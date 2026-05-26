@@ -1,4 +1,4 @@
-import Basalt
+import StrataGenerators.SetGen
 import Basalt.Examples.ArbNat
 import Strata.DL.Lambda.LExprWF
 
@@ -93,7 +93,7 @@ def pickBVar [Gen G] (bctx : BVarCtx) (τ : LMonoTy)
     (_h : (bvarsOfType bctx τ).length > 0) : G ULExpr := do
   let indices := bvarsOfType bctx τ
   let idx ← choose 0 (indices.length - 1) (by omega)
-  pure (.bvar () (indices.getD idx 0))
+  pure (.bvar () (indices.getD idx.down 0))
 
 -- ── Type generator ─────────────────────────────────────────────────────
 
@@ -294,8 +294,8 @@ private theorem pickBVar_sound (bctx : BVarCtx) (τ : LMonoTy)
   apply WellTyped.tBVar
   rw [← bvarsOfType_mem_iff]
   set indices := bvarsOfType bctx τ
-  have hlt : idx < indices.length := by omega
-  have : indices.getD idx 0 = indices[idx] := by
+  have hlt : idx.down < indices.length := by omega
+  have : indices.getD idx.down 0 = indices[idx.down] := by
     simp [List.getD, List.getElem?_eq_getElem hlt]
   rw [this]
   exact List.getElem_mem hlt
@@ -307,7 +307,8 @@ private theorem pickBVar_complete (bctx : BVarCtx) (τ : LMonoTy) (i : Nat)
   simp only [pickBVar, mem_support_iff, Set.mem_bind, Set.mem_pure]
   have hmem : i ∈ bvarsOfType bctx τ := (bvarsOfType_mem_iff bctx τ i).mpr hget
   obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hmem
-  refine ⟨idx, ⟨Nat.zero_le _, by omega⟩, ?_⟩
+  have : idx ≤ (bvarsOfType bctx τ).length - 1 := by omega
+  refine ⟨⟨idx⟩, ⟨Nat.zero_le _, this⟩, ?_⟩
   simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
 
 -- ── genLMonoTy support ────────────────────────────────────────────────
