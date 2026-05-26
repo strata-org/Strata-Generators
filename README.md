@@ -2,9 +2,8 @@
 
 (Work in progress) Experiments with random generators for [Strata](https://github.com/strata-org/strata) via [Basalt](https://github.com/hgoldstein95/basalt).
 
-## Prerequisites
-
-- [Lean 4](https://lean-lang.org/) (see `lean-toolchain` for the required version)
+`LExprGen.lean` contains a (work-in-progress) Basalt generator
+synthesized using an LLM (this does not fully work out of the box, there will be errors when we run `lake build`).
 
 ## Building
 
