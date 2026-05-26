@@ -5,18 +5,22 @@
 [`StrataGenerators/LExprGen.lean`](./StrataGenerators/LExprGen.lean) contains a (work-in-progress) Basalt generator for 
 `LExpr`s synthesized using an LLM. 
 
+**Dependencies**: 
+- `Strata`
+- `Basalt` 
+  - In order for GitHub Actions to function properly, this repo depends on Harry's public Basalt repo on GitHub, not the 
+AWS-internal fork. As a result, the `SetGen` portions of our internal Basalt fork (which aren't in the public-facing repo) have been manually copied over to this repo.
+
 ## Building
 
-1. Clone this repo and `cd` into it.
+1. Run `lake update` to resolve dependencies.
 
-2. Run `lake update` to resolve dependencies.
-
-3. Fetch prebuilt Mathlib build artifacts (avoids compiling Mathlib from scratch):
+2. Fetch prebuilt Mathlib build artifacts (avoids compiling Mathlib from scratch):
    ```bash
    lake exe cache get
    ```
 
-4. Build:
+3. Build:
    ```bash
    lake build
    ```
