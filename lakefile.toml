@@ -1,0 +1,19 @@
+name = "strata-generators"
+version = "0.1.0"
+defaultTargets = ["strata-generators"]
+
+[[require]]
+name = "Strata"
+git = "git@github.com:strata-org/strata"
+rev = "main"
+
+[[require]]
+name = "basalt"
+path = "../basalt"
+
+[[lean_lib]]
+name = "StrataGenerators"
+
+[[lean_exe]]
+name = "strata-generators"
+root = "Main"
