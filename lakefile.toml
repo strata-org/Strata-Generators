@@ -4,7 +4,7 @@ defaultTargets = ["strata-generators"]
 
 [[require]]
 name = "Strata"
-git = "git@github.com:strata-org/strata"
+git = "https://github.com/strata-org/strata"
 rev = "main"
 
 [[require]]
