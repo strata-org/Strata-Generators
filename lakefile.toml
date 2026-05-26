@@ -9,7 +9,8 @@ rev = "main"
 
 [[require]]
 name = "basalt"
-path = "../basalt"
+git = "https://github.com/hgoldstein95/basalt"
+rev = "main"
 
 [[lean_lib]]
 name = "StrataGenerators"

@@ -11,8 +11,4 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
-        with:
-          repository: hgoldstein95/basalt
-          path: ../basalt
       - uses: leanprover/lean-action@v1
