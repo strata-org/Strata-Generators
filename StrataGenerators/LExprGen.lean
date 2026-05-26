@@ -246,12 +246,12 @@ private theorem bvarsOfType_go_spec (τ : LMonoTy) :
       simp only [List.mem_cons]; rw [ih]
       constructor
       · rintro (rfl | ⟨k, hk, rfl, hget⟩)
-        · exact ⟨0, by simp, by omega, by simp [List.getElem?_cons_zero, hτeq]⟩
+        · exact ⟨0, by simp, by omega, by simp [hτeq]⟩
         · exact ⟨k + 1, by simp; omega, by omega,
             by simp [List.getElem?_cons_succ]; exact hget⟩
       · rintro ⟨k, hk, hx, hget⟩
         match k with
-        | 0 => simp [List.getElem?_cons_zero] at hget; left; omega
+        | 0 => simp at hget; left; omega
         | k + 1 =>
           right; exact ⟨k, by simp at hk; omega, by omega,
             by simp [List.getElem?_cons_succ] at hget; exact hget⟩
@@ -265,7 +265,7 @@ private theorem bvarsOfType_go_spec (τ : LMonoTy) :
       · rintro ⟨k, hk, hx, hget⟩
         match k with
         | 0 =>
-          simp [List.getElem?_cons_zero] at hget
+          simp at hget
           exact absurd hget hτne
         | k + 1 =>
           exact ⟨k, by simp at hk; omega, by omega,
@@ -288,8 +288,7 @@ private theorem pickBVar_sound (bctx : BVarCtx) (τ : LMonoTy)
     (hv : (bvarsOfType bctx τ).length > 0) (e : ULExpr)
     (he : e ∈ SetGen.support (pickBVar (G := SetGen.Set) bctx τ hv)) :
     WellTyped bctx e τ := by
-  simp only [pickBVar, mem_support_iff, Set.mem_bind, Set.mem_pure,
-             mem_support_choose_iff] at he
+  simp only [pickBVar, mem_support_iff, Set.mem_bind, Set.mem_pure] at he
   obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := he
   subst heq
   apply WellTyped.tBVar
@@ -305,8 +304,7 @@ private theorem pickBVar_complete (bctx : BVarCtx) (τ : LMonoTy) (i : Nat)
     (hget : bctx[i]? = some τ)
     (hv : (bvarsOfType bctx τ).length > 0) :
     .bvar () i ∈ SetGen.support (pickBVar (G := SetGen.Set) bctx τ hv) := by
-  simp only [pickBVar, mem_support_iff, Set.mem_bind, Set.mem_pure,
-             mem_support_choose_iff]
+  simp only [pickBVar, mem_support_iff, Set.mem_bind, Set.mem_pure]
   have hmem : i ∈ bvarsOfType bctx τ := (bvarsOfType_mem_iff bctx τ i).mpr hget
   obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hmem
   refine ⟨idx, ⟨Nat.zero_le _, by omega⟩, ?_⟩
@@ -325,11 +323,14 @@ theorem genLMonoTy_support (n : Nat) (τ : LMonoTy) :
     · rintro (rfl | rfl)
       · exact ⟨.bool, le_refl _⟩
       · exact ⟨.int, le_refl _⟩
-    · intro ⟨hs, _⟩
+    · intro ⟨hs, hd⟩
       cases hs with
       | bool  => left; rfl
       | int   => right; rfl
-      | arrow => simp [monoTyDepth, LMonoTy.arrow] at *
+      | arrow =>
+        rename_i τ₁ τ₂ _ _
+        have hd' : monoTyDepth (.tcons "arrow" [τ₁, τ₂]) ≤ 0 := hd
+        rw [monoTyDepth.eq_1] at hd'; omega
   | succ n ih =>
     simp only [genLMonoTy, mem_support_pick_iff, mem_support_pure_iff,
                mem_support_bind_iff]
@@ -340,15 +341,18 @@ theorem genLMonoTy_support (n : Nat) (τ : LMonoTy) :
       · subst heq
         have ⟨hs₁, hd₁⟩ := (ih τ₁).mp h₁
         have ⟨hs₂, hd₂⟩ := (ih τ₂).mp h₂
-        exact ⟨.arrow hs₁ hs₂, by simp [monoTyDepth, LMonoTy.arrow]; omega⟩
+        refine ⟨.arrow hs₁ hs₂, ?_⟩
+        change monoTyDepth (.tcons "arrow" [τ₁, τ₂]) ≤ n + 1
+        rw [monoTyDepth.eq_1]; omega
     · intro ⟨hs, hd⟩
       cases hs with
       | bool  => left; rfl
       | int   => right; left; rfl
-      | arrow τ₁ τ₂ hs₁ hs₂ =>
+      | arrow hs₁ hs₂ =>
+        rename_i τ₁ τ₂
         right; right
-        have hd' : monoTyDepth (.arrow τ₁ τ₂) ≤ n + 1 := hd
-        simp only [monoTyDepth, LMonoTy.arrow] at hd'
+        have hd' : monoTyDepth (.tcons "arrow" [τ₁, τ₂]) ≤ n + 1 := hd
+        rw [monoTyDepth.eq_1] at hd'
         exact ⟨τ₁, (ih τ₁).mpr ⟨hs₁, by omega⟩,
                τ₂, (ih τ₂).mpr ⟨hs₂, by omega⟩, rfl⟩
 
@@ -359,86 +363,87 @@ theorem genLMonoTy_simple (n : Nat) (τ : LMonoTy)
 
 -- ── Soundness for genLExpr ────────────────────────────────────────────
 
+-- `LMonoTy.bool`, `.int`, `.arrow` are abbreviations for `.tcons "bool" []` etc.
+-- Lean's equation lemmas for `genLExpr` are keyed on the expanded `.tcons` form,
+-- so `simp only [genLExpr, ...]` won't fire when the goal mentions `.bool`/`.int`/`.arrow`.
+-- These rewrite lemmas normalize the abbreviation so the equation lemmas can match.
+private theorem norm_bool : LMonoTy.bool = LMonoTy.tcons "bool" [] := rfl
+private theorem norm_int : LMonoTy.int = LMonoTy.tcons "int" [] := rfl
+private theorem norm_arrow (τ₁ τ₂ : LMonoTy) :
+    LMonoTy.arrow τ₁ τ₂ = LMonoTy.tcons "arrow" [τ₁, τ₂] := rfl
+
+
 /-- Every expression in the support of `genLExpr bctx size τ` is
     well-typed whenever `τ` is a `SimpleType`. -/
 theorem genLExpr_sound (bctx : BVarCtx) (size : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ) (e : ULExpr)
     (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) bctx size τ)) :
     WellTyped bctx e τ := by
-  induction size generalizing bctx τ e with
-  | zero =>
-    cases hτ with
-    | bool =>
-      simp only [genLExpr] at he
-      split at he
-      · simp only [mem_support_pick_iff, mem_support_pure_iff] at he
-        cases he with
-        | inl h => subst h; exact .tBoolConst true
-        | inr h => exact pickBVar_sound bctx .bool _ _ h
-      · simp only [mem_support_pure_iff] at he; subst he; exact .tBoolConst true
-    | int =>
-      simp only [genLExpr] at he
-      split at he
-      · simp only [mem_support_pick_iff, mem_support_bind_iff,
-                   mem_support_pure_iff] at he
-        cases he with
-        | inl h => obtain ⟨k, _, heq⟩ := h; subst heq; exact .tIntConst _
-        | inr h => exact pickBVar_sound bctx .int _ _ h
-      · simp only [mem_support_bind_iff, mem_support_pure_iff] at he
-        obtain ⟨k, _, heq⟩ := he; subst heq; exact .tIntConst _
-    | arrow τ₁ τ₂ hτ₁ hτ₂ =>
-      simp only [genLExpr] at he
-      split at he
-      · simp only [mem_support_pick_iff, mem_support_bind_iff,
-                   mem_support_pure_iff] at he
-        cases he with
-        | inl h => exact pickBVar_sound bctx _ _ _ h
-        | inr h =>
-          obtain ⟨body, hbody, heq⟩ := h; subst heq
-          exact .tAbs (ih (τ₁ :: bctx) body hbody)
-      · simp only [mem_support_bind_iff, mem_support_pure_iff] at he
-        obtain ⟨body, hbody, heq⟩ := he; subst heq
-        exact .tAbs (ih (τ₁ :: bctx) body hbody)
-  | succ n ih =>
-    cases hτ with
-    | bool =>
-      simp only [genLExpr, mem_support_pick_iff, mem_support_bind_iff,
-                 mem_support_pure_iff] at he
-      rcases he with h | h | h | h | h | h
-      · subst h; exact .tBoolConst true
-      · obtain ⟨c, hc, t, ht, e', he', heq⟩ := h; subst heq
-        exact .tIte (ih bctx c hc) (ih bctx t ht) (ih bctx e' he')
-      · obtain ⟨τ', hτ'mem, e₁, he₁, e₂, he₂, heq⟩ := h; subst heq
-        exact .tEq (ih bctx e₁ he₁) (ih bctx e₂ he₂)
-      · obtain ⟨τ', hτ'mem, arg, harg, fn, hfn, heq⟩ := h; subst heq
-        exact .tApp (ih bctx fn hfn) (ih bctx arg harg)
-      · obtain ⟨τ', hτ'mem, body, hbody, heq⟩ := h; subst heq
-        have hτ'simple := genLMonoTy_simple n τ' hτ'mem
-        exact .tQuantAll (ih (τ' :: bctx) body hbody)
-      · rcases h with ⟨hv, h⟩ | ⟨_, τ', hτ'mem, body, hbody, heq⟩
-        · exact pickBVar_sound bctx .bool hv _ h
-        · subst heq
-          have hτ'simple := genLMonoTy_simple n τ' hτ'mem
-          exact .tQuantExist (ih (τ' :: bctx) body hbody)
-    | int =>
-      simp only [genLExpr, mem_support_pick_iff, mem_support_bind_iff,
-                 mem_support_pure_iff] at he
-      rcases he with h | h | h
-      · obtain ⟨k, _, heq⟩ := h; subst heq; exact .tIntConst _
-      · obtain ⟨τ', hτ'mem, arg, harg, fn, hfn, heq⟩ := h; subst heq
-        exact .tApp (ih bctx fn hfn) (ih bctx arg harg)
-      · obtain ⟨c, hc, t, ht, e', he', heq⟩ := h; subst heq
-        exact .tIte (ih bctx c hc) (ih bctx t ht) (ih bctx e' he')
-    | arrow τ₁ τ₂ hτ₁ hτ₂ =>
-      simp only [genLExpr, mem_support_pick_iff, mem_support_bind_iff,
-                 mem_support_pure_iff] at he
-      rcases he with h | h | h
-      · obtain ⟨body, hbody, heq⟩ := h; subst heq
-        exact .tAbs (ih (τ₁ :: bctx) body hbody)
-      · obtain ⟨τ', hτ'mem, arg, harg, fn, hfn, heq⟩ := h; subst heq
-        exact .tApp (ih bctx fn hfn) (ih bctx arg harg)
-      · obtain ⟨c, hc, t, ht, e', he', heq⟩ := h; subst heq
-        exact .tIte (ih bctx c hc) (ih bctx t ht) (ih bctx e' he')
+  match size, τ, hτ with
+  | 0, _, SimpleType.bool =>
+    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with ⟨_, rfl | h⟩ | ⟨_, rfl⟩
+    · exact .tBoolConst true
+    · exact pickBVar_sound bctx .bool _ _ h
+    · exact .tBoolConst true
+  | 0, _, SimpleType.int =>
+    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with ⟨_, ⟨k, _, rfl⟩ | h⟩ | ⟨_, k, _, rfl⟩
+    · exact .tIntConst _
+    · exact pickBVar_sound bctx .int _ _ h
+    · exact .tIntConst _
+  | 0, _, SimpleType.arrow hs₁ hs₂ =>
+    rename_i τ₁ τ₂
+    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with ⟨_, h | ⟨body, hbody, rfl⟩⟩ | ⟨_, body, hbody, rfl⟩
+    · exact pickBVar_sound bctx _ _ _ h
+    · exact .tAbs (genLExpr_sound (τ₁ :: bctx) 0 τ₂ hs₂ _ hbody)
+    · exact .tAbs (genLExpr_sound (τ₁ :: bctx) 0 τ₂ hs₂ _ hbody)
+  | n + 1, _, SimpleType.bool =>
+    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with rfl | ⟨c, hc, t, ht, e', he', rfl⟩ | ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ |
+      ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ | ⟨τ', hτ'm, body, hbody, rfl⟩ |
+      ⟨_, h⟩ | ⟨_, τ', hτ'm, body, hbody, rfl⟩
+    · exact .tBoolConst true
+    · exact .tIte (genLExpr_sound bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound bctx n _ SimpleType.bool _ ht)
+                  (genLExpr_sound bctx n _ SimpleType.bool _ he')
+    · exact .tEq (genLExpr_sound bctx n _ (genLMonoTy_simple n _ hτ'm) _ he₁)
+                 (genLExpr_sound bctx n _ (genLMonoTy_simple n _ hτ'm) _ he₂)
+    · exact .tApp (genLExpr_sound bctx n _ (SimpleType.arrow (genLMonoTy_simple n _ hτ'm) SimpleType.bool) _ hfn)
+                  (genLExpr_sound bctx n _ (genLMonoTy_simple n _ hτ'm) _ harg)
+    · exact .tQuantAll (genLExpr_sound (τ' :: bctx) n _ SimpleType.bool _ hbody)
+    · exact pickBVar_sound bctx .bool _ _ h
+    · exact .tQuantExist (genLExpr_sound (τ' :: bctx) n _ SimpleType.bool _ hbody)
+  | n + 1, _, SimpleType.int =>
+    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff] at he
+    rcases he with ⟨k, _, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
+      ⟨c, hc, t, ht, e', he', rfl⟩
+    · exact .tIntConst _
+    · exact .tApp (genLExpr_sound bctx n _ (SimpleType.arrow (genLMonoTy_simple n _ hτ'm) SimpleType.int) _ hfn)
+                  (genLExpr_sound bctx n _ (genLMonoTy_simple n _ hτ'm) _ harg)
+    · exact .tIte (genLExpr_sound bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound bctx n _ SimpleType.int _ ht)
+                  (genLExpr_sound bctx n _ SimpleType.int _ he')
+  | n + 1, _, SimpleType.arrow hs₁ hs₂ =>
+    rename_i τ₁ τ₂
+    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff] at he
+    rcases he with ⟨body, hbody, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
+      ⟨c, hc, t, ht, e', he', rfl⟩
+    · exact .tAbs (genLExpr_sound (τ₁ :: bctx) n _ hs₂ _ hbody)
+    · exact .tApp (genLExpr_sound bctx n _ (SimpleType.arrow (genLMonoTy_simple n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
+                  (genLExpr_sound bctx n _ (genLMonoTy_simple n _ hτ'm) _ harg)
+    · exact .tIte (genLExpr_sound bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
+                  (genLExpr_sound bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
+  termination_by (size, sizeOf τ)
+  decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.arrow]; omega
 
 -- ── IsSoundAndComplete for genLMonoTy ─────────────────────────────────
 
@@ -452,6 +457,13 @@ instance {n : Nat} :
 
 -- ── Quick test ────────────────────────────────────────────────────────
 
-#guard_msgs(drop info) in
-#eval (for _ in [:10] do
-  IO.println <| repr (← ULExpr.gen 2) : IO Unit)
+-- We need this `ToFormat` instance in order to pretty-print the generated `LExpr`s
+-- before (since our metadata type is `Unit`)
+open Std in
+instance : ToFormat Unit where
+  format _ := .nil
+
+-- Print 5 randomly generated expressions
+#guard_msgs(drop warning) in
+#eval (for _ in [:5] do
+  IO.println <| Std.format (← ULExpr.gen 2) |>.pretty : IO Unit)
