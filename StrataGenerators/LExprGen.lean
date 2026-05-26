@@ -364,9 +364,17 @@ theorem genLMonoTy_simple (n : Nat) (τ : LMonoTy)
 -- ── Soundness for genLExpr ────────────────────────────────────────────
 
 -- `LMonoTy.bool`, `.int`, `.arrow` are abbreviations for `.tcons "bool" []` etc.
--- Lean's equation lemmas for `genLExpr` are keyed on the expanded `.tcons` form,
--- so `simp only [genLExpr, ...]` won't fire when the goal mentions `.bool`/`.int`/`.arrow`.
--- These rewrite lemmas normalize the abbreviation so the equation lemmas can match.
+-- In Strata, they're defined as abbreviations via the `abbrev` keyword,
+-- e.g. `abbrev LMonoTy.arrow τ₁ τ₂ := .tcons "arrow" [τ₁, τ₂]`.
+-- Now, when we define `genLExpr` via pattern-matching,
+-- Lean's automatically generated equational lemmas are defined in terms of the expanded constructor,
+-- i.e. `LmonoTy.tcons "arrow" [τ₁, τ₂]` instead of `LMonoTy.arrow τ₁ τ₂`.
+-- Thus, when we have a hypothesis that mentions `genLExpr`, e.g. `he : e ∈ support (genLExpr bctx 0 (LMonoTy.arrow τ₁ τ₂))`,
+-- when we try to naively do `simp only [genLExpr]`,
+-- Lean tries to match `LMonoTy.tcons "arrow" [τ₁, τ₂]` against the subterm `LMonoTy.arrow τ₁ τ₂` in the hypothesis.
+-- Even though the two terms are definitionally equal, the `simp/rw` tactics require syntactic equality,
+-- so we have to add the following rewrite lemmas which normalize the abbreviation,
+-- so that the equation lemmas cna match.
 private theorem norm_bool : LMonoTy.bool = LMonoTy.tcons "bool" [] := rfl
 private theorem norm_int : LMonoTy.int = LMonoTy.tcons "int" [] := rfl
 private theorem norm_arrow (τ₁ τ₂ : LMonoTy) :
@@ -464,6 +472,9 @@ instance : ToFormat Unit where
   format _ := .nil
 
 -- Print 5 randomly generated expressions
+-- Some example generated exprs:
+-- (if (if #true then #true else #true) then #true else #true)
+-- ((λ (bvar:bool) #true) ((λ (bvar:bool) %0) #true))
 #guard_msgs(drop warning) in
 #eval (for _ in [:5] do
   IO.println <| Std.format (← ULExpr.gen 2) |>.pretty : IO Unit)

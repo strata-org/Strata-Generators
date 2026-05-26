@@ -2,8 +2,8 @@
 
 (Work in progress) Experiments with random generators for [Strata](https://github.com/strata-org/strata) via [Basalt](https://github.com/hgoldstein95/basalt).
 
-`LExprGen.lean` contains a (work-in-progress) Basalt generator
-synthesized using an LLM (this does not fully work out of the box, there will be errors when we run `lake build`).
+[`StrataGenerators/LExprGen.lean`](./StrataGenerators/LExprGen.lean) contains a (work-in-progress) Basalt generator for 
+`LExpr`s synthesized using an LLM. 
 
 ## Building
 
