@@ -1,1 +1,2 @@
-import StrataGenerators.LExprGen
+import StrataGenerators.HasTypeAGen
+import StrataGenerators.HasTypeGen

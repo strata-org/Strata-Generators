@@ -5,10 +5,11 @@ import Strata.DL.Lambda.Denote.LExprAnnotated
 open Lambda RandomChoice ArbNat SetGen
 
 /-!
-# Well-Typed LExpr Generator
+# Generator of well-typed terms satisfying `HasTypeA`
 
-A Basalt `SetGen`-based random generator for well-typed Strata `LExpr`s.
-We work with the instantiation `P = LExprParams.mono ⟨Unit, Unit⟩` (unit
+A Basalt `SetGen`-based random generator for well-typed Strata `LExpr`s
+that satisfy the `HasTypeA` relation.
+We work with the `LExprParams` instantiation `LExprParams.mono ⟨Unit, Unit⟩` (unit
 metadata and identifier-metadata, monotype annotations).
 
 ## Contents
