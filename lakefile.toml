@@ -1,6 +1,6 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["strata-generators"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen"]
 
 [[require]]
 name = "Strata"
@@ -12,8 +12,21 @@ name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "main"
 
+# The HasTypeA generator (uses Basalt.Examples.ArbNat → Mathlib → Batteries)
 [[lean_lib]]
-name = "StrataGenerators"
+name = "StrataGenerators.HasTypeAGen"
+roots = ["StrataGenerators.HasTypeAGen"]
+
+# The HasType generator (uses LExprTypeSpec → Strata.DL.Util.List)
+# Cannot coexist with HasTypeAGen in one environment due to List.Forall₂ conflict.
+[[lean_lib]]
+name = "StrataGenerators.HasTypeGen"
+roots = ["StrataGenerators.HasTypeGen"]
+
+# Shared SetGen infrastructure (no conflicting imports)
+[[lean_lib]]
+name = "StrataGenerators.SetGen"
+roots = ["StrataGenerators.SetGen"]
 
 [[lean_exe]]
 name = "strata-generators"
