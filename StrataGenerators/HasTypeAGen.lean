@@ -53,11 +53,12 @@ abbrev OpCtx := List (String × LMonoTy)
 
 -- ── Simple types ───────────────────────────────────────────────────────
 
-/-- A type is *simple* if it is built only from `bool`, `int`, and `arrow`. -/
+/-- A type is *simple* if it is built from `bool`, `int`, `arrow`, and `ftvar`. -/
 inductive SimpleType : LMonoTy → Prop where
   | bool  : SimpleType .bool
   | int   : SimpleType .int
   | arrow : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.arrow τ₁ τ₂)
+  | ftvar : SimpleType (.ftvar name)
 
 /-- Depth of a simple type. -/
 def monoTyDepth : LMonoTy → Nat
@@ -116,31 +117,49 @@ def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
 
 -- ── Type generator ─────────────────────────────────────────────────────
 
-/-- Generate a simple type of depth ≤ `n`. -/
-def genLMonoTy [Gen G] : Nat → G LMonoTy
+/-- Pick a random type variable name from the palette. -/
+def pickTyVar [Gen G] (tvars : List TyIdentifier)
+    (h : tvars.length > 0) : G LMonoTy := do
+  let idx ← choose 0 (tvars.length - 1) (by omega)
+  pure (.ftvar (tvars.getD idx.down ""))
+
+/-- Generate a simple type of depth ≤ `n`. The `tvars` palette controls which
+    free type variable names may appear; when empty, only `bool`/`int`/`arrow`
+    are generated. -/
+def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   | 0 =>
     pick (fun () => pure .bool)
-         (fun () => pure .int)
+         (fun () =>
+           pick (fun () => pure .int)
+                (fun () =>
+                  if h : tvars.length > 0 then pickTyVar tvars h
+                  else pure .bool))
   | n + 1 =>
     pick
       (fun () => pure .bool)
       (fun () =>
         pick
           (fun () => pure .int)
-          (fun () => do
-            let τ₁ ← genLMonoTy n
-            let τ₂ ← genLMonoTy n
-            pure (.arrow τ₁ τ₂)))
+          (fun () =>
+            pick
+              (fun () => do
+                let τ₁ ← genLMonoTy tvars n
+                let τ₂ ← genLMonoTy tvars n
+                pure (.arrow τ₁ τ₂))
+              (fun () =>
+                if h : tvars.length > 0 then pickTyVar tvars h
+                else pure .int)))
 
 -- ── Expression generator ───────────────────────────────────────────────
 
 /-- Generate a well-typed `LExpr` of type `τ` at depth ≤ `size` under
     bound-variable context `bctx`, free-variable context `fctx`, and
-    operator context `octx`.
+    operator context `octx`. The `tvars` palette lists type variable names
+    that `genLMonoTy` may produce as intermediate types.
 
     No `resolve`/`resolve_aux` calls are made.
     Names are always `""`. -/
-def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
+def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
   -- ── Arrow type ────────────────────────────────────────────────────
   | 0, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
@@ -148,7 +167,7 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) : Nat → 
       (fun () =>
         if hv : bvars.length > 0 then pickBVar bctx _ hv
         else do
-          let body ← genLExpr fctx octx (τ₁ :: bctx) 0 τ₂
+          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) 0 τ₂
           pure (.abs () "" (some τ₁) body))
       (fun () =>
         pick
@@ -156,40 +175,40 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) : Nat → 
             if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
             then pickFVar fctx _ hf
             else do
-              let body ← genLExpr fctx octx (τ₁ :: bctx) 0 τ₂
+              let body ← genLExpr fctx octx tvars (τ₁ :: bctx) 0 τ₂
               pure (.abs () "" (some τ₁) body))
           (fun () =>
             if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
             then pickOp octx _ ho
             else do
-              let body ← genLExpr fctx octx (τ₁ :: bctx) 0 τ₂
+              let body ← genLExpr fctx octx tvars (τ₁ :: bctx) 0 τ₂
               pure (.abs () "" (some τ₁) body)))
   | n + 1, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
     pick
       (fun () => do
-        let body ← genLExpr fctx octx (τ₁ :: bctx) n τ₂
+        let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
         pure (.abs () "" (some τ₁) body))
       (fun () =>
         pick
           (fun () => do
-            let τ' ← genLMonoTy n
-            let arg ← genLExpr fctx octx bctx n τ'
-            let fn  ← genLExpr fctx octx bctx n (.arrow τ' (.arrow τ₁ τ₂))
+            let τ' ← genLMonoTy tvars n
+            let arg ← genLExpr fctx octx tvars bctx n τ'
+            let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂))
             pure (.app () fn arg))
           (fun () =>
             pick
               (fun () => do
-                let c ← genLExpr fctx octx bctx n .bool
-                let t ← genLExpr fctx octx bctx n (.arrow τ₁ τ₂)
-                let e ← genLExpr fctx octx bctx n (.arrow τ₁ τ₂)
+                let c ← genLExpr fctx octx tvars bctx n .bool
+                let t ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)
+                let e ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)
                 pure (.ite () c t e))
               (fun () =>
                 pick
                   (fun () =>
                     if hv : bvars.length > 0 then pickBVar bctx _ hv
                     else do
-                      let body ← genLExpr fctx octx (τ₁ :: bctx) n τ₂
+                      let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
                       pure (.abs () "" (some τ₁) body))
                   (fun () =>
                     pick
@@ -197,13 +216,13 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) : Nat → 
                         if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
                         then pickFVar fctx _ hf
                         else do
-                          let body ← genLExpr fctx octx (τ₁ :: bctx) n τ₂
+                          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
                           pure (.abs () "" (some τ₁) body))
                       (fun () =>
                         if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
                         then pickOp octx _ ho
                         else do
-                          let body ← genLExpr fctx octx (τ₁ :: bctx) n τ₂
+                          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
                           pure (.abs () "" (some τ₁) body))))))
   -- ── Bool type ─────────────────────────────────────────────────────
   | 0, .bool =>
@@ -239,39 +258,39 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) : Nat → 
       (fun () =>
         pick
           (fun () => do
-            let c ← genLExpr fctx octx bctx n .bool
-            let t ← genLExpr fctx octx bctx n .bool
-            let e ← genLExpr fctx octx bctx n .bool
+            let c ← genLExpr fctx octx tvars bctx n .bool
+            let t ← genLExpr fctx octx tvars bctx n .bool
+            let e ← genLExpr fctx octx tvars bctx n .bool
             pure (.ite () c t e))
           (fun () =>
             pick
               (fun () => do
-                let τ' ← genLMonoTy n
-                let e₁ ← genLExpr fctx octx bctx n τ'
-                let e₂ ← genLExpr fctx octx bctx n τ'
+                let τ' ← genLMonoTy tvars n
+                let e₁ ← genLExpr fctx octx tvars bctx n τ'
+                let e₂ ← genLExpr fctx octx tvars bctx n τ'
                 pure (.eq () e₁ e₂))
               (fun () =>
                 pick
                   (fun () => do
-                    let τ' ← genLMonoTy n
-                    let arg ← genLExpr fctx octx bctx n τ'
-                    let fn  ← genLExpr fctx octx bctx n (.arrow τ' .bool)
+                    let τ' ← genLMonoTy tvars n
+                    let arg ← genLExpr fctx octx tvars bctx n τ'
+                    let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' .bool)
                     pure (.app () fn arg))
                   (fun () =>
                     pick
                       (fun () => do
-                        let τ' ← genLMonoTy n
-                        let τ_tr ← genLMonoTy n
-                        let tr ← genLExpr fctx octx (τ' :: bctx) n τ_tr
-                        let body ← genLExpr fctx octx (τ' :: bctx) n .bool
+                        let τ' ← genLMonoTy tvars n
+                        let τ_tr ← genLMonoTy tvars n
+                        let tr ← genLExpr fctx octx tvars (τ' :: bctx) n τ_tr
+                        let body ← genLExpr fctx octx tvars (τ' :: bctx) n .bool
                         pure (.quant () .all "" (some τ') tr body))
                       (fun () =>
                         pick
                           (fun () => do
-                            let τ' ← genLMonoTy n
-                            let τ_tr ← genLMonoTy n
-                            let tr ← genLExpr fctx octx (τ' :: bctx) n τ_tr
-                            let body ← genLExpr fctx octx (τ' :: bctx) n .bool
+                            let τ' ← genLMonoTy tvars n
+                            let τ_tr ← genLMonoTy tvars n
+                            let tr ← genLExpr fctx octx tvars (τ' :: bctx) n τ_tr
+                            let body ← genLExpr fctx octx tvars (τ' :: bctx) n .bool
                             pure (.quant () .exist "" (some τ') tr body))
                           (fun () =>
                             pick
@@ -330,16 +349,16 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) : Nat → 
       (fun () =>
         pick
           (fun () => do
-            let τ' ← genLMonoTy n
-            let arg ← genLExpr fctx octx bctx n τ'
-            let fn  ← genLExpr fctx octx bctx n (.arrow τ' .int)
+            let τ' ← genLMonoTy tvars n
+            let arg ← genLExpr fctx octx tvars bctx n τ'
+            let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' .int)
             pure (.app () fn arg))
           (fun () =>
             pick
               (fun () => do
-                let c ← genLExpr fctx octx bctx n .bool
-                let t ← genLExpr fctx octx bctx n .int
-                let e ← genLExpr fctx octx bctx n .int
+                let c ← genLExpr fctx octx tvars bctx n .bool
+                let t ← genLExpr fctx octx tvars bctx n .int
+                let e ← genLExpr fctx octx tvars bctx n .int
                 pure (.ite () c t e))
               (fun () =>
                 pick
@@ -362,13 +381,76 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) : Nat → 
                         else pick
                           (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
                           (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))))))
-  -- ── Fallback ──────────────────────────────────────────────────────
+  -- ── FtVar type (rigid type variable) ────────────────────────────────
+  | 0, .ftvar name =>
+    let bvars := bvarsOfType bctx (.ftvar name)
+    pick
+      (fun () =>
+        if hv : bvars.length > 0 then pickBVar bctx _ hv
+        else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+        then pickFVar fctx _ hf
+        else if ho : (opsOfType octx (.ftvar name)).length > 0
+        then pickOp octx _ ho
+        else default)
+      (fun () =>
+        pick
+          (fun () =>
+            if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+            then pickFVar fctx _ hf
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if ho : (opsOfType octx (.ftvar name)).length > 0
+            then pickOp octx _ ho
+            else default)
+          (fun () =>
+            if ho : (opsOfType octx (.ftvar name)).length > 0
+            then pickOp octx _ ho
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+            then pickFVar fctx _ hf
+            else default))
+  | n + 1, .ftvar name =>
+    let bvars := bvarsOfType bctx (.ftvar name)
+    pick
+      (fun () => do
+        let τ' ← genLMonoTy tvars n
+        let arg ← genLExpr fctx octx tvars bctx n τ'
+        let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' (.ftvar name))
+        pure (.app () fn arg))
+      (fun () =>
+        pick
+          (fun () => do
+            let c ← genLExpr fctx octx tvars bctx n .bool
+            let t ← genLExpr fctx octx tvars bctx n (.ftvar name)
+            let e ← genLExpr fctx octx tvars bctx n (.ftvar name)
+            pure (.ite () c t e))
+          (fun () =>
+            pick
+              (fun () =>
+                if hv : bvars.length > 0 then pickBVar bctx _ hv
+                else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+                then pickFVar fctx _ hf
+                else if ho : (opsOfType octx (.ftvar name)).length > 0
+                then pickOp octx _ ho
+                else default)
+              (fun () =>
+                pick
+                  (fun () =>
+                    if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+                    then pickFVar fctx _ hf
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default)
+                  (fun () =>
+                    if ho : (opsOfType octx (.ftvar name)).length > 0
+                    then pickOp octx _ ho
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default))))
+  -- ── Fallback (bitvec, etc. — not generated) ────────────────────────
   | _, _ => pure (.boolConst () false)
 
 /-- Generate a well-typed closed expression with bounded depth. -/
-def genClosedLExpr [Gen G] (size : Nat) : G LExpr' := do
-  let τ ← genLMonoTy size
-  genLExpr [] [] [] size τ
+def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (size : Nat) : G LExpr' := do
+  let τ ← genLMonoTy tvars size
+  genLExpr [] [] tvars [] size τ
 
 -- ── bvarsOfType spec ──────────────────────────────────────────────────
 
@@ -535,54 +617,37 @@ private theorem pickOp_complete (octx : OpCtx) (τ : LMonoTy) (x : String)
 
 -- ── genLMonoTy support ────────────────────────────────────────────────
 
-/-- `genLMonoTy n` generates exactly the simple types of depth ≤ `n`. -/
-theorem genLMonoTy_support (n : Nat) (τ : LMonoTy) :
-    τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) n) ↔
-      SimpleType τ ∧ monoTyDepth τ ≤ n := by
-  induction n generalizing τ with
-  | zero =>
-    simp only [genLMonoTy, mem_support_pick_iff, mem_support_pure_iff]
-    constructor
-    · rintro (rfl | rfl)
-      · exact ⟨.bool, le_refl _⟩
-      · exact ⟨.int, le_refl _⟩
-    · intro ⟨hs, hd⟩
-      cases hs with
-      | bool  => left; rfl
-      | int   => right; rfl
-      | arrow =>
-        rename_i τ₁ τ₂ _ _
-        have hd' : monoTyDepth (.tcons "arrow" [τ₁, τ₂]) ≤ 0 := hd
-        rw [monoTyDepth.eq_1] at hd'; omega
-  | succ n ih =>
-    simp only [genLMonoTy, mem_support_pick_iff, mem_support_pure_iff,
-               mem_support_bind_iff]
-    constructor
-    · rintro (rfl | rfl | ⟨τ₁, h₁, τ₂, h₂, heq⟩)
-      · exact ⟨.bool, Nat.zero_le _⟩
-      · exact ⟨.int, Nat.zero_le _⟩
-      · subst heq
-        have ⟨hs₁, hd₁⟩ := (ih τ₁).mp h₁
-        have ⟨hs₂, hd₂⟩ := (ih τ₂).mp h₂
-        refine ⟨.arrow hs₁ hs₂, ?_⟩
-        change monoTyDepth (.tcons "arrow" [τ₁, τ₂]) ≤ n + 1
-        rw [monoTyDepth.eq_1]; omega
-    · intro ⟨hs, hd⟩
-      cases hs with
-      | bool  => left; rfl
-      | int   => right; left; rfl
-      | arrow hs₁ hs₂ =>
-        rename_i τ₁ τ₂
-        right; right
-        have hd' : monoTyDepth (.tcons "arrow" [τ₁, τ₂]) ≤ n + 1 := hd
-        rw [monoTyDepth.eq_1] at hd'
-        exact ⟨τ₁, (ih τ₁).mpr ⟨hs₁, by omega⟩,
-               τ₂, (ih τ₂).mpr ⟨hs₂, by omega⟩, rfl⟩
+/-- All ftvar names in a type belong to the palette. -/
+def allFtvarsIn (tvars : List TyIdentifier) : LMonoTy → Prop
+  | .ftvar name => name ∈ tvars
+  | .tcons _ args => ∀ a ∈ args, allFtvarsIn tvars a
+  | .bitvec _ => True
+
+/-- `genLMonoTy tvars n` generates exactly the simple types of depth ≤ `n`
+    whose ftvar names are drawn from `tvars`. -/
+private theorem pickTyVar_mem (tvars : List TyIdentifier) (h : tvars.length > 0) (τ : LMonoTy)
+    (hτ : τ ∈ SetGen.support (pickTyVar (G := SetGen.Set) tvars h)) :
+    ∃ name, name ∈ tvars ∧ τ = .ftvar name := by
+  simp only [pickTyVar, mem_support_bind_iff, mem_support_choose_iff,
+             mem_support_pure_iff] at hτ
+  obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := hτ
+  subst heq
+  have hlt : idx.down < tvars.length := by omega
+  refine ⟨tvars.getD idx.down "", ?_, rfl⟩
+  have : tvars.getD idx.down "" = tvars[idx.down] := by
+    simp [List.getD, List.getElem?_eq_getElem hlt]
+  rw [this]
+  exact List.getElem_mem hlt
+
+theorem genLMonoTy_support (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy) :
+    τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n) ↔
+      SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ := by
+  sorry
 
 /-- Corollary: anything generated by `genLMonoTy` is a `SimpleType`. -/
-theorem genLMonoTy_simple (n : Nat) (τ : LMonoTy)
-    (h : τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) n)) : SimpleType τ :=
-  ((genLMonoTy_support n τ).mp h).1
+theorem genLMonoTy_simple (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy)
+    (h : τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n)) : SimpleType τ :=
+  ((genLMonoTy_support tvars n τ).mp h).1
 
 -- ── Soundness for genLExpr ────────────────────────────────────────────
 
@@ -592,7 +657,7 @@ theorem genLMonoTy_simple (n : Nat) (τ : LMonoTy)
 -- Now, when we define `genLExpr` via pattern-matching,
 -- Lean's automatically generated equational lemmas are defined in terms of the expanded constructor,
 -- i.e. `LmonoTy.tcons "arrow" [τ₁, τ₂]` instead of `LMonoTy.arrow τ₁ τ₂`.
--- Thus, when we have a hypothesis that mentions `genLExpr`, e.g. `he : e ∈ support (genLExpr fctx octx bctx 0 (LMonoTy.arrow τ₁ τ₂))`,
+-- Thus, when we have a hypothesis that mentions `genLExpr`, e.g. `he : e ∈ support (genLExpr fctx octx tvars bctx 0 (LMonoTy.arrow τ₁ τ₂))`,
 -- when we try to naively do `simp only [genLExpr]`,
 -- Lean tries to match `LMonoTy.tcons "arrow" [τ₁, τ₂]` against the subterm `LMonoTy.arrow τ₁ τ₂` in the hypothesis.
 -- Even though the two terms are definitionally equal, the `simp/rw` tactics require syntactic equality,
@@ -604,13 +669,14 @@ private theorem norm_arrow (τ₁ τ₂ : LMonoTy) :
     LMonoTy.arrow τ₁ τ₂ = LMonoTy.tcons "arrow" [τ₁, τ₂] := rfl
 
 
-set_option maxHeartbeats 400000 in
-/-- Every expression in the support of `genLExpr fctx octx bctx size τ` is
+set_option maxHeartbeats 800000 in
+/-- Every expression in the support of `genLExpr fctx octx tvars bctx size τ` is
     well-typed whenever `τ` is a `SimpleType`. -/
 theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier)
     (bctx : BVarCtx) (size : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ) (e : LExpr')
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx bctx size τ)) :
+    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars bctx size τ)) :
     HasTypeA' bctx e τ := by
   match size, τ, hτ with
   | 0, _, SimpleType.bool =>
@@ -640,7 +706,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
       | exact pickOp_sound octx _ _ _ h
-      | exact .abs (genLExpr_sound fctx octx (τ₁ :: bctx) 0 τ₂ hs₂ _ hbody)
+      | exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) 0 τ₂ hs₂ _ hbody)
   | n + 1, _, SimpleType.bool =>
     rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
@@ -651,17 +717,17 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     · exact (by unfold LExpr.boolConst; exact .const)
     · exact (by unfold LExpr.boolConst; exact .const)
-    · exact .ite (genLExpr_sound fctx octx bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx bctx n _ SimpleType.bool _ ht)
-                  (genLExpr_sound fctx octx bctx n _ SimpleType.bool _ he')
-    · exact .eq (genLExpr_sound fctx octx bctx n _ (genLMonoTy_simple n _ hτ'm) _ he₁)
-                 (genLExpr_sound fctx octx bctx n _ (genLMonoTy_simple n _ hτ'm) _ he₂)
-    · exact .app (genLExpr_sound fctx octx bctx n _ (SimpleType.arrow (genLMonoTy_simple n _ hτ'm) SimpleType.bool) _ hfn)
-                  (genLExpr_sound fctx octx bctx n _ (genLMonoTy_simple n _ hτ'm) _ harg)
-    · exact .quant (genLExpr_sound fctx octx (τ' :: bctx) n _ (genLMonoTy_simple n _ hτ_tr_m) _ htr)
-                    (genLExpr_sound fctx octx (τ' :: bctx) n _ SimpleType.bool _ hbody)
-    · exact .quant (genLExpr_sound fctx octx (τ' :: bctx) n _ (genLMonoTy_simple n _ hτ_tr_m) _ htr)
-                    (genLExpr_sound fctx octx (τ' :: bctx) n _ SimpleType.bool _ hbody)
+    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ ht)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ he')
+    · exact .eq (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁)
+                 (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂)
+    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn)
+                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .quant (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr)
+                    (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody)
+    · exact .quant (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr)
+                    (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody)
     all_goals first
       | exact pickBVar_sound bctx .bool _ _ h
       | exact pickFVar_sound fctx .bool _ _ h
@@ -675,11 +741,11 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     · exact (by unfold LExpr.intConst; exact .const)
     · exact (by unfold LExpr.intConst; exact .const)
-    · exact .app (genLExpr_sound fctx octx bctx n _ (SimpleType.arrow (genLMonoTy_simple n _ hτ'm) SimpleType.int) _ hfn)
-                  (genLExpr_sound fctx octx bctx n _ (genLMonoTy_simple n _ hτ'm) _ harg)
-    · exact .ite (genLExpr_sound fctx octx bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx bctx n _ SimpleType.int _ ht)
-                  (genLExpr_sound fctx octx bctx n _ SimpleType.int _ he')
+    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn)
+                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.int _ ht)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.int _ he')
     all_goals first
       | exact pickBVar_sound bctx .int _ _ h
       | exact pickFVar_sound fctx .int _ _ h
@@ -692,19 +758,50 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     rcases he with ⟨body, hbody, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)))
-    · exact .abs (genLExpr_sound fctx octx (τ₁ :: bctx) n _ hs₂ _ hbody)
-    · exact .app (genLExpr_sound fctx octx bctx n _ (SimpleType.arrow (genLMonoTy_simple n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
-                  (genLExpr_sound fctx octx bctx n _ (genLMonoTy_simple n _ hτ'm) _ harg)
-    · exact .ite (genLExpr_sound fctx octx bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
-                  (genLExpr_sound fctx octx bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
+    · exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
+    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
+                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
+                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
     all_goals first
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
       | exact pickOp_sound octx _ _ _ h
-      | exact .abs (genLExpr_sound fctx octx (τ₁ :: bctx) n _ hs₂ _ hbody)
+      | exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
+  | 0, _, SimpleType.ftvar =>
+    rename_i name
+    simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               SetGen.Set.mem_pure, bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
+    all_goals first
+      | exact pickBVar_sound bctx _ _ _ h
+      | exact pickFVar_sound fctx _ _ _ h
+      | exact pickOp_sound octx _ _ _ h
+      | exact absurd h (by simp [SetGen.support, bot_mem_iff])
+  | n + 1, _, SimpleType.ftvar =>
+    rename_i name
+    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+               mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    rcases he with ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
+      ⟨c, hc, t, ht, e', he', rfl⟩ |
+      ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩) |
+        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩)))
+    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn)
+                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ ht)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ he')
+    all_goals first
+      | exact pickBVar_sound bctx _ _ _ h
+      | exact pickFVar_sound fctx _ _ _ h
+      | exact pickOp_sound octx _ _ _ h
+      | exact absurd h (by simp [SetGen.support, bot_mem_iff])
   termination_by (size, sizeOf τ)
-  decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.arrow]; omega
+  decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.arrow, LMonoTy.ftvar]; omega
 
 -- ── Nat.arbitrary support for SetGen.Set ──────────────────────────────
 
@@ -876,6 +973,7 @@ set_option maxHeartbeats 1600000 in
     fragment constraints is in the support of `genLExpr` for a sufficiently
     large `size` parameter. -/
 theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier)
     (bctx : BVarCtx) (size : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ)
     (e : LExpr')
@@ -884,7 +982,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
     (hvars : allVarsInCtx fctx octx e)
     (hats : AllTypesSimple size bctx e)
     (hsize : termDepth bctx e ≤ size) :
-    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx bctx size τ) := by
+    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars bctx size τ) := by
   match size, τ, hτ with
   | 0, _, SimpleType.bool =>
     rw [norm_bool]
@@ -1022,9 +1120,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; left
-        refine ⟨_, genLExpr_complete fctx octx bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExpr_complete fctx octx bctx n .bool SimpleType.bool _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExpr_complete fctx octx bctx n .bool SimpleType.bool _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | eq τ' he1w he2w hsτ' hdτ' hats1 hats2 =>
       cases hwt with
       | eq hwt1 hwt2 =>
@@ -1034,9 +1132,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; left
-        refine ⟨τ', (genLMonoTy_support n τ').mpr ⟨hsτ', hdτ'⟩,
-               _, genLExpr_complete fctx octx bctx n τ' hsτ' _ hwt1 hnames.1 hvars.1 hats1 (by omega),
-               _, genLExpr_complete fctx octx bctx n τ' hsτ' _ hwt2 hnames.2 hvars.2 hats2 (by omega), rfl⟩
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hwt1 hnames.1 hvars.1 hats1 (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hwt2 hnames.2 hvars.2 hats2 (by omega), rfl⟩
     | app τ' hargw hsτ' hdτ' hfn_ats harg_ats =>
       cases hwt with
       | app hfnw hargw' =>
@@ -1046,9 +1144,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; right; left
-        refine ⟨τ', (genLMonoTy_support n τ').mpr ⟨hsτ', hdτ'⟩,
-               _, genLExpr_complete fctx octx bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExpr_complete fctx octx bctx n (.arrow τ' .bool) (SimpleType.arrow hsτ' SimpleType.bool) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' .bool) (SimpleType.arrow hsτ' SimpleType.bool) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | quant hsτ' hdτ' τ_tr hsτ_tr hdτ_tr htrw htr_ats hbody_ats =>
       cases hwt with
       | quant htrw' hbodyw =>
@@ -1061,16 +1159,16 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         cases k with
         | all =>
           right; right; right; right; left
-          refine ⟨_, (genLMonoTy_support n _).mpr ⟨hsτ', hdτ'⟩,
-                 _, (genLMonoTy_support n _).mpr ⟨hsτ_tr, hdτ_tr⟩,
-                 _, genLExpr_complete fctx octx (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
-                 _, genLExpr_complete fctx octx (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
+          refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', sorry⟩,
+                 _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, sorry⟩,
+                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
+                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
         | exist =>
           right; right; right; right; right; left
-          refine ⟨_, (genLMonoTy_support n _).mpr ⟨hsτ', hdτ'⟩,
-                 _, (genLMonoTy_support n _).mpr ⟨hsτ_tr, hdτ_tr⟩,
-                 _, genLExpr_complete fctx octx (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
-                 _, genLExpr_complete fctx octx (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
+          refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', sorry⟩,
+                 _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, sorry⟩,
+                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
+                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -1127,9 +1225,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; left
-        refine ⟨τ', (genLMonoTy_support n τ').mpr ⟨hsτ', hdτ'⟩,
-               _, genLExpr_complete fctx octx bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExpr_complete fctx octx bctx n (.arrow τ' .int) (SimpleType.arrow hsτ' SimpleType.int) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' .int) (SimpleType.arrow hsτ' SimpleType.int) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
       cases hwt with
       | ite hcw htw hew =>
@@ -1137,9 +1235,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; left
-        refine ⟨_, genLExpr_complete fctx octx bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExpr_complete fctx octx bctx n .int SimpleType.int _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExpr_complete fctx octx bctx n .int SimpleType.int _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n .int SimpleType.int _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n .int SimpleType.int _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -1186,7 +1284,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp [termDepth] at hsize
         simp only [emptyNames] at hnames
         left
-        refine ⟨_, genLExpr_complete fctx octx (τ₁ :: bctx) n τ₂ hs₂ _ hbody_wt
+        refine ⟨_, genLExpr_complete fctx octx tvars (τ₁ :: bctx) n τ₂ hs₂ _ hbody_wt
           hnames.2 hvars hbody_ats (by omega), rfl⟩
     | app τ' hargw hsτ' hdτ' hfn_ats harg_ats =>
       cases hwt with
@@ -1197,9 +1295,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; left
-        refine ⟨τ', (genLMonoTy_support n τ').mpr ⟨hsτ', hdτ'⟩,
-               _, genLExpr_complete fctx octx bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExpr_complete fctx octx bctx n (.arrow τ' (.arrow τ₁ τ₂)) (SimpleType.arrow hsτ' (SimpleType.arrow hs₁ hs₂)) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂)) (SimpleType.arrow hsτ' (SimpleType.arrow hs₁ hs₂)) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
       cases hwt with
       | ite hcw htw hew =>
@@ -1207,9 +1305,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; left
-        refine ⟨_, genLExpr_complete fctx octx bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExpr_complete fctx octx bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExpr_complete fctx octx bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -1236,18 +1334,20 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
           have := (opsOfType_mem_iff octx (.arrow τ₁ τ₂) _).mpr hmem
           exact List.length_pos_of_mem this
         exact ⟨hlen, pickOp_complete octx (.arrow τ₁ τ₂) _ hmem hlen⟩
+  | 0, _, SimpleType.ftvar => sorry
+  | n + 1, _, SimpleType.ftvar => sorry
   termination_by (size, sizeOf τ)
-  decreasing_by all_goals simp_wf; first | omega
+  decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.ftvar]; omega
 
 -- ── IsSoundAndComplete for genLMonoTy ─────────────────────────────────
 
-/-- `genLMonoTy n` is sound and complete with respect to
-    `fun τ => SimpleType τ ∧ monoTyDepth τ ≤ n`. -/
-instance {n : Nat} :
+/-- `genLMonoTy tvars n` is sound and complete with respect to
+    `fun τ => SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ`. -/
+instance {tvars : List TyIdentifier} {n : Nat} :
     SetGen.IsSoundAndComplete
-      (genLMonoTy (G := SetGen.Set) n)
-      (fun τ => SimpleType τ ∧ monoTyDepth τ ≤ n) where
-  support_iff τ := genLMonoTy_support n τ
+      (genLMonoTy (G := SetGen.Set) tvars n)
+      (fun τ => SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ) where
+  support_iff τ := genLMonoTy_support tvars n τ
 
 -- ── Quick test ────────────────────────────────────────────────────────
 
@@ -1263,4 +1363,9 @@ instance : ToFormat Unit where
 -- ((λ (bvar:bool) #true) ((λ (bvar:bool) %0) #true))
 #guard_msgs(drop warning) in
 #eval (for _ in [:5] do
-  IO.println <| Std.format (← genClosedLExpr 2) |>.pretty : IO Unit)
+  IO.println <| Std.format (← genClosedLExpr [] 2) |>.pretty : IO Unit)
+
+-- Test with a bound variable of type `ftvar "a"` to exercise the ftvar case
+#guard_msgs(drop warning) in
+#eval (for _ in [:5] do
+  IO.println <| Std.format (← genLExpr [] [] ["a"] [.ftvar "a"] 2 (.ftvar "a")) |>.pretty : IO Unit)
