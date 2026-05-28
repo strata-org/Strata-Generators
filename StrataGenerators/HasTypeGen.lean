@@ -205,7 +205,25 @@ def genLMonoTy [Gen G] : Nat → G LMonoTy
 -- §7. Fresh Names
 -- ═══════════════════════════════════════════════════════════════════════
 
+/-- The `counter` is a monotonically increasing index that ensures each lambda
+    abstraction in the generated term binds a distinct variable name. When we
+    generate `tabs`, we consume `freshName counter` for the binder and pass
+    `counter + 1` to the recursive call for the body. The `hfresh` hypothesis
+    in `genHTExpr_sound` guarantees that all names at or above the counter are
+    absent from the typing context, which is essential for:
+    1. `hvctx_extend` — the new name doesn't shadow an existing binding
+    2. `hfresh'` — after inserting the new binding, names above `counter + 1`
+       remain absent (needed for the recursive call) -/
 def freshName (counter : Nat) : HTIdent := ⟨s!"x{counter}", ()⟩
+
+/-- `freshName` is injective (distinct counters yield distinct identifiers).
+    Relies on `Nat.repr` being injective, which lacks a stdlib lemma. -/
+private theorem freshName_injective (h : freshName a = freshName b) : a = b := by
+  simp only [freshName, Identifier.mk.injEq, String.ext_iff] at h
+  sorry
+
+private theorem freshName_ne (h : a ≠ b) : freshName a ≠ freshName b :=
+  fun heq => h (freshName_injective heq)
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- §8. Expression Generator
@@ -431,22 +449,53 @@ private theorem genLMonoTy_simple (n : Nat) (τ : LMonoTy)
 
 -- ─────────────────────────────────────────────────────────────────────
 -- §9a. Helper lemmas for HasType soundness
+--
+-- The real `HasType` relation (from Strata's LExprTypeSpec) differs from
+-- our local `SHasType` in three ways that require bridge lemmas:
+--
+-- 1. **Monotype witnesses** (`forAll_nil_isMonoType`, `forAll_nil_toMonoType`):
+--    `HasType.tabs` and `HasType.tapp` require `LTy.isMonoType` proofs and
+--    produce results using `LTy.toMonoType`. Since we only generate ground
+--    types `.forAll [] τ`, these are always trivially satisfied.
+--
+-- 2. **Scheme instantiation** (`HasType_tinst_matchScheme`):
+--    Our generator fuses `tvar`+`tinst` into a single step via `matchScheme`.
+--    The real relation requires first `HasType.tvar` (yielding the full scheme)
+--    then one `HasType.tinst` per bound variable. This lemma bridges the gap.
+--
+-- 3. **Locally-nameless encoding** (`fresh_varClose`, `varOpen_varClose_roundtrip`):
+--    The generator builds lambda bodies with free variables, then applies
+--    `varClose` to produce the de Bruijn representation. The real `HasType.tabs`
+--    requires a freshness proof (the binder is absent from the closed body) and
+--    types the body after `varOpen`. These lemmas establish the roundtrip.
+--
+-- 4. **Context coherence** (`hvctx_extend`):
+--    The generator tracks bindings in a flat `VarCtx` list, but `HasType` uses
+--    Strata's `Maps`-based `TContext`. This lemma shows that inserting a fresh
+--    name into `Γ.types` preserves the correspondence with the extended list.
 -- ─────────────────────────────────────────────────────────────────────
 
 section HasTypeSoundness
 open LExpr (HasType)
 
+/-- `.forAll [] τ` has no bound variables, so it counts as a monotype.
+    Needed because `HasType.tabs` and `HasType.tapp` gate on `isMonoType`. -/
 private theorem forAll_nil_isMonoType (body : LMonoTy) :
     LTy.isMonoType (.forAll [] body) = true := by
   simp [LTy.isMonoType, LTy.boundVars, List.isEmpty]
 
+/-- Extracting the monotype from `.forAll [] τ` gives back `τ`.
+    Used to rewrite the result type of `HasType.tabs`/`HasType.tapp`. -/
 private theorem forAll_nil_toMonoType (body : LMonoTy) :
     LTy.toMonoType (.forAll [] body) (forAll_nil_isMonoType body) = body := by
   simp [LTy.toMonoType]
 
-/-- Chain `tinst` to instantiate all bound variables in a scheme at once.
-    If `matchScheme scheme τ = some subst`, then from `HasType C Γ e scheme`
-    we can derive `HasType C Γ e (.forAll [] τ)`. -/
+/-- Bridge between our `matchScheme` and Strata's `HasType.tinst` rule.
+    If `matchScheme scheme τ = some subst`, this chains one `tinst` application
+    per bound variable in `scheme` to derive `HasType C Γ e (.forAll [] τ)`.
+    Morally: `matchScheme` computes the substitution, `tinst` applies it.
+    Requires connecting our `matchScheme.go` to `LMonoTy.subst` — see
+    `HasType_tinst_all` in LExprTypeSpec.lean (private, so reproduced here). -/
 private theorem HasType_tinst_matchScheme
     (C : LContext HTParams) (Γ : TContext Unit)
     (e : HTExpr) (scheme : LTy) (τ : LMonoTy) (subst : List LMonoTy)
@@ -455,13 +504,47 @@ private theorem HasType_tinst_matchScheme
     HasType C Γ e (.forAll [] τ) := by
   sorry
 
-/-- `varClose` removes all free occurrences of `x`, so `x` is fresh afterwards. -/
+/-- `varClose` replaces every `fvar x` with `bvar k`, so `x` cannot appear free
+    in the result. This discharges the `LExpr.fresh x e` premise of `HasType.tabs`
+    when `e` is produced by our generator's `LExpr.varClose 0 (x, none) body`. -/
 private theorem fresh_varClose (x : HTIdent) (k : Nat) (body : HTExpr) :
     LExpr.fresh (x, none) (LExpr.varClose k (x, none) body) := by
-  sorry
+  unfold LExpr.fresh
+  induction body generalizing k with
+  | const _ _ => simp [LExpr.varClose, LExpr.freeVars]
+  | bvar _ _ => simp [LExpr.varClose, LExpr.freeVars]
+  | fvar _ y ty =>
+    unfold LExpr.varClose
+    split
+    · simp [LExpr.freeVars]
+    · rename_i hne
+      simp only [LExpr.freeVars, List.mem_singleton]
+      intro heq
+      have ⟨h1, h2⟩ := Prod.mk.inj heq
+      subst h1; subst h2
+      simp at hne
+  | op _ _ _ => simp [LExpr.varClose, LExpr.freeVars]
+  | abs _ _ _ e ih =>
+    simp only [LExpr.varClose, LExpr.freeVars]
+    exact ih (k + 1)
+  | app _ e1 e2 ih1 ih2 =>
+    simp only [LExpr.varClose, LExpr.freeVars, List.mem_append, not_or]
+    exact ⟨ih1 k, ih2 k⟩
+  | ite _ c t e ihc iht ihe =>
+    simp only [LExpr.varClose, LExpr.freeVars, List.mem_append, not_or]
+    exact ⟨⟨ihc k, iht k⟩, ihe k⟩
+  | eq _ e1 e2 ih1 ih2 =>
+    simp only [LExpr.varClose, LExpr.freeVars, List.mem_append, not_or]
+    exact ⟨ih1 k, ih2 k⟩
+  | quant _ _ _ _ tr e ihtr ihe =>
+    simp only [LExpr.varClose, LExpr.freeVars, List.mem_append, not_or]
+    exact ⟨ihtr (k + 1), ihe (k + 1)⟩
 
-/-- `varOpen` after `varClose` is identity for well-formed expressions.
-    This is `varOpen_of_varClose` from LExprWF.lean specialized to our types. -/
+/-- `varOpen` after `varClose` is identity for well-formed (locally-closed) terms.
+    `HasType.tabs` requires typing the body after `varOpen 0 x e`. Since we set
+    `e = varClose 0 x body`, the roundtrip gives us back `body`, letting us use
+    the inductive hypothesis which types `body` directly. The WF precondition is
+    discharged via `HasType.regularity` on the recursive typing derivation. -/
 private theorem varOpen_varClose_roundtrip (x : HTIdent) (body : HTExpr)
     (hwf : LExpr.WF body) :
     LExpr.varOpen 0 (x, none) (LExpr.varClose 0 (x, none) body) = body :=
@@ -469,6 +552,11 @@ private theorem varOpen_varClose_roundtrip (x : HTIdent) (body : HTExpr)
 
 -- ─────────────────────────────────────────────────────────────────────
 -- §9b. pickMatching soundness for HasType
+--
+-- These lift the variable/operator lookup cases to `HasType`. The generator
+-- picks a variable or operator whose scheme matches the target type. We
+-- apply `HasType.tvar`/`HasType.top` to get typing at the full scheme, then
+-- `HasType_tinst_matchScheme` to instantiate down to `.forAll [] τ`.
 -- ─────────────────────────────────────────────────────────────────────
 
 private theorem pickMatchingVar_hastype
@@ -520,17 +608,39 @@ private theorem pickMatchingOp_hastype
 -- §9c. Context invariant for tabs
 -- ─────────────────────────────────────────────────────────────────────
 
-/-- Inserting a fresh name into the Maps-based TContext gives a find? result
-    compatible with the list-based VarCtx. -/
+/-- Extending the typing context with a fresh binding preserves the VarCtx
+    correspondence. When the generator enters a lambda body, it prepends
+    `(freshName counter, scheme)` to `vctx` and inserts the same binding into
+    `Γ.types`. This lemma shows the extended list still maps correctly into
+    the extended `Maps`. The `hx_fresh` precondition (the name isn't already
+    in `Γ.types`) ensures `Maps.insert` doesn't shadow an existing binding
+    that another VarCtx entry depends on. -/
 private theorem hvctx_extend
     (Γ : TContext Unit) (vctx : VarCtx) (x : HTIdent) (scheme : LTy)
-    (hvctx : ∀ y s, (y, s) ∈ vctx → Γ.types.find? y = some s) :
+    (hvctx : ∀ y s, (y, s) ∈ vctx → Γ.types.find? y = some s)
+    (hx_fresh : Γ.types.find? x = none) :
     ∀ y s, (y, s) ∈ ((x, scheme) :: vctx) →
       ({ Γ with types := Γ.types.insert x scheme } : TContext Unit).types.find? y = some s := by
-  sorry
+  intro y s hmem
+  simp only [List.mem_cons] at hmem
+  rcases hmem with ⟨rfl, rfl⟩ | hmem
+  · exact Maps.find?_insert_self Γ.types x scheme
+  · have hne : y ≠ x := by
+      intro heq; subst heq
+      have := hvctx y s hmem
+      rw [hx_fresh] at this
+      exact absurd this (by simp)
+    rw [Maps.find?_insert_ne Γ.types y x scheme hne]
+    exact hvctx y s hmem
 
 -- ─────────────────────────────────────────────────────────────────────
 -- §9d. Main soundness theorem concluding HasType
+--
+-- Every expression in the generator's support satisfies Strata's real
+-- `HasType` relation at the monomorphic type `.forAll [] τ`. The proof
+-- mirrors the generator's structure: for each `pick` branch, we identify
+-- which `HasType` constructor applies, discharge its premises using the
+-- helper lemmas above, and recurse.
 -- ─────────────────────────────────────────────────────────────────────
 
 set_option maxHeartbeats 1600000 in
@@ -571,10 +681,15 @@ theorem genHTExpr_sound
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)
     · exact pickMatchingVar_hastype C Γ vctx _ hvctx _ _ h
-    · have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+    · have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx (hfresh counter (Nat.le_refl _))
       have hfresh' : ∀ k ≥ counter + 1,
           ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
-        sorry
+        intro k hk
+        have hne : freshName k ≠ freshName counter := freshName_ne (by omega)
+        rw [show ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types
+            = Γ.types.insert (freshName counter) (.forAll [] τ₁) from rfl]
+        rw [Maps.find?_insert_ne Γ.types (freshName k) (freshName counter) (.forAll [] τ₁) hne]
+        exact hfresh k (by omega)
       have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
         ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) 0 τ₂ hs₂
         hbool hint hvctx' hoctx hfresh' body hbody
@@ -585,10 +700,15 @@ theorem genHTExpr_sound
         (by rw [varOpen_varClose_roundtrip _ _ (HasType.regularity ih)]; exact ih)
         (Or.inl rfl)
     · exact pickMatchingOp_hastype C Γ octx _ hoctx _ _ h
-    · have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+    · have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx (hfresh counter (Nat.le_refl _))
       have hfresh' : ∀ k ≥ counter + 1,
           ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
-        sorry
+        intro k hk
+        have hne : freshName k ≠ freshName counter := freshName_ne (by omega)
+        rw [show ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types
+            = Γ.types.insert (freshName counter) (.forAll [] τ₁) from rfl]
+        rw [Maps.find?_insert_ne Γ.types (freshName k) (freshName counter) (.forAll [] τ₁) hne]
+        exact hfresh k (by omega)
       have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
         ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) 0 τ₂ hs₂
         hbool hint hvctx' hoctx hfresh' body hbody
@@ -662,10 +782,15 @@ theorem genHTExpr_sound
       (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)
     · have hx_ty_mono : LTy.isMonoType (.forAll [] τ₁) = true := forAll_nil_isMonoType τ₁
       have he_ty_mono : LTy.isMonoType (.forAll [] τ₂) = true := forAll_nil_isMonoType τ₂
-      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx (hfresh counter (Nat.le_refl _))
       have hfresh' : ∀ k ≥ counter + 1,
           ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
-        sorry
+        intro k hk
+        have hne : freshName k ≠ freshName counter := freshName_ne (by omega)
+        rw [show ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types
+            = Γ.types.insert (freshName counter) (.forAll [] τ₁) from rfl]
+        rw [Maps.find?_insert_ne Γ.types (freshName k) (freshName counter) (.forAll [] τ₁) hne]
+        exact hfresh k (by omega)
       have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
         ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) n τ₂ hs₂
         hbool hint hvctx' hoctx hfresh' body hbody
@@ -689,10 +814,15 @@ theorem genHTExpr_sound
     · exact pickMatchingVar_hastype C Γ vctx _ hvctx _ _ h
     · have hx_ty_mono : LTy.isMonoType (.forAll [] τ₁) = true := forAll_nil_isMonoType τ₁
       have he_ty_mono : LTy.isMonoType (.forAll [] τ₂) = true := forAll_nil_isMonoType τ₂
-      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx (hfresh counter (Nat.le_refl _))
       have hfresh' : ∀ k ≥ counter + 1,
           ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
-        sorry
+        intro k hk
+        have hne : freshName k ≠ freshName counter := freshName_ne (by omega)
+        rw [show ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types
+            = Γ.types.insert (freshName counter) (.forAll [] τ₁) from rfl]
+        rw [Maps.find?_insert_ne Γ.types (freshName k) (freshName counter) (.forAll [] τ₁) hne]
+        exact hfresh k (by omega)
       have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
         ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) n τ₂ hs₂
         hbool hint hvctx' hoctx hfresh' body hbody
@@ -705,10 +835,15 @@ theorem genHTExpr_sound
     · exact pickMatchingOp_hastype C Γ octx _ hoctx _ _ h
     · have hx_ty_mono : LTy.isMonoType (.forAll [] τ₁) = true := forAll_nil_isMonoType τ₁
       have he_ty_mono : LTy.isMonoType (.forAll [] τ₂) = true := forAll_nil_isMonoType τ₂
-      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx (hfresh counter (Nat.le_refl _))
       have hfresh' : ∀ k ≥ counter + 1,
           ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
-        sorry
+        intro k hk
+        have hne : freshName k ≠ freshName counter := freshName_ne (by omega)
+        rw [show ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types
+            = Γ.types.insert (freshName counter) (.forAll [] τ₁) from rfl]
+        rw [Maps.find?_insert_ne Γ.types (freshName k) (freshName counter) (.forAll [] τ₁) hne]
+        exact hfresh k (by omega)
       have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
         ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) n τ₂ hs₂
         hbool hint hvctx' hoctx hfresh' body hbody
@@ -875,6 +1010,6 @@ def testOpCtx : OpSchemeCtx :=
 
 #guard_msgs(drop warning) in
 #eval (for _ in [:5] do
-  IO.println <| Std.format (← genHTExpr [] testOpCtx 0 2 .bool) |>.pretty : IO Unit)
+  IO.println <| Std.format (← genHTExpr [] testOpCtx 0 5 .bool) |>.pretty : IO Unit)
 
 end HT
