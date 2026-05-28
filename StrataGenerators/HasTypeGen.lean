@@ -408,40 +408,6 @@ private theorem opsMatchingTarget_mem (octx : OpSchemeCtx) (τ : LMonoTy) (name 
     exact ⟨scheme, subst, hmem, hsubst⟩
   · simp at hif
 
-private theorem pickMatchingVar_sound (vctx : VarCtx) (octx : OpSchemeCtx)
-    (τ : LMonoTy) (hv : (varsMatchingTarget vctx τ).length > 0)
-    (e : HTExpr)
-    (he : e ∈ SetGen.support (pickMatchingVar (G := SetGen.Set) vctx τ hv)) :
-    SHasType vctx octx e τ := by
-  simp only [pickMatchingVar, mem_support_bind_iff, mem_support_choose_iff,
-             mem_support_pure_iff] at he
-  obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := he
-  subst heq
-  have hlt : idx.down < (varsMatchingTarget vctx τ).length := by omega
-  have helem : (varsMatchingTarget vctx τ)[idx.down] ∈ (varsMatchingTarget vctx τ) := List.getElem_mem hlt
-  have hgetD : (varsMatchingTarget vctx τ).getD idx.down ⟨"", ()⟩ = (varsMatchingTarget vctx τ)[idx.down] := by
-    simp [List.getD, List.getElem?_eq_getElem hlt]
-  rw [hgetD]
-  obtain ⟨scheme, subst, hmem, hmatch⟩ := varsMatchingTarget_mem vctx τ _ helem
-  exact .tvar hmem hmatch
-
-private theorem pickMatchingOp_sound (vctx : VarCtx) (octx : OpSchemeCtx)
-    (τ : LMonoTy) (ho : (opsMatchingTarget octx τ).length > 0)
-    (e : HTExpr)
-    (he : e ∈ SetGen.support (pickMatchingOp (G := SetGen.Set) octx τ ho)) :
-    SHasType vctx octx e τ := by
-  simp only [pickMatchingOp, mem_support_bind_iff, mem_support_choose_iff,
-             mem_support_pure_iff] at he
-  obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := he
-  subst heq
-  have hlt : idx.down < (opsMatchingTarget octx τ).length := by omega
-  have helem : (opsMatchingTarget octx τ)[idx.down] ∈ (opsMatchingTarget octx τ) := List.getElem_mem hlt
-  have hgetD : (opsMatchingTarget octx τ).getD idx.down "" = (opsMatchingTarget octx τ)[idx.down] := by
-    simp [List.getD, List.getElem?_eq_getElem hlt]
-  rw [hgetD]
-  obtain ⟨scheme, subst, hmem, hmatch⟩ := opsMatchingTarget_mem octx τ _ helem
-  exact .top hmem hmatch
-
 private theorem norm_bool : LMonoTy.bool = LMonoTy.tcons "bool" [] := rfl
 private theorem norm_int : LMonoTy.int = LMonoTy.tcons "int" [] := rfl
 private theorem norm_arrow (τ₁ τ₂ : LMonoTy) :
@@ -463,40 +429,175 @@ private theorem genLMonoTy_simple (n : Nat) (τ : LMonoTy)
     · exact .int
     · exact .arrow (ih τ₁ h₁) (ih τ₂ h₂)
 
+-- ─────────────────────────────────────────────────────────────────────
+-- §9a. Helper lemmas for HasType soundness
+-- ─────────────────────────────────────────────────────────────────────
+
+section HasTypeSoundness
+open LExpr (HasType)
+
+private theorem forAll_nil_isMonoType (body : LMonoTy) :
+    LTy.isMonoType (.forAll [] body) = true := by
+  simp [LTy.isMonoType, LTy.boundVars, List.isEmpty]
+
+private theorem forAll_nil_toMonoType (body : LMonoTy) :
+    LTy.toMonoType (.forAll [] body) (forAll_nil_isMonoType body) = body := by
+  simp [LTy.toMonoType]
+
+/-- Chain `tinst` to instantiate all bound variables in a scheme at once.
+    If `matchScheme scheme τ = some subst`, then from `HasType C Γ e scheme`
+    we can derive `HasType C Γ e (.forAll [] τ)`. -/
+private theorem HasType_tinst_matchScheme
+    (C : LContext HTParams) (Γ : TContext Unit)
+    (e : HTExpr) (scheme : LTy) (τ : LMonoTy) (subst : List LMonoTy)
+    (htyped : HasType C Γ e scheme)
+    (hmatch : matchScheme scheme τ = some subst) :
+    HasType C Γ e (.forAll [] τ) := by
+  sorry
+
+/-- `varClose` removes all free occurrences of `x`, so `x` is fresh afterwards. -/
+private theorem fresh_varClose (x : HTIdent) (k : Nat) (body : HTExpr) :
+    LExpr.fresh (x, none) (LExpr.varClose k (x, none) body) := by
+  sorry
+
+/-- `varOpen` after `varClose` is identity for well-formed expressions.
+    This is `varOpen_of_varClose` from LExprWF.lean specialized to our types. -/
+private theorem varOpen_varClose_roundtrip (x : HTIdent) (body : HTExpr)
+    (hwf : LExpr.WF body) :
+    LExpr.varOpen 0 (x, none) (LExpr.varClose 0 (x, none) body) = body :=
+  LExpr.varOpen_of_varClose hwf
+
+-- ─────────────────────────────────────────────────────────────────────
+-- §9b. pickMatching soundness for HasType
+-- ─────────────────────────────────────────────────────────────────────
+
+private theorem pickMatchingVar_hastype
+    (C : LContext HTParams) (Γ : TContext Unit)
+    (vctx : VarCtx) (τ : LMonoTy)
+    (hvctx : ∀ x scheme, (x, scheme) ∈ vctx → Γ.types.find? x = some scheme)
+    (hv : (varsMatchingTarget vctx τ).length > 0)
+    (e : HTExpr)
+    (he : e ∈ SetGen.support (pickMatchingVar (G := SetGen.Set) vctx τ hv)) :
+    HasType C Γ e (.forAll [] τ) := by
+  simp only [pickMatchingVar, mem_support_bind_iff, mem_support_choose_iff,
+             mem_support_pure_iff] at he
+  obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := he
+  subst heq
+  have hlt : idx.down < (varsMatchingTarget vctx τ).length := by omega
+  have helem : (varsMatchingTarget vctx τ)[idx.down] ∈ (varsMatchingTarget vctx τ) := List.getElem_mem hlt
+  have hgetD : (varsMatchingTarget vctx τ).getD idx.down ⟨"", ()⟩ = (varsMatchingTarget vctx τ)[idx.down] := by
+    simp [List.getD, List.getElem?_eq_getElem hlt]
+  rw [hgetD]
+  obtain ⟨scheme, subst, hmem, hmatch⟩ := varsMatchingTarget_mem vctx τ _ helem
+  have hlookup := hvctx _ _ hmem
+  exact HasType_tinst_matchScheme C Γ _ scheme τ subst
+    (@HasType.tvar HTParams _ C Γ () _ scheme hlookup) hmatch
+
+private theorem pickMatchingOp_hastype
+    (C : LContext HTParams) (Γ : TContext Unit)
+    (octx : OpSchemeCtx) (τ : LMonoTy)
+    (hoctx : ∀ name scheme, (name, scheme) ∈ octx →
+      ∃ f, C.functions[name]? = some f ∧ f.type = .ok scheme)
+    (ho : (opsMatchingTarget octx τ).length > 0)
+    (e : HTExpr)
+    (he : e ∈ SetGen.support (pickMatchingOp (G := SetGen.Set) octx τ ho)) :
+    HasType C Γ e (.forAll [] τ) := by
+  simp only [pickMatchingOp, mem_support_bind_iff, mem_support_choose_iff,
+             mem_support_pure_iff] at he
+  obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := he
+  subst heq
+  have hlt : idx.down < (opsMatchingTarget octx τ).length := by omega
+  have helem : (opsMatchingTarget octx τ)[idx.down] ∈ (opsMatchingTarget octx τ) := List.getElem_mem hlt
+  have hgetD : (opsMatchingTarget octx τ).getD idx.down "" = (opsMatchingTarget octx τ)[idx.down] := by
+    simp [List.getD, List.getElem?_eq_getElem hlt]
+  rw [hgetD]
+  obtain ⟨scheme, subst, hmem, hmatch⟩ := opsMatchingTarget_mem octx τ _ helem
+  obtain ⟨f, hfind, hftype⟩ := hoctx _ _ hmem
+  exact HasType_tinst_matchScheme C Γ _ scheme τ subst
+    (@HasType.top HTParams _ C Γ () f ⟨_, ()⟩ scheme hfind hftype) hmatch
+
+-- ─────────────────────────────────────────────────────────────────────
+-- §9c. Context invariant for tabs
+-- ─────────────────────────────────────────────────────────────────────
+
+/-- Inserting a fresh name into the Maps-based TContext gives a find? result
+    compatible with the list-based VarCtx. -/
+private theorem hvctx_extend
+    (Γ : TContext Unit) (vctx : VarCtx) (x : HTIdent) (scheme : LTy)
+    (hvctx : ∀ y s, (y, s) ∈ vctx → Γ.types.find? y = some s) :
+    ∀ y s, (y, s) ∈ ((x, scheme) :: vctx) →
+      ({ Γ with types := Γ.types.insert x scheme } : TContext Unit).types.find? y = some s := by
+  sorry
+
+-- ─────────────────────────────────────────────────────────────────────
+-- §9d. Main soundness theorem concluding HasType
+-- ─────────────────────────────────────────────────────────────────────
+
 set_option maxHeartbeats 1600000 in
-theorem genHTExpr_sound (vctx : VarCtx) (octx : OpSchemeCtx)
+theorem genHTExpr_sound
+    (C : LContext HTParams) (Γ : TContext Unit)
+    (vctx : VarCtx) (octx : OpSchemeCtx)
     (counter : Nat) (size : Nat) (τ : LMonoTy)
-    (hτ : SimpleType τ) (e : HTExpr)
+    (hτ : SimpleType τ)
+    (hbool : C.knownTypes.containsName "bool")
+    (hint : C.knownTypes.containsName "int")
+    (hvctx : ∀ x scheme, (x, scheme) ∈ vctx → Γ.types.find? x = some scheme)
+    (hoctx : ∀ name scheme, (name, scheme) ∈ octx →
+      ∃ f, C.functions[name]? = some f ∧ f.type = .ok scheme)
+    (hfresh : ∀ k ≥ counter, Γ.types.find? (freshName k) = none)
+    (e : HTExpr)
     (he : e ∈ SetGen.support (genHTExpr (G := SetGen.Set) vctx octx counter size τ)) :
-    SHasType vctx octx e τ := by
+    HasType C Γ e (.forAll [] τ) := by
   match size, τ, hτ with
   | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genHTExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_bool] at he; simp only [genHTExpr, pick_mem_iff,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)
     all_goals first
-      | exact pickMatchingVar_sound vctx octx .bool _ _ h
-      | exact pickMatchingOp_sound vctx octx .bool _ _ h
-      | exact .tbool_const
+      | exact pickMatchingVar_hastype C Γ vctx .bool hvctx _ _ h
+      | exact pickMatchingOp_hastype C Γ octx .bool hoctx _ _ h
+      | exact .tbool_const Γ () _ hbool
   | 0, _, SimpleType.int =>
     rw [norm_int] at he; simp only [genHTExpr, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)
     all_goals first
-      | exact pickMatchingVar_sound vctx octx .int _ _ h
-      | exact pickMatchingOp_sound vctx octx .int _ _ h
-      | exact .tint_const
+      | exact pickMatchingVar_hastype C Γ vctx .int hvctx _ _ h
+      | exact pickMatchingOp_hastype C Γ octx .int hoctx _ _ h
+      | exact .tint_const Γ () _ hint
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
     rw [norm_arrow] at he; simp only [genHTExpr, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)
-    · exact pickMatchingVar_sound vctx octx _ _ _ h
-    · exact .tabs (genHTExpr_sound ((freshName counter, .forAll [] τ₁) :: vctx) octx
-                    (counter + 1) 0 τ₂ hs₂ _ hbody)
-    · exact pickMatchingOp_sound vctx octx _ _ _ h
-    · exact .tabs (genHTExpr_sound ((freshName counter, .forAll [] τ₁) :: vctx) octx
-                    (counter + 1) 0 τ₂ hs₂ _ hbody)
+    · exact pickMatchingVar_hastype C Γ vctx _ hvctx _ _ h
+    · have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hfresh' : ∀ k ≥ counter + 1,
+          ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
+        sorry
+      have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
+        ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) 0 τ₂ hs₂
+        hbool hint hvctx' hoctx hfresh' body hbody
+      exact HasType.tabs Γ () "" (freshName counter, none) (.forAll [] τ₁)
+        (LExpr.varClose 0 (freshName counter, none) body) (.forAll [] τ₂) none
+        (fresh_varClose (freshName counter) 0 body)
+        (forAll_nil_isMonoType τ₁) (forAll_nil_isMonoType τ₂)
+        (by rw [varOpen_varClose_roundtrip _ _ (HasType.regularity ih)]; exact ih)
+        (Or.inl rfl)
+    · exact pickMatchingOp_hastype C Γ octx _ hoctx _ _ h
+    · have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hfresh' : ∀ k ≥ counter + 1,
+          ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
+        sorry
+      have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
+        ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) 0 τ₂ hs₂
+        hbool hint hvctx' hoctx hfresh' body hbody
+      exact HasType.tabs Γ () "" (freshName counter, none) (.forAll [] τ₁)
+        (LExpr.varClose 0 (freshName counter, none) body) (.forAll [] τ₂) none
+        (fresh_varClose (freshName counter) 0 body)
+        (forAll_nil_isMonoType τ₁) (forAll_nil_isMonoType τ₂)
+        (by rw [varOpen_varClose_roundtrip _ _ (HasType.regularity ih)]; exact ih)
+        (Or.inl rfl)
   | n + 1, _, SimpleType.bool =>
     rw [norm_bool] at he; simp only [genHTExpr, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
@@ -504,22 +605,29 @@ theorem genHTExpr_sound (vctx : VarCtx) (octx : OpSchemeCtx)
       ⟨c, hc, t, ht, e', he', rfl⟩ | ⟨τ', hτ', e₁, he₁, e₂, he₂, rfl⟩ |
       ⟨τ', hτ', fn, hfn, arg, harg, rfl⟩ |
       (⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)
-    · exact .tbool_const
-    · exact .tbool_const
-    · exact .tif (genHTExpr_sound vctx octx counter n .bool .bool _ hc)
-                  (genHTExpr_sound vctx octx counter n .bool .bool _ ht)
-                  (genHTExpr_sound vctx octx counter n .bool .bool _ he')
-    · exact .teq (genHTExpr_sound vctx octx counter n τ' (genLMonoTy_simple n _ hτ') _ he₁)
-                  (genHTExpr_sound vctx octx counter n τ' (genLMonoTy_simple n _ hτ') _ he₂)
-    · exact .tapp (genHTExpr_sound vctx octx counter n (.arrow τ' .bool)
-                    (.arrow (genLMonoTy_simple n _ hτ') .bool) _ hfn)
-                  (genHTExpr_sound vctx octx counter n τ' (genLMonoTy_simple n _ hτ') _ harg)
-    · exact pickMatchingVar_sound vctx octx .bool _ _ h
-    · exact .tbool_const
-    · exact .tbool_const
-    · exact pickMatchingOp_sound vctx octx .bool _ _ h
-    · exact .tbool_const
-    · exact .tbool_const
+    · exact .tbool_const Γ () _ hbool
+    · exact .tbool_const Γ () _ hbool
+    · have h1 := genHTExpr_sound C Γ vctx octx counter n .bool .bool hbool hint hvctx hoctx hfresh _ hc
+      have h2 := genHTExpr_sound C Γ vctx octx counter n .bool .bool hbool hint hvctx hoctx hfresh _ ht
+      have h3 := genHTExpr_sound C Γ vctx octx counter n .bool .bool hbool hint hvctx hoctx hfresh _ he'
+      exact HasType.tif Γ () c t e' _ h1 h2 h3
+    · have hτ'_s := genLMonoTy_simple n _ hτ'
+      have h1 := genHTExpr_sound C Γ vctx octx counter n τ' hτ'_s hbool hint hvctx hoctx hfresh _ he₁
+      have h2 := genHTExpr_sound C Γ vctx octx counter n τ' hτ'_s hbool hint hvctx hoctx hfresh _ he₂
+      exact HasType.teq Γ () e₁ e₂ _ h1 h2
+    · have hτ'_s := genLMonoTy_simple n _ hτ'
+      have hfn_typed := genHTExpr_sound C Γ vctx octx counter n (.arrow τ' .bool) (.arrow hτ'_s .bool) hbool hint hvctx hoctx hfresh _ hfn
+      have harg_typed := genHTExpr_sound C Γ vctx octx counter n τ' hτ'_s hbool hint hvctx hoctx hfresh _ harg
+      exact HasType.tapp Γ () fn arg (.forAll [] .bool) (.forAll [] τ')
+        (forAll_nil_isMonoType .bool) (forAll_nil_isMonoType τ')
+        (by rw [forAll_nil_toMonoType, forAll_nil_toMonoType]; exact hfn_typed)
+        harg_typed
+    · exact pickMatchingVar_hastype C Γ vctx .bool hvctx _ _ h
+    · exact .tbool_const Γ () _ hbool
+    · exact .tbool_const Γ () _ hbool
+    · exact pickMatchingOp_hastype C Γ octx .bool hoctx _ _ h
+    · exact .tbool_const Γ () _ hbool
+    · exact .tbool_const Γ () _ hbool
   | n + 1, _, SimpleType.int =>
     rw [norm_int] at he; simp only [genHTExpr, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
@@ -527,18 +635,23 @@ theorem genHTExpr_sound (vctx : VarCtx) (octx : OpSchemeCtx)
       ⟨τ', hτ', fn, hfn, arg, harg, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)
-    · exact .tint_const
-    · exact .tint_const
-    · exact .tapp (genHTExpr_sound vctx octx counter n (.arrow τ' .int)
-                    (.arrow (genLMonoTy_simple n _ hτ') .int) _ hfn)
-                  (genHTExpr_sound vctx octx counter n τ' (genLMonoTy_simple n _ hτ') _ harg)
-    · exact .tif (genHTExpr_sound vctx octx counter n .bool .bool _ hc)
-                  (genHTExpr_sound vctx octx counter n .int .int _ ht)
-                  (genHTExpr_sound vctx octx counter n .int .int _ he')
-    · exact pickMatchingVar_sound vctx octx .int _ _ h
-    · exact .tint_const
-    · exact pickMatchingOp_sound vctx octx .int _ _ h
-    · exact .tint_const
+    · exact .tint_const Γ () _ hint
+    · exact .tint_const Γ () _ hint
+    · have hτ'_s := genLMonoTy_simple n _ hτ'
+      have hfn_typed := genHTExpr_sound C Γ vctx octx counter n (.arrow τ' .int) (.arrow hτ'_s .int) hbool hint hvctx hoctx hfresh _ hfn
+      have harg_typed := genHTExpr_sound C Γ vctx octx counter n τ' hτ'_s hbool hint hvctx hoctx hfresh _ harg
+      exact HasType.tapp Γ () fn arg (.forAll [] .int) (.forAll [] τ')
+        (forAll_nil_isMonoType .int) (forAll_nil_isMonoType τ')
+        (by rw [forAll_nil_toMonoType, forAll_nil_toMonoType]; exact hfn_typed)
+        harg_typed
+    · have h1 := genHTExpr_sound C Γ vctx octx counter n .bool .bool hbool hint hvctx hoctx hfresh _ hc
+      have h2 := genHTExpr_sound C Γ vctx octx counter n .int .int hbool hint hvctx hoctx hfresh _ ht
+      have h3 := genHTExpr_sound C Γ vctx octx counter n .int .int hbool hint hvctx hoctx hfresh _ he'
+      exact HasType.tif Γ () c t e' _ h1 h2 h3
+    · exact pickMatchingVar_hastype C Γ vctx .int hvctx _ _ h
+    · exact .tint_const Γ () _ hint
+    · exact pickMatchingOp_hastype C Γ octx .int hoctx _ _ h
+    · exact .tint_const Γ () _ hint
   | n + 1, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
     rw [norm_arrow] at he; simp only [genHTExpr, pick_mem_iff, SetGen.Set.mem_bind,
@@ -547,22 +660,68 @@ theorem genHTExpr_sound (vctx : VarCtx) (octx : OpSchemeCtx)
       ⟨τ', hτ', fn, hfn, arg, harg, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)
-    · exact .tabs (genHTExpr_sound ((freshName counter, .forAll [] τ₁) :: vctx) octx
-                    (counter + 1) n τ₂ hs₂ _ hbody)
-    · exact .tapp (genHTExpr_sound vctx octx counter n (.arrow τ' (.arrow τ₁ τ₂))
-                    (.arrow (genLMonoTy_simple n _ hτ') (.arrow hs₁ hs₂)) _ hfn)
-                  (genHTExpr_sound vctx octx counter n τ' (genLMonoTy_simple n _ hτ') _ harg)
-    · exact .tif (genHTExpr_sound vctx octx counter n .bool .bool _ hc)
-                  (genHTExpr_sound vctx octx counter n (.arrow τ₁ τ₂) (.arrow hs₁ hs₂) _ ht)
-                  (genHTExpr_sound vctx octx counter n (.arrow τ₁ τ₂) (.arrow hs₁ hs₂) _ he')
-    · exact pickMatchingVar_sound vctx octx _ _ _ h
-    · exact .tabs (genHTExpr_sound ((freshName counter, .forAll [] τ₁) :: vctx) octx
-                    (counter + 1) n τ₂ hs₂ _ hbody)
-    · exact pickMatchingOp_sound vctx octx _ _ _ h
-    · exact .tabs (genHTExpr_sound ((freshName counter, .forAll [] τ₁) :: vctx) octx
-                    (counter + 1) n τ₂ hs₂ _ hbody)
+    · have hx_ty_mono : LTy.isMonoType (.forAll [] τ₁) = true := forAll_nil_isMonoType τ₁
+      have he_ty_mono : LTy.isMonoType (.forAll [] τ₂) = true := forAll_nil_isMonoType τ₂
+      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hfresh' : ∀ k ≥ counter + 1,
+          ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
+        sorry
+      have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
+        ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) n τ₂ hs₂
+        hbool hint hvctx' hoctx hfresh' body hbody
+      exact HasType.tabs Γ () "" (freshName counter, none) (.forAll [] τ₁)
+        (LExpr.varClose 0 (freshName counter, none) body) (.forAll [] τ₂) none
+        (fresh_varClose (freshName counter) 0 body)
+        hx_ty_mono he_ty_mono
+        (by rw [varOpen_varClose_roundtrip _ _ (HasType.regularity ih)]; exact ih)
+        (Or.inl rfl)
+    · have hτ'_s := genLMonoTy_simple n _ hτ'
+      have hfn_typed := genHTExpr_sound C Γ vctx octx counter n (.arrow τ' (.arrow τ₁ τ₂)) (.arrow hτ'_s (.arrow hs₁ hs₂)) hbool hint hvctx hoctx hfresh _ hfn
+      have harg_typed := genHTExpr_sound C Γ vctx octx counter n τ' hτ'_s hbool hint hvctx hoctx hfresh _ harg
+      exact HasType.tapp Γ () fn arg (.forAll [] (.arrow τ₁ τ₂)) (.forAll [] τ')
+        (forAll_nil_isMonoType (.arrow τ₁ τ₂)) (forAll_nil_isMonoType τ')
+        (by rw [forAll_nil_toMonoType, forAll_nil_toMonoType]; exact hfn_typed)
+        harg_typed
+    · have h1 := genHTExpr_sound C Γ vctx octx counter n .bool .bool hbool hint hvctx hoctx hfresh _ hc
+      have h2 := genHTExpr_sound C Γ vctx octx counter n (.arrow τ₁ τ₂) (.arrow hs₁ hs₂) hbool hint hvctx hoctx hfresh _ ht
+      have h3 := genHTExpr_sound C Γ vctx octx counter n (.arrow τ₁ τ₂) (.arrow hs₁ hs₂) hbool hint hvctx hoctx hfresh _ he'
+      exact HasType.tif Γ () c t e' _ h1 h2 h3
+    · exact pickMatchingVar_hastype C Γ vctx _ hvctx _ _ h
+    · have hx_ty_mono : LTy.isMonoType (.forAll [] τ₁) = true := forAll_nil_isMonoType τ₁
+      have he_ty_mono : LTy.isMonoType (.forAll [] τ₂) = true := forAll_nil_isMonoType τ₂
+      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hfresh' : ∀ k ≥ counter + 1,
+          ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
+        sorry
+      have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
+        ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) n τ₂ hs₂
+        hbool hint hvctx' hoctx hfresh' body hbody
+      exact HasType.tabs Γ () "" (freshName counter, none) (.forAll [] τ₁)
+        (LExpr.varClose 0 (freshName counter, none) body) (.forAll [] τ₂) none
+        (fresh_varClose (freshName counter) 0 body)
+        hx_ty_mono he_ty_mono
+        (by rw [varOpen_varClose_roundtrip _ _ (HasType.regularity ih)]; exact ih)
+        (Or.inl rfl)
+    · exact pickMatchingOp_hastype C Γ octx _ hoctx _ _ h
+    · have hx_ty_mono : LTy.isMonoType (.forAll [] τ₁) = true := forAll_nil_isMonoType τ₁
+      have he_ty_mono : LTy.isMonoType (.forAll [] τ₂) = true := forAll_nil_isMonoType τ₂
+      have hvctx' := hvctx_extend Γ vctx (freshName counter) (.forAll [] τ₁) hvctx
+      have hfresh' : ∀ k ≥ counter + 1,
+          ({ Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) } : TContext Unit).types.find? (freshName k) = none := by
+        sorry
+      have ih := genHTExpr_sound C { Γ with types := Γ.types.insert (freshName counter) (.forAll [] τ₁) }
+        ((freshName counter, .forAll [] τ₁) :: vctx) octx (counter + 1) n τ₂ hs₂
+        hbool hint hvctx' hoctx hfresh' body hbody
+      exact HasType.tabs Γ () "" (freshName counter, none) (.forAll [] τ₁)
+        (LExpr.varClose 0 (freshName counter, none) body) (.forAll [] τ₂) none
+        (fresh_varClose (freshName counter) 0 body)
+        hx_ty_mono he_ty_mono
+        (by rw [varOpen_varClose_roundtrip _ _ (HasType.regularity ih)]; exact ih)
+        (Or.inl rfl)
   termination_by (size, sizeOf τ)
   decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.arrow]; omega
+
+end HasTypeSoundness
 
 -- ═══════════════════════════════════════════════════════════════════════
 -- §10. Completeness
