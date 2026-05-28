@@ -680,7 +680,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     HasTypeA' bctx e τ := by
   match size, τ, hτ with
   | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_pure,
+    rw [norm_bool] at he; simp only [genLExpr, pick_I femem_iff, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     all_goals first
