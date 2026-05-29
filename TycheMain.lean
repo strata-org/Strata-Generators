@@ -2,7 +2,7 @@ import StrataGenerators.Tyche
 import StrataGenerators.HasTypeAGen
 import Basalt.IO
 
-open Lambda RandomChoice ArbNat Tyche
+open Lambda RandomChoice ArbNat Tyche Std
 
 /-!
 # Tyche Visualization Runner
@@ -69,7 +69,7 @@ structure TypedExpr where
 
 instance : Tyche.TycheSample TypedExpr where
   toSample te :=
-    { representation := toString te.expr
+    { representation := (format te.expr).pretty
       features := [
         ("depth", .ordinal (exprDepth te.expr)),
         ("size", .ordinal (exprSize te.expr)),
@@ -81,7 +81,7 @@ instance : Tyche.TycheSample TypedExpr where
 /-- A generated monotype, ready for Tyche. -/
 instance : Tyche.TycheSample LMonoTy where
   toSample ty :=
-    { representation := toString ty
+    { representation := (format ty).pretty
       features := [
         ("depth", .ordinal (monoTyDepth ty)),
         ("type_kind", .nominal (typeKind ty))
