@@ -128,27 +128,37 @@ def pickTyVar [Gen G] (tvars : List TyIdentifier)
     are generated. -/
 def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   | 0 =>
-    pick (fun () => pure .bool)
-         (fun () =>
-           pick (fun () => pure .int)
-                (fun () =>
-                  if h : tvars.length > 0 then pickTyVar tvars h
-                  else pure .bool))
+    if h : tvars.length > 0 then
+      pick (fun () => pure .bool)
+           (fun () => pick (fun () => pure .int)
+                           (fun () => pickTyVar tvars h))
+    else
+      pick (fun () => pure .bool)
+           (fun () => pure .int)
   | n + 1 =>
-    pick
-      (fun () => pure .bool)
-      (fun () =>
-        pick
-          (fun () => pure .int)
-          (fun () =>
-            pick
-              (fun () => do
-                let τ₁ ← genLMonoTy tvars n
-                let τ₂ ← genLMonoTy tvars n
-                pure (.arrow τ₁ τ₂))
-              (fun () =>
-                if h : tvars.length > 0 then pickTyVar tvars h
-                else pure .int)))
+    if h : tvars.length > 0 then
+      pick
+        (fun () => pure .bool)
+        (fun () =>
+          pick
+            (fun () => pure .int)
+            (fun () =>
+              pick
+                (fun () => do
+                  let τ₁ ← genLMonoTy tvars n
+                  let τ₂ ← genLMonoTy tvars n
+                  pure (.arrow τ₁ τ₂))
+                (fun () => pickTyVar tvars h)))
+    else
+      pick
+        (fun () => pure .bool)
+        (fun () =>
+          pick
+            (fun () => pure .int)
+            (fun () => do
+              let τ₁ ← genLMonoTy tvars n
+              let τ₂ ← genLMonoTy tvars n
+              pure (.arrow τ₁ τ₂)))
 
 -- ── Expression generator ───────────────────────────────────────────────
 
@@ -639,10 +649,126 @@ private theorem pickTyVar_mem (tvars : List TyIdentifier) (h : tvars.length > 0)
   rw [this]
   exact List.getElem_mem hlt
 
+private theorem pickTyVar_complete (tvars : List TyIdentifier)
+    (h : tvars.length > 0) (name : TyIdentifier)
+    (hmem : name ∈ tvars) :
+    LMonoTy.ftvar name ∈ SetGen.support (pickTyVar (G := SetGen.Set) tvars h) := by
+  simp only [pickTyVar, mem_support_bind_iff, mem_support_choose_iff,
+             mem_support_pure_iff]
+  obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hmem
+  have hle : idx ≤ tvars.length - 1 := by omega
+  refine ⟨⟨idx⟩, ⟨Nat.zero_le _, hle⟩, ?_⟩
+  simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
+
+private theorem allFtvarsIn_bool (tvars : List TyIdentifier) :
+    allFtvarsIn tvars .bool := by simp [allFtvarsIn, LMonoTy.bool]
+private theorem allFtvarsIn_int (tvars : List TyIdentifier) :
+    allFtvarsIn tvars .int := by simp [allFtvarsIn, LMonoTy.int]
+private theorem allFtvarsIn_ftvar {tvars : List TyIdentifier} {name : TyIdentifier}
+    (h : name ∈ tvars) : allFtvarsIn tvars (.ftvar name) := by
+  unfold allFtvarsIn; exact h
+private theorem allFtvarsIn_ftvar_inv {tvars : List TyIdentifier} {name : TyIdentifier}
+    (h : allFtvarsIn tvars (.ftvar name)) : name ∈ tvars := by
+  unfold allFtvarsIn at h; exact h
+private theorem allFtvarsIn_arrow {tvars : List TyIdentifier} {τ₁ τ₂ : LMonoTy} :
+    allFtvarsIn tvars (.arrow τ₁ τ₂) ↔ allFtvarsIn tvars τ₁ ∧ allFtvarsIn tvars τ₂ := by
+  simp [allFtvarsIn, LMonoTy.arrow]
+
+private theorem genLMonoTy_zero_mem (tvars : List TyIdentifier) (τ : LMonoTy) :
+    τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars 0) ↔
+      SimpleType τ ∧ monoTyDepth τ ≤ 0 ∧ allFtvarsIn tvars τ := by
+  simp only [genLMonoTy, mem_support_dite_iff, mem_support_pick_iff,
+             mem_support_pure_iff]
+  constructor
+  · intro he
+    rcases he with (⟨htv, (rfl | (rfl | hftv))⟩ | ⟨htv, (rfl | rfl)⟩)
+    · exact ⟨SimpleType.bool, Nat.le_refl _, allFtvarsIn_bool _⟩
+    · exact ⟨SimpleType.int, Nat.le_refl _, allFtvarsIn_int _⟩
+    · obtain ⟨name, hmem, rfl⟩ := pickTyVar_mem tvars htv _ hftv
+      exact ⟨SimpleType.ftvar, Nat.le_refl _, allFtvarsIn_ftvar hmem⟩
+    · exact ⟨SimpleType.bool, Nat.le_refl _, allFtvarsIn_bool _⟩
+    · exact ⟨SimpleType.int, Nat.le_refl _, allFtvarsIn_int _⟩
+  · intro ⟨hs, hd, hftv⟩
+    by_cases htv : tvars.length > 0
+    · left; refine ⟨htv, ?_⟩
+      cases hs with
+      | bool => left; rfl
+      | int => right; left; rfl
+      | ftvar =>
+        rename_i name
+        right; right; exact pickTyVar_complete tvars htv name (allFtvarsIn_ftvar_inv hftv)
+      | arrow => simp [monoTyDepth, LMonoTy.arrow] at hd
+    · right; refine ⟨htv, ?_⟩
+      cases hs with
+      | bool => left; rfl
+      | int => right; rfl
+      | ftvar =>
+        rename_i name
+        exact absurd (List.length_pos_of_mem (allFtvarsIn_ftvar_inv hftv)) (by omega)
+      | arrow => simp [monoTyDepth, LMonoTy.arrow] at hd
+
+private theorem genLMonoTy_succ_mem (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy)
+    (ih : ∀ τ, τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n) ↔
+      SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ) :
+    τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars (n + 1)) ↔
+      SimpleType τ ∧ monoTyDepth τ ≤ n + 1 ∧ allFtvarsIn tvars τ := by
+  simp only [genLMonoTy, mem_support_dite_iff, mem_support_pick_iff,
+             mem_support_pure_iff, mem_support_bind_iff]
+  constructor
+  · intro he
+    rcases he with (⟨htv, (rfl | (rfl | (⟨τ₁, hτ₁, τ₂, hτ₂, rfl⟩ | hftv)))⟩ |
+                    ⟨htv, (rfl | (rfl | ⟨τ₁, hτ₁, τ₂, hτ₂, rfl⟩))⟩)
+    · exact ⟨SimpleType.bool, Nat.zero_le _, allFtvarsIn_bool _⟩
+    · exact ⟨SimpleType.int, Nat.zero_le _, allFtvarsIn_int _⟩
+    · have ⟨hs₁, hd₁, hf₁⟩ := (ih τ₁).mp hτ₁
+      have ⟨hs₂, hd₂, hf₂⟩ := (ih τ₂).mp hτ₂
+      refine ⟨SimpleType.arrow hs₁ hs₂, ?_, allFtvarsIn_arrow.mpr ⟨hf₁, hf₂⟩⟩
+      show max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1 ≤ n + 1; omega
+    · obtain ⟨name, hmem, rfl⟩ := pickTyVar_mem tvars htv _ hftv
+      exact ⟨SimpleType.ftvar, Nat.zero_le _, allFtvarsIn_ftvar hmem⟩
+    · exact ⟨SimpleType.bool, Nat.zero_le _, allFtvarsIn_bool _⟩
+    · exact ⟨SimpleType.int, Nat.zero_le _, allFtvarsIn_int _⟩
+    · have ⟨hs₁, hd₁, hf₁⟩ := (ih τ₁).mp hτ₁
+      have ⟨hs₂, hd₂, hf₂⟩ := (ih τ₂).mp hτ₂
+      refine ⟨SimpleType.arrow hs₁ hs₂, ?_, allFtvarsIn_arrow.mpr ⟨hf₁, hf₂⟩⟩
+      show max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1 ≤ n + 1; omega
+  · intro ⟨hs, hd, hftv⟩
+    by_cases htv : tvars.length > 0
+    · left; refine ⟨htv, ?_⟩
+      cases hs with
+      | bool => left; rfl
+      | int => right; left; rfl
+      | arrow hs₁ hs₂ =>
+        right; right; left
+        rename_i τ₁ τ₂
+        have hd' : max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1 ≤ n + 1 := hd
+        have ⟨hf₁, hf₂⟩ := allFtvarsIn_arrow.mp hftv
+        exact ⟨τ₁, (ih τ₁).mpr ⟨hs₁, by omega, hf₁⟩,
+               τ₂, (ih τ₂).mpr ⟨hs₂, by omega, hf₂⟩, rfl⟩
+      | ftvar =>
+        rename_i name
+        right; right; right; exact pickTyVar_complete tvars htv name (allFtvarsIn_ftvar_inv hftv)
+    · right; refine ⟨htv, ?_⟩
+      cases hs with
+      | bool => left; rfl
+      | int => right; left; rfl
+      | arrow hs₁ hs₂ =>
+        right; right
+        rename_i τ₁ τ₂
+        have hd' : max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1 ≤ n + 1 := hd
+        have ⟨hf₁, hf₂⟩ := allFtvarsIn_arrow.mp hftv
+        exact ⟨τ₁, (ih τ₁).mpr ⟨hs₁, by omega, hf₁⟩,
+               τ₂, (ih τ₂).mpr ⟨hs₂, by omega, hf₂⟩, rfl⟩
+      | ftvar =>
+        rename_i name
+        exact absurd (List.length_pos_of_mem (allFtvarsIn_ftvar_inv hftv)) (by omega)
+
 theorem genLMonoTy_support (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy) :
     τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n) ↔
       SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ := by
-  sorry
+  induction n generalizing τ with
+  | zero => exact genLMonoTy_zero_mem tvars τ
+  | succ n ih => exact genLMonoTy_succ_mem tvars n τ ih
 
 /-- Corollary: anything generated by `genLMonoTy` is a `SimpleType`. -/
 theorem genLMonoTy_simple (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy)
@@ -863,38 +989,40 @@ private def termDepth (bctx : BVarCtx) : LExpr' → Nat
       max (monoTyDepth τ) (max (termDepth (τ :: bctx) tr) (termDepth (τ :: bctx) body)) + 1
   | _                     => 0
 
-/-- All type annotations occurring in an expression are simple and have depth bounded
-    appropriately. The `n` parameter decreases by 1 at each compound expression level,
+/-- All type annotations occurring in an expression are simple, have depth bounded
+    appropriately, and have all ftvar names drawn from `tvars`.
+    The `n` parameter decreases by 1 at each compound expression level,
     matching the generator's fuel consumption. At level `n+1`, intermediate types
     produced by `genLMonoTy n` have depth ≤ `n`, and sub-expressions need `AllTypesSimple n`. -/
-inductive AllTypesSimple : Nat → BVarCtx → LExpr' → Prop where
-  | boolConst : AllTypesSimple n bctx (.boolConst () b)
-  | intConst  : AllTypesSimple n bctx (.intConst () k)
-  | bvar      : AllTypesSimple n bctx (.bvar () i)
-  | fvar      : AllTypesSimple n bctx (.fvar () x (some τ))
-  | op        : AllTypesSimple n bctx (.op () o (some τ))
-  | abs       : SimpleType τ₁ → monoTyDepth τ₁ ≤ n →
-                AllTypesSimple n (τ₁ :: bctx) body →
-                AllTypesSimple (n + 1) bctx (.abs () "" (some τ₁) body)
+inductive AllTypesSimple (tvars : List TyIdentifier) : Nat → BVarCtx → LExpr' → Prop where
+  | boolConst : AllTypesSimple tvars n bctx (.boolConst () b)
+  | intConst  : AllTypesSimple tvars n bctx (.intConst () k)
+  | bvar      : AllTypesSimple tvars n bctx (.bvar () i)
+  | fvar      : AllTypesSimple tvars n bctx (.fvar () x (some τ))
+  | op        : AllTypesSimple tvars n bctx (.op () o (some τ))
+  | abs       : SimpleType τ₁ → monoTyDepth τ₁ ≤ n → allFtvarsIn tvars τ₁ →
+                AllTypesSimple tvars n (τ₁ :: bctx) body →
+                AllTypesSimple tvars (n + 1) bctx (.abs () "" (some τ₁) body)
   | app       : (τ' : LMonoTy) →
                 HasTypeA' bctx arg τ' →
-                SimpleType τ' → monoTyDepth τ' ≤ n →
-                AllTypesSimple n bctx fn → AllTypesSimple n bctx arg →
-                AllTypesSimple (n + 1) bctx (.app () fn arg)
-  | ite       : AllTypesSimple n bctx c → AllTypesSimple n bctx t →
-                AllTypesSimple n bctx e →
-                AllTypesSimple (n + 1) bctx (.ite () c t e)
+                SimpleType τ' → monoTyDepth τ' ≤ n → allFtvarsIn tvars τ' →
+                AllTypesSimple tvars n bctx fn → AllTypesSimple tvars n bctx arg →
+                AllTypesSimple tvars (n + 1) bctx (.app () fn arg)
+  | ite       : AllTypesSimple tvars n bctx c → AllTypesSimple tvars n bctx t →
+                AllTypesSimple tvars n bctx e →
+                AllTypesSimple tvars (n + 1) bctx (.ite () c t e)
   | eq        : (τ' : LMonoTy) →
                 HasTypeA' bctx e₁ τ' → HasTypeA' bctx e₂ τ' →
-                SimpleType τ' → monoTyDepth τ' ≤ n →
-                AllTypesSimple n bctx e₁ → AllTypesSimple n bctx e₂ →
-                AllTypesSimple (n + 1) bctx (.eq () e₁ e₂)
-  | quant     : SimpleType τ → monoTyDepth τ ≤ n →
+                SimpleType τ' → monoTyDepth τ' ≤ n → allFtvarsIn tvars τ' →
+                AllTypesSimple tvars n bctx e₁ → AllTypesSimple tvars n bctx e₂ →
+                AllTypesSimple tvars (n + 1) bctx (.eq () e₁ e₂)
+  | quant     : SimpleType τ → monoTyDepth τ ≤ n → allFtvarsIn tvars τ →
                 (τ_tr : LMonoTy) → SimpleType τ_tr → monoTyDepth τ_tr ≤ n →
+                allFtvarsIn tvars τ_tr →
                 HasTypeA' (τ :: bctx) tr τ_tr →
-                AllTypesSimple n (τ :: bctx) tr →
-                AllTypesSimple n (τ :: bctx) body →
-                AllTypesSimple (n + 1) bctx (.quant () k "" (some τ) tr body)
+                AllTypesSimple tvars n (τ :: bctx) tr →
+                AllTypesSimple tvars n (τ :: bctx) body →
+                AllTypesSimple tvars (n + 1) bctx (.quant () k "" (some τ) tr body)
 
 -- ── Completeness for genLExpr ─────────────────────────────────────────
 
@@ -980,7 +1108,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
     (hwt : HasTypeA' bctx e τ)
     (hnames : emptyNames e)
     (hvars : allVarsInCtx fctx octx e)
-    (hats : AllTypesSimple size bctx e)
+    (hats : AllTypesSimple tvars size bctx e)
     (hsize : termDepth bctx e ≤ size) :
     e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars bctx size τ) := by
   match size, τ, hτ with
@@ -1111,7 +1239,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
       | const => left; cases (by assumption : Bool) <;> simp [LExpr.boolConst]
     | intConst =>
       exact absurd (intConst_hasType_int hwt) (by simp [LMonoTy.bool, LMonoTy.int])
-    | abs _ _ _ =>
+    | abs _ _ _ _ =>
       exact absurd (abs_hasType_arrow hwt) (by intro ⟨_, h⟩; simp [LMonoTy.bool, LMonoTy.arrow] at h)
     | ite hc ht he_ =>
       cases hwt with
@@ -1123,7 +1251,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
                _, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ htw hnames.2.1 hvars.2.1 ht (by omega),
                _, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
-    | eq τ' he1w he2w hsτ' hdτ' hats1 hats2 =>
+    | eq τ' he1w he2w hsτ' hdτ' hftv' hats1 hats2 =>
       cases hwt with
       | eq hwt1 hwt2 =>
         have hτeq := typing_deterministic he1w hwt1
@@ -1132,10 +1260,10 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; left
-        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
                _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hwt1 hnames.1 hvars.1 hats1 (by omega),
                _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hwt2 hnames.2 hvars.2 hats2 (by omega), rfl⟩
-    | app τ' hargw hsτ' hdτ' hfn_ats harg_ats =>
+    | app τ' hargw hsτ' hdτ' hftv' hfn_ats harg_ats =>
       cases hwt with
       | app hfnw hargw' =>
         have hτeq := typing_deterministic hargw hargw'
@@ -1144,10 +1272,10 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; right; left
-        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
                _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
                _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' .bool) (SimpleType.arrow hsτ' SimpleType.bool) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
-    | quant hsτ' hdτ' τ_tr hsτ_tr hdτ_tr htrw htr_ats hbody_ats =>
+    | quant hsτ' hdτ' hftv' τ_tr hsτ_tr hdτ_tr hftv_tr htrw htr_ats hbody_ats =>
       cases hwt with
       | quant htrw' hbodyw =>
         have hτ_tr_eq := typing_deterministic htrw htrw'
@@ -1159,14 +1287,14 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         cases k with
         | all =>
           right; right; right; right; left
-          refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', sorry⟩,
-                 _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, sorry⟩,
+          refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', hftv'⟩,
+                 _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, hftv_tr⟩,
                  _, genLExpr_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
                  _, genLExpr_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
         | exist =>
           right; right; right; right; right; left
-          refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', sorry⟩,
-                 _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, sorry⟩,
+          refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', hftv'⟩,
+                 _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, hftv_tr⟩,
                  _, genLExpr_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
                  _, genLExpr_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
     | bvar =>
@@ -1210,13 +1338,13 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         · right; exact ⟨k, hk, rfl⟩
     | boolConst =>
       exact absurd (boolConst_hasType_bool hwt) (by simp [LMonoTy.bool, LMonoTy.int])
-    | abs _ _ _ =>
+    | abs _ _ _ _ =>
       exact absurd (abs_hasType_arrow hwt) (by intro ⟨_, h⟩; simp [LMonoTy.int, LMonoTy.arrow] at h)
-    | eq _ _ _ _ _ _ _ =>
+    | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt) (by simp [LMonoTy.int, LMonoTy.bool])
-    | quant _ _ _ _ _ _ _ _ =>
+    | quant _ _ _ _ _ _ _ _ _ _ =>
       exact absurd (quant_hasType_bool hwt) (by simp [LMonoTy.int, LMonoTy.bool])
-    | app τ' hargw hsτ' hdτ' hfn_ats harg_ats =>
+    | app τ' hargw hsτ' hdτ' hftv' hfn_ats harg_ats =>
       cases hwt with
       | app hfnw hargw' =>
         have hτeq := typing_deterministic hargw hargw'
@@ -1225,7 +1353,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; left
-        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
                _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
                _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' .int) (SimpleType.arrow hsτ' SimpleType.int) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
@@ -1274,11 +1402,11 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (boolConst_hasType_bool hwt) (by intro h; simp [LMonoTy.bool, LMonoTy.arrow] at h)
     | intConst =>
       exact absurd (intConst_hasType_int hwt) (by intro h; simp [LMonoTy.int, LMonoTy.arrow] at h)
-    | eq _ _ _ _ _ _ _ =>
+    | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt) (by intro h; simp [LMonoTy.bool, LMonoTy.arrow] at h)
-    | quant _ _ _ _ _ _ _ _ =>
+    | quant _ _ _ _ _ _ _ _ _ _ =>
       exact absurd (quant_hasType_bool hwt) (by intro h; simp [LMonoTy.bool, LMonoTy.arrow] at h)
-    | abs hsτ₁ hdτ₁ hbody_ats =>
+    | abs hsτ₁ hdτ₁ _ hbody_ats =>
       cases hwt with
       | abs hbody_wt =>
         simp [termDepth] at hsize
@@ -1286,7 +1414,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         left
         refine ⟨_, genLExpr_complete fctx octx tvars (τ₁ :: bctx) n τ₂ hs₂ _ hbody_wt
           hnames.2 hvars hbody_ats (by omega), rfl⟩
-    | app τ' hargw hsτ' hdτ' hfn_ats harg_ats =>
+    | app τ' hargw hsτ' hdτ' hftv' hfn_ats harg_ats =>
       cases hwt with
       | app hfnw hargw' =>
         have hτeq := typing_deterministic hargw hargw'
@@ -1295,7 +1423,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; left
-        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', sorry⟩,
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
                _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
                _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂)) (SimpleType.arrow hsτ' (SimpleType.arrow hs₁ hs₂)) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
@@ -1334,8 +1462,99 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
           have := (opsOfType_mem_iff octx (.arrow τ₁ τ₂) _).mpr hmem
           exact List.length_pos_of_mem this
         exact ⟨hlen, pickOp_complete octx (.arrow τ₁ τ₂) _ hmem hlen⟩
-  | 0, _, SimpleType.ftvar => sorry
-  | n + 1, _, SimpleType.ftvar => sorry
+  | 0, _, SimpleType.ftvar =>
+    rename_i name
+    simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
+    cases hats with
+    | boolConst => exact absurd (boolConst_hasType_bool hwt) (by intro h; exact LMonoTy.noConfusion h)
+    | intConst => exact absurd (intConst_hasType_int hwt) (by intro h; exact LMonoTy.noConfusion h)
+    | bvar =>
+      cases hwt with
+      | bvar hget =>
+        left; left
+        have hlen : (bvarsOfType bctx (.ftvar name)).length > 0 := by
+          have := (bvarsOfType_mem_iff bctx (.ftvar name) _).mpr hget
+          exact List.length_pos_of_mem this
+        exact ⟨hlen, pickBVar_complete bctx (.ftvar name) _ hget hlen⟩
+    | fvar =>
+      cases hwt with
+      | fvar =>
+        right; left; left
+        have hmem : (_, _) ∈ fctx := hvars
+        have hlen : (fvarsOfType fctx (.ftvar name)).length > 0 := by
+          have := (fvarsOfType_mem_iff fctx (.ftvar name) _).mpr hmem
+          exact List.length_pos_of_mem this
+        exact ⟨hlen, pickFVar_complete fctx (.ftvar name) _ hmem hlen⟩
+    | op =>
+      cases hwt with
+      | op =>
+        right; right; left
+        have hmem : (_, _) ∈ octx := hvars
+        have hlen : (opsOfType octx (.ftvar name)).length > 0 := by
+          have := (opsOfType_mem_iff octx (.ftvar name) _).mpr hmem
+          exact List.length_pos_of_mem this
+        exact ⟨hlen, pickOp_complete octx (.ftvar name) _ hmem hlen⟩
+  | n + 1, _, SimpleType.ftvar =>
+    rename_i name
+    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite, bot_mem_iff]
+    cases hats with
+    | boolConst => exact absurd (boolConst_hasType_bool hwt) (by intro h; exact LMonoTy.noConfusion h)
+    | intConst => exact absurd (intConst_hasType_int hwt) (by intro h; exact LMonoTy.noConfusion h)
+    | abs _ _ _ _ =>
+      exact absurd (abs_hasType_arrow hwt) (by intro ⟨_, h⟩; exact LMonoTy.noConfusion h)
+    | eq _ _ _ _ _ _ _ _ =>
+      exact absurd (eq_hasType_bool hwt) (by intro h; exact LMonoTy.noConfusion h)
+    | quant _ _ _ _ _ _ _ _ _ _ =>
+      exact absurd (quant_hasType_bool hwt) (by intro h; exact LMonoTy.noConfusion h)
+    | app τ' hargw hsτ' hdτ' hftv' hfn_ats harg_ats =>
+      cases hwt with
+      | app hfnw hargw' =>
+        have hτeq := typing_deterministic hargw hargw'
+        subst hτeq
+        simp [termDepth] at hsize
+        simp only [emptyNames] at hnames
+        simp only [allVarsInCtx] at hvars
+        left
+        refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
+               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' (.ftvar name)) (SimpleType.arrow hsτ' SimpleType.ftvar) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+    | ite hc ht he_ =>
+      cases hwt with
+      | ite hcw htw hew =>
+        simp [termDepth] at hsize
+        simp only [emptyNames] at hnames
+        simp only [allVarsInCtx] at hvars
+        right; left
+        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.ftvar name) SimpleType.ftvar _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExpr_complete fctx octx tvars bctx n (.ftvar name) SimpleType.ftvar _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+    | bvar =>
+      cases hwt with
+      | bvar hget =>
+        right; right; left; left
+        have hlen : (bvarsOfType bctx (.ftvar name)).length > 0 := by
+          have := (bvarsOfType_mem_iff bctx (.ftvar name) _).mpr hget
+          exact List.length_pos_of_mem this
+        exact ⟨hlen, pickBVar_complete bctx (.ftvar name) _ hget hlen⟩
+    | fvar =>
+      cases hwt with
+      | fvar =>
+        right; right; right; left; left
+        have hmem : (_, _) ∈ fctx := hvars
+        have hlen : (fvarsOfType fctx (.ftvar name)).length > 0 := by
+          have := (fvarsOfType_mem_iff fctx (.ftvar name) _).mpr hmem
+          exact List.length_pos_of_mem this
+        exact ⟨hlen, pickFVar_complete fctx (.ftvar name) _ hmem hlen⟩
+    | op =>
+      cases hwt with
+      | op =>
+        right; right; right; right; left
+        have hmem : (_, _) ∈ octx := hvars
+        have hlen : (opsOfType octx (.ftvar name)).length > 0 := by
+          have := (opsOfType_mem_iff octx (.ftvar name) _).mpr hmem
+          exact List.length_pos_of_mem this
+        exact ⟨hlen, pickOp_complete octx (.ftvar name) _ hmem hlen⟩
   termination_by (size, sizeOf τ)
   decreasing_by all_goals simp_wf; omega
 
