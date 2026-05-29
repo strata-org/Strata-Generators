@@ -67,7 +67,7 @@ This saves the following data to the `.jsonl` file and visualizes theM:
 ### Viewing results
 
 Open VS Code, press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS), run
-`Tyche: Open`, and select the generated `.jsonl` file. Tyche will display
+`Tyche: Open`, and select the generated `.jsonl` file (e.g. the example `tyche_output.jsonl` file in this repo). Tyche will display
 interactive histograms and distribution charts for each generator property.
 
 ### Adding Tyche support to a new generator
