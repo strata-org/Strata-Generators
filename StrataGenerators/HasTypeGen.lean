@@ -171,13 +171,13 @@ def opsMatchingTarget (octx : OpSchemeCtx) (τ : LMonoTy) : List String :=
     if (matchScheme scheme τ).isSome then some name else none
 
 def pickMatchingVar [Gen G] (vctx : VarCtx) (τ : LMonoTy)
-    (h : (varsMatchingTarget vctx τ).length > 0) : G HTExpr := do
+    (_h : (varsMatchingTarget vctx τ).length > 0) : G HTExpr := do
   let names := varsMatchingTarget vctx τ
   let idx ← choose 0 (names.length - 1) (by omega)
   pure (.fvar () (names.getD idx.down ⟨"", ()⟩) none)
 
 def pickMatchingOp [Gen G] (octx : OpSchemeCtx) (τ : LMonoTy)
-    (h : (opsMatchingTarget octx τ).length > 0) : G HTExpr := do
+    (_h : (opsMatchingTarget octx τ).length > 0) : G HTExpr := do
   let names := opsMatchingTarget octx τ
   let idx ← choose 0 (names.length - 1) (by omega)
   pure (.op () ⟨names.getD idx.down "", ()⟩ none)
@@ -1008,8 +1008,8 @@ def testOpCtx : OpSchemeCtx :=
   , ("eq_op", .forAll ["a"] (.arrow (.ftvar "a") (.arrow (.ftvar "a") .bool)))
   ]
 
-#guard_msgs(drop warning) in
-#eval (for _ in [:5] do
-  IO.println <| Std.format (← genHTExpr [] testOpCtx 0 5 .bool) |>.pretty : IO Unit)
+-- #guard_msgs(drop warning) in
+-- #eval (for _ in [:5] do
+--   IO.println <| Std.format (← genHTExpr [] testOpCtx 0 5 .bool) |>.pretty : IO Unit)
 
 end HT

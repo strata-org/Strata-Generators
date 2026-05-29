@@ -1049,9 +1049,11 @@ inductive AllTypesSimple (tvars : List TyIdentifier) : Nat → BVarCtx → LExpr
 
 -- ── Completeness for genLExpr ─────────────────────────────────────────
 
+/-- Inversion lemma: if `.eq () e₁ e₂` has type `τ`, then `τ = .bool`. -/
 private theorem eq_hasType_bool {bctx : BVarCtx} {τ : LMonoTy} {e₁ e₂ : LExpr'}
     (h : HasTypeA' bctx (.eq () e₁ e₂) τ) : τ = .bool := by cases h with | eq _ _ => rfl
 
+/-- Inversion lemma: if `.quant () k name (some qty) tr body` has type `τ`, then `τ = .bool`. -/
 private theorem quant_hasType_bool {bctx : BVarCtx} {τ : LMonoTy} {k name qty tr body}
     (h : HasTypeA' bctx (.quant () k name (some qty) tr body) τ) : τ = .bool := by
   cases h with | quant _ _ => rfl
