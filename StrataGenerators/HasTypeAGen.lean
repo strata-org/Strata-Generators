@@ -119,7 +119,7 @@ def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
 
 /-- Pick a random type variable name from the palette. -/
 def pickTyVar [Gen G] (tvars : List TyIdentifier)
-    (h : tvars.length > 0) : G LMonoTy := do
+    (_h : tvars.length > 0) : G LMonoTy := do
   let idx ← choose 0 (tvars.length - 1) (by omega)
   pure (.ftvar (tvars.getD idx.down ""))
 
@@ -680,7 +680,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     HasTypeA' bctx e τ := by
   match size, τ, hτ with
   | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_I femem_iff, SetGen.Set.mem_pure,
+    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     all_goals first
@@ -772,7 +772,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
   | 0, _, SimpleType.ftvar =>
     rename_i name
     simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
-               SetGen.Set.mem_pure, bot_mem_iff] at he
+               bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
@@ -780,7 +780,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
       | exact pickOp_sound octx _ _ _ h
-      | exact absurd h (by simp [SetGen.support, bot_mem_iff])
+      | exact absurd h (by simp)
   | n + 1, _, SimpleType.ftvar =>
     rename_i name
     simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
@@ -799,9 +799,9 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
       | exact pickOp_sound octx _ _ _ h
-      | exact absurd h (by simp [SetGen.support, bot_mem_iff])
+      | exact absurd h (by simp)
   termination_by (size, sizeOf τ)
-  decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.arrow, LMonoTy.ftvar]; omega
+  decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.arrow]; omega
 
 -- ── Nat.arbitrary support for SetGen.Set ──────────────────────────────
 
@@ -1337,7 +1337,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
   | 0, _, SimpleType.ftvar => sorry
   | n + 1, _, SimpleType.ftvar => sorry
   termination_by (size, sizeOf τ)
-  decreasing_by all_goals simp_wf; first | omega | simp_all [LMonoTy.ftvar]; omega
+  decreasing_by all_goals simp_wf; omega
 
 -- ── IsSoundAndComplete for genLMonoTy ─────────────────────────────────
 
