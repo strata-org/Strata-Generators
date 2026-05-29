@@ -31,3 +31,18 @@ roots = ["StrataGenerators.SetGen"]
 [[lean_exe]]
 name = "strata-generators"
 root = "Main"
+
+# Tyche visualization support (no conflicting imports)
+[[lean_lib]]
+name = "StrataGenerators.Tyche"
+roots = ["StrataGenerators.Tyche"]
+
+# Tyche visualization executable (uses HasTypeAGen)
+[[lean_exe]]
+name = "tyche-viz"
+root = "TycheMain"
+
+# Lightweight Tyche demo (no Mathlib dependency)
+[[lean_exe]]
+name = "tyche-demo"
+root = "TycheDemo"
