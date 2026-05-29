@@ -117,13 +117,13 @@ def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
 
 -- ── Type generator ─────────────────────────────────────────────────────
 
-/-- Pick a random type variable name from the palette. -/
+/-- Pick a random type variable name from `tvars`. -/
 def pickTyVar [Gen G] (tvars : List TyIdentifier)
     (_h : tvars.length > 0) : G LMonoTy := do
   let idx ← choose 0 (tvars.length - 1) (by omega)
   pure (.ftvar (tvars.getD idx.down ""))
 
-/-- Generate a simple type of depth ≤ `n`. The `tvars` palette controls which
+/-- Generate a simple type of depth ≤ `n`. The `tvars` list controls which
     free type variable names may appear; when empty, only `bool`/`int`/`arrow`
     are generated. -/
 def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
@@ -164,7 +164,7 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
 
 /-- Generate a well-typed `LExpr` of type `τ` at depth ≤ `size` under
     bound-variable context `bctx`, free-variable context `fctx`, and
-    operator context `octx`. The `tvars` palette lists type variable names
+    operator context `octx`. The `tvars` list gives the type variable names
     that `genLMonoTy` may produce as intermediate types.
 
     No `resolve`/`resolve_aux` calls are made.
@@ -638,7 +638,7 @@ private theorem pickOp_complete (octx : OpCtx) (τ : LMonoTy) (x : String)
 
 -- ── genLMonoTy support ────────────────────────────────────────────────
 
-/-- All ftvar names in a type belong to the palette. -/
+/-- All ftvar names in a type belong to `tvars`. -/
 def allFtvarsIn (tvars : List TyIdentifier) : LMonoTy → Prop
   | .ftvar name => name ∈ tvars
   | .tcons _ args => ∀ a ∈ args, allFtvarsIn tvars a
