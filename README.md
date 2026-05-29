@@ -33,3 +33,58 @@ AWS-internal fork. As a result, the `SetGen` portions of our internal Basalt for
    ```bash
    lake build
    ```
+
+## Tyche Visualization
+
+You can visualize the output distribution of the generators using
+[Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension
+for inspecting property-based testing generators.
+
+### Setup
+
+1. Install the [Tyche extension](https://marketplace.visualstudio.com/items?itemName=hgoldstein95.tyche)
+   in VS Code.
+
+### Generating samples
+
+Build and run the visualization executable:
+
+```bash
+lake build tyche-viz
+.lake/build/bin/tyche-viz [numSamples] [outputPath]
+```
+
+- `numSamples` (default: 1000) — number of samples per generator
+- `outputPath` (default: `tyche_output.jsonl`) — output file path
+
+This runs `genLExpr` (well-typed expressions) and `genLMonoTy` (types) from
+`HasTypeAGen.lean` and writes a JSONL file with features like expression
+depth, size, constructor kind, and type information.
+
+A lightweight demo that doesn't require Mathlib is also available:
+
+```bash
+lake build tyche-demo
+.lake/build/bin/tyche-demo [numSamples] [outputPath]
+```
+
+### Viewing results
+
+Open VS Code, press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS), run
+`Tyche: Open`, and select the generated `.jsonl` file. Tyche will display
+interactive histograms and distribution charts for each generator property.
+
+### Adding Tyche support to a new generator
+
+1. Import `StrataGenerators.Tyche`.
+2. Implement a `Tyche.TycheSample` instance for your generated type:
+   ```lean
+   instance : Tyche.TycheSample MyType where
+     toSample x :=
+       { representation := toString x
+         features := [
+           ("size", .ordinal (computeSize x)),
+           ("kind", .nominal (classifyKind x))
+         ] }
+   ```
+3. Call `Tyche.run` with your `IO` generator action and a `Tyche.Config`.
