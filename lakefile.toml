@@ -41,8 +41,3 @@ roots = ["StrataGenerators.Tyche"]
 [[lean_exe]]
 name = "tyche-viz"
 root = "TycheMain"
-
-# Lightweight Tyche demo (no Mathlib dependency)
-[[lean_exe]]
-name = "tyche-demo"
-root = "TycheDemo"
