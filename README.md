@@ -84,3 +84,15 @@ interactive histograms and distribution charts for each generator property.
          ] }
    ```
 3. Call `Tyche.run` with your `IO` generator action and a `Tyche.Config`.
+
+## Documentation
+
+Design notes and proof explanations live in [`docs/`](./docs/):
+
+| File | Description |
+|------|-------------|
+| [`HasTypeAGen-docs.md`](./docs/HasTypeAGen-docs.md) | Architecture and proof structure of the `HasTypeA` generator (de Bruijn) |
+| [`lexpr-proof-explanation.md`](./docs/lexpr-proof-explanation.md) | Explanation of soundness/completeness proofs for the LExpr generator (well-typed terms satisfying `HasTypeA`) |
+| [`generator-distribution-analysis.md`](./docs/generator-distribution-analysis.md) | Analysis of the trivial-term bias in the LExpr generator and proposed `coin`-based fix |
+| [`stlc-proof-explanation.md`](./docs/stlc-proof-explanation.md) | Proof explanation for the STLC generator in `Basalt/Examples/STLC.lean` |
+| [`hastype-gen-plan.md`](./docs/hastype-gen-plan.md) | (Outdated) Design plan for the `HasType` generator (locally-nameless) |
