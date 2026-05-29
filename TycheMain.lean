@@ -19,6 +19,50 @@ lake build tyche-viz && .lake/build/bin/tyche-viz [numSamples] [outputPath]
 Then open the output file with the Tyche VS Code extension (`Tyche: Open`).
 -/
 
+-- ── Pretty-printing ──────────────────────────────────────────────────
+
+/-- Pretty-print a monotype with `→` for arrows. -/
+partial def ppType : LMonoTy → String
+  | .arrow τ₁ τ₂ =>
+    let lhs := match τ₁ with
+      | .arrow _ _ => s!"({ppType τ₁})"
+      | _ => ppType τ₁
+    s!"{lhs} -> {ppType τ₂}"
+  | .ftvar name => name
+  | .bool => "bool"
+  | .int => "int"
+  | .bitvec n => s!"bv{n}"
+  | .tcons name tys =>
+    if tys.isEmpty then name
+    else s!"({name} {" ".intercalate (tys.map ppType)})"
+
+/-- Pretty-print an LExpr, using `→` notation for type annotations. -/
+def ppExpr : LExpr' → String
+  | .const _ (.boolConst b) => s!"#{b}"
+  | .const _ (.intConst i) => s!"#{i}"
+  | .const _ (.strConst s) => s!"\"{s}\""
+  | .const _ (.realConst r) => s!"#{r}"
+  | .const _ (.bitvecConst _ b) => s!"#{b.toNat}"
+  | .op _ o ty => match ty with
+    | some t => s!"(~{o.name} : {ppType t})"
+    | none => s!"~{o.name}"
+  | .bvar _ i => s!"%{i}"
+  | .fvar _ x ty => match ty with
+    | some t => s!"({x.name} : {ppType t})"
+    | none => s!"{x.name}"
+  | .abs _ _ ty body => match ty with
+    | some t => s!"(λ (bvar:{ppType t}) {ppExpr body})"
+    | none => s!"(λ {ppExpr body})"
+  | .quant _ .all _ ty _ body => match ty with
+    | some t => s!"(∀ (bvar:{ppType t}) {ppExpr body})"
+    | none => s!"(∀ {ppExpr body})"
+  | .quant _ .exist _ ty _ body => match ty with
+    | some t => s!"(∃ (bvar:{ppType t}) {ppExpr body})"
+    | none => s!"(∃ {ppExpr body})"
+  | .app _ fn arg => s!"({ppExpr fn} {ppExpr arg})"
+  | .ite _ c t e => s!"(if {ppExpr c} then {ppExpr t} else {ppExpr e})"
+  | .eq _ e₁ e₂ => s!"({ppExpr e₁} == {ppExpr e₂})"
+
 -- ── Feature extraction ────────────────────────────────────────────────
 
 /-- Compute the depth (nesting level) of an LExpr. -/
@@ -69,7 +113,7 @@ structure TypedExpr where
 
 instance : Tyche.TycheSample TypedExpr where
   toSample te :=
-    { representation := (format te.expr).pretty
+    { representation := ppExpr te.expr
       features := [
         ("depth", .ordinal (exprDepth te.expr)),
         ("size", .ordinal (exprSize te.expr)),
@@ -81,10 +125,34 @@ instance : Tyche.TycheSample TypedExpr where
 /-- A generated monotype, ready for Tyche. -/
 instance : Tyche.TycheSample LMonoTy where
   toSample ty :=
-    { representation := (format ty).pretty
+    { representation := ppType ty
       features := [
         ("depth", .ordinal (monoTyDepth ty)),
         ("type_kind", .nominal (typeKind ty))
+      ] }
+
+-- ── Typecheck property ────────────────────────────────────────────────
+
+/-- Result of generating an expression and running the typechecker on it. -/
+structure TypeCheckResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  actualTy : Option LMonoTy
+
+/-- The typecheck property passes when `LExpr.typeCheck [] expr = some expectedTy`. -/
+instance : Tyche.TycheSample TypeCheckResult where
+  toSample r :=
+    let passed := r.actualTy == some r.expectedTy
+    let statusStr := if passed then "pass" else "fail"
+    { representation := s!"{ppExpr r.expr} : {ppType r.expectedTy}"
+      status := if passed then .passed else .failed
+      features := [
+        ("typecheck_result", .nominal statusStr),
+        ("expected_type_kind", .nominal (typeKind r.expectedTy)),
+        ("depth", .ordinal (exprDepth r.expr)),
+        ("size", .ordinal (exprSize r.expr)),
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("type_depth", .ordinal (monoTyDepth r.expectedTy))
       ] }
 
 -- ── Generator wrappers ────────────────────────────────────────────────
@@ -99,6 +167,13 @@ def genTypedExpr (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) :
 def genType (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO LMonoTy :=
   genLMonoTy (G := IO) tvars size
 
+/-- Generate an expression and typecheck it against the expected type. -/
+def genAndTypeCheck (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO TypeCheckResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let actualTy := LExpr.typeCheck (T := LExprParams') [] expr
+  return ⟨expr, ty, actualTy⟩
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -109,14 +184,25 @@ def main (args : List String) : IO Unit := do
   -- Run the typed expression generator
   Tyche.run (genTypedExpr) { numSamples, propertyName := "genLExpr (HasTypeA)", outputPath }
 
-  -- Also generate type samples into a second property in the same file
+  -- Run the typecheck property
+  Tyche.run (genAndTypeCheck)
+    { numSamples, propertyName := "typecheck (HasTypeA)", outputPath := outputPath ++ ".tc" }
+
+  -- Append typecheck results to the main file
+  let tcContent ← IO.FS.readFile (outputPath ++ ".tc")
   let handle ← IO.FS.Handle.mk outputPath .append
+  handle.putStr tcContent
+  IO.FS.removeFile (outputPath ++ ".tc")
+
+  -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow
   for _ in List.range numSamples do
-    let ty ← genType
-    let sample := TycheSample.toSample ty
-    let line := sample.toJsonLine "genLMonoTy" startTime
-    handle.putStrLn line
+    try
+      let ty ← genType
+      let sample := TycheSample.toSample ty
+      let line := sample.toJsonLine "genLMonoTy" startTime
+      handle.putStrLn line
+    catch _ => pure ()
 
   IO.println s!"Done! Output written to {outputPath}"
   IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"
