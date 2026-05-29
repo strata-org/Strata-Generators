@@ -162,10 +162,10 @@ instance : Tyche.TycheSample TypeCheckResult where
       features := [
         ("typecheck_result", .nominal statusStr),
         ("expected_type_kind", .nominal (typeKind r.expectedTy)),
-        ("depth", .ordinal (exprDepth r.expr)),
-        ("size", .ordinal (exprSize r.expr)),
-        ("expr_kind", .nominal (exprKind r.expr)),
-        ("type_depth", .ordinal (monoTyDepth r.expectedTy))
+        ("exprDepth", .ordinal (exprDepth r.expr)),
+        ("exprSize", .ordinal (exprSize r.expr)),
+        ("exprKind", .nominal (exprKind r.expr)),
+        ("monoTyDepth", .ordinal (monoTyDepth r.expectedTy))
       ] }
 
 -- ── Generator wrappers ────────────────────────────────────────────────
