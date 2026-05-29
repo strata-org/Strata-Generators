@@ -123,7 +123,7 @@ instance : Tyche.TycheSample TypedExpr where
     { representation := ppExpr te.expr
       features := [
         ("depth", .ordinal (exprDepth te.expr)),
-        ("size", .ordinal (exprSize te.expr)),
+        ("LExpr.size", .ordinal (exprSize te.expr)),
         ("expr_kind", .nominal (exprKind te.expr)),
         ("type_kind", .nominal (typeKind te.ty)),
         ("type_depth", .ordinal (monoTyDepth te.ty))
@@ -157,7 +157,7 @@ instance : Tyche.TycheSample TypeCheckResult where
         ("typecheck_result", .nominal statusStr),
         ("expected_type_kind", .nominal (typeKind r.expectedTy)),
         ("exprDepth", .ordinal (exprDepth r.expr)),
-        ("exprSize", .ordinal (exprSize r.expr)),
+        ("LExpr.size", .ordinal (exprSize r.expr)),
         ("exprKind", .nominal (exprKind r.expr)),
         ("monoTyDepth", .ordinal (monoTyDepth r.expectedTy))
       ] }
