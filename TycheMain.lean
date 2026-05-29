@@ -87,14 +87,8 @@ def exprDepth : LExpr' → Nat
   | .quant _ _ _ _ tr body => max (exprDepth tr) (exprDepth body) + 1
   | _ => 0
 
-/-- Compute the size (number of nodes) of an LExpr. -/
-def exprSize : LExpr' → Nat
-  | .abs _ _ _ body => exprSize body + 1
-  | .app _ fn arg => exprSize fn + exprSize arg + 1
-  | .ite _ c t e => exprSize c + exprSize t + exprSize e + 1
-  | .eq _ e₁ e₂ => exprSize e₁ + exprSize e₂ + 1
-  | .quant _ _ _ _ tr body => exprSize tr + exprSize body + 1
-  | _ => 1
+/-- Compute the size (number of nodes) of an LExpr (delegates to `LExpr.size` from Strata). -/
+def exprSize (e : LExpr') : Nat := LExpr.size LExprParamsT' e
 
 /-- Classify the top-level expression constructor. -/
 def exprKind : LExpr' → String
