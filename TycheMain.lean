@@ -20,6 +20,15 @@ Then open the output file with the Tyche VS Code extension (`Tyche: Open`).
 -/
 
 -- ── Pretty-printing ──────────────────────────────────────────────────
+-- These differ from Strata's built-in `ToFormat LMonoTy` / `ToFormat (LExpr T)`:
+--   • Types: arrows print as `α -> bool` instead of `(arrow α bool)`.
+--     Higher-order function arguments are parenthesized appropriately, e.g.
+--     `(int -> int) -> bool` (since the functino arrow is right-associative by default)
+--   • Exprs: precedence-based parenthesization instead of wrapping every
+--     compound subexpression in parens. Binder bodies extend to the right
+--     without extra parens (`λint. λint. #1`), and application is left-
+--     associative (`f x y` means `(f x) y`; only compound arguments like
+--     lambdas or if-then-else get wrapped).
 
 /-- Pretty-print a monotype with `→` for arrows. -/
 partial def ppType : LMonoTy → String
@@ -36,32 +45,36 @@ partial def ppType : LMonoTy → String
     if tys.isEmpty then name
     else s!"({name} {" ".intercalate (tys.map ppType)})"
 
-/-- Pretty-print an LExpr, using `→` notation for type annotations. -/
-def ppExpr : LExpr' → String
+/-- Pretty-print an LExpr with minimal parenthesization.
+    `prec` tracks the enclosing precedence to avoid unnecessary parens.
+    Precedence levels: 0 = top/binder body, 1 = if/eq, 2 = application fn, 3 = application arg -/
+def ppExpr (e : LExpr') (prec : Nat := 0) : String :=
+  let wrap (p : Nat) (s : String) := if prec ≥ p then s!"({s})" else s
+  match e with
   | .const _ (.boolConst b) => s!"#{b}"
   | .const _ (.intConst i) => s!"#{i}"
   | .const _ (.strConst s) => s!"\"{s}\""
   | .const _ (.realConst r) => s!"#{r}"
   | .const _ (.bitvecConst _ b) => s!"#{b.toNat}"
   | .op _ o ty => match ty with
-    | some t => s!"(~{o.name} : {ppType t})"
+    | some t => s!"~{o.name} : {ppType t}"
     | none => s!"~{o.name}"
   | .bvar _ i => s!"%{i}"
   | .fvar _ x ty => match ty with
-    | some t => s!"({x.name} : {ppType t})"
+    | some t => s!"{x.name} : {ppType t}"
     | none => s!"{x.name}"
-  | .abs _ _ ty body => match ty with
-    | some t => s!"(λ (bvar:{ppType t}) {ppExpr body})"
-    | none => s!"(λ {ppExpr body})"
-  | .quant _ .all _ ty _ body => match ty with
-    | some t => s!"(∀ (bvar:{ppType t}) {ppExpr body})"
-    | none => s!"(∀ {ppExpr body})"
-  | .quant _ .exist _ ty _ body => match ty with
-    | some t => s!"(∃ (bvar:{ppType t}) {ppExpr body})"
-    | none => s!"(∃ {ppExpr body})"
-  | .app _ fn arg => s!"({ppExpr fn} {ppExpr arg})"
-  | .ite _ c t e => s!"(if {ppExpr c} then {ppExpr t} else {ppExpr e})"
-  | .eq _ e₁ e₂ => s!"({ppExpr e₁} == {ppExpr e₂})"
+  | .abs _ _ ty body => wrap 1 <| match ty with
+    | some t => s!"λ{ppType t}. {ppExpr body 0}"
+    | none => s!"λ_. {ppExpr body 0}"
+  | .quant _ .all _ ty _ body => wrap 1 <| match ty with
+    | some t => s!"∀{ppType t}. {ppExpr body 0}"
+    | none => s!"∀_. {ppExpr body 0}"
+  | .quant _ .exist _ ty _ body => wrap 1 <| match ty with
+    | some t => s!"∃{ppType t}. {ppExpr body 0}"
+    | none => s!"∃_. {ppExpr body 0}"
+  | .app _ fn arg => wrap 3 <| s!"{ppExpr fn 2} {ppExpr arg 3}"
+  | .ite _ c t e => wrap 1 <| s!"if {ppExpr c 0} then {ppExpr t 0} else {ppExpr e 0}"
+  | .eq _ e₁ e₂ => wrap 2 <| s!"{ppExpr e₁ 2} == {ppExpr e₂ 2}"
 
 -- ── Feature extraction ────────────────────────────────────────────────
 
