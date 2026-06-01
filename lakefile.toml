@@ -12,6 +12,10 @@ name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "main"
 
+[[require]]
+name = "plausible"
+scope = "leanprover-community"
+
 # The HasTypeA generator (uses Basalt.Examples.ArbNat → Mathlib → Batteries)
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGen"
@@ -22,6 +26,11 @@ roots = ["StrataGenerators.HasTypeAGen"]
 [[lean_lib]]
 name = "StrataGenerators.HasTypeGen"
 roots = ["StrataGenerators.HasTypeGen"]
+
+# Plausible Gen instance (bridges Basalt generators to Plausible PBT)
+[[lean_lib]]
+name = "StrataGenerators.PlausibleGen"
+roots = ["StrataGenerators.PlausibleGen"]
 
 # Shared SetGen infrastructure (no conflicting imports)
 [[lean_lib]]
