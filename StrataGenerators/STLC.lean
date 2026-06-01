@@ -1,5 +1,5 @@
 import Basalt
-import StrataGenerators.PlausibleGen
+import Basalt.PlausibleGen
 import StrataGenerators.SetGen
 import Basalt.Examples.ArbNat
 

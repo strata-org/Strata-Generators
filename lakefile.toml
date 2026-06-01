@@ -28,11 +28,6 @@ roots = ["StrataGenerators.HasTypeAGen"]
 name = "StrataGenerators.HasTypeGen"
 roots = ["StrataGenerators.HasTypeGen"]
 
-# Plausible Gen instance (bridges Basalt generators to Plausible PBT)
-[[lean_lib]]
-name = "StrataGenerators.PlausibleGen"
-roots = ["StrataGenerators.PlausibleGen"]
-
 # STLC generator with soundness and completeness proofs
 [[lean_lib]]
 name = "StrataGenerators.STLC"

@@ -1,12 +1,12 @@
 import StrataGenerators.HasTypeAGen.Defs
-import StrataGenerators.PlausibleGen
+import Basalt.PlausibleGen
 import Strata.DL.Lambda.LExprEval
 import Plausible
 
 /-!
 # Property-based tests for LExpr generators
 
-Uses Plausible's `Gen` monad (via `PlausibleGen`) to run the generators with
+Uses Plausible's `Gen` monad (via Basalt's `PlausibleGen`) to run the generators with
 varying sizes, testing properties of `LExpr.eval`.
 
 ## Usage
