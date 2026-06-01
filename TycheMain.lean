@@ -162,6 +162,91 @@ instance : Tyche.TycheSample TypeCheckResult where
         ("monoTyDepth", .ordinal (monoTyDepth r.expectedTy))
       ] }
 
+-- ── Minimal evaluator for closed terms ────────────────────────────────
+-- A CBV evaluator for closed LExpr's (no free vars, no operators).
+-- We cannot import Strata's `LExpr.eval` due to naming collisions between
+-- `Strata.DL.Util.List` and Mathlib/Batteries (see docs/github-issue-lexpreval-conflict.md).
+
+/-- Is the expression a value? Constants are values; closed lambdas are values. -/
+def isValue : LExpr' → Bool
+  | .const _ _ => true
+  | .abs _ _ _ body => go body 1
+  | _ => false
+where
+  go : LExpr' → Nat → Bool
+    | .bvar _ i, depth => i < depth
+    | .const _ _, _ => true
+    | .op _ _ _, _ => true
+    | .fvar _ _ _, _ => false
+    | .abs _ _ _ body, depth => go body (depth + 1)
+    | .app _ fn arg, depth => go fn depth && go arg depth
+    | .ite _ c t e, depth => go c depth && go t depth && go e depth
+    | .eq _ e₁ e₂, depth => go e₁ depth && go e₂ depth
+    | .quant _ _ _ _ tr body, depth => go tr (depth + 1) && go body (depth + 1)
+
+/-- Substitute bound variable at de Bruijn index `depth` with `v`. -/
+def substBVar (body v : LExpr') (depth : Nat := 0) : LExpr' :=
+  match body with
+  | .bvar m i => if i == depth then v else .bvar m i
+  | .abs m name ty b => .abs m name ty (substBVar b v (depth + 1))
+  | .app m fn arg => .app m (substBVar fn v depth) (substBVar arg v depth)
+  | .ite m c t e => .ite m (substBVar c v depth) (substBVar t v depth) (substBVar e v depth)
+  | .eq m e₁ e₂ => .eq m (substBVar e₁ v depth) (substBVar e₂ v depth)
+  | .quant m k name ty tr b => .quant m k name ty (substBVar tr v (depth + 1)) (substBVar b v (depth + 1))
+  | e => e
+
+/-- One step of CBV reduction. Returns `none` if the term is stuck or a value. -/
+def step : LExpr' → Option LExpr'
+  | .app m (.abs _ _ _ body) arg =>
+    if isValue arg then some (substBVar body arg)
+    else do let arg' ← step arg; some (.app m (.abs () "" none body) arg')
+  | .app m fn arg =>
+    if isValue fn then do let arg' ← step arg; some (.app m fn arg')
+    else do let fn' ← step fn; some (.app m fn' arg)
+  | .ite _ (.const _ (.boolConst true)) t _ => some t
+  | .ite _ (.const _ (.boolConst false)) _ e => some e
+  | .ite m c t e => do let c' ← step c; some (.ite m c' t e)
+  | .eq m e₁ e₂ =>
+    match e₁, e₂ with
+    | .const _ c₁, .const _ c₂ => some (.const m (.boolConst (c₁ == c₂)))
+    | _, _ =>
+      if isValue e₁ then do let e₂' ← step e₂; some (.eq m e₁ e₂')
+      else do let e₁' ← step e₁; some (.eq m e₁' e₂)
+  | _ => none
+
+/-- Multi-step evaluation with fuel. -/
+def eval (fuel : Nat) (e : LExpr') : LExpr' :=
+  match fuel with
+  | 0 => e
+  | n + 1 => match step e with
+    | some e' => eval n e'
+    | none => e
+
+-- ── Type preservation property ────────────────────────────────────────
+
+/-- Result of generating, evaluating, and re-typechecking. -/
+structure EvalResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  evaled : LExpr'
+  evaledTy : Option LMonoTy
+  exprIsValue : Bool
+  madeProgress : Bool
+
+instance : Tyche.TycheSample EvalResult where
+  toSample r :=
+    let preserved := r.evaledTy == some r.expectedTy
+    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
+      status := if preserved then .passed else .failed
+      features := [
+        ("preservation", .nominal (if preserved then "pass" else "fail")),
+        ("is_value", .nominal (if r.exprIsValue then "value" else "non-value")),
+        ("made_progress", .nominal (if r.madeProgress then "yes" else "no")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("input_size", .ordinal (exprSize r.expr)),
+        ("output_size", .ordinal (exprSize r.evaled))
+      ] }
+
 -- ── Generator wrappers ────────────────────────────────────────────────
 
 /-- Generate a typed expression using `genClosedLExpr` from HasTypeAGen. -/
@@ -180,6 +265,14 @@ def genAndTypeCheck (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]
   let expr ← genLExpr (G := IO) [] [] tvars [] size ty
   let actualTy := LExpr.typeCheck (T := LExprParams') [] expr
   return ⟨expr, ty, actualTy⟩
+
+/-- Generate an expression, evaluate it, and check type preservation. -/
+def genAndEval (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let evaled := eval 100 expr
+  let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
+  return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled)⟩
 
 -- ── Main ──────────────────────────────────────────────────────────────
 
@@ -200,6 +293,13 @@ def main (args : List String) : IO Unit := do
   let handle ← IO.FS.Handle.mk outputPath .append
   handle.putStr tcContent
   IO.FS.removeFile (outputPath ++ ".tc")
+
+  -- Run the type preservation property
+  Tyche.run (genAndEval)
+    { numSamples, propertyName := "Type preservation under eval", outputPath := outputPath ++ ".ev" }
+  let evContent ← IO.FS.readFile (outputPath ++ ".ev")
+  handle.putStr evContent
+  IO.FS.removeFile (outputPath ++ ".ev")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow
