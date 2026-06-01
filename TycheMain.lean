@@ -1,5 +1,5 @@
 import StrataGenerators.Tyche
-import StrataGenerators.HasTypeAGen
+import StrataGenerators.HasTypeAGen.Defs
 import Basalt.IO
 
 open Lambda RandomChoice ArbNat Tyche Std
@@ -164,10 +164,9 @@ instance : Tyche.TycheSample TypeCheckResult where
 
 -- ── Minimal evaluator for closed terms ────────────────────────────────
 -- A CBV evaluator for closed LExpr's (no free vars, no operators).
--- We cannot import Strata's `LExpr.eval` due to naming collisions between
--- `Strata.DL.Util.List` and Mathlib/Batteries (see docs/github-issue-lexpreval-conflict.md).
+-- TODO: Replace with `LExpr.eval` from `Strata.DL.Lambda.LExprEval` once
+-- the `grind` regression in that file is fixed upstream.
 
-/-- Is the expression a value? Constants are values; closed lambdas are values. -/
 def isValue : LExpr' → Bool
   | .const _ _ => true
   | .abs _ _ _ body => go body 1
@@ -184,7 +183,6 @@ where
     | .eq _ e₁ e₂, depth => go e₁ depth && go e₂ depth
     | .quant _ _ _ _ tr body, depth => go tr (depth + 1) && go body (depth + 1)
 
-/-- Substitute bound variable at de Bruijn index `depth` with `v`. -/
 def substBVar (body v : LExpr') (depth : Nat := 0) : LExpr' :=
   match body with
   | .bvar m i => if i == depth then v else .bvar m i
@@ -195,7 +193,6 @@ def substBVar (body v : LExpr') (depth : Nat := 0) : LExpr' :=
   | .quant m k name ty tr b => .quant m k name ty (substBVar tr v (depth + 1)) (substBVar b v (depth + 1))
   | e => e
 
-/-- One step of CBV reduction. Returns `none` if the term is stuck or a value. -/
 def step : LExpr' → Option LExpr'
   | .app m (.abs _ _ _ body) arg =>
     if isValue arg then some (substBVar body arg)
@@ -214,7 +211,6 @@ def step : LExpr' → Option LExpr'
       else do let e₁' ← step e₁; some (.eq m e₁' e₂)
   | _ => none
 
-/-- Multi-step evaluation with fuel. -/
 def eval (fuel : Nat) (e : LExpr') : LExpr' :=
   match fuel with
   | 0 => e

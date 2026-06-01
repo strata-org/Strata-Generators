@@ -12,6 +12,11 @@ name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "main"
 
+# Generator definitions only (no Mathlib, compatible with LExprEval)
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGen.Defs"
+roots = ["StrataGenerators.HasTypeAGen.Defs"]
+
 # The HasTypeA generator (uses Basalt.Examples.ArbNat → Mathlib → Batteries)
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGen"
