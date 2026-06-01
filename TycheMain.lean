@@ -287,6 +287,121 @@ def genAndCheckProgress (size : Nat := 3) (tvars : List TyIdentifier := ["α", "
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, !(expr == evaled), isValue expr⟩
 
+-- ── Eval idempotence property ────────────────────────────────────────
+
+structure EvalIdempotentResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  evaled : LExpr'
+  evaledAgain : LExpr'
+  isIdempotent : Bool
+
+instance : Tyche.TycheSample EvalIdempotentResult where
+  toSample r :=
+    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
+      status := if r.isIdempotent then .passed else .failed
+      features := [
+        ("idempotent", .nominal (if r.isIdempotent then "yes" else "no")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("input_size", .ordinal (exprSize r.expr)),
+        ("output_size", .ordinal (exprSize r.evaled)),
+        ("expr_kind", .nominal (exprKind r.expr))
+      ] }
+
+def genAndCheckIdempotent (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalIdempotentResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let evaled := eval 100 expr
+  let evaledAgain := eval 100 evaled
+  return ⟨expr, ty, evaled, evaledAgain, evaled == evaledAgain⟩
+
+-- ── Eval monotonicity property ───────────────────────────────────────
+
+structure EvalMonotoneResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  evaled50 : LExpr'
+  evaled100 : LExpr'
+  evaled100From50 : LExpr'
+  isMonotone : Bool
+
+instance : Tyche.TycheSample EvalMonotoneResult where
+  toSample r :=
+    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled100}"
+      status := if r.isMonotone then .passed else .failed
+      features := [
+        ("monotone", .nominal (if r.isMonotone then "yes" else "no")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("input_size", .ordinal (exprSize r.expr)),
+        ("output_size", .ordinal (exprSize r.evaled100)),
+        ("expr_kind", .nominal (exprKind r.expr))
+      ] }
+
+def genAndCheckMonotone (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalMonotoneResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let evaled50 := eval 50 expr
+  let evaled100 := eval 100 expr
+  let evaled100From50 := eval 50 evaled50
+  return ⟨expr, ty, evaled50, evaled100, evaled100From50, evaled100 == evaled100From50⟩
+
+-- ── Closedness preservation property ─────────────────────────────────
+
+structure ClosednessResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  evaled : LExpr'
+  evaledIsClosed : Bool
+
+instance : Tyche.TycheSample ClosednessResult where
+  toSample r :=
+    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
+      status := if r.evaledIsClosed then .passed else .failed
+      features := [
+        ("closed", .nominal (if r.evaledIsClosed then "yes" else "no")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("input_size", .ordinal (exprSize r.expr)),
+        ("output_size", .ordinal (exprSize r.evaled)),
+        ("expr_kind", .nominal (exprKind r.expr))
+      ] }
+
+def genAndCheckClosed (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO ClosednessResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let evaled := eval 100 expr
+  return ⟨expr, ty, evaled, LExpr.closed evaled⟩
+
+-- ── Size non-increase property ───────────────────────────────────────
+
+structure SizeResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  evaled : LExpr'
+  inputSize : Nat
+  outputSize : Nat
+  sizeNonIncreased : Bool
+
+instance : Tyche.TycheSample SizeResult where
+  toSample r :=
+    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
+      status := if r.sizeNonIncreased then .passed else .failed
+      features := [
+        ("size_ok", .nominal (if r.sizeNonIncreased then "yes" else "no")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("input_size", .ordinal r.inputSize),
+        ("output_size", .ordinal r.outputSize),
+        ("size_reduction", .ordinal (r.inputSize - r.outputSize)),
+        ("expr_kind", .nominal (exprKind r.expr))
+      ] }
+
+def genAndCheckSize (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO SizeResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let evaled := eval 100 expr
+  let inputSize := exprSize expr
+  let outputSize := exprSize evaled
+  return ⟨expr, ty, evaled, inputSize, outputSize, outputSize ≤ inputSize⟩
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -327,6 +442,34 @@ def main (args : List String) : IO Unit := do
   let progContent ← IO.FS.readFile (outputPath ++ ".prog")
   handle.putStr progContent
   IO.FS.removeFile (outputPath ++ ".prog")
+
+  -- Run the eval idempotence property
+  Tyche.run (genAndCheckIdempotent)
+    { numSamples, propertyName := "LExpr.eval is idempotent", outputPath := outputPath ++ ".idem" }
+  let idemContent ← IO.FS.readFile (outputPath ++ ".idem")
+  handle.putStr idemContent
+  IO.FS.removeFile (outputPath ++ ".idem")
+
+  -- Run the eval monotonicity property
+  Tyche.run (genAndCheckMonotone)
+    { numSamples, propertyName := "LExpr.eval is monotone in fuel", outputPath := outputPath ++ ".mono" }
+  let monoContent ← IO.FS.readFile (outputPath ++ ".mono")
+  handle.putStr monoContent
+  IO.FS.removeFile (outputPath ++ ".mono")
+
+  -- Run the closedness preservation property
+  Tyche.run (genAndCheckClosed)
+    { numSamples, propertyName := "LExpr.eval preserves closedness", outputPath := outputPath ++ ".cls" }
+  let clsContent ← IO.FS.readFile (outputPath ++ ".cls")
+  handle.putStr clsContent
+  IO.FS.removeFile (outputPath ++ ".cls")
+
+  -- Run the size non-increase property
+  Tyche.run (genAndCheckSize)
+    { numSamples, propertyName := "LExpr.size does not increase under eval", outputPath := outputPath ++ ".sz" }
+  let szContent ← IO.FS.readFile (outputPath ++ ".sz")
+  handle.putStr szContent
+  IO.FS.removeFile (outputPath ++ ".sz")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow

@@ -65,6 +65,7 @@ The test executable checks seven properties:
 | `eval_idempotent` | PASS | `LExpr.eval` is idempotent |
 | `eval_monotone` | PASS | `LExpr.eval` is monotonic in the amount of fuel (supplying more fuel to `LExpr.eval` should produce the same result) |
 | `closedness_preservation` | PASS | Evaluation preserves whether a term is closed or not (i.e. no free variables are introduced during evaluation) |
+| `size_non_increase` | PASS | `LExpr.size` does not increase after evaluation (no factory = no inlining, so every reduction eliminates structure) |
 
 The `progress` and `normalization` properties are expected to find counterexamples:
 `LExpr.eval` is a partial evaluator that gets stuck on quantifiers in condition

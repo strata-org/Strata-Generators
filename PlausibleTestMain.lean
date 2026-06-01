@@ -141,6 +141,16 @@ def prop_closedness_preservation (te : TypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   LExpr.closed evaled
 
+-- Size non-increase: evaluation should never grow the term. With an empty
+-- factory (no function inlining), every reduction step either eliminates
+-- structure (beta-reduction discards the lambda wrapper, ite-reduction
+-- discards a branch) or leaves size unchanged (stuck terms).
+-- Inspired by the termination arguments in `Semantics.lean` which rely on
+-- `sizeOf` decreasing through reduction steps.
+def prop_size_non_increase (te : TypedExpr) : Bool :=
+  let evaled := eval 100 te.expr
+  LExpr.size LExprParamsT' evaled ≤ LExpr.size LExprParamsT' te.expr
+
 -- ── Test runner ──────────────────────────────────────────────────────
 
 def checkProperty (name : String) (p : Prop) [Testable p]
@@ -194,6 +204,10 @@ def main (args : List String) : IO UInt32 := do
 
   if !(← checkProperty "closedness_preservation"
     (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te = true)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "size_non_increase"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_size_non_increase te = true)) cfg) then
     allPassed := false
 
   IO.println ""

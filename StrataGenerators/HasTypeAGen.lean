@@ -167,6 +167,8 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
     operator context `octx`. The `tvars` list gives the type variable names
     that `genLMonoTy` may produce as intermediate types.
 
+    Note: all generated `LExpr`s are closed (i.e. there are no free variables).
+
     No `resolve`/`resolve_aux` calls are made.
     Names are always `""`. -/
 def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
