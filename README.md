@@ -54,14 +54,22 @@ lake build test-lexpr
 - `numTrials` (default: 1000) — number of random test cases per property
 - `maxSize` (default: 100) — maximum size parameter for generation (controls expression depth)
 
-The test executable checks four properties:
+The test executable checks seven properties:
 
-| Property | Description |
-|----------|-------------|
-| `typecheck` | Generated expressions typecheck to the expected type |
-| `preservation` | Types are preserved after `LExpr.eval` |
-| `progress` | Evaluation makes progress or the input is already a value (this property is falsified for `LExpr`s) |
-| `normalization` | Evaluation produces a canonical value (this property is falsified for `LExpr`s) |
+| Property | Status | Description |
+|----------|--------|-------------|
+| `typecheck` | PASS | Generated expressions typecheck to the expected type |
+| `preservation` | PASS | Types are preserved under `LExpr.eval` |
+| `progress` | FALSIFIED | Eval makes progress or input is already a value |
+| `normalization` | FALSIFIED | Evaluation produces a canonical value |
+| `eval_idempotent` | PASS | `LExpr.eval` is idempotent |
+| `eval_monotone` | PASS | `LExpr.eval` is monotonic in the amount of fuel (supplying more fuel to `LExpr.eval` should produce the same result) |
+| `closedness_preservation` | PASS | Evaluation preserves whether a term is closed or not (i.e. no free variables are introduced during evaluation) |
+
+The `progress` and `normalization` properties are expected to find counterexamples:
+`LExpr.eval` is a partial evaluator that gets stuck on quantifiers in condition
+position (e.g. `if ∀x. e then ...`) and on equality of lambdas with non-identical
+bodies (where `LExpr.eql` conservatively returns "inconclusive").
 
 The generators are instantiated at `Plausible.Gen` (via `PlausibleGen.lean`), which
 provides size-varying random generation — the size parameter increases across trials,
