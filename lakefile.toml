@@ -56,3 +56,8 @@ roots = ["StrataGenerators.Tyche"]
 [[lean_exe]]
 name = "tyche-viz"
 root = "TycheMain"
+
+# Property-based test executable (uses Plausible + LExpr.eval)
+[[lean_exe]]
+name = "test-lexpr"
+root = "PlausibleTestMain"

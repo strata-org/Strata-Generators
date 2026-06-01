@@ -42,15 +42,40 @@ A lightweight definitions-only module ([`HasTypeAGen/Defs.lean`](./StrataGenerat
    lake build
    ```
 
+## Property-based testing
+
+Run property-based tests against `LExpr.eval` using Plausible generators:
+
+```bash
+lake build test-lexpr
+.lake/build/bin/test-lexpr [numTrials] [maxSize]
+```
+
+- `numTrials` (default: 1000) — number of random test cases per property
+- `maxSize` (default: 100) — maximum size parameter for generation (controls expression depth)
+
+The test executable checks four properties:
+
+| Property | Description |
+|----------|-------------|
+| `typecheck` | Generated expressions typecheck to the expected type |
+| `type_preservation` | Types are preserved after `LExpr.eval` |
+| `progress` | Evaluation makes progress or the input is already a value (this property is falsified for `LExpr`s) |
+| `normalization` | Evaluation produces a canonical value (this property is falsified for `LExpr`s) |
+
+The generators are instantiated at `Plausible.Gen` (via `PlausibleGen.lean`), which
+provides size-varying random generation — the size parameter increases across trials,
+exercising both small and large expressions.
+
 ## Tyche Visualization
 
 You can visualize the output distribution of the generators using
 [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension
 for inspecting property-based testing generators.
 
-### Setup
+### Tyche setup
 
-1. Install the [Tyche extension](https://marketplace.visualstudio.com/items?itemName=hgoldstein95.tyche)
+Install the [Tyche extension](https://marketplace.visualstudio.com/items?itemName=hgoldstein95.tyche)
    in VS Code.
 
 ### Generating samples
@@ -117,5 +142,6 @@ StrataGenerators/
   SetGen.lean               -- SetGen framework (vendored from Basalt)
   SetGen/                   -- SetGen internals
   Tyche.lean                -- Tyche visualization support
-TycheMain.lean              -- Tyche visualization executable (uses LExpr.eval from Strata)
+TycheMain.lean              -- Tyche visualization executable
+PlausibleTestMain.lean      -- Property-based test executable (Plausible + LExpr.eval)
 ```

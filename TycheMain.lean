@@ -118,7 +118,6 @@ def typeKind : LMonoTy → String
 structure TypedExpr where
   expr : LExpr'
   ty : LMonoTy
-
 instance : Tyche.TycheSample TypedExpr where
   toSample te :=
     { representation := ppExpr te.expr
