@@ -66,34 +66,80 @@ instance : ToFormat Unit where
   format _ := .nil
 
 -- ── Properties ───────────────────────────────────────────────────────
+--
+-- These properties test `LExpr.eval` from `Strata.DL.Lambda.LExprEval`.
+-- The first two (typecheck, preservation) correspond to standard type-safety
+-- theorems. The rest exercise operational properties of the fuel-bounded
+-- evaluator, inspired by the theorems in `Strata.DL.Lambda.Semantics`:
+-- Some theorems are omitted though:
+--   • `eval_StepStar` (Semantics.lean): eval is sound w.r.t. the
+--     small-step relation `Step`. We don't test this directly because the
+--     existential witness (`∃ e', StepStar ... e e'`) would require searching
+--     for a reachable expression. Instead, our idempotence + monotonicity +
+--     preservation properties try to cover this.
+--
+--   • `eval_eraseMetadata_invariant` (Semantics.lean): eval is invariant
+--     under metadata changes. Since our metadata type is `Unit`, eraseMetadata
+--     is the identity (proved in LExprEvalTests.lean:106), so this property
+--     holds trivially and we omit it.
 
 -- Soundness of the generator: every generated expression typechecks
 -- to the type it was generated for.
 def prop_typecheck (te : TypedExpr) : Bool :=
   LExpr.typeCheck (T := LExprParams') [] te.expr == some te.ty
 
--- Preservation: the type of an expression is unchanged after
--- evaluation via `LExpr.eval`.
+-- Preservation: the type of an expression is unchanged after evaluation.
+-- That is, if Γ ⊢ e : τ and e →* e', then Γ ⊢ e' : τ.
 def prop_preservation (te : TypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   LExpr.typeCheck (T := LExprParams') [] evaled == some te.ty
 
 -- Progress: either the expression is already a canonical value, or
 -- `LExpr.eval` reduces it to something different.
--- This is falsified by expressions containing quantifiers (`∀`/`∃`) in
--- non-value positions, since `LExpr.eval` has no reduction rule for them.
+-- Falsified by quantifiers (`∀`/`∃`) in non-value positions — `LExpr.eval`
+-- has no reduction rule for them, so `if (∀x. e) then ...` gets stuck.
 def prop_progress (te : TypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   isValue te.expr || !(te.expr == evaled)
 
 -- Normalization: every expression evaluates to a canonical value.
--- This is falsified by (1) quantifiers in condition position (e.g.
--- `if ∀x. e then ...`) and (2) equality of lambdas with non-identical
--- bodies (e.g. `(λx. x+1) == (λx. 1+x)`), where `LExpr.eval`'s
--- conservative equality check returns `none` (inconclusive).
+-- Falsified by (1) stuck quantifiers (as above) and (2) equality of lambdas
+-- with non-identical bodies (e.g. `(λx. x+1) == (λx. 1+x)`), where
+-- `LExpr.eql` returns `none` (inconclusive) and the `==` node gets stuck.
 def prop_normalization (te : TypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   isValue evaled
+
+-- Idempotence: evaluating an already-evaluated expression again produces
+-- the same result. This follows from the structure of `LExpr.eval`
+-- (LExprEval.lean:207): it returns `e` unchanged when `isCanonicalValue` is
+-- true, and stuck terms have no applicable reduction rules.
+-- Inspired by `LExprEvalTests.lean:78` (`check`) which verifies eval reaches
+-- a fixpoint.
+def prop_eval_idempotent (te : TypedExpr) : Bool :=
+  let evaled := eval 100 te.expr
+  let evaled2 := eval 100 evaled
+  evaled == evaled2
+
+-- Monotonicity (fuel composability): `eval 100 e == eval 50 (eval 50 e)`.
+-- Since eval is deterministic and fuel-bounded, splitting fuel across two
+-- calls should produce the same result as using it all at once.
+-- Inspired by `eval_StepStar` (Semantics.lean:2926) which proves eval traces
+-- a sequence of `Step`s — the same sequence regardless of how fuel is split.
+def prop_eval_monotone (te : TypedExpr) : Bool :=
+  let evaled50 := eval 50 te.expr
+  let evaled100 := eval 100 te.expr
+  let evaled100_from50 := eval 50 evaled50
+  evaled100 == evaled100_from50
+
+-- Closedness preservation: evaluation preserves the absence of free
+-- variables. Our generator produces closed terms (empty fctx), and
+-- beta-reduction substitutes closed values, so no free vars should appear.
+-- Inspired by `LExprWFTests.lean:29-65` (bound variable lifting tests) and
+-- the scoping invariants of locally-nameless representation.
+def prop_closedness_preservation (te : TypedExpr) : Bool :=
+  let evaled := eval 100 te.expr
+  LExpr.closed evaled
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
@@ -136,6 +182,18 @@ def main (args : List String) : IO UInt32 := do
 
   if !(← checkProperty "normalization"
     (NamedBinder "te" (∀ te : TypedExpr, prop_normalization te = true)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "eval_idempotent"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_eval_idempotent te = true)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "eval_monotone"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_eval_monotone te = true)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "closedness_preservation"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te = true)) cfg) then
     allPassed := false
 
   IO.println ""

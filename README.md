@@ -59,7 +59,7 @@ The test executable checks four properties:
 | Property | Description |
 |----------|-------------|
 | `typecheck` | Generated expressions typecheck to the expected type |
-| `type_preservation` | Types are preserved after `LExpr.eval` |
+| `preservation` | Types are preserved after `LExpr.eval` |
 | `progress` | Evaluation makes progress or the input is already a value (this property is falsified for `LExpr`s) |
 | `normalization` | Evaluation produces a canonical value (this property is falsified for `LExpr`s) |
 
