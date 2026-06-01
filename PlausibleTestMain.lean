@@ -28,15 +28,13 @@ structure TypedExpr where
 instance : Shrinkable TypedExpr where
   shrink _ := []
 
-def genTypedExpr : Plausible.Gen TypedExpr := do
-  let size := (← Gen.getSize) / 20
-  let tvars : List TyIdentifier := []
-  let ty ← genLMonoTy (G := Plausible.Gen) tvars size
-  let expr ← genLExpr (G := Plausible.Gen) [] [] tvars [] size ty
-  pure ⟨expr, ty⟩
-
 instance : Arbitrary TypedExpr where
-  arbitrary := genTypedExpr
+  arbitrary := do
+    let size := (← Gen.getSize) / 20
+    let tvars : List TyIdentifier := []
+    let ty ← genLMonoTy (G := Plausible.Gen) tvars size
+    let expr ← genLExpr (G := Plausible.Gen) [] [] tvars [] size ty
+    pure ⟨expr, ty⟩
 
 -- ── Evaluator ────────────────────────────────────────────────────────
 
@@ -48,13 +46,11 @@ def eval (fuel : Nat) (e : LExpr') : LExpr' :=
 def isValue (e : LExpr') : Bool :=
   LExpr.isCanonicalValue emptyState.config.factory e
 
--- ── Pretty-printing (minimal, for counter-examples) ──────────────────
+-- ── Pretty-printing ──────────────────────────────────────────────────
 
 open Std in
 instance : ToFormat Unit where
   format _ := .nil
-
-def ppExpr (e : LExpr') : String := s!"{Std.format e}"
 
 -- ── Properties ───────────────────────────────────────────────────────
 
@@ -75,45 +71,47 @@ def prop_normalization (te : TypedExpr) : Bool :=
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
-def runProperty (name : String) (prop : TypedExpr → Bool)
-    (numTrials : Nat) (maxSize : Nat) : IO Bool := do
-  let mut failures := 0
-  let mut gaveUp := 0
-  for i in [:numTrials] do
-    let size := i % (maxSize + 1)
-    try
-      let te ← Plausible.Gen.run genTypedExpr size
-      if !prop te then
-        failures := failures + 1
-        if failures ≤ 3 then
-          let evaled := eval 100 te.expr
-          IO.eprintln s!"    Counter-example (size={size}):"
-          IO.eprintln s!"      {ppExpr te.expr}  ⟶  {ppExpr evaled}"
-    catch _ =>
-      gaveUp := gaveUp + 1
-  let passed := numTrials - failures - gaveUp
-  if failures == 0 then
-    IO.println s!"  {name} ... PASS ({passed} passed, {gaveUp} discarded)"
+def checkProperty (name : String) (p : Prop) [Testable p]
+    (cfg : Configuration) : IO Bool := do
+  IO.print s!"  {name} ... "
+  match ← Testable.checkIO p cfg with
+  | .success _ =>
+    IO.println "PASS"
     return true
-  else
-    IO.println s!"  {name} ... FAIL ({failures}/{numTrials - gaveUp} failed, {gaveUp} discarded)"
+  | .gaveUp n =>
+    IO.println s!"GAVE UP ({n} discards)"
+    return true
+  | .failure _ xs n =>
+    IO.println s!"FAIL (after {n} trials)"
+    IO.eprintln s!"    {Testable.formatFailure "" xs n}"
     return false
 
 def main (args : List String) : IO UInt32 := do
   let numTrials := (args[0]? >>= String.toNat?).getD 1000
   let maxSize := (args[1]? >>= String.toNat?).getD 100
+  let cfg : Configuration := { numInst := numTrials, maxSize }
 
   IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
   IO.println ""
+
   let mut allPassed := true
-  for (name, prop) in [
-    ("typecheck", prop_typecheck),
-    ("type_preservation", prop_type_preservation),
-    ("progress", prop_progress),
-    ("normalization", prop_normalization)
-  ] do
-    let passed ← runProperty name prop numTrials maxSize
-    if !passed then allPassed := false
+
+  if !(← checkProperty "typecheck"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_typecheck te = true)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "type_preservation"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_type_preservation te = true)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "progress"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_progress te = true)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "normalization"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_normalization te = true)) cfg) then
+    allPassed := false
+
   IO.println ""
   if allPassed then
     IO.println "All tests passed."
