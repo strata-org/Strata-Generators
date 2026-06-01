@@ -19,7 +19,7 @@ A lightweight definitions-only module ([`HasTypeAGen/Defs.lean`](./StrataGenerat
 
 ## Plausible integration
 
-[`StrataGenerators/PlausibleGen.lean`](./StrataGenerators/PlausibleGen.lean) establishes `Plausible.Gen` as an instance of Basalt's `Gen` typeclass. This allows any generator written polymorphically over Basalt's `Gen` class to be instantiated at Plausible's `Gen` for executable property-based testing.
+Basalt's [`PlausibleGen`](https://github.com/hgoldstein95/basalt/blob/main/Basalt/PlausibleGen.lean) module establishes `Plausible.Gen` as an instance of Basalt's `Gen` typeclass. This allows any generator written polymorphically over Basalt's `Gen` class to be instantiated at Plausible's `Gen` for executable property-based testing.
 
 ## Dependencies
 
@@ -72,7 +72,7 @@ The `progress` and `normalization` properties are expected to find counterexampl
 position (e.g. `if ∀x. e then ...`) and on equality of lambdas with non-identical
 bodies (where `LExpr.eql` conservatively returns "inconclusive").
 
-The generators are instantiated at `Plausible.Gen` (via `PlausibleGen.lean`), which
+The generators are instantiated at `Plausible.Gen` (via Basalt's `PlausibleGen`), which
 provides size-varying random generation — the size parameter increases across trials,
 exercising both small and large expressions.
 
@@ -147,7 +147,6 @@ StrataGenerators/
   HasTypeAGen/Defs.lean     -- Generator definitions only (no Mathlib, for use with LExprEval)
   HasTypeGen.lean           -- HasType generator (locally-nameless)
   STLC.lean                 -- STLC generator + proofs (ported from internal Basalt)
-  PlausibleGen.lean         -- Plausible.Gen instance of Basalt's Gen typeclass
   SetGen.lean               -- SetGen framework (vendored from Basalt)
   SetGen/                   -- SetGen internals
   Tyche.lean                -- Tyche visualization support
