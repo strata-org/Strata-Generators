@@ -1,5 +1,6 @@
 import StrataGenerators.Tyche
 import StrataGenerators.HasTypeAGen.Defs
+import Strata.DL.Lambda.LExprEval
 import Basalt.IO
 
 open Lambda RandomChoice ArbNat Tyche Std
@@ -162,61 +163,16 @@ instance : Tyche.TycheSample TypeCheckResult where
         ("monoTyDepth", .ordinal (monoTyDepth r.expectedTy))
       ] }
 
--- ── Minimal evaluator for closed terms ────────────────────────────────
--- A CBV evaluator for closed LExpr's (no free vars, no operators).
--- TODO: Replace with `LExpr.eval` from `Strata.DL.Lambda.LExprEval` once
--- the `grind` regression in that file is fixed upstream.
+-- ── Evaluator ─────────────────────────────────────────────────────────
+-- Uses Strata's `LExpr.eval` with an empty state (closed terms, no operators).
 
-def isValue : LExpr' → Bool
-  | .const _ _ => true
-  | .abs _ _ _ body => go body 1
-  | _ => false
-where
-  go : LExpr' → Nat → Bool
-    | .bvar _ i, depth => i < depth
-    | .const _ _, _ => true
-    | .op _ _ _, _ => true
-    | .fvar _ _ _, _ => false
-    | .abs _ _ _ body, depth => go body (depth + 1)
-    | .app _ fn arg, depth => go fn depth && go arg depth
-    | .ite _ c t e, depth => go c depth && go t depth && go e depth
-    | .eq _ e₁ e₂, depth => go e₁ depth && go e₂ depth
-    | .quant _ _ _ _ tr body, depth => go tr (depth + 1) && go body (depth + 1)
-
-def substBVar (body v : LExpr') (depth : Nat := 0) : LExpr' :=
-  match body with
-  | .bvar m i => if i == depth then v else .bvar m i
-  | .abs m name ty b => .abs m name ty (substBVar b v (depth + 1))
-  | .app m fn arg => .app m (substBVar fn v depth) (substBVar arg v depth)
-  | .ite m c t e => .ite m (substBVar c v depth) (substBVar t v depth) (substBVar e v depth)
-  | .eq m e₁ e₂ => .eq m (substBVar e₁ v depth) (substBVar e₂ v depth)
-  | .quant m k name ty tr b => .quant m k name ty (substBVar tr v (depth + 1)) (substBVar b v (depth + 1))
-  | e => e
-
-def step : LExpr' → Option LExpr'
-  | .app m (.abs _ _ _ body) arg =>
-    if isValue arg then some (substBVar body arg)
-    else do let arg' ← step arg; some (.app m (.abs () "" none body) arg')
-  | .app m fn arg =>
-    if isValue fn then do let arg' ← step arg; some (.app m fn arg')
-    else do let fn' ← step fn; some (.app m fn' arg)
-  | .ite _ (.const _ (.boolConst true)) t _ => some t
-  | .ite _ (.const _ (.boolConst false)) _ e => some e
-  | .ite m c t e => do let c' ← step c; some (.ite m c' t e)
-  | .eq m e₁ e₂ =>
-    match e₁, e₂ with
-    | .const _ c₁, .const _ c₂ => some (.const m (.boolConst (c₁ == c₂)))
-    | _, _ =>
-      if isValue e₁ then do let e₂' ← step e₂; some (.eq m e₁ e₂')
-      else do let e₁' ← step e₁; some (.eq m e₁' e₂)
-  | _ => none
+def emptyState : LState LExprParams' := LState.init
 
 def eval (fuel : Nat) (e : LExpr') : LExpr' :=
-  match fuel with
-  | 0 => e
-  | n + 1 => match step e with
-    | some e' => eval n e'
-    | none => e
+  LExpr.eval fuel emptyState e
+
+def isValue (e : LExpr') : Bool :=
+  LExpr.isCanonicalValue emptyState.config.factory e
 
 -- ── Type preservation property ────────────────────────────────────────
 

@@ -5,7 +5,7 @@ defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen"]
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "f4447080f11a7f69d5a1283735db12aafb7e0864"
+rev = "fc9997af8cc41c48321ce92b5dd482910fe375eb"
 
 [[require]]
 name = "basalt"

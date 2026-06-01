@@ -1,6 +1,6 @@
 # Soundness and Completeness Proofs for the STLC Generator
 
-This document explains the proof ideas behind the soundness and completeness theorems for the STLC generator in `Basalt/Examples/STLC.lean`.
+This document explains the proof ideas behind the soundness and completeness theorems for the STLC generator in [`StrataGenerators/STLC.lean`](../StrataGenerators/STLC.lean) (ported from the internal Basalt repo's `Basalt/Examples/STLC.lean`).
 
 ## The Key Insight: `SetGen.Set` as a Verification Oracle
 
