@@ -226,6 +226,68 @@ def genAndEval (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : I
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
   return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled)⟩
 
+-- ── Evaluates-to-value property ──────────────────────────────────────
+
+/-- Result of generating an expression and checking whether it evaluates to a value. -/
+structure EvalToValueResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  evaled : LExpr'
+  evaledIsValue : Bool
+
+instance : Tyche.TycheSample EvalToValueResult where
+  toSample r :=
+    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
+      status := if r.evaledIsValue then .passed else .failed
+      features := [
+        ("is_value", .nominal (if r.evaledIsValue then "yes" else "no")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("input_depth", .ordinal (exprDepth r.expr)),
+        ("input_size", .ordinal (exprSize r.expr)),
+        ("output_size", .ordinal (exprSize r.evaled)),
+        ("expr_kind", .nominal (exprKind r.expr))
+      ] }
+
+/-- Generate an expression, evaluate it, and check if the result is a value. -/
+def genAndCheckValue (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalToValueResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let evaled := eval 100 expr
+  return ⟨expr, ty, evaled, isValue evaled⟩
+
+-- ── Eval progress property ───────────────────────────────────────────
+
+/-- Result of checking whether `LExpr.eval` makes progress on a generated term. -/
+structure EvalProgressResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  evaled : LExpr'
+  madeProgress : Bool
+  inputIsValue : Bool
+
+instance : Tyche.TycheSample EvalProgressResult where
+  toSample r :=
+    let status := if r.madeProgress || r.inputIsValue then Tyche.Status.passed
+                  else .failed
+    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
+      status
+      features := [
+        ("made_progress", .nominal (if r.madeProgress then "yes" else "no")),
+        ("input_is_value", .nominal (if r.inputIsValue then "yes" else "no")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("input_depth", .ordinal (exprDepth r.expr)),
+        ("input_size", .ordinal (exprSize r.expr)),
+        ("output_size", .ordinal (exprSize r.evaled)),
+        ("expr_kind", .nominal (exprKind r.expr))
+      ] }
+
+/-- Generate an expression and check whether eval makes progress (or the input is already a value). -/
+def genAndCheckProgress (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
+  let ty ← genLMonoTy (G := IO) tvars size
+  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+  let evaled := eval 100 expr
+  return ⟨expr, ty, evaled, !(expr == evaled), isValue expr⟩
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -252,6 +314,20 @@ def main (args : List String) : IO Unit := do
   let evContent ← IO.FS.readFile (outputPath ++ ".ev")
   handle.putStr evContent
   IO.FS.removeFile (outputPath ++ ".ev")
+
+  -- Run the evaluates-to-value property
+  Tyche.run (genAndCheckValue)
+    { numSamples, propertyName := "Generated LExprs evaluate to values", outputPath := outputPath ++ ".val" }
+  let valContent ← IO.FS.readFile (outputPath ++ ".val")
+  handle.putStr valContent
+  IO.FS.removeFile (outputPath ++ ".val")
+
+  -- Run the eval progress property
+  Tyche.run (genAndCheckProgress)
+    { numSamples, propertyName := "LExpr.eval makes progress or input is a value", outputPath := outputPath ++ ".prog" }
+  let progContent ← IO.FS.readFile (outputPath ++ ".prog")
+  handle.putStr progContent
+  IO.FS.removeFile (outputPath ++ ".prog")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow
