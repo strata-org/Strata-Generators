@@ -17,6 +17,11 @@ rev = "main"
 name = "StrataGenerators.HasTypeAGen.Defs"
 roots = ["StrataGenerators.HasTypeAGen.Defs"]
 
+# Shared test utilities (eval, isValue, defaultFCtx); imports LExprEval
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGen.TestSupport"
+roots = ["StrataGenerators.HasTypeAGen.TestSupport"]
+
 # The HasTypeA generator (uses Basalt.Examples.ArbNat → Mathlib → Batteries)
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGen"

@@ -1,6 +1,5 @@
-import StrataGenerators.HasTypeAGen.Defs
+import StrataGenerators.HasTypeAGen.TestSupport
 import Basalt.PlausibleGen
-import Strata.DL.Lambda.LExprEval
 import Plausible
 
 /-!
@@ -41,9 +40,6 @@ structure TypedExpr where
 instance : Shrinkable TypedExpr where
   shrink _ := []
 
-private def defaultFCtx : FVarCtx :=
-  [("x", .bool), ("f", .arrow .int .bool), ("n", .int)]
-
 private def genTypedExpr : Gen TypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
@@ -56,16 +52,6 @@ private def genTypedExpr : Gen TypedExpr := Gen.sized fun s => do
 -- own, we use `Gen.backtrack` to retry with fresh randomness on failure.
 instance : Arbitrary TypedExpr where
   arbitrary := Gen.backtrack (List.replicate 20 (1, genTypedExpr))
-
--- ── Evaluator ────────────────────────────────────────────────────────
-
-def emptyState : LState LExprParams' := LState.init
-
-def eval (fuel : Nat) (e : LExpr') : LExpr' :=
-  LExpr.eval fuel emptyState e
-
-def isValue (e : LExpr') : Bool :=
-  LExpr.isCanonicalValue emptyState.config.factory e
 
 -- ── Pretty-printing ──────────────────────────────────────────────────
 

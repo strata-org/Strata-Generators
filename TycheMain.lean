@@ -1,6 +1,5 @@
 import StrataGenerators.Tyche
-import StrataGenerators.HasTypeAGen.Defs
-import Strata.DL.Lambda.LExprEval
+import StrataGenerators.HasTypeAGen.TestSupport
 import Basalt.IO
 
 open Lambda RandomChoice ArbNat Tyche Std
@@ -166,18 +165,6 @@ instance : Tyche.TycheSample TypeCheckResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
--- ── Evaluator ─────────────────────────────────────────────────────────
--- Uses Strata's `LExpr.eval` with an empty state. Free variables are treated
--- as irreducible values by the evaluator.
-
-def emptyState : LState LExprParams' := LState.init
-
-def eval (fuel : Nat) (e : LExpr') : LExpr' :=
-  LExpr.eval fuel emptyState e
-
-def isValue (e : LExpr') : Bool :=
-  LExpr.isCanonicalValue emptyState.config.factory e
-
 -- ── Type preservation property ────────────────────────────────────────
 
 /-- Result of generating, evaluating, and re-typechecking. -/
@@ -214,11 +201,6 @@ instance : Tyche.TycheSample EvalResult where
 def randomDepth (maxDepth : Nat := 5) : IO Nat := do
   let r ← IO.rand 1 maxDepth
   return r
-
-/-- A fixed free-variable context providing variables of common types.
-    This ensures generated terms exercise the `fvar` path. -/
-def defaultFCtx : FVarCtx :=
-  [("x", .bool), ("f", .arrow .int .bool), ("n", .int)]
 
 /-- Generate a typed expression with free variables from `defaultFCtx`. -/
 def genTypedExpr (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypedExpr := do
