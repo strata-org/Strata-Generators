@@ -32,6 +32,8 @@ open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible
 
 -- ── Typed expression generation via Plausible.Gen ────────────────────
 
+/-- A generated expression paired with its type. May contain free variables
+    from `defaultFCtx`. -/
 structure TypedExpr where
   expr : LExpr'
   ty : LMonoTy
@@ -40,7 +42,7 @@ structure TypedExpr where
 instance : Shrinkable TypedExpr where
   shrink _ := []
 
-private def genTypedExpr : Gen TypedExpr := Gen.sized fun s => do
+private def genOpenTypedExpr : Gen TypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
@@ -51,7 +53,28 @@ private def genTypedExpr : Gen TypedExpr := Gen.sized fun s => do
 -- bvar/fvar/op in context. Since `Plausible.Gen` doesn't backtrack on its
 -- own, we use `Gen.backtrack` to retry with fresh randomness on failure.
 instance : Arbitrary TypedExpr where
-  arbitrary := Gen.backtrack (List.replicate 20 (1, genTypedExpr))
+  arbitrary := Gen.backtrack (List.replicate 20 (1, genOpenTypedExpr))
+
+/-- A closed generated expression (no free variables). Used for properties
+    that are stated with respect to the empty typing context (progress,
+    preservation, normalization). -/
+structure ClosedTypedExpr where
+  expr : LExpr'
+  ty : LMonoTy
+  deriving Repr, BEq
+
+instance : Shrinkable ClosedTypedExpr where
+  shrink _ := []
+
+private def genClosedTypedExpr : Gen ClosedTypedExpr := Gen.sized fun s => do
+  let depth := max 1 (s / 20)
+  let tvars : List TyIdentifier := []
+  let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
+  let expr ← genLExpr (G := Plausible.Gen) [] [] tvars [] depth ty
+  pure ⟨expr, ty⟩
+
+instance : Arbitrary ClosedTypedExpr where
+  arbitrary := Gen.backtrack (List.replicate 20 (1, genClosedTypedExpr))
 
 -- ── Pretty-printing ──────────────────────────────────────────────────
 
@@ -78,29 +101,30 @@ instance : ToFormat Unit where
 --     holds trivially and we omit it.
 
 -- Soundness of the generator: every generated expression typechecks
--- to the type it was generated for.
+-- to the type it was generated for. (Works for both open and closed terms
+-- since HasTypeA trusts fvar annotations.)
 def prop_typecheck (te : TypedExpr) : Bool :=
   LExpr.typeCheck (T := LExprParams') [] te.expr == some te.ty
 
--- Preservation: the type of an expression is unchanged after evaluation.
--- That is, if Γ ⊢ e : τ and e →* e', then Γ ⊢ e' : τ.
-def prop_preservation (te : TypedExpr) : Bool :=
+-- Preservation (closed terms only): if ∅ ⊢ e : τ and e →* e', then ∅ ⊢ e' : τ.
+def prop_preservation (te : ClosedTypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   LExpr.typeCheck (T := LExprParams') [] evaled == some te.ty
 
--- Progress: either the expression is already a canonical value, or
--- `LExpr.eval` reduces it to something different.
--- Falsified by quantifiers (`∀`/`∃`) in non-value positions — `LExpr.eval`
--- has no reduction rule for them, so `if (∀x. e) then ...` gets stuck.
-def prop_progress (te : TypedExpr) : Bool :=
+-- Progress (closed terms only): a well-typed closed term is either a value
+-- or can take a step. Stated for the empty context per Software Foundations.
+-- Falsified by quantifiers (`∀`/`∃`) — `LExpr.eval` has no reduction rule
+-- for them, so `if (∀x. e) then ...` gets stuck.
+def prop_progress (te : ClosedTypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   isValue te.expr || !(te.expr == evaled)
 
--- Normalization: every expression evaluates to a canonical value.
+-- Normalization (closed terms only): every closed well-typed expression
+-- evaluates to a canonical value. Stated for the empty context.
 -- Falsified by (1) stuck quantifiers (as above) and (2) equality of lambdas
 -- with non-identical bodies (e.g. `(λx. x+1) == (λx. 1+x)`), where
 -- `LExpr.eql` returns `none` (inconclusive) and the `==` node gets stuck.
-def prop_normalization (te : TypedExpr) : Bool :=
+def prop_normalization (te : ClosedTypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   isValue evaled
 
@@ -176,16 +200,16 @@ def main (args : List String) : IO UInt32 := do
     (NamedBinder "te" (∀ te : TypedExpr, prop_typecheck te = true)) cfg) then
     allPassed := false
 
-  if !(← checkProperty "type_preservation"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_preservation te = true)) cfg) then
+  if !(← checkProperty "type_preservation (closed)"
+    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_preservation te = true)) cfg) then
     allPassed := false
 
-  if !(← checkProperty "progress"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_progress te = true)) cfg) then
+  if !(← checkProperty "progress (closed)"
+    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_progress te = true)) cfg) then
     allPassed := false
 
-  if !(← checkProperty "normalization"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_normalization te = true)) cfg) then
+  if !(← checkProperty "normalization (closed)"
+    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_normalization te = true)) cfg) then
     allPassed := false
 
   if !(← checkProperty "eval_idempotent"

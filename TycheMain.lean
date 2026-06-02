@@ -222,11 +222,12 @@ def genAndTypeCheck (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"
   let actualTy := LExpr.typeCheck (T := LExprParams') [] expr
   return ⟨expr, ty, actualTy, d⟩
 
-/-- Generate an expression, evaluate it, and check type preservation. -/
+/-- Generate a closed expression, evaluate it, and check type preservation.
+    Uses empty fctx since preservation is stated for the empty context. -/
 def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
   return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled), d⟩
@@ -255,11 +256,12 @@ instance : Tyche.TycheSample EvalToValueResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate an expression, evaluate it, and check if the result is a value. -/
+/-- Generate a closed expression, evaluate it, and check if the result is a value.
+    Uses empty fctx since normalization is stated for the empty context. -/
 def genAndCheckValue (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalToValueResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, isValue evaled, d⟩
 
@@ -291,11 +293,13 @@ instance : Tyche.TycheSample EvalProgressResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate an expression and check whether eval makes progress (or the input is already a value). -/
+/-- Generate a closed expression and check whether eval makes progress (or
+    the input is already a value). Uses empty fctx since progress is stated
+    for the empty context. -/
 def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, !(expr == evaled), isValue expr, d⟩
 
@@ -454,21 +458,21 @@ def main (args : List String) : IO Unit := do
 
   -- Run the type preservation property
   Tyche.run (genAndEval)
-    { numSamples, propertyName := "Type preservation under eval", outputPath := outputPath ++ ".ev" }
+    { numSamples, propertyName := "Type preservation under eval (closed terms)", outputPath := outputPath ++ ".ev" }
   let evContent ← IO.FS.readFile (outputPath ++ ".ev")
   handle.putStr evContent
   IO.FS.removeFile (outputPath ++ ".ev")
 
   -- Run the evaluates-to-value property
   Tyche.run (genAndCheckValue)
-    { numSamples, propertyName := "Generated LExprs evaluate to values", outputPath := outputPath ++ ".val" }
+    { numSamples, propertyName := "Closed LExprs evaluate to values", outputPath := outputPath ++ ".val" }
   let valContent ← IO.FS.readFile (outputPath ++ ".val")
   handle.putStr valContent
   IO.FS.removeFile (outputPath ++ ".val")
 
   -- Run the eval progress property
   Tyche.run (genAndCheckProgress)
-    { numSamples, propertyName := "LExpr.eval makes progress or input is a value", outputPath := outputPath ++ ".prog" }
+    { numSamples, propertyName := "LExpr.eval makes progress on closed terms", outputPath := outputPath ++ ".prog" }
   let progContent ← IO.FS.readFile (outputPath ++ ".prog")
   handle.putStr progContent
   IO.FS.removeFile (outputPath ++ ".prog")
