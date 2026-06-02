@@ -114,10 +114,11 @@ def typeKind : LMonoTy → String
   | .bitvec _ => "bitvec"
   | .tcons _ _ => "tcons"
 
-/-- A generated expression paired with its type, ready for Tyche. -/
+/-- A generated expression paired with its type and the depth (size parameter to the generator) used to generate it, ready for Tyche. -/
 structure TypedExpr where
   expr : LExpr'
   ty : LMonoTy
+  generatorSize : Nat
 instance : Tyche.TycheSample TypedExpr where
   toSample te :=
     { representation := ppExpr te.expr
@@ -126,7 +127,8 @@ instance : Tyche.TycheSample TypedExpr where
         ("LExpr.size", .ordinal (exprSize te.expr)),
         ("expr_kind", .nominal (exprKind te.expr)),
         ("type_kind", .nominal (typeKind te.ty)),
-        ("type_depth", .ordinal (monoTyDepth te.ty))
+        ("type_depth", .ordinal (monoTyDepth te.ty)),
+        ("generator_size", .ordinal te.generatorSize)
       ] }
 
 /-- A generated monotype, ready for Tyche. -/
@@ -145,6 +147,7 @@ structure TypeCheckResult where
   expr : LExpr'
   expectedTy : LMonoTy
   actualTy : Option LMonoTy
+  generatorSize : Nat
 
 /-- The typecheck property passes when `LExpr.typeCheck [] expr = some expectedTy`. -/
 instance : Tyche.TycheSample TypeCheckResult where
@@ -159,7 +162,8 @@ instance : Tyche.TycheSample TypeCheckResult where
         ("exprDepth", .ordinal (exprDepth r.expr)),
         ("LExpr.size", .ordinal (exprSize r.expr)),
         ("exprKind", .nominal (exprKind r.expr)),
-        ("monoTyDepth", .ordinal (monoTyDepth r.expectedTy))
+        ("monoTyDepth", .ordinal (monoTyDepth r.expectedTy)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
 -- ── Evaluator ─────────────────────────────────────────────────────────
@@ -183,6 +187,7 @@ structure EvalResult where
   evaledTy : Option LMonoTy
   exprIsValue : Bool
   madeProgress : Bool
+  generatorSize : Nat
 
 instance : Tyche.TycheSample EvalResult where
   toSample r :=
@@ -195,35 +200,48 @@ instance : Tyche.TycheSample EvalResult where
         ("made_progress", .nominal (if r.madeProgress then "yes" else "no")),
         ("type_kind", .nominal (typeKind r.expectedTy)),
         ("input_size", .ordinal (exprSize r.expr)),
-        ("output_size", .ordinal (exprSize r.evaled))
+        ("output_size", .ordinal (exprSize r.evaled)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
 -- ── Generator wrappers ────────────────────────────────────────────────
+-- Each wrapper varies the depth parameter uniformly over [1, 5] so that
+-- Tyche visualizations cover the full range of generator behavior, not
+-- just a single fixed depth.
+
+/-- Randomly choose a depth between 1 and `maxDepth` (inclusive). -/
+def randomDepth (maxDepth : Nat := 5) : IO Nat := do
+  let r ← IO.rand 1 maxDepth
+  return r
 
 /-- Generate a typed expression using `genClosedLExpr` from HasTypeAGen. -/
-def genTypedExpr (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO TypedExpr := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
-  return ⟨expr, ty⟩
+def genTypedExpr (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypedExpr := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  return ⟨expr, ty, d⟩
 
 /-- Generate just a monotype. -/
-def genType (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO LMonoTy :=
-  genLMonoTy (G := IO) tvars size
+def genType (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO LMonoTy := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  genLMonoTy (G := IO) tvars d
 
 /-- Generate an expression and typecheck it against the expected type. -/
-def genAndTypeCheck (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO TypeCheckResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+def genAndTypeCheck (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypeCheckResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let actualTy := LExpr.typeCheck (T := LExprParams') [] expr
-  return ⟨expr, ty, actualTy⟩
+  return ⟨expr, ty, actualTy, d⟩
 
 /-- Generate an expression, evaluate it, and check type preservation. -/
-def genAndEval (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
-  return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled)⟩
+  return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled), d⟩
 
 -- ── Evaluates-to-value property ──────────────────────────────────────
 
@@ -233,6 +251,7 @@ structure EvalToValueResult where
   expectedTy : LMonoTy
   evaled : LExpr'
   evaledIsValue : Bool
+  generatorSize : Nat
 
 instance : Tyche.TycheSample EvalToValueResult where
   toSample r :=
@@ -244,15 +263,17 @@ instance : Tyche.TycheSample EvalToValueResult where
         ("input_depth", .ordinal (exprDepth r.expr)),
         ("input_size", .ordinal (exprSize r.expr)),
         ("output_size", .ordinal (exprSize r.evaled)),
-        ("expr_kind", .nominal (exprKind r.expr))
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
 /-- Generate an expression, evaluate it, and check if the result is a value. -/
-def genAndCheckValue (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalToValueResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+def genAndCheckValue (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalToValueResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
-  return ⟨expr, ty, evaled, isValue evaled⟩
+  return ⟨expr, ty, evaled, isValue evaled, d⟩
 
 -- ── Eval progress property ───────────────────────────────────────────
 
@@ -263,6 +284,7 @@ structure EvalProgressResult where
   evaled : LExpr'
   madeProgress : Bool
   inputIsValue : Bool
+  generatorSize : Nat
 
 instance : Tyche.TycheSample EvalProgressResult where
   toSample r :=
@@ -277,15 +299,17 @@ instance : Tyche.TycheSample EvalProgressResult where
         ("input_depth", .ordinal (exprDepth r.expr)),
         ("input_size", .ordinal (exprSize r.expr)),
         ("output_size", .ordinal (exprSize r.evaled)),
-        ("expr_kind", .nominal (exprKind r.expr))
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
 /-- Generate an expression and check whether eval makes progress (or the input is already a value). -/
-def genAndCheckProgress (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
-  return ⟨expr, ty, evaled, !(expr == evaled), isValue expr⟩
+  return ⟨expr, ty, evaled, !(expr == evaled), isValue expr, d⟩
 
 -- ── Eval idempotence property ────────────────────────────────────────
 
@@ -295,6 +319,7 @@ structure EvalIdempotentResult where
   evaled : LExpr'
   evaledAgain : LExpr'
   isIdempotent : Bool
+  generatorSize : Nat
 
 instance : Tyche.TycheSample EvalIdempotentResult where
   toSample r :=
@@ -305,15 +330,20 @@ instance : Tyche.TycheSample EvalIdempotentResult where
         ("type_kind", .nominal (typeKind r.expectedTy)),
         ("input_size", .ordinal (exprSize r.expr)),
         ("output_size", .ordinal (exprSize r.evaled)),
-        ("expr_kind", .nominal (exprKind r.expr))
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
-def genAndCheckIdempotent (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalIdempotentResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+-- TODO: generate terms w/ free vars (we can use a fixed context for now)
+
+-- TODO: this may not be true in general
+def genAndCheckIdempotent (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalIdempotentResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
   let evaledAgain := eval 100 evaled
-  return ⟨expr, ty, evaled, evaledAgain, evaled == evaledAgain⟩
+  return ⟨expr, ty, evaled, evaledAgain, evaled == evaledAgain, d⟩
 
 -- ── Eval monotonicity property ───────────────────────────────────────
 
@@ -324,6 +354,7 @@ structure EvalMonotoneResult where
   evaled100 : LExpr'
   evaled100From50 : LExpr'
   isMonotone : Bool
+  generatorSize : Nat
 
 instance : Tyche.TycheSample EvalMonotoneResult where
   toSample r :=
@@ -334,16 +365,18 @@ instance : Tyche.TycheSample EvalMonotoneResult where
         ("type_kind", .nominal (typeKind r.expectedTy)),
         ("input_size", .ordinal (exprSize r.expr)),
         ("output_size", .ordinal (exprSize r.evaled100)),
-        ("expr_kind", .nominal (exprKind r.expr))
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
-def genAndCheckMonotone (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalMonotoneResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+def genAndCheckMonotone (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalMonotoneResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled50 := eval 50 expr
   let evaled100 := eval 100 expr
   let evaled100From50 := eval 50 evaled50
-  return ⟨expr, ty, evaled50, evaled100, evaled100From50, evaled100 == evaled100From50⟩
+  return ⟨expr, ty, evaled50, evaled100, evaled100From50, evaled100 == evaled100From50, d⟩
 
 -- ── Closedness preservation property ─────────────────────────────────
 
@@ -352,6 +385,7 @@ structure ClosednessResult where
   expectedTy : LMonoTy
   evaled : LExpr'
   evaledIsClosed : Bool
+  generatorSize : Nat
 
 instance : Tyche.TycheSample ClosednessResult where
   toSample r :=
@@ -362,14 +396,16 @@ instance : Tyche.TycheSample ClosednessResult where
         ("type_kind", .nominal (typeKind r.expectedTy)),
         ("input_size", .ordinal (exprSize r.expr)),
         ("output_size", .ordinal (exprSize r.evaled)),
-        ("expr_kind", .nominal (exprKind r.expr))
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
-def genAndCheckClosed (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO ClosednessResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+def genAndCheckClosed (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO ClosednessResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
-  return ⟨expr, ty, evaled, LExpr.closed evaled⟩
+  return ⟨expr, ty, evaled, LExpr.closed evaled, d⟩
 
 -- ── Size non-increase property ───────────────────────────────────────
 
@@ -380,6 +416,7 @@ structure SizeResult where
   inputSize : Nat
   outputSize : Nat
   sizeNonIncreased : Bool
+  generatorSize : Nat
 
 instance : Tyche.TycheSample SizeResult where
   toSample r :=
@@ -391,16 +428,18 @@ instance : Tyche.TycheSample SizeResult where
         ("input_size", .ordinal r.inputSize),
         ("output_size", .ordinal r.outputSize),
         ("size_reduction", .ordinal (r.inputSize - r.outputSize)),
-        ("expr_kind", .nominal (exprKind r.expr))
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
       ] }
 
-def genAndCheckSize (size : Nat := 3) (tvars : List TyIdentifier := ["α", "β"]) : IO SizeResult := do
-  let ty ← genLMonoTy (G := IO) tvars size
-  let expr ← genLExpr (G := IO) [] [] tvars [] size ty
+def genAndCheckSize (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO SizeResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
   let evaled := eval 100 expr
   let inputSize := exprSize expr
   let outputSize := exprSize evaled
-  return ⟨expr, ty, evaled, inputSize, outputSize, outputSize ≤ inputSize⟩
+  return ⟨expr, ty, evaled, inputSize, outputSize, outputSize ≤ inputSize, d⟩
 
 -- ── Main ──────────────────────────────────────────────────────────────
 
@@ -475,7 +514,8 @@ def main (args : List String) : IO Unit := do
   let startTime ← IO.monoMsNow
   for _ in List.range numSamples do
     try
-      let ty ← genType
+      let d ← randomDepth
+      let ty ← genType d
       let sample := TycheSample.toSample ty
       let line := sample.toJsonLine "Distribution of types generated by genLMonoTy" startTime
       handle.putStrLn line

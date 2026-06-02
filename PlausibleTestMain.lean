@@ -41,13 +41,18 @@ structure TypedExpr where
 instance : Shrinkable TypedExpr where
   shrink _ := []
 
+private def genTypedExpr : Gen TypedExpr := Gen.sized fun s => do
+  let depth := max 1 (s / 20)
+  let tvars : List TyIdentifier := []
+  let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
+  let expr ← genLExpr (G := Plausible.Gen) [] [] tvars [] depth ty
+  pure ⟨expr, ty⟩
+
+-- `genLExpr` can fail (via `default`) when a depth-0 arrow case has no
+-- bvar/fvar/op in context. Since `Plausible.Gen` doesn't backtrack on its
+-- own, we use `Gen.backtrack` to retry with fresh randomness on failure.
 instance : Arbitrary TypedExpr where
-  arbitrary := do
-    let size := (← Gen.getSize) / 20
-    let tvars : List TyIdentifier := []
-    let ty ← genLMonoTy (G := Plausible.Gen) tvars size
-    let expr ← genLExpr (G := Plausible.Gen) [] [] tvars [] size ty
-    pure ⟨expr, ty⟩
+  arbitrary := Gen.backtrack (List.replicate 20 (1, genTypedExpr))
 
 -- ── Evaluator ────────────────────────────────────────────────────────
 

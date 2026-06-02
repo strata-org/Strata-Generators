@@ -29,6 +29,74 @@ Three design choices work together:
 
 The key insight: because variables carry their type's depth, a variable of type `Nat → Nat` has `termDepth = 1`. This means `indicesOfType` filters out variables whose type is too deep for the current size budget, and the generator never returns something it "shouldn't" be able to afford.
 
+## `LExpr.size` from the Strata repo
+
+The Strata `LExpr` module defines its own `size` function (`Strata/DL/Lambda/LExpr.lean:559`):
+
+```lean
+def size (T : LExprParamsT) (e : LExpr T) : Nat :=
+  match e with
+  | .const .. | .op .. | .bvar .. | .fvar .. => 1
+  | .abs _ _ _ e' => 1 + size T e'
+  | .quant _ _ _ _ _ e' => 1 + size T e'
+  | .app _ e1 e2 => 1 + size T e1 + size T e2
+  | .ite _ c t f => 1 + size T c + size T t + size T f
+  | .eq _ e1 e2 => 1 + size T e1 + size T e2
+```
+
+This is a **sum-based node count** (total AST nodes). Key observations:
+- Every node contributes at least 1.
+- Multi-child nodes accumulate *all* children's sizes (e.g., `app` is `1 + size fn + size arg`).
+- `quant` does **not** count the trigger sub-expression in its size — only the body.
+
+### Comparison: `LExpr.size` vs `termDepth`
+
+| Property | `LExpr.size` | `termDepth` |
+|---|---|---|
+| Combination | sum (additive) | max (depth) |
+| Leaves | 1 | 0 |
+| `abs _ _ _ body` | `1 + size body` | `termDepth body + 1` |
+| `app _ fn arg` | `1 + size fn + size arg` | `max (depth fn) (depth arg) + 1` |
+| `ite _ c t e` | `1 + size c + size t + size e` | `max c (max t e) + 1` |
+| `eq _ e₁ e₂` | `1 + size e₁ + size e₂` | `max (depth e₁) (depth e₂) + 1` |
+| `quant _ _ _ τ tr body` | `1 + size body` (trigger ignored) | `max (monoTyDepth τ) (max (depth tr) (depth body)) + 1` |
+| Context-dependence | none | yes (bctx for recursive calls) |
+| Type depth | not incorporated | only for `quant` |
+
+### Why `LExpr.size` cannot serve as the generator's fuel bound
+
+The generator's `size` parameter acts as a **depth** control: at `| n + 1, .arrow τ₁ τ₂ =>`, the recursive calls pass `n` to *each* child independently:
+
+```lean
+| n + 1, .arrow τ₁ τ₂ =>
+    ...
+    let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂       -- abs
+    ...
+    let arg ← genLExpr fctx octx tvars bctx n τ'                 -- app (arg)
+    let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' ...)    -- app (fn)
+    ...
+    let c ← genLExpr fctx octx tvars bctx n .bool                -- ite
+    let t ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)      -- ite
+    let e ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)      -- ite
+```
+
+Each child gets the *full* budget `n`, not a fraction of it. This is the signature of depth-bounded generation: the budget bounds tree height, not total node count. For example, with `size = 2`, the generator can produce:
+
+```
+app (app (bvar 0) (boolConst true)) (intConst 42)
+```
+
+This has `termDepth = 2` but `LExpr.size = 5` (three leaves at 1 each, two `app` nodes each adding 1). If we tried to prove `LExpr.size e ≤ size` for generated `e`, it would fail — `LExpr.size` grows exponentially with depth for branching nodes.
+
+**Quantitative bound**: A balanced binary tree of depth `d` has `LExpr.size = 2^(d+1) - 1`. So `genLExpr` at fuel `n` can produce expressions with `LExpr.size` up to `O(3^n)` (ternary branching from `ite`), while `termDepth ≤ n` always holds.
+
+### Relationship: `termDepth ≤ LExpr.size`
+
+For all expressions, `termDepth bctx e ≤ LExpr.size T e` (since depth ≤ node count for any tree). But the converse gap can be arbitrarily large. This means:
+- A bound on `termDepth` is *weaker* than a bound on `LExpr.size`.
+- The generator controls depth, not total size — `termDepth` is the correct measure.
+- `LExpr.size` would be the right measure for a generator that *splits* fuel among children (fuel-splitting/size-bounded generation), but that's not our design.
+
 ## Current State of `HasTypeAGen.lean`
 
 ### `termDepth` definition (line 1003)
@@ -116,6 +184,18 @@ This creates a cascade: a bvar of type `(α → β) → γ` would have depth 2, 
 
 At size `n+1`, the abs case generates body at size `n`; by IH `termDepth body ≤ n`, so `termDepth (abs body) = termDepth body + 1 ≤ n + 1`.
 
+### Approach D: Use `LExpr.size` as the measure (fuel-splitting generator)
+
+**Idea**: Redesign the generator to split fuel among children (like QuickChick's sized generators), and use `LExpr.size` as the bound.
+
+**Why not**: This would be a fundamental redesign of the generator architecture:
+1. The generator would need to *choose* how to split budget `n` among children (e.g., for `app`, decide `k` such that `fn` gets budget `k` and `arg` gets budget `n - k - 1`).
+2. The completeness theorem becomes harder: you must show that *for every* valid split, the generator can produce the corresponding sub-expression.
+3. The depth-bounded approach produces more diverse terms at small fuel values (a balanced tree at depth 3 requires only fuel 3, vs fuel 15 with node-count budgeting).
+4. The existing proofs (soundness, completeness, `AllTypesSimple`) are all structured around depth recursion.
+
+Fuel-splitting would be appropriate if we wanted hard bounds on output size (e.g., for fuzzing with bounded-length inputs), but for property-based testing where we want structural diversity, depth-bounded generation is standard.
+
 ## Target Theorem Structure (After Approach C)
 
 ### Bounded soundness (new)
@@ -169,3 +249,76 @@ No changes needed — it already requires `n+1` for abs/app/ite/eq/quant constru
 **Generator efficiency**: Returning `default` instead of constructing a lambda at size 0 means the generator may fail more often when the context lacks arrow-typed bvars/fvars/ops. With a backtracking monad, this is recovered automatically. With `Plausible.Gen` (non-backtracking), the caller at size `n+1` would need to retry. In practice, the size-0 arrow case is typically reached from *within* a lambda body (where the context already has the binder's type), so a bvar is usually available.
 
 **Comparison with quant**: The `quant` case already incorporates `monoTyDepth τ` in `termDepth` because `genLMonoTy` consumes fuel proportional to type depth when generating the quantifier's type annotation. The `abs` case doesn't need this because the type annotation `τ₁` is the *target* type (passed in from the caller), not freshly generated.
+
+## Implementation Status (Approach C Applied)
+
+Approach C has been implemented. The generator, soundness theorem, and completeness theorem now use a consistent `depth` parameter whose operational meaning matches `termDepth` exactly.
+
+### Why the depth measures now coincide
+
+The key claim is: **for every expression `e` in the support of `genLExpr ... depth τ`, we have `termDepth bctx e ≤ depth`**. This follows from the structure of the generator after the Option C change, by induction on `depth`:
+
+**Base case (`depth = 0`)**:
+
+For each type `τ`, the generator at depth 0 only produces leaf expressions:
+- `.bool` / `.int`: produces `boolConst`, `intConst`, `bvar`, `fvar`, `op` — all have `termDepth = 0`.
+- `.arrow τ₁ τ₂`: produces `bvar`, `fvar`, or `op` (or fails with `default`) — all have `termDepth = 0`.
+- `.ftvar name`: produces `bvar`, `fvar`, or `op` (or fails) — all have `termDepth = 0`.
+
+Before the change, the `.arrow` case at depth 0 could produce `abs () "" (some τ₁) body` where `body` was generated at depth 0. Even though `body` has `termDepth = 0`, the wrapping `abs` adds 1, giving `termDepth = 1 > 0`. This violated the expected bound. Now, with `default` instead of the lambda fallback, no compound expression is produced at depth 0.
+
+**Inductive case (`depth = n + 1`)**:
+
+Every compound constructor recurses at depth `n`:
+- `abs`: body generated at depth `n` → by IH, `termDepth body ≤ n` → `termDepth (abs body) = termDepth body + 1 ≤ n + 1`.
+- `app`: fn and arg both generated at depth `n` → by IH, both ≤ `n` → `max(...) + 1 ≤ n + 1`.
+- `ite`: all three children generated at depth `n` → `max(max(...)) + 1 ≤ n + 1`.
+- `eq`: both children at depth `n` → `max(...) + 1 ≤ n + 1`.
+- `quant`: type `τ'` generated by `genLMonoTy tvars n` has `monoTyDepth τ' ≤ n`; trigger and body generated at depth `n` → `max(monoTyDepth τ', max(depth tr, depth body)) + 1 ≤ n + 1`.
+- Leaf cases (bvar/fvar/op/const) in the `n+1` branches: `termDepth = 0 ≤ n + 1`.
+
+This is not yet a formally proved theorem (a `genLExpr_termDepth_bound` theorem), but it follows mechanically from the generator structure and is the missing piece for the full `↔` characterization.
+
+### How the three theorems relate
+
+After implementing Approach C, the theorem landscape is:
+
+```
+genLExpr_sound:    e ∈ support(genLExpr ... depth τ) → HasTypeA' bctx e τ
+                                                       ∧ emptyNames e
+                                                       ∧ allVarsInCtx ...
+                                                       ∧ AllTypesSimple ...
+
+genLExpr_complete: HasTypeA' bctx e τ
+                   ∧ emptyNames e
+                   ∧ allVarsInCtx ...
+                   ∧ AllTypesSimple tvars depth bctx e
+                   ∧ termDepth bctx e ≤ depth
+                   → e ∈ support(genLExpr ... depth τ)
+
+genLExpr_termDepth_bound (not yet proved):
+                   e ∈ support(genLExpr ... depth τ) → termDepth bctx e ≤ depth
+```
+
+The three combine to give:
+```
+e ∈ support(genLExpr ... depth τ) ↔ wellFormedBounded ... depth τ e
+```
+
+The `termDepth_bound` theorem is the "glue" — without it, soundness is strictly weaker than the backward direction of completeness (soundness doesn't bound depth), so you can't derive the `↔` from `→` and `←` alone.
+
+### Why `AllTypesSimple` and `termDepth` use the same `depth` parameter
+
+Both `AllTypesSimple tvars depth bctx e` and `termDepth bctx e ≤ depth` decrease by 1 at each compound constructor. This is not a coincidence — they both track the generator's fuel consumption:
+
+- `AllTypesSimple tvars n (τ₁ :: bctx) body` at level `n` means: all *intermediate* types in `body` (those generated by `genLMonoTy n` during expression generation) have depth ≤ `n` and are simple. The generator at level `n+1` calls `genLMonoTy n` to produce intermediate types, then recurses at level `n` for sub-expressions.
+
+- `termDepth bctx e ≤ n` at level `n` means: the expression tree has at most `n` levels of compound constructors above any leaf.
+
+Both track the same resource: how many "levels" of the generator were consumed. `AllTypesSimple` constrains the *types* at each level, while `termDepth` constrains the *structure*. Together they fully characterize the generator's output at a given depth.
+
+### The naming convention
+
+Throughout the codebase, the generator parameter is now named `depth` (not `size`) to reflect its operational meaning: it bounds tree depth, not tree size. The completeness hypothesis is `hdepth : termDepth bctx e ≤ depth` and the termination measure is `termination_by (depth, sizeOf τ)`.
+
+The word "size" is reserved for `LExpr.size` (node count) when we need it in Tyche visualizations or comparison discussions.

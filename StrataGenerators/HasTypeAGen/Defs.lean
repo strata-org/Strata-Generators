@@ -138,28 +138,24 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
 -- ── Expression generator ─────────────────────────────────────────────
 
 def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
+  -- Depth 0 + arrow: only leaf expressions allowed; `default` on failure.
+  -- This ensures `termDepth e ≤ 0` for all outputs (Option C).
   | 0, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
     pick
       (fun () =>
         if hv : bvars.length > 0 then pickBVar bctx _ hv
-        else do
-          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) 0 τ₂
-          pure (.abs () "" (some τ₁) body))
+        else default)
       (fun () =>
         pick
           (fun () =>
             if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
             then pickFVar fctx _ hf
-            else do
-              let body ← genLExpr fctx octx tvars (τ₁ :: bctx) 0 τ₂
-              pure (.abs () "" (some τ₁) body))
+            else default)
           (fun () =>
             if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
             then pickOp octx _ ho
-            else do
-              let body ← genLExpr fctx octx tvars (τ₁ :: bctx) 0 τ₂
-              pure (.abs () "" (some τ₁) body)))
+            else default))
   | n + 1, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
     pick
@@ -420,6 +416,6 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
                     else default))))
   | _, _ => pure (.boolConst () false)
 
-def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (size : Nat) : G LExpr' := do
-  let τ ← genLMonoTy tvars size
-  genLExpr [] [] tvars [] size τ
+def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat) : G LExpr' := do
+  let τ ← genLMonoTy tvars depth
+  genLExpr [] [] tvars [] depth τ
