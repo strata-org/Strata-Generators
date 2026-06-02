@@ -206,7 +206,7 @@ def randomDepth (maxDepth : Nat := 5) : IO Nat := do
 def genTypedExpr (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypedExpr := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExprF (G := IO) defaultFCtx intBoolFactory tvars [] d ty
   return ⟨expr, ty, d⟩
 
 /-- Generate just a monotype. -/
@@ -218,7 +218,7 @@ def genType (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO 
 def genAndTypeCheck (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypeCheckResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExprF (G := IO) defaultFCtx intBoolFactory tvars [] d ty
   let actualTy := LExpr.typeCheck (T := LExprParams') [] expr
   return ⟨expr, ty, actualTy, d⟩
 
@@ -227,7 +227,7 @@ def genAndTypeCheck (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"
 def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExprF (G := IO) [] intBoolFactory tvars [] d ty
   let evaled := eval 100 expr
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
   return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled), d⟩
@@ -261,7 +261,7 @@ instance : Tyche.TycheSample EvalToValueResult where
 def genAndCheckValue (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalToValueResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExprF (G := IO) [] intBoolFactory tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, isValue evaled, d⟩
 
@@ -299,7 +299,7 @@ instance : Tyche.TycheSample EvalProgressResult where
 def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExprF (G := IO) [] intBoolFactory tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, !(expr == evaled), isValue expr, d⟩
 
@@ -332,7 +332,7 @@ instance : Tyche.TycheSample EvalIdempotentResult where
 def genAndCheckIdempotent (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalIdempotentResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExprF (G := IO) defaultFCtx intBoolFactory tvars [] d ty
   let evaled := eval 100 expr
   let evaledAgain := eval 100 evaled
   return ⟨expr, ty, evaled, evaledAgain, evaled == evaledAgain, d⟩
@@ -364,7 +364,7 @@ instance : Tyche.TycheSample EvalMonotoneResult where
 def genAndCheckMonotone (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalMonotoneResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExprF (G := IO) defaultFCtx intBoolFactory tvars [] d ty
   let evaled50 := eval 50 expr
   let evaled100 := eval 100 expr
   let evaled100From50 := eval 50 evaled50
@@ -395,7 +395,7 @@ instance : Tyche.TycheSample FvarPreservationResult where
 def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO FvarPreservationResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExprF (G := IO) defaultFCtx intBoolFactory tvars [] d ty
   let evaled := eval 100 expr
   let inputFvars := LExpr.collectFvarNames expr
   let outputFvars := LExpr.collectFvarNames evaled
@@ -430,7 +430,7 @@ instance : Tyche.TycheSample SizeResult where
 def genAndCheckSize (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO SizeResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
+  let expr ← genLExprF (G := IO) defaultFCtx intBoolFactory tvars [] d ty
   let evaled := eval 100 expr
   let inputSize := exprSize expr
   let outputSize := exprSize evaled

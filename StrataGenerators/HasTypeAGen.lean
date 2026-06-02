@@ -1,6 +1,6 @@
 import StrataGenerators.SetGen
-import Basalt.Examples.ArbNat
-import Strata.DL.Lambda.Denote.LExprAnnotated
+import StrataGenerators.HasTypeAGen.Core
+import Mathlib.Tactic
 
 open Lambda RandomChoice ArbNat SetGen
 
@@ -21,448 +21,6 @@ metadata and identifier-metadata, monotype annotations).
 - Soundness of `genLExpr` (every generated expression is well-typed)
 - `SetGen.IsSoundAndComplete` instance for `genLMonoTy`
 -/
-
--- ── Parameter type ─────────────────────────────────────────────────────
-
-/-- The base `LExprParams` we use: unit metadata & IDMeta. -/
-abbrev LExprParams' : LExprParams := ⟨Unit, Unit⟩
-
-/-- The `LExprParamsT` instantiation we use: unit metadata & IDMeta,
-    `LMonoTy` as the type-annotation type. -/
-abbrev LExprParamsT' : LExprParamsT := LExprParams.mono LExprParams'
-
-instance : DecidableEq Unit := instDecidableEqPUnit
-
-/-- Our working expression type (`LExpr` with `LExprParamsT` instantiated) -/
-abbrev LExpr' := LExpr LExprParamsT'
-
-instance : BEq LMonoTy := instBEqOfDecidableEq
-
--- ── Bound-variable context ─────────────────────────────────────────────
-
-/-- De Bruijn context: `bctx[i]?` is the type of `bvar i`. -/
-abbrev BVarCtx := List LMonoTy
-
--- ── Free-variable and operator contexts ────────────────────────────────
-
-/-- Free-variable context: maps variable names to their types. -/
-abbrev FVarCtx := List (String × LMonoTy)
-
-/-- Operator context: maps operator names to their types. -/
-abbrev OpCtx := List (String × LMonoTy)
-
--- ── Simple types ───────────────────────────────────────────────────────
-
-/-- A type is *simple* if it is built from `bool`, `int`, `arrow`, and `ftvar`. -/
-inductive SimpleType : LMonoTy → Prop where
-  | bool  : SimpleType .bool
-  | int   : SimpleType .int
-  | arrow : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.arrow τ₁ τ₂)
-  | ftvar : SimpleType (.ftvar name)
-
-/-- Depth of a simple type. -/
-def monoTyDepth : LMonoTy → Nat
-  | .arrow τ₁ τ₂ => max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1
-  | _             => 0
-
--- ── Well-typing relation ───────────────────────────────────────────────
-
-/-- We use Strata's `LExpr.HasTypeA` directly as our typing judgement.
-    `HasTypeA Δ e τ` means expression `e` has type `τ` under bound-variable
-    context `Δ` (a `List LMonoTy` indexed by de Bruijn level). -/
-abbrev HasTypeA' := LExpr.HasTypeA (T := LExprParams')
-
--- ── Bound-variable helpers ─────────────────────────────────────────────
-
-/-- All de Bruijn indices in `bctx` whose type equals `τ`. -/
-def bvarsOfType (bctx : BVarCtx) (τ : LMonoTy) : List Nat :=
-  go bctx 0
-where
-  go : List LMonoTy → Nat → List Nat
-    | [],         _  => []
-    | τ' :: rest, i  => if τ' == τ then i :: go rest (i + 1) else go rest (i + 1)
-
-/-- Pick a random `bvar` of type `τ` from `bctx`, given at least one exists. -/
-def pickBVar [Gen G] (bctx : BVarCtx) (τ : LMonoTy)
-    (_h : (bvarsOfType bctx τ).length > 0) : G LExpr' := do
-  let indices := bvarsOfType bctx τ
-  let idx ← choose 0 (indices.length - 1) (by omega)
-  pure (.bvar () (indices.getD idx.down 0))
-
--- ── Free-variable helpers ──────────────────────────────────────────────
-
-/-- All variable names in `fctx` whose type equals `τ`. -/
-def fvarsOfType (fctx : FVarCtx) (τ : LMonoTy) : List String :=
-  fctx.filterMap (fun (x, ty) => if ty == τ then some x else none)
-
-/-- Pick a random `fvar` of type `τ` from `fctx`, given at least one exists with that type. -/
-def pickFVar [Gen G] (fctx : FVarCtx) (τ : LMonoTy)
-    (_h : (fvarsOfType fctx τ).length > 0) : G LExpr' := do
-  let names := fvarsOfType fctx τ
-  let idx ← choose 0 (names.length - 1) (by omega)
-  pure (.fvar () ⟨names.getD idx.down "", ()⟩ (some τ))
-
--- ── Operator helpers ───────────────────────────────────────────────────
-
-/-- All operator names in `octx` whose type equals `τ`. -/
-def opsOfType (octx : OpCtx) (τ : LMonoTy) : List String :=
-  octx.filterMap (fun (x, ty) => if ty == τ then some x else none)
-
-/-- Pick a random `op` of type `τ` from `octx`, given at least one exists with that type. -/
-def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
-    (_h : (opsOfType octx τ).length > 0) : G LExpr' := do
-  let names := opsOfType octx τ
-  let idx ← choose 0 (names.length - 1) (by omega)
-  pure (.op () ⟨names.getD idx.down "", ()⟩ (some τ))
-
--- ── Type generator ─────────────────────────────────────────────────────
-
-/-- Pick a random type variable name from `tvars`. -/
-def pickTyVar [Gen G] (tvars : List TyIdentifier)
-    (_h : tvars.length > 0) : G LMonoTy := do
-  let idx ← choose 0 (tvars.length - 1) (by omega)
-  pure (.ftvar (tvars.getD idx.down ""))
-
-/-- Generate a simple type of depth ≤ `n`. The `tvars` list controls which
-    free type variable names may appear; when empty, only `bool`/`int`/`arrow`
-    are generated. -/
-def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
-  | 0 =>
-    if h : tvars.length > 0 then
-      pick (fun () => pure .bool)
-           (fun () => pick (fun () => pure .int)
-                           (fun () => pickTyVar tvars h))
-    else
-      pick (fun () => pure .bool)
-           (fun () => pure .int)
-  | n + 1 =>
-    if h : tvars.length > 0 then
-      pick
-        (fun () => pure .bool)
-        (fun () =>
-          pick
-            (fun () => pure .int)
-            (fun () =>
-              pick
-                (fun () => do
-                  let τ₁ ← genLMonoTy tvars n
-                  let τ₂ ← genLMonoTy tvars n
-                  pure (.arrow τ₁ τ₂))
-                (fun () => pickTyVar tvars h)))
-    else
-      pick
-        (fun () => pure .bool)
-        (fun () =>
-          pick
-            (fun () => pure .int)
-            (fun () => do
-              let τ₁ ← genLMonoTy tvars n
-              let τ₂ ← genLMonoTy tvars n
-              pure (.arrow τ₁ τ₂)))
-
--- ── Expression generator ───────────────────────────────────────────────
-
-/-- Generate a well-typed `LExpr` of type `τ` with term depth bounded by the
-    `depth` parameter, under bound-variable context `bctx`, free-variable
-    context `fctx`, and operator context `octx`. The `tvars` list gives the
-    type variable names that `genLMonoTy` may produce as intermediate types.
-
-    At depth 0, only leaf expressions (bvar, fvar, op, constants) are produced.
-    At depth `n+1`, compound expressions (abs, app, ite, eq, quant) may be
-    produced with sub-expressions generated at depth `n`.
-
-    Note: all generated `LExpr`s are closed (i.e. there are no free variables).
-    Names are always `""`. -/
-def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
-  -- ── Arrow type ────────────────────────────────────────────────────
-  -- At depth 0, only leaf expressions (bvar/fvar/op) are allowed.
-  -- Returning `default` (empty set / failure) when none exist ensures that
-  -- `termDepth e ≤ 0` holds for all generated `e`. (Option C from the
-  -- size-alignment analysis: no lambda construction at depth 0.)
-  | 0, .arrow τ₁ τ₂ =>
-    let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
-    pick
-      (fun () =>
-        if hv : bvars.length > 0 then pickBVar bctx _ hv
-        else default)
-      (fun () =>
-        pick
-          (fun () =>
-            if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
-            then pickFVar fctx _ hf
-            else default)
-          (fun () =>
-            if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
-            then pickOp octx _ ho
-            else default))
-  | n + 1, .arrow τ₁ τ₂ =>
-    let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
-    pick
-      (fun () => do
-        let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
-        pure (.abs () "" (some τ₁) body))
-      (fun () =>
-        pick
-          (fun () => do
-            let τ' ← genLMonoTy tvars n
-            let arg ← genLExpr fctx octx tvars bctx n τ'
-            let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂))
-            pure (.app () fn arg))
-          (fun () =>
-            pick
-              (fun () => do
-                let c ← genLExpr fctx octx tvars bctx n .bool
-                let t ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)
-                let e ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)
-                pure (.ite () c t e))
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else do
-                      let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
-                      pure (.abs () "" (some τ₁) body))
-                  (fun () =>
-                    pick
-                      (fun () =>
-                        if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
-                        then pickFVar fctx _ hf
-                        else do
-                          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
-                          pure (.abs () "" (some τ₁) body))
-                      (fun () =>
-                        if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
-                        then pickOp octx _ ho
-                        else do
-                          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
-                          pure (.abs () "" (some τ₁) body))))))
-  -- ── Bool type ─────────────────────────────────────────────────────
-  | 0, .bool =>
-    let bvars := bvarsOfType bctx .bool
-    pick
-      (fun () =>
-        pick (fun () => pure (.boolConst () true))
-             (fun () => pure (.boolConst () false)))
-      (fun () =>
-        pick
-          (fun () =>
-            if hv : bvars.length > 0 then pickBVar bctx .bool hv
-            else pick (fun () => pure (.boolConst () true))
-                      (fun () => pure (.boolConst () false)))
-          (fun () =>
-            pick
-              (fun () =>
-                if hf : (fvarsOfType fctx .bool).length > 0
-                then pickFVar fctx .bool hf
-                else pick (fun () => pure (.boolConst () true))
-                          (fun () => pure (.boolConst () false)))
-              (fun () =>
-                if ho : (opsOfType octx .bool).length > 0
-                then pickOp octx .bool ho
-                else pick (fun () => pure (.boolConst () true))
-                          (fun () => pure (.boolConst () false)))))
-  | n + 1, .bool =>
-    let bvars := bvarsOfType bctx .bool
-    pick
-      (fun () =>
-        pick (fun () => pure (.boolConst () true))
-             (fun () => pure (.boolConst () false)))
-      (fun () =>
-        pick
-          (fun () => do
-            let c ← genLExpr fctx octx tvars bctx n .bool
-            let t ← genLExpr fctx octx tvars bctx n .bool
-            let e ← genLExpr fctx octx tvars bctx n .bool
-            pure (.ite () c t e))
-          (fun () =>
-            pick
-              (fun () => do
-                let τ' ← genLMonoTy tvars n
-                let e₁ ← genLExpr fctx octx tvars bctx n τ'
-                let e₂ ← genLExpr fctx octx tvars bctx n τ'
-                pure (.eq () e₁ e₂))
-              (fun () =>
-                pick
-                  (fun () => do
-                    let τ' ← genLMonoTy tvars n
-                    let arg ← genLExpr fctx octx tvars bctx n τ'
-                    let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' .bool)
-                    pure (.app () fn arg))
-                  (fun () =>
-                    pick
-                      (fun () => do
-                        let τ' ← genLMonoTy tvars n
-                        let τ_tr ← genLMonoTy tvars n
-                        let tr ← genLExpr fctx octx tvars (τ' :: bctx) n τ_tr
-                        let body ← genLExpr fctx octx tvars (τ' :: bctx) n .bool
-                        pure (.quant () .all "" (some τ') tr body))
-                      (fun () =>
-                        pick
-                          (fun () => do
-                            let τ' ← genLMonoTy tvars n
-                            let τ_tr ← genLMonoTy tvars n
-                            let tr ← genLExpr fctx octx tvars (τ' :: bctx) n τ_tr
-                            let body ← genLExpr fctx octx tvars (τ' :: bctx) n .bool
-                            pure (.quant () .exist "" (some τ') tr body))
-                          (fun () =>
-                            pick
-                              (fun () =>
-                                if hv : bvars.length > 0 then pickBVar bctx .bool hv
-                                else pick (fun () => pure (.boolConst () true))
-                                          (fun () => pure (.boolConst () false)))
-                              (fun () =>
-                                pick
-                                  (fun () =>
-                                    if hf : (fvarsOfType fctx .bool).length > 0
-                                    then pickFVar fctx .bool hf
-                                    else pick (fun () => pure (.boolConst () true))
-                                              (fun () => pure (.boolConst () false)))
-                                  (fun () =>
-                                    if ho : (opsOfType octx .bool).length > 0
-                                    then pickOp octx .bool ho
-                                    else pick (fun () => pure (.boolConst () true))
-                                              (fun () => pure (.boolConst () false))))))))))
-  -- ── Int type ──────────────────────────────────────────────────────
-  | 0, .int =>
-    let bvars := bvarsOfType bctx .int
-    pick
-      (fun () =>
-        pick
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
-      (fun () =>
-        pick
-          (fun () =>
-            if hv : bvars.length > 0 then pickBVar bctx .int hv
-            else pick
-              (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-              (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
-          (fun () =>
-            pick
-              (fun () =>
-                if hf : (fvarsOfType fctx .int).length > 0
-                then pickFVar fctx .int hf
-                else pick
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
-              (fun () =>
-                if ho : (opsOfType octx .int).length > 0
-                then pickOp octx .int ho
-                else pick
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))))
-  | n + 1, .int =>
-    let bvars := bvarsOfType bctx .int
-    pick
-      (fun () =>
-        pick
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
-      (fun () =>
-        pick
-          (fun () => do
-            let τ' ← genLMonoTy tvars n
-            let arg ← genLExpr fctx octx tvars bctx n τ'
-            let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' .int)
-            pure (.app () fn arg))
-          (fun () =>
-            pick
-              (fun () => do
-                let c ← genLExpr fctx octx tvars bctx n .bool
-                let t ← genLExpr fctx octx tvars bctx n .int
-                let e ← genLExpr fctx octx tvars bctx n .int
-                pure (.ite () c t e))
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else pick
-                      (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                      (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
-                  (fun () =>
-                    pick
-                      (fun () =>
-                        if hf : (fvarsOfType fctx .int).length > 0
-                        then pickFVar fctx .int hf
-                        else pick
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
-                      (fun () =>
-                        if ho : (opsOfType octx .int).length > 0
-                        then pickOp octx .int ho
-                        else pick
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))))))
-  -- ── FtVar type (rigid type variable) ────────────────────────────────
-  | 0, .ftvar name =>
-    let bvars := bvarsOfType bctx (.ftvar name)
-    pick
-      (fun () =>
-        if hv : bvars.length > 0 then pickBVar bctx _ hv
-        else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-        then pickFVar fctx _ hf
-        else if ho : (opsOfType octx (.ftvar name)).length > 0
-        then pickOp octx _ ho
-        else default)
-      (fun () =>
-        pick
-          (fun () =>
-            if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-            then pickFVar fctx _ hf
-            else if hv : bvars.length > 0 then pickBVar bctx _ hv
-            else if ho : (opsOfType octx (.ftvar name)).length > 0
-            then pickOp octx _ ho
-            else default)
-          (fun () =>
-            if ho : (opsOfType octx (.ftvar name)).length > 0
-            then pickOp octx _ ho
-            else if hv : bvars.length > 0 then pickBVar bctx _ hv
-            else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-            then pickFVar fctx _ hf
-            else default))
-  | n + 1, .ftvar name =>
-    let bvars := bvarsOfType bctx (.ftvar name)
-    pick
-      (fun () => do
-        let τ' ← genLMonoTy tvars n
-        let arg ← genLExpr fctx octx tvars bctx n τ'
-        let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' (.ftvar name))
-        pure (.app () fn arg))
-      (fun () =>
-        pick
-          (fun () => do
-            let c ← genLExpr fctx octx tvars bctx n .bool
-            let t ← genLExpr fctx octx tvars bctx n (.ftvar name)
-            let e ← genLExpr fctx octx tvars bctx n (.ftvar name)
-            pure (.ite () c t e))
-          (fun () =>
-            pick
-              (fun () =>
-                if hv : bvars.length > 0 then pickBVar bctx _ hv
-                else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-                then pickFVar fctx _ hf
-                else if ho : (opsOfType octx (.ftvar name)).length > 0
-                then pickOp octx _ ho
-                else default)
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-                    then pickFVar fctx _ hf
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default)
-                  (fun () =>
-                    if ho : (opsOfType octx (.ftvar name)).length > 0
-                    then pickOp octx _ ho
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default))))
-  -- ── Fallback (bitvec, etc. — not generated) ────────────────────────
-  | _, _ => pure (.boolConst () false)
-
-/-- Generate a well-typed closed expression with bounded depth. -/
-def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat) : G LExpr' := do
-  let τ ← genLMonoTy tvars depth
-  genLExpr [] [] tvars [] depth τ
 
 -- ── bvarsOfType spec ──────────────────────────────────────────────────
 
@@ -1078,33 +636,17 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     rcases he with ⟨body, hbody, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)))
-    · show termDepth bctx (.abs () "" (some τ₁) body) ≤ n + 1
-      unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody
-      omega
-    · show termDepth bctx (.app () fn arg) ≤ n + 1
-      unfold termDepth
-      have hfn' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn
-      have harg' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
-      omega
-    · show termDepth bctx (.ite () c t e') ≤ n + 1
-      unfold termDepth
-      have hc' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have ht' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht
-      have he'' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he'
-      omega
-    all_goals (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (show termDepth bctx (.abs () "" (some τ₁) body) ≤ n + 1
-         unfold termDepth
-         have := genLExpr_termDepth_bound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody
-         omega))
+    · exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
+    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
+                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
+                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
+    all_goals first
+      | exact pickBVar_sound bctx _ _ _ h
+      | exact pickFVar_sound fctx _ _ _ h
+      | exact pickOp_sound octx _ _ _ h
+      | exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
   | 0, _, SimpleType.ftvar =>
     rename_i name
     simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
@@ -1112,15 +654,11 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
-    all_goals (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | exact absurd h (by simp))
+    all_goals first
+      | exact pickBVar_sound bctx _ _ _ h
+      | exact pickFVar_sound fctx _ _ _ h
+      | exact pickOp_sound octx _ _ _ h
+      | exact absurd h (by simp)
   | n + 1, _, SimpleType.ftvar =>
     rename_i name
     simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
@@ -1130,26 +668,16 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩) |
         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩)))
-    · show termDepth bctx (.app () fn arg) ≤ n + 1
-      unfold termDepth
-      have hfn' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn
-      have harg' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
-      omega
-    · show termDepth bctx (.ite () c t e') ≤ n + 1
-      unfold termDepth
-      have hc' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have ht' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.ftvar _ ht
-      have he'' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.ftvar _ he'
-      omega
-    all_goals (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | exact absurd h (by simp))
+    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn)
+                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ ht)
+                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ he')
+    all_goals first
+      | exact pickBVar_sound bctx _ _ _ h
+      | exact pickFVar_sound fctx _ _ _ h
+      | exact pickOp_sound octx _ _ _ h
+      | exact absurd h (by simp)
   termination_by (depth, sizeOf τ)
   decreasing_by all_goals simp_wf; omega
 -/
@@ -1460,7 +988,7 @@ private theorem quant_hasType_bool {bctx : BVarCtx} {τ : LMonoTy} {k name qty t
   cases h with | quant _ _ => rfl
 
 /-- Predicate asserting that all fvar names in the expression are in `fctx`
-    (with the correct type) and all op names are in `octx`. -/
+    (with the correct type) and all op names are in the factory `F`. -/
 def allVarsInCtx (fctx : FVarCtx) (octx : OpCtx) : LExpr' → Prop
   | .boolConst () _              => True
   | .intConst () _               => True

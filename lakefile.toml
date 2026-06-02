@@ -12,6 +12,11 @@ name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "main"
 
+# Core generator definitions (no Factory, no Mathlib — shared by Defs and HasTypeAGen)
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGen.Core"
+roots = ["StrataGenerators.HasTypeAGen.Core"]
+
 # Generator definitions only (no Mathlib, compatible with LExprEval)
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGen.Defs"
