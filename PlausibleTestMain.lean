@@ -41,11 +41,14 @@ structure TypedExpr where
 instance : Shrinkable TypedExpr where
   shrink _ := []
 
+private def defaultFCtx : FVarCtx :=
+  [("x", .bool), ("f", .arrow .int .bool), ("n", .int)]
+
 private def genTypedExpr : Gen TypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExpr (G := Plausible.Gen) [] [] tvars [] depth ty
+  let expr ← genLExpr (G := Plausible.Gen) defaultFCtx [] tvars [] depth ty
   pure ⟨expr, ty⟩
 
 -- `genLExpr` can fail (via `default`) when a depth-0 arrow case has no
@@ -137,14 +140,14 @@ def prop_eval_monotone (te : TypedExpr) : Bool :=
   let evaled100_from50 := eval 50 evaled50
   evaled100 == evaled100_from50
 
--- Closedness preservation: evaluation preserves the absence of free
--- variables. Our generator produces closed terms (empty fctx), and
--- beta-reduction substitutes closed values, so no free vars should appear.
--- Inspired by `LExprWFTests.lean:29-65` (bound variable lifting tests) and
--- the scoping invariants of locally-nameless representation.
+-- Fvar preservation: evaluation does not introduce *new* free variables.
+-- Free variables from the context (x, f, n) may appear in both the input
+-- and output, but eval should not create fvars that weren't already present.
 def prop_closedness_preservation (te : TypedExpr) : Bool :=
   let evaled := eval 100 te.expr
-  LExpr.closed evaled
+  let inputFvars := LExpr.collectFvarNames te.expr
+  let outputFvars := LExpr.collectFvarNames evaled
+  outputFvars.all (· ∈ inputFvars)
 
 -- Size non-increase: evaluation should never grow the term. With an empty
 -- factory (no function inlining), every reduction step either eliminates

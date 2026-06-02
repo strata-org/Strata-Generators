@@ -167,7 +167,8 @@ instance : Tyche.TycheSample TypeCheckResult where
       ] }
 
 -- ── Evaluator ─────────────────────────────────────────────────────────
--- Uses Strata's `LExpr.eval` with an empty state (closed terms, no operators).
+-- Uses Strata's `LExpr.eval` with an empty state. Free variables are treated
+-- as irreducible values by the evaluator.
 
 def emptyState : LState LExprParams' := LState.init
 
@@ -214,11 +215,16 @@ def randomDepth (maxDepth : Nat := 5) : IO Nat := do
   let r ← IO.rand 1 maxDepth
   return r
 
-/-- Generate a typed expression using `genClosedLExpr` from HasTypeAGen. -/
+/-- A fixed free-variable context providing variables of common types.
+    This ensures generated terms exercise the `fvar` path. -/
+def defaultFCtx : FVarCtx :=
+  [("x", .bool), ("f", .arrow .int .bool), ("n", .int)]
+
+/-- Generate a typed expression with free variables from `defaultFCtx`. -/
 def genTypedExpr (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypedExpr := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   return ⟨expr, ty, d⟩
 
 /-- Generate just a monotype. -/
@@ -230,7 +236,7 @@ def genType (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO 
 def genAndTypeCheck (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypeCheckResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let actualTy := LExpr.typeCheck (T := LExprParams') [] expr
   return ⟨expr, ty, actualTy, d⟩
 
@@ -238,7 +244,7 @@ def genAndTypeCheck (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"
 def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let evaled := eval 100 expr
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
   return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled), d⟩
@@ -271,7 +277,7 @@ instance : Tyche.TycheSample EvalToValueResult where
 def genAndCheckValue (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalToValueResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, isValue evaled, d⟩
 
@@ -307,7 +313,7 @@ instance : Tyche.TycheSample EvalProgressResult where
 def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, !(expr == evaled), isValue expr, d⟩
 
@@ -340,7 +346,7 @@ instance : Tyche.TycheSample EvalIdempotentResult where
 def genAndCheckIdempotent (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalIdempotentResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let evaled := eval 100 expr
   let evaledAgain := eval 100 evaled
   return ⟨expr, ty, evaled, evaledAgain, evaled == evaledAgain, d⟩
@@ -372,40 +378,43 @@ instance : Tyche.TycheSample EvalMonotoneResult where
 def genAndCheckMonotone (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalMonotoneResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let evaled50 := eval 50 expr
   let evaled100 := eval 100 expr
   let evaled100From50 := eval 50 evaled50
   return ⟨expr, ty, evaled50, evaled100, evaled100From50, evaled100 == evaled100From50, d⟩
 
--- ── Closedness preservation property ─────────────────────────────────
+-- ── Fvar preservation property ───────────────────────────────────────
 
-structure ClosednessResult where
+structure FvarPreservationResult where
   expr : LExpr'
   expectedTy : LMonoTy
   evaled : LExpr'
-  evaledIsClosed : Bool
-  generatorSize : Nat
+  fvarsPreserved : Bool
+  genDepth : Nat
 
-instance : Tyche.TycheSample ClosednessResult where
+instance : Tyche.TycheSample FvarPreservationResult where
   toSample r :=
     { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
-      status := if r.evaledIsClosed then .passed else .failed
+      status := if r.fvarsPreserved then .passed else .failed
       features := [
-        ("closed", .nominal (if r.evaledIsClosed then "yes" else "no")),
+        ("fvars_preserved", .nominal (if r.fvarsPreserved then "yes" else "no")),
         ("type_kind", .nominal (typeKind r.expectedTy)),
         ("input_size", .ordinal (exprSize r.expr)),
         ("output_size", .ordinal (exprSize r.evaled)),
         ("expr_kind", .nominal (exprKind r.expr)),
-        ("generator_size", .ordinal r.generatorSize)
+        ("gen_depth", .ordinal r.genDepth)
       ] }
 
-def genAndCheckClosed (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO ClosednessResult := do
+def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO FvarPreservationResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let evaled := eval 100 expr
-  return ⟨expr, ty, evaled, LExpr.closed evaled, d⟩
+  let inputFvars := LExpr.collectFvarNames expr
+  let outputFvars := LExpr.collectFvarNames evaled
+  let preserved := outputFvars.all (· ∈ inputFvars)
+  return ⟨expr, ty, evaled, preserved, d⟩
 
 -- ── Size non-increase property ───────────────────────────────────────
 
@@ -435,7 +444,7 @@ instance : Tyche.TycheSample SizeResult where
 def genAndCheckSize (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO SizeResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExpr (G := IO) [] [] tvars [] d ty
+  let expr ← genLExpr (G := IO) defaultFCtx [] tvars [] d ty
   let evaled := eval 100 expr
   let inputSize := exprSize expr
   let outputSize := exprSize evaled
@@ -496,9 +505,9 @@ def main (args : List String) : IO Unit := do
   handle.putStr monoContent
   IO.FS.removeFile (outputPath ++ ".mono")
 
-  -- Run the closedness preservation property
-  Tyche.run (genAndCheckClosed)
-    { numSamples, propertyName := "LExpr.eval preserves closedness", outputPath := outputPath ++ ".cls" }
+  -- Run the fvar preservation property
+  Tyche.run (genAndCheckFvarPreservation)
+    { numSamples, propertyName := "LExpr.eval preserves fvars", outputPath := outputPath ++ ".cls" }
   let clsContent ← IO.FS.readFile (outputPath ++ ".cls")
   handle.putStr clsContent
   IO.FS.removeFile (outputPath ++ ".cls")
