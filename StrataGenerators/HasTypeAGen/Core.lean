@@ -484,7 +484,7 @@ def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
   args.foldl (fun acc arg => .app () acc arg) base
 
 /-- Generate all arguments for an Indir application, returning a list of expressions.
-    Each argument is generated at the given depth with the corresponding type from `argTys`. -/
+    Each argument is generated at the given depth with the corresponding type. -/
 def genIndirArgs [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) : List LMonoTy → G (List LExpr')
   | [] => pure []
@@ -513,8 +513,10 @@ def genIndir [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
 
     When operators exist whose result type matches `τ`, the generator
     non-deterministically picks between the standard generation (via `genLExpr`)
-    and the Indir rule (via `genIndir`). This produces many more function
-    applications that use operators from the factory. -/
+    and the Indir rule (via `genIndir`). Since `genLExpr` generates sub-expressions
+    recursively (including further `App` nodes), and the test harnesses invoke
+    `genLExprIndir` at the top level, operator applications arise frequently
+    throughout the generated term. -/
 def genLExprIndir [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
   if h : (opsReturning octx τ).length > 0 then
