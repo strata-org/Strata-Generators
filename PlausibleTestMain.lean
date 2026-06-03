@@ -134,6 +134,8 @@ def prop_normalization (te : ClosedTypedExpr) : Bool :=
 -- true, and stuck terms have no applicable reduction rules.
 -- Inspired by `LExprEvalTests.lean:78` (`check`) which verifies eval reaches
 -- a fixpoint.
+
+-- Note: this doesn't hold because it is fuel-based
 def prop_eval_idempotent (te : TypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   let evaled2 := eval 100 evaled
@@ -144,6 +146,8 @@ def prop_eval_idempotent (te : TypedExpr) : Bool :=
 -- calls should produce the same result as using it all at once.
 -- Inspired by `eval_StepStar` (Semantics.lean:2926) which proves eval traces
 -- a sequence of `Step`s — the same sequence regardless of how fuel is split.
+
+-- TODO: we need to make sure we have enough fuel
 def prop_eval_monotone (te : TypedExpr) : Bool :=
   let evaled50 := eval 50 te.expr
   let evaled100 := eval 100 te.expr
@@ -165,6 +169,9 @@ def prop_closedness_preservation (te : TypedExpr) : Bool :=
 -- discards a branch) or leaves size unchanged (stuck terms).
 -- Inspired by the termination arguments in `Semantics.lean` which rely on
 -- `sizeOf` decreasing through reduction steps.
+
+-- TODO: This won't hold since beta-reduction might
+-- TODO: maybe depth? (not size?)
 def prop_size_non_increase (te : TypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   LExpr.size LExprParamsT' evaled ≤ LExpr.size LExprParamsT' te.expr
