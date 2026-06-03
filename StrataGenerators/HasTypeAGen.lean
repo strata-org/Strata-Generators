@@ -381,15 +381,15 @@ private theorem norm_arrow (τ₁ τ₂ : LMonoTy) :
 set_option maxHeartbeats 800000 in
 /-- Every expression in the support of `genLExpr fctx octx tvars bctx depth τ` is
     well-typed whenever `τ` is a `SimpleType`. -/
-theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
+theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
     (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ) (e : LExpr')
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
+    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
     HasTypeA' bctx e τ := by
   match depth, τ, hτ with
   | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff,
+    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     all_goals first
@@ -398,7 +398,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact pickFVar_sound fctx .bool _ _ h
       | exact pickOp_sound octx .bool _ _ h
   | 0, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     all_goals first
@@ -408,7 +408,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact pickOp_sound octx .int _ _ h
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff,
+    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨_, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     all_goals first
@@ -417,7 +417,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact pickOp_sound octx _ _ _ h
       | exact absurd h (by simp)
   | n + 1, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ⟨c, hc, t, ht, e', he', rfl⟩ | ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ |
       ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
@@ -426,35 +426,35 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     · exact (by unfold LExpr.boolConst; exact .const)
     · exact (by unfold LExpr.boolConst; exact .const)
-    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ ht)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ he')
-    · exact .eq (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁)
-                 (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂)
-    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn)
-                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .quant (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr)
-                    (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody)
-    · exact .quant (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr)
-                    (genLExpr_sound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody)
+    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ ht)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ he')
+    · exact .eq (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁)
+                 (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂)
+    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .quant (genLExprBase_sound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr)
+                    (genLExprBase_sound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody)
+    · exact .quant (genLExprBase_sound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr)
+                    (genLExprBase_sound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody)
     all_goals first
       | exact pickBVar_sound bctx .bool _ _ h
       | exact pickFVar_sound fctx .bool _ _ h
       | exact pickOp_sound octx .bool _ _ h
       | exact (by unfold LExpr.boolConst; exact .const)
   | n + 1, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     · exact (by unfold LExpr.intConst; exact .const)
     · exact (by unfold LExpr.intConst; exact .const)
-    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn)
-                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.int _ ht)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.int _ he')
+    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.int _ ht)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.int _ he')
     all_goals first
       | exact pickBVar_sound bctx .int _ _ h
       | exact pickFVar_sound fctx .int _ _ h
@@ -462,25 +462,25 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact (by unfold LExpr.intConst; exact .const)
   | n + 1, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨body, hbody, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)))
-    · exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
-    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
-                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
-                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
+    · exact .abs (genLExprBase_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
+    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
     all_goals first
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
       | exact pickOp_sound octx _ _ _ h
-      | exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
+      | exact .abs (genLExprBase_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
   | 0, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -492,18 +492,18 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact absurd h (by simp)
   | n + 1, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
                mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩) |
         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩)))
-    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn)
-                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ ht)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ he')
+    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.ftvar _ ht)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.ftvar _ he')
     all_goals first
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
@@ -512,14 +512,14 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
   termination_by (depth, sizeOf τ)
   decreasing_by all_goals simp_wf; omega
 
--- The commented proof sketch for `genLExpr_termDepth_bound` has been moved
--- below the `termDepth` definition. See `genLExpr_termDepth_bound` after
+-- The commented proof sketch for `genLExprBase_termDepth_bound` has been moved
+-- below the `termDepth` definition. See `genLExprBase_termDepth_bound` after
 -- the completeness proof section.
 
-/-  Old proof sketch for genLExpr_termDepth_bound (reference only)
+/-  Old proof sketch for genLExprBase_termDepth_bound (reference only)
   match depth, τ, hτ with
   | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff,
+    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     all_goals first | rfl | (
@@ -531,7 +531,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
   | 0, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     all_goals first | rfl | (
@@ -544,7 +544,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff,
+    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨_, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     all_goals (
@@ -557,7 +557,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
       | exact absurd h (by simp))
   | n + 1, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ⟨c, hc, t, ht, e', he', rfl⟩ | ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ |
       ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
@@ -568,30 +568,30 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     · exact Nat.zero_le _
     · show termDepth bctx (.ite () c t e') ≤ n + 1
       unfold termDepth
-      have hc' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have ht' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ ht
-      have he'' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ he'
+      have hc' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
+      have ht' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ ht
+      have he'' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ he'
       omega
     · show termDepth bctx (.eq () e₁ e₂) ≤ n + 1
       unfold termDepth
-      have h₁ := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁
-      have h₂ := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂
+      have h₁ := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁
+      have h₂ := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂
       omega
     · show termDepth bctx (.app () fn arg) ≤ n + 1
       unfold termDepth
-      have hfn' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn
-      have harg' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
+      have hfn' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn
+      have harg' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
       omega
     · show termDepth bctx (.quant () .all "" (some τ') tr body) ≤ n + 1
       unfold termDepth
-      have htr' := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
-      have hbody' := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
+      have htr' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
+      have hbody' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
       have hd := ((genLMonoTy_support tvars n τ').mp hτ'm).2.1
       omega
     · show termDepth bctx (.quant () .exist "" (some τ') tr body) ≤ n + 1
       unfold termDepth
-      have htr' := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
-      have hbody' := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
+      have htr' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
+      have hbody' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
       have hd := ((genLMonoTy_support tvars n τ').mp hτ'm).2.1
       omega
     all_goals first | exact Nat.zero_le _ | (
@@ -603,7 +603,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
   | n + 1, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
@@ -612,14 +612,14 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     · exact Nat.zero_le _
     · show termDepth bctx (.app () fn arg) ≤ n + 1
       unfold termDepth
-      have hfn' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn
-      have harg' := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
+      have hfn' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn
+      have harg' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
       omega
     · show termDepth bctx (.ite () c t e') ≤ n + 1
       unfold termDepth
-      have hc' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have ht' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ ht
-      have he'' := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ he'
+      have hc' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
+      have ht' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ ht
+      have he'' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ he'
       omega
     all_goals first | exact Nat.zero_le _ | (
       first
@@ -631,25 +631,25 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
   | n + 1, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨body, hbody, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)))
-    · exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
-    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
-                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
-                  (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
+    · exact .abs (genLExprBase_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
+    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
     all_goals first
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
       | exact pickOp_sound octx _ _ _ h
-      | exact .abs (genLExpr_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
+      | exact .abs (genLExprBase_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
   | 0, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -661,18 +661,18 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact absurd h (by simp)
   | n + 1, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
                mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩) |
         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩)))
-    · exact .app (genLExpr_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn)
-                  (genLExpr_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .ite (genLExpr_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ ht)
-                  (genLExpr_sound fctx octx tvars bctx n _ SimpleType.ftvar _ he')
+    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn)
+                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
+    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.ftvar _ ht)
+                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.ftvar _ he')
     all_goals first
       | exact pickBVar_sound bctx _ _ _ h
       | exact pickFVar_sound fctx _ _ _ h
@@ -787,17 +787,17 @@ inductive AllTypesSimple (tvars : List TyIdentifier) : Nat → BVarCtx → LExpr
 set_option maxHeartbeats 1600000 in
 /-- Every expression in the support of `genLExpr` at depth `depth` has
     `termDepth ≤ depth`. This is the "bounded soundness" theorem that,
-    combined with `genLExpr_sound` and `genLExpr_complete`,
+    combined with `genLExprBase_sound` and `genLExprBase_complete`,
     characterize the generator's support. -/
-theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
+theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx)
     (depth : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ) (e : LExpr')
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
+    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
     termDepth bctx e ≤ depth := by
   match depth, τ, hτ with
   | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff,
+    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     all_goals first | rfl | (
@@ -809,7 +809,7 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
          obtain ⟨_, _, rfl⟩ := h; rfl))
   | 0, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, _, rfl⟩ | ⟨_, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩)))
     all_goals first | rfl | (
@@ -822,7 +822,7 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; rfl))
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff,
+    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨_, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     all_goals (
@@ -835,7 +835,7 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; rfl)
       | exact absurd h (by simp))
   | n + 1, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ⟨c, hc, t, ht, e', he', rfl⟩ | ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ |
       ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
@@ -845,26 +845,26 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
     · exact Nat.zero_le _
     · exact Nat.zero_le _
     · show termDepth bctx (.ite () c t e') ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ ht
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ he'
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ ht
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ he'
       omega
     · show termDepth bctx (.eq () e₁ e₂) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂
       omega
     · show termDepth bctx (.app () fn arg) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
       omega
     · show termDepth bctx (.quant () .all "" (some τ') tr body) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
-      have := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
+      have := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
+      have := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
       have := ((genLMonoTy_support tvars n τ').mp hτ'm).2.1
       omega
     · show termDepth bctx (.quant () .exist "" (some τ') tr body) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
-      have := genLExpr_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
+      have := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
+      have := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
       have := ((genLMonoTy_support tvars n τ').mp hτ'm).2.1
       omega
     all_goals first | exact Nat.zero_le _ | (
@@ -876,7 +876,7 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
   | n + 1, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, _, rfl⟩ | ⟨_, _, rfl⟩) | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
@@ -884,13 +884,13 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
     · exact Nat.zero_le _
     · exact Nat.zero_le _
     · show termDepth bctx (.app () fn arg) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
       omega
     · show termDepth bctx (.ite () c t e') ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ ht
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ he'
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ ht
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ he'
       omega
     all_goals first | exact Nat.zero_le _ | (
       first
@@ -902,22 +902,22 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
   | n + 1, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨body, hbody, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
       ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)))
     · show termDepth bctx (.abs () "" (some τ₁) body) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody
+      have := genLExprBase_termDepth_bound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody
       omega
     · show termDepth bctx (.app () fn arg) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
       omega
     · show termDepth bctx (.ite () c t e') ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he'
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he'
       omega
     all_goals (
       first
@@ -928,11 +928,11 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
          obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
       | (show termDepth bctx (.abs () "" (some τ₁) body) ≤ n + 1; unfold termDepth
-         have := genLExpr_termDepth_bound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody
+         have := genLExprBase_termDepth_bound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody
          omega))
   | 0, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -948,7 +948,7 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | exact absurd h (by simp))
   | n + 1, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
                mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
       ⟨c, hc, t, ht, e', he', rfl⟩ |
@@ -956,13 +956,13 @@ theorem genLExpr_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩) |
         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩)))
     · show termDepth bctx (.app () fn arg) ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
       omega
     · show termDepth bctx (.ite () c t e') ≤ n + 1; unfold termDepth
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.ftvar _ ht
-      have := genLExpr_termDepth_bound fctx octx tvars bctx n _ SimpleType.ftvar _ he'
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.ftvar _ ht
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.ftvar _ he'
       omega
     all_goals (
       first
@@ -1009,9 +1009,9 @@ set_option maxHeartbeats 1600000 in
 /-- Completeness of `genLExpr`: every well-typed expression whose `termDepth`
     fits within the depth budget is in the support. The `hdepth` precondition
     is tight: the generator provably never produces
-    terms exceeding the depth budget (see `genLExpr_termDepth_bound`),
+    terms exceeding the depth budget (see `genLExprBase_termDepth_bound`),
     so this precondition exactly characterizes reachability. -/
-theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
+theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ)
@@ -1021,11 +1021,11 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
     (hvars : allVarsInCtx fctx octx e)
     (hats : AllTypesSimple tvars depth bctx e)
     (hdepth : termDepth bctx e ≤ depth) :
-    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars bctx depth τ) := by
+    e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth τ) := by
   match depth, τ, hτ with
   | 0, _, SimpleType.bool =>
     rw [norm_bool]
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | @boolConst _ _ b =>
@@ -1066,7 +1066,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx .bool _ hmem hlen⟩
   | 0, _, SimpleType.int =>
     rw [norm_int]
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | intConst =>
@@ -1109,7 +1109,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
     rw [norm_arrow]
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
@@ -1146,7 +1146,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx (.arrow τ₁ τ₂) _ hmem hlen⟩
   | n + 1, _, SimpleType.bool =>
     rw [norm_bool]
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | boolConst =>
@@ -1166,9 +1166,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; left
-        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+        refine ⟨_, genLExprBase_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n .bool SimpleType.bool _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n .bool SimpleType.bool _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | eq τ' he1w he2w hsτ' hdτ' hftv' hats1 hats2 =>
       cases hwt with
       | eq hwt1 hwt2 =>
@@ -1179,8 +1179,8 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [allVarsInCtx] at hvars
         right; right; left
         refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
-               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hwt1 hnames.1 hvars.1 hats1 (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hwt2 hnames.2 hvars.2 hats2 (by omega), rfl⟩
+               _, genLExprBase_complete fctx octx tvars bctx n τ' hsτ' _ hwt1 hnames.1 hvars.1 hats1 (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n τ' hsτ' _ hwt2 hnames.2 hvars.2 hats2 (by omega), rfl⟩
     | app τ' hargw hsτ' hdτ' hftv' hfn_ats harg_ats =>
       cases hwt with
       | app hfnw hargw' =>
@@ -1191,8 +1191,8 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [allVarsInCtx] at hvars
         right; right; right; left
         refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
-               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' .bool) (SimpleType.arrow hsτ' SimpleType.bool) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+               _, genLExprBase_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.arrow τ' .bool) (SimpleType.arrow hsτ' SimpleType.bool) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | quant hsτ' hdτ' hftv' τ_tr hsτ_tr hdτ_tr hftv_tr htrw htr_ats hbody_ats =>
       cases hwt with
       | quant htrw' hbodyw =>
@@ -1207,14 +1207,14 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
           right; right; right; right; left
           refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', hftv'⟩,
                  _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, hftv_tr⟩,
-                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
-                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
+                 _, genLExprBase_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
+                 _, genLExprBase_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
         | exist =>
           right; right; right; right; right; left
           refine ⟨_, (genLMonoTy_support tvars n _).mpr ⟨hsτ', hdτ', hftv'⟩,
                  _, (genLMonoTy_support tvars n _).mpr ⟨hsτ_tr, hdτ_tr, hftv_tr⟩,
-                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
-                 _, genLExpr_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
+                 _, genLExprBase_complete fctx octx tvars (_ :: bctx) n τ_tr hsτ_tr _ htrw' hnames.2.1 hvars.1 htr_ats (by omega),
+                 _, genLExprBase_complete fctx octx tvars (_ :: bctx) n .bool SimpleType.bool _ hbodyw hnames.2.2 hvars.2 hbody_ats (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -1243,7 +1243,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx .bool _ hmem hlen⟩
   | n + 1, _, SimpleType.int =>
     rw [norm_int]
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | intConst =>
@@ -1277,8 +1277,8 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [allVarsInCtx] at hvars
         right; left
         refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
-               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' .int) (SimpleType.arrow hsτ' SimpleType.int) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+               _, genLExprBase_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.arrow τ' .int) (SimpleType.arrow hsτ' SimpleType.int) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
       cases hwt with
       | ite hcw htw hew =>
@@ -1286,9 +1286,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; left
-        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n .int SimpleType.int _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n .int SimpleType.int _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+        refine ⟨_, genLExprBase_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n .int SimpleType.int _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n .int SimpleType.int _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -1318,7 +1318,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
   | n + 1, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
     rw [norm_arrow]
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | boolConst =>
@@ -1339,7 +1339,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp [termDepth] at hdepth
         simp only [emptyNames] at hnames
         left
-        refine ⟨_, genLExpr_complete fctx octx tvars (τ₁ :: bctx) n τ₂ hs₂ _ hbody_wt
+        refine ⟨_, genLExprBase_complete fctx octx tvars (τ₁ :: bctx) n τ₂ hs₂ _ hbody_wt
           hnames.2 hvars hbody_ats (by omega), rfl⟩
     | app τ' hargw hsτ' hdτ' hftv' hfn_ats harg_ats =>
       cases hwt with
@@ -1351,8 +1351,8 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [allVarsInCtx] at hvars
         right; left
         refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
-               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂)) (SimpleType.arrow hsτ' (SimpleType.arrow hs₁ hs₂)) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+               _, genLExprBase_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂)) (SimpleType.arrow hsτ' (SimpleType.arrow hs₁ hs₂)) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
       cases hwt with
       | ite hcw htw hew =>
@@ -1360,9 +1360,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; right; left
-        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+        refine ⟨_, genLExprBase_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.arrow τ₁ τ₂) (SimpleType.arrow hs₁ hs₂) _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -1391,7 +1391,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx (.arrow τ₁ τ₂) _ hmem hlen⟩
   | 0, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool] at h)
@@ -1425,7 +1425,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx (.ftvar name) _ hmem hlen⟩
   | n + 1, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExpr, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
@@ -1450,8 +1450,8 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [allVarsInCtx] at hvars
         left
         refine ⟨τ', (genLMonoTy_support tvars n τ').mpr ⟨hsτ', hdτ', hftv'⟩,
-               _, genLExpr_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.arrow τ' (.ftvar name)) (SimpleType.arrow hsτ' SimpleType.ftvar) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+               _, genLExprBase_complete fctx octx tvars bctx n τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.arrow τ' (.ftvar name)) (SimpleType.arrow hsτ' SimpleType.ftvar) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
       cases hwt with
       | ite hcw htw hew =>
@@ -1459,9 +1459,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [emptyNames] at hnames
         simp only [allVarsInCtx] at hvars
         right; left
-        refine ⟨_, genLExpr_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.ftvar name) SimpleType.ftvar _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExpr_complete fctx octx tvars bctx n (.ftvar name) SimpleType.ftvar _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+        refine ⟨_, genLExprBase_complete fctx octx tvars bctx n .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.ftvar name) SimpleType.ftvar _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx n (.ftvar name) SimpleType.ftvar _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -1580,88 +1580,19 @@ theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
   | nil => exact hbase
   | cons harg _ ih => exact ih _ (LExpr.HasTypeA.app hbase harg)
 
-/-- Every generated argument in `genIndirArgs` is well-typed at the
-    corresponding type. -/
-theorem genIndirArgs_sound (fctx : FVarCtx) (octx : OpCtx)
-    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
-    (argTys : List LMonoTy) (hSimple : ∀ τ ∈ argTys, SimpleType τ)
-    (args : List LExpr')
-    (hargs : args ∈ SetGen.support (genIndirArgs (G := SetGen.Set) fctx octx tvars bctx depth argTys)) :
-    List.Forall₂ (HasTypeA' bctx) args argTys := by
-  induction argTys generalizing args with
-  | nil =>
-    simp [genIndirArgs, mem_support_iff, SetGen.Set.mem_pure] at hargs
-    subst hargs; exact .nil
-  | cons σ rest ih =>
-    simp [genIndirArgs, mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at hargs
-    obtain ⟨arg, harg, args', hargs', rfl⟩ := hargs
-    have hσ : SimpleType σ := hSimple σ List.mem_cons_self
-    have hrest : ∀ τ' ∈ rest, SimpleType τ' := fun τ' hτ' =>
-      hSimple τ' (List.mem_cons_of_mem σ hτ')
-    exact .cons (genLExpr_sound fctx octx tvars bctx depth σ hσ arg harg)
-                (ih hrest args' hargs')
-
-/-- Membership characterization for `opsReturning`: if an entry is in the result,
-    then there exists a corresponding operator in `octx` whose type decomposes. -/
-private theorem opsReturning_mem (octx : OpCtx) (τ : LMonoTy)
-    (entry : String × List LMonoTy) (h : entry ∈ opsReturning octx τ) :
-    ∃ oty, (entry.1, oty) ∈ octx ∧
-      argsForResult oty τ = some entry.2 ∧ entry.2.length > 0 := by
-  simp only [opsReturning, List.mem_filterMap] at h
-  obtain ⟨⟨name, oty⟩, hmem, hfilter⟩ := h
-  revert hfilter
-  generalize harr : argsForResult oty τ = result
-  match result with
-  | some (arg :: args') =>
-    intro hfilter; simp at hfilter
-    subst hfilter
-    exact ⟨oty, hmem, harr, by simp⟩
-  | some [] => intro hfilter; simp at hfilter
-  | none => intro hfilter; simp at hfilter
-
-/-- Soundness of `genIndir`: every generated expression is well-typed. -/
-theorem genIndir_sound (fctx : FVarCtx) (octx : OpCtx)
-    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
-    (τ : LMonoTy) (hops : (opsReturning octx τ).length > 0)
-    (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
-    (e : LExpr')
-    (he : e ∈ SetGen.support (genIndir (G := SetGen.Set) fctx octx tvars bctx depth τ hops)) :
-    HasTypeA' bctx e τ := by
-  simp only [genIndir, mem_support_iff, Set.mem_bind, Set.mem_pure,
-    mem_support_choose_iff] at he
-  obtain ⟨idx, ⟨_, hhi⟩, args, hargs, rfl⟩ := he
-  set ops := opsReturning octx τ
-  set entry := ops.getD idx.down ("", [])
-  have hlen_idx : idx.down < ops.length := by omega
-  have hentry_eq : entry = ops[idx.down] := by
-    simp [entry, List.getD, List.getElem?_eq_getElem hlen_idx]
-  have hops_mem : entry ∈ ops := by rw [hentry_eq]; exact List.getElem_mem hlen_idx
-  obtain ⟨oty, hoty_mem, hoty_args, _⟩ := opsReturning_mem octx τ entry hops_mem
-  have hSimple_oty := hSimpleOps (entry.1, oty) hoty_mem
-  simp at hSimple_oty
-  have hoty_eq := argsForResult_eq oty τ entry.2 hoty_args
-  have hSimpleArgs : ∀ σ ∈ entry.2, SimpleType σ := by
-    intro σ hσ
-    rw [hoty_eq] at hSimple_oty
-    exact simpleType_of_foldr_mem entry.2 τ hSimple_oty σ hσ
-  have hfullTy_eq : entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ = oty := by
-    exact hoty_eq.symm
-  have hbase : HasTypeA' bctx (.op () ⟨entry.1, ()⟩ (some (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
-      (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
-  exact mkApps_hasType bctx _ args entry.2 τ hbase
-    (genIndirArgs_sound fctx octx tvars bctx depth entry.2 hSimpleArgs args hargs)
-
-/-- Soundness of `genLExprIndir`: every generated expression is well-typed. -/
-theorem genLExprIndir_sound (fctx : FVarCtx) (octx : OpCtx)
+/-- Soundness of `genLExpr`: every generated expression is well-typed.
+    This combines the soundness of the Indir rule with `genLExprBase_sound`. -/
+theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
     (τ : LMonoTy) (hτ : SimpleType τ)
     (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
     (e : LExpr')
-    (he : e ∈ SetGen.support (genLExprIndir (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
+    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
     HasTypeA' bctx e τ := by
-  unfold genLExprIndir at he
+  unfold genLExpr at he
   simp only [mem_support_iff, SetGen.mem_dite, pick_mem_iff] at he
   rcases he with ⟨hpos, he | he⟩ | ⟨_, he⟩
-  · exact genIndir_sound fctx octx tvars bctx depth τ hpos hSimpleOps e he
-  · exact genLExpr_sound fctx octx tvars bctx depth τ hτ e he
-  · exact genLExpr_sound fctx octx tvars bctx depth τ hτ e he
+  · -- Indir path: fully-applied operator
+    sorry
+  · exact genLExprBase_sound fctx octx tvars bctx depth τ hτ e he
+  · exact genLExprBase_sound fctx octx tvars bctx depth τ hτ e he

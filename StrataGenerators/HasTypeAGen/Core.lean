@@ -172,7 +172,7 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
     produced with sub-expressions at depth `n`.
 
     The generated term satisfies `HasTypeA' bctx e τ` (see `genLExpr_sound`). -/
-def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
+def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
   -- ── Arrow type ────────────────────────────────────────────────────
   | 0, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
@@ -194,28 +194,28 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
     pick
       (fun () => do
-        let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
+        let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
         pure (.abs () "" (some τ₁) body))
       (fun () =>
         pick
           (fun () => do
             let τ' ← genLMonoTy tvars n
-            let arg ← genLExpr fctx octx tvars bctx n τ'
-            let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂))
+            let arg ← genLExprBase fctx octx tvars bctx n τ'
+            let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂))
             pure (.app () fn arg))
           (fun () =>
             pick
               (fun () => do
-                let c ← genLExpr fctx octx tvars bctx n .bool
-                let t ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)
-                let e ← genLExpr fctx octx tvars bctx n (.arrow τ₁ τ₂)
+                let c ← genLExprBase fctx octx tvars bctx n .bool
+                let t ← genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂)
+                let e ← genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂)
                 pure (.ite () c t e))
               (fun () =>
                 pick
                   (fun () =>
                     if hv : bvars.length > 0 then pickBVar bctx _ hv
                     else do
-                      let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
+                      let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
                       pure (.abs () "" (some τ₁) body))
                   (fun () =>
                     pick
@@ -223,13 +223,13 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
                         if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
                         then pickFVar fctx _ hf
                         else do
-                          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
+                          let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
                           pure (.abs () "" (some τ₁) body))
                       (fun () =>
                         if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
                         then pickOp octx _ ho
                         else do
-                          let body ← genLExpr fctx octx tvars (τ₁ :: bctx) n τ₂
+                          let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
                           pure (.abs () "" (some τ₁) body))))))
   -- ── Bool type ─────────────────────────────────────────────────────
   | 0, .bool =>
@@ -265,39 +265,39 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
       (fun () =>
         pick
           (fun () => do
-            let c ← genLExpr fctx octx tvars bctx n .bool
-            let t ← genLExpr fctx octx tvars bctx n .bool
-            let e ← genLExpr fctx octx tvars bctx n .bool
+            let c ← genLExprBase fctx octx tvars bctx n .bool
+            let t ← genLExprBase fctx octx tvars bctx n .bool
+            let e ← genLExprBase fctx octx tvars bctx n .bool
             pure (.ite () c t e))
           (fun () =>
             pick
               (fun () => do
                 let τ' ← genLMonoTy tvars n
-                let e₁ ← genLExpr fctx octx tvars bctx n τ'
-                let e₂ ← genLExpr fctx octx tvars bctx n τ'
+                let e₁ ← genLExprBase fctx octx tvars bctx n τ'
+                let e₂ ← genLExprBase fctx octx tvars bctx n τ'
                 pure (.eq () e₁ e₂))
               (fun () =>
                 pick
                   (fun () => do
                     let τ' ← genLMonoTy tvars n
-                    let arg ← genLExpr fctx octx tvars bctx n τ'
-                    let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' .bool)
+                    let arg ← genLExprBase fctx octx tvars bctx n τ'
+                    let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' .bool)
                     pure (.app () fn arg))
                   (fun () =>
                     pick
                       (fun () => do
                         let τ' ← genLMonoTy tvars n
                         let τ_tr ← genLMonoTy tvars n
-                        let tr ← genLExpr fctx octx tvars (τ' :: bctx) n τ_tr
-                        let body ← genLExpr fctx octx tvars (τ' :: bctx) n .bool
+                        let tr ← genLExprBase fctx octx tvars (τ' :: bctx) n τ_tr
+                        let body ← genLExprBase fctx octx tvars (τ' :: bctx) n .bool
                         pure (.quant () .all "" (some τ') tr body))
                       (fun () =>
                         pick
                           (fun () => do
                             let τ' ← genLMonoTy tvars n
                             let τ_tr ← genLMonoTy tvars n
-                            let tr ← genLExpr fctx octx tvars (τ' :: bctx) n τ_tr
-                            let body ← genLExpr fctx octx tvars (τ' :: bctx) n .bool
+                            let tr ← genLExprBase fctx octx tvars (τ' :: bctx) n τ_tr
+                            let body ← genLExprBase fctx octx tvars (τ' :: bctx) n .bool
                             pure (.quant () .exist "" (some τ') tr body))
                           (fun () =>
                             pick
@@ -357,15 +357,15 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
         pick
           (fun () => do
             let τ' ← genLMonoTy tvars n
-            let arg ← genLExpr fctx octx tvars bctx n τ'
-            let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' .int)
+            let arg ← genLExprBase fctx octx tvars bctx n τ'
+            let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' .int)
             pure (.app () fn arg))
           (fun () =>
             pick
               (fun () => do
-                let c ← genLExpr fctx octx tvars bctx n .bool
-                let t ← genLExpr fctx octx tvars bctx n .int
-                let e ← genLExpr fctx octx tvars bctx n .int
+                let c ← genLExprBase fctx octx tvars bctx n .bool
+                let t ← genLExprBase fctx octx tvars bctx n .int
+                let e ← genLExprBase fctx octx tvars bctx n .int
                 pure (.ite () c t e))
               (fun () =>
                 pick
@@ -420,15 +420,15 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     pick
       (fun () => do
         let τ' ← genLMonoTy tvars n
-        let arg ← genLExpr fctx octx tvars bctx n τ'
-        let fn  ← genLExpr fctx octx tvars bctx n (.arrow τ' (.ftvar name))
+        let arg ← genLExprBase fctx octx tvars bctx n τ'
+        let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' (.ftvar name))
         pure (.app () fn arg))
       (fun () =>
         pick
           (fun () => do
-            let c ← genLExpr fctx octx tvars bctx n .bool
-            let t ← genLExpr fctx octx tvars bctx n (.ftvar name)
-            let e ← genLExpr fctx octx tvars bctx n (.ftvar name)
+            let c ← genLExprBase fctx octx tvars bctx n .bool
+            let t ← genLExprBase fctx octx tvars bctx n (.ftvar name)
+            let e ← genLExprBase fctx octx tvars bctx n (.ftvar name)
             pure (.ite () c t e))
           (fun () =>
             pick
@@ -483,48 +483,36 @@ def opsReturning (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :
 def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
   args.foldl (fun acc arg => .app () acc arg) base
 
-/-- Generate all arguments for an Indir application, returning a list of expressions.
-    Each argument is generated at the given depth with the corresponding type. -/
-def genIndirArgs [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (bctx : BVarCtx) (depth : Nat) : List LMonoTy → G (List LExpr')
-  | [] => pure []
-  | τ :: rest => do
-    let arg ← genLExpr fctx octx tvars bctx depth τ
-    let args ← genIndirArgs fctx octx tvars bctx depth rest
-    pure (arg :: args)
+/-- Generate a well-typed `LExpr` of type `τ` using the Indir rule from
+    Pałka et al. (2011) in addition to the standard generation rules.
 
-/-- Pick an operator from `octx` that returns `τ` and generate a fully-applied
-    application using the Indir rule. The generated expression has the form
-    `op arg₁ arg₂ ... argₙ` where `op : σ₁ → σ₂ → ... → σₙ → τ`. -/
-def genIndir [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (_h : (opsReturning octx τ).length > 0) : G LExpr' := do
-  let ops := opsReturning octx τ
-  let idx ← choose 0 (ops.length - 1) (by omega)
-  let (name, argTys) := ops.getD idx.down ("", [])
-  let fullTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
-  let base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
-  let args ← genIndirArgs fctx octx tvars bctx depth argTys
-  pure (mkApps base args)
+    When operators in `octx` have result type `τ` (after full application),
+    the generator non-deterministically picks between:
+    - The **Indir rule**: pick such an operator and recursively generate all
+      its arguments at the determined types (no type guessing needed).
+    - The **standard rules** (`genLExprBase`): variables, constants, App with
+      random type, lambda, if-then-else, etc.
 
-/-- Generate a well-typed `LExpr` of type `τ`, using the Indir rule from
-    Pałka et al. (2011) to generate fully-applied operator applications
-    in addition to the standard generation rules.
-
-    When operators exist whose result type matches `τ`, the generator
-    non-deterministically picks between the standard generation (via `genLExpr`)
-    and the Indir rule (via `genIndir`). Since `genLExpr` generates sub-expressions
-    recursively (including further `App` nodes), and the test harnesses invoke
-    `genLExprIndir` at the top level, operator applications arise frequently
-    throughout the generated term. -/
-def genLExprIndir [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    This produces significantly more fully-applied operator expressions
+    (e.g. `Int.Add #1 #2`) compared to relying solely on the App rule's
+    random type guessing. -/
+def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
   if h : (opsReturning octx τ).length > 0 then
     pick
-      (fun () => genIndir fctx octx tvars bctx depth τ h)
-      (fun () => genLExpr fctx octx tvars bctx depth τ)
+      (fun () => do
+        let ops := opsReturning octx τ
+        let idx ← choose 0 (ops.length - 1) (by omega)
+        let (name, argTys) := ops.getD idx.down ("", [])
+        let fullTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
+        let base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
+        let args ← argTys.foldrM (init := ([] : List LExpr')) fun σ acc => do
+          let arg ← genLExprBase fctx octx tvars bctx depth σ
+          pure (arg :: acc)
+        pure (mkApps base args))
+      (fun () => genLExprBase fctx octx tvars bctx depth τ)
   else
-    genLExpr fctx octx tvars bctx depth τ
+    genLExprBase fctx octx tvars bctx depth τ
 
 -- ── Top-level generators ─────────────────────────────────────────────
 

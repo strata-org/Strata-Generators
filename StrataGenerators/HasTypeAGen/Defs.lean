@@ -33,7 +33,8 @@ def factoryOps (F : @Factory LExprParams') : OpCtx :=
 
 /-- Generate a well-typed `LExpr` using a `Factory` for operators.
     This is a convenience wrapper around `genLExpr` that converts the factory
-    to an `OpCtx` via `factoryOps`. -/
+    to an `OpCtx` via `factoryOps`. Uses the Indir rule to generate
+    fully-applied operator applications. -/
 def genLExprWithFactory [Gen G] (fctx : FVarCtx) (F : @Factory LExprParams') (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
   genLExpr fctx (factoryOps F) tvars bctx depth τ
 
@@ -42,15 +43,3 @@ def genLExprWithFactory [Gen G] (fctx : FVarCtx) (F : @Factory LExprParams') (tv
 def genClosedLExprWithFactory [Gen G] (F : @Factory LExprParams') (tvars : List TyIdentifier) (depth : Nat) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
   genLExprWithFactory [] F tvars [] depth τ
-
--- ── Indir-enhanced factory-accepting wrappers ─────────────────────────
-
-/-- Generate a well-typed `LExpr` using a `Factory` for operators, with the
-    Indir rule enabled. This produces more fully-applied operator applications. -/
-def genLExprIndirWithFactory [Gen G] (fctx : FVarCtx) (F : @Factory LExprParams') (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
-  genLExprIndir fctx (factoryOps F) tvars bctx depth τ
-
-/-- Generate a well-typed closed expression with Indir rule using a factory. -/
-def genClosedLExprIndirWithFactory [Gen G] (F : @Factory LExprParams') (tvars : List TyIdentifier) (depth : Nat) : G LExpr' := do
-  let τ ← genLMonoTy tvars depth
-  genLExprIndirWithFactory [] F tvars [] depth τ
