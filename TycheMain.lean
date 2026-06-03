@@ -56,9 +56,7 @@ def ppExpr (e : LExpr') (prec : Nat := 0) : String :=
   | .const _ (.strConst s) => s!"\"{s}\""
   | .const _ (.realConst r) => s!"#{r}"
   | .const _ (.bitvecConst _ b) => s!"#{b.toNat}"
-  | .op _ o ty => match ty with
-    | some t => s!"~{o.name} : {ppType t}"
-    | none => s!"~{o.name}"
+  | .op _ o _ => s!"{o.name}"
   | .bvar _ i => s!"%{i}"
   | .fvar _ x ty => match ty with
     | some t => s!"{x.name} : {ppType t}"
