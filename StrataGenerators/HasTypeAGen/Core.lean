@@ -454,6 +454,78 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
   -- ── Fallback (bitvec, etc. — not generated) ────────────────────────
   | _, _ => pure (.boolConst () false)
 
+-- ── Indir rule helpers ──────────────────────────────────────────────
+
+/-- Extract the argument types from a curried function type, given that its
+    result type (after peeling all arrows) should equal `τ`. Returns `none`
+    if the type does not return `τ`, or `some args` where `args` is the list
+    of argument types.
+    E.g. `argsForResult (.arrow .int (.arrow .int .int)) .int = some [.int, .int]`
+         `argsForResult (.arrow .int .bool) .int = none`
+         `argsForResult .int .int = some []` -/
+def argsForResult (fullTy : LMonoTy) (τ : LMonoTy) : Option (List LMonoTy) :=
+  match fullTy with
+  | .tcons "arrow" [σ, rest] =>
+    match argsForResult rest τ with
+    | some args => some (σ :: args)
+    | none => none
+  | other => if other == τ then some [] else none
+
+/-- All (name, argTypes) pairs from `octx` for operators that return `τ`
+    after full application, requiring at least one argument. -/
+def opsReturning (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :=
+  octx.filterMap fun (name, ty) =>
+    match argsForResult ty τ with
+    | some (arg :: args) => some (name, arg :: args)
+    | _ => none
+
+/-- Build a left-nested application: `foldl app base [a₁, a₂, ...] = app (app base a₁) a₂ ...` -/
+def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
+  args.foldl (fun acc arg => .app () acc arg) base
+
+/-- Generate all arguments for an Indir application, returning a list of expressions.
+    Each argument is generated at the given depth with the corresponding type from `argTys`. -/
+def genIndirArgs [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) : List LMonoTy → G (List LExpr')
+  | [] => pure []
+  | τ :: rest => do
+    let arg ← genLExpr fctx octx tvars bctx depth τ
+    let args ← genIndirArgs fctx octx tvars bctx depth rest
+    pure (arg :: args)
+
+/-- Pick an operator from `octx` that returns `τ` and generate a fully-applied
+    application using the Indir rule. The generated expression has the form
+    `op arg₁ arg₂ ... argₙ` where `op : σ₁ → σ₂ → ... → σₙ → τ`. -/
+def genIndir [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (_h : (opsReturning octx τ).length > 0) : G LExpr' := do
+  let ops := opsReturning octx τ
+  let idx ← choose 0 (ops.length - 1) (by omega)
+  let (name, argTys) := ops.getD idx.down ("", [])
+  let fullTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
+  let base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
+  let args ← genIndirArgs fctx octx tvars bctx depth argTys
+  pure (mkApps base args)
+
+/-- Generate a well-typed `LExpr` of type `τ`, using the Indir rule from
+    Pałka et al. (2011) to generate fully-applied operator applications
+    in addition to the standard generation rules.
+
+    When operators exist whose result type matches `τ`, the generator
+    non-deterministically picks between the standard generation (via `genLExpr`)
+    and the Indir rule (via `genIndir`). This produces many more function
+    applications that use operators from the factory. -/
+def genLExprIndir [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
+  if h : (opsReturning octx τ).length > 0 then
+    pick
+      (fun () => genIndir fctx octx tvars bctx depth τ h)
+      (fun () => genLExpr fctx octx tvars bctx depth τ)
+  else
+    genLExpr fctx octx tvars bctx depth τ
+
+-- ── Top-level generators ─────────────────────────────────────────────
+
 /-- Generate a well-typed closed expression (no free variables, no operators)
     with bounded depth. -/
 def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat) : G LExpr' := do

@@ -1521,3 +1521,147 @@ instance : ToFormat Unit where
 #guard_msgs(drop warning, drop error) in
 #eval (for _ in [:5] do
   IO.println <| Std.format (← genLExpr [] [] ["a"] [.ftvar "a"] 3 (.ftvar "a")) |>.pretty : IO Unit)
+
+-- ── Indir rule soundness ─────────────────────────────────────────────
+
+/-- Inversion lemma for `SimpleType` at an arrow type. -/
+private theorem SimpleType_arrow_inv {τ₁ τ₂ : LMonoTy}
+    (h : SimpleType (.arrow τ₁ τ₂)) : SimpleType τ₁ ∧ SimpleType τ₂ :=
+  h.casesOn (motive := fun ty _ => ty = .arrow τ₁ τ₂ → SimpleType τ₁ ∧ SimpleType τ₂)
+    (fun heq => by simp [LMonoTy.bool, LMonoTy.arrow] at heq)
+    (fun heq => by simp [LMonoTy.int, LMonoTy.arrow] at heq)
+    (fun h₁ h₂ heq => by simp [LMonoTy.arrow] at heq; exact heq.1 ▸ heq.2 ▸ ⟨h₁, h₂⟩)
+    (fun heq => by simp [LMonoTy.arrow] at heq)
+    rfl
+
+/-- If `argsForResult fullTy τ = some args`, then
+    `fullTy = args.foldr (fun σ acc => .arrow σ acc) τ`. -/
+theorem argsForResult_eq (fullTy τ : LMonoTy) (args : List LMonoTy)
+    (h : argsForResult fullTy τ = some args) :
+    fullTy = args.foldr (fun σ acc => LMonoTy.arrow σ acc) τ := by
+  unfold argsForResult at h
+  split at h
+  · rename_i σ rest
+    split at h
+    · rename_i args' hrest
+      simp at h; subst h
+      simp only [List.foldr]
+      show LMonoTy.arrow σ rest = LMonoTy.arrow σ (List.foldr _ τ args')
+      congr 1
+      exact argsForResult_eq rest τ args' hrest
+    · simp at h
+  · split at h
+    · rename_i heq
+      have heq' := beq_iff_eq.mp heq
+      simp at h; subst h; simp [heq']
+    · simp at h
+  termination_by sizeOf fullTy
+
+/-- If `σ₁ → σ₂ → ... → σₙ → τ` is a `SimpleType`, then each `σᵢ` is too. -/
+private theorem simpleType_of_foldr_mem (args : List LMonoTy) (τ : LMonoTy)
+    (h : SimpleType (args.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))
+    (σ : LMonoTy) (hσ : σ ∈ args) : SimpleType σ := by
+  induction args with
+  | nil => simp at hσ
+  | cons a rest ih =>
+    simp only [List.foldr] at h
+    have ⟨h₁, h₂⟩ := SimpleType_arrow_inv h
+    rcases List.mem_cons.mp hσ with rfl | hmem
+    · exact h₁
+    · exact ih h₂ hmem
+
+/-- Helper: `mkApps` preserves typing via iterated `app` rule. -/
+theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
+    (argTys : List LMonoTy) (τ : LMonoTy)
+    (hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))
+    (hargs : List.Forall₂ (HasTypeA' bctx) args argTys) :
+    HasTypeA' bctx (mkApps base args) τ := by
+  induction hargs generalizing base with
+  | nil => exact hbase
+  | cons harg _ ih => exact ih _ (LExpr.HasTypeA.app hbase harg)
+
+/-- Every generated argument in `genIndirArgs` is well-typed at the
+    corresponding type. -/
+theorem genIndirArgs_sound (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
+    (argTys : List LMonoTy) (hSimple : ∀ τ ∈ argTys, SimpleType τ)
+    (args : List LExpr')
+    (hargs : args ∈ SetGen.support (genIndirArgs (G := SetGen.Set) fctx octx tvars bctx depth argTys)) :
+    List.Forall₂ (HasTypeA' bctx) args argTys := by
+  induction argTys generalizing args with
+  | nil =>
+    simp [genIndirArgs, mem_support_iff, SetGen.Set.mem_pure] at hargs
+    subst hargs; exact .nil
+  | cons σ rest ih =>
+    simp [genIndirArgs, mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at hargs
+    obtain ⟨arg, harg, args', hargs', rfl⟩ := hargs
+    have hσ : SimpleType σ := hSimple σ List.mem_cons_self
+    have hrest : ∀ τ' ∈ rest, SimpleType τ' := fun τ' hτ' =>
+      hSimple τ' (List.mem_cons_of_mem σ hτ')
+    exact .cons (genLExpr_sound fctx octx tvars bctx depth σ hσ arg harg)
+                (ih hrest args' hargs')
+
+/-- Membership characterization for `opsReturning`: if an entry is in the result,
+    then there exists a corresponding operator in `octx` whose type decomposes. -/
+private theorem opsReturning_mem (octx : OpCtx) (τ : LMonoTy)
+    (entry : String × List LMonoTy) (h : entry ∈ opsReturning octx τ) :
+    ∃ oty, (entry.1, oty) ∈ octx ∧
+      argsForResult oty τ = some entry.2 ∧ entry.2.length > 0 := by
+  simp only [opsReturning, List.mem_filterMap] at h
+  obtain ⟨⟨name, oty⟩, hmem, hfilter⟩ := h
+  revert hfilter
+  generalize harr : argsForResult oty τ = result
+  match result with
+  | some (arg :: args') =>
+    intro hfilter; simp at hfilter
+    subst hfilter
+    exact ⟨oty, hmem, harr, by simp⟩
+  | some [] => intro hfilter; simp at hfilter
+  | none => intro hfilter; simp at hfilter
+
+/-- Soundness of `genIndir`: every generated expression is well-typed. -/
+theorem genIndir_sound (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
+    (τ : LMonoTy) (hops : (opsReturning octx τ).length > 0)
+    (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
+    (e : LExpr')
+    (he : e ∈ SetGen.support (genIndir (G := SetGen.Set) fctx octx tvars bctx depth τ hops)) :
+    HasTypeA' bctx e τ := by
+  simp only [genIndir, mem_support_iff, Set.mem_bind, Set.mem_pure,
+    mem_support_choose_iff] at he
+  obtain ⟨idx, ⟨_, hhi⟩, args, hargs, rfl⟩ := he
+  set ops := opsReturning octx τ
+  set entry := ops.getD idx.down ("", [])
+  have hlen_idx : idx.down < ops.length := by omega
+  have hentry_eq : entry = ops[idx.down] := by
+    simp [entry, List.getD, List.getElem?_eq_getElem hlen_idx]
+  have hops_mem : entry ∈ ops := by rw [hentry_eq]; exact List.getElem_mem hlen_idx
+  obtain ⟨oty, hoty_mem, hoty_args, _⟩ := opsReturning_mem octx τ entry hops_mem
+  have hSimple_oty := hSimpleOps (entry.1, oty) hoty_mem
+  simp at hSimple_oty
+  have hoty_eq := argsForResult_eq oty τ entry.2 hoty_args
+  have hSimpleArgs : ∀ σ ∈ entry.2, SimpleType σ := by
+    intro σ hσ
+    rw [hoty_eq] at hSimple_oty
+    exact simpleType_of_foldr_mem entry.2 τ hSimple_oty σ hσ
+  have hfullTy_eq : entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ = oty := by
+    exact hoty_eq.symm
+  have hbase : HasTypeA' bctx (.op () ⟨entry.1, ()⟩ (some (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
+      (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
+  exact mkApps_hasType bctx _ args entry.2 τ hbase
+    (genIndirArgs_sound fctx octx tvars bctx depth entry.2 hSimpleArgs args hargs)
+
+/-- Soundness of `genLExprIndir`: every generated expression is well-typed. -/
+theorem genLExprIndir_sound (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
+    (τ : LMonoTy) (hτ : SimpleType τ)
+    (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
+    (e : LExpr')
+    (he : e ∈ SetGen.support (genLExprIndir (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
+    HasTypeA' bctx e τ := by
+  unfold genLExprIndir at he
+  simp only [mem_support_iff, SetGen.mem_dite, pick_mem_iff] at he
+  rcases he with ⟨hpos, he | he⟩ | ⟨_, he⟩
+  · exact genIndir_sound fctx octx tvars bctx depth τ hpos hSimpleOps e he
+  · exact genLExpr_sound fctx octx tvars bctx depth τ hτ e he
+  · exact genLExpr_sound fctx octx tvars bctx depth τ hτ e he

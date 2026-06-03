@@ -46,7 +46,7 @@ private def genOpenTypedExpr : Gen TypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExprWithFactory (G := Plausible.Gen) defaultFCtx intBoolFactory tvars [] depth ty
+  let expr ← genLExprIndirWithFactory (G := Plausible.Gen) defaultFCtx intBoolFactory tvars [] depth ty
   pure ⟨expr, ty⟩
 
 -- `genLExpr` can fail (via `default`) when a depth-0 arrow case has no
@@ -70,7 +70,7 @@ private def genClosedTypedExpr : Gen ClosedTypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExprWithFactory (G := Plausible.Gen) [] intBoolFactory tvars [] depth ty
+  let expr ← genLExprIndirWithFactory (G := Plausible.Gen) [] intBoolFactory tvars [] depth ty
   pure ⟨expr, ty⟩
 
 instance : Arbitrary ClosedTypedExpr where
