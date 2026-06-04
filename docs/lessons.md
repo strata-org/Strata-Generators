@@ -2,7 +2,9 @@
 
 ## Having some knowledge of the PBT literature helps
 
-The default generator synthesized by Claude doesn't make use of useful findings from the PBT literature. Here's an example:
+The default generator synthesized by Claude doesn't make use of useful findings from the PBT literature. Here are some examples:
+
+### Generating function applications that use multi-argument factory functions
 
 By default, trying to generate function applications naïvely using the `App` rule is challenging, especially when the function
 has multiple (more than one) argument. Consider the `App` rule and the corresponding (simplified) generator:
@@ -38,14 +40,21 @@ Specifically, in the derivation below, we need to pick `τ'' = Int` and `τ' = S
 However, in general, the probability of picking both `τ'' = Int` and `τ' = String` is very low, which means we are rarely going to 
 generate function applications that actually call factory functions! 
 
-To avoid this issue, [Pałka et al. (AST '11)](https://dl.acm.org/doi/pdf/10.1145/1982595.1982615) came up with an additional generation rule, called `Indir` below. This rule says: "if there's a function $f$ in the context that takes in $n$ arguments of types $\sigma_1, \ldots \sigma_n$ respectively, I will generate random arguments $e_1 : \sigma_1, \ldots, e_n : \sigma_n$ that have the corresponding type, and 
-construct a fully-applied function application $f ~e_1 \ldots ~e_n$.  
+To avoid this issue, [Pałka et al. (AST '11)](https://dl.acm.org/doi/pdf/10.1145/1982595.1982615) came up with an additional generation rule, called `Indir` below. This rule says: "if there's a function $f$ in the context that takes in $n$ arguments of types $\sigma_1, \ldots \sigma_n$ respectively, I will generate $n$ random argument expressions $e_1 : \sigma_1, \ldots, e_n : \sigma_n$ that each have the right types, and construct a fully-applied function application $f ~e_1 \ldots ~e_n$.  
 
 Here is the `Indir` rule from their paper, instantiated with $n = 2$:
 
 $$(\text{Indir}) \quad \frac{f:\sigma_1 \to \sigma_2 \to \tau,\ \Gamma \vdash e_1 : \sigma_1 \quad \quad f:\sigma_1 \to \sigma_2 \to \tau,\ \Gamma \vdash e_2 : \sigma_2}{f : \sigma_1 \to \sigma_2 \to \tau,\ \Gamma \vdash f\ e_1\  e_2 : \tau}$$
 
+Pałka et al. found that even though this rule is logically unnecessary (it follows from the other typing rules), it is far superior 
+as a *generation rule*, since it removes the need to *guess* argument types: all argument types are directly determined from the function's 
+type signature in the context. Pałka et al. argue that that a good STLC generator should use *both* the `App` and `Indir` rules to generate function applications, to ensure that we can generate both applications of anonymous lambda abstractions (e.g. $(\lambda x : \textsf{Int}. ~x) ~1$) and named library functions.
 
+Claude doesn't know about this finding, so the default generator it produced didn't generate many applications of 
+factory functions. 
+
+### Tuning generator distributions
+**TODO**: mention the distribution of the no. of `App` nodes from section 7 of Tjoa et al. (OOPSLA '25) (Tuning Random Generators)
 
 ## Avoiding mutual recursion when defining named sub-generators
 The Claude-synthesized generator inlines the definitions of all sub-generators, so the sub-generator for producing abstractions is repeated several times throughout the body of the parent generator. When we prompt Claude to create helper functions to avoid code duplication (i.e. separate functions for generating Abs, App etc.), it struggles with updating the proofs due to mutual recursion between the different sub-generators, and the solution was to define helpers that take in auxiliary generators as arguments, e.g.:
