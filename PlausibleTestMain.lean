@@ -40,10 +40,57 @@ structure TypedExpr where
   deriving BEq
 
 instance : Repr TypedExpr where
-  reprPrec te _ := s!"{ppExpr te.expr} : {ppType te.ty}"
+  reprPrec te _ := s!"({ppExpr te.expr}) : {ppType te.ty}"
 
+/-- For terms that don't involve top-level binders (e.g. `lam` or `quant`),
+    extract their immediate sub-terms. -/
+private def immediateSubtermsWithoutBinders (e : LExpr') : List LExpr' :=
+  match e with
+  | .app _ fn arg => [fn, arg]
+  | .ite _ c t e => [c, t, e]
+  | .eq _ e1 e2 => [e1, e2]
+  | _ => []
+
+/-- Shrinks an LExpr structually.
+    - Note: for terms involving binders (e.g. `abs` and `quant`), we shrink
+    the body but keep the binder, in order to ensure that the shrunken
+    term remains well-scoped.
+    - For terms that don't involve binders, we extract their top-level subterms.
+    - For constants (e.g. ints), we involve the default shrinker for that type. -/
+private partial def shrinkLExpr (e : LExpr') : List LExpr' :=
+  immediateSubtermsWithoutBinders e ++
+  match e with
+  | .app _ fn arg =>
+    (.app () · arg) <$> shrinkLExpr fn ++
+    (.app () fn ·) <$> shrinkLExpr arg
+  | .ite _ c t el =>
+    (.ite () · t el) <$> shrinkLExpr c ++
+    (.ite () c · el) <$> shrinkLExpr t ++
+    (.ite () c t ·) <$> shrinkLExpr el
+  | .eq _ e1 e2 =>
+    (.eq () · e2) <$> shrinkLExpr e1 ++
+    (.eq () e1 ·) <$> shrinkLExpr e2
+  | .abs _ name ty body =>
+    (.abs () name ty ·) <$> shrinkLExpr body
+  | .quant _ k name ty trigger body =>
+    (.quant () k name ty · body) <$> shrinkLExpr trigger ++
+    (.quant () k name ty trigger ·) <$> shrinkLExpr body
+  | .const _ (.intConst i) =>
+    (fun i' => .const () (.intConst i')) <$> Shrinkable.shrink i
+  | _ => []
+
+/-- Shrinkable instance for `TypedExpr` (a pair consisting of an `LExpr` and its type),
+    required by Plausible.
+    To ensure that the shrunken term has the right type, we just try to shrink
+    `LExpr`s using `shrinkLExpr` and perform rejection sampling (i.e. filter out
+    ill-typed candidate shrunken terms), and use the type of the shrunken
+    term as the second component of the `TypedExpr`. -/
 instance : Shrinkable TypedExpr where
-  shrink _ := []
+  shrink te :=
+    (shrinkLExpr te.expr).filterMap fun e' =>
+      match LExpr.typeCheck (T := LExprParams') [] e' with
+      | some τ' => some ⟨e', τ'⟩
+      | none => none
 
 private def genOpenTypedExpr : Gen TypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
@@ -67,10 +114,14 @@ structure ClosedTypedExpr where
   deriving BEq
 
 instance : Repr ClosedTypedExpr where
-  reprPrec te _ := s!"{ppExpr te.expr} : {ppType te.ty}"
+  reprPrec te _ := s!"({ppExpr te.expr}) : {ppType te.ty}"
 
 instance : Shrinkable ClosedTypedExpr where
-  shrink _ := []
+  shrink te :=
+    (shrinkLExpr te.expr).filterMap fun e' =>
+      match LExpr.typeCheck (T := LExprParams') [] e' with
+      | some τ' => some ⟨e', τ'⟩
+      | none => none
 
 private def genClosedTypedExpr : Gen ClosedTypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
