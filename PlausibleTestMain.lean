@@ -84,7 +84,8 @@ private partial def shrinkLExpr (e : LExpr') : List LExpr' :=
     To ensure that the shrunken term has the right type, we just try to shrink
     `LExpr`s using `shrinkLExpr` and perform rejection sampling (i.e. filter out
     ill-typed candidate shrunken terms), and use the type of the shrunken
-    term as the second component of the `TypedExpr`. -/
+    term as the second component of the `TypedExpr`. (This avoids us needing
+    to define separate shrinkers for types and `LExpr`s.) -/
 instance : Shrinkable TypedExpr where
   shrink te :=
     (shrinkLExpr te.expr).filterMap fun e' =>
