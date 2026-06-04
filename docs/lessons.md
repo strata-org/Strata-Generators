@@ -6,7 +6,7 @@ has multiple (more than one) argument. Consider the `App` rule and the correspon
 
 ```
 Γ ⊢ e₁ : τ' → τ      Γ ⊢ e₂ : τ'
----------------------------------- (APP)
+---------------------------------- (App)
         Γ ⊢ e₁ e₂ : τ 
 ```
 
@@ -20,7 +20,21 @@ do
 
 *A priori*, the generator doesn't know what the argument type `τ'` ought to be, so it needs to generate some random type `τ'`. 
 However, if your library functions have multiple arguments, each of which are different type, e.g. 
-`take : Int -> String -> String` ^[1] 
+`take : Int -> String -> String` (function for extracting a prefix from a string, taken from the [Haskell standard library](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Prelude.html#v:take)), then we need to apply the `App` rule twice and hope
+that we pick `Int` and `String` as the two random argument types during each application of the `App` rule.
+
+Specifically, in the derivation below, we need to pick `τ'' = Int` and `τ' = String`:
+```
+Γ ⊢ take : τ'' → τ' → String      Γ ⊢ n : τ''
+--------------------------------------------------------------------- (App)
+            Γ ⊢ take n : τ' → String                 Γ ⊢ s : τ'
+----------------------------------------------------------------------- (App)
+                         Γ ⊢ take n s : String 
+```
+
+However, in general, the probability of picking both `τ'' = Int` and `τ' = String` is very low, which means we are rarely going to 
+generate function applications that actually call factory functions! 
+
 
 
 
@@ -40,4 +54,4 @@ def genApp [Gen G] (genTy : G LMonoTy) (genExpr : LMonoTy → G LExpr') (τ : LM
 ... genApp genTy (genLExpr Γ) τ
 ```
 
-[^1]: `take n s` extracts the first `n` characters of the string `s`. This is a function from the [Haskell standard library](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Prelude.html#v:take), picked purely for illustrative purposes.  
+[^1]: `take n s` . 
