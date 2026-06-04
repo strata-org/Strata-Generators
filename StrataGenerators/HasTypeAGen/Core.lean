@@ -164,6 +164,49 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
               let τ₂ ← genLMonoTy tvars n
               pure (.arrow τ₁ τ₂)))
 
+-- ── Expression sub-generator combinators ─────────────────────────────────
+-- These combinators take in the generators that they invoke as explicit arguments,
+-- in order to avoid mutual recursion (which makes the proofs much more challegning).
+
+/-- Generate a random boolean constant (`true` or `false`). -/
+@[reducible] def genBoolConst [Gen G] : G LExpr' :=
+  pick (fun () => pure (.boolConst () true))
+       (fun () => pure (.boolConst () false))
+
+/-- Generate a random integer constant (non-negative or negative). -/
+@[reducible] def genIntConst [Gen G] : G LExpr' :=
+  pick (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
+       (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int))))
+
+/-- Generate an application: pick a random argument type, generate the argument
+    and a function from that type to `τ`, then apply. -/
+@[reducible] def genApp [Gen G] (genTy : G LMonoTy) (genExpr : LMonoTy → G LExpr')
+    (τ : LMonoTy) : G LExpr' := do
+  let τ' ← genTy
+  let arg ← genExpr τ'
+  let fn ← genExpr (.arrow τ' τ)
+  pure (.app () fn arg)
+
+/-- Generate a lambda abstraction with binder type `τ₁`. -/
+@[reducible] def genAbs [Gen G] (genBody : G LExpr') (τ₁ : LMonoTy) : G LExpr' := do
+  let body ← genBody
+  pure (.abs () "" (some τ₁) body)
+
+/-- Generate an if-then-else expression. -/
+@[reducible] def genIte [Gen G] (genCond genThen genElse : G LExpr') : G LExpr' := do
+  let c ← genCond
+  let t ← genThen
+  let e ← genElse
+  pure (.ite () c t e)
+
+/-- Generate an equality test: pick a random type, then generate two
+    expressions of that type. -/
+@[reducible] def genEq [Gen G] (genTy : G LMonoTy) (genExpr : LMonoTy → G LExpr') : G LExpr' := do
+  let τ' ← genTy
+  let e₁ ← genExpr τ'
+  let e₂ ← genExpr τ'
+  pure (.eq () e₁ e₂)
+
 -- ── Expression generator ─────────────────────────────────────────────
 
 /-- Generate a well-typed `LExpr` of type `τ` with term depth bounded by the
@@ -193,96 +236,65 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   | n + 1, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
     pick
-      (fun () => do
-        let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
-        pure (.abs () "" (some τ₁) body))
+      (fun () => genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)
       (fun () =>
         pick
-          (fun () => do
-            let τ' ← genLMonoTy tvars n
-            let arg ← genLExprBase fctx octx tvars bctx n τ'
-            let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' (.arrow τ₁ τ₂))
-            pure (.app () fn arg))
+          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂))
           (fun () =>
             pick
-              (fun () => do
-                let c ← genLExprBase fctx octx tvars bctx n .bool
-                let t ← genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂)
-                let e ← genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂)
-                pure (.ite () c t e))
+              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                                (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))
+                                (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂)))
               (fun () =>
                 pick
                   (fun () =>
                     if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else do
-                      let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
-                      pure (.abs () "" (some τ₁) body))
+                    else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)
                   (fun () =>
                     pick
                       (fun () =>
                         if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
                         then pickFVar fctx _ hf
-                        else do
-                          let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
-                          pure (.abs () "" (some τ₁) body))
+                        else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)
                       (fun () =>
                         if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
                         then pickOp octx _ ho
-                        else do
-                          let body ← genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂
-                          pure (.abs () "" (some τ₁) body))))))
+                        else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)))))
   -- ── Bool type ─────────────────────────────────────────────────────
   | 0, .bool =>
     let bvars := bvarsOfType bctx .bool
     pick
-      (fun () =>
-        pick (fun () => pure (.boolConst () true))
-             (fun () => pure (.boolConst () false)))
+      (fun () => genBoolConst)
       (fun () =>
         pick
           (fun () =>
             if hv : bvars.length > 0 then pickBVar bctx .bool hv
-            else pick (fun () => pure (.boolConst () true))
-                      (fun () => pure (.boolConst () false)))
+            else genBoolConst)
           (fun () =>
             pick
               (fun () =>
                 if hf : (fvarsOfType fctx .bool).length > 0
                 then pickFVar fctx .bool hf
-                else pick (fun () => pure (.boolConst () true))
-                          (fun () => pure (.boolConst () false)))
+                else genBoolConst)
               (fun () =>
                 if ho : (opsOfType octx .bool).length > 0
                 then pickOp octx .bool ho
-                else pick (fun () => pure (.boolConst () true))
-                          (fun () => pure (.boolConst () false)))))
+                else genBoolConst)))
   | n + 1, .bool =>
     let bvars := bvarsOfType bctx .bool
     pick
-      (fun () =>
-        pick (fun () => pure (.boolConst () true))
-             (fun () => pure (.boolConst () false)))
+      (fun () => genBoolConst)
       (fun () =>
         pick
-          (fun () => do
-            let c ← genLExprBase fctx octx tvars bctx n .bool
-            let t ← genLExprBase fctx octx tvars bctx n .bool
-            let e ← genLExprBase fctx octx tvars bctx n .bool
-            pure (.ite () c t e))
+          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                            (genLExprBase fctx octx tvars bctx n .bool)
+                            (genLExprBase fctx octx tvars bctx n .bool))
           (fun () =>
             pick
-              (fun () => do
-                let τ' ← genLMonoTy tvars n
-                let e₁ ← genLExprBase fctx octx tvars bctx n τ'
-                let e₂ ← genLExprBase fctx octx tvars bctx n τ'
-                pure (.eq () e₁ e₂))
+              (fun () => genEq (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n))
               (fun () =>
                 pick
-                  (fun () => do
-                    let τ' ← genLMonoTy tvars n
-                    let arg ← genLExprBase fctx octx tvars bctx n τ'
-                    let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' .bool)
-                    pure (.app () fn arg))
+                  (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .bool)
                   (fun () =>
                     pick
                       (fun () => do
@@ -303,91 +315,64 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                             pick
                               (fun () =>
                                 if hv : bvars.length > 0 then pickBVar bctx .bool hv
-                                else pick (fun () => pure (.boolConst () true))
-                                          (fun () => pure (.boolConst () false)))
+                                else genBoolConst)
                               (fun () =>
                                 pick
                                   (fun () =>
                                     if hf : (fvarsOfType fctx .bool).length > 0
                                     then pickFVar fctx .bool hf
-                                    else pick (fun () => pure (.boolConst () true))
-                                              (fun () => pure (.boolConst () false)))
+                                    else genBoolConst)
                                   (fun () =>
                                     if ho : (opsOfType octx .bool).length > 0
                                     then pickOp octx .bool ho
-                                    else pick (fun () => pure (.boolConst () true))
-                                              (fun () => pure (.boolConst () false))))))))))
+                                    else genBoolConst))))))))
   -- ── Int type ──────────────────────────────────────────────────────
   | 0, .int =>
     let bvars := bvarsOfType bctx .int
     pick
-      (fun () =>
-        pick
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
+      (fun () => genIntConst)
       (fun () =>
         pick
           (fun () =>
             if hv : bvars.length > 0 then pickBVar bctx .int hv
-            else pick
-              (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-              (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
+            else genIntConst)
           (fun () =>
             pick
               (fun () =>
                 if hf : (fvarsOfType fctx .int).length > 0
                 then pickFVar fctx .int hf
-                else pick
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
+                else genIntConst)
               (fun () =>
                 if ho : (opsOfType octx .int).length > 0
                 then pickOp octx .int ho
-                else pick
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                  (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))))
+                else genIntConst)))
   | n + 1, .int =>
     let bvars := bvarsOfType bctx .int
     pick
+      (fun () => genIntConst)
       (fun () =>
         pick
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
-      (fun () =>
-        pick
-          (fun () => do
-            let τ' ← genLMonoTy tvars n
-            let arg ← genLExprBase fctx octx tvars bctx n τ'
-            let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' .int)
-            pure (.app () fn arg))
+          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .int)
           (fun () =>
             pick
-              (fun () => do
-                let c ← genLExprBase fctx octx tvars bctx n .bool
-                let t ← genLExprBase fctx octx tvars bctx n .int
-                let e ← genLExprBase fctx octx tvars bctx n .int
-                pure (.ite () c t e))
+              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                                (genLExprBase fctx octx tvars bctx n .int)
+                                (genLExprBase fctx octx tvars bctx n .int))
               (fun () =>
                 pick
                   (fun () =>
                     if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else pick
-                      (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                      (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
+                    else genIntConst)
                   (fun () =>
                     pick
                       (fun () =>
                         if hf : (fvarsOfType fctx .int).length > 0
                         then pickFVar fctx .int hf
-                        else pick
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))
+                        else genIntConst)
                       (fun () =>
                         if ho : (opsOfType octx .int).length > 0
                         then pickOp octx .int ho
-                        else pick
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-                          (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))))))))
+                        else genIntConst)))))
   -- ── FtVar type (rigid type variable) ────────────────────────────────
   | 0, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
@@ -418,18 +403,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   | n + 1, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
     pick
-      (fun () => do
-        let τ' ← genLMonoTy tvars n
-        let arg ← genLExprBase fctx octx tvars bctx n τ'
-        let fn  ← genLExprBase fctx octx tvars bctx n (.arrow τ' (.ftvar name))
-        pure (.app () fn arg))
+      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.ftvar name))
       (fun () =>
         pick
-          (fun () => do
-            let c ← genLExprBase fctx octx tvars bctx n .bool
-            let t ← genLExprBase fctx octx tvars bctx n (.ftvar name)
-            let e ← genLExprBase fctx octx tvars bctx n (.ftvar name)
-            pure (.ite () c t e))
+          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                            (genLExprBase fctx octx tvars bctx n (.ftvar name))
+                            (genLExprBase fctx octx tvars bctx n (.ftvar name)))
           (fun () =>
             pick
               (fun () =>

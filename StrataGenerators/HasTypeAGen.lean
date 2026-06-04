@@ -1513,12 +1513,12 @@ instance : ToFormat Unit where
 -- Some example generated exprs:
 -- (if (if #true then #true else #true) then #true else #true)
 -- ((λ (bvar:bool) #true) ((λ (bvar:bool) %0) #true))
-#guard_msgs(drop warning, drop error) in
+#guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
   IO.println <| Std.format (← genClosedLExpr [] 3) |>.pretty : IO Unit)
 
 -- Test with a bound variable of type `ftvar "a"` to exercise the ftvar case
-#guard_msgs(drop warning, drop error) in
+#guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
   IO.println <| Std.format (← genLExpr [] [] ["a"] [.ftvar "a"] 3 (.ftvar "a")) |>.pretty : IO Unit)
 
