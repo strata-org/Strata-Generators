@@ -472,8 +472,8 @@ def argsForResult (fullTy : LMonoTy) (τ : LMonoTy) : Option (List LMonoTy) :=
   | other => if other == τ then some [] else none
 
 /-- All (name, argTypes) pairs from `octx` for operators that return `τ`
-    after full application, requiring at least one argument. -/
-def opsReturning (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :=
+    after they have been fully applied. -/
+def findOpsInCtx (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :=
   octx.filterMap fun (name, ty) =>
     match argsForResult ty τ with
     | some (arg :: args) => some (name, arg :: args)
@@ -498,10 +498,10 @@ def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
     random type guessing. -/
 def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
-  if h : (opsReturning octx τ).length > 0 then
+  if h : (findOpsInCtx octx τ).length > 0 then
     pick
       (fun () => do
-        let ops := opsReturning octx τ
+        let ops := findOpsInCtx octx τ
         let idx ← choose 0 (ops.length - 1) (by omega)
         let (name, argTys) := ops.getD idx.down ("", [])
         let fullTy := argTys.foldr (fun σ acc => .arrow σ acc) τ

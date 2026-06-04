@@ -1580,6 +1580,48 @@ theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
   | nil => exact hbase
   | cons harg _ ih => exact ih _ (LExpr.HasTypeA.app hbase harg)
 
+/-- Membership in the `foldrM`-cons pattern on `SetGen.Set`: `args` is in the support
+    iff each element is pointwise in the support of `f` at the corresponding type. -/
+private theorem mem_foldrM_cons_iff (f : LMonoTy → SetGen.Set LExpr')
+    (argTys : List LMonoTy) (args : List LExpr') :
+    args ∈ (argTys.foldrM (m := SetGen.Set) (init := ([] : List LExpr')) fun σ acc => do
+      let x ← f σ; pure (x :: acc)) ↔
+    List.Forall₂ (fun arg σ => arg ∈ f σ) args argTys := by
+  induction argTys generalizing args with
+  | nil =>
+    simp only [List.foldrM_nil, SetGen.Set.mem_pure]
+    constructor
+    · rintro rfl; exact .nil
+    · intro h; cases h; rfl
+  | cons σ rest ih =>
+    simp only [List.foldrM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    constructor
+    · rintro ⟨acc, hacc, x, hx, rfl⟩
+      exact .cons hx ((ih _).mp hacc)
+    · intro h
+      match args, h with
+      | _ :: _, .cons harg htail =>
+        exact ⟨_, (ih _).mpr htail, _, harg, rfl⟩
+
+/-- If `(name, argTys) ∈ findOpsInCtx octx τ`, then `(name, argTys.foldr arrow τ) ∈ octx`
+    and `argTys` is non-empty. -/
+private theorem findOpsInCtx_mem {octx : OpCtx} {τ : LMonoTy}
+    {name : String} {argTys : List LMonoTy}
+    (h : (name, argTys) ∈ findOpsInCtx octx τ) :
+    (name, argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∈ octx ∧ argTys ≠ [] := by
+  simp only [findOpsInCtx, List.mem_filterMap] at h
+  obtain ⟨⟨n, ty⟩, hmem, hfilt⟩ := h
+  simp only at hfilt
+  split at hfilt
+  · rename_i arg args hargs
+    simp only [Option.some.injEq, Prod.mk.injEq] at hfilt
+    obtain ⟨rfl, rfl⟩ := hfilt
+    refine ⟨?_, List.cons_ne_nil _ _⟩
+    have heq := argsForResult_eq ty τ (arg :: args) hargs
+    rw [heq] at hmem
+    exact hmem
+  · simp at hfilt
+
 /-- Soundness of `genLExpr`: every generated expression is well-typed.
     This combines the soundness of the Indir rule with `genLExprBase_sound`. -/
 theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
@@ -1593,6 +1635,37 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
   simp only [mem_support_iff, SetGen.mem_dite, pick_mem_iff] at he
   rcases he with ⟨hpos, he | he⟩ | ⟨_, he⟩
   · -- Indir path: fully-applied operator
-    sorry
+    simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
+    set ops := findOpsInCtx octx τ
+    have hlt : idx.down < ops.length := by omega
+    set entry := ops.getD idx.down ("", [])
+    have hentry_eq : entry = ops[idx.down] := by
+      simp [entry, List.getElem?_eq_getElem hlt]
+    have hentry_mem : entry ∈ ops := hentry_eq ▸ List.getElem_mem hlt
+    set name := entry.1
+    set argTys := entry.2
+    set fullTy := argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+    set base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
+    have ⟨hoctx_mem, _⟩ := findOpsInCtx_mem hentry_mem
+    have hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
+    have hforall₂ := (mem_foldrM_cons_iff
+      (genLExprBase fctx octx tvars bctx depth) argTys args).mp hargs
+    have hfull : SimpleType fullTy := hSimpleOps _ hoctx_mem
+    have hargs_typed : List.Forall₂ (HasTypeA' bctx) args argTys := by
+      suffices h : ∀ (tys : List LMonoTy) (es : List LExpr'),
+          (∀ σ ∈ tys, SimpleType σ) →
+          List.Forall₂ (fun arg σ => arg ∈ (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth σ)) es tys →
+          List.Forall₂ (HasTypeA' bctx) es tys from
+        h argTys args (simpleType_of_foldr_mem argTys τ hfull) hforall₂
+      intro tys es hsimple hf₂
+      induction hf₂ with
+      | nil => exact .nil
+      | @cons e ty _ _ hmem _ ih =>
+        exact .cons
+          (genLExprBase_sound fctx octx tvars bctx depth ty
+            (hsimple ty List.mem_cons_self) e hmem)
+          (ih (fun σ' hσ' => hsimple σ' (List.mem_cons_of_mem _ hσ')))
+    exact mkApps_hasType bctx base args argTys τ hbase hargs_typed
   · exact genLExprBase_sound fctx octx tvars bctx depth τ hτ e he
   · exact genLExprBase_sound fctx octx tvars bctx depth τ hτ e he
