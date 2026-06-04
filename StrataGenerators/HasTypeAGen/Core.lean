@@ -501,15 +501,20 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
   if h : (findOpsInCtx octx τ).length > 0 then
     pick
       (fun () => do
+        -- Find all operators `ops` in the context that when fully applied,
+        -- produces a term of the result type `τ`
         let ops := findOpsInCtx octx τ
+        -- Randomly choose one of these operators
         let idx ← choose 0 (ops.length - 1) (by omega)
         let (name, argTys) := ops.getD idx.down ("", [])
-        let fullTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
-        let base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
-        let args ← argTys.foldrM (init := ([] : List LExpr')) fun σ acc => do
-          let arg ← genLExprBase fctx octx tvars bctx depth σ
-          pure (arg :: acc)
-        pure (mkApps base args))
+        -- Construct the `LExpr` corresponding to the chosen `op`
+        let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
+        let opExpr := .op () ⟨name, ()⟩ (some fullArrowTy)
+        -- Iterate through the argument types in order
+        -- and generate successive random terms of those types
+        let args ← List.mapM (genLExprBase fctx octx tvars bctx depth) argTys
+        -- Then, apply the operator to all the args
+        pure (mkApps opExpr args))
       (fun () => genLExprBase fctx octx tvars bctx depth τ)
   else
     genLExprBase fctx octx tvars bctx depth τ

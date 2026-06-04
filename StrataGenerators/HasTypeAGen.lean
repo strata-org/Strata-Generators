@@ -1580,28 +1580,27 @@ theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
   | nil => exact hbase
   | cons harg _ ih => exact ih _ (LExpr.HasTypeA.app hbase harg)
 
-/-- Membership in the `foldrM`-cons pattern on `SetGen.Set`: `args` is in the support
-    iff each element is pointwise in the support of `f` at the corresponding type. -/
-private theorem mem_foldrM_cons_iff (f : LMonoTy → SetGen.Set LExpr')
+/-- Membership in `List.mapM f l` on `SetGen.Set`: `args` is in the support
+    iff each element is pointwise in the support of `f` at the corresponding input. -/
+private theorem mem_mapM_iff (f : LMonoTy → SetGen.Set LExpr')
     (argTys : List LMonoTy) (args : List LExpr') :
-    args ∈ (argTys.foldrM (m := SetGen.Set) (init := ([] : List LExpr')) fun σ acc => do
-      let x ← f σ; pure (x :: acc)) ↔
+    args ∈ (List.mapM (m := SetGen.Set) f argTys) ↔
     List.Forall₂ (fun arg σ => arg ∈ f σ) args argTys := by
   induction argTys generalizing args with
   | nil =>
-    simp only [List.foldrM_nil, SetGen.Set.mem_pure]
+    simp only [List.mapM_nil, SetGen.Set.mem_pure]
     constructor
     · rintro rfl; exact .nil
     · intro h; cases h; rfl
   | cons σ rest ih =>
-    simp only [List.foldrM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    simp only [List.mapM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
     constructor
-    · rintro ⟨acc, hacc, x, hx, rfl⟩
-      exact .cons hx ((ih _).mp hacc)
+    · rintro ⟨x, hx, tl, htl, rfl⟩
+      exact .cons hx ((ih _).mp htl)
     · intro h
       match args, h with
       | _ :: _, .cons harg htail =>
-        exact ⟨_, (ih _).mpr htail, _, harg, rfl⟩
+        exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
 
 /-- If `(name, argTys) ∈ findOpsInCtx octx τ`, then `(name, argTys.foldr arrow τ) ∈ octx`
     and `argTys` is non-empty. -/
@@ -1649,7 +1648,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx)
     set base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
     have ⟨hoctx_mem, _⟩ := findOpsInCtx_mem hentry_mem
     have hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
-    have hforall₂ := (mem_foldrM_cons_iff
+    have hforall₂ := (mem_mapM_iff
       (genLExprBase fctx octx tvars bctx depth) argTys args).mp hargs
     have hfull : SimpleType fullTy := hSimpleOps _ hoctx_mem
     have hargs_typed : List.Forall₂ (HasTypeA' bctx) args argTys := by
