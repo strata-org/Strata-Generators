@@ -1,6 +1,6 @@
 # strata-generators
 
-Random generators for [Strata](https://github.com/strata-org/strata) via [Basalt](https://github.com/hgoldstein95/basalt), with proved soundness and completeness.
+(Work in progress) Experiments with random generators for [Strata](https://github.com/strata-org/strata) via [Basalt](https://github.com/hgoldstein95/basalt).
 
 ## Well-typed generators
 
