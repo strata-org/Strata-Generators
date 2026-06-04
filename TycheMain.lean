@@ -188,39 +188,6 @@ def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : 
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
   return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled), d⟩
 
--- ── Evaluates-to-value property ──────────────────────────────────────
-
-/-- Result of generating an expression and checking whether it evaluates to a value. -/
-structure EvalToValueResult where
-  expr : LExpr'
-  expectedTy : LMonoTy
-  evaled : LExpr'
-  evaledIsValue : Bool
-  generatorSize : Nat
-
-instance : Tyche.TycheSample EvalToValueResult where
-  toSample r :=
-    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
-      status := if r.evaledIsValue then .passed else .failed
-      features := [
-        ("is_value", .nominal (if r.evaledIsValue then "yes" else "no")),
-        ("type_kind", .nominal (typeKind r.expectedTy)),
-        ("input_depth", .ordinal (exprDepth r.expr)),
-        ("input_size", .ordinal (exprSize r.expr)),
-        ("output_size", .ordinal (exprSize r.evaled)),
-        ("expr_kind", .nominal (exprKind r.expr)),
-        ("generator_size", .ordinal r.generatorSize)
-      ] }
-
-/-- Generate a closed expression, evaluate it, and check if the result is a value.
-    Uses empty fctx since normalization is stated for the empty context. -/
-def genAndCheckValue (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalToValueResult := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithFactory (G := IO) [] intBoolFactory tvars [] d ty
-  let evaled := eval 100 expr
-  return ⟨expr, ty, evaled, isValue evaled, d⟩
-
 -- ── Eval progress property ───────────────────────────────────────────
 
 /-- Result of checking whether `LExpr.eval` makes progress on a generated term. -/
@@ -259,73 +226,6 @@ def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", 
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, !(expr == evaled), isValue expr, d⟩
 
--- ── Eval idempotence property ────────────────────────────────────────
-
-structure EvalIdempotentResult where
-  expr : LExpr'
-  expectedTy : LMonoTy
-  evaled : LExpr'
-  evaledAgain : LExpr'
-  isIdempotent : Bool
-  generatorSize : Nat
-
-instance : Tyche.TycheSample EvalIdempotentResult where
-  toSample r :=
-    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
-      status := if r.isIdempotent then .passed else .failed
-      features := [
-        ("idempotent", .nominal (if r.isIdempotent then "yes" else "no")),
-        ("type_kind", .nominal (typeKind r.expectedTy)),
-        ("input_size", .ordinal (exprSize r.expr)),
-        ("output_size", .ordinal (exprSize r.evaled)),
-        ("expr_kind", .nominal (exprKind r.expr)),
-        ("generator_size", .ordinal r.generatorSize)
-      ] }
-
--- TODO: generate terms w/ free vars (we can use a fixed context for now)
-
--- TODO: this may not be true in general
-def genAndCheckIdempotent (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalIdempotentResult := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithFactory (G := IO) defaultFCtx intBoolFactory tvars [] d ty
-  let evaled := eval 100 expr
-  let evaledAgain := eval 100 evaled
-  return ⟨expr, ty, evaled, evaledAgain, evaled == evaledAgain, d⟩
-
--- ── Eval monotonicity property ───────────────────────────────────────
-
-structure EvalMonotoneResult where
-  expr : LExpr'
-  expectedTy : LMonoTy
-  evaled50 : LExpr'
-  evaled100 : LExpr'
-  evaled100From50 : LExpr'
-  isMonotone : Bool
-  generatorSize : Nat
-
-instance : Tyche.TycheSample EvalMonotoneResult where
-  toSample r :=
-    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled100}"
-      status := if r.isMonotone then .passed else .failed
-      features := [
-        ("monotone", .nominal (if r.isMonotone then "yes" else "no")),
-        ("type_kind", .nominal (typeKind r.expectedTy)),
-        ("input_size", .ordinal (exprSize r.expr)),
-        ("output_size", .ordinal (exprSize r.evaled100)),
-        ("expr_kind", .nominal (exprKind r.expr)),
-        ("generator_size", .ordinal r.generatorSize)
-      ] }
-
-def genAndCheckMonotone (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalMonotoneResult := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithFactory (G := IO) defaultFCtx intBoolFactory tvars [] d ty
-  let evaled50 := eval 50 expr
-  let evaled100 := eval 100 expr
-  let evaled100From50 := eval 50 evaled50
-  return ⟨expr, ty, evaled50, evaled100, evaled100From50, evaled100 == evaled100From50, d⟩
-
 -- ── Fvar preservation property ───────────────────────────────────────
 
 structure FvarPreservationResult where
@@ -358,40 +258,6 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   let preserved := outputFvars.all (· ∈ inputFvars)
   return ⟨expr, ty, evaled, preserved, d⟩
 
--- ── Size non-increase property ───────────────────────────────────────
-
-structure SizeResult where
-  expr : LExpr'
-  expectedTy : LMonoTy
-  evaled : LExpr'
-  inputSize : Nat
-  outputSize : Nat
-  sizeNonIncreased : Bool
-  generatorSize : Nat
-
-instance : Tyche.TycheSample SizeResult where
-  toSample r :=
-    { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
-      status := if r.sizeNonIncreased then .passed else .failed
-      features := [
-        ("size_ok", .nominal (if r.sizeNonIncreased then "yes" else "no")),
-        ("type_kind", .nominal (typeKind r.expectedTy)),
-        ("input_size", .ordinal r.inputSize),
-        ("output_size", .ordinal r.outputSize),
-        ("size_reduction", .ordinal (r.inputSize - r.outputSize)),
-        ("expr_kind", .nominal (exprKind r.expr)),
-        ("generator_size", .ordinal r.generatorSize)
-      ] }
-
-def genAndCheckSize (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO SizeResult := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithFactory (G := IO) defaultFCtx intBoolFactory tvars [] d ty
-  let evaled := eval 100 expr
-  let inputSize := exprSize expr
-  let outputSize := exprSize evaled
-  return ⟨expr, ty, evaled, inputSize, outputSize, outputSize ≤ inputSize, d⟩
-
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -419,13 +285,6 @@ def main (args : List String) : IO Unit := do
   handle.putStr evContent
   IO.FS.removeFile (outputPath ++ ".ev")
 
-  -- Run the evaluates-to-value property
-  Tyche.run (genAndCheckValue)
-    { numSamples, propertyName := "Closed LExprs evaluate to values", outputPath := outputPath ++ ".val" }
-  let valContent ← IO.FS.readFile (outputPath ++ ".val")
-  handle.putStr valContent
-  IO.FS.removeFile (outputPath ++ ".val")
-
   -- Run the eval progress property
   Tyche.run (genAndCheckProgress)
     { numSamples, propertyName := "LExpr.eval makes progress on closed terms", outputPath := outputPath ++ ".prog" }
@@ -433,33 +292,12 @@ def main (args : List String) : IO Unit := do
   handle.putStr progContent
   IO.FS.removeFile (outputPath ++ ".prog")
 
-  -- Run the eval idempotence property
-  Tyche.run (genAndCheckIdempotent)
-    { numSamples, propertyName := "LExpr.eval is idempotent", outputPath := outputPath ++ ".idem" }
-  let idemContent ← IO.FS.readFile (outputPath ++ ".idem")
-  handle.putStr idemContent
-  IO.FS.removeFile (outputPath ++ ".idem")
-
-  -- Run the eval monotonicity property
-  Tyche.run (genAndCheckMonotone)
-    { numSamples, propertyName := "LExpr.eval is monotone in fuel", outputPath := outputPath ++ ".mono" }
-  let monoContent ← IO.FS.readFile (outputPath ++ ".mono")
-  handle.putStr monoContent
-  IO.FS.removeFile (outputPath ++ ".mono")
-
   -- Run the fvar preservation property
   Tyche.run (genAndCheckFvarPreservation)
     { numSamples, propertyName := "LExpr.eval preserves fvars", outputPath := outputPath ++ ".cls" }
   let clsContent ← IO.FS.readFile (outputPath ++ ".cls")
   handle.putStr clsContent
   IO.FS.removeFile (outputPath ++ ".cls")
-
-  -- Run the size non-increase property
-  Tyche.run (genAndCheckSize)
-    { numSamples, propertyName := "LExpr.size does not increase under eval", outputPath := outputPath ++ ".sz" }
-  let szContent ← IO.FS.readFile (outputPath ++ ".sz")
-  handle.putStr szContent
-  IO.FS.removeFile (outputPath ++ ".sz")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow

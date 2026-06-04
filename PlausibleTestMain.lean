@@ -125,41 +125,6 @@ def prop_progress (te : ClosedTypedExpr) : Bool :=
   let evaled := eval 100 te.expr
   isValue te.expr || !(te.expr == evaled)
 
--- Normalization (closed terms only): every closed well-typed expression
--- evaluates to a canonical value. Stated for the empty context.
--- Falsified by (1) stuck quantifiers (as above) and (2) equality of lambdas
--- with non-identical bodies (e.g. `(λx. x+1) == (λx. 1+x)`), where
--- `LExpr.eql` returns `none` (inconclusive) and the `==` node gets stuck.
-def prop_normalization (te : ClosedTypedExpr) : Bool :=
-  let evaled := eval 100 te.expr
-  isValue evaled
-
--- Idempotence: evaluating an already-evaluated expression again produces
--- the same result. This follows from the structure of `LExpr.eval`
--- (LExprEval.lean:207): it returns `e` unchanged when `isCanonicalValue` is
--- true, and stuck terms have no applicable reduction rules.
--- Inspired by `LExprEvalTests.lean:78` (`check`) which verifies eval reaches
--- a fixpoint.
-
--- Note: this doesn't hold because it is fuel-based
-def prop_eval_idempotent (te : TypedExpr) : Bool :=
-  let evaled := eval 100 te.expr
-  let evaled2 := eval 100 evaled
-  evaled == evaled2
-
--- Monotonicity (fuel composability): `eval 100 e == eval 50 (eval 50 e)`.
--- Since eval is deterministic and fuel-bounded, splitting fuel across two
--- calls should produce the same result as using it all at once.
--- Inspired by `eval_StepStar` (Semantics.lean:2926) which proves eval traces
--- a sequence of `Step`s — the same sequence regardless of how fuel is split.
-
--- TODO: we need to make sure we have enough fuel
-def prop_eval_monotone (te : TypedExpr) : Bool :=
-  let evaled50 := eval 50 te.expr
-  let evaled100 := eval 100 te.expr
-  let evaled100_from50 := eval 50 evaled50
-  evaled100 == evaled100_from50
-
 -- Fvar preservation: evaluation does not introduce *new* free variables.
 -- Free variables from the context (x, f, n) may appear in both the input
 -- and output, but eval should not create fvars that weren't already present.
@@ -168,19 +133,6 @@ def prop_closedness_preservation (te : TypedExpr) : Bool :=
   let inputFvars := LExpr.collectFvarNames te.expr
   let outputFvars := LExpr.collectFvarNames evaled
   outputFvars.all (· ∈ inputFvars)
-
--- Size non-increase: evaluation should never grow the term. With an empty
--- factory (no function inlining), every reduction step either eliminates
--- structure (beta-reduction discards the lambda wrapper, ite-reduction
--- discards a branch) or leaves size unchanged (stuck terms).
--- Inspired by the termination arguments in `Semantics.lean` which rely on
--- `sizeOf` decreasing through reduction steps.
-
--- TODO: This won't hold since beta-reduction might
--- TODO: maybe depth? (not size?)
-def prop_size_non_increase (te : TypedExpr) : Bool :=
-  let evaled := eval 100 te.expr
-  LExpr.size LExprParamsT' evaled ≤ LExpr.size LExprParamsT' te.expr
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
@@ -209,11 +161,11 @@ def main (args : List String) : IO UInt32 := do
 
   let mut allPassed := true
 
-  -- if !(← checkProperty "typecheck"
-  --   (NamedBinder "te" (∀ te : TypedExpr, prop_typecheck te = true)) cfg) then
-  --   allPassed := false
+  if !(← checkProperty "generated terms typecheck"
+    (NamedBinder "te" (∀ te : TypedExpr, prop_typecheck te = true)) cfg) then
+    allPassed := false
 
-  if !(← checkProperty "type_preservation (closed)"
+  if !(← checkProperty "preservation (closed)"
     (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_preservation te = true)) cfg) then
     allPassed := false
 
@@ -221,24 +173,8 @@ def main (args : List String) : IO UInt32 := do
     (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_progress te = true)) cfg) then
     allPassed := false
 
-  if !(← checkProperty "normalization (closed)"
-    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_normalization te = true)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "eval_idempotent"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_eval_idempotent te = true)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "eval_monotone"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_eval_monotone te = true)) cfg) then
-    allPassed := false
-
   if !(← checkProperty "closedness_preservation"
     (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te = true)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "size_non_increase"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_size_non_increase te = true)) cfg) then
     allPassed := false
 
   IO.println ""
