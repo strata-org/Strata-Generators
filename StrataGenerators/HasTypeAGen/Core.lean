@@ -118,6 +118,15 @@ def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
   let idx ← choose 0 (names.length - 1) (by omega)
   pure (.op () ⟨names.getD idx.down "", ()⟩ (some τ))
 
+-- ── Biased choice combinator ─────────────────────────────────────────────
+
+/-- A biased binary choice: takes the first branch with probability 1/10 (and
+    the second with probability 9/10). Used at the outermost branch point of
+    recursive generator cases to heavily suppress the probability of trivial
+    base-case terms when depth budget remains. -/
+def RandomChoice.pickBiased [Monad m] [RandomChoice m] (x y : Unit → m α) := do
+  if (← coin (1 / 10)) then x () else y ()
+
 -- ── Type generator ───────────────────────────────────────────────────
 
 /-- Pick a uniformly random type variable name from `tvars` and return it
@@ -141,28 +150,22 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
            (fun () => pure .int)
   | n + 1 =>
     if h : tvars.length > 0 then
-      pick
-        (fun () => pure .bool)
+      pickBiased
+        (fun () => pick (fun () => pure .bool) (fun () => pure .int))
         (fun () =>
           pick
-            (fun () => pure .int)
-            (fun () =>
-              pick
-                (fun () => do
-                  let τ₁ ← genLMonoTy tvars n
-                  let τ₂ ← genLMonoTy tvars n
-                  pure (.arrow τ₁ τ₂))
-                (fun () => pickTyVar tvars h)))
-    else
-      pick
-        (fun () => pure .bool)
-        (fun () =>
-          pick
-            (fun () => pure .int)
             (fun () => do
               let τ₁ ← genLMonoTy tvars n
               let τ₂ ← genLMonoTy tvars n
-              pure (.arrow τ₁ τ₂)))
+              pure (.arrow τ₁ τ₂))
+            (fun () => pickTyVar tvars h))
+    else
+      pickBiased
+        (fun () => pick (fun () => pure .bool) (fun () => pure .int))
+        (fun () => do
+          let τ₁ ← genLMonoTy tvars n
+          let τ₂ ← genLMonoTy tvars n
+          pure (.arrow τ₁ τ₂))
 
 -- ── Expression sub-generator combinators ─────────────────────────────────
 -- These combinators take in the generators that they invoke as explicit arguments,
@@ -282,7 +285,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                 else genBoolConst)))
   | n + 1, .bool =>
     let bvars := bvarsOfType bctx .bool
-    pick
+    pickBiased
       (fun () => genBoolConst)
       (fun () =>
         pick
@@ -348,7 +351,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                 else genIntConst)))
   | n + 1, .int =>
     let bvars := bvarsOfType bctx .int
-    pick
+    pickBiased
       (fun () => genIntConst)
       (fun () =>
         pick
@@ -478,7 +481,8 @@ def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
 def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
   if h : (findOpsInCtx octx τ).length > 0 then
-    pick
+    pickBiased
+      (fun () => genLExprBase fctx octx tvars bctx depth τ)
       (fun () => do
         -- Find all operators `ops` in the context that when fully applied,
         -- produces a term of the result type `τ`
@@ -494,7 +498,6 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
         let args ← List.mapM (genLExprBase fctx octx tvars bctx depth) argTys
         -- Then, apply the operator to all the args
         pure (mkApps opExpr args))
-      (fun () => genLExprBase fctx octx tvars bctx depth τ)
   else
     genLExprBase fctx octx tvars bctx depth τ
 
