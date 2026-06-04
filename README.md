@@ -61,8 +61,16 @@ Basalt's [`PlausibleGen`](https://github.com/hgoldstein95/basalt/blob/main/Basal
 
 3. Build:
    ```bash
-   lake build
+   make build
    ```
+
+### Makefile targets
+
+| Target | Description |
+|--------|-------------|
+| `make build` | Build all Lean sources (`lake build`) |
+| `make tyche` | Build and run the Tyche visualization executable |
+| `make test` | Build and run the Plausible test suite |
 
 ## Property-based testing
 
