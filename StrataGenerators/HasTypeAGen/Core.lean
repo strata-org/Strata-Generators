@@ -210,6 +210,17 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   let e₂ ← genExpr τ'
   pure (.eq () e₁ e₂)
 
+/-- Generate a quantifier (∀ or ∃) expression. Picks a binder type and a
+    trigger type (the trigger is used for SMT in the LExpr grammar but is otherwise unused by the generator),
+    then generates the terms for the trigger and body in the extended context. -/
+@[reducible] def genQuant [Gen G] (k : QuantifierKind) (genTy : G LMonoTy)
+    (genTrigger : LMonoTy → LMonoTy → G LExpr') (genBody : LMonoTy → G LExpr') : G LExpr' := do
+  let τ' ← genTy
+  let τ_trigger ← genTy
+  let trigger ← genTrigger τ' τ_trigger
+  let body ← genBody τ'
+  pure (.quant () k "" (some τ') trigger body)
+
 -- ── Expression generator ─────────────────────────────────────────────
 
 /-- Generate a well-typed `LExpr` of type `τ` with term depth bounded by the
@@ -300,20 +311,14 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                   (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .bool)
                   (fun () =>
                     pick
-                      (fun () => do
-                        let τ' ← genLMonoTy tvars n
-                        let τ_tr ← genLMonoTy tvars n
-                        let tr ← genLExprBase fctx octx tvars (τ' :: bctx) n τ_tr
-                        let body ← genLExprBase fctx octx tvars (τ' :: bctx) n .bool
-                        pure (.quant () .all "" (some τ') tr body))
+                      (fun () => genQuant .all (genLMonoTy tvars n)
+                        (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
+                        (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool))
                       (fun () =>
                         pick
-                          (fun () => do
-                            let τ' ← genLMonoTy tvars n
-                            let τ_tr ← genLMonoTy tvars n
-                            let tr ← genLExprBase fctx octx tvars (τ' :: bctx) n τ_tr
-                            let body ← genLExprBase fctx octx tvars (τ' :: bctx) n .bool
-                            pure (.quant () .exist "" (some τ') tr body))
+                          (fun () => genQuant .exist (genLMonoTy tvars n)
+                            (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
+                            (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool))
                           (fun () =>
                             pick
                               (fun () =>
