@@ -20,7 +20,7 @@ do
 
 *A priori*, the generator doesn't know what the argument type `τ'` ought to be, so it needs to generate some random type `τ'`. 
 However, if your library functions have multiple arguments, each of which are different type, e.g. 
-`take : Int -> String -> String`^[take] 
+`take : Int -> String -> String` ^[1] 
 
 
 
@@ -40,4 +40,4 @@ def genApp [Gen G] (genTy : G LMonoTy) (genExpr : LMonoTy → G LExpr') (τ : LM
 ... genApp genTy (genLExpr Γ) τ
 ```
 
-[^take]: `take n s` extracts the first `n` characters of the string `s`. This is a function from the [Haskell standard library](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Prelude.html#v:take), picked purely for illustrative purposes.  
+[^1]: `take n s` extracts the first `n` characters of the string `s`. This is a function from the [Haskell standard library](https://hackage-content.haskell.org/package/base-4.22.0.0/docs/Prelude.html#v:take), picked purely for illustrative purposes.  
