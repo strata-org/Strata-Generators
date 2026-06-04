@@ -130,6 +130,12 @@ instance : Arbitrary ClosedTypedExpr where
 
 -- ── Pretty-printing ──────────────────────────────────────────────────
 
+instance : Repr LExpr' where
+  reprPrec e _ := ppExpr e
+
+instance : Repr LMonoTy where
+  reprPrec τ _ := ppType τ
+
 open Std in
 instance : ToFormat Unit where
   format _ := .nil
@@ -152,33 +158,38 @@ instance : ToFormat Unit where
 --     is the identity (proved in LExprEvalTests.lean:106), so this property
 --     holds trivially and we omit it.
 
+-- Properties are `@[reducible]` so that Lean's typeclass resolution can
+-- unfold them to find `Decidable` instances for the underlying propositions
+-- (e.g. `DecidableEq` for `=`). Without this, Plausible's `decidableTestable`
+-- instance sees an opaque `Prop` and fails to synthesize `Testable`.
+
 -- Soundness of the generator: every generated expression typechecks
 -- to the type it was generated for. (Works for both open and closed terms
 -- since HasTypeA trusts fvar annotations.)
-def prop_typecheck (te : TypedExpr) : Bool :=
-  LExpr.typeCheck (T := LExprParams') [] te.expr == some te.ty
+@[reducible] def prop_typecheck (te : TypedExpr) : Prop :=
+  LExpr.typeCheck (T := LExprParams') [] te.expr = some te.ty
 
 -- Preservation (closed terms only): if ∅ ⊢ e : τ and e →* e', then ∅ ⊢ e' : τ.
-def prop_preservation (te : ClosedTypedExpr) : Bool :=
+@[reducible] def prop_preservation (te : ClosedTypedExpr) : Prop :=
   let evaled := eval 100 te.expr
-  LExpr.typeCheck (T := LExprParams') [] evaled == some te.ty
+  LExpr.typeCheck (T := LExprParams') [] evaled = some te.ty
 
 -- Progress (closed terms only): a well-typed closed term is either a value
 -- or can take a step. Stated for the empty context per Software Foundations.
 -- Falsified by quantifiers (`∀`/`∃`) — `LExpr.eval` has no reduction rule
 -- for them, so `if (∀x. e) then ...` gets stuck.
-def prop_progress (te : ClosedTypedExpr) : Bool :=
+@[reducible] def prop_progress (te : ClosedTypedExpr) : Prop :=
   let evaled := eval 100 te.expr
-  isValue te.expr || !(te.expr == evaled)
+  isValue te.expr = true ∨ te.expr ≠ evaled
 
 -- Fvar preservation: evaluation does not introduce *new* free variables.
 -- Free variables from the context (x, f, n) may appear in both the input
 -- and output, but eval should not create fvars that weren't already present.
-def prop_closedness_preservation (te : TypedExpr) : Bool :=
+@[reducible] def prop_closedness_preservation (te : TypedExpr) : Prop :=
   let evaled := eval 100 te.expr
   let inputFvars := LExpr.collectFvarNames te.expr
   let outputFvars := LExpr.collectFvarNames evaled
-  outputFvars.all (· ∈ inputFvars)
+  outputFvars.all (· ∈ inputFvars) = true
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
@@ -207,20 +218,26 @@ def main (args : List String) : IO UInt32 := do
 
   let mut allPassed := true
 
+  -- `NamedBinder` wraps the quantified proposition so that Plausible's
+  -- `varTestable` instance can match on `∀ x : α, β x`. Without it,
+  -- `Testable.checkIO` (which works in `IO`, unlike `Testable.check` which
+  -- uses `CoreM` and the `mk_decorations` tactic) cannot find a `Testable`
+  -- instance for bare `∀`-propositions. The string argument ("te") labels
+  -- the variable in counterexample output.
   if !(← checkProperty "generated terms typecheck"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_typecheck te = true)) cfg) then
+    (NamedBinder "te" (∀ te : TypedExpr, prop_typecheck te)) cfg) then
     allPassed := false
 
   if !(← checkProperty "preservation (closed)"
-    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_preservation te = true)) cfg) then
+    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_preservation te)) cfg) then
     allPassed := false
 
   if !(← checkProperty "progress (closed)"
-    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_progress te = true)) cfg) then
+    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_progress te)) cfg) then
     allPassed := false
 
   if !(← checkProperty "closedness_preservation"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te = true)) cfg) then
+    (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te)) cfg) then
     allPassed := false
 
   IO.println ""
