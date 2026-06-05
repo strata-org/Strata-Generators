@@ -1,11 +1,11 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen", "StrataGenerators.CmdHasTypeAGen"]
 
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "fc9997af8cc41c48321ce92b5dd482910fe375eb"
+rev = "010194b27c35c37a625dee3a28def807205346b9"
 
 [[require]]
 name = "basalt"
@@ -42,6 +42,16 @@ roots = ["StrataGenerators.HasTypeGen"]
 [[lean_lib]]
 name = "StrataGenerators.STLC"
 roots = ["StrataGenerators.STLC"]
+
+# Core Cmd generator definitions (no Mathlib)
+[[lean_lib]]
+name = "StrataGenerators.CmdHasTypeAGen.Core"
+roots = ["StrataGenerators.CmdHasTypeAGen.Core"]
+
+# The CmdHasTypeA generator with soundness/completeness proofs
+[[lean_lib]]
+name = "StrataGenerators.CmdHasTypeAGen"
+roots = ["StrataGenerators.CmdHasTypeAGen"]
 
 # Shared SetGen infrastructure (no conflicting imports)
 [[lean_lib]]

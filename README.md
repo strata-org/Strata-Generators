@@ -35,6 +35,35 @@ theorem genLExpr_complete : HasTypeA' bctx e τ ∧ termDepth bctx e ≤ depth �
 theorem genLExpr_termDepth_bound : e ∈ support (genLExpr ...) → termDepth bctx e ≤ depth
 ```
 
+## Well-typed command generator
+
+[`StrataGenerators/CmdHasTypeAGen.lean`](./StrataGenerators/CmdHasTypeAGen.lean) generates well-typed imperative commands (`Cmd Expression`) satisfying the `CmdHasTypeA` relation from `Strata.Languages.Core.CmdTypeSpec`.
+
+### CmdHasTypeAGen module structure
+
+| File | Imports | Purpose |
+|------|---------|---------|
+| [`CmdHasTypeAGen/Core.lean`](./StrataGenerators/CmdHasTypeAGen/Core.lean) | `Basalt.Gen`, Strata CmdTypeSpec, HasTypeAGen/Core | Generator definitions: `genCmd`, sub-generators, `VarCtx` |
+| [`CmdHasTypeAGen.lean`](./StrataGenerators/CmdHasTypeAGen.lean) | Core + `SetGen` | Soundness and completeness proofs |
+
+**Architecture**: The generator maintains a flat `VarCtx` (list of name-type pairs) representing the monomorphic typing context. It dispatches to sub-generators for each command form (`init_det`, `init_nondet`, `set_det`, `set_nondet`, `assert`, `assume`, `cover`), using `genLExpr` from `HasTypeAGen/Core.lean` to produce well-typed expressions for right-hand sides.
+
+### Key theorems
+
+```lean
+-- Soundness: generated commands satisfy CmdHasTypeA
+theorem genAssertCmd_sound : HasTypeA [] e .bool → CmdHasTypeA C Γ (.assert "" e default) Γ
+theorem genInitDet_sound   : fresh x → HasTypeA [] e mty → x ∉ vars(e) → CmdHasTypeA C Γ (init x ...) Γ'
+theorem genSetDet_sound    : Γ.find? x = some (.forAll [] mty) → HasTypeA [] e mty → CmdHasTypeA C Γ (set x ...) Γ
+
+-- Completeness: reachable expressions yield reachable command results
+theorem genAssertCmd_complete : e ∈ support (genLExpr ...) → result ∈ support (genAssertCmd ...)
+theorem genSetDet_complete    : ctx[idx] = (name, mty) → e ∈ support (genLExpr ... mty) → result ∈ support (genSetDet ...)
+
+-- Embedding: sub-generator results are reachable from the top-level genCmd
+theorem genCmd_reaches_assert : r ∈ support (genAssertCmd ...) → r ∈ support (genCmd ...)
+```
+
 ## STLC generator
 
 [`StrataGenerators/STLC.lean`](./StrataGenerators/STLC.lean) contains a standalone STLC (simply-typed lambda calculus with naturals and addition) generator with full soundness and completeness proofs. Ported from the internal Basalt repo.
@@ -151,16 +180,20 @@ Design notes and proof explanations live in [`docs/`](./docs/):
 | [`llm_stlc_generator_synthesis.md`](./docs/llm_stlc_generator_synthesis.md) | Notes on using Kiro to synthesize a correct STLC generator |
 | [`strata-import-collision.md`](./docs/strata-import-collision.md) | Details of the `List.Forall2` import conflict between Strata and Batteries |
 | [`hastype-gen-plan.md`](./docs/hastype-gen-plan.md) | Design plan for the `HasType` generator (locally-nameless) |
+| [`CmdHasTypeAGen-docs.md`](./docs/CmdHasTypeAGen-docs.md) | Architecture and proof structure of the `CmdHasTypeA` command generator |
 
 ## Module structure
 
 ```
 StrataGenerators/
-  HasTypeAGen.lean              -- Soundness/completeness/depth-bound proofs
+  HasTypeAGen.lean              -- Soundness/completeness/depth-bound proofs (LExpr)
   HasTypeAGen/
     Core.lean                   -- Definition of the `genLExpr` generator
-    Defs.lean                   -- `genLExprWithFactory` (variant of the generator which takes in a Strata Lambda `Factory`)
+    Defs.lean                   -- `genLExprWithFactory` (variant taking a Strata Lambda `Factory`)
     TestSupport.lean            -- Shared test utilities (eval, isValue, intBoolFactory)
+  CmdHasTypeAGen.lean           -- Soundness/completeness proofs (Cmd)
+  CmdHasTypeAGen/
+    Core.lean                   -- Definition of the `genCmd` generator
   HasTypeGen.lean               -- HasType generator (locally-nameless, outdated)
   STLC.lean                     -- STLC generator + proofs
   SetGen.lean                   -- SetGen framework (vendored from Basalt)
