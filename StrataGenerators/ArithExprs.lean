@@ -44,7 +44,7 @@ def genTy [Gen G] : G Ty :=
   pick (fun _ => return .Nat) (fun _ => return .Bool)
 
 -- Generates a random well-typed arithmetic expr
-def genExpr [Gen G] (size : ℕ) (τ : Ty) : G Expr :=
+@[simp] def genExpr [Gen G] (size : ℕ) (τ : Ty) : G Expr :=
   match size, τ with
   | 0, .Nat => return .Zero
   | 0, .Bool => pick (fun _ => return .True) (fun _ => return .False)
@@ -108,7 +108,7 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
       cases H with
       | inl HIsZero =>
         rw [mem_support_bind_iff] at HIsZero
-        obtain ⟨ e', ⟨ He', He ⟩ ⟩ := HIsZero
+        rcases HIsZero with ⟨ e', He', He ⟩
         rw [mem_support_pure_iff] at He
         rw [He]
         constructor
@@ -116,30 +116,21 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         assumption
       | inr HIf =>
         rw [mem_support_bind_iff] at HIf
-        obtain ⟨ e1, ⟨ He1, H ⟩ ⟩ := HIf
+        rcases HIf with ⟨ e1, He1, H ⟩
         rw [mem_support_bind_iff] at H
-        obtain ⟨ e2, ⟨ He2, H ⟩ ⟩ := H
+        rcases H with ⟨ e2, He2, H ⟩
         rw [mem_support_bind_iff] at H
-        obtain ⟨ e3, ⟨ He3, H ⟩ ⟩ := H
+        rcases H with ⟨ e3, He3, H ⟩
         rw [mem_support_pure_iff] at H
         rw [H]
-        constructor
-        . -- HasType e1 Bool
-          apply ih
-          assumption
-        . -- HasType e2 Bool
-          apply ih
-          assumption
-        . -- HasType e3 Bool
-          apply ih
-          assumption
+        constructor <;> (apply ih; assumption)
     | Nat =>
       dsimp [genExpr] at H
       rw [mem_support_pick_iff] at H
       cases H with
       | inl HSucc =>
         rw [mem_support_bind_iff] at HSucc
-        obtain ⟨ e', ⟨ He', He ⟩ ⟩ := HSucc
+        rcases HSucc with ⟨ e', He', He ⟩
         rw [mem_support_pure_iff] at He
         rw [He]
         constructor
@@ -150,7 +141,7 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         cases H with
         | inl HPred =>
           rw [mem_support_bind_iff] at HPred
-          obtain ⟨ e', ⟨ He', He ⟩ ⟩ := HPred
+          rcases HPred with ⟨ e', He', He ⟩
           rw [mem_support_pure_iff] at He
           rw [He]
           constructor
@@ -158,20 +149,11 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
           assumption
         | inr HIf =>
           rw [mem_support_bind_iff] at HIf
-          obtain ⟨ e1, ⟨ He1, H ⟩ ⟩ := HIf
+          rcases HIf with ⟨ e1, He1, H ⟩
           rw [mem_support_bind_iff] at H
-          obtain ⟨ e2, ⟨ He2, H ⟩ ⟩ := H
+          rcases H with ⟨ e2, He2, H ⟩
           rw [mem_support_bind_iff] at H
-          obtain ⟨ e3, ⟨ He3, H ⟩ ⟩ := H
+          rcases H with ⟨ e3, He3, H ⟩
           rw [mem_support_pure_iff] at H
           rw [H]
-          constructor
-          . -- HasType e1 Bool
-            apply ih
-            assumption
-          . -- HasType e2 Nat
-            apply ih
-            assumption
-          . -- HasType e3 Nat
-            apply ih
-            assumption
+          constructor <;> (apply ih; assumption)
