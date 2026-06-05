@@ -43,6 +43,11 @@ roots = ["StrataGenerators.HasTypeGen"]
 name = "StrataGenerators.STLC"
 roots = ["StrataGenerators.STLC"]
 
+# Playground for experimenting with manually written Basalt proofs
+[[lean_lib]]
+name = "StrataGenerators.ArithExprs"
+roots = ["StrataGenerators.ArithExprs"]
+
 # Core Cmd generator definitions (no Mathlib)
 [[lean_lib]]
 name = "StrataGenerators.CmdHasTypeAGen.Core"
