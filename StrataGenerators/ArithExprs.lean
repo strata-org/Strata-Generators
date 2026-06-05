@@ -107,32 +107,22 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
       rw [mem_support_pick_iff] at H
       cases H with
       | inl HIsZero =>
-        rw [mem_support_bind_iff] at HIsZero
-        rcases HIsZero with ⟨ e', He', He ⟩
-        rw [mem_support_pure_iff] at He
-        rw [He]
+        simp only [mem_support_bind_iff, mem_support_pure_iff] at HIsZero
+        rcases HIsZero with ⟨ e', He', rfl ⟩
         constructor
         apply ih
         assumption
       | inr HIf =>
-        rw [mem_support_bind_iff] at HIf
-        rcases HIf with ⟨ e1, He1, H ⟩
-        rw [mem_support_bind_iff] at H
-        rcases H with ⟨ e2, He2, H ⟩
-        rw [mem_support_bind_iff] at H
-        rcases H with ⟨ e3, He3, H ⟩
-        rw [mem_support_pure_iff] at H
-        rw [H]
+        simp only [mem_support_bind_iff, mem_support_pure_iff] at HIf
+        rcases HIf with ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
         constructor <;> (apply ih; assumption)
     | Nat =>
       dsimp [genExpr] at H
       rw [mem_support_pick_iff] at H
       cases H with
       | inl HSucc =>
-        rw [mem_support_bind_iff] at HSucc
-        rcases HSucc with ⟨ e', He', He ⟩
-        rw [mem_support_pure_iff] at He
-        rw [He]
+        simp only [mem_support_bind_iff, mem_support_pure_iff] at HSucc
+        rcases HSucc with ⟨ e', He', rfl ⟩
         constructor
         apply ih
         assumption
@@ -140,20 +130,12 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         rw [mem_support_pick_iff] at H
         cases H with
         | inl HPred =>
-          rw [mem_support_bind_iff] at HPred
-          rcases HPred with ⟨ e', He', He ⟩
-          rw [mem_support_pure_iff] at He
-          rw [He]
+          simp only [mem_support_bind_iff, mem_support_pure_iff] at HPred
+          rcases HPred with ⟨ e', He', rfl ⟩
           constructor
           apply ih
           assumption
         | inr HIf =>
-          rw [mem_support_bind_iff] at HIf
-          rcases HIf with ⟨ e1, He1, H ⟩
-          rw [mem_support_bind_iff] at H
-          rcases H with ⟨ e2, He2, H ⟩
-          rw [mem_support_bind_iff] at H
-          rcases H with ⟨ e3, He3, H ⟩
-          rw [mem_support_pure_iff] at H
-          rw [H]
+          simp only [mem_support_bind_iff, mem_support_pure_iff] at HIf
+          rcases HIf with ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
           constructor <;> (apply ih; assumption)
