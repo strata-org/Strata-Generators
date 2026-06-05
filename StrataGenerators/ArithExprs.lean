@@ -50,29 +50,38 @@ def genTy [Gen G] : G Ty :=
   | 0, .Bool => pick (fun _ => return .True) (fun _ => return .False)
   | size' + 1, .Nat =>
     pick
-      (fun _ => do
-        let e ← genExpr size' .Nat
-        return .Succ e)
+      (fun _ => return .Zero)
       (fun _ =>
         pick
           (fun _ => do
             let e ← genExpr size' .Nat
-            return .Pred e)
-          (fun _ => do
-            let e1 ← genExpr size' .Bool
-            let e2 ← genExpr size' .Nat
-            let e3 ← genExpr size' .Nat
-            return .IfThenElse e1 e2 e3))
+            return .Succ e)
+          (fun _ =>
+            pick
+              (fun _ => do
+                let e ← genExpr size' .Nat
+                return .Pred e)
+              (fun _ => do
+                let e1 ← genExpr size' .Bool
+                let e2 ← genExpr size' .Nat
+                let e3 ← genExpr size' .Nat
+                return .IfThenElse e1 e2 e3)))
   | size' + 1, .Bool =>
     pick
-      (fun _ => do
-        let e ← genExpr size' .Nat
-        return .IsZero e)
-      (fun _ => do
-        let e1 ← genExpr size' .Bool
-        let e2 ← genExpr size' .Bool
-        let e3 ← genExpr size' .Bool
-        return .IfThenElse e1 e2 e3)
+      (fun _ => return .True)
+      (fun _ =>
+        pick
+          (fun _ => return .False)
+          (fun _ =>
+            pick
+              (fun _ => do
+                let e ← genExpr size' .Nat
+                return .IsZero e)
+              (fun _ => do
+                let e1 ← genExpr size' .Bool
+                let e2 ← genExpr size' .Bool
+                let e3 ← genExpr size' .Bool
+                return .IfThenElse e1 e2 e3)))
 
 -- genExpr produces well-typed arithmetic exprs
 theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
@@ -92,7 +101,11 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
     cases τ with
     | Bool =>
       simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
-      rcases H with ⟨ e', He', rfl ⟩ | ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
+      rcases H with rfl | rfl | ⟨ e', He', rfl ⟩ | ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
+      . -- HasType True Bool
+        constructor
+      . -- HasType False Bool
+        constructor
       . -- HasType (IsZero e') Bool
         constructor
         exact IH _ _ He'
@@ -100,7 +113,9 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         constructor <;> (apply IH; assumption)
     | Nat =>
       simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
-      rcases H with ⟨ e', He', rfl ⟩ | ⟨ e', He', rfl ⟩ | ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
+      rcases H with rfl | ⟨ e', He', rfl ⟩ | ⟨ e', He', rfl ⟩ | ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
+      . -- HasType Zero Nat
+        constructor
       . -- HasType (Succ e') Nat
         constructor
         exact IH _ _ He'
@@ -109,3 +124,89 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         exact IH _ _ He'
       . -- HasType (IfThenElse e1 e2 e3) Nat
         constructor <;> (apply IH; assumption)
+
+-- genExpr is monotonic in its size parameter
+lemma genExpr_monotone : ∀ (size1 size2 : ℕ) (τ : Ty) (e : Expr),
+  size1 ≤ size2 → e ∈ SetGen.support (genExpr size1 τ) → e ∈ SetGen.support (genExpr size2 τ) :=
+  sorry
+
+-- for all well-typed arithmetic exprs, there exists some size such that `genExpr`
+-- is capable of generating that expr
+theorem genExpr_complete : ∀ (τ : Ty) (e : Expr),
+    HasType e τ → ∃ size, e ∈ SetGen.support (genExpr size τ) := by
+  intro τ e H
+  induction H with
+  | TTrue =>
+    exists .zero
+    dsimp [genExpr]
+    rw [mem_support_pick_iff]
+    left
+    rw [mem_support_pure_iff]
+  | TFalse =>
+    exists .zero
+    dsimp [genExpr]
+    rw [mem_support_pick_iff]
+    right
+    rw [mem_support_pure_iff]
+  | TZero =>
+    exists 0
+  | TSucc e' He' IH =>
+    obtain ⟨ size', He' ⟩ := IH
+    exists size' + 1
+    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+    right; left
+    exists e'
+  | TPred e' He' IH =>
+    obtain ⟨ size', He' ⟩ := IH
+    exists size' + 1
+    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+    right; right; left
+    exists e'
+  | TIsZero e' He' IH =>
+    obtain ⟨ size', He' ⟩ := IH
+    exists size' + 1
+    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+    right; right; left
+    exists e'
+  | TIf e1 e2 e3 τ H1 H2 H3 IH1 IH2 IH3 =>
+    obtain ⟨ s1, IH1 ⟩ := IH1
+    obtain ⟨ s2, IH2 ⟩ := IH2
+    obtain ⟨ s3, IH3 ⟩ := IH3
+    let maxSize := max s1 (max s2 s3)
+    exists (maxSize + 1)
+    have h1 : s1 ≤ maxSize := by omega
+    have h2 : s2 ≤ maxSize := by omega
+    have h3 : s3 ≤ maxSize := by omega
+    cases τ with
+    | Bool =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+      right; right; right
+      exists e1
+      constructor
+      . -- e1 ∈ support (genExpr maxSize Ty.Bool)
+        apply (genExpr_monotone s1) <;> assumption
+      . exists e2
+        constructor
+        . -- e2 ∈ support (genExpr maxSize Ty.Bool)
+          apply (genExpr_monotone s2) <;> assumption
+        . exists e3
+          constructor
+          . -- e3 ∈ support (genExpr maxSize Ty.Bool)
+            apply (genExpr_monotone s3) <;> assumption
+          . rfl
+    | Nat =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+      right; right; right
+      exists e1
+      constructor
+      . -- e1 ∈ support (genExpr maxSize Ty.Bool)
+        apply (genExpr_monotone s1) <;> assumption
+      . exists e2
+        constructor
+        . -- e2 ∈ support (genExpr maxSize Ty.Bool)
+          apply (genExpr_monotone s2) <;> assumption
+        . exists e3
+          constructor
+          . -- e3 ∈ support (genExpr maxSize Ty.Bool)
+            apply (genExpr_monotone s3) <;> assumption
+          . rfl
