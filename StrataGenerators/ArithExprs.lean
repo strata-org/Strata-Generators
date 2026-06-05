@@ -83,7 +83,7 @@ def genTy [Gen G] : G Ty :=
                 let e3 ← genExpr size' .Bool
                 return .IfThenElse e1 e2 e3)))
 
--- genExpr produces well-typed arithmetic exprs
+-- Soundness: genExpr only produces well-typed arithmetic exprs
 theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
   e ∈ SetGen.support (genExpr size τ) → HasType e τ := by
   intros size τ e H
@@ -125,12 +125,104 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
       . -- HasType (IfThenElse e1 e2 e3) Nat
         constructor <;> (apply IH; assumption)
 
--- genExpr is monotonic in its size parameter
-lemma genExpr_monotone : ∀ (size1 size2 : ℕ) (τ : Ty) (e : Expr),
-  size1 ≤ size2 → e ∈ SetGen.support (genExpr size1 τ) → e ∈ SetGen.support (genExpr size2 τ) :=
-  sorry
+-- Helper lemma: if `genExpr` can produce some `e` at a particular `size`,
+-- it can also produce `e` if we increment `size`
+lemma genExpr_monotone_succ : ∀ (size : ℕ) (τ : Ty) (e : Expr),
+    e ∈ SetGen.support (genExpr size τ) → e ∈ SetGen.support (genExpr (size + 1) τ) := by
+  intro size τ e H
+  induction size generalizing τ e with
+  | zero =>
+    cases τ with
+    | Bool =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_pure_iff] at *
+      rcases H with rfl | rfl
+      · left; rfl
+      · right; left; rfl
+    | Nat =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_pure_iff] at *
+      subst H
+      left; rfl
+  | succ size' IH =>
+    cases τ with
+    | Bool =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+      rcases H with rfl | rfl | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+      · -- True
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; left
+        rw [mem_support_pure_iff]
+      · -- False
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; left
+        rw [mem_support_pure_iff]
+      · -- IsZero e'
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; left
+        rw [mem_support_bind_iff]
+        refine ⟨e', IH _ _ He', ?_⟩
+        rw [mem_support_pure_iff]
+      · -- IfThenElse e1 e2 e3
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_bind_iff]
+        refine ⟨e1, IH _ _ He1, ?_⟩
+        rw [mem_support_bind_iff]
+        refine ⟨e2, IH _ _ He2, ?_⟩
+        rw [mem_support_bind_iff]
+        refine ⟨e3, IH _ _ He3, ?_⟩
+        rw [mem_support_pure_iff]
+    | Nat =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+      rcases H with rfl | ⟨e', He', rfl⟩ | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+      · -- Zero
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; left
+        rw [mem_support_pure_iff]
+      · -- Succ e'
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; left
+        rw [mem_support_bind_iff]
+        refine ⟨e', IH _ _ He', ?_⟩
+        rw [mem_support_pure_iff]
+      · -- Pred e'
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; left
+        rw [mem_support_bind_iff]
+        refine ⟨e', IH _ _ He', ?_⟩
+        rw [mem_support_pure_iff]
+      · -- IfThenElse e1 e2 e3
+        dsimp only [genExpr]
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_pick_iff]; right
+        rw [mem_support_bind_iff]
+        refine ⟨e1, IH _ _ He1, ?_⟩
+        rw [mem_support_bind_iff]
+        refine ⟨e2, IH _ _ He2, ?_⟩
+        rw [mem_support_bind_iff]
+        refine ⟨e3, IH _ _ He3, ?_⟩
+        rw [mem_support_pure_iff]
 
--- for all well-typed arithmetic exprs, there exists some size such that `genExpr`
+-- Helper lemma: genExpr is monotonic in its size parameter (necessary for completeness proof)
+lemma genExpr_monotone : ∀ (size1 size2 : ℕ) (τ : Ty) (e : Expr),
+  size1 ≤ size2 → e ∈ SetGen.support (genExpr size1 τ) → e ∈ SetGen.support (genExpr size2 τ) := by
+  intro size1 size2 τ e Hsize Hsupport
+  -- From soundness, it follows that `e` is well-typed at type `τ`
+  induction Hsize with
+  | refl => assumption
+  | step _ IH =>
+    apply genExpr_monotone_succ
+    assumption
+
+-- Completeness: for all well-typed arithmetic exprs, there exists some size such that `genExpr`
 -- is capable of generating that expr
 theorem genExpr_complete : ∀ (τ : Ty) (e : Expr),
     HasType e τ → ∃ size, e ∈ SetGen.support (genExpr size τ) := by
