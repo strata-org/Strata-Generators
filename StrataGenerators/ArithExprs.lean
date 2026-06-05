@@ -82,60 +82,30 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
   | zero =>
     cases τ with
     | Bool =>
-      dsimp [genExpr] at H
-      rw [mem_support_pick_iff] at H
-      cases H with
-      | inl Htrue =>
-        -- e ∈ support (pure .True)
-        rw [mem_support_pure_iff] at Htrue
-        rw [Htrue]
-        constructor
-      | inr HFalse =>
-        -- e ∈ support (pure .False)
-        rw [mem_support_pure_iff] at HFalse
-        rw [HFalse]
-        constructor
+      simp only [genExpr, mem_support_pick_iff, mem_support_pure_iff] at H
+      rcases H with rfl | rfl <;> constructor
     | Nat =>
-      dsimp [genExpr] at H
-      rw [SetGen.Set.mem_singleton_iff] at H
-      rw [H]
+      simp only [genExpr, mem_support_pure_iff] at H
+      subst H
       constructor
-  | succ size' ih =>
+  | succ size' IH =>
     cases τ with
     | Bool =>
-      dsimp [genExpr] at H
-      rw [mem_support_pick_iff] at H
-      cases H with
-      | inl HIsZero =>
-        simp only [mem_support_bind_iff, mem_support_pure_iff] at HIsZero
-        rcases HIsZero with ⟨ e', He', rfl ⟩
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+      rcases H with ⟨ e', He', rfl ⟩ | ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
+      . -- HasType (IsZero e') Bool
         constructor
-        apply ih
-        assumption
-      | inr HIf =>
-        simp only [mem_support_bind_iff, mem_support_pure_iff] at HIf
-        rcases HIf with ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
-        constructor <;> (apply ih; assumption)
+        exact IH _ _ He'
+      . -- HasType (IfThenElse e1 e2 e3) Bool
+        constructor <;> (apply IH; assumption)
     | Nat =>
-      dsimp [genExpr] at H
-      rw [mem_support_pick_iff] at H
-      cases H with
-      | inl HSucc =>
-        simp only [mem_support_bind_iff, mem_support_pure_iff] at HSucc
-        rcases HSucc with ⟨ e', He', rfl ⟩
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+      rcases H with ⟨ e', He', rfl ⟩ | ⟨ e', He', rfl ⟩ | ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
+      . -- HasType (Succ e') Nat
         constructor
-        apply ih
-        assumption
-      | inr H =>
-        rw [mem_support_pick_iff] at H
-        cases H with
-        | inl HPred =>
-          simp only [mem_support_bind_iff, mem_support_pure_iff] at HPred
-          rcases HPred with ⟨ e', He', rfl ⟩
-          constructor
-          apply ih
-          assumption
-        | inr HIf =>
-          simp only [mem_support_bind_iff, mem_support_pure_iff] at HIf
-          rcases HIf with ⟨ e1, He1, e2, He2, e3, He3, rfl ⟩
-          constructor <;> (apply ih; assumption)
+        exact IH _ _ He'
+      . -- HasType (Pred e') Nat
+        constructor
+        exact IH _ _ He'
+      . -- HasType (IfThenElse e1 e2 e3) Nat
+        constructor <;> (apply IH; assumption)
