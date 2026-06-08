@@ -267,6 +267,101 @@ lemma genExpr_monotone_succ : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         refine ⟨e3, IH _ _ He3, ?_⟩
         rw [mem_support_pure_iff]
 
+-- Variant of the monotonicity helper lemma above that uses the `fun_induction` tactic
+lemma genExpr_monotone_succ' : ∀ (size : ℕ) (τ : Ty) (e : Expr),
+    e ∈ SetGen.support (genExpr size τ) → e ∈ SetGen.support (genExpr (size + 1) τ) := by
+  intro size τ
+  fun_induction genExpr (G := SetGen.Set) size τ with
+  | case1 =>
+    -- size = 0, Nat
+    intro e H
+    simp only [mem_support_pure_iff] at H
+    subst H
+    dsimp only [genExpr]
+    rw [mem_support_pick_iff]; left
+    rw [mem_support_pure_iff]
+  | case2 =>
+    -- size = 0, Bool
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_pure_iff] at H
+    dsimp only [genExpr]
+    rw [mem_support_pick_iff]
+    rcases H with rfl | rfl
+    · -- True
+      left; rw [mem_support_pure_iff]
+    · -- False
+      right; rw [mem_support_pick_iff]; left; rw [mem_support_pure_iff]
+  | case3 size' ih_nat ih_bool =>
+    -- size = succ size', Nat
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+    rcases H with rfl | ⟨e', He', rfl⟩ | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+    · -- Zero
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; left
+      rw [mem_support_pure_iff]
+    · -- Succ e'
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; left
+      rw [mem_support_bind_iff]
+      refine ⟨e', ih_nat _ He', ?_⟩
+      rw [mem_support_pure_iff]
+    · -- Pred e'
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; left
+      rw [mem_support_bind_iff]
+      refine ⟨e', ih_nat _ He', ?_⟩
+      rw [mem_support_pure_iff]
+    · -- IfThenElse e1 e2 e3
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_bind_iff]
+      refine ⟨e1, ih_bool _ He1, ?_⟩
+      rw [mem_support_bind_iff]
+      refine ⟨e2, ih_nat _ He2, ?_⟩
+      rw [mem_support_bind_iff]
+      refine ⟨e3, ih_nat _ He3, ?_⟩
+      rw [mem_support_pure_iff]
+  | case4 size' ih_nat ih_bool =>
+    -- size = succ size', Bool
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+    rcases H with rfl | rfl | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+    · -- True
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; left
+      rw [mem_support_pure_iff]
+    · -- False
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; left
+      rw [mem_support_pure_iff]
+    · -- IsZero e'
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; left
+      rw [mem_support_bind_iff]
+      refine ⟨e', ih_nat _ He', ?_⟩
+      rw [mem_support_pure_iff]
+    · -- IfThenElse e1 e2 e3
+      dsimp only [genExpr]
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_pick_iff]; right
+      rw [mem_support_bind_iff]
+      refine ⟨e1, ih_bool _ He1, ?_⟩
+      rw [mem_support_bind_iff]
+      refine ⟨e2, ih_bool _ He2, ?_⟩
+      rw [mem_support_bind_iff]
+      refine ⟨e3, ih_bool _ He3, ?_⟩
+      rw [mem_support_pure_iff]
+
 -- Helper lemma: genExpr is monotonic in its size parameter (necessary for completeness proof)
 lemma genExpr_monotone : ∀ (size1 size2 : ℕ) (τ : Ty) (e : Expr),
   size1 ≤ size2 → e ∈ SetGen.support (genExpr size1 τ) → e ∈ SetGen.support (genExpr size2 τ) := by
