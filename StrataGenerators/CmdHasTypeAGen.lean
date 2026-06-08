@@ -273,134 +273,114 @@ theorem genCmd_sound
 
 -- ── Full completeness of genCmd ──────────────────────────────────────
 
-/-- Full completeness of `genCmd`: every well-typed command form that the
-    generator could produce is actually in its support.
+/-- Predicate asserting that `genLExpr` is complete at type `τ`: every well-typed
+    expression satisfying the generator's side conditions is in the support.
+    This is proved as `genLExprBase_complete` in `HasTypeAGen.lean` (which
+    requires Mathlib); we take it as a hypothesis here. -/
+def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (depth : Nat) : Prop :=
+  ∀ τ e, LExpr.HasTypeA (T := LExprParams') [] e τ →
+    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth τ)
 
-    Specifically, the support includes:
-    - Every `assert/assume/cover` with any boolean expression from `genLExpr`
-    - Every `set x (det e)` / `set x nondet` for any `x` in `ctx`
-    - Every `init x τ (det e)` / `init x τ nondet` for any fresh name from `genFreshName`
+/-- Full completeness of `genCmd` with respect to `CmdHasTypeA`: if a command
+    is well-typed and its sub-components are reachable by the respective
+    sub-generators, then it is in `genCmd`'s support.
 
-    This is the converse of `genCmd_sound`: if a command is well-typed and
-    structurally matches what the generator can produce (correct labels, metadata,
-    names from `genFreshName`, expressions from `genLExpr`), it is in the support. -/
-theorem genCmd_complete_assert
+    The proof proceeds by inversion on the `CmdHasTypeA` derivation. The
+    hypotheses capture what the generator requires beyond well-typedness:
+    - `hExprComplete`: well-typed expressions are in `genLExpr`'s support
+    - `hNameReach`: the name of any init/set target is reachable
+    - `hTyReach`: the type of any init target is in `genLMonoTy`'s support
+    - `hVarInCtx`: the target of any set command exists in `ctx`
+
+    The generator fixes labels to `""` and metadata to `default`; the
+    conclusion states that the generator produces a command with the same
+    *expression* and *variable* content (but possibly different label/metadata). -/
+theorem genCmd_complete
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat)
-    (e : Expression.Expr)
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth .bool)) :
-    GenCmdResult.mk (.assert "" e default) ctx ∈
-      SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) := by
-  rw [genCmd_support_iff]
-  right; right; right; right; left
-  simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
-  exact ⟨e, he, rfl⟩
-
-/-- Full completeness: any assume command with a reachable boolean expression
-    is in `genCmd`'s support. -/
-theorem genCmd_complete_assume
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
-    (e : Expression.Expr)
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth .bool)) :
-    GenCmdResult.mk (.assume "" e default) ctx ∈
-      SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) := by
-  rw [genCmd_support_iff]
-  right; right; right; right; right; left
-  simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
-  exact ⟨e, he, rfl⟩
-
-/-- Full completeness: any cover command with a reachable boolean expression
-    is in `genCmd`'s support. -/
-theorem genCmd_complete_cover
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
-    (e : Expression.Expr)
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth .bool)) :
-    GenCmdResult.mk (.cover "" e default) ctx ∈
-      SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) := by
-  rw [genCmd_support_iff]
-  right; right; right; right; right; right
-  simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
-  exact ⟨e, he, rfl⟩
-
-/-- Full completeness: any deterministic set command for a valid context entry
-    with a reachable expression is in `genCmd`'s support. -/
-theorem genCmd_complete_set_det
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
-    (h : ctx.length > 0)
-    (idx : Nat) (hidx : idx < ctx.length)
-    (name : String) (mty : LMonoTy)
-    (hentry : ctx.getD idx ("", .bool) = (name, mty))
-    (e : Expression.Expr)
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth mty)) :
-    GenCmdResult.mk (.set ⟨name, ()⟩ (.det e) default) ctx ∈
-      SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) := by
-  rw [genCmd_support_iff]
-  right; right; left
-  refine ⟨h, ?_⟩
-  simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-             mem_support_choose_iff]
-  refine ⟨⟨idx⟩, ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, e, ?_, ?_⟩
-  · simp only [hentry]; exact he
-  · simp only [hentry]
-
-/-- Full completeness: any nondet set command for a valid context entry
-    is in `genCmd`'s support. -/
-theorem genCmd_complete_set_nondet
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
-    (h : ctx.length > 0)
-    (idx : Nat) (hidx : idx < ctx.length)
-    (name : String) (mty : LMonoTy)
-    (hentry : ctx.getD idx ("", .bool) = (name, mty)) :
-    GenCmdResult.mk (.set ⟨name, ()⟩ .nondet default) ctx ∈
-      SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) := by
-  rw [genCmd_support_iff]
-  right; right; right; left
-  refine ⟨h, ?_⟩
-  simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
-             mem_support_choose_iff]
-  refine ⟨⟨idx⟩, ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, ?_⟩
-  simp only [hentry]
-
-/-- Full completeness: any deterministic init command with a fresh name from
-    `genFreshName`, a type from `genLMonoTy`, and a reachable expression
-    is in `genCmd`'s support. -/
-theorem genCmd_complete_init_det
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
-    (name : String)
-    (hname : name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx))
-    (mty : LMonoTy)
-    (hmty : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth))
-    (e : Expression.Expr)
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth mty)) :
-    GenCmdResult.mk (.init ⟨name, ()⟩ (.forAll [] mty) (.det e) default)
-      ((name, mty) :: ctx) ∈
-      SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) := by
-  rw [genCmd_support_iff]
-  left
-  simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
-  exact ⟨name, hname, mty, hmty, e, he, rfl⟩
-
-/-- Full completeness: any nondet init command with a fresh name from
-    `genFreshName` and a type from `genLMonoTy` is in `genCmd`'s support. -/
-theorem genCmd_complete_init_nondet
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
-    (name : String)
-    (hname : name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx))
-    (mty : LMonoTy)
-    (hmty : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth)) :
-    GenCmdResult.mk (.init ⟨name, ()⟩ (.forAll [] mty) .nondet default)
-      ((name, mty) :: ctx) ∈
-      SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) := by
-  rw [genCmd_support_iff]
-  right; left
-  simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
-  exact ⟨name, hname, mty, hmty, rfl⟩
+    (C : LContext CoreLParams) (Γ Γ' : TContext Unit)
+    (cmd : Cmd Expression)
+    (hwt : CmdHasTypeA C Γ cmd Γ')
+    (hExprComplete : GenLExprComplete fctx octx tvars depth)
+    (hNameReach : ∀ x : Identifier Unit,
+      (∃ xty eOrNd md, cmd = .init x xty eOrNd md) →
+      x.name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx))
+    (hTyReach : ∀ (mty : LMonoTy),
+      mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth))
+    (hVarInCtx : ∀ (x : Identifier Unit) (mty : LMonoTy),
+      Γ.types.find? x = some (.forAll [] mty) →
+      ∃ idx, idx < ctx.length ∧
+        ctx.getD idx ("", .bool) = (x.name, mty)) :
+    ∃ r : GenCmdResult,
+      r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∧
+      CmdHasTypeA C Γ r.cmd Γ' := by
+  cases hwt with
+  | init_det x xty e mty md hfresh hnovar hexpr =>
+    have hname := hNameReach x ⟨xty, .det e, md, rfl⟩
+    have hmty := hTyReach mty
+    have he := hExprComplete mty e hexpr
+    have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, (x.name, mty) :: ctx⟩ : GenCmdResult) ∈
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+      (genCmd_support_iff ..).mpr (Or.inl (by
+        simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
+        exact ⟨x.name, hname, mty, hmty, e, he, rfl⟩))
+    exact ⟨_, hinSupport, CmdHasType'.init_det _ x _ e mty default hfresh hnovar hexpr⟩
+  | init_nondet x xty mty md hfresh =>
+    have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
+    have hmty := hTyReach mty
+    have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, (x.name, mty) :: ctx⟩ : GenCmdResult) ∈
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+      (genCmd_support_iff ..).mpr (Or.inr (Or.inl (by
+        simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
+        exact ⟨x.name, hname, mty, hmty, rfl⟩)))
+    exact ⟨_, hinSupport, CmdHasType'.init_nondet _ x _ mty default hfresh⟩
+  | set_det x mty e md hfind hexpr =>
+    have ⟨idx, hidx, hentry⟩ := hVarInCtx x mty hfind
+    have he := hExprComplete mty e hexpr
+    have hinSupport : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+      (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inl ⟨by omega, by
+        simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
+                   mem_support_choose_iff]
+        refine ⟨⟨idx⟩, ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, e, ?_, ?_⟩
+        · simp only [hentry]; exact he
+        · simp only [hentry]⟩)))
+    exact ⟨_, hinSupport, CmdHasType'.set_det _ x mty e default hfind hexpr⟩
+  | set_nondet x mty md hfind =>
+    have ⟨idx, hidx, hentry⟩ := hVarInCtx x mty hfind
+    have hinSupport : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+      (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inl ⟨by omega, by
+        simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
+                   mem_support_choose_iff]
+        refine ⟨⟨idx⟩, ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, ?_⟩
+        simp only [hentry]⟩))))
+    exact ⟨_, hinSupport, CmdHasType'.set_nondet _ x mty default hfind⟩
+  | assert l e md hexpr =>
+    have he := hExprComplete .bool e hexpr
+    have hinSupport : (⟨.assert "" e default, ctx⟩ : GenCmdResult) ∈
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+      (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
+        simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
+        exact ⟨e, he, rfl⟩))))))
+    exact ⟨_, hinSupport, CmdHasType'.assert _ "" e default hexpr⟩
+  | assume l e md hexpr =>
+    have he := hExprComplete .bool e hexpr
+    have hinSupport : (⟨.assume "" e default, ctx⟩ : GenCmdResult) ∈
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+      (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
+        simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
+        exact ⟨e, he, rfl⟩)))))))
+    exact ⟨_, hinSupport, CmdHasType'.assume _ "" e default hexpr⟩
+  | cover l e md hexpr =>
+    have he := hExprComplete .bool e hexpr
+    have hinSupport : (⟨.cover "" e default, ctx⟩ : GenCmdResult) ∈
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+      (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
+        simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
+        exact ⟨e, he, rfl⟩)))))))
+    exact ⟨_, hinSupport, CmdHasType'.cover _ "" e default hexpr⟩
 
 -- ── Quick test ────────────────────────────────────────────────────────
 
