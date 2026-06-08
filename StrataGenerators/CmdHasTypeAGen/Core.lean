@@ -62,7 +62,7 @@ def genInitDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
     (ctx : VarCtx) (tyDepth depth : Nat) : G GenCmdResult := do
   let name ← genFreshName ctx
   let mty ← genLMonoTy tvars tyDepth
-  let e ← genLExpr fctx octx tvars [] depth mty
+  let e ← genLExpr fctx octx [] tvars [] depth mty
   let xty : Lambda.LTy := .forAll [] mty
   pure ⟨.init ⟨name, ()⟩ xty (.det e) default, (name, mty) :: ctx⟩
 
@@ -79,7 +79,7 @@ def genSetDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
     (ctx : VarCtx) (depth : Nat) (_h : ctx.length > 0) : G GenCmdResult := do
   let idx ← choose 0 (ctx.length - 1) (by omega)
   let (name, mty) := ctx.getD idx.down ("", .bool)
-  let e ← genLExpr fctx octx tvars [] depth mty
+  let e ← genLExpr fctx octx [] tvars [] depth mty
   pure ⟨.set ⟨name, ()⟩ (.det e) default, ctx⟩
 
 /-- Generate `set x nondet` where `x` is an existing variable. -/
@@ -91,19 +91,19 @@ def genSetNondet [Gen G] (ctx : VarCtx) (_h : ctx.length > 0) : G GenCmdResult :
 /-- Generate `assert l e` with a boolean expression. -/
 def genAssertCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
-  let e ← genLExpr fctx octx tvars [] depth .bool
+  let e ← genLExpr fctx octx [] tvars [] depth .bool
   pure ⟨.assert "" e default, ctx⟩
 
 /-- Generate `assume l e` with a boolean expression. -/
 def genAssumeCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
-  let e ← genLExpr fctx octx tvars [] depth .bool
+  let e ← genLExpr fctx octx [] tvars [] depth .bool
   pure ⟨.assume "" e default, ctx⟩
 
 /-- Generate `cover l e` with a boolean expression. -/
 def genCoverCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
-  let e ← genLExpr fctx octx tvars [] depth .bool
+  let e ← genLExpr fctx octx [] tvars [] depth .bool
   pure ⟨.cover "" e default, ctx⟩
 
 -- ── Main command generator ─────────────────────────────────────────────

@@ -441,6 +441,180 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   -- ── Fallback (bitvec, etc. — not generated) ────────────────────────
   | _, _ => pure (.boolConst () false)
 
+-- ── Shared helpers ──────────────────────────────────────────────────
+
+/-- Build a left-nested application: `foldl app base [a₁, a₂, ...] = app (app base a₁) a₂ ...` -/
+def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
+  args.foldl (fun acc arg => .app () acc arg) base
+
+-- ── IndirPoly rule helpers ──────────────────────────────────────────
+
+/-- A polymorphic operator context entry: a name paired with a polymorphic type
+    scheme (`LTy`). Analogous to `[(String, PolyTyp)]` in the Haskell generator. -/
+abbrev PolyOpCtx := List (String × Lambda.LTy)
+
+/-- A simple type substitution mapping type variable names to monotypes.
+    Used internally by the IndirPoly rule for unification. -/
+abbrev SimpleSubst := List (TyIdentifier × LMonoTy)
+
+/-- Apply a simple substitution to a monotype. -/
+def applySimpleSubst (s : SimpleSubst) (ty : LMonoTy) : LMonoTy :=
+  match ty with
+  | .ftvar x => match s.lookup x with
+    | some t => t
+    | none => .ftvar x
+  | .bitvec n => .bitvec n
+  | .tcons name args => .tcons name (args.map (applySimpleSubst s))
+
+/-- Compose two simple substitutions: `composeSimpleSubst s1 s2` applies `s1`
+    to all values in `s2`, then appends `s1` entries not already in `s2`. -/
+def composeSimpleSubst (s1 s2 : SimpleSubst) : SimpleSubst :=
+  let s2' := s2.map (fun (v, t) => (v, applySimpleSubst s1 t))
+  s2' ++ s1.filter (fun (v, _) => s2'.lookup v == none)
+
+/-- Simple unification of two monotypes. Returns `none` on failure,
+    or `some subst` where `applySimpleSubst subst t1 = applySimpleSubst subst t2`.
+    Follows the same structure as the Haskell `unify` function. -/
+partial def unifySimple : LMonoTy → LMonoTy → Option SimpleSubst
+  | .ftvar x, .ftvar y =>
+    if x == y then some [] else some [(x, .ftvar y)]
+  | .ftvar x, ty =>
+    if x ∈ ty.freeVars then none else some [(x, ty)]
+  | ty, .ftvar x =>
+    if x ∈ ty.freeVars then none else some [(x, ty)]
+  | .tcons name1 args1, .tcons name2 args2 =>
+    if name1 == name2 && args1.length == args2.length then
+      unifyList args1 args2
+    else none
+  | .bitvec n1, .bitvec n2 =>
+    if n1 == n2 then some [] else none
+  | _, _ => none
+where
+  unifyList : List LMonoTy → List LMonoTy → Option SimpleSubst
+    | [], [] => some []
+    | t1 :: rest1, t2 :: rest2 => do
+      let s1 ← unifySimple t1 t2
+      let rest1' := rest1.map (applySimpleSubst s1)
+      let rest2' := rest2.map (applySimpleSubst s1)
+      let s2 ← unifyList rest1' rest2'
+      pure (composeSimpleSubst s2 s1)
+    | _, _ => none
+
+/-- Decompose a curried function type into (argument types, return type). -/
+def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
+  | .tcons "arrow" [σ, rest] =>
+    let (args, ret) := decomposeArrow rest
+    (σ :: args, ret)
+  | ty => ([], ty)
+
+/-- Find free type variables in a substitution that haven't been assigned:
+    those among `boundVars` that don't appear as keys in `subst`. -/
+def findFreeTyVars (boundVars : List TyIdentifier) (subst : SimpleSubst) : List TyIdentifier :=
+  boundVars.filter (fun v => subst.lookup v == none)
+
+/-- Compute the set of "generable types" from a context, following
+    Pałka et al. (2011, Section 4). We collect all syntactic sub-types
+    from the bvar context, fvar context, and op context, then close under
+    function application (if `σ → τ` and `σ` are both generable, so is `τ`). -/
+def syntacticSubtypes : LMonoTy → List LMonoTy
+  | ty@(.tcons "arrow" [a, b]) => ty :: (syntacticSubtypes a ++ syntacticSubtypes b)
+  | ty => [ty]
+
+/-- Iteratively close a set of types under function application:
+    if `σ → τ` and `σ` are both in the set, then `τ` is added.
+    Uses a fuel parameter to ensure termination. -/
+def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
+  match fuel with
+  | 0 => tys
+  | fuel + 1 =>
+    let newTys := tys.filterMap fun ty =>
+      match ty with
+      | .tcons "arrow" [argTy, retTy] =>
+        if argTy ∈ tys && retTy ∉ tys then some retTy else none
+      | _ => none
+    if newTys.isEmpty then tys
+    else addNewTypes fuel (tys ++ newTys)
+
+def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
+  let allTys := bctx ++ fctx.map Prod.snd ++ octx.map Prod.snd
+  let initial := (allTys.flatMap syntacticSubtypes).eraseDups
+  -- Use fuel = initial.length as an upper bound on iterations
+  addNewTypes initial.length initial
+
+/-- For each polymorphic operator in `pctx`, attempt to unify its return type
+    with the target type `τ`. Returns a list of
+    `(name, concreteArgTypes, fullConcreteType)` triples for operators that
+    successfully unify (with undetermined type variables to be sampled). -/
+def findPolyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
+    (generableTys : List LMonoTy) : List (String × List LMonoTy × LMonoTy) :=
+  pctx.filterMap fun (name, lty) =>
+    match lty with
+    | .forAll boundVars monoTy =>
+      let (argTys, retTy) := decomposeArrow monoTy
+      if argTys.isEmpty || argTys.length > 3 then none
+      else match unifySimple retTy τ with
+        | none => none
+        | some subst =>
+          let freeTyVars := findFreeTyVars boundVars subst
+          if !freeTyVars.isEmpty && generableTys.isEmpty then none
+          else some (name, argTys, monoTy, subst, freeTyVars)
+  |>.map fun (name, argTys, monoTy, subst, freeTyVars) =>
+    -- For now, instantiate free type vars with the first generable type
+    -- (the actual generator will sample randomly)
+    let defaultSubst := freeTyVars.map (fun v => (v, generableTys.headD .bool))
+    let fullSubst := composeSimpleSubst defaultSubst subst
+    let concreteArgTys := argTys.map (applySimpleSubst fullSubst)
+    let concreteTy := applySimpleSubst fullSubst monoTy
+    (name, concreteArgTys, concreteTy)
+
+/-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
+    Pałka et al. (2011, Section 4). Calls polymorphic library functions by:
+    1. Unifying the function's return type with the target type `τ`
+    2. Sampling undetermined type variables from the set of generable types
+    3. Generating arguments at the resulting concrete types
+
+    This is analogous to `genIndirPoly` in the Haskell generator. -/
+def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' := do
+  -- Compute the set of generable types from the current context
+  let generableTys := generableTypesFromCtx bctx fctx octx
+  -- Collect all candidate polymorphic operators
+  let candidates := pctx.filterMap fun (name, lty) =>
+    match lty with
+    | .forAll boundVars monoTy =>
+      let (argTys, retTy) := decomposeArrow monoTy
+      -- Only consider functions with 1-3 arguments (matching Haskell)
+      if argTys.isEmpty || argTys.length > 3 then none
+      else match unifySimple retTy τ with
+        | none => none
+        | some subst =>
+          let freeTyVars := findFreeTyVars boundVars subst
+          if !freeTyVars.isEmpty && generableTys.isEmpty then none
+          else some (name, argTys, monoTy, subst, freeTyVars)
+  if h : candidates.length > 0 then do
+    -- Randomly choose one candidate
+    let idx ← choose 0 (candidates.length - 1) (by omega)
+    let (name, argTys, _monoTy, subst, freeTyVars) := candidates.getD idx.down ("", [], .bool, [], [])
+    -- Instantiate each free type variable with a random generable type
+    let sampledTypes ← freeTyVars.mapM (fun _ =>
+      if hg : generableTys.length > 0 then do
+        let tidx ← choose 0 (generableTys.length - 1) (by omega)
+        pure (generableTys.getD tidx.down .bool)
+      else pure .bool)
+    -- Build the full substitution
+    let fullSubst := composeSimpleSubst (freeTyVars.zip sampledTypes) subst
+    let concreteArgTys := argTys.map (applySimpleSubst fullSubst)
+    -- Determine the full arrow type for the op annotation
+    let fullArrowTy := concreteArgTys.foldr (fun σ acc => .arrow σ acc) τ
+    let opExpr : LExpr' := .op () ⟨name, ()⟩ (some fullArrowTy)
+    -- Generate a random expression for each concrete argument type
+    let args ← concreteArgTys.mapM (genLExprBase fctx octx tvars bctx depth)
+    pure (mkApps opExpr args)
+  else
+    -- No candidates: fall back to base generator
+    genLExprBase fctx octx tvars bctx depth τ
+
 -- ── Indir rule helpers ──────────────────────────────────────────────
 
 /-- Extract the argument types from a curried function type, given that its
@@ -466,10 +640,6 @@ def findOpsInCtx (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :
     | some (arg :: args) => some (name, arg :: args)
     | _ => none
 
-/-- Build a left-nested application: `foldl app base [a₁, a₂, ...] = app (app base a₁) a₂ ...` -/
-def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
-  args.foldl (fun acc arg => .app () acc arg) base
-
 /-- Generate a well-typed `LExpr` of type `τ` using the Indir rule from
     Pałka et al. (2011) in addition to the standard generation rules.
 
@@ -483,28 +653,37 @@ def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
     This produces significantly more fully-applied operator expressions
     (e.g. `Int.Add #1 #2`) compared to relying solely on the App rule's
     random type guessing. -/
-def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
   if h : (findOpsInCtx octx τ).length > 0 then
     pickBiased
       (fun () => genLExprBase fctx octx tvars bctx depth τ)
-      (fun () => do
-        -- Find all operators `ops` in the context that when fully applied,
-        -- produces a term of the result type `τ`
-        let ops := findOpsInCtx octx τ
-        -- Randomly choose one of these operators
-        let idx ← choose 0 (ops.length - 1) (by omega)
-        let (name, argTys) := ops.getD idx.down ("", [])
-        -- Construct the `LExpr` corresponding to the chosen `op`
-        let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
-        let opExpr := .op () ⟨name, ()⟩ (some fullArrowTy)
-        -- Iterate through the argument types in order
-        -- and generate successive random terms of those types
-        let args ← List.mapM (genLExprBase fctx octx tvars bctx depth) argTys
-        -- Then, apply the operator to all the args
-        pure (mkApps opExpr args))
+      (fun () =>
+        pick
+          (fun () => do
+            -- Monomorphic Indir rule: find all operators `ops` in the context
+            -- that when fully applied, produce a term of the result type `τ`
+            let ops := findOpsInCtx octx τ
+            -- Randomly choose one of these operators
+            let idx ← choose 0 (ops.length - 1) (by omega)
+            let (name, argTys) := ops.getD idx.down ("", [])
+            -- Construct the `LExpr` corresponding to the chosen `op`
+            let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
+            let opExpr := .op () ⟨name, ()⟩ (some fullArrowTy)
+            -- Iterate through the argument types in order
+            -- and generate successive random terms of those types
+            let args ← List.mapM (genLExprBase fctx octx tvars bctx depth) argTys
+            -- Then, apply the operator to all the args
+            pure (mkApps opExpr args))
+          (fun () =>
+            -- Polymorphic IndirPoly rule (Pałka et al. 2011, Section 4)
+            genIndirPoly fctx octx pctx tvars bctx depth τ))
   else
-    genLExprBase fctx octx tvars bctx depth τ
+    -- No monomorphic Indir candidates; try IndirPoly or fall back to base
+    pick
+      (fun () => genLExprBase fctx octx tvars bctx depth τ)
+      (fun () => genIndirPoly fctx octx pctx tvars bctx depth τ)
 
 -- ── Top-level generators ─────────────────────────────────────────────
 
@@ -512,4 +691,4 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     with bounded depth. -/
 def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
-  genLExpr [] [] tvars [] depth τ
+  genLExpr [] [] [] tvars [] depth τ

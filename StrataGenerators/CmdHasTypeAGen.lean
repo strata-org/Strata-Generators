@@ -191,7 +191,7 @@ private theorem List.getD_mem_of_lt {xs : List α} {idx : Nat} {d : α}
     here to avoid the `List.Forall₂` import conflict. -/
 def GenLExprSound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : Prop :=
-  ∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth τ) →
+  ∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ) →
     LExpr.HasTypeA (T := LExprParams') [] e τ
 
 /-- Predicate asserting that `genFreshName` produces names that are fresh in the
@@ -201,7 +201,7 @@ def GenFreshNameSound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
     (ctx : VarCtx) (Γ : TContext Unit) (depth : Nat) : Prop :=
   ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
     (Γ.types.find? (⟨name, ()⟩ : Identifier Unit) = none) ∧
-    (∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth τ) →
+    (∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ) →
       (⟨name, ()⟩ : Identifier Unit) ∉ HasVarsPure.getVars (P := Expression) e)
 
 /-- Full soundness of `genCmd`: every result in the generator's support produces
@@ -280,7 +280,7 @@ theorem genCmd_sound
 def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : Prop :=
   ∀ τ e, LExpr.HasTypeA (T := LExprParams') [] e τ →
-    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx tvars [] depth τ)
+    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ)
 
 /-- Full completeness of `genCmd` with respect to `CmdHasTypeA`: if a command
     is well-typed and its sub-components are reachable by the respective
