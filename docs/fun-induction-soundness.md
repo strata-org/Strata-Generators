@@ -31,4 +31,13 @@ theorem genFoo_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
 
 ### When NOT to use `fun_induction`
 
-For monotonicity or completeness proofs where the goal also contains the generator at a different size, `fun_induction` provides little benefit — the hard part is constructing membership in the goal (via `dsimp only [genFoo]` + `rw [mem_support_pick_iff]` chains), which is identical either way. Use manual `induction`/`cases` for those.
+**Monotonicity/completeness proofs:** When the goal also contains the generator at a different size, `fun_induction` provides little benefit — the hard part is constructing membership in the goal (via `dsimp only [genFoo]` + `rw [mem_support_pick_iff]` chains), which is identical either way. Use manual `induction`/`cases` for those.
+
+**Complex generators like `genLExprBase`:** `fun_induction` is a poor fit when:
+
+1. The generator uses well-founded recursion (`termination_by`) rather than simple structural recursion — the generated `.induct` principle may be unwieldy or fail to resolve.
+2. The function matches on a proof argument (e.g., `hτ : SimpleType τ`) simultaneously with data arguments — `fun_induction` may not handle this cleanly.
+3. The function has many match arms (8+ cases from multiple discriminees × constructors) — the opaque `case1`...`case8` names become unreadable, and the existing `match depth, τ, hτ with` structure already mirrors the generator perfectly.
+4. The proof complexity is dominated by decomposing deeply nested membership hypotheses (`rcases` with multi-line patterns) rather than the induction structure itself — `fun_induction` doesn't help with that.
+
+In these cases, use `match depth, τ, hτ with` directly in the proof, mirroring the generator's definition structure with explicit recursive calls for the IH (e.g., `genLExprBase_sound ... hc`).

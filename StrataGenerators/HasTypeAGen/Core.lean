@@ -567,48 +567,63 @@ def findPolyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     let concreteTy := applySimpleSubst fullSubst monoTy
     (name, concreteArgTys, concreteTy)
 
-/-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
-    Pałka et al. (2011, Section 4). Calls polymorphic library functions by:
-    1. Unifying the function's return type with the target type `τ`
-    2. Sampling undetermined type variables from the set of generable types
-    3. Generating arguments at the resulting concrete types
+/-- Collect the concrete (name, argTypes) pairs that result from instantiating
+    polymorphic operators against target type `τ`. This is the pure computation
+    that determines which operators can be called and at which types.
 
-    This is analogous to `genIndirPoly` in the Haskell generator. -/
-def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
-    (pctx : PolyOpCtx) (tvars : List TyIdentifier)
-    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' := do
-  -- Compute the set of generable types from the current context
-  let generableTys := generableTypesFromCtx bctx fctx octx
-  -- Collect all candidate polymorphic operators
-  let candidates := pctx.filterMap fun (name, lty) =>
+    Each entry `(name, concreteArgTys)` means operator `name` can be called with
+    arguments of types `concreteArgTys` to produce a result of type `τ`. -/
+def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
+    (generableTys : List LMonoTy) (sampledTys : List LMonoTy)
+    : List (String × List LMonoTy) :=
+  pctx.filterMap fun (name, lty) =>
     match lty with
     | .forAll boundVars monoTy =>
       let (argTys, retTy) := decomposeArrow monoTy
-      -- Only consider functions with 1-3 arguments (matching Haskell)
       if argTys.isEmpty || argTys.length > 3 then none
       else match unifySimple retTy τ with
         | none => none
         | some subst =>
           let freeTyVars := findFreeTyVars boundVars subst
           if !freeTyVars.isEmpty && generableTys.isEmpty then none
-          else some (name, argTys, monoTy, subst, freeTyVars)
-  if h : candidates.length > 0 then do
-    -- Randomly choose one candidate
-    let idx ← choose 0 (candidates.length - 1) (by omega)
-    let (name, argTys, _monoTy, subst, freeTyVars) := candidates.getD idx.down ("", [], .bool, [], [])
-    -- Instantiate each free type variable with a random generable type
-    let sampledTypes ← freeTyVars.mapM (fun _ =>
+          else
+            let fullSubst := composeSimpleSubst (freeTyVars.zip sampledTys) subst
+            let concreteArgTys := argTys.map (applySimpleSubst fullSubst)
+            some (name, concreteArgTys)
+
+/-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
+    Pałka et al. (2011, Section 4). Calls polymorphic library functions by:
+    1. Unifying the function's return type with the target type `τ`
+    2. Sampling undetermined type variables from the set of generable types
+    3. Generating arguments at the resulting concrete types
+
+    This is analogous to `genIndirPoly` in the Haskell generator.
+
+    The structure mirrors the monomorphic `genLExpr` Indir rule:
+    given a list of `(name, concreteArgTys)` candidates, choose one,
+    generate args via `mapM genLExprBase`, and assemble via `mkApps`. -/
+def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' := do
+  -- Compute the set of generable types from the current context
+  let generableTys := generableTypesFromCtx bctx fctx octx
+  -- Sample types for instantiation (one per possible free tyvar, up to 3)
+  let sampledTys ← List.replicate 3 ()
+    |>.mapM (fun _ =>
       if hg : generableTys.length > 0 then do
         let tidx ← choose 0 (generableTys.length - 1) (by omega)
         pure (generableTys.getD tidx.down .bool)
       else pure .bool)
-    -- Build the full substitution
-    let fullSubst := composeSimpleSubst (freeTyVars.zip sampledTypes) subst
-    let concreteArgTys := argTys.map (applySimpleSubst fullSubst)
-    -- Determine the full arrow type for the op annotation
+  -- Compute concrete candidates
+  let ops := polyOpsForResult pctx τ generableTys sampledTys
+  if h : ops.length > 0 then do
+    -- Randomly choose one candidate
+    let idx ← choose 0 (ops.length - 1) (by omega)
+    let (name, concreteArgTys) := ops.getD idx.down ("", [])
+    -- Construct the op with the full curried type annotation
     let fullArrowTy := concreteArgTys.foldr (fun σ acc => .arrow σ acc) τ
     let opExpr : LExpr' := .op () ⟨name, ()⟩ (some fullArrowTy)
-    -- Generate a random expression for each concrete argument type
+    -- Generate arguments
     let args ← concreteArgTys.mapM (genLExprBase fctx octx tvars bctx depth)
     pure (mkApps opExpr args)
   else
