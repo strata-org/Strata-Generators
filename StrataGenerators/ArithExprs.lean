@@ -125,6 +125,62 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
       . -- HasType (IfThenElse e1 e2 e3) Nat
         constructor <;> (apply IH; assumption)
 
+-- Variant of the soundness proof above that uses the `fun_induction` tactic introduced in Lean 4.80
+theorem genExpr_sound' : ∀ (size : ℕ) (τ : Ty) (e : Expr),
+  e ∈ SetGen.support (genExpr size τ) → HasType e τ := by
+  intro size τ
+  fun_induction genExpr (G := SetGen.Set) size τ with
+  | case1 =>
+    -- size = 0, τ = Bool
+    intro e H
+    simp only [mem_support_pure_iff] at H
+    subst H
+    constructor
+  | case2 =>
+    -- size = 0, τ = Nat
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_pure_iff] at H
+    rcases H with rfl | rfl <;> constructor
+  | case3 size' ih_nat ih_bool =>
+    -- size = succ size', τ = Nat
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+    rcases H with rfl | ⟨e', He', rfl⟩ | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+    · -- HasType Zero Nat
+      constructor
+    · -- HasType (Succ e') Nat
+      constructor
+      apply ih_nat
+      assumption
+    · -- HasType (Pred e') Nat
+      constructor
+      apply ih_nat
+      assumption
+    · -- HasType (IfThenElse e1 e2 e3) Nat
+      constructor
+      · apply ih_bool
+        assumption
+      · apply ih_nat
+        assumption
+      · apply ih_nat
+        assumption
+  | case4 size' ih_nat ih_bool =>
+    -- size = succ size', τ = Bool
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+    rcases H with rfl | rfl | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+    · -- HasType True Bool
+      constructor
+    · -- HasType False Bool
+      constructor
+    · -- HasType (IsZero e') Bool
+      constructor
+      apply ih_nat
+      assumption
+    · -- HasType (IThenElse e1 e2 e3) Bool
+      constructor <;> apply ih_bool <;> assumption
+
+
 -- Helper lemma: if `genExpr` can produce some `e` at a particular `size`,
 -- it can also produce `e` if we increment `size`
 lemma genExpr_monotone_succ : ∀ (size : ℕ) (τ : Ty) (e : Expr),
