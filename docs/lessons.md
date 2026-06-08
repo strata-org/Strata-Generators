@@ -1,5 +1,8 @@
 # Takeaways from getting Claude to synthesize a correct `LExpr` generator
 
+This file documents some takeaways from getting an LLM to synthesize a sound and complete generator
+for random well-typed `LExpr`s. The generator (`genLExpr`) can be found in [`HasTypeAGen/Core.lean`](../StrataGenerators/HasTypeAGen/Core.lean), and its correctness proofs in [`HasTypeAGen.lean`](../StrataGenerators/HasTypeGen.lean).
+
 ## Having some knowledge of the PBT literature helps
 
 The default generator synthesized by Claude doesn't make use of useful findings from the PBT literature. Here are some examples:
