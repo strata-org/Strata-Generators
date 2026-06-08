@@ -62,7 +62,7 @@ The initial generator synthesized by Claude, while correct, generates trivial te
 Examining the distribution of ~2000 generated terms (size = 3) using [Tyche (Goldstein et al. UIST '24)], a VS Code extension for visualizing property-based testing effectiveness,
 we found that ~55% of generated terms were Boolean / integer literals, and that ~88% of generated terms had type `Bool` or `Int`. 
 
-The problem is that the generator uses nested applications of the Basalt framework's `pick` combinator, where `pick` chooses between two sub-generators, each with probability 0.5.
+The problem is that the generator uses nested applications of the [Basalt](https://github.com/hgoldstein95/basalt) Lean PBT framework's `pick` combinator, where `pick` chooses between two sub-generators, each with probability 0.5.
 The top-level argument to `pick` is a sub-generator that returns a literal, followed by more complex sub-generators at deeper nesting levels:
 
 ```lean
@@ -81,8 +81,12 @@ pick
 For each possible value of the generator's size parameter, there is a 50% chance of immediately returning a Boolean constant, which results in a distributino
 where trivial terms dominate. 
 
+To tune this generator, we pointed Claude to [*Tuning Random Generators* (Tjoa et al. OOPSLA '25)](https://starai.cs.ucla.edu/papers/TjoaOOPSLA25.pdf) which discusses how 
+to tune PBT generators using ideas from probabilistic programming. Section 7.1 of the paper mentions a particular distribution that allows generated inputs to uncover
+more bugs from the STLC case studies in the [Etna PBT benchmark](https://harrisongoldste.in/papers/icfp23-etna.pdf) (Shi et al. ICFP '23). We instructed 
+Claude to tune the generator by using biased coin flips (i.e. a variant of the aforementioend `pick` combinator that performs a weighted choice) to approximate this distribution, 
+which allowed more non-trivial terms (e.g. function applications, lambda abstractions) to be generated.
 
-**TODO**: demonstrate how we tuned this distribution
 
 ## Mismatch between size and depth in the initial LExpr generator
 **TODO**: you may want to look at previous versions of the `size-alignment-analysis.md` file to better understand what this issue was
