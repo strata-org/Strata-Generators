@@ -1719,6 +1719,7 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
   · -- No candidates: fell back to genLExprBase
     exact genLExprBase_sound fctx octx tvars bctx depth τ hτ e he
 
+
 /-- Soundness of `genLExpr`: every generated expression is well-typed.
     This combines the soundness of the Indir and IndirPoly rules with
     `genLExprBase_sound`. -/

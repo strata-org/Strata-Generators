@@ -5,7 +5,8 @@ import Basalt.Examples.ArbNat
 
 open RandomChoice ArbNat SetGen Set
 
--- Arithmetic expressions from Chapter 8 of TAPL
+-- A simple language of arithmetic expressions
+-- (from Chapter 8 of *Types & Programming Languages*)
 inductive Expr
   | True
   | False
@@ -22,7 +23,7 @@ inductive Ty
   | Nat
   deriving Repr, BEq
 
--- Typing relation
+-- Typing relation: `HasType e τ` means `· ⊢ e : τ`
 inductive HasType : Expr → Ty → Prop where
   | TTrue : HasType .True .Bool
   | TFalse : HasType .False .Bool
@@ -39,12 +40,10 @@ inductive HasType : Expr → Ty → Prop where
   | TIsZero (e : Expr) :
       HasType e .Nat → HasType (.IsZero e) .Bool
 
--- Generates a random type
-def genTy [Gen G] : G Ty :=
-  pick (fun _ => return .Nat) (fun _ => return .Bool)
-
 -- Generates a random well-typed arithmetic expr
-@[simp] def genExpr [Gen G] (size : ℕ) (τ : Ty) : G Expr :=
+-- of a particular `size` at type `τ`
+@[simp]
+def genExpr [Gen G] (size : ℕ) (τ : Ty) : G Expr :=
   match size, τ with
   | 0, .Nat => return .Zero
   | 0, .Bool => pick (fun _ => return .True) (fun _ => return .False)
@@ -54,14 +53,17 @@ def genTy [Gen G] : G Ty :=
       (fun _ =>
         pick
           (fun _ => do
+            -- Generate `Succ e'` for some `e'`
             let e ← genExpr size' .Nat
             return .Succ e)
           (fun _ =>
             pick
               (fun _ => do
+                -- Generate `Pred e'` for some `e'`
                 let e ← genExpr size' .Nat
                 return .Pred e)
               (fun _ => do
+                -- Generate an `IfThenElse`
                 let e1 ← genExpr size' .Bool
                 let e2 ← genExpr size' .Nat
                 let e3 ← genExpr size' .Nat
@@ -83,7 +85,7 @@ def genTy [Gen G] : G Ty :=
                 let e3 ← genExpr size' .Bool
                 return .IfThenElse e1 e2 e3)))
 
--- Soundness: genExpr only produces well-typed arithmetic exprs
+-- Soundness: `genExpr` only produces well-typed arithmetic exprs
 theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
   e ∈ SetGen.support (genExpr size τ) → HasType e τ := by
   intros size τ e H
@@ -124,62 +126,6 @@ theorem genExpr_sound : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         exact IH _ _ He'
       . -- HasType (IfThenElse e1 e2 e3) Nat
         constructor <;> (apply IH; assumption)
-
--- Variant of the soundness proof above that uses the `fun_induction` tactic introduced in Lean 4.80
-theorem genExpr_sound' : ∀ (size : ℕ) (τ : Ty) (e : Expr),
-  e ∈ SetGen.support (genExpr size τ) → HasType e τ := by
-  intro size τ
-  fun_induction genExpr (G := SetGen.Set) size τ with
-  | case1 =>
-    -- size = 0, τ = Bool
-    intro e H
-    simp only [mem_support_pure_iff] at H
-    subst H
-    constructor
-  | case2 =>
-    -- size = 0, τ = Nat
-    intro e H
-    simp only [mem_support_pick_iff, mem_support_pure_iff] at H
-    rcases H with rfl | rfl <;> constructor
-  | case3 size' ih_nat ih_bool =>
-    -- size = succ size', τ = Nat
-    intro e H
-    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
-    rcases H with rfl | ⟨e', He', rfl⟩ | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
-    · -- HasType Zero Nat
-      constructor
-    · -- HasType (Succ e') Nat
-      constructor
-      apply ih_nat
-      assumption
-    · -- HasType (Pred e') Nat
-      constructor
-      apply ih_nat
-      assumption
-    · -- HasType (IfThenElse e1 e2 e3) Nat
-      constructor
-      · apply ih_bool
-        assumption
-      · apply ih_nat
-        assumption
-      · apply ih_nat
-        assumption
-  | case4 size' ih_nat ih_bool =>
-    -- size = succ size', τ = Bool
-    intro e H
-    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
-    rcases H with rfl | rfl | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
-    · -- HasType True Bool
-      constructor
-    · -- HasType False Bool
-      constructor
-    · -- HasType (IsZero e') Bool
-      constructor
-      apply ih_nat
-      assumption
-    · -- HasType (IThenElse e1 e2 e3) Bool
-      constructor <;> apply ih_bool <;> assumption
-
 
 -- Helper lemma: if `genExpr` can produce some `e` at a particular `size`,
 -- it can also produce `e` if we increment `size`
@@ -266,6 +212,105 @@ lemma genExpr_monotone_succ : ∀ (size : ℕ) (τ : Ty) (e : Expr),
         rw [mem_support_bind_iff]
         refine ⟨e3, IH _ _ He3, ?_⟩
         rw [mem_support_pure_iff]
+
+-- Helper lemma: `genExpr` is monotonic in its `size` parameter (necessary for completeness proof)
+lemma genExpr_monotone : ∀ (size1 size2 : ℕ) (τ : Ty) (e : Expr),
+  size1 ≤ size2 → e ∈ SetGen.support (genExpr size1 τ) → e ∈ SetGen.support (genExpr size2 τ) := by
+  intro size1 size2 τ e Hsize Hsupport
+  -- From soundness, it follows that `e` is well-typed at type `τ`
+  induction Hsize with
+  | refl => assumption
+  | step _ IH =>
+    apply genExpr_monotone_succ
+    assumption
+
+-- Completeness: for all well-typed arithmetic exprs, there exists some `size` such that `genExpr`
+-- is capable of generating that expr
+theorem genExpr_complete : ∀ (τ : Ty) (e : Expr),
+    HasType e τ → ∃ size, e ∈ SetGen.support (genExpr size τ) := by
+  intro τ e H
+  induction H with
+  | TTrue =>
+    exists .zero
+    dsimp [genExpr]
+    rw [mem_support_pick_iff]
+    left
+    rw [mem_support_pure_iff]
+  | TFalse =>
+    exists .zero
+    dsimp [genExpr]
+    rw [mem_support_pick_iff]
+    right
+    rw [mem_support_pure_iff]
+  | TZero =>
+    exists 0
+  | TSucc e' He' IH =>
+    obtain ⟨ size', He' ⟩ := IH
+    exists size' + 1
+    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+    right; left
+    exists e'
+  | TPred e' He' IH =>
+    obtain ⟨ size', He' ⟩ := IH
+    exists size' + 1
+    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+    right; right; left
+    exists e'
+  | TIsZero e' He' IH =>
+    obtain ⟨ size', He' ⟩ := IH
+    exists size' + 1
+    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+    right; right; left
+    exists e'
+  | TIf e1 e2 e3 τ H1 H2 H3 IH1 IH2 IH3 =>
+    obtain ⟨ s1, IH1 ⟩ := IH1
+    obtain ⟨ s2, IH2 ⟩ := IH2
+    obtain ⟨ s3, IH3 ⟩ := IH3
+    let maxSize := max s1 (max s2 s3)
+    exists (maxSize + 1)
+    have h1 : s1 ≤ maxSize := by omega
+    have h2 : s2 ≤ maxSize := by omega
+    have h3 : s3 ≤ maxSize := by omega
+    cases τ with
+    | Bool =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+      right; right; right
+      exists e1
+      constructor
+      . -- e1 ∈ support (genExpr maxSize Ty.Bool)
+        apply (genExpr_monotone s1) <;> assumption
+      . exists e2
+        constructor
+        . -- e2 ∈ support (genExpr maxSize Ty.Bool)
+          apply (genExpr_monotone s2) <;> assumption
+        . exists e3
+          constructor
+          . -- e3 ∈ support (genExpr maxSize Ty.Bool)
+            apply (genExpr_monotone s3) <;> assumption
+          . rfl
+    | Nat =>
+      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+      right; right; right
+      exists e1
+      constructor
+      . -- e1 ∈ support (genExpr maxSize Ty.Bool)
+        apply (genExpr_monotone s1) <;> assumption
+      . exists e2
+        constructor
+        . -- e2 ∈ support (genExpr maxSize Ty.Bool)
+          apply (genExpr_monotone s2) <;> assumption
+        . exists e3
+          constructor
+          . -- e3 ∈ support (genExpr maxSize Ty.Bool)
+            apply (genExpr_monotone s3) <;> assumption
+          . rfl
+
+
+
+
+-------------------
+
+
 
 -- Variant of the monotonicity helper lemma above that uses the `fun_induction` tactic
 lemma genExpr_monotone_succ' : ∀ (size : ℕ) (τ : Ty) (e : Expr),
@@ -362,94 +407,57 @@ lemma genExpr_monotone_succ' : ∀ (size : ℕ) (τ : Ty) (e : Expr),
       refine ⟨e3, ih_bool _ He3, ?_⟩
       rw [mem_support_pure_iff]
 
--- Helper lemma: genExpr is monotonic in its size parameter (necessary for completeness proof)
-lemma genExpr_monotone : ∀ (size1 size2 : ℕ) (τ : Ty) (e : Expr),
-  size1 ≤ size2 → e ∈ SetGen.support (genExpr size1 τ) → e ∈ SetGen.support (genExpr size2 τ) := by
-  intro size1 size2 τ e Hsize Hsupport
-  -- From soundness, it follows that `e` is well-typed at type `τ`
-  induction Hsize with
-  | refl => assumption
-  | step _ IH =>
-    apply genExpr_monotone_succ
-    assumption
-
--- Completeness: for all well-typed arithmetic exprs, there exists some size such that `genExpr`
--- is capable of generating that expr
-theorem genExpr_complete : ∀ (τ : Ty) (e : Expr),
-    HasType e τ → ∃ size, e ∈ SetGen.support (genExpr size τ) := by
-  intro τ e H
-  induction H with
-  | TTrue =>
-    exists .zero
-    dsimp [genExpr]
-    rw [mem_support_pick_iff]
-    left
-    rw [mem_support_pure_iff]
-  | TFalse =>
-    exists .zero
-    dsimp [genExpr]
-    rw [mem_support_pick_iff]
-    right
-    rw [mem_support_pure_iff]
-  | TZero =>
-    exists 0
-  | TSucc e' He' IH =>
-    obtain ⟨ size', He' ⟩ := IH
-    exists size' + 1
-    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
-    right; left
-    exists e'
-  | TPred e' He' IH =>
-    obtain ⟨ size', He' ⟩ := IH
-    exists size' + 1
-    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
-    right; right; left
-    exists e'
-  | TIsZero e' He' IH =>
-    obtain ⟨ size', He' ⟩ := IH
-    exists size' + 1
-    simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
-    right; right; left
-    exists e'
-  | TIf e1 e2 e3 τ H1 H2 H3 IH1 IH2 IH3 =>
-    obtain ⟨ s1, IH1 ⟩ := IH1
-    obtain ⟨ s2, IH2 ⟩ := IH2
-    obtain ⟨ s3, IH3 ⟩ := IH3
-    let maxSize := max s1 (max s2 s3)
-    exists (maxSize + 1)
-    have h1 : s1 ≤ maxSize := by omega
-    have h2 : s2 ≤ maxSize := by omega
-    have h3 : s3 ≤ maxSize := by omega
-    cases τ with
-    | Bool =>
-      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
-      right; right; right
-      exists e1
+-- Variant of the soundness proof above that uses the `fun_induction` tactic introduced in Lean 4.80
+theorem genExpr_sound' : ∀ (size : ℕ) (τ : Ty) (e : Expr),
+  e ∈ SetGen.support (genExpr size τ) → HasType e τ := by
+  intro size τ
+  fun_induction genExpr (G := SetGen.Set) size τ with
+  | case1 =>
+    -- size = 0, τ = Bool
+    intro e H
+    simp only [mem_support_pure_iff] at H
+    subst H
+    constructor
+  | case2 =>
+    -- size = 0, τ = Nat
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_pure_iff] at H
+    rcases H with rfl | rfl <;> constructor
+  | case3 size' ih_nat ih_bool =>
+    -- size = succ size', τ = Nat
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+    rcases H with rfl | ⟨e', He', rfl⟩ | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+    · -- HasType Zero Nat
       constructor
-      . -- e1 ∈ support (genExpr maxSize Ty.Bool)
-        apply (genExpr_monotone s1) <;> assumption
-      . exists e2
-        constructor
-        . -- e2 ∈ support (genExpr maxSize Ty.Bool)
-          apply (genExpr_monotone s2) <;> assumption
-        . exists e3
-          constructor
-          . -- e3 ∈ support (genExpr maxSize Ty.Bool)
-            apply (genExpr_monotone s3) <;> assumption
-          . rfl
-    | Nat =>
-      simp only [genExpr, mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
-      right; right; right
-      exists e1
+    · -- HasType (Succ e') Nat
       constructor
-      . -- e1 ∈ support (genExpr maxSize Ty.Bool)
-        apply (genExpr_monotone s1) <;> assumption
-      . exists e2
-        constructor
-        . -- e2 ∈ support (genExpr maxSize Ty.Bool)
-          apply (genExpr_monotone s2) <;> assumption
-        . exists e3
-          constructor
-          . -- e3 ∈ support (genExpr maxSize Ty.Bool)
-            apply (genExpr_monotone s3) <;> assumption
-          . rfl
+      apply ih_nat
+      assumption
+    · -- HasType (Pred e') Nat
+      constructor
+      apply ih_nat
+      assumption
+    · -- HasType (IfThenElse e1 e2 e3) Nat
+      constructor
+      · apply ih_bool
+        assumption
+      · apply ih_nat
+        assumption
+      · apply ih_nat
+        assumption
+  | case4 size' ih_nat ih_bool =>
+    -- size = succ size', τ = Bool
+    intro e H
+    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff] at H
+    rcases H with rfl | rfl | ⟨e', He', rfl⟩ | ⟨e1, He1, e2, He2, e3, He3, rfl⟩
+    · -- HasType True Bool
+      constructor
+    · -- HasType False Bool
+      constructor
+    · -- HasType (IsZero e') Bool
+      constructor
+      apply ih_nat
+      assumption
+    · -- HasType (IThenElse e1 e2 e3) Bool
+      constructor <;> apply ih_bool <;> assumption

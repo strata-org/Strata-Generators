@@ -169,13 +169,25 @@ instance : ToFormat Unit where
 @[reducible] def prop_typecheck (te : TypedExpr) : Prop :=
   LExpr.typeCheck (T := LExprParams') [] te.expr = some te.ty
 
+
+
+
+
+
+
+
+
+
+
+
+
 -- Preservation (closed terms only): if ∅ ⊢ e : τ and e →* e', then ∅ ⊢ e' : τ.
 @[reducible] def prop_preservation (te : ClosedTypedExpr) : Prop :=
   let evaled := eval 100 te.expr
   LExpr.typeCheck (T := LExprParams') [] evaled = some te.ty
 
 -- Progress (closed terms only): a well-typed closed term is either a value
--- or can take a step. Stated for the empty context per Software Foundations.
+-- or can take a step.
 -- Falsified by quantifiers (`∀`/`∃`) — `LExpr.eval` has no reduction rule
 -- for them, so `if (∀x. e) then ...` gets stuck.
 @[reducible] def prop_progress (te : ClosedTypedExpr) : Prop :=
@@ -190,6 +202,16 @@ instance : ToFormat Unit where
   let inputFvars := LExpr.collectFvarNames te.expr
   let outputFvars := LExpr.collectFvarNames evaled
   outputFvars.all (· ∈ inputFvars) = true
+
+
+
+
+
+
+
+
+
+
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
