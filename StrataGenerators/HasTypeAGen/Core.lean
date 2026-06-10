@@ -56,13 +56,23 @@ abbrev OpCtx := List (String × LMonoTy)
 
 -- ── SimpleType and depth ─────────────────────────────────────────────
 
-/-- A monotype is *simple* if it is built from `bool`, `int`, `arrow`, and `ftvar`.
+/-- The fixed set of bitvector widths that `genLMonoTy` may produce. -/
+def bitvecWidths : List Nat := [1, 8, 16, 32, 64]
+
+/-- Predicate for bitvector widths producible by `genLMonoTy`. -/
+def IsGenWidth (n : Nat) : Prop := n ∈ (bitvecWidths : List Nat)
+
+/-- A monotype is *simple* if it is built from `bool`, `int`, `string`, `real`,
+    `bitvec n` (for `IsGenWidth n`), `arrow`, and `ftvar`.
     This characterizes exactly the types produced by `genLMonoTy`. -/
 inductive SimpleType : LMonoTy → Prop where
-  | bool  : SimpleType .bool
-  | int   : SimpleType .int
-  | arrow : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.arrow τ₁ τ₂)
-  | ftvar : SimpleType (.ftvar name)
+  | bool   : SimpleType .bool
+  | int    : SimpleType .int
+  | string : SimpleType .string
+  | real   : SimpleType .real
+  | bitvec : IsGenWidth n → SimpleType (.bitvec n)
+  | arrow  : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.arrow τ₁ τ₂)
+  | ftvar  : SimpleType (.ftvar name)
 
 /-- The nesting depth of a monotype: 0 for base types, `max(depth τ₁, depth τ₂) + 1`
     for arrows. Matches the fuel consumed by `genLMonoTy` to produce the type. -/
@@ -134,22 +144,34 @@ def pickTyVar [Gen G] (tvars : List TyIdentifier)
   let idx ← choose 0 (tvars.length - 1) (by omega)
   pure (.ftvar (tvars.getD idx.down ""))
 
+/-- Pick a uniformly random bitvector width from `bitvecWidths` and return
+    it as an `LMonoTy.bitvec`. -/
+def pickBitvecWidth [Gen G] : G LMonoTy := do
+  let idx ← choose 0 (bitvecWidths.length - 1) (by native_decide)
+  pure (.bitvec (bitvecWidths.getD idx.down 32))
+
+/-- Pick a uniformly random base type (bool, int, string, real, or bitvec). -/
+def pickBaseType [Gen G] : G LMonoTy :=
+  pick (fun () => pure .bool)
+       (fun () => pick (fun () => pure .int)
+                       (fun () => pick (fun () => pure .string)
+                                       (fun () => pick (fun () => pure .real)
+                                                       (fun () => pickBitvecWidth))))
+
 /-- Generate a simple monotype of depth ≤ `n`. When `tvars` is non-empty,
-    type variables (`ftvar`) may appear at leaves alongside `bool` and `int`.
+    type variables (`ftvar`) may appear at leaves alongside base types.
     Arrow types are only generated at depth `n + 1` with sub-types at depth `n`. -/
 def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   | 0 =>
     if h : tvars.length > 0 then
-      pick (fun () => pure .bool)
-           (fun () => pick (fun () => pure .int)
-                           (fun () => pickTyVar tvars h))
+      pick (fun () => pickBaseType)
+           (fun () => pickTyVar tvars h)
     else
-      pick (fun () => pure .bool)
-           (fun () => pure .int)
+      pickBaseType
   | n + 1 =>
     if h : tvars.length > 0 then
       pickBiased
-        (fun () => pick (fun () => pure .bool) (fun () => pure .int))
+        (fun () => pickBaseType)
         (fun () =>
           pick
             (fun () => do
@@ -159,7 +181,7 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
             (fun () => pickTyVar tvars h))
     else
       pickBiased
-        (fun () => pick (fun () => pure .bool) (fun () => pure .int))
+        (fun () => pickBaseType)
         (fun () => do
           let τ₁ ← genLMonoTy tvars n
           let τ₂ ← genLMonoTy tvars n
@@ -178,6 +200,28 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
 @[reducible] def genIntConst [Gen G] : G LExpr' :=
   pick (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
        (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int))))
+
+/-- Generate a random string constant. We generate strings of the form
+    `"s0"`, `"s1"`, ... indexed by an arbitrary natural number. -/
+@[reducible] def genStrConst [Gen G] : G LExpr' := do
+  let k ← Nat.arbitrary
+  pure (.strConst () (s!"s{k}"))
+
+/-- Generate a random rational constant (non-negative or negative). -/
+@[reducible] def genRealConst [Gen G] : G LExpr' :=
+  pick (fun () => do
+          let num ← Nat.arbitrary
+          let den ← Nat.arbitrary
+          pure (.realConst () (↑num / (↑den + 1 : Rat))))
+       (fun () => do
+          let num ← Nat.arbitrary
+          let den ← Nat.arbitrary
+          pure (.realConst () (-(↑num / (↑den + 1 : Rat)))))
+
+/-- Generate a random bitvector constant of width `n`. -/
+@[reducible] def genBitvecConst [Gen G] (n : Nat) : G LExpr' := do
+  let k ← Nat.arbitrary
+  pure (.bitvecConst () n (BitVec.ofNat n k))
 
 /-- Generate an application: pick a random argument type, generate the argument
     and a function from that type to `τ`, then apply. -/
@@ -436,7 +480,148 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                     then pickOp octx _ ho
                     else if hv : bvars.length > 0 then pickBVar bctx _ hv
                     else default))))
-  -- ── Fallback (bitvec, etc. — not generated) ────────────────────────
+  -- ── String type ────────────────────────────────────────────────────
+  | 0, .string =>
+    let bvars := bvarsOfType bctx .string
+    pick
+      (fun () => genStrConst)
+      (fun () =>
+        pick
+          (fun () =>
+            if hv : bvars.length > 0 then pickBVar bctx .string hv
+            else genStrConst)
+          (fun () =>
+            pick
+              (fun () =>
+                if hf : (fvarsOfType fctx .string).length > 0
+                then pickFVar fctx .string hf
+                else genStrConst)
+              (fun () =>
+                if ho : (opsOfType octx .string).length > 0
+                then pickOp octx .string ho
+                else genStrConst)))
+  | n + 1, .string =>
+    let bvars := bvarsOfType bctx .string
+    pickBiased
+      (fun () => genStrConst)
+      (fun () =>
+        pick
+          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .string)
+          (fun () =>
+            pick
+              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                                (genLExprBase fctx octx tvars bctx n .string)
+                                (genLExprBase fctx octx tvars bctx n .string))
+              (fun () =>
+                pick
+                  (fun () =>
+                    if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else genStrConst)
+                  (fun () =>
+                    pick
+                      (fun () =>
+                        if hf : (fvarsOfType fctx .string).length > 0
+                        then pickFVar fctx .string hf
+                        else genStrConst)
+                      (fun () =>
+                        if ho : (opsOfType octx .string).length > 0
+                        then pickOp octx .string ho
+                        else genStrConst)))))
+  -- ── Real type ─────────────────────────────────────────────────────
+  | 0, .real =>
+    let bvars := bvarsOfType bctx .real
+    pick
+      (fun () => genRealConst)
+      (fun () =>
+        pick
+          (fun () =>
+            if hv : bvars.length > 0 then pickBVar bctx .real hv
+            else genRealConst)
+          (fun () =>
+            pick
+              (fun () =>
+                if hf : (fvarsOfType fctx .real).length > 0
+                then pickFVar fctx .real hf
+                else genRealConst)
+              (fun () =>
+                if ho : (opsOfType octx .real).length > 0
+                then pickOp octx .real ho
+                else genRealConst)))
+  | n + 1, .real =>
+    let bvars := bvarsOfType bctx .real
+    pickBiased
+      (fun () => genRealConst)
+      (fun () =>
+        pick
+          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .real)
+          (fun () =>
+            pick
+              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                                (genLExprBase fctx octx tvars bctx n .real)
+                                (genLExprBase fctx octx tvars bctx n .real))
+              (fun () =>
+                pick
+                  (fun () =>
+                    if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else genRealConst)
+                  (fun () =>
+                    pick
+                      (fun () =>
+                        if hf : (fvarsOfType fctx .real).length > 0
+                        then pickFVar fctx .real hf
+                        else genRealConst)
+                      (fun () =>
+                        if ho : (opsOfType octx .real).length > 0
+                        then pickOp octx .real ho
+                        else genRealConst)))))
+  -- ── Bitvec type ───────────────────────────────────────────────────
+  | 0, .bitvec n =>
+    let bvars := bvarsOfType bctx (.bitvec n)
+    pick
+      (fun () => genBitvecConst n)
+      (fun () =>
+        pick
+          (fun () =>
+            if hv : bvars.length > 0 then pickBVar bctx (.bitvec n) hv
+            else genBitvecConst n)
+          (fun () =>
+            pick
+              (fun () =>
+                if hf : (fvarsOfType fctx (.bitvec n)).length > 0
+                then pickFVar fctx (.bitvec n) hf
+                else genBitvecConst n)
+              (fun () =>
+                if ho : (opsOfType octx (.bitvec n)).length > 0
+                then pickOp octx (.bitvec n) ho
+                else genBitvecConst n)))
+  | m + 1, .bitvec n =>
+    let bvars := bvarsOfType bctx (.bitvec n)
+    pickBiased
+      (fun () => genBitvecConst n)
+      (fun () =>
+        pick
+          (fun () => genApp (genLMonoTy tvars m) (genLExprBase fctx octx tvars bctx m) (.bitvec n))
+          (fun () =>
+            pick
+              (fun () => genIte (genLExprBase fctx octx tvars bctx m .bool)
+                                (genLExprBase fctx octx tvars bctx m (.bitvec n))
+                                (genLExprBase fctx octx tvars bctx m (.bitvec n)))
+              (fun () =>
+                pick
+                  (fun () =>
+                    if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else genBitvecConst n)
+                  (fun () =>
+                    pick
+                      (fun () =>
+                        if hf : (fvarsOfType fctx (.bitvec n)).length > 0
+                        then pickFVar fctx (.bitvec n) hf
+                        else genBitvecConst n)
+                      (fun () =>
+                        if ho : (opsOfType octx (.bitvec n)).length > 0
+                        then pickOp octx (.bitvec n) ho
+                        else genBitvecConst n)))))
+  -- ── Fallback (other tcons — not generated) ────────────────────────
   | _, _ => pure (.boolConst () false)
 
 -- ── Shared helpers ──────────────────────────────────────────────────
