@@ -454,17 +454,10 @@ abbrev PolyOpCtx := List (String × Lambda.LTy)
 open Lambda in
 /-- Unify two monotypes using Strata's constraint unification.
     Returns `none` on failure, or `some subst` on success. -/
-def unifyTypes (t1 t2 : LMonoTy) : Option Lambda.SubstOne :=
+def unifyTypes (t1 t2 : LMonoTy) : Option Lambda.Subst :=
   match Constraints.unify [(t1, t2)] .empty with
-  | .ok si => some (Maps.oldest si.subst)
+  | .ok si => some si.subst
   | .error _ => none
-
-/-- Compose two substitutions: apply `s1` to the values of `s2`, then add
-    entries from `s1` not already covered by `s2`. -/
-def composeSubst (s1 s2 : Lambda.SubstOne) : Lambda.SubstOne :=
-  let s2' := Lambda.SubstOne.apply s1 s2
-  let s1Extra : Lambda.SubstOne := s1.filter (fun (v, _) => s2'.lookup v == none)
-  s2' ++ s1Extra
 
 /-- Decompose a curried function type into (argument types, return type). -/
 def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
@@ -475,8 +468,8 @@ def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
 
 /-- Find free type variables in a substitution that haven't been assigned:
     those among `boundVars` that don't appear as keys in `subst`. -/
-def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.SubstOne) : List TyIdentifier :=
-  boundVars.filter (fun v => Map.find? subst v == none)
+def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List TyIdentifier :=
+  boundVars.filter (fun v => Maps.find? subst v == none)
 
 /-- Compute the set of "generable types" from a context, following
     Pałka et al. (2011, Section 4). We collect all syntactic sub-types
@@ -526,9 +519,9 @@ def findPolyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
           else some (name, argTys, monoTy, subst, freeTyVars)
   |>.map fun (name, argTys, monoTy, subst, freeTyVars) =>
     let defaultSubst : Lambda.SubstOne := freeTyVars.map (fun v => (v, generableTys.headD .bool))
-    let fullSubst := composeSubst defaultSubst subst
-    let concreteArgTys := argTys.map (LMonoTy.subst [fullSubst])
-    let concreteTy := LMonoTy.subst [fullSubst] monoTy
+    let fullSubst : Lambda.Subst := defaultSubst :: subst
+    let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
+    let concreteTy := LMonoTy.subst fullSubst monoTy
     (name, concreteArgTys, concreteTy)
 
 /-- Collect the concrete (name, argTypes) pairs that result from instantiating
@@ -551,8 +544,8 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
           let freeTyVars := findFreeTyVars boundVars subst
           if !freeTyVars.isEmpty && generableTys.isEmpty then none
           else
-            let fullSubst := composeSubst (freeTyVars.zip sampledTys) subst
-            let concreteArgTys := argTys.map (LMonoTy.subst [fullSubst])
+            let fullSubst : Lambda.Subst := (freeTyVars.zip sampledTys) :: subst
+            let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
             some (name, concreteArgTys)
 
 /-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
