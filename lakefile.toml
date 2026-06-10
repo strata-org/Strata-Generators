@@ -10,7 +10,7 @@ rev = "010194b27c35c37a625dee3a28def807205346b9"
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
-rev = "main"
+rev = "ernest/combinators"
 
 # Core generator definitions (no Factory, no Mathlib — shared by Defs and HasTypeAGen)
 [[lean_lib]]
