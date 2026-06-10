@@ -2,15 +2,9 @@ import StrataGenerators.SetGen
 import StrataGenerators.HasTypeAGen.Core
 import Strata.DL.Lambda.LTyUnify
 
+-- Mathlib registers Nat.le_refl with @[refl]
+-- Adding this annotation avoids us needing to depend on Mathlib
 attribute [refl] Nat.le_refl
-
-/-- Local replacement for `Mathlib.Tactic.Set`. -/
-macro "set " x:ident " := " e:term : tactic =>
-  `(tactic| let $x := $e)
-
-/-- Variant with type annotation. -/
-macro "set " x:ident " : " t:term " := " e:term : tactic =>
-  `(tactic| let $x : $t := $e)
 
 open Lambda RandomChoice ArbNat SetGen
 
@@ -1755,11 +1749,11 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           (findOpsInCtx octx τ)[idx.down] := by
         simp [List.getD, List.getElem?_eq_getElem hlt]
       rw [heq]; exact List.getElem_mem hlt
-    set entry := (findOpsInCtx octx τ).getD idx.down ("", [])
-    set name := entry.1
-    set argTys := entry.2
-    set fullTy := argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
-    set base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
+    let entry := (findOpsInCtx octx τ).getD idx.down ("", [])
+    let name := entry.1
+    let argTys := entry.2
+    let fullTy := argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+    let base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
     have ⟨hoctx_mem, _⟩ := findOpsInCtx_mem hentry_mem
     have hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
     have hforall₂ := (mem_mapM_iff
