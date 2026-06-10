@@ -14,7 +14,9 @@ evaluator wrapper, and the value predicate.
 
 -- ── Pretty-printers ────────────────────────────────────────────────────
 
-/-- Pretty-print a monotype with `→` for arrows. -/
+/-- Pretty-print a monotype with `→` for arrows. Left-hand sides of arrows
+    are parenthesized when they are themselves arrow types (standard convention
+    for right-associative `→`). -/
 partial def ppType : LMonoTy → String
   | .arrow τ₁ τ₂ =>
     let lhs := match τ₁ with
@@ -70,6 +72,16 @@ def defaultFCtx : FVarCtx :=
     and boolean operations (And, Or, Not, ...). -/
 def intBoolFactory : Factory LExprParams' :=
   @IntBoolFactory (T := LExprParams') ⟨()⟩ ⟨()⟩
+
+/-- Polymorphic operators for exercising the IndirPoly generator rule.
+    - `id : ∀ a. a → a`
+    - `churchTrue : ∀ a b. a → b → a`
+    - `churchFalse : ∀ a b. b → a → b` -/
+def defaultPolyOps : PolyOpCtx :=
+  [ ("id", .forAll ["a"] (.arrow (.ftvar "a") (.ftvar "a")))
+  , ("churchTrue", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "a"))))
+  , ("churchFalse", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "b"))))
+  ]
 
 -- ── Evaluator ───────────────────────────────────────────────────────────
 

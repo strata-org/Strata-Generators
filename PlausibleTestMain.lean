@@ -43,13 +43,18 @@ instance : Repr TypedExpr where
   reprPrec te _ := s!"({ppExpr te.expr}) : {ppType te.ty}"
 
 /-- For terms that don't involve top-level binders (e.g. `lam` or `quant`),
-    extract their immediate sub-terms. -/
+    extract their immediate sub-terms. Excludes bare `.op` nodes since
+    unapplied operators (interpretered functions)
+    are trivial counterexamples to progress (they aren't
+    values and can't reduce without arguments). -/
 private def immediateSubtermsWithoutBinders (e : LExpr') : List LExpr' :=
-  match e with
+  (match e with
   | .app _ fn arg => [fn, arg]
   | .ite _ c t e => [c, t, e]
   | .eq _ e1 e2 => [e1, e2]
-  | _ => []
+  | _ => []).filter fun
+    | .op _ _ _ => false
+    | _ => true
 
 /-- Shrinks an LExpr structually.
     - Note: for terms involving binders (e.g. `abs` and `quant`), we shrink
@@ -97,7 +102,7 @@ private def genTypedExprWith (fctx : FVarCtx) : Gen TypedExpr := Gen.sized fun s
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExprWithFactory (G := Plausible.Gen) fctx intBoolFactory tvars [] depth ty
+  let expr ← genLExprWithFactory (G := Plausible.Gen) (pctx := defaultPolyOps) fctx intBoolFactory tvars [] depth ty
   pure ⟨expr, ty⟩
 
 -- `genLExpr` can fail (via `default`) when a depth-0 arrow case has no
