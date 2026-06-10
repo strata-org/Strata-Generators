@@ -1,6 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Strata.DL.Lambda.Denote.LExprAnnotated
+import Strata.DL.Lambda.LTyUnify
 
 open Lambda RandomChoice
 
@@ -11,9 +12,6 @@ This file contains the canonical definitions of `genLExpr` and all supporting
 types/helpers. It is imported by both:
 - `HasTypeAGen/Defs.lean` (which adds `Factory`-accepting wrappers)
 - `HasTypeAGen.lean` (which adds soundness/completeness proofs)
-
-**Important**: This file must NOT import `Strata.DL.Lambda.Factory` or anything
-from Mathlib/Batteries that would trigger the `List.Forall₂` conflict.
 -/
 
 namespace ArbNat
@@ -453,52 +451,20 @@ def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
     scheme (`LTy`). Analogous to `[(String, PolyTyp)]` in the Haskell generator. -/
 abbrev PolyOpCtx := List (String × Lambda.LTy)
 
-/-- A simple type substitution mapping type variable names to monotypes.
-    Used internally by the IndirPoly rule for unification. -/
-abbrev SimpleSubst := List (TyIdentifier × LMonoTy)
+open Lambda in
+/-- Unify two monotypes using Strata's constraint unification.
+    Returns `none` on failure, or `some subst` on success. -/
+def unifyTypes (t1 t2 : LMonoTy) : Option Lambda.SubstOne :=
+  match Constraints.unify [(t1, t2)] .empty with
+  | .ok si => some (Maps.oldest si.subst)
+  | .error _ => none
 
-/-- Apply a simple substitution to a monotype. -/
-def applySimpleSubst (s : SimpleSubst) (ty : LMonoTy) : LMonoTy :=
-  match ty with
-  | .ftvar x => match s.lookup x with
-    | some t => t
-    | none => .ftvar x
-  | .bitvec n => .bitvec n
-  | .tcons name args => .tcons name (args.map (applySimpleSubst s))
-
-/-- Compose two simple substitutions: `composeSimpleSubst s1 s2` applies `s1`
-    to all values in `s2`, then appends `s1` entries not already in `s2`. -/
-def composeSimpleSubst (s1 s2 : SimpleSubst) : SimpleSubst :=
-  let s2' := s2.map (fun (v, t) => (v, applySimpleSubst s1 t))
-  s2' ++ s1.filter (fun (v, _) => s2'.lookup v == none)
-
-/-- Simple unification of two monotypes. Returns `none` on failure,
-    or `some subst` where `applySimpleSubst subst t1 = applySimpleSubst subst t2`.
-    Follows the same structure as the Haskell `unify` function. -/
-partial def unifySimple : LMonoTy → LMonoTy → Option SimpleSubst
-  | .ftvar x, .ftvar y =>
-    if x == y then some [] else some [(x, .ftvar y)]
-  | .ftvar x, ty =>
-    if x ∈ ty.freeVars then none else some [(x, ty)]
-  | ty, .ftvar x =>
-    if x ∈ ty.freeVars then none else some [(x, ty)]
-  | .tcons name1 args1, .tcons name2 args2 =>
-    if name1 == name2 && args1.length == args2.length then
-      unifyList args1 args2
-    else none
-  | .bitvec n1, .bitvec n2 =>
-    if n1 == n2 then some [] else none
-  | _, _ => none
-where
-  unifyList : List LMonoTy → List LMonoTy → Option SimpleSubst
-    | [], [] => some []
-    | t1 :: rest1, t2 :: rest2 => do
-      let s1 ← unifySimple t1 t2
-      let rest1' := rest1.map (applySimpleSubst s1)
-      let rest2' := rest2.map (applySimpleSubst s1)
-      let s2 ← unifyList rest1' rest2'
-      pure (composeSimpleSubst s2 s1)
-    | _, _ => none
+/-- Compose two substitutions: apply `s1` to the values of `s2`, then add
+    entries from `s1` not already covered by `s2`. -/
+def composeSubst (s1 s2 : Lambda.SubstOne) : Lambda.SubstOne :=
+  let s2' := Lambda.SubstOne.apply s1 s2
+  let s1Extra : Lambda.SubstOne := s1.filter (fun (v, _) => s2'.lookup v == none)
+  s2' ++ s1Extra
 
 /-- Decompose a curried function type into (argument types, return type). -/
 def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
@@ -509,8 +475,8 @@ def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
 
 /-- Find free type variables in a substitution that haven't been assigned:
     those among `boundVars` that don't appear as keys in `subst`. -/
-def findFreeTyVars (boundVars : List TyIdentifier) (subst : SimpleSubst) : List TyIdentifier :=
-  boundVars.filter (fun v => subst.lookup v == none)
+def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.SubstOne) : List TyIdentifier :=
+  boundVars.filter (fun v => Map.find? subst v == none)
 
 /-- Compute the set of "generable types" from a context, following
     Pałka et al. (2011, Section 4). We collect all syntactic sub-types
@@ -552,19 +518,17 @@ def findPolyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     | .forAll boundVars monoTy =>
       let (argTys, retTy) := decomposeArrow monoTy
       if argTys.isEmpty || argTys.length > 3 then none
-      else match unifySimple retTy τ with
+      else match unifyTypes retTy τ with
         | none => none
         | some subst =>
           let freeTyVars := findFreeTyVars boundVars subst
           if !freeTyVars.isEmpty && generableTys.isEmpty then none
           else some (name, argTys, monoTy, subst, freeTyVars)
   |>.map fun (name, argTys, monoTy, subst, freeTyVars) =>
-    -- For now, instantiate free type vars with the first generable type
-    -- (the actual generator will sample randomly)
-    let defaultSubst := freeTyVars.map (fun v => (v, generableTys.headD .bool))
-    let fullSubst := composeSimpleSubst defaultSubst subst
-    let concreteArgTys := argTys.map (applySimpleSubst fullSubst)
-    let concreteTy := applySimpleSubst fullSubst monoTy
+    let defaultSubst : Lambda.SubstOne := freeTyVars.map (fun v => (v, generableTys.headD .bool))
+    let fullSubst := composeSubst defaultSubst subst
+    let concreteArgTys := argTys.map (LMonoTy.subst [fullSubst])
+    let concreteTy := LMonoTy.subst [fullSubst] monoTy
     (name, concreteArgTys, concreteTy)
 
 /-- Collect the concrete (name, argTypes) pairs that result from instantiating
@@ -581,14 +545,14 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     | .forAll boundVars monoTy =>
       let (argTys, retTy) := decomposeArrow monoTy
       if argTys.isEmpty || argTys.length > 3 then none
-      else match unifySimple retTy τ with
+      else match unifyTypes retTy τ with
         | none => none
         | some subst =>
           let freeTyVars := findFreeTyVars boundVars subst
           if !freeTyVars.isEmpty && generableTys.isEmpty then none
           else
-            let fullSubst := composeSimpleSubst (freeTyVars.zip sampledTys) subst
-            let concreteArgTys := argTys.map (applySimpleSubst fullSubst)
+            let fullSubst := composeSubst (freeTyVars.zip sampledTys) subst
+            let concreteArgTys := argTys.map (LMonoTy.subst [fullSubst])
             some (name, concreteArgTys)
 
 /-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from

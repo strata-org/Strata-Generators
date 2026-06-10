@@ -1,6 +1,16 @@
 import StrataGenerators.SetGen
 import StrataGenerators.HasTypeAGen.Core
-import Mathlib.Tactic
+import Strata.DL.Lambda.LTyUnify
+
+attribute [refl] Nat.le_refl
+
+/-- Local replacement for `Mathlib.Tactic.Set`. -/
+macro "set " x:ident " := " e:term : tactic =>
+  `(tactic| let $x := $e)
+
+/-- Variant with type annotation. -/
+macro "set " x:ident " : " t:term " := " e:term : tactic =>
+  `(tactic| let $x : $t := $e)
 
 open Lambda RandomChoice ArbNat SetGen
 
@@ -91,9 +101,8 @@ private theorem pickBVar_sound (bctx : BVarCtx) (τ : LMonoTy)
   subst heq
   apply LExpr.HasTypeA.bvar
   rw [← bvarsOfType_mem_iff]
-  set indices := bvarsOfType bctx τ
-  have hlt : idx.down < indices.length := by omega
-  have : indices.getD idx.down 0 = indices[idx.down] := by
+  have hlt : idx.down < (bvarsOfType bctx τ).length := by omega
+  have : (bvarsOfType bctx τ).getD idx.down 0 = (bvarsOfType bctx τ)[idx.down] := by
     simp [List.getD, List.getElem?_eq_getElem hlt]
   rw [this]
   exact List.getElem_mem hlt
@@ -210,13 +219,15 @@ namespace SetGen
     | false => right; simpa using ha
   · intro h
     have htrue : true ∈ (RandomChoice.coin (1 / 10) : Set Bool) := by
-      simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose]
-      refine ⟨⟨0⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, ?_⟩
-      norm_num [Pure.pure]
+      simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
+                 show (1 / 10 : Rat).den = 10 from by native_decide,
+                 show (1 / 10 : Rat).num = 1 from by native_decide]
+      exact ⟨⟨0⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, rfl⟩
     have hfalse : false ∈ (RandomChoice.coin (1 / 10) : Set Bool) := by
-      simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose]
-      refine ⟨⟨10⟩, ⟨Nat.zero_le _, by norm_num⟩, ?_⟩
-      norm_num [Pure.pure]
+      simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
+                 show (1 / 10 : Rat).den = 10 from by native_decide,
+                 show (1 / 10 : Rat).num = 1 from by native_decide]
+      exact ⟨⟨10⟩, ⟨Nat.zero_le _, Nat.le_refl _⟩, rfl⟩
     cases h with
     | inl hx => exact ⟨true, htrue, by simpa⟩
     | inr hy => exact ⟨false, hfalse, by simpa⟩
@@ -1713,7 +1724,7 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     -- The only non-trivial obligation is showing SimpleType concreteArgTys[i]
     -- (required by genLExprBase_sound). This follows from hSimpleGenerable:
     -- the sampled types are drawn from generableTypesFromCtx (all SimpleType),
-    -- and applySimpleSubst preserves SimpleType when the substitution maps
+    -- and LMonoTy.subst preserves SimpleType when the substitution maps
     -- type variables to SimpleTypes.
     sorry
   · -- No candidates: fell back to genLExprBase
@@ -1738,12 +1749,13 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   · -- Monomorphic Indir path: fully-applied operator
     simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
     obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    set ops := findOpsInCtx octx τ
-    have hlt : idx.down < ops.length := by omega
-    set entry := ops.getD idx.down ("", [])
-    have hentry_eq : entry = ops[idx.down] := by
-      simp [entry, List.getElem?_eq_getElem hlt]
-    have hentry_mem : entry ∈ ops := hentry_eq ▸ List.getElem_mem hlt
+    have hlt : idx.down < (findOpsInCtx octx τ).length := by omega
+    have hentry_mem : (findOpsInCtx octx τ).getD idx.down ("", []) ∈ findOpsInCtx octx τ := by
+      have heq : (findOpsInCtx octx τ).getD idx.down ("", []) =
+          (findOpsInCtx octx τ)[idx.down] := by
+        simp [List.getD, List.getElem?_eq_getElem hlt]
+      rw [heq]; exact List.getElem_mem hlt
+    set entry := (findOpsInCtx octx τ).getD idx.down ("", [])
     set name := entry.1
     set argTys := entry.2
     set fullTy := argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
