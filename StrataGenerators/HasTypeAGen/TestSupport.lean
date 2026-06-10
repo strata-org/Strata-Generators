@@ -76,7 +76,7 @@ def intBoolFactory : Factory LExprParams' :=
 /-- Polymorphic operators for exercising the IndirPoly generator rule.
     - `id : ∀ a. a → a`
     - `churchTrue : ∀ a b. a → b → a`
-    - `churchFalse : ∀ a b. b → a → b` -/
+    - `churchFalse : ∀ a b. a → b → b` -/
 def defaultPolyOps : PolyOpCtx :=
   [ ("id", .forAll ["a"] (.arrow (.ftvar "a") (.ftvar "a")))
   , ("churchTrue", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "a"))))

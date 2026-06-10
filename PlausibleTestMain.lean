@@ -109,7 +109,7 @@ private def genTypedExprWith (fctx : FVarCtx) : Gen TypedExpr := Gen.sized fun s
 -- bvar/fvar/op in context. Since `Plausible.Gen` doesn't backtrack on its
 -- own, we use `Gen.backtrack` to retry with fresh randomness on failure.
 instance : Arbitrary TypedExpr where
-  arbitrary := Gen.backtrack (List.replicate 100 (1, genTypedExprWith defaultFCtx))
+  arbitrary := Gen.backtrack (List.replicate 500 (1, genTypedExprWith defaultFCtx))
 
 /-- A closed generated expression (no free variables). Used for properties
     that are stated with respect to the empty typing context (progress
@@ -130,7 +130,7 @@ instance : Shrinkable ClosedTypedExpr where
       | none => none
 
 instance : Arbitrary ClosedTypedExpr where
-  arbitrary := Gen.backtrack (List.replicate 100
+  arbitrary := Gen.backtrack (List.replicate 500
     (1, (fun te => ⟨te.expr, te.ty⟩) <$> genTypedExprWith []))
 
 -- ── Pretty-printing ──────────────────────────────────────────────────
