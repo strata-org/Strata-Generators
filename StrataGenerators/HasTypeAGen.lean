@@ -328,7 +328,7 @@ private theorem pickBitvecWidth_complete (n : Nat) (hmem : n ∈ (bitvecWidths :
 private theorem pickBaseType_mem (tvars : List TyIdentifier) (τ : LMonoTy)
     (hτ : τ ∈ SetGen.support (pickBaseType (G := SetGen.Set))) :
     SimpleType τ ∧ monoTyDepth τ = 0 ∧ allFtvarsIn tvars τ := by
-  simp only [pickBaseType, pick_mem_iff, mem_support_pure_iff,
+  simp only [pickBaseType, pick_mem_iff,
              SetGen.support, pickBitvecWidth] at hτ
   rcases hτ with rfl | (rfl | (rfl | (rfl | hbv)))
   · exact ⟨.bool, rfl, allFtvarsIn_bool _⟩
@@ -342,26 +342,26 @@ private theorem pickBaseType_mem (tvars : List TyIdentifier) (τ : LMonoTy)
     (For bitvec, we additionally require `n ∈ bitvecWidths`.) -/
 private theorem pickBaseType_complete_bool :
     LMonoTy.bool ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, mem_support_pure_iff, SetGen.support]; left; rfl
+  simp only [pickBaseType, pick_mem_iff, SetGen.support]; left; rfl
 
 private theorem pickBaseType_complete_int :
     LMonoTy.int ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, mem_support_pure_iff, SetGen.support]
+  simp only [pickBaseType, pick_mem_iff, SetGen.support]
   right; left; rfl
 
 private theorem pickBaseType_complete_string :
     LMonoTy.string ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, mem_support_pure_iff, SetGen.support]
+  simp only [pickBaseType, pick_mem_iff, SetGen.support]
   right; right; left; rfl
 
 private theorem pickBaseType_complete_real :
     LMonoTy.real ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, mem_support_pure_iff, SetGen.support]
+  simp only [pickBaseType, pick_mem_iff, SetGen.support]
   right; right; right; left; rfl
 
 private theorem pickBaseType_complete_bitvec (n : Nat) (hmem : n ∈ (bitvecWidths : List Nat)) :
     LMonoTy.bitvec n ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, mem_support_pure_iff, SetGen.support]
+  simp only [pickBaseType, pick_mem_iff, SetGen.support]
   right; right; right; right
   exact pickBitvecWidth_complete n hmem
 
@@ -721,176 +721,6 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
       | exact absurd h (by simp)
   termination_by (depth, sizeOf τ)
   decreasing_by all_goals simp_wf; omega
-
--- The commented proof sketch for `genLExprBase_termDepth_bound` has been moved
--- below the `termDepth` definition. See `genLExprBase_termDepth_bound` after
--- the completeness proof section.
-
-/-  Old proof sketch for genLExprBase_termDepth_bound (reference only)
-  match depth, τ, hτ with
-  | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff,
-      mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
-    all_goals first | rfl | (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
-  | 0, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
-    all_goals first | rfl | (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
-  | 0, _, SimpleType.arrow hs₁ hs₂ =>
-    rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff,
-      mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
-    rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨_, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
-    all_goals (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | exact absurd h (by simp))
-  | n + 1, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (rfl | rfl) | ⟨c, hc, t, ht, e', he', rfl⟩ | ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ |
-      ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
-      ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ |
-      ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ |
-      ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
-    · exact Nat.zero_le _
-    · exact Nat.zero_le _
-    · show termDepth bctx (.ite () c t e') ≤ n + 1
-      unfold termDepth
-      have hc' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have ht' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ ht
-      have he'' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ he'
-      omega
-    · show termDepth bctx (.eq () e₁ e₂) ≤ n + 1
-      unfold termDepth
-      have h₁ := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₁
-      have h₂ := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ he₂
-      omega
-    · show termDepth bctx (.app () fn arg) ≤ n + 1
-      unfold termDepth
-      have hfn' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.bool) _ hfn
-      have harg' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
-      omega
-    · show termDepth bctx (.quant () .all "" (some τ') tr body) ≤ n + 1
-      unfold termDepth
-      have htr' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
-      have hbody' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
-      have hd := ((genLMonoTy_support tvars n τ').mp hτ'm).2.1
-      omega
-    · show termDepth bctx (.quant () .exist "" (some τ') tr body) ≤ n + 1
-      unfold termDepth
-      have htr' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ (genLMonoTy_simple tvars n _ hτ_tr_m) _ htr
-      have hbody' := genLExprBase_termDepth_bound fctx octx tvars (τ' :: bctx) n _ SimpleType.bool _ hbody
-      have hd := ((genLMonoTy_support tvars n τ').mp hτ'm).2.1
-      omega
-    all_goals first | exact Nat.zero_le _ | (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
-  | n + 1, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
-      ⟨c, hc, t, ht, e', he', rfl⟩ |
-      ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
-    · exact Nat.zero_le _
-    · exact Nat.zero_le _
-    · show termDepth bctx (.app () fn arg) ≤ n + 1
-      unfold termDepth
-      have hfn' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.int) _ hfn
-      have harg' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg
-      omega
-    · show termDepth bctx (.ite () c t e') ≤ n + 1
-      unfold termDepth
-      have hc' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.bool _ hc
-      have ht' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ ht
-      have he'' := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.int _ he'
-      omega
-    all_goals first | exact Nat.zero_le _ | (
-      first
-      | (simp only [pickBVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickFVar, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-      | (simp only [pickOp, Set.mem_bind, Set.mem_pure] at h
-         obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _))
-  | n + 1, _, SimpleType.arrow hs₁ hs₂ =>
-    rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    rcases he with ⟨body, hbody, rfl⟩ | ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
-      ⟨c, hc, t, ht, e', he', rfl⟩ |
-      ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | ((⟨_, h⟩ | ⟨_, body, hbody, rfl⟩) | (⟨_, h⟩ | ⟨_, body, hbody, rfl⟩)))
-    · exact .abs (genLExprBase_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
-    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) (SimpleType.arrow hs₁ hs₂)) _ hfn)
-                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ ht)
-                  (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow hs₁ hs₂) _ he')
-    all_goals first
-      | exact pickBVar_sound bctx _ _ _ h
-      | exact pickFVar_sound fctx _ _ _ h
-      | exact pickOp_sound octx _ _ _ h
-      | exact .abs (genLExprBase_sound fctx octx tvars (τ₁ :: bctx) n _ hs₂ _ hbody)
-  | 0, _, SimpleType.ftvar =>
-    rename_i name
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
-               bot_mem_iff] at he
-    rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-      ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
-    all_goals first
-      | exact pickBVar_sound bctx _ _ _ h
-      | exact pickFVar_sound fctx _ _ _ h
-      | exact pickOp_sound octx _ _ _ h
-      | exact absurd h (by simp)
-  | n + 1, _, SimpleType.ftvar =>
-    rename_i name
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
-               mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
-    rcases he with ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ |
-      ⟨c, hc, t, ht, e', he', rfl⟩ |
-      ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩) |
-        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩)))
-    · exact .app (genLExprBase_sound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ hτ'm) SimpleType.ftvar) _ hfn)
-                  (genLExprBase_sound fctx octx tvars bctx n _ (genLMonoTy_simple tvars n _ hτ'm) _ harg)
-    · exact .ite (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.bool _ hc)
-                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.ftvar _ ht)
-                  (genLExprBase_sound fctx octx tvars bctx n _ SimpleType.ftvar _ he')
-    all_goals first
-      | exact pickBVar_sound bctx _ _ _ h
-      | exact pickFVar_sound fctx _ _ _ h
-      | exact pickOp_sound octx _ _ _ h
-      | exact absurd h (by simp)
-  termination_by (depth, sizeOf τ)
-  decreasing_by all_goals simp_wf; omega
--/
 
 -- ── Nat.arbitrary support for SetGen.Set ──────────────────────────────
 
@@ -1596,7 +1426,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
     rw [norm_arrow]
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
