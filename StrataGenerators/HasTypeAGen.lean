@@ -1669,6 +1669,67 @@ private theorem findOpsInCtx_mem {octx : OpCtx} {τ : LMonoTy}
     exact hmem
   · simp at hfilt
 
+-- ── Helper lemmas for SimpleType preservation ───────────────────────
+
+/-- `LMonoTy.subst` preserves `SimpleType` when the substitution maps
+    all type variables to `SimpleType` values. -/
+private theorem subst_simple (S : Lambda.Subst) (ty : LMonoTy)
+    (hTy : SimpleType ty)
+    (hSubst : ∀ v t, Maps.find? S v = some t → SimpleType t) :
+    SimpleType (LMonoTy.subst S ty) := by
+  induction hTy with
+  | bool =>
+    rw [LMonoTy.subst_unfold]; simp [LMonoTy.bool]; exact .bool
+  | int =>
+    rw [LMonoTy.subst_unfold]; simp [LMonoTy.int]; exact .int
+  | ftvar =>
+    rw [LMonoTy.subst_unfold]
+    simp only [LMonoTy.freeVars]
+    split
+    · exact hSubst _ _ ‹_›
+    · exact .ftvar
+  | arrow h₁ h₂ ih₁ ih₂ =>
+    rw [LMonoTy.subst_unfold]
+    simp only [LMonoTy.arrow, List.map]
+    exact .arrow ih₁ ih₂
+
+/-- All syntactic subtypes of a `SimpleType` are themselves `SimpleType`. -/
+private theorem syntacticSubtypes_simple (ty : LMonoTy) (hTy : SimpleType ty)
+    (σ : LMonoTy) (hσ : σ ∈ syntacticSubtypes ty) : SimpleType σ := by
+  induction hTy with
+  | bool =>
+    simp [syntacticSubtypes, LMonoTy.bool] at hσ
+    subst hσ; exact .bool
+  | int =>
+    simp [syntacticSubtypes, LMonoTy.int] at hσ
+    subst hσ; exact .int
+  | ftvar =>
+    simp [syntacticSubtypes] at hσ
+    subst hσ; exact .ftvar
+  | @arrow τ₁ τ₂ h₁ h₂ ih₁ ih₂ =>
+    simp [syntacticSubtypes, LMonoTy.arrow] at hσ
+    rcases hσ with rfl | hσ₁ | hσ₂
+    · exact .arrow h₁ h₂
+    · exact ih₁ hσ₁
+    · exact ih₂ hσ₂
+
+/-- `addNewTypes` preserves the property that all list elements are `SimpleType`. -/
+private theorem addNewTypes_simple (fuel : Nat) (tys : List LMonoTy)
+    (hAll : ∀ σ ∈ tys, SimpleType σ) :
+    ∀ σ ∈ addNewTypes fuel tys, SimpleType σ := by
+  sorry
+
+/-- All types in `generableTypesFromCtx` are `SimpleType`, given that
+    all types in the bound-variable, free-variable, and operator contexts
+    are `SimpleType`. -/
+theorem generableTypesFromCtx_simple
+    (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx)
+    (hBctx : ∀ τ ∈ bctx, SimpleType τ)
+    (hFctx : ∀ p ∈ fctx, SimpleType p.2)
+    (hOctx : ∀ p ∈ octx, SimpleType p.2) :
+    ∀ σ ∈ generableTypesFromCtx bctx fctx octx, SimpleType σ := by
+  sorry
+
 /-- Soundness of `genIndirPoly`: every generated expression is well-typed.
 
     The proof exploits the key structural invariant: `genIndirPoly` always
@@ -1685,13 +1746,24 @@ private theorem findOpsInCtx_mem {octx : OpCtx} {τ : LMonoTy}
     The `hSimpleGenerable` precondition ensures the types in `generableTypesFromCtx`
     are `SimpleType`s, which guarantees the concrete argument types (produced by
     substituting generable types into the polymorphic operator's type scheme) are
-    also `SimpleType`s. This holds whenever bctx/fctx/octx only contain simple types. -/
+    also `SimpleType`s. This holds whenever bctx/fctx/octx only contain simple types.
+
+    The `hSimplePolyOps` precondition directly asserts that `polyOpsForResult`
+    produces entries whose argument types are all `SimpleType`. This is needed
+    because `unifyTypes` wraps Strata's `Constraints.unify` which uses
+    well-founded recursion internally, and its output cannot easily be reasoned
+    about via structural induction on the input types. In practice, this holds
+    whenever the polymorphic operators' monotype bodies are `SimpleType`
+    (built from bool/int/arrow/ftvar). -/
 theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ)
     (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
     (hSimpleGenerable : ∀ σ ∈ generableTypesFromCtx bctx fctx octx, SimpleType σ)
+    (hSimplePolyOps : ∀ sampledTys entry,
+      entry ∈ polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys →
+      ∀ σ ∈ entry.2, SimpleType σ)
     (e : LExpr')
     (he : e ∈ SetGen.support (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
     HasTypeA' bctx e τ := by
@@ -1716,14 +1788,43 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     -- (3) mkApps_hasType assembles (1) and (2) into HasTypeA' bctx e τ
     --
     -- The only non-trivial obligation is showing SimpleType concreteArgTys[i]
-    -- (required by genLExprBase_sound). This follows from hSimpleGenerable:
-    -- the sampled types are drawn from generableTypesFromCtx (all SimpleType),
-    -- and LMonoTy.subst preserves SimpleType when the substitution maps
-    -- type variables to SimpleTypes.
-    sorry
+    -- (required by genLExprBase_sound). This follows from hSimplePolyOps
+    -- which directly asserts that polyOpsForResult entries have SimpleType args.
+    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
+    have hlt : idx.down < (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length := by omega
+    have hentry_mem : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down ("", []) ∈
+        polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys := by
+      have heq : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down ("", []) =
+          (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys)[idx.down] := by
+        simp [List.getD, List.getElem?_eq_getElem hlt]
+      rw [heq]; exact List.getElem_mem hlt
+    let entry := (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down ("", [])
+    let name := entry.1
+    let concreteArgTys := entry.2
+    let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+    let base : LExpr' := .op () ⟨name, ()⟩ (some fullArrowTy)
+    have hbase : HasTypeA' bctx base (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
+    have hforall₂ := (mem_mapM_iff
+      (genLExprBase fctx octx tvars bctx depth) concreteArgTys args).mp hargs
+    have hSimpleArgs : ∀ σ ∈ concreteArgTys, SimpleType σ :=
+      hSimplePolyOps sampledTys entry hentry_mem
+    have hargs_typed : List.Forall₂ (HasTypeA' bctx) args concreteArgTys := by
+      suffices h : ∀ (tys : List LMonoTy) (es : List LExpr'),
+          (∀ σ ∈ tys, SimpleType σ) →
+          List.Forall₂ (fun arg σ => arg ∈ (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth σ)) es tys →
+          List.Forall₂ (HasTypeA' bctx) es tys from
+        h concreteArgTys args hSimpleArgs hforall₂
+      intro tys es hsimple hf₂
+      induction hf₂ with
+      | nil => exact .nil
+      | @cons e ty _ _ hmem _ ih =>
+        exact .cons
+          (genLExprBase_sound fctx octx tvars bctx depth ty
+            (hsimple ty List.mem_cons_self) e hmem)
+          (ih (fun σ' hσ' => hsimple σ' (List.mem_cons_of_mem _ hσ')))
+    exact mkApps_hasType bctx base args concreteArgTys τ hbase hargs_typed
   · -- No candidates: fell back to genLExprBase
     exact genLExprBase_sound fctx octx tvars bctx depth τ hτ e he
-
 
 /-- Soundness of `genLExpr`: every generated expression is well-typed.
     This combines the soundness of the Indir and IndirPoly rules with
@@ -1732,6 +1833,11 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
     (τ : LMonoTy) (hτ : SimpleType τ)
     (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
+    (hSimpleBctx : ∀ τ ∈ bctx, SimpleType τ)
+    (hSimpleFctx : ∀ p ∈ fctx, SimpleType p.2)
+    (hSimplePolyOps : ∀ sampledTys entry,
+      entry ∈ polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys →
+      ∀ σ ∈ entry.2, SimpleType σ)
     (e : LExpr')
     (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
     HasTypeA' bctx e τ := by
@@ -1776,9 +1882,11 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     exact mkApps_hasType bctx base args argTys τ hbase hargs_typed
   · -- IndirPoly path (polymorphic operators)
     exact genIndirPoly_sound fctx octx pctx tvars bctx depth τ hτ hSimpleOps
-      (fun σ _ => by sorry) e he
+      (generableTypesFromCtx_simple bctx fctx octx hSimpleBctx hSimpleFctx hSimpleOps)
+      hSimplePolyOps e he
   · -- No monomorphic Indir candidates: genLExprBase fallback
     exact genLExprBase_sound fctx octx tvars bctx depth τ hτ e he
   · -- No monomorphic Indir candidates: IndirPoly fallback
     exact genIndirPoly_sound fctx octx pctx tvars bctx depth τ hτ hSimpleOps
-      (fun σ _ => by sorry) e he
+      (generableTypesFromCtx_simple bctx fctx octx hSimpleBctx hSimpleFctx hSimpleOps)
+      hSimplePolyOps e he
