@@ -242,11 +242,33 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   pick (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
        (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int))))
 
-/-- Generate a random string constant. We generate strings of the form
-    `"s0"`, `"s1"`, ... indexed by an arbitrary natural number. -/
+/-- The 62 alphanumeric characters. -/
+def alphanumChars : List Char :=
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".toList
+
+/-- Generate a random alphanumeric character. -/
+def Char.arbitrary [Gen G] : G Char := do
+  let idx ← choose 0 (alphanumChars.length - 1) (by native_decide)
+  pure (alphanumChars.getD idx.down '0')
+
+/-- Generate a random list of alphanumeric characters. -/
+def genAlphanumList [Gen G] : G (List Char) :=
+  pick
+    (fun _ => pure [])
+    (fun () => do
+      let c ← Char.arbitrary
+      let cs ← genAlphanumList
+      pure (c :: cs))
+partial_fixpoint
+
+/-- Generate a random alphanumeric string. -/
+def String.arbitrary [Gen G] : G String :=
+  String.ofList <$> genAlphanumList
+
+/-- Generate a random string constant (alphanumeric strings). -/
 @[reducible] def genStrConst [Gen G] : G LExpr' := do
-  let k ← Nat.arbitrary
-  pure (.strConst () (s!"s{k}"))
+  let s ← String.arbitrary
+  pure (.strConst () s)
 
 /-- Generate a random rational constant (non-negative or negative). -/
 @[reducible] def genRealConst [Gen G] : G LExpr' :=

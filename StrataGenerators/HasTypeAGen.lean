@@ -905,6 +905,47 @@ private theorem Int_cover (z : Int) :
   | ofNat n => left; exact ⟨n, Nat_arbitrary_support_set n, rfl⟩
   | negSucc n => right; exact ⟨n, Nat_arbitrary_support_set n, by simp [Int.negSucc_eq]⟩
 
+-- These support lemmas mirror those in `Basalt.Examples.ArbString`
+-- (`Char.arbitrary_support`, `genCharList_support`, `String.arbitrary_support`)
+-- but are restated for `SetGen.Set` rather than `SPMF`. We cannot import
+-- `Basalt.Examples.ArbString` here because it transitively brings in
+-- `Batteries.Data.Char`, which conflicts with `Strata.DL.Util.List`
+-- (both define `List.Forall₂`).
+
+/-- Every alphanumeric character is in the support of `Char.arbitrary` at `SetGen.Set`. -/
+private theorem Char_arbitrary_support_set (c : Char) (hc : c ∈ alphanumChars) :
+    c ∈ SetGen.support (Char.arbitrary (G := SetGen.Set)) := by
+  simp only [SetGen.support, Char.arbitrary, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+  obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hc
+  have hlen : alphanumChars.length = 62 := by native_decide
+  have hle : idx ≤ alphanumChars.length - 1 := by omega
+  refine ⟨⟨idx⟩, ⟨Nat.zero_le _, hle⟩, ?_⟩
+  simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
+
+/-- Every alphanumeric char-list is in the support of `genAlphanumList` at `SetGen.Set`. -/
+private theorem genAlphanumList_support_set (cs : List Char)
+    (hcs : ∀ c ∈ cs, c ∈ alphanumChars) :
+    cs ∈ SetGen.support (genAlphanumList (G := SetGen.Set)) := by
+  induction cs with
+  | nil =>
+    rw [SetGen.support, genAlphanumList]
+    simp [pick_mem_iff]
+  | cons c cs ih =>
+    rw [SetGen.support, genAlphanumList]
+    simp only [pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    right
+    refine ⟨c, ?_, cs, ?_, rfl⟩
+    · exact Char_arbitrary_support_set c (hcs c List.mem_cons_self)
+    · exact ih (fun c' hc' => hcs c' (List.mem_cons_of_mem c hc'))
+
+/-- Every alphanumeric string is in the support of `String.arbitrary` at `SetGen.Set`. -/
+private theorem String_arbitrary_support_set (s : String)
+    (hs : ∀ c ∈ s.toList, c ∈ alphanumChars) :
+    s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+  simp only [String.arbitrary, mem_support_map_iff]
+  refine ⟨s.toList, genAlphanumList_support_set s.toList hs, ?_⟩
+  exact String.ofList_toList.symm
+
 -- ── emptyNames predicate ──────────────────────────────────────────────
 
 /-- All binder names in the expression are empty strings. -/
@@ -953,7 +994,7 @@ def termDepth (bctx : BVarCtx) : LExpr' → Nat
 inductive AllTypesSimple (tvars : List TyIdentifier) : Nat → BVarCtx → LExpr' → Prop where
   | boolConst   : AllTypesSimple tvars n bctx (.boolConst () b)
   | intConst    : AllTypesSimple tvars n bctx (.intConst () k)
-  | strConst    : (k : Nat) → s = s!"s{k}" →
+  | strConst    : (∀ c ∈ s.toList, c ∈ alphanumChars) →
                   AllTypesSimple tvars n bctx (.strConst () s)
   | realConst   : (num den : Nat) → r = (↑num / (↑den + 1 : Rat)) ∨ r = -(↑num / (↑den + 1 : Rat)) →
                   AllTypesSimple tvars n bctx (.realConst () r)
@@ -1477,7 +1518,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
     | realConst _ _ _ =>
@@ -1528,7 +1569,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
     | realConst _ _ _ =>
@@ -1568,11 +1609,11 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
-    | strConst k heq =>
+    | strConst halpha =>
       cases hwt with
       | const =>
         left
-        exact ⟨k, Nat_arbitrary_support_set k, by simp [LExpr.strConst, heq]⟩
+        exact ⟨_, String_arbitrary_support_set _ halpha, by simp [LExpr.strConst]⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
@@ -1629,7 +1670,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.real])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
     | bitvecConst _ _ _ _ =>
@@ -1676,7 +1717,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string])
     | realConst _ _ _ =>
@@ -1720,7 +1761,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.arrow])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
     | realConst _ _ _ =>
@@ -1766,7 +1807,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
     | realConst _ _ _ =>
@@ -1877,7 +1918,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
     | realConst _ _ _ =>
@@ -1949,11 +1990,11 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     simp only [genLExprBase, pickBiased_mem_iff, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
-    | strConst k heq =>
+    | strConst halpha =>
       cases hwt with
       | const =>
         left
-        exact ⟨k, Nat_arbitrary_support_set k, by simp [LExpr.strConst, heq]⟩
+        exact ⟨_, String_arbitrary_support_set _ halpha, by simp [LExpr.strConst]⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
@@ -2042,7 +2083,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.real])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
     | bitvecConst _ _ _ _ =>
@@ -2121,7 +2162,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
     | realConst _ _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
@@ -2193,7 +2234,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.arrow])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
     | realConst _ _ _ =>
@@ -2272,7 +2313,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool] at h)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int] at h)
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
     | realConst _ _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
@@ -2313,7 +2354,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool] at h)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int] at h)
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
     | realConst _ _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
@@ -2382,7 +2423,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool, LMonoTy.regex] at h)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.regex] at h)
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.regex] at h)
     | realConst _ _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.regex] at h)
@@ -2422,7 +2463,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool, LMonoTy.regex] at h)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.regex] at h)
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.regex] at h)
     | realConst _ _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.regex] at h)
@@ -2495,7 +2536,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.map])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.map])
     | realConst _ _ _ =>
@@ -2541,7 +2582,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.map])
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.map])
     | realConst _ _ _ =>
@@ -2616,7 +2657,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool, LMonoTy.seq] at h)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.seq] at h)
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.seq] at h)
     | realConst _ _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.seq] at h)
@@ -2657,7 +2698,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool, LMonoTy.seq] at h)
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.seq] at h)
-    | strConst _ _ =>
+    | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.seq] at h)
     | realConst _ _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.seq] at h)
