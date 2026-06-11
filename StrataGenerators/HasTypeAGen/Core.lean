@@ -54,6 +54,21 @@ abbrev FVarCtx := List (String × LMonoTy)
     Used internally by the generator and proofs. -/
 abbrev OpCtx := List (String × LMonoTy)
 
+-- ── Type abbreviations ──────────────────────────────────────────────
+
+namespace Lambda
+
+/-- The regex monotype (a base type with no parameters). -/
+abbrev LMonoTy.regex : LMonoTy := .tcons "regex" []
+
+/-- The Map monotype with key type `k` and value type `v`. -/
+abbrev LMonoTy.map (k v : LMonoTy) : LMonoTy := .tcons "Map" [k, v]
+
+/-- The Sequence monotype with element type `a`. -/
+abbrev LMonoTy.seq (a : LMonoTy) : LMonoTy := .tcons "Sequence" [a]
+
+end Lambda
+
 -- ── SimpleType and depth ─────────────────────────────────────────────
 
 /-- The fixed set of bitvector widths that `genLMonoTy` may produce. -/
@@ -70,7 +85,10 @@ inductive SimpleType : LMonoTy → Prop where
   | int    : SimpleType .int
   | string : SimpleType .string
   | real   : SimpleType .real
+  | regex  : SimpleType .regex
   | bitvec : IsGenWidth n → SimpleType (.bitvec n)
+  | map    : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.map τ₁ τ₂)
+  | seq    : SimpleType τ → SimpleType (.seq τ)
   | arrow  : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.arrow τ₁ τ₂)
   | ftvar  : SimpleType (.ftvar name)
 
@@ -78,6 +96,8 @@ inductive SimpleType : LMonoTy → Prop where
     for arrows. Matches the fuel consumed by `genLMonoTy` to produce the type. -/
 def monoTyDepth : LMonoTy → Nat
   | .arrow τ₁ τ₂ => max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1
+  | .map τ₁ τ₂   => max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1
+  | .seq τ        => monoTyDepth τ + 1
   | _             => 0
 
 -- ── Well-typing relation ─────────────────────────────────────────────
@@ -150,17 +170,19 @@ def pickBitvecWidth [Gen G] : G LMonoTy := do
   let idx ← choose 0 (bitvecWidths.length - 1) (by native_decide)
   pure (.bitvec (bitvecWidths.getD idx.down 32))
 
-/-- Pick a uniformly random base type (bool, int, string, real, or bitvec). -/
+/-- Pick a uniformly random base type (bool, int, string, real, regex, or bitvec). -/
 def pickBaseType [Gen G] : G LMonoTy :=
   pick (fun () => pure .bool)
        (fun () => pick (fun () => pure .int)
                        (fun () => pick (fun () => pure .string)
                                        (fun () => pick (fun () => pure .real)
-                                                       (fun () => pickBitvecWidth))))
+                                                       (fun () => pick (fun () => pure .regex)
+                                                                       (fun () => pickBitvecWidth)))))
 
 /-- Generate a simple monotype of depth ≤ `n`. When `tvars` is non-empty,
     type variables (`ftvar`) may appear at leaves alongside base types.
-    Arrow types are only generated at depth `n + 1` with sub-types at depth `n`. -/
+    Compound types (arrow, map, sequence) are generated at depth `n + 1`
+    with sub-types at depth `n`. -/
 def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   | 0 =>
     if h : tvars.length > 0 then
@@ -178,14 +200,33 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
               let τ₁ ← genLMonoTy tvars n
               let τ₂ ← genLMonoTy tvars n
               pure (.arrow τ₁ τ₂))
-            (fun () => pickTyVar tvars h))
+            (fun () => pick
+              (fun () => do
+                let τ₁ ← genLMonoTy tvars n
+                let τ₂ ← genLMonoTy tvars n
+                pure (.map τ₁ τ₂))
+              (fun () => pick
+                (fun () => do
+                  let τ ← genLMonoTy tvars n
+                  pure (.seq τ))
+                (fun () => pickTyVar tvars h))))
     else
       pickBiased
         (fun () => pickBaseType)
-        (fun () => do
-          let τ₁ ← genLMonoTy tvars n
-          let τ₂ ← genLMonoTy tvars n
-          pure (.arrow τ₁ τ₂))
+        (fun () =>
+          pick
+            (fun () => do
+              let τ₁ ← genLMonoTy tvars n
+              let τ₂ ← genLMonoTy tvars n
+              pure (.arrow τ₁ τ₂))
+            (fun () => pick
+              (fun () => do
+                let τ₁ ← genLMonoTy tvars n
+                let τ₂ ← genLMonoTy tvars n
+                pure (.map τ₁ τ₂))
+              (fun () => do
+                let τ ← genLMonoTy tvars n
+                pure (.seq τ))))
 
 -- ── Expression sub-generator combinators ─────────────────────────────────
 -- These combinators take in the generators that they invoke as explicit arguments,
@@ -621,6 +662,177 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                         if ho : (opsOfType octx (.bitvec n)).length > 0
                         then pickOp octx (.bitvec n) ho
                         else genBitvecConst n)))))
+  -- ── Regex type (base type, no constants) ───────────────────────────
+  | 0, .regex =>
+    let bvars := bvarsOfType bctx .regex
+    pick
+      (fun () =>
+        if hv : bvars.length > 0 then pickBVar bctx _ hv
+        else if hf : (fvarsOfType fctx .regex).length > 0
+        then pickFVar fctx _ hf
+        else if ho : (opsOfType octx .regex).length > 0
+        then pickOp octx _ ho
+        else default)
+      (fun () =>
+        pick
+          (fun () =>
+            if hf : (fvarsOfType fctx .regex).length > 0
+            then pickFVar fctx _ hf
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if ho : (opsOfType octx .regex).length > 0
+            then pickOp octx _ ho
+            else default)
+          (fun () =>
+            if ho : (opsOfType octx .regex).length > 0
+            then pickOp octx _ ho
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if hf : (fvarsOfType fctx .regex).length > 0
+            then pickFVar fctx _ hf
+            else default))
+  | n + 1, .regex =>
+    let bvars := bvarsOfType bctx .regex
+    pick
+      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .regex)
+      (fun () =>
+        pick
+          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                            (genLExprBase fctx octx tvars bctx n .regex)
+                            (genLExprBase fctx octx tvars bctx n .regex))
+          (fun () =>
+            pick
+              (fun () =>
+                if hv : bvars.length > 0 then pickBVar bctx _ hv
+                else if hf : (fvarsOfType fctx .regex).length > 0
+                then pickFVar fctx _ hf
+                else if ho : (opsOfType octx .regex).length > 0
+                then pickOp octx _ ho
+                else default)
+              (fun () =>
+                pick
+                  (fun () =>
+                    if hf : (fvarsOfType fctx .regex).length > 0
+                    then pickFVar fctx _ hf
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default)
+                  (fun () =>
+                    if ho : (opsOfType octx .regex).length > 0
+                    then pickOp octx _ ho
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default))))
+  -- ── Map type ──────────────────────────────────────────────────────
+  | 0, .map τ₁ τ₂ =>
+    let bvars := bvarsOfType bctx (.map τ₁ τ₂)
+    pick
+      (fun () =>
+        if hv : bvars.length > 0 then pickBVar bctx _ hv
+        else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+        then pickFVar fctx _ hf
+        else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+        then pickOp octx _ ho
+        else default)
+      (fun () =>
+        pick
+          (fun () =>
+            if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+            then pickFVar fctx _ hf
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+            then pickOp octx _ ho
+            else default)
+          (fun () =>
+            if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+            then pickOp octx _ ho
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+            then pickFVar fctx _ hf
+            else default))
+  | n + 1, .map τ₁ τ₂ =>
+    let bvars := bvarsOfType bctx (.map τ₁ τ₂)
+    pick
+      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂))
+      (fun () =>
+        pick
+          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                            (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))
+                            (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂)))
+          (fun () =>
+            pick
+              (fun () =>
+                if hv : bvars.length > 0 then pickBVar bctx _ hv
+                else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+                then pickFVar fctx _ hf
+                else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+                then pickOp octx _ ho
+                else default)
+              (fun () =>
+                pick
+                  (fun () =>
+                    if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+                    then pickFVar fctx _ hf
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default)
+                  (fun () =>
+                    if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+                    then pickOp octx _ ho
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default))))
+  -- ── Sequence type ─────────────────────────────────────────────────
+  | 0, .seq τ =>
+    let bvars := bvarsOfType bctx (.seq τ)
+    pick
+      (fun () =>
+        if hv : bvars.length > 0 then pickBVar bctx _ hv
+        else if hf : (fvarsOfType fctx (.seq τ)).length > 0
+        then pickFVar fctx _ hf
+        else if ho : (opsOfType octx (.seq τ)).length > 0
+        then pickOp octx _ ho
+        else default)
+      (fun () =>
+        pick
+          (fun () =>
+            if hf : (fvarsOfType fctx (.seq τ)).length > 0
+            then pickFVar fctx _ hf
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if ho : (opsOfType octx (.seq τ)).length > 0
+            then pickOp octx _ ho
+            else default)
+          (fun () =>
+            if ho : (opsOfType octx (.seq τ)).length > 0
+            then pickOp octx _ ho
+            else if hv : bvars.length > 0 then pickBVar bctx _ hv
+            else if hf : (fvarsOfType fctx (.seq τ)).length > 0
+            then pickFVar fctx _ hf
+            else default))
+  | n + 1, .seq τ =>
+    let bvars := bvarsOfType bctx (.seq τ)
+    pick
+      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.seq τ))
+      (fun () =>
+        pick
+          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                            (genLExprBase fctx octx tvars bctx n (.seq τ))
+                            (genLExprBase fctx octx tvars bctx n (.seq τ)))
+          (fun () =>
+            pick
+              (fun () =>
+                if hv : bvars.length > 0 then pickBVar bctx _ hv
+                else if hf : (fvarsOfType fctx (.seq τ)).length > 0
+                then pickFVar fctx _ hf
+                else if ho : (opsOfType octx (.seq τ)).length > 0
+                then pickOp octx _ ho
+                else default)
+              (fun () =>
+                pick
+                  (fun () =>
+                    if hf : (fvarsOfType fctx (.seq τ)).length > 0
+                    then pickFVar fctx _ hf
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default)
+                  (fun () =>
+                    if ho : (opsOfType octx (.seq τ)).length > 0
+                    then pickOp octx _ ho
+                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
+                    else default))))
   -- ── Fallback (other tcons — not generated) ────────────────────────
   | _, _ => pure (.boolConst () false)
 

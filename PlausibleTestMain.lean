@@ -102,7 +102,7 @@ private def genTypedExprWith (fctx : FVarCtx) : Gen TypedExpr := Gen.sized fun s
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExprWithFactory (G := Plausible.Gen) (pctx := defaultPolyOps) fctx intBoolFactory tvars [] depth ty
+  let expr ← genLExprWithOps (G := Plausible.Gen) fctx coreOpCtx corePolyOps tvars [] depth ty
   pure ⟨expr, ty⟩
 
 -- `genLExpr` can fail (via `default`) when a depth-0 arrow case has no

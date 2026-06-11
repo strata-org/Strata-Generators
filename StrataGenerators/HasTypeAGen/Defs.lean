@@ -47,3 +47,11 @@ def genClosedLExprWithFactory [Gen G] (F : @Factory LExprParams')
     (pctx : PolyOpCtx := []) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
   genLExprWithFactory [] F tvars [] depth τ pctx
+
+/-- Generate a well-typed `LExpr` using explicit operator and polymorphic
+    operator contexts. This is a convenience wrapper around `genLExpr` that
+    avoids requiring a `Factory` value. -/
+def genLExprWithOps [Gen G] (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx)
+    (depth : Nat) (τ : LMonoTy) : G LExpr' :=
+  genLExpr fctx octx pctx tvars bctx depth τ
