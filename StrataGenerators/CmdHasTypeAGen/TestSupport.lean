@@ -21,20 +21,21 @@ def ppVarCtx (ctx : VarCtx) : String :=
 
 /-- Pretty-print an `LTy` (polytype). Monomorphic types `forAll [] mty` print
     as just the monotype; polymorphic types show the quantifier. -/
-def ppLTy : Lambda.LTy → String
+private def ppLTy : Lambda.LTy → String
   | .forAll [] mty => ppType mty
   | .forAll tvs mty => s!"∀{tvs}. {ppType mty}"
 
-/-- Pretty-print a command for test output. -/
+/-- Pretty-print a command using Strata's layout (init/set/havoc/assert/assume/cover)
+    with the human-readable type/expression pretty-printers from `TestSupport`. -/
 def ppCmd (cmd : Cmd Expression) : String :=
   match cmd with
-  | .init x xty (.det e) _ => s!"init {x.name} : {ppLTy xty} := {ppExpr e}"
-  | .init x xty .nondet _ => s!"init {x.name} : {ppLTy xty} := *"
-  | .set x (.det e) _ => s!"set {x.name} := {ppExpr e}"
-  | .set x .nondet _ => s!"set {x.name} := *"
-  | .assert _ e _ => s!"assert {ppExpr e}"
-  | .assume _ e _ => s!"assume {ppExpr e}"
-  | .cover _ e _ => s!"cover {ppExpr e}"
+  | .init x xty (.det e) _ => s!"init ({x.name} : {ppLTy xty}) := {ppExpr e}"
+  | .init x xty .nondet _ => s!"init ({x.name} : {ppLTy xty})"
+  | .set x (.det e) _ => s!"{x.name} := {ppExpr e}"
+  | .set x .nondet _ => s!"havoc {x.name}"
+  | .assert l e _ => s!"assert [{l}] {ppExpr e}"
+  | .assume l e _ => s!"assume [{l}] {ppExpr e}"
+  | .cover l e _ => s!"cover [{l}] {ppExpr e}"
 
 -- ── Decidable properties ──────────────────────────────────────────────
 
