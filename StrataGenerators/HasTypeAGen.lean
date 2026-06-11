@@ -1191,7 +1191,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         | false => right; rfl
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
     | strConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
@@ -1242,7 +1242,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         · right; exact ⟨k, hk, rfl⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
     | strConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
@@ -1431,10 +1431,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     cases hats with
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.arrow])
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.int, LMonoTy.arrow])
     | strConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
@@ -1480,7 +1480,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       | const => left; cases (by assumption : Bool) <;> simp [LExpr.boolConst]
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
     | strConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
@@ -1493,7 +1493,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
         (by simp [LExpr.typeCheck, bind, Option.bind]
-            split <;> simp_all [LMonoTy.arrow, LMonoTy.bool, LMonoTy.int])
+            split <;> simp_all [LMonoTy.arrow, LMonoTy.bool])
     | ite hc ht he_ =>
       cases hwt with
       | ite hcw htw hew =>
@@ -1591,7 +1591,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         · right; exact ⟨k, hk, rfl⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int])
     | strConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
@@ -1604,13 +1604,13 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
         (by simp [LExpr.typeCheck, bind, Option.bind]
-            split <;> simp_all [LMonoTy.arrow, LMonoTy.bool, LMonoTy.int])
+            split <;> simp_all [LMonoTy.arrow, LMonoTy.int])
     | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt)
-        (by simp [LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LMonoTy.bool, LMonoTy.int])
     | quant _ _ _ _ _ _ _ _ _ _ =>
       exact absurd (quant_hasType_bool hwt)
-        (by simp [LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LMonoTy.bool, LMonoTy.int])
     | app τ' hargw hsτ' hdτ' hftv' hfn_ats harg_ats =>
       cases hwt with
       | app hfnw hargw' =>
@@ -1684,7 +1684,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
         (by simp [LExpr.typeCheck, bind, Option.bind]
-            split <;> simp_all [LMonoTy.arrow, LMonoTy.bool, LMonoTy.string])
+            split <;> simp_all [LMonoTy.arrow, LMonoTy.string])
     | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt)
         (by simp [LMonoTy.bool, LMonoTy.string])
@@ -1766,7 +1766,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
         (by simp [LExpr.typeCheck, bind, Option.bind]
-            split <;> simp_all [LMonoTy.arrow, LMonoTy.bool, LMonoTy.real])
+            split <;> simp_all [LMonoTy.arrow, LMonoTy.real])
     | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt)
         (by simp [LMonoTy.bool, LMonoTy.real])
@@ -1843,7 +1843,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
         (by simp [LExpr.typeCheck, bind, Option.bind]
-            split <;> simp_all [LMonoTy.arrow, LMonoTy.bool])
+            split <;> simp_all [LMonoTy.arrow])
     | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt) (by intro h; simp [LMonoTy.bool] at h)
     | quant _ _ _ _ _ _ _ _ _ _ =>
@@ -1904,10 +1904,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     cases hats with
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.arrow])
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
-        (by simp [LConst.ty, LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LConst.ty, LMonoTy.int, LMonoTy.arrow])
     | strConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
@@ -1919,10 +1919,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         (by simp [LConst.ty, LMonoTy.arrow])
     | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt)
-        (by simp [LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LMonoTy.bool, LMonoTy.arrow])
     | quant _ _ _ _ _ _ _ _ _ _ =>
       exact absurd (quant_hasType_bool hwt)
-        (by simp [LMonoTy.bool, LMonoTy.int, LMonoTy.arrow])
+        (by simp [LMonoTy.bool, LMonoTy.arrow])
     | abs hsτ₁ hdτ₁ _ hbody_ats =>
       cases hwt with
       | abs hbody_wt =>
@@ -2037,7 +2037,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
         (by simp [LExpr.typeCheck, bind, Option.bind]
-            split <;> simp_all [LMonoTy.arrow, LMonoTy.bool, LMonoTy.int])
+            split <;> simp_all [LMonoTy.arrow])
     | eq _ _ _ _ _ _ _ _ =>
       exact absurd (eq_hasType_bool hwt) (by intro h; simp [LMonoTy.bool] at h)
     | quant _ _ _ _ _ _ _ _ _ _ =>
