@@ -1,8 +1,9 @@
 import StrataGenerators.Tyche
 import StrataGenerators.HasTypeAGen.TestSupport
+import StrataGenerators.CmdHasTypeAGen.TestSupport
 import Basalt.IO
 
-open Lambda RandomChoice ArbNat Tyche Std
+open Lambda RandomChoice ArbNat Tyche Std Core Imperative
 
 /-!
 # Tyche Visualization Runner
@@ -258,6 +259,97 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   let preserved := outputFvars.all (· ∈ inputFvars)
   return ⟨expr, ty, evaled, preserved, d⟩
 
+-- ── Command-level Tyche support ──────────────────────────────────────
+
+/-- Classify the top-level command constructor. -/
+def cmdKind (cmd : Cmd Expression) : String :=
+  match cmd with
+  | .init _ _ (.det _) _ => "init_det"
+  | .init _ _ .nondet _ => "init_nondet"
+  | .set _ (.det _) _ => "set_det"
+  | .set _ .nondet _ => "set_nondet"
+  | .assert _ _ _ => "assert"
+  | .assume _ _ _ => "assume"
+  | .cover _ _ _ => "cover"
+
+/-- Shared helper: generate a command from a random-size context. -/
+private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCtx × VarCtx × Nat) := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let tvars : List TyIdentifier := []
+  let ctxSize ← IO.rand 0 5
+  let (_, baseCtx) ← genCmds (G := IO) [] coreOpCtx tvars [] d ctxSize
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreOpCtx tvars baseCtx d
+  return (cmd, baseCtx, ctx', d)
+
+-- ── Panel 1: init freshness ──────────────────────────────────────────
+
+structure CmdInitFreshResult where
+  cmd : Cmd Expression
+  ctxSize : Nat
+  generatorSize : Nat
+  passed : Bool
+
+instance : Tyche.TycheSample CmdInitFreshResult where
+  toSample r :=
+    { representation := ppCmd r.cmd
+      status := if r.passed then .passed else .failed
+      features := [
+        ("cmd_kind", .nominal (cmdKind r.cmd)),
+        ("ctx_size", .ordinal r.ctxSize),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+def genAndCheckInitFresh : IO CmdInitFreshResult := do
+  let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
+  return { cmd, ctxSize := baseCtx.length, generatorSize := d,
+           passed := checkInitFreshNotInRhs cmd }
+
+-- ── Panel 2: expression typechecks ───────────────────────────────────
+
+structure CmdExprTypecheckResult where
+  cmd : Cmd Expression
+  ctxSize : Nat
+  generatorSize : Nat
+  passed : Bool
+
+instance : Tyche.TycheSample CmdExprTypecheckResult where
+  toSample r :=
+    { representation := ppCmd r.cmd
+      status := if r.passed then .passed else .failed
+      features := [
+        ("cmd_kind", .nominal (cmdKind r.cmd)),
+        ("ctx_size", .ordinal r.ctxSize),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+def genAndCheckExprTypecheck : IO CmdExprTypecheckResult := do
+  let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
+  return { cmd, ctxSize := baseCtx.length, generatorSize := d,
+           passed := checkExprTypechecks cmd }
+
+-- ── Panel 3: set target in context ───────────────────────────────────
+
+structure CmdSetInCtxResult where
+  cmd : Cmd Expression
+  ctxSize : Nat
+  generatorSize : Nat
+  passed : Bool
+
+instance : Tyche.TycheSample CmdSetInCtxResult where
+  toSample r :=
+    { representation := ppCmd r.cmd
+      status := if r.passed then .passed else .failed
+      features := [
+        ("cmd_kind", .nominal (cmdKind r.cmd)),
+        ("ctx_size", .ordinal r.ctxSize),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+def genAndCheckSetInCtx : IO CmdSetInCtxResult := do
+  let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
+  return { cmd, ctxSize := baseCtx.length, generatorSize := d,
+           passed := checkSetTargetInCtx cmd baseCtx }
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -298,6 +390,25 @@ def main (args : List String) : IO Unit := do
   let clsContent ← IO.FS.readFile (outputPath ++ ".cls")
   handle.putStr clsContent
   IO.FS.removeFile (outputPath ++ ".cls")
+
+  -- Run command-level property tests (one panel each)
+  Tyche.run (genAndCheckInitFresh)
+    { numSamples, propertyName := "genCmd: init var not in RHS", outputPath := outputPath ++ ".cmd1" }
+  let cmd1 ← IO.FS.readFile (outputPath ++ ".cmd1")
+  handle.putStr cmd1
+  IO.FS.removeFile (outputPath ++ ".cmd1")
+
+  Tyche.run (genAndCheckExprTypecheck)
+    { numSamples, propertyName := "genCmd: expressions typecheck", outputPath := outputPath ++ ".cmd2" }
+  let cmd2 ← IO.FS.readFile (outputPath ++ ".cmd2")
+  handle.putStr cmd2
+  IO.FS.removeFile (outputPath ++ ".cmd2")
+
+  Tyche.run (genAndCheckSetInCtx)
+    { numSamples, propertyName := "genCmd: set target in context", outputPath := outputPath ++ ".cmd3" }
+  let cmd3 ← IO.FS.readFile (outputPath ++ ".cmd3")
+  handle.putStr cmd3
+  IO.FS.removeFile (outputPath ++ ".cmd3")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow

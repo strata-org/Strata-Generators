@@ -1,4 +1,5 @@
 import StrataGenerators.HasTypeAGen.TestSupport
+import StrataGenerators.CmdHasTypeAGen.TestSupport
 import Basalt.PlausibleGen
 import Plausible
 
@@ -28,7 +29,7 @@ the manual equivalent of what `Testable.check`'s `mk_decorations` tactic does
 automatically in `#eval` contexts.
 -/
 
-open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible
+open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible Core Imperative
 
 -- ── Typed expression generation via Plausible.Gen ────────────────────
 
@@ -218,6 +219,96 @@ instance : ToFormat Unit where
 
 
 
+-- ── Command generation via Plausible.Gen ─────────────────────────────
+
+/-- A generated command paired with its input context. -/
+structure GenCmdWithCtx where
+  cmd : Cmd Expression
+  inCtx : VarCtx
+  outCtx : VarCtx
+
+instance : Repr GenCmdWithCtx where
+  reprPrec gc _ := s!"{ppCmd gc.cmd}  [ctx: {ppVarCtx gc.inCtx}]"
+
+instance : Shrinkable GenCmdWithCtx where
+  shrink _ := []
+
+private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
+  let depth := max 1 (s / 20)
+  let tvars : List TyIdentifier := []
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars ctx depth
+  pure ⟨cmd, ctx, ctx'⟩
+
+private def genCmdFromBuiltCtx : Gen GenCmdWithCtx := do
+  let depth := 2
+  let ctxSize := 3
+  let tvars : List TyIdentifier := []
+  let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] depth ctxSize
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars baseCtx depth
+  pure ⟨cmd, baseCtx, ctx'⟩
+
+instance : Arbitrary GenCmdWithCtx where
+  arbitrary := Gen.backtrack (List.replicate 1000
+    (1, genCmdFromBuiltCtx))
+
+/-- A generated command sequence paired with its context. -/
+structure GenCmdsWithCtx where
+  cmds : List (Cmd Expression)
+  inCtx : VarCtx
+  outCtx : VarCtx
+
+instance : Repr GenCmdsWithCtx where
+  reprPrec gc _ :=
+    let cmdStrs := gc.cmds.map ppCmd |> "; ".intercalate
+    s!"{cmdStrs}  [in: {ppVarCtx gc.inCtx}, out: {ppVarCtx gc.outCtx}]"
+
+instance : Shrinkable GenCmdsWithCtx where
+  shrink _ := []
+
+private def genCmdsWithCtx : Gen GenCmdsWithCtx := do
+  let depth := 2
+  let n := 4
+  let tvars : List TyIdentifier := []
+  let (cmds, ctx') ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] depth n
+  pure ⟨cmds, [], ctx'⟩
+
+instance : Arbitrary GenCmdsWithCtx where
+  arbitrary := Gen.backtrack (List.replicate 1000 (1, genCmdsWithCtx))
+
+-- ── Command-level properties ─────────────────────────────────────────
+
+-- For `init x τ (det e)`, the freshly declared variable `x` does not appear
+-- in the free variables of its own initializer `e`. This is a key
+-- precondition for the `CmdHasType'.init_det` typing rule.
+@[reducible] def prop_cmd_init_fresh (gc : GenCmdWithCtx) : Prop :=
+  checkInitFreshNotInRhs gc.cmd = true
+
+-- Every expression sub-term in a generated command typechecks to the
+-- expected monotype in the empty bound-variable context.
+@[reducible] def prop_cmd_expr_typechecks (gc : GenCmdWithCtx) : Prop :=
+  checkExprTypechecks gc.cmd = true
+
+-- The `definedVars` of an `init` command is exactly its target variable,
+-- and non-init commands define no variables.
+@[reducible] def prop_cmd_definedVars (gc : GenCmdWithCtx) : Prop :=
+  checkDefinedVarsCorrect gc.cmd = true
+
+-- The `modifiedVars` of a `set` command is exactly its target variable,
+-- and non-set commands modify no variables.
+@[reducible] def prop_cmd_modifiedVars (gc : GenCmdWithCtx) : Prop :=
+  checkModifiedVarsCorrect gc.cmd = true
+
+-- For a `set` command generated from context `ctx`, the target variable
+-- actually exists in `ctx`.
+@[reducible] def prop_cmd_set_in_ctx (gc : GenCmdWithCtx) : Prop :=
+  checkSetTargetInCtx gc.cmd gc.inCtx = true
+
+-- For a generated command sequence, the output context equals the input
+-- context prepended with the newly defined variables (in reverse order,
+-- since `init` conses onto the front).
+@[reducible] def prop_cmds_context_growth (gc : GenCmdsWithCtx) : Prop :=
+  checkContextGrowth gc.inCtx gc.outCtx gc.cmds = true
+
 -- ── Test runner ──────────────────────────────────────────────────────
 
 def checkProperty (name : String) (p : Prop) [Testable p]
@@ -265,6 +356,33 @@ def main (args : List String) : IO UInt32 := do
 
   if !(← checkProperty "closedness_preservation"
     (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te)) cfg) then
+    allPassed := false
+
+  IO.println ""
+  IO.println "Command generator properties:"
+
+  if !(← checkProperty "init: fresh var not in RHS"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_init_fresh gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: expressions typecheck"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_expr_typechecks gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: definedVars correct"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_definedVars gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: modifiedVars correct"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_modifiedVars gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: set target in context"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_set_in_ctx gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmds: context growth matches inits"
+    (NamedBinder "gc" (∀ gc : GenCmdsWithCtx, prop_cmds_context_growth gc)) cfg) then
     allPassed := false
 
   IO.println ""

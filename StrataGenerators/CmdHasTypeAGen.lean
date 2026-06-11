@@ -382,6 +382,135 @@ theorem genCmd_complete
         exact ⟨e, he, rfl⟩)))))))
     exact ⟨_, hinSupport, CmdHasType'.cover _ "" e default hexpr⟩
 
+-- ── Chained typing for command sequences ────────────────────────────
+
+/-- Well-typedness for a sequence of commands: each command is typed from one
+    context to the next, forming a chain `Γ₀ → Γ₁ → ... → Γₙ`. -/
+inductive CmdsHasTypeA (C : LContext CoreLParams) :
+    TContext Unit → List (Cmd Expression) → TContext Unit → Prop where
+  | nil : ∀ Γ, CmdsHasTypeA C Γ [] Γ
+  | cons : ∀ Γ Γ' Γ'' cmd cmds,
+      CmdHasTypeA C Γ cmd Γ' →
+      CmdsHasTypeA C Γ' cmds Γ'' →
+      CmdsHasTypeA C Γ (cmd :: cmds) Γ''
+
+/-- A uniform soundness environment packages the hypotheses needed to prove
+    `genCmd_sound` at *any* context reachable during sequence generation.
+    This bundles:
+    - A way to produce a `TContext` from any `VarCtx`
+    - Correspondence between them
+    - Expression-level soundness (context-independent)
+    - Freshness at every reachable context -/
+structure GenCmdSoundEnv (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (depth : Nat) (C : LContext CoreLParams) where
+  /-- Produce the semantic `TContext` for any flat `VarCtx`. -/
+  toTCtx : VarCtx → TContext Unit
+  /-- The correspondence holds for every context. -/
+  corr : ∀ ctx, VarCtxCorresponds ctx (toTCtx ctx)
+  /-- Expression soundness (does not depend on the variable context). -/
+  exprSound : GenLExprSound fctx octx tvars depth
+  /-- Freshness holds at every context. -/
+  freshSound : ∀ ctx, GenFreshNameSound fctx octx tvars ctx (toTCtx ctx) depth
+  /-- The `TContext` produced for `(name, mty) :: ctx` equals the insertion
+      into the `TContext` for `ctx`. This ensures the output `Γ'` from an `init`
+      command matches what `toTCtx` produces for the extended `VarCtx`. -/
+  toTCtx_cons : ∀ ctx name mty,
+    toTCtx ((name, mty) :: ctx) =
+      { toTCtx ctx with types := (toTCtx ctx).types.insert ⟨name, ()⟩ (.forAll [] mty) }
+
+/-- Lifted soundness of `genCmd` using a `GenCmdSoundEnv`: every result in the
+    generator's support produces a command typed from `env.toTCtx ctx` to
+    `env.toTCtx r.outCtx`. This follows the same case analysis as `genCmd_sound`
+    but additionally shows the output context matches `toTCtx` applied to the
+    generator's output `VarCtx`. -/
+theorem genCmd_sound_env
+    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (ctx : VarCtx) (depth : Nat)
+    (C : LContext CoreLParams)
+    (env : GenCmdSoundEnv fctx octx tvars depth C)
+    (r : GenCmdResult)
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth)) :
+    CmdHasTypeA C (env.toTCtx ctx) r.cmd (env.toTCtx r.outCtx) := by
+  rw [genCmd_support_iff] at hr
+  rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
+  · -- init_det
+    simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨name, hname, mty, hmty, e, he, rfl⟩ := hr
+    have ⟨hfreshΓ, hnovar⟩ := (env.freshSound ctx) name hname
+    have hwt := env.exprSound mty e he
+    rw [env.toTCtx_cons]
+    exact CmdHasType'.init_det _ ⟨name, ()⟩ _ e mty default hfreshΓ (hnovar mty e he) hwt
+  · -- init_nondet
+    simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨name, hname, mty, _, rfl⟩ := hr
+    have ⟨hfreshΓ, _⟩ := (env.freshSound ctx) name hname
+    rw [env.toTCtx_cons]
+    exact CmdHasType'.init_nondet _ ⟨name, ()⟩ _ mty default hfreshΓ
+  · -- set_det
+    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
+               mem_support_choose_iff] at hr
+    obtain ⟨idx, ⟨_, hidx⟩, e, he, rfl⟩ := hr
+    have hlt : idx.down < ctx.length := by omega
+    have hmem := List.getD_mem_of_lt (d := ("", LMonoTy.bool)) hlt
+    have hfind := (env.corr ctx).1 (ctx.getD idx.down ("", .bool)).1
+      (ctx.getD idx.down ("", .bool)).2 hmem
+    have hwt := env.exprSound (ctx.getD idx.down ("", .bool)).2 e he
+    exact CmdHasType'.set_det _ ⟨(ctx.getD idx.down ("", .bool)).1, ()⟩
+      (ctx.getD idx.down ("", .bool)).2 e default hfind hwt
+  · -- set_nondet
+    simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
+               mem_support_choose_iff] at hr
+    obtain ⟨idx, ⟨_, hidx⟩, rfl⟩ := hr
+    have hlt : idx.down < ctx.length := by omega
+    have hmem := List.getD_mem_of_lt (d := ("", LMonoTy.bool)) hlt
+    have hfind := (env.corr ctx).1 (ctx.getD idx.down ("", .bool)).1
+      (ctx.getD idx.down ("", .bool)).2 hmem
+    exact CmdHasType'.set_nondet _ ⟨(ctx.getD idx.down ("", .bool)).1, ()⟩
+      (ctx.getD idx.down ("", .bool)).2 default hfind
+  · -- assert
+    simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨e, he, rfl⟩ := hr
+    exact CmdHasType'.assert _ "" e default (env.exprSound .bool e he)
+  · -- assume
+    simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨e, he, rfl⟩ := hr
+    exact CmdHasType'.assume _ "" e default (env.exprSound .bool e he)
+  · -- cover
+    simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨e, he, rfl⟩ := hr
+    exact CmdHasType'.cover _ "" e default (env.exprSound .bool e he)
+
+/-- Soundness of `genCmds`: every command sequence in the generator's support
+    satisfies the chained `CmdsHasTypeA` relation.
+
+    The proof proceeds by induction on the fuel `n`. At each step, we use
+    `genCmd_sound_env` to type the head command, then invoke the inductive
+    hypothesis on the tail with the updated context. -/
+theorem genCmds_sound
+    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (ctx : VarCtx) (depth : Nat) (n : Nat)
+    (C : LContext CoreLParams)
+    (env : GenCmdSoundEnv fctx octx tvars depth C)
+    (result : List (Cmd Expression) × VarCtx)
+    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) fctx octx tvars ctx depth n)) :
+    CmdsHasTypeA C (env.toTCtx ctx) result.1 (env.toTCtx result.2) := by
+  induction n generalizing ctx result with
+  | zero =>
+    simp only [genCmds, mem_support_pure_iff] at hr
+    subst hr
+    exact CmdsHasTypeA.nil _
+  | succ n ih =>
+    simp only [genCmds, mem_support_bind_iff] at hr
+    obtain ⟨⟨cmd, ctx'⟩, hcmd, rest_hr⟩ := hr
+    dsimp only [GenCmdResult.outCtx, GenCmdResult.cmd] at rest_hr
+    obtain ⟨⟨cmds, ctx''⟩, hcmds, hpure⟩ := rest_hr
+    simp only [mem_support_pure_iff] at hpure
+    have heq : result = (cmd :: cmds, ctx'') := by
+      cases hpure; rfl
+    subst heq
+    have htyCmd := genCmd_sound_env fctx octx tvars ctx depth C env ⟨cmd, ctx'⟩ hcmd
+    exact CmdsHasTypeA.cons _ _ _ cmd cmds htyCmd (ih ctx' (cmds, ctx'') hcmds)
+
 -- ── Quick test ────────────────────────────────────────────────────────
 
 open Std in

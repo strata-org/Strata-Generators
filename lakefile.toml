@@ -53,6 +53,11 @@ roots = ["StrataGenerators.ArithExprs"]
 name = "StrataGenerators.CmdHasTypeAGen.Core"
 roots = ["StrataGenerators.CmdHasTypeAGen.Core"]
 
+# Shared Cmd test utilities (ppCmd, properties, generator wrappers)
+[[lean_lib]]
+name = "StrataGenerators.CmdHasTypeAGen.TestSupport"
+roots = ["StrataGenerators.CmdHasTypeAGen.TestSupport"]
+
 # The CmdHasTypeA generator with soundness/completeness proofs
 [[lean_lib]]
 name = "StrataGenerators.CmdHasTypeAGen"
