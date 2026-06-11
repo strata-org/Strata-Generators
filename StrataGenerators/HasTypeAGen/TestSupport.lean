@@ -26,7 +26,11 @@ partial def ppType : LMonoTy → String
   | .ftvar name => name
   | .bool => "bool"
   | .int => "int"
-  | .bitvec n => s!"bv{n}"
+  | .real => "real"
+  | .string => "string"
+  | .bitvec n => s!"bv<{n}>"
+  | .map k v => s!"Map<{ppType k}, {ppType v}>"
+  | .seq a => s!"Sequence<{ppType a}>"
   | .tcons name tys =>
     if tys.isEmpty then name
     else s!"({name} {" ".intercalate (tys.map ppType)})"
