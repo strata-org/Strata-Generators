@@ -6,6 +6,7 @@ Authors: Harrison Goldstein
 Vendored from https://github.com/hgoldstein95/basalt (SetGen branch, not yet on `main`).
 -/
 import StrataGenerators.SetGen.Core
+import Basalt.Combinators
 
 open Lean.Order RandomChoice
 open scoped SetGen.Set
@@ -87,12 +88,80 @@ theorem mem_support_pick_iff {x y : Set α} :
     a ∈ support (pick (fun () => x) (fun () => y)) ↔ a ∈ support x ∨ a ∈ support y := by
   simp [support, pick_mem_iff]
 
--- @[simp]
--- theorem support_oneOf
---     {gs : List (Unit → Set α)}
---     (hne : gs ≠ []) :
---     support (oneOf gs) = {a | ∃ g ∈ gs, a ∈ (g ()).support} := by
---   sorry
+@[simp]
+theorem mem_support_oneOf_iff
+    {gs : List (Unit → Set α)}
+    (hne : gs ≠ []) :
+    a ∈ support (oneOf gs) ↔ ∃ g ∈ gs, a ∈ support (g ()) := by
+  simp only [support, oneOf, Set.mem_bind, Set.fmap_eq_image, Set.mem_image]
+  constructor
+  · rintro ⟨idx, ⟨n, hn, rfl⟩, ha⟩
+    have h_pos : 0 < gs.length := List.length_pos_iff.mpr hne
+    have h_lt : n.down < gs.length := by
+      exact Nat.lt_of_le_of_lt hn.2 (by omega)
+    exact ⟨gs[n.down], List.getElem_mem h_lt, by rwa [getElem!_pos gs n.down h_lt] at ha⟩
+  · rintro ⟨g, hg, ha⟩
+    obtain ⟨i, hi, rfl⟩ := List.mem_iff_getElem.mp hg
+    have h_pos : 0 < gs.length := List.length_pos_iff.mpr hne
+    refine ⟨i, ⟨⟨i⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, by rwa [getElem!_pos gs i hi]⟩
+    show i ≤ gs.length - 1; omega
+
+private theorem frequencyAux_mem
+    {gs : List (Nat × (Unit → Set α))}
+    {n : Nat}
+    (h : n < List.sum (List.map Prod.fst gs)) :
+    ∃ w g, ⟨w, g⟩ ∈ gs ∧ 0 < w ∧ (frequencyAux default gs n).snd = g () := by
+  induction gs generalizing n with
+  | nil => contradiction
+  | cons hd tl ih =>
+    unfold frequencyAux
+    obtain ⟨w, g⟩ := hd
+    split
+    · exact ⟨w, g, .head tl, by omega, rfl⟩
+    · have h_remaining : n - w < List.sum (List.map Prod.fst tl) := by
+        simp only [List.map_cons, List.sum_cons] at h; omega
+      obtain ⟨w', g', hmem, hpos, heq⟩ := ih h_remaining
+      exact ⟨w', g', List.mem_cons_of_mem _ hmem, hpos, heq⟩
+
+private theorem frequencyAux_n_exists
+    {gs : List (Nat × (Unit → Set α))}
+    {w : Nat} {g : Unit → Set α}
+    (hmem : (w, g) ∈ gs)
+    (hnonzero : 0 < w) :
+    ∃ n, n < List.sum (List.map Prod.fst gs) ∧
+      (frequencyAux default gs n).snd = g () := by
+  induction gs with
+  | nil => contradiction
+  | cons hd tl ih =>
+    rcases List.mem_cons.mp hmem with rfl | h_tl
+    · refine ⟨0, ?_, ?_⟩
+      · simp only [List.map_cons, List.sum_cons]; omega
+      · unfold frequencyAux; simp [hnonzero]
+    · obtain ⟨n, hn, heq⟩ := ih h_tl
+      obtain ⟨w', _⟩ := hd
+      refine ⟨w' + n, ?_, ?_⟩
+      · simp only [List.map_cons, List.sum_cons]; omega
+      · unfold frequencyAux
+        have : ¬ (w' + n < w') := by omega
+        simp [this, heq]
+
+@[simp]
+theorem mem_support_frequency_iff
+    {gs : List (Nat × (Unit → Set α))}
+    (h_pos : 0 < List.sum (List.map Prod.fst gs)) :
+    a ∈ support (frequency gs h_pos) ↔
+      ∃ w g, ⟨w, g⟩ ∈ gs ∧ 0 < w ∧ a ∈ support (g ()) := by
+  simp only [support, frequency, Set.mem_bind, Set.fmap_eq_image, Set.mem_image]
+  constructor
+  · rintro ⟨idx, ⟨n, hn, rfl⟩, ha⟩
+    have h_lt : n.down < List.sum (List.map Prod.fst gs) := by
+      exact Nat.lt_of_le_of_lt hn.2 (by omega)
+    obtain ⟨w, g, hmem, hpos, heq⟩ := frequencyAux_mem h_lt
+    exact ⟨w, g, hmem, hpos, heq ▸ ha⟩
+  · rintro ⟨w, g, hmem, hpos, ha⟩
+    obtain ⟨n, hn_lt, hn_eq⟩ := frequencyAux_n_exists hmem hpos
+    refine ⟨n, ⟨⟨n⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, hn_eq ▸ ha⟩
+    show n ≤ (List.map Prod.fst gs).sum - 1; omega
 
 theorem bind_congr_support {x : Set α} (h : ∀ a ∈ support x, f a = g a) :
     (x >>= f) = (x >>= g) := by
