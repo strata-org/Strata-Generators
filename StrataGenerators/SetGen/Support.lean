@@ -257,6 +257,7 @@ theorem support_frequency
       rw [hn_eq]
       assumption
 
+
 theorem bind_congr_support {x : Set α} (h : ∀ a ∈ support x, f a = g a) :
     (x >>= f) = (x >>= g) := by
   ext b; simp only [Set.bind_def', support] at *

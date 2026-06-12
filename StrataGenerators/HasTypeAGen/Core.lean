@@ -1,5 +1,6 @@
 import Basalt.Gen
 import Basalt.IO
+import Basalt.Combinators
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.DL.Lambda.LTyUnify
 
@@ -354,31 +355,25 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
             else default))
   | n + 1, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
-    pick
-      (fun () => genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)
-      (fun () =>
-        pick
-          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂))
-          (fun () =>
-            pick
-              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                                (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))
-                                (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂)))
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)
-                  (fun () =>
-                    pick
-                      (fun () =>
-                        if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
-                        then pickFVar fctx _ hf
-                        else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)
-                      (fun () =>
-                        if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
-                        then pickOp octx _ ho
-                        else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁)))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (4, fun () => genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
+        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂)),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))
+                              (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
+        (2, fun () =>
+          if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+4+2+2+2+2; omega
+    frequency gs hw
   -- ── Bool type ─────────────────────────────────────────────────────
   | 0, .bool =>
     let bvars := bvarsOfType bctx .bool
@@ -401,44 +396,32 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                 else genBoolConst)))
   | n + 1, .bool =>
     let bvars := bvarsOfType bctx .bool
-    pickBiased
-      (fun () => genBoolConst)
-      (fun () =>
-        pick
-          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                            (genLExprBase fctx octx tvars bctx n .bool)
-                            (genLExprBase fctx octx tvars bctx n .bool))
-          (fun () =>
-            pick
-              (fun () => genEq (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n))
-              (fun () =>
-                pick
-                  (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .bool)
-                  (fun () =>
-                    pick
-                      (fun () => genQuant .all (genLMonoTy tvars n)
-                        (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
-                        (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool))
-                      (fun () =>
-                        pick
-                          (fun () => genQuant .exist (genLMonoTy tvars n)
-                            (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
-                            (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool))
-                          (fun () =>
-                            pick
-                              (fun () =>
-                                if hv : bvars.length > 0 then pickBVar bctx .bool hv
-                                else genBoolConst)
-                              (fun () =>
-                                pick
-                                  (fun () =>
-                                    if hf : (fvarsOfType fctx .bool).length > 0
-                                    then pickFVar fctx .bool hf
-                                    else genBoolConst)
-                                  (fun () =>
-                                    if ho : (opsOfType octx .bool).length > 0
-                                    then pickOp octx .bool ho
-                                    else genBoolConst))))))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genBoolConst),
+        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .bool),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .bool)),
+        (2, fun () => genEq (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n)),
+        (2, fun () => genQuant .all (genLMonoTy tvars n)
+          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
+          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
+        (2, fun () => genQuant .exist (genLMonoTy tvars n)
+          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
+          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx .bool hv
+          else genBoolConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .bool).length > 0
+          then pickFVar fctx .bool hf
+          else genBoolConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .bool).length > 0
+          then pickOp octx .bool ho
+          else genBoolConst) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2+2+2+2; omega
+    frequency gs hw
   -- ── Int type ──────────────────────────────────────────────────────
   | 0, .int =>
     let bvars := bvarsOfType bctx .int
@@ -461,31 +444,25 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                 else genIntConst)))
   | n + 1, .int =>
     let bvars := bvarsOfType bctx .int
-    pickBiased
-      (fun () => genIntConst)
-      (fun () =>
-        pick
-          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .int)
-          (fun () =>
-            pick
-              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                                (genLExprBase fctx octx tvars bctx n .int)
-                                (genLExprBase fctx octx tvars bctx n .int))
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else genIntConst)
-                  (fun () =>
-                    pick
-                      (fun () =>
-                        if hf : (fvarsOfType fctx .int).length > 0
-                        then pickFVar fctx .int hf
-                        else genIntConst)
-                      (fun () =>
-                        if ho : (opsOfType octx .int).length > 0
-                        then pickOp octx .int ho
-                        else genIntConst)))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genIntConst),
+        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .int),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .int)
+                              (genLExprBase fctx octx tvars bctx n .int)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genIntConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .int).length > 0
+          then pickFVar fctx .int hf
+          else genIntConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .int).length > 0
+          then pickOp octx .int ho
+          else genIntConst) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    frequency gs hw
   -- ── FtVar type (rigid type variable) ────────────────────────────────
   | 0, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
@@ -515,34 +492,30 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
             else default))
   | n + 1, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
-    pick
-      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.ftvar name))
-      (fun () =>
-        pick
-          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                            (genLExprBase fctx octx tvars bctx n (.ftvar name))
-                            (genLExprBase fctx octx tvars bctx n (.ftvar name)))
-          (fun () =>
-            pick
-              (fun () =>
-                if hv : bvars.length > 0 then pickBVar bctx _ hv
-                else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-                then pickFVar fctx _ hf
-                else if ho : (opsOfType octx (.ftvar name)).length > 0
-                then pickOp octx _ ho
-                else default)
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-                    then pickFVar fctx _ hf
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default)
-                  (fun () =>
-                    if ho : (opsOfType octx (.ftvar name)).length > 0
-                    then pickOp octx _ ho
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.ftvar name)),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.ftvar name))
+                              (genLExprBase fctx octx tvars bctx n (.ftvar name))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.ftvar name)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx (.ftvar name)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    frequency gs hw
   -- ── String type ────────────────────────────────────────────────────
   | 0, .string =>
     let bvars := bvarsOfType bctx .string
@@ -565,31 +538,25 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                 else genStrConst)))
   | n + 1, .string =>
     let bvars := bvarsOfType bctx .string
-    pickBiased
-      (fun () => genStrConst)
-      (fun () =>
-        pick
-          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .string)
-          (fun () =>
-            pick
-              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                                (genLExprBase fctx octx tvars bctx n .string)
-                                (genLExprBase fctx octx tvars bctx n .string))
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else genStrConst)
-                  (fun () =>
-                    pick
-                      (fun () =>
-                        if hf : (fvarsOfType fctx .string).length > 0
-                        then pickFVar fctx .string hf
-                        else genStrConst)
-                      (fun () =>
-                        if ho : (opsOfType octx .string).length > 0
-                        then pickOp octx .string ho
-                        else genStrConst)))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genStrConst),
+        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .string),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .string)
+                              (genLExprBase fctx octx tvars bctx n .string)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genStrConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .string).length > 0
+          then pickFVar fctx .string hf
+          else genStrConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .string).length > 0
+          then pickOp octx .string ho
+          else genStrConst) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    frequency gs hw
   -- ── Real type ─────────────────────────────────────────────────────
   | 0, .real =>
     let bvars := bvarsOfType bctx .real
@@ -612,31 +579,25 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                 else genRealConst)))
   | n + 1, .real =>
     let bvars := bvarsOfType bctx .real
-    pickBiased
-      (fun () => genRealConst)
-      (fun () =>
-        pick
-          (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .real)
-          (fun () =>
-            pick
-              (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                                (genLExprBase fctx octx tvars bctx n .real)
-                                (genLExprBase fctx octx tvars bctx n .real))
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else genRealConst)
-                  (fun () =>
-                    pick
-                      (fun () =>
-                        if hf : (fvarsOfType fctx .real).length > 0
-                        then pickFVar fctx .real hf
-                        else genRealConst)
-                      (fun () =>
-                        if ho : (opsOfType octx .real).length > 0
-                        then pickOp octx .real ho
-                        else genRealConst)))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genRealConst),
+        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .real),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .real)
+                              (genLExprBase fctx octx tvars bctx n .real)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genRealConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .real).length > 0
+          then pickFVar fctx .real hf
+          else genRealConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .real).length > 0
+          then pickOp octx .real ho
+          else genRealConst) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    frequency gs hw
   -- ── Bitvec type ───────────────────────────────────────────────────
   | 0, .bitvec n =>
     let bvars := bvarsOfType bctx (.bitvec n)
@@ -659,31 +620,25 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
                 else genBitvecConst n)))
   | m + 1, .bitvec n =>
     let bvars := bvarsOfType bctx (.bitvec n)
-    pickBiased
-      (fun () => genBitvecConst n)
-      (fun () =>
-        pick
-          (fun () => genApp (genLMonoTy tvars m) (genLExprBase fctx octx tvars bctx m) (.bitvec n))
-          (fun () =>
-            pick
-              (fun () => genIte (genLExprBase fctx octx tvars bctx m .bool)
-                                (genLExprBase fctx octx tvars bctx m (.bitvec n))
-                                (genLExprBase fctx octx tvars bctx m (.bitvec n)))
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else genBitvecConst n)
-                  (fun () =>
-                    pick
-                      (fun () =>
-                        if hf : (fvarsOfType fctx (.bitvec n)).length > 0
-                        then pickFVar fctx (.bitvec n) hf
-                        else genBitvecConst n)
-                      (fun () =>
-                        if ho : (opsOfType octx (.bitvec n)).length > 0
-                        then pickOp octx (.bitvec n) ho
-                        else genBitvecConst n)))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genBitvecConst n),
+        (4, fun () => genApp (genLMonoTy tvars m) (genLExprBase fctx octx tvars bctx m) (.bitvec n)),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx m .bool)
+                              (genLExprBase fctx octx tvars bctx m (.bitvec n))
+                              (genLExprBase fctx octx tvars bctx m (.bitvec n))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genBitvecConst n),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
+          then pickFVar fctx (.bitvec n) hf
+          else genBitvecConst n),
+        (2, fun () =>
+          if ho : (opsOfType octx (.bitvec n)).length > 0
+          then pickOp octx (.bitvec n) ho
+          else genBitvecConst n) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    frequency gs hw
   -- ── Regex type (base type, no constants) ───────────────────────────
   | 0, .regex =>
     let bvars := bvarsOfType bctx .regex
@@ -713,34 +668,30 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
             else default))
   | n + 1, .regex =>
     let bvars := bvarsOfType bctx .regex
-    pick
-      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .regex)
-      (fun () =>
-        pick
-          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                            (genLExprBase fctx octx tvars bctx n .regex)
-                            (genLExprBase fctx octx tvars bctx n .regex))
-          (fun () =>
-            pick
-              (fun () =>
-                if hv : bvars.length > 0 then pickBVar bctx _ hv
-                else if hf : (fvarsOfType fctx .regex).length > 0
-                then pickFVar fctx _ hf
-                else if ho : (opsOfType octx .regex).length > 0
-                then pickOp octx _ ho
-                else default)
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hf : (fvarsOfType fctx .regex).length > 0
-                    then pickFVar fctx _ hf
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default)
-                  (fun () =>
-                    if ho : (opsOfType octx .regex).length > 0
-                    then pickOp octx _ ho
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .regex),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .regex)
+                              (genLExprBase fctx octx tvars bctx n .regex)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx .regex).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx .regex).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .regex).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx .regex).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    frequency gs hw
   -- ── Map type ──────────────────────────────────────────────────────
   | 0, .map τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.map τ₁ τ₂)
@@ -770,34 +721,30 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
             else default))
   | n + 1, .map τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.map τ₁ τ₂)
-    pick
-      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂))
-      (fun () =>
-        pick
-          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                            (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))
-                            (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂)))
-          (fun () =>
-            pick
-              (fun () =>
-                if hv : bvars.length > 0 then pickBVar bctx _ hv
-                else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
-                then pickFVar fctx _ hf
-                else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
-                then pickOp octx _ ho
-                else default)
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
-                    then pickFVar fctx _ hf
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default)
-                  (fun () =>
-                    if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
-                    then pickOp octx _ ho
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂)),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))
+                              (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    frequency gs hw
   -- ── Sequence type ─────────────────────────────────────────────────
   | 0, .seq τ =>
     let bvars := bvarsOfType bctx (.seq τ)
@@ -827,34 +774,30 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
             else default))
   | n + 1, .seq τ =>
     let bvars := bvarsOfType bctx (.seq τ)
-    pick
-      (fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.seq τ))
-      (fun () =>
-        pick
-          (fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                            (genLExprBase fctx octx tvars bctx n (.seq τ))
-                            (genLExprBase fctx octx tvars bctx n (.seq τ)))
-          (fun () =>
-            pick
-              (fun () =>
-                if hv : bvars.length > 0 then pickBVar bctx _ hv
-                else if hf : (fvarsOfType fctx (.seq τ)).length > 0
-                then pickFVar fctx _ hf
-                else if ho : (opsOfType octx (.seq τ)).length > 0
-                then pickOp octx _ ho
-                else default)
-              (fun () =>
-                pick
-                  (fun () =>
-                    if hf : (fvarsOfType fctx (.seq τ)).length > 0
-                    then pickFVar fctx _ hf
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default)
-                  (fun () =>
-                    if ho : (opsOfType octx (.seq τ)).length > 0
-                    then pickOp octx _ ho
-                    else if hv : bvars.length > 0 then pickBVar bctx _ hv
-                    else default))))
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.seq τ)),
+        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.seq τ))
+                              (genLExprBase fctx octx tvars bctx n (.seq τ))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.seq τ)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.seq τ)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.seq τ)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx (.seq τ)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    frequency gs hw
   -- ── Fallback (other tcons — not generated) ────────────────────────
   | _, _ => pure (.boolConst () false)
 
