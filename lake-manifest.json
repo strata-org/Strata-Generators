@@ -5,7 +5,7 @@
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "814ccfd72bb41205a4a3fcb18c4a7da888abaa55",
+   "rev": "f89129f365f564133815b67161aa5c6519b9ced9",
    "name": "basalt",
    "manifestFile": "lake-manifest.json",
    "inputRev": "ernest/combinators",

@@ -258,6 +258,42 @@ theorem support_frequency
       assumption
 
 
+/-- The support of `elements xs` is exactly the elements of `xs` -/
+@[simp]
+theorem support_elements
+    [Inhabited α]
+    {xs : List α}
+    (hne : xs ≠ []) :
+    support (elements xs : Set α) = {a | a ∈ xs} := by
+  simp only [elements, support_bind, support_map, support_choose]
+  ext a
+  dsimp only [Set.mem_setOf_eq]
+  constructor
+  · rintro ⟨i, ⟨n, ⟨_, h_upper⟩, rfl⟩, ha⟩
+    have h_pos : 0 < xs.length := List.length_pos_iff.mpr hne
+    have h_lt : n.down < xs.length := by omega
+    simp only [support, Set.mem_pure] at ha
+    subst ha
+    rw [getElem!_pos xs n.down h_lt]
+    exact List.getElem_mem h_lt
+  · intro hmem
+    obtain ⟨i, hi, heq⟩ := List.mem_iff_getElem.mp hmem
+    refine ⟨i, ⟨⟨i⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, ?_⟩
+    · show i ≤ xs.length - 1; omega
+    · simp only [support, Set.mem_pure]
+      rw [getElem!_pos xs i hi]
+      exact heq.symm
+
+/-- `a` is in the support of `elements xs` if and only if `a ∈ xs` -/
+@[simp]
+theorem mem_support_elements_iff
+    [Inhabited α]
+    {xs : List α}
+    (hne : xs ≠ []) :
+    a ∈ support (elements xs : Set α) ↔ a ∈ xs := by
+  rw [support_elements hne]
+  exact Set.mem_setOf
+
 theorem bind_congr_support {x : Set α} (h : ∀ a ∈ support x, f a = g a) :
     (x >>= f) = (x >>= g) := by
   ext b; simp only [Set.bind_def', support] at *
