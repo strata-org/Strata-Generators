@@ -139,10 +139,11 @@ theorem genCmd_support_iff
   constructor
   · intro hr
     rcases hr with ⟨h, hr⟩ | ⟨hne, hr⟩
-    · rw [mem_support_oneOf_iff (by simp)] at hr
-      obtain ⟨g, hg, hr⟩ := hr
-      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hg
-      rcases hg with heq | heq | heq | heq | heq | heq | heq <;> subst heq <;>
+    · rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)] at hr
+      obtain ⟨w, g, hg, _, hr⟩ := hr
+      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+      rcases hg with ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ <;>
+        subst heq <;>
         first
         | exact Or.inl hr
         | exact Or.inr (Or.inl hr)
@@ -151,10 +152,11 @@ theorem genCmd_support_iff
         | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr))))
         | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr)))))
         | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hr)))))
-    · rw [mem_support_oneOf_iff (by simp)] at hr
-      obtain ⟨g, hg, hr⟩ := hr
-      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hg
-      rcases hg with heq | heq | heq | heq | heq <;> subst heq <;>
+    · rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)] at hr
+      obtain ⟨w, g, hg, _, hr⟩ := hr
+      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+      rcases hg with ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ | ⟨_, heq⟩ <;>
+        subst heq <;>
         first
         | exact Or.inl hr
         | exact Or.inr (Or.inl hr)
@@ -164,22 +166,22 @@ theorem genCmd_support_iff
   · intro hr
     rcases hr with hr | (hr | (⟨h, hr⟩ | (⟨h, hr⟩ | (hr | (hr | hr)))))
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .head _, hr⟩⟩
-      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .head _, hr⟩⟩
+      · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .head _, by omega, hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨3, _, .head _, by omega, hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.head _), hr⟩⟩
-      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.head _), hr⟩⟩
-    · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.head _)), hr⟩⟩
-    · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.head _))), hr⟩⟩
+      · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨1, _, .tail _ (.head _), by omega, hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨1, _, .tail _ (.head _), by omega, hr⟩⟩
+    · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨3, _, .tail _ (.tail _ (.head _)), by omega, hr⟩⟩
+    · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.head _))), by omega, hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), hr⟩⟩
-      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.head _)), hr⟩⟩
+      · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.head _)), by omega, hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), hr⟩⟩
-      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.head _))), hr⟩⟩
+      · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.head _))), by omega, hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), hr⟩⟩
-      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), hr⟩⟩
+      · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, hr⟩⟩
 
 -- ── Auxiliary lemma for List.getD ────────────────────────────────────
 

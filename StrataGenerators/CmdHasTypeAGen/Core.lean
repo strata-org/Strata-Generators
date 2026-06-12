@@ -129,23 +129,25 @@ def genCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult :=
   let tyDepth := depth
   if h : ctx.length > 0 then
-    oneOf [
-      fun () => genInitDet fctx octx tvars ctx tyDepth depth,
-      fun () => genInitNondet tvars ctx tyDepth,
-      fun () => genSetDet fctx octx tvars ctx depth h,
-      fun () => genSetNondet ctx h,
-      fun () => genAssertCmd fctx octx tvars ctx depth,
-      fun () => genAssumeCmd fctx octx tvars ctx depth,
-      fun () => genCoverCmd fctx octx tvars ctx depth
-    ]
+    let gs : List (Nat × (Unit → G GenCmdResult)) :=
+      [ (2, fun () => genInitDet fctx octx tvars ctx tyDepth depth),
+        (1, fun () => genInitNondet tvars ctx tyDepth),
+        (3, fun () => genSetDet fctx octx tvars ctx depth h),
+        (2, fun () => genSetNondet ctx h),
+        (2, fun () => genAssertCmd fctx octx tvars ctx depth),
+        (2, fun () => genAssumeCmd fctx octx tvars ctx depth),
+        (2, fun () => genCoverCmd fctx octx tvars ctx depth) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 2+1+3+2+2+2+2; omega
+    frequency gs hw
   else
-    oneOf [
-      fun () => genInitDet fctx octx tvars ctx tyDepth depth,
-      fun () => genInitNondet tvars ctx tyDepth,
-      fun () => genAssertCmd fctx octx tvars ctx depth,
-      fun () => genAssumeCmd fctx octx tvars ctx depth,
-      fun () => genCoverCmd fctx octx tvars ctx depth
-    ]
+    let gs : List (Nat × (Unit → G GenCmdResult)) :=
+      [ (3, fun () => genInitDet fctx octx tvars ctx tyDepth depth),
+        (1, fun () => genInitNondet tvars ctx tyDepth),
+        (2, fun () => genAssertCmd fctx octx tvars ctx depth),
+        (2, fun () => genAssumeCmd fctx octx tvars ctx depth),
+        (2, fun () => genCoverCmd fctx octx tvars ctx depth) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 3+1+2+2+2; omega
+    frequency gs hw
 
 -- ── Sequence generator ──────────────────────────────────────────────────
 
