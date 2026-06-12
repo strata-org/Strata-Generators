@@ -159,7 +159,8 @@ def genCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
 
 -- ── Sequence generator ──────────────────────────────────────────────────
 
-/-- Generate a sequence of well-typed commands, threading the context through. -/
+/-- `genCmds n` generates a length-n sequence of well-typed commands,
+    threading the context through. -/
 def genCmds [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : Nat → G (List (Cmd Expression) × VarCtx)
   | 0 => pure ([], ctx)

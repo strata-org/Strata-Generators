@@ -239,9 +239,8 @@ private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => 
   let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars ctx depth
   pure ⟨cmd, ctx, ctx'⟩
 
-private def genCmdFromBuiltCtx : Gen GenCmdWithCtx := do
+private def genCmdFromBuiltCtx (ctxSize : Nat) : Gen GenCmdWithCtx := do
   let depth := 2
-  let ctxSize := 3
   let tvars : List TyIdentifier := []
   let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] depth ctxSize
   let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars baseCtx depth
@@ -249,7 +248,7 @@ private def genCmdFromBuiltCtx : Gen GenCmdWithCtx := do
 
 instance : Arbitrary GenCmdWithCtx where
   arbitrary := Gen.backtrack (List.replicate 1000
-    (1, genCmdFromBuiltCtx))
+    (1, genCmdFromBuiltCtx 3))
 
 /-- A generated command sequence paired with its context. -/
 structure GenCmdsWithCtx where

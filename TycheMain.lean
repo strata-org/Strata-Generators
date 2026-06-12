@@ -272,12 +272,15 @@ def cmdKind (cmd : Cmd Expression) : String :=
   | .assume _ _ _ => "assume"
   | .cover _ _ _ => "cover"
 
-/-- Shared helper: generate a command from a random-size context. -/
+/-- Shared helper: generate a command from a random-size context.
+    Uses a large `numCmds` (3× desired context size) to compensate for the
+    fact that only `init` commands grow the context, while `assert`/`assume`/
+    `cover`/`set` leave it unchanged. -/
 private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCtx × VarCtx × Nat) := do
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
-  let ctxSize ← IO.rand 0 5
-  let (_, baseCtx) ← genCmds (G := IO) [] coreOpCtx tvars [] d ctxSize
+  let numCmds ← IO.rand 0 8
+  let (_, baseCtx) ← genCmds (G := IO) [] coreOpCtx tvars [] d numCmds
   let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreOpCtx tvars baseCtx d
   return (cmd, baseCtx, ctx', d)
 

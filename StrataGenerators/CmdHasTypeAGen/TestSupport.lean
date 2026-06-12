@@ -177,7 +177,8 @@ def checkCmdsRunNoError (cmds : List (Cmd Expression)) (inCtx : VarCtx) : Bool :
   | .error _ => false
 
 
-/-- After running `set x (det e)`, the variable `x` is still in the store. -/
+/-- After running `set x (det e)` (where `e` is a determinisitc command),
+    the variable `x` is still in the store. -/
 def checkSetPreservesVar (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
   match cmd with
   | .set x _ _ =>
