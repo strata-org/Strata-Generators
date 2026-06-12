@@ -88,6 +88,48 @@ theorem mem_support_pick_iff {x y : Set α} :
     a ∈ support (pick (fun () => x) (fun () => y)) ↔ a ∈ support x ∨ a ∈ support y := by
   simp [support, pick_mem_iff]
 
+/-- The support of `oneOf gs` is exactly the union of the support of all the generators in `gs` -/
+@[simp]
+theorem support_oneOf
+    {gs : List (Unit → Set α)}
+    (hne : gs ≠ []) :
+    support (oneOf gs) = {a | ∃ g ∈ gs, a ∈ g ()} := by
+  simp only [oneOf, support_bind, support_map, support_choose]
+  ext a
+  dsimp only [Set.mem_setOf_eq]
+  constructor
+  . -- ∃ i ∈ [0, gs.length -1], a ∈ (gs[i]! ()).support → ∃ g ∈ gs, a ∈ (g ()).support
+    intro h
+    obtain ⟨ i, h_idx, ha ⟩ := h
+    obtain ⟨ n, ⟨ h_lowerbound, h_upperbound ⟩, hi ⟩ := h_idx
+    have h_pos : 0 < gs.length := by
+      rw [List.length_pos_iff]
+      assumption
+    have h_lt : i < gs.length := by omega
+    refine ⟨ gs[i], ?_, ?_ ⟩
+    . -- Goal: `gs[i] ∈ gs`
+      apply List.getElem_mem
+    . -- Goal: `a ∈ (gs[i] ()).support`
+      -- To do this, rewrite `gs[i]!` in terms of `gs[i]`
+      rw [getElem!_pos gs i h_lt] at ha
+      assumption
+  . -- ∃ g ∈ gs, a ∈ (g ()).support → ∃ i ∈ [0, gs.length - 1], a ∈ (gs[i]! ()).support
+    intros h
+    obtain ⟨ g, hg, ha ⟩ := h
+    obtain ⟨ i, hi, heq ⟩ := List.mem_iff_getElem.mp hg
+    refine ⟨ i, ?_, ?_ ⟩
+    . -- 0 ≤ i ≤ gs.length - 1
+      exists ⟨ i ⟩
+      dsimp
+      constructor
+      . apply Set.mem_setOf_eq.mpr
+        constructor <;> (dsimp; omega)
+      . rfl
+    . -- a ∈ (gs[i]! ()).support
+      rw [getElem!_pos gs i hi]
+      subst heq
+      assumption
+
 /-- Any element in the support of `oneOf gs` is in the support of some
     generator in `gs` -/
 @[simp]
