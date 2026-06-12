@@ -214,6 +214,49 @@ theorem mem_support_frequency_iff
     refine ⟨n, ⟨⟨n⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, hn_eq ▸ ha⟩
     show n ≤ (List.map Prod.fst gs).sum - 1; omega
 
+/-- If the sum of weights in `gs` is non-zero, then the support of `frequency gs`
+    is exactly the union of the support of the generators in `gs` with non-zero weights -/
+@[simp]
+theorem support_frequency
+    {gs : List (Nat × (Unit → Set α))}
+    (h_pos : 0 < List.sum (List.map Prod.fst gs)) :
+    support (frequency gs h_pos) = {a | ∃ w g, ⟨ w, g ⟩ ∈ gs ∧ 0 < w ∧ a ∈ (g ())} := by
+  ext a
+  dsimp only [Set.mem_setOf_eq]
+  constructor
+  · -- a ∈ support (frequency gs h_pos) -> ∃ w g, (w, g) ∈ gs ∧ 0 < w ∧ a ∈ (g ()).support
+    intro h
+    simp only [frequency, support_bind, support_map, support_choose] at h
+    -- `i` is the weight value picked inside `frequency`
+    obtain ⟨i, h_idx, ha⟩ := h
+    obtain ⟨n, ⟨_, _⟩, hi⟩ := h_idx
+    have h_lt : i < List.sum (List.map Prod.fst gs) := by omega
+    obtain ⟨w, g, _, _, heq⟩ := frequencyAux_mem h_lt
+    rw [heq] at ha
+    refine ⟨w, g, ?_, ?_, ?_⟩ <;> assumption
+  · -- ∃ w g, (w, g) ∈ gs ∧ 0 < w ∧ a ∈ (g ()).support -> a ∈ support (frequency gs h_pos)
+    simp only [frequency, support_bind, support_map, support_choose]
+    intro ⟨w, g, hwg_mem, hwt, ha⟩
+    obtain ⟨n, hn_lt, hn_eq⟩ := frequencyAux_n_exists hwg_mem hwt
+    simp only [Set.mem_setOf_eq]
+    apply Exists.intro n
+    constructor
+    · -- ∃ a, (0 ≤ a.down ∧ a.down ≤ total - 1) ∧ n = a.down
+      apply Exists.intro (ULift.up n)
+      constructor
+      · -- 0 ≤ n ∧ n ≤ total - 1
+        constructor
+        · -- 0 ≤ n
+          omega
+        · -- n ≤ total - 1
+          show n ≤ (List.map Prod.fst gs).sum - 1
+          omega
+      · -- n = (ULift.up n).down
+        rfl
+    · -- a ∈ (frequencyAux default gs n).snd.support
+      rw [hn_eq]
+      assumption
+
 theorem bind_congr_support {x : Set α} (h : ∀ a ∈ support x, f a = g a) :
     (x >>= f) = (x >>= g) := by
   ext b; simp only [Set.bind_def', support] at *
