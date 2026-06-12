@@ -88,6 +88,8 @@ theorem mem_support_pick_iff {x y : Set α} :
     a ∈ support (pick (fun () => x) (fun () => y)) ↔ a ∈ support x ∨ a ∈ support y := by
   simp [support, pick_mem_iff]
 
+/-- Any element in the support of `oneOf gs` is in the support of some
+    generator in `gs` -/
 @[simp]
 theorem mem_support_oneOf_iff
     {gs : List (Unit → Set α)}
@@ -106,6 +108,8 @@ theorem mem_support_oneOf_iff
     refine ⟨i, ⟨⟨i⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, by rwa [getElem!_pos gs i hi]⟩
     show i ≤ gs.length - 1; omega
 
+/-- If `n < sum (fst <$> gs)`, then `frequencyAux default gs n` picks a sub-generator
+    from `gs` that has non-zero weight `w` -/
 private theorem frequencyAux_mem
     {gs : List (Nat × (Unit → Set α))}
     {n : Nat}
@@ -123,6 +127,9 @@ private theorem frequencyAux_mem
       obtain ⟨w', g', hmem, hpos, heq⟩ := ih h_remaining
       exact ⟨w', g', List.mem_cons_of_mem _ hmem, hpos, heq⟩
 
+
+/-- If a weighted generator `(w, g) ∈ gs` where the weight `w` is non-zero,
+    then `frequencyAux default gs n` produces `(w, g)` if `n < sum (fst <$> gs)` -/
 private theorem frequencyAux_n_exists
     {gs : List (Nat × (Unit → Set α))}
     {w : Nat} {g : Unit → Set α}
@@ -145,6 +152,8 @@ private theorem frequencyAux_n_exists
         have : ¬ (w' + n < w') := by omega
         simp [this, heq]
 
+/-- Any element in the support of `frequency gs` is in the support
+    of some generator in `gs` with non-zero weight -/
 @[simp]
 theorem mem_support_frequency_iff
     {gs : List (Nat × (Unit → Set α))}
