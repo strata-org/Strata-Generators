@@ -288,26 +288,24 @@ instance : Arbitrary GenCmdsWithCtx where
 @[reducible] def prop_cmd_expr_typechecks (gc : GenCmdWithCtx) : Prop :=
   checkExprTypechecks gc.cmd = true
 
--- The `definedVars` of an `init` command is exactly its target variable,
--- and non-init commands define no variables.
-@[reducible] def prop_cmd_definedVars (gc : GenCmdWithCtx) : Prop :=
-  checkDefinedVarsCorrect gc.cmd = true
-
--- The `modifiedVars` of a `set` command is exactly its target variable,
--- and non-set commands modify no variables.
-@[reducible] def prop_cmd_modifiedVars (gc : GenCmdWithCtx) : Prop :=
-  checkModifiedVarsCorrect gc.cmd = true
-
--- For a `set` command generated from context `ctx`, the target variable
--- actually exists in `ctx`.
-@[reducible] def prop_cmd_set_in_ctx (gc : GenCmdWithCtx) : Prop :=
-  checkSetTargetInCtx gc.cmd gc.inCtx = true
-
 -- For a generated command sequence, the output context equals the input
 -- context prepended with the newly defined variables (in reverse order,
 -- since `init` conses onto the front).
 @[reducible] def prop_cmds_context_growth (gc : GenCmdsWithCtx) : Prop :=
   checkContextGrowth gc.inCtx gc.outCtx gc.cmds = true
+
+-- Running a well-typed generated command produces no scoping error
+-- (e.g., set on undefined variable).
+@[reducible] def prop_cmd_run_no_error (gc : GenCmdWithCtx) : Prop :=
+  checkCmdRunNoError gc.cmd gc.inCtx = true
+
+-- Running a well-typed generated command sequence produces no scoping error.
+@[reducible] def prop_cmds_run_no_error (gc : GenCmdsWithCtx) : Prop :=
+  checkCmdsRunNoError gc.cmds gc.inCtx = true
+
+-- After `set x e`, the variable `x` remains defined in the store.
+@[reducible] def prop_cmd_set_preserves_var (gc : GenCmdWithCtx) : Prop :=
+  checkSetPreservesVar gc.cmd gc.inCtx = true
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
@@ -369,20 +367,20 @@ def main (args : List String) : IO UInt32 := do
     (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_expr_typechecks gc)) cfg) then
     allPassed := false
 
-  if !(← checkProperty "cmd: definedVars correct"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_definedVars gc)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "cmd: modifiedVars correct"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_modifiedVars gc)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "cmd: set target in context"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_set_in_ctx gc)) cfg) then
-    allPassed := false
-
   if !(← checkProperty "cmds: context growth matches inits"
     (NamedBinder "gc" (∀ gc : GenCmdsWithCtx, prop_cmds_context_growth gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: run produces no error"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_run_no_error gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmds: run sequence produces no error"
+    (NamedBinder "gc" (∀ gc : GenCmdsWithCtx, prop_cmds_run_no_error gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: set preserves variable"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_set_preserves_var gc)) cfg) then
     allPassed := false
 
   IO.println ""

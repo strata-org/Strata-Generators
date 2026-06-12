@@ -327,15 +327,15 @@ def genAndCheckExprTypecheck : IO CmdExprTypecheckResult := do
   return { cmd, ctxSize := baseCtx.length, generatorSize := d,
            passed := checkExprTypechecks cmd }
 
--- ── Panel 3: set target in context ───────────────────────────────────
+-- ── Panel 3: cmd run produces no error ───────────────────────────────
 
-structure CmdSetInCtxResult where
+structure CmdRunNoErrorResult where
   cmd : Cmd Expression
   ctxSize : Nat
   generatorSize : Nat
   passed : Bool
 
-instance : Tyche.TycheSample CmdSetInCtxResult where
+instance : Tyche.TycheSample CmdRunNoErrorResult where
   toSample r :=
     { representation := ppCmd r.cmd
       status := if r.passed then .passed else .failed
@@ -345,10 +345,33 @@ instance : Tyche.TycheSample CmdSetInCtxResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-def genAndCheckSetInCtx : IO CmdSetInCtxResult := do
+def genAndCheckCmdRunNoError : IO CmdRunNoErrorResult := do
   let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
   return { cmd, ctxSize := baseCtx.length, generatorSize := d,
-           passed := checkSetTargetInCtx cmd baseCtx }
+           passed := checkCmdRunNoError cmd baseCtx }
+
+-- ── Panel 4: set preserves variable ─────────────────────────────────
+
+structure CmdSetPreservesVarResult where
+  cmd : Cmd Expression
+  ctxSize : Nat
+  generatorSize : Nat
+  passed : Bool
+
+instance : Tyche.TycheSample CmdSetPreservesVarResult where
+  toSample r :=
+    { representation := ppCmd r.cmd
+      status := if r.passed then .passed else .failed
+      features := [
+        ("cmd_kind", .nominal (cmdKind r.cmd)),
+        ("ctx_size", .ordinal r.ctxSize),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+def genAndCheckSetPreservesVar : IO CmdSetPreservesVarResult := do
+  let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
+  return { cmd, ctxSize := baseCtx.length, generatorSize := d,
+           passed := checkSetPreservesVar cmd baseCtx }
 
 -- ── Main ──────────────────────────────────────────────────────────────
 
@@ -404,11 +427,17 @@ def main (args : List String) : IO Unit := do
   handle.putStr cmd2
   IO.FS.removeFile (outputPath ++ ".cmd2")
 
-  Tyche.run (genAndCheckSetInCtx)
-    { numSamples, propertyName := "genCmd: set target in context", outputPath := outputPath ++ ".cmd3" }
+  Tyche.run (genAndCheckCmdRunNoError)
+    { numSamples, propertyName := "genCmd: run produces no error", outputPath := outputPath ++ ".cmd3" }
   let cmd3 ← IO.FS.readFile (outputPath ++ ".cmd3")
   handle.putStr cmd3
   IO.FS.removeFile (outputPath ++ ".cmd3")
+
+  Tyche.run (genAndCheckSetPreservesVar)
+    { numSamples, propertyName := "genCmd: set preserves variable", outputPath := outputPath ++ ".cmd4" }
+  let cmd4 ← IO.FS.readFile (outputPath ++ ".cmd4")
+  handle.putStr cmd4
+  IO.FS.removeFile (outputPath ++ ".cmd4")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow
