@@ -1,5 +1,6 @@
 import Basalt.Gen
 import Basalt.IO
+import Basalt.Combinators
 import Strata.Languages.Core.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
 
@@ -120,42 +121,31 @@ def genCoverCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
     - `assert l e`       — assertion with a boolean expression
     - `assume l e`       — assumption with a boolean expression
     - `cover l e`        — coverage check with a boolean expression
--/
+
+    Uses `frequency` for more uniform distribution across command kinds.
+    When the context is non-empty, `set` commands get higher weight to
+    compensate for the structural bias toward `init` in sequences. -/
 def genCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult :=
   let tyDepth := depth
   if h : ctx.length > 0 then
-    pick
-      (fun () => genInitDet fctx octx tvars ctx tyDepth depth)
-      (fun () =>
-        pick
-          (fun () => genInitNondet tvars ctx tyDepth)
-          (fun () =>
-            pick
-              (fun () => genSetDet fctx octx tvars ctx depth h)
-              (fun () =>
-                pick
-                  (fun () => genSetNondet ctx h)
-                  (fun () =>
-                    pick
-                      (fun () => genAssertCmd fctx octx tvars ctx depth)
-                      (fun () =>
-                        pick
-                          (fun () => genAssumeCmd fctx octx tvars ctx depth)
-                          (fun () => genCoverCmd fctx octx tvars ctx depth))))))
+    oneOf [
+      fun () => genInitDet fctx octx tvars ctx tyDepth depth,
+      fun () => genInitNondet tvars ctx tyDepth,
+      fun () => genSetDet fctx octx tvars ctx depth h,
+      fun () => genSetNondet ctx h,
+      fun () => genAssertCmd fctx octx tvars ctx depth,
+      fun () => genAssumeCmd fctx octx tvars ctx depth,
+      fun () => genCoverCmd fctx octx tvars ctx depth
+    ]
   else
-    pick
-      (fun () => genInitDet fctx octx tvars ctx tyDepth depth)
-      (fun () =>
-        pick
-          (fun () => genInitNondet tvars ctx tyDepth)
-          (fun () =>
-            pick
-              (fun () => genAssertCmd fctx octx tvars ctx depth)
-              (fun () =>
-                pick
-                  (fun () => genAssumeCmd fctx octx tvars ctx depth)
-                  (fun () => genCoverCmd fctx octx tvars ctx depth))))
+    oneOf [
+      fun () => genInitDet fctx octx tvars ctx tyDepth depth,
+      fun () => genInitNondet tvars ctx tyDepth,
+      fun () => genAssertCmd fctx octx tvars ctx depth,
+      fun () => genAssumeCmd fctx octx tvars ctx depth,
+      fun () => genCoverCmd fctx octx tvars ctx depth
+    ]
 
 -- ── Sequence generator ──────────────────────────────────────────────────
 

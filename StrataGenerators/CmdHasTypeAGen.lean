@@ -135,43 +135,51 @@ theorem genCmd_support_iff
      r ∈ SetGen.support (genAssertCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∨
      r ∈ SetGen.support (genAssumeCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∨
      r ∈ SetGen.support (genCoverCmd (G := SetGen.Set) fctx octx tvars ctx depth)) := by
-  simp only [genCmd, mem_support_dite_iff, mem_support_pick_iff]
+  simp only [genCmd, mem_support_dite_iff]
   constructor
   · intro hr
     rcases hr with ⟨h, hr⟩ | ⟨hne, hr⟩
-    · rcases hr with hr | (hr | (hr | (hr | (hr | (hr | hr)))))
-      · exact Or.inl hr
-      · exact Or.inr (Or.inl hr)
-      · exact Or.inr (Or.inr (Or.inl ⟨h, hr⟩))
-      · exact Or.inr (Or.inr (Or.inr (Or.inl ⟨h, hr⟩)))
-      · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr))))
-      · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr)))))
-      · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hr)))))
-    · rcases hr with hr | (hr | (hr | (hr | hr)))
-      · exact Or.inl hr
-      · exact Or.inr (Or.inl hr)
-      · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr))))
-      · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr)))))
-      · exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hr)))))
+    · rw [mem_support_oneOf_iff (by simp)] at hr
+      obtain ⟨g, hg, hr⟩ := hr
+      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hg
+      rcases hg with heq | heq | heq | heq | heq | heq | heq <;> subst heq <;>
+        first
+        | exact Or.inl hr
+        | exact Or.inr (Or.inl hr)
+        | exact Or.inr (Or.inr (Or.inl ⟨h, hr⟩))
+        | exact Or.inr (Or.inr (Or.inr (Or.inl ⟨h, hr⟩)))
+        | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr))))
+        | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr)))))
+        | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hr)))))
+    · rw [mem_support_oneOf_iff (by simp)] at hr
+      obtain ⟨g, hg, hr⟩ := hr
+      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hg
+      rcases hg with heq | heq | heq | heq | heq <;> subst heq <;>
+        first
+        | exact Or.inl hr
+        | exact Or.inr (Or.inl hr)
+        | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr))))
+        | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr)))))
+        | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hr)))))
   · intro hr
     rcases hr with hr | (hr | (⟨h, hr⟩ | (⟨h, hr⟩ | (hr | (hr | hr)))))
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, Or.inl hr⟩
-      · exact Or.inr ⟨h, Or.inl hr⟩
+      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .head _, hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .head _, hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, Or.inr (Or.inl hr)⟩
-      · exact Or.inr ⟨h, Or.inr (Or.inl hr)⟩
-    · exact Or.inl ⟨h, Or.inr (Or.inr (Or.inl hr))⟩
-    · exact Or.inl ⟨h, Or.inr (Or.inr (Or.inr (Or.inl hr)))⟩
+      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.head _), hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.head _), hr⟩⟩
+    · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.head _)), hr⟩⟩
+    · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.head _))), hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr))))⟩
-      · exact Or.inr ⟨h, Or.inr (Or.inr (Or.inl hr))⟩
+      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.head _)), hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hr)))))⟩
-      · exact Or.inr ⟨h, Or.inr (Or.inr (Or.inr (Or.inl hr)))⟩
+      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.head _))), hr⟩⟩
     · by_cases h : ctx.length > 0
-      · exact Or.inl ⟨h, Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hr)))))⟩
-      · exact Or.inr ⟨h, Or.inr (Or.inr (Or.inr (Or.inr hr)))⟩
+      · exact Or.inl ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), hr⟩⟩
+      · exact Or.inr ⟨h, by rw [mem_support_oneOf_iff (by simp)]; exact ⟨_, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), hr⟩⟩
 
 -- ── Auxiliary lemma for List.getD ────────────────────────────────────
 
