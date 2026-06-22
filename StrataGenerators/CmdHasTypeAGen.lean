@@ -1,7 +1,7 @@
 import StrataGenerators.SetGen
 import StrataGenerators.CmdHasTypeAGen.Core
 
-open Lambda RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
 
 /-!
 # Generator of well-typed commands satisfying `CmdHasTypeA`
@@ -91,6 +91,19 @@ theorem genSetNondet_sound
     CmdHasTypeA C Γ (.set x .nondet default) Γ :=
   CmdHasType'.set_nondet Γ x mty default hfind
 
+/-- A monomorphic type scheme `∀ []. mty` (no bound variables) is trivially
+    `RigidAnnotCompat` with itself: opening with an empty list of type arguments
+    yields `mty` unchanged (the empty substitution is the identity), so the
+    compatibility check reduces to reflexivity. -/
+private theorem rigidAnnotCompat_forAll_nil (mty : LMonoTy) :
+    ∀ {aliases rigidVars},
+    RigidAnnotCompat aliases rigidVars ((LTy.forAll [] mty).openFull []) mty := by
+  intro aliases rigidVars
+  have h : (LTy.forAll [] mty).openFull [] = mty := by
+    simp only [LTy.openFull, LTy.boundVars, LTy.toMonoTypeUnsafe, List.zip_nil_left]
+    exact LMonoTy.subst_emptyS Subst.hasEmptyScopes_emptyScope
+  rw [h]; exact RigidAnnotCompat.of_eq
+
 /-- Soundness of init_det: if `x` is fresh in `Γ`, `x ∉ vars(e)`, and `e`
     has type `mty`, then `init x (.forAll [] mty) (det e) default` is well-typed
     with output context `{Γ with types := Γ.types.insert x (.forAll [] mty)}`. -/
@@ -104,7 +117,7 @@ theorem genInitDet_sound
     (hnovar : x ∉ HasVarsPure.getVars (P := Expression) e) :
     CmdHasTypeA C Γ (.init x (.forAll [] mty) (.det e) default)
       { Γ with types := Γ.types.insert x (.forAll [] mty) } :=
-  CmdHasType'.init_det Γ x (.forAll [] mty) e mty default hfresh hnovar hwt
+  CmdHasType'.init_det Γ x (.forAll [] mty) e mty [] default hfresh hnovar rfl (rigidAnnotCompat_forAll_nil mty) hwt
 
 /-- Soundness of init_nondet: if `x` is fresh in `Γ`,
     then `init x (.forAll [] mty) nondet default` is well-typed. -/
@@ -115,7 +128,7 @@ theorem genInitNondet_sound
     (hfresh : Γ.types.find? x = none) :
     CmdHasTypeA C Γ (.init x (.forAll [] mty) .nondet default)
       { Γ with types := Γ.types.insert x (.forAll [] mty) } :=
-  CmdHasType'.init_nondet Γ x (.forAll [] mty) mty default hfresh
+  CmdHasType'.init_nondet Γ x (.forAll [] mty) mty [] default hfresh rfl (rigidAnnotCompat_forAll_nil mty)
 
 -- ── Support characterization of genCmd ──────────────────────────────
 
@@ -232,6 +245,7 @@ theorem genCmd_sound
     (hFresh : GenFreshNameSound fctx octx tvars ctx Γ depth)
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth)) :
+    -- TODO: change this from Γ' to r.ctx
     ∃ Γ', CmdHasTypeA C Γ r.cmd Γ' := by
   rw [genCmd_support_iff] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -240,12 +254,12 @@ theorem genCmd_sound
     obtain ⟨name, hname, mty, hmty, e, he, rfl⟩ := hr
     have ⟨hfreshΓ, hnovar⟩ := hFresh name hname
     have hwt := hExprSound mty e he
-    exact ⟨_, CmdHasType'.init_det Γ ⟨name, ()⟩ _ e mty default hfreshΓ (hnovar mty e he) hwt⟩
+    exact ⟨_, CmdHasType'.init_det Γ ⟨name, ()⟩ _ e mty [] default hfreshΓ (hnovar mty e he) rfl (rigidAnnotCompat_forAll_nil mty) hwt⟩
   · -- init_nondet
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, hname, mty, _, rfl⟩ := hr
     have ⟨hfreshΓ, _⟩ := hFresh name hname
-    exact ⟨_, CmdHasType'.init_nondet Γ ⟨name, ()⟩ _ mty default hfreshΓ⟩
+    exact ⟨_, CmdHasType'.init_nondet Γ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)⟩
   · -- set_det
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_choose_iff] at hr
@@ -326,7 +340,7 @@ theorem genCmd_complete
       r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∧
       CmdHasTypeA C Γ r.cmd Γ' := by
   cases hwt with
-  | init_det x xty e mty md hfresh hnovar hexpr =>
+  | init_det x xty e mty tys md hfresh hnovar _ _ hexpr =>
     have hname := hNameReach x ⟨xty, .det e, md, rfl⟩
     have hmty := hTyReach mty
     have he := hExprComplete mty e hexpr
@@ -335,8 +349,8 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inl (by
         simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, e, he, rfl⟩))
-    exact ⟨_, hinSupport, CmdHasType'.init_det _ x _ e mty default hfresh hnovar hexpr⟩
-  | init_nondet x xty mty md hfresh =>
+    exact ⟨_, hinSupport, CmdHasType'.init_det _ x _ e mty [] default hfresh hnovar rfl (rigidAnnotCompat_forAll_nil mty) hexpr⟩
+  | init_nondet x xty mty tys md hfresh _ _ =>
     have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
     have hmty := hTyReach mty
     have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, (x.name, mty) :: ctx⟩ : GenCmdResult) ∈
@@ -344,7 +358,7 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inr (Or.inl (by
         simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, rfl⟩)))
-    exact ⟨_, hinSupport, CmdHasType'.init_nondet _ x _ mty default hfresh⟩
+    exact ⟨_, hinSupport, CmdHasType'.init_nondet _ x _ mty [] default hfresh rfl (rigidAnnotCompat_forAll_nil mty)⟩
   | set_det x mty e md hfind hexpr =>
     have ⟨idx, hidx, hentry⟩ := hVarInCtx x mty hfind
     have he := hExprComplete mty e hexpr
@@ -451,13 +465,13 @@ theorem genCmd_sound_env
     have ⟨hfreshΓ, hnovar⟩ := (env.freshSound ctx) name hname
     have hwt := env.exprSound mty e he
     rw [env.toTCtx_cons]
-    exact CmdHasType'.init_det _ ⟨name, ()⟩ _ e mty default hfreshΓ (hnovar mty e he) hwt
+    exact CmdHasType'.init_det _ ⟨name, ()⟩ _ e mty [] default hfreshΓ (hnovar mty e he) rfl (rigidAnnotCompat_forAll_nil mty) hwt
   · -- init_nondet
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, hname, mty, _, rfl⟩ := hr
     have ⟨hfreshΓ, _⟩ := (env.freshSound ctx) name hname
     rw [env.toTCtx_cons]
-    exact CmdHasType'.init_nondet _ ⟨name, ()⟩ _ mty default hfreshΓ
+    exact CmdHasType'.init_nondet _ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)
   · -- set_det
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_choose_iff] at hr
