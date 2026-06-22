@@ -269,8 +269,7 @@ private theorem pickTyVar_mem (tvars : List TyIdentifier) (h : tvars.length > 0)
   have hne : tvars ≠ [] := List.ne_nil_of_length_pos h
   simp only [pickTyVar, mem_support_map_iff,
              mem_support_elements_iff hne] at hτ
-  obtain ⟨name, hmem, rfl⟩ := hτ
-  exact ⟨name, hmem, rfl⟩
+  assumption
 
 /-- Completeness of `pickTyVar`: `.ftvar name` is in the support for any `name ∈ tvars`. -/
 private theorem pickTyVar_complete (tvars : List TyIdentifier)
@@ -327,8 +326,7 @@ private theorem pickBitvecWidth_mem (τ : LMonoTy)
     ∃ n, n ∈ (bitvecWidths : List Nat) ∧ τ = .bitvec n := by
   have hne : (bitvecWidths : List Nat) ≠ [] := by native_decide
   simp only [pickBitvecWidth, mem_support_map_iff, mem_support_elements_iff hne] at hτ
-  obtain ⟨n, hmem, rfl⟩ := hτ
-  exact ⟨n, hmem, rfl⟩
+  assumption
 
 /-- Completeness of `pickBitvecWidth`: `.bitvec n` is in the support for any `n ∈ bitvecWidths`. -/
 private theorem pickBitvecWidth_complete (n : Nat) (hmem : n ∈ (bitvecWidths : List Nat)) :
