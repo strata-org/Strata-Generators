@@ -118,10 +118,8 @@ where
 
 /-- Pick a uniformly random bound variable of type `τ` from `bctx`. -/
 def pickBVar [Gen G] (bctx : BVarCtx) (τ : LMonoTy)
-    (_h : (bvarsOfType bctx τ).length > 0) : G LExpr' := do
-  let indices := bvarsOfType bctx τ
-  let idx ← choose 0 (indices.length - 1) (by omega)
-  pure (.bvar () (indices.getD idx.down 0))
+    (_h : (bvarsOfType bctx τ).length > 0) : G LExpr' :=
+  elements ((bvarsOfType bctx τ).map (.bvar () ·))
 
 /-- All variable names in `fctx` whose type equals `τ`. -/
 def fvarsOfType (fctx : FVarCtx) (τ : LMonoTy) : List String :=
@@ -131,10 +129,8 @@ def fvarsOfType (fctx : FVarCtx) (τ : LMonoTy) : List String :=
     `fvar` node carries a type annotation `(some τ)` so that `HasTypeA` can
     typecheck it without an external environment. -/
 def pickFVar [Gen G] (fctx : FVarCtx) (τ : LMonoTy)
-    (_h : (fvarsOfType fctx τ).length > 0) : G LExpr' := do
-  let names := fvarsOfType fctx τ
-  let idx ← choose 0 (names.length - 1) (by omega)
-  pure (.fvar () ⟨names.getD idx.down "", ()⟩ (some τ))
+    (_h : (fvarsOfType fctx τ).length > 0) : G LExpr' :=
+  elements ((fvarsOfType fctx τ).map (fun name => .fvar () ⟨name, ()⟩ (some τ)))
 
 /-- All operator names in `octx` whose curried type equals `τ`. -/
 def opsOfType (octx : OpCtx) (τ : LMonoTy) : List String :=
@@ -142,10 +138,8 @@ def opsOfType (octx : OpCtx) (τ : LMonoTy) : List String :=
 
 /-- Pick a uniformly random operator of type `τ` from `octx`. -/
 def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
-    (_h : (opsOfType octx τ).length > 0) : G LExpr' := do
-  let names := opsOfType octx τ
-  let idx ← choose 0 (names.length - 1) (by omega)
-  pure (.op () ⟨names.getD idx.down "", ()⟩ (some τ))
+    (_h : (opsOfType octx τ).length > 0) : G LExpr' :=
+  elements ((opsOfType octx τ).map (fun name => .op () ⟨name, ()⟩ (some τ)))
 
 -- ── Biased choice combinator ─────────────────────────────────────────────
 
@@ -161,15 +155,13 @@ def RandomChoice.pickBiased [Monad m] [RandomChoice m] (x y : Unit → m α) := 
 /-- Pick a uniformly random type variable name from `tvars` and return it
     as an `LMonoTy.ftvar`. -/
 def pickTyVar [Gen G] (tvars : List TyIdentifier)
-    (_h : tvars.length > 0) : G LMonoTy := do
-  let idx ← choose 0 (tvars.length - 1) (by omega)
-  pure (.ftvar (tvars.getD idx.down ""))
+    (_h : tvars.length > 0) : G LMonoTy :=
+  LMonoTy.ftvar <$> elements tvars
 
 /-- Pick a uniformly random bitvector width from `bitvecWidths` and return
     it as an `LMonoTy.bitvec`. -/
-def pickBitvecWidth [Gen G] : G LMonoTy := do
-  let idx ← choose 0 (bitvecWidths.length - 1) (by native_decide)
-  pure (.bitvec (bitvecWidths.getD idx.down 32))
+def pickBitvecWidth [Gen G] : G LMonoTy :=
+  LMonoTy.bitvec <$> elements bitvecWidths
 
 /-- Pick a uniformly random base type (bool, int, string, real, regex, or bitvec). -/
 def pickBaseType [Gen G] : G LMonoTy :=
@@ -248,9 +240,8 @@ def alphanumChars : List Char :=
   "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".toList
 
 /-- Generate a random alphanumeric character. -/
-def Char.arbitrary [Gen G] : G Char := do
-  let idx ← choose 0 (alphanumChars.length - 1) (by native_decide)
-  pure (alphanumChars.getD idx.down '0')
+def Char.arbitrary [Gen G] : G Char :=
+  elements alphanumChars
 
 /-- Generate a random list of alphanumeric characters. -/
 def genAlphanumList [Gen G] : G (List Char) :=

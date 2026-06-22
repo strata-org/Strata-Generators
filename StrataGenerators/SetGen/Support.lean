@@ -292,7 +292,7 @@ theorem mem_support_elements_iff
     (hne : xs ≠ []) :
     a ∈ support (elements xs : Set α) ↔ a ∈ xs := by
   rw [support_elements hne]
-  exact Set.mem_setOf
+  rfl
 
 theorem bind_congr_support {x : Set α} (h : ∀ a ∈ support x, f a = g a) :
     (x >>= f) = (x >>= g) := by

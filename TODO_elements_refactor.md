@@ -4,7 +4,9 @@
 
 - Updated Basalt to latest `ernest/combinators` (commit `f89129f`) which includes `elements`
 - Added `support_elements` and `mem_support_elements_iff` lemmas to `StrataGenerators/SetGen/Support.lean`
-- Generator/proof changes not yet started
+- ✅ All 6 generators updated to use `elements` (pickBVar, pickFVar, pickOp, pickTyVar, pickBitvecWidth, Char.arbitrary)
+- ✅ All proofs updated (soundness, completeness, termDepth bound)
+- ✅ Build passes
 
 ## Basalt's `elements` combinator
 
