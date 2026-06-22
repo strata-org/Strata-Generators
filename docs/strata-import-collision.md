@@ -1,28 +1,61 @@
-# Why `strata-generators` Cannot Import `Strata.DL.Lambda.LExprEval`
+# `Strata.DL.Util.List` vs `Batteries.Data.List.Basic` Import Collision
+
+## Status
+
+**Latent (not currently triggered).** As of June 2026, the collision does not
+fire in practice because the build graph no longer connects the two modules.
+However, it is NOT fixed upstream — adding any transitive import path to
+`Batteries.Data.List.Basic` in a file that also imports Strata will reproduce it.
 
 ## The Problem
 
-`strata-generators` depends on both Strata and Basalt. Basalt depends on
-Mathlib/Batteries. When we try to import `Strata.DL.Lambda.LExprEval` in
-the same file as Basalt-based code (e.g., `HasTypeAGen`), Lean rejects the
-build with errors like:
+`Strata.DL.Util.List` defines `List.Forall₂` (and ~40 other `List.*` names)
+inside a `public section`. `Batteries.Data.List.Basic` also defines
+`List.Forall₂` inside an `@[expose] public section`. When both modules are
+loaded into the same environment, Lean rejects the import:
 
 ```
-import Strata.DL.Util.List failed, environment already contains
-'List.nodup_dedup' from Mathlib.Data.List.Dedup
+import Batteries.Data.List.Basic failed, environment already contains
+'List.Forall₂.below.casesOn' from Strata.DL.Util.List
 ```
 
-The collision is between `List.*` definitions in `Strata.DL.Util.List`
-(e.g., `List.dedup`, `List.nodup_dedup`, `List.Forall₂`) and identically-named
-definitions in Batteries/Mathlib.
+## Why It No Longer Fires
 
-## Why It Happens
-
-`Strata.DL.Util.List` defines ~40 `List.*` names in a `public section`.
-These propagate to external consumers through a chain of `public import`s:
+The collision requires `Batteries.Data.List.Basic` to be transitively imported
+alongside a Strata module. The import chain that used to trigger it was:
 
 ```
-Strata.DL.Util.List     (defines List.dedup, List.nodup_dedup, etc.)
+Basalt (umbrella)
+  → Basalt.Basic
+    → Basalt.SPMF
+      → Basalt.SPMF.Core
+        → Mathlib.Topology.Instances.ENNReal.Lemmas
+          → ... (deep Mathlib chain)
+            → Batteries.Data.List.Basic   ← collision source
+```
+
+**Previously** (Basalt `ernest/combinators` branch, Lean 4.30.0-rc2):
+`strata-generators` depended on the Basalt umbrella module, which pulled in
+`SPMF.Core` → Mathlib → Batteries transitively.
+
+**Now** (Basalt `lean-4.29` branch, Lean 4.29.0): `strata-generators` imports
+only `Basalt.Gen`, `Basalt.IO`, and `Basalt.Combinators`. These modules depend
+only on `Basalt.RandomChoice` — they have zero transitive dependency on Mathlib
+or Batteries. So `Batteries.Data.List.Basic` never enters the environment.
+
+The collision is unrelated to:
+- The Lean toolchain version (4.29 vs 4.30)
+- Batteries adopting the `module` system (that happened at Lean 4.25 but
+  `List.Forall₂` remains in an `@[expose] public section` so it is still
+  publicly exported)
+
+## How Strata Exports `List.Forall₂`
+
+`Strata.DL.Util.List` is a `module` file with a `public section` containing
+`namespace List` and the `Forall₂` inductive. The export chain is:
+
+```
+Strata.DL.Util.List     (defines List.Forall₂ in public section)
         ↓ public import
 LTyUnify.lean           (public import Strata.DL.Util.List)
         ↓ public import
@@ -31,59 +64,29 @@ Factory.lean            (public import Strata.DL.Lambda.LTyUnify)
 LState.lean             (public import Strata.DL.Lambda.Factory)
         ↓ public import
 LExprEval.lean          (public import Strata.DL.Lambda.LState)
-        ↓ import (from strata-generators)
-TycheMain.lean          ← collision with Batteries' List.*
 ```
 
-## Why We Can't Fix It With Import Changes
+Any file that imports along this chain gets `List.Forall₂` from Strata in its
+environment.
 
-Strata uses a `module` system where:
+## Reproducing the Collision
 
-- `public import Foo` = access Foo's **public** definitions + re-export them
-- `import all Foo` = access Foo's **module-private** definitions only
-- `import Foo` = no-op for `module` files (gives nothing)
+Add `import Batteries.Data.List.Basic` to any file that also transitively
+imports `Strata.DL.Util.List`:
 
-There is **no** "access public definitions without re-exporting" option.
-`Factory.lean` needs `public import LTyUnify` to access public definitions
-like `Subst` and `Constraints.unify`. This unavoidably re-exports everything
-`LTyUnify` publicly imports — including `List.dedup` from `Strata.DL.Util.List`.
+```lean
+import Strata.DL.Lambda.LTyUnify
+import Batteries.Data.List.Basic  -- ERROR: List.Forall₂.below.casesOn collision
+```
 
-## Why Namespacing Doesn't Work
+## When It Could Recur
 
-We tried wrapping `Strata.DL.Util.List`'s `namespace List` block inside
-`namespace Strata` (making definitions like `Strata.List.dedup`). This breaks
-dot notation: `l.dedup` where `l : List α` resolves against `_root_.List.dedup`,
-not `Strata.List.dedup`. Lean's dot notation always resolves against the type's
-own root namespace, regardless of `open` statements or current namespace context.
-
-## The Strata Design Principle (Aspirational)
-
-PR [#523](https://github.com/strata-org/Strata/pull/523) states:
-
-> Namespace extensions kept private. Definitions that extend Lean or library
-> namespaces (e.g. `BitVec.width`, `List.dedup`) stay private by default so
-> Strata does not conflict with Batteries or Mathlib. Consumers that need
-> these use `import all` to opt in explicitly.
-
-This principle is **not currently enforced** for `Strata.DL.Util.List`. The
-file uses `public section`, making all `List.*` definitions public. And
-internal consumers use `public import` which re-exports them. Making the
-definitions module-private (non-public section) would satisfy the principle
-but breaks dot notation (`l.dedup`) which internal Strata code relies on.
-
-## Toolchain Mismatch (Secondary Issue)
-
-Even if the collision were resolved, `LExprEval.lean` uses `grind` in two
-termination proofs that fail on Lean 4.30.0-rc2 (used by Basalt), while
-Strata targets 4.29.1. The fix is `grind` → `simp_all` at lines 107 and 140.
-`Strata.DL.Util.Maps` also has a `grind` failure at line 573.
-
-## Current Workaround
-
-`TycheMain.lean` defines a minimal CBV evaluator for closed terms (no free
-variables, no operators) that covers beta reduction, if-then-else, and
-equality. This is functionally equivalent to `LExpr.eval` for our use case
-but doesn't test the actual Strata infrastructure.
+The collision will resurface if any of the following happens:
+1. A new Basalt import is added that transitively depends on Mathlib/Batteries
+   (e.g., importing `Basalt.SPMF` or `Basalt.Examples.ArbChar`)
+2. A direct Mathlib dependency is added to `strata-generators`
+3. Any other package that transitively imports `Batteries.Data.List.Basic` is
+   added as a dependency
 
 ## Possible Long-Term Solutions
 
@@ -91,14 +94,16 @@ but doesn't test the actual Strata infrastructure.
    definitions from `Strata.DL.Util.List`. Cleanest fix, but conflicts with
    Strata's design goal to minimize dependencies.
 
-2. **New module system feature**: A hypothetical `import public Foo` that
-   gives access to public definitions without re-exporting. Doesn't exist today.
-
-3. **Two-binary approach**: Generate terms with `tyche-viz` (uses Basalt),
-   serialize them as a `.lean` file using `repr`, then import that file in a
-   separate `EvalTest.lean` that only imports Strata (no Basalt). Tests the
-   real `LExpr.eval` but requires a two-step build pipeline.
-
-4. **Make `List.*` definitions module-private in Strata** and rewrite all
+2. **Make `List.*` definitions module-private in Strata** and rewrite all
    internal usages to avoid dot notation (use explicit `List.dedup l` via
    `import all`). Large refactor across Strata.
+
+3. **New module system feature**: A hypothetical `import public Foo` that
+   gives access to public definitions without re-exporting. Doesn't exist today.
+
+## Toolchain Mismatch (Resolved)
+
+Previously there was a secondary issue: `LExprEval.lean` used `grind` in
+termination proofs that broke under Lean 4.30.0-rc2 (which had `grind` breaking
+changes). This is now moot — all packages are on Lean 4.29.x where `grind`
+works as expected.
