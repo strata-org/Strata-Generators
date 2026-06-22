@@ -353,7 +353,8 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inl ⟨by omega, by
         simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_choose_iff]
-        refine ⟨⟨idx⟩, ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, e, ?_, ?_⟩
+        refine ⟨⟨⟨idx, Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩⟩,
+          ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, e, ?_, ?_⟩
         · simp only [hentry]; exact he
         · simp only [hentry]⟩)))
     exact ⟨_, hinSupport, CmdHasType'.set_det _ x mty e default hfind hexpr⟩
@@ -364,7 +365,8 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inl ⟨by omega, by
         simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_choose_iff]
-        refine ⟨⟨idx⟩, ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, ?_⟩
+        refine ⟨⟨⟨idx, Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩⟩,
+          ⟨Nat.zero_le _, (by omega : idx ≤ ctx.length - 1)⟩, ?_⟩
         simp only [hentry]⟩))))
     exact ⟨_, hinSupport, CmdHasType'.set_nondet _ x mty default hfind⟩
   | assert l e md hexpr =>

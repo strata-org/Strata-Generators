@@ -237,12 +237,12 @@ namespace SetGen
       simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
                  show (1 / 10 : Rat).den = 10 from by native_decide,
                  show (1 / 10 : Rat).num = 1 from by native_decide]
-      exact ⟨⟨0⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, rfl⟩
+      exact ⟨⟨⟨0, Nat.zero_le _, Nat.zero_le _⟩⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, rfl⟩
     have hfalse : false ∈ (RandomChoice.coin (1 / 10) : Set Bool) := by
       simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
                  show (1 / 10 : Rat).den = 10 from by native_decide,
                  show (1 / 10 : Rat).num = 1 from by native_decide]
-      exact ⟨⟨10⟩, ⟨Nat.zero_le _, Nat.le_refl _⟩, rfl⟩
+      refine ⟨⟨⟨10, ?_, ?_⟩⟩, ⟨?_, ?_⟩, rfl⟩ <;> native_decide
     cases h with
     | inl hx => exact ⟨true, htrue, by simpa⟩
     | inr hy => exact ⟨false, hfalse, by simpa⟩
@@ -3655,14 +3655,14 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     -- (required by genLExprBase_sound). This follows from hSimplePolyOps
     -- which directly asserts that polyOpsForResult entries have SimpleType args.
     obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    have hlt : idx.down < (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length := by omega
-    have hentry_mem : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down ("", []) ∈
+    have hlt : idx.down.val < (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length := by omega
+    have hentry_mem : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) ∈
         polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys := by
-      have heq : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down ("", []) =
-          (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys)[idx.down] := by
+      have heq : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) =
+          (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys)[idx.down.val] := by
         simp [List.getD, List.getElem?_eq_getElem hlt]
       rw [heq]; exact List.getElem_mem hlt
-    let entry := (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down ("", [])
+    let entry := (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", [])
     let name := entry.1
     let concreteArgTys := entry.2
     let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
@@ -3711,13 +3711,13 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   · -- Monomorphic Indir path: fully-applied operator
     simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
     obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    have hlt : idx.down < (findOpsInCtx octx τ).length := by omega
-    have hentry_mem : (findOpsInCtx octx τ).getD idx.down ("", []) ∈ findOpsInCtx octx τ := by
-      have heq : (findOpsInCtx octx τ).getD idx.down ("", []) =
-          (findOpsInCtx octx τ)[idx.down] := by
+    have hlt : idx.down.val < (findOpsInCtx octx τ).length := by omega
+    have hentry_mem : (findOpsInCtx octx τ).getD idx.down.val ("", []) ∈ findOpsInCtx octx τ := by
+      have heq : (findOpsInCtx octx τ).getD idx.down.val ("", []) =
+          (findOpsInCtx octx τ)[idx.down.val] := by
         simp [List.getD, List.getElem?_eq_getElem hlt]
       rw [heq]; exact List.getElem_mem hlt
-    let entry := (findOpsInCtx octx τ).getD idx.down ("", [])
+    let entry := (findOpsInCtx octx τ).getD idx.down.val ("", [])
     let name := entry.1
     let argTys := entry.2
     let fullTy := argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ

@@ -32,7 +32,7 @@ instance : Inhabited (Set α) where
   default := ∅
 
 noncomputable instance : RandomChoice Set where
-  choose lo hi _ := {a | lo ≤ a.down ∧ a.down ≤ hi}
+  choose lo hi _ := {a | lo ≤ a.down.val ∧ a.down.val ≤ hi}
 
 end operations
 
@@ -43,16 +43,17 @@ section operation_uses
   simp only [RandomChoice.pick, Bind.bind, RandomChoice.choose]
   constructor
   · rintro ⟨n, ⟨hlo, hhi⟩, ha⟩
-    by_cases h : n.down == 0
+    by_cases h : n.down.val == 0
     · left; simpa [h] using ha
     · right; simpa [h] using ha
   · intro h
     cases h with
-    | inl hx => exact ⟨⟨0⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, by simpa⟩
-    | inr hy => exact ⟨⟨1⟩, ⟨Nat.zero_le _, Nat.le_refl _⟩, by simpa⟩
+    | inl hx => exact ⟨⟨⟨0, Nat.zero_le _, Nat.zero_le _⟩⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, by simpa⟩
+    | inr hy => exact ⟨⟨⟨1, Nat.zero_le _, Nat.le_refl _⟩⟩, ⟨Nat.zero_le _, Nat.le_refl _⟩, by simpa⟩
 
-@[simp] theorem mem_choose {lo hi : Nat} {h : lo ≤ hi} :
-    a ∈ (choose lo hi h : Set (ULift Nat)) ↔ lo ≤ a.down ∧ a.down ≤ hi := Iff.rfl
+@[simp] theorem mem_choose {lo hi : Nat} {h : lo ≤ hi}
+    {a : ULift {x : Nat // lo ≤ x ∧ x ≤ hi}} :
+    a ∈ (choose lo hi h : Set (ULift {x : Nat // lo ≤ x ∧ x ≤ hi})) ↔ lo ≤ a.down.val ∧ a.down.val ≤ hi := Iff.rfl
 
 @[simp] theorem mem_dite {p : Prop} [Decidable p] {t : p → Set α} {e : ¬p → Set α} :
     a ∈ (dite p t e : Set α) ↔ (∃ h : p, a ∈ t h) ∨ (∃ h : ¬p, a ∈ e h) := by

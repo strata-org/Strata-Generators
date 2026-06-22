@@ -72,11 +72,13 @@ theorem mem_support_ite_iff {p : Prop} [Decidable p]
 
 @[simp]
 theorem support_choose :
-    support (choose lo hi h : Set (ULift Nat)) = {a | lo ≤ a.down ∧ a.down ≤ hi} := rfl
+    support (choose lo hi h : Set (ULift {x : Nat // lo ≤ x ∧ x ≤ hi})) =
+      {a | lo ≤ a.down.val ∧ a.down.val ≤ hi} := rfl
 
 @[simp]
 theorem mem_support_choose_iff :
-    a ∈ support (choose lo hi h : Set (ULift Nat)) ↔ lo ≤ a.down ∧ a.down ≤ hi := Iff.rfl
+    a ∈ support (choose lo hi h : Set (ULift {x : Nat // lo ≤ x ∧ x ≤ hi})) ↔
+      lo ≤ a.down.val ∧ a.down.val ≤ hi := Iff.rfl
 
 @[simp]
 theorem support_pick {x y : Set α} :
@@ -93,40 +95,27 @@ theorem mem_support_pick_iff {x y : Set α} :
 theorem support_oneOf
     {gs : List (Unit → Set α)}
     (hne : gs ≠ []) :
-    support (oneOf gs) = {a | ∃ g ∈ gs, a ∈ g ()} := by
+    support (oneOf gs hne) = {a | ∃ g ∈ gs, a ∈ g ()} := by
   simp only [oneOf, support_bind, support_map, support_choose]
   ext a
   dsimp only [Set.mem_setOf_eq]
   constructor
-  . -- ∃ i ∈ [0, gs.length -1], a ∈ (gs[i]! ()).support → ∃ g ∈ gs, a ∈ (g ()).support
-    intro h
-    obtain ⟨ i, h_idx, ha ⟩ := h
-    obtain ⟨ n, ⟨ h_lowerbound, h_upperbound ⟩, hi ⟩ := h_idx
-    have h_pos : 0 < gs.length := by
-      rw [List.length_pos_iff]
-      assumption
+  . intro h
+    obtain ⟨ ⟨i, ⟨hi_gt, hi_lt⟩⟩, h_idx, ha ⟩ := h
+    obtain ⟨ ⟨n, ⟨hgt, hlt⟩⟩, ⟨h_lowerbound, h_upperbound⟩, hi ⟩ := h_idx
+    have h_pos : 0 < gs.length := List.length_pos_iff.mpr hne
     have h_lt : i < gs.length := by omega
     refine ⟨ gs[i], ?_, ?_ ⟩
-    . -- Goal: `gs[i] ∈ gs`
-      apply List.getElem_mem
-    . -- Goal: `a ∈ (gs[i] ()).support`
-      -- To do this, rewrite `gs[i]!` in terms of `gs[i]`
-      rw [getElem!_pos gs i h_lt] at ha
+    . apply List.getElem_mem
+    . dsimp at ha
       assumption
-  . -- ∃ g ∈ gs, a ∈ (g ()).support → ∃ i ∈ [0, gs.length - 1], a ∈ (gs[i]! ()).support
-    intros h
+  . intros h
     obtain ⟨ g, hg, ha ⟩ := h
     obtain ⟨ i, hi, heq ⟩ := List.mem_iff_getElem.mp hg
-    refine ⟨ i, ?_, ?_ ⟩
-    . -- 0 ≤ i ≤ gs.length - 1
-      exists ⟨ i ⟩
-      dsimp
-      constructor
-      . apply Set.mem_setOf_eq.mpr
-        constructor <;> (dsimp; omega)
-      . rfl
-    . -- a ∈ (gs[i]! ()).support
-      rw [getElem!_pos gs i hi]
+    have hle : i ≤ gs.length - 1 := by omega
+    refine ⟨ ⟨i, Nat.zero_le _, hle⟩, ?_, ?_ ⟩
+    . exact ⟨⟨⟨i, Nat.zero_le _, hle⟩⟩, ⟨⟨Nat.zero_le _, hle⟩, rfl⟩⟩
+    . dsimp
       subst heq
       assumption
 
@@ -136,31 +125,21 @@ theorem support_oneOf
 theorem mem_support_oneOf_iff
     {gs : List (Unit → Set α)}
     (hne : gs ≠ []) :
-    a ∈ support (oneOf gs) ↔ ∃ g ∈ gs, a ∈ support (g ()) := by
-  simp only [support, oneOf, Set.mem_bind, Set.fmap_eq_image, Set.mem_image]
-  constructor
-  · rintro ⟨idx, ⟨n, hn, rfl⟩, ha⟩
-    have h_pos : 0 < gs.length := List.length_pos_iff.mpr hne
-    have h_lt : n.down < gs.length := by
-      exact Nat.lt_of_le_of_lt hn.2 (by omega)
-    exact ⟨gs[n.down], List.getElem_mem h_lt, by rwa [getElem!_pos gs n.down h_lt] at ha⟩
-  · rintro ⟨g, hg, ha⟩
-    obtain ⟨i, hi, rfl⟩ := List.mem_iff_getElem.mp hg
-    have h_pos : 0 < gs.length := List.length_pos_iff.mpr hne
-    refine ⟨i, ⟨⟨i⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, by rwa [getElem!_pos gs i hi]⟩
-    show i ≤ gs.length - 1; omega
+    a ∈ support (oneOf gs hne) ↔ ∃ g ∈ gs, a ∈ support (g ()) := by
+  rw [show support (oneOf gs hne) = _ from support_oneOf hne]
+  simp only [Set.mem_setOf_eq, support]
 
-/-- If `n < sum (fst <$> gs)`, then `frequencyAux default gs n` picks a sub-generator
+/-- If `n < sum (fst <$> gs)`, then `Helpers.frequencyAux gs n` picks a sub-generator
     from `gs` that has non-zero weight `w` -/
 private theorem frequencyAux_mem
     {gs : List (Nat × (Unit → Set α))}
     {n : Nat}
     (h : n < List.sum (List.map Prod.fst gs)) :
-    ∃ w g, ⟨w, g⟩ ∈ gs ∧ 0 < w ∧ (frequencyAux default gs n).snd = g () := by
+    ∃ w g, ⟨w, g⟩ ∈ gs ∧ 0 < w ∧ Helpers.frequencyAux gs n h = g () := by
   induction gs generalizing n with
   | nil => contradiction
   | cons hd tl ih =>
-    unfold frequencyAux
+    unfold Helpers.frequencyAux
     obtain ⟨w, g⟩ := hd
     split
     · exact ⟨w, g, .head tl, by omega, rfl⟩
@@ -171,26 +150,26 @@ private theorem frequencyAux_mem
 
 
 /-- If a weighted generator `(w, g) ∈ gs` where the weight `w` is non-zero,
-    then `frequencyAux default gs n` produces `(w, g)` if `n < sum (fst <$> gs)` -/
+    then there exists `n` such that `Helpers.frequencyAux gs n` produces `g ()` -/
 private theorem frequencyAux_n_exists
     {gs : List (Nat × (Unit → Set α))}
     {w : Nat} {g : Unit → Set α}
     (hmem : (w, g) ∈ gs)
     (hnonzero : 0 < w) :
-    ∃ n, n < List.sum (List.map Prod.fst gs) ∧
-      (frequencyAux default gs n).snd = g () := by
+    ∃ n, ∃ (h : n < List.sum (List.map Prod.fst gs)),
+      Helpers.frequencyAux gs n h = g () := by
   induction gs with
   | nil => contradiction
   | cons hd tl ih =>
     rcases List.mem_cons.mp hmem with rfl | h_tl
     · refine ⟨0, ?_, ?_⟩
       · simp only [List.map_cons, List.sum_cons]; omega
-      · unfold frequencyAux; simp [hnonzero]
+      · unfold Helpers.frequencyAux; simp [hnonzero]
     · obtain ⟨n, hn, heq⟩ := ih h_tl
       obtain ⟨w', _⟩ := hd
       refine ⟨w' + n, ?_, ?_⟩
       · simp only [List.map_cons, List.sum_cons]; omega
-      · unfold frequencyAux
+      · unfold Helpers.frequencyAux
         have : ¬ (w' + n < w') := by omega
         simp [this, heq]
 
@@ -205,14 +184,17 @@ theorem mem_support_frequency_iff
   simp only [support, frequency, Set.mem_bind, Set.fmap_eq_image, Set.mem_image]
   constructor
   · rintro ⟨idx, ⟨n, hn, rfl⟩, ha⟩
-    have h_lt : n.down < List.sum (List.map Prod.fst gs) := by
+    have h_lt : n.down.val < List.sum (List.map Prod.fst gs) := by
       exact Nat.lt_of_le_of_lt hn.2 (by omega)
+    simp only [dif_pos h_lt] at ha
     obtain ⟨w, g, hmem, hpos, heq⟩ := frequencyAux_mem h_lt
     exact ⟨w, g, hmem, hpos, heq ▸ ha⟩
   · rintro ⟨w, g, hmem, hpos, ha⟩
     obtain ⟨n, hn_lt, hn_eq⟩ := frequencyAux_n_exists hmem hpos
-    refine ⟨n, ⟨⟨n⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, hn_eq ▸ ha⟩
-    show n ≤ (List.map Prod.fst gs).sum - 1; omega
+    have hle : n ≤ (List.map Prod.fst gs).sum - 1 := by omega
+    refine ⟨⟨n, Nat.zero_le _, hle⟩, ⟨⟨⟨n, Nat.zero_le _, hle⟩⟩, ⟨Nat.zero_le _, hle⟩, rfl⟩, ?_⟩
+    simp only [dif_pos hn_lt, hn_eq]
+    exact ha
 
 /-- If the sum of weights in `gs` is non-zero, then the support of `frequency gs`
     is exactly the union of the support of the generators in `gs` with non-zero weights -/
@@ -222,40 +204,7 @@ theorem support_frequency
     (h_pos : 0 < List.sum (List.map Prod.fst gs)) :
     support (frequency gs h_pos) = {a | ∃ w g, ⟨ w, g ⟩ ∈ gs ∧ 0 < w ∧ a ∈ (g ())} := by
   ext a
-  dsimp only [Set.mem_setOf_eq]
-  constructor
-  · -- a ∈ support (frequency gs h_pos) -> ∃ w g, (w, g) ∈ gs ∧ 0 < w ∧ a ∈ (g ()).support
-    intro h
-    simp only [frequency, support_bind, support_map, support_choose] at h
-    -- `i` is the weight value picked inside `frequency`
-    obtain ⟨i, h_idx, ha⟩ := h
-    obtain ⟨n, ⟨_, _⟩, hi⟩ := h_idx
-    have h_lt : i < List.sum (List.map Prod.fst gs) := by omega
-    obtain ⟨w, g, _, _, heq⟩ := frequencyAux_mem h_lt
-    rw [heq] at ha
-    refine ⟨w, g, ?_, ?_, ?_⟩ <;> assumption
-  · -- ∃ w g, (w, g) ∈ gs ∧ 0 < w ∧ a ∈ (g ()).support -> a ∈ support (frequency gs h_pos)
-    simp only [frequency, support_bind, support_map, support_choose]
-    intro ⟨w, g, hwg_mem, hwt, ha⟩
-    obtain ⟨n, hn_lt, hn_eq⟩ := frequencyAux_n_exists hwg_mem hwt
-    simp only [Set.mem_setOf_eq]
-    apply Exists.intro n
-    constructor
-    · -- ∃ a, (0 ≤ a.down ∧ a.down ≤ total - 1) ∧ n = a.down
-      apply Exists.intro (ULift.up n)
-      constructor
-      · -- 0 ≤ n ∧ n ≤ total - 1
-        constructor
-        · -- 0 ≤ n
-          omega
-        · -- n ≤ total - 1
-          show n ≤ (List.map Prod.fst gs).sum - 1
-          omega
-      · -- n = (ULift.up n).down
-        rfl
-    · -- a ∈ (frequencyAux default gs n).snd.support
-      rw [hn_eq]
-      assumption
+  exact mem_support_frequency_iff h_pos
 
 
 /-- The support of `elements xs` is exactly the elements of `xs` -/
@@ -264,25 +213,25 @@ theorem support_elements
     [Inhabited α]
     {xs : List α}
     (hne : xs ≠ []) :
-    support (elements xs : Set α) = {a | a ∈ xs} := by
+    support (elements xs hne : Set α) = {a | a ∈ xs} := by
   simp only [elements, support_bind, support_map, support_choose]
   ext a
   dsimp only [Set.mem_setOf_eq]
   constructor
-  · rintro ⟨i, ⟨n, ⟨_, h_upper⟩, rfl⟩, ha⟩
+  · intro h
+    obtain ⟨⟨i, ⟨hi_gt, hi_lt⟩⟩, h_idx, ha⟩ := h
+    obtain ⟨⟨n, ⟨hgt, hlt⟩⟩, ⟨h_lowerbound, h_upperbound⟩, hi⟩ := h_idx
     have h_pos : 0 < xs.length := List.length_pos_iff.mpr hne
-    have h_lt : n.down < xs.length := by omega
-    simp only [support, Set.mem_pure] at ha
-    subst ha
-    rw [getElem!_pos xs n.down h_lt]
-    exact List.getElem_mem h_lt
+    have h_lt : i < xs.length := by omega
+    dsimp at ha
+    simp at ha
+    exact List.mem_of_getElem (id (Eq.symm ha))
   · intro hmem
     obtain ⟨i, hi, heq⟩ := List.mem_iff_getElem.mp hmem
-    refine ⟨i, ⟨⟨i⟩, ⟨Nat.zero_le _, ?_⟩, rfl⟩, ?_⟩
-    · show i ≤ xs.length - 1; omega
-    · simp only [support, Set.mem_pure]
-      rw [getElem!_pos xs i hi]
-      exact heq.symm
+    have hle : i ≤ xs.length - 1 := by omega
+    exact ⟨⟨i, Nat.zero_le _, hle⟩,
+      ⟨⟨⟨i, Nat.zero_le _, hle⟩⟩, ⟨⟨Nat.zero_le _, hle⟩, rfl⟩⟩,
+      by dsimp; simp; exact heq.symm⟩
 
 /-- `a` is in the support of `elements xs` if and only if `a ∈ xs` -/
 @[simp]
@@ -290,7 +239,7 @@ theorem mem_support_elements_iff
     [Inhabited α]
     {xs : List α}
     (hne : xs ≠ []) :
-    a ∈ support (elements xs : Set α) ↔ a ∈ xs := by
+    a ∈ support (elements xs hne : Set α) ↔ a ∈ xs := by
   rw [support_elements hne]
   rfl
 

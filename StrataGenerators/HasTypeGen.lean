@@ -571,9 +571,9 @@ private theorem pickMatchingVar_hastype
              mem_support_pure_iff] at he
   obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := he
   subst heq
-  have hlt : idx.down < (varsMatchingTarget vctx τ).length := by omega
-  have helem : (varsMatchingTarget vctx τ)[idx.down] ∈ (varsMatchingTarget vctx τ) := List.getElem_mem hlt
-  have hgetD : (varsMatchingTarget vctx τ).getD idx.down ⟨"", ()⟩ = (varsMatchingTarget vctx τ)[idx.down] := by
+  have hlt : idx.down.val < (varsMatchingTarget vctx τ).length := by omega
+  have helem : (varsMatchingTarget vctx τ)[idx.down.val] ∈ (varsMatchingTarget vctx τ) := List.getElem_mem hlt
+  have hgetD : (varsMatchingTarget vctx τ).getD idx.down.val ⟨"", ()⟩ = (varsMatchingTarget vctx τ)[idx.down.val] := by
     simp [List.getD, List.getElem?_eq_getElem hlt]
   rw [hgetD]
   obtain ⟨scheme, subst, hmem, hmatch⟩ := varsMatchingTarget_mem vctx τ _ helem
@@ -594,9 +594,9 @@ private theorem pickMatchingOp_hastype
              mem_support_pure_iff] at he
   obtain ⟨idx, ⟨_, hhi⟩, heq⟩ := he
   subst heq
-  have hlt : idx.down < (opsMatchingTarget octx τ).length := by omega
-  have helem : (opsMatchingTarget octx τ)[idx.down] ∈ (opsMatchingTarget octx τ) := List.getElem_mem hlt
-  have hgetD : (opsMatchingTarget octx τ).getD idx.down "" = (opsMatchingTarget octx τ)[idx.down] := by
+  have hlt : idx.down.val < (opsMatchingTarget octx τ).length := by omega
+  have helem : (opsMatchingTarget octx τ)[idx.down.val] ∈ (opsMatchingTarget octx τ) := List.getElem_mem hlt
+  have hgetD : (opsMatchingTarget octx τ).getD idx.down.val "" = (opsMatchingTarget octx τ)[idx.down.val] := by
     simp [List.getD, List.getElem?_eq_getElem hlt]
   rw [hgetD]
   obtain ⟨scheme, subst, hmem, hmatch⟩ := opsMatchingTarget_mem octx τ _ helem
@@ -960,8 +960,8 @@ private theorem pickMatchingVar_complete (vctx : VarCtx) (τ : LMonoTy)
     simp only [varsMatchingTarget, List.mem_filterMap]
     exact ⟨(x, scheme), hmem, by simp [hmatch, Option.isSome]⟩
   obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hx_mem
-  have : idx ≤ (varsMatchingTarget vctx τ).length - 1 := by omega
-  refine ⟨⟨idx⟩, ⟨Nat.zero_le _, this⟩, ?_⟩
+  have hle : idx ≤ (varsMatchingTarget vctx τ).length - 1 := by omega
+  refine ⟨⟨⟨idx, Nat.zero_le _, hle⟩⟩, ⟨Nat.zero_le _, hle⟩, ?_⟩
   simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
 
 private theorem pickMatchingOp_complete (octx : OpSchemeCtx) (τ : LMonoTy)
@@ -975,8 +975,8 @@ private theorem pickMatchingOp_complete (octx : OpSchemeCtx) (τ : LMonoTy)
     simp only [opsMatchingTarget, List.mem_filterMap]
     exact ⟨(name, scheme), hmem, by simp [hmatch, Option.isSome]⟩
   obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hn_mem
-  have : idx ≤ (opsMatchingTarget octx τ).length - 1 := by omega
-  refine ⟨⟨idx⟩, ⟨Nat.zero_le _, this⟩, ?_⟩
+  have hle : idx ≤ (opsMatchingTarget octx τ).length - 1 := by omega
+  refine ⟨⟨⟨idx, Nat.zero_le _, hle⟩⟩, ⟨Nat.zero_le _, hle⟩, ?_⟩
   simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
 
 set_option maxHeartbeats 3200000 in
