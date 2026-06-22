@@ -88,6 +88,33 @@ The collision will resurface if any of the following happens:
 3. Any other package that transitively imports `Batteries.Data.List.Basic` is
    added as a dependency
 
+## Current Workaround
+
+Definitions that would normally be imported from Basalt (e.g. `Nat.arbitrary`,
+`Char.arbitrary`, `String.arbitrary`) are manually copied into this repo
+(`HasTypeAGen/Core.lean`) to avoid importing modules that transitively pull in
+`Batteries.Data.List.Basic`. This keeps the build graph disconnected from
+Batteries and prevents the collision from firing.
+
+## Why Local Duplicates in `HasTypeAGen/Core.lean` Cannot Be Removed
+
+`Core.lean` defines local copies of `Nat.arbitrary`, `Char.arbitrary`, and
+`String.arbitrary` that duplicate `Basalt.Examples.ArbNat`, `ArbChar`, and
+`ArbString`. These cannot be replaced with imports from Basalt because all
+paths to those modules pull in `Batteries.Data.List.Basic`:
+
+- **`Basalt.Examples.ArbNat`** imports `Basalt` (umbrella) → `Basalt.Basic` →
+  `Basalt.SPMF` → `Basalt.SPMF.Core` → Mathlib → ... →
+  `Batteries.Data.List.Basic`
+- **`Basalt.Examples.ArbChar`** and **`ArbString`** directly import
+  `Batteries.Data.Char` → `Batteries.Data.Char.Basic` →
+  `Batteries.Data.List.Lemmas` → `Batteries.Data.List.Basic`
+
+Using `import all` does not help: the collision is between two **public**
+definitions (`List.Forall₂` in `@[expose] public section` on both sides).
+`import all` only controls access to module-private definitions — it does not
+prevent public names from entering the environment.
+
 ## Possible Long-Term Solutions
 
 1. **Add Batteries as a Strata dependency** and delete the redundant `List.*`
