@@ -1,6 +1,7 @@
 import StrataGenerators.SetGen
 import StrataGenerators.HasTypeAGen.Core
 import Strata.DL.Lambda.LTyUnify
+import Batteries.Data.List.Basic
 
 -- Mathlib registers Nat.le_refl with @[refl]
 -- Adding this annotation avoids us needing to depend on Mathlib
@@ -1192,10 +1193,7 @@ private theorem Int_cover (z : Int) :
 
 -- These support lemmas mirror those in `Basalt.Examples.ArbString`
 -- (`Char.arbitrary_support`, `genCharList_support`, `String.arbitrary_support`)
--- but are restated for `SetGen.Set` rather than `SPMF`. We cannot import
--- `Basalt.Examples.ArbString` here because it transitively brings in
--- `Batteries.Data.Char`, which conflicts with `Strata.DL.Util.List`
--- (both define `List.Forall₂`).
+-- but are restated for `SetGen.Set` rather than `SPMF`.
 
 /-- Every alphanumeric character is in the support of `Char.arbitrary` at `SetGen.Set`. -/
 private theorem Char_arbitrary_support_set (c : Char) (hc : c ∈ alphanumChars) :

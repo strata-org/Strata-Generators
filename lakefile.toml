@@ -5,7 +5,7 @@ defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen",
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "9d69563c820609aaada7ad42a2465f7658b2d170"
+rev = "43d90cf40"
 
 [[require]]
 name = "basalt"
@@ -33,7 +33,6 @@ name = "StrataGenerators.HasTypeAGen"
 roots = ["StrataGenerators.HasTypeAGen"]
 
 # The HasType generator (uses LExprTypeSpec → Strata.DL.Util.List)
-# Cannot coexist with HasTypeAGen in one environment due to List.Forall₂ conflict.
 [[lean_lib]]
 name = "StrataGenerators.HasTypeGen"
 roots = ["StrataGenerators.HasTypeGen"]

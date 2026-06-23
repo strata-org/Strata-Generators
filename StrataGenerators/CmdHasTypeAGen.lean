@@ -22,8 +22,7 @@ The generator works with a flat `VarCtx` (list of name-type pairs). The full
 soundness theorem is stated compositionally: it takes expression-level soundness
 (`genLExpr` produces well-typed expressions) and freshness properties of
 `genFreshName` as hypotheses, then concludes that every generated command
-satisfies `CmdHasTypeA`. This avoids the `List.Forall₂` import conflict with
-Mathlib (where `genLExpr_sound` is proved).
+satisfies `CmdHasTypeA`.
 -/
 
 -- ── VarCtx ↔ TContext correspondence ─────────────────────────────────
@@ -210,8 +209,7 @@ private theorem List.getD_mem_of_lt {xs : List α} {idx : Nat} {d : α}
 
 /-- Predicate asserting that `genLExpr` is sound at type `τ`: every expression
     in the generator's support is well-typed. This is proved as `genLExpr_sound`
-    in `HasTypeAGen.lean` (which requires Mathlib); we take it as a hypothesis
-    here to avoid the `List.Forall₂` import conflict. -/
+    in `HasTypeAGen.lean`; we take it as a hypothesis here. -/
 def GenLExprSound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : Prop :=
   ∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ) →

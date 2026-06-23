@@ -7,8 +7,7 @@ open Lambda RandomChoice
 # Generator definitions for well-typed `LExpr`s (lightweight, no Mathlib)
 
 This file re-exports the core generator definitions from `Core.lean` and adds
-`Factory`-accepting wrappers. It can be imported alongside
-`Strata.DL.Lambda.LExprEval` without triggering the `List.Forall₂` collision.
+`Factory`-accepting wrappers.
 
 The full `HasTypeAGen` module re-exports everything here plus soundness/completeness proofs.
 -/
