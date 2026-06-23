@@ -20,17 +20,12 @@ A Basalt `SetGen`-based random generator for well-typed Strata `LExpr`s
 that satisfy a simplified `HasType` relation (Hindley-Milner without
 let-polymorphism, restricted to the monomorphic fragment).
 
-## Import Constraint
+## Design
 
-The full `HasType` relation lives in `Strata.DL.Lambda.LExprTypeSpec`, which
-imports `Strata.DL.Util.List`. That module conflicts with `Batteries.Data.List.Basic`
-(both define `List.Forall₂.below.casesOn`). Since SetGen depends on batteries,
-we cannot import both.
-
-**Solution**: We define a simplified `HasType` locally that captures exactly the
+We define a simplified `HasType` (`SHasType`) locally that captures exactly the
 fragment we generate for. The full equivalence (this relation ↔ the subset of
-Strata's `HasType` without `tgen`/`talias`/annotated rules) can be proved in a
-file that imports `LExprTypeSpec` without SetGen.
+Strata's `HasType` without `tgen`/`talias`/annotated rules) can be proved
+separately.
 
 ## Design
 

@@ -1,8 +1,10 @@
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.DL.Lambda.Denote.LExprAnnotated
+import Strata.Languages.Core.CmdEval
+import Strata.DL.Imperative.CmdEval
 
-open Lambda RandomChoice Core Imperative
+open Lambda RandomChoice Core Core.CmdEval Imperative
 
 /-!
 # Test support for the `CmdHasTypeAGen` generator
@@ -69,122 +71,33 @@ def checkContextGrowth (inCtx outCtx : VarCtx) (cmds : List (Cmd Expression)) : 
     | _ => none
   outCtx == definedNames.reverse ++ inCtx
 
--- ── Lightweight command runner ─────────────────────────────────────────
---
--- We redefine a minimal command executor here rather than importing
--- `Strata.Languages.Core.CmdEval` (which provides `Cmd.run`) because:
---
--- 1. `CmdEval` imports `Env`, which imports `Factory.lean`.
--- 2. `Factory.lean` uses `native_decide` to prove that all operator names
---    are unique. This requires the full definition of `CoreLParams` (and
---    its transitive dependencies) to be visible to the native compiler via
---    `public meta import`.
--- 3. Our project (`strata-generators`) uses Lean `v4.30.0-rc2` while the
---    Strata dependency uses `v4.29.1`. Between these versions, `native_decide`
---    became stricter about meta visibility, causing `Factory.lean` to fail
---    to build in our environment.
---
--- Rather than pin our toolchain or fight the meta import chain, we inline
--- the ~30 lines of `Cmd.run`'s logic here, using our already-working
--- expression evaluator (`eval` from `IntBoolFactory` in `TestSupport`).
--- The store is a simple association list mirroring `SemanticStore P`
--- (a function `P.Ident → Option P.Expr`).
+-- ── Command runner (using Strata's Cmd.run) ──────────────────────────
 
-/-- A concrete store mapping variable identifiers to expression values.
-    Mirrors `Imperative.SemanticStore Expression` but as a simple assoc list. -/
-abbrev CmdStore := List (Identifier Unit × Expression.Expr)
-
-/-- Result of running a command: either an updated store, or an error. -/
-inductive RunResult where
-  | ok (store : CmdStore)
-  | error (msg : String)
-
-/-- Look up a variable in the store. -/
-def CmdStore.lookup (store : CmdStore) (x : Identifier Unit) : Option Expression.Expr :=
-  match store with
-  | [] => none
-  | (y, e) :: rest => if x == y then some e else CmdStore.lookup rest x
-
-/-- Update an existing variable in the store. Returns `none` if not found. -/
-def CmdStore.update (store : CmdStore) (x : Identifier Unit) (e : Expression.Expr) :
-    Option CmdStore :=
-  match store with
-  | [] => none
-  | (y, v) :: rest =>
-    if x == y then some ((y, e) :: rest)
-    else (CmdStore.update rest x e).map ((y, v) :: ·)
-
-/-- Run a single command against a store. Mirrors `Imperative.Cmd.run` from
-    `Strata/DL/Imperative/CmdEval.lean` but uses our `IntBoolFactory`-based
-    evaluator for expression reduction.
-    Note: we don't check freshness for `init` because the generator can produce
-    contexts with duplicate variable names (the typing rule `init_det` enforces
-    freshness at the type level via `Γ.find? x = none`, but our flat `VarCtx`
-    tracks all historical bindings). -/
-def runCmd (store : CmdStore) (cmd : Cmd Expression) : RunResult :=
-  match cmd with
-  | .init x _ eOrNd _ =>
-    match eOrNd with
-    | .det e =>
-      let v := eval 100 e
-      .ok ((x, v) :: store)
-    | .nondet =>
-      .ok ((x, LExpr.intConst () 0) :: store)
-  | .set x eOrNd _ =>
-    match store.lookup x with
-    | none => .error s!"set: variable {x.name} not found"
-    | some _ =>
-      match eOrNd with
-      | .det e =>
-        let v := eval 100 e
-        match store.update x v with
-        | some store' => .ok store'
-        | none => .error s!"set: update failed for {x.name}"
-      | .nondet =>
-        match store.update x (.intConst () 0) with
-        | some store' => .ok store'
-        | none => .error s!"set: update failed for {x.name}"
-  | .assert _ _ _ => .ok store
-  | .assume _ _ _ => .ok store
-  | .cover _ _ _ => .ok store
-
-/-- Run a sequence of commands, threading the store through. -/
-def runCmds (store : CmdStore) : List (Cmd Expression) → RunResult
-  | [] => .ok store
-  | cmd :: rest =>
-    match runCmd store cmd with
-    | .ok store' => runCmds store' rest
-    | .error msg => .error msg
-
-/-- Build a `CmdStore` from a `VarCtx` by giving each variable a default
-    value (integer 0). This ensures all context variables are "defined" so
-    that `set` commands can find their targets. -/
-def storeFromVarCtx (ctx : VarCtx) : CmdStore :=
-  ctx.map fun (name, _) => (⟨name, ()⟩, LExpr.intConst () 0)
+/-- Build an `Env` from a `VarCtx` by initializing each variable with a
+    default value (integer 0). -/
+def envFromVarCtx (ctx : VarCtx) : Core.Env :=
+  ctx.foldl (fun env (name, mty) =>
+    CmdEval.update env ⟨name, ()⟩ (.forAll [] mty) (.intConst () 0))
+    Core.Env.init
 
 -- ── Evaluation-based properties ───────────────────────────────────────
 
 /-- Running a generated command in a well-formed store produces no error. -/
 def checkCmdRunNoError (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
-  match runCmd (storeFromVarCtx ctx) cmd with
-  | .ok _ => true
-  | .error _ => false
+  let env' := Cmd.run (envFromVarCtx ctx) cmd
+  env'.error.isNone
 
 /-- Running a generated command sequence produces no error. -/
 def checkCmdsRunNoError (cmds : List (Cmd Expression)) (inCtx : VarCtx) : Bool :=
-  match runCmds (storeFromVarCtx inCtx) cmds with
-  | .ok _ => true
-  | .error _ => false
+  let env' := Cmds.run (envFromVarCtx inCtx) cmds
+  env'.error.isNone
 
-
-/-- After running `set x (det e)` (where `e` is a determinisitc command),
-    the variable `x` is still in the store. -/
+/-- After running `set x (det e)`, the variable `x` is still in the store. -/
 def checkSetPreservesVar (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
   match cmd with
   | .set x _ _ =>
-    match runCmd (storeFromVarCtx ctx) cmd with
-    | .ok store' => (store'.lookup x).isSome
-    | .error _ => false
+    let env' := Cmd.run (envFromVarCtx ctx) cmd
+    env'.error.isNone && (CmdEval.lookup env' x).isSome
   | _ => true
 
 -- ── Generator wrappers ────────────────────────────────────────────────
