@@ -132,23 +132,29 @@ Denotational semantics → assumes OpsConsistent holds (never connected)
 
 Nobody has attempted to close this gap by proving generated terms satisfy `OpsConsistent`.
 
-### 4. The Haskell prototype didn't have this problem
+### 4. The Haskell prototype didn't trigger this problem in practice
 
 The original Haskell generator (`GenSTLC.hs`) uses De Bruijn indices (`TVar Int`) for type
 variables. Its unification algorithm treats `TVar x == TVar y` as rigid equality (returns
-`Nothing` for distinct indices, `[]` for identical indices). And critically, **target types
-never contain `TVar`** — the Haskell STLC context only holds ground types (`TBool`,
-`TFun TBool TBool`).
+`Nothing` for distinct indices, `[]` for identical indices). In practice, **target types
+never contain `TVar`** because:
 
-So the collision scenario cannot arise: bound variables are integers 0..n-1 in the
-polytype body, and target types contain no `TVar` at all.
+- `boolFunctionCtx` is built from `monoFunctions` (only `Forall 0` entries — ground types)
+- The `Arbitrary Typ` instance only generates `TBool` and `TFun` (never `TVar`)
+- Lambda binders use generated types, so contexts only grow with ground types
 
-The Lean port changed two things:
+This is an invariant maintained by convention, not enforced at the type level. `Ctx = [Typ]`
+and `Typ` includes `TVar Int` — nothing prevents a `TVar` from appearing. If someone
+manually called `genExactExpr [TVar 0] (TVar 0)`, the same capture issue would surface:
+`unify (TVar 0) (TVar 0)` returns `Just []`, and the bound variable appears "unsolved."
+
+The Lean port broke this accidental invariant in two ways:
 - Type variables became **named strings** (Strata's `LMonoTy.ftvar : String → LMonoTy`)
-- The typing context CAN contain free type variables (Strata supports polymorphic contexts)
+- The typing context **routinely** contains free type variables (Strata supports
+  polymorphic contexts, and the generator accepts a `tvars` parameter for this purpose)
 
-Both changes are necessary for Strata's richer type system but together create a capture
-problem that the simpler STLC setting avoided by construction.
+Both changes are necessary for Strata's richer type system but together make the capture
+problem manifest in normal usage rather than only in contrived edge cases.
 
 ## Consequences
 
