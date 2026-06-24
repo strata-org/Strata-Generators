@@ -3549,3 +3549,156 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     apply genLExprBase_sound <;> assumption
   · -- No monomorphic Indir candidates: IndirPoly fallback
     apply genIndirPoly_sound <;> assumption
+
+-- ── Completeness for genIndirPoly and genLExpr ─────────────────────────
+
+/-- A type `σ` is in the support of the per-element type-sampling action
+    used inside `genIndirPoly` (choose a random index into `generableTys`,
+    or return `.bool` when the list is empty). -/
+private theorem single_sample_mem (generableTys : List LMonoTy) (σ : LMonoTy)
+    (hpos : generableTys.length > 0 → σ ∈ generableTys)
+    (hneg : ¬(generableTys.length > 0) → σ = .bool) :
+    σ ∈ ((fun (_ : Unit) =>
+      if hg : generableTys.length > 0 then do
+        let tidx ← choose 0 (generableTys.length - 1) (by omega)
+        pure (generableTys.getD tidx.down .bool)
+      else pure .bool) () : SetGen.Set LMonoTy) := by
+  by_cases hg : generableTys.length > 0
+  · simp only [dif_pos hg, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    have hσ_mem := hpos hg
+    obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hσ_mem
+    have hidx_le : idx ≤ generableTys.length - 1 := by omega
+    exact ⟨⟨⟨idx, Nat.zero_le _, hidx_le⟩⟩, ⟨Nat.zero_le _, hidx_le⟩,
+      by simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]⟩
+  · simp only [dif_neg hg, SetGen.Set.mem_pure]
+    exact hneg hg
+
+set_option linter.unusedVariables false in
+/-- Each element of the type-sampling step in `genIndirPoly` is either a member
+    of `generableTys` (when non-empty) or `.bool` (when empty). This lemma
+    establishes that a valid `sampledTys` list is in the support of the sampling
+    computation. -/
+private theorem sampledTys_mem_support (generableTys : List LMonoTy)
+    (sampledTys : List LMonoTy)
+    (hLen : sampledTys.length = 3)
+    (hValid : ∀ σ ∈ sampledTys,
+      (generableTys.length > 0 → σ ∈ generableTys) ∧
+      (¬(generableTys.length > 0) → σ = .bool)) :
+    sampledTys ∈ ((List.replicate 3 ()).mapM (fun _ =>
+      if hg : generableTys.length > 0 then do
+        let tidx ← choose 0 (generableTys.length - 1) (by omega)
+        pure (generableTys.getD tidx.down .bool)
+      else pure .bool) : SetGen.Set (List LMonoTy)) := by
+  simp only [List.replicate, List.mapM_cons, List.mapM_nil,
+             SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+  match sampledTys, hLen with
+  | [a, b, c], _ =>
+    have mem := fun x h => single_sample_mem generableTys x (hValid x h).1 (hValid x h).2
+    exact ⟨a, mem a (by simp),
+           [b, c], ⟨b, mem b (by simp),
+                    [c], ⟨c, mem c (by simp),
+                          [], rfl, rfl⟩, rfl⟩, rfl⟩
+
+/-- Completeness of `genIndirPoly`: if an expression can be assembled as
+    `mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args` where
+    `(name, concreteArgTys)` is a valid entry in `polyOpsForResult` for
+    appropriate `sampledTys`, and each argument is in `genLExprBase`'s
+    support, then the expression is in `genIndirPoly`'s support. -/
+theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (sampledTys : List LMonoTy)
+    (hSampledLen : sampledTys.length = 3)
+    (hSampledValid : ∀ σ ∈ sampledTys,
+      ((generableTypesFromCtx bctx fctx octx).length > 0 →
+        σ ∈ generableTypesFromCtx bctx fctx octx) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) → σ = .bool))
+    (name : String) (concreteArgTys : List LMonoTy)
+    (hEntry : (name, concreteArgTys) ∈ polyOpsForResult pctx τ
+      (generableTypesFromCtx bctx fctx octx) sampledTys)
+    (args : List LExpr')
+    (hArgs : List.Forall₂ (fun arg σ =>
+      arg ∈ (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth σ))
+      args concreteArgTys) :
+    let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+    mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args ∈
+      SetGen.support (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ) := by
+  simp only [SetGen.support]
+  unfold genIndirPoly
+  simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite]
+  -- Exhibit sampledTys as the witness for the type-sampling mapM
+  refine ⟨sampledTys, sampledTys_mem_support _ _ hSampledLen hSampledValid, ?_⟩
+  -- Take the positive branch of the dite (ops.length > 0)
+  have hOpsPos : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length > 0 :=
+    List.length_pos_of_mem hEntry
+  left
+  refine ⟨hOpsPos, ?_⟩
+  -- Exhibit the index of (name, concreteArgTys) in ops
+  obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hEntry
+  have hidx_le : idx ≤ (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length - 1 := by omega
+  have hgetD : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", []) = (name, concreteArgTys) := by
+    simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
+  refine ⟨⟨⟨idx, Nat.zero_le _, hidx_le⟩⟩, ⟨Nat.zero_le _, hidx_le⟩, args, ?_, ?_⟩
+  · -- args ∈ concreteArgTys.mapM (genLExprBase ...)
+    -- The goal references `.getD idx ("", [])` which equals `(name, concreteArgTys)` by hgetD
+    show args ∈ List.mapM (m := SetGen.Set) (genLExprBase fctx octx tvars bctx depth)
+      ((polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2
+    rw [hgetD]
+    exact (mem_mapM_iff (genLExprBase fctx octx tvars bctx depth) concreteArgTys args).mpr hArgs
+  · -- The expression equals mkApps ...
+    show mkApps (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args =
+      mkApps (.op () ⟨((polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).1, ()⟩
+        (some (((polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args
+    rw [hgetD]
+
+/-- An expression is a valid polymorphic operator application reachable by
+    `genIndirPoly`: there exist sampled types, an operator entry in `pctx` that
+    unifies with the target, and arguments each in `genLExprBase`'s support. -/
+def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (e : LExpr') : Prop :=
+  ∃ (sampledTys : List LMonoTy) (name : String)
+    (concreteArgTys : List LMonoTy) (args : List LExpr'),
+    sampledTys.length = 3 ∧
+    (∀ σ ∈ sampledTys,
+      ((generableTypesFromCtx bctx fctx octx).length > 0 →
+        σ ∈ generableTypesFromCtx bctx fctx octx) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) → σ = .bool)) ∧
+    (name, concreteArgTys) ∈ polyOpsForResult pctx τ
+      (generableTypesFromCtx bctx fctx octx) sampledTys ∧
+    List.Forall₂ (fun arg σ =>
+      arg ∈ (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth σ))
+      args concreteArgTys ∧
+    e = mkApps (.op () ⟨name, ()⟩
+      (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args
+
+/-- Completeness of `genLExpr`: an expression is in the support if it satisfies
+    EITHER the `genLExprBase` completeness conditions OR it is a valid
+    polymorphic operator application (`IsPolyApp`).
+
+    The monomorphic Indir path is subsumed by Case 1: those expressions are
+    reachable via the App rule in `genLExprBase` (the Indir rule is a
+    distribution optimization, not a coverage extension). -/
+theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hτ : SimpleType τ)
+    (e : LExpr')
+    (he : (HasTypeA' bctx e τ ∧ emptyNames e ∧ allVarsInCtx fctx octx e ∧
+            AllTypesSimple tvars depth bctx e ∧ termDepth bctx e ≤ depth)
+          ∨ IsPolyApp fctx octx pctx tvars bctx depth τ e) :
+    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ) := by
+  simp only [SetGen.support]
+  unfold genLExpr
+  simp only [SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff]
+  rcases he with ⟨hwt, hnames, hvars, hats, hdepth⟩ | ⟨sampledTys, name, concreteArgTys, args, hLen, hValid, hEntry, hArgs, rfl⟩
+  · -- Case 1: route through genLExprBase (reachable in both dite branches)
+    have hbase := genLExprBase_complete fctx octx tvars bctx depth τ hτ e hwt hnames hvars hats hdepth
+    by_cases hops : (findOpsInCtx octx τ).length > 0
+    · exact Or.inl ⟨hops, Or.inl hbase⟩
+    · exact Or.inr ⟨hops, Or.inl hbase⟩
+  · -- Case 2: route through genIndirPoly (reachable in both dite branches)
+    have hindirpoly := genIndirPoly_complete fctx octx pctx tvars bctx depth τ
+      sampledTys hLen hValid name concreteArgTys hEntry args hArgs
+    by_cases hops : (findOpsInCtx octx τ).length > 0
+    · exact Or.inl ⟨hops, Or.inr (Or.inr hindirpoly)⟩
+    · exact Or.inr ⟨hops, Or.inr hindirpoly⟩
