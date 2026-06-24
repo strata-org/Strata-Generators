@@ -2,10 +2,12 @@ import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
 import Basalt.Examples.ArbNat.Def
+import Basalt.Examples.ArbChar.Def
+import Basalt.Examples.ArbString.Def
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.DL.Lambda.LTyUnify
 
-open Lambda RandomChoice ArbNat
+open Lambda RandomChoice ArbNat ArbChar ArbString
 
 -- ── Parameter types ──────────────────────────────────────────────────
 
@@ -221,27 +223,7 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   pick (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
        (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int))))
 
-/-- The 62 alphanumeric characters. -/
-def alphanumChars : List Char :=
-  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz".toList
-
-/-- Generate a random alphanumeric character. -/
-def Char.arbitrary [Gen G] : G Char :=
-  elements alphanumChars (by decide)
-
-/-- Generate a random list of alphanumeric characters. -/
-def genAlphanumList [Gen G] : G (List Char) :=
-  pick
-    (fun _ => pure [])
-    (fun () => do
-      let c ← Char.arbitrary
-      let cs ← genAlphanumList
-      pure (c :: cs))
-partial_fixpoint
-
-/-- Generate a random alphanumeric string. -/
-def String.arbitrary [Gen G] : G String :=
-  String.ofList <$> genAlphanumList
+abbrev genAlphanumList [Gen G] : G (List Char) := genCharList
 
 /-- Generate a random string constant (alphanumeric strings). -/
 @[reducible] def genStrConst [Gen G] : G LExpr' := do
