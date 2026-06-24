@@ -156,31 +156,180 @@ High if the goal is to prove `genLExpr_opsConsistent`:
 ## Fix
 
 Alpha-rename the polymorphic operator's bound variables to fresh names before unification.
-In `polyOpsForResult`:
+
+### New Helpers (in `HasTypeAGen/Core.lean`)
+
+```lean
+/-- Collect all ftvar names appearing in a monotype. -/
+def collectFtvars : LMonoTy → List TyIdentifier
+  | .ftvar x => [x]
+  | .tcons _ args => args.flatMap collectFtvars
+  | .bitvec _ => []
+
+/-- Generate a fresh name not in `used` by appending primes. -/
+def freshen (name : TyIdentifier) (used : List TyIdentifier) : TyIdentifier :=
+  if name ∉ used then name
+  else go (name ++ "'") used
+where
+  go (candidate : String) (used : List TyIdentifier) : TyIdentifier :=
+    if candidate ∉ used then candidate
+    else go (candidate ++ "'") used
+
+/-- Alpha-rename bound variables that collide with `contextVars`.
+    Returns (freshened bound var names, freshened monotype body). -/
+def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (contextVars : List TyIdentifier) : List TyIdentifier × LMonoTy :=
+  let allUsed := contextVars ++ boundVars
+  let (freshBound, _) := boundVars.foldl (fun (acc, used) v =>
+    if v ∈ contextVars then
+      let fresh := freshen v used
+      (acc ++ [fresh], fresh :: used)
+    else
+      (acc ++ [v], used))
+    ([], allUsed)
+  let renaming : Lambda.Subst :=
+    [(boundVars.zip freshBound).filterMap (fun (old, new) =>
+      if old == new then none else some (old, .ftvar new))]
+  let freshMonoTy := LMonoTy.subst renaming monoTy
+  (freshBound, freshMonoTy)
+```
+
+Note: `LMonoTy.freeVars` already exists in Strata (`Strata/DL/Lambda/LTy.lean:316`)
+and could be used instead of `collectFtvars` above.
+
+### Modified `polyOpsForResult`
 
 ```lean
 def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     (generableTys : List LMonoTy) (sampledTys : List LMonoTy)
     : List (String × List LMonoTy) :=
-  let contextFtvars := collectFtvars τ ++ generableTys.flatMap collectFtvars
+  let contextVars := (collectFtvars τ ++ generableTys.flatMap collectFtvars).eraseDups
   pctx.filterMap fun (name, lty) =>
     match lty with
     | .forAll boundVars monoTy =>
-      let (freshBoundVars, freshMonoTy) := freshenBoundVars boundVars monoTy contextFtvars
+      let (freshBoundVars, freshMonoTy) := freshenBoundVars boundVars monoTy contextVars
       let (argTys, retTy) := decomposeArrow freshMonoTy
-      ...
-      let freeTyVars := findFreeTyVars freshBoundVars subst
-      ...
+      if argTys.isEmpty || argTys.length > 3 then none
+      else match unifyTypes retTy τ with
+        | none => none
+        | some subst =>
+          let freeTyVars := findFreeTyVars freshBoundVars subst
+          if !freeTyVars.isEmpty && generableTys.isEmpty then none
+          else
+            let fullSubst : Lambda.Subst := (freeTyVars.zip sampledTys) :: subst
+            let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
+            some (name, concreteArgTys)
 ```
 
 After freshening, `unifyTypes retTy' τ` produces a non-trivial substitution (e.g.,
 `[α' ↦ .ftvar "α"]`) that correctly records how the operator was instantiated. The
 resulting annotation satisfies `OpsConsistent`.
 
-## Verification Plan
+### Why the Fix Works
 
-After the fix:
-1. Add a theorem `genLExpr_opsConsistent` proving generated terms satisfy `OpsConsistent F`
-   given a well-formedness condition linking `pctx` entries to factory functions.
-2. Add a property test that generates terms via `genIndirPoly` with `tvars` containing
-   names that collide with operator bound vars, and asserts `OpsConsistent` holds.
+With the `id : ∀ α. α → α` example and target `τ = .ftvar "α"`:
+
+1. `contextVars = ["α"]` (from `collectFtvars τ`)
+2. `freshenBoundVars ["α"] (α → α) ["α"]` → `(["α'"], .ftvar "α'" → .ftvar "α'")`
+3. `unifyTypes (.ftvar "α'") (.ftvar "α")` → `subst = [α' ↦ .ftvar "α"]`
+4. `findFreeTyVars ["α'"] [α' ↦ .ftvar "α"]` → `[]` (α' is now solved)
+5. `fullSubst = [α' ↦ .ftvar "α"]`
+6. `concreteArgTys = [(.ftvar "α'").subst [α' ↦ .ftvar "α"]]` = `[.ftvar "α"]`
+7. `fullArrowTy = .ftvar "α" → .ftvar "α"` ✓
+
+## Proving `OpsConsistent` on Generated Terms
+
+### Required Precondition
+
+A well-formedness condition linking `pctx` entries to the factory:
+
+```lean
+def PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx) : Prop :=
+  ∀ (name : String) (lty : Lambda.LTy),
+    (name, lty) ∈ pctx →
+    ∃ (f : LFunc LExprParams'), f ∈ F.toArray.toList ∧
+      f.name.name = name ∧
+      lty = .forAll f.typeArgs (LMonoTy.mkArrow' f.output f.inputs.values)
+```
+
+### Theorem Statement
+
+```lean
+theorem genLExpr_opsConsistent (F : @Factory LExprParams')
+    (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hτ : SimpleType τ)
+    (hOctx : octx = factoryOps F)
+    (hPctx : PCtxWF F pctx)
+    (e : LExpr')
+    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
+    Lambda.OpsConsistent F e
+```
+
+### Proof Strategy
+
+Two cases for `.op` nodes:
+
+1. **From `pickOp`** (via `genLExprBase`): The annotation `τ` is the generic curried type
+   from `factoryOps F`. For monomorphic ops, `opTypeSubst` returns `Subst.empty` and
+   `genericTy.subst Subst.empty = genericTy = ty_op`. For polymorphic ops in `octx` with
+   their full generic type, `opTypeSubst` unifies the annotation against itself.
+
+2. **From `genIndirPoly`**: The annotation is `concreteArgTys.foldr arrow τ`. After
+   freshening, this equals `genericTy.subst fullSubst`. Then `opTypeSubst` unifies the
+   annotation against `genericTy`, recovering an equivalent substitution.
+
+### Key Lemma
+
+```lean
+theorem freshen_subst_eq_generic_subst (boundVars : List TyIdentifier)
+    (monoTy : LMonoTy) (contextVars : List TyIdentifier)
+    (fullSubst : Lambda.Subst)
+    (hAll : ∀ v ∈ (freshenBoundVars boundVars monoTy contextVars).1,
+      (Maps.find? fullSubst v).isSome) :
+    let (_, freshMonoTy) := freshenBoundVars boundVars monoTy contextVars
+    LMonoTy.subst fullSubst freshMonoTy = LMonoTy.subst fullSubst monoTy
+```
+
+This states: if all freshened bound vars are mapped by `fullSubst`, then applying
+`fullSubst` to the freshened type gives the same result as applying it to the original.
+This holds because freshening only renames variables, and if both old and new names map
+to the same concrete type under `fullSubst`, the result is identical.
+
+This lemma is non-trivial to prove (requires reasoning about `LMonoTy.subst` and the
+renaming substitution). It can be `sorry`'d initially.
+
+### OpsConsistent for Sub-expressions
+
+For compound expressions (`.app`, `.ite`, `.abs`, `.eq`, `.quant`), `OpsConsistent` is
+structural (conjunction over sub-expressions). Each sub-expression is generated by
+`genLExprBase`, so the proof recurses. The base cases (`.const`, `.bvar`, `.fvar`) are
+trivially `True`.
+
+## Files Involved
+
+| File | Role |
+|------|------|
+| `HasTypeAGen/Core.lean` | Generator definitions (fix goes here) |
+| `HasTypeAGen.lean` | Proofs (soundness, completeness, new OpsConsistent theorem) |
+| `HasTypeAGen/Defs.lean` | `factoryOps` definition (unchanged) |
+| `Strata/.../Assumptions.lean` | `OpsConsistent` definition (unchanged, upstream) |
+| `Strata/.../Factory.lean` | `LFunc.opTypeSubst` definition (unchanged, upstream) |
+| `Strata/.../LTy.lean` | `LMonoTy.freeVars` (reusable, upstream) |
+
+## Implementation Order
+
+1. Add `collectFtvars`, `freshen`, `freshenBoundVars` to Core.lean
+2. Modify `polyOpsForResult` to freshen before unification
+3. Verify `lake build` passes (generator compiles)
+4. Update `genIndirPoly_sound` if needed
+5. Update `genIndirPoly_complete`, `genLExpr_complete`, `IsPolyApp`
+6. Add `PCtxWF` and `genLExpr_opsConsistent` (sorry complex sub-goals)
+7. Prove what's provable, document remaining sorrys
+
+## Verification
+
+1. `lake build` passes at each step
+2. No new `sorry` in previously-proven theorems
+3. Property test: generate terms with `tvars = ["α"]` and `pctx` containing operators
+   binding `"α"`, verify all generated terms pass a decidable `OpsConsistent` check
