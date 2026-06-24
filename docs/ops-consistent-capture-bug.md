@@ -8,6 +8,31 @@ are valid instantiations of the factory function's generic type scheme. The bug 
 when a bound type variable in the polymorphic operator's type shares a name with a free
 type variable appearing in the target type or context.
 
+## What is `OpsConsistent`?
+
+Every `.op` node in Strata's expression AST carries a type annotation — a monotype that
+declares the operator's type at that particular use site. For monomorphic operators this
+is always the same (e.g., `neg : bool → bool`). For polymorphic operators it varies per
+call site (e.g., `id` might be annotated `int → int` at one site and `bool → bool` at
+another).
+
+`OpsConsistent F e` checks that every `.op` annotation in `e` is a **valid instantiation**
+of the corresponding factory function's generic type scheme. Concretely, for an `.op`
+node with name `f` and annotation `ty_op`:
+
+1. Look up `f` in the factory to get its generic type (e.g., `α → α` for `id`)
+2. Unify `ty_op` against the generic type to recover a type substitution `S`
+3. Check that `ty_op` equals the generic type with `S` applied
+
+This ensures the annotation is coherent: it's the generic type specialized by a single
+consistent substitution. An annotation like `.int → .ftvar "α"` for `id` would fail
+because no single substitution makes `α → α` equal to `.int → .ftvar "α"`.
+
+The denotational semantics relies on `OpsConsistent` to inline operator bodies correctly:
+it uses the substitution recovered from the annotation to instantiate type variables in
+the function body. If the annotation is incoherent, the substitution disagrees with the
+actual argument types, and type preservation breaks.
+
 ## Background: How the Generator Works
 
 `genIndirPoly` (in `HasTypeAGen/Core.lean`) generates fully-applied polymorphic operator
