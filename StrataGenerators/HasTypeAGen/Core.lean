@@ -1,35 +1,11 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import Basalt.Examples.ArbNat.Def
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.DL.Lambda.LTyUnify
 
-open Lambda RandomChoice
-
-/-!
-# Core generator definitions for well-typed `LExpr`s
-
-This file contains the canonical definitions of `genLExpr` and all supporting
-types/helpers. It is imported by both:
-- `HasTypeAGen/Defs.lean` (which adds `Factory`-accepting wrappers)
-- `HasTypeAGen.lean` (which adds soundness/completeness proofs)
--/
-
-namespace ArbNat
-
-/-- Generate an arbitrary natural number with geometrically decreasing
-    probability: 0 with probability 1/2, 1 with 1/4, etc. -/
-def Nat.arbitrary [Gen G] : G Nat := do
-  pick
-    (fun () => pure 0)
-    (fun () => do
-      let n ← Nat.arbitrary
-      pure (n + 1))
-partial_fixpoint
-
-end ArbNat
-
-open ArbNat
+open Lambda RandomChoice ArbNat
 
 -- ── Parameter types ──────────────────────────────────────────────────
 
