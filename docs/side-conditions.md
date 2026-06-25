@@ -4,7 +4,9 @@ This document catalogs every side-condition (hypothesis beyond the bare
 "in support" / "is well-typed" facts) required by the soundness and
 completeness theorems for the expression generator (`genLExpr`,
 `StrataGenerators/HasTypeAGen.lean`) and the command generator (`genCmd`,
-`StrataGenerators/CmdHasTypeAGen.lean`).
+`StrataGenerators/CmdHasTypeAGen.lean`). The hypothesis-free soundness
+wrappers at an empty fvar context live in
+`StrataGenerators/CmdHasTypeAGenSound.lean` (see §2.1 and §4).
 
 For each theorem we list the hypotheses, give the *reason* each one is needed,
 and note whether it is **proved** or **assumed** (taken as a hypothesis to be
@@ -127,7 +129,7 @@ and (b) conditions about variable contexts and fresh names.
 | `VarCtxCorresponds ctx Γ` | line 33 | The flat `VarCtx` agrees with the semantic `TContext Γ`: every `(x, mty) ∈ ctx` maps to `forAll [] mty` in `Γ`, and fresh names are absent from `Γ`. |
 | `GenLExprSound` | line 281 | Assumed expression-soundness: everything in `genLExpr`'s support at `τ` is well-typed at `τ`. Discharged by `genLExpr_sound` (§1.1). |
 | `GenLExprComplete` | line 368 | Assumed expression-completeness: every well-typed expression is in `genLExpr`'s support. Discharged by `genLExpr_complete` (§1.6). |
-| `FreshNamesDisjointFromExprs` | line 291 | Fresh names from `genFreshName` never occur as free variables in generated expressions. **Currently assumed** — not yet proved as a standalone theorem (see notes). |
+| `FreshNamesDisjointFromExprs` | line 291 | Fresh names from `genFreshName` never occur as free variables in generated expressions. **Now proved for `fctx = []`** as `freshNamesDisjointFromExprs_nil` (`CmdHasTypeAGenSound.lean:25`); it is *false* for nonempty `fctx` (see notes). |
 
 ### 2.1 `genCmd_sound` (line 303)
 
@@ -139,11 +141,14 @@ support (genCmd fctx octx tvars ctx depth) → ∃ Γ', CmdHasTypeA C Γ r.cmd �
 |---|---|---|
 | `hCorr` | `VarCtxCorresponds ctx Γ` | Links the generator's flat `ctx` to the typing context `Γ`. Needed so that (a) a freshly generated name is absent from `Γ` (for `init`), and (b) a `set` target found in `ctx` resolves in `Γ`. |
 | `hExprSound` | `GenLExprSound fctx octx tvars depth` | The `init_det`/`set_det`/`assert`/`assume`/`cover` cases embed a generated expression; its well-typedness is needed to build the `CmdHasTypeA` derivation. |
-| `hDisjoint` | `FreshNamesDisjointFromExprs fctx octx tvars ctx depth` | The `init_det` rule requires the freshly introduced variable not to occur free in the initializer expression. **This is the only assumed side-condition** (see notes). |
+| `hDisjoint` | `FreshNamesDisjointFromExprs fctx octx tvars ctx depth` | The `init_det` rule requires the freshly introduced variable not to occur free in the initializer expression. Proved for `fctx = []` (see notes). |
 
-**Status:** `hCorr` and `hExprSound` are discharged by proved theorems
-(`VarCtxCorresponds` from the caller's setup; `hExprSound` by `genLExpr_sound`).
-`hDisjoint` is currently an unproved assumption.
+**Status:** all three side-conditions are now discharged for `fctx = []`.
+`hCorr` and `hExprSound` come from the caller's setup (`hExprSound` by
+`genLExpr_sound`); `hDisjoint` is discharged by `freshNamesDisjointFromExprs_nil`.
+The hypothesis-free wrapper is `genCmd_sound_nil` (`CmdHasTypeAGenSound.lean:40`),
+which supplies `hDisjoint` internally and leaves only the genuine
+context-dependent obligations `hCorr` and `hExprSound`.
 
 ### 2.2 `genCmd_sound_env` / `genCmds_sound` (lines 516, 580)
 
@@ -158,12 +163,14 @@ updated context through an induction on fuel.
 | `toTCtx` | `VarCtx → TContext Unit` | Semantic interpretation of a flat context. |
 | `corr` | `∀ ctx, VarCtxCorresponds ctx (toTCtx ctx)` | Correspondence at *every* reachable context (the sequence generator extends `ctx` as it goes). |
 | `exprSound` | `GenLExprSound …` | Same as `hExprSound` above. |
-| `freshDisjoint` | `∀ ctx, FreshNamesDisjointFromExprs … ctx …` | Same as `hDisjoint`, but quantified over all contexts reachable during sequence generation. |
+| `freshDisjoint` | `∀ ctx, FreshNamesDisjointFromExprs … ctx …` | Same as `hDisjoint`, but quantified over all contexts reachable during sequence generation. Discharged for `fctx = []` by `freshNamesDisjointFromExprs_nil`. |
 | `toTCtx_cons` | `toTCtx ((name,mty)::ctx) = insert …` | The output `Γ'` of an `init` matches `toTCtx` applied to the extended `VarCtx`, so the chained `CmdsHasTypeA` relation lines up across steps. |
 
 `genCmds_sound` requires no side-conditions beyond a `GenCmdSoundEnv`; the proof
 is an induction on fuel `n` that re-applies `genCmd_sound_env` to each head
-command.
+command. For `fctx = []`, `genCmdSoundEnv_nil` (`CmdHasTypeAGenSound.lean:56`)
+builds the record with `freshDisjoint` pre-filled, and `genCmds_sound_nil`
+(line 75) is the hypothesis-free sequence-soundness entry point.
 
 ### 2.3 `genCmd_complete` (line 387)
 
@@ -195,19 +202,37 @@ CmdHasTypeA C Γ cmd Γ' ∧ (reachability side-conditions)
 | `genLExpr_sound` | sound | `SimpleType τ`, simple op/poly-op args | — |
 | `genLExprBase_complete` | complete | `SimpleType τ`, `HasTypeA'`, `emptyNames`, `allVarsInCtx`, `AllTypesSimple`, `termDepth ≤ depth` | — |
 | `genLExpr_complete` | complete | base conditions ∨ `IsPolyApp` | — |
-| `genCmd_sound` | sound | `VarCtxCorresponds`, `GenLExprSound`, `FreshNamesDisjointFromExprs` | `FreshNamesDisjointFromExprs` |
-| `genCmds_sound` | sound | `GenCmdSoundEnv` (bundles the above, quantified over contexts) | `freshDisjoint` field |
+| `genCmd_sound` | sound | `VarCtxCorresponds`, `GenLExprSound`, `FreshNamesDisjointFromExprs` | — (all discharged for `fctx = []`) |
+| `genCmd_sound_nil` | sound | `VarCtxCorresponds`, `GenLExprSound` (at `fctx = []`) | — |
+| `genCmds_sound` | sound | `GenCmdSoundEnv` (bundles the above, quantified over contexts) | — (`freshDisjoint` discharged for `fctx = []`) |
+| `genCmds_sound_nil` | sound | `GenCmdSoundEnv` at `fctx = []` (via `genCmdSoundEnv_nil`) | — |
 | `genCmd_complete` | complete | `CmdHasTypeA`, `GenLExprComplete`, `hNameReach`, `hTyReach`, `hVarInCtx` | — |
 
-## 4. Notes on the assumed conditions
+## 4. Notes on the (formerly) assumed conditions
 
-- **`FreshNamesDisjointFromExprs`** (the `hDisjoint` / `freshDisjoint`
-  condition) is the single unproved assumption in the command-soundness chain.
-  It asserts that names produced by `genFreshName` never collide with free
-  variables in generated expressions. This is morally true — fvars are drawn
-  from `fctx` via `pickFVar`, while fresh names are generated to avoid `ctx` —
-  but it has not yet been formalized as a standalone theorem. See the docstring
-  at `CmdHasTypeAGen.lean:286`.
+- **`FreshNamesDisjointFromExprs`** is no longer an open assumption. It is now
+  proved for an empty fvar context as `freshNamesDisjointFromExprs_nil`
+  (`CmdHasTypeAGenSound.lean:25`). The proof does *not* reason about name
+  collision at all: with `fctx = []`, `pickFVar` is unreachable, so every
+  generated expression has *no* free variables (`getVars e = []`, via
+  `genLExpr_no_fvars` in `HasTypeAGen.lean:4273`). A fresh name therefore
+  trivially fails to occur in the empty variable list, regardless of what the
+  name is.
+
+  Crucially, the condition is **false for nonempty `fctx`**: `genLExpr` draws
+  free variables from `fctx` via `pickFVar`, and a name fresh with respect to
+  the command context `ctx` can still coincide with an `fctx` entry. So this is
+  not a general theorem that was merely unproved — it holds *only* at the
+  `fctx = []` instantiation, which is exactly what both test harnesses use. (An
+  earlier version of this document claimed it was "morally true" in general;
+  that was incorrect.)
+
+  The proof is packaged into hypothesis-free entry points in
+  `CmdHasTypeAGenSound.lean`: `genCmd_sound_nil` (line 40),
+  `genCmdSoundEnv_nil` (line 56), and `genCmds_sound_nil` (line 75). These
+  leave only the genuine context-dependent obligations (`hCorr`, `hExprSound` /
+  the `toTCtx` fields) to the caller. The file is registered as its own
+  `lean_lib` in `lakefile.toml`. All proofs are `sorry`-free.
 
 - **`GenLExprSound` / `GenLExprComplete`** are stated as `def` predicates in
   `CmdHasTypeAGen.lean` and taken as hypotheses there to avoid a Mathlib

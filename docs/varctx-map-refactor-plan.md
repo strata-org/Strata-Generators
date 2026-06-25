@@ -1,7 +1,9 @@
 # Refactor Plan: `VarCtx` from `List` to `Map`
 
-**Status:** Planned, not started. **Blocked on:** the concurrent
-`FreshNamesDisjointFromExprs` proof landing first (see "Coordination" below).
+**Status:** Planned, not started. **Unblocked** — the `FreshNamesDisjointFromExprs`
+proof has landed (commits `27e6102`, `89f9a77`; proved for `fctx = []` as
+`freshNamesDisjointFromExprs_nil` in the new file `StrataGenerators/CmdHasTypeAGenSound.lean`).
+This refactor may now proceed. See "Coordination" for what changed.
 
 ## Goal
 
@@ -18,20 +20,32 @@ to reconcile the `List` representation with `TContext.types` — toward a
 structural/identity correspondence, simplifying `toTCtx` and `toTCtx_cons`
 in `GenCmdSoundEnv`.
 
-## Coordination (read first)
+## Coordination (resolved)
 
-Another agent is proving `FreshNamesDisjointFromExprs`. That proof is
-**defined in terms of** `VarCtx.isFresh` and `genFreshName`
-(`CmdHasTypeAGen/Core.lean:39, 52`), both of which this refactor reshapes.
-The two tasks collide on the *same definitions*, not merely the same files.
+The freshness proof has landed, so the sequencing concern below is now
+historical. **What actually changed matters for this refactor:**
 
-**Sequencing decision:** land the freshness proof first, then execute this
-refactor on top of the finished code. Do **not** run concurrently. Rationale:
-the freshness proof is small and localized (adds a theorem, ~25 references),
-while this refactor is invasive (~80 references, changes a foundational
-`abbrev`). The merge conflict region is identical either way, so isolating in
-a worktree would only defer — not remove — the manual reconciliation, and
-would force the just-finished proof to be reworked against a moving type.
+- The proof did **not** reshape `VarCtx.isFresh` / `genFreshName`
+  (`CmdHasTypeAGen/Core.lean:39, 52`) as originally feared. Those definitions
+  are untouched. Instead the proof lives in a *new* file,
+  `StrataGenerators/CmdHasTypeAGenSound.lean`, and works by showing generated
+  expressions have no free variables at all (`genLExpr_no_fvars`) at
+  `fctx = []` — it never reasons about `isFresh` collision.
+- Consequence: **step 10 (rebasing the freshness proof) is now lighter than
+  planned.** The proof does not depend on the *representation* of `VarCtx`,
+  only on `genLExpr_no_fvars` (expression layer, unaffected by this refactor)
+  and `HasVarsPure.getVars`. The only `VarCtx`-typed surface in the new file is
+  the *parameter* `ctx : VarCtx` threaded through `freshNamesDisjointFromExprs_nil`,
+  `genCmd_sound_nil`, `genCmdSoundEnv_nil`, `genCmds_sound_nil`. Update those
+  signatures to the new representation; the proof bodies should be unaffected.
+- **Add `CmdHasTypeAGenSound.lean` to the surface-area list** (below) — it was
+  not present when this plan was first written.
+
+Original sequencing rationale (retained for context): the freshness proof was
+small and localized (~25 references, added theorems), while this refactor is
+invasive (~80 references, changes a foundational `abbrev`), so the freshness
+work was allowed to land first rather than running concurrently and racing on
+the same definitions.
 
 ## The crux: positional indexing in `set` generators
 
@@ -70,7 +84,7 @@ proof rewrites and keeps the distribution unchanged.
 |---|---|---|
 | `CmdHasTypeAGen/Core.lean` | `VarCtx` def + `names`/`find?`/`isFresh`, `fallbackFreshName`, `genFreshName`, `GenCmdResult.outCtx`, all sub-generators, `genCmd`, `genCmds` | **High** — the type definition and every consumer |
 | `CmdHasTypeAGen.lean` | `VarCtxCorresponds`, `genCmd_support_iff`, `genCmd_sound(_env)`, `genCmd_complete`, `genCmds_sound`, `GenCmdSoundEnv` | **High** — proofs destructure the list |
-| `CmdHasTypeAGen/TestSupport.lean` | `#eval` smoke tests | Low — update construction syntax |
+| `CmdHasTypeAGenSound.lean` (new) | `freshNamesDisjointFromExprs_nil`, `genCmd_sound_nil`, `genCmdSoundEnv_nil`, `genCmds_sound_nil` | **Low** — only `ctx : VarCtx` parameters; proof bodies depend on `genLExpr_no_fvars`, not the representation |
 | `HasTypeAGen*.lean`, `HasTypeGen.lean`, `Scratch.lean` | mostly unrelated `FVarCtx`/`OpCtx` (also `List (String × LMonoTy)`) | **Verify only** — do NOT change these; confirm grep hits are not the command `VarCtx` |
 
 > Caution: `FVarCtx` and `OpCtx` (`HasTypeAGen/Core.lean`) are *also*
@@ -125,9 +139,14 @@ proof rewrites and keeps the distribution unchanged.
    `CmdHasTypeAGen.lean:611+` (initial-context literals like
    `[("x", .int), ("y", .bool)]` become the new constructor).
 
-10. **Rebase the freshness proof.** Once it has landed, update its lemmas
-    about `VarCtx.isFresh`/`genFreshName` to the new representation. This is
-    the planned point of contact with the other agent's work.
+10. **Update `CmdHasTypeAGenSound.lean`.** The freshness proof has landed and
+    does *not* depend on the `VarCtx` representation (it goes via
+    `genLExpr_no_fvars`, not `isFresh`). Only retarget the `ctx : VarCtx`
+    parameters of `freshNamesDisjointFromExprs_nil`, `genCmd_sound_nil`,
+    `genCmdSoundEnv_nil`, `genCmds_sound_nil` to the new type; the proof bodies
+    should compile unchanged once `VarCtxCorresponds`/`GenCmdSoundEnv` (steps
+    5–6) are updated. The `(name, mty) :: ctx` insertion in `genCmdSoundEnv_nil`'s
+    `toTCtx_cons` signature must move to the new `VarCtx.insert` (step 2).
 
 ## Build / verification checkpoints
 
