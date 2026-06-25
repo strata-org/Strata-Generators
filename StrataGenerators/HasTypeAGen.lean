@@ -325,14 +325,14 @@ private theorem allFtvarsIn_seq {tvars : List TyIdentifier} {τ : LMonoTy} :
 private theorem pickBitvecWidth_mem (τ : LMonoTy)
     (hτ : τ ∈ SetGen.support (pickBitvecWidth (G := SetGen.Set))) :
     ∃ n, n ∈ (bitvecWidths : List Nat) ∧ τ = .bitvec n := by
-  have hne : (bitvecWidths : List Nat) ≠ [] := by native_decide
+  have hne : (bitvecWidths : List Nat) ≠ [] := by decide +kernel
   simp only [pickBitvecWidth, mem_support_map_iff, mem_support_elements_iff hne] at hτ
   assumption
 
 /-- Completeness of `pickBitvecWidth`: `.bitvec n` is in the support for any `n ∈ bitvecWidths`. -/
 private theorem pickBitvecWidth_complete (n : Nat) (hmem : n ∈ (bitvecWidths : List Nat)) :
     LMonoTy.bitvec n ∈ SetGen.support (pickBitvecWidth (G := SetGen.Set)) := by
-  have hne : (bitvecWidths : List Nat) ≠ [] := by native_decide
+  have hne : (bitvecWidths : List Nat) ≠ [] := by decide +kernel
   simp only [pickBitvecWidth, mem_support_map_iff, mem_support_elements_iff hne]
   exact ⟨n, hmem, rfl⟩
 
@@ -1199,7 +1199,7 @@ private theorem Int_cover (z : Int) :
 private theorem Char_arbitrary_support_set (c : Char) (hc : c ∈ alphanumChars) :
     c ∈ SetGen.support (Char.arbitrary (G := SetGen.Set)) := by
   simp only [Char.arbitrary]
-  rw [mem_support_elements_iff (show alphanumChars ≠ [] from by native_decide)]
+  rw [mem_support_elements_iff (show alphanumChars ≠ [] from by decide +kernel)]
   exact hc
 
 /-- Every alphanumeric char-list is in the support of `genAlphanumList` at `SetGen.Set`. -/

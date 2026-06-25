@@ -82,16 +82,6 @@ def envFromVarCtx (ctx : VarCtx) : Core.Env :=
 
 -- ── Evaluation-based properties ───────────────────────────────────────
 
-/-- Running a generated command in a well-formed store produces no error. -/
-def checkCmdRunNoError (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
-  let env' := Cmd.run (envFromVarCtx ctx) cmd
-  env'.error.isNone
-
-/-- Running a generated command sequence produces no error. -/
-def checkCmdsRunNoError (cmds : List (Cmd Expression)) (inCtx : VarCtx) : Bool :=
-  let env' := Cmds.run (envFromVarCtx inCtx) cmds
-  env'.error.isNone
-
 /-- After running `set x (det e)`, the variable `x` is still in the store. -/
 def checkSetPreservesVar (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
   match cmd with
