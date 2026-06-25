@@ -62,6 +62,12 @@ roots = ["StrataGenerators.CmdHasTypeAGen.TestSupport"]
 name = "StrataGenerators.CmdHasTypeAGen"
 roots = ["StrataGenerators.CmdHasTypeAGen"]
 
+# Hypothesis-free genCmd soundness at an empty fvar context (combines the
+# HasTypeAGen no-fvars proofs with the CmdHasTypeAGen soundness theorems)
+[[lean_lib]]
+name = "StrataGenerators.CmdHasTypeAGenSound"
+roots = ["StrataGenerators.CmdHasTypeAGenSound"]
+
 # Shared SetGen infrastructure (no conflicting imports)
 [[lean_lib]]
 name = "StrataGenerators.SetGen"

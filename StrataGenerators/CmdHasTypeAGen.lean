@@ -605,7 +605,7 @@ theorem genCmds_sound
 -- ── Quick test ────────────────────────────────────────────────────────
 
 open Std in
-instance : ToFormat Unit where
+instance instToFormatUnitCmdHasTypeAGen : ToFormat Unit where
   format _ := .nil
 
 #guard_msgs(drop warning, drop all) in
