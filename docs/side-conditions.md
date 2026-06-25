@@ -1,0 +1,215 @@
+# Side-Conditions for `genLExpr` and `genCmd` Soundness & Completeness
+
+This document catalogs every side-condition (hypothesis beyond the bare
+"in support" / "is well-typed" facts) required by the soundness and
+completeness theorems for the expression generator (`genLExpr`,
+`StrataGenerators/HasTypeAGen.lean`) and the command generator (`genCmd`,
+`StrataGenerators/CmdHasTypeAGen.lean`).
+
+For each theorem we list the hypotheses, give the *reason* each one is needed,
+and note whether it is **proved** or **assumed** (taken as a hypothesis to be
+discharged by the caller).
+
+> Convention: "support" means `SetGen.support (gen … (G := SetGen.Set))`, the
+> set of values the generator can produce. Soundness = `support → property`;
+> completeness = `property → support`.
+
+---
+
+## 1. Expression generator (`HasTypeAGen.lean`)
+
+### 1.1 `genLExpr_sound` (line 3497)
+
+```
+support (genLExpr fctx octx pctx tvars bctx depth τ) → HasTypeA' bctx e τ
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hτ` | `SimpleType τ` | The result type must be in the image of `genLMonoTy`. The proof recurses by case analysis on the `SimpleType` derivation, not on the raw `LMonoTy`; without it the generator's defining `match` would face type shapes (arbitrary `tcons`, non-generable bitvec widths) it never handles. |
+| `hSimpleOps` | `∀ p ∈ octx, SimpleType p.2` | The monomorphic Indir path picks an operator from `octx` and generates its arguments via `genLExprBase`, which requires each argument type to be `SimpleType`. The operator's curried type must therefore decompose into simple types. |
+| `hSimplePolyOps` | every entry returned by `polyOpsForResult pctx τ … sampledTys` has `SimpleType` argument types | The polymorphic Indir path (`genIndirPoly`) instantiates a poly-op and generates each argument via `genLExprBase`; the same `SimpleType` requirement on argument types applies. |
+
+**Status:** all proved/discharged at call sites. `hSimpleOps`/`hSimplePolyOps`
+are well-formedness conditions on the operator contexts.
+
+### 1.2 `genLExprBase_sound` (line 585)
+
+```
+support (genLExprBase fctx octx tvars bctx depth τ) → HasTypeA' bctx e τ
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hτ` | `SimpleType τ` | Same as above — drives the structural recursion (`match depth, τ, hτ`). |
+
+Note: `genLExprBase_sound` needs **no** `AllTypesSimple`, `emptyNames`,
+`allVarsInCtx`, or depth hypotheses. Soundness is "free" in those — the
+generator only ever emits well-typed, in-context terms, so recovering
+`HasTypeA'` requires nothing about the term beyond knowing the target type is
+generable.
+
+### 1.3 `genIndirPoly_sound` (line 3425)
+
+```
+support (genIndirPoly fctx octx pctx tvars bctx depth τ) → HasTypeA' bctx e τ
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hτ` | `SimpleType τ` | Target type is generable. |
+| `hSimplePolyOps` | poly-op entries have `SimpleType` argument types | Each generated argument flows through `genLExprBase`, which requires `SimpleType` on its target type. This is the *only* non-trivial obligation in the proof (see the inline comment at lines 3455–3457). |
+
+### 1.4 `genLExprBase_complete` (line 1833)
+
+```
+HasTypeA' bctx e τ ∧ emptyNames e ∧ allVarsInCtx fctx octx e
+  ∧ AllTypesSimple tvars depth bctx e ∧ termDepth bctx e ≤ depth
+→ support (genLExprBase fctx octx tvars bctx depth τ)
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hτ` | `SimpleType τ` | Drives the recursion and is required to re-derive type-sampling membership. |
+| `hwt` | `HasTypeA' bctx e τ` | The term must be well-typed at `τ` — the generator only produces well-typed terms, so this is necessary for reachability. |
+| `hnames` | `emptyNames e` | The generator emits binders with the fixed empty name `""` (locally nameless). A term carrying any other binder name is unreachable. |
+| `hvars` | `allVarsInCtx fctx octx e` | Free variables come from `pickFVar`/`pickOp`, which draw only from `fctx`/`octx`. Any fvar/op not present in those contexts is unreachable. |
+| `hats` | `AllTypesSimple tvars depth bctx e` | At each compound node (`abs`/`app`/`eq`/`quant`) the generator samples an **intermediate** type via `genLMonoTy`. To place the node in the support we must show that sampled type is in `genLMonoTy`'s support, which by `genLMonoTy_support` requires exactly `SimpleType τ' ∧ monoTyDepth τ' ≤ n ∧ allFtvarsIn tvars τ'`. `AllTypesSimple` is the recursive predicate carrying those three witnesses at every node. None of this information is recoverable from `hwt` or `termDepth` (see notes). |
+| `hdepth` | `termDepth bctx e ≤ depth` | The generator consumes one unit of fuel per compound level; a term deeper than `depth` cannot be produced. This precondition is *tight* — see `genLExprBase_termDepth_bound` (line 1318), which proves the generator never exceeds the budget. |
+
+**Why `AllTypesSimple` cannot be dropped or derived:**
+- `HasTypeA'` allows argument/annotation types that are non-`SimpleType`
+  (e.g. a `Map`/`Sequence`, a stray ftvar not in `tvars`, or a `bitvec 7`).
+  Such well-typed terms are genuinely unreachable, so the restriction is real.
+- `termDepth` (line 1255) ignores annotation-type depth for `abs`/`app`/`eq`
+  (only `quant` folds in `monoTyDepth`), so `monoTyDepth τ' ≤ n` cannot be
+  derived from the depth budget.
+- The `monoTyDepth` component could in principle be absorbed into a richer
+  `termDepth`, but `SimpleType` and `allFtvarsIn` are non-numeric and would
+  still need a dedicated predicate. So `AllTypesSimple` (or an equivalent) is
+  essential.
+
+### 1.5 `genIndirPoly_complete` (line 4292)
+
+Reachability of a polymorphic operator application. The side-conditions are
+packaged into the `IsPolyApp` predicate (line 4342) used by
+`genLExpr_complete`; they assert the existence of sampled types of the right
+length, a matching `polyOpsForResult` entry, and that each argument is in
+`genLExprBase`'s support.
+
+### 1.6 `genLExpr_complete` (line 4367)
+
+```
+( HasTypeA' bctx e τ ∧ emptyNames e ∧ allVarsInCtx fctx octx e
+    ∧ AllTypesSimple tvars depth bctx e ∧ termDepth bctx e ≤ depth )
+  ∨ IsPolyApp fctx octx pctx tvars bctx depth τ e
+→ support (genLExpr fctx octx pctx tvars bctx depth τ)
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hτ` | `SimpleType τ` | Generable target type. |
+| `he` (left disjunct) | the five `genLExprBase_complete` conditions above | Routes through `genLExprBase` (reachable in both `dite` branches). |
+| `he` (right disjunct) | `IsPolyApp …` | Routes through `genIndirPoly`. The monomorphic Indir path is subsumed by the App rule of the left disjunct (the Indir rule is a distribution optimization, not a coverage extension). |
+
+---
+
+## 2. Command generator (`CmdHasTypeAGen.lean`)
+
+The command generator delegates expression generation to `genLExpr`, so its
+side-conditions split into (a) conditions inherited from the expression layer
+and (b) conditions about variable contexts and fresh names.
+
+### Shared helper predicates
+
+| Predicate | Definition (location) | Role |
+|---|---|---|
+| `VarCtxCorresponds ctx Γ` | line 33 | The flat `VarCtx` agrees with the semantic `TContext Γ`: every `(x, mty) ∈ ctx` maps to `forAll [] mty` in `Γ`, and fresh names are absent from `Γ`. |
+| `GenLExprSound` | line 281 | Assumed expression-soundness: everything in `genLExpr`'s support at `τ` is well-typed at `τ`. Discharged by `genLExpr_sound` (§1.1). |
+| `GenLExprComplete` | line 368 | Assumed expression-completeness: every well-typed expression is in `genLExpr`'s support. Discharged by `genLExpr_complete` (§1.6). |
+| `FreshNamesDisjointFromExprs` | line 291 | Fresh names from `genFreshName` never occur as free variables in generated expressions. **Currently assumed** — not yet proved as a standalone theorem (see notes). |
+
+### 2.1 `genCmd_sound` (line 303)
+
+```
+support (genCmd fctx octx tvars ctx depth) → ∃ Γ', CmdHasTypeA C Γ r.cmd Γ'
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hCorr` | `VarCtxCorresponds ctx Γ` | Links the generator's flat `ctx` to the typing context `Γ`. Needed so that (a) a freshly generated name is absent from `Γ` (for `init`), and (b) a `set` target found in `ctx` resolves in `Γ`. |
+| `hExprSound` | `GenLExprSound fctx octx tvars depth` | The `init_det`/`set_det`/`assert`/`assume`/`cover` cases embed a generated expression; its well-typedness is needed to build the `CmdHasTypeA` derivation. |
+| `hDisjoint` | `FreshNamesDisjointFromExprs fctx octx tvars ctx depth` | The `init_det` rule requires the freshly introduced variable not to occur free in the initializer expression. **This is the only assumed side-condition** (see notes). |
+
+**Status:** `hCorr` and `hExprSound` are discharged by proved theorems
+(`VarCtxCorresponds` from the caller's setup; `hExprSound` by `genLExpr_sound`).
+`hDisjoint` is currently an unproved assumption.
+
+### 2.2 `genCmd_sound_env` / `genCmds_sound` (lines 516, 580)
+
+These bundle the soundness side-conditions into a single record
+`GenCmdSoundEnv` (line 494) so that the sequence generator can thread an
+updated context through an induction on fuel.
+
+`GenCmdSoundEnv` fields:
+
+| Field | Statement | Why it is needed |
+|---|---|---|
+| `toTCtx` | `VarCtx → TContext Unit` | Semantic interpretation of a flat context. |
+| `corr` | `∀ ctx, VarCtxCorresponds ctx (toTCtx ctx)` | Correspondence at *every* reachable context (the sequence generator extends `ctx` as it goes). |
+| `exprSound` | `GenLExprSound …` | Same as `hExprSound` above. |
+| `freshDisjoint` | `∀ ctx, FreshNamesDisjointFromExprs … ctx …` | Same as `hDisjoint`, but quantified over all contexts reachable during sequence generation. |
+| `toTCtx_cons` | `toTCtx ((name,mty)::ctx) = insert …` | The output `Γ'` of an `init` matches `toTCtx` applied to the extended `VarCtx`, so the chained `CmdsHasTypeA` relation lines up across steps. |
+
+`genCmds_sound` requires no side-conditions beyond a `GenCmdSoundEnv`; the proof
+is an induction on fuel `n` that re-applies `genCmd_sound_env` to each head
+command.
+
+### 2.3 `genCmd_complete` (line 387)
+
+```
+CmdHasTypeA C Γ cmd Γ' ∧ (reachability side-conditions)
+→ ∃ r, r ∈ support (genCmd …) ∧ CmdHasTypeA C Γ r.cmd Γ'
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hwt` | `CmdHasTypeA C Γ cmd Γ'` | The command must be well-typed; the proof proceeds by inversion on this derivation. |
+| `hExprComplete` | `GenLExprComplete fctx octx tvars depth` | The `init_det`/`set_det`/`assert`/`assume`/`cover` cases must show the sub-expression is reachable in `genLExpr`'s support. Discharged by `genLExpr_complete`. |
+| `hNameReach` | the name of any `init`/`set` target is in `genFreshName`'s support | The generator picks new variable names from `genFreshName`; a target name it cannot generate is unreachable. |
+| `hTyReach` | every `mty` is in `genLMonoTy tvars depth`'s support | An `init` command samples the declared type via `genLMonoTy`; non-generable types are unreachable. |
+| `hVarInCtx` | a `set` target found in `Γ` exists at some index of `ctx` | The `set` rule picks the target by index into `ctx` via `choose`; the target must therefore be present in the flat context. |
+
+> Note: the generator fixes labels to `""` and metadata to `default`, so the
+> conclusion guarantees the same *expression* and *variable* content, not
+> necessarily identical label/metadata.
+
+---
+
+## 3. Summary table
+
+| Theorem | Direction | Side-conditions | Assumed (unproved) |
+|---|---|---|---|
+| `genLExprBase_sound` | sound | `SimpleType τ` | — |
+| `genIndirPoly_sound` | sound | `SimpleType τ`, simple poly-op args | — |
+| `genLExpr_sound` | sound | `SimpleType τ`, simple op/poly-op args | — |
+| `genLExprBase_complete` | complete | `SimpleType τ`, `HasTypeA'`, `emptyNames`, `allVarsInCtx`, `AllTypesSimple`, `termDepth ≤ depth` | — |
+| `genLExpr_complete` | complete | base conditions ∨ `IsPolyApp` | — |
+| `genCmd_sound` | sound | `VarCtxCorresponds`, `GenLExprSound`, `FreshNamesDisjointFromExprs` | `FreshNamesDisjointFromExprs` |
+| `genCmds_sound` | sound | `GenCmdSoundEnv` (bundles the above, quantified over contexts) | `freshDisjoint` field |
+| `genCmd_complete` | complete | `CmdHasTypeA`, `GenLExprComplete`, `hNameReach`, `hTyReach`, `hVarInCtx` | — |
+
+## 4. Notes on the assumed conditions
+
+- **`FreshNamesDisjointFromExprs`** (the `hDisjoint` / `freshDisjoint`
+  condition) is the single unproved assumption in the command-soundness chain.
+  It asserts that names produced by `genFreshName` never collide with free
+  variables in generated expressions. This is morally true — fvars are drawn
+  from `fctx` via `pickFVar`, while fresh names are generated to avoid `ctx` —
+  but it has not yet been formalized as a standalone theorem. See the docstring
+  at `CmdHasTypeAGen.lean:286`.
+
+- **`GenLExprSound` / `GenLExprComplete`** are stated as `def` predicates in
+  `CmdHasTypeAGen.lean` and taken as hypotheses there to avoid a Mathlib
+  dependency in the command layer; they are *discharged* by the proved
+  `genLExpr_sound` / `genLExpr_complete` in `HasTypeAGen.lean`.
