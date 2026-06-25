@@ -236,14 +236,14 @@ namespace SetGen
   · intro h
     have htrue : true ∈ (RandomChoice.coin (1 / 10) : Set Bool) := by
       simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
-                 show (1 / 10 : Rat).den = 10 from by native_decide,
-                 show (1 / 10 : Rat).num = 1 from by native_decide]
+                 show (1 / 10 : Rat).den = 10 from by decide +kernel,
+                 show (1 / 10 : Rat).num = 1 from by decide +kernel]
       exact ⟨⟨⟨0, Nat.zero_le _, Nat.zero_le _⟩⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, rfl⟩
     have hfalse : false ∈ (RandomChoice.coin (1 / 10) : Set Bool) := by
       simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
-                 show (1 / 10 : Rat).den = 10 from by native_decide,
-                 show (1 / 10 : Rat).num = 1 from by native_decide]
-      refine ⟨⟨⟨10, ?_, ?_⟩⟩, ⟨?_, ?_⟩, rfl⟩ <;> native_decide
+                 show (1 / 10 : Rat).den = 10 from by decide +kernel,
+                 show (1 / 10 : Rat).num = 1 from by decide +kernel]
+      refine ⟨⟨⟨10, ?_, ?_⟩⟩, ⟨?_, ?_⟩, rfl⟩ <;> decide +kernel
     cases h with
     | inl hx => exact ⟨true, htrue, by simpa⟩
     | inr hy => exact ⟨false, hfalse, by simpa⟩
