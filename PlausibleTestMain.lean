@@ -2,6 +2,7 @@ import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import Basalt.PlausibleGen
 import Plausible
+import Strata.DL.Lambda.LExprT
 
 /-!
 # Property-based tests for LExpr generators
@@ -209,8 +210,75 @@ instance : ToFormat Unit where
   let outputFvars := LExpr.collectFvarNames evaled
   outputFvars.all (· ∈ inputFvars) = true
 
+-- ── Resolve after erasure ────────────────────────────────────────────
 
+/-- Known types covering all base types the generator can produce. -/
+private def resolveKnownTypes : Lambda.KnownTypes :=
+  open Lambda.LTy.Syntax in
+  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
+    t[bool], t[int], t[string], t[real], t[regex],
+    t[∀n. bitvec n],
+    t[∀a b. Map %a %b],
+    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
 
+/-- LContext with `intBoolFactory` and all generator-relevant known types. -/
+private def resolveLContext : Lambda.LContext LExprParams' :=
+  { Lambda.LContext.default with
+    functions := intBoolFactory,
+    knownTypes := resolveKnownTypes }
+
+/-- A closed expression generated using only `intBoolFactory` ops,
+    suitable for round-tripping through `eraseTypes` + `resolve`. -/
+structure ResolveTypedExpr where
+  expr : LExpr'
+  ty : LMonoTy
+  deriving BEq
+
+instance : Repr ResolveTypedExpr where
+  reprPrec te _ := s!"({ppExpr te.expr}) : {ppType te.ty}"
+
+instance : Shrinkable ResolveTypedExpr where
+  shrink te :=
+    (shrinkLExpr te.expr).filterMap fun e' =>
+      match LExpr.typeCheck (T := LExprParams') [] e' with
+      | some τ' => some ⟨e', τ'⟩
+      | none => none
+
+private def intBoolOpCtx : OpCtx := factoryOps intBoolFactory
+
+private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
+  let depth := max 1 (s / 20)
+  let tvars : List TyIdentifier := []
+  let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
+  let expr ← genLExprWithOps (G := Plausible.Gen) [] intBoolOpCtx [] tvars [] depth ty
+  pure ⟨expr, ty⟩
+
+instance : Arbitrary ResolveTypedExpr where
+  arbitrary := Gen.backtrack (List.replicate 500 (1, genResolveTypedExpr))
+
+/-- Erase op and fvar type annotations but keep binder types (abs and quant).
+    This is the subset of erasure that `resolve` can always recover from, since
+    it infers op types from the factory and fvar types from the context, but
+    needs binder types to seed fresh type variables. -/
+def eraseOpFvarTypes : LExpr' → LExpr'
+  | .const m c => .const m c
+  | .op m o _ => .op m o none
+  | .fvar m x _ => .fvar m x none
+  | .bvar m i => .bvar m i
+  | .abs m name ty e => .abs m name ty (eraseOpFvarTypes e)
+  | .quant m qk name ty tr e => .quant m qk name ty (eraseOpFvarTypes tr) (eraseOpFvarTypes e)
+  | .app m e1 e2 => .app m (eraseOpFvarTypes e1) (eraseOpFvarTypes e2)
+  | .ite m c t f => .ite m (eraseOpFvarTypes c) (eraseOpFvarTypes t) (eraseOpFvarTypes f)
+  | .eq m e1 e2 => .eq m (eraseOpFvarTypes e1) (eraseOpFvarTypes e2)
+
+def checkResolveAfterErase (te : ResolveTypedExpr) : Bool :=
+  let erased := eraseOpFvarTypes te.expr
+  match LExpr.resolve resolveLContext Lambda.TEnv.default erased with
+  | .ok (resolved, _) => resolved.toLMonoTy == te.ty
+  | .error _ => false
+
+@[reducible] def prop_resolve_after_erase (te : ResolveTypedExpr) : Prop :=
+  checkResolveAfterErase te = true
 
 
 
@@ -353,6 +421,10 @@ def main (args : List String) : IO UInt32 := do
 
   if !(← checkProperty "closedness_preservation"
     (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "erasing type annotations then performing type inference recovers the same type"
+    (NamedBinder "te" (∀ te : ResolveTypedExpr, prop_resolve_after_erase te)) cfg) then
     allPassed := false
 
   IO.println ""

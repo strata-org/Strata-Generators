@@ -1,10 +1,11 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import Basalt.Examples.ArbString.Def
 import Strata.Languages.Core.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
 
-open Lambda RandomChoice Core Imperative
+open Lambda RandomChoice Core Imperative ArbString
 
 /-!
 # Core generator definitions for well-typed `Cmd`s
@@ -40,14 +41,20 @@ def VarCtx.isFresh (ctx : VarCtx) (x : String) : Bool :=
 
 -- ── Fresh name generation ──────────────────────────────────────────────
 
-/-- Generate a fresh variable name not in `ctx` by appending a numeric suffix. -/
+/-- A fallback name guaranteed to be fresh: a string of `x` characters longer
+    than any name in the context. -/
+def fallbackFreshName (ctx : VarCtx) : String :=
+  String.ofList (List.replicate (ctx.names.foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
+
+/-- Generate a fresh variable name not in `ctx`. Uses `String.arbitrary` for
+    randomness and falls back to a length-based guarantee when the random
+    name collides. -/
 def genFreshName [Gen G] (ctx : VarCtx) : G String := do
-  let n ← ArbNat.Nat.arbitrary
-  let name := "v" ++ toString n
-  if ctx.isFresh name then
-    pure name
+  let s ← String.arbitrary
+  if ctx.isFresh s then
+    pure s
   else
-    pure ("v" ++ toString (ctx.names.length + n))
+    pure (fallbackFreshName ctx)
 
 -- ── Command sub-generators ─────────────────────────────────────────────
 
