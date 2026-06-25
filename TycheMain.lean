@@ -2,6 +2,7 @@ import StrataGenerators.Tyche
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import Basalt.IO
+import Strata.DL.Lambda.LExprT
 
 open Lambda RandomChoice ArbNat Tyche Std Core Imperative
 
@@ -259,6 +260,65 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   let preserved := outputFvars.all (· ∈ inputFvars)
   return ⟨expr, ty, evaled, preserved, d⟩
 
+-- ── Resolve after erasure property ──────────────────────────────────
+
+private def resolveKnownTypes : Lambda.KnownTypes :=
+  open Lambda.LTy.Syntax in
+  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
+    t[bool], t[int], t[string], t[real], t[regex],
+    t[∀n. bitvec n],
+    t[∀a b. Map %a %b],
+    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
+
+private def resolveLContext : Lambda.LContext LExprParams' :=
+  { Lambda.LContext.default with
+    functions := intBoolFactory,
+    knownTypes := resolveKnownTypes }
+
+private def intBoolOpCtx : OpCtx := factoryOps intBoolFactory
+
+private def eraseOpFvarTypes : LExpr' → LExpr'
+  | .const m c => .const m c
+  | .op m o _ => .op m o none
+  | .fvar m x _ => .fvar m x none
+  | .bvar m i => .bvar m i
+  | .abs m name ty e => .abs m name ty (eraseOpFvarTypes e)
+  | .quant m qk name ty tr e => .quant m qk name ty (eraseOpFvarTypes tr) (eraseOpFvarTypes e)
+  | .app m e1 e2 => .app m (eraseOpFvarTypes e1) (eraseOpFvarTypes e2)
+  | .ite m c t f => .ite m (eraseOpFvarTypes c) (eraseOpFvarTypes t) (eraseOpFvarTypes f)
+  | .eq m e1 e2 => .eq m (eraseOpFvarTypes e1) (eraseOpFvarTypes e2)
+
+structure ResolveAfterEraseResult where
+  expr : LExpr'
+  expectedTy : LMonoTy
+  resolvedTy : Option LMonoTy
+  generatorSize : Nat
+
+instance : Tyche.TycheSample ResolveAfterEraseResult where
+  toSample r :=
+    let passed := r.resolvedTy == some r.expectedTy
+    { representation := s!"{ppExpr r.expr} : {ppType r.expectedTy}"
+      status := if passed then .passed else .failed
+      features := [
+        ("resolve_result", .nominal (if passed then "pass" else "fail")),
+        ("type_kind", .nominal (typeKind r.expectedTy)),
+        ("expr_depth", .ordinal (exprDepth r.expr)),
+        ("expr_size", .ordinal (exprSize r.expr)),
+        ("expr_kind", .nominal (exprKind r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+def genAndCheckResolveAfterErase (depth : Nat := 0) : IO ResolveAfterEraseResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let tvars : List TyIdentifier := []
+  let ty ← genLMonoTy (G := IO) tvars d
+  let expr ← genLExprWithOps (G := IO) [] intBoolOpCtx [] tvars [] d ty
+  let erased := eraseOpFvarTypes expr
+  let resolvedTy := match LExpr.resolve resolveLContext Lambda.TEnv.default erased with
+    | .ok (resolved, _) => some resolved.toLMonoTy
+    | .error _ => none
+  return ⟨expr, ty, resolvedTy, d⟩
+
 -- ── Command-level Tyche support ──────────────────────────────────────
 
 /-- Classify the top-level command constructor. -/
@@ -416,6 +476,13 @@ def main (args : List String) : IO Unit := do
   let clsContent ← IO.FS.readFile (outputPath ++ ".cls")
   handle.putStr clsContent
   IO.FS.removeFile (outputPath ++ ".cls")
+
+  -- Run the resolve-after-erase property
+  Tyche.run (genAndCheckResolveAfterErase)
+    { numSamples, propertyName := "Erasing type annotations then resolving recovers the same type", outputPath := outputPath ++ ".res" }
+  let resContent ← IO.FS.readFile (outputPath ++ ".res")
+  handle.putStr resContent
+  IO.FS.removeFile (outputPath ++ ".res")
 
   -- Run command-level property tests (one panel each)
   Tyche.run (genAndCheckInitFresh)
