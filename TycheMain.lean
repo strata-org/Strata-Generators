@@ -59,7 +59,9 @@ def exprKind : LExpr' → String
   | .eq _ _ _ => "eq"
   | .const _ (.boolConst _) => "boolConst"
   | .const _ (.intConst _) => "intConst"
-  | .const _ _ => "const"
+  | .const _ (.strConst _) => "strConst"
+  | .const _ (.realConst _) => "realConst"
+  | .const _ (.bitvecConst _ _) => "bitvecConst"
   | .quant _ _ _ _ _ _ => "quant"
 
 /-- Classify the top-level type constructor. -/
@@ -86,6 +88,18 @@ instance : Tyche.TycheSample TypedExpr where
         ("type_kind", .nominal (typeKind te.ty)),
         ("type_depth", .ordinal (monoTyDepth te.ty)),
         ("generator_size", .ordinal te.generatorSize)
+      ] }
+
+/-- A generated expression carrying *only* its term-kind classification.
+    Because the sample has a single nominal feature, Tyche renders it as a
+    plain bar chart (the "distribution of term_kind") rather than a mosaic. -/
+structure TermKind where
+  expr : LExpr'
+instance : Tyche.TycheSample TermKind where
+  toSample tk :=
+    { representation := ppExpr tk.expr
+      features := [
+        ("term_kind", .nominal (exprKind tk.expr))
       ] }
 
 /-- A generated monotype, ready for Tyche. -/
@@ -166,6 +180,11 @@ def genTypedExpr (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) 
   let ty ← genLMonoTy (G := IO) tvars d
   let expr ← genLExprWithOps (G := IO) defaultFCtx coreOpCtx corePolyOps tvars [] d ty
   return ⟨expr, ty, d⟩
+
+/-- Generate an expression and keep only its term-kind classification. -/
+def genTermKind (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TermKind := do
+  let te ← genTypedExpr depth tvars
+  return ⟨te.expr⟩
 
 /-- Generate just a monotype. -/
 def genType (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO LMonoTy := do
@@ -290,6 +309,19 @@ private def eraseAllTypes : LExpr' → LExpr'
   | .ite m c t f => .ite m (eraseAllTypes c) (eraseAllTypes t) (eraseAllTypes f)
   | .eq m e1 e2 => .eq m (eraseAllTypes e1) (eraseAllTypes e2)
 
+/-- Whether the expression contains a quantifier (`∀`/`∃`) anywhere. Every known
+    counterexample to the resolve-after-erase property contains one: after the
+    binder annotation is erased, `LExpr.resolve` gives the bound variable a fresh
+    type variable and then rejects the quantifier with a *syntactic* `≠ bool`
+    check on the body instead of unifying it with `bool`. -/
+private def containsQuant : LExpr' → Bool
+  | .quant _ _ _ _ _ _ => true
+  | .abs _ _ _ b => containsQuant b
+  | .app _ a b => containsQuant a || containsQuant b
+  | .ite _ c t e => containsQuant c || containsQuant t || containsQuant e
+  | .eq _ a b => containsQuant a || containsQuant b
+  | _ => false
+
 /-- Whether the ground type `target` is a substitution instance of `inferred`
     (i.e. `inferred` generalizes `target`), checked via unification. This also
     abstracts over the names of the fresh type variables `resolve` introduces. -/
@@ -306,12 +338,15 @@ structure ResolveAfterEraseResult where
 
 instance : Tyche.TycheSample ResolveAfterEraseResult where
   toSample r :=
-    -- After full erasure `resolve` infers a principal type that may be more
-    -- general than the generation type, so we check the instance relation.
-    -- A `resolve` failure (e.g. on a fully-erased `∃x. x`) is a vacuous pass.
-    let passed := match r.resolvedTy with
-      | some inferred => isInstanceOf r.expectedTy inferred
-      | none => true
+    -- Counterexample-focused scoring: a sample PASSES only when `resolve`
+    -- succeeds *and* infers a type the generation type is an instance of.
+    -- A `resolve` *failure* is now scored as a FAIL (a counterexample) rather
+    -- than a vacuous pass, so these cases surface in the Tyche panel. The
+    -- `failure_mode` feature distinguishes the two kinds of counterexample.
+    let failureMode := match r.resolvedTy with
+      | some inferred => if isInstanceOf r.expectedTy inferred then "none" else "wrong_type"
+      | none => "resolve_failed"
+    let passed := failureMode == "none"
     let general := match r.resolvedTy with
       | some inferred => !(inferred == r.expectedTy)
       | none => false
@@ -321,6 +356,12 @@ instance : Tyche.TycheSample ResolveAfterEraseResult where
       status := if passed then .passed else .failed
       features := [
         ("resolve_result", .nominal (if passed then "pass" else "fail")),
+        -- Which kind of counterexample: `resolve_failed` (resolve errored) vs
+        -- `wrong_type` (resolve succeeded but inferred a non-instance type) vs
+        -- `none` (passing sample).
+        ("failure_mode", .nominal failureMode),
+        -- Does the counterexample contain a quantifier? (Expected: every failure.)
+        ("has_quantifier", .nominal (if containsQuant r.expr then "yes" else "no")),
         ("inferred_more_general", .nominal (if general then "yes" else "no")),
         ("resolve_succeeded", .nominal (if r.resolvedTy.isSome then "yes" else "no")),
         ("type_kind", .nominal (typeKind r.expectedTy)),
@@ -330,6 +371,8 @@ instance : Tyche.TycheSample ResolveAfterEraseResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
+/-- Generate one expression, erase its type annotations, and re-infer with
+    `LExpr.resolve`. The `resolvedTy` is `none` when `resolve` errors. -/
 def genAndCheckResolveAfterErase (depth : Nat := 0) : IO ResolveAfterEraseResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
@@ -340,6 +383,32 @@ def genAndCheckResolveAfterErase (depth : Nat := 0) : IO ResolveAfterEraseResult
     | .ok (resolved, _) => some resolved.toLMonoTy
     | .error _ => none
   return ⟨expr, ty, resolvedTy, d⟩
+
+/-- Whether a result is a counterexample to the resolve-after-erase property:
+    either `resolve` failed, or it inferred a type the generation type is not an
+    instance of. -/
+private def isResolveCounterexample (r : ResolveAfterEraseResult) : Bool :=
+  match r.resolvedTy with
+  | some inferred => !(isInstanceOf r.expectedTy inferred)
+  | none => true
+
+/-- Search for a *counterexample* to the resolve-after-erase property, so the
+    Tyche panel is densely populated with failing cases (counterexamples are
+    rare — well under 1% of generated terms — so an unbiased panel shows only a
+    handful). Retries generation up to `budget` times; if none is found within
+    the budget, returns the last sample generated so the run still terminates. -/
+partial def genResolveCounterexample (budget : Nat := 4000) : IO ResolveAfterEraseResult := do
+  let mut last : Option ResolveAfterEraseResult := none
+  for _ in List.range budget do
+    let r ← try some <$> genAndCheckResolveAfterErase catch _ => pure none
+    match r with
+    | some res =>
+      if isResolveCounterexample res then return res
+      last := some res
+    | none => pure ()
+  match last with
+  | some res => return res
+  | none => genAndCheckResolveAfterErase
 
 -- ── Command-level Tyche support ──────────────────────────────────────
 
@@ -435,6 +504,56 @@ def genAndCheckSetPreservesVar : IO CmdSetPreservesVarResult := do
   return { cmd, ctxSize := baseCtx.length, generatorSize := d,
            passed := checkSetPreservesVar cmd baseCtx }
 
+-- ── Panel 4: store type preservation ─────────────────────────────────
+
+structure CmdStoreTypePreservationResult where
+  cmd : Cmd Expression
+  ctxSize : Nat
+  generatorSize : Nat
+  passed : Bool
+
+instance : Tyche.TycheSample CmdStoreTypePreservationResult where
+  toSample r :=
+    { representation := ppCmd r.cmd
+      status := if r.passed then .passed else .failed
+      features := [
+        ("cmd_kind", .nominal (cmdKind r.cmd)),
+        ("ctx_size", .ordinal r.ctxSize),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+def genAndCheckStoreTypePreservation : IO CmdStoreTypePreservationResult := do
+  let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
+  return { cmd, ctxSize := baseCtx.length, generatorSize := d,
+           passed := checkStoreTypePreservation cmd baseCtx }
+
+-- ── Panel 5: symbolic/concrete eval agreement ────────────────────────
+
+structure CmdEvalRunAgreementResult where
+  cmd : Cmd Expression
+  ctx : VarCtx
+  ctxSize : Nat
+  generatorSize : Nat
+  passed : Bool
+
+instance : Tyche.TycheSample CmdEvalRunAgreementResult where
+  toSample r :=
+    { representation := ppCmd r.cmd
+      status := if r.passed then .passed else .failed
+      features := [
+        ("cmd_kind", .nominal (cmdKind r.cmd)),
+        -- How the command's condition reduced, which determines whether the
+        -- symbolic and concrete evaluators take the same branch.
+        ("condition_kind", .nominal (cmdConditionKind r.cmd r.ctx)),
+        ("ctx_size", .ordinal r.ctxSize),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+def genAndCheckEvalRunAgreement : IO CmdEvalRunAgreementResult := do
+  let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
+  return { cmd, ctx := baseCtx, ctxSize := baseCtx.length, generatorSize := d,
+           passed := checkEvalRunAgreement cmd baseCtx }
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -444,6 +563,14 @@ def main (args : List String) : IO Unit := do
 
   -- Run the typed expression generator
   Tyche.run (genTypedExpr) { numSamples, propertyName := "Distribution of terms generated by genLExpr", outputPath }
+
+  -- Run the term-kind-only generator (single nominal feature → plain bar chart)
+  Tyche.run (genTermKind)
+    { numSamples, propertyName := "Distribution of term_kind", outputPath := outputPath ++ ".tk" }
+  let tkContent ← IO.FS.readFile (outputPath ++ ".tk")
+  let tkHandle ← IO.FS.Handle.mk outputPath .append
+  tkHandle.putStr tkContent
+  IO.FS.removeFile (outputPath ++ ".tk")
 
   -- Run the typecheck property
   Tyche.run (genAndTypeCheck)
@@ -476,12 +603,14 @@ def main (args : List String) : IO Unit := do
   handle.putStr clsContent
   IO.FS.removeFile (outputPath ++ ".cls")
 
-  -- Run the resolve-after-erase property
-  Tyche.run (genAndCheckResolveAfterErase)
-    { numSamples, propertyName := "Erasing type annotations then resolving recovers the same type", outputPath := outputPath ++ ".res" }
-  let resContent ← IO.FS.readFile (outputPath ++ ".res")
-  handle.putStr resContent
-  IO.FS.removeFile (outputPath ++ ".res")
+  -- Counterexample-focused panel: every sample here is a *counterexample* to the
+  -- resolve-after-erase property (found by rejection-sampling), so the panel is
+  -- densely populated with failing cases for visualization.
+  Tyche.run (genResolveCounterexample)
+    { numSamples, propertyName := "Counterexamples: erase types then resolve", outputPath := outputPath ++ ".resX" }
+  let resXContent ← IO.FS.readFile (outputPath ++ ".resX")
+  handle.putStr resXContent
+  IO.FS.removeFile (outputPath ++ ".resX")
 
   -- Run command-level property tests (one panel each)
   Tyche.run (genAndCheckInitFresh)
@@ -501,6 +630,18 @@ def main (args : List String) : IO Unit := do
   let cmd3 ← IO.FS.readFile (outputPath ++ ".cmd3")
   handle.putStr cmd3
   IO.FS.removeFile (outputPath ++ ".cmd3")
+
+  Tyche.run (genAndCheckStoreTypePreservation)
+    { numSamples, propertyName := "genCmd: store type preservation under eval", outputPath := outputPath ++ ".cmd4" }
+  let cmd4 ← IO.FS.readFile (outputPath ++ ".cmd4")
+  handle.putStr cmd4
+  IO.FS.removeFile (outputPath ++ ".cmd4")
+
+  Tyche.run (genAndCheckEvalRunAgreement)
+    { numSamples, propertyName := "genCmd: symbolic/concrete eval agreement", outputPath := outputPath ++ ".cmd5" }
+  let cmd5 ← IO.FS.readFile (outputPath ++ ".cmd5")
+  handle.putStr cmd5
+  IO.FS.removeFile (outputPath ++ ".cmd5")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow

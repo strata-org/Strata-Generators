@@ -305,6 +305,18 @@ def checkResolveAfterErase (te : ResolveTypedExpr) : Bool :=
 @[reducible] def prop_resolve_after_erase (te : ResolveTypedExpr) : Prop :=
   checkResolveAfterErase te = true
 
+/-- Run `resolve` on the fully-erased term and report the outcome as a string:
+    `none` if the property holds (resolve succeeded and inferred a general-enough
+    type), or `some msg` describing the counterexample — either the `resolve`
+    error message verbatim, or the unexpected inferred type. -/
+def resolveErrorMessage (te : ResolveTypedExpr) : Option String :=
+  let erased := eraseAllTypes te.expr
+  match LExpr.resolve resolveLContext Lambda.TEnv.default erased with
+  | .ok (resolved, _) =>
+    if isInstanceOf te.ty resolved.toLMonoTy then none
+    else some s!"inferred {ppType resolved.toLMonoTy}, not an instance of {ppType te.ty}"
+  | .error e => some s!"{e}"
+
 
 -- ── Command generation via Plausible.Gen ─────────────────────────────
 
@@ -384,6 +396,16 @@ instance : Arbitrary GenCmdsWithCtx where
 @[reducible] def prop_cmd_set_preserves_var (gc : GenCmdWithCtx) : Prop :=
   checkSetPreservesVar gc.cmd gc.inCtx = true
 
+-- Store type preservation: running a command on a well-typed store leaves every
+-- variable bound to a value that still typechecks at its declared type.
+@[reducible] def prop_cmd_store_type_preservation (gc : GenCmdWithCtx) : Prop :=
+  checkStoreTypePreservation gc.cmd gc.inCtx = true
+
+-- Symbolic/concrete agreement: whenever concrete execution (`Cmd.run`) succeeds,
+-- symbolic simulation (`Cmd.eval`) also succeeds with the same store.
+@[reducible] def prop_cmd_eval_run_agreement (gc : GenCmdWithCtx) : Prop :=
+  checkEvalRunAgreement gc.cmd gc.inCtx = true
+
 -- ── Test runner ──────────────────────────────────────────────────────
 
 def checkProperty (name : String) (p : Prop) [Testable p]
@@ -400,6 +422,38 @@ def checkProperty (name : String) (p : Prop) [Testable p]
     IO.println s!"FAIL (after {n} trials)"
     IO.eprintln s!"    {Testable.formatFailure "" xs n}"
     return false
+
+/-- Sample erased terms and print the `resolve` error messages behind any
+    counterexamples to the resolve-after-erase property. Shows, per failure, the
+    erased term and the verbatim `resolve` outcome, plus a tally of distinct
+    error messages. Returns the number of counterexamples found. -/
+def printResolveErrors (numTrials maxSize : Nat) : IO Nat := do
+  let attempts := max numTrials 2000
+  let mut shown := 0
+  let mut msgTally : List (String × Nat) := []
+  IO.println "    ── resolve error messages on counterexamples ──"
+  for i in List.range attempts do
+    let size := i % (maxSize + 1)
+    let te ← try Gen.run (Arbitrary.arbitrary (α := ResolveTypedExpr)) size
+             catch _ => pure ⟨.const () (.boolConst true), .bool⟩
+    match resolveErrorMessage te with
+    | none => pure ()
+    | some msg =>
+      -- Print the first 15 concrete examples (erased term → error).
+      if shown < 15 then
+        IO.println s!"    erased: {ppExpr (eraseAllTypes te.expr)}"
+        IO.println s!"      → {msg}"
+        shown := shown + 1
+      -- Tally distinct messages (the error string, ignoring specific type-var ids).
+      let key := msg
+      msgTally := match msgTally.find? (·.1 == key) with
+        | some _ => msgTally.map (fun (m, c) => if m == key then (m, c + 1) else (m, c))
+        | none => (key, 1) :: msgTally
+  IO.println ""
+  IO.println s!"    distinct resolve error messages ({msgTally.length}):"
+  for (m, c) in msgTally.reverse do
+    IO.println s!"      [{c}×] {m}"
+  return shown
 
 def main (args : List String) : IO UInt32 := do
   let numTrials := (args[0]? >>= String.toNat?).getD 1000
@@ -436,6 +490,11 @@ def main (args : List String) : IO UInt32 := do
   if !(← checkProperty "erasing type annotations then performing type inference recovers the same type"
     (NamedBinder "te" (∀ te : ResolveTypedExpr, prop_resolve_after_erase te)) cfg) then
     allPassed := false
+    -- Surface the actual `resolve` error messages behind the counterexamples.
+    -- The standard Plausible failure output only shows one shrunk term; here we
+    -- sample fresh terms and print the resolve errors verbatim so the failure
+    -- mode (e.g. "Quantifier body has non-Boolean type") is visible.
+    let _ ← printResolveErrors numTrials maxSize
 
   IO.println ""
   IO.println "Command generator properties:"
@@ -444,7 +503,7 @@ def main (args : List String) : IO UInt32 := do
     (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_init_fresh gc)) cfg) then
     allPassed := false
 
-  if !(← checkProperty "cmd: expressions typecheck"
+  if !(← checkProperty "cmd: commands typecheck"
     (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_expr_typechecks gc)) cfg) then
     allPassed := false
 
@@ -454,6 +513,14 @@ def main (args : List String) : IO UInt32 := do
 
   if !(← checkProperty "cmd: set preserves variable"
     (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_set_preserves_var gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: store type preservation under eval"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_store_type_preservation gc)) cfg) then
+    allPassed := false
+
+  if !(← checkProperty "cmd: symbolic/concrete eval agreement"
+    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_eval_run_agreement gc)) cfg) then
     allPassed := false
 
   IO.println ""

@@ -80,6 +80,18 @@ def envFromVarCtx (ctx : VarCtx) : Core.Env :=
     CmdEval.update env ⟨name, ()⟩ (.forAll [] mty) (.intConst () 0))
     Core.Env.init
 
+/-- Build an `Env` from a `VarCtx`, seeding each variable with a *well-typed*
+    placeholder value: an annotated free variable `(x : τ)`, which typechecks to
+    exactly its declared type `τ`. This contrasts with `envFromVarCtx`, which
+    seeds every variable with `intConst 0` regardless of its declared type and
+    would therefore start from an ill-typed store for non-`int` variables.
+    Used by the store-type-preservation property so that the *starting* store is
+    well-typed and any failure is attributable to command evaluation. -/
+def envFromVarCtxWellTyped (ctx : VarCtx) : Core.Env :=
+  ctx.foldl (fun env (name, mty) =>
+    CmdEval.update env ⟨name, ()⟩ (.forAll [] mty) (.fvar () ⟨name, ()⟩ (some mty)))
+    Core.Env.init
+
 -- ── Evaluation-based properties ───────────────────────────────────────
 
 /-- After running `set x (det e)`, the variable `x` is still in the store. -/
@@ -89,6 +101,65 @@ def checkSetPreservesVar (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
     let env' := Cmd.run (envFromVarCtx ctx) cmd
     env'.error.isNone && (CmdEval.lookup env' x).isSome
   | _ => true
+
+/-- Every variable binding currently in the store typechecks to its declared
+    type. Bindings with no declared type are a vacuous pass. -/
+def storeWellTyped (E : Core.Env) : Bool :=
+  E.exprEnv.state.toSingleMap.all fun (_, (optTy, e)) =>
+    match optTy with
+    | some τ => LExpr.typeCheck (T := LExprParams') [] e == some τ
+    | none => true
+
+/-- **Store type preservation.** Running a command on a well-typed store leaves
+    every variable bound to a value that still typechecks at its declared type.
+    This is the command-level analogue of expression-level type preservation
+    under `eval`.
+
+    We seed the input context with well-typed placeholders (`envFromVarCtxWellTyped`)
+    so the starting store is well-typed, then run the command. If the run errors
+    (e.g. `cover`, which `Cmd.run` does not support, or a failed `assert`) the
+    command never produced a new store, so we treat it as a vacuous pass — this
+    deliberately avoids the invalid "commands never error" framing. -/
+def checkStoreTypePreservation (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
+  let env' := Cmd.run (envFromVarCtxWellTyped ctx) cmd
+  if env'.error.isNone then storeWellTyped env' else true
+
+/-- **Symbolic/concrete agreement (refinement).** Concrete execution `Cmd.run`
+    refines symbolic simulation `Cmd.eval`: whenever the concrete run succeeds
+    without error, the symbolic evaluation also succeeds and produces the *same*
+    variable store.
+
+    We state the *refinement* direction rather than full equivalence because the
+    two evaluators legitimately diverge when concrete execution gets stuck while
+    symbolic execution continues:
+      • `assert e` with `e` not reducing to a concrete bool: `Cmd.run` errors,
+        `Cmd.eval` defers a proof obligation.
+      • `assume false`: `Cmd.run` errors, `Cmd.eval` adds a path condition.
+      • `cover`: `Cmd.run` errors (unsupported), `Cmd.eval` defers an obligation.
+    In every such case concrete *fails*, so the implication is vacuously true and
+    we make no false claim. On the agreeing cases (`init`/`set`, `assert`/`assume`
+    with a concretely-true condition) both produce identical stores. -/
+def checkEvalRunAgreement (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
+  let σ := envFromVarCtxWellTyped ctx
+  let runEnv := Cmd.run σ cmd
+  let (_, evalEnv) := Cmd.eval σ cmd
+  if runEnv.error.isNone then
+    evalEnv.error.isNone &&
+      (runEnv.exprEnv.state.toSingleMap == evalEnv.exprEnv.state.toSingleMap)
+  else
+    true
+
+/-- Classify how a command's condition reduces, for visualization. For
+    `assert`/`assume`/`cover` we evaluate the condition in the seeded store and
+    report `"true"`, `"false"`, or `"non-concrete"`; other commands are `"n/a"`. -/
+def cmdConditionKind (cmd : Cmd Expression) (ctx : VarCtx) : String :=
+  match cmd with
+  | .assert _ e _ | .assume _ e _ | .cover _ e _ =>
+    match CmdEval.denoteBool (CmdEval.eval (envFromVarCtxWellTyped ctx) e) with
+    | some true => "true"
+    | some false => "false"
+    | none => "non-concrete"
+  | _ => "n/a"
 
 -- ── Generator wrappers ────────────────────────────────────────────────
 
