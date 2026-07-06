@@ -31,10 +31,10 @@ satisfies `CmdHasTypeA`.
     `ctx` map to monomorphic types `forAll [] mty` in `Γ`, and variables not
     in `ctx` are absent from `Γ`. -/
 def VarCtxCorresponds (ctx : VarCtx) (Γ : TContext Unit) : Prop :=
-  (∀ x mty, (x, mty) ∈ ctx →
-    Γ.types.find? (⟨x, ()⟩ : Identifier Unit) = some (.forAll [] mty)) ∧
-  (∀ x, VarCtx.isFresh ctx x = true →
-    Γ.types.find? (⟨x, ()⟩ : Identifier Unit) = none)
+  (∀ (x : Identifier Unit) mty, List.Mem (x, mty) ctx →
+    Γ.types.find? x = some (.forAll [] mty)) ∧
+  (∀ (x : Identifier Unit), VarCtx.isFresh ctx x = true →
+    Γ.types.find? x = none)
 
 -- ── Per-constructor soundness ────────────────────────────────────────
 
@@ -207,19 +207,16 @@ private theorem List.getD_mem_of_lt {xs : List α} {idx : Nat} {d : α}
 
 -- ── Freshness proof for genFreshName ────────────────────────────────
 
-/-- If no entry in `ctx` has a name equal to `name`, then `find?` returns `none`. -/
-private theorem VarCtx.find?_none_of_ne_all (ctx : VarCtx) (name : String)
-    (h : ∀ entry ∈ ctx, entry.1 ≠ name) :
-    VarCtx.find? ctx name = none := by
-  induction ctx with
-  | nil => rfl
-  | cons hd tl ih =>
-    unfold VarCtx.find?
-    have hne := h hd (by exact List.mem_cons_self)
-    simp only [ne_eq] at hne
-    simp only [show (name == hd.1) = false from by
-      rw [beq_eq_false_iff_ne]; exact Ne.symm hne]
-    exact ih (fun entry hmem => h entry (List.mem_cons_of_mem _ hmem))
+/-- If no entry in `ctx` has key equal to `x`, then `find?` returns `none`. -/
+private theorem VarCtx.find?_none_of_ne_all (ctx : VarCtx) (x : Identifier Unit)
+    (h : ∀ entry : Identifier Unit × LMonoTy, List.Mem entry ctx → entry.1 ≠ x) :
+    VarCtx.find? ctx x = none := by
+  unfold VarCtx.find?
+  apply Map.find?_none_of_not_mem_keys'
+  intro hmem
+  rw [Map.keys_eq_map_fst] at hmem
+  obtain ⟨entry, hentry, heq⟩ := List.mem_map.mp hmem
+  exact h entry hentry heq
 
 /-- Strings of different lengths are unequal. -/
 private theorem String.ne_of_length_ne {s₁ s₂ : String} (h : s₁.length ≠ s₂.length) :
@@ -246,25 +243,30 @@ private theorem foldl_max_length_ge_of_mem (xs : List String) (nm : String)
 /-- `fallbackFreshName ctx` is fresh in `ctx` because it is strictly longer
     than every name in the context. -/
 private theorem fallbackFreshName_isFresh (ctx : VarCtx) :
-    VarCtx.isFresh ctx (fallbackFreshName ctx) = true := by
+    VarCtx.isFresh ctx ⟨fallbackFreshName ctx, ()⟩ = true := by
   unfold VarCtx.isFresh
-  have hfind : VarCtx.find? ctx (fallbackFreshName ctx) = none := by
+  have hfind : VarCtx.find? ctx ⟨fallbackFreshName ctx, ()⟩ = none := by
     apply VarCtx.find?_none_of_ne_all
     intro entry hmem
-    apply String.ne_of_length_ne
-    have hlen : (fallbackFreshName ctx).length =
-        (VarCtx.names ctx).foldl (fun acc nm => max acc nm.length) 0 + 1 := by
-      simp [fallbackFreshName, String.length_ofList, List.length_replicate]
-    have hname_mem : entry.1 ∈ VarCtx.names ctx :=
-      List.mem_map_of_mem (f := Prod.fst) hmem
-    have hle := foldl_max_length_ge_of_mem (VarCtx.names ctx) entry.1 hname_mem 0
-    omega
+    -- Identifiers are equal iff their names are; derive name inequality by length.
+    have hname_ne : entry.1.name ≠ fallbackFreshName ctx := by
+      apply String.ne_of_length_ne
+      have hlen : (fallbackFreshName ctx).length =
+          (VarCtx.names ctx).foldl (fun acc nm => max acc nm.length) 0 + 1 := by
+        simp [fallbackFreshName, String.length_ofList, List.length_replicate]
+      have hname_mem : entry.1.name ∈ VarCtx.names ctx :=
+        List.mem_map.mpr ⟨entry, hmem, rfl⟩
+      have hle := foldl_max_length_ge_of_mem (VarCtx.names ctx) entry.1.name hname_mem 0
+      omega
+    intro heq
+    exact hname_ne (congrArg Identifier.name heq)
   simp [hfind]
 
-/-- Every name in the support of `genFreshName ctx` is fresh in `ctx`. -/
+/-- Every name in the support of `genFreshName ctx` is fresh in `ctx` (i.e. its
+    identifier `⟨name, ()⟩` is absent from the context). -/
 theorem genFreshName_produces_fresh (ctx : VarCtx) :
     ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
-      VarCtx.isFresh ctx name = true := by
+      VarCtx.isFresh ctx ⟨name, ()⟩ = true := by
   intro name hmem
   simp only [genFreshName, mem_support_bind_iff] at hmem
   obtain ⟨s, _, hname⟩ := hmem
@@ -315,34 +317,34 @@ theorem genCmd_sound
   · -- init_det
     simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, hname, mty, hmty, e, he, rfl⟩ := hr
-    have hfreshΓ := hCorr.2 name (genFreshName_produces_fresh ctx name hname)
+    have hfreshΓ := hCorr.2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
     have hnovar := hDisjoint name hname mty e he
     have hwt := hExprSound mty e he
     exact ⟨_, CmdHasType'.init_det Γ ⟨name, ()⟩ _ e mty [] default hfreshΓ hnovar rfl (rigidAnnotCompat_forAll_nil mty) hwt⟩
   · -- init_nondet
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, hname, mty, _, rfl⟩ := hr
-    have hfreshΓ := hCorr.2 name (genFreshName_produces_fresh ctx name hname)
+    have hfreshΓ := hCorr.2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
     exact ⟨_, CmdHasType'.init_nondet Γ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)⟩
   · -- set_det
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_choose_iff] at hr
     obtain ⟨idx, ⟨_, hidx⟩, e, he, rfl⟩ := hr
     have hlt : idx.down < ctx.length := by omega
-    have hmem := List.getD_mem_of_lt (d := ("", LMonoTy.bool)) hlt
-    have hfind := hCorr.1 (ctx.getD idx.down ("", .bool)).1 (ctx.getD idx.down ("", .bool)).2 hmem
-    have hwt := hExprSound (ctx.getD idx.down ("", .bool)).2 e he
-    exact ⟨Γ, CmdHasType'.set_det Γ ⟨(ctx.getD idx.down ("", .bool)).1, ()⟩
-      (ctx.getD idx.down ("", .bool)).2 e default hfind hwt⟩
+    have hmem := List.getD_mem_of_lt (d := (⟨"", ()⟩, LMonoTy.bool)) hlt
+    have hfind := hCorr.1 (ctx.getD idx.down (⟨"", ()⟩, .bool)).1 (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 hmem
+    have hwt := hExprSound (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 e he
+    exact ⟨Γ, CmdHasType'.set_det Γ (ctx.getD idx.down (⟨"", ()⟩, .bool)).1
+      (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 e default hfind hwt⟩
   · -- set_nondet
     simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_choose_iff] at hr
     obtain ⟨idx, ⟨_, hidx⟩, rfl⟩ := hr
     have hlt : idx.down < ctx.length := by omega
-    have hmem := List.getD_mem_of_lt (d := ("", LMonoTy.bool)) hlt
-    have hfind := hCorr.1 (ctx.getD idx.down ("", .bool)).1 (ctx.getD idx.down ("", .bool)).2 hmem
-    exact ⟨Γ, CmdHasType'.set_nondet Γ ⟨(ctx.getD idx.down ("", .bool)).1, ()⟩
-      (ctx.getD idx.down ("", .bool)).2 default hfind⟩
+    have hmem := List.getD_mem_of_lt (d := (⟨"", ()⟩, LMonoTy.bool)) hlt
+    have hfind := hCorr.1 (ctx.getD idx.down (⟨"", ()⟩, .bool)).1 (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 hmem
+    exact ⟨Γ, CmdHasType'.set_nondet Γ (ctx.getD idx.down (⟨"", ()⟩, .bool)).1
+      (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 default hfind⟩
   · -- assert
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨e, he, rfl⟩ := hr
@@ -399,7 +401,7 @@ theorem genCmd_complete
     (hVarInCtx : ∀ (x : Identifier Unit) (mty : LMonoTy),
       Γ.types.find? x = some (.forAll [] mty) →
       ∃ idx, idx < ctx.length ∧
-        ctx.getD idx ("", .bool) = (x.name, mty)) :
+        ctx.getD idx (⟨"", ()⟩, .bool) = (x, mty)) :
     ∃ r : GenCmdResult,
       r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∧
       CmdHasTypeA C Γ r.cmd Γ' := by
@@ -408,7 +410,7 @@ theorem genCmd_complete
     have hname := hNameReach x ⟨xty, .det e, md, rfl⟩
     have hmty := hTyReach mty
     have he := hExprComplete mty e hexpr
-    have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, (x.name, mty) :: ctx⟩ : GenCmdResult) ∈
+    have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inl (by
         simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
@@ -417,7 +419,7 @@ theorem genCmd_complete
   | init_nondet x xty mty tys md hfresh _ _ =>
     have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
     have hmty := hTyReach mty
-    have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, (x.name, mty) :: ctx⟩ : GenCmdResult) ∈
+    have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inl (by
         simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
@@ -501,12 +503,12 @@ structure GenCmdSoundEnv (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   exprSound : GenLExprSound fctx octx tvars depth
   /-- Fresh names do not appear as free variables in generated expressions. -/
   freshDisjoint : ∀ ctx, FreshNamesDisjointFromExprs fctx octx tvars ctx depth
-  /-- The `TContext` produced for `(name, mty) :: ctx` equals the insertion
+  /-- The `TContext` produced for `ctx.insert x mty` equals the insertion
       into the `TContext` for `ctx`. This ensures the output `Γ'` from an `init`
       command matches what `toTCtx` produces for the extended `VarCtx`. -/
-  toTCtx_cons : ∀ ctx name mty,
-    toTCtx ((name, mty) :: ctx) =
-      { toTCtx ctx with types := (toTCtx ctx).types.insert ⟨name, ()⟩ (.forAll [] mty) }
+  toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
+    toTCtx (ctx.insert x mty) =
+      { toTCtx ctx with types := (toTCtx ctx).types.insert x (.forAll [] mty) }
 
 /-- Lifted soundness of `genCmd` using a `GenCmdSoundEnv`: every result in the
     generator's support produces a command typed from `env.toTCtx ctx` to
@@ -526,38 +528,38 @@ theorem genCmd_sound_env
   · -- init_det
     simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, hname, mty, hmty, e, he, rfl⟩ := hr
-    have hfreshΓ := (env.corr ctx).2 name (genFreshName_produces_fresh ctx name hname)
+    have hfreshΓ := (env.corr ctx).2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
     have hnovar := (env.freshDisjoint ctx) name hname mty e he
     have hwt := env.exprSound mty e he
-    rw [env.toTCtx_cons]
+    rw [env.toTCtx_insert]
     exact CmdHasType'.init_det _ ⟨name, ()⟩ _ e mty [] default hfreshΓ hnovar rfl (rigidAnnotCompat_forAll_nil mty) hwt
   · -- init_nondet
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, hname, mty, _, rfl⟩ := hr
-    have hfreshΓ := (env.corr ctx).2 name (genFreshName_produces_fresh ctx name hname)
-    rw [env.toTCtx_cons]
+    have hfreshΓ := (env.corr ctx).2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
+    rw [env.toTCtx_insert]
     exact CmdHasType'.init_nondet _ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)
   · -- set_det
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_choose_iff] at hr
     obtain ⟨idx, ⟨_, hidx⟩, e, he, rfl⟩ := hr
     have hlt : idx.down < ctx.length := by omega
-    have hmem := List.getD_mem_of_lt (d := ("", LMonoTy.bool)) hlt
-    have hfind := (env.corr ctx).1 (ctx.getD idx.down ("", .bool)).1
-      (ctx.getD idx.down ("", .bool)).2 hmem
-    have hwt := env.exprSound (ctx.getD idx.down ("", .bool)).2 e he
-    exact CmdHasType'.set_det _ ⟨(ctx.getD idx.down ("", .bool)).1, ()⟩
-      (ctx.getD idx.down ("", .bool)).2 e default hfind hwt
+    have hmem := List.getD_mem_of_lt (d := (⟨"", ()⟩, LMonoTy.bool)) hlt
+    have hfind := (env.corr ctx).1 (ctx.getD idx.down (⟨"", ()⟩, .bool)).1
+      (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 hmem
+    have hwt := env.exprSound (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 e he
+    exact CmdHasType'.set_det _ (ctx.getD idx.down (⟨"", ()⟩, .bool)).1
+      (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 e default hfind hwt
   · -- set_nondet
     simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_choose_iff] at hr
     obtain ⟨idx, ⟨_, hidx⟩, rfl⟩ := hr
     have hlt : idx.down < ctx.length := by omega
-    have hmem := List.getD_mem_of_lt (d := ("", LMonoTy.bool)) hlt
-    have hfind := (env.corr ctx).1 (ctx.getD idx.down ("", .bool)).1
-      (ctx.getD idx.down ("", .bool)).2 hmem
-    exact CmdHasType'.set_nondet _ ⟨(ctx.getD idx.down ("", .bool)).1, ()⟩
-      (ctx.getD idx.down ("", .bool)).2 default hfind
+    have hmem := List.getD_mem_of_lt (d := (⟨"", ()⟩, LMonoTy.bool)) hlt
+    have hfind := (env.corr ctx).1 (ctx.getD idx.down (⟨"", ()⟩, .bool)).1
+      (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 hmem
+    exact CmdHasType'.set_nondet _ (ctx.getD idx.down (⟨"", ()⟩, .bool)).1
+      (ctx.getD idx.down (⟨"", ()⟩, .bool)).2 default hfind
   · -- assert
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨e, he, rfl⟩ := hr
@@ -615,5 +617,5 @@ instance instToFormatUnitCmdHasTypeAGen : ToFormat Unit where
 
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨cmd, ctx'⟩ ← genCmd [] [] [] [("x", .int), ("y", .bool)] 2
+  let ⟨cmd, ctx'⟩ ← genCmd [] [] [] [(⟨"x", ()⟩, .int), (⟨"y", ()⟩, .bool)] 2
   IO.println <| s!"{Std.format cmd |>.pretty} -- ctx: {ctx'}" : IO Unit)

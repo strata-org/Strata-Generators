@@ -51,7 +51,7 @@ theorem genCmd_sound_nil
 
 /-- A `GenCmdSoundEnv` at an empty fvar context, built from the proven
     disjointness fact. The remaining fields — `toTCtx`, `corr`, `exprSound`,
-    `toTCtx_cons` — are the genuine context-dependent obligations the caller
+    `toTCtx_insert` — are the genuine context-dependent obligations the caller
     supplies. -/
 def genCmdSoundEnv_nil
     (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
@@ -59,15 +59,15 @@ def genCmdSoundEnv_nil
     (toTCtx : VarCtx → TContext Unit)
     (corr : ∀ ctx, VarCtxCorresponds ctx (toTCtx ctx))
     (exprSound : GenLExprSound [] octx tvars depth)
-    (toTCtx_cons : ∀ ctx name mty,
-      toTCtx ((name, mty) :: ctx) =
-        { toTCtx ctx with types := (toTCtx ctx).types.insert ⟨name, ()⟩ (.forAll [] mty) }) :
+    (toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
+      toTCtx (ctx.insert x mty) =
+        { toTCtx ctx with types := (toTCtx ctx).types.insert x (.forAll [] mty) }) :
     GenCmdSoundEnv [] octx tvars depth C where
   toTCtx := toTCtx
   corr := corr
   exprSound := exprSound
   freshDisjoint := fun ctx => freshNamesDisjointFromExprs_nil octx tvars ctx depth
-  toTCtx_cons := toTCtx_cons
+  toTCtx_insert := toTCtx_insert
 
 /-- Hypothesis-free soundness of `genCmds` (command sequences) at an empty fvar
     context: every generated sequence satisfies the chained `CmdsHasTypeA`

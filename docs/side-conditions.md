@@ -126,7 +126,7 @@ and (b) conditions about variable contexts and fresh names.
 
 | Predicate | Definition (location) | Role |
 |---|---|---|
-| `VarCtxCorresponds ctx Γ` | line 33 | The flat `VarCtx` agrees with the semantic `TContext Γ`: every `(x, mty) ∈ ctx` maps to `forAll [] mty` in `Γ`, and fresh names are absent from `Γ`. |
+| `VarCtxCorresponds ctx Γ` | line 33 | The `Map`-based `VarCtx` agrees with the semantic `TContext Γ`: every `(x, mty) ∈ ctx` (keyed by `Identifier Unit`) maps to `forAll [] mty` in `Γ`, and fresh identifiers are absent from `Γ`. |
 | `GenLExprSound` | line 281 | Assumed expression-soundness: everything in `genLExpr`'s support at `τ` is well-typed at `τ`. Discharged by `genLExpr_sound` (§1.1). |
 | `GenLExprComplete` | line 368 | Assumed expression-completeness: every well-typed expression is in `genLExpr`'s support. Discharged by `genLExpr_complete` (§1.6). |
 | `FreshNamesDisjointFromExprs` | line 291 | Fresh names from `genFreshName` never occur as free variables in generated expressions. **Now proved for `fctx = []`** as `freshNamesDisjointFromExprs_nil` (`CmdHasTypeAGenSound.lean:25`); it is *false* for nonempty `fctx` (see notes). |
@@ -164,7 +164,7 @@ updated context through an induction on fuel.
 | `corr` | `∀ ctx, VarCtxCorresponds ctx (toTCtx ctx)` | Correspondence at *every* reachable context (the sequence generator extends `ctx` as it goes). |
 | `exprSound` | `GenLExprSound …` | Same as `hExprSound` above. |
 | `freshDisjoint` | `∀ ctx, FreshNamesDisjointFromExprs … ctx …` | Same as `hDisjoint`, but quantified over all contexts reachable during sequence generation. Discharged for `fctx = []` by `freshNamesDisjointFromExprs_nil`. |
-| `toTCtx_cons` | `toTCtx ((name,mty)::ctx) = insert …` | The output `Γ'` of an `init` matches `toTCtx` applied to the extended `VarCtx`, so the chained `CmdsHasTypeA` relation lines up across steps. |
+| `toTCtx_insert` | `toTCtx (ctx.insert x mty) = insert …` | The output `Γ'` of an `init` matches `toTCtx` applied to the extended `VarCtx`, so the chained `CmdsHasTypeA` relation lines up across steps. |
 
 `genCmds_sound` requires no side-conditions beyond a `GenCmdSoundEnv`; the proof
 is an induction on fuel `n` that re-applies `genCmd_sound_env` to each head

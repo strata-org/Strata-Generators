@@ -3878,7 +3878,7 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genBitvecConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genBitvecConst, genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     · obtain ⟨k, _, rfl⟩ := he; rfl
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
@@ -3921,7 +3921,7 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genAbs, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genAbs, genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     · obtain ⟨body, hbody, rfl⟩ := he
       simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars (τ₁ :: bctx) n _ _ hbody]
@@ -3988,7 +3988,7 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
@@ -4057,7 +4057,7 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
@@ -4126,7 +4126,7 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
@@ -4195,7 +4195,7 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,

@@ -815,6 +815,30 @@ def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
     if newTys.isEmpty then tys
     else addNewTypes fuel (tys ++ newTys)
 
+/-- Compute the set of "generable types" reachable from a context, following
+    Pałka et al. (2011, Section 4). This is a conservative over-approximation of
+    the types that are *inhabited* (i.e. for which some term can be built) given
+    the variables and operators in scope. It is used to bias type guesses — in
+    the (App) rule and when instantiating undetermined type variables of a
+    polymorphic operator (see `genIndirPoly`) — towards types that are plausibly
+    inhabited, rather than guessing arbitrary types that would dead-end and force
+    backtracking.
+
+    The computation has two stages, mirroring the paper:
+    1. **Seed.** Collect the syntactic sub-types (`syntacticSubtypes`) of every
+       type in the bvar, fvar, and op contexts. Decomposing into sub-types (down
+       to base types) is what makes the next stage able to fire: e.g. from
+       `f : String → Bool → Int` we seed `String`, `Bool`, `Int`, `Bool → Int`,
+       not just the whole arrow type.
+    2. **Close under application** (`addNewTypes`). Repeatedly add `τ` whenever
+       both `σ → τ` and `σ` are already present — i.e. if we can build a function
+       and its argument, we can build its result. `fuel = initial.length` bounds
+       the iterations (each round adds at least one new type, or stops).
+
+    Note: unlike the paper, we do not additionally *fabricate* new arrow types
+    from this set here; arrow-type generation is handled separately by
+    `genLMonoTy`. So this implements only the "select an inhabited type directly"
+    half of the paper's construction. -/
 def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
   let allTys := bctx ++ fctx.map Prod.snd ++ octx.map Prod.snd
   let initial := (allTys.flatMap syntacticSubtypes).eraseDups

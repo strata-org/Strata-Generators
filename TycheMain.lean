@@ -279,6 +279,100 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   let preserved := outputFvars.all (· ∈ inputFvars)
   return ⟨expr, ty, evaled, preserved, d⟩
 
+-- ── Sequence.map inspection panel ────────────────────────────────────
+-- This panel is *not* a pass/fail property in the usual sense: it exists so we
+-- can eyeball the terms `genLExpr` produces that actually call `Sequence.map`
+-- via the IndirPoly rule, and confirm the type variables `α`, `β` are
+-- instantiated consistently. `Sequence.map : ∀α β. (α → β) → Sequence<α> →
+-- Sequence<β>`; targeting `Sequence<β>` fixes `β` by unification but leaves `α`
+-- to be *sampled* from the generable types.
+
+/-- Find the first `Sequence.map` op-node in an expression and recover the
+    instantiated `(α, β)` from its annotation `(α → β) → Sequence<α> → Sequence<β>`. -/
+partial def seqMapInstantiation : LExpr' → Option (LMonoTy × LMonoTy)
+  | .op _ o (some (.arrow (.arrow a b) _)) =>
+    if o.name == "Sequence.map" then some (a, b) else none
+  | .op _ _ _ => none
+  | .app _ fn arg => match seqMapInstantiation fn with
+    | some r => some r | none => seqMapInstantiation arg
+  | .abs _ _ _ body => seqMapInstantiation body
+  | .quant _ _ _ _ tr body => match seqMapInstantiation tr with
+    | some r => some r | none => seqMapInstantiation body
+  | .ite _ c t e => match seqMapInstantiation c with
+    | some r => some r
+    | none => match seqMapInstantiation t with
+      | some r => some r | none => seqMapInstantiation e
+  | .eq _ e₁ e₂ => match seqMapInstantiation e₁ with
+    | some r => some r | none => seqMapInstantiation e₂
+  | _ => none
+
+/-- Whether an expression calls `Sequence.map` anywhere. -/
+def usesSeqMap (e : LExpr') : Bool := (seqMapInstantiation e).isSome
+
+structure SeqMapResult where
+  expr : LExpr'
+  ty : LMonoTy
+  /-- Whether rejection sampling actually found a `Sequence.map` call within
+      budget (if `false`, the panel shows a fallback term). -/
+  found : Bool
+  generatorSize : Nat
+
+instance : Tyche.TycheSample SeqMapResult where
+  toSample r :=
+    let inst := seqMapInstantiation r.expr
+    let wellTyped := LExpr.typeCheck (T := LExprParams') [] r.expr == some r.ty
+    -- A sample "passes" iff it is a well-typed Sequence.map call.
+    let passed := r.found && wellTyped
+    let instStr := match inst with
+      | some (a, b) => s!"   [α := {ppType a}, β := {ppType b}]"
+      | none => ""
+    { representation := s!"{ppExpr r.expr} : {ppType r.ty}{instStr}"
+      status := if passed then .passed else .failed
+      features := [
+        ("calls_seq_map", .nominal (if r.found then "yes" else "no")),
+        ("well_typed", .nominal (if wellTyped then "yes" else "no")),
+        -- The sampled α and the unification-fixed β, as observed on the node.
+        ("alpha", .nominal (match inst with | some (a, _) => ppType a | none => "—")),
+        ("beta", .nominal (match inst with | some (_, b) => ppType b | none => "—")),
+        ("alpha_eq_beta", .nominal (match inst with
+          | some (a, b) => if a == b then "yes" else "no"
+          | none => "—")),
+        ("expr_depth", .ordinal (exprDepth r.expr)),
+        ("expr_size", .ordinal (exprSize r.expr)),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+/-- Rejection-sample until `genLExpr` produces a term that calls `Sequence.map`.
+    We target `Sequence<elem>` types directly (element drawn from a small easy
+    set) to keep the hit rate up, and retry up to `budget` draws. If none is
+    found in budget, return the last generated term with `found := false` so the
+    run still terminates (mirrors `genResolveCounterexample`).
+
+    The per-sample depth floor is 3 (not 2): at depth 2 there is often not
+    enough budget to build both of `Sequence.map`'s arguments (a function
+    `α → β` and a `Sequence<α>`) in one non-backtracking draw. `budget` is kept
+    modest to keep the overall run fast — most samples are genuine
+    `Sequence.map` calls, and the occasional fallback (a non-`Sequence.map`
+    term) is fine: it is marked `calls_seq_map = no` and scored `failed` so it
+    is visually distinct in the panel. -/
+partial def genSeqMapCall (budget : Nat := 600) : IO SeqMapResult := do
+  let d ← IO.rand 3 5
+  let elems : List LMonoTy := [.int, .bool]
+  let mut last : Option (LExpr' × LMonoTy) := none
+  for _ in List.range budget do
+    let ei ← IO.rand 0 (elems.length - 1)
+    let ty := LMonoTy.seq (elems.getD ei .int)
+    let r ← try some <$> genLExprWithOps (G := IO) defaultFCtx coreOpCtx corePolyOps [] [] d ty
+            catch _ => pure none
+    match r with
+    | some e =>
+      last := some (e, ty)
+      if usesSeqMap e then return ⟨e, ty, true, d⟩
+    | none => pure ()
+  match last with
+  | some (e, ty) => return ⟨e, ty, false, d⟩
+  | none => return ⟨.const () (.boolConst true), .bool, false, d⟩
+
 -- ── Resolve after erasure property ──────────────────────────────────
 
 private def resolveKnownTypes : Lambda.KnownTypes :=
@@ -611,6 +705,17 @@ def main (args : List String) : IO Unit := do
   let resXContent ← IO.FS.readFile (outputPath ++ ".resX")
   handle.putStr resXContent
   IO.FS.removeFile (outputPath ++ ".resX")
+
+  -- Inspection panel: terms that call Sequence.map via the IndirPoly rule.
+  -- Most samples are (rejection-sampled to be) Sequence.map calls with the α/β
+  -- instantiation eyeballable; the occasional fallback is marked
+  -- `calls_seq_map = no`. This is an inspection aid, not a coverage property, so
+  -- we cap it at 300 samples to keep the run fast regardless of `numSamples`.
+  Tyche.run (genSeqMapCall)
+    { numSamples := min numSamples 300, propertyName := "Terms calling Sequence.map (IndirPoly rule)", outputPath := outputPath ++ ".smap" }
+  let smapContent ← IO.FS.readFile (outputPath ++ ".smap")
+  handle.putStr smapContent
+  IO.FS.removeFile (outputPath ++ ".smap")
 
   -- Run command-level property tests (one panel each)
   Tyche.run (genAndCheckInitFresh)

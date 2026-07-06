@@ -1,9 +1,17 @@
 # Refactor Plan: `VarCtx` from `List` to `Map`
 
-**Status:** Planned, not started. **Unblocked** — the `FreshNamesDisjointFromExprs`
-proof has landed (commits `27e6102`, `89f9a77`; proved for `fctx = []` as
-`freshNamesDisjointFromExprs_nil` in the new file `StrataGenerators/CmdHasTypeAGenSound.lean`).
-This refactor may now proceed. See "Coordination" for what changed.
+**Status:** DONE. `VarCtx` is now `Map (Identifier Unit) LMonoTy` (a bare `Map`,
+Option-B-style, not the structure of Option A). Because Strata's
+`Map α β := List (α × β)` is an `@[expose] def`, positional `length`/`getD`
+indexing survives unchanged, so the `set`-sampling proofs carried over directly
+and the `choose`-based distribution is unchanged — the Option-A concern about
+positional indexing did not materialize. The only substantive changes were the
+key type (`String` → `Identifier Unit`, so context values are threaded as
+identifiers and lookups use `Map.find?`) and, in the proofs, using explicit
+`List.Mem` / list ascriptions where `Map`'s non-`abbrev`-ness blocks `∈` and
+`++` instance synthesis. `genCmd_sound`, `genCmd_complete`, `genCmds_sound`
+(and the `_nil` variants) remain axiom-clean. The step-by-step plan below is
+retained for historical context.
 
 ## Goal
 

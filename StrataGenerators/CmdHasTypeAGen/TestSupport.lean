@@ -19,7 +19,7 @@ Provides shared utilities for property-based testing of `genCmd` and `genCmds`:
 
 /-- Pretty-print a `VarCtx` as a comma-separated list of `name : type`. -/
 def ppVarCtx (ctx : VarCtx) : String :=
-  ctx.map (fun (n, ty) => s!"{n} : {ppType ty}") |> ", ".intercalate |> (s!"[{·}]")
+  ctx.map (fun (n, ty) => s!"{n.name} : {ppType ty}") |> ", ".intercalate |> (s!"[{·}]")
 
 /-- Pretty-print an `LTy` (polytype). Monomorphic types `forAll [] mty` print
     as just the monotype; polymorphic types show the quantifier. -/
@@ -64,12 +64,15 @@ def checkExprTypechecks (cmd : Cmd Expression) : Bool :=
   | _ => true
 
 
-/-- Check that the output context matches input + newly init'd variables. -/
+/-- Check that the output context matches input + newly init'd variables.
+    `Map.insert` appends a fresh binding to the end of the flat map, so the
+    newly-defined variables appear after `inCtx` in definition order. -/
 def checkContextGrowth (inCtx outCtx : VarCtx) (cmds : List (Cmd Expression)) : Bool :=
-  let definedNames := cmds.filterMap fun
-    | .init x (.forAll [] mty) _ _ => some (x.name, mty)
+  let definedNames : List (Identifier Unit × LMonoTy) := cmds.filterMap fun
+    | .init x (.forAll [] mty) _ _ => some (x, mty)
     | _ => none
-  outCtx == definedNames.reverse ++ inCtx
+  (outCtx : List (Identifier Unit × LMonoTy)) ==
+    List.append (inCtx : List (Identifier Unit × LMonoTy)) definedNames
 
 -- ── Command runner (using Strata's Cmd.run) ──────────────────────────
 
@@ -77,7 +80,7 @@ def checkContextGrowth (inCtx outCtx : VarCtx) (cmds : List (Cmd Expression)) : 
     default value (integer 0). -/
 def envFromVarCtx (ctx : VarCtx) : Core.Env :=
   ctx.foldl (fun env (name, mty) =>
-    CmdEval.update env ⟨name, ()⟩ (.forAll [] mty) (.intConst () 0))
+    CmdEval.update env name (.forAll [] mty) (.intConst () 0))
     Core.Env.init
 
 /-- Build an `Env` from a `VarCtx`, seeding each variable with a *well-typed*
@@ -89,7 +92,7 @@ def envFromVarCtx (ctx : VarCtx) : Core.Env :=
     well-typed and any failure is attributable to command evaluation. -/
 def envFromVarCtxWellTyped (ctx : VarCtx) : Core.Env :=
   ctx.foldl (fun env (name, mty) =>
-    CmdEval.update env ⟨name, ()⟩ (.forAll [] mty) (.fvar () ⟨name, ()⟩ (some mty)))
+    CmdEval.update env name (.forAll [] mty) (.fvar () name (some mty)))
     Core.Env.init
 
 -- ── Evaluation-based properties ───────────────────────────────────────

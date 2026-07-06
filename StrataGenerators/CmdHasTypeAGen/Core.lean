@@ -20,23 +20,22 @@ expressions for the right-hand sides of commands.
 
 -- ── Typing context representation ──────────────────────────────────────
 
-/-- A flat representation of the typing context suitable for the generator.
-    Each entry is a variable name paired with its monotype (we only deal
-    with monomorphic contexts, i.e. `forAll [] mty`). -/
-abbrev VarCtx := List (String × LMonoTy)
+/-- A representation of the typing context suitable for the generator, using
+    Strata's `Map` keyed by identifier. Each entry maps a variable identifier
+    `⟨name, ()⟩` to its monotype (we only deal with monomorphic contexts, i.e.
+    `forAll [] mty`), mirroring the `Map` field of the semantic `TContext`. -/
+abbrev VarCtx := Map (Identifier Unit) LMonoTy
 
 /-- Extract all variable names from a `VarCtx`. -/
 def VarCtx.names (ctx : VarCtx) : List String :=
-  ctx.map Prod.fst
+  ctx.map (fun p => p.1.name)
 
-/-- Look up a variable name in the context. -/
-def VarCtx.find? (ctx : VarCtx) (x : String) : Option LMonoTy :=
-  match ctx with
-  | [] => none
-  | (y, ty) :: rest => if x == y then some ty else VarCtx.find? rest x
+/-- Look up a variable identifier in the context. -/
+def VarCtx.find? (ctx : VarCtx) (x : Identifier Unit) : Option LMonoTy :=
+  Map.find? ctx x
 
-/-- Check if a variable name is fresh (not in the context). -/
-def VarCtx.isFresh (ctx : VarCtx) (x : String) : Bool :=
+/-- Check if a variable identifier is fresh (not in the context). -/
+def VarCtx.isFresh (ctx : VarCtx) (x : Identifier Unit) : Bool :=
   ctx.find? x |>.isNone
 
 -- ── Fresh name generation ──────────────────────────────────────────────
@@ -51,7 +50,7 @@ def fallbackFreshName (ctx : VarCtx) : String :=
     name collides. -/
 def genFreshName [Gen G] (ctx : VarCtx) : G String := do
   let s ← String.arbitrary
-  if ctx.isFresh s then
+  if ctx.isFresh ⟨s, ()⟩ then
     pure s
   else
     pure (fallbackFreshName ctx)
@@ -72,7 +71,7 @@ def genInitDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
   let mty ← genLMonoTy tvars tyDepth
   let e ← genLExpr fctx octx [] tvars [] depth mty
   let xty : Lambda.LTy := .forAll [] mty
-  pure ⟨.init ⟨name, ()⟩ xty (.det e) default, (name, mty) :: ctx⟩
+  pure ⟨.init ⟨name, ()⟩ xty (.det e) default, ctx.insert ⟨name, ()⟩ mty⟩
 
 /-- Generate `init x τ nondet` with a fresh name. -/
 def genInitNondet [Gen G] (tvars : List TyIdentifier)
@@ -80,21 +79,21 @@ def genInitNondet [Gen G] (tvars : List TyIdentifier)
   let name ← genFreshName ctx
   let mty ← genLMonoTy tvars tyDepth
   let xty : Lambda.LTy := .forAll [] mty
-  pure ⟨.init ⟨name, ()⟩ xty .nondet default, (name, mty) :: ctx⟩
+  pure ⟨.init ⟨name, ()⟩ xty .nondet default, ctx.insert ⟨name, ()⟩ mty⟩
 
 /-- Generate `set x (det e)` where `x` is an existing variable. -/
 def genSetDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (_h : ctx.length > 0) : G GenCmdResult := do
   let idx ← choose 0 (ctx.length - 1) (by omega)
-  let (name, mty) := ctx.getD idx.down ("", .bool)
+  let (name, mty) := ctx.getD idx.down (⟨"", ()⟩, .bool)
   let e ← genLExpr fctx octx [] tvars [] depth mty
-  pure ⟨.set ⟨name, ()⟩ (.det e) default, ctx⟩
+  pure ⟨.set name (.det e) default, ctx⟩
 
 /-- Generate `set x nondet` where `x` is an existing variable. -/
 def genSetNondet [Gen G] (ctx : VarCtx) (_h : ctx.length > 0) : G GenCmdResult := do
   let idx ← choose 0 (ctx.length - 1) (by omega)
-  let (name, _mty) := ctx.getD idx.down ("", .bool)
-  pure ⟨.set ⟨name, ()⟩ .nondet default, ctx⟩
+  let (name, _mty) := ctx.getD idx.down (⟨"", ()⟩, .bool)
+  pure ⟨.set name .nondet default, ctx⟩
 
 /-- Generate `assert l e` with a boolean expression. -/
 def genAssertCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)

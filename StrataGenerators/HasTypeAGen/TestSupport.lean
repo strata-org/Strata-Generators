@@ -152,6 +152,13 @@ def corePolyOps : PolyOpCtx :=
   , ("Sequence.contains", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.ftvar "a") .bool)))
   , ("Sequence.take", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
   , ("Sequence.drop", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
+  -- `Sequence.map : ∀α β. (α → β) → Sequence<α> → Sequence<β>`. When the target
+  -- type is `Sequence<β>`, unification fixes `β` but leaves `α` undetermined, so
+  -- the IndirPoly rule must *sample* a concrete type for `α` from the generable
+  -- types (Pałka et al. 2011, §4) — the same `map`-style example discussed there.
+  , ("Sequence.map", .forAll ["a", "b"]
+      (.arrow (.arrow (.ftvar "a") (.ftvar "b"))
+        (.arrow (.seq (.ftvar "a")) (.seq (.ftvar "b")))))
   ]
 
 /-- Combined operator context for generation: monomorphic Core ops. -/

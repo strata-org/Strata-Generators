@@ -42,12 +42,14 @@ parameters and checks the expression against an **empty bound-variable context
 
 ### Context Representation: `VarCtx`
 
-The generator uses a flat `VarCtx := List (String × LMonoTy)` to track which
-variables are in scope and their monotypes. This is a simplified projection of
-Strata's `TContext Unit` (which uses nested `Maps (Identifier Unit) LTy`).
+The generator uses `VarCtx := Map (Identifier Unit) LMonoTy` to track which
+variables are in scope and their monotypes. This mirrors the `Map` field of
+Strata's `TContext Unit` (whose `types` field is `Maps (Identifier Unit) LTy`),
+differing only in that `VarCtx` is a single flat `Map` (the generator has no
+scoping) storing monotypes directly rather than `.forAll [] mty` schemes.
 
 The mapping is: an entry `(x, mty)` in `VarCtx` corresponds to
-`Γ.types.find? ⟨x, ()⟩ = some (.forAll [] mty)` in the `TContext`.
+`Γ.types.find? x = some (.forAll [] mty)` in the `TContext`.
 
 ### Sub-generators
 
@@ -64,8 +66,8 @@ genCoverCmd  : fctx → octx → tvars → ctx → depth → G GenCmdResult
 ```
 
 Each returns a `GenCmdResult` containing the generated command and the output
-context (which is `ctx` for set/assert/assume/cover, and `(name, mty) :: ctx`
-for init).
+context (which is `ctx` for set/assert/assume/cover, and
+`ctx.insert ⟨name, ()⟩ mty` for init).
 
 ### Top-level Dispatcher: `genCmd`
 
