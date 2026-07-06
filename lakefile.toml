@@ -5,7 +5,7 @@ defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen",
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "43d90cf40"
+rev = "66dcd82d1"
 
 [[require]]
 name = "basalt"
@@ -67,6 +67,16 @@ roots = ["StrataGenerators.CmdHasTypeAGen"]
 [[lean_lib]]
 name = "StrataGenerators.CmdHasTypeAGenSound"
 roots = ["StrataGenerators.CmdHasTypeAGenSound"]
+
+# Core Function generator definitions (no Mathlib)
+[[lean_lib]]
+name = "StrataGenerators.FunctionHasTypeAGen.Core"
+roots = ["StrataGenerators.FunctionHasTypeAGen.Core"]
+
+# The FunctionHasTypeA generator with soundness/completeness proofs
+[[lean_lib]]
+name = "StrataGenerators.FunctionHasTypeAGen"
+roots = ["StrataGenerators.FunctionHasTypeAGen"]
 
 # Shared SetGen infrastructure (no conflicting imports)
 [[lean_lib]]
