@@ -36,7 +36,7 @@ A generated `Function` is well-typed in the sense of `FuncHasTypeA` because:
 /-- Generate a random list of alphanumeric names of length ≤ `depth`. -/
 def genNameList [Gen G] (depth : Nat) : G (List String) := do
   let k ← choose 0 depth (by omega)
-  (List.replicate k.down.val ()).mapM (fun _ => String.arbitrary)
+  List.mapM (fun _ => String.arbitrary) (List.range k.down.val)
 
 /-- Generate a list of *distinct* type-argument names. Distinctness is
     guaranteed by `List.dedup`. -/

@@ -1,12 +1,13 @@
-# Side-Conditions for `genLExpr` and `genCmd` Soundness & Completeness
+# Side-Conditions for `genLExpr`, `genCmd`, and `genFunction` Soundness & Completeness
 
 This document catalogs every side-condition (hypothesis beyond the bare
 "in support" / "is well-typed" facts) required by the soundness and
 completeness theorems for the expression generator (`genLExpr`,
-`StrataGenerators/HasTypeAGen.lean`) and the command generator (`genCmd`,
-`StrataGenerators/CmdHasTypeAGen.lean`). The hypothesis-free soundness
-wrappers at an empty fvar context live in
-`StrataGenerators/CmdHasTypeAGenSound.lean` (see §2.1 and §4).
+`StrataGenerators/HasTypeAGen.lean`), the command generator (`genCmd`,
+`StrataGenerators/CmdHasTypeAGen.lean`), and the function generator
+(`genFunction`, `StrataGenerators/FunctionHasTypeAGen.lean`). The
+hypothesis-free soundness wrappers at an empty fvar context live in
+`StrataGenerators/CmdHasTypeAGenSound.lean` (see §2.1 and §5).
 
 For each theorem we list the hypotheses, give the *reason* each one is needed,
 and note whether it is **proved** or **assumed** (taken as a hypothesis to be
@@ -193,7 +194,117 @@ CmdHasTypeA C Γ cmd Γ' ∧ (reachability side-conditions)
 
 ---
 
-## 3. Summary table
+## 3. Function generator (`FunctionHasTypeAGen.lean`)
+
+The function generator produces `Function = LFunc CoreLParams` values and is
+proved sound/complete w.r.t. `FuncHasTypeA C Γ` (the annotated instantiation of
+`FuncHasType'` from `Strata.Languages.Core.FunctionTypeSpec`). It delegates
+type generation to `genLMonoTy` and body/measure generation to `genLExpr`, so
+its side-conditions are drawn almost entirely from the expression layer (§1).
+
+### Key simplification: the ambient context is irrelevant
+
+The annotated typing spec used by `FuncHasTypeA` is
+
+```
+instance instHasTypeA : ExprTypingSpec LMonoTy where
+  embed := id
+  exprTyped := fun _C _Γ e mty => LExpr.HasTypeA [] e mty
+```
+
+so `exprTyped` **ignores** the ambient context (`_C`, `_Γ`) and `embed = id`.
+The `bodyTyped`/`measureTyped` obligations of `FuncHasType'` therefore reduce
+*definitionally* to `HasTypeA' [] body output` and `HasTypeA' [] m .int` — exactly
+what `genLExpr … [] tvars [] depth τ` produces. **Consequence:** unlike `genCmd`,
+the function generator needs **no** `VarCtxCorresponds`-style context
+correspondence, no fresh-name disjointness, and the soundness/completeness
+theorems hold for *any* ambient `C`/`Γ`.
+
+The generator also fixes `pctx = []` (no polymorphic operators), which makes the
+`hSimplePolyOps` obligation of `genLExpr_sound` **vacuous**: `polyOpsForResult []
+τ … = []` (proved as `polyOpsForResult_nil`, line 152), so there are no entries
+to constrain.
+
+### Shared helper lemmas
+
+| Lemma | Location | Role |
+|---|---|---|
+| `allFtvarsIn_freeVars` | line 47 | `allFtvarsIn tvars τ → ∀ v ∈ LMonoTy.freeVars τ, v ∈ tvars`. Bridges `genLMonoTy`'s support witness to the spec's `noUndeclaredVars`, which is phrased via `freeVars`. |
+| `freeVars_mkArrow'` | line 71 | `freeVars (mkArrow' out vals)` splits into `freeVars out ∨ ∃ t ∈ vals, freeVars t`. Lets `noUndeclaredVars` be discharged component-wise (output + each input type). |
+| `genInputs_support` | line 138 | Support of `genInputs`: keys are `Nodup`, every value is in `genLMonoTy tvars depth`'s support. Relies on the local `dedup` facts (`StrataGenerators/FunctionHasTypeAGen/Dedup.lean`). |
+| `polyOpsForResult_nil` | line 152 | `polyOpsForResult [] τ … = []` — discharges `hSimplePolyOps` for `pctx = []`. |
+
+### 3.1 `genOptExpr_sound` (line 159)
+
+```
+o ∈ support (genOptExpr fctx octx tvars depth τ) ∧ o = some e → HasTypeA' [] e τ
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hτ` | `SimpleType τ` | Passed straight through to `genLExpr_sound` (§1.1) — the body/measure type must be generable. |
+| `hSimpleOps` | `∀ p ∈ octx, SimpleType p.2` | Inherited from `genLExpr_sound`: the Indir path over `octx` needs simple operator argument types. |
+
+The `none` case is vacuous; `hSimplePolyOps` is discharged internally via
+`polyOpsForResult_nil`, so it does **not** appear as a hypothesis.
+
+### 3.2 `genFunction_sound` (line 187)
+
+```
+func ∈ support (genFunction fctx octx depth) → FuncHasTypeA C Γ func
+```
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hSimpleOps` | `∀ p ∈ octx, SimpleType p.2` | The **only** side-condition. Required so `genOptExpr_sound` (hence `genLExpr_sound`) applies to the body and measure. |
+
+The four `FuncHasType'` obligations are discharged as follows, needing nothing
+beyond `hSimpleOps`:
+
+- `inputsNodup` / `typeArgsNodup` — from the `dedup`-based `genInputs_support` /
+  `genTypeArgs_nodup` (the generator dedups both lists).
+- `noUndeclaredVars` — `genLMonoTy_support` gives `allFtvarsIn typeArgs τ` for the
+  output and each input type; `allFtvarsIn_freeVars` + `freeVars_mkArrow'` convert
+  that into the spec's `freeVars ⊆ typeArgs`.
+- `bodyTyped` / `measureTyped` — the annotated spec reduces them to `HasTypeA' []
+  …`, discharged by `genOptExpr_sound` (`.int` is a `SimpleType` for the measure).
+
+**Status:** proved. `genFunction_sound_nil` (line 224) specializes to `octx = []`,
+where `hSimpleOps` is vacuously true — a fully hypothesis-free soundness entry
+point (mirroring `genCmd_sound_nil`).
+
+### 3.3 `genFunction_complete` (line 329)
+
+```
+FuncHasTypeA C Γ func ∧ (default-field + reachability side-conditions)
+→ func ∈ support (genFunction fctx octx depth)
+```
+
+The generator only varies six fields (`name`, `typeArgs`, `inputs`, `output`,
+`body`, `measure`) and leaves the rest at their `LFunc` defaults, so
+completeness requires the target function's remaining fields to *be* those
+defaults, plus per-component reachability (mirroring `genCmd_complete`'s
+`hExprComplete` / `hNameReach` / `hTyReach`).
+
+| Side-condition | Statement | Why it is needed |
+|---|---|---|
+| `hwt` | `FuncHasTypeA C Γ func` | The function must be well-typed; `bodyTyped`/`measureTyped` supply the `HasTypeA' []` facts the expression-completeness hypotheses consume, and `*Nodup` feed the `dedup` fixed-point reachability. |
+| `hConstr`, `hRec`, `hAttr`, `hEval`, `hAxioms`, `hPre` | `func.isConstr = false`, `func.isRecursive = false`, `func.attr = #[]`, `func.concreteEval = none`, `func.axioms = []`, `func.preconditions = []` | The generator hardcodes these fields to their defaults; a function differing in any of them is unreachable. (The `Unit`-valued name metadata needs no hypothesis — it is definitionally `()`.) |
+| `hNameReach` | `func.name.name ∈ support (String.arbitrary)` | The name is drawn from `String.arbitrary`; only its alphanumeric strings are reachable. |
+| `hTyArgsReach` | `func.typeArgs ∈ support (genNameList depth)` | `typeArgs` is `dedup` of a `genNameList` draw. Combined with `typeArgsNodup` (from `hwt`), `dedup_eq_self` makes the list a fixed point, hence reachable via `genTypeArgs`. |
+| `hInputNamesReach` | `func.inputs.keys.map (·.name) ∈ support (genNameList depth)` | Same reasoning for the input identifier names, which are `dedup`-ed inside `genIdents`. |
+| `hInputTyReach` | `∀ ty ∈ func.inputs.values, ty ∈ support (genLMonoTy func.typeArgs depth)` | Each input type is sampled by `genLMonoTy`; non-generable input types are unreachable. |
+| `hOutputReach` | `func.output ∈ support (genLMonoTy func.typeArgs depth)` | The output type is sampled by `genLMonoTy`. |
+| `hBodyReach` | `∀ b, func.body = some b → b ∈ support (genLExpr fctx octx [] func.typeArgs [] depth func.output)` | If a body exists it must be reachable by `genLExpr` at the output type. This is the function-level analogue of `GenLExprComplete`; the caller discharges it via `genLExpr_complete` (§1.6), whose own side-conditions (`emptyNames`, `allVarsInCtx`, `AllTypesSimple`, `termDepth ≤ depth`) apply to the body. |
+| `hMeasureReach` | `∀ m, func.measure = some m → m ∈ support (genLExpr fctx octx [] func.typeArgs [] depth .int)` | Same for the measure, at type `int`. |
+
+**Status:** proved. Note the completeness statement guarantees the same six
+generated fields; the fixed-default fields are constrained by hypothesis, and
+name metadata is definitionally trivial.
+
+---
+
+## 4. Summary table
 
 | Theorem | Direction | Side-conditions | Assumed (unproved) |
 |---|---|---|---|
@@ -207,8 +318,12 @@ CmdHasTypeA C Γ cmd Γ' ∧ (reachability side-conditions)
 | `genCmds_sound` | sound | `GenCmdSoundEnv` (bundles the above, quantified over contexts) | — (`freshDisjoint` discharged for `fctx = []`) |
 | `genCmds_sound_nil` | sound | `GenCmdSoundEnv` at `fctx = []` (via `genCmdSoundEnv_nil`) | — |
 | `genCmd_complete` | complete | `CmdHasTypeA`, `GenLExprComplete`, `hNameReach`, `hTyReach`, `hVarInCtx` | — |
+| `genOptExpr_sound` | sound | `SimpleType τ`, simple op args | — (`hSimplePolyOps` vacuous at `pctx = []`) |
+| `genFunction_sound` | sound | simple op args (`hSimpleOps`) | — |
+| `genFunction_sound_nil` | sound | — (at `octx = []`) | — |
+| `genFunction_complete` | complete | `FuncHasTypeA`, default non-typing fields, name/typeArgs/input-name/type/body/measure reachability | — |
 
-## 4. Notes on the (formerly) assumed conditions
+## 5. Notes on the (formerly) assumed conditions
 
 - **`FreshNamesDisjointFromExprs`** is no longer an open assumption. It is now
   proved for an empty fvar context as `freshNamesDisjointFromExprs_nil`
@@ -238,3 +353,16 @@ CmdHasTypeA C Γ cmd Γ' ∧ (reachability side-conditions)
   `CmdHasTypeAGen.lean` and taken as hypotheses there to avoid a Mathlib
   dependency in the command layer; they are *discharged* by the proved
   `genLExpr_sound` / `genLExpr_complete` in `HasTypeAGen.lean`.
+
+- **Function generator has no context-correspondence assumptions.** Because the
+  annotated `instHasTypeA` ignores the ambient context (§3), the function
+  soundness/completeness theorems carry *none* of the `VarCtxCorresponds` /
+  `FreshNamesDisjointFromExprs` baggage of the command layer. The only genuine
+  soundness side-condition is `hSimpleOps` (simple operator types), inherited
+  from `genLExpr_sound`; it vanishes at `octx = []` (`genFunction_sound_nil`).
+  Completeness additionally requires the target's non-generated fields to be at
+  their `LFunc` defaults and per-component reachability — the latter delegated to
+  `genLExpr_complete` (for the body/measure) and the `dedup` fixed-point argument
+  (for the `Nodup` `typeArgs`/inputs), the three local `dedup` facts living in
+  `StrataGenerators/FunctionHasTypeAGen/Dedup.lean`. All proofs are `sorry`-free
+  and depend only on `propext` / `Classical.choice` / `Quot.sound`.
