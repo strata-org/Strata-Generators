@@ -85,7 +85,30 @@ The command-level analogues to mirror are `genCmd_sound` / `genCmd_complete` in
 `StrataGenerators/CmdHasTypeAGen.lean` and the hypothesis-discharging pattern in
 `StrataGenerators/CmdHasTypeAGenSound.lean`.
 
-## THE BLOCKER: `List.dedup` import collision
+### 4. Proofs completed (DONE, builds clean, no `sorry`)
+- `StrataGenerators/FunctionHasTypeAGen/Dedup.lean` — the three local `dedup`
+  facts (`nodup_dedup`, `mem_dedup`, `dedup_eq_self`), isolated in their own file
+  (as the doc recommended). Own `lean_lib` entry in `lakefile.toml`.
+- `StrataGenerators/FunctionHasTypeAGen.lean` — soundness + completeness:
+  - Free-var helpers `allFtvarsIn_freeVars`, `freeVars_mkArrow'`.
+  - Support lemmas `genTypeArgs_nodup`, `genIdents_nodup`,
+    `mapM_genInputs_keys_values`, `genInputs_support`.
+  - `genOptExpr_sound` (uses `polyOpsForResult_nil` to discharge the poly side
+    condition, since `genFunction` fixes `pctx = []`).
+  - **`genFunction_sound`** — every generated function is `FuncHasTypeA C Γ` for
+    any `Γ`, given `octx` holds only simple types; plus a hypothesis-free
+    `genFunction_sound_nil` at `octx = []`.
+  - Completeness helpers `mapM_genInputs_complete`, `genIdents_complete`,
+    `genTypeArgs_complete`, `genInputs_complete`, `genOptExpr_complete`.
+  - **`genFunction_complete`** — every well-typed function with default
+    non-typing fields and per-component reachability (name/typeArgs/input
+    names/types/body/measure) is in `genFunction`'s support. Reachability
+    hypotheses mirror `genCmd_complete`'s `hExprComplete`/`hNameReach`/`hTyReach`.
+- `lake build` is green (only the pre-existing `HasTypeGen.lean` and upstream
+  `LExprTypeSpec` `sorry`s remain, both unrelated). `lean_verify` confirms both
+  top-level theorems reduce to `propext`/`Classical.choice`/`Quot.sound` only.
+
+## THE BLOCKER (RESOLVED): `List.dedup` import collision
 
 `List.dedup` is **defined twice** and the two definitions collide depending on
 imports:
@@ -115,7 +138,7 @@ imports:
 proof file (which must import `HasTypeAGen` for the reusable `genLExpr` lemmas)
 is stuck with **Strata's `dedup` definition but no dedup lemmas from either side**.
 
-### Resolution (recommended): prove the 3 dedup facts locally
+### Resolution (DONE): prove the 3 dedup facts locally in `Dedup.lean`
 We only need three facts about Strata's `dedup`, and all three are provable in a
 few lines by induction directly on `List.dedup`'s definition
 (`| a :: as => let as := as.dedup; if a ∈ as then as else a :: as`). Two already
@@ -162,7 +185,7 @@ environment. Put them near the top of `FunctionHasTypeAGen.lean`.
 avoids the collision, or ask upstream Strata to mark the dedup lemmas `public`.
 Local re-proof is the least invasive and keeps the generator file unchanged.)
 
-## TODO (pick up here)
+## TODO (all done — kept for reference)
 
 1. Create `StrataGenerators/FunctionHasTypeAGen.lean`:
    - `import StrataGenerators.HasTypeAGen`,
@@ -220,7 +243,8 @@ Local re-proof is the least invasive and keeps the generator file unchanged.)
 
 ## Current build status
 - `lake build StrataGenerators.FunctionHasTypeAGen.Core` ✅
-- Existing libs still ✅ after the dep bump.
-- `StrataGenerators.FunctionHasTypeAGen` (proofs) — **not created yet**; its
-  `lean_lib` entry is already in `lakefile.toml`, so a bare `lake build` will
-  error on the missing file until step 1 is done.
+- `lake build StrataGenerators.FunctionHasTypeAGen.Dedup` ✅
+- `lake build StrataGenerators.FunctionHasTypeAGen` (proofs) ✅ — soundness and
+  completeness proven, no `sorry`.
+- Full `lake build` ✅ (only pre-existing unrelated `sorry`s in
+  `HasTypeGen.lean` and upstream `LExprTypeSpec` remain).

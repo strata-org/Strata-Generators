@@ -73,6 +73,12 @@ roots = ["StrataGenerators.CmdHasTypeAGenSound"]
 name = "StrataGenerators.FunctionHasTypeAGen.Core"
 roots = ["StrataGenerators.FunctionHasTypeAGen.Core"]
 
+# Local re-proof of the three `List.dedup` facts (see file header for why these
+# are duplicated from Strata.DL.Util.List)
+[[lean_lib]]
+name = "StrataGenerators.FunctionHasTypeAGen.Dedup"
+roots = ["StrataGenerators.FunctionHasTypeAGen.Dedup"]
+
 # The FunctionHasTypeA generator with soundness/completeness proofs
 [[lean_lib]]
 name = "StrataGenerators.FunctionHasTypeAGen"
