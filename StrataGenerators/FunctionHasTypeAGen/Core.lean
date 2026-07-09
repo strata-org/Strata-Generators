@@ -4,7 +4,6 @@ import Basalt.Combinators
 import Basalt.Examples.ArbString.Def
 import Strata.Languages.Core.Function
 import StrataGenerators.HasTypeAGen.Core
-import StrataGenerators.Combinators
 
 open Lambda RandomChoice Core Imperative ArbString
 

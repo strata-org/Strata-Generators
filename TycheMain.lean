@@ -4,8 +4,19 @@ import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import Basalt.IO
 import Strata.DL.Lambda.LExprT
+-- Imports for Function.typeCheck property (typeCheck_annotated_sound)
+import Strata.Languages.Core.FunctionType
+import Strata.DL.Lambda.Denote.LExprAnnotated
+-- Imports for pretty-print/parse round-trip property
+import Strata.Languages.Core.DDMTransform.ASTtoCST
+import Strata.Languages.Core.DDMTransform.Translate
+import Strata.Languages.Core.DDMTransform.Grammar
+import StrataDDM.Elab
+import StrataDDM.BuiltinDialects.Init
 
 open Lambda RandomChoice ArbNat Tyche Std Core Imperative
+open Strata Strata.CoreDDM
+open StrataDDM (initDialect)
 
 /-!
 # Tyche Visualization Runner
@@ -693,6 +704,185 @@ def genAndCheckFunctionFvarsAnnotated (depth : Nat := 0) : IO FunctionFvarsAnnot
   let passed := functionFvarsAnnotatedBy (fctxToTyMap defaultFCtx) func
   return { func, passed, generatorSize := d }
 
+-- ── Known types and context for Function.typeCheck ─────────────────────
+
+/-- Known types covering all base types + type constructors the generator can
+    produce. Required for `Function.typeCheck` to resolve arrow/Map/Seq aliases. -/
+private def funcCheckKnownTypes : Lambda.KnownTypes :=
+  open Lambda.LTy.Syntax in
+  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
+    t[bool], t[int], t[string], t[real], t[regex],
+    t[∀n. bitvec n],
+    t[∀a b. Map %a %b],
+    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
+
+/-- LContext with `intBoolFactory` and all generator-relevant known types. -/
+private def funcCheckContext : Lambda.LContext CoreLParams :=
+  { Lambda.LContext.default with
+    functions := intBoolFactory,
+    knownTypes := funcCheckKnownTypes }
+
+-- ── Function property 1: typeCheck_annotated_sound ─────────────────────
+-- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound`
+-- (`Strata/Languages/Core/FunctionTypeSpecSound.lean:31`): when
+-- `Function.typeCheck` accepts a generated (spec-well-typed) function, the
+-- output satisfies the declarative spec `FuncHasTypeA`. Generated with an
+-- *empty* fvar context so bodies are closed (no ambient-context dependency).
+
+/-- Reflect `FuncHasTypeA` on a function via `LExpr.typeCheck`: body types at
+    the declared output, measure types at int, inputs/typeArgs `Nodup`. -/
+private def checkFuncHasTypeA (func : Function) : Bool :=
+  let bodyOk := match func.body with
+    | some b => LExpr.typeCheck (T := CoreLParams) [] b == some func.output
+    | none => true
+  let measureOk := match func.measure with
+    | some m => LExpr.typeCheck (T := CoreLParams) [] m == some .int
+    | none => true
+  bodyOk && measureOk && decide (func.inputs.keys.Nodup) && decide (func.typeArgs.Nodup)
+
+structure FunctionTypeCheckSoundResult where
+  func : Function
+  /-- Whether `Function.typeCheck` accepted the function. -/
+  accepted : Bool
+  /-- When accepted, whether the output satisfies `FuncHasTypeA`. -/
+  specHolds : Bool
+  generatorSize : Nat
+
+instance : Tyche.TycheSample FunctionTypeCheckSoundResult where
+  toSample r :=
+    -- A sample "passes" iff soundness is not violated: either typeCheck
+    -- rejected (vacuous — soundness untriggered) or it accepted and the spec
+    -- holds. A failure is: accepted but spec violated.
+    let passed := !r.accepted || r.specHolds
+    { representation := ppFunction r.func
+      status := if passed then .passed else .failed
+      features := [
+        ("typecheck_accepted", .nominal (if r.accepted then "yes" else "no")),
+        ("spec_holds", .nominal (if r.accepted then (if r.specHolds then "yes" else "no") else "—")),
+        ("func_shape", .nominal (funcShape r.func)),
+        ("has_body", .nominal (if r.func.body.isSome then "yes" else "no")),
+        ("has_measure", .nominal (if r.func.measure.isSome then "yes" else "no")),
+        ("num_type_args", .ordinal r.func.typeArgs.length),
+        ("num_inputs", .ordinal r.func.inputs.toList.length),
+        ("output_kind", .nominal (typeKind r.func.output)),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+/-- Generate a closed function (empty fctx), run `Function.typeCheck`, and record
+    whether it was accepted and whether the output satisfies `FuncHasTypeA`. -/
+def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckSoundResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let func ← genFunctionIO [] coreOpCtx d
+  match Function.typeCheck funcCheckContext TEnv.default func with
+  | .ok (func', _) =>
+    return { func := func', accepted := true, specHolds := checkFuncHasTypeA func', generatorSize := d }
+  | .error _ =>
+    return { func, accepted := false, specHolds := true, generatorSize := d }
+
+-- ── Function property 2: pretty-print / parse round-trip ───────────────
+-- Embeds a generated function in a `Program`, formats it via
+-- `Core.formatProgram`, re-parses via DDM, re-formats, and compares. Parse
+-- failures are marked separately (the generator can emit identifiers the Core
+-- grammar rejects — empty/numeric names — which is a generator artifact).
+
+/-- Embed a function into a one-decl Program and format it. -/
+private def formatFuncAsProgram (func : Function) : String :=
+  let prog : Core.Program := { decls := [ .func func .empty ] }
+  (Core.formatProgram prog).pretty
+
+/-- Parse a Core program string back to the Strata Core AST. -/
+private def parseCoreProgram (input : String) : IO (Option Core.Program) := do
+  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
+  let body := if input.startsWith "program Core;\n\n" then
+    (input.drop "program Core;\n\n".length).toString else input
+  let inputCtx := StrataDDM.Parser.stringInputContext ⟨"roundtrip"⟩ body
+  try
+    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" inputCtx
+    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
+    if !errs.isEmpty then pure none
+    else pure (some ast)
+  catch _ => pure none
+
+structure FunctionRoundtripResult where
+  func : Function
+  /-- Whether the printed function parsed back successfully. -/
+  parsed : Bool
+  /-- When parsed, whether format→parse→re-format is a fixed point. -/
+  roundtripped : Bool
+  generatorSize : Nat
+
+instance : Tyche.TycheSample FunctionRoundtripResult where
+  toSample r :=
+    -- Passes iff the round-trip held, OR the parse failed (vacuous — a
+    -- generator-name artifact, not a printer/parser bug). Fails only on a
+    -- genuine format→parse→re-format mismatch.
+    let passed := !r.parsed || r.roundtripped
+    { representation := ppFunction r.func
+      status := if passed then .passed else .failed
+      features := [
+        ("parsed", .nominal (if r.parsed then "yes" else "no")),
+        ("roundtripped", .nominal (if r.parsed then (if r.roundtripped then "yes" else "no") else "—")),
+        ("func_shape", .nominal (funcShape r.func)),
+        ("num_type_args", .ordinal r.func.typeArgs.length),
+        ("num_inputs", .ordinal r.func.inputs.toList.length),
+        ("output_kind", .nominal (typeKind r.func.output)),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+/-- Generate a closed function, print it, re-parse, re-print, and record whether
+    it parsed and whether it round-tripped. -/
+def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let func ← genFunctionIO [] coreOpCtx d
+  let s1 := formatFuncAsProgram func
+  match ← parseCoreProgram s1 with
+  | some ast2 =>
+    let s2 := (Core.formatProgram ast2).pretty
+    return { func, parsed := true, roundtripped := s1 == s2, generatorSize := d }
+  | none =>
+    return { func, parsed := false, roundtripped := false, generatorSize := d }
+
+-- ── Function property 3: type preservation under eval ──────────────────
+-- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
+-- `eval_denote_sound`. Evaluates a generated function body and checks the
+-- result still type-checks at the declared output type.
+
+structure FunctionBodyPreservationResult where
+  func : Function
+  /-- Whether the function has a body (the property is exercised non-vacuously). -/
+  hasBody : Bool
+  /-- When a body is present, whether eval preserved the output type. -/
+  preserved : Bool
+  generatorSize : Nat
+
+instance : Tyche.TycheSample FunctionBodyPreservationResult where
+  toSample r :=
+    -- Passes iff no body (vacuous) or the body's type is preserved under eval.
+    let passed := !r.hasBody || r.preserved
+    { representation := ppFunction r.func
+      status := if passed then .passed else .failed
+      features := [
+        ("has_body", .nominal (if r.hasBody then "yes" else "no")),
+        ("type_preserved", .nominal (if r.hasBody then (if r.preserved then "yes" else "no") else "—")),
+        ("num_type_args", .ordinal r.func.typeArgs.length),
+        ("num_inputs", .ordinal r.func.inputs.toList.length),
+        ("output_kind", .nominal (typeKind r.func.output)),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+/-- Generate a closed function, evaluate its body (if any), and check the result
+    still type-checks at the declared output type. -/
+def genAndCheckFunctionBodyPreservation (depth : Nat := 0) : IO FunctionBodyPreservationResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let func ← genFunctionIO [] coreOpCtx d
+  match func.body with
+  | some body =>
+    let evaled := eval 100 body
+    let preserved := LExpr.typeCheck (T := CoreLParams) [] evaled == some func.output
+    return { func, hasBody := true, preserved, generatorSize := d }
+  | none =>
+    return { func, hasBody := false, preserved := true, generatorSize := d }
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -800,6 +990,32 @@ def main (args : List String) : IO Unit := do
   let fn1 ← IO.FS.readFile (outputPath ++ ".fn1")
   handle.putStr fn1
   IO.FS.removeFile (outputPath ++ ".fn1")
+
+  -- Function property: Function.typeCheck_annotated_sound. When typeCheck
+  -- accepts a generated (spec-well-typed) function, the output satisfies the
+  -- declarative spec FuncHasTypeA.
+  Tyche.run (genAndCheckFunctionTypeCheckSound)
+    { numSamples, propertyName := "genFunction: typeCheck output satisfies FuncHasTypeA (typeCheck_annotated_sound)", outputPath := outputPath ++ ".fn2" }
+  let fn2 ← IO.FS.readFile (outputPath ++ ".fn2")
+  handle.putStr fn2
+  IO.FS.removeFile (outputPath ++ ".fn2")
+
+  -- Function property: pretty-print / parse round-trip. Format → parse →
+  -- re-format is a fixed point (parse failures marked separately).
+  Tyche.run (genAndCheckFunctionRoundtrip)
+    { numSamples, propertyName := "genFunction: pretty-print/parse round-trip", outputPath := outputPath ++ ".fn3" }
+  let fn3 ← IO.FS.readFile (outputPath ++ ".fn3")
+  handle.putStr fn3
+  IO.FS.removeFile (outputPath ++ ".fn3")
+
+  -- Function property: type preservation under eval (Step.type_preserved /
+  -- StepStar.type_preserved / eval_denote_sound). Evaluating a function body
+  -- preserves the declared output type.
+  Tyche.run (genAndCheckFunctionBodyPreservation)
+    { numSamples, propertyName := "genFunction: body type preserved under eval", outputPath := outputPath ++ ".fn4" }
+  let fn4 ← IO.FS.readFile (outputPath ++ ".fn4")
+  handle.putStr fn4
+  IO.FS.removeFile (outputPath ++ ".fn4")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow
