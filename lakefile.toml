@@ -84,6 +84,12 @@ roots = ["StrataGenerators.FunctionHasTypeAGen.Dedup"]
 name = "StrataGenerators.FunctionHasTypeAGen"
 roots = ["StrataGenerators.FunctionHasTypeAGen"]
 
+# List-generation combinators (vectorOf / listOfMaxLength), vendored from
+# Basalt PR #8 until it lands (no Mathlib)
+[[lean_lib]]
+name = "StrataGenerators.Combinators"
+roots = ["StrataGenerators.Combinators"]
+
 # Shared SetGen infrastructure (no conflicting imports)
 [[lean_lib]]
 name = "StrataGenerators.SetGen"

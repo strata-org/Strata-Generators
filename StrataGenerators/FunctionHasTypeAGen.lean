@@ -230,6 +230,19 @@ theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
 
 -- ── Completeness helpers ─────────────────────────────────────────────
 
+/-- Support of `genNameList`, inherited from `listOfMaxLength`: a list is
+    reachable iff it has length ≤ `depth` and every name is reachable by
+    `String.arbitrary`. This concretizes the opaque `∈ support (genNameList …)`
+    reachability side-conditions of `genFunction_complete`.
+
+    (The remaining `∈ support String.arbitrary` per-name obligation is the
+    residual bottleneck noted in `docs/vectorof-listofmaxlength-integration.md`
+    §4/§5 — it awaits a public two-directional `String.arbitrary` support lemma.) -/
+theorem mem_support_genNameList_iff (depth : Nat) (l : List String) :
+    l ∈ SetGen.support (genNameList (G := SetGen.Set) depth) ↔
+      l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+  simp only [genNameList, mem_support_listOfMaxLength_iff]
+
 set_option linter.unusedSimpArgs false in
 /-- Reverse of `mapM_genInputs_keys_values`: a `ListMap` whose every value is
     reachable by `genLMonoTy tvars depth` is itself in the support of the `mapM`
@@ -316,13 +329,18 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     `hNameReach` / `hTyReach`: they capture exactly what the generator must be
     able to produce beyond well-typedness. Concretely:
     - `hNameReach` — the function name and the parameter names are reachable
-      alphanumeric strings (needed by `String.arbitrary` / `genNameList`);
-    - `hTyArgsReach` — the (already `Nodup`) `typeArgs` list is reachable as a
-      name list;
-    - `hInputNamesReach` — the parameter-name list is reachable as a name list;
+      alphanumeric strings (needed by `String.arbitrary`);
+    - `hTyArgsLen` / `hTyArgsReach` — the (already `Nodup`) `typeArgs` list is no
+      longer than `depth` and each name is reachable by `String.arbitrary`;
+    - `hInputNamesLen` / `hInputNamesReach` — likewise for the parameter names;
     - `hTyReach` — the output and each input type are reachable by `genLMonoTy`;
     - `hBodyReach` / `hMeasureReach` — the body/measure (when present) are
       reachable by `genLExpr`.
+
+    The `typeArgs` / input-name conditions are stated concretely (a length bound
+    plus per-name `String.arbitrary` reachability) via
+    `mem_support_genNameList_iff`, rather than as opaque `∈ support (genNameList …)`
+    facts.
 
     Because the annotated spec ignores the ambient context, `bodyTyped` gives us
     exactly `HasTypeA [] body output`, which is what `genLExpr` completeness needs. -/
@@ -339,9 +357,11 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hPre : func.preconditions = [])
     -- reachability of the generated components:
     (hNameReach : func.name.name ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
-    (hTyArgsReach : func.typeArgs ∈ SetGen.support (genNameList (G := SetGen.Set) depth))
-    (hInputNamesReach : func.inputs.keys.map (·.name) ∈
-      SetGen.support (genNameList (G := SetGen.Set) depth))
+    (hTyArgsLen : func.typeArgs.length ≤ depth)
+    (hTyArgsReach : ∀ s ∈ func.typeArgs, s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+    (hInputNamesLen : (func.inputs.keys.map (·.name)).length ≤ depth)
+    (hInputNamesReach : ∀ s ∈ func.inputs.keys.map (·.name),
+      s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
     (hInputTyReach : ∀ ty ∈ func.inputs.values,
       ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
     (hOutputReach : func.output ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
@@ -359,10 +379,13 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
           func.body, ?_,
           func.measure, ?_, ?_⟩
   · -- typeArgs reachable via genTypeArgs (Nodup ⇒ dedup fixed point)
-    exact genTypeArgs_complete depth func.typeArgs hwt.typeArgsNodup hTyArgsReach
+    exact genTypeArgs_complete depth func.typeArgs hwt.typeArgsNodup
+      (mem_support_genNameList_iff depth func.typeArgs |>.mpr ⟨hTyArgsLen, hTyArgsReach⟩)
   · -- inputs reachable via genInputs
     exact genInputs_complete func.typeArgs depth func.inputs
-      hwt.inputsNodup hInputNamesReach hInputTyReach
+      hwt.inputsNodup
+      (mem_support_genNameList_iff depth _ |>.mpr ⟨hInputNamesLen, hInputNamesReach⟩)
+      hInputTyReach
   · -- body reachable via genOptExpr
     exact genOptExpr_complete fctx octx func.typeArgs depth func.output func.body hBodyReach
   · -- measure reachable via genOptExpr

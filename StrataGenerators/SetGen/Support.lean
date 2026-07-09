@@ -6,6 +6,7 @@ Authors: Harrison Goldstein
 Vendored from https://github.com/hgoldstein95/basalt (SetGen branch, not yet on `main`).
 -/
 import StrataGenerators.SetGen.Core
+import StrataGenerators.Combinators
 import Basalt.Combinators
 
 open Lean.Order RandomChoice
@@ -262,6 +263,61 @@ theorem mem_support_csup {c : Set α → Prop} (hc : chain c) {a : α} :
     exact hle a ha
   · intro ⟨s, hs, ha⟩
     exact le_csup hc hs a ha
+
+-- ── vectorOf / listOfMaxLength support ────────────────────────────────
+-- Ported to `SetGen.Set` from the `SPMF`-based lemmas in Basalt PR #8.
+
+/-- `xs ∈ support (vectorOf n g)` iff `xs` has length exactly `n` and every
+    element is in `support g`. -/
+@[simp]
+theorem mem_support_vectorOf_iff {n : Nat} {g : Set α} {xs : List α} :
+    xs ∈ support (vectorOf n g) ↔ xs.length = n ∧ ∀ x ∈ xs, x ∈ support g := by
+  induction n generalizing xs with
+  | zero =>
+    simp only [vectorOf_zero, mem_support_pure_iff]
+    constructor
+    · rintro rfl; exact ⟨rfl, by simp⟩
+    · rintro ⟨hlen, _⟩; exact List.length_eq_zero_iff.mp hlen
+  | succ n ih =>
+    rw [vectorOf_succ]
+    simp only [mem_support_bind_iff, mem_support_pure_iff]
+    constructor
+    · rintro ⟨x, hx, tl, htl, rfl⟩
+      obtain ⟨hlen, hmem⟩ := ih.mp htl
+      refine ⟨by simp [hlen], ?_⟩
+      intro y hy
+      rcases List.mem_cons.mp hy with rfl | hy
+      · exact hx
+      · exact hmem y hy
+    · rintro ⟨hlen, hmem⟩
+      match xs, hlen, hmem with
+      | x :: tl, hlen, hmem =>
+        refine ⟨x, hmem x List.mem_cons_self, tl, ?_, rfl⟩
+        exact ih.mpr ⟨by simpa using hlen, fun y hy => hmem y (List.mem_cons_of_mem _ hy)⟩
+
+theorem support_vectorOf {n : Nat} {g : Set α} :
+    support (vectorOf n g) = {xs | xs.length = n ∧ ∀ x ∈ xs, x ∈ support g} := by
+  ext xs; exact mem_support_vectorOf_iff
+
+/-- `xs ∈ support (listOfMaxLength n g)` iff `xs` has length at most `n` and every
+    element is in `support g`. -/
+@[simp]
+theorem mem_support_listOfMaxLength_iff {n : Nat} {g : Set α} {xs : List α} :
+    xs ∈ support (listOfMaxLength n g) ↔ xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g := by
+  simp only [listOfMaxLength, mem_support_bind_iff, mem_support_map_iff,
+             mem_support_choose_iff]
+  constructor
+  · rintro ⟨k, ⟨u, ⟨_, hk_hi⟩, rfl⟩, hxs⟩
+    obtain ⟨hlen, hmem⟩ := mem_support_vectorOf_iff.mp hxs
+    exact ⟨by omega, hmem⟩
+  · rintro ⟨hlen, hmem⟩
+    refine ⟨⟨xs.length, Nat.zero_le _, hlen⟩,
+            ⟨⟨⟨xs.length, Nat.zero_le _, hlen⟩⟩, ⟨Nat.zero_le _, hlen⟩, rfl⟩,
+            mem_support_vectorOf_iff.mpr ⟨rfl, hmem⟩⟩
+
+theorem support_listOfMaxLength {n : Nat} {g : Set α} :
+    support (listOfMaxLength n g) = {xs | xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g} := by
+  ext xs; exact mem_support_listOfMaxLength_iff
 
 end support
 

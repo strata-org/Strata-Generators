@@ -4,6 +4,7 @@ import Basalt.Combinators
 import Basalt.Examples.ArbString.Def
 import Strata.Languages.Core.Function
 import StrataGenerators.HasTypeAGen.Core
+import StrataGenerators.Combinators
 
 open Lambda RandomChoice Core Imperative ArbString
 
@@ -33,10 +34,12 @@ A generated `Function` is well-typed in the sense of `FuncHasTypeA` because:
 
 -- ── Name / type-argument generation ─────────────────────────────────────
 
-/-- Generate a random list of alphanumeric names of length ≤ `depth`. -/
-def genNameList [Gen G] (depth : Nat) : G (List String) := do
-  let k ← choose 0 depth (by omega)
-  List.mapM (fun _ => String.arbitrary) (List.range k.down.val)
+/-- Generate a random list of alphanumeric names of length ≤ `depth`.
+
+    Defined via the `listOfMaxLength` combinator (vendored from Basalt PR #8); its
+    support is characterized by `SetGen.mem_support_listOfMaxLength_iff`. -/
+def genNameList [Gen G] (depth : Nat) : G (List String) :=
+  listOfMaxLength depth String.arbitrary
 
 /-- Generate a list of *distinct* type-argument names. Distinctness is
     guaranteed by `List.dedup`. -/

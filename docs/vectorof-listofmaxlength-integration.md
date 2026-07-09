@@ -12,10 +12,18 @@ would buy the function-generator soundness/completeness proofs
 > `SetGen.support (gen … (G := SetGen.Set))`. Soundness = `support → property`;
 > completeness = `property → support`.
 
+> **Status (2026-07-09):** Item 1 of §6 is **done**. `vectorOf` /
+> `listOfMaxLength` and their `mem_support_*_iff` are vendored over `SetGen.Set`
+> (`StrataGenerators/Combinators.lean`,
+> `StrataGenerators/SetGen/Support.lean`), `genNameList` is redefined as
+> `listOfMaxLength depth String.arbitrary`, and the three §4 completeness
+> hypotheses are concretized. §5 (`genCharList` rewrite) and item 2 (public
+> two-way `String.arbitrary` support lemma) remain open.
+
 ## TL;DR
 
-- **Yes, the support lemmas would help completeness** — but only after being
-  **ported from `SPMF` to `SetGen.Set`**, and only up to the residual bottleneck
+- **Yes, the support lemmas help completeness** — now that they have been
+  **ported from `SPMF` to `SetGen.Set`** (done), up to the residual bottleneck
   of `String.arbitrary` (see §4).
 - **They do nothing for soundness** — `Nodup` comes from `List.dedup` alone,
   independent of the underlying list generator (§3).
@@ -59,13 +67,13 @@ Monotonicity lemmas (`@[partial_fixpoint_monotone]`) are `Gen`-generic
 `Basalt/Examples/ArbList.lean` (a new `List.arbitrary'` example) — **it does not
 change `genCharList`.**
 
-## 2. How close is `genNameList` already?
+## 2. How close was `genNameList` already? (done)
 
-`genNameList` (`FunctionHasTypeAGen/Core.lean:37`) is definitionally almost
-exactly `listOfMaxLength depth String.arbitrary`:
+`genNameList` previously (`FunctionHasTypeAGen/Core.lean`) was definitionally
+almost exactly `listOfMaxLength depth String.arbitrary`:
 
 ```lean
--- ours
+-- old ours
 genNameList depth =
   do let k ← choose 0 depth _
      (List.replicate k.down.val ()).mapM (fun _ => String.arbitrary)
@@ -75,15 +83,23 @@ listOfMaxLength n g =
      vectorOf k g
 ```
 
-The only gap is the body shape:
+The only gap was the body shape:
 
-- ours: `(List.replicate k ()).mapM (fun _ => g)`
-- PR:   `vectorOf k g = foldr (…) (pure []) (List.replicate k g)`
+- old ours: `(List.replicate k ()).mapM (fun _ => g)`
+- PR:       `vectorOf k g = foldr (…) (pure []) (List.replicate k g)`
 
-These produce the same set, but are **not syntactically equal**, so
-`genNameList := listOfMaxLength depth String.arbitrary` requires a small
-bridging lemma (a `rfl`/rewrite equating the `replicate … |>.mapM` form with the
-`vectorOf` `foldr` form), or adopting `vectorOf`'s shape directly.
+These produce the same set but are **not syntactically equal**. Rather than prove
+a bridging lemma equating the two forms, we **adopted `vectorOf`'s shape
+directly**:
+
+```lean
+def genNameList [Gen G] (depth : Nat) : G (List String) :=
+  listOfMaxLength depth String.arbitrary
+```
+
+The "bridging lemma" then comes for free: `mem_support_genNameList_iff`
+(`FunctionHasTypeAGen.lean`) is just
+`simp only [genNameList, mem_support_listOfMaxLength_iff]`.
 
 ## 3. Impact on soundness: none
 
@@ -98,45 +114,59 @@ discharged purely from `List.dedup`:
 So the `vectorOf` / `listOfMaxLength` support lemmas add nothing to the
 soundness direction.
 
-## 4. Impact on completeness: real, after a SetGen port
+## 4. Impact on completeness: real, after a SetGen port (done)
 
-`genFunction_complete` (`FunctionHasTypeAGen.lean:329`) currently takes three
-**opaque** reachability hypotheses, because the repo has no support
+`genFunction_complete` (`FunctionHasTypeAGen.lean`) previously took two
+**opaque** name-list reachability hypotheses, because the repo had no support
 characterization for `genNameList`:
 
-| Hypothesis | Current (opaque) form |
+| Old hypothesis | Old (opaque) form |
 |---|---|
-| `hNameReach` | `func.name.name ∈ support String.arbitrary` |
 | `hTyArgsReach` | `func.typeArgs ∈ support (genNameList depth)` |
 | `hInputNamesReach` | `func.inputs.keys.map (·.name) ∈ support (genNameList depth)` |
 
-With a **SetGen-ported** `mem_support_listOfMaxLength_iff`, the two
-`genNameList` hypotheses could be replaced by a transparent side-condition:
+With the **SetGen-ported** `mem_support_listOfMaxLength_iff`, the repo now proves
+the transparent characterization
 
 ```lean
 l ∈ support (genNameList depth) ↔ l.length ≤ depth ∧ ∀ s ∈ l, s ∈ support String.arbitrary
 ```
 
-i.e. "at most `depth` names, each an alphanumeric string." That is strictly more
-legible and reusable than the opaque `∈ support (genNameList …)` — and the same
-lemma would serve any other bounded-list generator (e.g. fuel-bounded command
-sequences in `genCmds`).
+(`mem_support_genNameList_iff`, `FunctionHasTypeAGen.lean`), i.e. "at most
+`depth` names, each an alphanumeric string." Each opaque hypothesis is now split
+into a length bound plus a per-name reachability condition:
 
-**Two caveats:**
+| New hypotheses | Form |
+|---|---|
+| `hTyArgsLen` | `func.typeArgs.length ≤ depth` |
+| `hTyArgsReach` | `∀ s ∈ func.typeArgs, s ∈ support String.arbitrary` |
+| `hInputNamesLen` | `(func.inputs.keys.map (·.name)).length ≤ depth` |
+| `hInputNamesReach` | `∀ s ∈ func.inputs.keys.map (·.name), s ∈ support String.arbitrary` |
 
-1. **The SPMF lemmas do not transfer.** This repo runs everything over
-   `SetGen.Set`; the PR's `support_*` / `IsPMF_*` lemmas are over `SPMF`. They
-   must be **re-proved over `Set`** — mechanically similar to the existing
-   `mem_mapM_iff` (`HasTypeAGen.lean:3242`) and `genAlphanumList_support_set`
-   (`HasTypeAGen.lean:1206`). The `monotone_*` lemmas are `Gen`-generic and
-   carry over as-is; the `IsPMF_*` lemmas are SPMF-only and irrelevant to us.
-2. **It still bottoms out at `String.arbitrary`.** Even after the port, the iff
-   above only reduces name-list reachability to per-name
-   `s ∈ support String.arbitrary`, which in this repo is characterized only
-   **one-directionally and privately**: `String_arbitrary_support_set`
-   (`HasTypeAGen.lean:1222`) proves `alphanumeric → in support`, not the
-   converse, and is `private`. So a fully concrete completeness statement needs
-   §5 as well.
+(`hNameReach` was already at the `String.arbitrary` level.) These are rebridged
+at the call sites via `mem_support_genNameList_iff … |>.mpr ⟨hLen, hReach⟩`. The
+form is strictly more legible and reusable than the opaque
+`∈ support (genNameList …)` — and the same lemma serves any other bounded-list
+generator (e.g. fuel-bounded command sequences in `genCmds`).
+
+**How it was ported:**
+
+- **The SPMF lemmas did not transfer.** This repo runs everything over
+  `SetGen.Set`; the PR's `support_*` / `IsPMF_*` lemmas are over `SPMF`. They
+  were **re-proved over `Set`** in `StrataGenerators/SetGen/Support.lean` (via
+  `mem_support_bind/map/choose/pure_iff`) — mechanically similar to the existing
+  `mem_mapM_iff` (`HasTypeAGen.lean:3242`) and `genAlphanumList_support_set`
+  (`HasTypeAGen.lean:1206`). The `monotone_*` lemmas are `Gen`-generic and carry
+  over as-is; the `IsPMF_*` lemmas are SPMF-only and irrelevant to us, so were
+  not ported.
+
+**Residual bottleneck (still open):** it still bottoms out at `String.arbitrary`.
+Even after the port, the iff above only reduces name-list reachability to
+per-name `s ∈ support String.arbitrary`, which in this repo is characterized only
+**one-directionally and privately**: `String_arbitrary_support_set`
+(`HasTypeAGen.lean:1222`) proves `alphanumeric → in support`, not the converse,
+and is `private`. So a fully concrete completeness statement still needs §5 /
+item 2 below.
 
 ## 5. Rewriting `genCharList` via `vectorOf` / `listOfMaxLength`: caution
 
@@ -168,17 +198,22 @@ theorem String_arbitrary_support (s : String) :
 
 Priority order:
 
-1. **Port `vectorOf` + `listOfMaxLength` and their `mem_support_*_iff` to
-   `SetGen.Set`** (in this repo, or the SetGen-flavored corner of Basalt). Then
-   redefine `genNameList := listOfMaxLength depth String.arbitrary` (with the
-   §2 bridging lemma) and concretize the three §4 completeness hypotheses.
+1. ✅ **Done.** Ported `vectorOf` + `listOfMaxLength` and their
+   `mem_support_*_iff` to `SetGen.Set` (vendored locally in
+   `StrataGenerators/Combinators.lean` +
+   `StrataGenerators/SetGen/Support.lean`). Redefined
+   `genNameList := listOfMaxLength depth String.arbitrary` (adopting `vectorOf`'s
+   shape directly, so the §2 bridge is `rfl`-free) and concretized the two
+   `genNameList` completeness hypotheses of `genFunction_complete`.
 2. **Add a public two-way `String.arbitrary` support lemma** (§5). This is the
    actual bottleneck for fully transparent name reachability — more so than the
    list combinator.
 3. **Rewriting `genCharList`**: only if Basalt wants the PMF/termination win;
    treat it as a semantics change and land it together with item 2.
 
-None of this is required for the current proofs, which are complete and
-`sorry`-free — it is a legibility/reuse improvement to the completeness
-side-conditions. Items 1–2 can be gated on PR #8 landing, or the definitions can
-be vendored locally in the meantime.
+None of this was required for the proofs, which are complete and `sorry`-free —
+item 1 is a legibility/reuse improvement to the completeness side-conditions.
+Items 2–3 can be gated on PR #8 landing, or (like item 1) vendored locally in the
+meantime. When PR #8 lands and the pinned Basalt rev is bumped,
+`StrataGenerators/Combinators.lean` should be deleted and `vectorOf` /
+`listOfMaxLength` imported from `Basalt.Combinators` instead.
