@@ -1,6 +1,7 @@
 import StrataGenerators.Tyche
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
+import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import Basalt.IO
 import Strata.DL.Lambda.LExprT
 
@@ -648,6 +649,50 @@ def genAndCheckEvalRunAgreement : IO CmdEvalRunAgreementResult := do
   return { cmd, ctx := baseCtx, ctxSize := baseCtx.length, generatorSize := d,
            passed := checkEvalRunAgreement cmd baseCtx }
 
+-- ── Function-level Tyche support ─────────────────────────────────────
+
+/-- Whether a generated function has a body / a measure, for the panel's
+    breakdown (the property is vacuously true when both are absent, so this
+    lets us see how often the property is exercised non-trivially). -/
+private def funcShape (func : Function) : String :=
+  match func.body.isSome, func.measure.isSome with
+  | true,  true  => "body+measure"
+  | true,  false => "body"
+  | false, true  => "measure"
+  | false, false => "neither"
+
+structure FunctionFvarsAnnotatedResult where
+  func : Function
+  /-- The property under test: all fvars in body/measure annotated per the
+      context type map. -/
+  passed : Bool
+  generatorSize : Nat
+
+instance : Tyche.TycheSample FunctionFvarsAnnotatedResult where
+  toSample r :=
+    { representation := ppFunction r.func
+      status := if r.passed then .passed else .failed
+      features := [
+        ("fvars_annotated", .nominal (if r.passed then "yes" else "no")),
+        -- Which optional sub-expressions are present (so we can see how often
+        -- the property is checked non-vacuously).
+        ("func_shape", .nominal (funcShape r.func)),
+        ("has_body", .nominal (if r.func.body.isSome then "yes" else "no")),
+        ("has_measure", .nominal (if r.func.measure.isSome then "yes" else "no")),
+        ("num_type_args", .ordinal r.func.typeArgs.length),
+        ("num_inputs", .ordinal r.func.inputs.toList.length),
+        ("output_kind", .nominal (typeKind r.func.output)),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+/-- Generate a `Function` via `genFunction` (against `defaultFCtx`) and check the
+    `fvars_annotated_by` property against the matching type map. -/
+def genAndCheckFunctionFvarsAnnotated (depth : Nat := 0) : IO FunctionFvarsAnnotatedResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let func ← genFunctionIO defaultFCtx coreOpCtx d
+  let passed := functionFvarsAnnotatedBy (fctxToTyMap defaultFCtx) func
+  return { func, passed, generatorSize := d }
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -747,6 +792,14 @@ def main (args : List String) : IO Unit := do
   let cmd5 ← IO.FS.readFile (outputPath ++ ".cmd5")
   handle.putStr cmd5
   IO.FS.removeFile (outputPath ++ ".cmd5")
+
+  -- Function generator property: fvars in generated functions are annotated
+  -- consistently with the context type map.
+  Tyche.run (genAndCheckFunctionFvarsAnnotated)
+    { numSamples, propertyName := "genFunction: fvars annotated by context type map", outputPath := outputPath ++ ".fn1" }
+  let fn1 ← IO.FS.readFile (outputPath ++ ".fn1")
+  handle.putStr fn1
+  IO.FS.removeFile (outputPath ++ ".fn1")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow

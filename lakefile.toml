@@ -84,6 +84,12 @@ roots = ["StrataGenerators.FunctionHasTypeAGen.Dedup"]
 name = "StrataGenerators.FunctionHasTypeAGen"
 roots = ["StrataGenerators.FunctionHasTypeAGen"]
 
+# Shared Function test utilities (ppFunction, fvarsAnnotatedBy reflection,
+# generator wrappers)
+[[lean_lib]]
+name = "StrataGenerators.FunctionHasTypeAGen.TestSupport"
+roots = ["StrataGenerators.FunctionHasTypeAGen.TestSupport"]
+
 # List-generation combinators (vectorOf / listOfMaxLength), vendored from
 # Basalt PR #8 until it lands (no Mathlib)
 [[lean_lib]]

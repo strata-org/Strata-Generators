@@ -299,13 +299,13 @@ theorem support_vectorOf {n : Nat} {g : Set α} :
     support (vectorOf n g) = {xs | xs.length = n ∧ ∀ x ∈ xs, x ∈ support g} := by
   ext xs; exact mem_support_vectorOf_iff
 
-/-- `xs ∈ support (listOfMaxLength n g)` iff `xs` has length at most `n` and every
-    element is in `support g`. -/
-@[simp]
-theorem mem_support_listOfMaxLength_iff {n : Nat} {g : Set α} {xs : List α} :
-    xs ∈ support (listOfMaxLength n g) ↔ xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g := by
+/-- The support of `listOfMaxLength n g` is the set of all lists of length at
+    most `n` whose every element is in `support g`. -/
+theorem support_listOfMaxLength {n : Nat} {g : Set α} :
+    support (listOfMaxLength n g) = {xs | xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g} := by
+  ext xs
   simp only [listOfMaxLength, mem_support_bind_iff, mem_support_map_iff,
-             mem_support_choose_iff]
+             mem_support_choose_iff, Set.mem_setOf_eq]
   constructor
   · rintro ⟨k, ⟨u, ⟨_, hk_hi⟩, rfl⟩, hxs⟩
     obtain ⟨hlen, hmem⟩ := mem_support_vectorOf_iff.mp hxs
@@ -315,9 +315,12 @@ theorem mem_support_listOfMaxLength_iff {n : Nat} {g : Set α} {xs : List α} :
             ⟨⟨⟨xs.length, Nat.zero_le _, hlen⟩⟩, ⟨Nat.zero_le _, hlen⟩, rfl⟩,
             mem_support_vectorOf_iff.mpr ⟨rfl, hmem⟩⟩
 
-theorem support_listOfMaxLength {n : Nat} {g : Set α} :
-    support (listOfMaxLength n g) = {xs | xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g} := by
-  ext xs; exact mem_support_listOfMaxLength_iff
+/-- `xs ∈ support (listOfMaxLength n g)` iff `xs` has length at most `n` and every
+    element is in `support g`. -/
+@[simp]
+theorem mem_support_listOfMaxLength_iff {n : Nat} {g : Set α} {xs : List α} :
+    xs ∈ support (listOfMaxLength n g) ↔ xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g := by
+  rw [support_listOfMaxLength]; rfl
 
 end support
 
