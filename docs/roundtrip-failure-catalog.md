@@ -170,8 +170,7 @@ a type error.
 **Examples** (`tyche_output.jsonl`):
 
 ```
-function L () : bool { re.none() }
-    → Parse errors: 2:2: Expression has type regex when bool expected.
+function F () : bool -> bool { re.none() }
     (conversion note: "Unsupported construct in lopToExpr: 0-ary op not found: Bool.Not")
 
 function f () : real { 0.0 }
@@ -182,13 +181,56 @@ function f () : bool { fun __q0 : bool -> regex => fun __q1 : bool => -2 }
     → Parse errors: 2:2: Expression has type bool -> regex -> bool -> int when bool expected.
 ```
 
-**Root cause — mixed printer incompleteness.** The `conversion note`s point at the
-*printer* side: `Core.formatProgram` (via `lopToExpr` / `lconstToExpr` in
-`FormatCore.lean`) hitting a construct it cannot faithfully render. Two concrete
-sub-cases:
+**Root cause — mixed.** The `conversion note`s point at the *printer* side
+(`Core.formatProgram` via `lopToExpr` / `lconstToExpr` in `FormatCore.lean`), but
+the sub-cases have genuinely different root causes:
 
-- **Builtin ops** like `Bool.Not` — `lopToExpr` can't find a rendering for the
-  0-ary op, prints a fallback, and the reparse infers the wrong type.
+- **Unapplied builtin operators** like `Bool.Not` — this is an **inexpressibility
+  gap, not a mere missing printer case**. The generated body is the *unapplied*
+  operator `Bool.Not`, a well-typed `LExpr.op` of type `bool -> bool`. Note the
+  function is declared `: bool -> bool`, so the AST **is** well-typed — the
+  operator's type matches the return type; there is no type mismatch. The problem
+  is purely surface syntax:
+
+  1. Core's grammar has no production for a bare/unapplied operator. `Bool.Not`
+     is declared as the `fn`
+
+     ```
+     fn not (b : bool) : bool => "!" b;
+     ```
+
+     at `Strata/Languages/Core/DDMTransform/Grammar.lean:87`. The right-hand side
+     `"!" b` is the operator's *entire* concrete syntax, and it is a template with
+     the argument slot `b` baked in: the surface form is the two tokens `!`
+     followed by an expression `b`. In other words, `Bool.Not` only ever appears
+     concretely as `!b` — the prefix `!` **must** be immediately followed by some
+     boolean expression `b` (e.g. `!x`, `!#true`, `!(f y)`).
+
+     There is no grammar production that yields the bare token `!` on its own, and
+     none that names the operator (there is no surface form spelled `Bool.Not`).
+     So the operator can be *written* only in fully-applied position; it has no
+     concrete syntax as a standalone `bool -> bool` value. This is exactly the
+     mismatch: at the AST level `Bool.Not` is a first-class value of type
+     `bool -> bool` (an `LExpr.op` that can sit anywhere a `bool -> bool` is
+     expected, including as a whole function body), but the concrete grammar can
+     only express it *saturated* — applied to its one argument. There is no way to
+     write down "the `!` function itself."
+  2. The printer renders a bare `.op` node by calling `lopToExpr name []` with an
+     **empty** argument list (`FormatCore.lean:576`).
+  3. `lopToExpr` dispatches purely on `args.length` (`FormatCore.lean:529-534`);
+     with `args = []`, `Bool.Not` is routed to `handleZeroaryOps` — even though
+     `Bool.Not` *is* handled as a unary op when applied (`handleUnaryOps`,
+     `FormatCore.lean:322`, `.bool .Not => .not default arg`).
+  4. `handleZeroaryOps` (`FormatCore.lean:290-299`) only knows three regex
+     constants (`re.all`/`re.allchar`/`re.none`); `Bool.Not` falls into the `_`
+     branch, logs `"0-ary op not found"`, and emits the fallback `re.none()`
+     (type `regex`), which then fails to re-typecheck.
+
+  Because no correct printout exists, this is better read as the **generator
+  producing a term with no concrete-syntax representation** than as a printer
+  defect. A robust fix would eta-expand unapplied operators on print
+  (`Bool.Not` → `fun x => !x`); alternatively the generator could avoid emitting
+  bare operators at function-value positions.
 
 - **Non-terminating-decimal real literals** like `1/3` — this one is a **lossy,
   incorrect print (a soundness bug), not just a parse failure**. The exact chain:
@@ -287,13 +329,18 @@ function and never a fabricated undeclared-variable artifact.
 2. **Class 2 (`<s` collision)** — a tokenizer/precedence issue
    (`Grammar.lean:62,187`), self-contained and easy to demonstrate
    (`f<s>` fails, `f< s>` parses).
-3. **Class 3 (body re-typecheck / printer gaps)** — triage individually. One
-   sub-case deserves priority above the others: the **real-literal soundness bug**
-   (`FormatCore.lean:277`) prints a non-terminating decimal like `1/3` as `0.0`,
-   silently changing the term's value. Unlike the syntactic bugs, this produces a
-   *wrong* program rather than an unparseable one, so it should be reported as a
-   correctness defect, not just a round-trip glitch. The `Bool.Not`-style op gaps
-   are lower priority.
+3. **Class 3** — the three sub-cases are genuinely different and route to
+   different owners:
+   - **Real-literal soundness bug** (`FormatCore.lean:277`) — highest priority
+     within Class 3. Prints a non-terminating decimal like `1/3` as `0.0`,
+     silently changing the term's value. Unlike the syntactic bugs, this produces
+     a *wrong* program rather than an unparseable one; report as a **printer
+     correctness defect**.
+   - **Unapplied builtin operators** (`Bool.Not`) — *not* a printer bug: the term
+     has no Core concrete syntax. Either the printer should eta-expand unapplied
+     operators, or the **generator** should not emit bare operators at
+     function-value positions. Best filed against the generator (or as a Core
+     surface-syntax feature request), not as a round-trip printer defect.
 4. **Class 4 (dot-in-identifier)** — a genuine tension between the identifier
    lexer (`Parser.lean:124-125`) and qualified-name syntax (`Init.lean:81-89`);
    arguably a spec question about whether `.` should be a legal bare-identifier
