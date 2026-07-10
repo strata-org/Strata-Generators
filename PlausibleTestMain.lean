@@ -429,7 +429,7 @@ structure GenFunction where
   fctx : FVarCtx
 
 instance : Repr GenFunction where
-  reprPrec gf _ := ppFunction gf.func
+  reprPrec gf _ := formatFunc gf.func
 
 -- Functions are generated whole (body/measure are drawn by sub-generators that
 -- already respect the typing spec); we do not attempt structural shrinking.
@@ -466,7 +466,7 @@ structure ClosedGenFunction where
   func : Function
 
 instance : Repr ClosedGenFunction where
-  reprPrec gf _ := ppFunction gf.func
+  reprPrec gf _ := formatFunc gf.func
 
 instance : Shrinkable ClosedGenFunction where
   shrink _ := []

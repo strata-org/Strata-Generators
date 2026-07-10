@@ -33,10 +33,20 @@ failure is a shrinker artifact rather than a genuine printer/parser bug.
 -- ── Format / parse round-trip ────────────────────────────────────────────
 
 /-- Embed a function into a one-decl Program and format it via Strata's own
-    `Core.formatProgram`. -/
+    `Core.formatProgram`. This is the string the round-trip property tests. -/
 def formatFuncAsProgram (func : Function) : String :=
   let prog : Core.Program := { decls := [ .func func .empty ] }
   (Core.formatProgram prog).pretty
+
+/-- Format a single `Function` using Strata's own `Core.formatProgram`, with the
+    `program Core;` header stripped — the Strata Core concrete syntax for the
+    function declaration alone, for use as a display label. Prefer this over any
+    hand-rolled printer so displays match the real formatter exactly. -/
+def formatFunc (func : Function) : String :=
+  let s := formatFuncAsProgram func
+  let s := if s.startsWith "program Core;\n\n" then
+    (s.drop "program Core;\n\n".length).toString else s
+  s.trim
 
 /-- Parse a Core program string back to the Strata Core AST (`none` on any
     parse or translation failure). -/

@@ -682,7 +682,7 @@ structure FunctionFvarsAnnotatedResult where
 
 instance : Tyche.TycheSample FunctionFvarsAnnotatedResult where
   toSample r :=
-    { representation := ppFunction r.func
+    { representation := formatFunc r.func
       status := if r.passed then .passed else .failed
       features := [
         ("fvars_annotated", .nominal (if r.passed then "yes" else "no")),
@@ -755,7 +755,7 @@ instance : Tyche.TycheSample FunctionTypeCheckSoundResult where
     -- rejected (vacuous — soundness untriggered) or it accepted and the spec
     -- holds. A failure is: accepted but spec violated.
     let passed := !r.accepted || r.specHolds
-    { representation := ppFunction r.func
+    { representation := formatFunc r.func
       status := if passed then .passed else .failed
       features := [
         ("typecheck_accepted", .nominal (if r.accepted then "yes" else "no")),
@@ -818,7 +818,9 @@ instance : Tyche.TycheSample FunctionRoundtripResult where
     -- identifiers by construction, so legal-but-unparseable output is a genuine
     -- printer/parser bug to report.
     let passed := r.parsed && r.roundtripped
-    { representation := ppFunction r.func
+    -- Show the exact string the round-trip tested (Strata's `Core.formatProgram`
+    -- output), so the panel is a faithful reproducer of any failure.
+    { representation := formatFuncAsProgram r.func
       status := if passed then .passed else .failed
       statusReason := r.parseError
       features := [
@@ -871,7 +873,7 @@ instance : Tyche.TycheSample FunctionBodyPreservationResult where
   toSample r :=
     -- Passes iff no body (vacuous) or the body's type is preserved under eval.
     let passed := !r.hasBody || r.preserved
-    { representation := ppFunction r.func
+    { representation := formatFunc r.func
       status := if passed then .passed else .failed
       features := [
         ("has_body", .nominal (if r.hasBody then "yes" else "no")),
