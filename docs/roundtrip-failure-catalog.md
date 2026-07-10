@@ -182,14 +182,39 @@ function f () : bool { fun __q0 : bool -> regex => fun __q1 : bool => -2 }
     → Parse errors: 2:2: Expression has type bool -> regex -> bool -> int when bool expected.
 ```
 
-**Root cause — mixed.** The `conversion note`s point at the *printer* side:
-`Core.formatProgram` (via `lopToExpr` / `lconstToExpr` in `FormatCore.lean`)
-hitting a construct it cannot faithfully render — a builtin op like `Bool.Not`, or
-a real literal such as `1/3` it prints as `0.0`. The resulting text then either
-doesn't parse (`0.0` case) or parses to an expression whose type no longer matches
-the declared output (`Expression has type … when bool expected`). These are worth
-triaging individually; the common thread is printer incompleteness for certain
-expression/constant forms rather than a single localized rule.
+**Root cause — mixed printer incompleteness.** The `conversion note`s point at the
+*printer* side: `Core.formatProgram` (via `lopToExpr` / `lconstToExpr` in
+`FormatCore.lean`) hitting a construct it cannot faithfully render. Two concrete
+sub-cases:
+
+- **Builtin ops** like `Bool.Not` — `lopToExpr` can't find a rendering for the
+  0-ary op, prints a fallback, and the reparse infers the wrong type.
+
+- **Non-terminating-decimal real literals** like `1/3` — this one is a **lossy,
+  incorrect print (a soundness bug), not just a parse failure**. The exact chain:
+
+  1. `Strata/Languages/Core/DDMTransform/FormatCore.lean:272-277` — `lconstToExpr`
+     for a `.realConst r` calls `StrataDDM.Decimal.fromRat r`; on `none` it logs
+     `"unsupported real"` and emits `.realLit default ⟨default, default⟩` — i.e. a
+     **default `Decimal`** in place of the real value (line 277).
+  2. `StrataDDM/StrataDDM/Util/DecimalRat.lean:45-54` — `fromRat` returns `none`
+     whenever the denominator has a prime factor other than 2 or 5
+     (`isTerminatingDenominator`), so `1/3` (denominator 3) is unrepresentable.
+  3. `default : Decimal` is `{ mantissa := 0, exponent := 0 }` (derived `Inhabited`,
+     `StrataDDM/StrataDDM/Util/Decimal.lean:16-19`), and `Decimal.toString`
+     (`StrataDDM/StrataDDM/Util/Decimal.lean:31-35`) renders mantissa 0 as the
+     literal string `"0.0"`.
+
+  So the printer emits `0.0` where the AST held `1/3`: the printed term has a
+  **different value** from the original (`0.0 ≠ 1/3`). This is more serious than
+  the syntactic round-trip bugs — it silently changes meaning. The
+  `unexpected token '-'` parse error in the sample is a *secondary* effect (the
+  logged error text lands in the stream); the primary defect is the value
+  substitution at `FormatCore.lean:277`.
+
+These are worth triaging individually; the common thread is printer
+incompleteness for certain expression/constant forms rather than a single
+localized rule.
 
 > **Note on a related, subtler case: unbound type variables in bodies.** A body
 > can mention a type variable that the function's `typeArgs` never declares, e.g.
@@ -262,9 +287,13 @@ function and never a fabricated undeclared-variable artifact.
 2. **Class 2 (`<s` collision)** — a tokenizer/precedence issue
    (`Grammar.lean:62,187`), self-contained and easy to demonstrate
    (`f<s>` fails, `f< s>` parses).
-3. **Class 3 (body re-typecheck / printer gaps)** — triage individually; several
-   are printer incompleteness for specific ops/constants (e.g. `Bool.Not`, real
-   `1/3`).
+3. **Class 3 (body re-typecheck / printer gaps)** — triage individually. One
+   sub-case deserves priority above the others: the **real-literal soundness bug**
+   (`FormatCore.lean:277`) prints a non-terminating decimal like `1/3` as `0.0`,
+   silently changing the term's value. Unlike the syntactic bugs, this produces a
+   *wrong* program rather than an unparseable one, so it should be reported as a
+   correctness defect, not just a round-trip glitch. The `Bool.Not`-style op gaps
+   are lower priority.
 4. **Class 4 (dot-in-identifier)** — a genuine tension between the identifier
    lexer (`Parser.lean:124-125`) and qualified-name syntax (`Init.lean:81-89`);
    arguably a spec question about whether `.` should be a legal bare-identifier
