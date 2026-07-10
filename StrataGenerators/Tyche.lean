@@ -44,6 +44,9 @@ structure Sample where
   representation : String
   features : List (String × Feature)
   status : Status := .passed
+  /-- Optional human-readable reason for the status (e.g. a parser error on a
+      failure). Serialized to Tyche's `status_reason` field. -/
+  statusReason : String := ""
   deriving Inhabited
 
 /-- Typeclass for types that can be converted to Tyche samples. -/
@@ -77,7 +80,8 @@ private def featuresJson (features : List (String × Feature)) : String :=
 /-- Serialize a sample as one line of Tyche JSONL. -/
 def Sample.toJsonLine (s : Sample) (property : String) (runStart : Nat) : String :=
   let repr := escapeJson s.representation
-  s!"\{\"type\":\"test_case\",\"run_start\":{runStart},\"property\":\"{property}\",\"status\":{Status.toJson s.status},\"status_reason\":\"\",\"representation\":\"{repr}\",\"features\":{featuresJson s.features},\"coverage\":null}"
+  let reason := escapeJson s.statusReason
+  s!"\{\"type\":\"test_case\",\"run_start\":{runStart},\"property\":\"{property}\",\"status\":{Status.toJson s.status},\"status_reason\":\"{reason}\",\"representation\":\"{repr}\",\"features\":{featuresJson s.features},\"coverage\":null}"
 
 /-- Configuration for a Tyche run. -/
 structure Config where

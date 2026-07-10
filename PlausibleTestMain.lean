@@ -564,6 +564,21 @@ def parseCoreProgram (input : String) : IO (Option Core.Program) := do
     else pure (some ast)
   catch _ => pure none
 
+/-- Like `parseCoreProgram`, but on failure returns the diagnostic message
+    (parser exception text, or the translation errors) instead of discarding it.
+    Returns `.ok ast` on success, `.error msg` on failure. -/
+def parseCoreProgramErr (input : String) : IO (Except String Core.Program) := do
+  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
+  let body := if input.startsWith "program Core;\n\n" then
+    (input.drop "program Core;\n\n".length).toString else input
+  let inputCtx := StrataDDM.Parser.stringInputContext ⟨"roundtrip"⟩ body
+  try
+    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" inputCtx
+    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
+    if !errs.isEmpty then pure (.error s!"translate: {(toString errs).replace "\n" " "}")
+    else pure (.ok ast)
+  catch e => pure (.error ((toString e).replace "\n" " "))
+
 /-- The round-trip property: format → parse → re-format yields the same string.
     Returns `true` only if the round-trip succeeds. Runs in `IO`.
 
@@ -578,6 +593,105 @@ def checkPrintParseRoundtrip (func : Function) : IO Bool := do
     let s2 := (Core.formatProgram ast2).pretty
     pure (s1 == s2)
   | none => pure false  -- parse failure = round-trip bug (names are legal by construction)
+
+-- ── Shrinker: minimal "parses but does not round-trip" functions ──────
+--
+-- Greedy structural shrinker. Given a `Function` that exhibits some failure
+-- predicate `p : Function → IO Bool`, it repeatedly replaces the function with
+-- the first strictly-smaller candidate that still satisfies `p`, until no such
+-- candidate exists. `sizeFunc` is strictly decreasing across every shrink step,
+-- so the loop terminates (fuel is only a backstop).
+--
+-- The default predicate `failsRoundtripParsed` targets the *mismatch* class:
+-- the printed program PARSES but format→parse→re-format is not a fixed point.
+-- Intermediate candidates that fail to parse are simply skipped (they don't
+-- satisfy the predicate), so shrinking stays inside the parse-but-mismatch
+-- region and yields a minimal witness of that specific bug class.
+
+/-- Structural size; each shrink step below strictly decreases it. -/
+def sizeTy : LMonoTy → Nat
+  | .ftvar _ => 2
+  | .bitvec _ => 2
+  | .tcons _ args => 1 + (args.map sizeTy).foldl (· + ·) 0
+
+def sizeFunc (f : Function) : Nat :=
+  f.name.name.length
+    + sizeTy f.output
+    + (f.inputs.toList.map (fun p => 1 + sizeTy p.2)).foldl (· + ·) 0
+    + f.typeArgs.length
+    + (match f.body with | some _ => 1 | none => 0)
+    + (match f.measure with | some _ => 1 | none => 0)
+
+/-- Immediate smaller candidates for a monotype: collapse a compound toward a
+    child or toward `int`, a type variable / bitvector toward `int`, and shrink
+    children in place. Base types have no smaller form. -/
+partial def shrinkTy : LMonoTy → List LMonoTy
+  | .ftvar _ => [.int]
+  | .bitvec _ => [.int]
+  | .tcons _ [] => []
+  | .tcons "arrow" [a, b] =>
+    [a, b, .int]
+      ++ (shrinkTy a).map (fun a' => .tcons "arrow" [a', b])
+      ++ (shrinkTy b).map (fun b' => .tcons "arrow" [a, b'])
+  | .tcons "Map" [k, v] =>
+    [k, v, .int]
+      ++ (shrinkTy k).map (fun k' => .tcons "Map" [k', v])
+      ++ (shrinkTy v).map (fun v' => .tcons "Map" [k, v'])
+  | .tcons "Sequence" [e] =>
+    [e, .int] ++ (shrinkTy e).map (fun e' => .tcons "Sequence" [e'])
+  | .tcons _ args => .int :: args
+
+/-- All ways to drop exactly one element of a list. -/
+def dropEach {α} : List α → List (List α)
+  | [] => []
+  | x :: xs => xs :: (dropEach xs).map (x :: ·)
+
+/-- Candidate smaller functions: drop body/measure, drop an input, drop a
+    type-arg, shrink an input type, shrink the output type, or shorten the name.
+    All candidates are strictly smaller by `sizeFunc`. -/
+def shrinkFunc (f : Function) : List Function :=
+  let ins := f.inputs.toList
+  let dropBody    := if f.body.isSome then [{ f with body := none }] else []
+  let dropMeasure := if f.measure.isSome then [{ f with measure := none }] else []
+  let dropInput   := (dropEach ins).map (fun i => { f with inputs := ListMap.ofList i })
+  let dropTyArg   := (dropEach f.typeArgs).map (fun tas => { f with typeArgs := tas })
+  let shrinkInput := (List.range ins.length).flatMap (fun i =>
+    match ins[i]? with
+    | some (x, ty) => (shrinkTy ty).map (fun ty' =>
+        { f with inputs := ListMap.ofList (ins.set i (x, ty')) })
+    | none => [])
+  let shrinkOut   := (shrinkTy f.output).map (fun o => { f with output := o })
+  let shrinkName  := if f.name.name.length > 1 then [{ f with name := ⟨"f", ()⟩ }] else []
+  dropBody ++ dropMeasure ++ dropInput ++ dropTyArg ++ shrinkInput ++ shrinkOut ++ shrinkName
+
+/-- First candidate (in order) that still satisfies the failure predicate. -/
+partial def firstSatisfying (p : Function → IO Bool) : List Function → IO (Option Function)
+  | [] => pure none
+  | c :: rest => do if ← p c then pure (some c) else firstSatisfying p rest
+
+/-- Greedily shrink `f` while preserving `p`. -/
+partial def shrinkWhile (p : Function → IO Bool) (fuel : Nat) (f : Function) : IO Function := do
+  match fuel with
+  | 0 => pure f
+  | fuel + 1 =>
+    let cands := (shrinkFunc f).filter (fun c => sizeFunc c < sizeFunc f)
+    match ← firstSatisfying p cands with
+    | some c => shrinkWhile p fuel c
+    | none => pure f
+
+/-- The target class: the printed program PARSES but does not round-trip. -/
+def failsRoundtripParsed (f : Function) : IO Bool := do
+  let s1 := formatFuncAsProgram f
+  match ← parseCoreProgram s1 with
+  | some ast2 => pure (s1 != (Core.formatProgram ast2).pretty)
+  | none => pure false
+
+/-- The other failure class: the printed program does NOT parse at all. Used to
+    shrink a parse-failure down to a minimal unparseable-but-legal witness. -/
+def failsRoundtripParseFail (f : Function) : IO Bool := do
+  match ← parseCoreProgram (formatFuncAsProgram f) with
+  | some _ => pure false
+  | none => pure true
 
 -- ── Single-identifier round-trip probe (minimal reproducers) ──────────
 --
@@ -624,9 +738,9 @@ def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
 def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
     IO (Option (String × String)) := do
   let s1 := formatFuncAsProgram (minimalFuncWithName pos name)
-  match ← parseCoreProgram s1 with
-  | none => pure (some (s1, "parse-failure"))
-  | some ast2 =>
+  match ← parseCoreProgramErr s1 with
+  | .error e => pure (some (s1, s!"parse-failure: {e.take 140}"))
+  | .ok ast2 =>
     let s2 := (Core.formatProgram ast2).pretty
     if s1 == s2 then pure none
     else pure (some (s1, s2))
@@ -801,16 +915,31 @@ def main (args : List String) : IO UInt32 := do
     | none =>
       -- Legal-by-construction names that fail to parse = printer/parser bug.
       rtParseFail := rtParseFail + 1
-      if rtParseFail + rtMismatch ≤ 5 then
-        IO.println s!"    FAIL (parse): {s.replace "\n" " " |>.take 80}"
+      if rtParseFail ≤ 3 then
+        -- Shrink to a minimal unparseable witness and show the parser's error.
+        let minF ← shrinkWhile failsRoundtripParseFail 1000 gf.func
+        let ms1 := formatFuncAsProgram minF
+        let err := match ← parseCoreProgramErr ms1 with
+                   | .error e => e | .ok _ => "<parsed unexpectedly>"
+        IO.println s!"    FAIL (parse): original: {s.replace "\n" " " |>.take 80}"
+        IO.println s!"      shrunk (size {sizeFunc minF}): {ms1.replace "\n" " "}"
+        IO.println s!"      parser error:                 {err.take 160}"
     | some ast2 =>
       let s2 := (Core.formatProgram ast2).pretty
       if s == s2 then
         rtOk := rtOk + 1
       else
         rtMismatch := rtMismatch + 1
-        if rtParseFail + rtMismatch ≤ 5 then
-          IO.println s!"    FAIL (mismatch): {s.replace "\n" " " |>.take 80}"
+        if rtMismatch ≤ 3 then
+          -- Shrink this mismatch to a minimal parses-but-doesn't-round-trip witness.
+          let minF ← shrinkWhile failsRoundtripParsed 1000 gf.func
+          let ms1 := formatFuncAsProgram minF
+          let ms2 ← (do match ← parseCoreProgram ms1 with
+                        | some a => pure (Core.formatProgram a).pretty
+                        | none => pure "<parse-failed>")
+          IO.println s!"    FAIL (mismatch): original: {s.replace "\n" " " |>.take 80}"
+          IO.println s!"      shrunk (size {sizeFunc minF}): {ms1.replace "\n" " "}"
+          IO.println s!"      re-formatted to:              {ms2.replace "\n" " "}"
   if rtParseFail == 0 && rtMismatch == 0 then
     IO.println s!"PASS ({rtOk} round-tripped)"
   else
@@ -839,14 +968,17 @@ def main (args : List String) : IO UInt32 := do
           else if name.any (· == '|') then "pipe"
           else if name.any (· == '\\') then "backslash"
           else if name.any (· == '\'') then "apostrophe"
-          else if name.data.head?.map (·.isDigit) == some true then "leading-digit"
+          else if name.toList.head?.map (·.isDigit) == some true then "leading-digit"
           else "other"
-        let key := s!"{pos.label}/{if outcome == "parse-failure" then "parse" else "mismatch"}/{cls}"
+        let isParseFail := outcome.startsWith "parse-failure"
+        let key := s!"{pos.label}/{if isParseFail then "parse" else "mismatch"}/{cls}"
         if !shownReprs.contains key then
           shownReprs := key :: shownReprs
-          IO.println s!"    REPRO [{pos.label}] class={cls} name={name.quote} outcome={outcome}"
+          IO.println s!"    REPRO [{pos.label}] class={cls} name={name.quote}"
           IO.println s!"           rendered: {rendered.replace "\n" " "}"
-          if outcome != "parse-failure" then
+          if isParseFail then
+            IO.println s!"           {outcome.replace "\n" " "}"
+          else
             IO.println s!"           reparsed: {outcome.replace "\n" " "}"
   if probeFail == 0 then
     IO.println s!"PASS ({probeOk} ident/position round-trips)"

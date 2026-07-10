@@ -803,12 +803,37 @@ private def parseCoreProgram (input : String) : IO (Option Core.Program) := do
     else pure (some ast)
   catch _ => pure none
 
+/-- Like `parseCoreProgram`, but returns the diagnostic message on failure. -/
+private def parseCoreProgramErr (input : String) : IO (Except String Core.Program) := do
+  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
+  let body := if input.startsWith "program Core;\n\n" then
+    (input.drop "program Core;\n\n".length).toString else input
+  let inputCtx := StrataDDM.Parser.stringInputContext ⟨"roundtrip"⟩ body
+  try
+    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" inputCtx
+    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
+    if !errs.isEmpty then pure (.error s!"translate: {(toString errs).replace "\n" " "}")
+    else pure (.ok ast)
+  catch e => pure (.error ((toString e).replace "\n" " "))
+
+/-- Extract a short, position-independent "kind" from a parser error message,
+    for grouping in the Tyche panel. Strips the `Parse errors:` prefix and the
+    `line:col` location so that e.g. every "Map expects 2 arguments" collapses
+    into one bucket regardless of where in the input it occurred. -/
+private def parseErrorKind (msg : String) : String :=
+  -- Drop everything up to and including the last "N:M:" location marker.
+  let afterLoc := (msg.splitOn ": ").reverse.headD msg
+  let core := afterLoc.trimAscii
+  (core.take 45).toString
+
 structure FunctionRoundtripResult where
   func : Function
   /-- Whether the printed function parsed back successfully. -/
   parsed : Bool
   /-- When parsed, whether format→parse→re-format is a fixed point. -/
   roundtripped : Bool
+  /-- On parse failure, the parser's diagnostic message (else ""). -/
+  parseError : String
   generatorSize : Nat
 
 instance : Tyche.TycheSample FunctionRoundtripResult where
@@ -820,9 +845,11 @@ instance : Tyche.TycheSample FunctionRoundtripResult where
     let passed := r.parsed && r.roundtripped
     { representation := ppFunction r.func
       status := if passed then .passed else .failed
+      statusReason := r.parseError
       features := [
         ("parsed", .nominal (if r.parsed then "yes" else "no")),
         ("roundtripped", .nominal (if r.parsed then (if r.roundtripped then "yes" else "no") else "—")),
+        ("error_kind", .nominal (if r.parsed then "—" else parseErrorKind r.parseError)),
         ("func_shape", .nominal (funcShape r.func)),
         ("num_type_args", .ordinal r.func.typeArgs.length),
         ("num_inputs", .ordinal r.func.inputs.toList.length),
@@ -836,12 +863,12 @@ def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreOpCtx d
   let s1 := formatFuncAsProgram func
-  match ← parseCoreProgram s1 with
-  | some ast2 =>
+  match ← parseCoreProgramErr s1 with
+  | .ok ast2 =>
     let s2 := (Core.formatProgram ast2).pretty
-    return { func, parsed := true, roundtripped := s1 == s2, generatorSize := d }
-  | none =>
-    return { func, parsed := false, roundtripped := false, generatorSize := d }
+    return { func, parsed := true, roundtripped := s1 == s2, parseError := "", generatorSize := d }
+  | .error e =>
+    return { func, parsed := false, roundtripped := false, parseError := e, generatorSize := d }
 
 -- ── Function property 3: type preservation under eval ──────────────────
 -- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
@@ -931,6 +958,8 @@ structure IdentProbeResult where
   parsed : Bool
   /-- When parsed, whether format→parse→re-format is a fixed point. -/
   roundtripped : Bool
+  /-- On parse failure, the parser's diagnostic message (else ""). -/
+  parseError : String
   rendered : String
 
 instance : Tyche.TycheSample IdentProbeResult where
@@ -941,11 +970,13 @@ instance : Tyche.TycheSample IdentProbeResult where
     let passed := r.parsed && r.roundtripped
     { representation := r.rendered.replace "\n" " "
       status := if passed then .passed else .failed
+      statusReason := r.parseError
       features := [
         ("position", .nominal r.pos.label),
         ("char_class", .nominal (identCharClass r.name)),
         ("parsed", .nominal (if r.parsed then "yes" else "no")),
-        ("roundtripped", .nominal (if r.parsed then (if r.roundtripped then "yes" else "no") else "—"))
+        ("roundtripped", .nominal (if r.parsed then (if r.roundtripped then "yes" else "no") else "—")),
+        ("error_kind", .nominal (if r.parsed then "—" else parseErrorKind r.parseError))
       ] }
 
 /-- Draw an adversarial identifier, place it in a random position, and record
@@ -958,12 +989,12 @@ def genAndCheckIdentProbe : IO IdentProbeResult := do
     | 1 => IdentPosition.typeArg
     | _ => IdentPosition.binder
   let s1 := formatFuncAsProgram (minimalFuncWithName pos name)
-  match ← parseCoreProgram s1 with
-  | some ast2 =>
+  match ← parseCoreProgramErr s1 with
+  | .ok ast2 =>
     let s2 := (Core.formatProgram ast2).pretty
-    return { pos, name, parsed := true, roundtripped := s1 == s2, rendered := s1 }
-  | none =>
-    return { pos, name, parsed := false, roundtripped := false, rendered := s1 }
+    return { pos, name, parsed := true, roundtripped := s1 == s2, parseError := "", rendered := s1 }
+  | .error e =>
+    return { pos, name, parsed := false, roundtripped := false, parseError := e, rendered := s1 }
 
 -- ── Main ──────────────────────────────────────────────────────────────
 
