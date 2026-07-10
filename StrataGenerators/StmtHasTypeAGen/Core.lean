@@ -153,9 +153,21 @@ def genCmdStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
   let r ← genCmd fctx octx tvars ctx depth
   pure ⟨Stmt.cmd (CmdExt.cmd r.cmd), C, r.outCtx⟩
 
-/-- Generate an `exit` statement with a random label. Context is unchanged. -/
-def genExitStmt [Gen G] (C : LContext CoreLParams) (ctx : VarCtx) : G GenStmtResult := do
-  let l ← String.arbitrary
+/-- Generate an `exit` statement. When there are enclosing block `labels` in
+    scope, the exit label is sampled from them, so the generated exit actually
+    breaks out of a live enclosing block (the `exiting l` config is consumed by a
+    matching `block` — see `Imperative.StmtSemantics`). When no block encloses the
+    current point (`labels = []`, e.g. at top level) it falls back to a random
+    alphanumeric label. Context is unchanged.
+
+    Labels are typing-irrelevant (`StmtHasType'.exit` has no premise on the
+    label), so this choice affects only operational realism, never well-typedness;
+    completeness is unaffected because both branches remain reachable. -/
+def genExitStmt [Gen G] (labels : List String)
+    (C : LContext CoreLParams) (ctx : VarCtx) : G GenStmtResult := do
+  let l ← match labels with
+    | [] => String.arbitrary
+    | l :: ls => elements (l :: ls) (by simp)
   pure ⟨Stmt.exit l default, C, ctx⟩
 
 /-- Generate a `funcDecl` statement. The syntactic declaration `decl` (a
@@ -194,11 +206,12 @@ mutual
     The generated statement satisfies `StmtHasTypeA P C Γ s C' Γ'` (for any
     program `P`) — see `genStmt_sound`. -/
 def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : Nat → G GenStmtResult
   | 0 =>
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
       [ (4, fun () => genCmdStmt fctx octx tvars C ctx depth),
-        (1, fun () => genExitStmt C ctx),
+        (1, fun () => genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx depth),
         (1, fun () => genTypeDeclStmt C ctx depth) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1; omega
@@ -206,33 +219,35 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
   | fuel + 1 =>
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
       [ (4, fun () => genCmdStmt fctx octx tvars C ctx depth),
-        (1, fun () => genExitStmt C ctx),
+        (1, fun () => genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx depth),
         (1, fun () => genTypeDeclStmt C ctx depth),
         (2, fun () => do
           let label ← String.arbitrary
           let ⟨⟨len, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let (body, _, _) ← genStmts fctx octx tvars C ctx depth fuel len
+          -- The block's own `label` becomes an enclosing label for its body, so
+          -- an `exit` inside the body can break out of this block.
+          let (body, _, _) ← genStmts fctx octx tvars (label :: labels) C ctx depth fuel len
           pure ⟨Stmt.block label body default, C, ctx⟩),
         (2, fun () => do
           let cond ← genLExpr fctx octx [] tvars [] depth .bool
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let (thenb, _, _) ← genStmts fctx octx tvars C ctx depth fuel tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars C ctx depth fuel elen
+          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel elen
           pure ⟨Stmt.ite (.det cond) thenb elseb default, C, ctx⟩),
         (1, fun () => do
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let (thenb, _, _) ← genStmts fctx octx tvars C ctx depth fuel tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars C ctx depth fuel elen
+          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel elen
           pure ⟨Stmt.ite .nondet thenb elseb default, C, ctx⟩),
         (2, fun () => do
           let guard ← genCondOrNondet fctx octx tvars depth
           let measure ← genOptMeasure fctx octx tvars depth
           let invariants ← genInvariants fctx octx tvars depth
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let (body, _, _) ← genStmts fctx octx tvars C ctx depth fuel blen
+          let (body, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel blen
           pure ⟨Stmt.loop guard measure invariants body default, C, ctx⟩) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1+2+2+1+2; omega
     frequency gs hw
@@ -245,12 +260,13 @@ termination_by n => (n, 0, 0)
     Returns the statement list together with the final `(C, Γ)`. Satisfies the
     chained `StmtsHasTypeA` relation — see `genStmts_sound`. -/
 def genStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) (fuel : Nat) :
     Nat → G (List Statement × LContext CoreLParams × VarCtx)
   | 0 => pure ([], C, ctx)
   | len + 1 => do
-    let r ← genStmt fctx octx tvars C ctx depth fuel
-    let (rest, C'', ctx'') ← genStmts fctx octx tvars r.outC r.outCtx depth fuel len
+    let r ← genStmt fctx octx tvars labels C ctx depth fuel
+    let (rest, C'', ctx'') ← genStmts fctx octx tvars labels r.outC r.outCtx depth fuel len
     pure (r.stmt :: rest, C'', ctx'')
 termination_by n => (fuel, 1, n)
 
@@ -263,7 +279,7 @@ end
     variable scope. -/
 def genProgramStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth fuel len : Nat) : G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmts fctx octx tvars (LContext.default) [] depth fuel len
+  genStmts fctx octx tvars [] (LContext.default) [] depth fuel len
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
@@ -274,14 +290,14 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of individual statements at nesting fuel 2.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] (LContext.default) [] 2 2
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] (LContext.default) [] 2 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
 -- Smoke test: a statement started from a non-empty variable scope, so `set`
 -- and control-flow guards over existing variables can appear.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] (LContext.default)
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] (LContext.default)
     [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] 2 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 

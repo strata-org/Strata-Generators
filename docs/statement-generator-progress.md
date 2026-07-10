@@ -20,7 +20,7 @@ It reuses the existing, already-proven-sound-and-complete generators:
 | File | Status |
 |---|---|
 | `StrataGenerators/StmtHasTypeAGen/Core.lean` | **Complete, builds clean.** Generator defs. |
-| `StrataGenerators/StmtHasTypeAGen.lean` | **Soundness complete; completeness in progress.** |
+| `StrataGenerators/StmtHasTypeAGen.lean` | **Soundness and completeness complete.** |
 | `lakefile.toml` | Two `lean_lib` entries added (`StmtHasTypeAGen.Core`, `StmtHasTypeAGen`). |
 
 Everything currently on the branch **builds with zero `sorry`**:
@@ -68,6 +68,23 @@ lines 900/928/5495 — not ours.)
    generate their bodies via `genStmts … fuel …` at the *smaller* `fuel`. The same
    measure is repeated on the mutual soundness theorems.
 
+7. **Enclosing block labels (`exit` realism).** `genStmt`/`genStmts` thread a
+   `labels : List String` of the *enclosing block labels*. `genExitStmt` samples
+   its label from `labels` (falling back to `String.arbitrary` only when empty, at
+   top level), so a generated `exit` breaks out of a live enclosing block instead
+   of a dead random string — the `exiting l` config is consumed by a matching
+   `block` (`Imperative.StmtSemantics`, `step_block_exit_match`). A `block`
+   descends into its body under `label :: labels`; `ite`/`loop` bodies inherit
+   `labels` unchanged (only `block` introduces a named exit target). Labels are
+   typing-irrelevant (no `StmtHasType'` rule constrains them), so this affects only
+   operational realism, never soundness/completeness. `labels` is a *proof-relevant
+   index* of the `StmtReachable`/`StmtsReachable` relations (the `block`
+   constructor extends it) and an explicit argument of the mutual
+   soundness/completeness/monotonicity theorems (recursive calls vary it).
+   Design informed by *Testing Noninterference, Quickly* (Hriţcu et al., ICFP'13):
+   their "generation by execution" makes jump targets valid by construction;
+   Strata's lexical scoping lets us achieve the same guarantee statically.
+
 ---
 
 ## Soundness — DONE ✅
@@ -86,15 +103,48 @@ In `StmtHasTypeAGen.lean`:
 
 ---
 
-## Completeness — IN PROGRESS 🚧
+## Completeness — DONE ✅
 
-The chosen scope (confirmed with the user) is the **reachability-hypothesis**
-style already used by `genCmd_complete` / `genFunction_complete`: given a
-well-typed statement whose *sub-components* are individually reachable by the
-component sub-generators, the statement is in `genStmt`'s support at sufficient
-fuel. In particular the `cmd`→`.call` (procedure-call) sub-case is handled by a
-reachability side-condition (there is no procedure-call generator; building one is
-a separate, comparably-sized project — deliberately out of scope).
+**Final design differs from the sketch below** (which is retained for context).
+Two facts forced the change:
+
+1. **`StmtHasTypeA` alone can't state a meaningful completeness goal.** Lexical
+   scoping makes the typing judgment of `block`/`ite`/`loop` equal `C Γ ⟶ C Γ` —
+   the body/branches don't appear in it. So "∃ reachable `r` re-realizing the
+   judgment" is *vacuous* for every nesting constructor (an `exit` would witness
+   any block). The spec relation discards exactly the structure completeness must
+   pin down.
+2. **`CmdHasTypeA` output context is not deterministic** (`init_nondet` leaves the
+   stored monotype free up to `RigidAnnotCompat`), so `genCmd_complete` can't be
+   black-boxed + bridged by a determinism lemma to thread the sequence.
+
+**What was proven instead.** A fuel-indexed, `VarCtx`-threaded mutual inductive
+**reachability relation** `StmtReachable` / `StmtsReachable` that mirrors
+`genStmt` / `genStmts` constructor-for-constructor. Each constructor carries the
+generator's normal-form conditions (metadata `default`) plus component
+reachability (leaf sub-generator support membership; `genLExpr` support for
+guards/measures/invariants; `len ≤ depth` bounds; bodies reachable at the smaller
+fuel). Then:
+
+- `genStmt_complete` / `genStmts_complete` (mutual): every reachable statement /
+  list is in the generator's support with the **exact** statement, output ambient
+  context `C'`, and output scope `ctx'` — i.e. `⟨s, C', ctx'⟩ ∈ support …`.
+  Proof is a one-line-per-constructor dispatch to the `_mem` lemmas.
+- `genStmt_complete_sound` (capstone): reachable ⇒ in support **and** well-typed
+  (`StmtHasTypeA`, via `genStmt_sound`), confirming `StmtReachable` characterizes
+  exactly the generator's *well-typed* support (not vacuous).
+
+All axiom-clean (`propext`, `Classical.choice`, `Quot.sound` only). The
+procedure-call (`cmd`→`.call`) sub-case remains genuinely unreachable: the `cmd`
+constructor of `StmtReachable` ranges over `genCmdStmt` (wrapping `CmdExt.cmd`)
+support only; there is no procedure-call generator (out of scope, as before).
+
+### Original sketch (superseded — kept for reference)
+
+The originally-planned scope was the **reachability-hypothesis** style used by
+`genCmd_complete` / `genFunction_complete`: given a well-typed statement whose
+*sub-components* are individually reachable, the statement is in `genStmt`'s
+support at sufficient fuel.
 
 ### Done so far (membership-lifting lemmas, all build clean)
 These lift a sub-generator result into `genStmt`/`genStmts` support:
