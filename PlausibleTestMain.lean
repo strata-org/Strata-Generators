@@ -565,15 +565,71 @@ def parseCoreProgram (input : String) : IO (Option Core.Program) := do
   catch _ => pure none
 
 /-- The round-trip property: format → parse → re-format yields the same string.
-    Returns `true` if the round-trip succeeds, or if the parse fails (vacuous
-    pass for generator names the grammar rejects). Runs in `IO`. -/
+    Returns `true` only if the round-trip succeeds. Runs in `IO`.
+
+    A parse failure is scored as a **failure**, not a vacuous pass: the name
+    generators (`genIdentName`) produce only legal Core identifiers by
+    construction, so if the printed function does not parse back, the printer has
+    emitted legal-but-unparseable output — a genuine round-trip bug to report. -/
 def checkPrintParseRoundtrip (func : Function) : IO Bool := do
   let s1 := formatFuncAsProgram func
   match ← parseCoreProgram s1 with
   | some ast2 =>
     let s2 := (Core.formatProgram ast2).pretty
     pure (s1 == s2)
-  | none => pure true  -- parse failure = vacuous pass
+  | none => pure false  -- parse failure = round-trip bug (names are legal by construction)
+
+-- ── Single-identifier round-trip probe (minimal reproducers) ──────────
+--
+-- The full-function round-trip fails on samples that bundle a name, typeargs,
+-- types, a body, etc., so a failure can't be attributed to one cause. This
+-- probe isolates a single generated identifier in one syntactic position at a
+-- time, using an otherwise-trivial function, so a failure yields a minimal
+-- reproducer: "identifier X in position P does not round-trip".
+--
+-- Identifiers are drawn from `genQuotedName` (the adversarial alphabet incl.
+-- `. ' | \ ? ! @`), so this deliberately exercises the special-character and
+-- pipe-escape paths that `genIdentName` (fed to `genFunction`) never reaches.
+
+/-- The three syntactic positions an identifier can occupy in a `Function`. -/
+inductive IdentPosition where
+  | funcName
+  | typeArg
+  | binder
+  deriving Repr, DecidableEq
+
+def IdentPosition.label : IdentPosition → String
+  | .funcName => "function-name"
+  | .typeArg  => "type-arg"
+  | .binder   => "binder"
+
+/-- Build a minimal `Function` that places `name` in the given position and is
+    otherwise trivial (no body, no measure, `int` output). For `typeArg`, the
+    name is also referenced as the output type (`ftvar name`) so it appears in a
+    use position, not just its binding. For `binder`, the single input uses the
+    name as its parameter identifier at type `int`. -/
+def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
+  let ident : Identifier Unit := ⟨name, ()⟩
+  match pos with
+  | .funcName =>
+    LFunc.mk (name := ident) (inputs := []) (output := .int)
+  | .typeArg =>
+    LFunc.mk (name := ⟨"f", ()⟩) (typeArgs := [name]) (inputs := [])
+      (output := .ftvar name)
+  | .binder =>
+    LFunc.mk (name := ⟨"f", ()⟩) (inputs := [(ident, .int)]) (output := .int)
+
+/-- Round-trip a single identifier in one position. Returns `none` on success,
+    or `some (renderedProgram, reparsedOrMismatch)` describing the failure. -/
+def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
+    IO (Option (String × String)) := do
+  let s1 := formatFuncAsProgram (minimalFuncWithName pos name)
+  match ← parseCoreProgram s1 with
+  | none => pure (some (s1, "parse-failure"))
+  | some ast2 =>
+    let s2 := (Core.formatProgram ast2).pretty
+    if s1 == s2 then pure none
+    else pure (some (s1, s2))
 
 -- ── Property 3: Type preservation under evaluation ────────────────────
 --
@@ -611,7 +667,7 @@ def checkProperty (name : String) (p : Prop) [Testable p]
     return true
   | .failure _ xs n =>
     IO.println s!"FAIL (after {n} trials)"
-    IO.eprintln s!"    {Testable.formatFailure "" xs n}"
+    IO.println s!"    {Testable.formatFailure "" xs n}"
     return false
 
 /-- Sample erased terms and print the `resolve` error messages behind any
@@ -734,29 +790,68 @@ def main (args : List String) : IO UInt32 := do
   -- Property 2: pretty-print / parse round-trip (IO-based, manual loop)
   IO.print "  function: pretty-print/parse round-trip ... "
   let mut rtOk := 0
-  let mut rtFail := 0
-  let mut rtVacuous := 0
+  let mut rtParseFail := 0
+  let mut rtMismatch := 0
   for i in List.range (min numTrials 200) do
     let size := i % (maxSize + 1)
     let gf ← try Gen.run (Arbitrary.arbitrary (α := ClosedGenFunction)) size
              catch _ => pure ⟨default⟩
-    let passed ← checkPrintParseRoundtrip gf.func
-    if passed then
-      -- Distinguish vacuous (parse failed) from real success
-      let s := formatFuncAsProgram gf.func
-      match ← parseCoreProgram s with
-      | some _ => rtOk := rtOk + 1
-      | none => rtVacuous := rtVacuous + 1
-    else
-      rtFail := rtFail + 1
-      if rtFail ≤ 5 then
-        let s := formatFuncAsProgram gf.func
-        IO.eprintln s!"    FAIL: {s.replace "\n" " " |>.take 80}"
-  if rtFail == 0 then
-    IO.println s!"PASS ({rtOk} round-tripped, {rtVacuous} vacuous/parse-failed)"
+    let s := formatFuncAsProgram gf.func
+    match ← parseCoreProgram s with
+    | none =>
+      -- Legal-by-construction names that fail to parse = printer/parser bug.
+      rtParseFail := rtParseFail + 1
+      if rtParseFail + rtMismatch ≤ 5 then
+        IO.println s!"    FAIL (parse): {s.replace "\n" " " |>.take 80}"
+    | some ast2 =>
+      let s2 := (Core.formatProgram ast2).pretty
+      if s == s2 then
+        rtOk := rtOk + 1
+      else
+        rtMismatch := rtMismatch + 1
+        if rtParseFail + rtMismatch ≤ 5 then
+          IO.println s!"    FAIL (mismatch): {s.replace "\n" " " |>.take 80}"
+  if rtParseFail == 0 && rtMismatch == 0 then
+    IO.println s!"PASS ({rtOk} round-tripped)"
   else
-    IO.println s!"FAIL ({rtFail} mismatches, {rtOk} ok, {rtVacuous} vacuous)"
+    IO.println s!"FAIL ({rtParseFail} parse-failures, {rtMismatch} mismatches, {rtOk} ok)"
     allPassed := false
+
+  -- Single-identifier probe: minimal reproducers per position, drawn from the
+  -- adversarial `genQuotedName` alphabet.
+  IO.print "  function: single-identifier round-trip probe ... "
+  let positions := [IdentPosition.funcName, .typeArg, .binder]
+  let mut probeOk := 0
+  let mut probeFail := 0
+  let mut shownReprs : List String := []
+  for i in List.range (min numTrials 200) do
+    let size := i % (maxSize + 1)
+    let name ← try Gen.run genQuotedName size catch _ => pure "x"
+    for pos in positions do
+      match ← probeIdentRoundtrip pos name with
+      | none => probeOk := probeOk + 1
+      | some (rendered, outcome) =>
+        probeFail := probeFail + 1
+        -- One reproducer per distinct (position, outcome, triggering-char-class),
+        -- so different mechanisms surface separately instead of collapsing.
+        let cls :=
+          if name.any (· == '.') then "dot"
+          else if name.any (· == '|') then "pipe"
+          else if name.any (· == '\\') then "backslash"
+          else if name.any (· == '\'') then "apostrophe"
+          else if name.data.head?.map (·.isDigit) == some true then "leading-digit"
+          else "other"
+        let key := s!"{pos.label}/{if outcome == "parse-failure" then "parse" else "mismatch"}/{cls}"
+        if !shownReprs.contains key then
+          shownReprs := key :: shownReprs
+          IO.println s!"    REPRO [{pos.label}] class={cls} name={name.quote} outcome={outcome}"
+          IO.println s!"           rendered: {rendered.replace "\n" " "}"
+          if outcome != "parse-failure" then
+            IO.println s!"           reparsed: {outcome.replace "\n" " "}"
+  if probeFail == 0 then
+    IO.println s!"PASS ({probeOk} ident/position round-trips)"
+  else
+    IO.println s!"FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
 
   IO.println ""
   if allPassed then

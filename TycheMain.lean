@@ -781,9 +781,9 @@ def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckS
 
 -- ── Function property 2: pretty-print / parse round-trip ───────────────
 -- Embeds a generated function in a `Program`, formats it via
--- `Core.formatProgram`, re-parses via DDM, re-formats, and compares. Parse
--- failures are marked separately (the generator can emit identifiers the Core
--- grammar rejects — empty/numeric names — which is a generator artifact).
+-- `Core.formatProgram`, re-parses via DDM, re-formats, and compares. A parse
+-- failure is scored as a FAILURE: names are legal Core identifiers by
+-- construction (`genIdentName`), so unparseable output is a printer/parser bug.
 
 /-- Embed a function into a one-decl Program and format it. -/
 private def formatFuncAsProgram (func : Function) : String :=
@@ -813,10 +813,11 @@ structure FunctionRoundtripResult where
 
 instance : Tyche.TycheSample FunctionRoundtripResult where
   toSample r :=
-    -- Passes iff the round-trip held, OR the parse failed (vacuous — a
-    -- generator-name artifact, not a printer/parser bug). Fails only on a
-    -- genuine format→parse→re-format mismatch.
-    let passed := !r.parsed || r.roundtripped
+    -- Passes iff the printed function parsed back AND round-tripped. A parse
+    -- failure is a FAILURE, not vacuous: `genIdentName` produces only legal Core
+    -- identifiers by construction, so legal-but-unparseable output is a genuine
+    -- printer/parser bug to report.
+    let passed := r.parsed && r.roundtripped
     { representation := ppFunction r.func
       status := if passed then .passed else .failed
       features := [
@@ -882,6 +883,87 @@ def genAndCheckFunctionBodyPreservation (depth : Nat := 0) : IO FunctionBodyPres
     return { func, hasBody := true, preserved, generatorSize := d }
   | none =>
     return { func, hasBody := false, preserved := true, generatorSize := d }
+
+-- ── Function property: single-identifier round-trip probe ──────────────
+-- Isolates one adversarial identifier (`genQuotedName`, alphabet incl.
+-- `. ' | \ ? ! @`) in one syntactic position (function name / type-arg /
+-- binder) inside an otherwise-trivial function, so a failure is a minimal
+-- reproducer. Mirrors the probe in `PlausibleTestMain.lean` (those defs live in
+-- a separate executable root and can't be imported, so they're restated here).
+
+/-- The three syntactic positions an identifier can occupy in a `Function`. -/
+inductive IdentPosition where
+  | funcName
+  | typeArg
+  | binder
+  deriving Repr, DecidableEq
+
+def IdentPosition.label : IdentPosition → String
+  | .funcName => "function-name"
+  | .typeArg  => "type-arg"
+  | .binder   => "binder"
+
+/-- Character class of the identifier that likely triggered a failure — used as
+    the panel's grouping feature so distinct mechanisms surface separately. -/
+def identCharClass (name : String) : String :=
+  if name.any (· == '.') then "dot"
+  else if name.any (· == '|') then "pipe"
+  else if name.any (· == '\\') then "backslash"
+  else if name.any (· == '\'') then "apostrophe"
+  else if name.toList.head?.map (·.isDigit) == some true then "leading-digit"
+  else if name.any (fun c => c == '?' || c == '!' || c == '@') then "special"
+  else "plain"
+
+/-- Build a minimal `Function` that places `name` in the given position and is
+    otherwise trivial (no body, no measure, `int` output). -/
+def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
+  let ident : Identifier Unit := ⟨name, ()⟩
+  match pos with
+  | .funcName => LFunc.mk (name := ident) (inputs := []) (output := .int)
+  | .typeArg  => LFunc.mk (name := ⟨"f", ()⟩) (typeArgs := [name]) (inputs := [])
+                   (output := .ftvar name)
+  | .binder   => LFunc.mk (name := ⟨"f", ()⟩) (inputs := [(ident, .int)]) (output := .int)
+
+structure IdentProbeResult where
+  pos : IdentPosition
+  name : String
+  /-- Whether the printed single-identifier function parsed back. -/
+  parsed : Bool
+  /-- When parsed, whether format→parse→re-format is a fixed point. -/
+  roundtripped : Bool
+  rendered : String
+
+instance : Tyche.TycheSample IdentProbeResult where
+  toSample r :=
+    -- Passes iff the identifier parsed back AND round-tripped. A parse failure
+    -- is a FAILURE: the name is a legal Core identifier, so unparseable output
+    -- is a printer/parser bug.
+    let passed := r.parsed && r.roundtripped
+    { representation := r.rendered.replace "\n" " "
+      status := if passed then .passed else .failed
+      features := [
+        ("position", .nominal r.pos.label),
+        ("char_class", .nominal (identCharClass r.name)),
+        ("parsed", .nominal (if r.parsed then "yes" else "no")),
+        ("roundtripped", .nominal (if r.parsed then (if r.roundtripped then "yes" else "no") else "—"))
+      ] }
+
+/-- Draw an adversarial identifier, place it in a random position, and record
+    whether that single identifier round-trips. -/
+def genAndCheckIdentProbe : IO IdentProbeResult := do
+  let name ← genQuotedName (G := IO)
+  let posIdx ← IO.rand 0 2
+  let pos := match posIdx with
+    | 0 => IdentPosition.funcName
+    | 1 => IdentPosition.typeArg
+    | _ => IdentPosition.binder
+  let s1 := formatFuncAsProgram (minimalFuncWithName pos name)
+  match ← parseCoreProgram s1 with
+  | some ast2 =>
+    let s2 := (Core.formatProgram ast2).pretty
+    return { pos, name, parsed := true, roundtripped := s1 == s2, rendered := s1 }
+  | none =>
+    return { pos, name, parsed := false, roundtripped := false, rendered := s1 }
 
 -- ── Main ──────────────────────────────────────────────────────────────
 
@@ -1016,6 +1098,15 @@ def main (args : List String) : IO Unit := do
   let fn4 ← IO.FS.readFile (outputPath ++ ".fn4")
   handle.putStr fn4
   IO.FS.removeFile (outputPath ++ ".fn4")
+
+  -- Function property: single-identifier round-trip probe. An adversarial
+  -- identifier (`genQuotedName`) in one syntactic position; a parse failure or
+  -- mismatch is a minimal printer/parser bug reproducer.
+  Tyche.run genAndCheckIdentProbe
+    { numSamples, propertyName := "genFunction: single-identifier round-trip probe", outputPath := outputPath ++ ".fn5" }
+  let fn5 ← IO.FS.readFile (outputPath ++ ".fn5")
+  handle.putStr fn5
+  IO.FS.removeFile (outputPath ++ ".fn5")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow
