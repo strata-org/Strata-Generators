@@ -90,6 +90,12 @@ roots = ["StrataGenerators.FunctionHasTypeAGen"]
 name = "StrataGenerators.FunctionHasTypeAGen.TestSupport"
 roots = ["StrataGenerators.FunctionHasTypeAGen.TestSupport"]
 
+# Shared round-trip helpers + structural shrinker used by both the Plausible and
+# Tyche harnesses (format/parse, shrinkWhile, failure predicates)
+[[lean_lib]]
+name = "StrataGenerators.FunctionHasTypeAGen.Roundtrip"
+roots = ["StrataGenerators.FunctionHasTypeAGen.Roundtrip"]
+
 # Shared SetGen infrastructure (no conflicting imports)
 [[lean_lib]]
 name = "StrataGenerators.SetGen"

@@ -2,6 +2,7 @@ import StrataGenerators.Tyche
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
+import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import Basalt.IO
 import Strata.DL.Lambda.LExprT
 -- Imports for Function.typeCheck property (typeCheck_annotated_sound)
@@ -785,36 +786,10 @@ def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckS
 -- failure is scored as a FAILURE: names are legal Core identifiers by
 -- construction (`genIdentName`), so unparseable output is a printer/parser bug.
 
-/-- Embed a function into a one-decl Program and format it. -/
-private def formatFuncAsProgram (func : Function) : String :=
-  let prog : Core.Program := { decls := [ .func func .empty ] }
-  (Core.formatProgram prog).pretty
-
-/-- Parse a Core program string back to the Strata Core AST. -/
-private def parseCoreProgram (input : String) : IO (Option Core.Program) := do
-  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
-  let body := if input.startsWith "program Core;\n\n" then
-    (input.drop "program Core;\n\n".length).toString else input
-  let inputCtx := StrataDDM.Parser.stringInputContext ⟨"roundtrip"⟩ body
-  try
-    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" inputCtx
-    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
-    if !errs.isEmpty then pure none
-    else pure (some ast)
-  catch _ => pure none
-
-/-- Like `parseCoreProgram`, but returns the diagnostic message on failure. -/
-private def parseCoreProgramErr (input : String) : IO (Except String Core.Program) := do
-  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
-  let body := if input.startsWith "program Core;\n\n" then
-    (input.drop "program Core;\n\n".length).toString else input
-  let inputCtx := StrataDDM.Parser.stringInputContext ⟨"roundtrip"⟩ body
-  try
-    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" inputCtx
-    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
-    if !errs.isEmpty then pure (.error s!"translate: {(toString errs).replace "\n" " "}")
-    else pure (.ok ast)
-  catch e => pure (.error ((toString e).replace "\n" " "))
+-- `formatFuncAsProgram`, `parseCoreProgram`, `parseCoreProgramErr`, the
+-- structural shrinker (`shrinkWhile` et al.) and the failure predicates
+-- (`failsRoundtrip`, …) are shared with the Plausible harness — see
+-- `StrataGenerators.FunctionHasTypeAGen.Roundtrip`.
 
 /-- Extract a short, position-independent "kind" from a parser error message,
     for grouping in the Tyche panel. Strips the `Parse errors:` prefix and the
@@ -857,11 +832,8 @@ instance : Tyche.TycheSample FunctionRoundtripResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate a closed function, print it, re-parse, re-print, and record whether
-    it parsed and whether it round-tripped. -/
-def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  let func ← genFunctionIO [] coreOpCtx d
+/-- Build a `FunctionRoundtripResult` for a specific function. -/
+def mkRoundtripResult (func : Function) (d : Nat) : IO FunctionRoundtripResult := do
   let s1 := formatFuncAsProgram func
   match ← parseCoreProgramErr s1 with
   | .ok ast2 =>
@@ -869,6 +841,18 @@ def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult
     return { func, parsed := true, roundtripped := s1 == s2, parseError := "", generatorSize := d }
   | .error e =>
     return { func, parsed := false, roundtripped := false, parseError := e, generatorSize := d }
+
+def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let func ← genFunctionIO [] coreOpCtx d
+  -- If the function fails to round-trip, shrink it to a minimal witness and
+  -- report that instead, so the Tyche `representation` shows the smallest
+  -- reproducer (features / status_reason are recomputed on the shrunk func).
+  if ← failsRoundtrip func then
+    let minF ← shrinkWhile failsRoundtrip 1000 func
+    mkRoundtripResult minF d
+  else
+    mkRoundtripResult func d
 
 -- ── Function property 3: type preservation under eval ──────────────────
 -- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /

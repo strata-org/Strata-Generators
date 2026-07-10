@@ -1,6 +1,7 @@
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
+import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import Basalt.PlausibleGen
 import Plausible
 import Strata.DL.Lambda.LExprT
@@ -542,42 +543,13 @@ def checkTypeCheckAnnotatedSound (gf : ClosedGenFunction) : Bool :=
 --
 -- Embeds a generated `Function` in a trivial `Program`, pretty-prints it via
 -- `Core.formatProgram`, re-parses via DDM, re-formats, and asserts string
--- equality. Parse failures are treated as vacuous passes (the generator can
--- produce identifiers the grammar rejects — empty strings, numerics — which is
--- a generator-level artifact, not a printer/parser bug).
-
-/-- Embed a function into a one-decl Program and format it. -/
-def formatFuncAsProgram (func : Function) : String :=
-  let prog : Core.Program := { decls := [ .func func .empty ] }
-  (Core.formatProgram prog).pretty
-
-/-- Parse a Core program string back to the Strata Core AST. -/
-def parseCoreProgram (input : String) : IO (Option Core.Program) := do
-  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
-  let body := if input.startsWith "program Core;\n\n" then
-    (input.drop "program Core;\n\n".length).toString else input
-  let inputCtx := StrataDDM.Parser.stringInputContext ⟨"roundtrip"⟩ body
-  try
-    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" inputCtx
-    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
-    if !errs.isEmpty then pure none
-    else pure (some ast)
-  catch _ => pure none
-
-/-- Like `parseCoreProgram`, but on failure returns the diagnostic message
-    (parser exception text, or the translation errors) instead of discarding it.
-    Returns `.ok ast` on success, `.error msg` on failure. -/
-def parseCoreProgramErr (input : String) : IO (Except String Core.Program) := do
-  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
-  let body := if input.startsWith "program Core;\n\n" then
-    (input.drop "program Core;\n\n".length).toString else input
-  let inputCtx := StrataDDM.Parser.stringInputContext ⟨"roundtrip"⟩ body
-  try
-    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" inputCtx
-    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
-    if !errs.isEmpty then pure (.error s!"translate: {(toString errs).replace "\n" " "}")
-    else pure (.ok ast)
-  catch e => pure (.error ((toString e).replace "\n" " "))
+-- equality. A parse failure is a genuine printer/parser bug (names are legal
+-- Core identifiers by construction).
+--
+-- `formatFuncAsProgram`, `parseCoreProgram`, `parseCoreProgramErr`, the
+-- structural shrinker (`shrinkWhile` et al.) and the failure predicates
+-- (`failsRoundtripParsed`, `failsRoundtripParseFail`) are shared with the Tyche
+-- harness — see `StrataGenerators.FunctionHasTypeAGen.Roundtrip`.
 
 /-- The round-trip property: format → parse → re-format yields the same string.
     Returns `true` only if the round-trip succeeds. Runs in `IO`.
@@ -593,105 +565,6 @@ def checkPrintParseRoundtrip (func : Function) : IO Bool := do
     let s2 := (Core.formatProgram ast2).pretty
     pure (s1 == s2)
   | none => pure false  -- parse failure = round-trip bug (names are legal by construction)
-
--- ── Shrinker: minimal "parses but does not round-trip" functions ──────
---
--- Greedy structural shrinker. Given a `Function` that exhibits some failure
--- predicate `p : Function → IO Bool`, it repeatedly replaces the function with
--- the first strictly-smaller candidate that still satisfies `p`, until no such
--- candidate exists. `sizeFunc` is strictly decreasing across every shrink step,
--- so the loop terminates (fuel is only a backstop).
---
--- The default predicate `failsRoundtripParsed` targets the *mismatch* class:
--- the printed program PARSES but format→parse→re-format is not a fixed point.
--- Intermediate candidates that fail to parse are simply skipped (they don't
--- satisfy the predicate), so shrinking stays inside the parse-but-mismatch
--- region and yields a minimal witness of that specific bug class.
-
-/-- Structural size; each shrink step below strictly decreases it. -/
-def sizeTy : LMonoTy → Nat
-  | .ftvar _ => 2
-  | .bitvec _ => 2
-  | .tcons _ args => 1 + (args.map sizeTy).foldl (· + ·) 0
-
-def sizeFunc (f : Function) : Nat :=
-  f.name.name.length
-    + sizeTy f.output
-    + (f.inputs.toList.map (fun p => 1 + sizeTy p.2)).foldl (· + ·) 0
-    + f.typeArgs.length
-    + (match f.body with | some _ => 1 | none => 0)
-    + (match f.measure with | some _ => 1 | none => 0)
-
-/-- Immediate smaller candidates for a monotype: collapse a compound toward a
-    child or toward `int`, a type variable / bitvector toward `int`, and shrink
-    children in place. Base types have no smaller form. -/
-partial def shrinkTy : LMonoTy → List LMonoTy
-  | .ftvar _ => [.int]
-  | .bitvec _ => [.int]
-  | .tcons _ [] => []
-  | .tcons "arrow" [a, b] =>
-    [a, b, .int]
-      ++ (shrinkTy a).map (fun a' => .tcons "arrow" [a', b])
-      ++ (shrinkTy b).map (fun b' => .tcons "arrow" [a, b'])
-  | .tcons "Map" [k, v] =>
-    [k, v, .int]
-      ++ (shrinkTy k).map (fun k' => .tcons "Map" [k', v])
-      ++ (shrinkTy v).map (fun v' => .tcons "Map" [k, v'])
-  | .tcons "Sequence" [e] =>
-    [e, .int] ++ (shrinkTy e).map (fun e' => .tcons "Sequence" [e'])
-  | .tcons _ args => .int :: args
-
-/-- All ways to drop exactly one element of a list. -/
-def dropEach {α} : List α → List (List α)
-  | [] => []
-  | x :: xs => xs :: (dropEach xs).map (x :: ·)
-
-/-- Candidate smaller functions: drop body/measure, drop an input, drop a
-    type-arg, shrink an input type, shrink the output type, or shorten the name.
-    All candidates are strictly smaller by `sizeFunc`. -/
-def shrinkFunc (f : Function) : List Function :=
-  let ins := f.inputs.toList
-  let dropBody    := if f.body.isSome then [{ f with body := none }] else []
-  let dropMeasure := if f.measure.isSome then [{ f with measure := none }] else []
-  let dropInput   := (dropEach ins).map (fun i => { f with inputs := ListMap.ofList i })
-  let dropTyArg   := (dropEach f.typeArgs).map (fun tas => { f with typeArgs := tas })
-  let shrinkInput := (List.range ins.length).flatMap (fun i =>
-    match ins[i]? with
-    | some (x, ty) => (shrinkTy ty).map (fun ty' =>
-        { f with inputs := ListMap.ofList (ins.set i (x, ty')) })
-    | none => [])
-  let shrinkOut   := (shrinkTy f.output).map (fun o => { f with output := o })
-  let shrinkName  := if f.name.name.length > 1 then [{ f with name := ⟨"f", ()⟩ }] else []
-  dropBody ++ dropMeasure ++ dropInput ++ dropTyArg ++ shrinkInput ++ shrinkOut ++ shrinkName
-
-/-- First candidate (in order) that still satisfies the failure predicate. -/
-partial def firstSatisfying (p : Function → IO Bool) : List Function → IO (Option Function)
-  | [] => pure none
-  | c :: rest => do if ← p c then pure (some c) else firstSatisfying p rest
-
-/-- Greedily shrink `f` while preserving `p`. -/
-partial def shrinkWhile (p : Function → IO Bool) (fuel : Nat) (f : Function) : IO Function := do
-  match fuel with
-  | 0 => pure f
-  | fuel + 1 =>
-    let cands := (shrinkFunc f).filter (fun c => sizeFunc c < sizeFunc f)
-    match ← firstSatisfying p cands with
-    | some c => shrinkWhile p fuel c
-    | none => pure f
-
-/-- The target class: the printed program PARSES but does not round-trip. -/
-def failsRoundtripParsed (f : Function) : IO Bool := do
-  let s1 := formatFuncAsProgram f
-  match ← parseCoreProgram s1 with
-  | some ast2 => pure (s1 != (Core.formatProgram ast2).pretty)
-  | none => pure false
-
-/-- The other failure class: the printed program does NOT parse at all. Used to
-    shrink a parse-failure down to a minimal unparseable-but-legal witness. -/
-def failsRoundtripParseFail (f : Function) : IO Bool := do
-  match ← parseCoreProgram (formatFuncAsProgram f) with
-  | some _ => pure false
-  | none => pure true
 
 -- ── Single-identifier round-trip probe (minimal reproducers) ──────────
 --
