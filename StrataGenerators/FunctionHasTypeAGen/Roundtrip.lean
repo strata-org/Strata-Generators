@@ -115,13 +115,30 @@ def dropEach {α} : List α → List (List α)
   | [] => []
   | x :: xs => xs :: (dropEach xs).map (x :: ·)
 
-/-- Well-formedness: every free type variable in the signature (inputs + output)
-    is declared in `typeArgs`. `genFunction` maintains this invariant, and the
-    shrinker preserves it so it never fabricates undeclared-type-variable
-    "failures". -/
+/-- Well-formedness of a shrink candidate. `genFunction` maintains all of these
+    invariants; the shrinker must preserve them so it never fabricates a failure
+    that is really an *ill-formed* function (which the parser would rightly
+    reject) rather than a genuine printer/parser bug. Two conditions:
+
+    1. **Scoping** — every free type variable in the signature (inputs + output)
+       is declared in `typeArgs`.
+    2. **Body typing** — the body (if present) type-checks at the declared
+       `output`, and the measure (if present) at `int`. This is essential:
+       `shrinkFunc` can collapse `output` toward `int` (`shrinkOut`) *without*
+       touching the body, which would leave e.g. a `real`-returning lambda body
+       under an `int` output — an ill-typed function whose parse failure is a
+       shrinker artifact, not a Strata bug. Re-checking here rejects such
+       candidates. -/
 def funcWellFormed (f : Function) : Bool :=
   let used := f.output.freeVars ++ (f.inputs.toList.flatMap (fun p => p.2.freeVars))
-  used.all (· ∈ f.typeArgs)
+  let scopedOk := used.all (· ∈ f.typeArgs)
+  let bodyOk := match f.body with
+    | some b => LExpr.typeCheck (T := CoreLParams) [] b == some f.output
+    | none => true
+  let measureOk := match f.measure with
+    | some m => LExpr.typeCheck (T := CoreLParams) [] m == some .int
+    | none => true
+  scopedOk && bodyOk && measureOk
 
 /-- Candidate smaller functions: drop body/measure, drop an input, drop a
     type-arg, shrink an input type, shrink the output type, or shorten the name.

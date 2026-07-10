@@ -277,16 +277,22 @@ These are worth triaging individually; the common thread is printer
 incompleteness for certain expression/constant forms rather than a single
 localized rule.
 
-> **Note on a related, subtler case: unbound type variables in bodies.** A body
-> can mention a type variable that the function's `typeArgs` never declares, e.g.
-> `function L () : int { fun __q0 : c -> int => if true then -1.0 else 5.0 }`.
-> Here the *AST* is well-typed by construction (`genFunction` generates the body
-> at the declared output type — `Core.lean:174`), and the `int` inside `c -> int`
-> is `__q0`'s parameter codomain, not the lambda's result (the lambda's result is
-> the `real`-typed `if`, so `__q0 : (c -> int) -> real`). The defect is that `c`
-> appears in the printed body but `L` has no `<c>` type-argument list, so on
-> re-parse `c` is undeclared. This is the body-side analogue of an
-> undeclared-type-variable print, distinct from the type errors above.
+> **Fixed shrinker artifact (was mis-reported as a bug).** Earlier runs produced
+> apparent Class-3 failures like
+> `function L () : int { fun __q0 : c -> int => if true then -1.0 else 5.0 }`,
+> where the body is a lambda of type `(c -> int) -> real` but the function is
+> declared `: int`. This function is **genuinely ill-typed** (`(c -> int) -> real`
+> ≠ `int`), so the parser is correct to reject it — it is *not* a Strata bug.
+>
+> The cause was the shrinker: `shrinkFunc`'s `shrinkOut` collapses the declared
+> `output` toward `int` *without touching the body*, and the old `funcWellFormed`
+> only checked type-variable scoping, not body typing. So it let through a
+> well-formed-*looking* but ill-typed candidate. `funcWellFormed` now additionally
+> requires `LExpr.typeCheck [] body == some output` (and the measure at `int`), so
+> the shrinker can no longer manufacture these. Genuine body-side failures that
+> survive — e.g. the compound-type reassociation ones where the body's inferred
+> type prints identically to the declared type yet differs structurally — are real
+> Class 1 manifestations inside the body position, not artifacts.
 
 ---
 
@@ -383,9 +389,22 @@ genuine Strata printer/parser bugs.
 
 Shared round-trip + shrinker machinery lives in
 `StrataGenerators/FunctionHasTypeAGen/Roundtrip.lean`. The shrinker preserves the
-`funcWellFormed` invariant (every free type variable in the signature is declared
-in `typeArgs`), so a minimal witness is always a genuine `genFunction`-shaped
-function and never a fabricated undeclared-variable artifact.
+`funcWellFormed` invariant — every candidate is both **well-scoped** (every free
+type variable in the signature is declared in `typeArgs`) and **well-typed** (the
+body type-checks at the declared `output`, the measure at `int`) — so a minimal
+witness is always a genuine `genFunction`-shaped function, never a fabricated
+ill-formed artifact.
+
+> **History / caveat.** The earlier version of the function shrinker was
+> LLM-synthesized, and it was **producing ill-typed functions after shrinking**:
+> `shrinkOut` collapsed a function's declared `output` toward `int` without
+> adjusting the body, so a `real`-returning (or otherwise mismatched) body would
+> be left under an `int` output. The original `funcWellFormed` only checked
+> type-variable scoping, so these ill-typed candidates passed the filter and their
+> parse failures were mis-reported as Strata printer/parser bugs (they are not —
+> an ill-typed function is correctly rejected by the parser). The well-typedness
+> check described above was added to close this gap; treat any pre-fix results in
+> older reports with suspicion.
 
 ## Priority for reporting to the Strata Core team
 
