@@ -95,20 +95,20 @@ def sizeFunc (f : Function) : Nat :=
     child or toward `int`, a type variable / bitvector toward `int`, and shrink
     children in place. Base types have no smaller form. -/
 partial def shrinkTy : LMonoTy → List LMonoTy
-  | .ftvar _ => [.int]
-  | .bitvec _ => [.int]
+  | .ftvar _ => []
+  | .bitvec _ => []
   | .tcons _ [] => []
   | .tcons "arrow" [a, b] =>
-    [a, b, .int]
+    [a, b]
       ++ (shrinkTy a).map (fun a' => .tcons "arrow" [a', b])
       ++ (shrinkTy b).map (fun b' => .tcons "arrow" [a, b'])
   | .tcons "Map" [k, v] =>
-    [k, v, .int]
+    [k, v]
       ++ (shrinkTy k).map (fun k' => .tcons "Map" [k', v])
       ++ (shrinkTy v).map (fun v' => .tcons "Map" [k, v'])
   | .tcons "Sequence" [e] =>
-    [e, .int] ++ (shrinkTy e).map (fun e' => .tcons "Sequence" [e'])
-  | .tcons _ args => .int :: args
+    e :: (shrinkTy e).map (fun e' => .tcons "Sequence" [e'])
+  | .tcons _ args => args ++ List.flatMap shrinkTy args
 
 /-- All ways to drop exactly one element of a list. -/
 def dropEach {α} : List α → List (List α)
