@@ -44,9 +44,8 @@ def formatFuncAsProgram (func : Function) : String :=
     hand-rolled printer so displays match the real formatter exactly. -/
 def formatFunc (func : Function) : String :=
   let s := formatFuncAsProgram func
-  let s := if s.startsWith "program Core;\n\n" then
-    (s.drop "program Core;\n\n".length).toString else s
-  s.trim
+  if s.startsWith "program Core;\n\n" then
+    (s.drop "program Core;\n\n".length).toString else s.trimAscii.toString
 
 /-- Parse a Core program string back to the Strata Core AST (`none` on any
     parse or translation failure). -/
