@@ -566,7 +566,7 @@ def checkPrintParseRoundtrip (func : Function) : IO Bool := do
     pure (s1 == s2)
   | none => pure false  -- parse failure = round-trip bug (names are legal by construction)
 
--- ── Single-identifier round-trip probe (minimal reproducers) ──────────
+-- ── Special-character identifier round-trip (minimal reproducers) ──────
 --
 -- The full-function round-trip fails on samples that bundle a name, typeargs,
 -- types, a body, etc., so a failure can't be attributed to one cause. This
@@ -574,9 +574,11 @@ def checkPrintParseRoundtrip (func : Function) : IO Bool := do
 -- time, using an otherwise-trivial function, so a failure yields a minimal
 -- reproducer: "identifier X in position P does not round-trip".
 --
--- Identifiers are drawn from `genQuotedName` (the adversarial alphabet incl.
--- `. ' | \ ? ! @`), so this deliberately exercises the special-character and
--- pipe-escape paths that `genIdentName` (fed to `genFunction`) never reaches.
+-- Identifiers are drawn from `genQuotedName`: legal Core identifiers (so a
+-- failure is a genuine bug, not a generator artifact) that contain special
+-- (non-alphanumeric) characters `. ' | \ ? ! @` in interior positions. This
+-- deliberately exercises the special-character and pipe-escape paths that
+-- `genIdentName` (fed to `genFunction`) never reaches.
 
 /-- The three syntactic positions an identifier can occupy in a `Function`. -/
 inductive IdentPosition where
@@ -819,9 +821,10 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"FAIL ({rtParseFail} parse-failures, {rtMismatch} mismatches, {rtOk} ok)"
     allPassed := false
 
-  -- Single-identifier probe: minimal reproducers per position, drawn from the
-  -- adversarial `genQuotedName` alphabet.
-  IO.print "  function: single-identifier round-trip probe ... "
+  -- Special-character identifier probe: minimal reproducers per position, using
+  -- legal identifiers that contain special (non-alphanumeric) characters
+  -- (`genQuotedName`).
+  IO.print "  function: special-character identifier round-trip ... "
   let positions := [IdentPosition.funcName, .typeArg, .binder]
   let mut probeOk := 0
   let mut probeFail := 0

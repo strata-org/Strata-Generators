@@ -32,19 +32,23 @@ cannot read back (or reads back differently).
 
 ## Summary of the run
 
-From a representative `make tyche` run (200 samples on the round-trip panel):
+From a representative `make tyche` run (1000 samples on the round-trip panel):
 
-- **88 failed / 112 passed.**
+- **466 failed / 534 passed** on the full-function round-trip.
+- **25 failed / 975 passed** on the special-character identifier round-trip.
 - Failures group (via the `error_kind` feature) into the classes below.
 
-| Class | count | Kind | Root cause |
+| Class | count (approx) | Kind | Root cause |
 |---|---|---|---|
-| 1. Missing parens around compound type arguments | 82 | parse-fail (71) + mismatch (11) | printer doesn't parenthesize an arrow/compound used as a type argument; application binds tighter than `->` |
-| 2. `<s` operator / type-arg bracket collision | 3 | parse-failure | `<s` token swallows `<` + an `s`-initial type-arg |
-| 3. Body expression not re-typecheckable | 2 | parse-failure | printed body fails the parser's type check (often a builtin-op printing gap) |
-| 4. Dot-in-identifier (rarer here; see probe panel) | ~0–1 | parse-failure | `.` is legal in idents but reparses as a qualified name |
+| 1. Missing parens around compound type arguments | ~428 | parse-fail (366) + mismatch (62) | printer doesn't parenthesize an arrow/compound used as a type argument; application binds tighter than `->` |
+| 2. `<s` operator / type-arg bracket collision | ~19 | parse-failure | `<s` token swallows `<` + an `s`-initial type-arg |
+| 3. Body expression not re-typecheckable | ~8 | parse-failure | printed body fails the parser's type check (unapplied ops, non-terminating reals) |
+| 4. Dot-in-identifier | ~22 | parse-failure | `.` is legal in idents but reparses as a qualified name |
+| 5. Type-variable use-site not quoted | ~13 | parse-failure | printer emits a `\|`/`\`-containing type var bare at its use site |
+| ⚠ Generator artifact | 1–2 | (false positive) | `genIdentName` can produce reserved keywords like `if` |
 
-(88 failures total, from 200 round-trip samples. Class 1 dominates at ~93%.)
+(491 total failures across both panels. Class 1 dominates at ~87%.
+The 1–2 generator artifacts are *not* Strata bugs; see the note at the end.)
 
 ---
 
@@ -68,11 +72,14 @@ function f (Z : Map int Map int int -> string) : int;
 ```
 
 **Mismatch examples** (parse OK, but `format → parse → re-format` is not a fixed
-point — `parsed=yes, roundtripped=no`, empty `status_reason`):
+point — `parsed=yes, roundtripped=no`, empty `status_reason`). Minimal shrunk
+witnesses from `tyche_output.jsonl`:
 
 ```
-function r () : Sequence (Map int string -> int);
+function C () : Sequence (Map int int -> bool);
 function f () : Sequence (Sequence int -> int);
+function f () : Map int (Sequence int -> bool);
+function f<F> () : Map F (Map F F -> bool);
 ```
 
 **Root cause — the printer does not parenthesize an arrow (or other compound)
@@ -121,9 +128,21 @@ The grammar it must satisfy:
 
 **One fix addresses the whole class**: parenthesize a type argument whenever it is
 an arrow (prec 30) — or, more conservatively, any non-atomic type — before
-splicing it into a juxtaposition position. Whether a given instance shows up as a
-parse-failure or a mismatch just depends on whether the mis-grouped string happens
-to be rejected outright or re-associates into a different valid-looking string.
+splicing it into a juxtaposition position.
+
+**Why both parse-failures and mismatches arise from the same bug.** Consider the
+minimal case `Sequence (Map int int -> bool)`:
+
+- The *correct* form `Sequence (Map int int -> bool)` **parses** (the parser
+  accepts explicit parentheses) but `Core.formatProgram` reprints it as
+  `Sequence Map int int -> bool` (parens dropped) — so `s1 ≠ s2`, a **mismatch**.
+- The *printer's* form `Sequence Map int int -> bool` **parse-fails** outright
+  (the parser mis-groups it).
+
+So the printer always loses the parens, and what you see in the Tyche panel
+depends on the *shrinker*: if the shrinker's final `representation` is the
+parenthesized first-print, you see a mismatch; if it's the un-parenthesized
+reprint, you see a parse-failure. Both are the same underlying bug.
 
 This class is independent of names and fires for essentially any signature
 containing a `Map`, `Sequence`, or arrow nested inside another type constructor.
@@ -156,8 +175,8 @@ the type-argument bracket. The parser then expects bindings after `f` and report
 **Confirmed directly**: `function f<s> () : int;` fails, while `function f< s>
 () : int;` (space after `<`) parses. So it is specifically `<` immediately
 followed by `s`. This affects even the clean `genIdentName`, which readily
-produces type-variable names starting with `s`. The single-identifier probe panel
-shows this as `char_class=plain` failures whose names start with `s`.
+produces type-variable names starting with `s`. The special-character identifier
+panel shows this as `char_class=plain` failures whose names start with `s`.
 
 ---
 
@@ -274,8 +293,8 @@ localized rule.
 ## Class 4 — Dot-in-identifier reparses as a qualified name
 
 Rare in the full-function panel at this sample size, but reliably reproduced by
-the single-identifier probe (`genFunction: single-identifier round-trip probe`,
-`char_class=dot`).
+the special-character identifier panel
+(`genFunction: special-character identifier round-trip`, `char_class=dot`).
 
 **Example form**:
 
@@ -299,12 +318,63 @@ panel it shows as error `expected Init.QualifiedIdent`.
 
 ---
 
+## Class 5 — Type-variable use-site not pipe-quoted
+
+Surfaced primarily via the special-character identifier panel.
+
+**Examples** (`tyche_output.jsonl`):
+
+```
+function f<|A\|L|> () : A|L;        → unterminated pipe-delimited identifier
+function f<|hCxl\\49|> () : hCxl\49;  → expected token
+function f<|J\||> () : J|;          → unterminated pipe-delimited identifier
+```
+
+**Root cause — the printer pipe-quotes the identifier at its *binding* site
+(`<|A\|L|>`) but emits it **bare** at its *use* site (`: A|L`).** The use-site
+renderer (`lmonoTyToCoreType`'s `.ftvar name => .tvar default name`,
+`FormatCore.lean:209`) doesn't pipe-quote; it passes the raw name value through.
+When the name contains `|` or `\` (which are legal *values* — the pipe form
+`|A\|L|` demonstrates both sites can accept it), the bare use position produces
+unparseable text (`A|L` triggers the pipe-delimited-ident parser mid-token and it
+sees an unterminated `|…` without a closing `|`).
+
+**Confirmed directly**: `function f<|A\|L|> () : |A\|L|;` (both sites quoted)
+**parses fine**. So the identifier value is legal; the failure is purely that the
+*use-site* doesn't quote it.
+
+This is the same asymmetry visible in Class 4 (dot names) and leading-digit names
+(e.g. `f<|8W|> () : 8W`), but for `|`/`\` characters specifically. The fix is a
+single "pipe-quote the name at the use site when `needsPipeDelimiters` would be
+true" check in the `.ftvar` rendering path.
+
+---
+
+## Known generator artifacts (NOT Strata bugs)
+
+The following failure(s) are **false positives** caused by the generator producing
+names that, while syntactically legal identifiers, collide with reserved keywords
+in the Core grammar:
+
+```
+function if () : int;   → unexpected token 'if'; expected identifier
+```
+
+`if` is a keyword (`Grammar.lean:99`, `fn if (…) : tp => "if " …`). The parser is
+correct to reject it as a function name. `genIdentName` produces syntactically
+valid identifiers but does not currently exclude reserved keywords. These
+represent ~0.2% of failures (1–2 in a 1000-sample run); the remaining 99.8% are
+genuine Strata printer/parser bugs.
+
+---
+
 ## How to reproduce
 
 - `make test` — the Plausible harness prints, per failing class, the original
   counterexample, the **shrunk** minimal witness, and the parser's error message.
-  It also runs a single-identifier probe (`genQuotedName`) isolating name-position
-  bugs (Classes 2, 4).
+  It also runs a special-character identifier round-trip (`genQuotedName`:
+  legal identifiers containing special characters) isolating name-position bugs
+  (Classes 2, 4, 5).
 - `make tyche` — writes `tyche_output.jsonl`; open with the Tyche VS Code
   extension. The `error_kind` feature groups failures by parser message
   (position-stripped), and the full parser message is in each sample's
@@ -345,3 +415,8 @@ function and never a fabricated undeclared-variable artifact.
    lexer (`Parser.lean:124-125`) and qualified-name syntax (`Init.lean:81-89`);
    arguably a spec question about whether `.` should be a legal bare-identifier
    character.
+5. **Class 5 (type-variable use-site not quoted)** — same root as Classes 4 and
+   the pipe-char cases: the formatter quotes the *binding* site but not the *use*
+   site (`FormatCore.lean:209`). A single "apply `needsPipeDelimiters` at the use
+   site too" fix addresses this and the leading-digit / dot variants. Low
+   incremental effort once the fix is in that one spot.

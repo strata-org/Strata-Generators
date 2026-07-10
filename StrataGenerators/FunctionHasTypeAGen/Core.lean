@@ -86,25 +86,27 @@ def quotedNameChars : List Char :=
 def genQuotedNameChar [Gen G] : G Char :=
   elements quotedNameChars (by decide)
 
-/-- Generate a name from the full adversarial alphabet, with **no** first/rest
-    restriction — special characters (including `|`/`\`) may appear in any
-    position, leading included. Unlike `genIdentName`, this is *not* guaranteed to
-    round-trip: it is the probe for exercising the pipe-quote / escape path
-    (`escapePipeIdent` ↔ `parsePipeDelimitedIdent`) and the bare-render hazards
-    (`.` munch collisions). A round-trip failure on a `genQuotedName` output is a
-    candidate Core printer/parser faithfulness bug, not a generator artifact.
+/-- Generate an adversarial-but-**legal** identifier: a first character from
+    `startChars` (letters plus `_`/`$`, all in `strataIsIdFirst`), followed by a
+    possibly-empty run of `quotedNameChars` (special characters `. ' ? ! $ @` and
+    the pipe-only `| \`) in the *interior*.
+
+    Constraining the first character to `strataIsIdFirst` is what keeps every
+    output a *legal Core identifier*: a leading `@`/`?`/digit/`|` is not a valid
+    identifier in any position (bare or pipe-quoted in a type-variable slot), so
+    without this restriction the probe would emit illegal names and its round-trip
+    "failures" would be generator artifacts, not Strata bugs. With it, a failure
+    is a genuine Core printer/parser faithfulness bug — the same guarantee
+    `genIdentName` gives — while still exercising the pipe-quote / escape path
+    (`escapePipeIdent` ↔ `parsePipeDelimitedIdent`) and bare-render hazards
+    (`.` munch collisions) via interior special characters.
 
     NOTE: kept separate from `genIdentName` on purpose — it does not feed
     `genFunction` or the soundness/completeness proofs; drive it through a
-    dedicated single-identifier round-trip harness.
-
-    The empty string is excluded: an unnamed declaration is a separate
-    (ambiguously-expressible) case, and since `listOf` yields `[]` ~50% of the
-    time, leaving it in would swamp the probe with empty names. We prepend one
-    guaranteed non-empty character so every output is a genuine special-character
-    identifier. -/
+    dedicated single-identifier round-trip harness. The leading character also
+    guarantees a non-empty name (so `listOf` yielding `[]` for the tail is fine). -/
 def genQuotedName [Gen G] : G String := do
-  let c ← genQuotedNameChar
+  let c ← genStartChar
   let cs ← listOf genQuotedNameChar
   return String.ofList (c :: cs)
 

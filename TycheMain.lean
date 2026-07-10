@@ -897,12 +897,15 @@ def genAndCheckFunctionBodyPreservation (depth : Nat := 0) : IO FunctionBodyPres
   | none =>
     return { func, hasBody := false, preserved := true, generatorSize := d }
 
--- ── Function property: single-identifier round-trip probe ──────────────
--- Isolates one adversarial identifier (`genQuotedName`, alphabet incl.
--- `. ' | \ ? ! @`) in one syntactic position (function name / type-arg /
--- binder) inside an otherwise-trivial function, so a failure is a minimal
--- reproducer. Mirrors the probe in `PlausibleTestMain.lean` (those defs live in
--- a separate executable root and can't be imported, so they're restated here).
+-- ── Function property: special-character identifier round-trip ─────────
+-- Isolates one *legal* identifier that contains special (non-alphanumeric)
+-- characters (`genQuotedName`: letter/`_`/`$`-initial, then `. ' | \ ? ! @` in
+-- the interior) in one syntactic position (function name / type-arg / binder)
+-- inside an otherwise-trivial function, so a failure is a minimal reproducer.
+-- Every generated name is a legal Core identifier by construction, so a failure
+-- is a genuine printer/parser bug, not a generator artifact. Mirrors the probe
+-- in `PlausibleTestMain.lean` (those defs live in a separate executable root and
+-- can't be imported, so they're restated here).
 
 /-- The three syntactic positions an identifier can occupy in a `Function`. -/
 inductive IdentPosition where
@@ -1116,11 +1119,12 @@ def main (args : List String) : IO Unit := do
   handle.putStr fn4
   IO.FS.removeFile (outputPath ++ ".fn4")
 
-  -- Function property: single-identifier round-trip probe. An adversarial
-  -- identifier (`genQuotedName`) in one syntactic position; a parse failure or
-  -- mismatch is a minimal printer/parser bug reproducer.
+  -- Function property: special-character identifier round-trip. A legal
+  -- identifier containing special (non-alphanumeric) characters (`genQuotedName`)
+  -- in one syntactic position; a parse failure or mismatch is a minimal
+  -- printer/parser bug reproducer.
   Tyche.run genAndCheckIdentProbe
-    { numSamples, propertyName := "genFunction: single-identifier round-trip probe", outputPath := outputPath ++ ".fn5" }
+    { numSamples, propertyName := "genFunction: special-character identifier round-trip", outputPath := outputPath ++ ".fn5" }
   let fn5 ← IO.FS.readFile (outputPath ++ ".fn5")
   handle.putStr fn5
   IO.FS.removeFile (outputPath ++ ".fn5")
