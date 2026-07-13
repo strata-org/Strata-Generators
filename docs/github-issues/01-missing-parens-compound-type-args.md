@@ -28,7 +28,8 @@ So `Map int (int -> int)` prints as `Map int int -> int`, which the parser reads
 ## Reproduce (self-contained)
 
 Paste into `Repro.lean` and run `lake env lean Repro.lean` from a workspace that
-depends on Strata. Uses only Strata functions.
+depends on Strata. Uses only Strata functions. Expected output is in the trailing
+comments.
 
 ```lean
 import Strata.Languages.Core.DDMTransform.ASTtoCST
@@ -54,38 +55,9 @@ def roundtrip (src : String) : IO Unit := do
   catch e =>
     IO.println s!"PARSE ERROR: {(toString e).replace "\n" " "}"
 
--- Mismatch: the correct source parses, but the reprint drops the parens.
-#eval roundtrip "function C () : Sequence (Map int int -> bool);"
--- Parse-failure: feed that printer output straight back in.
-#eval roundtrip "function C () : Sequence Map int int -> bool;"
-```
-
-## Observed
-
-```
--- #1 (mismatch): source has parens, reprint does not
-OK; reformatted =
-program Core;
-
-function C () : Sequence Map int int -> bool;
-
--- #2 (parse failure): the printer's own output does not parse
-PARSE ERROR: Parse errors:   1:25: Map expects 2 arguments.   1:29: Unexpected argument to Sequence.
-```
-
-## Proof of the misgrouping (regression oracle)
-
-The `roundtrip` helper above only shows the *string*-level paren loss. To pin the
-root cause — that the reprint parses to a **structurally different** type — dump the
-parsed output-type AST. Use `Map int (int -> int)`, which (unlike the `Sequence`
-example) parses in *both* forms, so you can compare the two ASTs directly. A fixed
-printer must make `Map int (int -> int)` reprint to a string that parses back to the
-first AST below.
-
-Add to the same file (reuses the imports/opens above):
-
-```lean
-/-- Parse a one-function program and print its output type's AST (or the error). -/
+/-- Parse a one-function program and print its output type's AST (or the error).
+    This is the regression oracle: it exposes the *structural* misgrouping that
+    `roundtrip` (string-level only) cannot distinguish from mere reformatting. -/
 def probeOutputTy (src : String) : IO Unit := do
   let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
   let ictx := StrataDDM.Parser.stringInputContext ⟨"repro"⟩ src
@@ -97,25 +69,31 @@ def probeOutputTy (src : String) : IO Unit := do
     | _, _ => IO.println s!"ERROR: {(toString errs).replace "\n" " "}"
   catch e => IO.println s!"PARSE ERROR: {(toString e).replace "\n" " "}"
 
--- Intended type: a Map whose value is an arrow.
+-- (1) Mismatch: the correct source parses, but the reprint drops the parens.
+#eval roundtrip "function C () : Sequence (Map int int -> bool);"
+--  OK; reformatted =
+--  program Core;
+--  function C () : Sequence Map int int -> bool;     ← parens gone: reprint ≠ source
+
+-- (2) Parse-failure: feed that printer output straight back in.
+#eval roundtrip "function C () : Sequence Map int int -> bool;"
+--  PARSE ERROR: Parse errors: 1:25: Map expects 2 arguments. 1:29: Unexpected argument to Sequence.
+
+-- (3) Regression oracle. `Map int (int -> int)` parses in BOTH forms, so the two
+--     ASTs can be compared directly; they differ — that IS the bug. A fixed
+--     printer must make (3a) reprint to a string that parses back to the (3a) AST.
+
+-- (3a) Intended type: a Map whose value is an arrow.
 #eval probeOutputTy "function f () : Map int (int -> int);"
--- The printer's output: parses as an arrow whose domain is a Map.
+--  output type AST = Lambda.LMonoTy.tcons "Map"
+--    [Lambda.LMonoTy.tcons "int" [],
+--     Lambda.LMonoTy.tcons "arrow" [Lambda.LMonoTy.tcons "int" [], Lambda.LMonoTy.tcons "int" []]]
+
+-- (3b) The printer's output: parses as (Map int int) -> int — WRONG structure.
 #eval probeOutputTy "function f () : Map int int -> int;"
-```
-
-Observed — the two strings parse to **different** types (the misgrouping), yet both
-reprint to the same `Map int int -> int`:
-
-```
--- Map int (int -> int)  →  Map [int, (int -> int)]   (intended)
-output type AST = Lambda.LMonoTy.tcons "Map"
-  [Lambda.LMonoTy.tcons "int" [],
-   Lambda.LMonoTy.tcons "arrow" [Lambda.LMonoTy.tcons "int" [], Lambda.LMonoTy.tcons "int" []]]
-
--- Map int int -> int    →  arrow [(Map int int), int] = (Map int int) -> int   (wrong)
-output type AST = Lambda.LMonoTy.tcons "arrow"
-  [Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "int" [], Lambda.LMonoTy.tcons "int" []],
-   Lambda.LMonoTy.tcons "int" []]
+--  output type AST = Lambda.LMonoTy.tcons "arrow"
+--    [Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "int" [], Lambda.LMonoTy.tcons "int" []],
+--     Lambda.LMonoTy.tcons "int" []]
 ```
 
 ## Expected
