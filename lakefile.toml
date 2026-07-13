@@ -1,6 +1,6 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen", "StrataGenerators.CmdHasTypeAGen"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent", "StrataGenerators.HasTypeGen", "StrataGenerators.CmdHasTypeAGen"]
 
 [[require]]
 name = "Strata"
@@ -11,6 +11,12 @@ rev = "66dcd82d1"
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
+
+# A public, reasoning-friendly copy of Strata's private `OpsConsistent` predicate
+# (module file; certified faithful to the original at build time)
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGen.OpsConsistentDef"
+roots = ["StrataGenerators.HasTypeAGen.OpsConsistentDef"]
 
 # Core generator definitions (no Factory, no Mathlib — shared by Defs and HasTypeAGen)
 [[lean_lib]]
@@ -31,6 +37,11 @@ roots = ["StrataGenerators.HasTypeAGen.TestSupport"]
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGen"
 roots = ["StrataGenerators.HasTypeAGen"]
+
+# OpsConsistent soundness/completeness for the HasTypeA generator
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGenOpsConsistent"
+roots = ["StrataGenerators.HasTypeAGenOpsConsistent"]
 
 # The HasType generator (uses LExprTypeSpec → Strata.DL.Util.List)
 [[lean_lib]]
@@ -119,3 +130,8 @@ root = "TycheMain"
 [[lean_exe]]
 name = "test-lexpr"
 root = "PlausibleTestMain"
+
+# Ground-matching unification completeness (helper for the OpsConsistent proof)
+[[lean_lib]]
+name = "StrataGenerators.UnifyGroundInstance"
+roots = ["StrataGenerators.UnifyGroundInstance"]

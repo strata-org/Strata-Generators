@@ -792,6 +792,48 @@ def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
 def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List TyIdentifier :=
   boundVars.filter (fun v => Maps.find? subst v == none)
 
+-- ── Alpha-renaming for polymorphic operators (OpsConsistent fix) ──────
+-- See `docs/ops-consistent-capture-bug.md`. Without freshening, a polymorphic
+-- operator whose bound type variable shares a name with a free type variable of
+-- the target type (e.g. `id : ∀α. α → α` at target `.ftvar "α"`) yields an `.op`
+-- annotation that is *not* a valid factory instantiation, violating
+-- `OpsConsistent`. Freshening the bound variables away from the context's free
+-- variables before unification restores coherence.
+
+/-- Append primes to `candidate` until it avoids `used`, using `fuel` steps.
+    `fuel = used.length + 1` always suffices: the candidates produced have
+    strictly increasing length, so they are pairwise distinct, and there are
+    `fuel` of them for `used.length` names to avoid — by pigeonhole one is
+    free. -/
+def freshenGo : (fuel : Nat) → (candidate : String) → (used : List TyIdentifier) → TyIdentifier
+  | 0,        candidate, _    => candidate
+  | fuel + 1, candidate, used =>
+    if candidate ∉ used then candidate
+    else freshenGo fuel (candidate ++ "'") used
+
+/-- Generate a fresh name not in `used` by appending primes. -/
+def freshen (name : TyIdentifier) (used : List TyIdentifier) : TyIdentifier :=
+  freshenGo (used.length + 1) name used
+
+/-- Alpha-rename bound variables that collide with `contextVars`.
+    Returns `(freshened bound var names, freshened monotype body)`. Bound
+    variables that do not collide are left untouched. -/
+def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (contextVars : List TyIdentifier) : List TyIdentifier × LMonoTy :=
+  let allUsed := contextVars ++ boundVars
+  let (freshBound, _) := boundVars.foldl (fun (acc, used) v =>
+    if v ∈ contextVars then
+      let fresh := freshen v used
+      (acc ++ [fresh], fresh :: used)
+    else
+      (acc ++ [v], used))
+    ([], allUsed)
+  let renameSubst : Lambda.Subst :=
+    [(boundVars.zip freshBound).filterMap (fun (old, new) =>
+      if old == new then none else some (old, .ftvar new))]
+  let freshMonoTy := LMonoTy.subst renameSubst monoTy
+  (freshBound, freshMonoTy)
+
 /-- Compute the set of "generable types" from a context, following
     Pałka et al. (2011, Section 4). We collect all syntactic sub-types
     from the bvar context, fvar context, and op context, then close under
@@ -878,20 +920,38 @@ def findPolyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
 def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     (generableTys : List LMonoTy) (sampledTys : List LMonoTy)
     : List (String × List LMonoTy) :=
+  -- Free type variables in scope that a bound var must not be captured by:
+  -- those of the target type together with those of the sampled generable types.
+  let contextVars := (LMonoTy.freeVars τ ++ generableTys.flatMap LMonoTy.freeVars).eraseDups
   pctx.filterMap fun (name, lty) =>
     match lty with
     | .forAll boundVars monoTy =>
-      let (argTys, retTy) := decomposeArrow monoTy
+      -- Alpha-rename the operator's bound vars away from `contextVars` so that a
+      -- bound var sharing a name with a context free var doesn't get treated as
+      -- already-solved by unification (see `docs/ops-consistent-capture-bug.md`).
+      let (freshBoundVars, freshMonoTy) := freshenBoundVars boundVars monoTy contextVars
+      let (argTys, retTy) := decomposeArrow freshMonoTy
       if argTys.isEmpty || argTys.length > 3 then none
       else match unifyTypes retTy τ with
         | none => none
         | some subst =>
-          let freeTyVars := findFreeTyVars boundVars subst
+          let freeTyVars := findFreeTyVars freshBoundVars subst
           if !freeTyVars.isEmpty && generableTys.isEmpty then none
           else
             let fullSubst : Lambda.Subst := (freeTyVars.zip sampledTys) :: subst
             let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
-            some (name, concreteArgTys)
+            -- Ground-only instantiation (see `docs/ops-consistent-polymorphic-gap.md`):
+            -- keep the candidate only if the resulting op annotation
+            -- `concreteArgTys.foldr arrow τ` is ground (no free type variables).
+            -- A ground annotation is a genuine instance of the operator's generic
+            -- type, so `LFunc.opTypeSubst` can only solve the operator's own bound
+            -- variables (never a context free variable in the wrong direction),
+            -- keeping the term `OpsConsistent`. Non-ground candidates (which arise
+            -- when the target `τ` or a sampled type carries free type variables)
+            -- are dropped rather than emitted with an incoherent annotation.
+            if LMonoTy.freeVars τ == [] && concreteArgTys.all (fun σ => LMonoTy.freeVars σ == []) then
+              some (name, concreteArgTys)
+            else none
 
 /-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
     Pałka et al. (2011, Section 4). Calls polymorphic library functions by:
