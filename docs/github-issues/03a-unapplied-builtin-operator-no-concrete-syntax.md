@@ -1,4 +1,4 @@
-# Unapplied `Bool.Not` operator has no concrete syntax
+# Unapplied `Bool.Not` operator fails to print
 
 ## Summary
 
