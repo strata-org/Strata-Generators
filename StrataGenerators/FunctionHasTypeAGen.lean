@@ -232,15 +232,15 @@ theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
 
 /-- Support of `genNameList`, inherited from `listOfMaxLength`: a list is
     reachable iff it has length ≤ `depth` and every name is reachable by
-    `String.arbitrary`. This concretizes the opaque `∈ support (genNameList …)`
+    `genIdentName`. This concretizes the opaque `∈ support (genNameList …)`
     reachability side-conditions of `genFunction_complete`.
 
-    (The remaining `∈ support String.arbitrary` per-name obligation is the
+    (The remaining `∈ support genIdentName` per-name obligation is the
     residual bottleneck noted in `docs/vectorof-listofmaxlength-integration.md`
-    §4/§5 — it awaits a public two-directional `String.arbitrary` support lemma.) -/
+    §4/§5 — it awaits a public two-directional `genIdentName` support lemma.) -/
 theorem mem_support_genNameList_iff (depth : Nat) (l : List String) :
     l ∈ SetGen.support (genNameList (G := SetGen.Set) depth) ↔
-      l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+      l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
   simp only [genNameList, mem_support_listOfMaxLength_iff]
 
 set_option linter.unusedSimpArgs false in
@@ -329,16 +329,16 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     `hNameReach` / `hTyReach`: they capture exactly what the generator must be
     able to produce beyond well-typedness. Concretely:
     - `hNameReach` — the function name and the parameter names are reachable
-      alphanumeric strings (needed by `String.arbitrary`);
+      identifier strings (needed by `genIdentName`);
     - `hTyArgsLen` / `hTyArgsReach` — the (already `Nodup`) `typeArgs` list is no
-      longer than `depth` and each name is reachable by `String.arbitrary`;
+      longer than `depth` and each name is reachable by `genIdentName`;
     - `hInputNamesLen` / `hInputNamesReach` — likewise for the parameter names;
     - `hTyReach` — the output and each input type are reachable by `genLMonoTy`;
     - `hBodyReach` / `hMeasureReach` — the body/measure (when present) are
       reachable by `genLExpr`.
 
     The `typeArgs` / input-name conditions are stated concretely (a length bound
-    plus per-name `String.arbitrary` reachability) via
+    plus per-name `genIdentName` reachability) via
     `mem_support_genNameList_iff`, rather than as opaque `∈ support (genNameList …)`
     facts.
 
@@ -356,12 +356,12 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hAxioms : func.axioms = [])
     (hPre : func.preconditions = [])
     -- reachability of the generated components:
-    (hNameReach : func.name.name ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+    (hNameReach : func.name.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hTyArgsLen : func.typeArgs.length ≤ depth)
-    (hTyArgsReach : ∀ s ∈ func.typeArgs, s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+    (hTyArgsReach : ∀ s ∈ func.typeArgs, s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hInputNamesLen : (func.inputs.keys.map (·.name)).length ≤ depth)
     (hInputNamesReach : ∀ s ∈ func.inputs.keys.map (·.name),
-      s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+      s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hInputTyReach : ∀ ty ∈ func.inputs.values,
       ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
     (hOutputReach : func.output ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
