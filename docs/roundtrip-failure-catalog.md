@@ -32,34 +32,78 @@ cannot read back (or reads back differently).
 
 ## Invoking the Strata parser / printer directly (for bug reports)
 
-Every failure below can be triggered by calling two Strata entry points directly —
-no generator or test harness required. Use these when writing up GitHub issues.
+Every failure below can be triggered by calling **Strata's own** parser and printer
+directly — no generator or test harness required, and nothing defined in *this*
+repo. Each class's **Reproduce** recipe is a self-contained single file: paste it
+into `Repro.lean` and run `lake env lean Repro.lean` (from a workspace that depends
+on Strata), or `#eval` it in the editor.
 
-**Printer** — `Core.formatProgram : Core.Program → Std.Format`
-(`Strata/Languages/Core/DDMTransform/ASTtoCST.lean:274`). Wrap an expression in a
-one-decl program and format it. (The generic `Std.format` on a `Core.Program`
-dispatches to the same function via the `ToFormat` instance in `FormatCore.lean`,
-so `(Std.format prog).pretty` and `(Core.formatProgram prog).pretty` are
-interchangeable.)
+There are two MWE shapes, depending on whether the bug is on the parse side or the
+print side. Both use only these Strata entry points:
 
-**Parser** — the DDM pipeline used by the harness, wrapped as `parseCoreProgram` /
-`parseCoreProgramErr` in `StrataGenerators/FunctionHasTypeAGen/Roundtrip.lean:52,66`.
-The underlying Strata calls are:
+- **Parser pipeline** — `StrataDDM.Elab.LoadedDialects.ofDialects!`,
+  `StrataDDM.Parser.stringInputContext`,
+  `StrataDDM.Elab.parseStrataProgramFromDialect` (`StrataDDM/StrataDDM/Elab.lean:515`),
+  and `Strata.translateProgram` (`Strata/Languages/Core/DDMTransform/Translate.lean:2249`),
+  which turns a source string into a `Core.Program` (plus any translation errors).
+- **Printer** — `Core.formatProgram : Core.Program → Std.Format`
+  (`Strata/Languages/Core/DDMTransform/ASTtoCST.lean:274`).
+
+**Shape A — round-trip a source string** (for parse-failure and mismatch bugs):
 
 ```lean
--- parse a Core source string → CST → Core.Program (with translation errors)
-let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
-let ictx := StrataDDM.Parser.stringInputContext ⟨"repro"⟩ src
-let sp   ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" ictx  -- Elab.lean:515
-let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)   -- Translate.lean:2249
+import Strata.Languages.Core.DDMTransform.ASTtoCST
+import Strata.Languages.Core.DDMTransform.Translate
+import Strata.Languages.Core.DDMTransform.Grammar
+import StrataDDM.Elab
+import StrataDDM.BuiltinDialects.Init
+
+open Lambda Core Strata
+open StrataDDM (initDialect)
+
+/-- Parse a Core source string, then re-format it via Strata's own printer. -/
+def roundtrip (src : String) : IO Unit := do
+  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
+  let ictx := StrataDDM.Parser.stringInputContext ⟨"repro"⟩ src
+  try
+    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" ictx
+    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
+    if !errs.isEmpty then
+      IO.println s!"TRANSLATE ERROR: {(toString errs).replace "\n" " "}"
+    else
+      IO.println s!"OK; reformatted =\n{(Core.formatProgram ast).pretty}"
+  catch e =>
+    IO.println s!"PARSE ERROR: {(toString e).replace "\n" " "}"
 ```
 
-A **round-trip** is then `Core.formatProgram ∘ parse ∘ Core.formatProgram`; a bug is
-either a parse/translate failure on the printer's output, or a *mismatch* (both
-parse, but the two `Core.formatProgram` strings differ). Each class below lists a
-**Reproduce** recipe: the minimal source string and/or the AST expression to feed
-these two functions, and what you should observe. All recipes were verified by
-running `parseCoreProgramErr` and `Core.formatProgram` directly.
+Notes: pass the source **without** a `program Core;` header (the parser rejects it
+there); the printer *emits* the header, so a round-trip compares the reformatted
+output — header included — against a `program Core;`-prefixed expectation. A bug is
+either a `PARSE`/`TRANSLATE ERROR` on the printer's output, or a *mismatch* (both
+the source and its reprint parse, but `Core.formatProgram` gives two different
+strings).
+
+**Shape B — format an AST directly** (for printer-only bugs, Class 3): build the
+`Core.Program` in Lean and print it — no parse step is needed to trigger the defect.
+
+```lean
+import Strata.Languages.Core.DDMTransform.ASTtoCST
+import Strata.Languages.Core.DDMTransform.Translate
+
+open Lambda Core Strata
+
+/-- Wrap an expression as the body of `function f () : bool { … }` and print it. -/
+def showBody (e : Core.Expression.Expr) : IO Unit := do
+  let prog : Core.Program :=
+    { decls := [ .func { name := ⟨"f", ()⟩, inputs := [], output := .bool, body := some e } .empty ] }
+  IO.println (Core.formatProgram prog).pretty
+```
+
+(The `import … Translate` line is what makes `Core.formatProgram` visible; it is
+declared in `ASTtoCST.lean` but re-exported through the transform modules.)
+
+Each class below gives the exact `#eval` line(s) to add to the relevant shape and
+what you should observe. All recipes were verified by running them.
 
 ## Summary of the run
 
@@ -178,21 +222,21 @@ reprint, you see a parse-failure. Both are the same underlying bug.
 This class is independent of names and fires for essentially any signature
 containing a `Map`, `Sequence`, or arrow nested inside another type constructor.
 
-**Reproduce.** Both manifestations, verified directly:
+**Reproduce** (Shape A). Both manifestations, verified directly:
 
 ```lean
 -- Mismatch: the correct source parses, but Core.formatProgram drops the parens.
-parseCoreProgram "function C () : Sequence (Map int int -> bool);"
-  -- parses OK; Core.formatProgram of the result yields
-  --   "function C () : Sequence Map int int -> bool;"   (parens gone ⇒ s1 ≠ s2)
+#eval roundtrip "function C () : Sequence (Map int int -> bool);"
+--  OK; reformatted = program Core;  function C () : Sequence Map int int -> bool;
+--  (parens gone ⇒ reprint ≠ source: a round-trip mismatch)
 
 -- Parse-failure: feed that printer output straight back in.
-parseCoreProgramErr "function C () : Sequence Map int int -> bool;"
-  -- .error "… 1:25: Map expects 2 arguments.  1:29: Unexpected argument to Sequence."
+#eval roundtrip "function C () : Sequence Map int int -> bool;"
+--  PARSE ERROR: … 1:25: Map expects 2 arguments.  1:29: Unexpected argument to Sequence.
 ```
 
-Minimal one-constructor variant: `Map int (int -> int)` parses but reformats to the
-non-fixed-point `Map int int -> int`; `Map (int -> int) int` parses and is stable.
+Minimal one-constructor variant: `#eval roundtrip "function f () : Map int (int -> int);"`
+reformats to the non-fixed-point `Map int int -> int`; `Map (int -> int) int` is stable.
 
 ---
 
@@ -231,11 +275,13 @@ after each token and stored in trailing `SourceInfo`, and an identifier's value
 is `mkIdResult`'s `c.extract startPart stopPart`, which spans only id-characters).
 So `f< s>` parses with type parameter `s`, not `" s"` — reformatting yields `f<s>`.
 
-**Reproduce.**
+**Reproduce** (Shape A).
 
 ```lean
-parseCoreProgramErr "function f<s> () : int;"    -- .error "… 1:10: unexpected token '<s'; expected Core.Bindings"
-parseCoreProgram    "function f< s> () : int;"   -- parses; Core.formatProgram ⇒ "function f<s> () : int;"
+#eval roundtrip "function f<s> () : int;"
+--  PARSE ERROR: … 1:10: unexpected token '<s'; expected Core.Bindings
+#eval roundtrip "function f< s> () : int;"
+--  OK; reformatted = program Core;  function f<s> () : int;   (space gone, name is `s`)
 ```
 
 ---
@@ -357,29 +403,30 @@ the sub-cases have genuinely different root causes:
   logged error text lands in the stream); the primary defect is the value
   substitution at `FormatCore.lean:277`.
 
-**Reproduce.** Both sub-cases are *printer-side*, so build the AST expression
-directly and format it — no parse step needed to trigger them:
+**Reproduce.** Both sub-cases are *printer-side*, so use **Shape B** (build the AST
+and format it — no parse step needed to trigger them):
 
 ```lean
 -- Unapplied Bool.Not: prints the wrong (untypeable) fallback re.none().
--- (Build the one-decl program however is convenient; the operative call is
---  Core.formatProgram on a body holding this bare .op node.)
-(.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool)) : Core.Expression.Expr)
-  -- Core.formatProgram / Std.format ⇒ "re.none()"
-  --   + logged: "Unsupported construct in lopToExpr: 0-ary op not found: Bool.Not"
+#eval showBody (.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool)))
+--  program Core;  function f () : bool {   re.none() }
+--    + logged: Unsupported construct in lopToExpr: 0-ary op not found: Bool.Not
 
 -- Contrast (NOT a bug): the applied operator round-trips via notation.
-(.app () (.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool))) (.boolConst () true))
-  -- Core.formatProgram / Std.format ⇒ "!true", which re-parses to the same AST.
-
--- And the name-form does not exist in the grammar at all:
-parseCoreProgramErr "function f () : bool { Bool.Not true }"    -- .error (parse fails)
-parseCoreProgramErr "function f () : bool { Bool.Not(true) }"   -- .error (parse fails)
+#eval showBody (.app () (.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool))) (.boolConst () true))
+--  program Core;  function f () : bool {   !true }        (re-parses to the same AST)
 
 -- Non-terminating real: prints 0.0 in place of 1/3 (value corruption).
-(.realConst () (1/3 : Rat) : Core.Expression.Expr)
-  -- Core.formatProgram / Std.format ⇒ "0.0"
-  --   + logged: "Unsupported construct in lconstToExpr: unsupported real: 1/3"
+#eval showBody (.realConst () (1/3 : Rat))
+--  program Core;  function f () : bool {   0.0 }
+--    + logged: Unsupported construct in lconstToExpr: unsupported real: 1/3
+```
+
+And with **Shape A**, confirm the operator has no name-form the parser accepts:
+
+```lean
+#eval roundtrip "function f () : bool { Bool.Not true }"    -- PARSE ERROR
+#eval roundtrip "function f () : bool { Bool.Not(true) }"   -- PARSE ERROR
 ```
 
 These are worth triaging individually; the common thread is printer
@@ -431,10 +478,10 @@ hence `Undeclared type or category F.pl`. The variable *is* declared in the
 `<...>`, so this is the dot-driven misparse, not a real scoping error. In the probe
 panel it shows as error `expected Init.QualifiedIdent`.
 
-**Reproduce.**
+**Reproduce** (Shape A).
 
 ```lean
-parseCoreProgramErr "function f<F.pl>() : F.pl;"   -- .error "… 1:21: Undeclared type or category F.pl."
+#eval roundtrip "function f<F.pl>() : F.pl;"   -- PARSE ERROR: … 1:21: Undeclared type or category F.pl.
 ```
 
 ---
@@ -469,14 +516,16 @@ This is the same asymmetry visible in Class 4 (dot names) and leading-digit name
 single "pipe-quote the name at the use site when `needsPipeDelimiters` would be
 true" check in the `.ftvar` rendering path.
 
-**Reproduce.**
+**Reproduce** (Shape A).
 
 ```lean
 -- Use-site bare (what the printer emits): fails.
-parseCoreProgramErr "function f<|A\\|L|> () : A|L;"    -- .error "… 1:26: unterminated pipe-delimited identifier"
+#eval roundtrip "function f<|A\\|L|> () : A|L;"
+--  PARSE ERROR: … 1:26: unterminated pipe-delimited identifier
 -- Both sites quoted: parses (proving the value is legal), but Core.formatProgram
--- re-emits the use site bare, so it does not round-trip.
-parseCoreProgram    "function f<|A\\|L|> () : |A\\|L|;" -- parses; reformat ⇒ "function f<|A\|L|> () : A|L;"
+-- re-emits the use site bare, so it does not round-trip (mismatch).
+#eval roundtrip "function f<|A\\|L|> () : |A\\|L|;"
+--  OK; reformatted = program Core;  function f<|A\|L|> () : A|L;   (use site bare ⇒ reprint ≠ source)
 ```
 
 ---
