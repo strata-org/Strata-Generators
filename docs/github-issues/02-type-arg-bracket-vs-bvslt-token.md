@@ -1,30 +1,27 @@
-# `<s`-initial type argument collides with the `<s` (signed-less-than) token
+# Function type parameters of the form `<s...` collide with the `<s` (signed-less-than) operator
 
 ## Summary
 
-When a type-argument name begins with `s`, the printed `<...>` type-argument list
-is mis-lexed: the maximal-munch tokenizer grabs `<s` (the signed-less-than
-bitvector operator) before `<` can open the type-argument bracket. The printer
-emits `function f<s> () : int;`, which its own parser then rejects.
+When a type parameter to a function begins with `s`, e.g. in 
 
-## Root cause
+```
+function f<s> (...) : int { ... }
+```
 
-Two grammar tokens collide under maximal munch:
+the parser fails to parse this function, as `<s` is the concrete syntax 
+for the signed less-than operator over bit-vectors.
 
-- Type arguments print with `<...>` brackets —
-  `Strata/Languages/Core/DDMTransform/Grammar.lean:62`:
-  `op type_args (...) : TypeArgs => "<" args ">";`
-- Signed-less-than is the token `<s` —
-  `Strata/Languages/Core/DDMTransform/Grammar.lean:187`:
-  `fn bvslt (…) => @[prec(20), leftassoc] a " <s " b;`
+Notably, if we add a space before the type parameter `s`, e.g. in 
 
-So `f<s>` lexes as `f` · `<s` · `s>`: the `<s` operator token is grabbed before `<`
-can open the bracket. The parser then expects bindings after `f`.
+```
+function f< s> (...) : int { ... }
+```
 
-Inserting a space (`f< s>`) defeats the maximal munch and parses; the space is
-*not* folded into the name (the lexer stores trailing whitespace separately, and an
-identifier's value spans only id-characters — `StrataDDM/StrataDDM/Parser.lean`),
-so `f< s>` parses with type parameter `s` and reprints as `f<s>`.
+the function parses successfully.
+
+This issue was identified via property-based testing (generating 1000 random 
+well-typed Strata Core functions), and I believe this issue affects any function type parameters whose name begins with `s`.
+
 
 ## Reproduce (self-contained)
 
@@ -54,7 +51,7 @@ def roundtrip (src : String) : IO Unit := do
 
 -- What the printer emits for a type arg named `s`: fails to parse.
 #eval roundtrip "function f<s> () : int;"
--- Adding a space defeats the maximal munch (parses; name is still `s`).
+-- Adding a space allows the function to parse
 #eval roundtrip "function f< s> () : int;"
 ```
 
@@ -73,17 +70,4 @@ function f<s> () : int;
 
 ## Expected
 
-`function f<s> () : int;` should parse: the `<` opening a type-argument list should
-not be swallowed into the `<s` operator token.
-
-## Suggested fix
-
-Tokenizer/precedence adjustment so `<` opening a `TypeArgs` list is recognized
-ahead of `<s` in that position (e.g. require surrounding whitespace for the `<s`
-infix operator, or make the type-arg opener a distinct token). Self-contained and
-easy to demonstrate: `f<s>` fails, `f< s>` parses.
-
-## Notes
-
-Affects any type-variable name starting with `s` — which the identifier generators
-readily produce — so this is not a special-character edge case.
+The function declaration `function f<s> () : int;` should be parse-able.
