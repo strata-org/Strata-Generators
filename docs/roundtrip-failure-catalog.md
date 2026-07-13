@@ -30,6 +30,37 @@ cannot read back (or reads back differently).
 > the grammar dictates. The dominant bug is therefore not "angle brackets" — it
 > is **missing parentheses around compound type arguments** (Class 1 below).
 
+## Invoking the Strata parser / printer directly (for bug reports)
+
+Every failure below can be triggered by calling two Strata entry points directly —
+no generator or test harness required. Use these when writing up GitHub issues.
+
+**Printer** — `Core.formatProgram : Core.Program → Std.Format`
+(`Strata/Languages/Core/DDMTransform/ASTtoCST.lean:274`). Wrap an expression in a
+one-decl program and format it. (The generic `Std.format` on a `Core.Program`
+dispatches to the same function via the `ToFormat` instance in `FormatCore.lean`,
+so `(Std.format prog).pretty` and `(Core.formatProgram prog).pretty` are
+interchangeable.)
+
+**Parser** — the DDM pipeline used by the harness, wrapped as `parseCoreProgram` /
+`parseCoreProgramErr` in `StrataGenerators/FunctionHasTypeAGen/Roundtrip.lean:52,66`.
+The underlying Strata calls are:
+
+```lean
+-- parse a Core source string → CST → Core.Program (with translation errors)
+let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
+let ictx := StrataDDM.Parser.stringInputContext ⟨"repro"⟩ src
+let sp   ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" ictx  -- Elab.lean:515
+let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)   -- Translate.lean:2249
+```
+
+A **round-trip** is then `Core.formatProgram ∘ parse ∘ Core.formatProgram`; a bug is
+either a parse/translate failure on the printer's output, or a *mismatch* (both
+parse, but the two `Core.formatProgram` strings differ). Each class below lists a
+**Reproduce** recipe: the minimal source string and/or the AST expression to feed
+these two functions, and what you should observe. All recipes were verified by
+running `parseCoreProgramErr` and `Core.formatProgram` directly.
+
 ## Summary of the run
 
 From a representative `make tyche` run (1000 samples on the round-trip panel):
@@ -147,6 +178,22 @@ reprint, you see a parse-failure. Both are the same underlying bug.
 This class is independent of names and fires for essentially any signature
 containing a `Map`, `Sequence`, or arrow nested inside another type constructor.
 
+**Reproduce.** Both manifestations, verified directly:
+
+```lean
+-- Mismatch: the correct source parses, but Core.formatProgram drops the parens.
+parseCoreProgram "function C () : Sequence (Map int int -> bool);"
+  -- parses OK; Core.formatProgram of the result yields
+  --   "function C () : Sequence Map int int -> bool;"   (parens gone ⇒ s1 ≠ s2)
+
+-- Parse-failure: feed that printer output straight back in.
+parseCoreProgramErr "function C () : Sequence Map int int -> bool;"
+  -- .error "… 1:25: Map expects 2 arguments.  1:29: Unexpected argument to Sequence."
+```
+
+Minimal one-constructor variant: `Map int (int -> int)` parses but reformats to the
+non-fixed-point `Map int int -> int`; `Map (int -> int) int` parses and is stable.
+
 ---
 
 ## Class 2 — `<s` operator / type-argument bracket collision
@@ -177,6 +224,19 @@ the type-argument bracket. The parser then expects bindings after `f` and report
 followed by `s`. This affects even the clean `genIdentName`, which readily
 produces type-variable names starting with `s`. The special-character identifier
 panel shows this as `char_class=plain` failures whose names start with `s`.
+
+Note the space is *not* absorbed into the type-variable name: the lexer treats it
+as inter-token whitespace (`StrataDDM/StrataDDM/Parser.lean` — `whitespace` is run
+after each token and stored in trailing `SourceInfo`, and an identifier's value
+is `mkIdResult`'s `c.extract startPart stopPart`, which spans only id-characters).
+So `f< s>` parses with type parameter `s`, not `" s"` — reformatting yields `f<s>`.
+
+**Reproduce.**
+
+```lean
+parseCoreProgramErr "function f<s> () : int;"    -- .error "… 1:10: unexpected token '<s'; expected Core.Bindings"
+parseCoreProgram    "function f< s> () : int;"   -- parses; Core.formatProgram ⇒ "function f<s> () : int;"
+```
 
 ---
 
@@ -251,6 +311,30 @@ the sub-cases have genuinely different root causes:
   (`Bool.Not` → `fun x => !x`); alternatively the generator could avoid emitting
   bare operators at function-value positions.
 
+  **This is one bug, not two.** It is tempting to split this into (a) "unapplied
+  `Bool.Not` can't be printed" and (b) "factory operators are printed via special
+  notation (`!b`) instead of by name (`Bool.Not`), which breaks round-tripping."
+  Direct probing shows (b) is a non-issue and there is only one real defect:
+
+  - **Applied occurrences round-trip cleanly via notation.** The *applied*
+    operator `Bool.Not true` — i.e. `LExpr.app (.op ⟨"Bool.Not"⟩) (boolConst true)`
+    — prints as `!true`, which re-parses to the same AST. Notation on both the
+    print and parse sides is exactly consistent; there is no round-trip failure
+    for any *applied* operator. (`!(true)` also parses, normalizing to `!true`.)
+  - **The operator has no name-form to fall back to — on either side.** There is
+    no concrete syntax spelled `Bool.Not` at all: **neither `Bool.Not true`
+    (juxtaposition) nor `Bool.Not(true)` (call form) parses** — both are rejected
+    by the parser. So "print by notation instead of by name" is not a *choice* the
+    printer makes over an available name-form; the name-form simply does not exist
+    in the grammar. The notation `!b` is the operator's *only* surface syntax, and
+    it is unavoidably saturated (the `b` slot is mandatory).
+
+  So the notation scheme is not itself a bug (it round-trips whenever the operator
+  is applied); the single defect is that the notation-only grammar has **no
+  representation for the bare, unapplied operator**, which the *generator* can
+  nonetheless construct as a well-typed `bool -> bool` value. That is the whole of
+  this failure. See the reproducers below.
+
 - **Non-terminating-decimal real literals** like `1/3` — this one is a **lossy,
   incorrect print (a soundness bug), not just a parse failure**. The exact chain:
 
@@ -272,6 +356,31 @@ the sub-cases have genuinely different root causes:
   `unexpected token '-'` parse error in the sample is a *secondary* effect (the
   logged error text lands in the stream); the primary defect is the value
   substitution at `FormatCore.lean:277`.
+
+**Reproduce.** Both sub-cases are *printer-side*, so build the AST expression
+directly and format it — no parse step needed to trigger them:
+
+```lean
+-- Unapplied Bool.Not: prints the wrong (untypeable) fallback re.none().
+-- (Build the one-decl program however is convenient; the operative call is
+--  Core.formatProgram on a body holding this bare .op node.)
+(.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool)) : Core.Expression.Expr)
+  -- Core.formatProgram / Std.format ⇒ "re.none()"
+  --   + logged: "Unsupported construct in lopToExpr: 0-ary op not found: Bool.Not"
+
+-- Contrast (NOT a bug): the applied operator round-trips via notation.
+(.app () (.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool))) (.boolConst () true))
+  -- Core.formatProgram / Std.format ⇒ "!true", which re-parses to the same AST.
+
+-- And the name-form does not exist in the grammar at all:
+parseCoreProgramErr "function f () : bool { Bool.Not true }"    -- .error (parse fails)
+parseCoreProgramErr "function f () : bool { Bool.Not(true) }"   -- .error (parse fails)
+
+-- Non-terminating real: prints 0.0 in place of 1/3 (value corruption).
+(.realConst () (1/3 : Rat) : Core.Expression.Expr)
+  -- Core.formatProgram / Std.format ⇒ "0.0"
+  --   + logged: "Unsupported construct in lconstToExpr: unsupported real: 1/3"
+```
 
 These are worth triaging individually; the common thread is printer
 incompleteness for certain expression/constant forms rather than a single
@@ -322,6 +431,12 @@ hence `Undeclared type or category F.pl`. The variable *is* declared in the
 `<...>`, so this is the dot-driven misparse, not a real scoping error. In the probe
 panel it shows as error `expected Init.QualifiedIdent`.
 
+**Reproduce.**
+
+```lean
+parseCoreProgramErr "function f<F.pl>() : F.pl;"   -- .error "… 1:21: Undeclared type or category F.pl."
+```
+
 ---
 
 ## Class 5 — Type-variable use-site not pipe-quoted
@@ -353,6 +468,16 @@ This is the same asymmetry visible in Class 4 (dot names) and leading-digit name
 (e.g. `f<|8W|> () : 8W`), but for `|`/`\` characters specifically. The fix is a
 single "pipe-quote the name at the use site when `needsPipeDelimiters` would be
 true" check in the `.ftvar` rendering path.
+
+**Reproduce.**
+
+```lean
+-- Use-site bare (what the printer emits): fails.
+parseCoreProgramErr "function f<|A\\|L|> () : A|L;"    -- .error "… 1:26: unterminated pipe-delimited identifier"
+-- Both sites quoted: parses (proving the value is legal), but Core.formatProgram
+-- re-emits the use site bare, so it does not round-trip.
+parseCoreProgram    "function f<|A\\|L|> () : |A\\|L|;" -- parses; reformat ⇒ "function f<|A\|L|> () : A|L;"
+```
 
 ---
 
@@ -425,11 +550,17 @@ ill-formed artifact.
      silently changing the term's value. Unlike the syntactic bugs, this produces
      a *wrong* program rather than an unparseable one; report as a **printer
      correctness defect**.
-   - **Unapplied builtin operators** (`Bool.Not`) — *not* a printer bug: the term
-     has no Core concrete syntax. Either the printer should eta-expand unapplied
-     operators, or the **generator** should not emit bare operators at
-     function-value positions. Best filed against the generator (or as a Core
-     surface-syntax feature request), not as a round-trip printer defect.
+   - **Unapplied builtin operators** (`Bool.Not`) — *not* a printer bug, and *not*
+     two bugs. The *applied* form round-trips fine via notation (`!true` prints and
+     re-parses); the operator simply has **no concrete syntax at all** in its bare
+     form (neither `Bool.Not true` nor `Bool.Not(true)` parses — notation `!b` is
+     the only surface form, and it is mandatorily saturated). So the single defect
+     is a generator/grammar expressibility gap: the generator emits a bare
+     `bool -> bool` operator value the grammar cannot write down. Either the printer
+     should eta-expand unapplied operators (`Bool.Not` → `fun x => !x`), or the
+     **generator** should not emit bare operators at function-value positions. Best
+     filed against the generator (or as a Core surface-syntax feature request), not
+     as a round-trip printer defect.
 4. **Class 4 (dot-in-identifier)** — a genuine tension between the identifier
    lexer (`Parser.lean:124-125`) and qualified-name syntax (`Init.lean:81-89`);
    arguably a spec question about whether `.` should be a legal bare-identifier
