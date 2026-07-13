@@ -25,6 +25,9 @@ well-typed Strata Core functions), and I believe this issue affects any function
 
 ## Reproduce (self-contained)
 
+To reproduce this issue, create a new file `Repro.lean` containing the following, and run `lake env lean Repro.lean` in any Lean environment 
+where Strata is imported.
+
 ```lean
 import Strata.Languages.Core.DDMTransform.ASTtoCST
 import Strata.Languages.Core.DDMTransform.Translate
