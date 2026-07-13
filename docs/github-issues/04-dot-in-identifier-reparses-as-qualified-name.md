@@ -2,24 +2,19 @@
 
 ## Summary
 
-`.` is a legal identifier character, so a type variable named `F.pl` is a valid
-identifier value and the printer emits it bare. But `.` is also the qualified-name
-separator, so on re-parse `F.pl` is read as *dialect `F`, name `pl`* — an
-undeclared qualified reference — and rejected.
+The following bug was found via property-based testing when testing the property
+that randomly generated well-typed Strata Core functions should round-trip (i.e. 
+printing a function and parsing it again should yield the same AST).
 
-## Root cause
-
-- `StrataDDM/StrataDDM/Parser.lean:124-125` — `strataIsIdRest` includes `'.'`, so
-  `F.pl` is a legal identifier *value*.
-- `StrataDDM/StrataDDM/BuiltinDialects/Init.lean:81-89` — a type name parses as a
-  `QualifiedIdent`, whose explicit form is `Ident "." Ident` (a dialect-qualified
-  reference).
-
-The variable *is* declared in the `<...>` binder, so this is the dot-driven
-misparse, not a genuine scoping error.
+`.` is a legal character for identifiers, and a type parameter to a function called `F.pl` is a valid
+identifier and is pretty-printed as-is. However, `.` is also the separator for qualified names,
+so when upon re-parsing, `F.pl` is read as *dialect `F`, name `pl`*, which is interpreted
+as an undeclared qualified reference and subsequently rejected by the parser.
 
 ## Reproduce (self-contained)
 
+To reproduce, paste the following self-contained example into a new file `Repro.lean` and run `lake env lean Repro.lean` in a 
+repo where Strata is imported.
 ```lean
 import Strata.Languages.Core.DDMTransform.ASTtoCST
 import Strata.Languages.Core.DDMTransform.Translate
@@ -52,16 +47,4 @@ def roundtrip (src : String) : IO Unit := do
 ```
 PARSE ERROR: Parse errors:   1:21: Undeclared type or category F.pl.
 ```
-
-## Expected
-
-A type variable whose name contains `.` and is bound in the `<...>` list should
-round-trip. Either the printer should quote such names (pipe-delimit them) so they
-lex as a single identifier, or `.` should not be a legal bare-identifier character.
-
-## Suggested fix
-
-Two options: (a) pipe-quote identifiers containing `.` at both binding and use
-sites in the printer, or (b) a spec decision to exclude `.` from
-`strataIsIdRest`. This is a genuine tension between the identifier lexer
-(`Parser.lean:124-125`) and qualified-name syntax (`Init.lean:81-89`).
+ 
