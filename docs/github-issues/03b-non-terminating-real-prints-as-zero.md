@@ -2,15 +2,17 @@
 
 ## Summary
 
-`Core.formatProgram` prints a real literal whose denominator is not a product of
-2s and 5s (e.g. `1/3`) as `0.0`. The printed term has a **different value** from the
-original — a soundness bug, not merely an unparseable output. Triggered purely by
-the printer — no parse step needed.
+In Strata Core, the `real` type is represented using Lean `rat`s (rational numbers), 
+but printed as decimals using `Decimal.FromRat`.
+For rational numbers whose decimal representation is nonterminating (e.g. `1/3` is `0.333...`), `Decimal.fromRat` returns `None,` and the pretty-printer prints `0.0` instead (the default decimal value), 
+so `1/3` is rendered as the string `"0.0"` instead, a different value.
+
+This bug was found via property-based testing using a generator for random well-typed Strata Core functions.
 
 ## Reproduce (self-contained)
 
-Paste into `Repro.lean` and run `lake env lean Repro.lean`. Uses only Strata
-functions.
+To reproduce, paste the following into a new file `Repro.lean` and run `lake env lean Repro.lean`. 
+The following example uses only Strata functions.
 
 ```lean
 import Strata.Languages.Core.DDMTransform.ASTtoCST
@@ -40,41 +42,3 @@ function f () : bool {
 -- Errors encountered during conversion:
 -- Unsupported construct in lconstToExpr: unsupported real: 1/3
 ```
-
-## Root cause
-
-1. `Strata/Languages/Core/DDMTransform/FormatCore.lean:272-277` — `lconstToExpr`
-   for `.realConst r` calls `StrataDDM.Decimal.fromRat r`; on `none` it logs
-   `"unsupported real"` and emits `.realLit default ⟨default, default⟩` — a
-   **default `Decimal`** (line 277).
-2. `StrataDDM/StrataDDM/Util/DecimalRat.lean:45-54` — `fromRat` returns `none`
-   when the denominator has a prime factor other than 2 or 5, so `1/3` is
-   unrepresentable as a terminating decimal.
-3. `default : Decimal` is `{ mantissa := 0, exponent := 0 }`
-   (`StrataDDM/StrataDDM/Util/Decimal.lean:16-19`), and `Decimal.toString` renders
-   it as `"0.0"` (`Decimal.lean:31-35`).
-
-So `1/3` prints as `0.0`. Unlike the syntactic round-trip bugs, this produces a
-*wrong* program rather than an unparseable one — it silently changes the term's
-value.
-
-## Expected
-
-The printed real literal must denote the same value as the AST (`1/3`), or printing
-must fail loudly rather than substituting `0.0`.
-
-## Suggested fix
-
-Print unrepresentable rationals losslessly (e.g. as a division expression or an
-exact rational literal) instead of substituting a default `Decimal`; at minimum,
-raise an error rather than silently emitting `0.0`.
-
-## Priority
-
-High — this is a printer **correctness** defect (value corruption), more serious
-than the syntactic round-trip failures which merely produce unparseable output.
-
-## Related
-
-See also the sibling issue "unapplied builtin operator has no concrete syntax",
-another printer-side defect on function bodies (an unparseable-output bug).
