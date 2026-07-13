@@ -9,13 +9,17 @@ then fails to re-typecheck. Triggered purely by the printer — no parse step ne
 ## Reproduce (self-contained)
 
 Paste into `Repro.lean` and run `lake env lean Repro.lean`. Uses only Strata
-functions.
+functions. Expected output is in the trailing comments.
 
 ```lean
 import Strata.Languages.Core.DDMTransform.ASTtoCST
 import Strata.Languages.Core.DDMTransform.Translate
+import Strata.Languages.Core.DDMTransform.Grammar
+import StrataDDM.Elab
+import StrataDDM.BuiltinDialects.Init
 
 open Lambda Core Strata
+open StrataDDM (initDialect)
 
 /-- Wrap an expression as the body of `function f () : bool { … }` and print it. -/
 def showBody (e : Core.Expression.Expr) : IO Unit := do
@@ -23,30 +27,41 @@ def showBody (e : Core.Expression.Expr) : IO Unit := do
     { decls := [ .func { name := ⟨"f", ()⟩, inputs := [], output := .bool, body := some e } .empty ] }
   IO.println (Core.formatProgram prog).pretty
 
--- Unapplied builtin operator `Bool.Not`
+/-- Parse a Core source string, then re-format it via Strata's own printer. -/
+def roundtrip (src : String) : IO Unit := do
+  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
+  let ictx := StrataDDM.Parser.stringInputContext ⟨"repro"⟩ src
+  try
+    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" ictx
+    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
+    if !errs.isEmpty then
+      IO.println s!"TRANSLATE ERROR: {(toString errs).replace "\n" " "}"
+    else
+      IO.println s!"OK; reformatted = {(Core.formatProgram ast).pretty.replace "\n" " "}"
+  catch e =>
+    IO.println s!"PARSE ERROR: {(toString e).replace "\n" " "}"
+
+-- (1) The printer side: unapplied Bool.Not emits the untypeable fallback re.none().
 #eval showBody (.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool)))
--- Contrast (NOT a bug): the *applied* operator round-trips via notation
+--  program Core;
+--  function f () : bool {
+--    re.none()
+--  }
+--  -- Errors encountered during conversion:
+--  -- Unsupported construct in lopToExpr: 0-ary op not found: Bool.Not
+
+-- (2) There is no source syntax to print TO: the "natural" name-form is unparseable.
+#eval roundtrip "function f () : bool -> bool { Bool.Not }"
+--  PARSE ERROR: Parse errors: 1:31: Unknown expr identifier Bool.Not
+
+-- (3) Contrast (NOT a bug): the APPLIED operator round-trips fine via notation.
 #eval showBody (.app () (.op () ⟨"Bool.Not", ()⟩ (some (.arrow .bool .bool))) (.boolConst () true))
-```
-
-## Observed
-
-```
--- unapplied Bool.Not  →  emits the untypeable fallback re.none()
-program Core;
-
-function f () : bool {
-  re.none()
-}
--- Errors encountered during conversion:
--- Unsupported construct in lopToExpr: 0-ary op not found: Bool.Not
-
--- contrast: applied Bool.Not  →  !true  (correct; re-parses to the same AST)
-program Core;
-
-function f () : bool {
-  !true
-}
+--  program Core;
+--  function f () : bool {
+--    !true
+--  }
+#eval roundtrip "function f () : bool { !true }"
+--  OK; reformatted = program Core;  function f () : bool {   !true }
 ```
 
 ## Root cause
@@ -62,11 +77,14 @@ function f () : bool {
 
 **This is one issue, not two.** The *applied* operator round-trips fine via
 notation (`!true` above). The operator simply has **no name-form concrete syntax at
-all** — neither `Bool.Not true` nor `Bool.Not(true)` parses; the only surface form
-is the notation `!b` from `Grammar.lean:87` (`fn not (b : bool) : bool => "!" b`),
-which is mandatorily saturated. So this is not "printer chose notation over a name
-it could have used"; there is no name-form. The single defect is that the printer
-(and grammar) have **no representation for the bare, unapplied operator**.
+all** — the "natural" printout `function f () : bool -> bool { Bool.Not }` does not
+parse (`Unknown expr identifier Bool.Not`, step (2) above), and neither does
+`Bool.Not true` nor `Bool.Not(true)`. The only surface form is the notation `!b`
+from `Grammar.lean:87` (`fn not (b : bool) : bool => "!" b`), which is mandatorily
+saturated. So this is not "printer chose notation over a name it could have used";
+there is no name-form to choose. The single defect is that the printer (and
+grammar) have **no representation for the bare, unapplied operator** — the printer
+is handed an AST it genuinely cannot render into any parseable Core program.
 
 ## Expected
 
