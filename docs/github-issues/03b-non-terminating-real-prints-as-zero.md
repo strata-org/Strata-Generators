@@ -1,4 +1,4 @@
-# Non-terminating real literal prints as `0.0` (value corruption / soundness bug)
+# Real numbers with no terminating decimal representation are printed as `0.0` 
 
 ## Summary
 
