@@ -73,6 +73,51 @@ function C () : Sequence Map int int -> bool;
 PARSE ERROR: Parse errors:   1:25: Map expects 2 arguments.   1:29: Unexpected argument to Sequence.
 ```
 
+## Proof of the misgrouping (regression oracle)
+
+The `roundtrip` helper above only shows the *string*-level paren loss. To pin the
+root cause — that the reprint parses to a **structurally different** type — dump the
+parsed output-type AST. Use `Map int (int -> int)`, which (unlike the `Sequence`
+example) parses in *both* forms, so you can compare the two ASTs directly. A fixed
+printer must make `Map int (int -> int)` reprint to a string that parses back to the
+first AST below.
+
+Add to the same file (reuses the imports/opens above):
+
+```lean
+/-- Parse a one-function program and print its output type's AST (or the error). -/
+def probeOutputTy (src : String) : IO Unit := do
+  let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
+  let ictx := StrataDDM.Parser.stringInputContext ⟨"repro"⟩ src
+  try
+    let sp ← StrataDDM.Elab.parseStrataProgramFromDialect dialects "Core" ictx
+    let (ast, errs) := TransM.run Inhabited.default (Strata.translateProgram sp)
+    match errs.isEmpty, ast.decls with
+    | true, [ .func f _ ] => IO.println s!"output type AST = {repr f.output}"
+    | _, _ => IO.println s!"ERROR: {(toString errs).replace "\n" " "}"
+  catch e => IO.println s!"PARSE ERROR: {(toString e).replace "\n" " "}"
+
+-- Intended type: a Map whose value is an arrow.
+#eval probeOutputTy "function f () : Map int (int -> int);"
+-- The printer's output: parses as an arrow whose domain is a Map.
+#eval probeOutputTy "function f () : Map int int -> int;"
+```
+
+Observed — the two strings parse to **different** types (the misgrouping), yet both
+reprint to the same `Map int int -> int`:
+
+```
+-- Map int (int -> int)  →  Map [int, (int -> int)]   (intended)
+output type AST = Lambda.LMonoTy.tcons "Map"
+  [Lambda.LMonoTy.tcons "int" [],
+   Lambda.LMonoTy.tcons "arrow" [Lambda.LMonoTy.tcons "int" [], Lambda.LMonoTy.tcons "int" []]]
+
+-- Map int int -> int    →  arrow [(Map int int), int] = (Map int int) -> int   (wrong)
+output type AST = Lambda.LMonoTy.tcons "arrow"
+  [Lambda.LMonoTy.tcons "Map" [Lambda.LMonoTy.tcons "int" [], Lambda.LMonoTy.tcons "int" []],
+   Lambda.LMonoTy.tcons "int" []]
+```
+
 ## Expected
 
 `function C () : Sequence (Map int int -> bool);` should reprint **unchanged**
