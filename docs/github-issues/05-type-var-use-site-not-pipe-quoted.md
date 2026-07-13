@@ -1,4 +1,4 @@
-# Type-variable use site is not pipe-quoted (binding site is)
+# Type parameters with `|`/`\` in their names fail to round-trip (use site not pipe-quoted)
 
 ## Summary
 

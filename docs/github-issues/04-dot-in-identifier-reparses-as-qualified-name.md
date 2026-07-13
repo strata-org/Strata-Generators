@@ -1,4 +1,4 @@
-# Identifier containing `.` reparses as a qualified name
+# Type parameters containing `.` fail to round-trip (misparsed as qualified names)
 
 ## Summary
 
