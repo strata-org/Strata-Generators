@@ -65,6 +65,30 @@ theorem mem_zip_map {β : Type} (g : β → β) (l : List β) (a p : β)
     · injection h with h1 h2; subst h1; subst h2; rfl
     · exact ih h
 
+/-- **Induction workhorse for `unify_ground_instance`.** Every constraint `(a, p)`
+    in `cs` is a *ground match*: `a` is ground and `a = p.subst σ` for one fixed,
+    shared matcher `σ`. Under that hypothesis `Constraints.unifyCore` cannot fail —
+    it returns some `r` whose accumulated substitution `r.newS` still `Matchesσ σ`
+    (every recorded binding agrees with `σ` and is ground).
+
+    This is the completeness fact Strata does not ship: its unifier comes with
+    *soundness* lemmas (a successful unification yields equal types) but no
+    guarantee that a solvable system actually succeeds. We only need the
+    ground-matching special case, where the shared `σ` witnesses solvability and
+    pins down the direction the unifier must solve each equation.
+
+    Proof shape (why it is the longest lemma here): it is a mutual well-founded
+    induction driven by the auto-generated `Constraints.unifyCore.induct`
+    principle, so it has one subgoal per branch of `Constraint.unifyOne` /
+    `Constraints.unifyCore` — 17 in total. `Matchesσ` is the invariant carried
+    through the recursion. Groundness does most of the work: in the branches that
+    would otherwise fail or diverge (`ftvar`-vs-ground mismatch, the occurs check,
+    name/arity mismatch, bitvec-vs-`tcons`), `subst_ground` collapses `a` to a
+    fixed ground type, so the ground-match hypothesis makes the failing case
+    contradictory. The two substantive cases are the `ftvar id` binding steps
+    (find-hit re-derives the same ground type; find-miss extends `S` and re-proves
+    `Matchesσ`) and the `tcons` case (recurse into the argument lists, transporting
+    the ground-match hypothesis pointwise via `mem_zip_map`). -/
 theorem unifyCore_success (σ : SubstInfo) (cs : Constraints) (S : SubstInfo)
     (hM : Matchesσ σ S)
     (hcs : ∀ a p, (a, p) ∈ cs → a.freeVars = [] ∧ a = LMonoTy.subst σ.subst p) :
@@ -222,9 +246,10 @@ theorem unifyCore_success (σ : SubstInfo) (cs : Constraints) (S : SubstInfo)
     unfold Constraints.unifyCore
     simp only [hrelS_eq, Except.mapError, hr_eq, bind, Except.bind]
 
-/-- **Ground-matching completeness.** If `A` is ground and equals `P.subst σ`
-    for some `σ`, then unifying `A` against `P` succeeds and the result
-    reconstructs `A`. -/
+/-- **Ground-matching completeness.** If `A` is a ground type and equals `P.subst σ`
+    for some `σ` (where `P` is a monotype),
+    then unifying `A` against `P` succeeds with resultant substitution `R`,
+    and applying the substitution `R` to `P` should give us back `A`. -/
 public theorem unify_ground_instance (A P : LMonoTy) (σ : SubstInfo)
     (hground : A.freeVars = []) (hinst : A = LMonoTy.subst σ.subst P) :
     ∃ R : SubstInfo, Constraints.unify [(A, P)] SubstInfo.empty = .ok R

@@ -39,6 +39,19 @@ So `genIndirPoly` emits `.op "id" (some (β → β))`. Now check `OpsConsistent`
 - The coherence check is `annotation = genericTy.subst tySubst`, i.e.
   `β → β = (α → α).subst [β ↦ α] = α → α`. This is **false**.
 
+Here `genericTy` is the operator's declared, *uninstantiated* arrow type built
+from the factory signature — `LMonoTy.mkArrow' fn.output fn.inputs.values`, so
+`α → α` for `id`, still mentioning `id`'s own **bound** type variable `α`
+(`fn.typeArgs = ["α"]`). `tySubst` is the substitution `LFunc.opTypeSubst`
+*recovers after the fact* by unifying the annotation against `genericTy`
+(`Constraints.unify [(annotation, genericTy)]`) — **not** the substitution the
+generator used to build the annotation. The check passes only when that recovered
+`tySubst` maps `genericTy`'s bound variables *forward* onto the annotation; the
+bug is that `Constraints.unify` is symmetric and here orients the solved equation
+the other way (`[β ↦ α]`, solving the target's `β`), so applying it to `α → α`
+leaves `α → α` rather than reproducing `β → β`. See `OpsConsistentDef.lean:36-47`
+(the check) and `Strata/DL/Lambda/Factory.lean:628-637` (`opTypeSubst`).
+
 Verified in Lean:
 
 ```
@@ -57,6 +70,16 @@ context variable. That is necessary but not sufficient here: even with distinct
 names (`α` vs `β`), `Constraints.unify` is symmetric and may orient the solved
 equation either way. When it solves `β ↦ α` (context var ↦ bound var), applying
 that substitution to the generic type does not reproduce the annotation.
+
+A type is **ground** when it contains no free type variables — i.e.
+`LMonoTy.freeVars τ = []`. `int`, `bool`, and `int → bool` are ground; anything
+mentioning a type variable such as `α`, `β`, or `β → β` is not. (In this
+codebase there is no separate binder on `LMonoTy`, so "free type variable" just
+means "any type variable occurring in the type".) A **ground instance** of a
+generic type is a ground type obtained by substituting ground types for the
+generic type's variables — e.g. `int → int` and `(int→bool)→(int→bool)` are
+ground instances of `id`'s `α → α`, whereas `β → β` is an instance but not a
+ground one.
 
 For the annotation to be `OpsConsistent`, `opTypeSubst` must recover a
 substitution `S` with `annotation = genericTy.subst S`. That holds when the
@@ -89,6 +112,55 @@ This restricts IndirPoly to ground target/argument types. Since the generator is
 for property testing, that is an acceptable coverage trade-off (polymorphic
 operators are still exercised, just at ground instantiations); free-type-variable
 targets are still reachable through the other rules.
+
+### Coverage impact (for future test authors)
+
+The generator is used for property-based testing, where "coverage" means the
+variety of well-typed term *shapes* it can produce. The ground-only guard removes
+exactly one shape from the space:
+
+> **A polymorphic operator applied at a result type that is (or contains) a free
+> type variable.**
+
+Concretely, `genLExpr`/`genIndirPoly` take a `tvars` parameter (type variables in
+scope) and a target type `τ`. When you generate the *body* of a polymorphic
+function such as
+
+```
+function f<β>(x : β) : β { … }
+```
+
+the target is `τ = .ftvar "β"` — a free (rigid) type variable. Before this fix,
+`genIndirPoly` could instantiate e.g. `id : ∀α. α → α` at `α := β` and emit
+`id : β → β` applied to some `x : β`. That term is well-typed under `HasTypeA`,
+but its `.op` annotation `β → β` is *not* `OpsConsistent` (the wrong-direction
+unification above). The ground-only guard now **drops** such candidates, so
+`genIndirPoly` instantiates polymorphic operators only at ground types
+(`id : int → int`, `id : bool → bool`, `id : (int → bool) → (int → bool)`, …),
+never at `β`.
+
+What this means in practice:
+
+- **No test breaks today.** No existing property test asserts on this shape or on
+  the generator's distribution, so nothing starts failing. This is a forward-looking
+  note, not a regression.
+- **Only non-empty `pctx` is affected.** The `IndirPoly` rule fires only when the
+  polymorphic-operator context `pctx` is non-empty. The default/closed-term entry
+  points (`genClosedLExpr`, `genLExprWithFactory` at its default `pctx := []`) never
+  invoke it, so they are entirely unaffected — as are their fully unconditional
+  `…_nil` consistency proofs.
+- **The dropped terms are still reachable indirectly.** Polymorphic operators are
+  still exercised (at ground instantiations), and a term like `id x` at a
+  free-type-variable type can still arise through the other generation rules
+  (e.g. a bound/free variable of that type, the `App` rule). Only the specific
+  *`IndirPoly`-emitted polymorphic-op-at-free-tyvar* shape is excluded.
+- **If you genuinely need that shape covered** (e.g. testing round-tripping or
+  denotation of polymorphic-op applications sitting inside polymorphic function
+  bodies), do *not* just re-enable non-ground candidates — that reintroduces the
+  `OpsConsistent` violation. Instead adopt one of the "Alternative generator
+  fixes" below (annotating the op with `genericTy.subst fullSubst` directly is the
+  most local), which keeps IndirPoly working at free target types while producing
+  a coherent annotation.
 
 ## Status in the proof
 
@@ -123,7 +195,46 @@ theorem unify_ground_instance (A P : LMonoTy) (σ : SubstInfo)
 — a **ground-matching completeness** result for Strata's unifier (which ships
 only soundness lemmas), by mutual well-founded induction over
 `Constraint.unifyOne`/`Constraints.unifyCore` with a matching invariant
-(`Matchesσ`). `PolyOpsConsistent_of_PCtxWF` then derives `PolyOpsConsistent` from
+(`Matchesσ`).
+
+### Why the `unifyCore_success` helper exists (the longest proof in the file)
+
+`unify_ground_instance` is short because it delegates the hard half to
+`unifyCore_success`, which is where all the induction lives. The split mirrors
+what "completeness" actually requires here:
+
+- **Soundness — already in Strata.** `LExpr.unify_makes_equal` says *if* unify
+  succeeds with `R`, then `A.subst R = P.subst R`. Combined with `A` ground
+  (`subst_ground`, so `A.subst R = A`), that gives the reconstruction half
+  `A = P.subst R` — Part 2 of `unify_ground_instance`, three lines.
+- **Termination-with-success — what Strata does *not* provide.** Nothing in
+  Strata guarantees that a *solvable* system actually returns `.ok`; its unifier
+  could in principle fail or the recursion diverge. That existence obligation
+  (`∃ R, Constraints.unify … = .ok R`, Part 1) is the real content, and it can
+  only be discharged by following the unifier's own recursion. That is
+  `unifyCore_success`.
+
+`unifyCore_success` runs the mutual well-founded induction generated by
+`Constraints.unifyCore.induct`, giving **17 subgoals** — one per branch of
+`Constraint.unifyOne`/`Constraints.unifyCore` — which is why it is by far the
+longest lemma. It carries the invariant `Matchesσ σ S`: every binding already in
+the accumulator `S` agrees with the fixed matcher `σ` and is ground. The reason
+groundness is doing the heavy lifting is that the branches which would normally
+make unification *fail* (an `ftvar` against a mismatched ground type, the occurs
+check, name/arity mismatch on `tcons`, bitvec-vs-`tcons`) all become
+*contradictory* once `subst_ground` collapses the ground side to a fixed type —
+so the "failure" cases are closed by contradiction rather than by producing an
+error. The two branches with real work are the `ftvar id` binding steps (on a
+find-hit the stored type re-derives the same ground type; on a find-miss we
+extend `S` and re-establish `Matchesσ`) and the `tcons` recursion (descend into
+the argument lists, transporting the ground-match hypothesis pointwise with
+`mem_zip_map`). Isolating this as its own lemma keeps the headline
+`unify_ground_instance` statement readable and lets the induction be stated over
+arbitrary constraint lists `cs`/accumulators `S` (which the induction needs) while
+`unify_ground_instance` only exposes the single-equation `[(A, P)]` case the
+generator uses.
+
+`PolyOpsConsistent_of_PCtxWF` then derives `PolyOpsConsistent` from
 `PCtxWF`: the annotation's groundness comes from the `freeVars … == []` guard, the
 "instance of `genericTy`" fact from `polyOpsForResult_instance`, and consistency
 from `opGroundInstance_opsConsistent` (poly) / `opGeneric_opsConsistent` (mono).
