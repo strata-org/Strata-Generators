@@ -196,58 +196,66 @@ def genTypeDeclStmt [Gen G] (C : LContext CoreLParams) (ctx : VarCtx) (depth : N
 mutual
 
 /-- Generate a well-typed `Statement` given the ambient context `C`, the variable
-    scope `ctx`, an expression-term `depth`, and a nesting `fuel`.
+    scope `ctx`, and a single `size` budget.
 
-    At `fuel = 0` only the *leaf* constructors are produced (`cmd`, `exit`,
-    `funcDecl`, `typeDecl`). At `fuel + 1` the nesting constructors (`block`,
-    `ite`, `loop`) may additionally be produced, with their bodies generated at
-    the smaller `fuel`.
+    `size` is the QuickCheck-style `sized` knob: it bounds the statement's nesting
+    depth *and* — as it is passed on to the leaf/expression sub-generators and to
+    the body-length `choose`s — the size of expressions and the length of
+    generated statement sequences. There is no separate nesting `fuel`: `size`
+    plays both roles, exactly as the single `Nat` argument of `genLExprBase` does
+    for expressions.
+
+    At `size = 0` only the *leaf* constructors are produced (`cmd`, `exit`,
+    `funcDecl`, `typeDecl`), with size-0 expressions. At `size + 1` the nesting
+    constructors (`block`, `ite`, `loop`) may additionally be produced, with their
+    bodies generated at the smaller `size` (so sub-programs shrink as they nest).
 
     The generated statement satisfies `StmtHasTypeA P C Γ s C' Γ'` (for any
     program `P`) — see `genStmt_sound`. -/
 def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : Nat → G GenStmtResult
+    (C : LContext CoreLParams) (ctx : VarCtx) : Nat → G GenStmtResult
   | 0 =>
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
-      [ (4, fun () => genCmdStmt fctx octx tvars C ctx depth),
+      [ (4, fun () => genCmdStmt fctx octx tvars C ctx 0),
         (1, fun () => genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt fctx octx C ctx depth),
-        (1, fun () => genTypeDeclStmt C ctx depth) ]
+        (1, fun () => genFuncDeclStmt fctx octx C ctx 0),
+        (1, fun () => genTypeDeclStmt C ctx 0) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1; omega
     frequency gs hw
-  | fuel + 1 =>
+  | size + 1 =>
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
-      [ (4, fun () => genCmdStmt fctx octx tvars C ctx depth),
+      [ (4, fun () => genCmdStmt fctx octx tvars C ctx (size + 1)),
         (1, fun () => genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt fctx octx C ctx depth),
-        (1, fun () => genTypeDeclStmt C ctx depth),
+        (1, fun () => genFuncDeclStmt fctx octx C ctx (size + 1)),
+        (1, fun () => genTypeDeclStmt C ctx (size + 1)),
         (2, fun () => do
           let label ← String.arbitrary
-          let ⟨⟨len, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
+          let ⟨⟨len, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           -- The block's own `label` becomes an enclosing label for its body, so
-          -- an `exit` inside the body can break out of this block.
-          let (body, _, _) ← genStmts fctx octx tvars (label :: labels) C ctx depth fuel len
+          -- an `exit` inside the body can break out of this block. The body is
+          -- generated at the smaller `size` (guaranteeing termination).
+          let (body, _, _) ← genStmts fctx octx tvars (label :: labels) C ctx size len
           pure ⟨Stmt.block label body default, C, ctx⟩),
         (2, fun () => do
-          let cond ← genLExpr fctx octx [] tvars [] depth .bool
-          let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel elen
+          let cond ← genLExpr fctx octx [] tvars [] (size + 1) .bool
+          let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
+          let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
+          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx size tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx size elen
           pure ⟨Stmt.ite (.det cond) thenb elseb default, C, ctx⟩),
         (1, fun () => do
-          let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel elen
+          let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
+          let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
+          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx size tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx size elen
           pure ⟨Stmt.ite .nondet thenb elseb default, C, ctx⟩),
         (2, fun () => do
-          let guard ← genCondOrNondet fctx octx tvars depth
-          let measure ← genOptMeasure fctx octx tvars depth
-          let invariants ← genInvariants fctx octx tvars depth
-          let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 depth (Nat.zero_le depth)
-          let (body, _, _) ← genStmts fctx octx tvars labels C ctx depth fuel blen
+          let guard ← genCondOrNondet fctx octx tvars (size + 1)
+          let measure ← genOptMeasure fctx octx tvars (size + 1)
+          let invariants ← genInvariants fctx octx tvars (size + 1)
+          let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
+          let (body, _, _) ← genStmts fctx octx tvars labels C ctx size blen
           pure ⟨Stmt.loop guard measure invariants body default, C, ctx⟩) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1+2+2+1+2; omega
     frequency gs hw
@@ -255,31 +263,33 @@ termination_by n => (n, 0, 0)
 
 /-- Generate a length-`len` sequence of well-typed statements, threading both the
     ambient context `C` and the variable scope `ctx` through the sequence. Each
-    statement is generated at nesting `fuel`.
+    statement is generated at the same `size`; `len` is a separate structural
+    accumulator (the remaining sequence length).
 
     Returns the statement list together with the final `(C, Γ)`. Satisfies the
     chained `StmtsHasTypeA` relation — see `genStmts_sound`. -/
 def genStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) (fuel : Nat) :
+    (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
     Nat → G (List Statement × LContext CoreLParams × VarCtx)
   | 0 => pure ([], C, ctx)
   | len + 1 => do
-    let r ← genStmt fctx octx tvars labels C ctx depth fuel
-    let (rest, C'', ctx'') ← genStmts fctx octx tvars labels r.outC r.outCtx depth fuel len
+    let r ← genStmt fctx octx tvars labels C ctx size
+    let (rest, C'', ctx'') ← genStmts fctx octx tvars labels r.outC r.outCtx size len
     pure (r.stmt :: rest, C'', ctx'')
-termination_by n => (fuel, 1, n)
+termination_by n => (size, 1, n)
 
 end
 
 -- ── Top-level convenience generator ──────────────────────────────────────
 
-/-- Generate a well-typed statement list of length up to `len`, at nesting `fuel`
-    and term depth `depth`, starting from an empty ambient context and empty
-    variable scope. -/
+/-- Generate a well-typed statement list of up to `len` statements, each generated
+    at element `size`, starting from an empty ambient context and empty variable
+    scope. The two knobs are orthogonal: `size` bounds each statement's
+    nesting/expression size, `len` bounds the top-level sequence length. -/
 def genProgramStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth fuel len : Nat) : G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmts fctx octx tvars [] (LContext.default) [] depth fuel len
+    (size len : Nat) : G (List Statement × LContext CoreLParams × VarCtx) :=
+  genStmts fctx octx tvars [] (LContext.default) [] size len
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
@@ -287,10 +297,10 @@ open Std in
 instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
   format _ := .nil
 
--- Smoke test: a handful of individual statements at nesting fuel 2.
+-- Smoke test: a handful of individual statements at size 2.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] [] (LContext.default) [] 2 2
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] (LContext.default) [] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
 -- Smoke test: a statement started from a non-empty variable scope, so `set`
@@ -298,13 +308,13 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
   let ⟨s, _, _⟩ ← genStmt [] [] [] [] (LContext.default)
-    [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] 2 2
+    [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
--- Smoke test: a whole statement sequence.
+-- Smoke test: a whole statement sequence (size 2, up to 4 statements).
 #guard_msgs(drop warning, drop all) in
 #eval (do
-  let (ss, _, _) ← genProgramStmts [] [] [] 2 2 4
+  let (ss, _, _) ← genProgramStmts [] [] [] 2 4
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 end StrataGenerators.Stmt
