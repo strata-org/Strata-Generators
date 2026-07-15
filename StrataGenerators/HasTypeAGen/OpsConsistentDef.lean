@@ -2,7 +2,6 @@ module
 public import Strata.DL.Lambda.LExpr
 public import Strata.DL.Lambda.Factory
 public import Strata.DL.Lambda.LTyUnify
-public import StrataGenerators.UnifyGroundInstance
 import all Strata.DL.Lambda.Factory
 import all Strata.DL.Lambda.Denote.Assumptions
 import Std.Data.HashMap.Lemmas
@@ -71,6 +70,92 @@ theorem GenOpsConsistent.faithful (F : @Factory T) (e : LExpr T.mono) :
   | bvar => rfl
   | fvar => rfl
 
+-- ── Declarative `OpsConsistentR` copy ────────────────────────────────
+-- Strata's `Lambda.OpsConsistentR` (the *inductive*, declarative specification of
+-- `OpsConsistent`) also lives in the non-`public` section of `Assumptions.lean`,
+-- so it is not nameable from the non-`module` proof files either. We mirror it
+-- here as `GenOpsConsistentR`, marked `@[expose] public`, and certify it
+-- equivalent to the original by `GenOpsConsistentR.faithful` below.
+--
+-- Unlike the operational `GenOpsConsistent`, the `.op_in` case demands only the
+-- *existence* of a type substitution turning the function's generic type into the
+-- node's annotation — it never mentions `opTypeSubst`/unification. That is exactly
+-- what makes the generator's polymorphic op annotations consistent by
+-- construction (they are built as such an instance), with no need for the
+-- ground-matching unification-completeness machinery.
+
+/-- A faithful, `@[expose] public` copy of `Lambda.OpsConsistentR` (see comment
+    above). Certified equivalent to the original by `GenOpsConsistentR.faithful`. -/
+public inductive GenOpsConsistentR (F : @Factory T) : LExpr T.mono → Prop where
+  | const {m c} : GenOpsConsistentR F (.const m c)
+  | bvar {m i} : GenOpsConsistentR F (.bvar m i)
+  | fvar {m name ty} : GenOpsConsistentR F (.fvar m name ty)
+  /-- An operator whose name is not in the factory is unconstrained. -/
+  | op_notin {m name ty} (h : F[name.name]? = none) : GenOpsConsistentR F (.op m name ty)
+  /-- An operator in the factory must be annotated with some instantiation of the
+  function's generic type. -/
+  | op_in {m name ty_op fn tySubst}
+      (hfn : F[name.name]? = some fn)
+      (hty : ty_op = (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd)).subst tySubst) :
+      GenOpsConsistentR F (.op m name (some ty_op))
+  | app {m fn arg} :
+      GenOpsConsistentR F fn → GenOpsConsistentR F arg → GenOpsConsistentR F (.app m fn arg)
+  | abs {m name ty body} : GenOpsConsistentR F body → GenOpsConsistentR F (.abs m name ty body)
+  | ite {m c t f} :
+      GenOpsConsistentR F c → GenOpsConsistentR F t → GenOpsConsistentR F f →
+      GenOpsConsistentR F (.ite m c t f)
+  | eq {m e1 e2} :
+      GenOpsConsistentR F e1 → GenOpsConsistentR F e2 → GenOpsConsistentR F (.eq m e1 e2)
+  | quant {m k name ty tr body} :
+      GenOpsConsistentR F tr → GenOpsConsistentR F body →
+      GenOpsConsistentR F (.quant m k name ty tr body)
+
+set_option linter.unusedSectionVars false in
+/-- **Faithfulness**: `GenOpsConsistentR` is equivalent to Strata's
+    `Lambda.OpsConsistentR`. Checked at build time. (Cannot be `public` because it
+    mentions the private `Lambda.OpsConsistentR`, but this build-time check is what
+    licenses reading `GenOpsConsistentR`-based results as results about the real
+    predicate.) -/
+theorem GenOpsConsistentR.faithful (F : @Factory T) (e : LExpr T.mono) :
+    GenOpsConsistentR F e ↔ Lambda.OpsConsistentR F e := by
+  constructor
+  · intro h
+    induction h with
+    | const => exact .const
+    | bvar => exact .bvar
+    | fvar => exact .fvar
+    | op_notin hn => exact .op_notin hn
+    | op_in hfn hty => exact .op_in hfn hty
+    | app _ _ ihf iha => exact .app ihf iha
+    | abs _ ih => exact .abs ih
+    | ite _ _ _ ihc iht ihf => exact .ite ihc iht ihf
+    | eq _ _ ih1 ih2 => exact .eq ih1 ih2
+    | quant _ _ ihtr ihbody => exact .quant ihtr ihbody
+  · intro h
+    induction h with
+    | const => exact .const
+    | bvar => exact .bvar
+    | fvar => exact .fvar
+    | op_notin hn => exact .op_notin hn
+    | op_in hfn hty => exact .op_in hfn hty
+    | app _ _ ihf iha => exact .app ihf iha
+    | abs _ ih => exact .abs ih
+    | ite _ _ _ ihc iht ihf => exact .ite ihc iht ihf
+    | eq _ _ ih1 ih2 => exact .eq ih1 ih2
+    | quant _ _ ihtr ihbody => exact .quant ihtr ihbody
+
+/-- **Soundness bridge (operational ⇒ declarative), on the public copies.**
+    `GenOpsConsistent F e → GenOpsConsistentR F e`. This lets the existing
+    operational-consistency lemmas (leaf ops, monomorphic Indir) be reused
+    verbatim and then bridged into the declarative relation. Proven by routing
+    through Strata's own `OpsConsistent_OpsConsistentR` via the two `faithful`
+    theorems. -/
+public theorem GenOpsConsistent.toR (F : @Factory T) (e : LExpr T.mono)
+    (h : GenOpsConsistent F e) : GenOpsConsistentR F e := by
+  rw [GenOpsConsistentR.faithful]
+  rw [GenOpsConsistent.faithful] at h
+  exact Lambda.OpsConsistent_OpsConsistentR h
+
 -- ── Factory lookup bridge ────────────────────────────────────────────
 -- These bridge lemmas need access to the *private* internals of `Factory`
 -- (`nameMap`), so they must live in a `module` file that does `import all`
@@ -136,32 +221,13 @@ public theorem opGeneric_opsConsistent (F : @Factory T)
     show fn.output.mkArrow' fn.inputs.values = LMonoTy.subst SubstInfo.empty.subst _
     rw [LMonoTy.subst_emptyS (by simp [SubstInfo.empty])]
 
-/-- **Ground-instance op consistency.** An `.op` node annotated with a *ground*
-    type `A` that is a substitution instance of the operator's generic type
-    (`A = genericTy.subst σ` for some `σ`, where `genericTy = mkArrow' fn.output
-    fn.inputs.values`) satisfies `GenOpsConsistent`. This is the fact the
-    polymorphic IndirPoly path needs under the ground-only instantiation fix:
-    a ground instance unifies against the generic type (via
-    `unify_ground_instance`), and the recovered substitution reconstructs `A`. -/
-public theorem opGroundInstance_opsConsistent (F : @Factory T)
-    (fn : LFunc T) (m : T.Metadata) (name : T.Identifier) (A : LMonoTy) (σ : SubstInfo)
-    (hname : F[name.name]? = some fn)
-    (hpoly : fn.typeArgs.isEmpty = false)
-    (hground : A.freeVars = [])
-    (hinst : A = LMonoTy.subst σ.subst (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))) :
-    GenOpsConsistent F (.op m name (some A)) := by
-  unfold GenOpsConsistent
-  simp only [hname]
-  unfold LFunc.opTypeSubst
-  simp only [hpoly, Bool.false_eq_true, if_false]
-  rw [← ListMap.values_eq_map_snd]
-  -- The annotation `A` is a ground instance of the generic type, so unifying it
-  -- against the generic type succeeds and the result reconstructs `A`.
-  obtain ⟨R, hunify, hrecon⟩ :=
-    unify_ground_instance A (LMonoTy.mkArrow' fn.output fn.inputs.values) σ hground
-      (by rw [ListMap.values_eq_map_snd]; exact hinst)
-  rw [hunify]
-  exact hrecon
+-- Note: the operational `opGroundInstance_opsConsistent` (ground-instance op
+-- consistency for the *operational* `OpsConsistent`, which needed the
+-- ground-matching unification-completeness result `unify_ground_instance`) is no
+-- longer required. The generator's polymorphic op annotations are now discharged
+-- against the *declarative* `OpsConsistentR`, whose `.op_in` constructor asks only
+-- for the existence of an instantiating substitution — the generator builds one by
+-- construction, so no `opTypeSubst` round-trip / ground matching is needed.
 
 -- ── `factoryOps` type-shape bridge ───────────────────────────────────
 -- `factoryOps` assigns each op the curried type

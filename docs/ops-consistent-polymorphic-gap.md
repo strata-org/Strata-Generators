@@ -1,5 +1,29 @@
 # A second `OpsConsistent` gap: wrong-direction unification at free target types
 
+> **UPDATE (OpsConsistentR retargeting).** The generator is now proven against
+> Strata's *declarative* `OpsConsistentR` relation instead of the operational
+> `OpsConsistent`. `OpsConsistentR`'s `.op_in` constructor requires only the
+> *existence* of a substitution `S` with `annotation = genericTy.subst S` — it
+> never runs `opTypeSubst`, so the wrong-direction-unification failure mode below
+> simply does not arise. Consequently:
+> - The **ground-only guard** (below) is replaced by a **forward-instance guard**
+>   `subst fullSubst retTy == τ` in `polyOpsForResult`. This is strictly more
+>   permissive: it now *admits* polymorphic-op annotations that mention a free
+>   (non-quantified) type variable — e.g. `id : β → β` at target `β` — which the
+>   ground-only guard dropped. Such an annotation is a genuine forward instance
+>   (`α ↦ β`), hence `OpsConsistentR`-consistent.
+> - `unify_ground_instance` / `StrataGenerators/UnifyGroundInstance.lean` and
+>   `opGroundInstance_opsConsistent` are **no longer needed** and were removed. The
+>   witness is built directly by `composite_instance_subst` (composing the
+>   freshening renaming with the generator's substitution via
+>   `composeWitnessScope`), needing neither groundness nor `SubstWF`.
+> - `PCtxWF` was **weakened**: the `freeVars ⊆ typeArgs` conjunct (needed only for
+>   the operational monomorphic `opTypeSubst` short-circuit) is gone.
+> The headline result is now `genLExpr_opsConsistentR_of_PCtxWF` (and the
+> `pctx = []` corollary `genLExpr_opsConsistentR_nil`), both depending only on the
+> standard axioms. The material below documents the *original operational* gap and
+> its ground-only fix, retained for historical context.
+
 ## Summary
 
 While proving that the generator produces `OpsConsistent` terms

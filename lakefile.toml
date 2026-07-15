@@ -5,7 +5,7 @@ defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenO
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "66dcd82d1"
+rev = "0b49739cb"
 
 [[require]]
 name = "basalt"
@@ -130,8 +130,3 @@ root = "TycheMain"
 [[lean_exe]]
 name = "test-lexpr"
 root = "PlausibleTestMain"
-
-# Ground-matching unification completeness (helper for the OpsConsistent proof)
-[[lean_lib]]
-name = "StrataGenerators.UnifyGroundInstance"
-roots = ["StrataGenerators.UnifyGroundInstance"]

@@ -940,16 +940,23 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
           else
             let fullSubst : Lambda.Subst := (freeTyVars.zip sampledTys) :: subst
             let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
-            -- Ground-only instantiation (see `docs/ops-consistent-polymorphic-gap.md`):
-            -- keep the candidate only if the resulting op annotation
-            -- `concreteArgTys.foldr arrow τ` is ground (no free type variables).
-            -- A ground annotation is a genuine instance of the operator's generic
-            -- type, so `LFunc.opTypeSubst` can only solve the operator's own bound
-            -- variables (never a context free variable in the wrong direction),
-            -- keeping the term `OpsConsistent`. Non-ground candidates (which arise
-            -- when the target `τ` or a sampled type carries free type variables)
-            -- are dropped rather than emitted with an incoherent annotation.
-            if LMonoTy.freeVars τ == [] && concreteArgTys.all (fun σ => LMonoTy.freeVars σ == []) then
+            -- Forward-instance guard (declarative `OpsConsistentR`; see
+            -- `docs/ops-consistent-polymorphic-gap.md`). We keep the candidate iff
+            -- applying the generator's own substitution `fullSubst` to the return
+            -- type `retTy` actually yields the target `τ`. Since the whole emitted
+            -- annotation `concreteArgTys.foldr arrow τ` is then
+            -- `subst fullSubst (subst renameSubst genericTy)` — a genuine
+            -- substitution *instance* of the operator's generic type in the forward
+            -- direction — it satisfies `OpsConsistentR`'s `.op_in` (which asks only
+            -- for the *existence* of such a substitution), regardless of whether the
+            -- annotation is ground. This is strictly more permissive than the old
+            -- ground-only guard: it also admits annotations mentioning a free
+            -- type variable, as long as that variable comes from the context
+            -- (`τ`/the sampled types) rather than being a *quantified* variable the
+            -- unifier solved in the wrong direction. The guard rejects exactly the
+            -- wrong-orientation candidates (e.g. `id : ∀α. α → α` at target `β`
+            -- unifying `β ↦ α`, whose annotation would not be a forward instance).
+            if LMonoTy.subst fullSubst retTy == τ then
               some (name, concreteArgTys)
             else none
 
