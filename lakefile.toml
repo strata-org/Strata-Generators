@@ -12,11 +12,12 @@ name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
 
-# A public, reasoning-friendly copy of Strata's private `OpsConsistent` predicate
-# (module file; certified faithful to the original at build time)
+# Module-only bridge lemmas for the OpsConsistent(R) generator proofs (Factory
+# `nameMap` lookup, self-unification, generic-type op-consistency) — they need
+# `import all` on Strata internals, which the non-module proof file can't do.
 [[lean_lib]]
-name = "StrataGenerators.HasTypeAGen.OpsConsistentDef"
-roots = ["StrataGenerators.HasTypeAGen.OpsConsistentDef"]
+name = "StrataGenerators.HasTypeAGen.OpsConsistentBridge"
+roots = ["StrataGenerators.HasTypeAGen.OpsConsistentBridge"]
 
 # Core generator definitions (no Factory, no Mathlib — shared by Defs and HasTypeAGen)
 [[lean_lib]]

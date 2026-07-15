@@ -1,5 +1,18 @@
 # Why `OpsConsistent` is reproduced locally (`GenOpsConsistent`)
 
+> **SUPERSEDED (this workaround was retired).** The local copies described below
+> (`GenOpsConsistent` / `GenOpsConsistentR` + their `faithful` bridges) **no longer
+> exist.** Strata's `OpsConsistent` was made `@[expose] public`, `OpsConsistentR`
+> `public`, and `OpsConsistent_OpsConsistentR` `public` (in
+> `Strata/DL/Lambda/Denote/Assumptions.lean`), so the non-`module` proof files now
+> name and unfold the *real* predicates directly — no mirror copies, no `faithful`
+> theorems. The former shim file `HasTypeAGen/OpsConsistentDef.lean` was renamed to
+> **`HasTypeAGen/OpsConsistentBridge.lean`** and now holds only the handful of
+> helper lemmas that genuinely require a `module` file (Factory `nameMap` lookup,
+> self-unification, generic-type op-consistency) — not any predicate definition.
+> The text below is retained only as background on the module-system constraint
+> that originally motivated the copy.
+
 ## TL;DR
 
 The generator's `OpsConsistent` proofs need to *name* Strata's

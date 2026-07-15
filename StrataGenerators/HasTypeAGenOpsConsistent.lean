@@ -1,6 +1,6 @@
 import StrataGenerators.HasTypeAGen
 import StrataGenerators.HasTypeAGen.Defs
-import StrataGenerators.HasTypeAGen.OpsConsistentDef
+import StrataGenerators.HasTypeAGen.OpsConsistentBridge
 
 open Lambda RandomChoice ArbNat ArbChar ArbString SetGen
 
@@ -16,11 +16,12 @@ factory function's generic type. Together with `genLExpr_sound`/`genLExpr_comple
 (which handle `HasTypeA`) this makes the generator sound and complete with respect
 to *both* `HasTypeA` and `OpsConsistentR`.
 
-`OpsConsistentR` is marked `public` in Strata's `Assumptions.lean`, so these proofs
-name `Lambda.OpsConsistentR` directly — no local copy is needed. (The *operational*
-`OpsConsistent` is still private, so the reused operational lemmas go through the
-`Lambda.OpsConsistent` copy in `HasTypeAGen/OpsConsistentDef.lean` and are bridged into
-`OpsConsistentR` by `OpsConsistent_OpsConsistentR`.)
+Both `OpsConsistent` (`@[expose] public`) and `OpsConsistentR` (`public`) are named
+directly from Strata's `Assumptions.lean` — no local copies. The reused operational
+lemmas produce `Lambda.OpsConsistent` and are bridged into `Lambda.OpsConsistentR`
+by Strata's `OpsConsistent_OpsConsistentR`. The `module`-only helper lemmas they
+depend on (Factory `nameMap` lookup, self-unification, generic-type op-consistency)
+live in `HasTypeAGen/OpsConsistentBridge.lean`.
 
 Working against the declarative `OpsConsistentR` (rather than the operational
 `OpsConsistent`, whose `.op` check runs `opTypeSubst` and demands the annotation be

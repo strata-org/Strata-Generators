@@ -73,7 +73,7 @@ generator used to build the annotation. The check passes only when that recovere
 `tySubst` maps `genericTy`'s bound variables *forward* onto the annotation; the
 bug is that `Constraints.unify` is symmetric and here orients the solved equation
 the other way (`[β ↦ α]`, solving the target's `β`), so applying it to `α → α`
-leaves `α → α` rather than reproducing `β → β`. See `OpsConsistentDef.lean:36-47`
+leaves `α → α` rather than reproducing `β → β`. See the operational `OpsConsistent`
 (the check) and `Strata/DL/Lambda/Factory.lean:628-637` (`opTypeSubst`).
 
 Verified in Lean:
