@@ -22,12 +22,12 @@ file that does `import all` on `Factory`/`Assumptions`:
 * `mem_get?_eq` — reaches the *private* `Factory.nameMap` internals.
 * `opGeneric_opsConsistent` — op-annotation consistency for a generic factory type.
 * `unify_self` / `unifyOne_self` — self-unification facts.
-* the `factoryOps` type-shape lemmas (`ArrowSpineOK`, `destructArrow`/`mkArrow`
-  reconstruction).
 
 These are re-used by the non-`module` op-consistency proofs, which cannot
 themselves `import all` (they transitively depend on the non-`module` Basalt
-library).
+library). (The former `destructArrow`/`mkArrow` reconciliation lemmas are gone:
+`factoryOps` now builds each op type with `mkArrow'` directly, so its entries are
+*definitionally* the operator's generic type — no arrow-spine bridging needed.)
 -/
 
 namespace Lambda
@@ -118,78 +118,5 @@ public theorem opGeneric_opsConsistent (F : @Factory T)
 -- against the *declarative* `OpsConsistentR`, whose `.op_in` constructor asks only
 -- for the existence of an instantiating substitution — the generator builds one by
 -- construction, so no `opTypeSubst` round-trip / ground matching is needed.
-
--- ── `factoryOps` type-shape bridge ───────────────────────────────────
--- `factoryOps` assigns each op the curried type
---   `mkArrow ity (irest ++ destructArrow output)`
--- whereas `OpsConsistent` expects the generic type `mkArrow' output values`.
--- These coincide exactly when the output type's arrow spine is well-formed
--- (each `arrow` node has arity 2), captured by `ArrowSpineOK`. Real factory
--- outputs (produced by the parser/type-checker) always satisfy this.
-
-/-- The arrow *spine* of a monotype is well-formed: every `arrow` tycon along
-    the right spine has exactly two arguments. This is all that
-    `destructArrow`/`mkArrow` reconstruction requires. -/
-public def ArrowSpineOK : LMonoTy → Prop
-  | .tcons "arrow" [_, b] => ArrowSpineOK b
-  | .tcons "arrow" _ => False
-  | _ => True
-
-/-- `LMonoTys.destructArrow` of a singleton is `LMonoTy.destructArrow`. -/
-public theorem LMonoTys_destructArrow_single (t : LMonoTy) :
-    LMonoTys.destructArrow [t] = LMonoTy.destructArrow t := by
-  rw [LMonoTys.destructArrow]; simp [LMonoTys.destructArrow]
-
-/-- `destructArrow` of a non-arrow tycon is the singleton list. -/
-public theorem destructArrow_non_arrow (nm : String) (args : List LMonoTy)
-    (h : nm ≠ "arrow") : LMonoTy.destructArrow (.tcons nm args) = [.tcons nm args] := by
-  rw [LMonoTy.destructArrow]
-  intro t1 trest heq
-  simp only [LMonoTy.tcons.injEq] at heq
-  exact absurd heq.1 h
-
-/-- `destructArrow` of a binary arrow peels the domain and recurses. -/
-public theorem destructArrow_arrow2 (a b : LMonoTy) :
-    LMonoTy.destructArrow (.tcons "arrow" [a, b]) = a :: LMonoTy.destructArrow b := by
-  rw [LMonoTy.destructArrow]
-  show a :: LMonoTys.destructArrow [b] = _
-  rw [LMonoTys_destructArrow_single]
-
-/-- Reconstruction: for a monotype with a well-formed arrow spine,
-    `mkArrow x (destructArrow o) = arrow x o`. -/
-public theorem mkArrow_destructArrow : (o : LMonoTy) → ArrowSpineOK o → (x : LMonoTy) →
-    LMonoTy.mkArrow x (LMonoTy.destructArrow o) = LMonoTy.arrow x o
-  | .tcons "arrow" [a, b] => fun hwf x => by
-      have hb : ArrowSpineOK b := hwf
-      rw [destructArrow_arrow2]
-      show LMonoTy.arrow x (LMonoTy.mkArrow a (LMonoTy.destructArrow b)) = _
-      rw [mkArrow_destructArrow b hb a]; rfl
-  | .ftvar nm => fun _ x => by simp [LMonoTy.destructArrow, LMonoTy.mkArrow]
-  | .bitvec n => fun _ x => by simp [LMonoTy.destructArrow, LMonoTy.mkArrow]
-  | .tcons "arrow" [] => fun hwf x => absurd hwf (by simp [ArrowSpineOK])
-  | .tcons "arrow" [_] => fun hwf x => absurd hwf (by simp [ArrowSpineOK])
-  | .tcons "arrow" (_::_::_::_) => fun hwf x => absurd hwf (by simp [ArrowSpineOK])
-  | .tcons "bool" args => fun _ x => by rw [destructArrow_non_arrow _ _ (by decide)]; simp [LMonoTy.mkArrow]
-  | .tcons "int" args => fun _ x => by rw [destructArrow_non_arrow _ _ (by decide)]; simp [LMonoTy.mkArrow]
-  | .tcons "string" args => fun _ x => by rw [destructArrow_non_arrow _ _ (by decide)]; simp [LMonoTy.mkArrow]
-  | .tcons "real" args => fun _ x => by rw [destructArrow_non_arrow _ _ (by decide)]; simp [LMonoTy.mkArrow]
-  | .tcons "regex" args => fun _ x => by rw [destructArrow_non_arrow _ _ (by decide)]; simp [LMonoTy.mkArrow]
-  | .tcons "Map" args => fun _ x => by rw [destructArrow_non_arrow _ _ (by decide)]; simp [LMonoTy.mkArrow]
-  | .tcons "Sequence" args => fun _ x => by rw [destructArrow_non_arrow _ _ (by decide)]; simp [LMonoTy.mkArrow]
-  | .tcons nm args => fun hwf x => by
-      by_cases hnm : nm = "arrow"
-      · subst hnm
-        match args, hwf with
-        | [], hwf => exact absurd hwf (by simp [ArrowSpineOK])
-        | [_], hwf => exact absurd hwf (by simp [ArrowSpineOK])
-        | [a, b], hwf =>
-            have hb : ArrowSpineOK b := hwf
-            rw [destructArrow_arrow2]
-            show LMonoTy.arrow x (LMonoTy.mkArrow a (LMonoTy.destructArrow b)) = _
-            rw [mkArrow_destructArrow b hb a]; rfl
-        | (_::_::_::_), hwf => exact absurd hwf (by simp [ArrowSpineOK])
-      · rw [destructArrow_non_arrow nm args hnm]; simp [LMonoTy.mkArrow]
-  termination_by o => sizeOf o
-  decreasing_by all_goals (simp_wf; omega)
 
 end Lambda

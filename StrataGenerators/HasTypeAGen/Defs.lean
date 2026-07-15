@@ -18,15 +18,18 @@ export ArbNat (Nat.arbitrary)
 -- ── Factory conversion ──────────────────────────────────────────────
 
 /-- Extract the flat operator list from a `Factory` by computing the curried
-    type of each operation (inputs → output). -/
+    type of each operation (inputs → output).
+
+    The curried type is built with `mkArrow'` — exactly the *generic type* form
+    `OpsConsistent`/`OpsConsistentR` canonicalize each operator to
+    (`mkArrow' fn.output fn.inputs.values`). Using the same builder here means the
+    annotation the generator stamps on a `factoryOps`-sourced `.op` node *is*
+    definitionally the operator's generic type, so no `destructArrow`/`mkArrow`
+    reconciliation (nor an `ArrowSpineOK`/`FactoryOutputWF` side condition) is
+    needed to see it is op-consistent. -/
 def factoryOps (F : @Factory LExprParams') : OpCtx :=
   F.toArray.toList.filterMap fun f =>
-    let inputTys := f.inputs.values
-    let outputTys := LMonoTy.destructArrow f.output
-    let ty := match inputTys with
-      | [] => f.output
-      | ity :: irest => LMonoTy.mkArrow ity (irest ++ outputTys)
-    some (f.name.name, ty)
+    some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
 -- ── Factory-accepting wrappers ──────────────────────────────────────
 
