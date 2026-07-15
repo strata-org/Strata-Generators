@@ -16,9 +16,11 @@ factory function's generic type. Together with `genLExpr_sound`/`genLExpr_comple
 (which handle `HasTypeA`) this makes the generator sound and complete with respect
 to *both* `HasTypeA` and `OpsConsistentR`.
 
-`OpsConsistentR` (defined in a private section of Strata's `Assumptions.lean`) is
-mirrored here as `Lambda.GenOpsConsistentR`, proven equivalent by
-`Lambda.GenOpsConsistentR.faithful` (see `HasTypeAGen/OpsConsistentDef.lean`).
+`OpsConsistentR` is marked `public` in Strata's `Assumptions.lean`, so these proofs
+name `Lambda.OpsConsistentR` directly — no local copy is needed. (The *operational*
+`OpsConsistent` is still private, so the reused operational lemmas go through the
+`Lambda.OpsConsistent` copy in `HasTypeAGen/OpsConsistentDef.lean` and are bridged into
+`OpsConsistentR` by `OpsConsistent_OpsConsistentR`.)
 
 Working against the declarative `OpsConsistentR` (rather than the operational
 `OpsConsistent`, whose `.op` check runs `opTypeSubst` and demands the annotation be
@@ -34,7 +36,7 @@ Every `.op` node a generated term can contain comes from one of two places:
 * **`pickOp`** (inside `genLExprBase`): the annotation is exactly the *generic*
   factory type of the operator (as computed by `factoryOps`). The reused
   operational lemma `opGeneric_opsConsistent` shows this annotation is even
-  `GenOpsConsistent`; `GenOpsConsistent.toR` then bridges it to `GenOpsConsistentR`.
+  `Lambda.OpsConsistent`; `OpsConsistent_OpsConsistentR` then bridges it to `OpsConsistentR`.
   The same bridge covers the (subsumed) monomorphic Indir op node.
 
 * **`genIndirPoly`**: the annotation is `concreteArgTys.foldr arrow τ`, built as a
@@ -128,80 +130,80 @@ theorem mem_opsOfType (octx : OpCtx) (τ : LMonoTy) (name : String)
     subst this; subst heq; exact hmem
   · simp at heq
 
-/-- An op node emitted by `pickOp` on `factoryOps F` is `GenOpsConsistent`. The
+/-- An op node emitted by `pickOp` on `factoryOps F` is `Lambda.OpsConsistent`. The
     annotation `τ` equals the operator's generic factory type, so
     `opGeneric_opsConsistent` applies. -/
 theorem pickOp_opsConsistent (F : @Factory LExprParams') (τ : LMonoTy) (name : String)
     (hFwf : FactoryOutputWF F)
     (hmem : name ∈ opsOfType (factoryOps F) τ) :
-    Lambda.GenOpsConsistent F (.op () ⟨name, ()⟩ (some τ)) := by
+    Lambda.OpsConsistent F (.op () ⟨name, ()⟩ (some τ)) := by
   have hoctx : (name, τ) ∈ factoryOps F := mem_opsOfType _ _ _ hmem
   obtain ⟨fn, hget, hτ⟩ := factoryOps_mem_char F name τ hFwf hoctx
   subst hτ
   exact Lambda.opGeneric_opsConsistent F fn () ⟨name, ()⟩ hget
 
--- ── GenOpsConsistent structural unfolding (via faithful) ─────────────
+-- ── Lambda.OpsConsistent structural unfolding (via faithful) ─────────────
 
 @[simp] theorem gopc_const (F : @Factory LExprParams') (m) (c) :
-    Lambda.GenOpsConsistent F (.const m c) := by
-  show Lambda.GenOpsConsistent F (.const m c); unfold Lambda.GenOpsConsistent; trivial
+    Lambda.OpsConsistent F (.const m c) := by
+  show Lambda.OpsConsistent F (.const m c); unfold Lambda.OpsConsistent; trivial
 
 @[simp] theorem gopc_boolConst (F : @Factory LExprParams') (m) (b) :
-    Lambda.GenOpsConsistent F (.boolConst m b) := by
+    Lambda.OpsConsistent F (.boolConst m b) := by
   unfold LExpr.boolConst; exact gopc_const F m _
 
 @[simp] theorem gopc_intConst (F : @Factory LExprParams') (m) (k) :
-    Lambda.GenOpsConsistent F (.intConst m k) := by
+    Lambda.OpsConsistent F (.intConst m k) := by
   unfold LExpr.intConst; exact gopc_const F m _
 
 @[simp] theorem gopc_strConst (F : @Factory LExprParams') (m) (str) :
-    Lambda.GenOpsConsistent F (.strConst m str) := by
+    Lambda.OpsConsistent F (.strConst m str) := by
   unfold LExpr.strConst; exact gopc_const F m _
 
 @[simp] theorem gopc_realConst (F : @Factory LExprParams') (m) (r) :
-    Lambda.GenOpsConsistent F (.realConst m r) := by
+    Lambda.OpsConsistent F (.realConst m r) := by
   unfold LExpr.realConst; exact gopc_const F m _
 
 @[simp] theorem gopc_bitvecConst (F : @Factory LExprParams') (m) (w) (v) :
-    Lambda.GenOpsConsistent F (.bitvecConst m w v) := by
+    Lambda.OpsConsistent F (.bitvecConst m w v) := by
   unfold LExpr.bitvecConst; exact gopc_const F m _
 
 @[simp] theorem gopc_bvar (F : @Factory LExprParams') (m) (i) :
-    Lambda.GenOpsConsistent F (.bvar m i) := by
-  unfold Lambda.GenOpsConsistent; trivial
+    Lambda.OpsConsistent F (.bvar m i) := by
+  unfold Lambda.OpsConsistent; trivial
 
 @[simp] theorem gopc_fvar (F : @Factory LExprParams') (m) (x) (ty) :
-    Lambda.GenOpsConsistent F (.fvar m x ty) := by
-  unfold Lambda.GenOpsConsistent; trivial
+    Lambda.OpsConsistent F (.fvar m x ty) := by
+  unfold Lambda.OpsConsistent; trivial
 
 @[simp] theorem gopc_app (F : @Factory LExprParams') (m) (fn arg : LExpr') :
-    Lambda.GenOpsConsistent F (.app m fn arg) ↔
-      Lambda.GenOpsConsistent F fn ∧ Lambda.GenOpsConsistent F arg := by
-  rw [show Lambda.GenOpsConsistent F (.app m fn arg)
-        = (Lambda.GenOpsConsistent F fn ∧ Lambda.GenOpsConsistent F arg) from rfl]
+    Lambda.OpsConsistent F (.app m fn arg) ↔
+      Lambda.OpsConsistent F fn ∧ Lambda.OpsConsistent F arg := by
+  rw [show Lambda.OpsConsistent F (.app m fn arg)
+        = (Lambda.OpsConsistent F fn ∧ Lambda.OpsConsistent F arg) from rfl]
 
 @[simp] theorem gopc_abs (F : @Factory LExprParams') (m) (nm) (aty) (body : LExpr') :
-    Lambda.GenOpsConsistent F (.abs m nm aty body) ↔ Lambda.GenOpsConsistent F body := by
-  rw [show Lambda.GenOpsConsistent F (.abs m nm aty body)
-        = Lambda.GenOpsConsistent F body from rfl]
+    Lambda.OpsConsistent F (.abs m nm aty body) ↔ Lambda.OpsConsistent F body := by
+  rw [show Lambda.OpsConsistent F (.abs m nm aty body)
+        = Lambda.OpsConsistent F body from rfl]
 
 @[simp] theorem gopc_ite (F : @Factory LExprParams') (m) (c t e : LExpr') :
-    Lambda.GenOpsConsistent F (.ite m c t e) ↔
-      Lambda.GenOpsConsistent F c ∧ Lambda.GenOpsConsistent F t ∧ Lambda.GenOpsConsistent F e := by
-  rw [show Lambda.GenOpsConsistent F (.ite m c t e)
-        = (Lambda.GenOpsConsistent F c ∧ Lambda.GenOpsConsistent F t ∧ Lambda.GenOpsConsistent F e) from rfl]
+    Lambda.OpsConsistent F (.ite m c t e) ↔
+      Lambda.OpsConsistent F c ∧ Lambda.OpsConsistent F t ∧ Lambda.OpsConsistent F e := by
+  rw [show Lambda.OpsConsistent F (.ite m c t e)
+        = (Lambda.OpsConsistent F c ∧ Lambda.OpsConsistent F t ∧ Lambda.OpsConsistent F e) from rfl]
 
 @[simp] theorem gopc_eq (F : @Factory LExprParams') (m) (e₁ e₂ : LExpr') :
-    Lambda.GenOpsConsistent F (.eq m e₁ e₂) ↔
-      Lambda.GenOpsConsistent F e₁ ∧ Lambda.GenOpsConsistent F e₂ := by
-  rw [show Lambda.GenOpsConsistent F (.eq m e₁ e₂)
-        = (Lambda.GenOpsConsistent F e₁ ∧ Lambda.GenOpsConsistent F e₂) from rfl]
+    Lambda.OpsConsistent F (.eq m e₁ e₂) ↔
+      Lambda.OpsConsistent F e₁ ∧ Lambda.OpsConsistent F e₂ := by
+  rw [show Lambda.OpsConsistent F (.eq m e₁ e₂)
+        = (Lambda.OpsConsistent F e₁ ∧ Lambda.OpsConsistent F e₂) from rfl]
 
 @[simp] theorem gopc_quant (F : @Factory LExprParams') (m) (k) (nm) (qty) (tr body : LExpr') :
-    Lambda.GenOpsConsistent F (.quant m k nm qty tr body) ↔
-      Lambda.GenOpsConsistent F tr ∧ Lambda.GenOpsConsistent F body := by
-  rw [show Lambda.GenOpsConsistent F (.quant m k nm qty tr body)
-        = (Lambda.GenOpsConsistent F tr ∧ Lambda.GenOpsConsistent F body) from rfl]
+    Lambda.OpsConsistent F (.quant m k nm qty tr body) ↔
+      Lambda.OpsConsistent F tr ∧ Lambda.OpsConsistent F body := by
+  rw [show Lambda.OpsConsistent F (.quant m k nm qty tr body)
+        = (Lambda.OpsConsistent F tr ∧ Lambda.OpsConsistent F body) from rfl]
 
 -- ── Public support characterizations for pick* (mirror private ones) ──
 
@@ -221,32 +223,32 @@ theorem mem_support_pickOp_iff' {octx : OpCtx} {τ : LMonoTy}
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
 
-/-- Any op node produced by `pickOp` on `factoryOps F` is `GenOpsConsistent`. -/
+/-- Any op node produced by `pickOp` on `factoryOps F` is `Lambda.OpsConsistent`. -/
 theorem pickOp_mem_opsConsistent (F : @Factory LExprParams') (τ : LMonoTy)
     (hFwf : FactoryOutputWF F) {hv : (opsOfType (factoryOps F) τ).length > 0} {e : LExpr'}
     (he : e ∈ (pickOp (G := SetGen.Set) (factoryOps F) τ hv)) :
-    Lambda.GenOpsConsistent F e := by
+    Lambda.OpsConsistent F e := by
   rw [mem_support_pickOp_iff'] at he
   obtain ⟨name, hmem, rfl⟩ := he
   exact pickOp_opsConsistent F τ name hFwf hmem
 
 
-/-- Any node produced by `pickBVar` is a `.bvar`, hence `GenOpsConsistent`. -/
+/-- Any node produced by `pickBVar` is a `.bvar`, hence `Lambda.OpsConsistent`. -/
 theorem pickBVar_mem_opsConsistent (F : @Factory LExprParams') (bctx : BVarCtx) (τ : LMonoTy)
     {hv : (bvarsOfType bctx τ).length > 0} {e : LExpr'}
     (he : e ∈ (pickBVar (G := SetGen.Set) bctx τ hv)) :
-    Lambda.GenOpsConsistent F e := by
+    Lambda.OpsConsistent F e := by
   change e ∈ SetGen.support (pickBVar (G := SetGen.Set) bctx τ hv) at he
   simp only [pickBVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
     List.mem_map] at he
   obtain ⟨i, _, rfl⟩ := he
   simp
 
-/-- Any node produced by `pickFVar` is a `.fvar`, hence `GenOpsConsistent`. -/
+/-- Any node produced by `pickFVar` is a `.fvar`, hence `Lambda.OpsConsistent`. -/
 theorem pickFVar_mem_opsConsistent (F : @Factory LExprParams') (fctx : FVarCtx) (τ : LMonoTy)
     {hv : (fvarsOfType fctx τ).length > 0} {e : LExpr'}
     (he : e ∈ (pickFVar (G := SetGen.Set) fctx τ hv)) :
-    Lambda.GenOpsConsistent F e := by
+    Lambda.OpsConsistent F e := by
   change e ∈ SetGen.support (pickFVar (G := SetGen.Set) fctx τ hv) at he
   simp only [pickFVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
     List.mem_map] at he
@@ -265,7 +267,7 @@ theorem genLExprBase_opsConsistent (F : @Factory LExprParams') (fctx : FVarCtx) 
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
     (hFwf : FactoryOutputWF F)
     (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx depth τ)) :
-    Lambda.GenOpsConsistent F e := by
+    Lambda.OpsConsistent F e := by
   rw [genLExprBase.eq_def] at he
   split at he
   case h_1 τ₁ τ₂ =>
@@ -932,13 +934,13 @@ theorem genLExprBase_opsConsistent (F : @Factory LExprParams') (fctx : FVarCtx) 
 
 -- ── mkApps and mapM-argument consistency ─────────────────────────────
 
-/-- `mkApps` of a `GenOpsConsistent` base and `GenOpsConsistent` args is
-    `GenOpsConsistent` (the op consistency propagates structurally through the
+/-- `mkApps` of a `Lambda.OpsConsistent` base and `Lambda.OpsConsistent` args is
+    `Lambda.OpsConsistent` (the op consistency propagates structurally through the
     left-nested applications). -/
 theorem mkApps_opsConsistent (F : @Factory LExprParams') (base : LExpr') (args : List LExpr')
-    (hbase : Lambda.GenOpsConsistent F base)
-    (hargs : ∀ a ∈ args, Lambda.GenOpsConsistent F a) :
-    Lambda.GenOpsConsistent F (mkApps base args) := by
+    (hbase : Lambda.OpsConsistent F base)
+    (hargs : ∀ a ∈ args, Lambda.OpsConsistent F a) :
+    Lambda.OpsConsistent F (mkApps base args) := by
   induction args generalizing base with
   | nil => simpa [mkApps] using hbase
   | cons a rest ih =>
@@ -947,28 +949,28 @@ theorem mkApps_opsConsistent (F : @Factory LExprParams') (base : LExpr') (args :
     · rw [gopc_app]; exact ⟨hbase, hargs a (by simp)⟩
     · intro x hx; exact hargs x (by simp [hx])
 
-/-- `mkApps` of a `GenOpsConsistentR` base and `GenOpsConsistentR` args is
-    `GenOpsConsistentR` (the declarative version, via the `.app` constructor). -/
+/-- `mkApps` of a `OpsConsistentR` base and `OpsConsistentR` args is
+    `OpsConsistentR` (the declarative version, via the `.app` constructor). -/
 theorem mkApps_opsConsistentR (F : @Factory LExprParams') (base : LExpr') (args : List LExpr')
-    (hbase : Lambda.GenOpsConsistentR F base)
-    (hargs : ∀ a ∈ args, Lambda.GenOpsConsistentR F a) :
-    Lambda.GenOpsConsistentR F (mkApps base args) := by
+    (hbase : Lambda.OpsConsistentR F base)
+    (hargs : ∀ a ∈ args, Lambda.OpsConsistentR F a) :
+    Lambda.OpsConsistentR F (mkApps base args) := by
   induction args generalizing base with
   | nil => simpa [mkApps] using hbase
   | cons a rest ih =>
     simp only [mkApps, List.foldl_cons]
     apply ih
-    · exact Lambda.GenOpsConsistentR.app hbase (hargs a (by simp))
+    · exact Lambda.OpsConsistentR.app hbase (hargs a (by simp))
     · intro x hx; exact hargs x (by simp [hx])
 
 /-- Every argument produced by `mapM (genLExprBase fctx (factoryOps F) …)` is
-    `GenOpsConsistent`. -/
+    `Lambda.OpsConsistent`. -/
 theorem mapM_genLExprBase_opsConsistent (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (hFwf : FactoryOutputWF F)
     (argTys : List LMonoTy) (args : List LExpr')
     (hargs : args ∈ (List.mapM (m := SetGen.Set)
       (genLExprBase fctx (factoryOps F) tvars bctx depth) argTys)) :
-    ∀ a ∈ args, Lambda.GenOpsConsistent F a := by
+    ∀ a ∈ args, Lambda.OpsConsistent F a := by
   induction argTys generalizing args with
   | nil =>
     simp only [List.mapM_nil, SetGen.Set.mem_pure] at hargs
@@ -1004,11 +1006,11 @@ theorem findOpsInCtx_mem' {octx : OpCtx} {τ : LMonoTy}
   · simp at hfilt
 
 /-- The op node in the monomorphic Indir rule (annotated with the reconstructed
-    curried type from `findOpsInCtx (factoryOps F) τ`) is `GenOpsConsistent`. -/
+    curried type from `findOpsInCtx (factoryOps F) τ`) is `Lambda.OpsConsistent`. -/
 theorem indir_op_opsConsistent (F : @Factory LExprParams') (τ : LMonoTy)
     (name : String) (argTys : List LMonoTy) (hFwf : FactoryOutputWF F)
     (hmem : (name, argTys) ∈ findOpsInCtx (factoryOps F) τ) :
-    Lambda.GenOpsConsistent F
+    Lambda.OpsConsistent F
       (.op () ⟨name, ()⟩ (some (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) := by
   obtain ⟨hoctx, _⟩ := findOpsInCtx_mem' hmem
   obtain ⟨fn, hget, hty⟩ := factoryOps_mem_char F name _ hFwf hoctx
@@ -1018,7 +1020,7 @@ theorem indir_op_opsConsistent (F : @Factory LExprParams') (τ : LMonoTy)
 -- ── Polymorphic IndirPoly op-node consistency ────────────────────────
 
 /-- The assumption that every polymorphic-operator annotation `genIndirPoly`
-    can emit for target `τ` is `GenOpsConsistentR`: for every candidate
+    can emit for target `τ` is `OpsConsistentR`: for every candidate
     `(name, concreteArgTys)` in `polyOpsForResult pctx τ generableTys sampledTys`,
     the op node annotated with `concreteArgTys.foldr arrow τ` is consistent.
 
@@ -1045,7 +1047,7 @@ def PolyOpsConsistentR (F : @Factory LExprParams') (pctx : PolyOpCtx)
   ∀ (sampledTys : List LMonoTy) (name : String) (concreteArgTys : List LMonoTy),
     (name, concreteArgTys) ∈
       polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys →
-    Lambda.GenOpsConsistentR F
+    Lambda.OpsConsistentR F
       (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
 
 /-- `decomposeArrow` is a right inverse of the right-nested-arrow fold. -/
@@ -1281,7 +1283,7 @@ theorem polyOpsForResult_instanceR (F : @Factory LExprParams') (pctx : PolyOpCtx
 /-- Under `PCtxWF`, the polymorphic-annotation assumption `PolyOpsConsistentR`
     holds — because every emitted annotation is a substitution instance of the
     operator's generic type (`polyOpsForResult_instanceR`), which is exactly the
-    witness `OpsConsistentR.op_in` (`GenOpsConsistentR.op_in`) demands. No case
+    witness `OpsConsistentR.op_in` (`OpsConsistentR.op_in`) demands. No case
     split on `typeArgs`, no groundness. -/
 theorem PolyOpsConsistentR_of_PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx)
     (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) (hPctx : PCtxWF F pctx) :
@@ -1289,23 +1291,23 @@ theorem PolyOpsConsistentR_of_PCtxWF (F : @Factory LExprParams') (pctx : PolyOpC
   intro sampledTys name concreteArgTys hEntry
   obtain ⟨fn, S, hget, hinst⟩ :=
     polyOpsForResult_instanceR F pctx τ _ sampledTys hPctx name concreteArgTys hEntry
-  exact Lambda.GenOpsConsistentR.op_in hget hinst
+  exact Lambda.OpsConsistentR.op_in hget hinst
 
 -- ── genIndirPoly consistency ─────────────────────────────────────────
 
 set_option maxHeartbeats 800000 in
-/-- Every expression in `genIndirPoly`'s support is `GenOpsConsistentR`, GIVEN the
+/-- Every expression in `genIndirPoly`'s support is `OpsConsistentR`, GIVEN the
     polymorphic-annotation assumption `PolyOpsConsistentR` (which is itself proven,
     from `PCtxWF`, by `PolyOpsConsistentR_of_PCtxWF`). Either a polymorphic operator
     was applied (op node consistent by `hPoly`, args by
-    `mapM_genLExprBase_opsConsistent` bridged with `GenOpsConsistent.toR`), or the
+    `mapM_genLExprBase_opsConsistent` bridged with `OpsConsistent_OpsConsistentR`), or the
     generator fell back to `genLExprBase`. -/
 theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hFwf : FactoryOutputWF F) (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
     (he : e ∈ SetGen.support
       (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
-    Lambda.GenOpsConsistentR F e := by
+    Lambda.OpsConsistentR F e := by
   unfold genIndirPoly at he
   simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite] at he
   obtain ⟨sampledTys, _, he⟩ := he
@@ -1324,18 +1326,17 @@ theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [heq]; exact List.getElem_mem hlt
     apply mkApps_opsConsistentR
     · exact hPoly sampledTys _ _ hentry_mem
-    · exact fun a ha => Lambda.GenOpsConsistent.toR _ _ (mapM_genLExprBase_opsConsistent F fctx tvars bctx depth hFwf _ args hargs a ha)
+    · exact fun a ha => Lambda.OpsConsistent_OpsConsistentR (mapM_genLExprBase_opsConsistent F fctx tvars bctx depth hFwf _ args hargs a ha)
   · -- fallback to genLExprBase
-    exact Lambda.GenOpsConsistent.toR _ _ (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
+    exact Lambda.OpsConsistent_OpsConsistentR (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
 
 -- ── Top-level: genLExpr consistency ──────────────────────────────────
 
 set_option maxHeartbeats 800000 in
 /-- **Main result (general polymorphic context).** Every expression in the
     support of `genLExpr` on a factory operator context `factoryOps F` satisfies
-    `GenOpsConsistentR F`, hence — by `GenOpsConsistentR.faithful` — Strata's
-    declarative `OpsConsistentR F`. Combined with `genLExpr_sound` this gives
-    soundness w.r.t. both `HasTypeA` and `OpsConsistentR`.
+    Strata's declarative `OpsConsistentR F`. Combined with `genLExpr_sound` this
+    gives soundness w.r.t. both `HasTypeA` and `OpsConsistentR`.
 
     Takes the polymorphic-annotation assumption `PolyOpsConsistentR` as a
     hypothesis for generality; it is discharged from `PCtxWF` by
@@ -1347,12 +1348,12 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
     (hFwf : FactoryOutputWF F) (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
     (he : e ∈ SetGen.support
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
-    Lambda.GenOpsConsistentR F e := by
+    Lambda.OpsConsistentR F e := by
   unfold genLExpr at he
   simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
   rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
   · -- genLExprBase branch
-    exact Lambda.GenOpsConsistent.toR _ _ (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
+    exact Lambda.OpsConsistent_OpsConsistentR (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
   · -- monomorphic Indir
     simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
     obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
@@ -1364,51 +1365,44 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
         simp [List.getD, List.getElem?_eq_getElem hlt]
       rw [heq]; exact List.getElem_mem hlt
     apply mkApps_opsConsistentR
-    · exact Lambda.GenOpsConsistent.toR _ _ (indir_op_opsConsistent F τ _ _ hFwf hentry_mem)
-    · exact fun a ha => Lambda.GenOpsConsistent.toR _ _ (mapM_genLExprBase_opsConsistent F fctx tvars bctx depth hFwf _ args hargs a ha)
+    · exact Lambda.OpsConsistent_OpsConsistentR (indir_op_opsConsistent F τ _ _ hFwf hentry_mem)
+    · exact fun a ha => Lambda.OpsConsistent_OpsConsistentR (mapM_genLExprBase_opsConsistent F fctx tvars bctx depth hFwf _ args hargs a ha)
   · -- IndirPoly (with candidates)
     exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hFwf hPoly e he
   · -- genLExprBase fallback (no monomorphic candidates)
-    exact Lambda.GenOpsConsistent.toR _ _ (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
+    exact Lambda.OpsConsistent_OpsConsistentR (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
   · -- IndirPoly fallback
     exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hFwf hPoly e he
 
--- ── Bridge to Strata's real `OpsConsistentR` ─────────────────────────
---
--- `genLExpr_opsConsistentR` above proves `Lambda.GenOpsConsistentR F e`, the
--- `public` copy of Strata's declarative `OpsConsistentR` defined in
--- `HasTypeAGen/OpsConsistentDef.lean`. Strata's actual `Lambda.OpsConsistentR`
--- lives in a *private* section of `Assumptions.lean` and is not nameable from
--- this (non-`module`) file. The module-level theorem
--- `Lambda.GenOpsConsistentR.faithful` machine-checks, at build time, that
--- `GenOpsConsistentR F e ↔ Lambda.OpsConsistentR F e` for all `e`. Composing the
--- two therefore yields Strata's `OpsConsistentR` for every generated term; the
--- restatement in terms of the private predicate can only be written inside a
--- `module` file that `import all`s `Assumptions` (see `OpsConsistentDef.lean`).
+-- Note: `genLExpr_opsConsistentR` above proves `Lambda.OpsConsistentR F e`
+-- directly — Strata's declarative predicate, which is `public` in `Assumptions.lean`,
+-- so no local copy or `faithful` bridge is involved for it. (The reused operational
+-- lemmas still go through the private-`OpsConsistent` copy `Lambda.OpsConsistent` and its
+-- `OpsConsistent_OpsConsistentR` bridge, since the operational predicate remains private.)
 
 /-- The `Factory`-wrapper generator `genLExprWithFactory` produces
-    `GenOpsConsistentR` terms (equivalently, `OpsConsistentR`; see note above),
-    given the polymorphic-annotation assumption `PolyOpsConsistentR`. -/
+    `OpsConsistentR` terms, given the polymorphic-annotation assumption
+    `PolyOpsConsistentR`. -/
 theorem genLExprWithFactory_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx)
     (hFwf : FactoryOutputWF F) (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
     (he : e ∈ SetGen.support
       (genLExprWithFactory (G := SetGen.Set) fctx F tvars bctx depth τ pctx)) :
-    Lambda.GenOpsConsistentR F e :=
+    Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ hFwf hPoly e he
 
 /-- **Main result, parameterized by `PCtxWF` (no `PolyOpsConsistentR` assumption).**
     A well-formed polymorphic context (`PCtxWF F pctx` — every `pctx` entry is a
     factory function's generic scheme) is enough: `PolyOpsConsistentR` is *derived*
     via `PolyOpsConsistentR_of_PCtxWF`. So `genLExpr` on a factory produces
-    `GenOpsConsistentR` (equivalently `OpsConsistentR`) terms for *any* polymorphic
+    `OpsConsistentR` (equivalently `OpsConsistentR`) terms for *any* polymorphic
     context that matches the factory. -/
 theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FVarCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hFwf : FactoryOutputWF F) (hPctx : PCtxWF F pctx) (e : LExpr')
     (he : e ∈ SetGen.support
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
-    Lambda.GenOpsConsistentR F e :=
+    Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ hFwf
     (PolyOpsConsistentR_of_PCtxWF F pctx bctx fctx τ hPctx) e he
 
@@ -1423,25 +1417,25 @@ theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FV
     polyOpsForResult [] τ g s = [] := by unfold polyOpsForResult; rfl
 
 /-- `genIndirPoly` with an empty polymorphic context always falls back to
-    `genLExprBase`, hence is `GenOpsConsistentR`. -/
+    `genLExprBase`, hence is `OpsConsistentR`. -/
 theorem genIndirPoly_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hFwf : FactoryOutputWF F) (e : LExpr')
     (he : e ∈ SetGen.support
       (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
-    Lambda.GenOpsConsistentR F e := by
+    Lambda.OpsConsistentR F e := by
   unfold genIndirPoly at he
   simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite] at he
   obtain ⟨sampledTys, _, he⟩ := he
   -- Only the fallback branch survives (candidate list is empty).
   rcases he with ⟨hpos, _⟩ | ⟨_, he⟩
   · exact absurd hpos (by simp)
-  · exact Lambda.GenOpsConsistent.toR _ _ (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
+  · exact Lambda.OpsConsistent_OpsConsistentR (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
 
 set_option maxHeartbeats 800000 in
 /-- **Main result, empty polymorphic context (fully `sorry`-free).** Every
     expression produced by `genLExpr` with `pctx = []` on a factory operator
-    context satisfies `GenOpsConsistentR F` (equivalently Strata's
+    context satisfies `OpsConsistentR F` (equivalently Strata's
     `OpsConsistentR`; see the bridge note above). This covers the closed-term
     generators. -/
 theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
@@ -1449,11 +1443,11 @@ theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (hFwf : FactoryOutputWF F) (e : LExpr')
     (he : e ∈ SetGen.support
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
-    Lambda.GenOpsConsistentR F e := by
+    Lambda.OpsConsistentR F e := by
   unfold genLExpr at he
   simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
   rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
-  · exact Lambda.GenOpsConsistent.toR _ _ (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
+  · exact Lambda.OpsConsistent_OpsConsistentR (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
   · simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
     obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
     have hlt : idx.down.val < (findOpsInCtx (factoryOps F) τ).length := by omega
@@ -1464,8 +1458,8 @@ theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
         simp [List.getD, List.getElem?_eq_getElem hlt]
       rw [heq]; exact List.getElem_mem hlt
     apply mkApps_opsConsistentR
-    · exact Lambda.GenOpsConsistent.toR _ _ (indir_op_opsConsistent F τ _ _ hFwf hentry_mem)
-    · exact fun a ha => Lambda.GenOpsConsistent.toR _ _ (mapM_genLExprBase_opsConsistent F fctx tvars bctx depth hFwf _ args hargs a ha)
+    · exact Lambda.OpsConsistent_OpsConsistentR (indir_op_opsConsistent F τ _ _ hFwf hentry_mem)
+    · exact fun a ha => Lambda.OpsConsistent_OpsConsistentR (mapM_genLExprBase_opsConsistent F fctx tvars bctx depth hFwf _ args hargs a ha)
   · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ hFwf e he
-  · exact Lambda.GenOpsConsistent.toR _ _ (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
+  · exact Lambda.OpsConsistent_OpsConsistentR (genLExprBase_opsConsistent F fctx tvars bctx depth τ e hFwf he)
   · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ hFwf e he
