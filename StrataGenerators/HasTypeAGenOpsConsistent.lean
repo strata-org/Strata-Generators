@@ -126,8 +126,8 @@ theorem pickOp_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy) (name :
 private theorem list_map_ne_nil_of_length_pos' {α β : Type} {xs : List α} {f : α → β}
     (h : xs.length > 0) : xs.map f ≠ [] := by
   intro heq
-  have : (xs.map f).length = 0 := by rw [heq]; rfl
-  rw [List.length_map] at this; omega
+  apply List.ne_nil_of_length_pos h
+  apply List.map_eq_nil_iff.mp heq
 
 theorem mem_support_pickOp_iff' {octx : OpCtx} {τ : LMonoTy}
     {hv : (opsOfType octx τ).length > 0} {e : LExpr'} :
