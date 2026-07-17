@@ -253,6 +253,14 @@ namespace SetGen
     a ∈ support x ∨ a ∈ support y := by
   simp [support, pickBiased_mem_iff]
 
+/-- Raw-membership (non-`support`-wrapped) characterization of `oneOf`, mirroring
+    `pick_mem_iff`. Since `support` is the identity on `Set`, this coincides with
+    `mem_support_oneOf_iff` and lets `simp` unfold `oneOf` even after the ambient
+    `support` wrapper has already been stripped by `mem_support_iff`. -/
+@[simp] theorem mem_oneOf_iff {gs : List (Unit → Set α)} (hne : gs ≠ []) (a : α) :
+    a ∈ (oneOf gs hne : Set α) ↔ ∃ g ∈ gs, a ∈ g () :=
+  mem_support_oneOf_iff hne
+
 end SetGen
 
 -- ── genLMonoTy support ────────────────────────────────────────────────
@@ -341,7 +349,8 @@ private theorem pickBitvecWidth_complete (n : Nat) (hmem : n ∈ (bitvecWidths :
 private theorem pickBaseType_mem (tvars : List TyIdentifier) (τ : LMonoTy)
     (hτ : τ ∈ SetGen.support (pickBaseType (G := SetGen.Set))) :
     SimpleType τ ∧ monoTyDepth τ = 0 ∧ allFtvarsIn tvars τ := by
-  simp only [pickBaseType, pick_mem_iff,
+  rw [pickBaseType, mem_support_oneOf_iff] at hτ
+  simp only [List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left,
              SetGen.support, pickBitvecWidth] at hτ
   rcases hτ with rfl | (rfl | (rfl | (rfl | (rfl | hbv))))
   · exact ⟨.bool, rfl, allFtvarsIn_bool _⟩
@@ -356,33 +365,33 @@ private theorem pickBaseType_mem (tvars : List TyIdentifier) (τ : LMonoTy)
     (For bitvec, we additionally require `n ∈ bitvecWidths`.) -/
 private theorem pickBaseType_complete_bool :
     LMonoTy.bool ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, SetGen.support]; left; rfl
+  rw [pickBaseType, mem_support_oneOf_iff]
+  exact ⟨fun () => pure .bool, by simp, rfl⟩
 
 private theorem pickBaseType_complete_int :
     LMonoTy.int ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, SetGen.support]
-  right; left; rfl
+  rw [pickBaseType, mem_support_oneOf_iff]
+  exact ⟨fun () => pure .int, by simp, rfl⟩
 
 private theorem pickBaseType_complete_string :
     LMonoTy.string ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, SetGen.support]
-  right; right; left; rfl
+  rw [pickBaseType, mem_support_oneOf_iff]
+  exact ⟨fun () => pure .string, by simp, rfl⟩
 
 private theorem pickBaseType_complete_real :
     LMonoTy.real ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, SetGen.support]
-  right; right; right; left; rfl
+  rw [pickBaseType, mem_support_oneOf_iff]
+  exact ⟨fun () => pure .real, by simp, rfl⟩
 
 private theorem pickBaseType_complete_regex :
     LMonoTy.regex ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, SetGen.support]
-  right; right; right; right; left; rfl
+  rw [pickBaseType, mem_support_oneOf_iff]
+  exact ⟨fun () => pure .regex, by simp, rfl⟩
 
 private theorem pickBaseType_complete_bitvec (n : Nat) (hmem : n ∈ (bitvecWidths : List Nat)) :
     LMonoTy.bitvec n ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
-  simp only [pickBaseType, pick_mem_iff, SetGen.support]
-  right; right; right; right; right
-  exact pickBitvecWidth_complete n hmem
+  rw [pickBaseType, mem_support_oneOf_iff]
+  exact ⟨fun () => pickBitvecWidth, by simp, pickBitvecWidth_complete n hmem⟩
 
 
 /-- Support characterization of `genLMonoTy` at depth 0. -/
@@ -436,7 +445,8 @@ private theorem genLMonoTy_succ_mem (tvars : List TyIdentifier) (n : Nat) (τ : 
       SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ) :
     τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars (n + 1)) ↔
       SimpleType τ ∧ monoTyDepth τ ≤ n + 1 ∧ allFtvarsIn tvars τ := by
-  simp only [genLMonoTy, mem_support_dite_iff, mem_support_pickBiased_iff, mem_support_pick_iff,
+  simp only [genLMonoTy, mem_support_dite_iff, mem_support_pickBiased_iff, mem_support_oneOf_iff,
+             List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left,
              mem_support_bind_iff]
   constructor
   · intro he
@@ -596,7 +606,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_1 τ₁ τ₂ =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.arrow τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
-    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff,
+    rw [norm_arrow] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨_, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     all_goals first
@@ -651,7 +662,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_3 =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .bool) := by
       rw [genLExprBase.eq_def]; exact he
-    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff,
+    rw [norm_bool] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     all_goals first
@@ -722,7 +734,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_5 =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .int) := by
       rw [genLExprBase.eq_def]; exact he
-    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     all_goals first
@@ -777,7 +790,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_7 name =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.ftvar name)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -842,7 +856,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_9 =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .string) := by
       rw [genLExprBase.eq_def]; exact he
-    rw [norm_string] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_string] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     all_goals first
@@ -897,7 +912,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_11 =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .real) := by
       rw [genLExprBase.eq_def]; exact he
-    rw [norm_real] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_real] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩)))
     all_goals first
@@ -952,7 +968,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_13 n =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     all_goals first
@@ -1007,7 +1024,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_15 =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .regex) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1072,7 +1090,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_17 τ₁ τ₂ =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.map τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1137,7 +1156,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   case h_19 τ₁ =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.seq τ₁)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1361,7 +1381,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
     termDepth bctx e ≤ depth := by
   match depth, τ, hτ with
   | 0, _, SimpleType.bool =>
-    rw [norm_bool] at he; simp only [genLExprBase, pick_mem_iff,
+    rw [norm_bool] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     all_goals first | rfl | (
@@ -1373,7 +1394,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | (rw [mem_support_pickOp_iff] at h
          obtain ⟨_, _, rfl⟩ := h; rfl))
   | 0, _, SimpleType.int =>
-    rw [norm_int] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_int] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, _, rfl⟩ | ⟨_, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩)))
     all_goals first | rfl | (
@@ -1385,7 +1407,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | (rw [mem_support_pickOp_iff] at h
          obtain ⟨_, _, rfl⟩ := h; rfl))
   | 0, _, SimpleType.string =>
-    rw [norm_string] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_string] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨_, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩)))
     all_goals first | rfl | (
@@ -1397,7 +1420,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | (rw [mem_support_pickOp_iff] at h
          obtain ⟨_, _, rfl⟩ := h; rfl))
   | 0, _, SimpleType.real =>
-    rw [norm_real] at he; simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    rw [norm_real] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩)⟩) | ((⟨_, h⟩ | ⟨_, (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩)⟩)))
     all_goals first | rfl | (
@@ -1409,7 +1433,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       | (rw [mem_support_pickOp_iff] at h
          obtain ⟨_, _, rfl⟩ := h; rfl))
   | 0, _, @SimpleType.bitvec n hmem =>
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨_, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩)))
     all_goals first | rfl | (
@@ -1422,7 +1447,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; rfl))
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    rw [norm_arrow] at he; simp only [genLExprBase, pick_mem_iff,
+    rw [norm_arrow] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨_, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     all_goals (
@@ -1626,7 +1652,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
         omega)
   | 0, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1677,7 +1704,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
         | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | exact absurd h (by simp)
   | 0, _, SimpleType.regex =>
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1728,7 +1756,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
         | exact absurd h (by simp)
   | 0, _, SimpleType.map hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    simp only [genLExprBase, pick_mem_iff,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1780,7 +1809,8 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
         | exact absurd h (by simp)
   | 0, _, SimpleType.seq hs =>
     rename_i τ₁
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1882,7 +1912,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
   match depth, τ, hτ with
   | 0, _, SimpleType.bool =>
     rw [norm_bool]
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | @boolConst _ _ b =>
@@ -1932,7 +1963,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx .bool _ hmem hlen⟩
   | 0, _, SimpleType.int =>
     rw [norm_int]
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | intConst =>
@@ -1983,7 +2015,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx .int _ hmem hlen⟩
   | 0, _, SimpleType.string =>
     rw [norm_string]
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | strConst halpha =>
@@ -2031,7 +2064,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         exact ⟨hlen, pickOp_complete octx .string _ hmem hlen⟩
   | 0, _, SimpleType.real =>
     rw [norm_real]
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | realConst num den hor =>
@@ -2080,7 +2114,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
           exact List.length_pos_of_mem this
         exact ⟨hlen, pickOp_complete octx .real _ hmem hlen⟩
   | 0, _, @SimpleType.bitvec n hmem =>
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
     | bitvecConst _ _ k heq =>
@@ -2129,7 +2164,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
   | 0, _, SimpleType.arrow hs₁ hs₂ =>
     rename_i τ₁ τ₂
     rw [norm_arrow]
-    simp only [genLExprBase, pick_mem_iff,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
@@ -2705,7 +2741,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         exact dif_pos hlen ▸ pickOp_complete octx (.arrow τ₁ τ₂) _ hmem hlen
   | 0, _, SimpleType.ftvar =>
     rename_i name
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool] at h)
@@ -2817,7 +2854,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
           exact List.length_pos_of_mem this
         exact dif_pos hlen ▸ pickOp_complete octx (.ftvar name) _ hmem hlen
   | 0, _, SimpleType.regex =>
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool, LMonoTy.regex] at h)
@@ -2929,7 +2967,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         exact dif_pos hlen ▸ pickOp_complete octx .regex _ hmem hlen
   | 0, _, SimpleType.map hs₁ hs₂ =>
     rename_i τ₁ τ₂
-    simp only [genLExprBase, pick_mem_iff,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff,
       mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
@@ -3055,7 +3094,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         exact dif_pos hlen ▸ pickOp_complete octx (.map τ₁ τ₂) _ hmem hlen
   | 0, _, SimpleType.seq hs =>
     rename_i τ₁
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff]
     cases hats with
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.bool, LMonoTy.seq] at h)
@@ -3499,14 +3539,8 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     exact genLExprBase_sound fctx octx tvars bctx depth τ e he
   · -- Monomorphic Indir path: fully-applied operator
     simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
-    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    have hlt : idx.down.val < (findOpsInCtx octx τ).length := by omega
-    have hentry_mem : (findOpsInCtx octx τ).getD idx.down.val ("", []) ∈ findOpsInCtx octx τ := by
-      have heq : (findOpsInCtx octx τ).getD idx.down.val ("", []) =
-          (findOpsInCtx octx τ)[idx.down.val] := by
-        simp [List.getD, List.getElem?_eq_getElem hlt]
-      rw [heq]; exact List.getElem_mem hlt
-    let entry := (findOpsInCtx octx τ).getD idx.down.val ("", [])
+    obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
+    rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
     let name := entry.1
     let argTys := entry.2
     let fullTy := argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
@@ -3537,6 +3571,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 namespace Lambda.LExpr
 
 set_option maxHeartbeats 1600000 in
+set_option linter.unusedSimpArgs false in
 /-- With an empty fvar context, every expression in `genLExprBase`'s support has
     no free variables (the only source of fvars is `pickFVar`, which draws from
     `fctx`, and `fvarsOfType [] τ = []`). -/
@@ -3550,7 +3585,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.arrow τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_arrow] at he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨hf, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
     · exact h.elim
@@ -3562,7 +3598,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .bool) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_bool] at he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite] at he
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨hf, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     · rfl
     · rfl
@@ -3579,7 +3616,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .int) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_int] at he
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     · rfl
@@ -3597,7 +3635,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .string) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_string] at he
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     · rfl
@@ -3611,7 +3650,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .real) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_real] at he
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | ((⟨hf, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩)))
     · rfl
@@ -3628,7 +3668,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
   case h_13 n =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     · rfl
@@ -3926,7 +3967,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
   case h_7 name =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.ftvar name)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -3995,7 +4037,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
   case h_15 =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .regex) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -4064,7 +4107,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
   case h_17 τ₁ τ₂ =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.map τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -4133,7 +4177,8 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
   case h_19 τ =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.seq τ)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -4279,17 +4324,13 @@ private theorem single_sample_mem (generableTys : List LMonoTy) (σ : LMonoTy)
     (hpos : generableTys.length > 0 → σ ∈ generableTys)
     (hneg : ¬(generableTys.length > 0) → σ = .bool) :
     σ ∈ ((fun (_ : Unit) =>
-      if hg : generableTys.length > 0 then do
-        let tidx ← choose 0 (generableTys.length - 1) (by omega)
-        pure (generableTys.getD tidx.down .bool)
+      if hg : generableTys.length > 0 then
+        elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
       else pure .bool) () : SetGen.Set LMonoTy) := by
   by_cases hg : generableTys.length > 0
-  · simp only [dif_pos hg, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
-    have hσ_mem := hpos hg
-    obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hσ_mem
-    have hidx_le : idx ≤ generableTys.length - 1 := by omega
-    exact ⟨⟨⟨idx, Nat.zero_le _, hidx_le⟩⟩, ⟨Nat.zero_le _, hidx_le⟩,
-      by simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]⟩
+  · simp only [dif_pos hg]
+    rw [← mem_support_iff, mem_support_elements_iff]
+    exact hpos hg
   · simp only [dif_neg hg, SetGen.Set.mem_pure]
     exact hneg hg
 
@@ -4305,9 +4346,8 @@ private theorem sampledTys_mem_support (generableTys : List LMonoTy)
       (generableTys.length > 0 → σ ∈ generableTys) ∧
       (¬(generableTys.length > 0) → σ = .bool)) :
     sampledTys ∈ ((List.replicate 3 ()).mapM (fun _ =>
-      if hg : generableTys.length > 0 then do
-        let tidx ← choose 0 (generableTys.length - 1) (by omega)
-        pure (generableTys.getD tidx.down .bool)
+      if hg : generableTys.length > 0 then
+        elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
       else pure .bool) : SetGen.Set (List LMonoTy)) := by
   simp only [List.replicate, List.mapM_cons, List.mapM_nil,
              SetGen.Set.mem_bind, SetGen.Set.mem_pure]
