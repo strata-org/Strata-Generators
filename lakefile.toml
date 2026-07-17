@@ -1,6 +1,6 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent",  "StrataGenerators.CmdHasTypeAGen"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent",  "StrataGenerators.CmdHasTypeAGen", "StrataGenerators.StmtHasTypeAGen"]
 
 [[require]]
 name = "Strata"
