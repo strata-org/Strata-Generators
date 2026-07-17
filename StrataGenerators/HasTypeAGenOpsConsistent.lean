@@ -1076,71 +1076,63 @@ theorem polyOpsForResult_instanceR (F : @Factory LExprParams') (pctx : PolyOpCtx
   unfold polyOpsForResult at hEntry
   simp only [List.mem_filterMap] at hEntry
   obtain ⟨⟨nm, boundVars, monoTy⟩, hmem, hfilt⟩ := hEntry
-  simp only [] at hfilt
-  -- Peel the guards: the `argTys.isEmpty || length > 3` guard, then `unifyTypes`,
-  -- then the `freeTyVars` guard, then the forward-instance guard.
-  split at hfilt
-  · exact absurd hfilt (by simp)
-  · rename_i hguard1
-    split at hfilt
-    · exact absurd hfilt (by simp)
-    · rename_i subst hunif
-      split at hfilt
-      · exact absurd hfilt (by simp)
-      · rename_i hguard2
-        split at hfilt
-        · rename_i hguard3
-          -- success branch.  Extract the two equalities from `hfilt`.
-          simp only [Option.some.injEq, Prod.mk.injEq] at hfilt
-          obtain ⟨hname, hcat⟩ := hfilt
-          subst hname
-          -- Name the freshening result and its arrow decomposition.
-          obtain ⟨freshBoundVars, freshMonoTy, hfreshEq⟩ :
-              ∃ a b, freshenBoundVars boundVars monoTy
-                (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups = (a, b) :=
-            ⟨_, _, rfl⟩
-          obtain ⟨argTys, retTy, hdecEq⟩ :
-              ∃ a b, decomposeArrow freshMonoTy = (a, b) := ⟨_, _, rfl⟩
-          rw [hfreshEq] at hunif hguard1 hguard2 hguard3 hcat
-          simp only at hunif hguard1 hguard2 hguard3 hcat
-          rw [hdecEq] at hunif hguard1 hguard3 hcat
-          simp only at hunif hguard1 hguard3 hcat
-          -- Step 2: `PCtxWF` gives the factory function and the shape of its type.
-          obtain ⟨fn, hget, hlty⟩ := hPctx nm (.forAll boundVars monoTy) hmem
-          -- Injectivity of `.forAll`: boundVars = fn.typeArgs, monoTy = genericTy.
-          rw [LTy.forAll.injEq] at hlty
-          obtain ⟨hba, hmono⟩ := hlty
-          have hgenericEq : monoTy = LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd) := hmono
-          -- Step 3: the forward-instance guard *is* `subst fullSubst retTy = τ`.
-          have hunifEqFull : LMonoTy.subst
-              ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst) retTy = τ :=
-            beq_iff_eq.mp hguard3
-          -- Step 4: build the substitution witness.
-          -- (a) `freshMonoTy = subst renameSubst monoTy` for the freshening renaming.
-          obtain ⟨renameSubst, hfmt⟩ : ∃ R, freshMonoTy = LMonoTy.subst R monoTy := by
-            obtain ⟨R, hR⟩ := freshenBoundVars_snd_eq_subst boundVars monoTy
-              (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups
-            rw [hfreshEq] at hR; exact ⟨R, hR⟩
-          -- (b) `A = subst fullSubst (subst renameSubst genericTy)`.
-          have hAeq : concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
-              = LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
-                  (LMonoTy.subst renameSubst
-                    (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))) := by
-            rw [← hgenericEq, ← hfmt]
-            -- freshMonoTy = argTys.foldr arrow retTy
-            have hfreshFold : freshMonoTy
-                = argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) retTy := by
-              have := decomposeArrow_foldr freshMonoTy
-              rw [hdecEq] at this; simpa using this
-            rw [hfreshFold, subst_foldr_arrow, hunifEqFull, ← hcat]
-          -- Package into a single substitution witness (no groundness / no WF).
-          obtain ⟨S, hS⟩ := composite_instance_subst
-            (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
-            (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))
-            renameSubst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
-            hAeq
-          exact ⟨fn, S, hget, hS⟩
-        · exact absurd hfilt (by simp)
+  -- The per-operator computation runs in the `Option` monad (`filterMap`'s
+  -- callback). Its `do`-block is a chain of `guard`s and one `unifyTypes` bind;
+  -- because it equals `some (name, concreteArgTys)`, each `guard` must have held
+  -- and `unifyTypes` must have succeeded. `Option.bind_eq_some_iff` +
+  -- `Option.guard`/`ite`-to-`some` normalization peel the chain into a flat
+  -- conjunction, which we then destructure. (This replaces the old nested `split`
+  -- cascade, which relied on the pre-`do`-refactor `if`/`match` structure.)
+  simp only [guard, bind, failure, pure, Option.pure_def, Option.bind_eq_some_iff,
+    Option.ite_some_none_eq_some, Option.some.injEq, Prod.mk.injEq] at hfilt
+  obtain ⟨_, ⟨hguard1, _⟩, subst, hunif, _, ⟨hguard2, _⟩, _, ⟨hguard3, _⟩, hname, hcat⟩ := hfilt
+  subst hname
+  -- Name the freshening result and its arrow decomposition.
+  obtain ⟨freshBoundVars, freshMonoTy, hfreshEq⟩ :
+      ∃ a b, freshenBoundVars boundVars monoTy
+        (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups = (a, b) :=
+    ⟨_, _, rfl⟩
+  obtain ⟨argTys, retTy, hdecEq⟩ :
+      ∃ a b, decomposeArrow freshMonoTy = (a, b) := ⟨_, _, rfl⟩
+  rw [hfreshEq] at hunif hguard1 hguard2 hguard3 hcat
+  simp only at hunif hguard1 hguard2 hguard3 hcat
+  rw [hdecEq] at hunif hguard1 hguard3 hcat
+  simp only at hunif hguard1 hguard3 hcat
+  -- Step 2: `PCtxWF` gives the factory function and the shape of its type.
+  obtain ⟨fn, hget, hlty⟩ := hPctx nm (.forAll boundVars monoTy) hmem
+  -- Injectivity of `.forAll`: boundVars = fn.typeArgs, monoTy = genericTy.
+  rw [LTy.forAll.injEq] at hlty
+  obtain ⟨hba, hmono⟩ := hlty
+  have hgenericEq : monoTy = LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd) := hmono
+  -- Step 3: the forward-instance guard *is* `subst fullSubst retTy = τ`.
+  have hunifEqFull : LMonoTy.subst
+      ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst) retTy = τ :=
+    beq_iff_eq.mp hguard3
+  -- Step 4: build the substitution witness.
+  -- (a) `freshMonoTy = subst renameSubst monoTy` for the freshening renaming.
+  obtain ⟨renameSubst, hfmt⟩ : ∃ R, freshMonoTy = LMonoTy.subst R monoTy := by
+    obtain ⟨R, hR⟩ := freshenBoundVars_snd_eq_subst boundVars monoTy
+      (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups
+    rw [hfreshEq] at hR; exact ⟨R, hR⟩
+  -- (b) `A = subst fullSubst (subst renameSubst genericTy)`.
+  have hAeq : concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+      = LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+          (LMonoTy.subst renameSubst
+            (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))) := by
+    rw [← hgenericEq, ← hfmt]
+    -- freshMonoTy = argTys.foldr arrow retTy
+    have hfreshFold : freshMonoTy
+        = argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) retTy := by
+      have := decomposeArrow_foldr freshMonoTy
+      rw [hdecEq] at this; simpa using this
+    rw [hfreshFold, subst_foldr_arrow, hunifEqFull, ← hcat]
+  -- Package into a single substitution witness (no groundness / no WF).
+  obtain ⟨S, hS⟩ := composite_instance_subst
+    (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))
+    renameSubst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+    hAeq
+  exact ⟨fn, S, hget, hS⟩
 
 /-- Under `PCtxWF`, the polymorphic-annotation assumption `PolyOpsConsistentR`
     holds — because every emitted annotation is a substitution instance of the

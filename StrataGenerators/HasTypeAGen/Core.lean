@@ -923,52 +923,52 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     : List (String × List LMonoTy) :=
   -- Free type variables in scope that a bound var must not be captured by:
   -- those of the target type together with those of the sampled generable types.
-  let contextVars := (LMonoTy.freeVars τ ++ generableTys.flatMap LMonoTy.freeVars).eraseDups
-  pctx.filterMap fun (name, lty) =>
-    match lty with
-    | .forAll boundVars monoTy =>
-      -- Alpha-rename the operator's bound vars away from `contextVars` so that a
-      -- bound var sharing a name with a context free var doesn't get treated as
-      -- already-solved by unification (see `docs/ops-consistent-capture-bug.md`).
-      let (freshBoundVars, freshMonoTy) := freshenBoundVars boundVars monoTy contextVars
-      let (argTys, retTy) := decomposeArrow freshMonoTy
-      if argTys.isEmpty || argTys.length > 3 then none
-      else match unifyTypes retTy τ with
-        | none => none
-        | some subst =>
-          let freeTyVars := findFreeTyVars freshBoundVars subst
-          if !freeTyVars.isEmpty && generableTys.isEmpty then none
-          else
-            let fullSubst : Lambda.Subst := (freeTyVars.zip sampledTys) :: subst
-            let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
-            -- Forward-instance guard (declarative `OpsConsistentR`; see
-            -- `docs/ops-consistent-polymorphic-gap.md`). We keep the candidate iff
-            -- applying the generator's own substitution `fullSubst` to the return
-            -- type `retTy` actually yields the target `τ`.
-            --
-            -- Why this is needed for `OpsConsistentR` (which never runs
-            -- `opTypeSubst`): the emitted annotation is built as
-            -- `concreteArgTys.foldr arrow τ`, i.e. it *hardcodes* `τ` in the return
-            -- position. To discharge `OpsConsistentR.op_in` the soundness proof
-            -- (`polyOpsForResult_instanceR`) must exhibit *some* substitution `S`
-            -- with `annotation = genericTy.subst S`, and it constructs that witness
-            -- from `fullSubst` (composed with the freshening renaming). That witness
-            -- reproduces the annotation's return position as `subst fullSubst retTy`
-            -- — so the hardcoded `τ` and the witness-produced return agree exactly
-            -- when `subst fullSubst retTy = τ`. This guard enforces that
-            -- precondition; the proof then reads it back off via `beq_iff_eq`.
-            --
-            -- It rejects only the candidates where unification oriented the
-            -- `retTy ~ τ` equation against `τ` (e.g. `id : ∀α. α → α` at target `β`,
-            -- where `unify α β` may solve `β ↦ α`: then `subst fullSubst retTy = α ≠
-            -- β = τ` and no `fullSubst`-derived witness reconstructs the annotation).
-            -- It is strictly more permissive than the old ground-only guard: it
-            -- still admits annotations mentioning a free (non-quantified) type
-            -- variable, as long as that variable comes from the context (`τ`/the
-            -- sampled types) and the forward reading holds.
-            if LMonoTy.subst fullSubst retTy == τ then
-              some (name, concreteArgTys)
-            else none
+  let varsAlreadyInUse := (LMonoTy.freeVars τ ++ generableTys.flatMap LMonoTy.freeVars).eraseDups
+  -- `filterMap` supplies the list-level iteration (Lean's `List` has no `Monad`/
+  -- `Alternative` instance, so a top-level `List` `do`-block with `guard`s does not
+  -- elaborate). The per-operator computation, however, runs in the `Option` monad —
+  -- where `←`-binding `unifyTypes` (itself `Option`) and `guard` (via
+  -- `Alternative Option`) work natively, and `guard False = none` is dropped by
+  -- `filterMap`. This keeps the monadic, guard-based inner style while compiling.
+  pctx.filterMap fun (name, .forAll boundVars monoTy) => do
+    -- Alpha-rename the operator's bound vars away from `varsAlreadyInUse` so that a
+    -- bound var sharing a name with a context free var doesn't get treated as
+    -- already-solved by unification (see `docs/ops-consistent-capture-bug.md`).
+    let (freshBoundVars, freshMonoTy) := freshenBoundVars boundVars monoTy varsAlreadyInUse
+    let (argTys, retTy) := decomposeArrow freshMonoTy
+    guard (!argTys.isEmpty && argTys.length ≤ 3)
+    let subst ← unifyTypes retTy τ
+    let freeTyVars := findFreeTyVars freshBoundVars subst
+    guard (freeTyVars.isEmpty || !generableTys.isEmpty)
+    let fullSubst : Lambda.Subst := (freeTyVars.zip sampledTys) :: subst
+    let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
+    -- Forward-instance guard (declarative `OpsConsistentR`; see
+    -- `docs/ops-consistent-polymorphic-gap.md`). We keep the candidate iff
+    -- applying the generator's own substitution `fullSubst` to the return
+    -- type `retTy` actually yields the target `τ`.
+    --
+    -- Why this is needed for `OpsConsistentR` (which never runs
+    -- `opTypeSubst`): the emitted annotation is built as
+    -- `concreteArgTys.foldr arrow τ`, i.e. it *hardcodes* `τ` in the return
+    -- position. To discharge `OpsConsistentR.op_in` the soundness proof
+    -- (`polyOpsForResult_instanceR`) must exhibit *some* substitution `S`
+    -- with `annotation = genericTy.subst S`, and it constructs that witness
+    -- from `fullSubst` (composed with the freshening renaming). That witness
+    -- reproduces the annotation's return position as `subst fullSubst retTy`
+    -- — so the hardcoded `τ` and the witness-produced return agree exactly
+    -- when `subst fullSubst retTy = τ`. This guard enforces that
+    -- precondition; the proof then reads it back off via `beq_iff_eq`.
+    --
+    -- It rejects only the candidates where unification oriented the
+    -- `retTy ~ τ` equation against `τ` (e.g. `id : ∀α. α → α` at target `β`,
+    -- where `unify α β` may solve `β ↦ α`: then `subst fullSubst retTy = α ≠
+    -- β = τ` and no `fullSubst`-derived witness reconstructs the annotation).
+    -- It is strictly more permissive than the old ground-only guard: it
+    -- still admits annotations mentioning a free (non-quantified) type
+    -- variable, as long as that variable comes from the context (`τ`/the
+    -- sampled types) and the forward reading holds.
+    guard (LMonoTy.subst fullSubst retTy == τ)
+    pure (name, concreteArgTys)
 
 /-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
     Pałka et al. (2011, Section 4). Calls polymorphic library functions by:
