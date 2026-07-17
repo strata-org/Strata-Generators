@@ -1,5 +1,18 @@
 # Variable Capture Bug in `genIndirPoly`
 
+> **Status note.** The *capture bug* and the *freshening fix* (`freshenBoundVars`)
+> described here are still live — freshening remains in the generator and is
+> essential. However, this document was written during the **operational
+> `OpsConsistent`** era, and its later sections (especially "Two corrections",
+> and any mention of `opTypeSubst` orienting a substitution the "wrong direction",
+> or `Constraints.unify` being symmetric) describe the operational check that the
+> generator is **no longer proven against**. The generator now targets the
+> *declarative* `OpsConsistentR`, whose `.op_in` never runs `opTypeSubst`. Treat
+> the `opTypeSubst`/symmetric-unifier and ground-only-fix material as historical;
+> the current guard and its rationale are in
+> `docs/ops-consistent-polymorphic-gap.md` (top note) and
+> `docs/lean-vs-haskell-generator.md`.
+
 ## Summary
 
 The polymorphic operator instantiation path (`genIndirPoly`) can produce `.op` nodes

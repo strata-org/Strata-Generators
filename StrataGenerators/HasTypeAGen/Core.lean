@@ -805,9 +805,10 @@ def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List
     strictly increasing length, so they are pairwise distinct, and there are
     `fuel` of them for `used.length` names to avoid — by pigeonhole one is
     free. -/
-def freshenGo : (fuel : Nat) → (candidate : String) → (used : List TyIdentifier) → TyIdentifier
-  | 0,        candidate, _    => candidate
-  | fuel + 1, candidate, used =>
+def freshenGo (fuel : Nat) (candidate : String) (used : List TyIdentifier) : TyIdentifier :=
+  match fuel with
+  | 0 => candidate
+  | fuel + 1 =>
     if candidate ∉ used then candidate
     else freshenGo fuel (candidate ++ "'") used
 
@@ -943,19 +944,28 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
             -- Forward-instance guard (declarative `OpsConsistentR`; see
             -- `docs/ops-consistent-polymorphic-gap.md`). We keep the candidate iff
             -- applying the generator's own substitution `fullSubst` to the return
-            -- type `retTy` actually yields the target `τ`. Since the whole emitted
-            -- annotation `concreteArgTys.foldr arrow τ` is then
-            -- `subst fullSubst (subst renameSubst genericTy)` — a genuine
-            -- substitution *instance* of the operator's generic type in the forward
-            -- direction — it satisfies `OpsConsistentR`'s `.op_in` (which asks only
-            -- for the *existence* of such a substitution), regardless of whether the
-            -- annotation is ground. This is strictly more permissive than the old
-            -- ground-only guard: it also admits annotations mentioning a free
-            -- type variable, as long as that variable comes from the context
-            -- (`τ`/the sampled types) rather than being a *quantified* variable the
-            -- unifier solved in the wrong direction. The guard rejects exactly the
-            -- wrong-orientation candidates (e.g. `id : ∀α. α → α` at target `β`
-            -- unifying `β ↦ α`, whose annotation would not be a forward instance).
+            -- type `retTy` actually yields the target `τ`.
+            --
+            -- Why this is needed for `OpsConsistentR` (which never runs
+            -- `opTypeSubst`): the emitted annotation is built as
+            -- `concreteArgTys.foldr arrow τ`, i.e. it *hardcodes* `τ` in the return
+            -- position. To discharge `OpsConsistentR.op_in` the soundness proof
+            -- (`polyOpsForResult_instanceR`) must exhibit *some* substitution `S`
+            -- with `annotation = genericTy.subst S`, and it constructs that witness
+            -- from `fullSubst` (composed with the freshening renaming). That witness
+            -- reproduces the annotation's return position as `subst fullSubst retTy`
+            -- — so the hardcoded `τ` and the witness-produced return agree exactly
+            -- when `subst fullSubst retTy = τ`. This guard enforces that
+            -- precondition; the proof then reads it back off via `beq_iff_eq`.
+            --
+            -- It rejects only the candidates where unification oriented the
+            -- `retTy ~ τ` equation against `τ` (e.g. `id : ∀α. α → α` at target `β`,
+            -- where `unify α β` may solve `β ↦ α`: then `subst fullSubst retTy = α ≠
+            -- β = τ` and no `fullSubst`-derived witness reconstructs the annotation).
+            -- It is strictly more permissive than the old ground-only guard: it
+            -- still admits annotations mentioning a free (non-quantified) type
+            -- variable, as long as that variable comes from the context (`τ`/the
+            -- sampled types) and the forward reading holds.
             if LMonoTy.subst fullSubst retTy == τ then
               some (name, concreteArgTys)
             else none

@@ -21,8 +21,19 @@
 >   the operational monomorphic `opTypeSubst` short-circuit) is gone.
 > The headline result is now `genLExpr_opsConsistentR_of_PCtxWF` (and the
 > `pctx = []` corollary `genLExpr_opsConsistentR_nil`), both depending only on the
-> standard axioms. The material below documents the *original operational* gap and
-> its ground-only fix, retained for historical context.
+> standard axioms.
+>
+> **Read the rest of this file as history.** Everything below — including the
+> "wrong-direction unification", `opTypeSubst`, and "`Constraints.unify` is
+> symmetric" discussion — describes the *operational* `OpsConsistent` era and its
+> ground-only fix. It is **not** the reason the current generator needs the
+> forward-instance guard. `OpsConsistentR` never calls `opTypeSubst`, so no
+> symmetric-unifier orientation failure occurs at check time. The guard is needed
+> for a different, proof-side reason: the annotation `concreteArgTys.foldr arrow τ`
+> hardcodes `τ` in its return position, while the `op_in` witness is derived from
+> `fullSubst`, so the two agree only when `subst fullSubst retTy = τ`. See
+> `docs/lean-vs-haskell-generator.md` (§ "The forward-instance guard") for the
+> accurate current explanation and how it contrasts with the Haskell generator.
 
 ## Summary
 
