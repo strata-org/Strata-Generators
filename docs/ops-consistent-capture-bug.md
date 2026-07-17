@@ -3,7 +3,7 @@
 > **Scope.** This document covers the *capture bug* and the *freshening fix*
 > (`freshenBoundVars`), both of which are live — freshening remains in the
 > generator and is essential. The op-consistency proof that consumes it is
-> described in `docs/ops-consistent-polymorphic-gap.md` (top note) and
+> described in `docs/ops-consistent-polymorphic-gap.md` and
 > `docs/lean-vs-haskell-generator.md`, which are the authority on the current
 > design.
 
@@ -269,5 +269,5 @@ Freshening (above) is a *necessary* ingredient but not the whole story, and the
 op-consistency proof it feeds into has since been rebuilt against Strata's
 declarative `OpsConsistentR`. For the current design — the forward-instance guard
 in `findPolymorphicOps`, `PCtxWF`, and the headline
-`genLExpr_opsConsistentR_of_PCtxWF` — see `ops-consistent-polymorphic-gap.md` (top
-note) and `lean-vs-haskell-generator.md`.
+`genLExpr_opsConsistentR_of_PCtxWF` — see `ops-consistent-polymorphic-gap.md` and
+`lean-vs-haskell-generator.md`.
