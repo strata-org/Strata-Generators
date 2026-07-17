@@ -1,0 +1,1354 @@
+import StrataGenerators.HasTypeAGen
+import StrataGenerators.HasTypeAGen.Defs
+import StrataGenerators.HasTypeAGen.OpsConsistentBridge
+import Strata.DL.Lambda.Denote.Assumptions
+
+open Lambda RandomChoice ArbNat ArbChar ArbString SetGen
+
+set_option linter.unusedSimpArgs false
+
+/-!
+# `OpsConsistentR` for generated `LExpr`s
+
+This module establishes that the generator (`genLExpr` and friends) produces
+terms satisfying Strata's *declarative* `OpsConsistentR` predicate — the inductive
+specification that every `.op` type annotation is *some* instantiation of the
+factory function's generic type. Together with `genLExpr_sound`/`genLExpr_complete`
+(which handle `HasTypeA`) this makes the generator sound and complete with respect
+to *both* `HasTypeA` and `OpsConsistentR`.
+
+`OpsConsistentR` (`public` in Strata's `Assumptions.lean`) is named directly — no
+local copy. The proofs are stated *directly* against `OpsConsistentR` and closed by
+its constructors, so no operational `OpsConsistent` unfolding or
+`OpsConsistent_OpsConsistentR` bridge is used. The only `module`-only helper they
+need is `mem_get?_eq` (a Factory `nameMap` lookup), in
+`HasTypeAGen/OpsConsistentBridge.lean`.
+
+Working against the declarative `OpsConsistentR` (rather than the operational
+`OpsConsistent`, whose `.op` check runs `opTypeSubst` and demands the annotation be
+*reconstructible* by unification) is what makes this proof simple: `OpsConsistentR`'s
+`.op_in` constructor asks only for the *existence* of an instantiating substitution,
+and the generator builds every polymorphic annotation as exactly such an instance.
+No ground-matching unification-completeness result is needed.
+
+## Why the generator is `OpsConsistentR`
+
+Every `.op` node a generated term can contain comes from one of two places:
+
+* **`pickOp`** (inside `genLExprBase`): the annotation is exactly the *generic*
+  factory type of the operator (as computed by `factoryOps`). It is therefore the
+  identity instance `genericTy.subst []`, which `OpsConsistentR.op_in` accepts
+  directly (`pickOp_opsConsistentR`). The same holds for the monomorphic Indir op
+  node (`indir_op_opsConsistentR`).
+
+* **`genIndirPoly`**: the annotation is `concreteArgTys.foldr arrow τ`, built as a
+  substitution instance of the operator's generic type (a bound-variable freshening
+  renaming composed with the generator's own substitution — see
+  `docs/ops-consistent-capture-bug.md`). The forward-instance guard in
+  `findPolymorphicOps` (`subst fullSubst retTy == τ`) ensures the instance targets `τ`;
+  `findPolymorphicOps_instanceR` recovers a single witnessing substitution, discharged
+  from a factory-well-formedness hypothesis `PCtxWF` (via
+  `PolyOpsConsistentR_of_PCtxWF`), giving the unconditional
+  `genLExpr_opsConsistentR_of_PCtxWF`. Unlike the old ground-only approach this
+  permits annotations mentioning a free (non-quantified) type variable.
+
+All compound cases (`.app`, `.ite`, `.abs`, `.eq`, `.quant`) are structural.
+-/
+
+-- ── `factoryOps` characterization ────────────────────────────────────
+
+/-- Every operator entry produced by `factoryOps F` resolves to a factory
+    function whose generic type is exactly the entry's type. Since `factoryOps`
+    now builds the type as `mkArrow' fn.output fn.inputs.values` directly, the
+    type equality is immediate — no arrow-spine reconciliation is needed. -/
+theorem factoryOps_mem_char (F : @Factory LExprParams') (nm : String) (τ : LMonoTy)
+    (h : (nm, τ) ∈ factoryOps F) :
+    ∃ fn, F[nm]? = some fn ∧ τ = LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd) := by
+  unfold factoryOps at h
+  simp only [List.mem_filterMap] at h
+  obtain ⟨fn, hfn_mem, hfn_eq⟩ := h
+  simp only [Option.some.injEq, Prod.mk.injEq] at hfn_eq
+  obtain ⟨hnm, hτ⟩ := hfn_eq
+  subst hnm
+  have hfn_mem' : fn ∈ F.toArray := Array.mem_def.mpr hfn_mem
+  obtain ⟨hs, hget⟩ := Factory.mem_name_eq_getElem hfn_mem' rfl
+  exact ⟨fn, Lambda.mem_get?_eq hs hget, hτ.symm⟩
+
+-- ── Well-formedness of `pctx` and the factory ────────────────────────
+
+/-- Well-formedness linking a polymorphic operator context `pctx` to the factory
+    `F`: every `(name, lty)` in `pctx` is the polymorphic type scheme of some
+    factory function `fn` (i.e. `lty = ∀ fn.typeArgs. mkArrow' fn.output fn.inputs.values`),
+    and `F[name]? = some fn`.
+
+    For the *declarative* `OpsConsistentR` relation, this is all we need — no
+    `freeVars ⊆ typeArgs` invariant is required. `OpsConsistentR`'s `.op_in`
+    constructor demands only the *existence* of a substitution turning the generic
+    type into the annotation, and the generator builds its annotation as exactly
+    such a substitution instance (see `findPolymorphicOps_instanceR`); it never runs
+    `opTypeSubst`, so the monomorphic short-circuit that forced the extra invariant
+    in the operational proof (`docs/ops-consistent-polymorphic-gap.md`) does not
+    arise here. -/
+def PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx) : Prop :=
+  ∀ (name : String) (lty : Lambda.LTy),
+    (name, lty) ∈ pctx →
+    ∃ (fn : LFunc LExprParams'), F[name]? = some fn ∧
+      lty = .forAll fn.typeArgs (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))
+
+/-- The polymorphic operator context extracted directly from a factory is always
+    well-formed with respect to that factory. Since `factoryPolyOps` builds each
+    entry as exactly the scheme `PCtxWF` demands, the proof is pure `filterMap`
+    bookkeeping — no assumption required. This is what makes the factory
+    generators unconditionally op-consistent even with polymorphic operators
+    enabled (see `genLExpr_opsConsistentR_factory`). -/
+theorem PCtxWF_factoryPolyOps (F : @Factory LExprParams') :
+    PCtxWF F (factoryPolyOps F) := by
+  intro name lty h
+  unfold factoryPolyOps at h
+  simp only [List.mem_filterMap] at h
+  obtain ⟨fn, hfn_mem, hfn_eq⟩ := h
+  simp only [Option.some.injEq, Prod.mk.injEq] at hfn_eq
+  obtain ⟨hnm, hlty⟩ := hfn_eq
+  subst hnm
+  have hfn_mem' : fn ∈ F.toArray := Array.mem_def.mpr hfn_mem
+  obtain ⟨hs, hget⟩ := Factory.mem_name_eq_getElem hfn_mem' rfl
+  exact ⟨fn, Lambda.mem_get?_eq hs hget, hlty.symm⟩
+
+-- ── Leaf-op consistency (`pickOp`) ───────────────────────────────────
+
+/-- Membership in `opsOfType octx τ` implies `(name, τ) ∈ octx`. -/
+theorem mem_opsOfType (octx : OpCtx) (τ : LMonoTy) (name : String)
+    (h : name ∈ opsOfType octx τ) : (name, τ) ∈ octx := by
+  unfold opsOfType at h
+  simp only [List.mem_filterMap] at h
+  obtain ⟨⟨x, ty⟩, hmem, heq⟩ := h
+  split at heq
+  · rename_i hty; simp only [Option.some.injEq] at heq
+    have : ty = τ := beq_iff_eq.mp hty
+    subst this; subst heq; exact hmem
+  · simp at heq
+
+/-- An op node emitted by `pickOp` on `factoryOps F` is `Lambda.OpsConsistentR`.
+    The annotation `τ` equals the operator's generic factory type
+    (`mkArrow' fn.output fn.inputs.values`), which is exactly the instance
+    `OpsConsistentR.op_in` requires (with the empty/identity substitution). -/
+theorem pickOp_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy) (name : String)
+    (hmem : name ∈ opsOfType (factoryOps F) τ) :
+    Lambda.OpsConsistentR F (.op () ⟨name, ()⟩ (some τ)) := by
+  have hoctx : (name, τ) ∈ factoryOps F := mem_opsOfType _ _ _ hmem
+  obtain ⟨fn, hget, hτ⟩ := factoryOps_mem_char F name τ hoctx
+  -- `τ = genericTy` is the identity instance `genericTy.subst []`.
+  exact .op_in (tySubst := []) hget (by rw [hτ]; exact (LMonoTy.subst_emptyS (by simp)).symm)
+
+-- ── Public support characterizations for pick* (mirror private ones) ──
+
+private theorem list_map_ne_nil_of_length_pos' {α β : Type} {xs : List α} {f : α → β}
+    (h : xs.length > 0) : xs.map f ≠ [] := by
+  intro heq
+  apply List.ne_nil_of_length_pos h
+  apply List.map_eq_nil_iff.mp heq
+
+theorem mem_support_pickOp_iff' {octx : OpCtx} {τ : LMonoTy}
+    {hv : (opsOfType octx τ).length > 0} {e : LExpr'} :
+    e ∈ (pickOp (G := SetGen.Set) octx τ hv) ↔
+      ∃ name ∈ opsOfType octx τ, e = .op () ⟨name, ()⟩ (some τ) := by
+  change e ∈ SetGen.support (pickOp (G := SetGen.Set) octx τ hv) ↔ _
+  simp only [pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv), List.mem_map]
+  constructor
+  · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
+  · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
+
+/-- Any op node produced by `pickOp` on `factoryOps F` is `Lambda.OpsConsistentR`. -/
+theorem pickOp_mem_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
+    {hv : (opsOfType (factoryOps F) τ).length > 0} {e : LExpr'}
+    (he : e ∈ (pickOp (G := SetGen.Set) (factoryOps F) τ hv)) :
+    Lambda.OpsConsistentR F e := by
+  rw [mem_support_pickOp_iff'] at he
+  obtain ⟨name, hmem, rfl⟩ := he
+  exact pickOp_opsConsistentR F τ name hmem
+
+
+/-- Any node produced by `pickBVar` is a `.bvar`, hence `Lambda.OpsConsistentR`. -/
+theorem pickBVar_mem_opsConsistentR (F : @Factory LExprParams') (bctx : BVarCtx) (τ : LMonoTy)
+    {hv : (bvarsOfType bctx τ).length > 0} {e : LExpr'}
+    (he : e ∈ (pickBVar (G := SetGen.Set) bctx τ hv)) :
+    Lambda.OpsConsistentR F e := by
+  change e ∈ SetGen.support (pickBVar (G := SetGen.Set) bctx τ hv) at he
+  simp only [pickBVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
+    List.mem_map] at he
+  obtain ⟨i, _, rfl⟩ := he
+  exact .bvar
+
+/-- Any node produced by `pickFVar` is a `.fvar`, hence `Lambda.OpsConsistentR`. -/
+theorem pickFVar_mem_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (τ : LMonoTy)
+    {hv : (fvarsOfType fctx τ).length > 0} {e : LExpr'}
+    (he : e ∈ (pickFVar (G := SetGen.Set) fctx τ hv)) :
+    Lambda.OpsConsistentR F e := by
+  change e ∈ SetGen.support (pickFVar (G := SetGen.Set) fctx τ hv) at he
+  simp only [pickFVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
+    List.mem_map] at he
+  obtain ⟨name, _, rfl⟩ := he
+  exact .fvar
+
+private theorem norm_bool' : LMonoTy.bool = LMonoTy.tcons "bool" [] := rfl
+private theorem norm_int' : LMonoTy.int = LMonoTy.tcons "int" [] := rfl
+private theorem norm_string' : LMonoTy.string = LMonoTy.tcons "string" [] := rfl
+private theorem norm_real' : LMonoTy.real = LMonoTy.tcons "real" [] := rfl
+private theorem norm_arrow' (τ₁ τ₂ : LMonoTy) :
+    LMonoTy.arrow τ₁ τ₂ = LMonoTy.tcons "arrow" [τ₁, τ₂] := rfl
+
+set_option maxHeartbeats 1600000 in
+theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e := by
+  rw [genLExprBase.eq_def] at he
+  split at he
+  case h_1 τ₁ τ₂ =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 (.arrow τ₁ τ₂)) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_arrow'] at he
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨hf, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
+    · exact pickBVar_mem_opsConsistentR F bctx (.arrow τ₁ τ₂) h
+    · exact h.elim
+    · exact pickFVar_mem_opsConsistentR F fctx (.arrow τ₁ τ₂) h
+    · exact h.elim
+    · exact pickOp_mem_opsConsistentR F (.arrow τ₁ τ₂) h
+    · exact h.elim
+  case h_3 =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 .bool) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_bool'] at he
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite] at he
+    rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨hf, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
+    · exact .const
+    · exact .const
+    · exact pickBVar_mem_opsConsistentR F bctx .bool h
+    · exact .const
+    · exact .const
+    · exact pickFVar_mem_opsConsistentR F fctx .bool h
+    · exact .const
+    · exact .const
+    · exact pickOp_mem_opsConsistentR F .bool h
+    · exact .const
+    · exact .const
+  case h_5 =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 .int) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_int'] at he
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
+    · exact .const
+    · exact .const
+    · exact pickBVar_mem_opsConsistentR F bctx .int h
+    · exact .const
+    · exact .const
+    · exact pickFVar_mem_opsConsistentR F fctx .int h
+    · exact .const
+    · exact .const
+    · exact pickOp_mem_opsConsistentR F .int h
+    · exact .const
+    · exact .const
+  case h_9 =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 .string) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_string'] at he
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
+    · exact .const
+    · exact pickBVar_mem_opsConsistentR F bctx .string h
+    · exact .const
+    · exact pickFVar_mem_opsConsistentR F fctx .string h
+    · exact .const
+    · exact pickOp_mem_opsConsistentR F .string h
+    · exact .const
+  case h_11 =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 .real) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_real'] at he
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | ((⟨hf, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩)))
+    · exact .const
+    · exact .const
+    · exact pickBVar_mem_opsConsistentR F bctx .real h
+    · exact .const
+    · exact .const
+    · exact pickFVar_mem_opsConsistentR F fctx .real h
+    · exact .const
+    · exact .const
+    · exact pickOp_mem_opsConsistentR F .real h
+    · exact .const
+    · exact .const
+  case h_13 n =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 (.bitvec n)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+      mem_support_iff, SetGen.mem_dite] at he
+    rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
+    · exact .const
+    · exact pickBVar_mem_opsConsistentR F bctx (.bitvec n) h
+    · exact .const
+    · exact pickFVar_mem_opsConsistentR F fctx (.bitvec n) h
+    · exact .const
+    · exact pickOp_mem_opsConsistentR F (.bitvec n) h
+    · exact .const
+  case h_4 n =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) .bool) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_bool'] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (1, fun () => genBoolConst (G := SetGen.Set)),
+         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .bool),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .bool)),
+         (2, fun () => genEq (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n)),
+         (2, fun () => genQuant .all (genLMonoTy tvars n)
+           (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n)
+           (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n .bool)),
+         (2, fun () => genQuant .exist (genLMonoTy tvars n)
+           (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n)
+           (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n .bool)),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx .bool).length > 0 then pickBVar bctx .bool hv
+           else genBoolConst),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx .bool).length > 0 then pickFVar fctx .bool hf
+           else genBoolConst),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) .bool).length > 0 then pickOp (factoryOps F) .bool ho
+           else genBoolConst) ]
+      ) (by show 0 < 1+4+2+2+2+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genBoolConst, genApp, genIte, genEq, genQuant, pick_mem_iff, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    · rcases he with rfl | rfl <;> exact .const
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · obtain ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ := he
+      exact .eq (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he₁) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he₂)
+    · obtain ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ := he
+      exact .quant (genLExprBase_opsConsistentR F fctx tvars (τ' :: bctx) n _ _ htr) (genLExprBase_opsConsistentR F fctx tvars (τ' :: bctx) n _ _ hbody)
+    · obtain ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ := he
+      exact .quant (genLExprBase_opsConsistentR F fctx tvars (τ' :: bctx) n _ _ htr) (genLExprBase_opsConsistentR F fctx tvars (τ' :: bctx) n _ _ hbody)
+    · rcases he with ⟨_, h⟩ | ⟨_, rfl | rfl⟩
+      · exact pickBVar_mem_opsConsistentR F bctx .bool h
+      · exact .const
+      · exact .const
+    · rcases he with ⟨hf, h⟩ | ⟨_, rfl | rfl⟩
+      · exact pickFVar_mem_opsConsistentR F fctx .bool h
+      · exact .const
+      · exact .const
+    · rcases he with ⟨_, h⟩ | ⟨_, rfl | rfl⟩
+      · exact pickOp_mem_opsConsistentR F .bool h
+      · exact .const
+      · exact .const
+  case h_6 n =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) .int) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_int'] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (1, fun () => genIntConst (G := SetGen.Set)),
+         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .int),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .int)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .int)),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx .int).length > 0 then pickBVar bctx .int hv
+           else genIntConst),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx .int).length > 0 then pickFVar fctx .int hf
+           else genIntConst),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) .int).length > 0 then pickOp (factoryOps F) .int ho
+           else genIntConst) ]
+      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genIntConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    · rcases he with ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩ <;> exact .const
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx .int h
+      · exact .const
+      · exact .const
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx .int h
+      · exact .const
+      · exact .const
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩
+      · exact pickOp_mem_opsConsistentR F .int h
+      · exact .const
+      · exact .const
+  case h_10 n =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) .string) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_string'] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (1, fun () => genStrConst (G := SetGen.Set)),
+         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .string),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .string)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .string)),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx .string).length > 0 then pickBVar bctx .string hv
+           else genStrConst),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx .string).length > 0 then pickFVar fctx .string hf
+           else genStrConst),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) .string).length > 0 then pickOp (factoryOps F) .string ho
+           else genStrConst) ]
+      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genStrConst, genApp, genIte, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    · obtain ⟨s, _, rfl⟩ := he; exact .const
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx .string h
+      · exact .const
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx .string h
+      · exact .const
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
+      · exact pickOp_mem_opsConsistentR F .string h
+      · exact .const
+  case h_12 n =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) .real) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_real'] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (1, fun () => genRealConst (G := SetGen.Set)),
+         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .real),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .real)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .real)),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx .real).length > 0 then pickBVar bctx .real hv
+           else genRealConst),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx .real).length > 0 then pickFVar fctx .real hf
+           else genRealConst),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) .real).length > 0 then pickOp (factoryOps F) .real ho
+           else genRealConst) ]
+      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    · rcases he with ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩ <;> exact .const
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx .real h
+      · exact .const
+      · exact .const
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx .real h
+      · exact .const
+      · exact .const
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+      · exact pickOp_mem_opsConsistentR F .real h
+      · exact .const
+      · exact .const
+  case h_14 m n =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (m + 1) (.bitvec n)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (1, fun () => genBitvecConst (G := SetGen.Set) n),
+         (4, fun () => genApp (genLMonoTy tvars m) (genLExprBase fctx (factoryOps F) tvars bctx m) (.bitvec n)),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx m .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx m (.bitvec n))
+                              (genLExprBase fctx (factoryOps F) tvars bctx m (.bitvec n))),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx (.bitvec n)).length > 0 then pickBVar bctx (.bitvec n) hv
+           else genBitvecConst n),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx (.bitvec n)).length > 0 then pickFVar fctx (.bitvec n) hf
+           else genBitvecConst n),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) (.bitvec n)).length > 0 then pickOp (factoryOps F) (.bitvec n) ho
+           else genBitvecConst n) ]
+      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genBitvecConst, genApp, genIte, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    · obtain ⟨k, _, rfl⟩ := he; exact .const
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx m _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx m _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx m _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx m _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx m _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx (.bitvec n) h
+      · exact .const
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx (.bitvec n) h
+      · exact .const
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
+      · exact pickOp_mem_opsConsistentR F (.bitvec n) h
+      · exact .const
+  case h_2 n τ₁ τ₂ =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) (.arrow τ₁ τ₂)) := by
+      rw [genLExprBase.eq_def]; exact he
+    rw [norm_arrow'] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (4, fun () => genAbs (G := SetGen.Set) (genLExprBase fctx (factoryOps F) tvars (τ₁ :: bctx) n τ₂) τ₁),
+         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.arrow τ₁ τ₂)),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.arrow τ₁ τ₂))
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.arrow τ₁ τ₂))),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx (.arrow τ₁ τ₂)).length > 0 then pickBVar bctx (.arrow τ₁ τ₂) hv
+           else genAbs (genLExprBase fctx (factoryOps F) tvars (τ₁ :: bctx) n τ₂) τ₁),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0 then pickFVar fctx (.arrow τ₁ τ₂) hf
+           else genAbs (genLExprBase fctx (factoryOps F) tvars (τ₁ :: bctx) n τ₂) τ₁),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) (.arrow τ₁ τ₂)).length > 0 then pickOp (factoryOps F) (.arrow τ₁ τ₂) ho
+           else genAbs (genLExprBase fctx (factoryOps F) tvars (τ₁ :: bctx) n τ₂) τ₁) ]
+      ) (by show 0 < 4+4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genAbs, genApp, genIte, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    · obtain ⟨body, hbody, rfl⟩ := he
+      exact .abs (genLExprBase_opsConsistentR F fctx tvars (τ₁ :: bctx) n _ _ hbody)
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, body, hbody, rfl⟩
+      · exact pickBVar_mem_opsConsistentR F bctx (.arrow τ₁ τ₂) h
+      · exact .abs (genLExprBase_opsConsistentR F fctx tvars (τ₁ :: bctx) n _ _ hbody)
+    · rcases he with ⟨hf, h⟩ | ⟨_, body, hbody, rfl⟩
+      · exact pickFVar_mem_opsConsistentR F fctx (.arrow τ₁ τ₂) h
+      · exact .abs (genLExprBase_opsConsistentR F fctx tvars (τ₁ :: bctx) n _ _ hbody)
+    · rcases he with ⟨_, h⟩ | ⟨_, body, hbody, rfl⟩
+      · exact pickOp_mem_opsConsistentR F (.arrow τ₁ τ₂) h
+      · exact .abs (genLExprBase_opsConsistentR F fctx tvars (τ₁ :: bctx) n _ _ hbody)
+  case h_7 name =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 (.ftvar name)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
+    · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
+    · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
+    · exact pickOp_mem_opsConsistentR F (.ftvar name) h
+    · exact absurd h (by simp)
+    · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
+    · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
+    · exact pickOp_mem_opsConsistentR F (.ftvar name) h
+    · exact absurd h (by simp)
+    · exact pickOp_mem_opsConsistentR F (.ftvar name) h
+    · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
+    · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
+    · exact absurd h (by simp)
+  case h_8 n name =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) (.ftvar name)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.ftvar name)),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.ftvar name))
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.ftvar name))),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx (.ftvar name)).length > 0 then pickBVar bctx (.ftvar name) hv
+           else if hf : (fvarsOfType fctx (.ftvar name)).length > 0 then pickFVar fctx (.ftvar name) hf
+           else if ho : (opsOfType (factoryOps F) (.ftvar name)).length > 0 then pickOp (factoryOps F) (.ftvar name) ho
+           else default),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx (.ftvar name)).length > 0 then pickFVar fctx (.ftvar name) hf
+           else if hv : (bvarsOfType bctx (.ftvar name)).length > 0 then pickBVar bctx (.ftvar name) hv
+           else default),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) (.ftvar name)).length > 0 then pickOp (factoryOps F) (.ftvar name) ho
+           else if hv : (bvarsOfType bctx (.ftvar name)).length > 0 then pickBVar bctx (.ftvar name) hv
+           else default) ]
+      ) (by show 0 < 4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
+      · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
+      · exact pickOp_mem_opsConsistentR F (.ftvar name) h
+      · exact absurd h (by simp)
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
+      · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
+      · exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickOp_mem_opsConsistentR F (.ftvar name) h
+      · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
+      · exact absurd h (by simp)
+  case h_15 =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 .regex) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
+    · exact pickBVar_mem_opsConsistentR F bctx .regex h
+    · exact pickFVar_mem_opsConsistentR F fctx .regex h
+    · exact pickOp_mem_opsConsistentR F .regex h
+    · exact absurd h (by simp)
+    · exact pickFVar_mem_opsConsistentR F fctx .regex h
+    · exact pickBVar_mem_opsConsistentR F bctx .regex h
+    · exact pickOp_mem_opsConsistentR F .regex h
+    · exact absurd h (by simp)
+    · exact pickOp_mem_opsConsistentR F .regex h
+    · exact pickBVar_mem_opsConsistentR F bctx .regex h
+    · exact pickFVar_mem_opsConsistentR F fctx .regex h
+    · exact absurd h (by simp)
+  case h_16 n =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) .regex) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .regex),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .regex)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n .regex)),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx .regex).length > 0 then pickBVar bctx .regex hv
+           else if hf : (fvarsOfType fctx .regex).length > 0 then pickFVar fctx .regex hf
+           else if ho : (opsOfType (factoryOps F) .regex).length > 0 then pickOp (factoryOps F) .regex ho
+           else default),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx .regex).length > 0 then pickFVar fctx .regex hf
+           else if hv : (bvarsOfType bctx .regex).length > 0 then pickBVar bctx .regex hv
+           else default),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) .regex).length > 0 then pickOp (factoryOps F) .regex ho
+           else if hv : (bvarsOfType bctx .regex).length > 0 then pickBVar bctx .regex hv
+           else default) ]
+      ) (by show 0 < 4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx .regex h
+      · exact pickFVar_mem_opsConsistentR F fctx .regex h
+      · exact pickOp_mem_opsConsistentR F .regex h
+      · exact absurd h (by simp)
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx .regex h
+      · exact pickBVar_mem_opsConsistentR F bctx .regex h
+      · exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickOp_mem_opsConsistentR F .regex h
+      · exact pickBVar_mem_opsConsistentR F bctx .regex h
+      · exact absurd h (by simp)
+  case h_17 τ₁ τ₂ =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 (.map τ₁ τ₂)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
+    · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
+    · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
+    · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
+    · exact absurd h (by simp)
+    · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
+    · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
+    · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
+    · exact absurd h (by simp)
+    · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
+    · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
+    · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
+    · exact absurd h (by simp)
+  case h_18 n τ₁ τ₂ =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) (.map τ₁ τ₂)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.map τ₁ τ₂)),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.map τ₁ τ₂))
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.map τ₁ τ₂))),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx (.map τ₁ τ₂)).length > 0 then pickBVar bctx (.map τ₁ τ₂) hv
+           else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0 then pickFVar fctx (.map τ₁ τ₂) hf
+           else if ho : (opsOfType (factoryOps F) (.map τ₁ τ₂)).length > 0 then pickOp (factoryOps F) (.map τ₁ τ₂) ho
+           else default),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0 then pickFVar fctx (.map τ₁ τ₂) hf
+           else if hv : (bvarsOfType bctx (.map τ₁ τ₂)).length > 0 then pickBVar bctx (.map τ₁ τ₂) hv
+           else default),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) (.map τ₁ τ₂)).length > 0 then pickOp (factoryOps F) (.map τ₁ τ₂) ho
+           else if hv : (bvarsOfType bctx (.map τ₁ τ₂)).length > 0 then pickBVar bctx (.map τ₁ τ₂) hv
+           else default) ]
+      ) (by show 0 < 4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
+      · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
+      · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
+      · exact absurd h (by simp)
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
+      · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
+      · exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
+      · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
+      · exact absurd h (by simp)
+  case h_19 τ =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 (.seq τ)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
+    · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
+    · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
+    · exact pickOp_mem_opsConsistentR F (.seq τ) h
+    · exact absurd h (by simp)
+    · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
+    · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
+    · exact pickOp_mem_opsConsistentR F (.seq τ) h
+    · exact absurd h (by simp)
+    · exact pickOp_mem_opsConsistentR F (.seq τ) h
+    · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
+    · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
+    · exact absurd h (by simp)
+  case h_20 n τ =>
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (n + 1) (.seq τ)) := by
+      rw [genLExprBase.eq_def]; exact he
+    simp only [genLExprBase] at he
+    have hfreq : e ∈ SetGen.support (frequency
+      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.seq τ)),
+         (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.seq τ))
+                              (genLExprBase fctx (factoryOps F) tvars bctx n (.seq τ))),
+         (2, fun () =>
+           if hv : (bvarsOfType bctx (.seq τ)).length > 0 then pickBVar bctx (.seq τ) hv
+           else if hf : (fvarsOfType fctx (.seq τ)).length > 0 then pickFVar fctx (.seq τ) hf
+           else if ho : (opsOfType (factoryOps F) (.seq τ)).length > 0 then pickOp (factoryOps F) (.seq τ) ho
+           else default),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx (.seq τ)).length > 0 then pickFVar fctx (.seq τ) hf
+           else if hv : (bvarsOfType bctx (.seq τ)).length > 0 then pickBVar bctx (.seq τ) hv
+           else default),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) (.seq τ)).length > 0 then pickOp (factoryOps F) (.seq τ) ho
+           else if hv : (bvarsOfType bctx (.seq τ)).length > 0 then pickBVar bctx (.seq τ) hv
+           else default) ]
+      ) (by show 0 < 4+2+2+2+2; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [genApp, genIte, SetGen.Set.mem_bind,
+      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
+      exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
+    · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
+      exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
+      · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
+      · exact pickOp_mem_opsConsistentR F (.seq τ) h
+      · exact absurd h (by simp)
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
+      · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
+      · exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
+      · exact pickOp_mem_opsConsistentR F (.seq τ) h
+      · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
+      · exact absurd h (by simp)
+  case h_21 =>
+    rw [mem_support_iff] at he; exact absurd he (bot_mem_iff e).mp
+  termination_by depth
+  decreasing_by all_goals simp_wf; omega
+
+
+-- ── mkApps and mapM-argument consistency ─────────────────────────────
+
+/-- `mkApps` of a `OpsConsistentR` base and `OpsConsistentR` args is
+    `OpsConsistentR` (the declarative version, via the `.app` constructor). -/
+theorem mkApps_opsConsistentR (F : @Factory LExprParams') (base : LExpr') (args : List LExpr')
+    (hbase : Lambda.OpsConsistentR F base)
+    (hargs : ∀ a ∈ args, Lambda.OpsConsistentR F a) :
+    Lambda.OpsConsistentR F (mkApps base args) := by
+  induction args generalizing base with
+  | nil => simpa [mkApps] using hbase
+  | cons a rest ih =>
+    simp only [mkApps, List.foldl_cons]
+    apply ih
+    · exact Lambda.OpsConsistentR.app hbase (hargs a (by simp))
+    · intro x hx; exact hargs x (by simp [hx])
+
+/-- Every argument produced by `mapM (genLExprBase fctx (factoryOps F) …)` is
+    `Lambda.OpsConsistentR`. -/
+theorem mapM_genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)    (argTys : List LMonoTy) (args : List LExpr')
+    (hargs : args ∈ (List.mapM (m := SetGen.Set)
+      (genLExprBase fctx (factoryOps F) tvars bctx depth) argTys)) :
+    ∀ a ∈ args, Lambda.OpsConsistentR F a := by
+  induction argTys generalizing args with
+  | nil =>
+    simp only [List.mapM_nil, SetGen.Set.mem_pure] at hargs
+    subst hargs; intro a ha; simp at ha
+  | cons σ rest ih =>
+    simp only [List.mapM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at hargs
+    obtain ⟨x, hx, tl, htl, rfl⟩ := hargs
+    intro a ha
+    simp only [List.mem_cons] at ha
+    rcases ha with rfl | ha
+    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth σ a hx
+    · exact ih tl htl a ha
+
+-- ── Monomorphic Indir op-node consistency ────────────────────────────
+
+/-- Public version of `findOpsInCtx` membership: an entry `(name, argTys)`
+    corresponds to an octx entry with the reconstructed curried type. -/
+theorem findOpsInCtx_mem' {octx : OpCtx} {τ : LMonoTy}
+    {name : String} {argTys : List LMonoTy}
+    (h : (name, argTys) ∈ findOpsInCtx octx τ) :
+    (name, argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∈ octx ∧ argTys ≠ [] := by
+  simp only [findOpsInCtx, List.mem_filterMap] at h
+  obtain ⟨⟨n, ty⟩, hmem, hfilt⟩ := h
+  simp only at hfilt
+  split at hfilt
+  · rename_i arg args hargs
+    simp only [Option.some.injEq, Prod.mk.injEq] at hfilt
+    obtain ⟨rfl, rfl⟩ := hfilt
+    refine ⟨?_, List.cons_ne_nil _ _⟩
+    have heq := argsForResult_eq ty τ (arg :: args) hargs
+    rw [heq] at hmem
+    exact hmem
+  · simp at hfilt
+
+/-- The op node in the monomorphic Indir rule (annotated with the reconstructed
+    curried type from `findOpsInCtx (factoryOps F) τ`) is `Lambda.OpsConsistentR`.
+    The annotation equals the operator's generic type, so it is the identity
+    instance `genericTy.subst []` that `OpsConsistentR.op_in` requires. -/
+theorem indir_op_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
+    (name : String) (argTys : List LMonoTy)    (hmem : (name, argTys) ∈ findOpsInCtx (factoryOps F) τ) :
+    Lambda.OpsConsistentR F
+      (.op () ⟨name, ()⟩ (some (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) := by
+  obtain ⟨hoctx, _⟩ := findOpsInCtx_mem' hmem
+  obtain ⟨fn, hget, hty⟩ := factoryOps_mem_char F name _ hoctx
+  exact .op_in (tySubst := []) hget (by rw [hty]; exact (LMonoTy.subst_emptyS (by simp)).symm)
+
+-- ── Polymorphic IndirPoly op-node consistency ────────────────────────
+
+/-- The assumption that every polymorphic-operator annotation `genIndirPoly`
+    can emit for target `τ` is `OpsConsistentR`: for every candidate
+    `(name, concreteArgTys)` in `findPolymorphicOps pctx τ generableTys sampledTys`,
+    the op node annotated with `concreteArgTys.foldr arrow τ` is consistent.
+
+    **This predicate is fully PROVEN** — see `PolyOpsConsistentR_of_PCtxWF`,
+    which derives it from `PCtxWF F pctx` (a factory-well-formedness condition
+    discharged for any real factory). It is kept as an explicit hypothesis on the
+    general `genIndirPoly_opsConsistentR`/`genLExpr_opsConsistentR` below only so
+    those theorems stay maximally general; the unconditional top-level result is
+    `genLExpr_opsConsistentR_of_PCtxWF`.
+
+    Against the *declarative* `OpsConsistentR` the proof is direct and needs no
+    ground-matching machinery: the generator builds its annotation as
+    `subst fullSubst (subst renameSubst genericTy)`, a genuine substitution
+    *instance* of the operator's generic type, which is exactly the witness
+    `OpsConsistentR.op_in` asks for (`findPolymorphicOps_instanceR`). The
+    forward-instance guard in `findPolymorphicOps` (`subst fullSubst retTy == τ`)
+    ensures the instance actually targets `τ`; unlike the old ground-only guard it
+    permits annotations mentioning a free (non-quantified) type variable.
+
+    It holds vacuously when `pctx = []` (see the `…_nil` results, which need no
+    such assumption). -/
+def PolyOpsConsistentR (F : @Factory LExprParams') (pctx : PolyOpCtx)
+    (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) : Prop :=
+  ∀ (sampledTys : List LMonoTy) (name : String) (concreteArgTys : List LMonoTy),
+    (name, concreteArgTys) ∈
+      findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys →
+    Lambda.OpsConsistentR F
+      (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
+
+/-- `decomposeArrow` is a right inverse of the right-nested-arrow fold. -/
+theorem decomposeArrow_foldr (t : LMonoTy) :
+    t = (decomposeArrow t).1.foldr (fun σ acc => LMonoTy.arrow σ acc) (decomposeArrow t).2 := by
+  fun_induction decomposeArrow t with
+  | case1 σ rest args ret hrec ih =>
+    simp only [hrec, List.foldr_cons]
+    show LMonoTy.arrow σ rest = LMonoTy.arrow σ _
+    congr 1
+    rw [hrec] at ih; simpa using ih
+  | case2 ty hne => rfl
+
+/-- Substitution distributes over a right-nested arrow fold. -/
+theorem subst_foldr_arrow (S : Lambda.Subst) (l : List LMonoTy) (t : LMonoTy) :
+    LMonoTy.subst S (l.foldr (fun σ acc => LMonoTy.arrow σ acc) t)
+      = (l.map (LMonoTy.subst S)).foldr (fun σ acc => LMonoTy.arrow σ acc)
+          (LMonoTy.subst S t) := by
+  induction l with
+  | nil => simp
+  | cons a as ih =>
+    simp only [List.foldr_cons, List.map_cons]
+    rw [LMonoTy.arrow, LMonoTy.subst_tcons]
+    show LMonoTy.tcons "arrow"
+        (LMonoTys.subst S [a, as.foldr (fun σ acc => LMonoTy.arrow σ acc) t]) = _
+    rw [LMonoTys.subst_eq_substLogic]
+    by_cases hS : Subst.hasEmptyScopes S
+    · simp only [LMonoTys.substLogic_emptyS hS, LMonoTy.subst_emptyS hS]
+      simp only [LMonoTy.subst_emptyS hS] at ih
+      rw [ih]; rfl
+    · simp only [LMonoTys.substLogic, hS, Bool.false_eq_true, ↓reduceIte]
+      rw [ih]; rfl
+
+/-- `LMonoTys.subst` is the pointwise `map` of `LMonoTy.subst` (public restatement,
+    since Strata's `LMonoTys_subst_eq_map` lives in a `module` file). -/
+theorem LMonoTys_subst_map (S : Lambda.Subst) (args : List LMonoTy) :
+    LMonoTys.subst S args = args.map (LMonoTy.subst S) := by
+  have h := LMonoTy.subst_unfold S (LMonoTy.tcons "x" args)
+  rw [LMonoTy.subst_tcons] at h
+  simp only at h
+  injection h with _ hh
+
+/-- The single-scope substitution that sends each free variable `v` of `P` to its
+    image under the composite `subst T2 ∘ subst T1`. Applied to `P` (or any type
+    whose free variables are all free in `P`) it reconstructs the composite; that
+    is all `OpsConsistentR`'s existence witness needs — no groundness or
+    well-formedness is required. -/
+def composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst) : Lambda.SubstOne :=
+  (LMonoTy.freeVars P).map (fun v => (v, LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))))
+
+/-- Looking up a free variable `v` of `P` in `composeWitnessScope P T1 T2` returns
+    its composite image. -/
+theorem find?_composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst)
+    (v : TyIdentifier) (hv : v ∈ LMonoTy.freeVars P) :
+    Maps.find? [composeWitnessScope P T1 T2] v
+      = some (LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))) := by
+  unfold composeWitnessScope Maps.find?
+  -- `Map.find?` over `l.map (fun v => (v, g v))` at a key `v ∈ l` returns `g v`.
+  have key : ∀ (l : List TyIdentifier), v ∈ l →
+      Map.find? (l.map (fun v => (v, LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))))) v
+        = some (LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))) := by
+    intro l hl
+    induction l with
+    | nil => simp at hl
+    | cons w ws ih =>
+      simp only [List.map_cons, Map.find?]
+      by_cases hvw : w = v
+      · subst hvw; simp
+      · rw [if_neg hvw]
+        rw [List.mem_cons] at hl
+        rcases hl with h | h
+        · exact absurd h.symm hvw
+        · exact ih h
+  rw [key (LMonoTy.freeVars P) hv]
+
+/-- **Composite-to-single-scope collapse.** If `mty`'s free variables are all free
+    variables of `P`, then applying the ground-valued single scope
+    `composeWitnessScope P T1 T2` to `mty` equals applying the composite
+    `subst T2 ∘ subst T1`. -/
+theorem subst_composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst) :
+    ∀ (mty : LMonoTy), (∀ v, v ∈ LMonoTy.freeVars mty → v ∈ LMonoTy.freeVars P) →
+      LMonoTy.subst [composeWitnessScope P T1 T2] mty
+        = LMonoTy.subst T2 (LMonoTy.subst T1 mty) := by
+  intro mty hsub
+  by_cases hE : Subst.hasEmptyScopes [composeWitnessScope P T1 T2]
+  · -- Empty scope ⇒ `P` has no free variables ⇒ `mty` has none ⇒ both sides fixed.
+    have hPnil : LMonoTy.freeVars P = [] := by
+      cases hfv : LMonoTy.freeVars P with
+      | nil => rfl
+      | cons w ws =>
+        exfalso
+        change Subst.hasEmptyScopes [composeWitnessScope P T1 T2] = true at hE
+        simp only [composeWitnessScope, hfv, List.map_cons, Subst.hasEmptyScopes,
+          List.all_cons, Map.isEmpty] at hE
+        simp at hE
+    have hmtynil : ∀ v, v ∈ LMonoTy.freeVars mty → False := by
+      intro v hv; have := hsub v hv; rw [hPnil] at this; simp at this
+    rw [LMonoTy.subst_emptyS hE]
+    rw [LMonoTy.subst_no_relevant_keys T1 mty (fun v hv _ => (hmtynil v hv).elim)]
+    exact (LMonoTy.subst_no_relevant_keys T2 mty (fun v hv _ => (hmtynil v hv).elim)).symm
+  · have hEne : Subst.hasEmptyScopes [composeWitnessScope P T1 T2] = false :=
+      Bool.eq_false_iff.mpr hE
+    induction mty with
+    | ftvar v =>
+      have hv := hsub v (by simp [LMonoTy.freeVars])
+      rw [LMonoTy.subst]
+      simp only [hEne, Bool.false_eq_true, ↓reduceIte]
+      rw [find?_composeWitnessScope P T1 T2 v hv]
+    | bitvec n => simp [LMonoTy.subst_bitvec]
+    | tcons name args ih =>
+      rw [LMonoTy.subst_tcons, LMonoTy.subst_tcons, LMonoTy.subst_tcons]
+      congr 1
+      rw [LMonoTys_subst_map, LMonoTys_subst_map, LMonoTys_subst_map, List.map_map]
+      apply List.map_congr_left
+      intro a ha
+      exact ih a ha (fun v hv => hsub v (by
+        simp only [LMonoTy.freeVars]; exact LMonoTys.freeVars_mem_subset ha hv))
+
+/-- **Composite-instance packaging (declarative).** If `A` equals the composite
+    `subst T2 (subst T1 P)`, then there is a *raw* substitution `S` with
+    `A = subst S P`. The witness is the single scope `composeWitnessScope P T1 T2`;
+    unlike the operational proof this needs no `SubstWF` and no groundness, because
+    `OpsConsistentR.op_in` accepts any `Subst`, not a well-formed `SubstInfo`. -/
+theorem composite_instance_subst (A P : LMonoTy) (T1 T2 : Lambda.Subst)
+    (hA : A = LMonoTy.subst T2 (LMonoTy.subst T1 P)) :
+    ∃ S : Lambda.Subst, A = LMonoTy.subst S P := by
+  refine ⟨[composeWitnessScope P T1 T2], ?_⟩
+  rw [hA]
+  exact (subst_composeWitnessScope P T1 T2 P (fun v hv => hv)).symm
+
+/-- The freshened body is a renaming (a substitution) applied to the original. -/
+theorem freshenBoundVars_snd_eq_subst (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (contextVars : List TyIdentifier) :
+    ∃ R : Lambda.Subst, (freshenBoundVars boundVars monoTy contextVars).2
+      = LMonoTy.subst R monoTy := by
+  unfold freshenBoundVars
+  exact ⟨_, rfl⟩
+
+/-- **Instance witness (declarative).** Every candidate `(name, concreteArgTys)`
+    that `findPolymorphicOps` returns has, for the corresponding factory function
+    `fn` (`F[name]? = some fn`), an annotation `A = concreteArgTys.foldr arrow τ`
+    that is a substitution *instance* of `fn`'s generic type
+    `mkArrow' fn.output fn.inputs.values` — i.e. there is a substitution `S` with
+    `A = subst S genericTy`. That is exactly the witness `OpsConsistentR.op_in`
+    requires.
+
+    Compared with the operational version, this needs **no** groundness and no
+    unification-completeness result: the forward-instance guard
+    (`subst fullSubst retTy == τ`) gives the orientation equality directly (no
+    unification-soundness argument), and the witness is assembled purely by
+    composing the freshening renaming with the generator's substitution via
+    `composite_instance_subst` (no `SubstWF`). Annotations mentioning a free type
+    variable are handled uniformly. -/
+theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpCtx)
+    (τ : LMonoTy) (generableTys sampledTys : List LMonoTy)
+    (hPctx : PCtxWF F pctx)
+    (name : String) (concreteArgTys : List LMonoTy)
+    (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ generableTys sampledTys) :
+    ∃ (fn : LFunc LExprParams') (S : Lambda.Subst),
+      F[name]? = some fn ∧
+      concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+        = LMonoTy.subst S (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd)) := by
+  -- Step 1: unfold membership in `findPolymorphicOps` down to the success branch.
+  unfold findPolymorphicOps at hEntry
+  simp only [List.mem_filterMap] at hEntry
+  obtain ⟨⟨nm, boundVars, monoTy⟩, hmem, hfilt⟩ := hEntry
+  -- The per-operator computation runs in the `Option` monad (`filterMap`'s
+  -- callback). Its `do`-block is a chain of `guard`s and one `unifyTypes` bind;
+  -- because it equals `some (name, concreteArgTys)`, each `guard` must have held
+  -- and `unifyTypes` must have succeeded. `Option.bind_eq_some_iff` +
+  -- `Option.guard`/`ite`-to-`some` normalization peel the chain into a flat
+  -- conjunction, which we then destructure. (This replaces the old nested `split`
+  -- cascade, which relied on the pre-`do`-refactor `if`/`match` structure.)
+  simp only [guard, bind, failure, pure, Option.pure_def, Option.bind_eq_some_iff,
+    Option.ite_some_none_eq_some, Option.some.injEq, Prod.mk.injEq] at hfilt
+  obtain ⟨_, ⟨hguard1, _⟩, subst, hunif, _, ⟨hguard2, _⟩, _, ⟨hguard3, _⟩, hname, hcat⟩ := hfilt
+  subst hname
+  -- Name the freshening result and its arrow decomposition.
+  obtain ⟨freshBoundVars, freshMonoTy, hfreshEq⟩ :
+      ∃ a b, freshenBoundVars boundVars monoTy
+        (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups = (a, b) :=
+    ⟨_, _, rfl⟩
+  obtain ⟨argTys, retTy, hdecEq⟩ :
+      ∃ a b, decomposeArrow freshMonoTy = (a, b) := ⟨_, _, rfl⟩
+  rw [hfreshEq] at hunif hguard1 hguard2 hguard3 hcat
+  simp only at hunif hguard1 hguard2 hguard3 hcat
+  rw [hdecEq] at hunif hguard1 hguard3 hcat
+  simp only at hunif hguard1 hguard3 hcat
+  -- Step 2: `PCtxWF` gives the factory function and the shape of its type.
+  obtain ⟨fn, hget, hlty⟩ := hPctx nm (.forAll boundVars monoTy) hmem
+  -- Injectivity of `.forAll`: boundVars = fn.typeArgs, monoTy = genericTy.
+  rw [LTy.forAll.injEq] at hlty
+  obtain ⟨hba, hmono⟩ := hlty
+  have hgenericEq : monoTy = LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd) := hmono
+  -- Step 3: the forward-instance guard *is* `subst fullSubst retTy = τ`.
+  have hunifEqFull : LMonoTy.subst
+      ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst) retTy = τ :=
+    beq_iff_eq.mp hguard3
+  -- Step 4: build the substitution witness.
+  -- (a) `freshMonoTy = subst renameSubst monoTy` for the freshening renaming.
+  obtain ⟨renameSubst, hfmt⟩ : ∃ R, freshMonoTy = LMonoTy.subst R monoTy := by
+    obtain ⟨R, hR⟩ := freshenBoundVars_snd_eq_subst boundVars monoTy
+      (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups
+    rw [hfreshEq] at hR; exact ⟨R, hR⟩
+  -- (b) `A = subst fullSubst (subst renameSubst genericTy)`.
+  have hAeq : concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+      = LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+          (LMonoTy.subst renameSubst
+            (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))) := by
+    rw [← hgenericEq, ← hfmt]
+    -- freshMonoTy = argTys.foldr arrow retTy
+    have hfreshFold : freshMonoTy
+        = argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) retTy := by
+      have := decomposeArrow_foldr freshMonoTy
+      rw [hdecEq] at this; simpa using this
+    rw [hfreshFold, subst_foldr_arrow, hunifEqFull, ← hcat]
+  -- Package into a single substitution witness (no groundness / no WF).
+  obtain ⟨S, hS⟩ := composite_instance_subst
+    (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))
+    renameSubst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+    hAeq
+  exact ⟨fn, S, hget, hS⟩
+
+/-- Under `PCtxWF`, the polymorphic-annotation assumption `PolyOpsConsistentR`
+    holds — because every emitted annotation is a substitution instance of the
+    operator's generic type (`findPolymorphicOps_instanceR`), which is exactly the
+    witness `OpsConsistentR.op_in` (`OpsConsistentR.op_in`) demands. No case
+    split on `typeArgs`, no groundness. -/
+theorem PolyOpsConsistentR_of_PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx)
+    (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) (hPctx : PCtxWF F pctx) :
+    PolyOpsConsistentR F pctx bctx fctx τ := by
+  intro sampledTys name concreteArgTys hEntry
+  obtain ⟨fn, S, hget, hinst⟩ :=
+    findPolymorphicOps_instanceR F pctx τ _ sampledTys hPctx name concreteArgTys hEntry
+  exact Lambda.OpsConsistentR.op_in hget hinst
+
+-- ── genIndirPoly consistency ─────────────────────────────────────────
+
+set_option maxHeartbeats 800000 in
+/-- Every expression in `genIndirPoly`'s support is `OpsConsistentR`, GIVEN the
+    polymorphic-annotation assumption `PolyOpsConsistentR` (which is itself proven,
+    from `PCtxWF`, by `PolyOpsConsistentR_of_PCtxWF`). Either a polymorphic operator
+    was applied (op node consistent by `hPoly`, args by
+    `mapM_genLExprBase_opsConsistentR`), or the generator fell back to
+    `genLExprBase`. -/
+theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e := by
+  unfold genIndirPoly at he
+  simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite] at he
+  obtain ⟨sampledTys, _, he⟩ := he
+  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+  · -- polymorphic operator applied: `elements` picks an entry of the candidate list
+    obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
+    rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+    apply mkApps_opsConsistentR
+    · exact hPoly sampledTys _ _ hentry_mem
+    · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
+  · -- fallback to genLExprBase
+    exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+
+-- ── Top-level: genLExpr consistency ──────────────────────────────────
+
+set_option maxHeartbeats 800000 in
+/-- **Main result (general polymorphic context).** Every expression in the
+    support of `genLExpr` on a factory operator context `factoryOps F` satisfies
+    Strata's declarative `OpsConsistentR F`. Combined with `genLExpr_sound` this
+    gives soundness w.r.t. both `HasTypeA` and `OpsConsistentR`.
+
+    Takes the polymorphic-annotation assumption `PolyOpsConsistentR` as a
+    hypothesis for generality; it is discharged from `PCtxWF` by
+    `PolyOpsConsistentR_of_PCtxWF`, giving the unconditional
+    `genLExpr_opsConsistentR_of_PCtxWF`. For the common `pctx = []` case use
+    `genLExpr_opsConsistentR_nil`. -/
+theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e := by
+  unfold genLExpr at he
+  simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
+  rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
+  · -- genLExprBase branch
+    exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+  · -- monomorphic Indir
+    simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
+    have hlt : idx.down.val < (findOpsInCtx (factoryOps F) τ).length := by omega
+    have hentry_mem : (findOpsInCtx (factoryOps F) τ).getD idx.down.val ("", []) ∈
+        findOpsInCtx (factoryOps F) τ := by
+      have heq : (findOpsInCtx (factoryOps F) τ).getD idx.down.val ("", []) =
+          (findOpsInCtx (factoryOps F) τ)[idx.down.val] := by
+        simp [List.getD, List.getElem?_eq_getElem hlt]
+      rw [heq]; exact List.getElem_mem hlt
+    apply mkApps_opsConsistentR
+    · exact indir_op_opsConsistentR F τ _ _ hentry_mem
+    · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
+  · -- IndirPoly (with candidates)
+    exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
+  · -- genLExprBase fallback (no monomorphic candidates)
+    exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+  · -- IndirPoly fallback
+    exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
+
+-- Note: `genLExpr_opsConsistentR` above proves `Lambda.OpsConsistentR F e`
+-- directly — Strata's declarative predicate, which is `public` in `Assumptions.lean`.
+-- The proof is stated against `OpsConsistentR` throughout and closed by its
+-- constructors; there is no operational `OpsConsistent` detour or `faithful` bridge.
+
+/-- The `Factory`-wrapper generator `genLExprWithFactory` produces
+    `OpsConsistentR` terms, given the polymorphic-annotation assumption
+    `PolyOpsConsistentR`. -/
+theorem genLExprWithFactory_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx)
+    (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExprWithFactory (G := SetGen.Set) fctx F tvars bctx depth τ pctx)) :
+    Lambda.OpsConsistentR F e :=
+  genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
+
+/-- **Main result, parameterized by `PCtxWF` (no `PolyOpsConsistentR` assumption).**
+    A well-formed polymorphic context (`PCtxWF F pctx` — every `pctx` entry is a
+    factory function's generic scheme) is enough: `PolyOpsConsistentR` is *derived*
+    via `PolyOpsConsistentR_of_PCtxWF`. So `genLExpr` on a factory produces
+    `OpsConsistentR` (equivalently `OpsConsistentR`) terms for *any* polymorphic
+    context that matches the factory. -/
+theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FVarCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hPctx : PCtxWF F pctx) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e :=
+  genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ
+    (PolyOpsConsistentR_of_PCtxWF F pctx bctx fctx τ hPctx) e he
+
+/-- **Main result, factory-derived polymorphic context (no hypothesis).** When the
+    polymorphic operator context is extracted directly from the factory via
+    `factoryPolyOps F`, `PCtxWF` holds *by construction* (`PCtxWF_factoryPolyOps`),
+    so `genLExpr` produces `OpsConsistentR` terms unconditionally — even with
+    polymorphic operators enabled. This is the polymorphic analogue of
+    `genLExpr_opsConsistentR_nil`: no `pctx = []` restriction and no side
+    condition to discharge at the call site. -/
+theorem genLExpr_opsConsistentR_factory (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx (factoryOps F) (factoryPolyOps F) tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e :=
+  genLExpr_opsConsistentR_of_PCtxWF F fctx (factoryPolyOps F) tvars bctx depth τ
+    (PCtxWF_factoryPolyOps F) e he
+
+/-- The `Factory`-wrapper generator `genLExprWithFactory`, run with the factory's
+    own polymorphic context `factoryPolyOps F`, produces `OpsConsistentR` terms
+    unconditionally — no `PolyOpsConsistentR`/`PCtxWF` hypothesis needed. -/
+theorem genLExprWithFactory_opsConsistentR_factory (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExprWithFactory (G := SetGen.Set) fctx F tvars bctx depth τ (factoryPolyOps F))) :
+    Lambda.OpsConsistentR F e :=
+  genLExpr_opsConsistentR_factory F fctx tvars bctx depth τ e he
+
+-- ── Sorry-free corollary for the empty polymorphic context ───────────
+-- The factory wrappers now default to `pctx := factoryPolyOps F` (covered
+-- unconditionally by `genLExpr_opsConsistentR_factory`). The `pctx = []` results
+-- below still apply to callers that *explicitly* pass an empty polymorphic
+-- context: `findPolymorphicOps [] _ _ = []`, so `genIndirPoly` never emits a
+-- polymorphic op and the polymorphic-annotation obligation is vacuous — giving a
+-- result that does not even need `PCtxWF`.
+
+@[simp] theorem findPolymorphicOps_nil (τ : LMonoTy) (g s : List LMonoTy) :
+    findPolymorphicOps [] τ g s = [] := by unfold findPolymorphicOps; rfl
+
+/-- `genIndirPoly` with an empty polymorphic context always falls back to
+    `genLExprBase`, hence is `OpsConsistentR`. -/
+theorem genIndirPoly_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e := by
+  unfold genIndirPoly at he
+  simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite] at he
+  obtain ⟨sampledTys, _, he⟩ := he
+  -- Only the fallback branch survives (candidate list is empty).
+  rcases he with ⟨hpos, _⟩ | ⟨_, he⟩
+  · exact absurd hpos (by simp)
+  · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+
+set_option maxHeartbeats 800000 in
+/-- **Main result, empty polymorphic context (fully `sorry`-free).** Every
+    expression produced by `genLExpr` with `pctx = []` on a factory operator
+    context satisfies `OpsConsistentR F` (equivalently Strata's
+    `OpsConsistentR`; see the bridge note above). This covers the closed-term
+    generators. -/
+theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e := by
+  unfold genLExpr at he
+  simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
+  rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
+  · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+  · simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
+    have hlt : idx.down.val < (findOpsInCtx (factoryOps F) τ).length := by omega
+    have hentry_mem : (findOpsInCtx (factoryOps F) τ).getD idx.down.val ("", []) ∈
+        findOpsInCtx (factoryOps F) τ := by
+      have heq : (findOpsInCtx (factoryOps F) τ).getD idx.down.val ("", []) =
+          (findOpsInCtx (factoryOps F) τ)[idx.down.val] := by
+        simp [List.getD, List.getElem?_eq_getElem hlt]
+      rw [heq]; exact List.getElem_mem hlt
+    apply mkApps_opsConsistentR
+    · exact indir_op_opsConsistentR F τ _ _ hentry_mem
+    · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
+  · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he
+  · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+  · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he

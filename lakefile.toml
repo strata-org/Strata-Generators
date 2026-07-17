@@ -1,16 +1,23 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen", "StrataGenerators.CmdHasTypeAGen"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent", "StrataGenerators.HasTypeGen", "StrataGenerators.CmdHasTypeAGen"]
 
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "66dcd82d1"
+rev = "91e735876"
 
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
+
+# Module-only bridge lemmas for the OpsConsistent(R) generator proofs (Factory
+# `nameMap` lookup, self-unification, generic-type op-consistency) — they need
+# `import all` on Strata internals, which the non-module proof file can't do.
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGen.OpsConsistentBridge"
+roots = ["StrataGenerators.HasTypeAGen.OpsConsistentBridge"]
 
 # Core generator definitions (no Factory, no Mathlib — shared by Defs and HasTypeAGen)
 [[lean_lib]]
@@ -31,6 +38,11 @@ roots = ["StrataGenerators.HasTypeAGen.TestSupport"]
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGen"
 roots = ["StrataGenerators.HasTypeAGen"]
+
+# OpsConsistent soundness/completeness for the HasTypeA generator
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGenOpsConsistent"
+roots = ["StrataGenerators.HasTypeAGenOpsConsistent"]
 
 # The HasType generator (uses LExprTypeSpec → Strata.DL.Util.List)
 [[lean_lib]]
