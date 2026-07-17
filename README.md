@@ -7,7 +7,6 @@
 Two generators produce well-typed Strata `LExpr`s with proved soundness, using different variable representations:
 
 - **[`HasTypeAGen.lean`](./StrataGenerators/HasTypeAGen.lean)** -- Generator of well-typed terms satisfying the `HasTypeA` relation, with soundness, completeness, and depth-bound proofs. Uses de Bruijn indices for bound variables and the locally-nameless representation for free variables (matching Strata's `LExpr`).
-- **[`HasTypeGen.lean`](./StrataGenerators/HasTypeGen.lean)** -- (**Outdated**) Generator of well-typed terms satisfying the `HasType` relation. Uses a monotonic counter for fresh binder names and `varOpen`/`varClose` for the locally-nameless roundtrip.
 
 ### HasTypeAGen module structure
 

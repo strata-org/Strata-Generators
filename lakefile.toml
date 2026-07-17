@@ -1,6 +1,6 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent", "StrataGenerators.HasTypeGen", "StrataGenerators.CmdHasTypeAGen"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent",  "StrataGenerators.CmdHasTypeAGen"]
 
 [[require]]
 name = "Strata"
@@ -43,11 +43,6 @@ roots = ["StrataGenerators.HasTypeAGen"]
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGenOpsConsistent"
 roots = ["StrataGenerators.HasTypeAGenOpsConsistent"]
-
-# The HasType generator (uses LExprTypeSpec → Strata.DL.Util.List)
-[[lean_lib]]
-name = "StrataGenerators.HasTypeGen"
-roots = ["StrataGenerators.HasTypeGen"]
 
 # STLC generator with soundness and completeness proofs
 [[lean_lib]]
