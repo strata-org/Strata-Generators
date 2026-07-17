@@ -780,15 +780,15 @@ def unifyTypes (t1 t2 : LMonoTy) : Option Lambda.Subst :=
   | .ok si => some si.subst
   | .error _ => none
 
-/-- Decompose a curried function type into (argument types, return type). -/
+/-- Decomposes an arrow type into a pair consisting of (list of argument types, return type)-/
 def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
   | .tcons "arrow" [σ, rest] =>
     let (args, ret) := decomposeArrow rest
     (σ :: args, ret)
   | ty => ([], ty)
 
-/-- Find free type variables in a substitution that haven't been assigned:
-    those among `boundVars` that don't appear as keys in `subst`. -/
+/-- Find free type variables that haven't been instantiated in a substituion,
+    i.e. `findFreeTyVars boundVars subst` elements of `boundVars` that don't appear as keys in `subst`. -/
 def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List TyIdentifier :=
   boundVars.filter (fun v => Maps.find? subst v == none)
 
@@ -816,14 +816,14 @@ def freshenGo (fuel : Nat) (candidate : String) (used : List TyIdentifier) : TyI
 def freshen (name : TyIdentifier) (used : List TyIdentifier) : TyIdentifier :=
   freshenGo (used.length + 1) name used
 
-/-- Alpha-rename bound variables that collide with `contextVars`.
+/-- Alpha-rename bound variables that collide with `varsAlreadyInUse`.
     Returns `(freshened bound var names, freshened monotype body)`. Bound
-    variables that do not collide are left untouched. -/
+    variables that don't collide are left untouched. -/
 def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
-    (contextVars : List TyIdentifier) : List TyIdentifier × LMonoTy :=
-  let allUsed := contextVars ++ boundVars
+    (varsAlreadyInUse : List TyIdentifier) : List TyIdentifier × LMonoTy :=
+  let allUsed := varsAlreadyInUse ++ boundVars
   let (freshBound, _) := boundVars.foldl (fun (acc, used) v =>
-    if v ∈ contextVars then
+    if v ∈ varsAlreadyInUse then
       let fresh := freshen v used
       (acc ++ [fresh], fresh :: used)
     else
@@ -835,16 +835,13 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
   let freshMonoTy := LMonoTy.subst renameSubst monoTy
   (freshBound, freshMonoTy)
 
-/-- Compute the set of "generable types" from a context, following
-    Pałka et al. (2011, Section 4). We collect all syntactic sub-types
-    from the bvar context, fvar context, and op context, then close under
-    function application (if `σ → τ` and `σ` are both generable, so is `τ`). -/
+/-- Collects all syntactic sub-types (i.e. sub-terms of a type expression) that appear in a type -/
 def syntacticSubtypes : LMonoTy → List LMonoTy
   | ty@(.tcons "arrow" [a, b]) => ty :: (syntacticSubtypes a ++ syntacticSubtypes b)
   | ty => [ty]
 
-/-- Iteratively close a set of types under function application:
-    if `σ → τ` and `σ` are both in the set, then `τ` is added.
+/-- Helper function used when building the set of generable types.
+    Implementts this rule: if `σ → τ` and `σ` are both in the set, then `τ` is added.
     Uses a fuel parameter to ensure termination. -/
 def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
   match fuel with
@@ -858,30 +855,12 @@ def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
     if newTys.isEmpty then tys
     else addNewTypes fuel (tys ++ newTys)
 
-/-- Compute the set of "generable types" reachable from a context, following
-    Pałka et al. (2011, Section 4). This is a conservative over-approximation of
-    the types that are *inhabited* (i.e. for which some term can be built) given
-    the variables and operators in scope. It is used to bias type guesses — in
-    the (App) rule and when instantiating undetermined type variables of a
-    polymorphic operator (see `genIndirPoly`) — towards types that are plausibly
-    inhabited, rather than guessing arbitrary types that would dead-end and force
-    backtracking.
+/-- Compute the set of "generable types" (i.e. types that can be generated from the
+  current context), following Palka et al. 2011.
 
-    The computation has two stages, mirroring the paper:
-    1. **Seed.** Collect the syntactic sub-types (`syntacticSubtypes`) of every
-       type in the bvar, fvar, and op contexts. Decomposing into sub-types (down
-       to base types) is what makes the next stage able to fire: e.g. from
-       `f : String → Bool → Int` we seed `String`, `Bool`, `Int`, `Bool → Int`,
-       not just the whole arrow type.
-    2. **Close under application** (`addNewTypes`). Repeatedly add `τ` whenever
-       both `σ → τ` and `σ` are already present — i.e. if we can build a function
-       and its argument, we can build its result. `fuel = initial.length` bounds
-       the iterations (each round adds at least one new type, or stops).
-
-    Note: unlike the paper, we do not additionally *fabricate* new arrow types
-    from this set here; arrow-type generation is handled separately by
-    `genLMonoTy`. So this implements only the "select an inhabited type directly"
-    half of the paper's construction. -/
+  We begin by computing the syntactic sub-types for each types in the context,
+  then add new types to the set according to the following rule:
+  if (σ → τ) and σ are both in the set, then τ is too. -/
 def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
   let allTys := bctx ++ fctx.map Prod.snd ++ octx.map Prod.snd
   let initial := (allTys.flatMap syntacticSubtypes).eraseDups
