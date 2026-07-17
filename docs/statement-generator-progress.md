@@ -28,19 +28,24 @@ Everything currently on the branch **builds with zero `sorry`**:
 cd ~/Documents/strata-generators-stmt
 lake build StrataGenerators.StmtHasTypeAGen   # EXIT=0
 ```
-(The only `sorry` warnings are pre-existing in Strata's `LExprTypeSpec.lean`,
-lines 900/928/5495 — not ours.)
+(The only `sorry` warnings from a full `lake build` are pre-existing and not ours:
+in this repo's `StrataGenerators/HasTypeGen.lean` — the in-progress frequency
+rewrite — and in Strata's upstream `LExprTypeSpec.lean`.)
 
 ---
 
 ## Design decisions (already made — keep these)
 
-1. **Two threaded contexts.** `StmtHasType'` is 5-place: `C Γ s C' Γ'`.
+1. **Three threaded contexts.** `StmtHasType'` is 6-place: `C Γ L s C' Γ'`
+   (post-#1392, the spec now tracks the enclosing-block label set `L`).
    - `Γ` (variable scope) is threaded as the flat `VarCtx` from
      `CmdHasTypeAGen/Core.lean`, related to the semantic `TContext` via
      `VarCtxCorresponds` — exactly as `genCmds` does.
    - `C` (ambient `LContext`) is threaded as an honest `LContext CoreLParams`;
      `GenStmtResult.outC` **is** the output ambient context of the typing relation.
+   - `L` (enclosing-block labels) is threaded as a `List String` (`labels`),
+     extended by a fresh label whenever the generator descends into a `block` body.
+     See design decision 7 — it is now **typing-relevant** (`exit`/`block` premises).
 
 2. **`cmd` case** reuses `genCmd` (wrapped `CmdExt.cmd`); typing goes through
    `CmdExtHasType'.cmd → CmdHasType'`.
@@ -55,7 +60,9 @@ lines 900/928/5495 — not ours.)
 4. **`typeDecl` case.** The premise is `C.addKnownTypeWithError … = .ok C'`.
    The generator **matches** on the very same `addKnownTypeWithError` call, so the
    `.ok` branch's output context is *definitionally* `C'` — no `HashMap` freshness
-   reasoning needed. On `.error` (name clash) it falls back to a well-typed `exit`.
+   reasoning needed. On `.error` (name clash) it falls back to `noopStmt` (an empty
+   `ite .nondet [] []`, always well-typed regardless of `C`/`Γ`/`L`; a bare `exit`
+   is no longer a valid fallback since `exit` now requires `label ∈ L`).
    Soundness inverts this with `split at hr`.
 
 5. **Lexical scoping.** `block`, each `ite` branch, and the `loop` body have
@@ -78,22 +85,30 @@ lines 900/928/5495 — not ours.)
    all depths `d`), since leaves are generated at the shrinking size rather than a
    fixed depth.
 
-7. **Enclosing block labels (`exit` realism).** `genStmt`/`genStmts` thread a
-   `labels : List String` of the *enclosing block labels*. `genExitStmt` samples
-   its label from `labels` (falling back to `String.arbitrary` only when empty, at
-   top level), so a generated `exit` breaks out of a live enclosing block instead
-   of a dead random string — the `exiting l` config is consumed by a matching
-   `block` (`Imperative.StmtSemantics`, `step_block_exit_match`). A `block`
-   descends into its body under `label :: labels`; `ite`/`loop` bodies inherit
-   `labels` unchanged (only `block` introduces a named exit target). Labels are
-   typing-irrelevant (no `StmtHasType'` rule constrains them), so this affects only
-   operational realism, never soundness/completeness. `labels` is a *proof-relevant
-   index* of the `StmtReachable`/`StmtsReachable` relations (the `block`
-   constructor extends it) and an explicit argument of the mutual
-   soundness/completeness theorems (recursive calls vary it).
-   Design informed by *Testing Noninterference, Quickly* (Hriţcu et al., ICFP'13):
-   their "generation by execution" makes jump targets valid by construction;
-   Strata's lexical scoping lets us achieve the same guarantee statically.
+7. **Enclosing block labels (now typing-relevant).** `genStmt`/`genStmts` thread a
+   `labels : List String` of the *enclosing block labels* = the spec's `L`. Under
+   the post-#1392 spec the labels are **no longer typing-irrelevant**: `exit label`
+   requires `label ∈ L` and `block label` requires `label ∉ L` (no shadowing), with
+   the body typed under `label :: L`. The generator is constrained accordingly:
+   - `genExitStmt` samples its label from `labels` via `elements` (so `label ∈ L`
+     holds by construction, discharged in soundness by `mem_support_elements_iff`).
+     When `labels = []` (top level, no enclosing block) **no** well-typed `exit`
+     exists, so it falls back to `noopStmt` (empty `ite .nondet [] []`).
+   - The `block` case draws its label from `genFreshLabel labels` (mirroring
+     `genFreshName` for variables), guaranteeing `label ∉ L`; the freshness lemma
+     `genFreshLabel_not_mem` discharges the `block` premise in soundness. The body
+     is generated (and typed) under `label :: labels`.
+   - `ite`/`loop` bodies inherit `labels` unchanged (only `block` introduces a
+     named exit target).
+
+   Operationally this still gives the *Testing Noninterference, Quickly* (Hriţcu et
+   al., ICFP'13) guarantee — an `exit` breaks out of a live enclosing block (the
+   `exiting l` config is consumed by a matching `block`, `Imperative.StmtSemantics`
+   `step_block_exit_match`) — but it is now also *forced* by the typing spec rather
+   than a realism nicety. `labels` is a *proof-relevant index* of the
+   `StmtReachable`/`StmtsReachable` relations (the `block` constructor extends it),
+   an explicit argument of the mutual soundness/completeness theorems (recursive
+   calls vary it), and the fifth argument of every `StmtHasTypeA` conclusion.
 
 ---
 
@@ -104,12 +119,16 @@ In `StmtHasTypeAGen.lean`:
   `exprSound`, `freshDisjoint`, `toTCtx_insert`, `simpleOps`). `toCmdEnv` reinterprets
   it as a `GenCmdSoundEnv` at any `C` (legal: no `GenCmdSoundEnv` field mentions `C`).
 - Per-constructor: `genCmdStmt_sound`, `genExitStmt_sound`, `genFuncDeclStmt_sound`,
-  `genTypeDeclStmt_sound`.
+  `genTypeDeclStmt_sound`, plus `noopStmt_sound` (the shared always-well-typed
+  fallback used by the empty-`labels` `exit` case and the `typeDecl` name-clash case).
+- Label freshness: `fallbackFreshLabel_not_mem` / `genFreshLabel_not_mem` — every
+  label produced by `genFreshLabel labels` is absent from `labels`, discharging the
+  `block` premise `label ∉ L` (mirrors `genFreshName_produces_fresh` for variables).
 - Guard/measure/invariant helpers: `genCondOrNondet_det_sound`,
   `genOptMeasure_some_sound`, `genInvariants_sound`.
 - **Mutual** `genStmt_sound` / `genStmts_sound` — full soundness by WF recursion on
-  `(size, tag, len)`. Every generated statement satisfies `StmtHasTypeA P C Γ s C' Γ'`
-  for any program `P`.
+  `(size, tag, len)`. Every generated statement satisfies `StmtHasTypeA P C Γ L s C' Γ'`
+  for any program `P`, at the enclosing label set `L = labels` threaded by the generator.
 
 ---
 
@@ -157,7 +176,9 @@ support):
   — a leaf result at depth `n` lands in `genStmt … n` (`exit` at every `n`).
 - `block_mem`, `ite_det_mem`, `ite_nondet_mem`, `loop_mem` — reachable at `size+1`
   given body/branch reachability at `size` (+ guard/measure/invariant reachability
-  at `size+1`, `len ≤ size+1`).
+  at `size+1`, `len ≤ size+1`). `block_mem` (and the `StmtReachable.block`
+  constructor) take the label as `∈ support (genFreshLabel labels)`, matching the
+  generator's fresh-label draw.
 - `genStmts_nil_mem`, `genStmts_cons_mem` — the list-level constructors.
 
 Completeness-helper support-inversion lemmas (`pick`/`map`/`listOfMaxLength`):

@@ -31,14 +31,17 @@ component generators:
 - `genLExpr` (from `HasTypeAGen/Core.lean`) for the `bool`/`int` expressions
   appearing in `ite`/`loop` guards, loop measures, and loop invariants.
 
-## The two threaded contexts
+## The three threaded contexts
 
-`StmtHasType'` is a 5-place relation `C Γ s C' Γ'`. The generator threads a
-representation of both:
+`StmtHasType'` is a 6-place relation `C Γ L s C' Γ'` (post-#1392: the spec now
+tracks the set `L` of enclosing-block labels). The generator threads a
+representation of all three:
 
 - `Γ` (variable type-scope) is threaded via the flat `VarCtx` from
   `CmdHasTypeAGen/Core.lean`, exactly as `genCmd`/`genCmds` do.
 - `C` (the ambient `LContext`) is threaded as an honest `LContext CoreLParams`.
+- `L` (the enclosing-block labels) is threaded as a `List String`, extended by a
+  fresh label whenever the generator descends into a `block` body.
 
 The **annotated** spec `instHasTypeA` ignores both `C` and `Γ` when typing
 expressions, so `C` never influences *which expression* is produced. The only
@@ -46,7 +49,19 @@ constructor whose well-typedness genuinely depends on `C` is `typeDecl` (its
 premise is `C.addKnownTypeWithError … = .ok C'`); we handle it by generating a
 `TypeConstructor` and then **matching** on the result of `addKnownTypeWithError`,
 so the `.ok` branch's output context is definitionally the required `C'`. On a
-name clash we fall back to an (always-well-typed) `exit`.
+name clash we fall back to an (always-well-typed) empty non-deterministic `ite`.
+
+## Labels
+
+Under the new spec `exit label` requires `label ∈ L` and `block label` requires
+`label ∉ L` (no shadowing), with the body typed under `label :: L`. Accordingly:
+
+- `genExitStmt` samples its target from the *enclosing* labels `L` (via
+  `elements`), so the generated `exit` genuinely targets a live enclosing block.
+  When `L = []` (no enclosing block, e.g. at top level) no valid `exit` exists,
+  so it falls back to the always-well-typed empty non-deterministic `ite`.
+- The `block` generator draws its label from `genFreshLabel L`, guaranteeing
+  `label ∉ L`, and generates the body under `label :: L`.
 
 ## Lexical scoping
 
@@ -70,6 +85,25 @@ structure GenStmtResult where
   outC : LContext CoreLParams
   /-- The output variable type-scope after the statement. -/
   outCtx : VarCtx
+
+-- ── Fresh label generation ───────────────────────────────────────────────
+
+/-- A fallback label guaranteed to be absent from `labels`: a string of `x`
+    characters strictly longer than any label in the list. Mirrors
+    `fallbackFreshName` for variable contexts. -/
+def fallbackFreshLabel (labels : List String) : String :=
+  String.ofList (List.replicate (labels.foldl (fun acc l => max acc l.length) 0 + 1) 'x')
+
+/-- Generate a fresh block label not in `labels`. Uses `String.arbitrary` for
+    randomness and falls back to a length-based guarantee when the random label
+    collides. Guarantees `label ∉ labels`, the `block` premise of the new spec.
+    Mirrors `genFreshName` for variable names. -/
+def genFreshLabel [Gen G] (labels : List String) : G String := do
+  let s ← String.arbitrary
+  if s ∈ labels then
+    pure (fallbackFreshLabel labels)
+  else
+    pure s
 
 -- ── TypeConstructor / declaration sub-generators ─────────────────────────
 
@@ -153,22 +187,27 @@ def genCmdStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
   let r ← genCmd fctx octx tvars ctx depth
   pure ⟨Stmt.cmd (CmdExt.cmd r.cmd), C, r.outCtx⟩
 
-/-- Generate an `exit` statement. When there are enclosing block `labels` in
-    scope, the exit label is sampled from them, so the generated exit actually
-    breaks out of a live enclosing block (the `exiting l` config is consumed by a
-    matching `block` — see `Imperative.StmtSemantics`). When no block encloses the
-    current point (`labels = []`, e.g. at top level) it falls back to a random
-    alphanumeric label. Context is unchanged.
+/-- An always-well-typed "no-op" statement: an empty non-deterministic `ite`.
+    Typed by `StmtHasType'.ite_nondet` with both (empty) branches typed by
+    `StmtsHasType'.nil`, independent of `C`, `Γ`, and the label set `L`. Used as
+    the fallback wherever no in-scope `exit` (or fresh type name) is available. -/
+def noopStmt (C : LContext CoreLParams) (ctx : VarCtx) : GenStmtResult :=
+  ⟨Stmt.ite .nondet [] [] default, C, ctx⟩
 
-    Labels are typing-irrelevant (`StmtHasType'.exit` has no premise on the
-    label), so this choice affects only operational realism, never well-typedness;
-    completeness is unaffected because both branches remain reachable. -/
+/-- Generate an `exit` statement targeting an enclosing block. Under the new
+    typing spec `StmtHasType'.exit` requires `label ∈ L`, so the target label is
+    sampled (via `elements`) from the enclosing-block `labels` — the generated
+    `exit` genuinely breaks out of a live enclosing block. When no block encloses
+    the current point (`labels = []`, e.g. at top level) *no* well-typed `exit`
+    exists, so this falls back to the always-well-typed `noopStmt`. Context is
+    unchanged. -/
 def genExitStmt [Gen G] (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) : G GenStmtResult := do
-  let l ← match labels with
-    | [] => String.arbitrary
-    | l :: ls => elements (l :: ls) (by simp)
-  pure ⟨Stmt.exit l default, C, ctx⟩
+    (C : LContext CoreLParams) (ctx : VarCtx) : G GenStmtResult :=
+  match labels with
+  | [] => pure (noopStmt C ctx)
+  | l :: ls => do
+      let lbl ← elements (l :: ls) (by simp)
+      pure ⟨Stmt.exit lbl default, C, ctx⟩
 
 /-- Generate a `funcDecl` statement. The syntactic declaration `decl` (a
     non-recursive `PureFunc`) and the well-typed witness `func` (added to `C`)
@@ -182,14 +221,14 @@ def genFuncDeclStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx)
 
 /-- Generate a `typeDecl` statement. A random `TypeConstructor` is generated and
     checked against `C` via `addKnownTypeWithError`. On success the output context
-    is the extended `C'`; on a name clash we fall back to an `exit` (leaving `C`
+    is the extended `C'`; on a name clash we fall back to `noopStmt` (leaving `C`
     unchanged), keeping the generator total and sound. -/
 def genTypeDeclStmt [Gen G] (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) :
     G GenStmtResult := do
   let tc ← genTypeConstructor depth
   match C.addKnownTypeWithError { name := tc.name, metadata := tc.numargs } default with
   | .ok C' => pure ⟨Stmt.typeDecl tc default, C', ctx⟩
-  | .error _ => pure ⟨Stmt.exit "" default, C, ctx⟩
+  | .error _ => pure (noopStmt C ctx)
 
 -- ── Main mutually-recursive statement / statement-list generators ─────────
 
@@ -230,7 +269,9 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
         (1, fun () => genFuncDeclStmt fctx octx C ctx (size + 1)),
         (1, fun () => genTypeDeclStmt C ctx (size + 1)),
         (2, fun () => do
-          let label ← String.arbitrary
+          -- The block's `label` must not shadow an enclosing one (`label ∉ L`,
+          -- the new-spec `block` premise), so it is drawn fresh from `labels`.
+          let label ← genFreshLabel labels
           let ⟨⟨len, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           -- The block's own `label` becomes an enclosing label for its body, so
           -- an `exit` inside the body can break out of this block. The body is
@@ -316,5 +357,11 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 #eval (do
   let (ss, _, _) ← genProgramStmts [] [] [] 2 4
   IO.println <| Std.format ss |>.pretty : IO Unit)
+
+-- Smoke test: with enclosing labels in scope, `exit` may target one of them.
+#guard_msgs(drop warning, drop all) in
+#eval (for _ in [:5] do
+  let ⟨s, _, _⟩ ← genStmt [] [] [] ["outer", "inner"] (LContext.default) [] 2
+  IO.println <| Std.format s |>.pretty : IO Unit)
 
 end StrataGenerators.Stmt

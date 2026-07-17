@@ -53,11 +53,16 @@ the same operation the generator performs — no reasoning about the underlying
 
 ## Threading
 
-Both proofs thread two contexts, mirroring the generator:
+Both proofs thread three contexts, mirroring the generator:
 - `Γ` is threaded via a `VarCtx` and related to the semantic `TContext` through a
   `toTCtx`/`VarCtxCorresponds` bundle (`GenStmtSoundEnv`), just as `genCmds` does.
 - `C` is threaded as an honest `LContext CoreLParams`; the generator's output
   `outC` field *is* the output ambient context of the typing relation.
+- `L` (the enclosing-block labels, `labels`) is threaded as a `List String`. It is
+  the fifth argument of the 6-place `StmtHasTypeA` relation. Its typing role is in
+  two constructors: `exit label` requires `label ∈ L`, discharged by the
+  `elements` support of `genExitStmt`; `block label` requires `label ∉ L`,
+  discharged by the freshness of `genFreshLabel` (see `genFreshLabel_fresh`).
 -/
 
 namespace StrataGenerators.Stmt
@@ -122,39 +127,53 @@ variable {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdentifier}
 theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) fctx octx tvars C ctx d)) :
-    StmtHasTypeA P C (env.toTCtx ctx) r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
   simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
   obtain ⟨rc, hrc, rfl⟩ := hr
   have hcmd := genCmd_sound_env fctx octx tvars ctx d C (env.toCmdEnv C d) rc hrc
-  exact StmtHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) (.cmd rc.cmd)
+  exact StmtHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) labels (.cmd rc.cmd)
     (CmdExtHasType'.cmd (env.toTCtx ctx) (env.toTCtx rc.outCtx) rc.cmd hcmd)
 
-/-- Soundness of `genExitStmt`. -/
+/-- `noopStmt` (the empty non-deterministic `ite`) is well-typed at every ambient
+    context, scope, and label set, via `ite_nondet` with two `nil` branches. -/
+theorem noopStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
+    (C : LContext CoreLParams) (ctx : VarCtx) :
+    StmtHasTypeA P C (env.toTCtx ctx) labels (noopStmt C ctx).stmt
+      (noopStmt C ctx).outC (env.toTCtx (noopStmt C ctx).outCtx) :=
+  StmtHasType'.ite_nondet C (env.toTCtx ctx) C (env.toTCtx ctx) C (env.toTCtx ctx)
+    labels [] [] default
+    (StmtsHasType'.nil C (env.toTCtx ctx) labels)
+    (StmtsHasType'.nil C (env.toTCtx ctx) labels)
+
+/-- Soundness of `genExitStmt`. With enclosing labels the target is drawn from
+    them (`label ∈ L`, discharging the `exit` premise); with no enclosing block
+    (`labels = []`) it falls back to the well-typed `noopStmt`. -/
 theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
-    StmtHasTypeA P C (env.toTCtx ctx) r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
   cases labels with
   | nil =>
-    simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨l, _, rfl⟩ := hr
-    exact StmtHasType'.exit C (env.toTCtx ctx) l default
+    simp only [genExitStmt, mem_support_pure_iff] at hr
+    subst hr
+    exact noopStmt_sound P env C ctx
   | cons hd tl =>
-    simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨l, _, rfl⟩ := hr
-    exact StmtHasType'.exit C (env.toTCtx ctx) l default
+    simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
+               mem_support_elements_iff] at hr
+    obtain ⟨l, hl, rfl⟩ := hr
+    exact StmtHasType'.exit C (env.toTCtx ctx) (hd :: tl) l default hl
 
 /-- Soundness of `genFuncDeclStmt` (at any depth `d`). -/
 theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) fctx octx C ctx d)) :
-    StmtHasTypeA P C (env.toTCtx ctx) r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
   simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
              mem_support_pure_iff] at hr
   obtain ⟨decl, ⟨f0, _hf0, rfl⟩, func, hfunc, rfl⟩ := hr
   have hwt : FuncHasTypeA C (env.toTCtx ctx) func :=
     genFunction_sound fctx octx d env.simpleOps C (env.toTCtx ctx) func hfunc
-  exact StmtHasType'.funcDecl C (env.toTCtx ctx) (Function.toPureFuncDecl f0) func default
+  exact StmtHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default
     (by simp) hwt
 
 /-- Soundness of `genTypeDeclStmt` (at any depth `d`). The `.ok` branch discharges
@@ -162,7 +181,7 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
 theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d)) :
-    StmtHasTypeA P C (env.toTCtx ctx) r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
   simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
   obtain ⟨tc, _htc, hr⟩ := hr
   -- Branch on the same `addKnownTypeWithError` the generator computed.
@@ -171,19 +190,61 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
     rename_i C' heq
     simp only [mem_support_pure_iff] at hr
     subst hr
-    exact StmtHasType'.typeDecl C C' (env.toTCtx ctx) tc default heq
-  · -- `.error`: falls back to `exit`.
+    exact StmtHasType'.typeDecl C C' (env.toTCtx ctx) labels tc default heq
+  · -- `.error`: falls back to `noopStmt`.
     rename_i heq
     simp only [mem_support_pure_iff] at hr
     subst hr
-    exact StmtHasType'.exit C (env.toTCtx ctx) "" default
+    exact noopStmt_sound P env C ctx
+
+-- ── Fresh-label freshness (for the `block` premise) ──────────────────────
+
+/-- The foldl-max accumulator over label lengths is non-decreasing. -/
+private theorem foldl_maxlen_ge_init (xs : List String) (init : Nat) :
+    init ≤ xs.foldl (fun acc l => max acc l.length) init := by
+  induction xs generalizing init with
+  | nil => exact Nat.le_refl _
+  | cons hd tl ih => exact Nat.le_trans (Nat.le_max_left _ _) (ih _)
+
+/-- The foldl-max result bounds the length of every member. -/
+private theorem foldl_maxlen_ge_of_mem (xs : List String) (l : String)
+    (h : l ∈ xs) (init : Nat) :
+    l.length ≤ xs.foldl (fun acc l => max acc l.length) init := by
+  induction xs generalizing init with
+  | nil => exact absurd h (by exact List.not_mem_nil)
+  | cons hd tl ih =>
+    cases h with
+    | head => exact Nat.le_trans (Nat.le_max_right _ _) (foldl_maxlen_ge_init tl _)
+    | tail _ hmem => exact ih hmem _
+
+/-- `fallbackFreshLabel labels` is absent from `labels`: it is strictly longer
+    than every label in the list. -/
+theorem fallbackFreshLabel_not_mem (labels : List String) :
+    fallbackFreshLabel labels ∉ labels := by
+  intro hmem
+  have hlen : (fallbackFreshLabel labels).length =
+      (labels.foldl (fun acc l => max acc l.length) 0) + 1 := by
+    simp [fallbackFreshLabel, String.length_ofList, List.length_replicate]
+  have hle := foldl_maxlen_ge_of_mem labels (fallbackFreshLabel labels) hmem 0
+  omega
+
+/-- Every label in the support of `genFreshLabel labels` is absent from `labels`,
+    discharging the `label ∉ L` premise of the `block` typing rule. -/
+theorem genFreshLabel_not_mem (labels : List String) :
+    ∀ l, l ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) → l ∉ labels := by
+  intro l hmem
+  simp only [genFreshLabel, mem_support_bind_iff] at hmem
+  obtain ⟨s, _, hl⟩ := hmem
+  simp only [mem_support_ite_iff, mem_support_pure_iff] at hl
+  rcases hl with ⟨_, rfl⟩ | ⟨hns, rfl⟩
+  · exact fallbackFreshLabel_not_mem labels
+  · exact hns
 
 -- ── Guard / measure / invariant soundness helpers ────────────────────────
 
 /-- Any `.det`-guard produced by `genCondOrNondet` (at depth `d`) carries a
     boolean expression. -/
 theorem genCondOrNondet_det_sound (env : GenStmtSoundEnv fctx octx tvars) (d : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
     (cond : ExprOrNondet Expression)
     (hc : cond ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) fctx octx tvars d))
     (g : Expression.Expr) (hg : cond = .det g) :
@@ -242,7 +303,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars labels C ctx n)) :
-    StmtHasTypeA P C (env.toTCtx ctx) r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
   cases n with
   | zero =>
     simp only [genStmt, mem_support_frequency_iff] at hr
@@ -264,17 +325,18 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     · exact genTypeDeclStmt_sound P env C ctx (size + 1) r hr
     · -- block
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
-      obtain ⟨label, _hlabel, ⟨⟨len, _⟩⟩, _hlenbd, triple, htriple, rfl⟩ := hr
+      obtain ⟨label, hlabel, ⟨⟨len, _⟩⟩, _hlenbd, triple, htriple, rfl⟩ := hr
+      have hfresh := genFreshLabel_not_mem labels label hlabel
       have ih := genStmts_sound P env (label :: labels) C ctx size len triple htriple
       exact StmtHasType'.block C (env.toTCtx ctx) triple.2.1 (env.toTCtx triple.2.2)
-        label triple.1 default ih
+        labels label triple.1 default hfresh ih
     · -- ite_det
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨cond, hcond, ⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
       have iht := genStmts_sound P env labels C ctx size tlen tt htt
       have ihe := genStmts_sound P env labels C ctx size elen et het
       exact StmtHasType'.ite_det C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
-        et.2.1 (env.toTCtx et.2.2) cond tt.1 et.1 default
+        et.2.1 (env.toTCtx et.2.2) labels cond tt.1 et.1 default
         (env.exprSound (size + 1) .bool cond hcond) iht ihe
     · -- ite_nondet
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
@@ -282,15 +344,15 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
       have iht := genStmts_sound P env labels C ctx size tlen tt htt
       have ihe := genStmts_sound P env labels C ctx size elen et het
       exact StmtHasType'.ite_nondet C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
-        et.2.1 (env.toTCtx et.2.2) tt.1 et.1 default iht ihe
+        et.2.1 (env.toTCtx et.2.2) labels tt.1 et.1 default iht ihe
     · -- loop
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨guard, hguard, measure, hmeasure, invs, hinvs, ⟨⟨blen, _⟩⟩, _, body, hbody, rfl⟩ := hr
       have ih := genStmts_sound P env labels C ctx size blen body hbody
       refine StmtHasType'.loop C (env.toTCtx ctx) body.2.1 (env.toTCtx body.2.2)
-        guard measure invs body.1 default ?_ ?_ ?_ ih
+        labels guard measure invs body.1 default ?_ ?_ ?_ ih
       · intro g hg
-        exact genCondOrNondet_det_sound env (size + 1) C (env.toTCtx ctx) guard hguard g hg
+        exact genCondOrNondet_det_sound env (size + 1) guard hguard g hg
       · intro m hm
         exact genOptMeasure_some_sound env (size + 1) measure hmeasure m hm
       · intro p hp
@@ -309,19 +371,19 @@ theorem genStmts_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (result : List Statement × LContext CoreLParams × VarCtx)
     (hr : result ∈ SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars labels C ctx size len)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) result.1 result.2.1 (env.toTCtx result.2.2) := by
+    StmtsHasTypeA P C (env.toTCtx ctx) labels result.1 result.2.1 (env.toTCtx result.2.2) := by
   cases len with
   | zero =>
     simp only [genStmts, mem_support_pure_iff] at hr
     subst hr
-    exact StmtsHasType'.nil C (env.toTCtx ctx)
+    exact StmtsHasType'.nil C (env.toTCtx ctx) labels
   | succ len =>
     simp only [genStmts, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨rhead, hhead, rtail, htail, rfl⟩ := hr
     have hh := genStmt_sound P env labels C ctx size rhead hhead
     have ht := genStmts_sound P env labels rhead.outC rhead.outCtx size len rtail htail
     exact StmtsHasType'.cons C rhead.outC rtail.2.1 (env.toTCtx ctx) (env.toTCtx rhead.outCtx)
-      (env.toTCtx rtail.2.2) rhead.stmt rtail.1 hh ht
+      (env.toTCtx rtail.2.2) labels rhead.stmt rtail.1 hh ht
 termination_by (size, 1, len)
 
 end
@@ -395,7 +457,7 @@ theorem block_mem (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat)
     (len : Nat) (hlen : len ≤ size + 1)
     (hbody : (body, C_body, Γ_body) ∈
       SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars (label :: labels) C ctx size len))
-    (hlabel : label ∈ SetGen.support (String.arbitrary (G := SetGen.Set))) :
+    (hlabel : label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels)) :
     (⟨Stmt.block label body default, C, ctx⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars labels C ctx (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+2+2+1+2; omega)]
@@ -595,7 +657,7 @@ inductive StmtReachable (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
       is generated under `label :: labels`, so a nested `exit` may target this block. -/
   | block : ∀ labels C ctx size label body C_body Γ_body len,
       len ≤ size + 1 →
-      label ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) →
+      label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) →
       StmtsReachable fctx octx tvars (label :: labels) C ctx size len body C_body Γ_body →
       StmtReachable fctx octx tvars labels C ctx (size + 1)
         (Stmt.block label body default) C ctx
@@ -712,7 +774,7 @@ theorem genStmt_complete_sound (P : Program) (env : GenStmtSoundEnv fctx octx tv
     (h : StmtReachable fctx octx tvars labels C ctx n s C' ctx') :
     (⟨s, C', ctx'⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars labels C ctx n) ∧
-    StmtHasTypeA P C (env.toTCtx ctx) s C' (env.toTCtx ctx') := by
+    StmtHasTypeA P C (env.toTCtx ctx) labels s C' (env.toTCtx ctx') := by
   have hmem := genStmt_complete labels C ctx n s C' ctx' h
   exact ⟨hmem, genStmt_sound P env labels C ctx n ⟨s, C', ctx'⟩ hmem⟩
 
