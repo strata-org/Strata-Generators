@@ -3455,15 +3455,8 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     -- The only non-trivial obligation is showing SimpleType concreteArgTys[i]
     -- (required by genLExprBase_sound). This follows from hSimplePolyOps
     -- which directly asserts that findPolymorphicOps entries have SimpleType args.
-    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    have hlt : idx.down.val < (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length := by omega
-    have hentry_mem : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) ∈
-        findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys := by
-      have heq : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) =
-          (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys)[idx.down.val] := by
-        simp [List.getD, List.getElem?_eq_getElem hlt]
-      rw [heq]; exact List.getElem_mem hlt
-    let entry := (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", [])
+    obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
+    rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
     let name := entry.1
     let concreteArgTys := entry.2
     let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
@@ -4371,23 +4364,16 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
     List.length_pos_of_mem hEntry
   left
   refine ⟨hOpsPos, ?_⟩
-  -- Exhibit the index of (name, concreteArgTys) in ops
-  obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hEntry
-  have hidx_le : idx ≤ (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length - 1 := by omega
-  have hgetD : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", []) = (name, concreteArgTys) := by
-    simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
-  refine ⟨⟨⟨idx, Nat.zero_le _, hidx_le⟩⟩, ⟨Nat.zero_le _, hidx_le⟩, args, ?_, ?_⟩
+  -- The candidate is chosen by `elements`, so exhibit `(name, concreteArgTys)` as
+  -- the picked entry (a member of `ops`), then the args and the two equalities.
+  refine ⟨(name, concreteArgTys), ?_, args, ?_, ?_⟩
+  · -- (name, concreteArgTys) ∈ elements ops _
+    rw [← mem_support_iff, mem_support_elements_iff]
+    exact hEntry
   · -- args ∈ concreteArgTys.mapM (genLExprBase ...)
-    -- The goal references `.getD idx ("", [])` which equals `(name, concreteArgTys)` by hgetD
-    show args ∈ List.mapM (m := SetGen.Set) (genLExprBase fctx octx tvars bctx depth)
-      ((findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2
-    rw [hgetD]
     exact (mem_mapM_iff (genLExprBase fctx octx tvars bctx depth) concreteArgTys args).mpr hArgs
   · -- The expression equals mkApps ...
-    show mkApps (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args =
-      mkApps (.op () ⟨((findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).1, ()⟩
-        (some (((findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args
-    rw [hgetD]
+    rfl
 
 /-- An expression is a valid polymorphic operator application reachable by
     `genIndirPoly`: there exist sampled types, an operator entry in `pctx` that

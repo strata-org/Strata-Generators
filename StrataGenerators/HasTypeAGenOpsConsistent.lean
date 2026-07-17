@@ -1166,18 +1166,9 @@ theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
   simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite] at he
   obtain ⟨sampledTys, _, he⟩ := he
   rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
-  · -- polymorphic operator applied
-    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    have hlt : idx.down.val <
-        (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).length := by omega
-    have hentry_mem :
-        (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).getD idx.down.val ("", []) ∈
-        findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys := by
-      have heq :
-          (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).getD idx.down.val ("", []) =
-          (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys)[idx.down.val] := by
-        simp [List.getD, List.getElem?_eq_getElem hlt]
-      rw [heq]; exact List.getElem_mem hlt
+  · -- polymorphic operator applied: `elements` picks an entry of the candidate list
+    obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
+    rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
     apply mkApps_opsConsistentR
     · exact hPoly sampledTys _ _ hentry_mem
     · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs

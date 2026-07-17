@@ -797,8 +797,7 @@ def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List
 -- function whose type variables shares a name with a free type variable of
 -- the target type (e.g. `id : ∀α. α → α` at target `.ftvar "α"`) would result in an `.op`
 -- annotation that is *not* a valid type instantiation of the factory function's polymorphic
--- type, violating `OpsConsistent`. Freshening the bound variables away from the context's free
--- variables before unification restores coherence.
+-- type, violating `OpsConsistent`. Freshening bound type variables before unification prevents this problem.
 
 /-- A supply of candidate fresh type-variable names: `a, b, …, z, a1, b1, c1, …` —
     `freshNameSupply n` returns a list containing at least `n` distinct names. -/
