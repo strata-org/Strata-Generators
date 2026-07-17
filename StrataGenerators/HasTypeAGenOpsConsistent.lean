@@ -45,8 +45,8 @@ Every `.op` node a generated term can contain comes from one of two places:
   substitution instance of the operator's generic type (a bound-variable freshening
   renaming composed with the generator's own substitution — see
   `docs/ops-consistent-capture-bug.md`). The forward-instance guard in
-  `polyOpsForResult` (`subst fullSubst retTy == τ`) ensures the instance targets `τ`;
-  `polyOpsForResult_instanceR` recovers a single witnessing substitution, discharged
+  `findPolymorphicOps` (`subst fullSubst retTy == τ`) ensures the instance targets `τ`;
+  `findPolymorphicOps_instanceR` recovers a single witnessing substitution, discharged
   from a factory-well-formedness hypothesis `PCtxWF` (via
   `PolyOpsConsistentR_of_PCtxWF`), giving the unconditional
   `genLExpr_opsConsistentR_of_PCtxWF`. Unlike the old ground-only approach this
@@ -85,7 +85,7 @@ theorem factoryOps_mem_char (F : @Factory LExprParams') (nm : String) (τ : LMon
     `freeVars ⊆ typeArgs` invariant is required. `OpsConsistentR`'s `.op_in`
     constructor demands only the *existence* of a substitution turning the generic
     type into the annotation, and the generator builds its annotation as exactly
-    such a substitution instance (see `polyOpsForResult_instanceR`); it never runs
+    such a substitution instance (see `findPolymorphicOps_instanceR`); it never runs
     `opTypeSubst`, so the monomorphic short-circuit that forced the extra invariant
     in the operational proof (`docs/ops-consistent-polymorphic-gap.md`) does not
     arise here. -/
@@ -883,7 +883,7 @@ theorem indir_op_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
 
 /-- The assumption that every polymorphic-operator annotation `genIndirPoly`
     can emit for target `τ` is `OpsConsistentR`: for every candidate
-    `(name, concreteArgTys)` in `polyOpsForResult pctx τ generableTys sampledTys`,
+    `(name, concreteArgTys)` in `findPolymorphicOps pctx τ generableTys sampledTys`,
     the op node annotated with `concreteArgTys.foldr arrow τ` is consistent.
 
     **This predicate is fully PROVEN** — see `PolyOpsConsistentR_of_PCtxWF`,
@@ -897,8 +897,8 @@ theorem indir_op_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
     ground-matching machinery: the generator builds its annotation as
     `subst fullSubst (subst renameSubst genericTy)`, a genuine substitution
     *instance* of the operator's generic type, which is exactly the witness
-    `OpsConsistentR.op_in` asks for (`polyOpsForResult_instanceR`). The
-    forward-instance guard in `polyOpsForResult` (`subst fullSubst retTy == τ`)
+    `OpsConsistentR.op_in` asks for (`findPolymorphicOps_instanceR`). The
+    forward-instance guard in `findPolymorphicOps` (`subst fullSubst retTy == τ`)
     ensures the instance actually targets `τ`; unlike the old ground-only guard it
     permits annotations mentioning a free (non-quantified) type variable.
 
@@ -908,7 +908,7 @@ def PolyOpsConsistentR (F : @Factory LExprParams') (pctx : PolyOpCtx)
     (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) : Prop :=
   ∀ (sampledTys : List LMonoTy) (name : String) (concreteArgTys : List LMonoTy),
     (name, concreteArgTys) ∈
-      polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys →
+      findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys →
     Lambda.OpsConsistentR F
       (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
 
@@ -1049,7 +1049,7 @@ theorem freshenBoundVars_snd_eq_subst (boundVars : List TyIdentifier) (monoTy : 
   exact ⟨_, rfl⟩
 
 /-- **Instance witness (declarative).** Every candidate `(name, concreteArgTys)`
-    that `polyOpsForResult` returns has, for the corresponding factory function
+    that `findPolymorphicOps` returns has, for the corresponding factory function
     `fn` (`F[name]? = some fn`), an annotation `A = concreteArgTys.foldr arrow τ`
     that is a substitution *instance* of `fn`'s generic type
     `mkArrow' fn.output fn.inputs.values` — i.e. there is a substitution `S` with
@@ -1063,17 +1063,17 @@ theorem freshenBoundVars_snd_eq_subst (boundVars : List TyIdentifier) (monoTy : 
     composing the freshening renaming with the generator's substitution via
     `composite_instance_subst` (no `SubstWF`). Annotations mentioning a free type
     variable are handled uniformly. -/
-theorem polyOpsForResult_instanceR (F : @Factory LExprParams') (pctx : PolyOpCtx)
+theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpCtx)
     (τ : LMonoTy) (generableTys sampledTys : List LMonoTy)
     (hPctx : PCtxWF F pctx)
     (name : String) (concreteArgTys : List LMonoTy)
-    (hEntry : (name, concreteArgTys) ∈ polyOpsForResult pctx τ generableTys sampledTys) :
+    (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ generableTys sampledTys) :
     ∃ (fn : LFunc LExprParams') (S : Lambda.Subst),
       F[name]? = some fn ∧
       concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
         = LMonoTy.subst S (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd)) := by
-  -- Step 1: unfold membership in `polyOpsForResult` down to the success branch.
-  unfold polyOpsForResult at hEntry
+  -- Step 1: unfold membership in `findPolymorphicOps` down to the success branch.
+  unfold findPolymorphicOps at hEntry
   simp only [List.mem_filterMap] at hEntry
   obtain ⟨⟨nm, boundVars, monoTy⟩, hmem, hfilt⟩ := hEntry
   -- The per-operator computation runs in the `Option` monad (`filterMap`'s
@@ -1136,7 +1136,7 @@ theorem polyOpsForResult_instanceR (F : @Factory LExprParams') (pctx : PolyOpCtx
 
 /-- Under `PCtxWF`, the polymorphic-annotation assumption `PolyOpsConsistentR`
     holds — because every emitted annotation is a substitution instance of the
-    operator's generic type (`polyOpsForResult_instanceR`), which is exactly the
+    operator's generic type (`findPolymorphicOps_instanceR`), which is exactly the
     witness `OpsConsistentR.op_in` (`OpsConsistentR.op_in`) demands. No case
     split on `typeArgs`, no groundness. -/
 theorem PolyOpsConsistentR_of_PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx)
@@ -1144,7 +1144,7 @@ theorem PolyOpsConsistentR_of_PCtxWF (F : @Factory LExprParams') (pctx : PolyOpC
     PolyOpsConsistentR F pctx bctx fctx τ := by
   intro sampledTys name concreteArgTys hEntry
   obtain ⟨fn, S, hget, hinst⟩ :=
-    polyOpsForResult_instanceR F pctx τ _ sampledTys hPctx name concreteArgTys hEntry
+    findPolymorphicOps_instanceR F pctx τ _ sampledTys hPctx name concreteArgTys hEntry
   exact Lambda.OpsConsistentR.op_in hget hinst
 
 -- ── genIndirPoly consistency ─────────────────────────────────────────
@@ -1169,13 +1169,13 @@ theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
   · -- polymorphic operator applied
     obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
     have hlt : idx.down.val <
-        (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).length := by omega
+        (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).length := by omega
     have hentry_mem :
-        (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).getD idx.down.val ("", []) ∈
-        polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys := by
+        (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).getD idx.down.val ("", []) ∈
+        findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys := by
       have heq :
-          (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).getD idx.down.val ("", []) =
-          (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys)[idx.down.val] := by
+          (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys).getD idx.down.val ("", []) =
+          (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys)[idx.down.val] := by
         simp [List.getD, List.getElem?_eq_getElem hlt]
       rw [heq]; exact List.getElem_mem hlt
     apply mkApps_opsConsistentR
@@ -1262,12 +1262,12 @@ theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FV
 -- ── Sorry-free corollary for the empty polymorphic context ───────────
 -- The closed-term generators (`genClosedLExprWithFactory`, and
 -- `genLExprWithFactory` at its default `pctx := []`) use `pctx = []`. For that
--- case `polyOpsForResult [] _ _ = []`, so `genIndirPoly` never emits a
+-- case `findPolymorphicOps [] _ _ = []`, so `genIndirPoly` never emits a
 -- polymorphic op and the polymorphic-annotation obligation is vacuous — giving a
 -- result that does not even need `PCtxWF`.
 
-@[simp] theorem polyOpsForResult_nil (τ : LMonoTy) (g s : List LMonoTy) :
-    polyOpsForResult [] τ g s = [] := by unfold polyOpsForResult; rfl
+@[simp] theorem findPolymorphicOps_nil (τ : LMonoTy) (g s : List LMonoTy) :
+    findPolymorphicOps [] τ g s = [] := by unfold findPolymorphicOps; rfl
 
 /-- `genIndirPoly` with an empty polymorphic context always falls back to
     `genLExprBase`, hence is `OpsConsistentR`. -/

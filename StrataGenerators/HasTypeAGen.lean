@@ -3415,7 +3415,7 @@ theorem generableTypesFromCtx_simple
     substituting generable types into the polymorphic operator's type scheme) are
     also `SimpleType`s. This holds whenever bctx/fctx/octx only contain simple types.
 
-    The `hSimplePolyOps` precondition directly asserts that `polyOpsForResult`
+    The `hSimplePolyOps` precondition directly asserts that `findPolymorphicOps`
     produces entries whose argument types are all `SimpleType`. This is needed
     because `unifyTypes` wraps Strata's `Constraints.unify` which uses
     well-founded recursion internally, and its output cannot easily be reasoned
@@ -3427,7 +3427,7 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ)
     (hSimplePolyOps : ∀ sampledTys entry,
-      entry ∈ polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys →
+      entry ∈ findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys →
       ∀ σ ∈ entry.2, SimpleType σ)
     (e : LExpr')
     (he : e ∈ SetGen.support (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
@@ -3438,7 +3438,7 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
              SetGen.mem_dite] at he
   -- Peel the outer mapM (type sampling)
   obtain ⟨sampledTys, _, he⟩ := he
-  -- Split on whether polyOpsForResult found candidates
+  -- Split on whether findPolymorphicOps found candidates
   rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
   · -- Candidates found: choose one, generate args, assemble via mkApps.
     -- After destructuring the monadic binds, the expression is:
@@ -3454,16 +3454,16 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     --
     -- The only non-trivial obligation is showing SimpleType concreteArgTys[i]
     -- (required by genLExprBase_sound). This follows from hSimplePolyOps
-    -- which directly asserts that polyOpsForResult entries have SimpleType args.
+    -- which directly asserts that findPolymorphicOps entries have SimpleType args.
     obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    have hlt : idx.down.val < (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length := by omega
-    have hentry_mem : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) ∈
-        polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys := by
-      have heq : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) =
-          (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys)[idx.down.val] := by
+    have hlt : idx.down.val < (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length := by omega
+    have hentry_mem : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) ∈
+        findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys := by
+      have heq : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", []) =
+          (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys)[idx.down.val] := by
         simp [List.getD, List.getElem?_eq_getElem hlt]
       rw [heq]; exact List.getElem_mem hlt
-    let entry := (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", [])
+    let entry := (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx.down.val ("", [])
     let name := entry.1
     let concreteArgTys := entry.2
     let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
@@ -3499,7 +3499,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (τ : LMonoTy) (hτ : SimpleType τ)
     (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
     (hSimplePolyOps : ∀ sampledTys entry,
-      entry ∈ polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys →
+      entry ∈ findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys →
       ∀ σ ∈ entry.2, SimpleType σ)
     (e : LExpr')
     (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
@@ -4339,7 +4339,7 @@ private theorem sampledTys_mem_support (generableTys : List LMonoTy)
 
 /-- Completeness of `genIndirPoly`: if an expression can be assembled as
     `mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args` where
-    `(name, concreteArgTys)` is a valid entry in `polyOpsForResult` for
+    `(name, concreteArgTys)` is a valid entry in `findPolymorphicOps` for
     appropriate `sampledTys`, and each argument is in `genLExprBase`'s
     support, then the expression is in `genIndirPoly`'s support. -/
 theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
@@ -4352,7 +4352,7 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
       (¬((generableTypesFromCtx bctx fctx octx).length > 0) → σ = .bool))
     (name : String) (concreteArgTys : List LMonoTy)
-    (hEntry : (name, concreteArgTys) ∈ polyOpsForResult pctx τ
+    (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
       (generableTypesFromCtx bctx fctx octx) sampledTys)
     (args : List LExpr')
     (hArgs : List.Forall₂ (fun arg σ =>
@@ -4367,26 +4367,26 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
   -- Exhibit sampledTys as the witness for the type-sampling mapM
   refine ⟨sampledTys, sampledTys_mem_support _ _ hSampledLen hSampledValid, ?_⟩
   -- Take the positive branch of the dite (ops.length > 0)
-  have hOpsPos : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length > 0 :=
+  have hOpsPos : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length > 0 :=
     List.length_pos_of_mem hEntry
   left
   refine ⟨hOpsPos, ?_⟩
   -- Exhibit the index of (name, concreteArgTys) in ops
   obtain ⟨idx, hidx_lt, hidx_eq⟩ := List.getElem_of_mem hEntry
-  have hidx_le : idx ≤ (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length - 1 := by omega
-  have hgetD : (polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", []) = (name, concreteArgTys) := by
+  have hidx_le : idx ≤ (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length - 1 := by omega
+  have hgetD : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", []) = (name, concreteArgTys) := by
     simp [List.getD, List.getElem?_eq_getElem hidx_lt, hidx_eq]
   refine ⟨⟨⟨idx, Nat.zero_le _, hidx_le⟩⟩, ⟨Nat.zero_le _, hidx_le⟩, args, ?_, ?_⟩
   · -- args ∈ concreteArgTys.mapM (genLExprBase ...)
     -- The goal references `.getD idx ("", [])` which equals `(name, concreteArgTys)` by hgetD
     show args ∈ List.mapM (m := SetGen.Set) (genLExprBase fctx octx tvars bctx depth)
-      ((polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2
+      ((findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2
     rw [hgetD]
     exact (mem_mapM_iff (genLExprBase fctx octx tvars bctx depth) concreteArgTys args).mpr hArgs
   · -- The expression equals mkApps ...
     show mkApps (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args =
-      mkApps (.op () ⟨((polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).1, ()⟩
-        (some (((polyOpsForResult pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args
+      mkApps (.op () ⟨((findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).1, ()⟩
+        (some (((findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).getD idx ("", [])).2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args
     rw [hgetD]
 
 /-- An expression is a valid polymorphic operator application reachable by
@@ -4402,7 +4402,7 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
       (¬((generableTypesFromCtx bctx fctx octx).length > 0) → σ = .bool)) ∧
-    (name, concreteArgTys) ∈ polyOpsForResult pctx τ
+    (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
       (generableTypesFromCtx bctx fctx octx) sampledTys ∧
     List.Forall₂ (fun arg σ =>
       arg ∈ (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth σ))

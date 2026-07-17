@@ -888,38 +888,21 @@ def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : Lis
   -- Use fuel = initial.length as an upper bound on iterations
   addNewTypes initial.length initial
 
-/-- For each polymorphic operator in `pctx`, attempt to unify its return type
-    with the target type `τ`. Returns a list of
-    `(name, concreteArgTypes, fullConcreteType)` triples for operators that
-    successfully unify (with undetermined type variables to be sampled). -/
-def findPolyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
-    (generableTys : List LMonoTy) : List (String × List LMonoTy × LMonoTy) :=
-  pctx.filterMap fun (name, lty) =>
-    match lty with
-    | .forAll boundVars monoTy =>
-      let (argTys, retTy) := decomposeArrow monoTy
-      if argTys.isEmpty || argTys.length > 3 then none
-      else match unifyTypes retTy τ with
-        | none => none
-        | some subst =>
-          let freeTyVars := findFreeTyVars boundVars subst
-          if !freeTyVars.isEmpty && generableTys.isEmpty then none
-          else some (name, argTys, monoTy, subst, freeTyVars)
-  |>.map fun (name, argTys, monoTy, subst, freeTyVars) =>
-    let defaultSubst : Lambda.SubstOne := freeTyVars.map (fun v => (v, generableTys.headD .bool))
-    let fullSubst : Lambda.Subst := defaultSubst :: subst
-    let concreteArgTys := argTys.map (LMonoTy.subst fullSubst)
-    let concreteTy := LMonoTy.subst fullSubst monoTy
-    (name, concreteArgTys, concreteTy)
-
 /-- Collect the concrete (name, argTypes) pairs that result from instantiating
     polymorphic operators against target type `τ`. This is the pure computation
     that determines which operators can be called and at which types.
 
     Each entry `(name, concreteArgTys)` means operator `name` can be called with
-    arguments of types `concreteArgTys` to produce a result of type `τ`. -/
-def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
-    (generableTys : List LMonoTy) (sampledTys : List LMonoTy)
+    arguments of types `concreteArgTys` to produce a result of type `τ`.
+
+    `maxNumArgs` bounds the arity of operators considered: it must be ≥ the number
+    of free type variables any admitted operator can leave for the caller to
+    sample, since the caller (`genIndirPoly`) supplies exactly `maxNumArgs` sampled
+    types and `freeTyVars.zip sampledTys` would otherwise truncate. For any
+    well-formed factory operator its free type variables occur in its signature, so
+    `argTys.length ≤ maxNumArgs` guarantees no truncation. -/
+def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
+    (generableTys : List LMonoTy) (sampledTys : List LMonoTy) (maxNumArgs : Nat := 3)
     : List (String × List LMonoTy) :=
   -- Free type variables in scope that a bound var must not be captured by:
   -- those of the target type together with those of the sampled generable types.
@@ -936,7 +919,7 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     -- already-solved by unification (see `docs/ops-consistent-capture-bug.md`).
     let (freshBoundVars, freshMonoTy) := freshenBoundVars boundVars monoTy varsAlreadyInUse
     let (argTys, retTy) := decomposeArrow freshMonoTy
-    guard (!argTys.isEmpty && argTys.length ≤ 3)
+    guard (!argTys.isEmpty && argTys.length ≤ maxNumArgs)
     let subst ← unifyTypes retTy τ
     let freeTyVars := findFreeTyVars freshBoundVars subst
     guard (freeTyVars.isEmpty || !generableTys.isEmpty)
@@ -951,7 +934,7 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     -- `opTypeSubst`): the emitted annotation is built as
     -- `concreteArgTys.foldr arrow τ`, i.e. it *hardcodes* `τ` in the return
     -- position. To discharge `OpsConsistentR.op_in` the soundness proof
-    -- (`polyOpsForResult_instanceR`) must exhibit *some* substitution `S`
+    -- (`findPolymorphicOps_instanceR`) must exhibit *some* substitution `S`
     -- with `annotation = genericTy.subst S`, and it constructs that witness
     -- from `fullSubst` (composed with the freshening renaming). That witness
     -- reproduces the annotation's return position as `subst fullSubst retTy`
@@ -983,18 +966,21 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
     generate args via `mapM genLExprBase`, and assemble via `mkApps`. -/
 def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier)
-    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' := do
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3) : G LExpr' := do
   -- Compute the set of generable types from the current context
   let generableTys := generableTypesFromCtx bctx fctx octx
-  -- Sample types for instantiation (one per possible free tyvar, up to 3)
-  let sampledTys ← List.replicate 3 ()
+  -- Sample types for instantiation (one per possible free tyvar). We draw
+  -- `maxNumArgs` of them, which bounds the number of free type variables any
+  -- admitted operator can have (`findPolymorphicOps` filters to arity ≤ maxNumArgs),
+  -- so `freeTyVars.zip sampledTys` never truncates.
+  let sampledTys ← List.replicate maxNumArgs ()
     |>.mapM (fun _ =>
       if hg : generableTys.length > 0 then do
         let tidx ← choose 0 (generableTys.length - 1) (by omega)
         pure (generableTys.getD tidx.down .bool)
       else pure .bool)
   -- Compute concrete candidates
-  let ops := polyOpsForResult pctx τ generableTys sampledTys
+  let ops := findPolymorphicOps pctx τ generableTys sampledTys maxNumArgs
   if h : ops.length > 0 then do
     -- Randomly choose one candidate
     let idx ← choose 0 (ops.length - 1) (by omega)
@@ -1049,7 +1035,7 @@ def findOpsInCtx (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :
     random type guessing. -/
 def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier)
-    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) : G LExpr' :=
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3) : G LExpr' :=
   if h : (findOpsInCtx octx τ).length > 0 then
     pickBiased
       (fun () => genLExprBase fctx octx tvars bctx depth τ)
@@ -1072,17 +1058,18 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
             pure (mkApps opExpr args))
           (fun () =>
             -- Polymorphic IndirPoly rule (Pałka et al. 2011, Section 4)
-            genIndirPoly fctx octx pctx tvars bctx depth τ))
+            genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs))
   else
     -- No monomorphic Indir candidates; try IndirPoly or fall back to base
     pick
       (fun () => genLExprBase fctx octx tvars bctx depth τ)
-      (fun () => genIndirPoly fctx octx pctx tvars bctx depth τ)
+      (fun () => genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs)
 
 -- ── Top-level generators ─────────────────────────────────────────────
 
 /-- Generate a well-typed closed expression (no free variables, no operators)
     with bounded depth. -/
-def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat) : G LExpr' := do
+def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat)
+    (maxNumArgs : Nat := 3) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
-  genLExpr [] [] [] tvars [] depth τ
+  genLExpr [] [] [] tvars [] depth τ maxNumArgs

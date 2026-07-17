@@ -150,8 +150,8 @@ theorem genInputs_support (tvars : List TyIdentifier) (depth : Nat)
 /-- With an empty polymorphic-op context, `polyOpsForResult` is always empty, so
     the `hSimplePolyOps` side-condition of `genLExpr_sound` is vacuous. -/
 theorem polyOpsForResult_nil (τ : LMonoTy) (generableTys sampledTys : List LMonoTy) :
-    polyOpsForResult [] τ generableTys sampledTys = [] := by
-  simp [polyOpsForResult]
+    findPolymorphicOps [] τ generableTys sampledTys = [] := by
+  simp [findPolymorphicOps]
 
 /-- Soundness of `genOptExpr`: any `some e` it produces is well-typed at `τ`
     (empty bvar context), given `octx` contains only simple types and `τ` is
