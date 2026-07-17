@@ -31,6 +31,22 @@ def factoryOps (F : @Factory LExprParams') : OpCtx :=
   F.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
+/-- Extract the polymorphic operator context from a `Factory` by recording each
+    operation's full type *scheme*: quantify over the operation's type arguments,
+    then curry its inputs to its output.
+
+    This is the polymorphic analogue of `factoryOps`. Where `factoryOps` collapses
+    each function to a single `LMonoTy` (losing polymorphism), `factoryPolyOps`
+    keeps the `∀ typeArgs. …` scheme that the polymorphic generation rules
+    (`genIndirPoly`/`findPolymorphicOps`) need. The scheme is built with the same
+    `mkArrow'` builder as `factoryOps`, so an entry here is *by construction* the
+    generic type of a real factory function — that is exactly the `PCtxWF F`
+    well-formedness condition, discharged as a lemma rather than assumed. -/
+def factoryPolyOps (F : @Factory LExprParams') : PolyOpCtx :=
+  F.toArray.toList.filterMap fun f =>
+    some (f.name.name,
+      Lambda.LTy.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)))
+
 -- ── Factory-accepting wrappers ──────────────────────────────────────
 
 /-- Generate a well-typed `LExpr` using a `Factory` for operators.

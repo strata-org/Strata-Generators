@@ -95,6 +95,25 @@ def PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx) : Prop :=
     ∃ (fn : LFunc LExprParams'), F[name]? = some fn ∧
       lty = .forAll fn.typeArgs (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))
 
+/-- The polymorphic operator context extracted directly from a factory is always
+    well-formed with respect to that factory. Since `factoryPolyOps` builds each
+    entry as exactly the scheme `PCtxWF` demands, the proof is pure `filterMap`
+    bookkeeping — no assumption required. This is what makes the factory
+    generators unconditionally op-consistent even with polymorphic operators
+    enabled (see `genLExpr_opsConsistentR_factory`). -/
+theorem PCtxWF_factoryPolyOps (F : @Factory LExprParams') :
+    PCtxWF F (factoryPolyOps F) := by
+  intro name lty h
+  unfold factoryPolyOps at h
+  simp only [List.mem_filterMap] at h
+  obtain ⟨fn, hfn_mem, hfn_eq⟩ := h
+  simp only [Option.some.injEq, Prod.mk.injEq] at hfn_eq
+  obtain ⟨hnm, hlty⟩ := hfn_eq
+  subst hnm
+  have hfn_mem' : fn ∈ F.toArray := Array.mem_def.mpr hfn_mem
+  obtain ⟨hs, hget⟩ := Factory.mem_name_eq_getElem hfn_mem' rfl
+  exact ⟨fn, Lambda.mem_get?_eq hs hget, hlty.symm⟩
+
 -- ── Leaf-op consistency (`pickOp`) ───────────────────────────────────
 
 /-- Membership in `opsOfType octx τ` implies `(name, τ) ∈ octx`. -/
@@ -1249,6 +1268,31 @@ theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FV
     Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ
     (PolyOpsConsistentR_of_PCtxWF F pctx bctx fctx τ hPctx) e he
+
+/-- **Main result, factory-derived polymorphic context (no hypothesis).** When the
+    polymorphic operator context is extracted directly from the factory via
+    `factoryPolyOps F`, `PCtxWF` holds *by construction* (`PCtxWF_factoryPolyOps`),
+    so `genLExpr` produces `OpsConsistentR` terms unconditionally — even with
+    polymorphic operators enabled. This is the polymorphic analogue of
+    `genLExpr_opsConsistentR_nil`: no `pctx = []` restriction and no side
+    condition to discharge at the call site. -/
+theorem genLExpr_opsConsistentR_factory (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx (factoryOps F) (factoryPolyOps F) tvars bctx depth τ)) :
+    Lambda.OpsConsistentR F e :=
+  genLExpr_opsConsistentR_of_PCtxWF F fctx (factoryPolyOps F) tvars bctx depth τ
+    (PCtxWF_factoryPolyOps F) e he
+
+/-- The `Factory`-wrapper generator `genLExprWithFactory`, run with the factory's
+    own polymorphic context `factoryPolyOps F`, produces `OpsConsistentR` terms
+    unconditionally — no `PolyOpsConsistentR`/`PCtxWF` hypothesis needed. -/
+theorem genLExprWithFactory_opsConsistentR_factory (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support
+      (genLExprWithFactory (G := SetGen.Set) fctx F tvars bctx depth τ (factoryPolyOps F))) :
+    Lambda.OpsConsistentR F e :=
+  genLExpr_opsConsistentR_factory F fctx tvars bctx depth τ e he
 
 -- ── Sorry-free corollary for the empty polymorphic context ───────────
 -- The closed-term generators (`genClosedLExprWithFactory`, and
