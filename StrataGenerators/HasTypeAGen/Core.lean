@@ -758,7 +758,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
     frequency gs hw
   -- ── Fallback (other tcons — not generated) ────────────────────────
-  | _, _ => pure (.boolConst () false)
+  | _, _ => default
 
 -- ── Shared helpers ──────────────────────────────────────────────────
 

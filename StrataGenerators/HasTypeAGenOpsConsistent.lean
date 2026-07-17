@@ -824,7 +824,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
       · exact absurd h (by simp)
   case h_21 =>
-    simp only [mem_support_iff, SetGen.Set.mem_pure] at he; subst he; exact .const
+    rw [mem_support_iff] at he; exact absurd he (bot_mem_iff e).mp
   termination_by depth
   decreasing_by all_goals simp_wf; omega
 
