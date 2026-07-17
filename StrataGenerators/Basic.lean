@@ -1,2 +1,1 @@
 import StrataGenerators.HasTypeAGen
-import StrataGenerators.HasTypeGen

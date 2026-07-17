@@ -1,6 +1,6 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeGen", "StrataGenerators.CmdHasTypeAGen"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent",  "StrataGenerators.CmdHasTypeAGen"]
 
 [[require]]
 name = "Strata"
@@ -11,6 +11,13 @@ rev = "6e71fc9b7"
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
+
+# Module-only bridge lemmas for the OpsConsistent(R) generator proofs (Factory
+# `nameMap` lookup, self-unification, generic-type op-consistency) — they need
+# `import all` on Strata internals, which the non-module proof file can't do.
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGen.OpsConsistentBridge"
+roots = ["StrataGenerators.HasTypeAGen.OpsConsistentBridge"]
 
 # Core generator definitions (no Factory, no Mathlib — shared by Defs and HasTypeAGen)
 [[lean_lib]]
@@ -32,10 +39,10 @@ roots = ["StrataGenerators.HasTypeAGen.TestSupport"]
 name = "StrataGenerators.HasTypeAGen"
 roots = ["StrataGenerators.HasTypeAGen"]
 
-# The HasType generator (uses LExprTypeSpec → Strata.DL.Util.List)
+# OpsConsistent soundness/completeness for the HasTypeA generator
 [[lean_lib]]
-name = "StrataGenerators.HasTypeGen"
-roots = ["StrataGenerators.HasTypeGen"]
+name = "StrataGenerators.HasTypeAGenOpsConsistent"
+roots = ["StrataGenerators.HasTypeAGenOpsConsistent"]
 
 # STLC generator with soundness and completeness proofs
 [[lean_lib]]
@@ -100,11 +107,11 @@ roots = ["StrataGenerators.StmtHasTypeAGen.Core"]
 name = "StrataGenerators.StmtHasTypeAGen"
 roots = ["StrataGenerators.StmtHasTypeAGen"]
 
-# List-generation combinators (vectorOf / listOfMaxLength), vendored from
-# Basalt PR #8 until it lands (no Mathlib)
+# Shared round-trip helpers + structural shrinker used by both the Plausible and
+# Tyche harnesses (format/parse, shrinkWhile, failure predicates)
 [[lean_lib]]
-name = "StrataGenerators.Combinators"
-roots = ["StrataGenerators.Combinators"]
+name = "StrataGenerators.FunctionHasTypeAGen.Roundtrip"
+roots = ["StrataGenerators.FunctionHasTypeAGen.Roundtrip"]
 
 # Shared SetGen infrastructure (no conflicting imports)
 [[lean_lib]]

@@ -74,8 +74,7 @@ open StrataGenerators.Function
 /-- A soundness environment for the statement generator, bundling the
     context-dependent obligations needed to type every constructor. It packages
     the `genCmd` soundness data (`toTCtx`, `corr`, `exprSound`, `freshDisjoint`,
-    `toTCtx_insert`) plus the operator-context simplicity condition
-    (`simpleOps`) required by `genFunction_sound`.
+    `toTCtx_insert`).
 
     The expression-level obligations (`exprSound`, `freshDisjoint`) are quantified
     over **all** depths `d`: because the single `size` budget shrinks as statements
@@ -99,8 +98,6 @@ structure GenStmtSoundEnv (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdenti
   toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
     toTCtx (ctx.insert x mty) =
       { toTCtx ctx with types := (toTCtx ctx).types.insert x (.forAll [] mty) }
-  /-- The operator context contains only simple types (needed by `genFunction_sound`). -/
-  simpleOps : ∀ p ∈ octx, SimpleType p.2
 
 /-- Reinterpret a `GenStmtSoundEnv` as a `GenCmdSoundEnv` at an arbitrary ambient
     context `C` and depth `d`. Legal because no `GenCmdSoundEnv` field references
@@ -161,7 +158,7 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
              mem_support_pure_iff] at hr
   obtain ⟨decl, ⟨f0, _hf0, rfl⟩, func, hfunc, rfl⟩ := hr
   have hwt : FuncHasTypeA C (env.toTCtx ctx) func :=
-    genFunction_sound fctx octx d env.simpleOps C (env.toTCtx ctx) func hfunc
+    genFunction_sound fctx octx d C (env.toTCtx ctx) func hfunc
   exact StmtHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default
     (by simp) hwt
 

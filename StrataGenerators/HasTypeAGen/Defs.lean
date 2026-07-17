@@ -18,15 +18,34 @@ export ArbNat (Nat.arbitrary)
 -- ── Factory conversion ──────────────────────────────────────────────
 
 /-- Extract the flat operator list from a `Factory` by computing the curried
-    type of each operation (inputs → output). -/
+    type of each operation (inputs → output).
+
+    The curried type is built with `mkArrow'` — exactly the *generic type* form
+    `OpsConsistent`/`OpsConsistentR` canonicalize each operator to
+    (`mkArrow' fn.output fn.inputs.values`). Using the same builder here means the
+    annotation the generator stamps on a `factoryOps`-sourced `.op` node *is*
+    definitionally the operator's generic type, so no `destructArrow`/`mkArrow`
+    reconciliation (nor an `ArrowSpineOK`/`FactoryOutputWF` side condition) is
+    needed to see it is op-consistent. -/
 def factoryOps (F : @Factory LExprParams') : OpCtx :=
   F.toArray.toList.filterMap fun f =>
-    let inputTys := f.inputs.values
-    let outputTys := LMonoTy.destructArrow f.output
-    let ty := match inputTys with
-      | [] => f.output
-      | ity :: irest => LMonoTy.mkArrow ity (irest ++ outputTys)
-    some (f.name.name, ty)
+    some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
+
+/-- Extract the polymorphic operator context from a `Factory` by recording each
+    operation's full type *scheme*: quantify over the operation's type arguments,
+    then curry its inputs to its output.
+
+    This is the polymorphic analogue of `factoryOps`. Where `factoryOps` collapses
+    each function to a single `LMonoTy` (losing polymorphism), `factoryPolyOps`
+    keeps the `∀ typeArgs. …` scheme that the polymorphic generation rules
+    (`genIndirPoly`/`findPolymorphicOps`) need. The scheme is built with the same
+    `mkArrow'` builder as `factoryOps`, so an entry here is *by construction* the
+    generic type of a real factory function — that is exactly the `PCtxWF F`
+    well-formedness condition, discharged as a lemma rather than assumed. -/
+def factoryPolyOps (F : @Factory LExprParams') : PolyOpCtx :=
+  F.toArray.toList.filterMap fun f =>
+    some (f.name.name,
+      Lambda.LTy.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)))
 
 -- ── Factory-accepting wrappers ──────────────────────────────────────
 
@@ -36,14 +55,14 @@ def factoryOps (F : @Factory LExprParams') : OpCtx :=
     generate fully-applied operator applications. -/
 def genLExprWithFactory [Gen G] (fctx : FVarCtx) (F : @Factory LExprParams')
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (pctx : PolyOpCtx := []) : G LExpr' :=
+    (pctx : PolyOpCtx := factoryPolyOps F) : G LExpr' :=
   genLExpr fctx (factoryOps F) pctx tvars bctx depth τ
 
 /-- Generate a well-typed closed expression (no free variables) using the
     given factory for operators. -/
 def genClosedLExprWithFactory [Gen G] (F : @Factory LExprParams')
     (tvars : List TyIdentifier) (depth : Nat)
-    (pctx : PolyOpCtx := []) : G LExpr' := do
+    (pctx : PolyOpCtx := factoryPolyOps F) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
   genLExprWithFactory [] F tvars [] depth τ pctx
 

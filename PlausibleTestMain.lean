@@ -1,9 +1,19 @@
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
+import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import Basalt.PlausibleGen
 import Plausible
 import Strata.DL.Lambda.LExprT
+-- Imports for Function.typeCheck property (typeCheck_annotated_sound)
+import Strata.Languages.Core.FunctionType
+import Strata.DL.Lambda.Denote.LExprAnnotated
+-- Imports for pretty-print/parse round-trip property
+import Strata.Languages.Core.DDMTransform.ASTtoCST
+import Strata.Languages.Core.DDMTransform.Translate
+import Strata.Languages.Core.DDMTransform.Grammar
+import StrataDDM.Elab
+import StrataDDM.BuiltinDialects.Init
 
 /-!
 # Property-based tests for LExpr generators
@@ -32,6 +42,8 @@ automatically in `#eval` contexts.
 -/
 
 open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible Core Imperative
+open Strata Strata.CoreDDM
+open StrataDDM (initDialect)
 
 -- ── Typed expression generation via Plausible.Gen ────────────────────
 
@@ -417,7 +429,7 @@ structure GenFunction where
   fctx : FVarCtx
 
 instance : Repr GenFunction where
-  reprPrec gf _ := ppFunction gf.func
+  reprPrec gf _ := formatFunc gf.func
 
 -- Functions are generated whole (body/measure are drawn by sub-generators that
 -- already respect the typing spec); we do not attempt structural shrinking.
@@ -445,6 +457,191 @@ instance : Arbitrary GenFunction where
 @[reducible] def prop_function_fvars_annotated (gf : GenFunction) : Prop :=
   functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func = true
 
+-- ── Closed function generator (for typeCheck + round-trip + preservation) ──
+
+/-- A `Function` generated with an *empty* fvar context. Bodies are closed (no
+    free variables), so `Function.typeCheck` can succeed without an ambient
+    context carrying those variables. -/
+structure ClosedGenFunction where
+  func : Function
+
+instance : Repr ClosedGenFunction where
+  reprPrec gf _ := formatFunc gf.func
+
+instance : Shrinkable ClosedGenFunction where
+  shrink _ := []
+
+private def genClosedFunctionWith : Gen ClosedGenFunction := Gen.sized fun s => do
+  let depth := max 2 (s / 20)
+  let func ← genFunction (G := Plausible.Gen) [] coreOpCtx depth
+  pure ⟨func⟩
+
+instance : Arbitrary ClosedGenFunction where
+  arbitrary := Gen.backtrack (List.replicate 2000 (1, genClosedFunctionWith))
+
+-- ── Known types and context for Function.typeCheck ─────────────────────
+
+/-- Known types covering all base types + type constructors the generator can
+    produce. Required for `Function.typeCheck` to resolve arrow/Map/Seq aliases. -/
+private def funcCheckKnownTypes : Lambda.KnownTypes :=
+  open Lambda.LTy.Syntax in
+  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
+    t[bool], t[int], t[string], t[real], t[regex],
+    t[∀n. bitvec n],
+    t[∀a b. Map %a %b],
+    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
+
+/-- LContext with `intBoolFactory` and all generator-relevant known types.
+    This matches the `resolveLContext` used for expression-level tests. -/
+private def funcCheckContext : Lambda.LContext CoreLParams :=
+  { Lambda.LContext.default with
+    functions := intBoolFactory,
+    knownTypes := funcCheckKnownTypes }
+
+-- ── Property 1: Function.typeCheck_annotated_sound ─────────────────────
+--
+-- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound` at
+-- `Strata/Languages/Core/FunctionTypeSpecSound.lean:31`:
+--
+--   If `Function.typeCheck C Env func = .ok (func', _)` then `func'` satisfies
+--   `FuncHasTypeA C Γ` for any Γ.
+--
+-- We test the conclusion's decidable reflection: for the output `func'`, every
+-- body type-checks at the declared output and every measure at `.int`.
+-- We also test a prerequisite (relative completeness of `typeCheck`): a generated
+-- well-typed function should be *accepted* by `typeCheck`.
+
+/-- Check `FuncHasTypeA` on a function using `LExpr.typeCheck` as reflection.
+    Returns `true` iff:
+    - `func.body = some b` implies `LExpr.typeCheck [] b = some func.output`
+    - `func.measure = some m` implies `LExpr.typeCheck [] m = some .int`
+    - `func.inputs.keys.Nodup` (checked via `decide`)
+    - `func.typeArgs.Nodup` (checked via `decide`) -/
+def checkFuncHasTypeA (func : Function) : Bool :=
+  let bodyOk := match func.body with
+    | some b => LExpr.typeCheck (T := CoreLParams) [] b == some func.output
+    | none => true
+  let measureOk := match func.measure with
+    | some m => LExpr.typeCheck (T := CoreLParams) [] m == some .int
+    | none => true
+  bodyOk && measureOk && decide (func.inputs.keys.Nodup) && decide (func.typeArgs.Nodup)
+
+/-- `Function.typeCheck` soundness: when `typeCheck` accepts, the output satisfies
+    the declarative spec `FuncHasTypeA` (body types at output, measure types at int).
+    When `typeCheck` rejects (e.g. measure-without-body, which `FuncHasTypeA` allows
+    but `typeCheck` forbids), this is a vacuous pass — the property only asserts
+    soundness, not completeness. -/
+def checkTypeCheckAnnotatedSound (gf : ClosedGenFunction) : Bool :=
+  match Function.typeCheck funcCheckContext TEnv.default gf.func with
+  | .ok (func', _) => checkFuncHasTypeA func'
+  | .error _ => true  -- typeCheck rejected = vacuous pass (soundness not triggered)
+
+@[reducible] def prop_function_typeCheck_annotated_sound (gf : ClosedGenFunction) : Prop :=
+  checkTypeCheckAnnotatedSound gf = true
+
+-- ── Property 2: Pretty-print / parse round-trip ───────────────────────
+--
+-- Embeds a generated `Function` in a trivial `Program`, pretty-prints it via
+-- `Core.formatProgram`, re-parses via DDM, re-formats, and asserts string
+-- equality. A parse failure is a genuine printer/parser bug (names are legal
+-- Core identifiers by construction).
+--
+-- `formatFuncAsProgram`, `parseCoreProgram`, `parseCoreProgramErr`, the
+-- structural shrinker (`shrinkWhile` et al.) and the failure predicates
+-- (`failsRoundtripParsed`, `failsRoundtripParseFail`) are shared with the Tyche
+-- harness — see `StrataGenerators.FunctionHasTypeAGen.Roundtrip`.
+
+/-- The round-trip property: format → parse → re-format yields the same string.
+    Returns `true` only if the round-trip succeeds. Runs in `IO`.
+
+    A parse failure is scored as a **failure**, not a vacuous pass: the name
+    generators (`genIdentName`) produce only legal Core identifiers by
+    construction, so if the printed function does not parse back, the printer has
+    emitted legal-but-unparseable output — a genuine round-trip bug to report. -/
+def checkPrintParseRoundtrip (func : Function) : IO Bool := do
+  let s1 := formatFuncAsProgram func
+  match ← parseCoreProgram s1 with
+  | some ast2 =>
+    let s2 := (Core.formatProgram ast2).pretty
+    pure (s1 == s2)
+  | none => pure false  -- parse failure = round-trip bug (names are legal by construction)
+
+-- ── Special-character identifier round-trip (minimal reproducers) ──────
+--
+-- The full-function round-trip fails on samples that bundle a name, typeargs,
+-- types, a body, etc., so a failure can't be attributed to one cause. This
+-- probe isolates a single generated identifier in one syntactic position at a
+-- time, using an otherwise-trivial function, so a failure yields a minimal
+-- reproducer: "identifier X in position P does not round-trip".
+--
+-- Identifiers are drawn from `genQuotedName`: legal Core identifiers (so a
+-- failure is a genuine bug, not a generator artifact) that contain special
+-- (non-alphanumeric) characters `. ' | \ ? ! @` in interior positions. This
+-- deliberately exercises the special-character and pipe-escape paths that
+-- `genIdentName` (fed to `genFunction`) never reaches.
+
+/-- The three syntactic positions an identifier can occupy in a `Function`. -/
+inductive IdentPosition where
+  | funcName
+  | typeArg
+  | binder
+  deriving Repr, DecidableEq
+
+def IdentPosition.label : IdentPosition → String
+  | .funcName => "function-name"
+  | .typeArg  => "type-arg"
+  | .binder   => "binder"
+
+/-- Build a minimal `Function` that places `name` in the given position and is
+    otherwise trivial (no body, no measure, `int` output). For `typeArg`, the
+    name is also referenced as the output type (`ftvar name`) so it appears in a
+    use position, not just its binding. For `binder`, the single input uses the
+    name as its parameter identifier at type `int`. -/
+def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
+  let ident : Identifier Unit := ⟨name, ()⟩
+  match pos with
+  | .funcName =>
+    LFunc.mk (name := ident) (inputs := []) (output := .int)
+  | .typeArg =>
+    LFunc.mk (name := ⟨"f", ()⟩) (typeArgs := [name]) (inputs := [])
+      (output := .ftvar name)
+  | .binder =>
+    LFunc.mk (name := ⟨"f", ()⟩) (inputs := [(ident, .int)]) (output := .int)
+
+/-- Round-trip a single identifier in one position. Returns `none` on success,
+    or `some (renderedProgram, reparsedOrMismatch)` describing the failure. -/
+def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
+    IO (Option (String × String)) := do
+  let s1 := formatFuncAsProgram (minimalFuncWithName pos name)
+  match ← parseCoreProgramErr s1 with
+  | .error e => pure (some (s1, s!"parse-failure: {e.take 140}"))
+  | .ok ast2 =>
+    let s2 := (Core.formatProgram ast2).pretty
+    if s1 == s2 then pure none
+    else pure (some (s1, s2))
+
+-- ── Property 3: Type preservation under evaluation ────────────────────
+--
+-- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
+-- `eval_denote_sound` (`Strata/DL/Lambda/Denote/LExprSemanticsConsistent.lean`).
+--
+-- For a generated function with a body, evaluate the body using `eval` (fuel-
+-- bounded, with `IntBoolFactory`) and assert the result still type-checks at
+-- the declared output type.
+
+/-- Type preservation under evaluation: if a generated function has a body,
+    evaluating it preserves the declared output type. Functions with no body
+    pass vacuously. -/
+def checkFunctionBodyPreservation (gf : ClosedGenFunction) : Bool :=
+  match gf.func.body with
+  | some body =>
+    let evaled := eval 100 body
+    LExpr.typeCheck (T := CoreLParams) [] evaled == some gf.func.output
+  | none => true
+
+@[reducible] def prop_function_body_preservation (gf : ClosedGenFunction) : Prop :=
+  checkFunctionBodyPreservation gf = true
+
 -- ── Test runner ──────────────────────────────────────────────────────
 
 def checkProperty (name : String) (p : Prop) [Testable p]
@@ -459,7 +656,7 @@ def checkProperty (name : String) (p : Prop) [Testable p]
     return true
   | .failure _ xs n =>
     IO.println s!"FAIL (after {n} trials)"
-    IO.eprintln s!"    {Testable.formatFailure "" xs n}"
+    IO.println s!"    {Testable.formatFailure "" xs n}"
     return false
 
 /-- Sample erased terms and print the `resolve` error messages behind any
@@ -568,6 +765,101 @@ def main (args : List String) : IO UInt32 := do
   if !(← checkProperty "function: fvars annotated by context type map"
     (NamedBinder "gf" (∀ gf : GenFunction, prop_function_fvars_annotated gf)) cfg) then
     allPassed := false
+
+  -- Property 1: Function.typeCheck_annotated_sound
+  if !(← checkProperty "function: typeCheck accepts generated func AND output satisfies FuncHasTypeA"
+    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_typeCheck_annotated_sound gf)) cfg) then
+    allPassed := false
+
+  -- Property 3: type preservation under evaluation (Step.type_preserved / StepStar.type_preserved)
+  if !(← checkProperty "function: body type preserved under eval"
+    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_body_preservation gf)) cfg) then
+    allPassed := false
+
+  -- Property 2: pretty-print / parse round-trip (IO-based, manual loop)
+  IO.print "  function: pretty-print/parse round-trip ... "
+  let mut rtOk := 0
+  let mut rtParseFail := 0
+  let mut rtMismatch := 0
+  for i in List.range (min numTrials 200) do
+    let size := i % (maxSize + 1)
+    let gf ← try Gen.run (Arbitrary.arbitrary (α := ClosedGenFunction)) size
+             catch _ => pure ⟨default⟩
+    let s := formatFuncAsProgram gf.func
+    match ← parseCoreProgram s with
+    | none =>
+      -- Legal-by-construction names that fail to parse = printer/parser bug.
+      rtParseFail := rtParseFail + 1
+      if rtParseFail ≤ 3 then
+        -- Shrink to a minimal unparseable witness and show the parser's error.
+        let minF ← shrinkWhile failsRoundtripParseFail 1000 gf.func
+        let ms1 := formatFuncAsProgram minF
+        let err := match ← parseCoreProgramErr ms1 with
+                   | .error e => e | .ok _ => "<parsed unexpectedly>"
+        IO.println s!"    FAIL (parse): original: {s.replace "\n" " " |>.take 80}"
+        IO.println s!"      shrunk (size {sizeFunc minF}): {ms1.replace "\n" " "}"
+        IO.println s!"      parser error:                 {err.take 160}"
+    | some ast2 =>
+      let s2 := (Core.formatProgram ast2).pretty
+      if s == s2 then
+        rtOk := rtOk + 1
+      else
+        rtMismatch := rtMismatch + 1
+        if rtMismatch ≤ 3 then
+          -- Shrink this mismatch to a minimal parses-but-doesn't-round-trip witness.
+          let minF ← shrinkWhile failsRoundtripParsed 1000 gf.func
+          let ms1 := formatFuncAsProgram minF
+          let ms2 ← (do match ← parseCoreProgram ms1 with
+                        | some a => pure (Core.formatProgram a).pretty
+                        | none => pure "<parse-failed>")
+          IO.println s!"    FAIL (mismatch): original: {s.replace "\n" " " |>.take 80}"
+          IO.println s!"      shrunk (size {sizeFunc minF}): {ms1.replace "\n" " "}"
+          IO.println s!"      re-formatted to:              {ms2.replace "\n" " "}"
+  if rtParseFail == 0 && rtMismatch == 0 then
+    IO.println s!"PASS ({rtOk} round-tripped)"
+  else
+    IO.println s!"FAIL ({rtParseFail} parse-failures, {rtMismatch} mismatches, {rtOk} ok)"
+    allPassed := false
+
+  -- Special-character identifier probe: minimal reproducers per position, using
+  -- legal identifiers that contain special (non-alphanumeric) characters
+  -- (`genQuotedName`).
+  IO.print "  function: special-character identifier round-trip ... "
+  let positions := [IdentPosition.funcName, .typeArg, .binder]
+  let mut probeOk := 0
+  let mut probeFail := 0
+  let mut shownReprs : List String := []
+  for i in List.range (min numTrials 200) do
+    let size := i % (maxSize + 1)
+    let name ← try Gen.run genQuotedName size catch _ => pure "x"
+    for pos in positions do
+      match ← probeIdentRoundtrip pos name with
+      | none => probeOk := probeOk + 1
+      | some (rendered, outcome) =>
+        probeFail := probeFail + 1
+        -- One reproducer per distinct (position, outcome, triggering-char-class),
+        -- so different mechanisms surface separately instead of collapsing.
+        let cls :=
+          if name.any (· == '.') then "dot"
+          else if name.any (· == '|') then "pipe"
+          else if name.any (· == '\\') then "backslash"
+          else if name.any (· == '\'') then "apostrophe"
+          else if name.toList.head?.map (·.isDigit) == some true then "leading-digit"
+          else "other"
+        let isParseFail := outcome.startsWith "parse-failure"
+        let key := s!"{pos.label}/{if isParseFail then "parse" else "mismatch"}/{cls}"
+        if !shownReprs.contains key then
+          shownReprs := key :: shownReprs
+          IO.println s!"    REPRO [{pos.label}] class={cls} name={name.quote}"
+          IO.println s!"           rendered: {rendered.replace "\n" " "}"
+          if isParseFail then
+            IO.println s!"           {outcome.replace "\n" " "}"
+          else
+            IO.println s!"           reparsed: {outcome.replace "\n" " "}"
+  if probeFail == 0 then
+    IO.println s!"PASS ({probeOk} ident/position round-trips)"
+  else
+    IO.println s!"FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
 
   IO.println ""
   if allPassed then

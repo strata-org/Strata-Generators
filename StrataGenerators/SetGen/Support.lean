@@ -6,7 +6,6 @@ Authors: Harrison Goldstein
 Vendored from https://github.com/hgoldstein95/basalt (SetGen branch, not yet on `main`).
 -/
 import StrataGenerators.SetGen.Core
-import StrataGenerators.Combinators
 import Basalt.Combinators
 
 open Lean.Order RandomChoice
@@ -97,7 +96,7 @@ theorem support_oneOf
     {gs : List (Unit → Set α)}
     (hne : gs ≠ []) :
     support (oneOf gs hne) = {a | ∃ g ∈ gs, a ∈ g ()} := by
-  simp only [oneOf, support_bind, support_map, support_choose]
+  simp only [oneOf]
   ext a
   dsimp only [Set.mem_setOf_eq]
   constructor
@@ -130,17 +129,17 @@ theorem mem_support_oneOf_iff
   rw [show support (oneOf gs hne) = _ from support_oneOf hne]
   simp only [Set.mem_setOf_eq, support]
 
-/-- If `n < sum (fst <$> gs)`, then `Helpers.frequencyAux gs n` picks a sub-generator
+/-- If `n < sum (fst <$> gs)`, then `Helpers.frequencySelect gs n` picks a sub-generator
     from `gs` that has non-zero weight `w` -/
-private theorem frequencyAux_mem
+private theorem frequencySelect_mem
     {gs : List (Nat × (Unit → Set α))}
     {n : Nat}
     (h : n < List.sum (List.map Prod.fst gs)) :
-    ∃ w g, ⟨w, g⟩ ∈ gs ∧ 0 < w ∧ Helpers.frequencyAux gs n h = g () := by
+    ∃ w g, ⟨w, g⟩ ∈ gs ∧ 0 < w ∧ Helpers.frequencySelect gs n h = g () := by
   induction gs generalizing n with
   | nil => contradiction
   | cons hd tl ih =>
-    unfold Helpers.frequencyAux
+    unfold Helpers.frequencySelect
     obtain ⟨w, g⟩ := hd
     split
     · exact ⟨w, g, .head tl, by omega, rfl⟩
@@ -151,26 +150,26 @@ private theorem frequencyAux_mem
 
 
 /-- If a weighted generator `(w, g) ∈ gs` where the weight `w` is non-zero,
-    then there exists `n` such that `Helpers.frequencyAux gs n` produces `g ()` -/
-private theorem frequencyAux_n_exists
+    then there exists `n` such that `Helpers.frequencySelect gs n` produces `g ()` -/
+private theorem frequencySelect_n_exists
     {gs : List (Nat × (Unit → Set α))}
     {w : Nat} {g : Unit → Set α}
     (hmem : (w, g) ∈ gs)
     (hnonzero : 0 < w) :
     ∃ n, ∃ (h : n < List.sum (List.map Prod.fst gs)),
-      Helpers.frequencyAux gs n h = g () := by
+      Helpers.frequencySelect gs n h = g () := by
   induction gs with
   | nil => contradiction
   | cons hd tl ih =>
     rcases List.mem_cons.mp hmem with rfl | h_tl
     · refine ⟨0, ?_, ?_⟩
       · simp only [List.map_cons, List.sum_cons]; omega
-      · unfold Helpers.frequencyAux; simp [hnonzero]
+      · unfold Helpers.frequencySelect; simp [hnonzero]
     · obtain ⟨n, hn, heq⟩ := ih h_tl
       obtain ⟨w', _⟩ := hd
       refine ⟨w' + n, ?_, ?_⟩
       · simp only [List.map_cons, List.sum_cons]; omega
-      · unfold Helpers.frequencyAux
+      · unfold Helpers.frequencySelect
         have : ¬ (w' + n < w') := by omega
         simp [this, heq]
 
@@ -182,16 +181,17 @@ theorem mem_support_frequency_iff
     (h_pos : 0 < List.sum (List.map Prod.fst gs)) :
     a ∈ support (frequency gs h_pos) ↔
       ∃ w g, ⟨w, g⟩ ∈ gs ∧ 0 < w ∧ a ∈ support (g ()) := by
-  simp only [support, frequency, Set.mem_bind, Set.fmap_eq_image, Set.mem_image]
+  simp only [support, frequency, Helpers.frequencyAux, Set.mem_bind, Set.fmap_eq_image,
+             Set.mem_image]
   constructor
   · rintro ⟨idx, ⟨n, hn, rfl⟩, ha⟩
     have h_lt : n.down.val < List.sum (List.map Prod.fst gs) := by
       exact Nat.lt_of_le_of_lt hn.2 (by omega)
     simp only [dif_pos h_lt] at ha
-    obtain ⟨w, g, hmem, hpos, heq⟩ := frequencyAux_mem h_lt
+    obtain ⟨w, g, hmem, hpos, heq⟩ := frequencySelect_mem h_lt
     exact ⟨w, g, hmem, hpos, heq ▸ ha⟩
   · rintro ⟨w, g, hmem, hpos, ha⟩
-    obtain ⟨n, hn_lt, hn_eq⟩ := frequencyAux_n_exists hmem hpos
+    obtain ⟨n, hn_lt, hn_eq⟩ := frequencySelect_n_exists hmem hpos
     have hle : n ≤ (List.map Prod.fst gs).sum - 1 := by omega
     refine ⟨⟨n, Nat.zero_le _, hle⟩, ⟨⟨⟨n, Nat.zero_le _, hle⟩⟩, ⟨Nat.zero_le _, hle⟩, rfl⟩, ?_⟩
     simp only [dif_pos hn_lt, hn_eq]
@@ -265,7 +265,11 @@ theorem mem_support_csup {c : Set α → Prop} (hc : chain c) {a : α} :
     exact le_csup hc hs a ha
 
 -- ── vectorOf / listOfMaxLength support ────────────────────────────────
--- Ported to `SetGen.Set` from the `SPMF`-based lemmas in Basalt PR #8.
+-- Ported to `SetGen.Set` from the `SPMF`-based lemmas in `Basalt.Combinators`.
+
+/-- `vectorOf 0 g` produces the empty list. (`Basalt.Combinators` ships
+    `vectorOf_succ` but not the base case, which we need below.) -/
+@[simp] theorem vectorOf_zero [Gen G] (g : G α) : vectorOf 0 g = pure [] := rfl
 
 /-- `xs ∈ support (vectorOf n g)` iff `xs` has length exactly `n` and every
     element is in `support g`. -/

@@ -82,23 +82,10 @@ def functionFvarsAnnotatedBy (tyMap : Map (Identifier Unit) LMonoTy) (func : Fun
   (match func.body with | some b => fvarsAnnotatedBy tyMap b | none => true) &&
   (match func.measure with | some m => fvarsAnnotatedBy tyMap m | none => true)
 
--- ── Pretty-printing ──────────────────────────────────────────────────────
-
-/-- Pretty-print a generated `Function` using the human-readable type/expression
-    printers from `HasTypeAGen.TestSupport`, in Strata's `func` layout (with
-    `∀`-quantified type args, a `decreases` measure clause, and `:=` body). -/
-def ppFunction (func : Function) : String :=
-  let tyArgs := if func.typeArgs.isEmpty then "" else s!"∀{", ".intercalate func.typeArgs}. "
-  let inputs := func.inputs.toList.map (fun (x, ty) => s!"({x.name} : {ppType ty})")
-                |> " ".intercalate
-  let sig := s!"{tyArgs}{inputs} → {ppType func.output}"
-  let measureStr := match func.measure with
-    | some m => s!" decreases {ppExpr m}"
-    | none => ""
-  let bodyStr := match func.body with
-    | some b => s!" := {ppExpr b}"
-    | none => ";"
-  s!"func {func.name.name} : {sig}{measureStr}{bodyStr}"
+-- Function pretty-printing now goes through Strata's own `Core.formatProgram`
+-- (see `formatFunc` / `formatFuncAsProgram` in
+-- `StrataGenerators.FunctionHasTypeAGen.Roundtrip`), so displays match the real
+-- formatter exactly. The former hand-rolled `ppFunction` has been removed.
 
 -- ── Generator wrappers ────────────────────────────────────────────────────
 

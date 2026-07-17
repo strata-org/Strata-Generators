@@ -150,15 +150,13 @@ theorem genInputs_support (tvars : List TyIdentifier) (depth : Nat)
 /-- With an empty polymorphic-op context, `polyOpsForResult` is always empty, so
     the `hSimplePolyOps` side-condition of `genLExpr_sound` is vacuous. -/
 theorem polyOpsForResult_nil (τ : LMonoTy) (generableTys sampledTys : List LMonoTy) :
-    polyOpsForResult [] τ generableTys sampledTys = [] := by
-  simp [polyOpsForResult]
+    findPolymorphicOps [] τ generableTys sampledTys = [] := by
+  simp [findPolymorphicOps]
 
 /-- Soundness of `genOptExpr`: any `some e` it produces is well-typed at `τ`
-    (empty bvar context), given `octx` contains only simple types and `τ` is
-    simple. The `none` case is vacuous. -/
+    (empty bvar context). The `none` case is vacuous. -/
 theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) (τ : LMonoTy) (hτ : SimpleType τ)
-    (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
+    (depth : Nat) (τ : LMonoTy)
     (o : Option LExpr')
     (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ))
     (e : LExpr') (heq : o = some e) :
@@ -170,22 +168,15 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   · -- `o = some e'` and `heq : some e' = some e`, so `e' = e`
     have hee : e' = e := by simpa using heq
     subst hee
-    exact genLExpr_sound fctx octx [] tvars [] depth τ hτ hSimpleOps
-      (by intro sampledTys entry hentry
-          rw [polyOpsForResult_nil] at hentry
-          simp at hentry)
-      e' he'
+    exact genLExpr_sound fctx octx [] tvars [] depth τ e' he'
 
 -- ── Soundness of genFunction ─────────────────────────────────────────
 
 /-- **Soundness of `genFunction`.** Every function in the generator's support is
     well-typed w.r.t. `FuncHasTypeA` for *any* ambient context `Γ` (the annotated
-    spec ignores it). The only side-condition is that the operator context
-    contains only simple types — exactly the condition `genLExpr_sound` needs.
-
-    For the common hypothesis-free case (`octx = []`), see `genFunction_sound_nil`. -/
+    spec ignores it) and *any* operator context — `genLExpr_sound` is now
+    unconditional. -/
 theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
-    (hSimpleOps : ∀ p ∈ octx, SimpleType p.2)
     (C : LContext CoreLParams) (Γ : TContext Unit)
     (func : Function)
     (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth)) :
@@ -197,7 +188,6 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
   -- Facts about the generated typeArgs / inputs.
   have htyNodup : typeArgs.Nodup := genTypeArgs_nodup depth typeArgs htypeArgs
   obtain ⟨hkeysNodup, hvals⟩ := genInputs_support typeArgs depth inputs hinputs
-  have houtputSimple : SimpleType output := genLMonoTy_simple typeArgs depth output houtput
   have houtputFtv : allFtvarsIn typeArgs output :=
     (genLMonoTy_support typeArgs depth output |>.mp houtput).2.2
   -- Build the `FuncHasType'` structure.
@@ -213,34 +203,33 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
       exact allFtvarsIn_freeVars ht_ftv v hvt
   · -- bodyTyped
     intro b hb
-    exact genOptExpr_sound fctx octx typeArgs depth output houtputSimple hSimpleOps
-      body hbody b hb
+    exact genOptExpr_sound fctx octx typeArgs depth output body hbody b hb
   · -- measureTyped
     intro m hm _
-    exact genOptExpr_sound fctx octx typeArgs depth .int SimpleType.int hSimpleOps
-      measure hmeasure m hm
+    exact genOptExpr_sound fctx octx typeArgs depth .int measure hmeasure m hm
 
-/-- Hypothesis-free soundness of `genFunction` at an empty operator context. -/
+/-- Hypothesis-free soundness of `genFunction` at an empty operator context.
+    (Now a special case of `genFunction_sound`, which is unconditional in `octx`.) -/
 theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit)
     (func : Function)
     (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx [] depth)) :
     FuncHasTypeA C Γ func :=
-  genFunction_sound fctx [] depth (by intro p hp; simp at hp) C Γ func hfunc
+  genFunction_sound fctx [] depth C Γ func hfunc
 
 -- ── Completeness helpers ─────────────────────────────────────────────
 
 /-- Support of `genNameList`, inherited from `listOfMaxLength`: a list is
     reachable iff it has length ≤ `depth` and every name is reachable by
-    `String.arbitrary`. This concretizes the opaque `∈ support (genNameList …)`
+    `genIdentName`. This concretizes the opaque `∈ support (genNameList …)`
     reachability side-conditions of `genFunction_complete`.
 
-    (The remaining `∈ support String.arbitrary` per-name obligation is the
+    (The remaining `∈ support genIdentName` per-name obligation is the
     residual bottleneck noted in `docs/vectorof-listofmaxlength-integration.md`
-    §4/§5 — it awaits a public two-directional `String.arbitrary` support lemma.) -/
+    §4/§5 — it awaits a public two-directional `genIdentName` support lemma.) -/
 theorem mem_support_genNameList_iff (depth : Nat) (l : List String) :
     l ∈ SetGen.support (genNameList (G := SetGen.Set) depth) ↔
-      l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+      l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
   simp only [genNameList, mem_support_listOfMaxLength_iff]
 
 set_option linter.unusedSimpArgs false in
@@ -329,16 +318,16 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     `hNameReach` / `hTyReach`: they capture exactly what the generator must be
     able to produce beyond well-typedness. Concretely:
     - `hNameReach` — the function name and the parameter names are reachable
-      alphanumeric strings (needed by `String.arbitrary`);
+      identifier strings (needed by `genIdentName`);
     - `hTyArgsLen` / `hTyArgsReach` — the (already `Nodup`) `typeArgs` list is no
-      longer than `depth` and each name is reachable by `String.arbitrary`;
+      longer than `depth` and each name is reachable by `genIdentName`;
     - `hInputNamesLen` / `hInputNamesReach` — likewise for the parameter names;
     - `hTyReach` — the output and each input type are reachable by `genLMonoTy`;
     - `hBodyReach` / `hMeasureReach` — the body/measure (when present) are
       reachable by `genLExpr`.
 
     The `typeArgs` / input-name conditions are stated concretely (a length bound
-    plus per-name `String.arbitrary` reachability) via
+    plus per-name `genIdentName` reachability) via
     `mem_support_genNameList_iff`, rather than as opaque `∈ support (genNameList …)`
     facts.
 
@@ -356,12 +345,12 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hAxioms : func.axioms = [])
     (hPre : func.preconditions = [])
     -- reachability of the generated components:
-    (hNameReach : func.name.name ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+    (hNameReach : func.name.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hTyArgsLen : func.typeArgs.length ≤ depth)
-    (hTyArgsReach : ∀ s ∈ func.typeArgs, s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+    (hTyArgsReach : ∀ s ∈ func.typeArgs, s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hInputNamesLen : (func.inputs.keys.map (·.name)).length ≤ depth)
     (hInputNamesReach : ∀ s ∈ func.inputs.keys.map (·.name),
-      s ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+      s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hInputTyReach : ∀ ty ∈ func.inputs.values,
       ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
     (hOutputReach : func.output ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
