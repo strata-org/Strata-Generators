@@ -221,37 +221,7 @@ private theorem pickOp_complete (octx : OpCtx) (τ : LMonoTy) (x : String)
     .op () ⟨x, ()⟩ (some τ) ∈ SetGen.support (pickOp (G := SetGen.Set) octx τ hv) := by
   exact mem_support_pickOp_iff.mpr ⟨x, (opsOfType_mem_iff octx τ x).mpr hmem, rfl⟩
 
--- ── pickBiased support lemma ──────────────────────────────────────────
-
 namespace SetGen
-
-@[simp] theorem pickBiased_mem_iff {x y : Set α} (a : α) :
-    a ∈ (RandomChoice.pickBiased (fun () => x) (fun () => y) : Set α) ↔ a ∈ x ∨ a ∈ y := by
-  simp only [RandomChoice.pickBiased, SetGen.Set.mem_bind]
-  constructor
-  · rintro ⟨b, _, ha⟩
-    cases b with
-    | true => left; simpa using ha
-    | false => right; simpa using ha
-  · intro h
-    have htrue : true ∈ (RandomChoice.coin (1 / 10) : Set Bool) := by
-      simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
-                 show (1 / 10 : Rat).den = 10 from by decide +kernel,
-                 show (1 / 10 : Rat).num = 1 from by decide +kernel]
-      exact ⟨⟨⟨0, Nat.zero_le _, Nat.zero_le _⟩⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, rfl⟩
-    have hfalse : false ∈ (RandomChoice.coin (1 / 10) : Set Bool) := by
-      simp only [RandomChoice.coin, Bind.bind, RandomChoice.choose,
-                 show (1 / 10 : Rat).den = 10 from by decide +kernel,
-                 show (1 / 10 : Rat).num = 1 from by decide +kernel]
-      refine ⟨⟨⟨10, ?_, ?_⟩⟩, ⟨?_, ?_⟩, rfl⟩ <;> decide +kernel
-    cases h with
-    | inl hx => exact ⟨true, htrue, by simpa⟩
-    | inr hy => exact ⟨false, hfalse, by simpa⟩
-
-@[simp] theorem mem_support_pickBiased_iff {x y : Set α} :
-    a ∈ support (RandomChoice.pickBiased (fun () => x) (fun () => y)) ↔
-    a ∈ support x ∨ a ∈ support y := by
-  simp [support, pickBiased_mem_iff]
 
 /-- Raw-membership (non-`support`-wrapped) characterization of `oneOf`, mirroring
     `pick_mem_iff`. Since `support` is the identity on `Set`, this coincides with
@@ -445,7 +415,27 @@ private theorem genLMonoTy_succ_mem (tvars : List TyIdentifier) (n : Nat) (τ : 
       SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ) :
     τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars (n + 1)) ↔
       SimpleType τ ∧ monoTyDepth τ ≤ n + 1 ∧ allFtvarsIn tvars τ := by
-  simp only [genLMonoTy, mem_support_dite_iff, mem_support_pickBiased_iff, mem_support_oneOf_iff,
+  -- The two-element `frequency` (weights 1, 9) at the outermost branch point has
+  -- support equal to the union of its two sub-generators' supports. We establish
+  -- this once locally from the general `mem_support_frequency_iff` (no
+  -- weight-specific lemma), then feed it to `simp` so the rest of the proof sees
+  -- a clean two-way disjunction.
+  have hfreq : ∀ (x y : Unit → SetGen.Set LMonoTy)
+      (h : 0 < List.sum (List.map Prod.fst [(1, x), (9, y)])),
+      τ ∈ SetGen.support (frequency [(1, x), (9, y)] h) ↔
+        τ ∈ SetGen.support (x ()) ∨ τ ∈ SetGen.support (y ()) := by
+    intro x y h
+    rw [mem_support_frequency_iff]
+    constructor
+    · rintro ⟨w, g, hg, hpos, hmem⟩
+      simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hg
+      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+      · exact Or.inl hmem
+      · exact Or.inr hmem
+    · rintro (hmem | hmem)
+      · exact ⟨1, x, by simp, by omega, hmem⟩
+      · exact ⟨9, y, by simp, by omega, hmem⟩
+  simp only [genLMonoTy, mem_support_dite_iff, hfreq, mem_support_oneOf_iff,
              List.mem_cons, List.not_mem_nil, or_false, exists_eq_or_imp, exists_eq_left,
              mem_support_bind_iff]
   constructor
@@ -3533,38 +3523,55 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
     HasTypeA' bctx e τ := by
   unfold genLExpr at he
-  simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
-  rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
-  · -- genLExprBase path (first branch of pickBiased)
-    exact genLExprBase_sound fctx octx tvars bctx depth τ e he
-  · -- Monomorphic Indir path: fully-applied operator
-    simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
-    obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
-    rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
-    let name := entry.1
-    let argTys := entry.2
-    let fullTy := argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
-    let base : LExpr' := .op () ⟨name, ()⟩ (some fullTy)
-    have hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
+  simp only [mem_support_iff, SetGen.mem_dite] at he
+  -- Handle the monomorphic Indir op node uniformly (reachable from both the
+  -- weight-9 `pick` branch and — via IndirPoly — elsewhere): given the chosen
+  -- `(name, argTys)` entry and its generated `args`, the assembled `mkApps` is
+  -- well-typed.
+  have indir : ∀ (entry : String × List LMonoTy),
+      entry ∈ findOpsInCtx octx τ →
+      ∀ args, args ∈ SetGen.support (List.mapM (genLExprBase fctx octx tvars bctx depth) entry.2) →
+      HasTypeA' bctx (mkApps (.op () ⟨entry.1, ()⟩
+        (some (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args) τ := by
+    intro entry _ args hargs
+    have hbase : HasTypeA' bctx (.op () ⟨entry.1, ()⟩ _)
+        (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
     have hforall₂ := (mem_mapM_iff
-      (genLExprBase fctx octx tvars bctx depth) argTys args).mp hargs
-    have hargs_typed : List.Forall₂ (HasTypeA' bctx) args argTys := by
+      (genLExprBase fctx octx tvars bctx depth) entry.2 args).mp hargs
+    have hargs_typed : List.Forall₂ (HasTypeA' bctx) args entry.2 := by
       suffices h : ∀ (tys : List LMonoTy) (es : List LExpr'),
           List.Forall₂ (fun arg σ => arg ∈ (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth σ)) es tys →
           List.Forall₂ (HasTypeA' bctx) es tys from
-        h argTys args hforall₂
+        h entry.2 args hforall₂
       intro tys es hf₂
       induction hf₂ with
       | nil => exact .nil
       | @cons e ty _ _ hmem _ ih =>
         exact .cons (genLExprBase_sound fctx octx tvars bctx depth ty e hmem) ih
-    exact mkApps_hasType bctx base args argTys τ hbase hargs_typed
-  · -- IndirPoly path (polymorphic operators)
-    exact genIndirPoly_sound fctx octx pctx tvars bctx depth τ e he
-  · -- No monomorphic Indir candidates: genLExprBase fallback
-    exact genLExprBase_sound fctx octx tvars bctx depth τ e he
-  · -- No monomorphic Indir candidates: IndirPoly fallback
-    exact genIndirPoly_sound fctx octx pctx tvars bctx depth τ e he
+    exact mkApps_hasType bctx _ args entry.2 τ hbase hargs_typed
+  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+  · -- Monomorphic Indir candidates: two-element frequency, then a binary pick
+    rw [← mem_support_iff, mem_support_frequency_iff] at he
+    obtain ⟨_, g, hg, _, he⟩ := he
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+    · -- genLExprBase path (weight-1 branch of the frequency)
+      exact genLExprBase_sound fctx octx tvars bctx depth τ e he
+    -- weight-9 branch: a binary pick between the monomorphic Indir and IndirPoly rules
+    rw [mem_support_pick_iff] at he
+    rcases he with he | he
+    · -- Monomorphic Indir path: fully-applied operator
+      simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+      obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
+      rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+      exact indir entry hentry_mem args hargs
+    · -- IndirPoly path (polymorphic operators)
+      exact genIndirPoly_sound fctx octx pctx tvars bctx depth τ e he
+  · -- No monomorphic Indir candidates: pick between genLExprBase and IndirPoly
+    rw [pick_mem_iff] at he
+    rcases he with he | he
+    · exact genLExprBase_sound fctx octx tvars bctx depth τ e he
+    · exact genIndirPoly_sound fctx octx pctx tvars bctx depth τ e he
 
 -- ── No-free-variables guarantees for the empty fvar context ────────────
 
@@ -4302,16 +4309,27 @@ theorem genLExpr_no_fvars (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIden
     (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx pctx tvars bctx depth τ)) :
     LExpr.getVars e = [] := by
   unfold genLExpr at he
-  simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
-  rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
-  · exact genLExprBase_no_fvars octx tvars bctx depth τ e he
-  · simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
-    obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    exact mkApps_no_fvars _ args rfl
-      (mapM_genLExprBase_no_fvars octx tvars bctx depth _ args hargs)
-  · exact genIndirPoly_no_fvars octx pctx tvars bctx depth τ e he
-  · exact genLExprBase_no_fvars octx tvars bctx depth τ e he
-  · exact genIndirPoly_no_fvars octx pctx tvars bctx depth τ e he
+  simp only [mem_support_iff, SetGen.mem_dite] at he
+  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+  · -- Monomorphic Indir candidates: two-element frequency, then a binary pick
+    rw [← mem_support_iff, mem_support_frequency_iff] at he
+    obtain ⟨_, g, hg, _, he⟩ := he
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+    · exact genLExprBase_no_fvars octx tvars bctx depth τ e he
+    -- weight-9 branch: a binary pick between the monomorphic Indir and IndirPoly rules
+    rw [mem_support_pick_iff] at he
+    rcases he with he | he
+    · simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+      obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
+      exact mkApps_no_fvars _ args rfl
+        (mapM_genLExprBase_no_fvars octx tvars bctx depth _ args hargs)
+    · exact genIndirPoly_no_fvars octx pctx tvars bctx depth τ e he
+  · -- No monomorphic Indir candidates: pick between genLExprBase and IndirPoly
+    rw [pick_mem_iff] at he
+    rcases he with he | he
+    · exact genLExprBase_no_fvars octx tvars bctx depth τ e he
+    · exact genIndirPoly_no_fvars octx pctx tvars bctx depth τ e he
 
 end Lambda.LExpr
 
@@ -4442,16 +4460,27 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ) := by
   simp only [SetGen.support]
   unfold genLExpr
-  simp only [SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff]
+  simp only [SetGen.mem_dite]
+  -- `genLExprBase` sits at weight 1 in the two-element `frequency`; both it and
+  -- `genIndirPoly` are reachable regardless of the `dite` branch. In the
+  -- Indir-candidates branch we exhibit the `frequency` witness explicitly via
+  -- `mem_support_frequency_iff` (weight 1 for the base rule; weight 9's binary
+  -- `pick` for the Indir/IndirPoly rules).
   rcases he with ⟨hwt, hnames, hvars, hats, hdepth⟩ | ⟨sampledTys, name, concreteArgTys, args, hLen, hValid, hEntry, hArgs, rfl⟩
   · -- Case 1: route through genLExprBase (reachable in both dite branches)
     have hbase := genLExprBase_complete fctx octx tvars bctx depth τ hτ e hwt hnames hvars hats hdepth
     by_cases hops : (findOpsInCtx octx τ).length > 0
-    · exact Or.inl ⟨hops, Or.inl hbase⟩
-    · exact Or.inr ⟨hops, Or.inl hbase⟩
+    · refine Or.inl ⟨hops, ?_⟩
+      rw [← mem_support_iff, mem_support_frequency_iff]
+      exact ⟨1, _, List.mem_cons_self, by omega, hbase⟩
+    · exact Or.inr ⟨hops, (pick_mem_iff _).mpr (Or.inl hbase)⟩
   · -- Case 2: route through genIndirPoly (reachable in both dite branches)
     have hindirpoly := genIndirPoly_complete fctx octx pctx tvars bctx depth τ
       sampledTys hLen hValid name concreteArgTys hEntry args hArgs
     by_cases hops : (findOpsInCtx octx τ).length > 0
-    · exact Or.inl ⟨hops, Or.inr (Or.inr hindirpoly)⟩
-    · exact Or.inr ⟨hops, Or.inr hindirpoly⟩
+    · refine Or.inl ⟨hops, ?_⟩
+      rw [← mem_support_iff, mem_support_frequency_iff]
+      refine ⟨9, _, List.mem_cons_of_mem _ List.mem_cons_self, by omega, ?_⟩
+      rw [mem_support_pick_iff]
+      exact Or.inr hindirpoly
+    · exact Or.inr ⟨hops, (pick_mem_iff _).mpr (Or.inr hindirpoly)⟩

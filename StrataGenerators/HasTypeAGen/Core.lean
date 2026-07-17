@@ -128,15 +128,6 @@ def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
     exact List.length_pos_iff.mp h
   elements _ hne
 
--- ── Biased choice combinator ─────────────────────────────────────────────
-
-/-- A biased binary choice: takes the first branch with probability 1/10 (and
-    the second with probability 9/10). Used at the outermost branch point of
-    recursive generator cases to heavily suppress the probability of trivial
-    base-case terms when depth budget remains. -/
-def RandomChoice.pickBiased [Monad m] [RandomChoice m] (x y : Unit → m α) := do
-  if (← coin (1 / 10)) then x () else y ()
-
 -- ── Type generator ───────────────────────────────────────────────────
 
 /-- Pick a uniformly random type variable name from `tvars` and return it
@@ -175,40 +166,42 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
       pickBaseType
   | n + 1 =>
     if h : tvars.length > 0 then
-      pickBiased
-        (fun () => pickBaseType)
-        (fun () =>
-          oneOf
-            [ (fun () => do
-                let τ₁ ← genLMonoTy tvars n
-                let τ₂ ← genLMonoTy tvars n
-                pure (.arrow τ₁ τ₂)),
-              (fun () => do
-                let τ₁ ← genLMonoTy tvars n
-                let τ₂ ← genLMonoTy tvars n
-                pure (.map τ₁ τ₂)),
-              (fun () => do
-                let τ ← genLMonoTy tvars n
-                pure (.seq τ)),
-              (fun () => pickTyVar tvars h) ]
-            (by simp))
+      frequency
+        [ (1, fun () => pickBaseType),
+          (9, fun () =>
+            oneOf
+              [ (fun () => do
+                  let τ₁ ← genLMonoTy tvars n
+                  let τ₂ ← genLMonoTy tvars n
+                  pure (.arrow τ₁ τ₂)),
+                (fun () => do
+                  let τ₁ ← genLMonoTy tvars n
+                  let τ₂ ← genLMonoTy tvars n
+                  pure (.map τ₁ τ₂)),
+                (fun () => do
+                  let τ ← genLMonoTy tvars n
+                  pure (.seq τ)),
+                (fun () => pickTyVar tvars h) ]
+              (by simp)) ]
+        (by simp)
     else
-      pickBiased
-        (fun () => pickBaseType)
-        (fun () =>
-          oneOf
-            [ (fun () => do
-                let τ₁ ← genLMonoTy tvars n
-                let τ₂ ← genLMonoTy tvars n
-                pure (.arrow τ₁ τ₂)),
-              (fun () => do
-                let τ₁ ← genLMonoTy tvars n
-                let τ₂ ← genLMonoTy tvars n
-                pure (.map τ₁ τ₂)),
-              (fun () => do
-                let τ ← genLMonoTy tvars n
-                pure (.seq τ)) ]
-            (by simp))
+      frequency
+        [ (1, fun () => pickBaseType),
+          (9, fun () =>
+            oneOf
+              [ (fun () => do
+                  let τ₁ ← genLMonoTy tvars n
+                  let τ₂ ← genLMonoTy tvars n
+                  pure (.arrow τ₁ τ₂)),
+                (fun () => do
+                  let τ₁ ← genLMonoTy tvars n
+                  let τ₂ ← genLMonoTy tvars n
+                  pure (.map τ₁ τ₂)),
+                (fun () => do
+                  let τ ← genLMonoTy tvars n
+                  pure (.seq τ)) ]
+              (by simp)) ]
+        (by simp)
 
 -- ── Expression sub-generator combinators ─────────────────────────────────
 -- These combinators take in the generators that they invoke as explicit arguments,
@@ -1012,9 +1005,9 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3) : G LExpr' :=
   if h : (findOpsInCtx octx τ).length > 0 then
-    pickBiased
-      (fun () => genLExprBase fctx octx tvars bctx depth τ)
-      (fun () =>
+    frequency
+      [ (1, fun () => genLExprBase fctx octx tvars bctx depth τ),
+        (9, fun () =>
         pick
           (fun () => do
             -- Monomorphic Indir rule: find all operators `ops` in the context
@@ -1032,7 +1025,8 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
             pure (mkApps opExpr args))
           (fun () =>
             -- Polymorphic IndirPoly rule (Pałka et al. 2011, Section 4)
-            genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs))
+            genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs)) ]
+      (by simp)
   else
     -- No monomorphic Indir candidates; try IndirPoly or fall back to base
     pick

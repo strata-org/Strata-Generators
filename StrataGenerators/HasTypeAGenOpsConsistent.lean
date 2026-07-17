@@ -1224,23 +1224,32 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e := by
   unfold genLExpr at he
-  simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
-  rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
-  · -- genLExprBase branch
-    exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-  · -- monomorphic Indir
-    simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
-    obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
-    rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
-    apply mkApps_opsConsistentR
-    · exact indir_op_opsConsistentR F τ _ _ hentry_mem
-    · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
-  · -- IndirPoly (with candidates)
-    exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
-  · -- genLExprBase fallback (no monomorphic candidates)
-    exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-  · -- IndirPoly fallback
-    exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
+  simp only [mem_support_iff, SetGen.mem_dite] at he
+  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+  · -- Monomorphic Indir candidates: two-element frequency, then a binary pick
+    rw [← mem_support_iff, mem_support_frequency_iff] at he
+    obtain ⟨_, g, hg, _, he⟩ := he
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+    · -- genLExprBase branch (weight-1 branch of the frequency)
+      exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+    -- weight-9 branch: a binary pick between the monomorphic Indir and IndirPoly rules
+    rw [mem_support_pick_iff] at he
+    rcases he with he | he
+    · -- monomorphic Indir
+      simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+      obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
+      rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+      apply mkApps_opsConsistentR
+      · exact indir_op_opsConsistentR F τ _ _ hentry_mem
+      · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
+    · -- IndirPoly (with candidates)
+      exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
+  · -- No monomorphic Indir candidates: pick between genLExprBase and IndirPoly
+    rw [pick_mem_iff] at he
+    rcases he with he | he
+    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+    · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
 
 -- Note: `genLExpr_opsConsistentR` above proves `Lambda.OpsConsistentR F e`
 -- directly — Strata's declarative predicate, which is `public` in `Assumptions.lean`.
@@ -1338,15 +1347,25 @@ theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e := by
   unfold genLExpr at he
-  simp only [mem_support_iff, SetGen.mem_dite, pickBiased_mem_iff, pick_mem_iff] at he
-  rcases he with ⟨hpos, he | (he | he)⟩ | ⟨_, he | he⟩
-  · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-  · simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
-    obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
-    rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
-    apply mkApps_opsConsistentR
-    · exact indir_op_opsConsistentR F τ _ _ hentry_mem
-    · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
-  · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he
-  · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-  · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he
+  simp only [mem_support_iff, SetGen.mem_dite] at he
+  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+  · -- Monomorphic Indir candidates: two-element frequency, then a binary pick
+    rw [← mem_support_iff, mem_support_frequency_iff] at he
+    obtain ⟨_, g, hg, _, he⟩ := he
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+    rw [mem_support_pick_iff] at he
+    rcases he with he | he
+    · simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+      obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
+      rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+      apply mkApps_opsConsistentR
+      · exact indir_op_opsConsistentR F τ _ _ hentry_mem
+      · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
+    · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he
+  · -- No monomorphic Indir candidates: pick between genLExprBase and IndirPoly
+    rw [pick_mem_iff] at he
+    rcases he with he | he
+    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
+    · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he
