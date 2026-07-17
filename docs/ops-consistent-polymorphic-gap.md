@@ -287,19 +287,18 @@ a machine-checked counterexample and is the reason the monomorphic case of
 `PolyOpsConsistent_of_PCtxWF` needs the invariant (it forces the generic type
 ground when `typeArgs = []`, so `A = genericTy`).
 
-## Relation to the type-inference incompleteness (issue 06)
+## Relation to the type-inference incompleteness
 
 It is natural to ask whether `unify_ground_instance` is just a special case of
-the type-inference completeness discussed in
-`docs/github-issues/06-quantifier-body-type-inference-incomplete.md` (the `∃x. x`
-/ `∀x. x` counterexamples where `LExpr.resolve` rejects a type-erased but
-well-typed term). It is **not** a special case — the two live at different layers
-of the type machinery, and understanding why clarifies both.
+type-inference completeness — the `∃x. x` / `∀x. x` counterexamples where
+`LExpr.resolve` rejects a type-erased but well-typed term. It is **not** a special
+case — the two live at different layers of the type machinery, and understanding
+why clarifies both.
 
 Both stem from the *same* structural fact about Strata: its type machinery is
 proven **sound but not complete**. Strata ships soundness lemmas (if `unify` /
 `resolve` succeeds, the result is correct) but no completeness lemmas (if a
-solution exists, the algorithm finds it). Issue 06 and `unify_ground_instance`
+solution exists, the algorithm finds it). The quantifier-body bug and `unify_ground_instance`
 are two encounters with that one gap — but one is a *bug found* and the other a
 *narrow completeness fact proved*, and they sit on opposite sides of it.
 
@@ -310,11 +309,11 @@ Type inference splits into two stages:
    "is this Boolean?" check lives here.
 2. **Constraint solving** — `Constraints.unify` solves the equations it is handed.
 
-- **Issue 06 is a bug in stage 1.** For `∃x. x`, `resolve` infers the body's
+- **The quantifier-body bug is in stage 1.** For `∃x. x`, `resolve` infers the body's
   type as an unsolved metavariable `$__ty0`, then does a *rigid* syntactic check
   "is this literally `bool`?" and rejects. The fix is to instead *pose* the
   constraint `$__ty0 = bool` and let the unifier solve it (`$__ty0 ↦ bool`). So a
-  perfectly complete unifier would **not** fix issue 06 — the solvable problem is
+  perfectly complete unifier would **not** fix it — the solvable problem is
   never handed to the unifier at all. It is an incompleteness *above*
   unification.
 - **`unify_ground_instance` is a completeness fact about stage 2.** It says
@@ -323,10 +322,10 @@ Type inference splits into two stages:
   Strata omits, so we prove it ourselves — but only in the narrow *ground-instance*
   regime.
 
-The sharper link is that **groundness is precisely what dodges issue 06's failure
+The sharper link is that **groundness is precisely what dodges the quantifier-body bug's failure
 mode**:
 
-- Issue 06's failure is *triggered* by a non-ground, unsolved metavariable
+- The quantifier-body bug's failure is *triggered* by a non-ground, unsolved metavariable
   (`$__ty0`) that the rigid checker mishandles.
 - `unify_ground_instance` *requires* the target `A` to be ground
   (`A.freeVars = []`), and that hypothesis is what rules the unsolved-metavariable
@@ -337,12 +336,12 @@ mode**:
 So `unify_ground_instance` is not a slice of the (incomplete) full inference;
 it carves out the fragment — ground instances, no live metavariables — where
 completeness *does* hold and is provable. It succeeds exactly by excluding the
-class of inputs (free / unsolved type variables) that makes both issue 06's
+class of inputs (free / unsolved type variables) that makes both the quantifier-body bug's
 `resolve` and the polymorphic `OpsConsistent` path (the wrong-direction
 unification at the top of this doc) misbehave. In the `OpsConsistent` proof we
 get to *impose* that groundness ourselves (the `freeVars … == []` guard on the
 annotation), which is why the gap is closable here, whereas in the general
-`resolve` setting of issue 06 it surfaces as a genuine bug.
+`resolve` setting it surfaces as a genuine bug.
 
 ## Alternative generator fixes (not taken)
 

@@ -1,17 +1,11 @@
 # Variable Capture Bug in `genIndirPoly`
 
-> **Status note.** The *capture bug* and the *freshening fix* (`freshenBoundVars`)
-> described here are still live — freshening remains in the generator and is
-> essential. However, this document was written during the **operational
-> `OpsConsistent`** era, and its later sections (especially "Two corrections",
-> and any mention of `opTypeSubst` orienting a substitution the "wrong direction",
-> or `Constraints.unify` being symmetric) describe the operational check that the
-> generator is **no longer proven against**. The generator now targets the
-> *declarative* `OpsConsistentR`, whose `.op_in` never runs `opTypeSubst`. Treat
-> the `opTypeSubst`/symmetric-unifier and ground-only-fix material as historical;
-> the current guard and its rationale are in
-> `docs/ops-consistent-polymorphic-gap.md` (top note) and
-> `docs/lean-vs-haskell-generator.md`.
+> **Scope.** This document covers the *capture bug* and the *freshening fix*
+> (`freshenBoundVars`), both of which are live — freshening remains in the
+> generator and is essential. The op-consistency proof that consumes it is
+> described in `docs/ops-consistent-polymorphic-gap.md` (top note) and
+> `docs/lean-vs-haskell-generator.md`, which are the authority on the current
+> design.
 
 ## Summary
 
@@ -266,209 +260,14 @@ def polyOpsForResult (pctx : PolyOpCtx) (τ : LMonoTy)
 ```
 
 After freshening, `unifyTypes retTy' τ` produces a non-trivial substitution (e.g.,
-`[α' ↦ .ftvar "α"]`) that correctly records how the operator was instantiated. The
-resulting annotation satisfies `OpsConsistent`.
+`[α' ↦ .ftvar "α"]`) that correctly records how the operator was instantiated,
+removing the name capture.
 
-### Why the Fix Works
+## Current op-consistency proof
 
-> **⚠️ SUPERSEDED — this subsection is historically inaccurate.** It claims the
-> freshening fix alone makes `id` at target `.ftvar "α"` produce a *consistent*
-> `α → α` annotation. It does **not**: `LFunc.opTypeSubst` unifies `(α → α, α → α)`
-> and the round-trip does not certify the annotation as a valid instantiation once
-> the target type carries free variables — this is the very gap documented in
-> `ops-consistent-polymorphic-gap.md`. The actual fix drops such non-ground
-> candidates entirely (ground-only instantiation), so `id` at target `.ftvar "α"`
-> is **not** generated. Freshening remains necessary (it removes name capture) but
-> is not sufficient on its own. The steps below are left only as a record of the
-> original — incorrect — reasoning.
-
-With the `id : ∀ α. α → α` example and target `τ = .ftvar "α"`:
-
-1. `contextVars = ["α"]` (from `collectFtvars τ`)
-2. `freshenBoundVars ["α"] (α → α) ["α"]` → `(["α'"], .ftvar "α'" → .ftvar "α'")`
-3. `unifyTypes (.ftvar "α'") (.ftvar "α")` → `subst = [α' ↦ .ftvar "α"]`
-4. `findFreeTyVars ["α'"] [α' ↦ .ftvar "α"]` → `[]` (α' is now solved)
-5. `fullSubst = [α' ↦ .ftvar "α"]`
-6. `concreteArgTys = [(.ftvar "α'").subst [α' ↦ .ftvar "α"]]` = `[.ftvar "α"]`
-7. `fullArrowTy = .ftvar "α" → .ftvar "α"` — **not** `OpsConsistent` (see above),
-   so under the ground-only fix this candidate is dropped, not emitted.
-
-## Proving `OpsConsistent` on Generated Terms
-
-> **⚠️ HISTORICAL DESIGN SKETCH — superseded by the actual implementation.** The
-> `PCtxWF`, theorem statement, proof strategy, and "Key Lemma" below are the
-> *original plan*, and differ from what was built. See the "Implementation status"
-> section at the end of this file and `ops-consistent-polymorphic-gap.md` for the
-> real design. In particular: (a) `PCtxWF` was strengthened with a
-> free-type-variables-⊆-`typeArgs` invariant; (b) the `freshen_subst_eq_generic_subst`
-> "Key Lemma" below is **not** how the proof closes — instead the generator was
-> restricted to *ground* polymorphic instantiations and the real completeness
-> ingredient is `unify_ground_instance` (ground-matching unification completeness);
-> (c) the final theorem proves `Lambda.GenOpsConsistent` (a certified copy of
-> `OpsConsistent`), not the private `Lambda.OpsConsistent` directly.
-
-### Required Precondition
-
-A well-formedness condition linking `pctx` entries to the factory:
-
-```lean
-def PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx) : Prop :=
-  ∀ (name : String) (lty : Lambda.LTy),
-    (name, lty) ∈ pctx →
-    ∃ (f : LFunc LExprParams'), f ∈ F.toArray.toList ∧
-      f.name.name = name ∧
-      lty = .forAll f.typeArgs (LMonoTy.mkArrow' f.output f.inputs.values)
-```
-
-### Theorem Statement
-
-```lean
-theorem genLExpr_opsConsistent (F : @Factory LExprParams')
-    (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
-    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hτ : SimpleType τ)
-    (hOctx : octx = factoryOps F)
-    (hPctx : PCtxWF F pctx)
-    (e : LExpr')
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
-    Lambda.OpsConsistent F e
-```
-
-### Proof Strategy
-
-Two cases for `.op` nodes:
-
-1. **From `pickOp`** (via `genLExprBase`): The annotation `τ` is the generic curried type
-   from `factoryOps F`. For monomorphic ops, `opTypeSubst` returns `Subst.empty` and
-   `genericTy.subst Subst.empty = genericTy = ty_op`. For polymorphic ops in `octx` with
-   their full generic type, `opTypeSubst` unifies the annotation against itself.
-
-2. **From `genIndirPoly`**: The annotation is `concreteArgTys.foldr arrow τ`. After
-   freshening, this equals `genericTy.subst fullSubst`. Then `opTypeSubst` unifies the
-   annotation against `genericTy`, recovering an equivalent substitution.
-
-### Key Lemma
-
-```lean
-theorem freshen_subst_eq_generic_subst (boundVars : List TyIdentifier)
-    (monoTy : LMonoTy) (contextVars : List TyIdentifier)
-    (fullSubst : Lambda.Subst)
-    (hAll : ∀ v ∈ (freshenBoundVars boundVars monoTy contextVars).1,
-      (Maps.find? fullSubst v).isSome) :
-    let (_, freshMonoTy) := freshenBoundVars boundVars monoTy contextVars
-    LMonoTy.subst fullSubst freshMonoTy = LMonoTy.subst fullSubst monoTy
-```
-
-This states: if all freshened bound vars are mapped by `fullSubst`, then applying
-`fullSubst` to the freshened type gives the same result as applying it to the original.
-This holds because freshening only renames variables, and if both old and new names map
-to the same concrete type under `fullSubst`, the result is identical.
-
-This lemma is non-trivial to prove (requires reasoning about `LMonoTy.subst` and the
-renaming substitution). It can be `sorry`'d initially.
-
-### OpsConsistent for Sub-expressions
-
-For compound expressions (`.app`, `.ite`, `.abs`, `.eq`, `.quant`), `OpsConsistent` is
-structural (conjunction over sub-expressions). Each sub-expression is generated by
-`genLExprBase`, so the proof recurses. The base cases (`.const`, `.bvar`, `.fvar`) are
-trivially `True`.
-
-## Files Involved
-
-| File | Role |
-|------|------|
-| `HasTypeAGen/Core.lean` | Generator definitions (fix goes here) |
-| `HasTypeAGen.lean` | Proofs (soundness, completeness, new OpsConsistent theorem) |
-| `HasTypeAGen/Defs.lean` | `factoryOps` definition (unchanged) |
-| `Strata/.../Assumptions.lean` | `OpsConsistent` definition (unchanged, upstream) |
-| `Strata/.../Factory.lean` | `LFunc.opTypeSubst` definition (unchanged, upstream) |
-| `Strata/.../LTy.lean` | `LMonoTy.freeVars` (reusable, upstream) |
-
-## Implementation Order
-
-1. Add `collectFtvars`, `freshen`, `freshenBoundVars` to Core.lean
-2. Modify `polyOpsForResult` to freshen before unification
-3. Verify `lake build` passes (generator compiles)
-4. Update `genIndirPoly_sound` if needed
-5. Update `genIndirPoly_complete`, `genLExpr_complete`, `IsPolyApp`
-6. Add `PCtxWF` and `genLExpr_opsConsistent` (sorry complex sub-goals)
-7. Prove what's provable, document remaining sorrys
-
-## Verification
-
-1. `lake build` passes at each step
-2. No new `sorry` in previously-proven theorems
-3. Property test: generate terms with `tvars = ["α"]` and `pctx` containing operators
-   binding `"α"`, verify all generated terms pass a decidable `OpsConsistent` check
-
-## Implementation status (completed)
-
-Done in `StrataGenerators/HasTypeAGen/Core.lean`,
-`StrataGenerators/HasTypeAGen/OpsConsistentDef.lean` (new), and
-`StrataGenerators/HasTypeAGenOpsConsistent.lean` (new):
-
-1. ✅ `freshen` / `freshenBoundVars` added to `Core.lean`; `polyOpsForResult`
-   freshens before unification. (`collectFtvars` not needed — used Strata's
-   existing `LMonoTy.freeVars`.)
-2. ✅ Generator compiles; `genLExpr_sound`, `genLExpr_complete`, and all existing
-   proofs still pass unchanged (they treat `polyOpsForResult` as a black box, so
-   the internal freshening change is transparent to them). No new `sorry` in any
-   previously-proven theorem.
-3. ✅ `OpsConsistent` machinery:
-   - `OpsConsistentDef.lean` is a `module` file exposing `Lambda.GenOpsConsistent`,
-     an `@[expose] public` copy of Strata's private `Lambda.OpsConsistent`, with a
-     build-checked `GenOpsConsistent.faithful : GenOpsConsistent = OpsConsistent`.
-     (Necessary because `OpsConsistent` is non-`public` and only nameable from a
-     `module` that `import all`s `Assumptions`, which cannot import the non-module
-     generator — see `opsconsistent-module-shim.md`.) It also proves the reusable
-     Strata bridge lemmas (`unify_self`, `opGeneric_opsConsistent`,
-     `opGroundInstance_opsConsistent`, `mkArrow_destructArrow` + `ArrowSpineOK`,
-     `mem_get?_eq`).
-   - `HasTypeAGenOpsConsistent.lean` proves `GenOpsConsistent` for the full
-     generator: `genLExprBase_opsConsistent` (structural induction over the
-     generator, all 21 depth/type cases), `mkApps`/`mapM` propagation, the
-     monomorphic Indir op node, and the top-level `genLExpr_opsConsistent`.
-   - **`genLExpr_opsConsistent_nil`** (and `genIndirPoly_opsConsistent_nil`):
-     fully unconditional, `sorry`-free, for `pctx = []` — covering the closed-term
-     generators.
-   - **`genLExpr_opsConsistent_of_PCtxWF`** (general `pctx`): the headline result,
-     **fully proven and unconditional** given `FactoryOutputWF F` + `PCtxWF F pctx`
-     (both discharged for any real factory). Depends only on the standard axioms
-     (`propext`, `Classical.choice`, `Quot.sound`) — no `sorry`. (`genLExpr_opsConsistent`
-     is a slightly more general form taking the — now proven — `PolyOpsConsistent`
-     assumption directly.)
-
-### Two corrections to this document's original design
-
-**1. The freshening fix alone is not sufficient (the `freshen_subst_eq_generic_subst`
-"Key Lemma" plan does not close the proof).** A *second, independent* gap exists:
-when the target type carries free type variables, `LFunc.opTypeSubst` can orient
-the recovered substitution in the wrong direction, so the annotation
-`concreteArgTys.foldr arrow τ` is not a valid factory instantiation even after
-freshening. The fix was to restrict `polyOpsForResult` to **ground** instantiations
-(drop any candidate whose annotation has free type variables); a ground annotation
-is a genuine instance of the generic type and `opTypeSubst` recovers it correctly.
-Freshening is still applied (it removes name capture), but groundness is what makes
-the annotation consistent. Fully documented, with the `id : ∀α. α → α` at target
-`.ftvar "β"` counterexample, in `ops-consistent-polymorphic-gap.md`.
-
-**2. `PolyOpsConsistent` IS proven (not just assumed).** After the ground-only fix
-it becomes true, and `PolyOpsConsistent_of_PCtxWF` proves it from `PCtxWF`. This
-required (a) proving `unify_ground_instance` — a ground-matching *unification
-completeness* result that Strata does not ship (only soundness) — from scratch in
-`StrataGenerators/UnifyGroundInstance.lean`, and (b) **strengthening `PCtxWF`** to
-require every free type variable of a factory function's generic type to be bound
-by its `typeArgs` (`(mkArrow' fn.output fn.inputs.values).freeVars ⊆ fn.typeArgs`),
-matching Strata's real `FuncWF` invariant. Without (b), a monomorphic function with
-a free type variable would break consistency (machine-checked counterexample; see
-`ops-consistent-polymorphic-gap.md`).
-
-### Why `GenOpsConsistent` instead of `OpsConsistent` directly
-
-The proofs are stated in terms of `Lambda.GenOpsConsistent`, an `@[expose] public`
-copy of Strata's private `Lambda.OpsConsistent`, certified definitionally equal by
-the build-checked `GenOpsConsistent.faithful`. This is forced by Lean's module
-system: `OpsConsistent` is only nameable from a `module` file, which cannot import
-the non-`module` generator. See `opsconsistent-module-shim.md` for the full
-explanation.
+Freshening (above) is a *necessary* ingredient but not the whole story, and the
+op-consistency proof it feeds into has since been rebuilt against Strata's
+declarative `OpsConsistentR`. For the current design — the forward-instance guard
+in `findPolymorphicOps`, `PCtxWF`, and the headline
+`genLExpr_opsConsistentR_of_PCtxWF` — see `ops-consistent-polymorphic-gap.md` (top
+note) and `lean-vs-haskell-generator.md`.
