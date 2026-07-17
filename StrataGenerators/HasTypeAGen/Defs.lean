@@ -55,14 +55,14 @@ def factoryPolyOps (F : @Factory LExprParams') : PolyOpCtx :=
     generate fully-applied operator applications. -/
 def genLExprWithFactory [Gen G] (fctx : FVarCtx) (F : @Factory LExprParams')
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (pctx : PolyOpCtx := []) : G LExpr' :=
+    (pctx : PolyOpCtx := factoryPolyOps F) : G LExpr' :=
   genLExpr fctx (factoryOps F) pctx tvars bctx depth τ
 
 /-- Generate a well-typed closed expression (no free variables) using the
     given factory for operators. -/
 def genClosedLExprWithFactory [Gen G] (F : @Factory LExprParams')
     (tvars : List TyIdentifier) (depth : Nat)
-    (pctx : PolyOpCtx := []) : G LExpr' := do
+    (pctx : PolyOpCtx := factoryPolyOps F) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
   genLExprWithFactory [] F tvars [] depth τ pctx
 

@@ -1295,9 +1295,10 @@ theorem genLExprWithFactory_opsConsistentR_factory (F : @Factory LExprParams') (
   genLExpr_opsConsistentR_factory F fctx tvars bctx depth τ e he
 
 -- ── Sorry-free corollary for the empty polymorphic context ───────────
--- The closed-term generators (`genClosedLExprWithFactory`, and
--- `genLExprWithFactory` at its default `pctx := []`) use `pctx = []`. For that
--- case `findPolymorphicOps [] _ _ = []`, so `genIndirPoly` never emits a
+-- The factory wrappers now default to `pctx := factoryPolyOps F` (covered
+-- unconditionally by `genLExpr_opsConsistentR_factory`). The `pctx = []` results
+-- below still apply to callers that *explicitly* pass an empty polymorphic
+-- context: `findPolymorphicOps [] _ _ = []`, so `genIndirPoly` never emits a
 -- polymorphic op and the polymorphic-annotation obligation is vacuous — giving a
 -- result that does not even need `PCtxWF`.
 
