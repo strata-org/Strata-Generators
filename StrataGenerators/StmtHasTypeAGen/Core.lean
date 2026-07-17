@@ -49,7 +49,8 @@ constructor whose well-typedness genuinely depends on `C` is `typeDecl` (its
 premise is `C.addKnownTypeWithError … = .ok C'`); we handle it by generating a
 `TypeConstructor` and then **matching** on the result of `addKnownTypeWithError`,
 so the `.ok` branch's output context is definitionally the required `C'`. On a
-name clash we fall back to an (always-well-typed) empty non-deterministic `ite`.
+name clash we produce the empty generator (`default`, whose `SetGen.Set` support
+is `∅`), so a clashing constructor simply contributes nothing.
 
 ## Labels
 
@@ -59,7 +60,8 @@ Under the new spec `exit label` requires `label ∈ L` and `block label` require
 - `genExitStmt` samples its target from the *enclosing* labels `L` (via
   `elements`), so the generated `exit` genuinely targets a live enclosing block.
   When `L = []` (no enclosing block, e.g. at top level) no valid `exit` exists,
-  so it falls back to the always-well-typed empty non-deterministic `ite`.
+  so it produces the empty generator (`default`) — the `exit` branch contributes
+  nothing there.
 - The `block` generator draws its label from `genFreshLabel L`, guaranteeing
   `label ∉ L`, and generates the body under `label :: L`.
 
@@ -187,24 +189,18 @@ def genCmdStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
   let r ← genCmd fctx octx tvars ctx depth
   pure ⟨Stmt.cmd (CmdExt.cmd r.cmd), C, r.outCtx⟩
 
-/-- An always-well-typed "no-op" statement: an empty non-deterministic `ite`.
-    Typed by `StmtHasType'.ite_nondet` with both (empty) branches typed by
-    `StmtsHasType'.nil`, independent of `C`, `Γ`, and the label set `L`. Used as
-    the fallback wherever no in-scope `exit` (or fresh type name) is available. -/
-def noopStmt (C : LContext CoreLParams) (ctx : VarCtx) : GenStmtResult :=
-  ⟨Stmt.ite .nondet [] [] default, C, ctx⟩
-
 /-- Generate an `exit` statement targeting an enclosing block. Under the new
     typing spec `StmtHasType'.exit` requires `label ∈ L`, so the target label is
     sampled (via `elements`) from the enclosing-block `labels` — the generated
     `exit` genuinely breaks out of a live enclosing block. When no block encloses
     the current point (`labels = []`, e.g. at top level) *no* well-typed `exit`
-    exists, so this falls back to the always-well-typed `noopStmt`. Context is
-    unchanged. -/
+    exists, so this produces the empty generator (`default`, whose `SetGen.Set`
+    support is `∅`): the `exit` branch simply contributes nothing there. Context
+    is unchanged. -/
 def genExitStmt [Gen G] (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) : G GenStmtResult :=
   match labels with
-  | [] => pure (noopStmt C ctx)
+  | [] => default
   | l :: ls => do
       let lbl ← elements (l :: ls) (by simp)
       pure ⟨Stmt.exit lbl default, C, ctx⟩
@@ -221,14 +217,15 @@ def genFuncDeclStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx)
 
 /-- Generate a `typeDecl` statement. A random `TypeConstructor` is generated and
     checked against `C` via `addKnownTypeWithError`. On success the output context
-    is the extended `C'`; on a name clash we fall back to `noopStmt` (leaving `C`
-    unchanged), keeping the generator total and sound. -/
+    is the extended `C'`; on a name clash we produce the empty generator
+    (`default`, support `∅`), so a clashing constructor simply contributes nothing.
+    This keeps the generator total and sound. -/
 def genTypeDeclStmt [Gen G] (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) :
     G GenStmtResult := do
   let tc ← genTypeConstructor depth
   match C.addKnownTypeWithError { name := tc.name, metadata := tc.numargs } default with
   | .ok C' => pure ⟨Stmt.typeDecl tc default, C', ctx⟩
-  | .error _ => pure (noopStmt C ctx)
+  | .error _ => default
 
 -- ── Main mutually-recursive statement / statement-list generators ─────────
 

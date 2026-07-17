@@ -60,10 +60,11 @@ rewrite — and in Strata's upstream `LExprTypeSpec.lean`.)
 4. **`typeDecl` case.** The premise is `C.addKnownTypeWithError … = .ok C'`.
    The generator **matches** on the very same `addKnownTypeWithError` call, so the
    `.ok` branch's output context is *definitionally* `C'` — no `HashMap` freshness
-   reasoning needed. On `.error` (name clash) it falls back to `noopStmt` (an empty
-   `ite .nondet [] []`, always well-typed regardless of `C`/`Γ`/`L`; a bare `exit`
-   is no longer a valid fallback since `exit` now requires `label ∈ L`).
-   Soundness inverts this with `split at hr`.
+   reasoning needed. On `.error` (name clash) it produces the empty generator
+   (`default`, whose `SetGen.Set` support is `∅`), so a clashing constructor simply
+   contributes nothing (a bare `exit` is no longer a valid fallback since `exit`
+   now requires `label ∈ L`). Soundness inverts this with `split at hr`; the
+   `.error` branch's support is empty, so that case is vacuous.
 
 5. **Lexical scoping.** `block`, each `ite` branch, and the `loop` body have
    output context = **input** `(C, Γ)`. The generator discards the nested output
@@ -93,7 +94,8 @@ rewrite — and in Strata's upstream `LExprTypeSpec.lean`.)
    - `genExitStmt` samples its label from `labels` via `elements` (so `label ∈ L`
      holds by construction, discharged in soundness by `mem_support_elements_iff`).
      When `labels = []` (top level, no enclosing block) **no** well-typed `exit`
-     exists, so it falls back to `noopStmt` (empty `ite .nondet [] []`).
+     exists, so it produces the empty generator (`default`, support `∅`) — the
+     `exit` branch contributes nothing there.
    - The `block` case draws its label from `genFreshLabel labels` (mirroring
      `genFreshName` for variables), guaranteeing `label ∉ L`; the freshness lemma
      `genFreshLabel_not_mem` discharges the `block` premise in soundness. The body
@@ -119,8 +121,9 @@ In `StmtHasTypeAGen.lean`:
   `exprSound`, `freshDisjoint`, `toTCtx_insert`, `simpleOps`). `toCmdEnv` reinterprets
   it as a `GenCmdSoundEnv` at any `C` (legal: no `GenCmdSoundEnv` field mentions `C`).
 - Per-constructor: `genCmdStmt_sound`, `genExitStmt_sound`, `genFuncDeclStmt_sound`,
-  `genTypeDeclStmt_sound`, plus `noopStmt_sound` (the shared always-well-typed
-  fallback used by the empty-`labels` `exit` case and the `typeDecl` name-clash case).
+  `genTypeDeclStmt_sound`. The empty-`labels` `exit` case and the `typeDecl`
+  name-clash case are the empty generator (`default`, support `∅`), so soundness
+  there is vacuous (via `SetGen.bot_mem_iff`).
 - Label freshness: `fallbackFreshLabel_not_mem` / `genFreshLabel_not_mem` — every
   label produced by `genFreshLabel labels` is absent from `labels`, discharging the
   `block` premise `label ∉ L` (mirrors `genFreshName_produces_fresh` for variables).

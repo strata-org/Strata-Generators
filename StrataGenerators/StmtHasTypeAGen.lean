@@ -134,29 +134,18 @@ theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
   exact StmtHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) labels (.cmd rc.cmd)
     (CmdExtHasType'.cmd (env.toTCtx ctx) (env.toTCtx rc.outCtx) rc.cmd hcmd)
 
-/-- `noopStmt` (the empty non-deterministic `ite`) is well-typed at every ambient
-    context, scope, and label set, via `ite_nondet` with two `nil` branches. -/
-theorem noopStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
-    (C : LContext CoreLParams) (ctx : VarCtx) :
-    StmtHasTypeA P C (env.toTCtx ctx) labels (noopStmt C ctx).stmt
-      (noopStmt C ctx).outC (env.toTCtx (noopStmt C ctx).outCtx) :=
-  StmtHasType'.ite_nondet C (env.toTCtx ctx) C (env.toTCtx ctx) C (env.toTCtx ctx)
-    labels [] [] default
-    (StmtsHasType'.nil C (env.toTCtx ctx) labels)
-    (StmtsHasType'.nil C (env.toTCtx ctx) labels)
-
 /-- Soundness of `genExitStmt`. With enclosing labels the target is drawn from
     them (`label ∈ L`, discharging the `exit` premise); with no enclosing block
-    (`labels = []`) it falls back to the well-typed `noopStmt`. -/
+    (`labels = []`) the generator is empty (support `∅`), so there is nothing to
+    prove. -/
 theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
     StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
   cases labels with
   | nil =>
-    simp only [genExitStmt, mem_support_pure_iff] at hr
-    subst hr
-    exact noopStmt_sound P env C ctx
+    -- `genExitStmt [] … = default`, whose support is `∅`.
+    simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
   | cons hd tl =>
     simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
@@ -177,7 +166,8 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
     (by simp) hwt
 
 /-- Soundness of `genTypeDeclStmt` (at any depth `d`). The `.ok` branch discharges
-    `typeDecl`; the `.error` (name-clash) branch falls back to a well-typed `exit`. -/
+    `typeDecl`; the `.error` (name-clash) branch is the empty generator (support
+    `∅`), so there is nothing to prove. -/
 theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d)) :
@@ -191,11 +181,9 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
     simp only [mem_support_pure_iff] at hr
     subst hr
     exact StmtHasType'.typeDecl C C' (env.toTCtx ctx) labels tc default heq
-  · -- `.error`: falls back to `noopStmt`.
+  · -- `.error`: the empty generator `default`, whose support is `∅`.
     rename_i heq
-    simp only [mem_support_pure_iff] at hr
-    subst hr
-    exact noopStmt_sound P env C ctx
+    simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
 -- ── Fresh-label freshness (for the `block` premise) ──────────────────────
 
