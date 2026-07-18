@@ -83,16 +83,14 @@ def genInitNondet [Gen G] (tvars : List TyIdentifier)
 
 /-- Generate `set x (det e)` where `x` is an existing variable. -/
 def genSetDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) (_h : ctx.length > 0) : G GenCmdResult := do
-  let idx ← choose 0 (ctx.length - 1) (by omega)
-  let (name, mty) := ctx.getD idx.down (⟨"", ()⟩, .bool)
+    (ctx : VarCtx) (depth : Nat) (h : ctx.length > 0) : G GenCmdResult := do
+  let (name, mty) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
   let e ← genLExpr fctx octx [] tvars [] depth mty
   pure ⟨.set name (.det e) default, ctx⟩
 
 /-- Generate `set x nondet` where `x` is an existing variable. -/
-def genSetNondet [Gen G] (ctx : VarCtx) (_h : ctx.length > 0) : G GenCmdResult := do
-  let idx ← choose 0 (ctx.length - 1) (by omega)
-  let (name, _mty) := ctx.getD idx.down (⟨"", ()⟩, .bool)
+def genSetNondet [Gen G] (ctx : VarCtx) (h : ctx.length > 0) : G GenCmdResult := do
+  let (name, _mty) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
 /-- Generate `assert l e` with a boolean expression. -/
