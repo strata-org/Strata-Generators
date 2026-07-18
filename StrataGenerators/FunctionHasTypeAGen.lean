@@ -161,11 +161,16 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ))
     (e : LExpr') (heq : o = some e) :
     HasTypeA' [] e τ := by
-  simp only [genOptExpr, mem_support_pick_iff, mem_support_pure_iff,
-             mem_support_map_iff] at ho
-  rcases ho with hnone | ⟨e', he', rfl⟩
-  · exact absurd (heq ▸ hnone) (by simp)
-  · -- `o = some e'` and `heq : some e' = some e`, so `e' = e`
+  simp only [genOptExpr, mem_support_frequency_iff] at ho
+  obtain ⟨_, g, hg, _, ho⟩ := ho
+  simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hg
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+  · -- weight-1 branch: `none`
+    simp only [mem_support_pure_iff] at ho
+    exact absurd (heq ▸ ho) (by simp)
+  · -- weight-3 branch: `some e'` for some well-typed `e'`
+    simp only [mem_support_map_iff] at ho
+    obtain ⟨e', he', rfl⟩ := ho
     have hee : e' = e := by simpa using heq
     subst hee
     exact genLExpr_sound fctx octx [] tvars [] depth τ e' he'
@@ -302,10 +307,15 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     (depth : Nat) (τ : LMonoTy) (o : Option LExpr')
     (ho : ∀ e, o = some e → e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ)) :
     o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ) := by
-  simp only [genOptExpr, mem_support_pick_iff, mem_support_pure_iff, mem_support_map_iff]
+  simp only [genOptExpr, mem_support_frequency_iff]
   cases o with
-  | none => exact Or.inl rfl
-  | some e => exact Or.inr ⟨e, ho e rfl, rfl⟩
+  | none =>
+    -- weight-1 branch: `none`
+    exact ⟨1, _, List.mem_cons_self, by omega, mem_support_pure_iff.mpr rfl⟩
+  | some e =>
+    -- weight-3 branch: `some e`
+    refine ⟨3, _, List.mem_cons_of_mem _ List.mem_cons_self, by omega, ?_⟩
+    exact mem_support_map_iff.mpr ⟨e, ho e rfl, rfl⟩
 
 -- ── Completeness of genFunction ──────────────────────────────────────
 
