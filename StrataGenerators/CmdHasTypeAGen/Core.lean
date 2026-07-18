@@ -90,7 +90,7 @@ def genSetDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
 
 /-- Generate `set x nondet` where `x` is an existing variable. -/
 def genSetNondet [Gen G] (ctx : VarCtx) (h : ctx.length > 0) : G GenCmdResult := do
-  let (name, _mty) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
+  let (name, _) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
 /-- Generate `assert l e` with a boolean expression. -/
