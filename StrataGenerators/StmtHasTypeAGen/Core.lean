@@ -158,12 +158,16 @@ def genCondOrNondet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     (fun () => (fun e => ExprOrNondet.det e) <$> genLExpr fctx octx [] tvars [] depth .bool)
 
 /-- Generate an optional loop measure: either `none`, or `some m` for an
-    integer expression `m`. -/
+    integer expression `m`. Biased to produce a measure 75% of the time (weights
+    `1` for `none` versus `3` for `some`), so generated loops usually carry a
+    measure. -/
 def genOptMeasure [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : G (Option Expression.Expr) :=
-  pick
-    (fun () => pure none)
-    (fun () => (fun e => some e) <$> genLExpr fctx octx [] tvars [] depth .int)
+  let gs : List (Nat × (Unit → G (Option Expression.Expr))) :=
+    [ (1, fun () => pure none),
+      (3, fun () => (fun e => some e) <$> genLExpr fctx octx [] tvars [] depth .int) ]
+  have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+3; omega
+  frequency gs hw
 
 /-- Generate a single loop invariant: an alphanumeric label paired with a
     boolean expression. -/
