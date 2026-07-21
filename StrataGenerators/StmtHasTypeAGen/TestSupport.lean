@@ -67,70 +67,39 @@ def stmtCheckContext : LContext CoreLParams :=
 
 mutual
 
-/-- Number of `loop` nodes anywhere in a statement (including nested bodies). -/
-def countLoopsStmt : Statement → Nat
-  | .loop _ _ _ body _ => 1 + countLoopsStmts body
-  | .block _ body _ => countLoopsStmts body
-  | .ite _ thenb elseb _ => countLoopsStmts thenb + countLoopsStmts elseb
-  | .cmd _ | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => 0
+/-- Count the statement nodes (anywhere in `s`, including nested bodies) that
+    satisfy `pred`. The generic traversal underlying every structural count/has
+    query below: recurse into `block`/`ite`/`loop` bodies, adding one for each
+    node — leaf or compound — for which `pred` holds. -/
+def countStmtsBy (pred : Statement → Bool) : Statement → Nat
+  | s@(.block _ body _) => (if pred s then 1 else 0) + countStmtsByList pred body
+  | s@(.ite _ thenb elseb _) =>
+      (if pred s then 1 else 0) + countStmtsByList pred thenb + countStmtsByList pred elseb
+  | s@(.loop _ _ _ body _) => (if pred s then 1 else 0) + countStmtsByList pred body
+  | s => if pred s then 1 else 0
+
+/-- List analogue of `countStmtsBy`: total matching nodes across the list. -/
+def countStmtsByList (pred : Statement → Bool) : List Statement → Nat
+  | [] => 0
+  | s :: ss => countStmtsBy pred s + countStmtsByList pred ss
+
+end
 
 /-- Number of `loop` nodes anywhere in a statement list. -/
-def countLoopsStmts : List Statement → Nat
-  | [] => 0
-  | s :: ss => countLoopsStmt s + countLoopsStmts ss
-
-end
-
-mutual
-
-/-- Number of `exit` nodes anywhere in a statement. -/
-def countExitStmt : Statement → Nat
-  | .exit _ _ => 1
-  | .loop _ _ _ body _ => countExitStmts body
-  | .block _ body _ => countExitStmts body
-  | .ite _ thenb elseb _ => countExitStmts thenb + countExitStmts elseb
-  | .cmd _ | .funcDecl _ _ | .typeDecl _ _ => 0
+def countLoopsStmts (ss : List Statement) : Nat :=
+  countStmtsByList (fun | .loop _ _ _ _ _ => true | _ => false) ss
 
 /-- Number of `exit` nodes anywhere in a statement list. -/
-def countExitStmts : List Statement → Nat
-  | [] => 0
-  | s :: ss => countExitStmt s + countExitStmts ss
-
-end
-
-mutual
-
-/-- Number of `funcDecl` nodes anywhere in a statement. -/
-def countFuncDeclStmt : Statement → Nat
-  | .funcDecl _ _ => 1
-  | .loop _ _ _ body _ => countFuncDeclStmts body
-  | .block _ body _ => countFuncDeclStmts body
-  | .ite _ thenb elseb _ => countFuncDeclStmts thenb + countFuncDeclStmts elseb
-  | .cmd _ | .exit _ _ | .typeDecl _ _ => 0
+def countExitStmts (ss : List Statement) : Nat :=
+  countStmtsByList (fun | .exit _ _ => true | _ => false) ss
 
 /-- Number of `funcDecl` nodes anywhere in a statement list. -/
-def countFuncDeclStmts : List Statement → Nat
-  | [] => 0
-  | s :: ss => countFuncDeclStmt s + countFuncDeclStmts ss
-
-end
-
-mutual
-
-/-- Number of `typeDecl` nodes anywhere in a statement. -/
-def countTypeDeclStmt : Statement → Nat
-  | .typeDecl _ _ => 1
-  | .loop _ _ _ body _ => countTypeDeclStmts body
-  | .block _ body _ => countTypeDeclStmts body
-  | .ite _ thenb elseb _ => countTypeDeclStmts thenb + countTypeDeclStmts elseb
-  | .cmd _ | .exit _ _ | .funcDecl _ _ => 0
+def countFuncDeclStmts (ss : List Statement) : Nat :=
+  countStmtsByList (fun | .funcDecl _ _ => true | _ => false) ss
 
 /-- Number of `typeDecl` nodes anywhere in a statement list. -/
-def countTypeDeclStmts : List Statement → Nat
-  | [] => 0
-  | s :: ss => countTypeDeclStmt s + countTypeDeclStmts ss
-
-end
+def countTypeDeclStmts (ss : List Statement) : Nat :=
+  countStmtsByList (fun | .typeDecl _ _ => true | _ => false) ss
 
 /-- AST size of a statement list (delegates to `Block.sizeOf`). -/
 def sizeStmts (ss : List Statement) : Nat := Block.sizeOf ss
@@ -150,23 +119,14 @@ def stmtKind : Statement → String
     exactly the constructors `StmtToKleeneStmt` has no Kleene counterpart for.
     Used to state the "defined ⟺ supported" property (#6). -/
 def hasKleeneUnsupported (ss : List Statement) : Bool :=
-  countExitStmts ss + countFuncDeclStmts ss + countTypeDeclStmts ss != 0
+  countStmtsByList (fun | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => true | _ => false) ss != 0
 
-mutual
-/-- Whether a statement contains any `loop` node carrying a non-empty invariant
-    list. `StmtToKleeneStmt` returns `none` for such loops (Kleene has no
-    invariants), an extra rejection beyond `exit`/`funcDecl`/`typeDecl` —
+/-- Whether a statement list contains any `loop` node carrying a non-empty
+    invariant list. `StmtToKleeneStmt` returns `none` for such loops (Kleene has
+    no invariants), an extra rejection beyond `exit`/`funcDecl`/`typeDecl` —
     accounted for in property #6. -/
-def hasInvLoopStmt : Statement → Bool
-  | .loop _ _ inv body _ => !inv.isEmpty || hasInvLoopStmts body
-  | .block _ body _ => hasInvLoopStmts body
-  | .ite _ thenb elseb _ => hasInvLoopStmts thenb || hasInvLoopStmts elseb
-  | .cmd _ | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => false
-/-- List analogue of `hasInvLoopStmt`. -/
-def hasInvLoopStmts : List Statement → Bool
-  | [] => false
-  | s :: ss => hasInvLoopStmt s || hasInvLoopStmts ss
-end
+def hasInvLoopStmts (ss : List Statement) : Bool :=
+  countStmtsByList (fun | .loop _ _ inv _ _ => !inv.isEmpty | _ => false) ss != 0
 
 /-- Structural equality on statement lists via their canonical pretty-print.
     `Statement` has no `BEq`/`DecidableEq` instance, so — following the codebase's
@@ -203,17 +163,19 @@ private def typeDeclStmt : Statement :=
 private def invLoop : Statement :=
   .loop .nondet none [("i", .const () (.boolConst true))] [] .empty
 
-#guard countLoopsStmt leafStmt == 0
-#guard countLoopsStmt loopInBlock == 1
-#guard countLoopsStmt iteTwoLoops == 2
-#guard countExitStmt iteTwoLoops == 1
-#guard countExitStmt loopInBlock == 0
-#guard countTypeDeclStmt typeDeclStmt == 1
+#guard countLoopsStmts [leafStmt] == 0
+#guard countLoopsStmts [loopInBlock] == 1
+#guard countLoopsStmts [iteTwoLoops] == 2
+#guard countExitStmts [iteTwoLoops] == 1
+#guard countExitStmts [loopInBlock] == 0
+#guard countTypeDeclStmts [typeDeclStmt] == 1
 #guard countLoopsStmts [leafStmt, loopInBlock, iteTwoLoops] == 3
 #guard hasKleeneUnsupported [iteTwoLoops] == true
 #guard hasKleeneUnsupported [loopInBlock] == false
-#guard hasInvLoopStmt invLoop == true
-#guard hasInvLoopStmt loopInBlock == false
+#guard hasInvLoopStmts [invLoop] == true
+#guard hasInvLoopStmts [loopInBlock] == false
+-- `countStmtsBy` counts compound nodes too: block + inner loop + the loop's leaf.
+#guard countStmtsByList (fun _ => true) [loopInBlock] == 3
 #guard stmtKind leafStmt == "cmd"
 #guard stmtKind loopInBlock == "block"
 

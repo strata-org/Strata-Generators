@@ -691,10 +691,10 @@ instance : Arbitrary GenStmts where
 -- #1: The typechecker accepts every generated (spec-well-typed) statement list.
 -- This is the *completeness* direction of the statement typechecker (only
 -- soundness, `typeCheck_annotated_sound`, is proven). A counterexample is a
--- genuine spec/algorithm divergence. This property is EXPECTED TO FAIL on the
--- `funcDecl` gap (the spec's `funcDecl` rule is strictly more permissive than the
--- algorithm) — we assert it honestly rather than mask it; the shrunk
--- counterexample is a minimal `funcDecl` witness.
+-- genuine spec/algorithm divergence. This property FAILS on the `funcDecl` gap
+-- (the spec's `funcDecl` rule is strictly more permissive than the algorithm) —
+-- we assert it honestly rather than mask it, so the suite reports a real failure
+-- with a minimal `funcDecl` counterexample.
 @[reducible] def prop_stmt_typechecks (gs : GenStmts) : Prop :=
   checkTypeCheckerComplete gs.stmts = true
 
@@ -747,28 +747,6 @@ def checkProperty (name : String) (p : Prop) [Testable p]
     IO.println s!"FAIL (after {n} trials)"
     IO.println s!"    {Testable.formatFailure "" xs n}"
     return false
-
-/-- Run a property that is *expected to fail* because it pins a known, documented
-    spec/algorithm discrepancy (the `funcDecl` gap). A failure is the expected
-    outcome — reported as `XFAIL` with the counterexample and NOT counted against
-    the suite. A *pass* is surprising (the gap may have been fixed upstream) and is
-    flagged as `UNEXPECTED PASS`, which *does* fail the suite so the harness is
-    updated. Returns `true` when the outcome matches expectation. -/
-def checkExpectedFailure (name : String) (reason : String) (p : Prop) [Testable p]
-    (cfg : Configuration) : IO Bool := do
-  IO.print s!"  {name} ... "
-  match ← Testable.checkIO p cfg with
-  | .success _ =>
-    IO.println "UNEXPECTED PASS"
-    IO.println s!"    expected this to fail ({reason}); the discrepancy may be fixed — update the harness."
-    return false
-  | .gaveUp n =>
-    IO.println s!"GAVE UP ({n} discards)"
-    return true
-  | .failure _ xs n =>
-    IO.println s!"XFAIL (expected — {reason})"
-    IO.println s!"    minimal counterexample: {Testable.formatFailure "" xs n}"
-    return true
 
 /-- Sample erased terms and print the `resolve` error messages behind any
     counterexamples to the resolve-after-erase property. Shows, per failure, the
@@ -976,9 +954,11 @@ def main (args : List String) : IO UInt32 := do
   IO.println "Statement generator properties (transforms + typechecker):"
 
   -- #1: typechecker accepts every generated well-typed statement (completeness).
-  -- EXPECTED TO FAIL on the funcDecl gap — asserted honestly, reported as XFAIL.
-  if !(← checkExpectedFailure "stmt: typechecker accepts generated statements (#1)"
-    "spec's funcDecl rule is strictly more permissive than the algorithm"
+  -- This FAILS on the funcDecl gap (the spec's funcDecl rule is strictly more
+  -- permissive than the algorithm) — a genuine spec/algorithm divergence, asserted
+  -- honestly, so the suite reports it as a real failure with a minimal
+  -- `funcDecl` counterexample.
+  if !(← checkProperty "stmt: typechecker accepts generated statements (#1)"
     (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_typechecks gs)) cfg) then
     allPassed := false
 

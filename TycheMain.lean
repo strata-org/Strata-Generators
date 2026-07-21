@@ -1217,10 +1217,11 @@ def main (args : List String) : IO Unit := do
   -- well-typed statement list (proven sound+complete against `StmtsHasTypeA`) and
   -- visualizes the property's pass/fail against structural features.
   -- Panel #1 uses the HONEST completeness predicate, so `funcDecl`-bearing
-  -- statements render as failed marks (the real spec/algorithm gap is visible,
-  -- not masked). Panel #1b shows that every such rejection carries a `funcDecl`.
+  -- statements render as failed marks (the real spec/algorithm gap shows up as
+  -- failures, not masked). Panel #1b shows that every such rejection carries a
+  -- `funcDecl`.
   let stmtPanels : List (String × String × (List Statement → Bool)) :=
-    [ (".st1", "stmt: typechecker accepts generated statements (#1 — funcDecl gap visible)", checkTypeCheckerComplete),
+    [ (".st1", "stmt: typechecker accepts generated statements (#1)", checkTypeCheckerComplete),
       (".st1b", "stmt: typecheck rejections are only funcDecl (#1b)", rejectionImpliesFuncDecl),
       (".st3", "stmt: LoopElim preserves typeability (#3)", checkLoopElimPreservesTyping),
       (".st4", "stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops),
