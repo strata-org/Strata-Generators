@@ -4,8 +4,9 @@ import Basalt.Combinators
 import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.Function
 import StrataGenerators.HasTypeAGen.Core
+import Std.Data.HashSet
 
-open Lambda RandomChoice Core Imperative ArbString
+open Lambda RandomChoice Core Imperative ArbString Std
 
 /-!
 # Core generator definitions for well-typed Strata Core `Function`s
@@ -53,9 +54,10 @@ def remainingChars : List Char :=
 def genRemainingChar [Gen G] : G Char :=
   elements remainingChars (by decide)
 
-/-- The Strata Core reserved keywords: bare words the Core lexer tokenizes as
-    keywords, so the parser rejects them in identifier position (e.g.
-    `function if () : int;` fails with "unexpected token 'if'").
+/-- The Strata Core reserved keywords as a plain list — the *source of truth*.
+    These are the bare words the Core lexer tokenizes as keywords, so the parser
+    rejects them in identifier position (e.g. `function if () : int;` fails with
+    "unexpected token 'if'").
 
     Compiled from `Strata/Languages/Core/DDMTransform/Grammar.lean`:
     - built-in type names (`type bool;` … and the `Map`/`Sequence`/`Type` cons),
@@ -66,9 +68,10 @@ def genRemainingChar [Gen G] : G Char :=
       `decreases`/`invariant`/`out`/`inout`/`old`/`have`),
     - boolean literals (`true`/`false`).
 
-    Kept as a plain `List String` (not a `HashSet`) so `decide`/`simp` can
-    evaluate membership in proofs. -/
-def reservedKeywords : List String :=
+    The list is retained (rather than only the `HashSet` below) so `decide`/`simp`
+    can evaluate membership in proofs; runtime membership goes through the
+    `HashSet` via `reservedKeywords`. -/
+def reservedKeywordsList : List String :=
   -- type names
   [ "bool", "int", "string", "regex", "real",
     "bv1", "bv8", "bv16", "bv32", "bv64", "bv128",
@@ -88,8 +91,25 @@ def reservedKeywords : List String :=
   -- boolean literals
     "true", "false" ]
 
-/-- `true` iff `s` is a reserved Strata Core keyword (see `reservedKeywords`). -/
-def isReservedKeyword (s : String) : Bool := s ∈ reservedKeywords
+/-- The reserved keywords as a `HashSet` for efficient membership testing in the
+    generator (`isReservedKeyword` runs on every generated name). Built from
+    `reservedKeywordsList`; `HashSet.contains_ofList` bridges the two so proofs
+    can still reason over the concrete list via `decide`. -/
+def reservedKeywords : Std.HashSet String := Std.HashSet.ofList reservedKeywordsList
+
+/-- `true` iff `s` is a reserved Strata Core keyword. Uses the `HashSet` for an
+    O(1) expected-time lookup (see `isReservedKeyword_eq_list_contains` for the
+    bridge to `reservedKeywordsList` used in proofs). -/
+def isReservedKeyword (s : String) : Bool := reservedKeywords.contains s
+
+/-- Membership via the `HashSet` agrees with membership in the source list. This
+    is the bridge that lets proofs reason over the concrete `reservedKeywordsList`
+    (which `decide` can evaluate) while the generator uses the efficient
+    `HashSet`. -/
+theorem isReservedKeyword_eq_list_contains (s : String) :
+    isReservedKeyword s = reservedKeywordsList.contains s := by
+  unfold isReservedKeyword reservedKeywords
+  exact Std.HashSet.contains_ofList
 
 /-- Deterministically map a reserved keyword to a fresh non-keyword identifier by
     appending `_`. No reserved keyword ends in `_`, and appending `_` to a legal

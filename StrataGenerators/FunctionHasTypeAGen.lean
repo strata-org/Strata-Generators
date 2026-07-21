@@ -110,29 +110,32 @@ theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
 -- the parser would reject in identifier position.
 
 /-- No reserved keyword's character list ends in `_` (checked over the concrete
-    `reservedKeywords` list). -/
+    source list `reservedKeywordsList`). -/
 theorem no_keyword_ends_underscore :
-    ∀ k ∈ reservedKeywords, k.toList.getLast? ≠ some '_' := by decide +kernel
+    ∀ k ∈ reservedKeywordsList, k.toList.getLast? ≠ some '_' := by decide +kernel
 
-/-- `s ++ "_"` is never a reserved keyword: it ends in `_`, and no keyword does. -/
+/-- `s ++ "_"` is never a reserved keyword: it ends in `_`, and no keyword does.
+    Stated via `isReservedKeyword` (the `HashSet` lookup) and discharged through
+    the `isReservedKeyword_eq_list_contains` bridge to `reservedKeywordsList`. -/
 theorem append_underscore_not_keyword (s : String) :
-    (s ++ "_") ∉ reservedKeywords := by
-  intro hmem
+    isReservedKeyword (s ++ "_") = false := by
+  rw [isReservedKeyword_eq_list_contains, Bool.eq_false_iff]
+  intro hc
+  rw [List.contains_iff_mem] at hc
   have hlast : (s ++ "_").toList.getLast? = some '_' := by
     rw [String.toList_append]; exact List.getLast?_concat
-  exact no_keyword_ends_underscore _ hmem hlast
+  exact no_keyword_ends_underscore _ hc hlast
 
 /-- `dodgeKeyword` never returns a reserved keyword: keywords are mapped to
     `k ++ "_"` (not a keyword), non-keywords are returned unchanged. -/
 theorem dodgeKeyword_not_keyword (s : String) :
     isReservedKeyword (dodgeKeyword s) = false := by
-  unfold dodgeKeyword isReservedKeyword
+  unfold dodgeKeyword
   split
   · rename_i h
-    simp only [decide_eq_false_iff_not]
     exact append_underscore_not_keyword s
   · rename_i h
-    simpa [isReservedKeyword] using h
+    simpa using h
 
 /-- **Keyword-freedom of `genIdentName`.** Every name in the support of
     `genIdentName` is a non-keyword identifier. -/
