@@ -34,7 +34,7 @@ size 60), against `ngernest/Strata@cse-ptrcache-cr` (resolved `8a3b26083`).
 |---|---|---|---|
 | #5a | CSE reaches a fixpoint (var-count idempotence proxy) | `checkCseIdempotent` | **PASS** (200 ok) |
 | #5b | CSE preserves typeability | `checkCsePreservesTyping` | **PASS** (200 ok) |
-| P-CSE-3 | CSE introduces no free-bvar init (capture safety) | `checkCseNoFreeBVarInInits` | **PASS** (200 ok) |
+| P-CSE-3 | CSE introduces no init with a dangling de Bruijn index (capture safety) | `checkCseNoFreeBVarInInits` | **PASS** (200 ok) |
 | P-CSE-6 | CSE var-count bounded by input DAG size | `checkCseVarCountBounded` | **PASS** (200 ok) |
 
 P-CSE-3 passing across binder-rich generated programs is the meaningful signal:
@@ -199,12 +199,18 @@ than structural equality (a second pass that rewrites subterms without changing
 the var count would slip through) but captures exactly the non-convergence
 failure mode §2.3 is about.
 
-### P-CSE-3 — No free bound variable in any extracted init (**new; strongest capture detector**)
+### P-CSE-3 — No dangling de Bruijn index in any extracted init (**new; strongest capture detector**)
 
-The sharpest, cheapest oracle for §2.1 — no evaluator needed. CSE only ever
-introduces `var $__cse.k := e` declarations; assert that **no such init `e`
-contains a free `.bvar`**. A captured bound variable is a `.bvar` that escaped its
-binder, so it appears as a free bvar in the hoisted init.
+The sharpest, cheapest oracle for §2.1 — no evaluator needed. Strata's `LExpr` is
+locally-nameless: a `.bvar i` node is a de Bruijn index pointing `i` binders
+outward, well-formed only under enough enclosing `abs`/`quant`s. CSE hoists a
+subexpression into a top-level `var $__cse.k := e` declaration, which sits under
+*zero* binders — so any `.bvar` node surviving in `e` there points past every
+binder: it is a **dangling index** (an escaped bound variable), the signature of
+a capture bug. Assert that **no such init `e` contains any `.bvar` node**.
+
+(Note: "dangling"/"escaped", not "free bound variable" — a `.bvar` node *is* the
+bound-variable form; it becomes ill-formed only relative to its new position.)
 
 ```lean
 /-- Every `$__cse.*` init expression introduced by CSE is closed w.r.t. bound

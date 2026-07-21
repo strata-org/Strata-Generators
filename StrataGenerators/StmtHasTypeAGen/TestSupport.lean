@@ -388,14 +388,19 @@ def checkCsePreservesTyping (ss : List Statement) : Bool :=
 -- (`cseInitRHSs` / `cseInitRHSsList` / `countCseVars` are defined above, next to
 -- `checkCseIdempotent`.)
 
-/-- **Property P-CSE-3 (capture safety — no free bound variable in any extracted
-    init).** CSE only ever introduces `var $__cse.k := e` declarations, prepended
-    to the body they were lifted from. A subterm hoisted out of an enclosing
-    `abs`/`quant` binder would carry a now-unbound de Bruijn index — i.e. a free
-    `.bvar` — into its init expression. So this asserts that every CSE-introduced
-    init RHS is bvar-closed (`!e.hasBVar`). A failure is a variable-capture bug
-    and thus a violation of the pass's "model-preserving" contract. This is the
-    cheapest, most direct detector for the `collectSubexprs.abs` approximation. -/
+/-- **Property P-CSE-3 (capture safety — no dangling de Bruijn index in any
+    extracted init).** CSE only ever introduces `var $__cse.k := e` declarations,
+    prepended to the body they were lifted from — i.e. at top level, under *zero*
+    binders. In Strata's locally-nameless `LExpr`, a `.bvar i` node is a de Bruijn
+    index pointing `i` binders outward; it is well-formed only under enough
+    enclosing `abs`/`quant`s. A subterm hoisted out of an enclosing binder carries
+    its `.bvar` node along, and at top level that index now points past every
+    binder — it is *dangling* (an escaped bound variable). Since the init sits
+    under no binders, `LExpr.hasBVar e` (true iff `e` contains any `.bvar` node at
+    all) detects exactly this: we assert every CSE-introduced init RHS satisfies
+    `!e.hasBVar`. A failure is a variable-capture bug and thus a violation of the
+    pass's "model-preserving" contract — the cheapest, most direct detector for
+    the `collectSubexprs.abs` bvar-freeness approximation. -/
 def checkCseNoFreeBVarInInits (ss : List Statement) : Bool :=
   (cseInitRHSsList (cseStmts ss)).all (fun e => !LExpr.hasBVar e)
 

@@ -757,8 +757,9 @@ instance : Arbitrary GenStmts where
 @[reducible] def prop_stmt_cse_preserves_typing (gs : GenStmts) : Prop :=
   checkCsePreservesTyping gs.stmts = true
 
--- P-CSE-3: no CSE-introduced `var` init contains a free bound variable (capture
--- safety — targets the `collectSubexprs.abs` bvar-freeness approximation).
+-- P-CSE-3: no CSE-introduced `var` init contains a dangling de Bruijn index — a
+-- `.bvar` node that escaped its enclosing binder when hoisted to top level
+-- (capture safety — targets the `collectSubexprs.abs` bvar-freeness approximation).
 @[reducible] def prop_stmt_cse_no_free_bvar (gs : GenStmts) : Prop :=
   checkCseNoFreeBVarInInits gs.stmts = true
 
@@ -1046,7 +1047,7 @@ def main (args : List String) : IO UInt32 := do
     allPassed := false
 
   -- P-CSE-3: no free bvar in any CSE-introduced init (capture safety)
-  if !(← checkProperty "stmt: CSE introduces no free-bvar init (capture safety, P-CSE-3)"
+  if !(← checkProperty "stmt: CSE inits have no dangling de Bruijn index (capture safety, P-CSE-3)"
     (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_no_free_bvar gs)) cfg) then
     allPassed := false
 

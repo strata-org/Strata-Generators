@@ -1289,7 +1289,7 @@ def main (args : List String) : IO Unit := do
       (".st4", "stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops),
       (".st5a", "stmt: CSE is idempotent (#5a)", checkCseIdempotent),
       (".st5b", "stmt: CSE preserves typeability (#5b)", checkCsePreservesTyping),
-      (".stcse3", "stmt: CSE introduces no free-bvar init (P-CSE-3)", checkCseNoFreeBVarInInits),
+      (".stcse3", "stmt: CSE inits have no dangling de Bruijn index (P-CSE-3)", checkCseNoFreeBVarInInits),
       (".stcse6", "stmt: CSE var-count bounded by DAG size (P-CSE-6)", checkCseVarCountBounded),
       (".st9", "stmt: mapExprs id = id (#9)", checkMapExprsId) ]
   for (suffix, title, check) in stmtPanels do
