@@ -5,6 +5,24 @@ Applying this repo's well-typed Strata Core generators to
 ANFEncoder to CommonSubexprElim, accelerate with a safe pointer-address hash
 cache"*.
 
+> **Status (implemented on branch `cse-ptrcache-properties`).** The CR is
+> reconstructed on `ngernest/Strata` branch `cse-ptrcache-cr` (full 15-file diff,
+> base `984172d4`; builds clean). This repo's `lakefile.toml` targets that branch
+> (resolved commit `8a3b26083`). The rename (§4.2) is done, and the black-box
+> properties **P-CSE-1/2/3/6** are wired into both harnesses and **all pass** at
+> 200 trials / size 60:
+>
+> | Property | Predicate | Result |
+> |---|---|---|
+> | P-CSE-2 idempotence (#5a) | `checkCseIdempotent` | PASS |
+> | P-CSE-1 typing preservation (#5b) | `checkCsePreservesTyping` | PASS |
+> | P-CSE-3 capture safety | `checkCseNoFreeBVarInInits` | PASS |
+> | P-CSE-6 DAG-size output bound | `checkCseVarCountBounded` | PASS |
+>
+> P-CSE-4 (eval preservation) and P-CSE-5/7 (hash-quality independence, traversal
+> linearity) remain future work — the latter two need the §5 seam. The sections
+> below are the design rationale.
+
 The CR rewrites the common-subexpression-elimination (CSE) pass so every
 traversal is proportional to the number of *distinct DAG nodes* rather than the
 expanded tree size, using the pointer-address cache of §5 of [*Sealing
