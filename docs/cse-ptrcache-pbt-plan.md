@@ -23,6 +23,49 @@ cache"*.
 > linearity) remain future work — the latter two need the §5 seam. The sections
 > below are the design rationale.
 
+## Test results
+
+Run: `.lake/build/bin/test-lexpr 200 60` (200 trials per property, max generator
+size 60), against `ngernest/Strata@cse-ptrcache-cr` (resolved `8a3b26083`).
+
+### The four CSE properties — all PASS
+
+| # | Property | Predicate | Result |
+|---|---|---|---|
+| #5a | CSE reaches a fixpoint (var-count idempotence proxy) | `checkCseIdempotent` | **PASS** (200 ok) |
+| #5b | CSE preserves typeability | `checkCsePreservesTyping` | **PASS** (200 ok) |
+| P-CSE-3 | CSE introduces no free-bvar init (capture safety) | `checkCseNoFreeBVarInInits` | **PASS** (200 ok) |
+| P-CSE-6 | CSE var-count bounded by input DAG size | `checkCseVarCountBounded` | **PASS** (200 ok) |
+
+P-CSE-3 passing across binder-rich generated programs is the meaningful signal:
+the CR's conservative `collectSubexprs.abs` bvar-freeness approximation did not
+produce a capture on any generated input. This is supporting evidence, not a
+proof — it is now a continuous regression guard.
+
+### Other statement/transform properties (unchanged by this work)
+
+All PASS: `#1b` funcDecl-rejection characterization, `#3` LoopElim preserves
+typing, `#4` LoopElim eliminates loops, `#6` DetToKleene defined-iff-supported,
+`#9` mapExprs id = id.
+
+### Pre-existing failures — NOT introduced by this CR work
+
+The suite's overall exit code is non-zero, but every failure is a **known,
+previously-documented** spec/algorithm gap unrelated to CSE (see the repo README
+and `docs/`), reproduced here for honesty:
+
+| Property | Failure | Root cause (documented) |
+|---|---|---|
+| `progress (closed)` | FAIL | `LExpr.eval` gets stuck on quantifiers-in-condition / lambda equality — expected per README |
+| `function: typeCheck completeness` | FAIL | measure-without-body function: spec permits, algorithm rejects (`FunctionType.lean`) |
+| `function: pretty-print/parse round-trip` | FAIL (3 parse-failures, 0 mismatches, 197 ok) | formatter/parser gaps (unsupported ops, pipe-delimited idents) — see `roundtrip-failure-catalog.md` |
+| `function: special-character identifier round-trip` | 5 failing ident cases (595 ok) | pipe/dot/backslash identifiers don't round-trip |
+| `stmt: typechecker accepts generated statements (#1)` | FAIL | the `funcDecl`-without-body spec/algorithm gap (#1b pins it as the sole cause; #1b PASSES) |
+
+None of these touch `cseStmts`, `PtrCache`, or the new predicates. The `#1`
+failure in particular is characterized by its companion `#1b` (which passes),
+confirming the sole rejection cause is the pre-existing `funcDecl` gap, not CSE.
+
 The CR rewrites the common-subexpression-elimination (CSE) pass so every
 traversal is proportional to the number of *distinct DAG nodes* rather than the
 expanded tree size, using the pointer-address cache of §5 of [*Sealing
