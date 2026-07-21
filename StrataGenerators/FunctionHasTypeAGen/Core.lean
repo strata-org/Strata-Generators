@@ -1,7 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
-import Basalt.Examples.ArbString.Def
+import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.Function
 import StrataGenerators.HasTypeAGen.Core
 
@@ -53,11 +53,59 @@ def remainingChars : List Char :=
 def genRemainingChar [Gen G] : G Char :=
   elements remainingChars (by decide)
 
+/-- The Strata Core reserved keywords: bare words the Core lexer tokenizes as
+    keywords, so the parser rejects them in identifier position (e.g.
+    `function if () : int;` fails with "unexpected token 'if'").
+
+    Compiled from `Strata/Languages/Core/DDMTransform/Grammar.lean`:
+    - built-in type names (`type bool;` … and the `Map`/`Sequence`/`Type` cons),
+    - structured-statement / declaration leading words (`if`/`then`/`else`,
+      `forall`/`exists`, `var`/`assume`/`assert`/`cover`/`while`, `spec`/
+      `requires`/`ensures`/`free`, `procedure`/`function`/`type`/`const`/
+      `axiom`/`distinct`/`datatype`, `goto`/`branch`/`return`, `inline`/
+      `decreases`/`invariant`/`out`/`inout`/`old`/`have`),
+    - boolean literals (`true`/`false`).
+
+    Kept as a plain `List String` (not a `HashSet`) so `decide`/`simp` can
+    evaluate membership in proofs. -/
+def reservedKeywords : List String :=
+  -- type names
+  [ "bool", "int", "string", "regex", "real",
+    "bv1", "bv8", "bv16", "bv32", "bv64", "bv128",
+    "Map", "Sequence", "Type",
+  -- expressions / structured statements
+    "if", "then", "else", "forall", "exists",
+    "var", "assume", "assert", "cover", "while",
+  -- specs
+    "spec", "requires", "ensures", "free", "invariant", "decreases",
+  -- declarations
+    "procedure", "function", "const", "type", "axiom", "distinct", "datatype",
+    "inline",
+  -- CFG transfers
+    "goto", "branch", "return",
+  -- modifiers / misc
+    "out", "inout", "old", "have",
+  -- boolean literals
+    "true", "false" ]
+
+/-- `true` iff `s` is a reserved Strata Core keyword (see `reservedKeywords`). -/
+def isReservedKeyword (s : String) : Bool := s ∈ reservedKeywords
+
+/-- Deterministically map a reserved keyword to a fresh non-keyword identifier by
+    appending `_`. No reserved keyword ends in `_`, and appending `_` to a legal
+    identifier yields a legal identifier (`_ ∈ strataIsIdRest`), so `dodgeKeyword
+    s` is always a legal, non-keyword identifier — and it is the identity on names
+    that were not keywords to begin with. -/
+def dodgeKeyword (s : String) : String :=
+  if isReservedKeyword s then s ++ "_" else s
+
 /-- Generate a valid Core identifier *by construction*: a first character from
     `startChars` (letters plus `_`/`$`, all in `strataIsIdFirst`), then a
-    possibly-empty run of `remainingChars` (all in `strataIsIdRest`). Every
-    output is therefore a legal Core identifier — non-empty and letter-initial,
-    so it always lexes as an `Ident` and never as a `Num`.
+    possibly-empty run of `remainingChars` (all in `strataIsIdRest`), finally
+    mapping any reserved keyword to a non-keyword via `dodgeKeyword`. Every
+    output is therefore a legal, non-keyword Core identifier — non-empty and
+    letter-initial (so it lexes as an `Ident`, never a `Num`), and never a
+    reserved word the parser would reject in identifier position.
 
     This is the name source for `genFunction`. Note `remainingChars` includes
     `.`, which is legal in a bare identifier but collides with binder /
@@ -69,7 +117,7 @@ def genRemainingChar [Gen G] : G Char :=
 def genIdentName [Gen G] : G String := do
   let x ← genStartChar
   let xs ← listOf genRemainingChar
-  return String.ofList (x :: xs)
+  return dodgeKeyword (String.ofList (x :: xs))
 
 -- ── Adversarial identifier generation (round-trip fuzzing) ───────────────
 

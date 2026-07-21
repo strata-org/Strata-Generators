@@ -1256,10 +1256,10 @@ private theorem genAlphanumList_support_set (cs : List Char)
     cs ∈ SetGen.support (genAlphanumList (G := SetGen.Set)) := by
   induction cs with
   | nil =>
-    rw [SetGen.support, genAlphanumList, genCharList]
+    rw [SetGen.support, genAlphanumList, listOf]
     simp [pick_mem_iff]
   | cons c cs ih =>
-    rw [SetGen.support, genAlphanumList, genCharList]
+    rw [SetGen.support, genAlphanumList, listOf]
     simp only [pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
     right
     refine ⟨c, ?_, cs, ?_, rfl⟩

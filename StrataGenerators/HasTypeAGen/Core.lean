@@ -1,11 +1,32 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
-import Basalt.Examples.ArbNat.Def
-import Basalt.Examples.ArbChar.Def
-import Basalt.Examples.ArbString.Def
+import BasaltExamples.ArbChar.Def
+import BasaltExamples.ArbString.Def
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.DL.Lambda.LTyUnify
+
+namespace ArbNat
+open RandomChoice
+
+/-- A `Nat` generator, defined locally rather than imported from
+    `BasaltExamples.ArbNat`. The upstream `non_empty_combinators` reorg dropped the
+    lightweight `ArbNat.Def` split, so `BasaltExamples.ArbNat` now imports the
+    full `Basalt` umbrella — which transitively pulls in Mathlib's `List.dedup`
+    and collides with Strata's `List.dedup` (from `Strata.DL.Util.List`, imported
+    via `Strata.DL.Lambda.*`). This file is deliberately kept Mathlib-free, so we
+    inline the definition. It is definitionally identical to the upstream one
+    (`pick 0 / (·+1)`), so the support proofs in `HasTypeAGen.lean` that unfold
+    `Nat.arbitrary` are unaffected. -/
+def Nat.arbitrary [Gen G] : G Nat := do
+  pick
+    (fun () => pure 0)
+    (fun () => do
+      let n ← Nat.arbitrary
+      pure (n + 1))
+partial_fixpoint
+
+end ArbNat
 
 open Lambda RandomChoice ArbNat ArbChar ArbString
 
@@ -217,7 +238,10 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   pick (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
        (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int))))
 
-abbrev genAlphanumList [Gen G] : G (List Char) := genCharList
+/-- The character-list backing of `String.arbitrary`. Upstream Basalt dropped
+    `genCharList` and now defines `String.arbitrary := String.ofList <$> listOf
+    Char.arbitrary`, so this is `listOf Char.arbitrary`. -/
+abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
 
 /-- Generate a random string constant (alphanumeric strings). -/
 @[reducible] def genStrConst [Gen G] : G LExpr' := do

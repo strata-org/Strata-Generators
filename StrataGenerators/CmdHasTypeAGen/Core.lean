@@ -1,7 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
-import Basalt.Examples.ArbString.Def
+import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
 
@@ -45,11 +45,11 @@ def VarCtx.isFresh (ctx : VarCtx) (x : Identifier Unit) : Bool :=
 def fallbackFreshName (ctx : VarCtx) : String :=
   String.ofList (List.replicate (ctx.names.foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
 
-/-- Generate a fresh variable name not in `ctx`. Uses `String.arbitrary` for
-    randomness and falls back to a length-based guarantee when the random
-    name collides. -/
+/-- Generate a fresh variable name not in `ctx`. Uses `NonEmptyString.arbitrary`
+    for randomness (a variable identifier must be non-empty) and falls back to a
+    length-based guarantee when the random name collides. -/
 def genFreshName [Gen G] (ctx : VarCtx) : G String := do
-  let s ← String.arbitrary
+  let s ← NonEmptyString.arbitrary
   if ctx.isFresh ⟨s, ()⟩ then
     pure s
   else
