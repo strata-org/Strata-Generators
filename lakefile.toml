@@ -10,7 +10,7 @@ rev = "6e71fc9b7"
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
-rev = "lean-4.29"
+rev = "non_empty_combinators"
 
 # Module-only bridge lemmas for the OpsConsistent(R) generator proofs (Factory
 # `nameMap` lookup, self-unification, generic-type op-consistency) — they need

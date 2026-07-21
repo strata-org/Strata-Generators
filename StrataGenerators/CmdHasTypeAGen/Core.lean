@@ -1,7 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
-import Basalt.Examples.ArbString.Def
+import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
 
@@ -45,11 +45,11 @@ def VarCtx.isFresh (ctx : VarCtx) (x : Identifier Unit) : Bool :=
 def fallbackFreshName (ctx : VarCtx) : String :=
   String.ofList (List.replicate (ctx.names.foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
 
-/-- Generate a fresh variable name not in `ctx`. Uses `String.arbitrary` for
-    randomness and falls back to a length-based guarantee when the random
-    name collides. -/
+/-- Generate a fresh variable name not in `ctx`. Uses `NonEmptyString.arbitrary`
+    for randomness (a variable identifier must be non-empty) and falls back to a
+    length-based guarantee when the random name collides. -/
 def genFreshName [Gen G] (ctx : VarCtx) : G String := do
-  let s ← String.arbitrary
+  let s ← NonEmptyString.arbitrary
   if ctx.isFresh ⟨s, ()⟩ then
     pure s
   else
@@ -83,16 +83,14 @@ def genInitNondet [Gen G] (tvars : List TyIdentifier)
 
 /-- Generate `set x (det e)` where `x` is an existing variable. -/
 def genSetDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) (_h : ctx.length > 0) : G GenCmdResult := do
-  let idx ← choose 0 (ctx.length - 1) (by omega)
-  let (name, mty) := ctx.getD idx.down (⟨"", ()⟩, .bool)
+    (ctx : VarCtx) (depth : Nat) (h : ctx.length > 0) : G GenCmdResult := do
+  let (name, mty) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
   let e ← genLExpr fctx octx [] tvars [] depth mty
   pure ⟨.set name (.det e) default, ctx⟩
 
 /-- Generate `set x nondet` where `x` is an existing variable. -/
-def genSetNondet [Gen G] (ctx : VarCtx) (_h : ctx.length > 0) : G GenCmdResult := do
-  let idx ← choose 0 (ctx.length - 1) (by omega)
-  let (name, _mty) := ctx.getD idx.down (⟨"", ()⟩, .bool)
+def genSetNondet [Gen G] (ctx : VarCtx) (h : ctx.length > 0) : G GenCmdResult := do
+  let (name, _) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
 /-- Generate `assert l e` with a boolean expression. -/

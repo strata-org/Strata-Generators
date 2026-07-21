@@ -1,7 +1,7 @@
 import Basalt
 import Basalt.PlausibleGen
 import StrataGenerators.SetGen
-import Basalt.Examples.ArbNat
+import BasaltExamples.ArbNat
 
 open RandomChoice ArbNat SetGen
 

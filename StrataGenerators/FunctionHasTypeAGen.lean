@@ -102,6 +102,50 @@ theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
   obtain ⟨names, _, rfl⟩ := hl
   exact nodup_dedup _
 
+-- ── Keyword-freedom of generated names ───────────────────────────────
+-- `genIdentName` post-processes each candidate with `dodgeKeyword`, so it never
+-- produces a reserved Strata Core keyword. These lemmas make that guarantee
+-- explicit and provable (a soundness-style property of the name generator): no
+-- generated function name, type argument, or parameter name is a reserved word
+-- the parser would reject in identifier position.
+
+/-- No reserved keyword's character list ends in `_` (checked over the concrete
+    source list `reservedKeywordsList`). -/
+theorem no_keyword_ends_underscore :
+    ∀ k ∈ reservedKeywordsList, k.toList.getLast? ≠ some '_' := by decide +kernel
+
+/-- `s ++ "_"` is never a reserved keyword: it ends in `_`, and no keyword does.
+    Stated via `isReservedKeyword` (the `HashSet` lookup) and discharged through
+    the `isReservedKeyword_eq_list_contains` bridge to `reservedKeywordsList`. -/
+theorem append_underscore_not_keyword (s : String) :
+    isReservedKeyword (s ++ "_") = false := by
+  rw [isReservedKeyword_eq_list_contains, Bool.eq_false_iff]
+  intro hc
+  rw [List.contains_iff_mem] at hc
+  have hlast : (s ++ "_").toList.getLast? = some '_' := by
+    rw [String.toList_append]; exact List.getLast?_concat
+  exact no_keyword_ends_underscore _ hc hlast
+
+/-- `dodgeKeyword` never returns a reserved keyword: keywords are mapped to
+    `k ++ "_"` (not a keyword), non-keywords are returned unchanged. -/
+theorem dodgeKeyword_not_keyword (s : String) :
+    isReservedKeyword (dodgeKeyword s) = false := by
+  unfold dodgeKeyword
+  split
+  · rename_i h
+    exact append_underscore_not_keyword s
+  · rename_i h
+    simpa using h
+
+/-- **Keyword-freedom of `genIdentName`.** Every name in the support of
+    `genIdentName` is a non-keyword identifier. -/
+theorem genIdentName_not_keyword (s : String)
+    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
+    isReservedKeyword s = false := by
+  simp only [genIdentName, mem_support_bind_iff, mem_support_pure_iff] at hs
+  obtain ⟨x, _, xs, _, rfl⟩ := hs
+  exact dodgeKeyword_not_keyword _
+
 set_option linter.unusedSimpArgs false in
 /-- The `mapM` inside `genInputs` produces a `ListMap` whose keys are exactly the
     input ident list and whose values are each in `genLMonoTy tvars depth`. -/
@@ -161,11 +205,16 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ))
     (e : LExpr') (heq : o = some e) :
     HasTypeA' [] e τ := by
-  simp only [genOptExpr, mem_support_pick_iff, mem_support_pure_iff,
-             mem_support_map_iff] at ho
-  rcases ho with hnone | ⟨e', he', rfl⟩
-  · exact absurd (heq ▸ hnone) (by simp)
-  · -- `o = some e'` and `heq : some e' = some e`, so `e' = e`
+  simp only [genOptExpr, mem_support_frequency_iff] at ho
+  obtain ⟨_, g, hg, _, ho⟩ := ho
+  simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hg
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+  · -- weight-1 branch: `none`
+    simp only [mem_support_pure_iff] at ho
+    exact absurd (heq ▸ ho) (by simp)
+  · -- weight-3 branch: `some e'` for some well-typed `e'`
+    simp only [mem_support_map_iff] at ho
+    obtain ⟨e', he', rfl⟩ := ho
     have hee : e' = e := by simpa using heq
     subst hee
     exact genLExpr_sound fctx octx [] tvars [] depth τ e' he'
@@ -231,6 +280,13 @@ theorem mem_support_genNameList_iff (depth : Nat) (l : List String) :
     l ∈ SetGen.support (genNameList (G := SetGen.Set) depth) ↔
       l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
   simp only [genNameList, mem_support_listOfMaxLength_iff]
+
+/-- Every name in a list produced by `genNameList` is a non-keyword (lifts
+    `genIdentName_not_keyword` through the element-wise `genNameList` support). -/
+theorem genNameList_not_keyword (depth : Nat) (l : List String)
+    (hl : l ∈ SetGen.support (genNameList (G := SetGen.Set) depth)) :
+    ∀ s ∈ l, isReservedKeyword s = false := fun s hs =>
+  genIdentName_not_keyword s ((mem_support_genNameList_iff depth l |>.mp hl).2 s hs)
 
 set_option linter.unusedSimpArgs false in
 /-- Reverse of `mapM_genInputs_keys_values`: a `ListMap` whose every value is
@@ -302,10 +358,15 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     (depth : Nat) (τ : LMonoTy) (o : Option LExpr')
     (ho : ∀ e, o = some e → e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ)) :
     o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ) := by
-  simp only [genOptExpr, mem_support_pick_iff, mem_support_pure_iff, mem_support_map_iff]
+  simp only [genOptExpr, mem_support_frequency_iff]
   cases o with
-  | none => exact Or.inl rfl
-  | some e => exact Or.inr ⟨e, ho e rfl, rfl⟩
+  | none =>
+    -- weight-1 branch: `none`
+    exact ⟨1, _, List.mem_cons_self, by omega, mem_support_pure_iff.mpr rfl⟩
+  | some e =>
+    -- weight-3 branch: `some e`
+    refine ⟨3, _, List.mem_cons_of_mem _ List.mem_cons_self, by omega, ?_⟩
+    exact mem_support_map_iff.mpr ⟨e, ho e rfl, rfl⟩
 
 -- ── Completeness of genFunction ──────────────────────────────────────
 
@@ -386,5 +447,55 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     simp only at hConstr hRec hAttr hEval hAxioms hPre ⊢
     subst hConstr hRec hAttr hEval hAxioms hPre
     rfl
+
+-- ── Function-level keyword-freedom ───────────────────────────────────
+
+/-- Every type-argument name produced by `genTypeArgs` is a non-keyword: the
+    names come from `genNameList` (all non-keyword by `genNameList_not_keyword`),
+    and `List.dedup` only removes elements. -/
+theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
+    (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) :
+    ∀ s ∈ l, isReservedKeyword s = false := by
+  simp only [genTypeArgs, mem_support_map_iff] at hl
+  obtain ⟨names, hnames, rfl⟩ := hl
+  intro s hs
+  exact genNameList_not_keyword depth names hnames s ((mem_dedup names s).mp hs)
+
+/-- Every input-identifier name produced by `genIdents` is a non-keyword: each
+    identifier `⟨s, ()⟩` comes from mapping over the `genNameList` names, and
+    `List.dedup` only removes elements. -/
+theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
+    (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) :
+    ∀ x ∈ l, isReservedKeyword x.name = false := by
+  simp only [genIdents, mem_support_map_iff] at hl
+  obtain ⟨names, hnames, rfl⟩ := hl
+  intro x hx
+  -- `x ∈ (names.map ⟨·,()⟩).dedup` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
+  have hx' : x ∈ names.map (fun s => (⟨s, ()⟩ : Identifier Unit)) :=
+    (mem_dedup _ x).mp hx
+  obtain ⟨s, hs_mem, rfl⟩ := List.mem_map.mp hx'
+  exact genNameList_not_keyword depth names hnames s hs_mem
+
+/-- **Keyword-freedom of `genFunction`.** Every name a generated function exposes
+    in identifier position — its own name, its type arguments, and its parameter
+    names — is a non-keyword, so none is a reserved word the Core parser would
+    reject in identifier position. (The function's body/measure and its types are
+    unconstrained by this lemma; it is about the identifier-position names only.) -/
+theorem genFunction_names_not_keyword (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
+    (func : Function)
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth)) :
+    isReservedKeyword func.name.name = false ∧
+    (∀ s ∈ func.typeArgs, isReservedKeyword s = false) ∧
+    (∀ x ∈ func.inputs.keys, isReservedKeyword x.name = false) := by
+  simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
+  obtain ⟨name, hname, typeArgs, htypeArgs, inputs, hinputs,
+          output, _houtput, body, _hbody, measure, _hmeasure, rfl⟩ := hfunc
+  refine ⟨genIdentName_not_keyword name hname, genTypeArgs_not_keyword depth typeArgs htypeArgs, ?_⟩
+  -- `inputs.keys = idents`, and each ident's name is non-keyword by `genIdents_not_keyword`.
+  simp only [genInputs, mem_support_bind_iff] at hinputs
+  obtain ⟨idents, hidents, hmap⟩ := hinputs
+  obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values typeArgs depth idents inputs hmap
+  rw [hkeys]
+  exact genIdents_not_keyword depth idents hidents
 
 end StrataGenerators.Function

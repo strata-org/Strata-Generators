@@ -1,11 +1,12 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
-import Basalt.Examples.ArbString.Def
+import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.Function
 import StrataGenerators.HasTypeAGen.Core
+import Std.Data.HashSet
 
-open Lambda RandomChoice Core Imperative ArbString
+open Lambda RandomChoice Core Imperative ArbString Std
 
 /-!
 # Core generator definitions for well-typed Strata Core `Function`s
@@ -53,11 +54,78 @@ def remainingChars : List Char :=
 def genRemainingChar [Gen G] : G Char :=
   elements remainingChars (by decide)
 
+/-- The Strata Core reserved keywords as a plain list — the *source of truth*.
+    These are the bare words the Core lexer tokenizes as keywords, so the parser
+    rejects them in identifier position (e.g. `function if () : int;` fails with
+    "unexpected token 'if'").
+
+    Compiled from `Strata/Languages/Core/DDMTransform/Grammar.lean`:
+    - built-in type names (`type bool;` … and the `Map`/`Sequence`/`Type` cons),
+    - structured-statement / declaration leading words (`if`/`then`/`else`,
+      `forall`/`exists`, `var`/`assume`/`assert`/`cover`/`while`, `spec`/
+      `requires`/`ensures`/`free`, `procedure`/`function`/`type`/`const`/
+      `axiom`/`distinct`/`datatype`, `goto`/`branch`/`return`, `inline`/
+      `decreases`/`invariant`/`out`/`inout`/`old`/`have`),
+    - boolean literals (`true`/`false`).
+
+    The list is retained (rather than only the `HashSet` below) so `decide`/`simp`
+    can evaluate membership in proofs; runtime membership goes through the
+    `HashSet` via `reservedKeywords`. -/
+def reservedKeywordsList : List String :=
+  -- type names
+  [ "bool", "int", "string", "regex", "real",
+    "bv1", "bv8", "bv16", "bv32", "bv64", "bv128",
+    "Map", "Sequence", "Type",
+  -- expressions / structured statements
+    "if", "then", "else", "forall", "exists",
+    "var", "assume", "assert", "cover", "while",
+  -- specs
+    "spec", "requires", "ensures", "free", "invariant", "decreases",
+  -- declarations
+    "procedure", "function", "const", "type", "axiom", "distinct", "datatype",
+    "inline",
+  -- CFG transfers
+    "goto", "branch", "return",
+  -- modifiers / misc
+    "out", "inout", "old", "have",
+  -- boolean literals
+    "true", "false" ]
+
+/-- The reserved keywords as a `HashSet` for efficient membership testing in the
+    generator (`isReservedKeyword` runs on every generated name). Built from
+    `reservedKeywordsList`; `HashSet.contains_ofList` bridges the two so proofs
+    can still reason over the concrete list via `decide`. -/
+def reservedKeywords : Std.HashSet String := Std.HashSet.ofList reservedKeywordsList
+
+/-- `true` iff `s` is a reserved Strata Core keyword. Uses the `HashSet` for an
+    O(1) expected-time lookup (see `isReservedKeyword_eq_list_contains` for the
+    bridge to `reservedKeywordsList` used in proofs). -/
+def isReservedKeyword (s : String) : Bool := reservedKeywords.contains s
+
+/-- Membership via the `HashSet` agrees with membership in the source list. This
+    is the bridge that lets proofs reason over the concrete `reservedKeywordsList`
+    (which `decide` can evaluate) while the generator uses the efficient
+    `HashSet`. -/
+theorem isReservedKeyword_eq_list_contains (s : String) :
+    isReservedKeyword s = reservedKeywordsList.contains s := by
+  unfold isReservedKeyword reservedKeywords
+  exact Std.HashSet.contains_ofList
+
+/-- Deterministically map a reserved keyword to a fresh non-keyword identifier by
+    appending `_`. No reserved keyword ends in `_`, and appending `_` to a legal
+    identifier yields a legal identifier (`_ ∈ strataIsIdRest`), so `dodgeKeyword
+    s` is always a legal, non-keyword identifier — and it is the identity on names
+    that were not keywords to begin with. -/
+def dodgeKeyword (s : String) : String :=
+  if isReservedKeyword s then s ++ "_" else s
+
 /-- Generate a valid Core identifier *by construction*: a first character from
     `startChars` (letters plus `_`/`$`, all in `strataIsIdFirst`), then a
-    possibly-empty run of `remainingChars` (all in `strataIsIdRest`). Every
-    output is therefore a legal Core identifier — non-empty and letter-initial,
-    so it always lexes as an `Ident` and never as a `Num`.
+    possibly-empty run of `remainingChars` (all in `strataIsIdRest`), finally
+    mapping any reserved keyword to a non-keyword via `dodgeKeyword`. Every
+    output is therefore a legal, non-keyword Core identifier — non-empty and
+    letter-initial (so it lexes as an `Ident`, never a `Num`), and never a
+    reserved word the parser would reject in identifier position.
 
     This is the name source for `genFunction`. Note `remainingChars` includes
     `.`, which is legal in a bare identifier but collides with binder /
@@ -69,7 +137,7 @@ def genRemainingChar [Gen G] : G Char :=
 def genIdentName [Gen G] : G String := do
   let x ← genStartChar
   let xs ← listOf genRemainingChar
-  return String.ofList (x :: xs)
+  return dodgeKeyword (String.ofList (x :: xs))
 
 -- ── Adversarial identifier generation (round-trip fuzzing) ───────────────
 
@@ -144,12 +212,14 @@ def genInputs [Gen G] (tvars : List TyIdentifier) (depth : Nat) :
 
 /-- Generate an optional well-typed expression of type `τ`: either `none`, or
     `some e` for `e` generated by `genLExpr` at type `τ` (empty bvar context,
-    empty polymorphic-op context). -/
+    empty polymorphic-op context). Biased 3:1 toward `some` (≈75%), so measures
+    and bodies are usually present rather than absent. -/
 def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (τ : LMonoTy) : G (Option LExpr') :=
-  pick
-    (fun () => pure none)
-    (fun () => (fun e => some e) <$> genLExpr fctx octx [] tvars [] depth τ)
+  frequency
+    [ (1, fun () => pure none),
+      (3, fun () => (fun e => some e) <$> genLExpr fctx octx [] tvars [] depth τ) ]
+    (by simp)
 
 -- ── Main function generator ─────────────────────────────────────────────
 
