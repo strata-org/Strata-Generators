@@ -1,7 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
-import Basalt.Examples.ArbString.Def
+import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
@@ -95,12 +95,14 @@ structure GenStmtResult where
 def fallbackFreshLabel (labels : List String) : String :=
   String.ofList (List.replicate (labels.foldl (fun acc l => max acc l.length) 0 + 1) 'x')
 
-/-- Generate a fresh block label not in `labels`. Uses `String.arbitrary` for
-    randomness and falls back to a length-based guarantee when the random label
+/-- Generate a fresh block label not in `labels`. Uses `genIdentName` for
+    randomness — so the label is a non-empty, non-keyword identifier (a `block`
+    label appears in identifier position, so it must not be empty or a reserved
+    word) — and falls back to a length-based guarantee when the random label
     collides. Guarantees `label ∉ labels`, the `block` premise of the new spec.
     Mirrors `genFreshName` for variable names. -/
 def genFreshLabel [Gen G] (labels : List String) : G String := do
-  let s ← String.arbitrary
+  let s ← genIdentName
   if s ∈ labels then
     pure (fallbackFreshLabel labels)
   else
@@ -108,12 +110,13 @@ def genFreshLabel [Gen G] (labels : List String) : G String := do
 
 -- ── TypeConstructor / declaration sub-generators ─────────────────────────
 
-/-- Generate a random `TypeConstructor`: an alphanumeric name and a list of
-    (up to `depth`) alphanumeric parameter names. The `bound` field is left at
-    its default (`.Infinite`). -/
+/-- Generate a random `TypeConstructor`: a name and a list of (up to `depth`)
+    parameter names, all produced by `genIdentName` so each is a non-empty,
+    non-keyword identifier (constructor and type-parameter names both appear in
+    identifier position). The `bound` field is left at its default (`.Infinite`). -/
 def genTypeConstructor [Gen G] (depth : Nat) : G TypeConstructor := do
-  let name ← String.arbitrary
-  let params ← listOfMaxLength depth String.arbitrary
+  let name ← genIdentName
+  let params ← listOfMaxLength depth genIdentName
   pure { name := name, params := params }
 
 /-- Lift a monomorphic `Function` to a non-recursive `PureFunc Expression` (the
@@ -169,11 +172,12 @@ def genOptMeasure [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdenti
   have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+3; omega
   frequency gs hw
 
-/-- Generate a single loop invariant: an alphanumeric label paired with a
-    boolean expression. -/
+/-- Generate a single loop invariant: a label (a non-empty, non-keyword
+    identifier via `genIdentName`, since an invariant label appears in identifier
+    position) paired with a boolean expression. -/
 def genInvariant [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : G (String × Expression.Expr) := do
-  let l ← String.arbitrary
+  let l ← genIdentName
   let e ← genLExpr fctx octx [] tvars [] depth .bool
   pure (l, e)
 

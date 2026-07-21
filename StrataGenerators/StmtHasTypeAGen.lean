@@ -568,9 +568,10 @@ theorem genOptMeasure_complete (depth : Nat) (measure : Option Expression.Expr)
   | some m => exact ⟨3, _, Or.inr ⟨rfl, rfl⟩, by omega, m, hmeasure m rfl, rfl⟩
 
 /-- Completeness of `genInvariant`. A `(label, e)` pair is reachable when the
-    label is a reachable alphanumeric string and `e` is a reachable boolean. -/
+    label is a reachable identifier (via `genIdentName`, so non-empty and
+    non-keyword) and `e` is a reachable boolean. -/
 theorem genInvariant_complete (depth : Nat) (p : String × Expression.Expr)
-    (hlabel : p.1 ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+    (hlabel : p.1 ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hexpr : p.2 ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool)) :
     p ∈ SetGen.support (genInvariant (G := SetGen.Set) fctx octx tvars depth) := by
   simp only [genInvariant, mem_support_bind_iff, mem_support_pure_iff]
@@ -580,7 +581,7 @@ theorem genInvariant_complete (depth : Nat) (p : String × Expression.Expr)
     no longer than `depth` and each element is reachable by `genInvariant`. -/
 theorem genInvariants_complete (depth : Nat) (invs : List (String × Expression.Expr))
     (hlen : invs.length ≤ depth)
-    (hinvs : ∀ p ∈ invs, p.1 ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) ∧
+    (hinvs : ∀ p ∈ invs, p.1 ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧
       p.2 ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool)) :
     invs ∈ SetGen.support (genInvariants (G := SetGen.Set) fctx octx tvars depth) := by
   simp only [genInvariants, mem_support_listOfMaxLength_iff]
@@ -588,13 +589,14 @@ theorem genInvariants_complete (depth : Nat) (invs : List (String × Expression.
   exact genInvariant_complete depth p (hinvs p hp).1 (hinvs p hp).2
 
 /-- Completeness of `genTypeConstructor`. A type constructor is reachable when its
-    name and each parameter name are reachable alphanumeric strings, its parameter
-    list is no longer than `depth`, and its `bound` is at the default `.Infinite`. -/
+    name and each parameter name are reachable identifiers (via `genIdentName`, so
+    non-empty and non-keyword), its parameter list is no longer than `depth`, and
+    its `bound` is at the default `.Infinite`. -/
 theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
     (hbound : tc.bound = .Infinite)
-    (hname : tc.name ∈ SetGen.support (String.arbitrary (G := SetGen.Set)))
+    (hname : tc.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hlen : tc.params.length ≤ depth)
-    (hparams : ∀ s ∈ tc.params, s ∈ SetGen.support (String.arbitrary (G := SetGen.Set))) :
+    (hparams : ∀ s ∈ tc.params, s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
     tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth) := by
   simp only [genTypeConstructor, mem_support_bind_iff, mem_support_pure_iff,
              mem_support_listOfMaxLength_iff]
