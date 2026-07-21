@@ -1287,8 +1287,10 @@ def main (args : List String) : IO Unit := do
       (".st1b", "stmt: typecheck rejections are only funcDecl (#1b)", rejectionImpliesFuncDecl),
       (".st3", "stmt: LoopElim preserves typeability (#3)", checkLoopElimPreservesTyping),
       (".st4", "stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops),
-      (".st5a", "stmt: ANF is idempotent (#5a)", checkAnfIdempotent),
-      (".st5b", "stmt: ANF preserves typeability (#5b)", checkAnfPreservesTyping),
+      (".st5a", "stmt: CSE is idempotent (#5a)", checkCseIdempotent),
+      (".st5b", "stmt: CSE preserves typeability (#5b)", checkCsePreservesTyping),
+      (".stcse3", "stmt: CSE introduces no free-bvar init (P-CSE-3)", checkCseNoFreeBVarInInits),
+      (".stcse6", "stmt: CSE var-count bounded by DAG size (P-CSE-6)", checkCseVarCountBounded),
       (".st9", "stmt: mapExprs id = id (#9)", checkMapExprsId) ]
   for (suffix, title, check) in stmtPanels do
     Tyche.run (genStmtProp title check)

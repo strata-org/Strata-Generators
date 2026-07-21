@@ -5,7 +5,7 @@ import Strata.Languages.Core.StatementType
 import Strata.Languages.Core.Factory
 import Strata.Transform.LoopElim
 import Strata.Transform.DetToKleene
-import Strata.Transform.ANFEncoder
+import Strata.Transform.CommonSubexprElim
 
 open Lambda RandomChoice Core Imperative
 open StrataGenerators.Stmt
@@ -210,10 +210,10 @@ end Guards
 def loopElimStmts (ss : List Statement) : List Statement :=
   (StateT.run (Block.removeLoopsM ss) {}).fst
 
-/-- Apply the ANF encoder to a statement list (starting fresh-var index 0),
-    discarding the returned next-index. -/
-def anfStmts (ss : List Statement) : List Statement :=
-  (Core.ANFEncoder.anfEncodeBody ss 0).fst
+/-- Apply common-subexpression elimination to a statement list (starting
+    fresh-var index 0), discarding the returned next-index. -/
+def cseStmts (ss : List Statement) : List Statement :=
+  (Core.CSE.stmtRunCSE ss 0).fst
 
 -- `StmtToKleeneStmt` operates on `Stmt Expression (Cmd Expression)`, whereas the
 -- generator produces `Statement = Stmt Expression Command` with
@@ -319,17 +319,104 @@ def checkLoopElimPreservesTyping (ss : List Statement) : Bool :=
 def checkLoopElimZeroLoops (ss : List Statement) : Bool :=
   countLoopsStmts (loopElimStmts ss) == 0
 
-/-- **Property #5a**: ANF is idempotent — `anf (anf x) = anf x` (structural
-    equality on the resulting statement lists). -/
-def checkAnfIdempotent (ss : List Statement) : Bool :=
-  let once := anfStmts ss
-  stmtsEq (anfStmts once) once
+/-- **Property #5a**: CSE is idempotent — `cse (cse x) = cse x` (structural
+    equality on the resulting statement lists). Exercises the fixpoint-fuel
+    convergence of `stmtRunCSE` (the CR replaced the provable `|S(body)|` bound
+    with the constant `fuel := 1024`): if the fixpoint fails to converge, a
+    second pass keeps extracting and this fails. -/
+def checkCseIdempotent (ss : List Statement) : Bool :=
+  let once := cseStmts ss
+  stmtsEq (cseStmts once) once
 
-/-- **Property #5b (ANF preserves typeability).** As #3: the implication "input
-    typechecks ⇒ ANF output typechecks". Vacuous when the input is rejected;
-    genuinely FAILS if ANF turns an accepted statement list into a rejected one. -/
-def checkAnfPreservesTyping (ss : List Statement) : Bool :=
-  !checkTypeChecks ss || checkTypeChecks (anfStmts ss)
+/-- **Property #5b (CSE preserves typeability).** As #3: the implication "input
+    typechecks ⇒ CSE output typechecks". Vacuous when the input is rejected;
+    genuinely FAILS if CSE turns an accepted statement list into a rejected one.
+    Because a subterm hoisted out of its binder becomes ill-scoped, this is also
+    a partial capture detector: a capture that yields an unbound/ill-typed
+    reference surfaces here as a typing regression. -/
+def checkCsePreservesTyping (ss : List Statement) : Bool :=
+  !checkTypeChecks ss || checkTypeChecks (cseStmts ss)
+
+-- ── CSE capture-safety and DAG-size properties (see docs/cse-ptrcache-pbt-plan.md) ──
+-- These target the parts of CR-289836082 that are *not* covered by a Lean proof:
+-- the `PtrCache` itself is proved a transparent optimization (`run'_output_eq`),
+-- but the CSE traversal built on top of it — in particular the bvar-freeness flag
+-- in `collectSubexprs.abs` (flagged "may spuriously return true") — is not.
+
+mutual
+/-- Collect the RHS `Expr` of every CSE-introduced `init` declaration (name
+    prefixed by `Core.CSE.cseVarPrefix`) anywhere in a statement, nested bodies
+    included. These are exactly the subexpressions CSE hoisted into fresh `var`
+    declarations. -/
+def cseInitRHSs : Statement → List Expression.Expr
+  | .cmd (.cmd (.init n _ (.det e) _)) =>
+      if n.name.startsWith Core.CSE.cseVarPrefix then [e] else []
+  | .cmd _ => []
+  | .block _ body _ => cseInitRHSsList body
+  | .ite _ thenb elseb _ => cseInitRHSsList thenb ++ cseInitRHSsList elseb
+  | .loop _ _ _ body _ => cseInitRHSsList body
+  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+/-- List analogue of `cseInitRHSs`. -/
+def cseInitRHSsList : List Statement → List Expression.Expr
+  | [] => []
+  | s :: ss => cseInitRHSs s ++ cseInitRHSsList ss
+end
+
+/-- **Property P-CSE-3 (capture safety — no free bound variable in any extracted
+    init).** CSE only ever introduces `var $__cse.k := e` declarations, prepended
+    to the body they were lifted from. A subterm hoisted out of an enclosing
+    `abs`/`quant` binder would carry a now-unbound de Bruijn index — i.e. a free
+    `.bvar` — into its init expression. So this asserts that every CSE-introduced
+    init RHS is bvar-closed (`!e.hasBVar`). A failure is a variable-capture bug
+    and thus a violation of the pass's "model-preserving" contract. This is the
+    cheapest, most direct detector for the `collectSubexprs.abs` approximation. -/
+def checkCseNoFreeBVarInInits (ss : List Statement) : Bool :=
+  (cseInitRHSsList (cseStmts ss)).all (fun e => !LExpr.hasBVar e)
+
+/-- Number of distinct subterms of `e` up to structural (metadata-ignoring)
+    equality — the DAG-node count. Uses a `HashMap` keyed by `LExpr.hashExpr`
+    with a structural `==` disambiguator inside each bucket, so it is robust to
+    hash collisions (counting distinct `UInt64` hashes would undercount). The
+    early-return on an already-seen key is what makes this the DAG measure rather
+    than the exponential tree measure. -/
+partial def structuralDagSize (e : Expression.Expr) : Nat :=
+  go [e] (Std.HashMap.emptyWithCapacity) |>.size
+where
+  /-- `seen` maps a structural hash to the list of distinct subterms carrying it. -/
+  go (work : List Expression.Expr)
+     (seen : Std.HashMap UInt64 (List Expression.Expr)) :
+     Std.HashMap UInt64 (List Expression.Expr) :=
+    match work with
+    | [] => seen
+    | e :: rest =>
+      let h := LExpr.hashExpr e
+      let bucket := seen.getD h []
+      if bucket.any (fun e' => e' == e) then go rest seen
+      else
+        let seen := seen.insert h (e :: bucket)
+        go (children e ++ rest) seen
+  /-- Immediate structural children of a node. -/
+  children : Expression.Expr → List Expression.Expr
+    | .app _ fn arg => [fn, arg]
+    | .ite _ c t f => [c, t, f]
+    | .eq _ a b => [a, b]
+    | .abs _ _ _ body => [body]
+    | .quant _ _ _ _ tr body => [tr, body]
+    | _ => []
+
+/-- Number of CSE-introduced `var` declarations in the output. -/
+def cseVarCount (ss : List Statement) : Nat :=
+  (cseInitRHSsList (cseStmts ss)).length
+
+/-- **Property P-CSE-6 (output-size bound on the DAG measure).** Your reviewer's
+    "output doesn't grow more than it should", pinned to the *distinct-DAG-node*
+    measure rather than tree size (CSE *adds* `var` decls, so a tree-size bound
+    would report false failures). The number of fresh `var` declarations CSE
+    introduces cannot exceed the number of distinct non-leaf subterms available
+    to abbreviate, which is bounded by the input's structural DAG size. -/
+def checkCseVarCountBounded (ss : List Statement) : Bool :=
+  cseVarCount ss ≤ ((Statements.collectExprs ss).foldl
+    (fun acc e => acc + structuralDagSize e) 0)
 
 /-- **Property #6**: `StmtToKleeneStmt` is defined *exactly* when the block has no
     `exit`/`funcDecl`/`typeDecl`. One caveat: the transform *also* rejects loops

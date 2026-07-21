@@ -747,13 +747,23 @@ instance : Arbitrary GenStmts where
 @[reducible] def prop_stmt_loopElim_zero_loops (gs : GenStmts) : Prop :=
   checkLoopElimZeroLoops gs.stmts = true
 
--- #5a: ANF encoding is idempotent (`anf (anf x) = anf x`).
-@[reducible] def prop_stmt_anf_idempotent (gs : GenStmts) : Prop :=
-  checkAnfIdempotent gs.stmts = true
+-- #5a: CSE is idempotent (`cse (cse x) = cse x`).
+@[reducible] def prop_stmt_cse_idempotent (gs : GenStmts) : Prop :=
+  checkCseIdempotent gs.stmts = true
 
--- #5b: ANF encoding preserves typeability.
-@[reducible] def prop_stmt_anf_preserves_typing (gs : GenStmts) : Prop :=
-  checkAnfPreservesTyping gs.stmts = true
+-- #5b: CSE preserves typeability.
+@[reducible] def prop_stmt_cse_preserves_typing (gs : GenStmts) : Prop :=
+  checkCsePreservesTyping gs.stmts = true
+
+-- P-CSE-3: no CSE-introduced `var` init contains a free bound variable (capture
+-- safety — targets the `collectSubexprs.abs` bvar-freeness approximation).
+@[reducible] def prop_stmt_cse_no_free_bvar (gs : GenStmts) : Prop :=
+  checkCseNoFreeBVarInInits gs.stmts = true
+
+-- P-CSE-6: the number of fresh `var` decls CSE introduces is bounded by the
+-- input's distinct-DAG-node count (output-size bound on the DAG measure).
+@[reducible] def prop_stmt_cse_var_count_bounded (gs : GenStmts) : Prop :=
+  checkCseVarCountBounded gs.stmts = true
 
 -- #6: `StmtToKleeneStmt` is defined exactly when the block has no
 -- `exit`/`funcDecl`/`typeDecl` (and, for the invariant-loop caveat, not defined
@@ -1023,14 +1033,24 @@ def main (args : List String) : IO UInt32 := do
     (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_loopElim_zero_loops gs)) cfg) then
     allPassed := false
 
-  -- #5a: ANF idempotent
-  if !(← checkProperty "stmt: ANF is idempotent (#5a)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_anf_idempotent gs)) cfg) then
+  -- #5a: CSE idempotent
+  if !(← checkProperty "stmt: CSE is idempotent (#5a)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_idempotent gs)) cfg) then
     allPassed := false
 
-  -- #5b: ANF preserves typeability
-  if !(← checkProperty "stmt: ANF preserves typeability (#5b)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_anf_preserves_typing gs)) cfg) then
+  -- #5b: CSE preserves typeability
+  if !(← checkProperty "stmt: CSE preserves typeability (#5b)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_preserves_typing gs)) cfg) then
+    allPassed := false
+
+  -- P-CSE-3: no free bvar in any CSE-introduced init (capture safety)
+  if !(← checkProperty "stmt: CSE introduces no free-bvar init (capture safety, P-CSE-3)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_no_free_bvar gs)) cfg) then
+    allPassed := false
+
+  -- P-CSE-6: CSE var-decl count bounded by input DAG size
+  if !(← checkProperty "stmt: CSE var-count bounded by DAG size (P-CSE-6)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_var_count_bounded gs)) cfg) then
     allPassed := false
 
   -- #6: StmtToKleeneStmt defined iff no exit/funcDecl/typeDecl
