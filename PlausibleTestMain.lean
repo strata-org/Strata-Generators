@@ -2,6 +2,7 @@ import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
+import StrataGenerators.StmtHasTypeAGen.TestSupport
 import Basalt.PlausibleGen
 import Plausible
 import Strata.DL.Lambda.LExprT
@@ -642,6 +643,94 @@ def checkFunctionBodyPreservation (gf : ClosedGenFunction) : Bool :=
 @[reducible] def prop_function_body_preservation (gf : ClosedGenFunction) : Prop :=
   checkFunctionBodyPreservation gf = true
 
+-- ── Statement generation via Plausible.Gen ────────────────────────────
+--
+-- `genProgramStmts` generates a well-typed Strata Core statement list
+-- (`StmtsHasTypeA`), proven sound AND complete against the declarative typing
+-- spec. We use it as a certified-well-typed oracle input for the statement
+-- typechecker (property #1) and the Core statement-level transformations
+-- (properties #3–#6, #9). All check predicates live in the shared module
+-- `StrataGenerators.StmtHasTypeAGen.TestSupport`.
+
+open StrataGenerators.Stmt.TestSupport
+
+/-- A generated well-typed statement list. -/
+structure GenStmts where
+  stmts : List Statement
+
+instance : Repr GenStmts where
+  reprPrec gs _ := (Std.format gs.stmts).pretty
+
+-- Statement lists are generated whole by a sound+complete generator; we do not
+-- attempt structural shrinking (a shrunk sub-list need not remain well-typed).
+instance : Shrinkable GenStmts where
+  shrink _ := []
+
+/-- Generate a well-typed statement list. `size` (nesting/expression size) and
+    the sequence length both scale with Plausible's size parameter. -/
+-- Statement nesting `size` and sequence length `len` are capped low (≤ 3 / ≤ 4):
+-- the properties under test don't need large programs, and a bigger `size`
+-- multiplies the chance that *some* nested sub-generator hits its empty-support
+-- fallback (`default`) — e.g. a `typeDecl` name clash or an `exit` with no
+-- enclosing label — which forces `Gen.backtrack` to retry the *whole* list and
+-- can exhaust its fuel at large Plausible sizes.
+private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
+  let size := max 1 (min 3 (s / 25))
+  let len := max 1 (min 4 (s / 20))
+  let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) [] coreOpCtx [] size len
+  pure ⟨ss⟩
+
+-- `genStmt` can hit the empty generator (`default`) in sub-cases (e.g. a
+-- `typeDecl` name clash), so — like the other generators — we retry with fresh
+-- randomness via `Gen.backtrack`.
+instance : Arbitrary GenStmts where
+  arbitrary := Gen.backtrack (List.replicate 4000 (1, genStmtsWith))
+
+-- ── Statement-level properties (all currently unproven) ───────────────
+
+-- #1: The typechecker accepts every generated (spec-well-typed) statement list.
+-- This is the *completeness* direction of the statement typechecker (only
+-- soundness, `typeCheck_annotated_sound`, is proven). A counterexample is a
+-- genuine spec/algorithm divergence. This property is EXPECTED TO FAIL on the
+-- `funcDecl` gap (the spec's `funcDecl` rule is strictly more permissive than the
+-- algorithm) — we assert it honestly rather than mask it; the shrunk
+-- counterexample is a minimal `funcDecl` witness.
+@[reducible] def prop_stmt_typechecks (gs : GenStmts) : Prop :=
+  checkTypeCheckerComplete gs.stmts = true
+
+-- #1b: Every rejection is attributable to a `funcDecl`. This PINS the sole known
+-- source of incompleteness: it should pass, and a failure means the generator
+-- produced a spec-well-typed statement rejected for some *other* reason — a new,
+-- unclassified completeness bug worth investigating.
+@[reducible] def prop_stmt_rejection_only_funcDecl (gs : GenStmts) : Prop :=
+  rejectionImpliesFuncDecl gs.stmts = true
+
+-- #3: LoopElim (`removeLoops`) preserves typeability.
+@[reducible] def prop_stmt_loopElim_preserves_typing (gs : GenStmts) : Prop :=
+  checkLoopElimPreservesTyping gs.stmts = true
+
+-- #4: LoopElim eliminates every loop (result has zero `loop` nodes).
+@[reducible] def prop_stmt_loopElim_zero_loops (gs : GenStmts) : Prop :=
+  checkLoopElimZeroLoops gs.stmts = true
+
+-- #5a: ANF encoding is idempotent (`anf (anf x) = anf x`).
+@[reducible] def prop_stmt_anf_idempotent (gs : GenStmts) : Prop :=
+  checkAnfIdempotent gs.stmts = true
+
+-- #5b: ANF encoding preserves typeability.
+@[reducible] def prop_stmt_anf_preserves_typing (gs : GenStmts) : Prop :=
+  checkAnfPreservesTyping gs.stmts = true
+
+-- #6: `StmtToKleeneStmt` is defined exactly when the block has no
+-- `exit`/`funcDecl`/`typeDecl` (and, for the invariant-loop caveat, not defined
+-- when an invariant-bearing loop is present).
+@[reducible] def prop_stmt_kleene_defined_iff (gs : GenStmts) : Prop :=
+  checkKleeneDefinedIff gs.stmts = true
+
+-- #9: `Statements.mapExprs id = id`.
+@[reducible] def prop_stmt_mapExprs_id (gs : GenStmts) : Prop :=
+  checkMapExprsId gs.stmts = true
+
 -- ── Test runner ──────────────────────────────────────────────────────
 
 def checkProperty (name : String) (p : Prop) [Testable p]
@@ -658,6 +747,28 @@ def checkProperty (name : String) (p : Prop) [Testable p]
     IO.println s!"FAIL (after {n} trials)"
     IO.println s!"    {Testable.formatFailure "" xs n}"
     return false
+
+/-- Run a property that is *expected to fail* because it pins a known, documented
+    spec/algorithm discrepancy (the `funcDecl` gap). A failure is the expected
+    outcome — reported as `XFAIL` with the counterexample and NOT counted against
+    the suite. A *pass* is surprising (the gap may have been fixed upstream) and is
+    flagged as `UNEXPECTED PASS`, which *does* fail the suite so the harness is
+    updated. Returns `true` when the outcome matches expectation. -/
+def checkExpectedFailure (name : String) (reason : String) (p : Prop) [Testable p]
+    (cfg : Configuration) : IO Bool := do
+  IO.print s!"  {name} ... "
+  match ← Testable.checkIO p cfg with
+  | .success _ =>
+    IO.println "UNEXPECTED PASS"
+    IO.println s!"    expected this to fail ({reason}); the discrepancy may be fixed — update the harness."
+    return false
+  | .gaveUp n =>
+    IO.println s!"GAVE UP ({n} discards)"
+    return true
+  | .failure _ xs n =>
+    IO.println s!"XFAIL (expected — {reason})"
+    IO.println s!"    minimal counterexample: {Testable.formatFailure "" xs n}"
+    return true
 
 /-- Sample erased terms and print the `resolve` error messages behind any
     counterexamples to the resolve-after-erase property. Shows, per failure, the
@@ -860,6 +971,51 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  IO.println ""
+  IO.println "Statement generator properties (transforms + typechecker):"
+
+  -- #1: typechecker accepts every generated well-typed statement (completeness).
+  -- EXPECTED TO FAIL on the funcDecl gap — asserted honestly, reported as XFAIL.
+  if !(← checkExpectedFailure "stmt: typechecker accepts generated statements (#1)"
+    "spec's funcDecl rule is strictly more permissive than the algorithm"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_typechecks gs)) cfg) then
+    allPassed := false
+
+  -- #1b: every rejection is attributable to a funcDecl (pins the sole known gap).
+  if !(← checkProperty "stmt: typecheck rejections are only funcDecl (#1b)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_rejection_only_funcDecl gs)) cfg) then
+    allPassed := false
+
+  -- #3: LoopElim preserves typeability
+  if !(← checkProperty "stmt: LoopElim preserves typeability (#3)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_loopElim_preserves_typing gs)) cfg) then
+    allPassed := false
+
+  -- #4: LoopElim eliminates all loops
+  if !(← checkProperty "stmt: LoopElim eliminates all loops (#4)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_loopElim_zero_loops gs)) cfg) then
+    allPassed := false
+
+  -- #5a: ANF idempotent
+  if !(← checkProperty "stmt: ANF is idempotent (#5a)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_anf_idempotent gs)) cfg) then
+    allPassed := false
+
+  -- #5b: ANF preserves typeability
+  if !(← checkProperty "stmt: ANF preserves typeability (#5b)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_anf_preserves_typing gs)) cfg) then
+    allPassed := false
+
+  -- #6: StmtToKleeneStmt defined iff no exit/funcDecl/typeDecl
+  if !(← checkProperty "stmt: DetToKleene defined iff supported (#6)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_kleene_defined_iff gs)) cfg) then
+    allPassed := false
+
+  -- #9: mapExprs id = id
+  if !(← checkProperty "stmt: mapExprs id = id (#9)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_mapExprs_id gs)) cfg) then
+    allPassed := false
 
   IO.println ""
   if allPassed then

@@ -3,6 +3,7 @@ import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
+import StrataGenerators.StmtHasTypeAGen.TestSupport
 import Basalt.IO
 import Strata.DL.Lambda.LExprT
 -- Imports for Function.typeCheck property (typeCheck_annotated_sound)
@@ -985,6 +986,88 @@ def genAndCheckIdentProbe : IO IdentProbeResult := do
   | .error e =>
     return { pos, name, parsed := false, roundtripped := false, parseError := e, rendered := s1 }
 
+-- ── Statement-level Tyche support ────────────────────────────────────
+-- Panels visualizing the six statement-transform / typechecker properties on
+-- well-typed statement lists from `genProgramStmts` (proven sound+complete
+-- against `StmtsHasTypeA`). The `check*` predicates and measurements are shared
+-- with the Plausible harness via `StrataGenerators.StmtHasTypeAGen.TestSupport`.
+
+open StrataGenerators.Stmt.TestSupport
+
+/-- Shared statement-list features for every statement panel: structural
+    breakdown (size, kind counts) plus the generator size. -/
+private def stmtListFeatures (ss : List Statement) (genSize : Nat) :
+    List (String × Tyche.Feature) :=
+  [ ("num_stmts", .ordinal ss.length),
+    ("ast_size", .ordinal (sizeStmts ss)),
+    ("num_loops", .ordinal (countLoopsStmts ss)),
+    ("num_exits", .ordinal (countExitStmts ss)),
+    ("num_funcDecls", .ordinal (countFuncDeclStmts ss)),
+    ("num_typeDecls", .ordinal (countTypeDeclStmts ss)),
+    ("has_funcDecl", .nominal (if stmtsHaveFuncDecl ss then "yes" else "no")),
+    ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")),
+    ("generator_size", .ordinal genSize) ]
+
+/-- A generated statement list paired with a single property's pass/fail verdict
+    and the property name (used as the pass/fail nominal feature). One structure
+    serves every boolean statement property; the panel title distinguishes them. -/
+structure StmtPropResult where
+  stmts : List Statement
+  passed : Bool
+  genSize : Nat
+  /-- Short property tag, surfaced as the primary nominal feature. -/
+  tag : String
+
+instance : Tyche.TycheSample StmtPropResult where
+  toSample r :=
+    { representation := (Std.format r.stmts).pretty
+      status := if r.passed then .passed else .failed
+      features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
+        :: stmtListFeatures r.stmts r.genSize }
+
+/-- Generate one well-typed statement list in `IO` for the Tyche panels. Caps
+    `size`/`len` low (mirrors the Plausible wrapper) so whole-list generation
+    rarely hits an empty sub-generator. -/
+def genStmtsForTyche : IO (List Statement × Nat) := do
+  let d ← IO.rand 1 3
+  let len ← IO.rand 1 4
+  let ss ← genProgramStmtsIO d len
+  return (ss, d)
+
+/-- Build a `StmtPropResult` by generating a statement list and applying a check
+    predicate under the given tag. -/
+def genStmtProp (tag : String) (check : List Statement → Bool) : IO StmtPropResult := do
+  let (ss, d) ← genStmtsForTyche
+  return { stmts := ss, passed := check ss, genSize := d, tag }
+
+-- ── The `StmtToKleeneStmt` definedness panel (extra breakdown) ────────
+-- Unlike the pass/fail panels, this one also records *why* the transform was (un)
+-- defined, so the definedness contract (#6) is eyeballable.
+
+structure KleeneDefinedResult where
+  stmts : List Statement
+  defined : Bool
+  genSize : Nat
+
+instance : Tyche.TycheSample KleeneDefinedResult where
+  toSample r :=
+    let unsupported := hasKleeneUnsupported r.stmts
+    let invLoop := hasInvLoopStmts r.stmts
+    -- Passes iff the definedness matches the documented contract.
+    let passed := checkKleeneDefinedIff r.stmts
+    { representation := (Std.format r.stmts).pretty
+      status := if passed then .passed else .failed
+      features := [
+        ("defined", .nominal (if r.defined then "yes" else "no")),
+        ("has_unsupported_ctor", .nominal (if unsupported then "yes" else "no")),
+        ("has_invariant_loop", .nominal (if invLoop then "yes" else "no")),
+        ("contract_holds", .nominal (if passed then "yes" else "no"))
+      ] ++ stmtListFeatures r.stmts r.genSize }
+
+def genKleeneDefined : IO KleeneDefinedResult := do
+  let (ss, d) ← genStmtsForTyche
+  return { stmts := ss, defined := (kleeneStmts ss).isSome, genSize := d }
+
 -- ── Main ──────────────────────────────────────────────────────────────
 
 def main (args : List String) : IO Unit := do
@@ -1128,6 +1211,35 @@ def main (args : List String) : IO Unit := do
   let fn5 ← IO.FS.readFile (outputPath ++ ".fn5")
   handle.putStr fn5
   IO.FS.removeFile (outputPath ++ ".fn5")
+
+  -- ── Statement generator panels (transforms + typechecker) ───────────
+  -- One panel per property (#1, #3, #4, #5a, #5b, #6, #9). Each generates a
+  -- well-typed statement list (proven sound+complete against `StmtsHasTypeA`) and
+  -- visualizes the property's pass/fail against structural features.
+  -- Panel #1 uses the HONEST completeness predicate, so `funcDecl`-bearing
+  -- statements render as failed marks (the real spec/algorithm gap is visible,
+  -- not masked). Panel #1b shows that every such rejection carries a `funcDecl`.
+  let stmtPanels : List (String × String × (List Statement → Bool)) :=
+    [ (".st1", "stmt: typechecker accepts generated statements (#1 — funcDecl gap visible)", checkTypeCheckerComplete),
+      (".st1b", "stmt: typecheck rejections are only funcDecl (#1b)", rejectionImpliesFuncDecl),
+      (".st3", "stmt: LoopElim preserves typeability (#3)", checkLoopElimPreservesTyping),
+      (".st4", "stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops),
+      (".st5a", "stmt: ANF is idempotent (#5a)", checkAnfIdempotent),
+      (".st5b", "stmt: ANF preserves typeability (#5b)", checkAnfPreservesTyping),
+      (".st9", "stmt: mapExprs id = id (#9)", checkMapExprsId) ]
+  for (suffix, title, check) in stmtPanels do
+    Tyche.run (genStmtProp title check)
+      { numSamples, propertyName := title, outputPath := outputPath ++ suffix }
+    let content ← IO.FS.readFile (outputPath ++ suffix)
+    handle.putStr content
+    IO.FS.removeFile (outputPath ++ suffix)
+
+  -- #6 gets its own richer panel (definedness + why).
+  Tyche.run genKleeneDefined
+    { numSamples, propertyName := "stmt: DetToKleene defined iff supported (#6)", outputPath := outputPath ++ ".st6" }
+  let st6 ← IO.FS.readFile (outputPath ++ ".st6")
+  handle.putStr st6
+  IO.FS.removeFile (outputPath ++ ".st6")
 
   -- Also generate type samples into the same file
   let startTime ← IO.monoMsNow

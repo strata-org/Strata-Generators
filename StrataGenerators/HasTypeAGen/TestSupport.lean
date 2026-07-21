@@ -181,7 +181,7 @@ def intBoolState : LState LExprParams' :=
 /-- Evaluate an expression with the given fuel using `IntBoolFactory`.
     Operators reduce when applied to constants; free variables are irreducible. -/
 def eval (fuel : Nat) (e : LExpr') : LExpr' :=
-  LExpr.eval fuel intBoolState e
+  (LExpr.evalWithLState fuel intBoolState e).fst
 
 /-- Check whether an expression is a canonical value under `IntBoolFactory`. -/
 def isValue (e : LExpr') : Bool :=

@@ -107,6 +107,12 @@ roots = ["StrataGenerators.StmtHasTypeAGen.Core"]
 name = "StrataGenerators.StmtHasTypeAGen"
 roots = ["StrataGenerators.StmtHasTypeAGen"]
 
+# Shared test support for the statement generator (measurements, transform
+# applications, and the six property check predicates) used by both harnesses
+[[lean_lib]]
+name = "StrataGenerators.StmtHasTypeAGen.TestSupport"
+roots = ["StrataGenerators.StmtHasTypeAGen.TestSupport"]
+
 # Shared round-trip helpers + structural shrinker used by both the Plausible and
 # Tyche harnesses (format/parse, shrinkWhile, failure predicates)
 [[lean_lib]]
