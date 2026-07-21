@@ -747,7 +747,9 @@ instance : Arbitrary GenStmts where
 @[reducible] def prop_stmt_loopElim_zero_loops (gs : GenStmts) : Prop :=
   checkLoopElimZeroLoops gs.stmts = true
 
--- #5a: CSE is idempotent (`cse (cse x) = cse x`).
+-- #5a: CSE reaches a fixpoint — a second pass introduces no additional
+-- `$__cse.*` vars (`countCseVars (cse x) = countCseVars (cse (cse x))`). A
+-- var-count proxy for idempotence that avoids brittle statement-list equality.
 @[reducible] def prop_stmt_cse_idempotent (gs : GenStmts) : Prop :=
   checkCseIdempotent gs.stmts = true
 

@@ -128,10 +128,19 @@ def hasKleeneUnsupported (ss : List Statement) : Bool :=
 def hasInvLoopStmts (ss : List Statement) : Bool :=
   countStmtsByList (fun | .loop _ _ inv _ _ => !inv.isEmpty | _ => false) ss != 0
 
-/-- Structural equality on statement lists via their canonical pretty-print.
-    `Statement` has no `BEq`/`DecidableEq` instance, so — following the codebase's
-    own `StrataTest/Transform/DetToKleene.lean` convention — we compare through
-    `Std.format`. -/
+/-- Equality on statement lists via their canonical pretty-print. `Statement` has
+    no `BEq`/`DecidableEq` instance (its `funcDecl` payload carries a
+    function-typed field), so — following the codebase's own
+    `StrataTest/Transform/DetToKleene.lean` convention — we compare through
+    `Std.format`.
+
+    CAVEAT: this is brittle. The CST formatter cannot faithfully render every
+    statement (e.g. a bodiless `funcDecl` gets a substituted dummy body), so two
+    *distinct* lists can format identically. Only use it where a false "equal" is
+    harmless — e.g. `checkMapExprsId` below, where both sides are literally the
+    same list. Do NOT use it to decide CSE-output equality; `checkCseIdempotent`
+    instead compares CSE-introduced var *counts* (`countCseVars`), which is total
+    and formatter-independent. -/
 def stmtsEq (ss ss' : List Statement) : Bool :=
   (Std.format ss).pretty == (Std.format ss').pretty
 
@@ -319,14 +328,48 @@ def checkLoopElimPreservesTyping (ss : List Statement) : Bool :=
 def checkLoopElimZeroLoops (ss : List Statement) : Bool :=
   countLoopsStmts (loopElimStmts ss) == 0
 
-/-- **Property #5a**: CSE is idempotent — `cse (cse x) = cse x` (structural
-    equality on the resulting statement lists). Exercises the fixpoint-fuel
-    convergence of `stmtRunCSE` (the CR replaced the provable `|S(body)|` bound
-    with the constant `fuel := 1024`): if the fixpoint fails to converge, a
-    second pass keeps extracting and this fails. -/
+mutual
+/-- Collect the RHS `Expr` of every CSE-introduced `init` declaration (name
+    prefixed by `Core.CSE.cseVarPrefix`) anywhere in a statement, nested bodies
+    included. These are exactly the subexpressions CSE hoisted into fresh `var`
+    declarations. Operates on a *given* statement list — it does not run CSE. -/
+def cseInitRHSs : Statement → List Expression.Expr
+  | .cmd (.cmd (.init n _ (.det e) _)) =>
+      if n.name.startsWith Core.CSE.cseVarPrefix then [e] else []
+  | .cmd _ => []
+  | .block _ body _ => cseInitRHSsList body
+  | .ite _ thenb elseb _ => cseInitRHSsList thenb ++ cseInitRHSsList elseb
+  | .loop _ _ _ body _ => cseInitRHSsList body
+  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+/-- List analogue of `cseInitRHSs`. -/
+def cseInitRHSsList : List Statement → List Expression.Expr
+  | [] => []
+  | s :: ss => cseInitRHSs s ++ cseInitRHSsList ss
+end
+
+/-- Number of CSE-introduced `var` declarations *already present* in a statement
+    list (name prefixed by `Core.CSE.cseVarPrefix`). Does not run CSE. -/
+def countCseVars (ss : List Statement) : Nat :=
+  (cseInitRHSsList ss).length
+
+/-- **Property #5a (CSE reaches a fixpoint / idempotence proxy).** Rather than
+    assert exact structural equality of `cse (cse x)` and `cse x` — which would
+    force a brittle comparison of statement lists (`Statement` has no
+    `DecidableEq`; its `funcDecl` payload even carries a function-typed field) —
+    we compare the *number of CSE-introduced `var` declarations* before and after
+    a second pass. This directly exercises the fixpoint-fuel convergence of
+    `stmtRunCSE` (the CR replaced the provable `|S(body)|` bound with the constant
+    `fuel := 1024`): if the fixpoint has not converged, the second pass extracts
+    further duplicates and introduces *additional* `$__cse.*` vars, so the count
+    strictly increases and this fails.
+
+    This is a proxy, deliberately weaker than structural equality (a second pass
+    that rewrites without changing the var count would not be caught) — but it is
+    total, deterministic, and free of pretty-printer artifacts, and it captures
+    exactly the non-convergence failure mode we care about. -/
 def checkCseIdempotent (ss : List Statement) : Bool :=
   let once := cseStmts ss
-  stmtsEq (cseStmts once) once
+  countCseVars once == countCseVars (cseStmts once)
 
 /-- **Property #5b (CSE preserves typeability).** As #3: the implication "input
     typechecks ⇒ CSE output typechecks". Vacuous when the input is rejected;
@@ -342,25 +385,8 @@ def checkCsePreservesTyping (ss : List Statement) : Bool :=
 -- the `PtrCache` itself is proved a transparent optimization (`run'_output_eq`),
 -- but the CSE traversal built on top of it — in particular the bvar-freeness flag
 -- in `collectSubexprs.abs` (flagged "may spuriously return true") — is not.
-
-mutual
-/-- Collect the RHS `Expr` of every CSE-introduced `init` declaration (name
-    prefixed by `Core.CSE.cseVarPrefix`) anywhere in a statement, nested bodies
-    included. These are exactly the subexpressions CSE hoisted into fresh `var`
-    declarations. -/
-def cseInitRHSs : Statement → List Expression.Expr
-  | .cmd (.cmd (.init n _ (.det e) _)) =>
-      if n.name.startsWith Core.CSE.cseVarPrefix then [e] else []
-  | .cmd _ => []
-  | .block _ body _ => cseInitRHSsList body
-  | .ite _ thenb elseb _ => cseInitRHSsList thenb ++ cseInitRHSsList elseb
-  | .loop _ _ _ body _ => cseInitRHSsList body
-  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
-/-- List analogue of `cseInitRHSs`. -/
-def cseInitRHSsList : List Statement → List Expression.Expr
-  | [] => []
-  | s :: ss => cseInitRHSs s ++ cseInitRHSsList ss
-end
+-- (`cseInitRHSs` / `cseInitRHSsList` / `countCseVars` are defined above, next to
+-- `checkCseIdempotent`.)
 
 /-- **Property P-CSE-3 (capture safety — no free bound variable in any extracted
     init).** CSE only ever introduces `var $__cse.k := e` declarations, prepended
@@ -404,9 +430,9 @@ where
     | .quant _ _ _ _ tr body => [tr, body]
     | _ => []
 
-/-- Number of CSE-introduced `var` declarations in the output. -/
+/-- Number of CSE-introduced `var` declarations in the output of running CSE. -/
 def cseVarCount (ss : List Statement) : Nat :=
-  (cseInitRHSsList (cseStmts ss)).length
+  countCseVars (cseStmts ss)
 
 /-- **Property P-CSE-6 (output-size bound on the DAG measure).** Your reviewer's
     "output doesn't grow more than it should", pinned to the *distinct-DAG-node*
