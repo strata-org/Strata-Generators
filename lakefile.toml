@@ -1,11 +1,11 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent",  "StrataGenerators.CmdHasTypeAGen"]
+defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent",  "StrataGenerators.CmdHasTypeAGen", "StrataGenerators.StmtHasTypeAGen"]
 
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "91e735876"
+rev = "6e71fc9b7"
 
 [[require]]
 name = "basalt"
@@ -96,6 +96,16 @@ roots = ["StrataGenerators.FunctionHasTypeAGen"]
 [[lean_lib]]
 name = "StrataGenerators.FunctionHasTypeAGen.TestSupport"
 roots = ["StrataGenerators.FunctionHasTypeAGen.TestSupport"]
+
+# Core Statement generator definitions (no Mathlib)
+[[lean_lib]]
+name = "StrataGenerators.StmtHasTypeAGen.Core"
+roots = ["StrataGenerators.StmtHasTypeAGen.Core"]
+
+# The StmtHasTypeA generator with soundness/completeness proofs
+[[lean_lib]]
+name = "StrataGenerators.StmtHasTypeAGen"
+roots = ["StrataGenerators.StmtHasTypeAGen"]
 
 # Shared round-trip helpers + structural shrinker used by both the Plausible and
 # Tyche harnesses (format/parse, shrinkWhile, failure predicates)
