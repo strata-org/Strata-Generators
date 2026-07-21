@@ -781,6 +781,50 @@ def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckS
   | .error _ =>
     return { func, accepted := false, specHolds := true, generatorSize := d }
 
+-- ── Function property: typechecker COMPLETENESS ────────────────────────
+-- Dual to the soundness panel above. `genFunction` is proven sound, so
+-- `Function.typeCheck` should accept every generated function — but it does NOT:
+-- the spec permits a measure without a body, the algorithm rejects it. Here a
+-- REJECTED function renders as a FAILED mark (the real gap is visible), and the
+-- `measure_no_body` feature shows it is the cause. Uses the full-Core-factory
+-- predicates from the shared statement module so no operator spuriously fails to
+-- resolve. The `[body=…, measure=…]` shape is surfaced explicitly since the
+-- pretty-printer omits an absent body/measure.
+open StrataGenerators.Stmt.TestSupport in
+structure FunctionTypeCheckCompleteResult where
+  func : Function
+  accepted : Bool
+  generatorSize : Nat
+
+open StrataGenerators.Stmt.TestSupport in
+instance : Tyche.TycheSample FunctionTypeCheckCompleteResult where
+  toSample r :=
+    -- Passes iff the typechecker accepted the (spec-well-typed) function. A
+    -- rejection is a FAILURE — the genuine completeness gap.
+    let measNoBody := funcMeasureWithoutBody r.func
+    { representation := s!"[body={r.func.body.isSome}, measure={r.func.measure.isSome}]\n{formatFunc r.func}"
+      status := if r.accepted then .passed else .failed
+      features := [
+        ("typecheck_accepted", .nominal (if r.accepted then "yes" else "no")),
+        -- The known gap: rejected because it has a measure but no body.
+        ("measure_no_body", .nominal (if measNoBody then "yes" else "no")),
+        ("func_shape", .nominal (funcShape r.func)),
+        ("has_body", .nominal (if r.func.body.isSome then "yes" else "no")),
+        ("has_measure", .nominal (if r.func.measure.isSome then "yes" else "no")),
+        ("num_type_args", .ordinal r.func.typeArgs.length),
+        ("num_inputs", .ordinal r.func.inputs.toList.length),
+        ("output_kind", .nominal (typeKind r.func.output)),
+        ("generator_size", .ordinal r.generatorSize)
+      ] }
+
+open StrataGenerators.Stmt.TestSupport in
+/-- Generate a closed function and record whether `Function.typeCheck` accepts it
+    (in the full Core ambient context). -/
+def genAndCheckFunctionTypeCheckComplete (depth : Nat := 0) : IO FunctionTypeCheckCompleteResult := do
+  let d ← if depth == 0 then randomDepth else pure depth
+  let func ← genFunctionIO [] coreOpCtx d
+  return { func, accepted := checkFunctionTypeCheckerComplete func, generatorSize := d }
+
 -- ── Function property 2: pretty-print / parse round-trip ───────────────
 -- Embeds a generated function in a `Program`, formats it via
 -- `Core.formatProgram`, re-parses via DDM, re-formats, and compares. A parse
@@ -1008,6 +1052,15 @@ private def stmtListFeatures (ss : List Statement) (genSize : Nat) :
     ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")),
     ("generator_size", .ordinal genSize) ]
 
+/-- Render a statement list for a Tyche panel using Strata's own formatter (real
+    Core concrete syntax), appending a `funcDecl[body=…, measure=…]` summary since
+    the CST formatter cannot represent a bodiless `funcDecl` statement (it
+    substitutes a dummy body) — exactly the completeness counterexample shape. -/
+def stmtRepr (ss : List Statement) : String :=
+  let shapes := funcDeclShapesList ss
+  let suffix := if shapes.isEmpty then "" else s!"\n-- {" ".intercalate shapes}"
+  formatStmts ss ++ suffix
+
 /-- A generated statement list paired with a single property's pass/fail verdict
     and the property name (used as the pass/fail nominal feature). One structure
     serves every boolean statement property; the panel title distinguishes them. -/
@@ -1020,7 +1073,7 @@ structure StmtPropResult where
 
 instance : Tyche.TycheSample StmtPropResult where
   toSample r :=
-    { representation := (Std.format r.stmts).pretty
+    { representation := stmtRepr r.stmts
       status := if r.passed then .passed else .failed
       features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
         :: stmtListFeatures r.stmts r.genSize }
@@ -1055,7 +1108,7 @@ instance : Tyche.TycheSample KleeneDefinedResult where
     let invLoop := hasInvLoopStmts r.stmts
     -- Passes iff the definedness matches the documented contract.
     let passed := checkKleeneDefinedIff r.stmts
-    { representation := (Std.format r.stmts).pretty
+    { representation := stmtRepr r.stmts
       status := if passed then .passed else .failed
       features := [
         ("defined", .nominal (if r.defined then "yes" else "no")),
@@ -1184,6 +1237,15 @@ def main (args : List String) : IO Unit := do
   let fn2 ← IO.FS.readFile (outputPath ++ ".fn2")
   handle.putStr fn2
   IO.FS.removeFile (outputPath ++ ".fn2")
+
+  -- Function property: typechecker COMPLETENESS (dual to fn2). Rejected functions
+  -- render as failed marks — the measure-without-body gap shows up as failures,
+  -- with `measure_no_body = yes` identifying the cause.
+  Tyche.run (genAndCheckFunctionTypeCheckComplete)
+    { numSamples, propertyName := "genFunction: typeCheck accepts generated functions (completeness)", outputPath := outputPath ++ ".fn2c" }
+  let fn2c ← IO.FS.readFile (outputPath ++ ".fn2c")
+  handle.putStr fn2c
+  IO.FS.removeFile (outputPath ++ ".fn2c")
 
   -- Function property: pretty-print / parse round-trip. Format → parse →
   -- re-format is a fixed point (parse failures marked separately).

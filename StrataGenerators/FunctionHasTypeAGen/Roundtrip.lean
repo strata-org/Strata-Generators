@@ -47,6 +47,36 @@ def formatFunc (func : Function) : String :=
   if s.startsWith "program Core;\n\n" then
     (s.drop "program Core;\n\n".length).toString else s.trimAscii.toString
 
+/-- Embed a statement list as the body of a trivial procedure `p` in a one-decl
+    `Program`, and format it via Strata's own `Core.formatProgram`. This yields
+    genuine Strata Core concrete syntax for the statements (a `funcDecl`, `block`,
+    `while`, etc. rendered exactly as the real grammar prescribes) rather than any
+    hand-rolled approximation.
+
+    Caveat (a faithful reflection of a real limitation, not a display bug): the
+    Core CST formatter cannot represent a **bodiless `funcDecl` statement** — the
+    `funcDecl_statement` grammar requires a body, so `funcDeclToStatement`
+    substitutes a dummy `body` expression (and logs an internal error) for a
+    `funcDecl` whose declaration has no body. Such a statement is exactly the
+    typechecker-completeness counterexample (a `funcDecl` with a measure but no
+    body), so its rendered form shows a placeholder body. The `[body=…]` tag on
+    the counterexample (see the harness `Repr`) records the true shape. -/
+def formatStmtsAsProgram (ss : List Statement) : String :=
+  let proc : Core.Procedure :=
+    { header := { name := ⟨"p", ()⟩, typeArgs := [], inputs := [], outputs := [] },
+      spec := default,
+      body := .structured ss }
+  let prog : Core.Program := { decls := [ .proc proc .empty ] }
+  (Core.formatProgram prog).pretty
+
+/-- Format a statement list using Strata's own formatter, with the `program Core;`
+    header stripped — for use as a display label in counterexamples. Renders
+    `funcDecl`/`block`/`while`/etc. in real Core concrete syntax. -/
+def formatStmts (ss : List Statement) : String :=
+  let s := formatStmtsAsProgram ss
+  if s.startsWith "program Core;\n\n" then
+    (s.drop "program Core;\n\n".length).toString else s.trimAscii.toString
+
 /-- Parse a Core program string back to the Strata Core AST (`none` on any
     parse or translation failure). -/
 def parseCoreProgram (input : String) : IO (Option Core.Program) := do

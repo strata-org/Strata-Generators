@@ -1,5 +1,6 @@
 import StrataGenerators.SetGen
 import StrataGenerators.CmdHasTypeAGen.Core
+import StrataGenerators.FunctionHasTypeAGen
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
 
@@ -230,20 +231,17 @@ private theorem foldl_max_length_ge_of_mem (xs : List String) (nm : String)
     | head => exact Nat.le_trans (Nat.le_max_right _ _) (foldl_max_length_ge_init tl _)
     | tail _ hmem => exact ih hmem _
 
-/-- `fallbackFreshName ctx` is fresh in `ctx` because it is strictly longer
-    than every name in the context. -/
-private theorem fallbackFreshName_isFresh (ctx : VarCtx) :
-    VarCtx.isFresh ctx ⟨fallbackFreshName ctx, ()⟩ = true := by
+/-- Any name strictly longer than every name in `ctx` is fresh in `ctx`. -/
+private theorem isFresh_of_maxlen_lt (ctx : VarCtx) (s : String)
+    (h : (VarCtx.names ctx).foldl (fun acc nm => max acc nm.length) 0 < s.length) :
+    VarCtx.isFresh ctx ⟨s, ()⟩ = true := by
   unfold VarCtx.isFresh
-  have hfind : VarCtx.find? ctx ⟨fallbackFreshName ctx, ()⟩ = none := by
+  have hfind : VarCtx.find? ctx ⟨s, ()⟩ = none := by
     apply VarCtx.find?_none_of_ne_all
     intro entry hmem
     -- Identifiers are equal iff their names are; derive name inequality by length.
-    have hname_ne : entry.1.name ≠ fallbackFreshName ctx := by
+    have hname_ne : entry.1.name ≠ s := by
       apply String.ne_of_length_ne
-      have hlen : (fallbackFreshName ctx).length =
-          (VarCtx.names ctx).foldl (fun acc nm => max acc nm.length) 0 + 1 := by
-        simp [fallbackFreshName, String.length_ofList, List.length_replicate]
       have hname_mem : entry.1.name ∈ VarCtx.names ctx :=
         List.mem_map.mpr ⟨entry, hmem, rfl⟩
       have hle := foldl_max_length_ge_of_mem (VarCtx.names ctx) entry.1.name hname_mem 0
@@ -251,6 +249,38 @@ private theorem fallbackFreshName_isFresh (ctx : VarCtx) :
     intro heq
     exact hname_ne (congrArg Identifier.name heq)
   simp [hfind]
+
+/-- `fallbackFreshName ctx` has length one greater than the longest context name. -/
+private theorem fallbackFreshName_length (ctx : VarCtx) :
+    (fallbackFreshName ctx).length =
+      (VarCtx.names ctx).foldl (fun acc nm => max acc nm.length) 0 + 1 := by
+  simp [fallbackFreshName, String.length_ofList, List.length_replicate]
+
+/-- `dodgeKeyword` never shortens its argument: it either returns it unchanged or
+    appends `_`. -/
+private theorem length_le_dodgeKeyword (s : String) :
+    s.length ≤ (dodgeKeyword s).length := by
+  unfold dodgeKeyword
+  split
+  · simp [String.length_append]
+  · exact Nat.le_refl _
+
+/-- `fallbackFreshName ctx` is fresh in `ctx` because it is strictly longer
+    than every name in the context. -/
+private theorem fallbackFreshName_isFresh (ctx : VarCtx) :
+    VarCtx.isFresh ctx ⟨fallbackFreshName ctx, ()⟩ = true := by
+  apply isFresh_of_maxlen_lt
+  rw [fallbackFreshName_length]; omega
+
+/-- `dodgeKeyword (fallbackFreshName ctx)` is also fresh: `dodgeKeyword` only ever
+    lengthens the already-long-enough fallback name, so it too exceeds every
+    context name in length. -/
+private theorem dodgeKeyword_fallbackFreshName_isFresh (ctx : VarCtx) :
+    VarCtx.isFresh ctx ⟨dodgeKeyword (fallbackFreshName ctx), ()⟩ = true := by
+  apply isFresh_of_maxlen_lt
+  have h := length_le_dodgeKeyword (fallbackFreshName ctx)
+  rw [fallbackFreshName_length] at h
+  omega
 
 /-- Every name in the support of `genFreshName ctx` is fresh in `ctx` (i.e. its
     identifier `⟨name, ()⟩` is absent from the context). -/
@@ -263,7 +293,24 @@ theorem genFreshName_produces_fresh (ctx : VarCtx) :
   simp only [mem_support_ite_iff, mem_support_pure_iff] at hname
   rcases hname with ⟨hfresh, rfl⟩ | ⟨_, rfl⟩
   · exact hfresh
-  · exact fallbackFreshName_isFresh ctx
+  · exact dodgeKeyword_fallbackFreshName_isFresh ctx
+
+/-- **Keyword-freedom of `genFreshName`.** Every name in the support of
+    `genFreshName ctx` is a non-keyword: both exit paths (the dodged random
+    candidate and the dodged fallback) pass through `dodgeKeyword`, which never
+    returns a reserved Core keyword. So the variable names `genInitDet` /
+    `genInitNondet` bind in `init` commands are never reserved words the Core
+    parser would reject in identifier position. -/
+theorem genFreshName_not_keyword (ctx : VarCtx) :
+    ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
+      isReservedKeyword name = false := by
+  intro name hmem
+  simp only [genFreshName, mem_support_bind_iff] at hmem
+  obtain ⟨s, _, hname⟩ := hmem
+  simp only [mem_support_ite_iff, mem_support_pure_iff] at hname
+  rcases hname with ⟨_, rfl⟩ | ⟨_, rfl⟩
+  · exact StrataGenerators.Function.dodgeKeyword_not_keyword s
+  · exact StrataGenerators.Function.dodgeKeyword_not_keyword _
 
 -- ── Full soundness of genCmd ─────────────────────────────────────────
 

@@ -467,7 +467,12 @@ structure ClosedGenFunction where
   func : Function
 
 instance : Repr ClosedGenFunction where
-  reprPrec gf _ := formatFunc gf.func
+  reprPrec gf _ :=
+    -- Show body/measure presence explicitly: the pretty-printer omits an absent
+    -- body/measure, but that distinction is exactly what the completeness gap
+    -- (measure-without-body) turns on, so make it visible in counterexamples.
+    let tag := s!"[body={gf.func.body.isSome}, measure={gf.func.measure.isSome}]"
+    s!"{tag}\n{formatFunc gf.func}"
 
 instance : Shrinkable ClosedGenFunction where
   shrink _ := []
@@ -643,6 +648,27 @@ def checkFunctionBodyPreservation (gf : ClosedGenFunction) : Bool :=
 @[reducible] def prop_function_body_preservation (gf : ClosedGenFunction) : Prop :=
   checkFunctionBodyPreservation gf = true
 
+-- ── Function typechecker completeness ─────────────────────────────────
+-- Dual to the soundness property above. `genFunction` is proven sound (output
+-- satisfies `FuncHasType'`), so `Function.typeCheck` should accept every generated
+-- function. It does NOT — the spec permits a measure without a body, the algorithm
+-- rejects it. Checks live in `StrataGenerators.StmtHasTypeAGen.TestSupport`
+-- (`checkFunctionTypeCheckerComplete` / `funcRejectionImpliesMeasureNoBody`), run
+-- against the full `Core.Factory` context so no operator spuriously fails to
+-- resolve. The `funcDecl` gap in the statement test (#1) is the syntactic-statement
+-- analogue of exactly this.
+
+open StrataGenerators.Stmt.TestSupport in
+-- Completeness: the typechecker accepts every generated function. FAILS on the
+-- measure-without-body gap — asserted honestly, so a real failure is reported.
+@[reducible] def prop_function_typeCheck_complete (gf : ClosedGenFunction) : Prop :=
+  checkFunctionTypeCheckerComplete gf.func = true
+
+open StrataGenerators.Stmt.TestSupport in
+-- Every rejection is a measure-without-body function (pins the sole known gap).
+@[reducible] def prop_function_rejection_only_measure (gf : ClosedGenFunction) : Prop :=
+  funcRejectionImpliesMeasureNoBody gf.func = true
+
 -- ── Statement generation via Plausible.Gen ────────────────────────────
 --
 -- `genProgramStmts` generates a well-typed Strata Core statement list
@@ -659,7 +685,15 @@ structure GenStmts where
   stmts : List Statement
 
 instance : Repr GenStmts where
-  reprPrec gs _ := (Std.format gs.stmts).pretty
+  -- Render via Strata's own formatter (real Core concrete syntax), plus a summary
+  -- of any `funcDecl` shapes: the CST formatter cannot represent a bodiless
+  -- `funcDecl` statement (it substitutes a dummy body), and a bodiless funcDecl
+  -- with a measure is exactly the typechecker-completeness counterexample, so the
+  -- summary records the true shape the rendered form can't show.
+  reprPrec gs _ :=
+    let shapes := funcDeclShapesList gs.stmts
+    let suffix := if shapes.isEmpty then "" else s!"\n  -- {" ".intercalate shapes}"
+    formatStmts gs.stmts ++ suffix
 
 -- Statement lists are generated whole by a sound+complete generator; we do not
 -- attempt structural shrinking (a shrunk sub-list need not remain well-typed).
@@ -863,6 +897,18 @@ def main (args : List String) : IO UInt32 := do
   -- Property 3: type preservation under evaluation (Step.type_preserved / StepStar.type_preserved)
   if !(← checkProperty "function: body type preserved under eval"
     (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_body_preservation gf)) cfg) then
+    allPassed := false
+
+  -- Function typechecker completeness. FAILS on the measure-without-body gap
+  -- (spec permits it, algorithm rejects it) — the function-level analogue of the
+  -- statement `funcDecl` gap (#1), asserted honestly as a real failure.
+  if !(← checkProperty "function: typeCheck accepts generated functions (completeness)"
+    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_typeCheck_complete gf)) cfg) then
+    allPassed := false
+
+  -- Every typeCheck rejection is a measure-without-body function (pins the gap).
+  if !(← checkProperty "function: typeCheck rejections are only measure-without-body"
+    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_rejection_only_measure gf)) cfg) then
     allPassed := false
 
   -- Property 2: pretty-print / parse round-trip (IO-based, manual loop)

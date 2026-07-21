@@ -135,6 +135,24 @@ def hasInvLoopStmts (ss : List Statement) : Bool :=
 def stmtsEq (ss ss' : List Statement) : Bool :=
   (Std.format ss).pretty == (Std.format ss').pretty
 
+mutual
+/-- Collect a `[body=…, measure=…]` tag for every `funcDecl` node anywhere in a
+    statement (nested bodies included). Strata's CST formatter cannot represent a
+    bodiless `funcDecl` statement — it substitutes a dummy body — and a bodiless
+    funcDecl *with a measure* is exactly the typechecker-completeness
+    counterexample, so this records the true shape the rendered form can't show. -/
+def funcDeclShapes : Statement → List String
+  | .funcDecl d _ => [s!"funcDecl[body={d.body.isSome}, measure={d.measure.isSome}]"]
+  | .block _ body _ => funcDeclShapesList body
+  | .ite _ thenb elseb _ => funcDeclShapesList thenb ++ funcDeclShapesList elseb
+  | .loop _ _ _ body _ => funcDeclShapesList body
+  | .cmd _ | .exit _ _ | .typeDecl _ _ => []
+/-- List analogue of `funcDeclShapes`. -/
+def funcDeclShapesList : List Statement → List String
+  | [] => []
+  | s :: ss => funcDeclShapes s ++ funcDeclShapesList ss
+end
+
 -- ── `#guard` sanity checks on the measurement functions ──────────────────
 
 section Guards
@@ -335,6 +353,47 @@ def checkKleeneDefinedIff (ss : List Statement) : Bool :=
     expressions in a statement list is the identity. -/
 def checkMapExprsId (ss : List Statement) : Bool :=
   stmtsEq (Statements.mapExprs id ss) ss
+
+-- ── Function typechecker completeness ─────────────────────────────────────
+-- `genFunction` is proven sound: every function it produces satisfies the
+-- declarative spec `FuncHasType'`. So `Function.typeCheck` — whose *soundness* is
+-- tested elsewhere but whose *completeness* is not — should accept every one. The
+-- probe (see git history) shows it does NOT: the spec's `FuncHasType'` has no
+-- field requiring a body (both `bodyTyped` and `measureTyped` are conditional on
+-- the component being present), so a function with a **measure but no body**
+-- satisfies the spec; but `Function.typeCheck` rejects it ("a decreases clause was
+-- supplied but the function has no body", FunctionType.lean). This is the
+-- function-level analogue of the statement-level `funcDecl` gap. Running against
+-- the full `Core.Factory`/`Core.KnownTypes` (below), measure-without-body is the
+-- *sole* cause — with a smaller factory, generated regex/real ops would spuriously
+-- fail to resolve, masking the real gap.
+
+/-- Whether `Function.typeCheck` accepts `func` in the full Core ambient context
+    (`Core.Factory` + `Core.KnownTypes`, so every operator/type the generator can
+    emit resolves). -/
+def checkFunctionTypeChecks (func : Function) : Bool :=
+  match Function.typeCheck stmtCheckContext TEnv.default func with
+  | .ok _ => true
+  | .error _ => false
+
+/-- Whether `func` has a measure but no body — the spec-permitted, algorithm-
+    rejected shape that witnesses the function typechecker's incompleteness. -/
+def funcMeasureWithoutBody (func : Function) : Bool :=
+  func.measure.isSome && func.body.isNone
+
+/-- **Function typechecker completeness.** `genFunction` is sound (output satisfies
+    `FuncHasType'`), so the algorithm should accept every generated function. This
+    asserts that HONESTLY and so FAILS on the measure-without-body gap — a genuine
+    spec/algorithm divergence, reported as a real failure with a minimal witness. -/
+abbrev checkFunctionTypeCheckerComplete (func : Function) : Bool := checkFunctionTypeChecks func
+
+/-- **Characterization of the function-completeness gap.** "Every rejection is a
+    measure-without-body function." Accepts, OR is measure-without-body. This PINS
+    measure-without-body as the sole known cause: it should pass, and a failure
+    means `genFunction` produced a spec-well-typed function the algorithm rejects
+    for some *other* reason — a new, unclassified completeness bug. -/
+def funcRejectionImpliesMeasureNoBody (func : Function) : Bool :=
+  checkFunctionTypeChecks func || funcMeasureWithoutBody func
 
 -- ── Generator wrapper (IO) ───────────────────────────────────────────────
 

@@ -4,6 +4,7 @@ import Basalt.Combinators
 import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
+import StrataGenerators.FunctionHasTypeAGen.Core
 
 open Lambda RandomChoice Core Imperative ArbString
 
@@ -46,14 +47,21 @@ def fallbackFreshName (ctx : VarCtx) : String :=
   String.ofList (List.replicate (ctx.names.foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
 
 /-- Generate a fresh variable name not in `ctx`. Uses `NonEmptyString.arbitrary`
-    for randomness (a variable identifier must be non-empty) and falls back to a
-    length-based guarantee when the random name collides. -/
+    for randomness (a variable identifier must be non-empty), maps it through
+    `dodgeKeyword` so the result is never a reserved Core keyword, and falls back
+    to a length-based guarantee when the (dodged) random name collides.
+
+    `dodgeKeyword` is applied *before* the freshness check so that the name we
+    test for freshness is exactly the name we return; the fallback is dodged too
+    (it is all `x`s, hence never a keyword, so `dodgeKeyword` is the identity on
+    it — but this keeps keyword-freedom uniform across both branches). -/
 def genFreshName [Gen G] (ctx : VarCtx) : G String := do
   let s ← NonEmptyString.arbitrary
+  let s := dodgeKeyword s
   if ctx.isFresh ⟨s, ()⟩ then
     pure s
   else
-    pure (fallbackFreshName ctx)
+    pure (dodgeKeyword (fallbackFreshName ctx))
 
 -- ── Command sub-generators ─────────────────────────────────────────────
 
