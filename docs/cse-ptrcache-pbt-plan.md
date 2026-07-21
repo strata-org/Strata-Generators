@@ -14,7 +14,7 @@ cache"*.
 >
 > | Property | Predicate | Result |
 > |---|---|---|
-> | P-CSE-2 idempotence (#5a) | `checkCseIdempotent` | PASS |
+> | P-CSE-2 fixpoint convergence (#5a) | `checkCseIdempotent` (var-count proxy) | PASS |
 > | P-CSE-1 typing preservation (#5b) | `checkCsePreservesTyping` | PASS |
 > | P-CSE-3 capture safety | `checkCseNoFreeBVarInInits` | PASS |
 > | P-CSE-6 DAG-size output bound | `checkCseVarCountBounded` | PASS |
@@ -137,11 +137,24 @@ def checkCsePreservesTyping (ss : List Statement) : Bool :=
   !checkTypeChecks ss || checkTypeChecks (cseStmts ss)
 ```
 
-### P-CSE-2 — Idempotence (rename of existing #5a; **already wired**)
+### P-CSE-2 — Fixpoint convergence / idempotence proxy (rename of existing #5a; **already wired**)
 
-`checkAnfIdempotent` → `checkCseIdempotent`: `cse (cse x) ≈ cse x` under
-`stmtsEq`. Directly exercises §2.3: if the 1024-fuel fixpoint fails to converge,
-a second pass keeps extracting and this fails.
+`checkCseIdempotent` compares the *count* of CSE-introduced `$__cse.*` var
+declarations before and after a second pass:
+`countCseVars (cse x) == countCseVars (cse (cse x))`. Directly exercises §2.3: if
+the 1024-fuel fixpoint has not converged, the second pass extracts further
+duplicates and introduces additional vars, so the count rises and this fails.
+
+We deliberately avoid asserting exact `cse (cse x) ≈ cse x` structural equality:
+`Statement` has no `DecidableEq` (its `funcDecl` payload carries a function-typed
+`concreteEval` field), and the only total fallback — comparing pretty-prints via
+`stmtsEq` — is brittle (the CST formatter renders some distinct lists
+identically, e.g. a bodiless `funcDecl` gets a dummy body, which for an
+idempotence check is the *dangerous* false-positive direction). The var-count
+proxy is total, deterministic, and formatter-independent. It is strictly weaker
+than structural equality (a second pass that rewrites subterms without changing
+the var count would slip through) but captures exactly the non-convergence
+failure mode §2.3 is about.
 
 ### P-CSE-3 — No free bound variable in any extracted init (**new; strongest capture detector**)
 
