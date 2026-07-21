@@ -16,6 +16,104 @@ this repo. See "Deliberately excluded" at the bottom.
 
 ---
 
+## Retargeting to `strata-org/Strata`
+
+**Goal:** flip this repo's `lakefile.toml` `require Strata` from
+`https://github.com/ngernest/Strata` (a fork) back to the public
+`https://github.com/strata-org/Strata`.
+
+**Status:** *blocked.* The fork carries the Core **typing-specification** work
+(`LExpr` type-checking soundness, `Cmd`/`Function`/`Statement` typing relations)
+that this repo's generators derive against. Public `strata-org/Strata` does not
+have it. The fork's `main` last merged public `strata-org/Strata` at
+`ee0b2ecb2` (`fix(ci): Missing edits, lake update (#1440)`); the delta below is
+everything this repo needs on top of that.
+
+Retargeting becomes possible only once these land in public Strata. The clusters
+are listed roughly in the order they'd need to go up (each depends on the ones
+above it).
+
+### A. New modules to add (fork-only — do not exist upstream at all)
+
+These are imported directly by this repo and pull in the rest of the typing-spec
+cluster transitively:
+
+| Module | Purpose | This repo names |
+|---|---|---|
+| `Strata.Languages.Core.FunctionTypeSpec` | declarative `FunctionHasType(A)` typing relation | `FunctionHasTypeA`, its constructors |
+| `Strata.Languages.Core.CmdTypeSpec` | declarative `CmdHasType'` / `CmdHasTypeA` typing relations | `CmdHasType'.*`, `CmdHasTypeA` |
+
+Their transitive closure also requires the fork-only Lambda-layer theory that
+lives *inside* the differing modules below (notably the ~69 fork-only theorems in
+`LExprTypeSpec` and the 6 lemmas — `genTyVars_prefixed`,
+`addInNewestContext_stateSubstInfo`, `unify_pred`,
+`LTy_instantiateWithCheck_preserves_stateSubstInfo`,
+`typeBoundVar_xv_not_in_knownVars`, `CmdHasType'`).
+
+### B. Existing upstream modules the fork diverges from
+
+For each: whether the change is **purely additive** (safe, mergeable as-is) or
+**behavioral** (upstream would have to accept a typechecker semantics change, or
+this repo would have to adapt). Line counts are fork-vs-`ee0b2ecb2`.
+
+| Module | Δ lines | Kind | What the fork adds / changes |
+|---|---|---|---|
+| `DL/Lambda/LExprTypeSpec` | ~2124 | additive | +69 typing-soundness theorems (superset; 0 upstream-only decls) |
+| `DL/Lambda/LTyUnifyProps` | ~502 | additive | +8 unification/substitution lemmas |
+| `Languages/Core/FunctionType` | ~148 | **behavioral** | `checkAnnotCompat`, monomorphic-annotation & rigid-typevar checks; `arrowsBinary` guard in `LFunc.type` |
+| `DL/Lambda/LExprTypeEnv` | ~131 | additive | +8 env lemmas (incl. `genTyVars_prefixed`, `addInNewestContext_stateSubstInfo`) |
+| `Util/Tactics` | ~229 | additive | +9 custom tactics (`elim_err`, `splitIte`, …) used throughout the proofs |
+| `DL/Util/Maps` | ~48 | additive | `find?_append`, `keys_append`, `values_append` |
+| `DL/Lambda/Denote/Assumptions` | ~42 | additive (visibility) | marks `OpsConsistent(R)` + `OpsConsistent_OpsConsistentR` `public`/`@[expose]` |
+| `DL/Lambda/LTy` | ~17 | additive | `arrowsBinary` and companions |
+| `DL/Lambda/LTyUnify` | ~16 | additive | supporting lemmas |
+| `DL/Lambda/LExprWF` | ~14 | additive | `freeVars_map_fst_eq_getVars` |
+| `DL/Util/Map` | ~12 | additive | `append_nil`, `values_append` |
+| `DL/Lambda/Factory` | ~8 | **behavioral** | `arrowsBinary` binary-arrow guard in `LFunc.type` |
+| `DL/Lambda/LExprT` | ~7 | **behavioral** | `resolveAux` `.quant` case rejects non-`bool` bodies rather than unifying (opposite of upstream `3f079df8f`) |
+| `Languages/Core/Expressions` | ~3 | additive | `HasVarsPure Expression Expression.Expr` instance |
+
+The **behavioral** rows are the only ones that aren't a clean "add these
+decls" PR:
+
+- **`LExprT` `.quant`** — upstream commit `3f079df8f` ("unify unannotated
+  quantifier body with bool") is *incompatible* with the fork's typing specs,
+  which are written against the older non-unifying `resolveAux`. Upstream would
+  need to either revert that behavior or the specs would need re-proving against
+  the unify version.
+- **`FunctionType` / `Factory` guards** (`checkAnnotCompat`, monomorphic-
+  annotation, `arrowsBinary`) — these change what the typechecker *accepts*, so
+  a handful of upstream `#guard_msgs` tests assert different output. See the
+  fork's `MERGE_NOTES.md` for the exact 9 tests affected.
+
+### C. Visibility-only fixes (module-system `public` markers)
+
+Even where the *logic* matches upstream, this repo needs certain symbols exported
+across the `module` boundary. Already tracked concretely:
+
+- `Denote/Assumptions`: `OpsConsistent`, `OpsConsistentR`,
+  `OpsConsistent_OpsConsistentR` must be `public` (this repo names
+  `Lambda.OpsConsistentR` directly). *(Included in row B above.)*
+- `Util/List`: upstream's `public section` **exports** `List.Forall₂`, which
+  then **collides** with `Batteries`/`Mathlib`'s `List.Forall₂` in this repo. The
+  workaround lives here (drop `import Batteries.Data.List.Basic` in
+  `HasTypeAGen.lean`); no upstream change is needed for it, but a future upstream
+  rename of `List.Forall₂` → a Strata-namespaced name would let this repo import
+  Batteries freely again.
+- See **PR 1** and **PR 2** below for the `module`-boundary lemma shims
+  (`mem_get?_eq`, substitution/arrow-spine facts).
+
+### Retarget checklist
+
+1. Land clusters **A** and the additive rows of **B/C** in `strata-org/Strata`.
+2. Resolve the three **behavioral** rows (either upstream accepts the semantics,
+   or re-prove the specs against upstream's behavior).
+3. Land **PR 1 / PR 2** (below) to delete the remaining `module` shims.
+4. Flip `lakefile.toml`: `git = "https://github.com/strata-org/Strata"`, pin a
+   `rev` that includes the above, then `lake update Strata`.
+
+---
+
 ## PR 1 — `Factory` forward-lookup bridge (`mem_get?_eq`)
 
 **Required to delete the `module` shim `HasTypeAGen/OpsConsistentBridge.lean`.**

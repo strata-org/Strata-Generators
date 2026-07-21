@@ -1,7 +1,11 @@
 import StrataGenerators.SetGen
 import StrataGenerators.HasTypeAGen.Core
 import Strata.DL.Lambda.LTyUnify
-import Batteries.Data.List.Basic
+-- NOTE: `Batteries.Data.List.Basic` intentionally NOT imported here. It defines
+-- its own `List.Forall₂`, which clashes with Strata's now-public `List.Forall₂`
+-- (`Strata.DL.Util.List`, reached transitively via `LTyUnify`) on the generated
+-- `List.Forall₂.below.casesOn` symbol. The `List` lemmas this file uses
+-- (`mem_cons`, `length_pos_of_mem`, …) are available transitively via Strata / Lean core.
 
 -- Mathlib registers Nat.le_refl with @[refl]
 -- Adding this annotation avoids us needing to depend on Mathlib
