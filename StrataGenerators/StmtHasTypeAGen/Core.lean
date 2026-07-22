@@ -166,11 +166,7 @@ def genCondOrNondet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     measure. -/
 def genOptMeasure [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : G (Option Expression.Expr) :=
-  let gs : List (Nat × (Unit → G (Option Expression.Expr))) :=
-    [ (1, fun () => pure none),
-      (3, fun () => (fun e => some e) <$> genLExpr fctx octx [] tvars [] depth .int) ]
-  have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+3; omega
-  frequency gs hw
+  biasedOptionGen (3 / 4) (genLExpr fctx octx [] tvars [] depth .int)
 
 /-- Generate a single loop invariant: a label (a non-empty, non-keyword
     identifier via `genIdentName`, since an invariant label appears in identifier

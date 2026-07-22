@@ -326,6 +326,61 @@ theorem mem_support_listOfMaxLength_iff {n : Nat} {g : Set α} {xs : List α} :
     xs ∈ support (listOfMaxLength n g) ↔ xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g := by
   rw [support_listOfMaxLength]; rfl
 
+-- ── coin / biasedOptionGen / optionGen support ───────────────────────────
+-- Ported to `SetGen.Set` from the `SPMF`-based lemmas in `Basalt.SPMF.Support`.
+
+/-- The support of `coin r` is all of `Bool` when the bias is strictly between 0
+    and 1: `true` is reachable because `0 < r.num`, and `false` because
+    `r.num < r.den`. The rational arithmetic is quarantined here, exactly as in
+    the `SPMF` version. -/
+@[simp]
+theorem mem_support_coin_iff {r : Rat} {b : Bool} (h0 : 0 < r) (h1 : r < 1) :
+    b ∈ support (RandomChoice.coin r : Set Bool) ↔ b = true ∨ b = false := by
+  have hnum : (0 : Int) < r.num := Rat.intCast_pos.mp h0
+  have hden : r.num < (r.den : Int) := by
+    have h1' := h1
+    rw [Rat.lt_iff] at h1'
+    simpa using h1'
+  have hden_pos : 0 < r.den := r.den_pos
+  unfold RandomChoice.coin
+  simp only [mem_support_bind_iff, mem_support_choose_iff, mem_support_ite_iff,
+             mem_support_pure_iff]
+  constructor
+  · rintro _; cases b <;> simp
+  · rintro _
+    cases b
+    · -- `false`: reachable via the maximal index `r.den - 1` (where `r.num ≤ idx`)
+      refine ⟨⟨⟨r.den - 1, ?_, ?_⟩⟩, ⟨?_, ?_⟩, Or.inr ⟨?_, rfl⟩⟩ <;> dsimp only <;> omega
+    · -- `true`: reachable via the minimal index `0` (where `idx < r.num`)
+      refine ⟨⟨⟨0, ?_, ?_⟩⟩, ⟨?_, ?_⟩, Or.inl ⟨?_, rfl⟩⟩ <;> dsimp only <;> omega
+
+/-- Support of `biasedOptionGen`: `none` is reachable (via the `false` coin
+    branch, needing `r < 1`) and `some x` is reachable exactly when `x ∈ support g`
+    (via the `true` branch, needing `0 < r`). -/
+@[simp]
+theorem mem_support_biasedOptionGen_iff {r : Rat} {g : Set α} {o : Option α}
+    (h0 : 0 < r) (h1 : r < 1) :
+    o ∈ support (biasedOptionGen r g) ↔ o = none ∨ ∃ a ∈ support g, o = some a := by
+  unfold biasedOptionGen
+  simp only [mem_support_bind_iff, mem_support_coin_iff h0 h1, mem_support_ite_iff,
+             mem_support_pure_iff]
+  constructor
+  · rintro ⟨b, _, ho⟩
+    rcases ho with ⟨_, a, ha, rfl⟩ | ⟨_, rfl⟩
+    · exact Or.inr ⟨a, ha, rfl⟩
+    · exact Or.inl rfl
+  · rintro (rfl | ⟨a, ha, rfl⟩)
+    · exact ⟨false, Or.inr rfl, Or.inr ⟨by simp, rfl⟩⟩
+    · exact ⟨true, Or.inl rfl, Or.inl ⟨rfl, a, ha, rfl⟩⟩
+
+/-- Support of `optionGen` (the unbiased 1/2 instance). Hypothesis-free: the
+    `0 < 1/2` / `1/2 < 1` obligations discharge by `norm_num`. -/
+@[simp]
+theorem mem_support_optionGen_iff {g : Set α} {o : Option α} :
+    o ∈ support (optionGen g) ↔ o = none ∨ ∃ a ∈ support g, o = some a := by
+  unfold optionGen
+  exact mem_support_biasedOptionGen_iff (r := 1/2) (by decide +kernel) (by decide +kernel)
+
 end support
 
 end SetGen

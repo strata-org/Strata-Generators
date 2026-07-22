@@ -216,10 +216,7 @@ def genInputs [Gen G] (tvars : List TyIdentifier) (depth : Nat) :
     and bodies are usually present rather than absent. -/
 def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (τ : LMonoTy) : G (Option LExpr') :=
-  frequency
-    [ (1, fun () => pure none),
-      (3, fun () => (fun e => some e) <$> genLExpr fctx octx [] tvars [] depth τ) ]
-    (by simp)
+  biasedOptionGen (3 / 4) (genLExpr fctx octx [] tvars [] depth τ)
 
 -- ── Main function generator ─────────────────────────────────────────────
 

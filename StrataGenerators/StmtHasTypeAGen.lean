@@ -249,13 +249,12 @@ theorem genOptMeasure_some_sound (env : GenStmtSoundEnv fctx octx tvars) (d : Na
     (hm : m? ∈ SetGen.support (genOptMeasure (G := SetGen.Set) fctx octx tvars d))
     (m : Expression.Expr) (hmeq : m? = some m) :
     HasTypeA' [] m .int := by
-  simp only [genOptMeasure, mem_support_frequency_iff, List.mem_cons, List.mem_nil_iff,
-             Prod.mk.injEq, or_false] at hm
-  obtain ⟨w, g, hg, _, hm⟩ := hm
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
-  · exact absurd (hmeq ▸ hm) (by simp)
-  · obtain ⟨e, he, rfl⟩ := hm
-    have : e = m := by simpa using hmeq
+  simp only [genOptMeasure,
+    mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)] at hm
+  rcases hm with hnone | ⟨e, he, hm⟩
+  · exact absurd (hmeq ▸ hnone) (by simp)
+  · subst hmeq
+    have : e = m := (Option.some.inj hm).symm
     subst this
     exact env.exprSound d .int e he
 
@@ -561,11 +560,11 @@ theorem genOptMeasure_complete (depth : Nat) (measure : Option Expression.Expr)
     (hmeasure : ∀ m, measure = some m →
       m ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .int)) :
     measure ∈ SetGen.support (genOptMeasure (G := SetGen.Set) fctx octx tvars depth) := by
-  simp only [genOptMeasure, mem_support_frequency_iff, List.mem_cons, List.mem_nil_iff,
-             Prod.mk.injEq, or_false]
+  simp only [genOptMeasure,
+    mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)]
   cases measure with
-  | none => exact ⟨1, _, Or.inl ⟨rfl, rfl⟩, by omega, rfl⟩
-  | some m => exact ⟨3, _, Or.inr ⟨rfl, rfl⟩, by omega, m, hmeasure m rfl, rfl⟩
+  | none => exact Or.inl rfl
+  | some m => exact Or.inr ⟨m, hmeasure m rfl, rfl⟩
 
 /-- Completeness of `genInvariant`. A `(label, e)` pair is reachable when the
     label is a reachable identifier (via `genIdentName`, so non-empty and
