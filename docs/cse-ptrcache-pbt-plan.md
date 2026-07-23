@@ -42,17 +42,18 @@ size 60), against `ngernest/Strata@cse-ptrcache-cr` (resolved `8a3b26083`).
 | #5a | CSE reaches a fixpoint (var-count idempotence proxy) | `checkCseIdempotent` | **PASS** (200 ok) |
 | #5b | CSE preserves typeability | `checkCsePreservesTyping` | **PASS** (200 ok) |
 | P-CSE-3 | CSE introduces no init with a dangling de Bruijn index (capture safety) | `checkCseNoFreeBVarInInits` | **PASS** (200 ok) |
-| P-CSE-4 | CSE preserves evaluation semantics (proof-obligation signature) | `checkCseSemanticPreservation` | **PASS** (200 ok) |
+| P-CSE-4 | CSE preserves evaluation semantics (proof-obligation *and* final-store signatures) | `checkCseSemanticPreservation` | **PASS** (10 000 ok) |
 | P-CSE-6 | CSE var-count bounded by input DAG size | `checkCseVarCountBounded` | **PASS** (200 ok) |
 
 P-CSE-3 passing across binder-rich generated programs is the meaningful signal:
 the CR's conservative `collectSubexprs.abs` bvar-freeness approximation did not
 produce a capture on any generated input. P-CSE-4 strengthens this from a
 necessary condition (no dangling index / still well-typed) to the sufficient one
-(same *meaning*): the proof-obligation signature emitted by the statement-level
-symbolic simulator is byte-for-byte identical before and after CSE, so no
-generated program was miscompiled into a well-typed-but-different one. Both are
-supporting evidence, not proofs — they are now continuous regression guards.
+(same *meaning*): both the proof-obligation signature *and* the final-store
+signature emitted by the statement-level symbolic simulator are identical before
+and after CSE, so no generated program was miscompiled into a
+well-typed-but-different one. Both are supporting evidence, not proofs — they are
+now continuous regression guards.
 
 ### Other statement/transform properties (unchanged by this work)
 
@@ -249,20 +250,33 @@ Strata**: `Core.Statement.eval : Env → SubstMap → Statements → List Env ×
 Statistics` (`StatementEval.lean`, public) is a statement-level *symbolic
 simulator* — strictly stronger than the expression-/command-level `LExpr.eval`
 proxy the note proposed as a fallback. It evaluates a whole statement list over
-all control-flow paths and accumulates the **proof obligations** (assert / cover
-/ overflow / bounds conditions, each with its path-condition assumptions) that a
-verifier would discharge. Those obligations are the program's observable meaning.
+all control-flow paths, accumulating on each resulting `Env` both the **proof
+obligations** (assert / cover / overflow / bounds conditions, each with its
+path-condition assumptions) a verifier would discharge, and the final **variable
+store**. We compare *two* complementary observables and require both to match.
 
-**Why the observable is CSE-invariant.** The simulator's expression evaluator
+**Why the observables are CSE-invariant.** The simulator's expression evaluator
 inlines in-scope store bindings (`EC.eval` resolves every `.fvar`). A CSE pass
 turns `… P[e] …` into `var $__cse.k := e; … P[$__cse.k] …`; when the simulator
-reaches the obligation it looks `$__cse.k` up in the store and substitutes `e`
-back, recovering `P[e]`. So a *correct* CSE leaves every obligation expression —
-and every assumption expression — identical, while a capturing CSE (a `$__cse.k`
-bound to the wrong subterm) changes one. We compare the multiset of
-`(PropertyType, obligation expr, assumption exprs)` signatures before and after
-CSE. Since `ExpressionMetadata := Unit`, `Expression.Expr`'s `BEq` is clean
-structural equality — no pretty-printing, no store diffing.
+reaches a use of `$__cse.k` it looks it up in the store and substitutes `e` back,
+recovering `P[e]`. So a *correct* CSE leaves each observable identical, while a
+capturing CSE (a `$__cse.k` bound to the wrong subterm) perturbs at least one.
+Since `ExpressionMetadata := Unit`, `Expression.Expr`'s `BEq` is clean structural
+equality — no pretty-printing, no brittle statement-list diffing.
+
+1. **`obligationSignature`** — the multiset of `(PropertyType, obligation expr,
+   assumption exprs)` over all paths. Catches a capture that corrupts an
+   `assert`/`cover`/overflow condition or a branch assumption.
+2. **`storeSignature`** — the final value of every *user* variable on every path
+   (the `exprEnv.state` single-map, `$__cse.*` temporaries dropped and each value
+   re-evaluated to inline any residual temp reference). This is the crucial
+   addition: **~two-thirds of generated programs emit no proof obligation at
+   all** (straight-line `var`/`set` code), so obligations alone give a vacuous
+   `[] == []` on them — yet a capture that corrupts a *computed value* there is
+   exactly a silent miscompile. The store observable witnesses it. Measured over
+   3000 generated programs: obligations give a non-vacuous check on 32% of
+   type-checking inputs, the store on 25%, and the two together on ~50%; neither
+   is *ever* perturbed by the (correct) CSE pass, so there are no false positives.
 
 Two soundness details, both verified against the Strata source:
 - `.init`/`var` commands only *update the store* (`Imperative.Cmd.eval`) — they
@@ -277,8 +291,8 @@ matches Strata's real LoopElim→CSE pipeline order, and P-CSE #3/#4 certify
 LoopElim preserves typing and removes every loop), passes vacuously if a loop
 somehow survives (backstop against the `panic!`) and on typechecker-rejected
 input (only well-typed programs have semantics to preserve — as in
-`checkCsePreservesTyping`). **Result: PASS**, 200 Plausible trials + 1000 Tyche
-samples, no mismatches.
+`checkCsePreservesTyping`). **Result: PASS**, 10 000 Plausible trials + 1000
+Tyche samples, no mismatches on either observable.
 
 ### P-CSE-5 — Correctness is independent of hash quality (**new; needs a CR seam — see §5**)
 
@@ -585,8 +599,10 @@ black-box and belongs here in `strata-generators`.
    detector; no evaluator needed.
 3. **P-CSE-4 (semantic preservation)** — the actual "model-preserving" claim;
    done via Strata's public statement-level symbolic simulator
-   (`Core.Statement.eval`), comparing the proof-obligation signature before/after
-   CSE — stronger than the command-eval oracle proxy originally sketched.
+   (`Core.Statement.eval`), comparing both the proof-obligation signature and the
+   final-store signature before/after CSE — stronger than the command-eval oracle
+   proxy originally sketched, and the store observable covers the ~two-thirds of
+   programs that emit no obligation.
 4. **P-CSE-6 (DAG-size output bound)** — black-box, gives shrunk counterexamples.
 5. **P-CSE-1/2 (typing preservation, idempotence)** — already wired; keep as
    regression guards.
