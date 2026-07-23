@@ -1,6 +1,6 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators.HasTypeAGen", "StrataGenerators.HasTypeAGenOpsConsistent",  "StrataGenerators.CmdHasTypeAGen", "StrataGenerators.StmtHasTypeAGen"]
+defaultTargets = ["StrataGenerators"]
 
 [[require]]
 name = "Strata"
@@ -12,116 +12,16 @@ name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
 
-# Module-only bridge lemmas for the OpsConsistent(R) generator proofs (Factory
-# `nameMap` lookup, self-unification, generic-type op-consistency) — they need
-# `import all` on Strata internals, which the non-module proof file can't do.
+# A single library covering every module under `StrataGenerators/`. The glob
+# `StrataGenerators.*` selects `StrataGenerators` and all of its submodules, so
+# new files are picked up automatically without adding a stanza per module.
 [[lean_lib]]
-name = "StrataGenerators.HasTypeAGen.OpsConsistentBridge"
-roots = ["StrataGenerators.HasTypeAGen.OpsConsistentBridge"]
-
-# Core generator definitions (no Factory, no Mathlib — shared by Defs and HasTypeAGen)
-[[lean_lib]]
-name = "StrataGenerators.HasTypeAGen.Core"
-roots = ["StrataGenerators.HasTypeAGen.Core"]
-
-# Generator definitions only (no Mathlib, compatible with LExprEval)
-[[lean_lib]]
-name = "StrataGenerators.HasTypeAGen.Defs"
-roots = ["StrataGenerators.HasTypeAGen.Defs"]
-
-# Shared test utilities (eval, isValue, defaultFCtx); imports LExprEval
-[[lean_lib]]
-name = "StrataGenerators.HasTypeAGen.TestSupport"
-roots = ["StrataGenerators.HasTypeAGen.TestSupport"]
-
-# The HasTypeA generator (uses Basalt.Examples.ArbNat → Mathlib → Batteries)
-[[lean_lib]]
-name = "StrataGenerators.HasTypeAGen"
-roots = ["StrataGenerators.HasTypeAGen"]
-
-# OpsConsistent soundness/completeness for the HasTypeA generator
-[[lean_lib]]
-name = "StrataGenerators.HasTypeAGenOpsConsistent"
-roots = ["StrataGenerators.HasTypeAGenOpsConsistent"]
-
-# Core Cmd generator definitions (no Mathlib)
-[[lean_lib]]
-name = "StrataGenerators.CmdHasTypeAGen.Core"
-roots = ["StrataGenerators.CmdHasTypeAGen.Core"]
-
-# Shared Cmd test utilities (ppCmd, properties, generator wrappers)
-[[lean_lib]]
-name = "StrataGenerators.CmdHasTypeAGen.TestSupport"
-roots = ["StrataGenerators.CmdHasTypeAGen.TestSupport"]
-
-# The CmdHasTypeA generator with soundness/completeness proofs
-[[lean_lib]]
-name = "StrataGenerators.CmdHasTypeAGen"
-roots = ["StrataGenerators.CmdHasTypeAGen"]
-
-# Hypothesis-free genCmd soundness at an empty fvar context (combines the
-# HasTypeAGen no-fvars proofs with the CmdHasTypeAGen soundness theorems)
-[[lean_lib]]
-name = "StrataGenerators.CmdHasTypeAGenSound"
-roots = ["StrataGenerators.CmdHasTypeAGenSound"]
-
-# Core Function generator definitions (no Mathlib)
-[[lean_lib]]
-name = "StrataGenerators.FunctionHasTypeAGen.Core"
-roots = ["StrataGenerators.FunctionHasTypeAGen.Core"]
-
-# Local re-proof of the three `List.dedup` facts (see file header for why these
-# are duplicated from Strata.DL.Util.List)
-[[lean_lib]]
-name = "StrataGenerators.FunctionHasTypeAGen.Dedup"
-roots = ["StrataGenerators.FunctionHasTypeAGen.Dedup"]
-
-# The FunctionHasTypeA generator with soundness/completeness proofs
-[[lean_lib]]
-name = "StrataGenerators.FunctionHasTypeAGen"
-roots = ["StrataGenerators.FunctionHasTypeAGen"]
-
-# Shared Function test utilities (ppFunction, fvarsAnnotatedBy reflection,
-# generator wrappers)
-[[lean_lib]]
-name = "StrataGenerators.FunctionHasTypeAGen.TestSupport"
-roots = ["StrataGenerators.FunctionHasTypeAGen.TestSupport"]
-
-# Core Statement generator definitions (no Mathlib)
-[[lean_lib]]
-name = "StrataGenerators.StmtHasTypeAGen.Core"
-roots = ["StrataGenerators.StmtHasTypeAGen.Core"]
-
-# The StmtHasTypeA generator with soundness/completeness proofs
-[[lean_lib]]
-name = "StrataGenerators.StmtHasTypeAGen"
-roots = ["StrataGenerators.StmtHasTypeAGen"]
-
-# Shared test support for the statement generator (measurements, transform
-# applications, and the six property check predicates) used by both harnesses
-[[lean_lib]]
-name = "StrataGenerators.StmtHasTypeAGen.TestSupport"
-roots = ["StrataGenerators.StmtHasTypeAGen.TestSupport"]
-
-# Shared round-trip helpers + structural shrinker used by both the Plausible and
-# Tyche harnesses (format/parse, shrinkWhile, failure predicates)
-[[lean_lib]]
-name = "StrataGenerators.FunctionHasTypeAGen.Roundtrip"
-roots = ["StrataGenerators.FunctionHasTypeAGen.Roundtrip"]
-
-# Shared SetGen infrastructure (no conflicting imports)
-[[lean_lib]]
-name = "StrataGenerators.SetGen"
-roots = ["StrataGenerators.SetGen"]
+name = "StrataGenerators"
+globs = ["StrataGenerators.*"]
 
 [[lean_exe]]
 name = "strata-generators"
 root = "Main"
-
-# Tyche visualization support (no conflicting imports)
-[[lean_lib]]
-name = "StrataGenerators.Tyche"
-roots = ["StrataGenerators.Tyche"]
 
 # Tyche visualization executable (uses HasTypeAGen)
 [[lean_exe]]
