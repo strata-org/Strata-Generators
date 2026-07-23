@@ -38,31 +38,28 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 
 ## Building
 
-1. Resolve dependencies:
+1. Resolve dependencies and fetch prebuilt artifacts:
    ```bash
    lake update
-   ```
-2. Fetch prebuilt Mathlib artifacts (avoids compiling Mathlib from scratch):
-   ```bash
    lake exe cache get
    ```
-3. Build:
+2. Build:
    ```bash
-   make build
+   lake build
    ```
 
 ### Makefile targets
 
 | Target | Description |
 |--------|-------------|
-| `make build` | Build all Lean sources (`lake build`) |
+| `lake build` | Build all Lean sources |
 | `make tyche` | Build and run the Tyche visualization executable |
 | `make test` | Build and run the Plausible test suite |
 
 ## Property-based testing
 
-Run the property-based test suite (via Basalt's `PlausibleGen`, which makes the
-generators executable under `Plausible.Gen`):
+Run `make test` to execute the property-based test harness. 
+If you want to manually configure the no. of trials / size of inputs, you can do so as follows:
 
 ```bash
 lake build test-lexpr
