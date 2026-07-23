@@ -199,3 +199,12 @@ StrataGenerators/
 TycheMain.lean                  -- Tyche visualization executable
 PlausibleTestMain.lean          -- Property-based test executable
 ```
+
+## License
+
+The contents of this repository are licensed under the terms of either
+the Apache-2.0 or MIT license, at your choice. See
+[LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT) for
+details of the two licenses.
+
+
