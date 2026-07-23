@@ -29,6 +29,11 @@ roots = ["StrataGenerators.HasTypeAGen.Core"]
 name = "StrataGenerators.HasTypeAGen.Defs"
 roots = ["StrataGenerators.HasTypeAGen.Defs"]
 
+# Type-preserving output mutation to force common subexpressions (CSE testing)
+[[lean_lib]]
+name = "StrataGenerators.HasTypeAGen.SubexprMutate"
+roots = ["StrataGenerators.HasTypeAGen.SubexprMutate"]
+
 # Shared test utilities (eval, isValue, defaultFCtx); imports LExprEval
 [[lean_lib]]
 name = "StrataGenerators.HasTypeAGen.TestSupport"

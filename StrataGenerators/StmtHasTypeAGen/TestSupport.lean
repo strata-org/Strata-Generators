@@ -1,4 +1,5 @@
 import StrataGenerators.StmtHasTypeAGen.Core
+import StrataGenerators.HasTypeAGen.SubexprMutate
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import Strata.Languages.Core.StatementType
@@ -6,6 +7,7 @@ import Strata.Languages.Core.Factory
 import Strata.Transform.LoopElim
 import Strata.Transform.DetToKleene
 import Strata.Transform.CommonSubexprElim
+import Strata.Languages.Core.StatementEval
 
 open Lambda RandomChoice Core Imperative
 open StrataGenerators.Stmt
@@ -224,6 +226,43 @@ def loopElimStmts (ss : List Statement) : List Statement :=
 def cseStmts (ss : List Statement) : List Statement :=
   (Core.CSE.stmtRunCSE ss 0).fst
 
+-- ── Subexpression-duplication mutation (CSE input shaping) ────────────────
+-- `genStmt`'s expressions are drawn independently, so they almost never contain
+-- two structurally-equal non-trivial subterms — CSE then runs near-vacuously.
+-- Rather than change the *proven* generator (which would force re-discharging
+-- `genStmt_sound`; see docs/cse-ptrcache-pbt-plan.md), we mutate the generated
+-- output here, at the proof-free harness layer, via a pure per-expression map.
+-- `SubexprMutate.duplicateOneSubterm` is type-preserving by construction (it
+-- returns a `duplicationMutants` entry), so the mutated list stays well-typed —
+-- the CSE properties' own `typeCheck` oracle re-confirms this.
+--
+-- Every user-facing statement expression is typed under the empty bound-variable
+-- context (statement-scope variables are `fvar`s; only `abs`/`quant` *inside* an
+-- expression introduce de Bruijn binders, which `SubexprMutate.occurrences`
+-- threads correctly). So the same-context splice runs soundly at `bctx = []`.
+
+/-- Duplicate one non-trivial subterm inside every user-facing expression of a
+    statement list, forcing common subexpressions for CSE to act on. Each
+    expression is mapped through `SubexprMutate.duplicateOneSubterm []`, a
+    type-preserving no-op when the expression has no duplication opportunity. -/
+def dupSubtermsStmts (ss : List Statement) : List Statement :=
+  Statements.mapExprs (SubexprMutate.duplicateOneSubterm []) ss
+
+/-- Total count of subterm-duplication opportunities across all user-facing
+    expressions of a statement list — a Tyche feature (`dup_sites`) confirming the
+    mutation actually fires on a sample rather than passing vacuously. -/
+def dupSitesStmts (ss : List Statement) : Nat :=
+  (Statements.collectExprs ss).foldl
+    (fun acc e => acc + SubexprMutate.duplicationSiteCount [] e) 0
+
+/-- **Regression guard on the mutation code itself.** Every duplication mutant of
+    every user-facing expression typechecks at the expression's own type under the
+    empty context. Should be impossible to falsify unless `SubexprMutate`'s
+    path/context bookkeeping is wrong (analogous to MUTAGEN's
+    `prop_mutantsWellTyped`) — a failure indicts this harness code, not CSE. -/
+def checkDupMutantsWellTyped (ss : List Statement) : Bool :=
+  (Statements.collectExprs ss).all (SubexprMutate.checkAllMutantsWellTyped [])
+
 -- `StmtToKleeneStmt` operates on `Stmt Expression (Cmd Expression)`, whereas the
 -- generator produces `Statement = Stmt Expression Command` with
 -- `Command = CmdExt Expression`. The two differ only by the `CmdExt` wrapper: a
@@ -439,6 +478,55 @@ where
 def cseVarCount (ss : List Statement) : Nat :=
   countCseVars (cseStmts ss)
 
+/-- Number of **common (shared) compound subterms** in a statement list: the count
+    of *distinct* non-leaf subterms — up to structural (metadata-ignoring)
+    equality — that occur two or more times across every expression in `ss`.
+
+    This is exactly the pool of subexpressions CSE can eliminate: only compound
+    nodes (`app`/`ite`/`eq`/`abs`/`quant`) are worth abbreviating (a bare
+    `fvar`/`bvar`/`const`/`op` is already atomic), and a subterm is only a *common*
+    subexpression once it appears at least twice. A program with a count of `0` has
+    nothing for CSE to do; a positive count means the sample genuinely exercises
+    the transform. Robust to hash collisions the same way `structuralDagSize` is:
+    a `HashMap` keyed by `LExpr.hashExpr` whose buckets carry a structural `==`
+    disambiguator, each paired with its running occurrence tally. -/
+partial def commonSubtermCount (ss : List Statement) : Nat :=
+  let seen := (Statements.collectExprs ss).foldl (fun acc e => tally [e] acc)
+                (Std.HashMap.emptyWithCapacity)
+  -- Count distinct compound subterms whose occurrence tally reached ≥ 2.
+  seen.fold (fun n _ bucket =>
+    n + (bucket.filter (fun (e, c) => c ≥ 2 && isCompound e)).length) 0
+where
+  /-- Whether `e` is a compound node worth abbreviating (not an atomic leaf). -/
+  isCompound : Expression.Expr → Bool
+    | .app _ _ _ | .ite _ _ _ _ | .eq _ _ _ | .abs _ _ _ _ | .quant _ _ _ _ _ _ => true
+    | _ => false
+  /-- Immediate structural children of a node (same set as `structuralDagSize`). -/
+  children : Expression.Expr → List Expression.Expr
+    | .app _ fn arg => [fn, arg]
+    | .ite _ c t f => [c, t, f]
+    | .eq _ a b => [a, b]
+    | .abs _ _ _ body => [body]
+    | .quant _ _ _ _ tr body => [tr, body]
+    | _ => []
+  /-- Walk every subterm, incrementing each distinct subterm's occurrence tally.
+      `seen` maps a structural hash to a bucket of `(subterm, occurrences)`. -/
+  tally (work : List Expression.Expr)
+     (seen : Std.HashMap UInt64 (List (Expression.Expr × Nat))) :
+     Std.HashMap UInt64 (List (Expression.Expr × Nat)) :=
+    match work with
+    | [] => seen
+    | e :: rest =>
+      let h := LExpr.hashExpr e
+      let bucket := seen.getD h []
+      -- Every visited node is descended into (unlike the DAG measure, which prunes
+      -- repeats): we need the true multiplicity of each subterm across the program.
+      let seen := seen.insert h
+        (if bucket.any (fun (e', _) => e' == e)
+         then bucket.map (fun (e', c) => if e' == e then (e', c + 1) else (e', c))
+         else (e, 1) :: bucket)
+      tally (children e ++ rest) seen
+
 /-- **Property P-CSE-6 (output-size bound on the DAG measure).** Your reviewer's
     "output doesn't grow more than it should", pinned to the *distinct-DAG-node*
     measure rather than tree size (CSE *adds* `var` decls, so a tree-size bound
@@ -448,6 +536,83 @@ def cseVarCount (ss : List Statement) : Nat :=
 def checkCseVarCountBounded (ss : List Statement) : Bool :=
   cseVarCount ss ≤ ((Statements.collectExprs ss).foldl
     (fun acc e => acc + structuralDagSize e) 0)
+
+-- ── P-CSE-4: semantic preservation under evaluation ──────────────────────
+-- This is the "model-preserving" claim of CR-289836082 itself: CSE must not
+-- change what a program *means*. P-CSE-3 (no dangling bvar) and P-CSE-2 (typing
+-- preservation) are cheap *necessary* conditions — they catch a capture that
+-- produces an ill-scoped or ill-typed program. P-CSE-4 is the *sufficient* one:
+-- it catches a capture that produces a program that is still well-typed but
+-- computes a *different* result. It is the only property here that would fail on
+-- a "well-typed but wrong" miscompile.
+--
+-- The observable. Strata ships a public statement-level symbolic simulator,
+-- `Core.Statement.eval : Env → SubstMap → Statements → List Env × Statistics`,
+-- which is exactly the evaluation oracle the plan doc flagged as missing. Its
+-- expression evaluator *inlines store bindings* (`EC.eval` resolves every
+-- in-scope `.fvar`), so a CSE-introduced `var $__cse.k := e; … assert P[$__cse.k]`
+-- evaluates the assertion back to `P[e]` — the fresh abbreviation is substituted
+-- away. Consequently the **proof obligations** the simulator emits (the
+-- verifier-facing semantic output: the assert/cover/overflow conditions together
+-- with their path-condition assumptions) are invariant under a *correct* CSE
+-- pass, and differ under a capturing one. Because `ExpressionMetadata := Unit`,
+-- `Expression.Expr`'s `BEq` is clean structural equality — no pretty-printing,
+-- no brittle store diffing.
+--
+-- Two facts make this sound rather than lucky:
+--  * `.init`/`var` commands only *update the store*; they never push a
+--    path-condition entry (`Imperative.Cmd.eval`, CmdEval.lean). So the fresh
+--    `$__cse.*` declarations never leak into obligation assumptions either.
+--  * ite-branch path-condition *labels* embed the RAW, un-inlined branch
+--    condition (`processIteBranches`: `<label_ite_cond_true: {cond.eraseTypes}>`),
+--    which CSE *does* rewrite. So we compare obligation and assumption
+--    *expressions* (which are inlined), never labels.
+--
+-- The simulator `panic!`s on `loop` statements — so we loop-eliminate first
+-- (matching Strata's real LoopElim→CSE pipeline order; P-CSE properties #3/#4
+-- certify that LoopElim preserves typing and removes every loop) and keep a
+-- zero-loop backstop so a stray loop yields a vacuous pass rather than a panic.
+
+/-- The semantic *observable* of a statement list: run the Core statement-level
+    symbolic simulator (`Statement.eval`) from the initial Core environment and,
+    for every resulting path and every proof obligation accumulated on it,
+    collect a label-free signature — the obligation's `PropertyType`, its
+    (evaluated) obligation expression, and the (evaluated) expressions of its
+    path-condition assumptions. Labels are dropped because ite-branch labels
+    embed the raw un-inlined condition (see the section note); everything
+    retained is post-evaluation and hence free of `$__cse.*` abbreviations. -/
+def obligationSignature (ss : List Statement) :
+    List (Imperative.PropertyType × Expression.Expr × List Expression.Expr) :=
+  let (envs, _) := Statement.eval Env.init [] ss
+  envs.flatMap (fun E =>
+    E.deferred.toList.map (fun ob =>
+      (ob.property,
+       ob.obligation,
+       ob.assumptions.flatMap (fun pc =>
+         pc.filterMap (fun
+           | .assumption _ e => some e
+           | _ => none)))))
+
+/-- **Property P-CSE-4 (semantic preservation under evaluation).** The heart of
+    the transform's "model-preserving" contract: CSE must not change program
+    meaning. We compare the *proof-obligation signature* (property kind +
+    evaluated obligation expression + evaluated assumption expressions) produced
+    by the symbolic simulator before and after CSE. Because the simulator inlines
+    the CSE-introduced `$__cse.*` bindings back to their definitions, a correct
+    pass leaves this signature identical; a variable-capture bug that yields a
+    well-typed-but-different program changes an obligation or assumption
+    expression and is caught here — the failure mode P-CSE-2/3 cannot see.
+
+    Conditional and total: we loop-eliminate first (the simulator cannot evaluate
+    `loop`s; this mirrors the real LoopElim→CSE pipeline), pass vacuously if any
+    loop somehow survives (backstop against the simulator's `panic!`), and pass
+    vacuously on input the typechecker rejects (only well-typed programs have
+    semantics to preserve — cf. `checkCsePreservesTyping`). -/
+def checkCseSemanticPreservation (ss : List Statement) : Bool :=
+  let base := loopElimStmts ss
+  if countLoopsStmts base != 0 then true
+  else if !checkTypeChecks base then true
+  else obligationSignature base == obligationSignature (cseStmts base)
 
 /-- **Property #6**: `StmtToKleeneStmt` is defined *exactly* when the block has no
     `exit`/`funcDecl`/`typeDecl`. One caveat: the transform *also* rejects loops

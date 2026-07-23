@@ -9,7 +9,7 @@ cache"*.
 > reconstructed on `ngernest/Strata` branch `cse-ptrcache-cr` (full 15-file diff,
 > base `984172d4`; builds clean). This repo's `lakefile.toml` targets that branch
 > (resolved commit `8a3b26083`). The rename (§4.2) is done, and the black-box
-> properties **P-CSE-1/2/3/6** are wired into both harnesses and **all pass** at
+> properties **P-CSE-1/2/3/4/6** are wired into both harnesses and **all pass** at
 > 200 trials / size 60:
 >
 > | Property | Predicate | Result |
@@ -17,30 +17,42 @@ cache"*.
 > | P-CSE-2 fixpoint convergence (#5a) | `checkCseIdempotent` (var-count proxy) | PASS |
 > | P-CSE-1 typing preservation (#5b) | `checkCsePreservesTyping` | PASS |
 > | P-CSE-3 capture safety | `checkCseNoFreeBVarInInits` | PASS |
+> | P-CSE-4 eval preservation | `checkCseSemanticPreservation` | PASS |
 > | P-CSE-6 DAG-size output bound | `checkCseVarCountBounded` | PASS |
 >
-> P-CSE-4 (eval preservation) and P-CSE-5/7 (hash-quality independence, traversal
-> linearity) remain future work — the latter two need the §5 seam. The sections
-> below are the design rationale.
+> The five CSE properties now run on **duplication-mutated inputs** so CSE has
+> genuine common subexpressions to act on rather than passing near-vacuously; the
+> mutation is applied at the proof-free harness layer (see *Where it is wired*
+> below), leaving the proven generator and its soundness proof untouched. A
+> regression property (`prop_stmt_dup_mutants_well_typed`) confirms the mutation is
+> type-preserving.
+>
+> P-CSE-5/7 (hash-quality independence, traversal linearity) remain future work —
+> both need the §5 seam. The sections below are the design rationale.
 
 ## Test results
 
 Run: `.lake/build/bin/test-lexpr 200 60` (200 trials per property, max generator
 size 60), against `ngernest/Strata@cse-ptrcache-cr` (resolved `8a3b26083`).
 
-### The four CSE properties — all PASS
+### The five CSE properties — all PASS
 
 | # | Property | Predicate | Result |
 |---|---|---|---|
 | #5a | CSE reaches a fixpoint (var-count idempotence proxy) | `checkCseIdempotent` | **PASS** (200 ok) |
 | #5b | CSE preserves typeability | `checkCsePreservesTyping` | **PASS** (200 ok) |
 | P-CSE-3 | CSE introduces no init with a dangling de Bruijn index (capture safety) | `checkCseNoFreeBVarInInits` | **PASS** (200 ok) |
+| P-CSE-4 | CSE preserves evaluation semantics (proof-obligation signature) | `checkCseSemanticPreservation` | **PASS** (200 ok) |
 | P-CSE-6 | CSE var-count bounded by input DAG size | `checkCseVarCountBounded` | **PASS** (200 ok) |
 
 P-CSE-3 passing across binder-rich generated programs is the meaningful signal:
 the CR's conservative `collectSubexprs.abs` bvar-freeness approximation did not
-produce a capture on any generated input. This is supporting evidence, not a
-proof — it is now a continuous regression guard.
+produce a capture on any generated input. P-CSE-4 strengthens this from a
+necessary condition (no dangling index / still well-typed) to the sufficient one
+(same *meaning*): the proof-obligation signature emitted by the statement-level
+symbolic simulator is byte-for-byte identical before and after CSE, so no
+generated program was miscompiled into a well-typed-but-different one. Both are
+supporting evidence, not proofs — they are now continuous regression guards.
 
 ### Other statement/transform properties (unchanged by this work)
 
@@ -226,22 +238,47 @@ def checkCseNoFreeBVarInInits (ss : List Statement) : Bool :=
 whose name has prefix `Core.CSE.cseVarPrefix` — mirrors the existing
 `funcDeclShapes` traversal style in `TestSupport.lean`.
 
-### P-CSE-4 — Semantic preservation under evaluation (**new; the "model-preserving" claim itself**)
+### P-CSE-4 — Semantic preservation under evaluation (**implemented; the "model-preserving" claim itself**)
 
 The only property that catches a capture producing a *well-typed but
-different-meaning* program, plus the SSA "structurally-equal ⇒ same value"
-assumption the pass relies on. Model it on the existing
-`prop_cmd_eval_run_agreement` (which already evaluates generated commands): for a
-generated *closed, well-typed* statement list, evaluate before and after CSE and
-assert equal observable results / final store.
+different-meaning* program. Wired into both harnesses as
+`checkCseSemanticPreservation` (`TestSupport.lean`).
 
-> Note: the repo's eval oracle is currently expression- and command-level
-> (`LExpr.eval`, `prop_cmd_eval_run_agreement`). A statement-list evaluator is
-> needed to state this at full strength. If one is not readily reachable, a strong
-> proxy is: for each generated *expression* `e`, compare `eval e` against `eval e'`
-> where `e'` is `e` after `replaceExprs`/the expression-level CSE core — reusing
-> the existing `TypedExpr`/`ClosedTypedExpr` generators and `eval` from
-> `HasTypeAGen/TestSupport.lean`.
+**The statement-list evaluator the earlier note asked for already ships in
+Strata**: `Core.Statement.eval : Env → SubstMap → Statements → List Env ×
+Statistics` (`StatementEval.lean`, public) is a statement-level *symbolic
+simulator* — strictly stronger than the expression-/command-level `LExpr.eval`
+proxy the note proposed as a fallback. It evaluates a whole statement list over
+all control-flow paths and accumulates the **proof obligations** (assert / cover
+/ overflow / bounds conditions, each with its path-condition assumptions) that a
+verifier would discharge. Those obligations are the program's observable meaning.
+
+**Why the observable is CSE-invariant.** The simulator's expression evaluator
+inlines in-scope store bindings (`EC.eval` resolves every `.fvar`). A CSE pass
+turns `… P[e] …` into `var $__cse.k := e; … P[$__cse.k] …`; when the simulator
+reaches the obligation it looks `$__cse.k` up in the store and substitutes `e`
+back, recovering `P[e]`. So a *correct* CSE leaves every obligation expression —
+and every assumption expression — identical, while a capturing CSE (a `$__cse.k`
+bound to the wrong subterm) changes one. We compare the multiset of
+`(PropertyType, obligation expr, assumption exprs)` signatures before and after
+CSE. Since `ExpressionMetadata := Unit`, `Expression.Expr`'s `BEq` is clean
+structural equality — no pretty-printing, no store diffing.
+
+Two soundness details, both verified against the Strata source:
+- `.init`/`var` commands only *update the store* (`Imperative.Cmd.eval`) — they
+  never push a path-condition entry, so the fresh `$__cse.*` declarations do not
+  leak into obligation assumptions either.
+- ite-branch path-condition *labels* embed the raw, un-inlined branch condition
+  (`processIteBranches`), which CSE *does* rewrite — so we compare obligation and
+  assumption **expressions**, never labels.
+
+The predicate loop-eliminates first (the simulator `panic!`s on `loop`; this
+matches Strata's real LoopElim→CSE pipeline order, and P-CSE #3/#4 certify
+LoopElim preserves typing and removes every loop), passes vacuously if a loop
+somehow survives (backstop against the `panic!`) and on typechecker-rejected
+input (only well-typed programs have semantics to preserve — as in
+`checkCsePreservesTyping`). **Result: PASS**, 200 Plausible trials + 1000 Tyche
+samples, no mismatches.
 
 ### P-CSE-5 — Correctness is independent of hash quality (**new; needs a CR seam — see §5**)
 
@@ -306,6 +343,119 @@ Measuring misses requires wrapping `hx` (§5). Without the seam, only P-CSE-6
 - **Sharing modes** for P-CSE-7: post-process a generated term to (2) share a
   common base, (3) duplicate a subterm into two pointer-disjoint copies, or run it
   through `shareCommon` (1). Family 4 is the raw generator output.
+
+#### The core problem: independent recursion generates share-*less* terms
+
+`genLExprBase` draws every sub-term independently and randomly (`genApp` picks a
+fresh `τ'` then generates `arg` and `fn` with no shared history; `genEq`,
+`genIte`, and the quantifier bodies are all independent recursive draws). Two
+structurally-identical non-trivial subterms therefore occur with vanishing
+probability, so CSE runs on inputs that have essentially **no common
+subexpressions to eliminate** — the pass is exercised near-vacuously.
+
+This is the same failure mode diagnosed in Frank, Quiring & Lampropoulos,
+*"Generating Well-Typed Terms That Are Not 'Useless'"* (POPL 2024): a top-down
+type-directed generator spends its budget on inputs that don't exercise the
+target (their *use-less* functions; our *share-less* terms). Two observations
+carry over regardless of *how* we inject sharing:
+
+1. **`HasTypeA` doesn't care how a subterm of type `τ` was produced.** Variable
+   lookup (`pickBVar`/`pickFVar`/`pickOp`) is just the atomic special case of
+   "put something of type `τ` in a `τ`-hole." A whole subexpression of type `τ`
+   is an equally valid filling — which is what lets us *duplicate* an existing
+   subterm and stay well-typed.
+2. **Invert their `GenLet` — duplicate, don't share.** The paper's
+   `GenLet`/`GenFunVar▷` share one value through a *binder*, referenced twice by a
+   *variable*. That is precisely the **post-CSE** form: if we produce it, the
+   value is already shared and CSE has nothing to extract. For CSE *inputs* we
+   want the opposite — two structural **copies** of the subterm, no binding — so
+   CSE sees two `exprEq` subterms and a genuine common subexpression to hoist.
+   (That inlined-duplicate form is also exactly the paper's Fig. 3
+   "structurally-equal-but-pointer-disjoint" family that `shareCommon` must
+   re-share — our P-CSE-7 family 3.)
+
+#### The approach: mutate the generated term, don't touch the generator
+
+The tempting move — add a "subexpression pool" production rule inside
+`genLExprBase` — forces us to re-discharge the 4500-line `genLExprBase_sound`
+proof for a new arm, and (as a first cut showed) the binder-context side
+condition is subtle: the generator extends `bctx` by consing on the **front**,
+which *shifts every de Bruijn index*, so "replay a pooled subterm under a deeper
+context" is unsound without index arithmetic. Not worth it.
+
+Instead, following the MUTAGEN / FuzzChick line of work (Mista & Russo;
+Lampropoulos, Hicks & Pierce), **leave the generator and its proofs untouched and
+mutate its output**. MUTAGEN's constructor mutations already reuse a sibling
+subexpression when filling a slot (`Branch l x r ↝ Branch l x l`) — the
+CSE-inducing operation. We generalize sibling-reuse to whole-term reuse:
+
+> **Same-context splice.** Walk the generated term once, recording at every node
+> its path, its bound-variable context `bctx`, and its type. For each ordered
+> pair of occurrences `(target, donor)` with the **same `bctx`**, the **same
+> type**, and a **non-trivial donor**, replace `target` with a copy of `donor`.
+
+Restricting donor and target to an **identical `bctx`** is the whole trick: the
+only place `HasTypeA` consults the context is the `bvar` rule (`bctx[i]?`), so a
+subterm well-typed under `bctx` stays well-typed at any *other* occurrence of the
+same `bctx` — **zero de Bruijn shifting, well-typed by construction**. No
+generator proof is involved, and each mutant is re-checked by the harness's
+`typeCheck` oracle anyway (`checkAllMutantsWellTyped` is a standing regression
+guard on the hand-written mutation code, à la MUTAGEN's `prop_mutantsWellTyped`).
+
+This yields both target input shapes for free:
+
+- **Closed sharing (`bctx = []`):** duplicating a top-level subterm gives CSE
+  non-trivial common subexpressions — P-CSE-6/7 family 3.
+- **Binder-rich sharing (`bctx ≠ []`, i.e. under an `abs`/`quant`):** because the
+  shared context is non-empty, the duplicated subterm *contains live de Bruijn
+  indices bound by an enclosing binder*. This is the single most valuable input,
+  aimed straight at the CR's self-flagged `collectSubexprs.abs` bvar-freeness
+  approximation (§2.1) and feeding P-CSE-3 / P-CSE-4: if CSE hoists such a shared
+  subterm past its binder, the extracted init carries a dangling index = capture
+  bug. (Verified on `λ(x:int). (x+1) == (x+2)`: 10 well-typed mutants, donors
+  reference the live `bvar 0`.)
+
+The exhaustive over-all-(target,donor)-pairs enumeration is MUTAGEN's
+`CreateMutationBatch` style, not FuzzChick's depth-decaying one-mutation-per-step
+`freq` — every subterm is tried as a duplication site in one pass.
+
+**Limitations (deliberate, flagged for future work):** the same-context
+restriction misses cases where a *closed* subterm could safely migrate into a
+different context; genuine cross-context splicing would need a `bvar`-shifting
+pass. Same-context already covers all top-level and same-binder-depth sharing,
+which is what P-CSE-3/6/7 need. See `HasTypeAGen/SubexprMutate.lean` for the
+implementation.
+
+**Where it is wired (harness layer, not the proven generator).** The mutation is
+applied *after* generation, at the proof-free harness layer, as a pure
+per-expression map — `TestSupport.dupSubtermsStmts = Statements.mapExprs
+(SubexprMutate.duplicateOneSubterm [])`. Every top-level statement expression is
+typed under the empty bound-variable context (statement-scope variables are
+`fvar`s; only `abs`/`quant` *inside* an expression introduce de Bruijn binders,
+which `SubexprMutate.occurrences` threads correctly), so the `bctx = []`
+same-context splice is sound on every user-facing expression.
+
+The five CSE properties (#5a/#5b/P-CSE-3/P-CSE-6/P-CSE-4) draw from a
+duplication-mutated input source — `DupGenStmts` in `PlausibleTestMain.lean`, and
+the `isCse` branch of `genStmtProp` in `TycheMain.lean` — while the non-CSE
+statement properties keep using the pristine generator. A standing regression
+property `prop_stmt_dup_mutants_well_typed` (harness predicate
+`checkDupMutantsWellTyped`, delegating to `SubexprMutate.checkAllMutantsWellTyped`)
+asserts every mutant is type-preserving; a Tyche `dup_sites` ordinal feature
+(`dupSitesStmts`) reports how many duplication opportunities each sample had, so a
+vacuous panel is visible at a glance.
+
+> **Rejected alternative — wrapping `genLExpr` at its call sites.** Wrapping the
+> four `genLExpr` call sites inside `StmtHasTypeAGen/Core.lean` with
+> `SubexprMutate.withDuplicateSubterm []` type-checks in `Core.lean` but breaks 8
+> obligations in `StmtHasTypeAGen.lean` (4 in `genStmt_sound` and its
+> guard/measure/invariant helpers, 4 reachability/completeness lemmas): those
+> proofs reason about the *exact support* of each `genLExpr` call, and the wrapper
+> enlarges that support with spliced mutants. That is precisely the
+> proof-maintenance cost the mutation approach exists to avoid — avoided only when
+> the mutation lives *outside* the proven generator. `withDuplicateSubterm` is
+> kept in `SubexprMutate.lean` for callers who want in-generator mutation and are
+> willing to re-discharge the affected support lemmas.
 
 ### Tyche panels
 
@@ -434,7 +584,9 @@ black-box and belongs here in `strata-generators`.
 2. **P-CSE-3 (no free bvar in inits)** — cheapest, highest-signal capture
    detector; no evaluator needed.
 3. **P-CSE-4 (semantic preservation)** — the actual "model-preserving" claim;
-   reuse the command-eval oracle pattern.
+   done via Strata's public statement-level symbolic simulator
+   (`Core.Statement.eval`), comparing the proof-obligation signature before/after
+   CSE — stronger than the command-eval oracle proxy originally sketched.
 4. **P-CSE-6 (DAG-size output bound)** — black-box, gives shrunk counterexamples.
 5. **P-CSE-1/2 (typing preservation, idempotence)** — already wired; keep as
    regression guards.

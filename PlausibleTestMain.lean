@@ -720,6 +720,32 @@ private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
 instance : Arbitrary GenStmts where
   arbitrary := Gen.backtrack (List.replicate 4000 (1, genStmtsWith))
 
+-- ── Duplication-mutated statement lists (CSE input shaping) ───────────────
+-- The independently-drawn expressions of `genStmt` almost never share a
+-- non-trivial subterm, so CSE runs near-vacuously on a raw `GenStmts`. For the
+-- CSE properties we post-process each generated list with `dupSubtermsStmts`,
+-- which duplicates one non-trivial subterm inside every user-facing expression.
+-- The mutation is type-preserving by construction (it splices a same-type,
+-- same-context subterm — see `StrataGenerators.HasTypeAGen.SubexprMutate`), so it
+-- lives entirely at this proof-free harness layer and touches neither the proven
+-- `genStmt` nor its soundness proof. Non-CSE properties keep using the pristine
+-- `GenStmts` so the established suite's semantics are unchanged.
+
+/-- A generated well-typed statement list whose expressions have been mutated to
+    contain common subexpressions (for the CSE properties). -/
+structure DupGenStmts where
+  stmts : List Statement
+
+instance : Repr DupGenStmts where
+  reprPrec gs p := reprPrec (GenStmts.mk gs.stmts) p
+
+instance : Shrinkable DupGenStmts where
+  shrink _ := []
+
+instance : Arbitrary DupGenStmts where
+  arbitrary := (fun gs => ⟨dupSubtermsStmts gs.stmts⟩) <$>
+    Gen.backtrack (List.replicate 4000 (1, genStmtsWith))
+
 -- ── Statement-level properties (all currently unproven) ───────────────
 
 -- #1: The typechecker accepts every generated (spec-well-typed) statement list.
@@ -747,26 +773,45 @@ instance : Arbitrary GenStmts where
 @[reducible] def prop_stmt_loopElim_zero_loops (gs : GenStmts) : Prop :=
   checkLoopElimZeroLoops gs.stmts = true
 
+-- The CSE properties run on duplication-mutated inputs (`DupGenStmts`) so CSE has
+-- genuine common subexpressions to eliminate rather than passing near-vacuously.
+
 -- #5a: CSE reaches a fixpoint — a second pass introduces no additional
 -- `$__cse.*` vars (`countCseVars (cse x) = countCseVars (cse (cse x))`). A
 -- var-count proxy for idempotence that avoids brittle statement-list equality.
-@[reducible] def prop_stmt_cse_idempotent (gs : GenStmts) : Prop :=
+@[reducible] def prop_stmt_cse_idempotent (gs : DupGenStmts) : Prop :=
   checkCseIdempotent gs.stmts = true
 
 -- #5b: CSE preserves typeability.
-@[reducible] def prop_stmt_cse_preserves_typing (gs : GenStmts) : Prop :=
+@[reducible] def prop_stmt_cse_preserves_typing (gs : DupGenStmts) : Prop :=
   checkCsePreservesTyping gs.stmts = true
 
 -- P-CSE-3: no CSE-introduced `var` init contains a dangling de Bruijn index — a
 -- `.bvar` node that escaped its enclosing binder when hoisted to top level
 -- (capture safety — targets the `collectSubexprs.abs` bvar-freeness approximation).
-@[reducible] def prop_stmt_cse_no_free_bvar (gs : GenStmts) : Prop :=
+@[reducible] def prop_stmt_cse_no_free_bvar (gs : DupGenStmts) : Prop :=
   checkCseNoFreeBVarInInits gs.stmts = true
 
 -- P-CSE-6: the number of fresh `var` decls CSE introduces is bounded by the
 -- input's distinct-DAG-node count (output-size bound on the DAG measure).
-@[reducible] def prop_stmt_cse_var_count_bounded (gs : GenStmts) : Prop :=
+@[reducible] def prop_stmt_cse_var_count_bounded (gs : DupGenStmts) : Prop :=
   checkCseVarCountBounded gs.stmts = true
+
+-- P-CSE-4: CSE preserves evaluation semantics — the proof-obligation signature
+-- (property kind + evaluated obligation and assumption expressions) produced by
+-- the statement-level symbolic simulator is identical before and after CSE. The
+-- "model-preserving" claim itself: catches a capture that yields a well-typed
+-- but different-meaning program (the failure mode P-CSE-2/3 cannot detect).
+@[reducible] def prop_stmt_cse_semantic_preservation (gs : DupGenStmts) : Prop :=
+  checkCseSemanticPreservation gs.stmts = true
+
+-- Regression guard on the duplication-mutation code itself: every mutant of every
+-- user-facing expression typechecks at the expression's own type. Should be
+-- impossible to falsify unless `SubexprMutate` has a path/context bug (it indicts
+-- the harness mutation, not CSE). Run on the pristine `GenStmts` — it checks the
+-- mutation's well-typedness, so it must see the pre-mutation term.
+@[reducible] def prop_stmt_dup_mutants_well_typed (gs : GenStmts) : Prop :=
+  checkDupMutantsWellTyped gs.stmts = true
 
 -- #6: `StmtToKleeneStmt` is defined exactly when the block has no
 -- `exit`/`funcDecl`/`typeDecl` (and, for the invariant-loop caveat, not defined
@@ -1036,24 +1081,34 @@ def main (args : List String) : IO UInt32 := do
     (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_loopElim_zero_loops gs)) cfg) then
     allPassed := false
 
-  -- #5a: CSE idempotent
+  -- #5a: CSE idempotent (on duplication-mutated inputs)
   if !(← checkProperty "stmt: CSE is idempotent (#5a)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_idempotent gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_idempotent gs)) cfg) then
     allPassed := false
 
-  -- #5b: CSE preserves typeability
+  -- #5b: CSE preserves typeability (on duplication-mutated inputs)
   if !(← checkProperty "stmt: CSE preserves typeability (#5b)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_preserves_typing gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_preserves_typing gs)) cfg) then
     allPassed := false
 
   -- P-CSE-3: no free bvar in any CSE-introduced init (capture safety)
   if !(← checkProperty "stmt: CSE inits have no dangling de Bruijn index (capture safety, P-CSE-3)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_no_free_bvar gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_no_free_bvar gs)) cfg) then
     allPassed := false
 
   -- P-CSE-6: CSE var-decl count bounded by input DAG size
   if !(← checkProperty "stmt: CSE var-count bounded by DAG size (P-CSE-6)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_cse_var_count_bounded gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_var_count_bounded gs)) cfg) then
+    allPassed := false
+
+  -- P-CSE-4: CSE preserves evaluation semantics (model-preserving claim)
+  if !(← checkProperty "stmt: CSE preserves evaluation semantics (P-CSE-4)"
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_semantic_preservation gs)) cfg) then
+    allPassed := false
+
+  -- Regression guard: the harness duplication-mutation is itself type-preserving.
+  if !(← checkProperty "stmt: duplication mutants are well-typed (mutation regression guard)"
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_dup_mutants_well_typed gs)) cfg) then
     allPassed := false
 
   -- #6: StmtToKleeneStmt defined iff no exit/funcDecl/typeDecl

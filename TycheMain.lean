@@ -1052,6 +1052,19 @@ private def stmtListFeatures (ss : List Statement) (genSize : Nat) :
     ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")),
     ("generator_size", .ordinal genSize) ]
 
+/-- CSE-specific features, appended only on the CSE property panels: how many
+    common (shared) compound subterms the generated program actually contains —
+    the pool CSE can act on — a yes/no on whether the sample exercises CSE at all,
+    and how many fresh `$__cse.*` vars CSE introduced. Lets you read, per panel,
+    what fraction of random test cases genuinely stress the transform vs. pass
+    vacuously for lack of any shared subterm. -/
+private def cseFeatures (ss : List Statement) : List (String × Tyche.Feature) :=
+  let shared := commonSubtermCount ss
+  [ ("num_common_subterms", .ordinal shared),
+    ("exercises_cse", .nominal (if shared > 0 then "yes" else "no")),
+    ("dup_sites", .ordinal (dupSitesStmts ss)),
+    ("cse_vars_introduced", .ordinal (cseVarCount ss)) ]
+
 /-- Render a statement list for a Tyche panel using Strata's own formatter (real
     Core concrete syntax), appending a `funcDecl[body=…, measure=…]` summary since
     the CST formatter cannot represent a bodiless `funcDecl` statement (it
@@ -1070,13 +1083,17 @@ structure StmtPropResult where
   genSize : Nat
   /-- Short property tag, surfaced as the primary nominal feature. -/
   tag : String
+  /-- Whether this is a CSE property panel — adds the CSE-specific features
+      (common-subterm count etc.) so those breakdowns appear only where relevant. -/
+  isCse : Bool := false
 
 instance : Tyche.TycheSample StmtPropResult where
   toSample r :=
     { representation := stmtRepr r.stmts
       status := if r.passed then .passed else .failed
       features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
-        :: stmtListFeatures r.stmts r.genSize }
+        :: stmtListFeatures r.stmts r.genSize
+        ++ (if r.isCse then cseFeatures r.stmts else []) }
 
 /-- Generate one well-typed statement list in `IO` for the Tyche panels. Caps
     `size`/`len` low (mirrors the Plausible wrapper) so whole-list generation
@@ -1088,10 +1105,16 @@ def genStmtsForTyche : IO (List Statement × Nat) := do
   return (ss, d)
 
 /-- Build a `StmtPropResult` by generating a statement list and applying a check
-    predicate under the given tag. -/
-def genStmtProp (tag : String) (check : List Statement → Bool) : IO StmtPropResult := do
-  let (ss, d) ← genStmtsForTyche
-  return { stmts := ss, passed := check ss, genSize := d, tag }
+    predicate under the given tag. `isCse` toggles the CSE-specific feature set
+    (common-subterm count etc.) on for the CSE property panels. -/
+def genStmtProp (tag : String) (check : List Statement → Bool) (isCse : Bool := false) :
+    IO StmtPropResult := do
+  let (raw, d) ← genStmtsForTyche
+  -- On CSE panels, duplicate a non-trivial subterm in every expression so CSE has
+  -- genuine common subexpressions to act on (mirrors the Plausible `DupGenStmts`
+  -- input). Type-preserving; runs at this proof-free harness layer only.
+  let ss := if isCse then dupSubtermsStmts raw else raw
+  return { stmts := ss, passed := check ss, genSize := d, tag, isCse }
 
 -- ── The `StmtToKleeneStmt` definedness panel (extra breakdown) ────────
 -- Unlike the pass/fail panels, this one also records *why* the transform was (un)
@@ -1282,18 +1305,22 @@ def main (args : List String) : IO Unit := do
   -- statements render as failed marks (the real spec/algorithm gap shows up as
   -- failures, not masked). Panel #1b shows that every such rejection carries a
   -- `funcDecl`.
-  let stmtPanels : List (String × String × (List Statement → Bool)) :=
-    [ (".st1", "stmt: typechecker accepts generated statements (#1)", checkTypeCheckerComplete),
-      (".st1b", "stmt: typecheck rejections are only funcDecl (#1b)", rejectionImpliesFuncDecl),
-      (".st3", "stmt: LoopElim preserves typeability (#3)", checkLoopElimPreservesTyping),
-      (".st4", "stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops),
-      (".st5a", "stmt: CSE is idempotent (#5a)", checkCseIdempotent),
-      (".st5b", "stmt: CSE preserves typeability (#5b)", checkCsePreservesTyping),
-      (".stcse3", "stmt: CSE inits have no dangling de Bruijn index (P-CSE-3)", checkCseNoFreeBVarInInits),
-      (".stcse6", "stmt: CSE var-count bounded by DAG size (P-CSE-6)", checkCseVarCountBounded),
-      (".st9", "stmt: mapExprs id = id (#9)", checkMapExprsId) ]
-  for (suffix, title, check) in stmtPanels do
-    Tyche.run (genStmtProp title check)
+  -- The `isCse` flag adds the common-subterm/exercises-CSE/vars-introduced
+  -- features to the five CSE panels, so you can see how many random test cases
+  -- actually contain shared subexpressions for the transform to eliminate.
+  let stmtPanels : List (String × String × (List Statement → Bool) × Bool) :=
+    [ (".st1", "stmt: typechecker accepts generated statements (#1)", checkTypeCheckerComplete, false),
+      (".st1b", "stmt: typecheck rejections are only funcDecl (#1b)", rejectionImpliesFuncDecl, false),
+      (".st3", "stmt: LoopElim preserves typeability (#3)", checkLoopElimPreservesTyping, false),
+      (".st4", "stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops, false),
+      (".st5a", "stmt: CSE is idempotent (#5a)", checkCseIdempotent, true),
+      (".st5b", "stmt: CSE preserves typeability (#5b)", checkCsePreservesTyping, true),
+      (".stcse3", "stmt: CSE inits have no dangling de Bruijn index (P-CSE-3)", checkCseNoFreeBVarInInits, true),
+      (".stcse6", "stmt: CSE var-count bounded by DAG size (P-CSE-6)", checkCseVarCountBounded, true),
+      (".stcse4", "stmt: CSE preserves evaluation semantics (P-CSE-4)", checkCseSemanticPreservation, true),
+      (".st9", "stmt: mapExprs id = id (#9)", checkMapExprsId, false) ]
+  for (suffix, title, check, isCse) in stmtPanels do
+    Tyche.run (genStmtProp title check isCse)
       { numSamples, propertyName := title, outputPath := outputPath ++ suffix }
     let content ← IO.FS.readFile (outputPath ++ suffix)
     handle.putStr content
