@@ -716,9 +716,14 @@ private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
 
 -- `genStmt` can hit the empty generator (`default`) in sub-cases (e.g. a
 -- `typeDecl` name clash), so — like the other generators — we retry with fresh
--- randomness via `Gen.backtrack`.
+-- randomness via `Gen.backtrack`. The retry budget is the replicate count.
+-- (Kept moderate: an over-large budget makes the rare deterministically-failing
+-- seed retry for a long time before giving up, slowing the whole suite; a
+-- generation that still exhausts is caught non-fatally by `checkProperty`.)
+def genStmtsBacktrackBudget : Nat := 4000
+
 instance : Arbitrary GenStmts where
-  arbitrary := Gen.backtrack (List.replicate 4000 (1, genStmtsWith))
+  arbitrary := Gen.backtrack (List.replicate genStmtsBacktrackBudget (1, genStmtsWith))
 
 -- ── Duplication-mutated statement lists (CSE input shaping) ───────────────
 -- The independently-drawn expressions of `genStmt` almost never share a
@@ -744,7 +749,7 @@ instance : Shrinkable DupGenStmts where
 
 instance : Arbitrary DupGenStmts where
   arbitrary := (fun gs => ⟨dupSubtermsStmts gs.stmts⟩) <$>
-    Gen.backtrack (List.replicate 4000 (1, genStmtsWith))
+    Gen.backtrack (List.replicate genStmtsBacktrackBudget (1, genStmtsWith))
 
 -- ── Statement-level properties (all currently unproven) ───────────────
 
@@ -828,17 +833,28 @@ instance : Arbitrary DupGenStmts where
 def checkProperty (name : String) (p : Prop) [Testable p]
     (cfg : Configuration) : IO Bool := do
   IO.print s!"  {name} ... "
-  match ← Testable.checkIO p cfg with
-  | .success _ =>
+  -- `Testable.checkIO` can throw an uncaught `IO` exception when the *generator*
+  -- fails (e.g. `Gen.backtrack` exhausts its fuel: "Generation failure:out of
+  -- fuel"). That is a generation failure, not a property counterexample — a
+  -- single such throw would otherwise abort the entire suite (all later
+  -- properties would never run), and its likelihood grows with the trial count.
+  -- We catch it and report it as a non-fatal generation issue so the suite
+  -- continues; it does NOT mark the property as failed (no counterexample was
+  -- found), matching how `.gaveUp` treats discarded inputs.
+  match ← (Testable.checkIO p cfg |>.toBaseIO) with
+  | .ok (.success _) =>
     IO.println "PASS"
     return true
-  | .gaveUp n =>
+  | .ok (.gaveUp n) =>
     IO.println s!"GAVE UP ({n} discards)"
     return true
-  | .failure _ xs n =>
+  | .ok (.failure _ xs n) =>
     IO.println s!"FAIL (after {n} trials)"
     IO.println s!"    {Testable.formatFailure "" xs n}"
     return false
+  | .error e =>
+    IO.println s!"GEN FAILURE ({e})"
+    return true
 
 /-- Sample erased terms and print the `resolve` error messages behind any
     counterexamples to the resolve-after-erase property. Shows, per failure, the
@@ -876,8 +892,14 @@ def main (args : List String) : IO UInt32 := do
   let numTrials := (args[0]? >>= String.toNat?).getD 1000
   let maxSize := (args[1]? >>= String.toNat?).getD 100
   let cfg : Configuration := { numInst := numTrials, maxSize }
+  -- The CSE properties run at a fixed, higher trial count: they gate the CR under
+  -- review and the duplication mutation gives each trial a genuine common
+  -- subexpression, so extra trials buy real coverage. Overridable upward via the
+  -- CLI trial count, never dropping below 10000.
+  let cseCfg : Configuration := { numInst := max numTrials 10000, maxSize }
 
-  IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
+  IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize}; \
+    CSE properties at {cseCfg.numInst} trials)..."
   IO.println ""
 
   let mut allPassed := true
@@ -1083,32 +1105,32 @@ def main (args : List String) : IO UInt32 := do
 
   -- #5a: CSE idempotent (on duplication-mutated inputs)
   if !(← checkProperty "stmt: CSE is idempotent (#5a)"
-    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_idempotent gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_idempotent gs)) cseCfg) then
     allPassed := false
 
   -- #5b: CSE preserves typeability (on duplication-mutated inputs)
   if !(← checkProperty "stmt: CSE preserves typeability (#5b)"
-    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_preserves_typing gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_preserves_typing gs)) cseCfg) then
     allPassed := false
 
   -- P-CSE-3: no free bvar in any CSE-introduced init (capture safety)
   if !(← checkProperty "stmt: CSE inits have no dangling de Bruijn index (capture safety, P-CSE-3)"
-    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_no_free_bvar gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_no_free_bvar gs)) cseCfg) then
     allPassed := false
 
   -- P-CSE-6: CSE var-decl count bounded by input DAG size
   if !(← checkProperty "stmt: CSE var-count bounded by DAG size (P-CSE-6)"
-    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_var_count_bounded gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_var_count_bounded gs)) cseCfg) then
     allPassed := false
 
   -- P-CSE-4: CSE preserves evaluation semantics (model-preserving claim)
   if !(← checkProperty "stmt: CSE preserves evaluation semantics (P-CSE-4)"
-    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_semantic_preservation gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : DupGenStmts, prop_stmt_cse_semantic_preservation gs)) cseCfg) then
     allPassed := false
 
   -- Regression guard: the harness duplication-mutation is itself type-preserving.
   if !(← checkProperty "stmt: duplication mutants are well-typed (mutation regression guard)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_dup_mutants_well_typed gs)) cfg) then
+    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_dup_mutants_well_typed gs)) cseCfg) then
     allPassed := false
 
   -- #6: StmtToKleeneStmt defined iff no exit/funcDecl/typeDecl

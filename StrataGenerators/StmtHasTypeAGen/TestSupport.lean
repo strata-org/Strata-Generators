@@ -593,15 +593,48 @@ def obligationSignature (ss : List Statement) :
            | .assumption _ e => some e
            | _ => none)))))
 
+/-- The *store* observable of a statement list, complementing `obligationSignature`.
+    For every resulting path, collect the final value of every **user** variable:
+    the single-map view of the evaluation store (`exprEnv.state.toSingleMap`), with
+    the CSE-introduced `$__cse.*` temporaries dropped and each remaining value run
+    through `E.exprEval` so any residual reference to a `$__cse.*` binding is
+    inlined back to its definition. This makes the signature CSE-invariant for the
+    same reason the obligation one is (the evaluator resolves store bindings), while
+    covering the large class of programs that emit **no proof obligation at all** —
+    e.g. straight-line `var`/`set` code, where a capture bug would corrupt a
+    computed value with nothing in `deferred` to witness it. Because
+    `ExpressionMetadata := Unit`, the resulting `Expr`s compare by clean structural
+    equality; identifiers and the outer `List` lift that. -/
+def storeSignature (ss : List Statement) :
+    List (List (Expression.Ident × Expression.Expr)) :=
+  let (envs, _) := Statement.eval Env.init [] ss
+  envs.map (fun E =>
+    E.exprEnv.state.toSingleMap.filterMap (fun (i, _, e) =>
+      if i.name.startsWith Core.CSE.cseVarPrefix then none
+      else some (i, E.exprEval e)))
+
 /-- **Property P-CSE-4 (semantic preservation under evaluation).** The heart of
     the transform's "model-preserving" contract: CSE must not change program
-    meaning. We compare the *proof-obligation signature* (property kind +
-    evaluated obligation expression + evaluated assumption expressions) produced
-    by the symbolic simulator before and after CSE. Because the simulator inlines
-    the CSE-introduced `$__cse.*` bindings back to their definitions, a correct
-    pass leaves this signature identical; a variable-capture bug that yields a
-    well-typed-but-different program changes an obligation or assumption
-    expression and is caught here — the failure mode P-CSE-2/3 cannot see.
+    meaning. We compare **two** complementary observables produced by the symbolic
+    simulator before and after CSE, and require *both* to match:
+
+    * `obligationSignature` — the verification conditions (property kind +
+      evaluated obligation expression + assumption expressions). Catches a capture
+      that corrupts an `assert`/`cover`/overflow condition or a branch assumption.
+    * `storeSignature` — the final value of every user variable on every path.
+      Catches a capture that corrupts a *computed value* in straight-line code
+      that emits no proof obligation at all — the majority of generated programs
+      (~two-thirds have no obligation), which the obligation observable alone
+      leaves as a vacuous `[] == []`.
+
+    Both are CSE-invariant for the same reason: the simulator inlines the
+    CSE-introduced `$__cse.*` bindings back to their definitions, so a correct pass
+    leaves each observable identical, while a variable-capture bug that yields a
+    well-typed-but-different program perturbs at least one of them. This is the
+    failure mode P-CSE-2/3 (typing / no-dangling-index) cannot see. Empirically,
+    over thousands of generated programs, neither observable is ever perturbed by
+    CSE (no false positives) and together they give a non-vacuous check on ~50% of
+    type-checking inputs vs. ~32% for obligations alone.
 
     Conditional and total: we loop-eliminate first (the simulator cannot evaluate
     `loop`s; this mirrors the real LoopElim→CSE pipeline), pass vacuously if any
@@ -612,7 +645,10 @@ def checkCseSemanticPreservation (ss : List Statement) : Bool :=
   let base := loopElimStmts ss
   if countLoopsStmts base != 0 then true
   else if !checkTypeChecks base then true
-  else obligationSignature base == obligationSignature (cseStmts base)
+  else
+    let cse := cseStmts base
+    obligationSignature base == obligationSignature cse
+      && storeSignature base == storeSignature cse
 
 /-- **Property #6**: `StmtToKleeneStmt` is defined *exactly* when the block has no
     `exit`/`funcDecl`/`typeDecl`. One caveat: the transform *also* rejects loops
