@@ -44,11 +44,6 @@ roots = ["StrataGenerators.HasTypeAGen"]
 name = "StrataGenerators.HasTypeAGenOpsConsistent"
 roots = ["StrataGenerators.HasTypeAGenOpsConsistent"]
 
-# STLC generator with soundness and completeness proofs
-[[lean_lib]]
-name = "StrataGenerators.STLC"
-roots = ["StrataGenerators.STLC"]
-
 # Playground for experimenting with manually written Basalt proofs
 [[lean_lib]]
 name = "StrataGenerators.ArithExprs"
