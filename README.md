@@ -28,10 +28,7 @@ Each generator is split into a `Core.lean` (containing the generator's executabl
 separate proof file. For example, for the `LExpr` generator, `HasTypeAGen/Core.lean` contains 
 the actual code for the generator, while `HasTypeAGen.lean` contains the generator's correctness proofs. 
 This allows us to avoid importing both Strata and Batteries (imported transitively via Mathlib) 
-in the same file, as `List.Forall₂` is defined by both libraries. Additionally, since 
-the proof files need Mathlib tactics, the generator
-definitions live in Mathlib-free `Core` modules and expose flat contexts (e.g.
-an `OpCtx = List (String × LMonoTy)`) instead of importing Strata's `Factory`.
+in the same file, as `List.Forall₂` is defined by both libraries. 
 
 ## Dependencies
 
@@ -74,7 +71,7 @@ lake build test-lexpr
 
 - `numTrials` (default: 1000) — number of random test cases per property
 - `maxSize` (default: 100) — maximum size parameter for generation (controls
-  expression/statement depth)
+  the depth of the generated AST)
 
 The harness exercises properties across all four generators — expression
 type-safety (typecheck, preservation, progress, type-erasure round-trip),
@@ -87,8 +84,7 @@ variables from a fixed context: `x : bool`, `f : int -> bool`, `n : int`) and
 A few properties are *expected* to find counterexamples — for instance,
 `progress` and `normalization`: `LExpr.eval` gets stuck on quantifiers in
 condition position (e.g. `if (forall x. e) then ...`) and on equality of
-lambdas with non-identical bodies. Progress and preservation follow the
-Software Foundations convention of being stated for the empty typing context.
+lambdas with non-identical bodies. 
 
 ## Tyche visualization
 
@@ -105,10 +101,6 @@ lake build tyche-viz
 
 - `numSamples` (default: 1000) — number of samples per generator
 - `outputPath` (default: `tyche_output.jsonl`) — output file path
-
-The depth parameter is varied uniformly over [1, 5] across samples so that
-visualizations cover the full range of generator behavior. Each sample records
-`gen_depth` as a feature.
 
 ### Viewing results
 
