@@ -106,19 +106,22 @@ private partial def shrinkLExpr (e : LExpr') : List LExpr' :=
     (fun i' => .const () (.intConst i')) <$> Shrinkable.shrink i
   | _ => []
 
-/-- Shrinkable instance for `TypedExpr` (a pair consisting of an `LExpr` and its type),
-    required by Plausible.
-    To ensure that the shrunken term has the right type, we just try to shrink
-    `LExpr`s using `shrinkLExpr` and perform rejection sampling (i.e. filter out
-    ill-typed candidate shrunken terms), and use the type of the shrunken
-    term as the second component of the `TypedExpr`. (This avoids us needing
-    to define separate shrinkers for types and `LExpr`s.) -/
+/-- Shared shrinker for the expr/type-pair wrappers (`TypedExpr`,
+    `ClosedTypedExpr`, `ResolveTypedExpr`), which all pair an `LExpr` with its
+    type and differ only in how they are generated.
+    To ensure that the shrunken term has the right type, we shrink the `LExpr`
+    with `shrinkLExpr` and perform rejection sampling (i.e. filter out ill-typed
+    candidates), re-typechecking to recover the shrunken term's type; `mk`
+    rebuilds the concrete wrapper from the `(expr, type)` pair. (This avoids us
+    needing to define separate shrinkers for types and `LExpr`s.) -/
+private def shrinkTypedExpr (mk : LExpr' → LMonoTy → α) (e : LExpr') : List α :=
+  (shrinkLExpr e).filterMap fun e' =>
+    match LExpr.typeCheck (T := LExprParams') [] e' with
+    | some τ' => some (mk e' τ')
+    | none => none
+
 instance : Shrinkable TypedExpr where
-  shrink te :=
-    (shrinkLExpr te.expr).filterMap fun e' =>
-      match LExpr.typeCheck (T := LExprParams') [] e' with
-      | some τ' => some ⟨e', τ'⟩
-      | none => none
+  shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
 private def genTypedExprWith (fctx : FVarCtx) : Gen TypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
@@ -145,11 +148,7 @@ instance : Repr ClosedTypedExpr where
   reprPrec te _ := s!"({ppExpr te.expr}) : {ppType te.ty}"
 
 instance : Shrinkable ClosedTypedExpr where
-  shrink te :=
-    (shrinkLExpr te.expr).filterMap fun e' =>
-      match LExpr.typeCheck (T := LExprParams') [] e' with
-      | some τ' => some ⟨e', τ'⟩
-      | none => none
+  shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
 instance : Arbitrary ClosedTypedExpr where
   arbitrary := Gen.backtrack (List.replicate 500
@@ -258,11 +257,7 @@ instance : Repr ResolveTypedExpr where
   reprPrec te _ := s!"({ppExpr te.expr}) : {ppType te.ty}"
 
 instance : Shrinkable ResolveTypedExpr where
-  shrink te :=
-    (shrinkLExpr te.expr).filterMap fun e' =>
-      match LExpr.typeCheck (T := LExprParams') [] e' with
-      | some τ' => some ⟨e', τ'⟩
-      | none => none
+  shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
 private def intBoolOpCtx : OpCtx := factoryOps intBoolFactory
 
