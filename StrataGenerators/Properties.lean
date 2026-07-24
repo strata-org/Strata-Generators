@@ -49,6 +49,9 @@ def exprPreservation      : String := "expr: preservation under eval (closed)"
 def exprProgress          : String := "expr: progress (closed)"
 def exprFvarsPreserved    : String := "expr: eval preserves fvars"
 def exprResolveAfterErase : String := "expr: resolve after type erasure"
+/-- Opt-in (`--smt`); requires a live SMT solver. Ported from
+    `StrataTest/Languages/Core/Tests/ExprEvalTest.lean`. -/
+def exprSmtEvalAgreement  : String := "expr: SMT/concrete eval agreement (closed)"
 
 -- ── Command-generator properties ─────────────────────────────────────
 def cmdInitFresh             : String := "cmd: init var not in RHS"
@@ -81,7 +84,7 @@ def stmtMapExprsId         : String := "stmt: mapExprs id = id (#9)"
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
-    exprResolveAfterErase,
+    exprResolveAfterErase, exprSmtEvalAgreement,
     cmdInitFresh, cmdExprTypecheck, cmdSetPreservesVar, cmdStoreTypePreservation,
     cmdEvalRunAgreement, cmdContextGrowth,
     fnFvarsAnnotated, fnTypeCheckSound, fnTypeCheckComplete, fnRejectionOnlyMeasure,

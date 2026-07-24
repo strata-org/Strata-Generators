@@ -1,5 +1,6 @@
 import StrataGenerators.Properties
 import StrataGenerators.HasTypeAGen.TestSupport
+import StrataGenerators.HasTypeAGen.SmtEval
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
@@ -55,6 +56,8 @@ property, default 1000; `maxSize` = max generator size, default 100). Flags:
 - `--no-tyche` — skip the Tyche visualization pass (it runs by default).
 - `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`).
 - `--tyche-samples=N` — samples per Tyche panel (default 1000).
+- `--smt` — add the SMT/concrete-eval agreement property (off by default; needs
+  a live `cvc5`/`z3` solver on `PATH`, so it is not part of the default run or CI).
 
 The exit code is always the LSpec verdict; the Tyche pass never affects it.
 
@@ -735,6 +738,7 @@ structure CliConfig where
   tycheEnabled : Bool
   tycheOut : String
   tycheSamples : Nat
+  smtEnabled : Bool
 
 /-- Parse `args` into a `CliConfig`. Positional args are `[numTrials] [maxSize]`;
     `--`-prefixed flags configure the Tyche visualization (on by default). -/
@@ -747,7 +751,8 @@ def parseArgs (args : List String) : CliConfig :=
     maxSize := (positional[1]? >>= String.toNat?).getD 100
     tycheEnabled := !flags.contains "--no-tyche"
     tycheOut := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
-    tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000 }
+    tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
+    smtEnabled := flags.contains "--smt" }
 
 def main (args : List String) : IO UInt32 := do
   let cli := parseArgs args
@@ -758,7 +763,15 @@ def main (args : List String) : IO UInt32 := do
   IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
   IO.println ""
 
-  -- Expression-generator properties.
+  -- Expression-generator properties. The SMT/concrete-eval agreement check
+  -- (`--smt`) is an IO-based `.individualIO` node — it runs the SMT solver per
+  -- generated term rather than a pure `Prop` — and is appended only when the flag
+  -- is set, since it needs a live `cvc5`/`z3` on `PATH` (see `SmtEval`).
+  let exprSmtTail : TestSeq :=
+    if cli.smtEnabled then
+      .individualIO PropertyNames.exprSmtEvalAgreement none
+        (StrataGenerators.SmtEval.smtEvalAgreementAction numTrials maxSize) .done
+    else .done
   let exprSuite : TestSeq :=
     checkIO PropertyNames.exprTypecheck
       (∀ te : TypedExpr, prop_typecheck te) (cfg := cfg) $
@@ -769,7 +782,8 @@ def main (args : List String) : IO UInt32 := do
     checkIO PropertyNames.exprFvarsPreserved
       (∀ te : TypedExpr, prop_closedness_preservation te) (cfg := cfg) $
     checkIO PropertyNames.exprResolveAfterErase
-      (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) (cfg := cfg)
+      (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) (cfg := cfg) ++
+    exprSmtTail
 
   -- Command-generator properties. The four single-verdict properties are folded
   -- from the shared `Properties.cmdSingleVerdict` bundle (name↔check paired in one

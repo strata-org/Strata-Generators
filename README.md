@@ -80,8 +80,62 @@ Flags (all optional; the Tyche visualization pass is on by default):
 - `--no-tyche` — skip the Tyche visualization pass (property tests only)
 - `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`)
 - `--tyche-samples=N` — samples per Tyche panel (default 1000)
+- `--smt` — add the SMT/concrete-eval agreement property (off by default). This
+  property cross-checks the in-Lean evaluator against an SMT semantics, so it
+  needs a live `cvc5`/`z3` solver on `PATH`; it is excluded from the default run
+  and CI for that reason.
 
 See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of properties tested.
+
+## Adding a new property
+
+Properties are catalogued in
+[`Properties.lean`](./StrataGenerators/Properties.lean) and run from the single
+test driver [`TestMain.lean`](./TestMain.lean). The name and the pass/fail check
+are kept separate so the LSpec assertion and the Tyche panel for a property can
+never drift apart. To add one:
+
+1. **Write the check.** Put the decision procedure — a `check* : α → Bool` on
+   whatever the generator produces (`LExpr'`, `Cmd Expression`, `List Statement`,
+   `Function`, …) — in the relevant `*.TestSupport` module (e.g.
+   `HasTypeAGen/TestSupport.lean`, `CmdHasTypeAGen/TestSupport.lean`,
+   `StmtHasTypeAGen/TestSupport.lean`). Keeping the check there means both the
+   LSpec suite and the Tyche panel evaluate the *same* function.
+
+2. **Name it.** Add a `String` constant to the matching `PropertyNames.*` group
+   in `Properties.lean` (naming scheme: `"area: description"`, where `area` is
+   one of `expr` / `cmd` / `function` / `stmt`), then add the constant to
+   `PropertyNames.all` — the `#guard` there enforces that no two properties share
+   a name.
+
+3. **Pair name ↔ check (when both harnesses run the identical `Bool` check).**
+   If the LSpec assertion and the Tyche panel run a byte-identical predicate, add
+   a `Property` bundle entry to the appropriate list in the `Properties`
+   namespace (`cmdSingleVerdict` or `stmtTransforms`). Each harness iterates that
+   list, so the pairing is defined exactly once. Properties whose two views
+   genuinely differ (or that only one harness runs) keep just the shared *name*
+   here and state their logic in `TestMain.lean`.
+
+4. **Add it to the suite in `TestMain.lean`.**
+   - For a pure `α → Bool` property, wrap it as a `Prop` (`prop_* te := check* … = true`)
+     and add a `checkIO PropertyNames.yourName (∀ x, prop_your x)` node to the
+     relevant `*Suite`. Properties from a `Property` bundle are folded in
+     automatically via `foldr` over the bundle list.
+   - For an `IO`-based check (one that runs in `IO`, shrinks its own
+     counterexamples, or needs an external tool), give it the
+     `(success, passed, attempted, errorMsg)` shape and add it as a
+     `.individualIO PropertyNames.yourName none action .done` node. The
+     SMT/concrete-eval agreement property
+     ([`HasTypeAGen/SmtEval.lean`](./StrataGenerators/HasTypeAGen/SmtEval.lean),
+     gated behind `--smt`) is a worked example.
+
+5. **(Optional) Add a Tyche panel** in
+   [`TycheViz.lean`](./StrataGenerators/TycheViz.lean), referencing the same
+   `PropertyNames.*` constant so the LSpec result and the panel share a label.
+
+The exit code is the LSpec verdict, so any property added to a `*Suite` gates
+`lake test`; always-run *diagnostics* (which report but don't gate) are called
+after `lspecIO` in `main`.
 
 ## Tyche visualization
 
