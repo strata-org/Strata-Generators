@@ -58,12 +58,19 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 
 ## Property-based testing
 
-Run `make test` to execute the property-based test harness. 
-If you want to manually configure the no. of trials / size of inputs, you can do so as follows:
+Run `make test` (or `lake test`) to execute the property-based test harness.
+If you want to manually configure the no. of trials / size of inputs, you can
+pass them through to the test driver after `--`:
 
 ```bash
-lake build test-lexpr
-.lake/build/bin/test-lexpr [numTrials] [maxSize]
+lake test -- [numTrials] [maxSize]
+```
+
+Alternatively, build and run the executable directly:
+
+```bash
+lake build test
+.lake/build/bin/test [numTrials] [maxSize]
 ```
 
 - `numTrials` (default: 1000) — number of random test cases per property

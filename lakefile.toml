@@ -1,6 +1,7 @@
 name = "strata-generators"
 version = "0.1.0"
 defaultTargets = ["StrataGenerators"]
+testDriver = "test"
 
 [[require]]
 name = "Strata"
@@ -11,6 +12,11 @@ rev = "1d858fb03"
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
+
+[[require]]
+name = "LSpec"
+git = "https://github.com/ngernest/LSpec"
+rev = "aa07f8c"
 
 # A single library covering every module under `StrataGenerators/`. The glob
 # `StrataGenerators.*` selects `StrataGenerators` and all of its submodules, so
@@ -28,7 +34,8 @@ root = "Main"
 name = "tyche-viz"
 root = "TycheMain"
 
-# Property-based test executable (uses Plausible + LExpr.eval)
+# Property-based test executable (exercises the expr/command/function/statement
+# generators via Plausible + LSpec). Registered as the `lake test` driver above.
 [[lean_exe]]
-name = "test-lexpr"
+name = "test"
 root = "PlausibleTestMain"

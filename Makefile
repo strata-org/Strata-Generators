@@ -8,5 +8,4 @@ tyche:
 	.lake/build/bin/tyche-viz
 
 test:
-	lake build test-lexpr
-	.lake/build/bin/test-lexpr
+	lake test

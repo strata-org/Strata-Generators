@@ -5,6 +5,7 @@ import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import StrataGenerators.StmtHasTypeAGen.TestSupport
 import Basalt.PlausibleGen
 import Plausible
+import LSpec
 import Strata.DL.Lambda.LExprT
 -- Imports for Function.typeCheck property (typeCheck_annotated_sound)
 import Strata.Languages.Core.FunctionType
@@ -17,34 +18,39 @@ import StrataDDM.Elab
 import StrataDDM.BuiltinDialects.Init
 
 /-!
-# Property-based tests for LExpr generators
+# Property-based tests using the Strata generators
 
-Uses Plausible's `Gen` monad (via Basalt's `PlausibleGen`) to run the generators with
-varying sizes, testing properties of `LExpr.eval`.
+Uses Plausible's `Gen` monad (via Basalt's `PlausibleGen`) to run the expression,
+command, function, and statement generators with varying sizes, checking their
+properties via LSpec.
 
 ## Usage
 
 ```bash
-lake build test-lexpr && .lake/build/bin/test-lexpr [numTrials] [maxSize]
+lake test -- [numTrials] [maxSize]
 ```
 
-## Why we define our own test runner
+or, equivalently:
 
-Plausible's standard entry point `Testable.check` returns `CoreM` (it uses
-the `mk_decorations` tactic to wrap quantifiers in `NamedBinder` annotations
-for better error messages). Since `CoreM` requires the Lean elaboration
-environment, it cannot be called from a standalone `IO`-based `main` function.
+```bash
+lake build test && .lake/build/bin/test [numTrials] [maxSize]
+```
 
-The lower-level `Testable.checkIO` works in `IO`, but its `Testable` instance
-for `∀ x : α, p x` only matches when the proposition is wrapped in
-`NamedBinder`. We apply this wrapper explicitly at each call site, which is
-the manual equivalent of what `Testable.check`'s `mk_decorations` tactic does
-automatically in `#eval` contexts.
+## How the tests are run
+
+Each property is registered using `LSpec.checkIO`, and the whole test suite runs via
+`LSpec.lspecIO`, which prints a per-suite `✓/×` summary and returns the exit
+code (`0` all-pass, `1` on any failure).
+
+The two format→parse round-trip checks are not plain `Prop`s: they run in `IO`,
+shrink counterexamples, and print minimal reproducers. They are wrapped as
+custom `TestSeq.individualIO` nodes so they join the same `lspecIO` suite.
 -/
 
 open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible Core Imperative
 open Strata Strata.CoreDDM
 open StrataDDM (initDialect)
+open LSpec (TestSeq checkIO lspecIO group)
 
 -- ── Typed expression generation via Plausible.Gen ────────────────────
 
@@ -767,21 +773,6 @@ instance : Arbitrary GenStmts where
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
-def checkProperty (name : String) (p : Prop) [Testable p]
-    (cfg : Configuration) : IO Bool := do
-  IO.print s!"  {name} ... "
-  match ← Testable.checkIO p cfg with
-  | .success _ =>
-    IO.println "PASS"
-    return true
-  | .gaveUp n =>
-    IO.println s!"GAVE UP ({n} discards)"
-    return true
-  | .failure _ xs n =>
-    IO.println s!"FAIL (after {n} trials)"
-    IO.println s!"    {Testable.formatFailure "" xs n}"
-    return false
-
 /-- Sample erased terms and print the `resolve` error messages behind any
     counterexamples to the resolve-after-erase property. Shows, per failure, the
     erased term and the verbatim `resolve` outcome, plus a tally of distinct
@@ -814,109 +805,24 @@ def printResolveErrors (numTrials maxSize : Nat) : IO Nat := do
     IO.println s!"      [{c}×] {m}"
   return shown
 
-def main (args : List String) : IO UInt32 := do
-  let numTrials := (args[0]? >>= String.toNat?).getD 1000
-  let maxSize := (args[1]? >>= String.toNat?).getD 100
-  let cfg : Configuration := { numInst := numTrials, maxSize }
+-- ── IO-based round-trip checks (wrapped as `TestSeq.individualIO` nodes) ──
+--
+-- These two checks don't fit `checkIO` (they aren't plain `Prop`s): they run in
+-- `IO`, shrink their own counterexamples, and print minimal reproducers as they
+-- go. Each returns the `checkIO`-style tuple `(success, numSamples, totalTests,
+-- errorMsg)` so it can be dropped into an `lspecIO` suite via `.individualIO`.
 
-  IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
-  IO.println ""
-
-  let mut allPassed := true
-
-  -- `NamedBinder` wraps the quantified proposition so that Plausible's
-  -- `varTestable` instance can match on `∀ x : α, β x`. Without it,
-  -- `Testable.checkIO` (which works in `IO`, unlike `Testable.check` which
-  -- uses `CoreM` and the `mk_decorations` tactic) cannot find a `Testable`
-  -- instance for bare `∀`-propositions. The string argument ("te") labels
-  -- the variable in counterexample output.
-  if !(← checkProperty "generated terms typecheck"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_typecheck te)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "preservation (closed)"
-    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_preservation te)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "progress (closed)"
-    (NamedBinder "te" (∀ te : ClosedTypedExpr, prop_progress te)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "closedness_preservation"
-    (NamedBinder "te" (∀ te : TypedExpr, prop_closedness_preservation te)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "erasing type annotations then performing type inference recovers the same type"
-    (NamedBinder "te" (∀ te : ResolveTypedExpr, prop_resolve_after_erase te)) cfg) then
-    allPassed := false
-    -- Surface the actual `resolve` error messages behind the counterexamples.
-    -- The standard Plausible failure output only shows one shrunk term; here we
-    -- sample fresh terms and print the resolve errors verbatim so the failure
-    -- mode (e.g. "Quantifier body has non-Boolean type") is visible.
-    let _ ← printResolveErrors numTrials maxSize
-
-  IO.println ""
-  IO.println "Command generator properties:"
-
-  if !(← checkProperty "init: fresh var not in RHS"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_init_fresh gc)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "cmd: commands typecheck"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_expr_typechecks gc)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "cmds: context growth matches inits"
-    (NamedBinder "gc" (∀ gc : GenCmdsWithCtx, prop_cmds_context_growth gc)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "cmd: set preserves variable"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_set_preserves_var gc)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "cmd: store type preservation under eval"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_store_type_preservation gc)) cfg) then
-    allPassed := false
-
-  if !(← checkProperty "cmd: symbolic/concrete eval agreement"
-    (NamedBinder "gc" (∀ gc : GenCmdWithCtx, prop_cmd_eval_run_agreement gc)) cfg) then
-    allPassed := false
-
-  IO.println ""
-  IO.println "Function generator properties:"
-
-  if !(← checkProperty "function: fvars annotated by context type map"
-    (NamedBinder "gf" (∀ gf : GenFunction, prop_function_fvars_annotated gf)) cfg) then
-    allPassed := false
-
-  -- Property 1: Function.typeCheck_annotated_sound
-  if !(← checkProperty "function: typeCheck accepts generated func AND output satisfies FuncHasTypeA"
-    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_typeCheck_annotated_sound gf)) cfg) then
-    allPassed := false
-
-  -- Property 3: type preservation under evaluation (Step.type_preserved / StepStar.type_preserved)
-  if !(← checkProperty "function: body type preserved under eval"
-    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_body_preservation gf)) cfg) then
-    allPassed := false
-
-  -- Function typechecker completeness. FAILS on the measure-without-body gap
-  -- (spec permits it, algorithm rejects it) — the function-level analogue of the
-  -- statement `funcDecl` gap (#1), asserted honestly as a real failure.
-  if !(← checkProperty "function: typeCheck accepts generated functions (completeness)"
-    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_typeCheck_complete gf)) cfg) then
-    allPassed := false
-
-  -- Every typeCheck rejection is a measure-without-body function (pins the gap).
-  if !(← checkProperty "function: typeCheck rejections are only measure-without-body"
-    (NamedBinder "gf" (∀ gf : ClosedGenFunction, prop_function_rejection_only_measure gf)) cfg) then
-    allPassed := false
-
-  -- Property 2: pretty-print / parse round-trip (IO-based, manual loop)
-  IO.print "  function: pretty-print/parse round-trip ... "
+/-- Pretty-print each generated function to concrete syntax and parse it back,
+    expecting an identical re-print. Shrinks and prints minimal reproducers for
+    the first few parse failures and mismatches. Gates the suite (a
+    legal-by-construction function that fails to round-trip is a printer/parser
+    bug). -/
+def roundtripFunctionAction (numTrials maxSize : Nat) : IO (Bool × Nat × Nat × Option String) := do
+  let total := min numTrials 200
   let mut rtOk := 0
   let mut rtParseFail := 0
   let mut rtMismatch := 0
-  for i in List.range (min numTrials 200) do
+  for i in List.range total do
     let size := i % (maxSize + 1)
     let gf ← try Gen.run (Arbitrary.arbitrary (α := ClosedGenFunction)) size
              catch _ => pure ⟨default⟩
@@ -951,15 +857,18 @@ def main (args : List String) : IO UInt32 := do
           IO.println s!"      shrunk (size {sizeFunc minF}): {ms1.replace "\n" " "}"
           IO.println s!"      re-formatted to:              {ms2.replace "\n" " "}"
   if rtParseFail == 0 && rtMismatch == 0 then
-    IO.println s!"PASS ({rtOk} round-tripped)"
+    pure (true, rtOk, total, none)
   else
-    IO.println s!"FAIL ({rtParseFail} parse-failures, {rtMismatch} mismatches, {rtOk} ok)"
-    allPassed := false
+    pure (false, rtOk, total,
+      some s!"{rtParseFail} parse-failures, {rtMismatch} mismatches, {rtOk} ok")
 
-  -- Special-character identifier probe: minimal reproducers per position, using
-  -- legal identifiers that contain special (non-alphanumeric) characters
-  -- (`genQuotedName`).
-  IO.print "  function: special-character identifier round-trip ... "
+/-- Special-character identifier probe: for each position (funcName/typeArg/binder)
+    render a legal identifier containing special characters and check it round-trips,
+    printing one reproducer per distinct (position, outcome, char-class). This is a
+    **diagnostic** — it reports how many probes fail but does not gate the exit code
+    (special-character round-tripping is a known limitation). Returns the number of
+    failing and passing probes. -/
+def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
   let positions := [IdentPosition.funcName, .typeArg, .binder]
   let mut probeOk := 0
   let mut probeFail := 0
@@ -991,62 +900,127 @@ def main (args : List String) : IO UInt32 := do
             IO.println s!"           {outcome.replace "\n" " "}"
           else
             IO.println s!"           reparsed: {outcome.replace "\n" " "}"
+  return (probeFail, probeOk)
+
+def main (args : List String) : IO UInt32 := do
+  let numTrials := (args[0]? >>= String.toNat?).getD 1000
+  let maxSize := (args[1]? >>= String.toNat?).getD 100
+  let cfg : Configuration := { numInst := numTrials, maxSize }
+
+  IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
+  IO.println ""
+
+  -- Expression-generator properties.
+  let exprSuite : TestSeq :=
+    checkIO "generated terms typecheck"
+      (∀ te : TypedExpr, prop_typecheck te) (cfg := cfg) $
+    checkIO "preservation (closed)"
+      (∀ te : ClosedTypedExpr, prop_preservation te) (cfg := cfg) $
+    checkIO "progress (closed)"
+      (∀ te : ClosedTypedExpr, prop_progress te) (cfg := cfg) $
+    checkIO "closedness_preservation"
+      (∀ te : TypedExpr, prop_closedness_preservation te) (cfg := cfg) $
+    checkIO "erasing type annotations then performing type inference recovers the same type"
+      (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) (cfg := cfg)
+
+  -- Command-generator properties.
+  let cmdSuite : TestSeq :=
+    checkIO "init: fresh var not in RHS"
+      (∀ gc : GenCmdWithCtx, prop_cmd_init_fresh gc) (cfg := cfg) $
+    checkIO "cmd: commands typecheck"
+      (∀ gc : GenCmdWithCtx, prop_cmd_expr_typechecks gc) (cfg := cfg) $
+    checkIO "cmds: context growth matches inits"
+      (∀ gc : GenCmdsWithCtx, prop_cmds_context_growth gc) (cfg := cfg) $
+    checkIO "cmd: set preserves variable"
+      (∀ gc : GenCmdWithCtx, prop_cmd_set_preserves_var gc) (cfg := cfg) $
+    checkIO "cmd: store type preservation under eval"
+      (∀ gc : GenCmdWithCtx, prop_cmd_store_type_preservation gc) (cfg := cfg) $
+    checkIO "cmd: symbolic/concrete eval agreement"
+      (∀ gc : GenCmdWithCtx, prop_cmd_eval_run_agreement gc) (cfg := cfg)
+
+  -- Function-generator properties. The two format→parse round-trip checks below
+  -- run in `IO` and shrink/print their own reproducers, so they join the suite as
+  -- custom `TestSeq.individualIO` nodes rather than `checkIO` `Prop`s. The
+  -- special-character probe is a diagnostic (see below) and is not part of this
+  -- gating suite.
+  let functionSuite : TestSeq :=
+    checkIO "function: fvars annotated by context type map"
+      (∀ gf : GenFunction, prop_function_fvars_annotated gf) (cfg := cfg) $
+    -- Property 1: Function.typeCheck_annotated_sound
+    checkIO "function: typeCheck accepts generated func AND output satisfies FuncHasTypeA"
+      (∀ gf : ClosedGenFunction, prop_function_typeCheck_annotated_sound gf) (cfg := cfg) $
+    -- Property 3: type preservation under evaluation (Step.type_preserved / StepStar.type_preserved)
+    checkIO "function: body type preserved under eval"
+      (∀ gf : ClosedGenFunction, prop_function_body_preservation gf) (cfg := cfg) $
+    -- Function typechecker completeness. FAILS on the measure-without-body gap
+    -- (spec permits it, algorithm rejects it) — the function-level analogue of the
+    -- statement `funcDecl` gap (#1), asserted honestly as a real failure.
+    checkIO "function: typeCheck accepts generated functions (completeness)"
+      (∀ gf : ClosedGenFunction, prop_function_typeCheck_complete gf) (cfg := cfg) $
+    -- Every typeCheck rejection is a measure-without-body function (pins the gap).
+    checkIO "function: typeCheck rejections are only measure-without-body"
+      (∀ gf : ClosedGenFunction, prop_function_rejection_only_measure gf) (cfg := cfg) $
+    -- Property 2: pretty-print / parse round-trip (IO-based, shrinks + prints reproducers)
+    .individualIO "function: pretty-print/parse round-trip" none
+      (roundtripFunctionAction numTrials maxSize) .done
+
+  -- Statement-generator properties (transforms + typechecker).
+  let stmtSuite : TestSeq :=
+    -- #1: typechecker accepts every generated well-typed statement (completeness).
+    -- This FAILS on the funcDecl gap (the spec's funcDecl rule is strictly more
+    -- permissive than the algorithm) — a genuine spec/algorithm divergence, asserted
+    -- honestly, so the suite reports it as a real failure with a minimal
+    -- `funcDecl` counterexample.
+    checkIO "stmt: typechecker accepts generated statements (#1)"
+      (∀ gs : GenStmts, prop_stmt_typechecks gs) (cfg := cfg) $
+    -- #1b: every rejection is attributable to a funcDecl (pins the sole known gap).
+    checkIO "stmt: typecheck rejections are only funcDecl (#1b)"
+      (∀ gs : GenStmts, prop_stmt_rejection_only_funcDecl gs) (cfg := cfg) $
+    -- #3: LoopElim preserves typeability
+    checkIO "stmt: LoopElim preserves typeability (#3)"
+      (∀ gs : GenStmts, prop_stmt_loopElim_preserves_typing gs) (cfg := cfg) $
+    -- #4: LoopElim eliminates all loops
+    checkIO "stmt: LoopElim eliminates all loops (#4)"
+      (∀ gs : GenStmts, prop_stmt_loopElim_zero_loops gs) (cfg := cfg) $
+    -- #5a: ANF idempotent
+    checkIO "stmt: ANF is idempotent (#5a)"
+      (∀ gs : GenStmts, prop_stmt_anf_idempotent gs) (cfg := cfg) $
+    -- #5b: ANF preserves typeability
+    checkIO "stmt: ANF preserves typeability (#5b)"
+      (∀ gs : GenStmts, prop_stmt_anf_preserves_typing gs) (cfg := cfg) $
+    -- #6: StmtToKleeneStmt defined iff no exit/funcDecl/typeDecl
+    checkIO "stmt: DetToKleene defined iff supported (#6)"
+      (∀ gs : GenStmts, prop_stmt_kleene_defined_iff gs) (cfg := cfg) $
+    -- #9: mapExprs id = id
+    checkIO "stmt: mapExprs id = id (#9)"
+      (∀ gs : GenStmts, prop_stmt_mapExprs_id gs) (cfg := cfg)
+
+  let exitCode ← lspecIO (.ofList [
+    ("expr", [exprSuite]),
+    ("cmd", [cmdSuite]),
+    ("function", [functionSuite]),
+    ("stmt", [stmtSuite])
+  ]) []
+
+  -- Always-run diagnostics (do not gate the exit code):
+  --
+  -- Surface the actual `resolve` error messages behind any resolve-after-erase
+  -- counterexamples. The standard Plausible failure output only shows one shrunk
+  -- term; here we sample fresh terms and print the resolve errors verbatim so the
+  -- failure mode (e.g. "Quantifier body has non-Boolean type") is visible.
+  IO.println ""
+  IO.println "Resolve-after-erase error diagnostics:"
+  let _ ← printResolveErrors numTrials maxSize
+
+  -- Special-character identifier probe: minimal reproducers per position, using
+  -- legal identifiers that contain special (non-alphanumeric) characters
+  -- (`genQuotedName`). Reported as a diagnostic (known limitation), not gated.
+  IO.println ""
+  IO.println "Special-character identifier round-trip diagnostics:"
+  let (probeFail, probeOk) ← specialCharProbeDiagnostic numTrials maxSize
   if probeFail == 0 then
-    IO.println s!"PASS ({probeOk} ident/position round-trips)"
+    IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
-    IO.println s!"FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+    IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
 
-  IO.println ""
-  IO.println "Statement generator properties (transforms + typechecker):"
-
-  -- #1: typechecker accepts every generated well-typed statement (completeness).
-  -- This FAILS on the funcDecl gap (the spec's funcDecl rule is strictly more
-  -- permissive than the algorithm) — a genuine spec/algorithm divergence, asserted
-  -- honestly, so the suite reports it as a real failure with a minimal
-  -- `funcDecl` counterexample.
-  if !(← checkProperty "stmt: typechecker accepts generated statements (#1)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_typechecks gs)) cfg) then
-    allPassed := false
-
-  -- #1b: every rejection is attributable to a funcDecl (pins the sole known gap).
-  if !(← checkProperty "stmt: typecheck rejections are only funcDecl (#1b)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_rejection_only_funcDecl gs)) cfg) then
-    allPassed := false
-
-  -- #3: LoopElim preserves typeability
-  if !(← checkProperty "stmt: LoopElim preserves typeability (#3)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_loopElim_preserves_typing gs)) cfg) then
-    allPassed := false
-
-  -- #4: LoopElim eliminates all loops
-  if !(← checkProperty "stmt: LoopElim eliminates all loops (#4)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_loopElim_zero_loops gs)) cfg) then
-    allPassed := false
-
-  -- #5a: ANF idempotent
-  if !(← checkProperty "stmt: ANF is idempotent (#5a)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_anf_idempotent gs)) cfg) then
-    allPassed := false
-
-  -- #5b: ANF preserves typeability
-  if !(← checkProperty "stmt: ANF preserves typeability (#5b)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_anf_preserves_typing gs)) cfg) then
-    allPassed := false
-
-  -- #6: StmtToKleeneStmt defined iff no exit/funcDecl/typeDecl
-  if !(← checkProperty "stmt: DetToKleene defined iff supported (#6)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_kleene_defined_iff gs)) cfg) then
-    allPassed := false
-
-  -- #9: mapExprs id = id
-  if !(← checkProperty "stmt: mapExprs id = id (#9)"
-    (NamedBinder "gs" (∀ gs : GenStmts, prop_stmt_mapExprs_id gs)) cfg) then
-    allPassed := false
-
-  IO.println ""
-  if allPassed then
-    IO.println "All tests passed."
-    return 0
-  else
-    IO.println "Some tests failed."
-    return 1
+  return exitCode
