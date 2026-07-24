@@ -86,23 +86,28 @@ structure Config where
   outputPath : String := "tyche_output.jsonl"
   deriving Inhabited
 
+/-- Append `numSamples` generated samples to an already-open handle as Tyche
+    JSONL lines. Retries on failure so exactly `numSamples` lines are written.
+    Lets many generators share one output file without per-panel temp files. -/
+def runInto [TycheSample α] (handle : IO.FS.Handle) (gen : IO α)
+    (property : String) (numSamples : Nat) (runStart : Nat) : IO Unit := do
+  let mut written := 0
+  let mut retries := 0
+  let maxRetries := numSamples * 10
+  while written < numSamples && retries < maxRetries do
+    try
+      let val ← gen
+      handle.putStrLn ((TycheSample.toSample val).toJsonLine property runStart)
+      written := written + 1
+    catch _ =>
+      retries := retries + 1
+
 /-- Run a generator `numSamples` times and write Tyche JSONL output.
     Retries on failure so the output always contains exactly `numSamples` lines. -/
 def run [TycheSample α] (gen : IO α) (config : Config := {}) : IO Unit := do
   let startTime ← IO.monoMsNow
   let handle ← IO.FS.Handle.mk config.outputPath .write
-  let mut written := 0
-  let mut retries := 0
-  let maxRetries := config.numSamples * 10
-  while written < config.numSamples && retries < maxRetries do
-    try
-      let val ← gen
-      let sample := TycheSample.toSample val
-      let line := sample.toJsonLine config.propertyName startTime
-      handle.putStrLn line
-      written := written + 1
-    catch _ =>
-      retries := retries + 1
+  runInto handle gen config.propertyName config.numSamples startTime
 
 /-- Run multiple named generators and write all samples to one JSONL file. -/
 def runMultiple (generators : List (String × IO Sample)) (config : Config := {}) : IO Unit := do
