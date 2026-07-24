@@ -53,29 +53,39 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 | Target | Description |
 |--------|-------------|
 | `lake build` | Build all Lean sources |
-| `make tyche` | Build and run the Tyche visualization executable |
-| `make test` | Build and run the Plausible test suite |
+| `make tyche` | Build and run the test driver *with* Tyche visualizations |
+| `make test` | Build and run the test suite (skips Tyche visualizations) |
 
 ## Property-based testing
 
-Run `make test` (or `lake test`) to execute the property-based test harness.
-If you want to manually configure the no. of trials / size of inputs, you can
-pass them through to the test driver after `--`:
+A single executable test driver exercises the generators in two complementary
+ways from one run: the Plausible + LSpec property suite, and (by default) the
+Tyche visualization panels. Run `lake test` (or `make test`) to execute it. If
+you want to manually configure the no. of trials / size of inputs, you can pass
+them through to the test driver after `--`:
 
 ```bash
-lake test -- [numTrials] [maxSize]
+lake test -- [numTrials] [maxSize] [flags]
 ```
 
 Alternatively, build and run the executable directly:
 
 ```bash
 lake build test
-.lake/build/bin/test [numTrials] [maxSize]
+.lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
 - `numTrials` (default: 1000) — number of random test cases per property
 - `maxSize` (default: 100) — maximum size parameter for generation (controls
   the depth of the generated AST)
+
+Flags (all optional; the Tyche visualization pass is **on by default**):
+
+- `--no-tyche` — skip the Tyche visualization pass (property tests only)
+- `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`)
+- `--tyche-samples=N` — samples per Tyche panel (default 1000)
+
+The exit code is always the LSpec verdict; the Tyche pass never affects it.
 
 The harness exercises properties across all four generators — expression
 type-safety (typecheck, preservation, progress, type-erasure round-trip),
@@ -98,13 +108,18 @@ inspecting property-based testing generators.
 
 ### Generating samples
 
+The test driver writes Tyche panels by default, so a plain run produces the
+JSONL file alongside the property-test results:
+
 ```bash
-lake build tyche-viz
-.lake/build/bin/tyche-viz [numSamples] [outputPath]
+lake build test
+.lake/build/bin/test [numTrials] [maxSize]
 ```
 
-- `numSamples` (default: 1000) — number of samples per generator
-- `outputPath` (default: `tyche_output.jsonl`) — output file path
+Use the Tyche flags to control the output (or `make tyche` for the defaults):
+
+- `--tyche-samples=N` (default: 1000) — number of samples per generator
+- `--tyche-out=PATH` (default: `tyche_output.jsonl`) — output file path
 
 ### Viewing results
 

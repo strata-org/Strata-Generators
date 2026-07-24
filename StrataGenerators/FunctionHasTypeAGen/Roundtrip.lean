@@ -11,9 +11,10 @@ open StrataDDM (initDialect)
 /-!
 # Shared round-trip helpers and shrinker for Strata Core `Function`s
 
-This module is imported by *both* property-based test harnesses
-(`PlausibleTestMain.lean` and `TycheMain.lean`) so the pretty-print/parse
-round-trip machinery and the structural shrinker live in exactly one place.
+This module is imported by *both* views in the merged `TestMain` driver — the
+Plausible/LSpec property suite and the Tyche panels (`StrataGenerators.TycheViz`)
+— so the pretty-print/parse round-trip machinery and the structural shrinker live
+in exactly one place.
 
 It provides:
 - `formatFuncAsProgram` / `parseCoreProgram` / `parseCoreProgramErr` — embed a

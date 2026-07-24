@@ -1,8 +1,10 @@
+import StrataGenerators.PropertyNames
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import StrataGenerators.StmtHasTypeAGen.TestSupport
+import StrataGenerators.TycheViz
 import Basalt.PlausibleGen
 import Plausible
 import LSpec
@@ -18,29 +20,45 @@ import StrataDDM.Elab
 import StrataDDM.BuiltinDialects.Init
 
 /-!
-# Property-based tests using the Strata generators
+# Property-based tests using the Strata generators (single merged driver)
 
-Uses Plausible's `Gen` monad (via Basalt's `PlausibleGen`) to run the expression,
-command, function, and statement generators with varying sizes, checking their
-properties via LSpec.
+The one executable test driver for this package, registered as the `lake test`
+driver. It exercises the expression, command, function, and statement generators
+in *two* complementary ways from a single run:
+
+1. **Plausible + LSpec** — each property is a `Bool` check asserted over many
+   randomly-generated inputs; `LSpec.lspecIO` prints a per-suite `✓/×` summary and
+   returns the exit code (`0` all-pass, `1` on any failure).
+2. **Tyche visualization** — the same properties are sampled and written as Tyche
+   JSONL panels for interactive exploration (see `StrataGenerators.TycheViz`).
+
+Every property's *pass/fail decision* comes from a shared `check*` predicate in the
+`*.TestSupport` modules, so the LSpec assertion and the Tyche panel for a given
+property always agree; only the Tyche-specific visualization scaffolding (feature
+breakdowns, counterexample-dense rejection sampling) lives separately.
 
 ## Usage
 
 ```bash
-lake test -- [numTrials] [maxSize]
+lake test -- [numTrials] [maxSize] [flags]
 ```
 
 or, equivalently:
 
 ```bash
-lake build test && .lake/build/bin/test [numTrials] [maxSize]
+lake build test && .lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
-## How the tests are run
+Positional arguments configure the Plausible run (`numTrials` = trials per
+property, default 1000; `maxSize` = max generator size, default 100). Flags:
 
-Each property is registered using `LSpec.checkIO`, and the whole test suite runs via
-`LSpec.lspecIO`, which prints a per-suite `✓/×` summary and returns the exit
-code (`0` all-pass, `1` on any failure).
+- `--no-tyche` — skip the Tyche visualization pass (it runs by default).
+- `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`).
+- `--tyche-samples=N` — samples per Tyche panel (default 1000).
+
+The exit code is always the LSpec verdict; the Tyche pass never affects it.
+
+## How the tests are run
 
 The two format→parse round-trip checks are not plain `Prop`s: they run in `IO`,
 shrink counterexamples, and print minimal reproducers. They are wrapped as
@@ -195,56 +213,24 @@ instance : ToFormat Unit where
 @[reducible] def prop_typecheck (te : TypedExpr) : Prop :=
   LExpr.typeCheck (T := LExprParams') [] te.expr = some te.ty
 
-
-
-
-
-
-
-
-
-
-
-
-
 -- Preservation (closed terms only): if ∅ ⊢ e : τ and e →* e', then ∅ ⊢ e' : τ.
 @[reducible] def prop_preservation (te : ClosedTypedExpr) : Prop :=
-  let evaled := eval 100 te.expr
-  LExpr.typeCheck (T := LExprParams') [] evaled = some te.ty
+  checkPreservation te.expr te.ty = true
 
 -- Progress (closed terms only): a well-typed closed term is either a value
 -- or can take a step.
 -- Falsified by quantifiers (`∀`/`∃`) — `LExpr.eval` has no reduction rule
 -- for them, so `if (∀x. e) then ...` gets stuck.
 @[reducible] def prop_progress (te : ClosedTypedExpr) : Prop :=
-  let evaled := eval 100 te.expr
-  isValue te.expr = true ∨ te.expr ≠ evaled
+  checkProgress te.expr = true
 
 -- Fvar preservation: evaluation does not introduce *new* free variables.
 -- Free variables from the context (x, f, n) may appear in both the input
 -- and output, but eval should not create fvars that weren't already present.
 @[reducible] def prop_closedness_preservation (te : TypedExpr) : Prop :=
-  let evaled := eval 100 te.expr
-  let inputFvars := LExpr.collectFvarNames te.expr
-  let outputFvars := LExpr.collectFvarNames evaled
-  outputFvars.all (· ∈ inputFvars) = true
+  checkFvarsPreserved te.expr = true
 
 -- ── Resolve after erasure ────────────────────────────────────────────
-
-/-- Known types covering all base types the generator can produce. -/
-private def resolveKnownTypes : Lambda.KnownTypes :=
-  open Lambda.LTy.Syntax in
-  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
-    t[bool], t[int], t[string], t[real], t[regex],
-    t[∀n. bitvec n],
-    t[∀a b. Map %a %b],
-    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
-
-/-- LContext with `intBoolFactory` and all generator-relevant known types. -/
-private def resolveLContext : Lambda.LContext LExprParams' :=
-  { Lambda.LContext.default with
-    functions := intBoolFactory,
-    knownTypes := resolveKnownTypes }
 
 /-- A closed expression generated using only `intBoolFactory` ops,
     suitable for round-tripping through `eraseTypes` + `resolve`. -/
@@ -259,8 +245,6 @@ instance : Repr ResolveTypedExpr where
 instance : Shrinkable ResolveTypedExpr where
   shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
-private def intBoolOpCtx : OpCtx := factoryOps intBoolFactory
-
 private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
@@ -270,32 +254,6 @@ private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
 
 instance : Arbitrary ResolveTypedExpr where
   arbitrary := Gen.backtrack (List.replicate 500 (1, genResolveTypedExpr))
-
-/-- Erase *all* type annotations on an `LExpr`, including the binder-type
-    annotations on lambdas (`abs`) and quantifiers (`quant`). After this, no
-    node carries a type, so `resolve` must reconstruct every type from scratch
-    via unification. -/
-def eraseAllTypes : LExpr' → LExpr'
-  | .const m c => .const m c
-  | .op m o _ => .op m o none
-  | .fvar m x _ => .fvar m x none
-  | .bvar m i => .bvar m i
-  | .abs m name _ e => .abs m name none (eraseAllTypes e)
-  | .quant m qk name _ tr e => .quant m qk name none (eraseAllTypes tr) (eraseAllTypes e)
-  | .app m e1 e2 => .app m (eraseAllTypes e1) (eraseAllTypes e2)
-  | .ite m c t f => .ite m (eraseAllTypes c) (eraseAllTypes t) (eraseAllTypes f)
-  | .eq m e1 e2 => .eq m (eraseAllTypes e1) (eraseAllTypes e2)
-
-/-- Check whether the ground type `target` is a substitution instance of the
-    (possibly more general) inferred type `inferred`. Because `target` has no
-    free type variables, unifying the two can only substitute into `inferred`'s
-    variables, so success exactly witnesses that `inferred` generalizes `target`.
-    This also abstracts over the *names* of the fresh type variables that
-    `resolve` introduces, so the comparison is up to alpha-equivalence. -/
-def isInstanceOf (target inferred : LMonoTy) : Bool :=
-  match Lambda.Constraints.unify [(inferred, target)] Lambda.SubstInfo.empty with
-  | .ok _ => true
-  | .error _ => false
 
 /-- After erasing *all* type annotations, `resolve` infers a principal type that
     may be more general than the type the expression was generated at (e.g. a
@@ -310,15 +268,13 @@ def isInstanceOf (target inferred : LMonoTy) : Bool :=
     rule checks the body type is literally `bool` rather than unifying it with
     `bool`. This is an incompleteness of `resolve` on erased quantifiers, not a
     soundness violation, so we treat resolve-failure as a (vacuous) pass and
-    only assert the instance relation when `resolve` succeeds. -/
-def checkResolveAfterErase (te : ResolveTypedExpr) : Bool :=
-  let erased := eraseAllTypes te.expr
-  match LExpr.resolve resolveLContext Lambda.TEnv.default erased with
-  | .ok (resolved, _) => isInstanceOf te.ty resolved.toLMonoTy
-  | .error _ => false
+    only assert the instance relation when `resolve` succeeds.
 
+    The decision procedure (`checkResolveAfterErase`) and its helpers
+    (`eraseAllTypes` / `isInstanceOf` / `resolveLContext`) are shared with the
+    Tyche harness — see `StrataGenerators.HasTypeAGen.TestSupport`. -/
 @[reducible] def prop_resolve_after_erase (te : ResolveTypedExpr) : Prop :=
-  checkResolveAfterErase te = true
+  checkResolveAfterErase te.expr te.ty = true
 
 /-- Run `resolve` on the fully-erased term and report the outcome as a string:
     `none` if the property holds (resolve succeeded and inferred a general-enough
@@ -331,7 +287,6 @@ def resolveErrorMessage (te : ResolveTypedExpr) : Option String :=
     if isInstanceOf te.ty resolved.toLMonoTy then none
     else some s!"inferred {ppType resolved.toLMonoTy}, not an instance of {ppType te.ty}"
   | .error e => some s!"{e}"
-
 
 -- ── Command generation via Plausible.Gen ─────────────────────────────
 
@@ -390,31 +345,17 @@ instance : Arbitrary GenCmdsWithCtx where
 
 -- ── Command-level properties ─────────────────────────────────────────
 
--- For `init x τ (det e)`, the freshly declared variable `x` does not appear
--- in the free variables of its own initializer `e`. This is a key
--- precondition for the `CmdHasType'.init_det` typing rule.
-@[reducible] def prop_cmd_init_fresh (gc : GenCmdWithCtx) : Prop :=
-  checkInitFreshNotInRhs gc.cmd = true
-
--- Every expression sub-term in a generated command typechecks to the
--- expected monotype in the empty bound-variable context.
-@[reducible] def prop_cmd_expr_typechecks (gc : GenCmdWithCtx) : Prop :=
-  checkExprTypechecks gc.cmd = true
+-- The four single-verdict command properties — init-fresh, expr-typechecks,
+-- set-preserves-var, store-type-preservation — are defined by the shared
+-- `Properties.cmdSingleVerdict` bundle (see `StrataGenerators.PropertyNames`),
+-- which pairs each name with its check in one place, so they are folded directly
+-- into `cmdSuite` below rather than restated as `prop_*` wrappers here.
 
 -- For a generated command sequence, the output context equals the input
 -- context prepended with the newly defined variables (in reverse order,
 -- since `init` conses onto the front).
 @[reducible] def prop_cmds_context_growth (gc : GenCmdsWithCtx) : Prop :=
   checkContextGrowth gc.inCtx gc.outCtx gc.cmds = true
-
--- After `set x e`, the variable `x` remains defined in the store.
-@[reducible] def prop_cmd_set_preserves_var (gc : GenCmdWithCtx) : Prop :=
-  checkSetPreservesVar gc.cmd gc.inCtx = true
-
--- Store type preservation: running a command on a well-typed store leaves every
--- variable bound to a value that still typechecks at its declared type.
-@[reducible] def prop_cmd_store_type_preservation (gc : GenCmdWithCtx) : Prop :=
-  checkStoreTypePreservation gc.cmd gc.inCtx = true
 
 -- Symbolic/concrete agreement: whenever concrete execution (`Cmd.run`) succeeds,
 -- symbolic simulation (`Cmd.eval`) also succeeds with the same store.
@@ -486,25 +427,6 @@ private def genClosedFunctionWith : Gen ClosedGenFunction := Gen.sized fun s => 
 instance : Arbitrary ClosedGenFunction where
   arbitrary := Gen.backtrack (List.replicate 2000 (1, genClosedFunctionWith))
 
--- ── Known types and context for Function.typeCheck ─────────────────────
-
-/-- Known types covering all base types + type constructors the generator can
-    produce. Required for `Function.typeCheck` to resolve arrow/Map/Seq aliases. -/
-private def funcCheckKnownTypes : Lambda.KnownTypes :=
-  open Lambda.LTy.Syntax in
-  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
-    t[bool], t[int], t[string], t[real], t[regex],
-    t[∀n. bitvec n],
-    t[∀a b. Map %a %b],
-    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
-
-/-- LContext with `intBoolFactory` and all generator-relevant known types.
-    This matches the `resolveLContext` used for expression-level tests. -/
-private def funcCheckContext : Lambda.LContext CoreLParams :=
-  { Lambda.LContext.default with
-    functions := intBoolFactory,
-    knownTypes := funcCheckKnownTypes }
-
 -- ── Property 1: Function.typeCheck_annotated_sound ─────────────────────
 --
 -- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound` at
@@ -513,38 +435,12 @@ private def funcCheckContext : Lambda.LContext CoreLParams :=
 --   If `Function.typeCheck C Env func = .ok (func', _)` then `func'` satisfies
 --   `FuncHasTypeA C Γ` for any Γ.
 --
--- We test the conclusion's decidable reflection: for the output `func'`, every
--- body type-checks at the declared output and every measure at `.int`.
--- We also test a prerequisite (relative completeness of `typeCheck`): a generated
--- well-typed function should be *accepted* by `typeCheck`.
-
-/-- Check `FuncHasTypeA` on a function using `LExpr.typeCheck` as reflection.
-    Returns `true` iff:
-    - `func.body = some b` implies `LExpr.typeCheck [] b = some func.output`
-    - `func.measure = some m` implies `LExpr.typeCheck [] m = some .int`
-    - `func.inputs.keys.Nodup` (checked via `decide`)
-    - `func.typeArgs.Nodup` (checked via `decide`) -/
-def checkFuncHasTypeA (func : Function) : Bool :=
-  let bodyOk := match func.body with
-    | some b => LExpr.typeCheck (T := CoreLParams) [] b == some func.output
-    | none => true
-  let measureOk := match func.measure with
-    | some m => LExpr.typeCheck (T := CoreLParams) [] m == some .int
-    | none => true
-  bodyOk && measureOk && decide (func.inputs.keys.Nodup) && decide (func.typeArgs.Nodup)
-
-/-- `Function.typeCheck` soundness: when `typeCheck` accepts, the output satisfies
-    the declarative spec `FuncHasTypeA` (body types at output, measure types at int).
-    When `typeCheck` rejects (e.g. measure-without-body, which `FuncHasTypeA` allows
-    but `typeCheck` forbids), this is a vacuous pass — the property only asserts
-    soundness, not completeness. -/
-def checkTypeCheckAnnotatedSound (gf : ClosedGenFunction) : Bool :=
-  match Function.typeCheck funcCheckContext TEnv.default gf.func with
-  | .ok (func', _) => checkFuncHasTypeA func'
-  | .error _ => true  -- typeCheck rejected = vacuous pass (soundness not triggered)
+-- The decision procedure (`checkTypeCheckAnnotatedSound`, which reflects
+-- `FuncHasTypeA` via `checkFuncHasTypeA` using `funcCheckContext`) is shared with
+-- the Tyche harness — see `StrataGenerators.FunctionHasTypeAGen.TestSupport`.
 
 @[reducible] def prop_function_typeCheck_annotated_sound (gf : ClosedGenFunction) : Prop :=
-  checkTypeCheckAnnotatedSound gf = true
+  checkTypeCheckAnnotatedSound gf.func = true
 
 -- ── Property 2: Pretty-print / parse round-trip ───────────────────────
 --
@@ -586,34 +482,9 @@ def checkPrintParseRoundtrip (func : Function) : IO Bool := do
 -- (non-alphanumeric) characters `. ' | \ ? ! @` in interior positions. This
 -- deliberately exercises the special-character and pipe-escape paths that
 -- `genIdentName` (fed to `genFunction`) never reaches.
-
-/-- The three syntactic positions an identifier can occupy in a `Function`. -/
-inductive IdentPosition where
-  | funcName
-  | typeArg
-  | binder
-  deriving Repr, DecidableEq
-
-def IdentPosition.label : IdentPosition → String
-  | .funcName => "function-name"
-  | .typeArg  => "type-arg"
-  | .binder   => "binder"
-
-/-- Build a minimal `Function` that places `name` in the given position and is
-    otherwise trivial (no body, no measure, `int` output). For `typeArg`, the
-    name is also referenced as the output type (`ftvar name`) so it appears in a
-    use position, not just its binding. For `binder`, the single input uses the
-    name as its parameter identifier at type `int`. -/
-def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
-  let ident : Identifier Unit := ⟨name, ()⟩
-  match pos with
-  | .funcName =>
-    LFunc.mk (name := ident) (inputs := []) (output := .int)
-  | .typeArg =>
-    LFunc.mk (name := ⟨"f", ()⟩) (typeArgs := [name]) (inputs := [])
-      (output := .ftvar name)
-  | .binder =>
-    LFunc.mk (name := ⟨"f", ()⟩) (inputs := [(ident, .int)]) (output := .int)
+--
+-- `IdentPosition` and `minimalFuncWithName` are shared with the Tyche harness —
+-- see `StrataGenerators.FunctionHasTypeAGen.TestSupport`.
 
 /-- Round-trip a single identifier in one position. Returns `none` on success,
     or `some (renderedProgram, reparsedOrMismatch)` describing the failure. -/
@@ -631,23 +502,11 @@ def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
 --
 -- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
 -- `eval_denote_sound` (`Strata/DL/Lambda/Denote/LExprSemanticsConsistent.lean`).
---
--- For a generated function with a body, evaluate the body using `eval` (fuel-
--- bounded, with `IntBoolFactory`) and assert the result still type-checks at
--- the declared output type.
-
-/-- Type preservation under evaluation: if a generated function has a body,
-    evaluating it preserves the declared output type. Functions with no body
-    pass vacuously. -/
-def checkFunctionBodyPreservation (gf : ClosedGenFunction) : Bool :=
-  match gf.func.body with
-  | some body =>
-    let evaled := eval 100 body
-    LExpr.typeCheck (T := CoreLParams) [] evaled == some gf.func.output
-  | none => true
+-- The decision procedure (`checkFunctionBodyPreservation`) is shared with the
+-- Tyche harness — see `StrataGenerators.FunctionHasTypeAGen.TestSupport`.
 
 @[reducible] def prop_function_body_preservation (gf : ClosedGenFunction) : Prop :=
-  checkFunctionBodyPreservation gf = true
+  checkFunctionBodyPreservation gf.func = true
 
 -- ── Function typechecker completeness ─────────────────────────────────
 -- Dual to the soundness property above. `genFunction` is proven sound (output
@@ -723,41 +582,18 @@ instance : Arbitrary GenStmts where
 
 -- ── Statement-level properties (all currently unproven) ───────────────
 
--- #1: The typechecker accepts every generated (spec-well-typed) statement list.
--- This is the *completeness* direction of the statement typechecker (only
--- soundness, `typeCheck_annotated_sound`, is proven). A counterexample is a
--- genuine spec/algorithm divergence. This property FAILS on the `funcDecl` gap
--- (the spec's `funcDecl` rule is strictly more permissive than the algorithm) —
--- we assert it honestly rather than mask it, so the suite reports a real failure
--- with a minimal `funcDecl` counterexample.
-@[reducible] def prop_stmt_typechecks (gs : GenStmts) : Prop :=
-  checkTypeCheckerComplete gs.stmts = true
-
--- #3: LoopElim (`removeLoops`) preserves typeability.
-@[reducible] def prop_stmt_loopElim_preserves_typing (gs : GenStmts) : Prop :=
-  checkLoopElimPreservesTyping gs.stmts = true
-
--- #4: LoopElim eliminates every loop (result has zero `loop` nodes).
-@[reducible] def prop_stmt_loopElim_zero_loops (gs : GenStmts) : Prop :=
-  checkLoopElimZeroLoops gs.stmts = true
-
--- #5a: ANF encoding is idempotent (`anf (anf x) = anf x`).
-@[reducible] def prop_stmt_anf_idempotent (gs : GenStmts) : Prop :=
-  checkAnfIdempotent gs.stmts = true
-
--- #5b: ANF encoding preserves typeability.
-@[reducible] def prop_stmt_anf_preserves_typing (gs : GenStmts) : Prop :=
-  checkAnfPreservesTyping gs.stmts = true
+-- The six statement-transform / typechecker properties (#1, #3, #4, #5a, #5b, #9)
+-- are defined by the shared `Properties.stmtTransforms` bundle (see
+-- `StrataGenerators.PropertyNames`), which pairs each name with its check in one
+-- place, so they are folded directly into `stmtSuite` below rather than restated
+-- as `prop_*` wrappers here. Only #6 keeps a wrapper — its Tyche panel records
+-- extra breakdown, so it is not part of the shared bundle.
 
 -- #6: `StmtToKleeneStmt` is defined exactly when the block has no
 -- `exit`/`funcDecl`/`typeDecl` (and, for the invariant-loop caveat, not defined
 -- when an invariant-bearing loop is present).
 @[reducible] def prop_stmt_kleene_defined_iff (gs : GenStmts) : Prop :=
   checkKleeneDefinedIff gs.stmts = true
-
--- #9: `Statements.mapExprs id = id`.
-@[reducible] def prop_stmt_mapExprs_id (gs : GenStmts) : Prop :=
-  checkMapExprsId gs.stmts = true
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
@@ -890,9 +726,33 @@ def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
             IO.println s!"           reparsed: {outcome.replace "\n" " "}"
   return (probeFail, probeOk)
 
+-- ── CLI ────────────────────────────────────────────────────────────────
+
+/-- Parsed command-line configuration for the merged driver. -/
+structure CliConfig where
+  numTrials : Nat
+  maxSize : Nat
+  tycheEnabled : Bool
+  tycheOut : String
+  tycheSamples : Nat
+
+/-- Parse `args` into a `CliConfig`. Positional args are `[numTrials] [maxSize]`;
+    `--`-prefixed flags configure the Tyche visualization (on by default). -/
+def parseArgs (args : List String) : CliConfig :=
+  let flags := args.filter (·.startsWith "--")
+  let positional := args.filter (fun a => !a.startsWith "--")
+  let flagValue (key : String) : Option String :=
+    (flags.find? (·.startsWith key)).map (·.drop key.length |>.toString)
+  { numTrials := (positional[0]? >>= String.toNat?).getD 1000
+    maxSize := (positional[1]? >>= String.toNat?).getD 100
+    tycheEnabled := !flags.contains "--no-tyche"
+    tycheOut := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
+    tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000 }
+
 def main (args : List String) : IO UInt32 := do
-  let numTrials := (args[0]? >>= String.toNat?).getD 1000
-  let maxSize := (args[1]? >>= String.toNat?).getD 100
+  let cli := parseArgs args
+  let numTrials := cli.numTrials
+  let maxSize := cli.maxSize
   let cfg : Configuration := { numInst := numTrials, maxSize }
 
   IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
@@ -900,31 +760,32 @@ def main (args : List String) : IO UInt32 := do
 
   -- Expression-generator properties.
   let exprSuite : TestSeq :=
-    checkIO "generated terms typecheck"
+    checkIO PropertyNames.exprTypecheck
       (∀ te : TypedExpr, prop_typecheck te) (cfg := cfg) $
-    checkIO "preservation (closed)"
+    checkIO PropertyNames.exprPreservation
       (∀ te : ClosedTypedExpr, prop_preservation te) (cfg := cfg) $
-    checkIO "progress (closed)"
+    checkIO PropertyNames.exprProgress
       (∀ te : ClosedTypedExpr, prop_progress te) (cfg := cfg) $
-    checkIO "closedness_preservation"
+    checkIO PropertyNames.exprFvarsPreserved
       (∀ te : TypedExpr, prop_closedness_preservation te) (cfg := cfg) $
-    checkIO "erasing type annotations then performing type inference recovers the same type"
+    checkIO PropertyNames.exprResolveAfterErase
       (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) (cfg := cfg)
 
-  -- Command-generator properties.
-  let cmdSuite : TestSeq :=
-    checkIO "init: fresh var not in RHS"
-      (∀ gc : GenCmdWithCtx, prop_cmd_init_fresh gc) (cfg := cfg) $
-    checkIO "cmd: commands typecheck"
-      (∀ gc : GenCmdWithCtx, prop_cmd_expr_typechecks gc) (cfg := cfg) $
-    checkIO "cmds: context growth matches inits"
+  -- Command-generator properties. The four single-verdict properties are folded
+  -- from the shared `Properties.cmdSingleVerdict` bundle (name↔check paired in one
+  -- place, also driving the Tyche panels), so their names can never be attached to
+  -- the wrong check. Context-growth and eval-agreement have distinct shapes and
+  -- are stated directly.
+  let cmdTail : TestSeq :=
+    checkIO PropertyNames.cmdContextGrowth
       (∀ gc : GenCmdsWithCtx, prop_cmds_context_growth gc) (cfg := cfg) $
-    checkIO "cmd: set preserves variable"
-      (∀ gc : GenCmdWithCtx, prop_cmd_set_preserves_var gc) (cfg := cfg) $
-    checkIO "cmd: store type preservation under eval"
-      (∀ gc : GenCmdWithCtx, prop_cmd_store_type_preservation gc) (cfg := cfg) $
-    checkIO "cmd: symbolic/concrete eval agreement"
+    checkIO PropertyNames.cmdEvalRunAgreement
       (∀ gc : GenCmdWithCtx, prop_cmd_eval_run_agreement gc) (cfg := cfg)
+  let cmdSuite : TestSeq :=
+    Properties.cmdSingleVerdict.foldr
+      (fun p rest => checkIO p.name
+        (∀ gc : GenCmdWithCtx, p.check (gc.cmd, gc.inCtx) = true) (cfg := cfg) rest)
+      cmdTail
 
   -- Function-generator properties. The two format→parse round-trip checks below
   -- run in `IO` and shrink/print their own reproducers, so they join the suite as
@@ -932,53 +793,40 @@ def main (args : List String) : IO UInt32 := do
   -- special-character probe is a diagnostic (see below) and is not part of this
   -- gating suite.
   let functionSuite : TestSeq :=
-    checkIO "function: fvars annotated by context type map"
+    checkIO PropertyNames.fnFvarsAnnotated
       (∀ gf : GenFunction, prop_function_fvars_annotated gf) (cfg := cfg) $
     -- Property 1: Function.typeCheck_annotated_sound
-    checkIO "function: typeCheck accepts generated func AND output satisfies FuncHasTypeA"
+    checkIO PropertyNames.fnTypeCheckSound
       (∀ gf : ClosedGenFunction, prop_function_typeCheck_annotated_sound gf) (cfg := cfg) $
     -- Property 3: type preservation under evaluation (Step.type_preserved / StepStar.type_preserved)
-    checkIO "function: body type preserved under eval"
+    checkIO PropertyNames.fnBodyPreservation
       (∀ gf : ClosedGenFunction, prop_function_body_preservation gf) (cfg := cfg) $
     -- Function typechecker completeness. FAILS on the measure-without-body gap
     -- (spec permits it, algorithm rejects it) — the function-level analogue of the
     -- statement `funcDecl` gap (#1), asserted honestly as a real failure.
-    checkIO "function: typeCheck accepts generated functions (completeness)"
+    checkIO PropertyNames.fnTypeCheckComplete
       (∀ gf : ClosedGenFunction, prop_function_typeCheck_complete gf) (cfg := cfg) $
     -- Every typeCheck rejection is a measure-without-body function (pins the gap).
-    checkIO "function: typeCheck rejections are only measure-without-body"
+    checkIO PropertyNames.fnRejectionOnlyMeasure
       (∀ gf : ClosedGenFunction, prop_function_rejection_only_measure gf) (cfg := cfg) $
     -- Property 2: pretty-print / parse round-trip (IO-based, shrinks + prints reproducers)
-    .individualIO "function: pretty-print/parse round-trip" none
+    .individualIO PropertyNames.fnRoundtrip none
       (roundtripFunctionAction numTrials maxSize) .done
 
-  -- Statement-generator properties (transforms + typechecker).
+  -- Statement-generator properties (transforms + typechecker). The six transform
+  -- / typechecker properties (#1, #3, #4, #5a, #5b, #9) are folded from the shared
+  -- `Properties.stmtTransforms` bundle (name↔check paired in one place, also
+  -- driving the Tyche panels), so their names can never be attached to the wrong
+  -- check. #1 FAILS honestly on the funcDecl gap (the spec's funcDecl rule is
+  -- strictly more permissive than the algorithm) — a genuine spec/algorithm
+  -- divergence surfaced as a real failure. #6 (Kleene definedness) has a richer
+  -- Tyche panel, so it is stated directly here.
   let stmtSuite : TestSeq :=
-    -- #1: typechecker accepts every generated well-typed statement (completeness).
-    -- This FAILS on the funcDecl gap (the spec's funcDecl rule is strictly more
-    -- permissive than the algorithm) — a genuine spec/algorithm divergence, asserted
-    -- honestly, so the suite reports it as a real failure with a minimal
-    -- `funcDecl` counterexample.
-    checkIO "stmt: typechecker accepts generated statements (#1)"
-      (∀ gs : GenStmts, prop_stmt_typechecks gs) (cfg := cfg) $
-    -- #3: LoopElim preserves typeability
-    checkIO "stmt: LoopElim preserves typeability (#3)"
-      (∀ gs : GenStmts, prop_stmt_loopElim_preserves_typing gs) (cfg := cfg) $
-    -- #4: LoopElim eliminates all loops
-    checkIO "stmt: LoopElim eliminates all loops (#4)"
-      (∀ gs : GenStmts, prop_stmt_loopElim_zero_loops gs) (cfg := cfg) $
-    -- #5a: ANF idempotent
-    checkIO "stmt: ANF is idempotent (#5a)"
-      (∀ gs : GenStmts, prop_stmt_anf_idempotent gs) (cfg := cfg) $
-    -- #5b: ANF preserves typeability
-    checkIO "stmt: ANF preserves typeability (#5b)"
-      (∀ gs : GenStmts, prop_stmt_anf_preserves_typing gs) (cfg := cfg) $
-    -- #6: StmtToKleeneStmt defined iff no exit/funcDecl/typeDecl
-    checkIO "stmt: DetToKleene defined iff supported (#6)"
-      (∀ gs : GenStmts, prop_stmt_kleene_defined_iff gs) (cfg := cfg) $
-    -- #9: mapExprs id = id
-    checkIO "stmt: mapExprs id = id (#9)"
-      (∀ gs : GenStmts, prop_stmt_mapExprs_id gs) (cfg := cfg)
+    Properties.stmtTransforms.foldr
+      (fun p rest => checkIO p.name
+        (∀ gs : GenStmts, p.check gs.stmts = true) (cfg := cfg) rest)
+      (checkIO PropertyNames.stmtKleeneDefinedIff
+        (∀ gs : GenStmts, prop_stmt_kleene_defined_iff gs) (cfg := cfg))
 
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
@@ -1007,5 +855,20 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  -- Tyche visualization pass (on by default; disable with `--no-tyche`). Writes
+  -- one JSONL panel per property to `cli.tycheOut`, using the *same* shared
+  -- `check*` verdicts as the LSpec suite above. Never affects the exit code.
+  if cli.tycheEnabled then
+    IO.println ""
+    IO.println s!"Generating Tyche visualizations ({cli.tycheSamples} samples/panel)..."
+    let startTime ← IO.monoMsNow
+    let handle ← IO.FS.Handle.mk cli.tycheOut .write
+    runTychePanels handle cli.tycheSamples startTime
+    IO.println s!"Tyche output written to {cli.tycheOut}"
+    IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"
+  else
+    IO.println ""
+    IO.println "Tyche visualizations disabled (--no-tyche)."
 
   return exitCode

@@ -1,4 +1,5 @@
 import StrataGenerators.Tyche
+import StrataGenerators.PropertyNames
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
@@ -21,32 +22,21 @@ open Strata Strata.CoreDDM
 open StrataDDM (initDialect)
 
 /-!
-# Tyche Visualization Runner
+# Tyche Visualization Panels
 
-This executable generates samples from the `HasTypeA` generator and writes
-them in Tyche JSONL format for visualization.
+Generates samples from the `HasTypeA` / command / function / statement generators
+and writes them in Tyche JSONL format for visualization.
 
-## Usage
+This module holds every Tyche panel (feature extractors, `TycheSample` instances,
+`IO` generator wrappers, and `runTychePanels`). It is *not* an executable root: the
+merged test driver in `TestMain.lean` calls `runTychePanels` after the LSpec suite,
+gated behind a CLI flag (Tyche visualization is on by default).
 
-```
-lake build tyche-viz && .lake/build/bin/tyche-viz [numSamples] [outputPath]
-```
-
-Then open the output file with the Tyche VS Code extension (`Tyche: Open`).
+All property *check* logic (pass/fail verdicts and the helper contexts behind them)
+is shared with the Plausible harness via the `*.TestSupport` modules — this file
+only adds the Tyche-specific visualization scaffolding (feature breakdowns, sample
+representations, and rejection-sampling for counterexample-dense panels).
 -/
-
--- ── Pretty-printing ──────────────────────────────────────────────────
--- These differ from Strata's built-in `ToFormat LMonoTy` / `ToFormat (LExpr T)`:
---   • Types: arrows print as `α -> bool` instead of `(arrow α bool)`.
---     Higher-order function arguments are parenthesized appropriately, e.g.
---     `(int -> int) -> bool` (since the function arrow is right-associative by default)
---   • Exprs: precedence-based parenthesization instead of wrapping every
---     compound subexpression in parens. Binder bodies extend to the right
---     without extra parens (`λint. λint. #1`), and application is left-
---     associative (`f x y` means `(f x) y`; only compound arguments like
---     lambdas or if-then-else get wrapped).
-
--- ppType and ppExpr are imported from TestSupport
 
 -- ── Feature extraction ────────────────────────────────────────────────
 
@@ -101,7 +91,9 @@ structure EvalResult where
 
 instance : Tyche.TycheSample EvalResult where
   toSample r :=
-    let preserved := r.evaledTy == some r.expectedTy
+    -- The pass/fail verdict is the shared `checkPreservation`; `evaledTy` is kept
+    -- only to display the re-inferred type in the sample representation.
+    let preserved := checkPreservation r.expr r.expectedTy
     { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
       status := if preserved then .passed else .failed
       features := [
@@ -141,19 +133,20 @@ structure EvalProgressResult where
   expr : LExpr'
   expectedTy : LMonoTy
   evaled : LExpr'
-  madeProgress : Bool
-  inputIsValue : Bool
   generatorSize : Nat
 
 instance : Tyche.TycheSample EvalProgressResult where
   toSample r :=
-    let status := if r.madeProgress || r.inputIsValue then Tyche.Status.passed
-                  else .failed
+    -- Shared `checkProgress` decides the verdict; the `made_progress` /
+    -- `input_is_value` features break down *why* it passed.
+    let madeProgress := !(r.expr == r.evaled)
+    let inputIsValue := isValue r.expr
+    let status := if checkProgress r.expr then Tyche.Status.passed else .failed
     { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
       status
       features := [
-        ("made_progress", .nominal (if r.madeProgress then "yes" else "no")),
-        ("input_is_value", .nominal (if r.inputIsValue then "yes" else "no")),
+        ("made_progress", .nominal (if madeProgress then "yes" else "no")),
+        ("input_is_value", .nominal (if inputIsValue then "yes" else "no")),
         ("type_kind", .nominal (typeKind r.expectedTy)),
         ("input_depth", .ordinal (exprDepth r.expr)),
         ("input_size", .ordinal (exprSize r.expr)),
@@ -170,7 +163,7 @@ def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", 
   let ty ← genLMonoTy (G := IO) tvars d
   let expr ← genLExprWithOps (G := IO) [] coreOpCtx corePolyOps tvars [] d ty
   let evaled := eval 100 expr
-  return ⟨expr, ty, evaled, !(expr == evaled), isValue expr, d⟩
+  return ⟨expr, ty, evaled, d⟩
 
 -- ── Fvar preservation property ───────────────────────────────────────
 
@@ -178,15 +171,15 @@ structure FvarPreservationResult where
   expr : LExpr'
   expectedTy : LMonoTy
   evaled : LExpr'
-  fvarsPreserved : Bool
   genDepth : Nat
 
 instance : Tyche.TycheSample FvarPreservationResult where
   toSample r :=
+    let fvarsPreserved := checkFvarsPreserved r.expr
     { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
-      status := if r.fvarsPreserved then .passed else .failed
+      status := if fvarsPreserved then .passed else .failed
       features := [
-        ("fvars_preserved", .nominal (if r.fvarsPreserved then "yes" else "no")),
+        ("fvars_preserved", .nominal (if fvarsPreserved then "yes" else "no")),
         ("type_kind", .nominal (typeKind r.expectedTy)),
         ("input_size", .ordinal (exprSize r.expr)),
         ("output_size", .ordinal (exprSize r.evaled)),
@@ -199,40 +192,13 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   let ty ← genLMonoTy (G := IO) tvars d
   let expr ← genLExprWithOps (G := IO) defaultFCtx coreOpCtx corePolyOps tvars [] d ty
   let evaled := eval 100 expr
-  let inputFvars := LExpr.collectFvarNames expr
-  let outputFvars := LExpr.collectFvarNames evaled
-  let preserved := outputFvars.all (· ∈ inputFvars)
-  return ⟨expr, ty, evaled, preserved, d⟩
+  return ⟨expr, ty, evaled, d⟩
 
 -- ── Resolve after erasure property ──────────────────────────────────
-
-private def resolveKnownTypes : Lambda.KnownTypes :=
-  open Lambda.LTy.Syntax in
-  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
-    t[bool], t[int], t[string], t[real], t[regex],
-    t[∀n. bitvec n],
-    t[∀a b. Map %a %b],
-    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
-
-private def resolveLContext : Lambda.LContext LExprParams' :=
-  { Lambda.LContext.default with
-    functions := intBoolFactory,
-    knownTypes := resolveKnownTypes }
-
-private def intBoolOpCtx : OpCtx := factoryOps intBoolFactory
-
-/-- Erase *all* type annotations on an `LExpr`, including the binder-type
-    annotations on lambdas (`abs`) and quantifiers (`quant`). -/
-private def eraseAllTypes : LExpr' → LExpr'
-  | .const m c => .const m c
-  | .op m o _ => .op m o none
-  | .fvar m x _ => .fvar m x none
-  | .bvar m i => .bvar m i
-  | .abs m name _ e => .abs m name none (eraseAllTypes e)
-  | .quant m qk name _ tr e => .quant m qk name none (eraseAllTypes tr) (eraseAllTypes e)
-  | .app m e1 e2 => .app m (eraseAllTypes e1) (eraseAllTypes e2)
-  | .ite m c t f => .ite m (eraseAllTypes c) (eraseAllTypes t) (eraseAllTypes f)
-  | .eq m e1 e2 => .eq m (eraseAllTypes e1) (eraseAllTypes e2)
+-- `resolveLContext`, `intBoolOpCtx`, `eraseAllTypes`, and `isInstanceOf` are the
+-- shared definitions from `HasTypeAGen.TestSupport` — the same ones the Plausible
+-- `checkResolveAfterErase` uses, so the two harnesses score this property
+-- identically.
 
 /-- Whether the expression contains a quantifier (`∀`/`∃`) anywhere. Every known
     counterexample to the resolve-after-erase property contains one: after the
@@ -247,14 +213,6 @@ private def containsQuant : LExpr' → Bool
   | .eq _ a b => containsQuant a || containsQuant b
   | _ => false
 
-/-- Whether the ground type `target` is a substitution instance of `inferred`
-    (i.e. `inferred` generalizes `target`), checked via unification. This also
-    abstracts over the names of the fresh type variables `resolve` introduces. -/
-private def isInstanceOf (target inferred : LMonoTy) : Bool :=
-  match Lambda.Constraints.unify [(inferred, target)] Lambda.SubstInfo.empty with
-  | .ok _ => true
-  | .error _ => false
-
 structure ResolveAfterEraseResult where
   expr : LExpr'
   expectedTy : LMonoTy
@@ -265,8 +223,8 @@ instance : Tyche.TycheSample ResolveAfterEraseResult where
   toSample r :=
     -- Counterexample-focused scoring: a sample PASSES only when `resolve`
     -- succeeds *and* infers a type the generation type is an instance of.
-    -- A `resolve` *failure* is now scored as a FAIL (a counterexample) rather
-    -- than a vacuous pass, so these cases surface in the Tyche panel. The
+    -- A `resolve` *failure* is scored as a FAIL (a counterexample) rather than
+    -- a vacuous pass, so these cases surface in the Tyche panel. The
     -- `failure_mode` feature distinguishes the two kinds of counterexample.
     let failureMode := match r.resolvedTy with
       | some inferred => if isInstanceOf r.expectedTy inferred then "none" else "wrong_type"
@@ -460,41 +418,15 @@ def genAndCheckFunctionFvarsAnnotated (depth : Nat := 0) : IO FunctionFvarsAnnot
   let passed := functionFvarsAnnotatedBy (fctxToTyMap defaultFCtx) func
   return { func, passed, generatorSize := d }
 
--- ── Known types and context for Function.typeCheck ─────────────────────
-
-/-- Known types covering all base types + type constructors the generator can
-    produce. Required for `Function.typeCheck` to resolve arrow/Map/Seq aliases. -/
-private def funcCheckKnownTypes : Lambda.KnownTypes :=
-  open Lambda.LTy.Syntax in
-  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
-    t[bool], t[int], t[string], t[real], t[regex],
-    t[∀n. bitvec n],
-    t[∀a b. Map %a %b],
-    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
-
-/-- LContext with `intBoolFactory` and all generator-relevant known types. -/
-private def funcCheckContext : Lambda.LContext CoreLParams :=
-  { Lambda.LContext.default with
-    functions := intBoolFactory,
-    knownTypes := funcCheckKnownTypes }
-
 -- ── Function property 1: typeCheck_annotated_sound ─────────────────────
 -- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound`
 -- (`Strata/Languages/Core/FunctionTypeSpecSound.lean:31`): when
 -- `Function.typeCheck` accepts a generated (spec-well-typed) function, the
 -- output satisfies the declarative spec `FuncHasTypeA`. Generated with an
 -- *empty* fvar context so bodies are closed (no ambient-context dependency).
-
-/-- Reflect `FuncHasTypeA` on a function via `LExpr.typeCheck`: body types at
-    the declared output, measure types at int, inputs/typeArgs `Nodup`. -/
-private def checkFuncHasTypeA (func : Function) : Bool :=
-  let bodyOk := match func.body with
-    | some b => LExpr.typeCheck (T := CoreLParams) [] b == some func.output
-    | none => true
-  let measureOk := match func.measure with
-    | some m => LExpr.typeCheck (T := CoreLParams) [] m == some .int
-    | none => true
-  bodyOk && measureOk && decide (func.inputs.keys.Nodup) && decide (func.typeArgs.Nodup)
+-- `funcCheckContext` / `checkFuncHasTypeA` are the shared definitions from
+-- `FunctionHasTypeAGen.TestSupport`, so this scores identically to the Plausible
+-- `checkTypeCheckAnnotatedSound`.
 
 structure FunctionTypeCheckSoundResult where
   func : Function
@@ -584,7 +516,7 @@ def genAndCheckFunctionTypeCheckComplete (depth : Nat := 0) : IO FunctionTypeChe
 -- `Core.formatProgram`, re-parses via DDM, re-formats, and compares. A parse
 -- failure is scored as a FAILURE: names are legal Core identifiers by
 -- construction (`genIdentName`), so unparseable output is a printer/parser bug.
-
+--
 -- `formatFuncAsProgram`, `parseCoreProgram`, `parseCoreProgramErr`, the
 -- structural shrinker (`shrinkWhile` et al.) and the failure predicates
 -- (`failsRoundtrip`, …) are shared with the Plausible harness — see
@@ -658,25 +590,26 @@ def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult
 -- ── Function property 3: type preservation under eval ──────────────────
 -- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
 -- `eval_denote_sound`. Evaluates a generated function body and checks the
--- result still type-checks at the declared output type.
+-- result still type-checks at the declared output type. The verdict is the
+-- shared `checkFunctionBodyPreservation`.
 
 structure FunctionBodyPreservationResult where
   func : Function
   /-- Whether the function has a body (the property is exercised non-vacuously). -/
   hasBody : Bool
-  /-- When a body is present, whether eval preserved the output type. -/
-  preserved : Bool
   generatorSize : Nat
 
 instance : Tyche.TycheSample FunctionBodyPreservationResult where
   toSample r :=
     -- Passes iff no body (vacuous) or the body's type is preserved under eval.
-    let passed := !r.hasBody || r.preserved
+    let passed := checkFunctionBodyPreservation r.func
+    -- When a body is present, whether eval preserved the output type.
+    let preserved := passed
     { representation := formatFunc r.func
       status := if passed then .passed else .failed
       features := [
         ("has_body", .nominal (if r.hasBody then "yes" else "no")),
-        ("type_preserved", .nominal (if r.hasBody then (if r.preserved then "yes" else "no") else "—")),
+        ("type_preserved", .nominal (if r.hasBody then (if preserved then "yes" else "no") else "—")),
         ("num_type_args", .ordinal r.func.typeArgs.length),
         ("num_inputs", .ordinal r.func.inputs.toList.length),
         ("output_kind", .nominal (typeKind r.func.output)),
@@ -688,13 +621,7 @@ instance : Tyche.TycheSample FunctionBodyPreservationResult where
 def genAndCheckFunctionBodyPreservation (depth : Nat := 0) : IO FunctionBodyPreservationResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreOpCtx d
-  match func.body with
-  | some body =>
-    let evaled := eval 100 body
-    let preserved := LExpr.typeCheck (T := CoreLParams) [] evaled == some func.output
-    return { func, hasBody := true, preserved, generatorSize := d }
-  | none =>
-    return { func, hasBody := false, preserved := true, generatorSize := d }
+  return { func, hasBody := func.body.isSome, generatorSize := d }
 
 -- ── Function property: special-character identifier round-trip ─────────
 -- Isolates one *legal* identifier that contains special (non-alphanumeric)
@@ -702,21 +629,9 @@ def genAndCheckFunctionBodyPreservation (depth : Nat := 0) : IO FunctionBodyPres
 -- the interior) in one syntactic position (function name / type-arg / binder)
 -- inside an otherwise-trivial function, so a failure is a minimal reproducer.
 -- Every generated name is a legal Core identifier by construction, so a failure
--- is a genuine printer/parser bug, not a generator artifact. Mirrors the probe
--- in `PlausibleTestMain.lean` (those defs live in a separate executable root and
--- can't be imported, so they're restated here).
-
-/-- The three syntactic positions an identifier can occupy in a `Function`. -/
-inductive IdentPosition where
-  | funcName
-  | typeArg
-  | binder
-  deriving Repr, DecidableEq
-
-def IdentPosition.label : IdentPosition → String
-  | .funcName => "function-name"
-  | .typeArg  => "type-arg"
-  | .binder   => "binder"
+-- is a genuine printer/parser bug, not a generator artifact. `IdentPosition` and
+-- `minimalFuncWithName` are the shared definitions from
+-- `FunctionHasTypeAGen.TestSupport`.
 
 /-- Character class of the identifier that likely triggered a failure — used as
     the panel's grouping feature so distinct mechanisms surface separately. -/
@@ -728,16 +643,6 @@ def identCharClass (name : String) : String :=
   else if name.toList.head?.map (·.isDigit) == some true then "leading-digit"
   else if name.any (fun c => c == '?' || c == '!' || c == '@') then "special"
   else "plain"
-
-/-- Build a minimal `Function` that places `name` in the given position and is
-    otherwise trivial (no body, no measure, `int` output). -/
-def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
-  let ident : Identifier Unit := ⟨name, ()⟩
-  match pos with
-  | .funcName => LFunc.mk (name := ident) (inputs := []) (output := .int)
-  | .typeArg  => LFunc.mk (name := ⟨"f", ()⟩) (typeArgs := [name]) (inputs := [])
-                   (output := .ftvar name)
-  | .binder   => LFunc.mk (name := ⟨"f", ()⟩) (inputs := [(ident, .int)]) (output := .int)
 
 structure IdentProbeResult where
   pos : IdentPosition
@@ -875,82 +780,68 @@ def genKleeneDefined : IO KleeneDefinedResult := do
   let (ss, d) ← genStmtsForTyche
   return { stmts := ss, defined := (kleeneStmts ss).isSome, genSize := d }
 
--- ── Main ──────────────────────────────────────────────────────────────
+-- ── Panel runner ────────────────────────────────────────────────────
 
-def main (args : List String) : IO Unit := do
-  let numSamples := (args[0]? >>= String.toNat?).getD 1000
-  let outputPath := (args[1]?).getD "tyche_output.jsonl"
-  IO.println s!"Generating {numSamples} samples..."
+/-- Write every Tyche panel to `handle` in JSONL format, `numSamples` samples per
+    panel. `startTime` is the run-start timestamp shared by all panels (from
+    `IO.monoMsNow`). Called by the merged test driver after the LSpec suite, unless
+    Tyche visualization is disabled via the CLI flag.
 
-  -- Every panel appends to one shared handle via `Tyche.runInto`, so there are
-  -- no per-panel temp files. `panel` fixes the shared handle / sample count /
-  -- run-start timestamp; each call just supplies a title and a generator.
-  let startTime ← IO.monoMsNow
-  let handle ← IO.FS.Handle.mk outputPath .write
+    Each panel's title comes from the shared `PropertyNames.*` catalog, and each
+    pass/fail verdict comes from the shared `check*` predicates — so a panel here
+    and its `checkIO` counterpart in the Plausible suite always agree. -/
+def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) : IO Unit := do
   let panel {α} [Tyche.TycheSample α] (title : String) (gen : IO α)
       (count : Nat := numSamples) : IO Unit :=
     Tyche.runInto handle gen title count startTime
 
-  panel "Type preservation under eval (closed terms)" genAndEval
-  panel "LExpr.eval makes progress on closed terms" genAndCheckProgress
-  panel "LExpr.eval preserves fvars" genAndCheckFvarPreservation
+  panel PropertyNames.exprPreservation genAndEval
+  panel PropertyNames.exprProgress genAndCheckProgress
+  panel PropertyNames.exprFvarsPreserved genAndCheckFvarPreservation
   -- Counterexample-focused panel: every sample here is a *counterexample* to the
   -- resolve-after-erase property (found by rejection-sampling), so the panel is
   -- densely populated with failing cases for visualization.
-  panel "Counterexamples: erase types then resolve" genResolveCounterexample
+  panel PropertyNames.exprResolveAfterErase genResolveCounterexample
 
   -- Command-level property tests (one panel each). The first four share the
-  -- `CmdPropResult` shape via `genCmdProp`; #5 has its own richer panel.
-  panel "genCmd: init var not in RHS" (genCmdProp (fun c _ => checkInitFreshNotInRhs c))
-  panel "genCmd: expressions typecheck" (genCmdProp (fun c _ => checkExprTypechecks c))
-  panel "genCmd: set preserves variable" (genCmdProp checkSetPreservesVar)
-  panel "genCmd: store type preservation under eval" (genCmdProp checkStoreTypePreservation)
-  panel "genCmd: symbolic/concrete eval agreement" genAndCheckEvalRunAgreement
+  -- `CmdPropResult` shape and a shared name↔check bundle (`Properties.cmdSingleVerdict`,
+  -- also consumed by the Plausible harness); #5 has its own richer panel.
+  for p in Properties.cmdSingleVerdict do
+    panel p.name (genCmdProp (fun c ctx => p.check (c, ctx)))
+  panel PropertyNames.cmdEvalRunAgreement genAndCheckEvalRunAgreement
 
   -- Function generator property: fvars in generated functions are annotated
   -- consistently with the context type map.
-  panel "genFunction: fvars annotated by context type map" genAndCheckFunctionFvarsAnnotated
+  panel PropertyNames.fnFvarsAnnotated genAndCheckFunctionFvarsAnnotated
   -- Function.typeCheck_annotated_sound: when typeCheck accepts a generated
   -- (spec-well-typed) function, the output satisfies the declarative spec
   -- FuncHasTypeA.
-  panel "genFunction: typeCheck output satisfies FuncHasTypeA (typeCheck_annotated_sound)"
+  panel PropertyNames.fnTypeCheckSound
     genAndCheckFunctionTypeCheckSound
   -- Typechecker COMPLETENESS (dual to the panel above). Rejected functions render
   -- as failed marks — the measure-without-body gap shows up as failures, with
   -- `measure_no_body = yes` identifying the cause.
-  panel "genFunction: typeCheck accepts generated functions (completeness)"
+  panel PropertyNames.fnTypeCheckComplete
     genAndCheckFunctionTypeCheckComplete
   -- Pretty-print / parse round-trip: format → parse → re-format is a fixed point
   -- (parse failures marked separately).
-  panel "genFunction: pretty-print/parse round-trip" genAndCheckFunctionRoundtrip
+  panel PropertyNames.fnRoundtrip genAndCheckFunctionRoundtrip
   -- Type preservation under eval (Step.type_preserved / StepStar.type_preserved /
   -- eval_denote_sound). Evaluating a function body preserves the declared output.
-  panel "genFunction: body type preserved under eval" genAndCheckFunctionBodyPreservation
+  panel PropertyNames.fnBodyPreservation genAndCheckFunctionBodyPreservation
   -- Special-character identifier round-trip: a legal identifier containing special
   -- (non-alphanumeric) characters (`genQuotedName`) in one syntactic position; a
   -- parse failure or mismatch is a minimal printer/parser bug reproducer.
-  panel "genFunction: special-character identifier round-trip" genAndCheckIdentProbe
+  panel PropertyNames.fnIdentProbe genAndCheckIdentProbe
 
   -- ── Statement generator panels (transforms + typechecker) ───────────
   -- One panel per property (#1, #3, #4, #5a, #5b, #6, #9). Each generates a
   -- well-typed statement list (proven sound+complete against `StmtsHasTypeA`) and
   -- visualizes the property's pass/fail against structural features.
-  -- Panel #1 uses the HONEST completeness predicate, so `funcDecl`-bearing
-  -- statements render as failed marks (the real spec/algorithm gap shows up as
-  -- failures, not masked). Panel #1b shows that every such rejection carries a
-  -- `funcDecl`.
-  let stmtPanels : List (String × (List Statement → Bool)) :=
-    [ ("stmt: typechecker accepts generated statements (#1)", checkTypeCheckerComplete),
-      ("stmt: LoopElim preserves typeability (#3)", checkLoopElimPreservesTyping),
-      ("stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops),
-      ("stmt: ANF is idempotent (#5a)", checkAnfIdempotent),
-      ("stmt: ANF preserves typeability (#5b)", checkAnfPreservesTyping),
-      ("stmt: mapExprs id = id (#9)", checkMapExprsId) ]
-  for (title, check) in stmtPanels do
-    panel title (genStmtProp title check)
+  -- Shared name↔check bundles (`Properties.stmtTransforms`), also consumed by the
+  -- Plausible harness, so a name is never paired with the wrong check.
+  for p in Properties.stmtTransforms do
+    panel p.name (genStmtProp p.name p.check)
 
   -- #6 gets its own richer panel (definedness + why).
-  panel "stmt: DetToKleene defined iff supported (#6)" genKleeneDefined
-
-  IO.println s!"Done! Output written to {outputPath}"
-  IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"
+  panel PropertyNames.stmtKleeneDefinedIff genKleeneDefined

@@ -1,6 +1,7 @@
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.DL.Lambda.Denote.LExprAnnotated
+import Strata.Languages.Core.FunctionType
 
 open Lambda RandomChoice Core Imperative
 
@@ -95,3 +96,86 @@ def functionFvarsAnnotatedBy (tyMap : Map (Identifier Unit) LMonoTy) (func : Fun
 def genFunctionIO (fctx : FVarCtx := defaultFCtx) (octx : OpCtx := coreOpCtx)
     (depth : Nat := 3) : IO Function :=
   genFunction (G := IO) fctx octx depth
+
+-- ── Known types and context for `Function.typeCheck` ──────────────────────
+
+/-- Known types covering all base types + type constructors the generator can
+    produce. Required for `Function.typeCheck` to resolve arrow/Map/Seq aliases. -/
+def funcCheckKnownTypes : Lambda.KnownTypes :=
+  open Lambda.LTy.Syntax in
+  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
+    t[bool], t[int], t[string], t[real], t[regex],
+    t[∀n. bitvec n],
+    t[∀a b. Map %a %b],
+    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
+
+/-- `LContext` with `intBoolFactory` and all generator-relevant known types.
+    Matches the `resolveLContext` used for expression-level tests. -/
+def funcCheckContext : Lambda.LContext CoreLParams :=
+  { Lambda.LContext.default with
+    functions := intBoolFactory,
+    knownTypes := funcCheckKnownTypes }
+
+-- ── Function property checks (shared by both harnesses) ───────────────────
+
+/-- Reflect `FuncHasTypeA` on a function via `LExpr.typeCheck`: the body (if any)
+    types at the declared output, the measure (if any) at `int`, and the input /
+    type-argument lists are duplicate-free. -/
+def checkFuncHasTypeA (func : Function) : Bool :=
+  let bodyOk := match func.body with
+    | some b => LExpr.typeCheck (T := CoreLParams) [] b == some func.output
+    | none => true
+  let measureOk := match func.measure with
+    | some m => LExpr.typeCheck (T := CoreLParams) [] m == some .int
+    | none => true
+  bodyOk && measureOk && decide (func.inputs.keys.Nodup) && decide (func.typeArgs.Nodup)
+
+/-- `Function.typeCheck` soundness (`typeCheck_annotated_sound`): when `typeCheck`
+    accepts, its output satisfies the declarative spec `FuncHasTypeA`. When
+    `typeCheck` rejects (e.g. measure-without-body, which the spec allows but the
+    algorithm forbids), this is a vacuous pass — the property asserts soundness,
+    not completeness. -/
+def checkTypeCheckAnnotatedSound (func : Function) : Bool :=
+  match Function.typeCheck funcCheckContext TEnv.default func with
+  | .ok (func', _) => checkFuncHasTypeA func'
+  | .error _ => true
+
+/-- Type preservation under evaluation (`Step.type_preserved` /
+    `StepStar.type_preserved` / `eval_denote_sound`): if a function has a body,
+    evaluating it preserves the declared output type. A bodiless function passes
+    vacuously. -/
+def checkFunctionBodyPreservation (func : Function) : Bool :=
+  match func.body with
+  | some body => LExpr.typeCheck (T := CoreLParams) [] (eval 100 body) == some func.output
+  | none => true
+
+-- ── Special-character identifier probe (shared by both harnesses) ─────────
+-- The full-function round-trip bundles a name, typeargs, types, a body, etc., so
+-- a failure can't be attributed to one cause. This probe isolates a single
+-- generated identifier in one syntactic position at a time inside an otherwise-
+-- trivial function, so a failure yields a minimal reproducer.
+
+/-- The three syntactic positions an identifier can occupy in a `Function`. -/
+inductive IdentPosition where
+  | funcName
+  | typeArg
+  | binder
+  deriving Repr, DecidableEq
+
+def IdentPosition.label : IdentPosition → String
+  | .funcName => "function-name"
+  | .typeArg  => "type-arg"
+  | .binder   => "binder"
+
+/-- Build a minimal `Function` that places `name` in the given position and is
+    otherwise trivial (no body, no measure, `int` output). For `typeArg`, the name
+    is also referenced as the output type (`ftvar name`) so it appears in a use
+    position, not just its binding. For `binder`, the single input uses the name
+    as its parameter identifier at type `int`. -/
+def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
+  let ident : Identifier Unit := ⟨name, ()⟩
+  match pos with
+  | .funcName => LFunc.mk (name := ident) (inputs := []) (output := .int)
+  | .typeArg  => LFunc.mk (name := ⟨"f", ()⟩) (typeArgs := [name]) (inputs := [])
+                   (output := .ftvar name)
+  | .binder   => LFunc.mk (name := ⟨"f", ()⟩) (inputs := [(ident, .int)]) (output := .int)

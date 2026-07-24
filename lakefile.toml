@@ -29,13 +29,10 @@ globs = ["StrataGenerators.*"]
 name = "strata-generators"
 root = "Main"
 
-# Tyche visualization executable (uses HasTypeAGen)
-[[lean_exe]]
-name = "tyche-viz"
-root = "TycheMain"
-
-# Property-based test executable (exercises the expr/command/function/statement
-# generators via Plausible + LSpec). Registered as the `lake test` driver above.
+# The single merged test driver (registered as the `lake test` driver above). It
+# exercises the expr/command/function/statement generators via Plausible + LSpec
+# and — unless `--no-tyche` is passed — also writes Tyche visualization panels.
+# Run: `lake test -- [numTrials] [maxSize] [--no-tyche] [--tyche-out=PATH] [--tyche-samples=N]`
 [[lean_exe]]
 name = "test"
-root = "PlausibleTestMain"
+root = "TestMain"

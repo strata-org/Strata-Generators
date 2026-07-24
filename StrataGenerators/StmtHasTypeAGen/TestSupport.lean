@@ -13,8 +13,9 @@ open StrataGenerators.Stmt
 /-!
 # Shared test support for the `StmtHasTypeAGen` generator
 
-Utilities shared between `PlausibleTestMain` and `TycheMain` for property-based
-testing of `genStmt` / `genStmts` (defined in `StmtHasTypeAGen/Core.lean`), which
+Utilities shared between the LSpec property suite and the Tyche panels (both in
+the merged `TestMain` driver) for property-based testing of `genStmt` / `genStmts`
+(defined in `StmtHasTypeAGen/Core.lean`), which
 generate random well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
 `StmtHasTypeA` / `StmtsHasTypeA` typing relations. The generator is proven both

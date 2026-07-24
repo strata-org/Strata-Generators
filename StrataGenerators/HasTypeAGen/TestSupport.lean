@@ -1,5 +1,6 @@
 import StrataGenerators.HasTypeAGen.Defs
 import Strata.DL.Lambda.LExprEval
+import Strata.DL.Lambda.LExprT
 import Strata.DL.Lambda.IntBoolFactory
 
 open Lambda
@@ -7,9 +8,9 @@ open Lambda
 /-!
 # Shared test support for the `HasTypeA` generator
 
-Utilities shared between `PlausibleTestMain` and `TycheMain`: the default
-free-variable context, the operator context from `IntBoolFactory`, the
-evaluator wrapper, and the value predicate.
+Utilities shared between the LSpec property suite and the Tyche panels (both in
+the merged `TestMain` driver): the default free-variable context, the operator
+context from `IntBoolFactory`, the evaluator wrapper, and the value predicate.
 -/
 
 -- ── Pretty-printers ────────────────────────────────────────────────────
@@ -186,3 +187,87 @@ def eval (fuel : Nat) (e : LExpr') : LExpr' :=
 /-- Check whether an expression is a canonical value under `IntBoolFactory`. -/
 def isValue (e : LExpr') : Bool :=
   LExpr.isCanonicalValue intBoolState.config.factory e
+
+-- ── Expression property checks (shared by both harnesses) ────────────────
+-- The pass/fail decision for each expression-generator property lives here so
+-- the Plausible assertion and the Tyche panel evaluate the *same* function.
+
+/-- Preservation (closed terms): a well-typed closed term stays well-typed at the
+    same type after evaluation. `expectedTy` is the type it was generated at. -/
+def checkPreservation (expr : LExpr') (expectedTy : LMonoTy) : Bool :=
+  LExpr.typeCheck (T := LExprParams') [] (eval 100 expr) == some expectedTy
+
+/-- Progress (closed terms): a well-typed closed term is either already a value
+    or takes a step under evaluation. -/
+def checkProgress (expr : LExpr') : Bool :=
+  isValue expr || !(expr == eval 100 expr)
+
+/-- Fvar preservation: evaluation introduces no free variables that were not
+    already present in the input term. -/
+def checkFvarsPreserved (expr : LExpr') : Bool :=
+  let inputFvars := LExpr.collectFvarNames expr
+  (LExpr.collectFvarNames (eval 100 expr)).all (· ∈ inputFvars)
+
+-- ── Resolve-after-erasure property (shared by both harnesses) ─────────────
+
+/-- Known types covering all base types the generator can produce. Required for
+    `LExpr.resolve` to reconstruct arrow/Map/Seq aliases after erasure. -/
+def resolveKnownTypes : Lambda.KnownTypes :=
+  open Lambda.LTy.Syntax in
+  Lambda.makeKnownTypes ([t[∀a b. %a → %b],
+    t[bool], t[int], t[string], t[real], t[regex],
+    t[∀n. bitvec n],
+    t[∀a b. Map %a %b],
+    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
+
+/-- `LContext` with `intBoolFactory` and all generator-relevant known types. -/
+def resolveLContext : Lambda.LContext LExprParams' :=
+  { Lambda.LContext.default with
+    functions := intBoolFactory,
+    knownTypes := resolveKnownTypes }
+
+/-- The operator context of `intBoolFactory`, used to *generate* the terms whose
+    types are erased and re-inferred by the resolve-after-erase property. -/
+def intBoolOpCtx : OpCtx := factoryOps intBoolFactory
+
+/-- Erase *all* type annotations on an `LExpr`, including the binder-type
+    annotations on lambdas (`abs`) and quantifiers (`quant`). After this, no node
+    carries a type, so `resolve` must reconstruct every type from scratch via
+    unification. -/
+def eraseAllTypes : LExpr' → LExpr'
+  | .const m c => .const m c
+  | .op m o _ => .op m o none
+  | .fvar m x _ => .fvar m x none
+  | .bvar m i => .bvar m i
+  | .abs m name _ e => .abs m name none (eraseAllTypes e)
+  | .quant m qk name _ tr e => .quant m qk name none (eraseAllTypes tr) (eraseAllTypes e)
+  | .app m e1 e2 => .app m (eraseAllTypes e1) (eraseAllTypes e2)
+  | .ite m c t f => .ite m (eraseAllTypes c) (eraseAllTypes t) (eraseAllTypes f)
+  | .eq m e1 e2 => .eq m (eraseAllTypes e1) (eraseAllTypes e2)
+
+/-- Whether the ground type `target` is a substitution instance of the (possibly
+    more general) inferred type `inferred`. Because `target` has no free type
+    variables, unifying the two can only substitute into `inferred`'s variables,
+    so success exactly witnesses that `inferred` generalizes `target`. This also
+    abstracts over the *names* of the fresh type variables `resolve` introduces,
+    so the comparison is up to alpha-equivalence. -/
+def isInstanceOf (target inferred : LMonoTy) : Bool :=
+  match Lambda.Constraints.unify [(inferred, target)] Lambda.SubstInfo.empty with
+  | .ok _ => true
+  | .error _ => false
+
+/-- Re-infer the type of `expr` after erasing all annotations. `none` when
+    `resolve` errors (e.g. on a fully-erased quantifier whose body type is the
+    bound variable — an incompleteness of `resolve`, not a soundness bug). -/
+def resolveErasedTy (expr : LExpr') : Option LMonoTy :=
+  match LExpr.resolve resolveLContext Lambda.TEnv.default (eraseAllTypes expr) with
+  | .ok (resolved, _) => some resolved.toLMonoTy
+  | .error _ => none
+
+/-- Resolve-after-erase property: after erasing all annotations, `resolve`
+    succeeds and infers a type the generation type `expectedTy` is an instance of.
+    (A `resolve` failure is scored as a counterexample — see `resolveErasedTy`.) -/
+def checkResolveAfterErase (expr : LExpr') (expectedTy : LMonoTy) : Bool :=
+  match resolveErasedTy expr with
+  | some inferred => isInstanceOf expectedTy inferred
+  | none => false
