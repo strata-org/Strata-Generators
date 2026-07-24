@@ -33,8 +33,9 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 ## Dependencies
 
 - `Strata`
-- `Basalt`
-- `Plausible`
+- `Basalt` (used for proving generators correct)
+- `Plausible` (used to run generators)
+- `LSpec` (Lean testing framework, we use LSpec's test harnesses to run tests)
 
 ## Building
 
@@ -48,27 +49,22 @@ in the same file, as `List.Forall₂` is defined by both libraries.
    lake build
    ```
 
-### Makefile targets
+## Running tests using these generators 
 
-| Target | Description |
-|--------|-------------|
-| `lake build` | Build all Lean sources |
-| `make tyche` | Build and run the test driver *with* Tyche visualizations |
-| `make test` | Build and run the test suite (skips Tyche visualizations) |
+To run a test executable, which tests a variety of properties using these Strata Core generators,
+run `lake test`. 
 
-## Property-based testing
+This executable runs a Plausible test suite via LSpec, and visualizes test results using [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
+inspecting property-based testing generators.
 
-A single executable test driver exercises the generators in two complementary
-ways from one run: the Plausible + LSpec property suite, and (by default) the
-Tyche visualization panels. Run `lake test` (or `make test`) to execute it. If
-you want to manually configure the no. of trials / size of inputs, you can pass
+If you want to manually configure the no. of trials / size of inputs, you can pass
 them through to the test driver after `--`:
 
 ```bash
 lake test -- [numTrials] [maxSize] [flags]
 ```
 
-Alternatively, build and run the executable directly:
+Alternatively, you can also build & run the test executable directly as follows:
 
 ```bash
 lake build test
@@ -79,30 +75,17 @@ lake build test
 - `maxSize` (default: 100) — maximum size parameter for generation (controls
   the depth of the generated AST)
 
-Flags (all optional; the Tyche visualization pass is **on by default**):
+Flags (all optional; the Tyche visualization pass is on by default):
 
 - `--no-tyche` — skip the Tyche visualization pass (property tests only)
 - `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`)
 - `--tyche-samples=N` — samples per Tyche panel (default 1000)
 
-The exit code is always the LSpec verdict; the Tyche pass never affects it.
-
-The harness exercises properties across all four generators — expression
-type-safety (typecheck, preservation, progress, type-erasure round-trip),
-command well-typedness and store-type preservation, function typechecking and
-soundness of `Function.typeCheck`, and statement-transform passes (LoopElim,
-ANF, DetToKleene). Expression generation covers both **open terms** (free
-variables from a fixed context: `x : bool`, `f : int -> bool`, `n : int`) and
-**closed terms**, using operators from `IntBoolFactory`.
-
-A few properties are *expected* to find counterexamples — for instance,
-`progress` and `normalization`: `LExpr.eval` gets stuck on quantifiers in
-condition position (e.g. `if (forall x. e) then ...`) and on equality of
-lambdas with non-identical bodies. 
+See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of properties tested.
 
 ## Tyche visualization
 
-Visualize the generators' output distributions with
+One can visualize the generators' output distributions with
 [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
 inspecting property-based testing generators.
 
@@ -116,7 +99,7 @@ lake build test
 .lake/build/bin/test [numTrials] [maxSize]
 ```
 
-Use the Tyche flags to control the output (or `make tyche` for the defaults):
+Use these CLI flags to control the output:
 
 - `--tyche-samples=N` (default: 1000) — number of samples per generator
 - `--tyche-out=PATH` (default: `tyche_output.jsonl`) — output file path
