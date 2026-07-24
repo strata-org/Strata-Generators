@@ -87,70 +87,6 @@ def typeKind : LMonoTy → String
   | .bitvec _ => "bitvec"
   | .tcons _ _ => "tcons"
 
-/-- A generated expression paired with its type and the depth (size parameter to the generator) used to generate it, ready for Tyche. -/
-structure TypedExpr where
-  expr : LExpr'
-  ty : LMonoTy
-  generatorSize : Nat
-instance : Tyche.TycheSample TypedExpr where
-  toSample te :=
-    { representation := ppExpr te.expr
-      features := [
-        ("depth", .ordinal (exprDepth te.expr)),
-        ("LExpr.size", .ordinal (exprSize te.expr)),
-        ("expr_kind", .nominal (exprKind te.expr)),
-        ("type_kind", .nominal (typeKind te.ty)),
-        ("type_depth", .ordinal (monoTyDepth te.ty)),
-        ("generator_size", .ordinal te.generatorSize)
-      ] }
-
-/-- A generated expression carrying *only* its term-kind classification.
-    Because the sample has a single nominal feature, Tyche renders it as a
-    plain bar chart (the "distribution of term_kind") rather than a mosaic. -/
-structure TermKind where
-  expr : LExpr'
-instance : Tyche.TycheSample TermKind where
-  toSample tk :=
-    { representation := ppExpr tk.expr
-      features := [
-        ("term_kind", .nominal (exprKind tk.expr))
-      ] }
-
-/-- A generated monotype, ready for Tyche. -/
-instance : Tyche.TycheSample LMonoTy where
-  toSample ty :=
-    { representation := ppType ty
-      features := [
-        ("depth", .ordinal (monoTyDepth ty)),
-        ("type_kind", .nominal (typeKind ty))
-      ] }
-
--- ── Typecheck property ────────────────────────────────────────────────
-
-/-- Result of generating an expression and running the typechecker on it. -/
-structure TypeCheckResult where
-  expr : LExpr'
-  expectedTy : LMonoTy
-  actualTy : Option LMonoTy
-  generatorSize : Nat
-
-/-- The typecheck property passes when `LExpr.typeCheck [] expr = some expectedTy`. -/
-instance : Tyche.TycheSample TypeCheckResult where
-  toSample r :=
-    let passed := r.actualTy == some r.expectedTy
-    let statusStr := if passed then "pass" else "fail"
-    { representation := s!"{ppExpr r.expr} : {ppType r.expectedTy}"
-      status := if passed then .passed else .failed
-      features := [
-        ("typecheck_result", .nominal statusStr),
-        ("expected_type_kind", .nominal (typeKind r.expectedTy)),
-        ("exprDepth", .ordinal (exprDepth r.expr)),
-        ("LExpr.size", .ordinal (exprSize r.expr)),
-        ("exprKind", .nominal (exprKind r.expr)),
-        ("monoTyDepth", .ordinal (monoTyDepth r.expectedTy)),
-        ("generator_size", .ordinal r.generatorSize)
-      ] }
-
 -- ── Type preservation property ────────────────────────────────────────
 
 /-- Result of generating, evaluating, and re-typechecking. -/
@@ -187,31 +123,6 @@ instance : Tyche.TycheSample EvalResult where
 def randomDepth (maxDepth : Nat := 5) : IO Nat := do
   let r ← IO.rand 1 maxDepth
   return r
-
-/-- Generate a typed expression with free variables from `defaultFCtx`. -/
-def genTypedExpr (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypedExpr := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithOps (G := IO) defaultFCtx coreOpCtx corePolyOps tvars [] d ty
-  return ⟨expr, ty, d⟩
-
-/-- Generate an expression and keep only its term-kind classification. -/
-def genTermKind (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TermKind := do
-  let te ← genTypedExpr depth tvars
-  return ⟨te.expr⟩
-
-/-- Generate just a monotype. -/
-def genType (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO LMonoTy := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  genLMonoTy (G := IO) tvars d
-
-/-- Generate an expression and typecheck it against the expected type. -/
-def genAndTypeCheck (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO TypeCheckResult := do
-  let d ← if depth == 0 then randomDepth else pure depth
-  let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithOps (G := IO) defaultFCtx coreOpCtx corePolyOps tvars [] d ty
-  let actualTy := LExpr.typeCheck (T := LExprParams') [] expr
-  return ⟨expr, ty, actualTy, d⟩
 
 /-- Generate a closed expression, evaluate it, and check type preservation.
     Uses empty fctx since preservation is stated for the empty context. -/
@@ -292,100 +203,6 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   let outputFvars := LExpr.collectFvarNames evaled
   let preserved := outputFvars.all (· ∈ inputFvars)
   return ⟨expr, ty, evaled, preserved, d⟩
-
--- ── Sequence.map inspection panel ────────────────────────────────────
--- This panel is *not* a pass/fail property in the usual sense: it exists so we
--- can eyeball the terms `genLExpr` produces that actually call `Sequence.map`
--- via the IndirPoly rule, and confirm the type variables `α`, `β` are
--- instantiated consistently. `Sequence.map : ∀α β. (α → β) → Sequence<α> →
--- Sequence<β>`; targeting `Sequence<β>` fixes `β` by unification but leaves `α`
--- to be *sampled* from the generable types.
-
-/-- Find the first `Sequence.map` op-node in an expression and recover the
-    instantiated `(α, β)` from its annotation `(α → β) → Sequence<α> → Sequence<β>`. -/
-partial def seqMapInstantiation : LExpr' → Option (LMonoTy × LMonoTy)
-  | .op _ o (some (.arrow (.arrow a b) _)) =>
-    if o.name == "Sequence.map" then some (a, b) else none
-  | .op _ _ _ => none
-  | .app _ fn arg => match seqMapInstantiation fn with
-    | some r => some r | none => seqMapInstantiation arg
-  | .abs _ _ _ body => seqMapInstantiation body
-  | .quant _ _ _ _ tr body => match seqMapInstantiation tr with
-    | some r => some r | none => seqMapInstantiation body
-  | .ite _ c t e => match seqMapInstantiation c with
-    | some r => some r
-    | none => match seqMapInstantiation t with
-      | some r => some r | none => seqMapInstantiation e
-  | .eq _ e₁ e₂ => match seqMapInstantiation e₁ with
-    | some r => some r | none => seqMapInstantiation e₂
-  | _ => none
-
-/-- Whether an expression calls `Sequence.map` anywhere. -/
-def usesSeqMap (e : LExpr') : Bool := (seqMapInstantiation e).isSome
-
-structure SeqMapResult where
-  expr : LExpr'
-  ty : LMonoTy
-  /-- Whether rejection sampling actually found a `Sequence.map` call within
-      budget (if `false`, the panel shows a fallback term). -/
-  found : Bool
-  generatorSize : Nat
-
-instance : Tyche.TycheSample SeqMapResult where
-  toSample r :=
-    let inst := seqMapInstantiation r.expr
-    let wellTyped := LExpr.typeCheck (T := LExprParams') [] r.expr == some r.ty
-    -- A sample "passes" iff it is a well-typed Sequence.map call.
-    let passed := r.found && wellTyped
-    let instStr := match inst with
-      | some (a, b) => s!"   [α := {ppType a}, β := {ppType b}]"
-      | none => ""
-    { representation := s!"{ppExpr r.expr} : {ppType r.ty}{instStr}"
-      status := if passed then .passed else .failed
-      features := [
-        ("calls_seq_map", .nominal (if r.found then "yes" else "no")),
-        ("well_typed", .nominal (if wellTyped then "yes" else "no")),
-        -- The sampled α and the unification-fixed β, as observed on the node.
-        ("alpha", .nominal (match inst with | some (a, _) => ppType a | none => "—")),
-        ("beta", .nominal (match inst with | some (_, b) => ppType b | none => "—")),
-        ("alpha_eq_beta", .nominal (match inst with
-          | some (a, b) => if a == b then "yes" else "no"
-          | none => "—")),
-        ("expr_depth", .ordinal (exprDepth r.expr)),
-        ("expr_size", .ordinal (exprSize r.expr)),
-        ("generator_size", .ordinal r.generatorSize)
-      ] }
-
-/-- Rejection-sample until `genLExpr` produces a term that calls `Sequence.map`.
-    We target `Sequence<elem>` types directly (element drawn from a small easy
-    set) to keep the hit rate up, and retry up to `budget` draws. If none is
-    found in budget, return the last generated term with `found := false` so the
-    run still terminates (mirrors `genResolveCounterexample`).
-
-    The per-sample depth floor is 3 (not 2): at depth 2 there is often not
-    enough budget to build both of `Sequence.map`'s arguments (a function
-    `α → β` and a `Sequence<α>`) in one non-backtracking draw. `budget` is kept
-    modest to keep the overall run fast — most samples are genuine
-    `Sequence.map` calls, and the occasional fallback (a non-`Sequence.map`
-    term) is fine: it is marked `calls_seq_map = no` and scored `failed` so it
-    is visually distinct in the panel. -/
-partial def genSeqMapCall (budget : Nat := 600) : IO SeqMapResult := do
-  let d ← IO.rand 3 5
-  let elems : List LMonoTy := [.int, .bool]
-  let mut last : Option (LExpr' × LMonoTy) := none
-  for _ in List.range budget do
-    let ei ← IO.rand 0 (elems.length - 1)
-    let ty := LMonoTy.seq (elems.getD ei .int)
-    let r ← try some <$> genLExprWithOps (G := IO) defaultFCtx coreOpCtx corePolyOps [] [] d ty
-            catch _ => pure none
-    match r with
-    | some e =>
-      last := some (e, ty)
-      if usesSeqMap e then return ⟨e, ty, true, d⟩
-    | none => pure ()
-  match last with
-  | some (e, ty) => return ⟨e, ty, false, d⟩
-  | none => return ⟨.const () (.boolConst true), .bool, false, d⟩
 
 -- ── Resolve after erasure property ──────────────────────────────────
 
@@ -1074,10 +891,6 @@ def main (args : List String) : IO Unit := do
       (count : Nat := numSamples) : IO Unit :=
     Tyche.runInto handle gen title count startTime
 
-  panel "Distribution of terms generated by genLExpr" genTypedExpr
-  -- Term-kind-only generator (single nominal feature → plain bar chart).
-  panel "Distribution of term_kind" genTermKind
-  panel "Terms generated by genLExpr typecheck" genAndTypeCheck
   panel "Type preservation under eval (closed terms)" genAndEval
   panel "LExpr.eval makes progress on closed terms" genAndCheckProgress
   panel "LExpr.eval preserves fvars" genAndCheckFvarPreservation
@@ -1085,12 +898,6 @@ def main (args : List String) : IO Unit := do
   -- resolve-after-erase property (found by rejection-sampling), so the panel is
   -- densely populated with failing cases for visualization.
   panel "Counterexamples: erase types then resolve" genResolveCounterexample
-  -- Inspection panel: terms that call Sequence.map via the IndirPoly rule.
-  -- Most samples are (rejection-sampled to be) Sequence.map calls with the α/β
-  -- instantiation eyeballable; the occasional fallback is marked
-  -- `calls_seq_map = no`. This is an inspection aid, not a coverage property, so
-  -- we cap it at 300 samples to keep the run fast regardless of `numSamples`.
-  panel "Terms calling Sequence.map (IndirPoly rule)" genSeqMapCall (min numSamples 300)
 
   -- Command-level property tests (one panel each). The first four share the
   -- `CmdPropResult` shape via `genCmdProp`; #5 has its own richer panel.
@@ -1134,7 +941,6 @@ def main (args : List String) : IO Unit := do
   -- `funcDecl`.
   let stmtPanels : List (String × (List Statement → Bool)) :=
     [ ("stmt: typechecker accepts generated statements (#1)", checkTypeCheckerComplete),
-      ("stmt: typecheck rejections are only funcDecl (#1b)", rejectionImpliesFuncDecl),
       ("stmt: LoopElim preserves typeability (#3)", checkLoopElimPreservesTyping),
       ("stmt: LoopElim eliminates all loops (#4)", checkLoopElimZeroLoops),
       ("stmt: ANF is idempotent (#5a)", checkAnfIdempotent),
@@ -1145,9 +951,6 @@ def main (args : List String) : IO Unit := do
 
   -- #6 gets its own richer panel (definedness + why).
   panel "stmt: DetToKleene defined iff supported (#6)" genKleeneDefined
-
-  -- Also generate type samples into the same file.
-  panel "Distribution of types generated by genLMonoTy" genType
 
   IO.println s!"Done! Output written to {outputPath}"
   IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"

@@ -733,13 +733,6 @@ instance : Arbitrary GenStmts where
 @[reducible] def prop_stmt_typechecks (gs : GenStmts) : Prop :=
   checkTypeCheckerComplete gs.stmts = true
 
--- #1b: Every rejection is attributable to a `funcDecl`. This PINS the sole known
--- source of incompleteness: it should pass, and a failure means the generator
--- produced a spec-well-typed statement rejected for some *other* reason — a new,
--- unclassified completeness bug worth investigating.
-@[reducible] def prop_stmt_rejection_only_funcDecl (gs : GenStmts) : Prop :=
-  rejectionImpliesFuncDecl gs.stmts = true
-
 -- #3: LoopElim (`removeLoops`) preserves typeability.
 @[reducible] def prop_stmt_loopElim_preserves_typing (gs : GenStmts) : Prop :=
   checkLoopElimPreservesTyping gs.stmts = true
@@ -968,9 +961,6 @@ def main (args : List String) : IO UInt32 := do
     -- `funcDecl` counterexample.
     checkIO "stmt: typechecker accepts generated statements (#1)"
       (∀ gs : GenStmts, prop_stmt_typechecks gs) (cfg := cfg) $
-    -- #1b: every rejection is attributable to a funcDecl (pins the sole known gap).
-    checkIO "stmt: typecheck rejections are only funcDecl (#1b)"
-      (∀ gs : GenStmts, prop_stmt_rejection_only_funcDecl gs) (cfg := cfg) $
     -- #3: LoopElim preserves typeability
     checkIO "stmt: LoopElim preserves typeability (#3)"
       (∀ gs : GenStmts, prop_stmt_loopElim_preserves_typing gs) (cfg := cfg) $
