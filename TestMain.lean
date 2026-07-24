@@ -1,4 +1,4 @@
-import StrataGenerators.PropertyNames
+import StrataGenerators.Properties
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
@@ -347,7 +347,7 @@ instance : Arbitrary GenCmdsWithCtx where
 
 -- The four single-verdict command properties — init-fresh, expr-typechecks,
 -- set-preserves-var, store-type-preservation — are defined by the shared
--- `Properties.cmdSingleVerdict` bundle (see `StrataGenerators.PropertyNames`),
+-- `Properties.cmdSingleVerdict` bundle (see `StrataGenerators.Properties`),
 -- which pairs each name with its check in one place, so they are folded directly
 -- into `cmdSuite` below rather than restated as `prop_*` wrappers here.
 
@@ -584,7 +584,7 @@ instance : Arbitrary GenStmts where
 
 -- The six statement-transform / typechecker properties (#1, #3, #4, #5a, #5b, #9)
 -- are defined by the shared `Properties.stmtTransforms` bundle (see
--- `StrataGenerators.PropertyNames`), which pairs each name with its check in one
+-- `StrataGenerators.Properties`), which pairs each name with its check in one
 -- place, so they are folded directly into `stmtSuite` below rather than restated
 -- as `prop_*` wrappers here. Only #6 keeps a wrapper — its Tyche panel records
 -- extra breakdown, so it is not part of the shared bundle.

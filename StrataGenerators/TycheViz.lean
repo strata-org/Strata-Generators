@@ -1,5 +1,5 @@
 import StrataGenerators.Tyche
-import StrataGenerators.PropertyNames
+import StrataGenerators.Properties
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
