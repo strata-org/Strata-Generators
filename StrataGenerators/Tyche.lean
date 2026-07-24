@@ -1,4 +1,5 @@
 import Basalt.IO
+import Lean.Data.Json
 
 /-!
 # Tyche Visualization Support
@@ -22,6 +23,8 @@ Each line in the output file is a JSON object with `type: "test_case"`:
 2. Call `Tyche.run` with a generator action and output path.
 3. Open the resulting `.jsonl` file with Tyche (`Tyche: Open` in VS Code).
 -/
+
+open Lean (Json JsonNumber)
 
 namespace Tyche
 
@@ -53,35 +56,28 @@ structure Sample where
 class TycheSample (α : Type) where
   toSample : α → Sample
 
-private def escapeJson (s : String) : String :=
-  s.foldl (fun acc c =>
-    match c with
-    | '"' => acc ++ "\\\""
-    | '\\' => acc ++ "\\\\"
-    | '\n' => acc ++ "\\n"
-    | '\t' => acc ++ "\\t"
-    | c => acc.push c) ""
+def Status.toJson : Status → Json
+  | .passed => "passed"
+  | .failed => "failed"
+  | .gaveUp => "gave_up"
 
-def Status.toJson : Status → String
-  | .passed => "\"passed\""
-  | .failed => "\"failed\""
-  | .gaveUp => "\"gave_up\""
-
-def Feature.toJson : Feature → String
-  | .ordinal v => toString v
-  | .nominal v => s!"\"{escapeJson v}\""
-  | .continuous v => toString v
-
-private def featuresJson (features : List (String × Feature)) : String :=
-  let pairs := features.map fun (k, v) =>
-    s!"\"{k}\":{Feature.toJson v}"
-  "{" ++ String.intercalate "," pairs ++ "}"
+def Feature.toJson : Feature → Json
+  | .ordinal v => Json.num (JsonNumber.fromInt v)
+  | .nominal v => Json.str v
+  | .continuous v => Lean.toJson v
 
 /-- Serialize a sample as one line of Tyche JSONL. -/
 def Sample.toJsonLine (s : Sample) (property : String) (runStart : Nat) : String :=
-  let repr := escapeJson s.representation
-  let reason := escapeJson s.statusReason
-  s!"\{\"type\":\"test_case\",\"run_start\":{runStart},\"property\":\"{property}\",\"status\":{Status.toJson s.status},\"status_reason\":\"{reason}\",\"representation\":\"{repr}\",\"features\":{featuresJson s.features},\"coverage\":null}"
+  Json.compress <| Json.mkObj [
+    ("type", "test_case"),
+    ("run_start", Json.num (JsonNumber.fromNat runStart)),
+    ("property", property),
+    ("status", s.status.toJson),
+    ("status_reason", s.statusReason),
+    ("representation", s.representation),
+    ("features", Json.mkObj (s.features.map fun (k, v) => (k, v.toJson))),
+    ("coverage", Json.null)
+  ]
 
 /-- Configuration for a Tyche run. -/
 structure Config where
