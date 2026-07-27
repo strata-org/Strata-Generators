@@ -174,8 +174,11 @@ def IdentPosition.label : IdentPosition → String
     as its parameter identifier at type `int`. -/
 def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
   let ident : Identifier Unit := ⟨name, ()⟩
+  -- `Function` aliases the decidable base `LFuncDefined` (no `concreteEval`) after
+  -- Strata's `76933e8b` split, so build the bare record directly rather than via
+  -- `LFunc.mk` (which constructs the fuller `LFunc`).
   match pos with
-  | .funcName => LFunc.mk (name := ident) (inputs := []) (output := .int)
-  | .typeArg  => LFunc.mk (name := ⟨"f", ()⟩) (typeArgs := [name]) (inputs := [])
-                   (output := .ftvar name)
-  | .binder   => LFunc.mk (name := ⟨"f", ()⟩) (inputs := [(ident, .int)]) (output := .int)
+  | .funcName => { name := ident, inputs := [], output := .int }
+  | .typeArg  => { name := ⟨"f", ()⟩, typeArgs := [name], inputs := [],
+                   output := .ftvar name }
+  | .binder   => { name := ⟨"f", ()⟩, inputs := [(ident, .int)], output := .int }

@@ -399,7 +399,9 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hConstr : func.isConstr = false)
     (hRec : func.isRecursive = false)
     (hAttr : func.attr = #[])
-    (hEval : func.concreteEval = none)
+    -- (Strata's `76933e8b` split moved the function-typed `concreteEval` off the
+    -- base `Func`, so `Function` no longer has that field and the former
+    -- `func.concreteEval = none` hypothesis is gone.)
     (hAxioms : func.axioms = [])
     (hPre : func.preconditions = [])
     -- reachability of the generated components:
@@ -439,10 +441,10 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     exact genOptExpr_complete fctx octx func.typeArgs depth .int func.measure hMeasureReach
   · -- the reassembled record equals `func`
     obtain ⟨fname, ftyArgs, fconstr, frec, finputs, foutput, fbody, fattr,
-            feval, faxioms, fpre, fmeasure⟩ := func
+            faxioms, fpre, fmeasure⟩ := func
     obtain ⟨nm, nmeta⟩ := fname
-    simp only at hConstr hRec hAttr hEval hAxioms hPre ⊢
-    subst hConstr hRec hAttr hEval hAxioms hPre
+    simp only at hConstr hRec hAttr hAxioms hPre ⊢
+    subst hConstr hRec hAttr hAxioms hPre
     rfl
 
 -- ── Function-level keyword-freedom ───────────────────────────────────

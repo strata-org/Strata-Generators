@@ -129,12 +129,13 @@ def hasKleeneUnsupported (ss : List Statement) : Bool :=
 def hasInvLoopStmts (ss : List Statement) : Bool :=
   countStmtsByList (fun | .loop _ _ inv _ _ => !inv.isEmpty | _ => false) ss != 0
 
-/-- Structural equality on statement lists via their canonical pretty-print.
-    `Statement` has no `BEq`/`DecidableEq` instance, so — following the codebase's
-    own `StrataTest/Transform/DetToKleene.lean` convention — we compare through
-    `Std.format`. -/
+/-- Structural equality on statement lists, via Strata's `DecidableEq (Stmt …)`
+    instance (added in `strata-org/Strata` commit `496bba7`). This compares the
+    ASTs directly rather than their pretty-printed forms, which is exact where
+    the old `Std.format`-based comparison was brittle (distinct ASTs can share a
+    rendering, and `funcDecl` bodies in particular do not round-trip). -/
 def stmtsEq (ss ss' : List Statement) : Bool :=
-  (Std.format ss).pretty == (Std.format ss').pretty
+  decide (ss = ss')
 
 mutual
 /-- Collect a `[body=…, measure=…]` tag for every `funcDecl` node anywhere in a

@@ -6,7 +6,7 @@ testDriver = "test"
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "1d858fb03"
+rev = "7f94d01f"
 
 [[require]]
 name = "basalt"

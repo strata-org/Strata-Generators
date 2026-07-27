@@ -133,7 +133,6 @@ def Function.toPureFuncDecl (f : Function) : Imperative.PureFunc Expression :=
     output := (.forAll [] f.output : LTy),
     body := f.body,
     attr := f.attr,
-    concreteEval := none,
     axioms := f.axioms,
     preconditions := f.preconditions,
     measure := f.measure }
@@ -216,7 +215,7 @@ def genFuncDeclStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult := do
   let decl ← genDecl fctx octx depth
   let func ← genFunction fctx octx depth
-  pure ⟨Stmt.funcDecl decl default, C.addFactoryFunction func, ctx⟩
+  pure ⟨Stmt.funcDecl decl default, C.addFactoryFunction func.toLFunc, ctx⟩
 
 /-- Generate a `typeDecl` statement. A random `TypeConstructor` is generated and
     checked against `C` via `addKnownTypeWithError`. On success the output context
