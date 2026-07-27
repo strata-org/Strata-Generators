@@ -87,6 +87,26 @@ Flags (all optional; the Tyche visualization pass is on by default):
 
 See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of properties tested.
 
+### LSpec-free harness (`test-plain`)
+
+There is a second test executable, `test-plain`, that runs the exact same
+properties without depending on LSpec, to evaluate whether the LSpec dependency
+could be dropped. It shares all its properties, generators, and CLI with the
+LSpec driver via [`TestScaffold.lean`](./StrataGenerators/TestScaffold.lean), and
+runs them through a small Plausible-only harness
+([`PlainHarness.lean`](./StrataGenerators/PlainHarness.lean)) instead of LSpec:
+
+```bash
+lake build test-plain
+.lake/build/bin/test-plain [numTrials] [maxSize] [--smt]
+```
+
+It accepts the same positional args and `--smt` flag, reports the same pass/fail
+verdicts and exit code as `test`, and prints a simpler `PASS/FAIL (n/m)` line per
+property. It has no Tyche pass (the `--tyche-*` flags are accepted but ignored),
+and it is **not** registered as the `lake test` driver — `test` (LSpec) remains
+the driver.
+
 ## Adding a new property
 
 Properties are catalogued in

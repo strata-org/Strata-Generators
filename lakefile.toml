@@ -36,3 +36,14 @@ root = "Main"
 [[lean_exe]]
 name = "test"
 root = "TestMain"
+
+# A second test driver that reproduces the same suite *without* the LSpec
+# dependency, to de-risk dropping LSpec in the future (see issue #21). It imports
+# the same shared `StrataGenerators.TestScaffold` as `test`, so the two cannot
+# drift, and runs the properties through the ~small Plausible-only harness in
+# `StrataGenerators.PlainHarness` instead of `LSpec.checkIO`/`lspecIO`. It is
+# deliberately NOT the registered `lake test` driver (that stays `test`).
+# Run: `lake build test-plain && .lake/build/bin/test-plain [numTrials] [maxSize] [--smt]`
+[[lean_exe]]
+name = "test-plain"
+root = "PlainTestMain"
