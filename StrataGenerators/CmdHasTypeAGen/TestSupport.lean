@@ -3,6 +3,8 @@ import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.Languages.Core.CmdEval
 import Strata.DL.Imperative.CmdEval
+import Strata.DL.Imperative.CmdType
+import Strata.Languages.Core.CmdType
 
 open Lambda RandomChoice Core Core.CmdEval Imperative
 
@@ -163,6 +165,111 @@ def cmdConditionKind (cmd : Cmd Expression) (ctx : VarCtx) : String :=
     | some false => "false"
     | none => "non-concrete"
   | _ => "n/a"
+
+-- ── Structural command shrinker ───────────────────────────────────────
+--
+-- Mirrors the expression shrinker's structural-shrink + rejection-sample
+-- strategy (`shrinkLExpr` from `HasTypeAGen.TestSupport`) at the command level.
+-- Every candidate is required to remain well-typed via `checkExprTypechecks`,
+-- but — as the expression shrinker already allows — a candidate's *type* may
+-- change: shrinking `init (x : bool) := (b && c)` toward `init (x : int) := n`
+-- keeps a well-typed command, and the declared type is re-derived so it still
+-- matches the shrunk RHS.
+
+/-- Structurally smaller candidates for a command, before well-typedness
+    filtering. Two families of reduction:
+
+    * **RHS-expression shrinks** — reduce the expression carried by
+      `init`/`set` (deterministic RHS only) or the boolean condition of
+      `assert`/`assume`/`cover`, using the shared `shrinkLExpr`. For a
+      deterministic `init` we re-derive the declared type from the shrunk RHS so
+      the result stays well-typed even when the RHS type changes.
+    * **Determinism collapse** — replace a deterministic `init`/`set` RHS by
+      `.nondet` (havoc), a strictly simpler, always-well-typed command. -/
+def shrinkCmdCandidates (c : Cmd Expression) : List (Cmd Expression) :=
+  match c with
+  | .init x ty (.det ex) md =>
+    ((shrinkLExpr ex).filterMap fun ex' =>
+      match LExpr.typeCheck (T := LExprParams') [] ex' with
+      | some τ' => some (Cmd.init x (.forAll [] τ') (.det ex') md)
+      | none => none)
+    ++ [Cmd.init x ty .nondet md]
+  | .init _ _ .nondet _ => []
+  | .set x (.det ex) md =>
+    ((fun ex' => Cmd.set x (.det ex') md) <$> shrinkLExpr ex)
+    ++ [Cmd.set x .nondet md]
+  | .set _ .nondet _ => []
+  | .assert l b md => (Cmd.assert l · md) <$> shrinkLExpr b
+  | .assume l b md => (Cmd.assume l · md) <$> shrinkLExpr b
+  | .cover l b md => (Cmd.cover l · md) <$> shrinkLExpr b
+
+/-- Well-typed structural shrinks of a command: candidate commands whose
+    expression sub-terms still typecheck (bool for `assert`/`assume`/`cover`, the
+    re-derived declared type for `init`, any type for `set`). -/
+def shrinkCmd (c : Cmd Expression) : List (Cmd Expression) :=
+  (shrinkCmdCandidates c).filter checkExprTypechecks
+
+/-- The variables a command adds to the ambient context (only `init` defines a
+    new variable). Mirrors the `definedNames` computation in `checkContextGrowth`
+    so a shrunk command's recomputed output context stays consistent. -/
+def cmdDefinedVars (c : Cmd Expression) : List (Identifier Unit × LMonoTy) :=
+  match c with
+  | .init x (.forAll [] mty) _ _ => [(x, mty)]
+  | _ => []
+
+/-- Recompute the output context of a (shrunk) command from its input context:
+    the input context extended with any variable the command defines. -/
+def cmdOutCtx (inCtx : VarCtx) (c : Cmd Expression) : VarCtx :=
+  Map.ofList (List.append (inCtx : List (Identifier Unit × LMonoTy)) (cmdDefinedVars c))
+
+/-- Recompute the output context of a (shrunk) command *sequence*: the input
+    context extended with every variable defined along the sequence, in order.
+    Mirrors the `definedNames` fold in `checkContextGrowth`, so a shrunk sequence
+    satisfies the context-growth property by construction. -/
+def cmdsOutCtx (inCtx : VarCtx) (cmds : List (Cmd Expression)) : VarCtx :=
+  Map.ofList (List.append (inCtx : List (Identifier Unit × LMonoTy)) (cmds.flatMap cmdDefinedVars))
+
+/-- The standard Core ambient typing context (built-in `Core.Factory` operators +
+    `Core.KnownTypes`), used to type-check a whole command *sequence*. Mirrors the
+    statement module's `stmtCheckContext`; duplicated here (rather than imported)
+    because that module imports *this* one. -/
+def cmdSeqCheckContext : LContext CoreLParams :=
+  { LContext.default with
+    functions := Core.Factory,
+    knownTypes := Core.KnownTypes }
+
+/-- Seed a typing environment from a `VarCtx`: every variable in the input context
+    is declared (with its monotype) so a command sequence generated under `inCtx`
+    is type-checked with those variables already in scope. -/
+def seedTyEnv (inCtx : VarCtx) : TEnv Unit :=
+  (inCtx : List (Identifier Unit × LMonoTy)).foldl
+    (fun e (x, mty) => Core.CmdType.update e x (LTy.forAll [] mty)) TEnv.default
+
+/-- **Scope-threading well-formedness check** for a command *sequence*. Unlike the
+    per-command `checkExprTypechecks` (which type-checks each expression in the
+    *empty* context and trusts annotated free variables), this runs Strata's own
+    `Imperative.Cmds.typeCheck`, which threads a variable context along the
+    sequence: an `init` extends scope, a `set`/reference to an *undeclared*
+    variable is rejected. Seeded from `inCtx` so pre-declared variables are in
+    scope. This is what makes dropping an `init` whose variable is used later a
+    rejected shrink, rather than a dangling reference. -/
+def cmdsScopeWellFormed (inCtx : VarCtx) (cmds : List (Cmd Expression)) : Bool :=
+  match Imperative.Cmds.typeCheck cmdSeqCheckContext (seedTyEnv inCtx) cmds with
+  | .ok _ => true
+  | .error _ => false
+
+/-- Structural shrinks of a command sequence: drop one command, or replace one
+    command by a smaller one (`shrinkCmd`). Every candidate is filtered by the
+    whole-sequence scope-threading check `cmdsScopeWellFormed` (seeded from
+    `inCtx`), so a candidate stays not just well-typed but well-*formed*: dropping
+    an `init` whose variable a later command references is rejected, never
+    yielding a dangling variable. (The per-command `shrinkCmd` already keeps each
+    replacement's own expression well-typed; the sequence check adds cross-command
+    scoping.) -/
+def shrinkCmds (inCtx : VarCtx) (cmds : List (Cmd Expression)) : List (List (Cmd Expression)) :=
+  (dropEach cmds
+   ++ cmds.zipIdx.flatMap (fun (c, i) => (cmds.set i ·) <$> shrinkCmd c)).filter
+    (cmdsScopeWellFormed inCtx)
 
 -- ── Generator wrappers ────────────────────────────────────────────────
 

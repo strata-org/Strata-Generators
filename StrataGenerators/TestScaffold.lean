@@ -4,6 +4,7 @@ import StrataGenerators.HasTypeAGen.SmtEval
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
+import StrataGenerators.FunctionHasTypeAGen.Shrink
 import StrataGenerators.StmtHasTypeAGen.TestSupport
 import Basalt.PlausibleGen
 import Plausible
@@ -52,47 +53,11 @@ structure TypedExpr where
 instance : Repr TypedExpr where
   reprPrec te _ := s!"({ppExpr te.expr}) : {ppType te.ty}"
 
-/-- For terms that don't involve top-level binders (e.g. `lam` or `quant`),
-    extract their immediate sub-terms. Excludes bare `.op` nodes since
-    unapplied operators (interpretered functions)
-    are trivial counterexamples to progress (they aren't
-    values and can't reduce without arguments). -/
-private def immediateSubtermsWithoutBinders (e : LExpr') : List LExpr' :=
-  (match e with
-  | .app _ fn arg => [fn, arg]
-  | .ite _ c t e => [c, t, e]
-  | .eq _ e1 e2 => [e1, e2]
-  | _ => []).filter fun
-    | .op _ _ _ => false
-    | _ => true
-
-/-- Shrinks an LExpr structually.
-    - Note: for terms involving binders (e.g. `abs` and `quant`), we shrink
-    the body but keep the binder, in order to ensure that the shrunken
-    term remains well-scoped.
-    - For terms that don't involve binders, we extract their top-level subterms.
-    - For constants (e.g. ints), we involve the default shrinker for that type. -/
-private partial def shrinkLExpr (e : LExpr') : List LExpr' :=
-  immediateSubtermsWithoutBinders e ++
-  match e with
-  | .app _ fn arg =>
-    (.app () · arg) <$> shrinkLExpr fn ++
-    (.app () fn ·) <$> shrinkLExpr arg
-  | .ite _ c t el =>
-    (.ite () · t el) <$> shrinkLExpr c ++
-    (.ite () c · el) <$> shrinkLExpr t ++
-    (.ite () c t ·) <$> shrinkLExpr el
-  | .eq _ e1 e2 =>
-    (.eq () · e2) <$> shrinkLExpr e1 ++
-    (.eq () e1 ·) <$> shrinkLExpr e2
-  | .abs _ name ty body =>
-    (.abs () name ty ·) <$> shrinkLExpr body
-  | .quant _ k name ty trigger body =>
-    (.quant () k name ty · body) <$> shrinkLExpr trigger ++
-    (.quant () k name ty trigger ·) <$> shrinkLExpr body
-  | .const _ (.intConst i) =>
-    (fun i' => .const () (.intConst i')) <$> Shrinkable.shrink i
-  | _ => []
+-- The structural expression shrinker `shrinkLExpr` (and its helper
+-- `immediateSubtermsWithoutBinders`) now lives in
+-- `StrataGenerators.HasTypeAGen.TestSupport` so the command / statement /
+-- function shrinkers can reuse the exact same reduction rules. It is imported
+-- transitively here.
 
 /-- Shared shrinker for the expr/type-pair wrappers (`TypedExpr`,
     `ClosedTypedExpr`, `ResolveTypedExpr`), which all pair an `LExpr` with its
@@ -269,8 +234,13 @@ structure GenCmdWithCtx where
 instance : Repr GenCmdWithCtx where
   reprPrec gc _ := s!"{ppCmd gc.cmd}  [ctx: {ppVarCtx gc.inCtx}]"
 
+-- Shrink the command with the shared structural command shrinker (keeps it
+-- well-typed via `checkExprTypechecks`), holding the input context fixed and
+-- recomputing the output context from the shrunk command so the wrapper stays
+-- internally consistent (`inCtx` extended with any variable the command defines).
 instance : Shrinkable GenCmdWithCtx where
-  shrink _ := []
+  shrink gc := (shrinkCmd gc.cmd).map fun c' =>
+    { gc with cmd := c', outCtx := cmdOutCtx gc.inCtx c' }
 
 private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
   let depth := max 1 (s / 20)
@@ -300,8 +270,12 @@ instance : Repr GenCmdsWithCtx where
     let cmdStrs := gc.cmds.map ppCmd |> "; ".intercalate
     s!"{cmdStrs}  [in: {ppVarCtx gc.inCtx}, out: {ppVarCtx gc.outCtx}]"
 
+-- Shrink the command sequence (drop or shrink individual commands), holding the
+-- input context fixed and recomputing the output context from the shrunk
+-- sequence so `checkContextGrowth` still relates `inCtx` and `outCtx`.
 instance : Shrinkable GenCmdsWithCtx where
-  shrink _ := []
+  shrink gc := (shrinkCmds gc.inCtx gc.cmds).map fun cs' =>
+    { gc with cmds := cs', outCtx := cmdsOutCtx gc.inCtx cs' }
 
 private def genCmdsWithCtx : Gen GenCmdsWithCtx := do
   let depth := 2
@@ -344,10 +318,14 @@ structure GenFunction where
 instance : Repr GenFunction where
   reprPrec gf _ := formatFunc gf.func
 
--- Functions are generated whole (body/measure are drawn by sub-generators that
--- already respect the typing spec); we do not attempt structural shrinking.
+-- Shrink the function structurally (drop body/measure/inputs/type-args, shrink
+-- types, shrink body/measure expressions), keeping the fvar context fixed. Every
+-- candidate satisfies `funcWellFormed`, so it stays well-typed; and because
+-- `shrinkLExpr` only reduces to sub-terms (never introducing a fresh, differently
+-- annotated fvar), the fvar-annotation property continues to hold against the
+-- unchanged `fctx`.
 instance : Shrinkable GenFunction where
-  shrink _ := []
+  shrink gf := (shrinkFuncWellFormed gf.func).map fun f' => { gf with func := f' }
 
 /-- Generate a function against `defaultFCtx`, exposing the fvar context so the
     property can consult the matching type map. Depth scales with Plausible's
@@ -386,8 +364,14 @@ instance : Repr ClosedGenFunction where
     let tag := s!"[body={gf.func.body.isSome}, measure={gf.func.measure.isSome}]"
     s!"{tag}\n{formatFunc gf.func}"
 
+-- Same structural function shrinker as `GenFunction`. `funcWellFormed` admits a
+-- measure-without-body function (body absent ⇒ vacuously body-typed), so the
+-- shrinker *preserves* that shape — the very counterexample the completeness
+-- properties (`prop_function_typeCheck_complete` / `prop_function_rejection_only_measure`)
+-- hunt for — and can even reach it by dropping a body while keeping the measure,
+-- yielding a minimal witness rather than discarding it.
 instance : Shrinkable ClosedGenFunction where
-  shrink _ := []
+  shrink gf := (shrinkFuncWellFormed gf.func).map fun f' => { gf with func := f' }
 
 private def genClosedFunctionWith : Gen ClosedGenFunction := Gen.sized fun s => do
   let depth := max 2 (s / 20)
@@ -525,10 +509,14 @@ instance : Repr GenStmts where
     let suffix := if shapes.isEmpty then "" else s!"\n  -- {" ".intercalate shapes}"
     formatStmts gs.stmts ++ suffix
 
--- Statement lists are generated whole by a sound+complete generator; we do not
--- attempt structural shrinking (a shrunk sub-list need not remain well-typed).
+-- Shrink the statement list structurally (drop a statement, replace one by a
+-- smaller one, or splice a compound's body in place of the compound), keeping
+-- only candidates the algorithmic typechecker still accepts (`shrinkStmts`
+-- filters on `checkTypeChecks`). A shrunk sub-list *does* remain well-typed by
+-- construction — the well-typedness invariant is re-established by re-checking
+-- the whole list rather than assumed to be preserved locally.
 instance : Shrinkable GenStmts where
-  shrink _ := []
+  shrink gs := (shrinkStmts gs.stmts).map (⟨·⟩)
 
 /-- Generate a well-typed statement list. `size` (nesting/expression size) and
     the sequence length both scale with Plausible's size parameter. -/

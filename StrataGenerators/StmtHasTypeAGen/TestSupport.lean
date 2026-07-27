@@ -396,6 +396,98 @@ abbrev checkFunctionTypeCheckerComplete (func : Function) : Bool := checkFunctio
 def funcRejectionImpliesMeasureNoBody (func : Function) : Bool :=
   checkFunctionTypeChecks func || funcMeasureWithoutBody func
 
+-- ── Structural statement shrinker ─────────────────────────────────────────
+--
+-- The statement-level analogue of the expression shrinker (`shrinkLExpr`): it
+-- proposes structurally smaller statement lists, and the caller
+-- (`shrinkStmts`) rejection-samples on the well-typedness oracle
+-- `checkTypeChecks` (the algorithmic `Statement.typeCheck` in the standard Core
+-- ambient context). This is the direct analogue of how the expression shrinker
+-- filters on `LExpr.typeCheck`. Consequently *every* statement list the shrinker
+-- yields is well-typed by the algorithm — but, exactly as the requirement
+-- permits, it need not have the same "shape"/scope as the original (a shrink may
+-- drop a variable's `init` and everything referencing it, change a guard's type,
+-- etc.), because we re-check the whole list rather than tracking per-node types.
+--
+-- Interaction with the completeness-gap properties: property #1
+-- (`checkTypeCheckerComplete`) and the function-completeness properties hunt for
+-- statement lists the *algorithm rejects* (e.g. a `funcDecl` with a measure but
+-- no body). Since the oracle here is the algorithm, the shrinker will not
+-- minimize *those* counterexamples (any candidate that still fails is filtered
+-- out), so Plausible reports them unshrunk — never a *wrong* result. For the
+-- transform properties (#3–#6, #9), whose inputs must be genuinely well-typed,
+-- the algorithmic filter is exactly the right invariant.
+
+/-- Structurally smaller replacements for a deterministic-or-nondet guard: shrink
+    the carried expression (via `shrinkLExpr`), or collapse a deterministic guard
+    to a nondeterministic one (`.nondet`) — a strictly simpler choice. Candidates
+    whose type is wrong for a guard position are pruned by the whole-list
+    typecheck in `shrinkStmts`. -/
+def shrinkGuard (g : ExprOrNondet Expression) : List (ExprOrNondet Expression) :=
+  match g with
+  | .det e => (ExprOrNondet.det <$> shrinkLExpr e) ++ [ExprOrNondet.nondet]
+  | .nondet => []
+
+/-- Structurally smaller `funcDecl` bodies: drop the body, or drop the measure.
+    Dropping the body while keeping the measure deliberately *preserves* the
+    measure-without-body shape (the known completeness counterexample); dropping
+    the measure moves toward a shape the algorithm accepts. -/
+def shrinkPureFunc (d : PureFunc Expression) : List (PureFunc Expression) :=
+  (if d.body.isSome then [{ d with body := none }] else [])
+  ++ (if d.measure.isSome then [{ d with measure := none }] else [])
+
+mutual
+/-- Structurally smaller replacements for a single statement (each strictly
+    smaller by `Stmt.sizeOf`): recurse into bodies/branches, shrink the atomic
+    command (via `shrinkCmd`), shrink guards, and — for loops — drop the measure
+    or the invariants. Blocks/ites/loops are also *flattened* at the list level
+    by `shrinkStmtsList` (their body spliced in place), so this need not itself
+    unwrap them. -/
+partial def shrinkStmt : Statement → List Statement
+  | .cmd (.cmd c) => (fun c' => .cmd (.cmd c')) <$> shrinkCmd c
+  -- Procedure calls are unreachable from the generator; nothing to shrink.
+  | .cmd (.call _ _ _) => []
+  | .block label body md =>
+    (.block label · md) <$> shrinkStmtsList body
+  | .ite cond thenb elseb md =>
+    (.ite cond · elseb md) <$> shrinkStmtsList thenb
+    ++ (.ite cond thenb · md) <$> shrinkStmtsList elseb
+    ++ (.ite · thenb elseb md) <$> shrinkGuard cond
+  | .loop guard measure inv body md =>
+    (if measure.isSome then [Stmt.loop guard none inv body md] else [])
+    ++ (if !inv.isEmpty then [Stmt.loop guard measure [] body md] else [])
+    ++ (.loop · measure inv body md) <$> shrinkGuard guard
+    ++ (.loop guard measure inv · md) <$> shrinkStmtsList body
+  | .exit _ _ => []
+  | .funcDecl decl md => (.funcDecl · md) <$> shrinkPureFunc decl
+  | .typeDecl _ _ => []
+
+/-- Structurally smaller statement lists. Three families of reduction: drop one
+    statement (`dropEach`); replace one statement by a smaller one (`shrinkStmt`);
+    or *flatten* a `block`/`ite`/`loop` at position `i` by splicing its body (or a
+    branch) in place of the compound node, dropping the wrapper. -/
+partial def shrinkStmtsList (ss : List Statement) : List (List Statement) :=
+  dropEach ss
+  ++ ss.zipIdx.flatMap (fun (s, i) => (ss.set i ·) <$> shrinkStmt s)
+  ++ (List.range ss.length).flatMap (fun i =>
+      match ss.splitAt i with
+      | (pre, s :: post) =>
+        let splice (mid : List Statement) := pre ++ mid ++ post
+        match s with
+        | .block _ body _ => [splice body]
+        | .ite _ thenb elseb _ => [splice thenb, splice elseb]
+        | .loop _ _ _ body _ => [splice body]
+        | _ => []
+      | (_, []) => [])
+end
+
+/-- Well-typed structural shrinks of a statement list: every structurally smaller
+    candidate (`shrinkStmtsList`) that still typechecks under the standard Core
+    ambient context (`checkTypeChecks`). Guaranteed to remain well-typed; the type
+    of individual sub-terms may differ from the original. -/
+def shrinkStmts (ss : List Statement) : List (List Statement) :=
+  (shrinkStmtsList ss).filter checkTypeChecks
+
 -- ── Generator wrapper (IO) ───────────────────────────────────────────────
 
 /-- Generate a well-typed statement list in `IO` via `genProgramStmts`, from an

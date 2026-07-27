@@ -2,6 +2,7 @@ import StrataGenerators.HasTypeAGen.Defs
 import Strata.DL.Lambda.LExprEval
 import Strata.DL.Lambda.LExprT
 import Strata.DL.Lambda.IntBoolFactory
+import Plausible
 
 open Lambda
 
@@ -271,3 +272,60 @@ def checkResolveAfterErase (expr : LExpr') (expectedTy : LMonoTy) : Bool :=
   match resolveErasedTy expr with
   | some inferred => isInstanceOf expectedTy inferred
   | none => false
+
+-- ── Shared structural expression shrinker ─────────────────────────────────
+--
+-- The single expression shrinker reused by *every* term-level shrinker in the
+-- suite (`TypedExpr`/`ClosedTypedExpr`/`ResolveTypedExpr` in `TestScaffold`, and
+-- the command / statement / function shrinkers). It only proposes *structurally
+-- smaller* expressions; the caller is responsible for keeping candidates
+-- well-typed (typically by re-`typeCheck`ing and rejecting failures), so a shrunk
+-- expression may legitimately change type — e.g. `(f x) : bool` shrinks toward its
+-- subterm `f : int -> bool`.
+
+/-- All ways to drop exactly one element of a list. Shared by every sequence
+    shrinker in the suite (command / statement / function). -/
+def dropEach {α} : List α → List (List α)
+  | [] => []
+  | x :: xs => xs :: (x :: ·) <$> dropEach xs
+
+/-- For terms that don't involve top-level binders (e.g. `lam` or `quant`),
+    extract their immediate sub-terms. Excludes bare `.op` nodes since
+    unapplied operators (interpreted functions) are trivial degenerate results
+    (they aren't values and can't reduce without arguments). -/
+def immediateSubtermsWithoutBinders (e : LExpr') : List LExpr' :=
+  (match e with
+  | .app _ fn arg => [fn, arg]
+  | .ite _ c t e => [c, t, e]
+  | .eq _ e1 e2 => [e1, e2]
+  | _ => []).filter fun
+    | .op _ _ _ => false
+    | _ => true
+
+/-- Structurally shrink an `LExpr'`.
+    - For terms involving binders (`abs`/`quant`), we shrink the body but keep the
+      binder, so the shrunken term stays well-scoped.
+    - For terms without binders, we also extract their top-level subterms.
+    - For integer constants we defer to the default `Nat`/`Int` shrinker.
+    Candidates are structurally smaller but not re-typechecked here; callers filter. -/
+partial def shrinkLExpr (e : LExpr') : List LExpr' :=
+  immediateSubtermsWithoutBinders e ++
+  match e with
+  | .app _ fn arg =>
+    (.app () · arg) <$> shrinkLExpr fn ++
+    (.app () fn ·) <$> shrinkLExpr arg
+  | .ite _ c t el =>
+    (.ite () · t el) <$> shrinkLExpr c ++
+    (.ite () c · el) <$> shrinkLExpr t ++
+    (.ite () c t ·) <$> shrinkLExpr el
+  | .eq _ e1 e2 =>
+    (.eq () · e2) <$> shrinkLExpr e1 ++
+    (.eq () e1 ·) <$> shrinkLExpr e2
+  | .abs _ name ty body =>
+    (.abs () name ty ·) <$> shrinkLExpr body
+  | .quant _ k name ty trigger body =>
+    (.quant () k name ty · body) <$> shrinkLExpr trigger ++
+    (.quant () k name ty trigger ·) <$> shrinkLExpr body
+  | .const _ (.intConst i) =>
+    (fun i' => .const () (.intConst i')) <$> Plausible.Shrinkable.shrink i
+  | _ => []

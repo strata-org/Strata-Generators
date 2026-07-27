@@ -9,26 +9,32 @@ open Lambda Core Imperative Strata Strata.CoreDDM
 open StrataDDM (initDialect)
 
 /-!
-# Shared round-trip helpers and shrinker for Strata Core `Function`s
+# Shared round-trip helpers for Strata Core `Function`s
 
-This module is imported by *both* views in the merged `TestMain` driver — the
+This module holds exactly what the parser/pretty-printer round-trip property
+needs. It is imported by *both* views in the merged `TestMain` driver — the
 Plausible/LSpec property suite and the Tyche panels (`StrataGenerators.TycheViz`)
-— so the pretty-print/parse round-trip machinery and the structural shrinker live
-in exactly one place.
+— so the pretty-print/parse round-trip machinery lives in exactly one place.
 
 It provides:
 - `formatFuncAsProgram` / `parseCoreProgram` / `parseCoreProgramErr` — embed a
   `Function` in a one-decl `Program`, format via `Core.formatProgram`, and parse
   back via the Core DDM dialect (the error variant surfaces the parser message).
-- A greedy structural shrinker (`shrinkWhile`) plus failure predicates, used to
-  reduce a round-trip counterexample to a minimal reproducer.
+- A greedy structural minimizer (`shrinkWhile`) plus failure predicates, used to
+  reduce a round-trip counterexample to a minimal reproducer. This is a
+  *signature-reducing* minimizer specific to the round-trip property — distinct
+  from the body-only `Shrinkable Function` instance shrinker, which lives in
+  `StrataGenerators.FunctionHasTypeAGen.Shrink`.
 
-**Well-formedness invariant.** Every shrink candidate is required to satisfy
+**Well-formedness invariant.** Every minimizer candidate is required to satisfy
 `funcWellFormed` (every free type variable in the signature is declared in
 `typeArgs`), matching the invariant `genFunction` maintains. Without this the
-shrinker could drop a `∀`-bound type-arg while leaving it used in a type,
+minimizer could drop a `∀`-bound type-arg while leaving it used in a type,
 yielding an *undeclared type variable* — an ill-formed function whose parse
-failure is a shrinker artifact rather than a genuine printer/parser bug.
+failure is a minimizer artifact rather than a genuine printer/parser bug.
+
+`funcWellFormed` is `public` here because `Shrink` reuses it as its candidate
+filter.
 -/
 
 -- ── Format / parse round-trip ────────────────────────────────────────────
@@ -131,20 +137,15 @@ partial def shrinkTy : LMonoTy → List LMonoTy
   | .tcons _ [] => []
   | .tcons "arrow" [a, b] =>
     [a, b]
-      ++ (shrinkTy a).map (fun a' => .tcons "arrow" [a', b])
-      ++ (shrinkTy b).map (fun b' => .tcons "arrow" [a, b'])
+      ++ (.tcons "arrow" [·, b]) <$> shrinkTy a
+      ++ (.tcons "arrow" [a, ·]) <$> shrinkTy b
   | .tcons "Map" [k, v] =>
     [k, v]
-      ++ (shrinkTy k).map (fun k' => .tcons "Map" [k', v])
-      ++ (shrinkTy v).map (fun v' => .tcons "Map" [k, v'])
+      ++ (.tcons "Map" [·, v]) <$> shrinkTy k
+      ++ (.tcons "Map" [k, ·]) <$> shrinkTy v
   | .tcons "Sequence" [e] =>
-    e :: (shrinkTy e).map (fun e' => .tcons "Sequence" [e'])
+    e :: (.tcons "Sequence" [·]) <$> shrinkTy e
   | .tcons _ args => args ++ List.flatMap shrinkTy args
-
-/-- All ways to drop exactly one element of a list. -/
-def dropEach {α} : List α → List (List α)
-  | [] => []
-  | x :: xs => xs :: (dropEach xs).map (x :: ·)
 
 /-- Well-formedness of a shrink candidate. `genFunction` maintains all of these
     invariants; the shrinker must preserve them so it never fabricates a failure
@@ -179,14 +180,11 @@ def shrinkFunc (f : Function) : List Function :=
   let ins := f.inputs.toList
   let dropBody    := if f.body.isSome then [{ f with body := none }] else []
   let dropMeasure := if f.measure.isSome then [{ f with measure := none }] else []
-  let dropInput   := (dropEach ins).map (fun i => { f with inputs := ListMap.ofList i })
-  let dropTyArg   := (dropEach f.typeArgs).map (fun tas => { f with typeArgs := tas })
-  let shrinkInput := (List.range ins.length).flatMap (fun i =>
-    match ins[i]? with
-    | some (x, ty) => (shrinkTy ty).map (fun ty' =>
-        { f with inputs := ListMap.ofList (ins.set i (x, ty')) })
-    | none => [])
-  let shrinkOut   := (shrinkTy f.output).map (fun o => { f with output := o })
+  let dropInput   := (fun i => { f with inputs := ListMap.ofList i }) <$> dropEach ins
+  let dropTyArg   := (fun tas => { f with typeArgs := tas }) <$> dropEach f.typeArgs
+  let shrinkInput := ins.zipIdx.flatMap (fun ((x, ty), i) =>
+    (fun ty' => { f with inputs := ListMap.ofList (ins.set i (x, ty')) }) <$> shrinkTy ty)
+  let shrinkOut   := (fun o => { f with output := o }) <$> shrinkTy f.output
   let shrinkName  := if f.name.name.length > 1 then [{ f with name := ⟨"f", ()⟩ }] else []
   dropBody ++ dropMeasure ++ dropInput ++ dropTyArg ++ shrinkInput ++ shrinkOut ++ shrinkName
 
