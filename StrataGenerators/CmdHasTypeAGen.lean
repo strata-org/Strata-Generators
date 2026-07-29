@@ -28,14 +28,256 @@ satisfies `CmdHasTypeA`.
 
 -- ── VarCtx ↔ TContext correspondence ─────────────────────────────────
 
-/-- A `VarCtx` corresponds to a `TContext` if every lookup agrees: entries in
-    `ctx` map to monomorphic types `forAll [] mty` in `Γ`, and variables not
-    in `ctx` are absent from `Γ`. -/
+/-- A `VarCtx` corresponds to a `TContext` if every lookup agrees: whatever
+    `ctx.find?` resolves a name to (a monotype `mty`) `Γ` resolves to the
+    monomorphic polytype `forAll [] mty`, and names fresh for `ctx` are absent
+    from `Γ`.
+
+    Condition 1 is phrased in terms of `ctx.find?` (the *resolved* binding, i.e.
+    the first matching pair), **not** raw `List.Mem`. This matters because a flat
+    `VarCtx` may in principle carry duplicate keys, and a `TContext`'s `find?`
+    can only agree with one binding per name. Using `find?` on both sides makes
+    the correspondence hold for *every* `ctx` — even ill-formed duplicate-key
+    ones — so a soundness environment can supply `corr : ∀ ctx` unconditionally.
+    (The reachable contexts are in fact always `Nodup`-keyed, since the seed is
+    and `Map.insert` deduplicates; that `Nodup` fact is what lets the `set` case,
+    whose target is drawn by `elements` from *any* member, recover a `find?`.) -/
 def VarCtxCorresponds (ctx : VarCtx) (Γ : TContext Unit) : Prop :=
-  (∀ (x : Identifier Unit) mty, List.Mem (x, mty) ctx →
+  (∀ (x : Identifier Unit) mty, ctx.find? x = some mty →
     Γ.types.find? x = some (.forAll [] mty)) ∧
   (∀ (x : Identifier Unit), VarCtx.isFresh ctx x = true →
     Γ.types.find? x = none)
+
+/-- In a `Nodup`-key map, membership determines the `find?` result: if `(x, v)`
+    is a member and the keys are `Nodup`, then `find? x = some v` (there is no
+    earlier, shadowing binding for `x`). This is what lets the `set` cases — whose
+    target `(x, mty)` is drawn by `elements` from *any* member of `ctx` — recover
+    the resolved `ctx.find? x = some mty` needed by the `find?`-based
+    `VarCtxCorresponds`. -/
+theorem Map.find?_of_mem_of_nodup {α β : Type} [DecidableEq α]
+    (m : Map α β) (x : α) (v : β)
+    (hnodup : m.keys.Nodup) (hmem : List.Mem (x, v) m) :
+    Map.find? m x = some v := by
+  induction m with
+  | nil => cases hmem
+  | cons hd rest ih =>
+    obtain ⟨a, b⟩ := hd
+    rw [Map.keys_eq_map_fst] at hnodup
+    simp only [List.map_cons, List.nodup_cons] at hnodup
+    obtain ⟨hnotin, hrest⟩ := hnodup
+    simp only [Map.find?]
+    cases hmem with
+    | head => simp
+    | tail _ hmem' =>
+      -- `x` is a key of `rest`, and `a ∉ rest.keys`, so `a ≠ x`.
+      have hxkey : x ∈ rest.map Prod.fst :=
+        List.mem_map.mpr ⟨(x, v), hmem', rfl⟩
+      have hne : a ≠ x := fun h => hnotin (h ▸ hxkey)
+      simp only [if_neg hne]
+      exact ih (by rw [Map.keys_eq_map_fst]; exact hrest) hmem'
+
+/-- `Map.insert` preserves `Nodup` of the key list: inserting either replaces an
+    existing binding in place (keys unchanged) or appends a genuinely fresh key
+    (keys stay `Nodup`). This is what carries the `Nodup` invariant across the
+    `init` command, whose output context is `ctx.insert x mty`. -/
+theorem Map.insert_keys_nodup {α β : Type} [DecidableEq α]
+    (m : Map α β) (x : α) (v : β) (hnodup : (Map.keys m).Nodup) :
+    (Map.keys (Map.insert m x v)).Nodup := by
+  induction m with
+  | nil => simp [Map.insert, Map.keys]
+  | cons hd rest ih =>
+    obtain ⟨a, b⟩ := hd
+    rw [Map.keys_eq_map_fst] at hnodup
+    simp only [List.map_cons, List.nodup_cons] at hnodup
+    obtain ⟨hnotin, hrest⟩ := hnodup
+    have hrest' : (Map.keys rest).Nodup := by rw [Map.keys_eq_map_fst]; exact hrest
+    simp only [Map.insert]
+    split
+    · -- key found at head: keys unchanged
+      rename_i hax; subst hax
+      rw [Map.keys_eq_map_fst]
+      simp only [List.map_cons, List.nodup_cons]
+      exact ⟨hnotin, hrest⟩
+    · -- recurse; head key `a` stays, fresh w.r.t. the recursive result
+      rename_i hax
+      rw [Map.keys_eq_map_fst]
+      simp only [List.map_cons, List.nodup_cons]
+      refine ⟨?_, by rw [← Map.keys_eq_map_fst]; exact ih hrest'⟩
+      -- `a ∈ keys (insert rest x v) ⊆ x :: keys rest`, but `a ≠ x` and `a ∉ keys rest`.
+      intro hmem
+      have hsub := Map.insert_keys rest (key := x) (val := v)
+      rw [← Map.keys_eq_map_fst] at hmem
+      have hin := hsub hmem
+      simp only [List.mem_cons] at hin
+      rcases hin with h | h
+      · exact hax h
+      · exact hnotin (by rw [← Map.keys_eq_map_fst]; exact h)
+
+-- ── Functional contexts (Nodup-weakening) ────────────────────────────
+
+/-- A `Map` is *functional* when any two entries sharing a key share a value.
+    This is strictly weaker than `Nodup`-keys: it permits duplicate keys as long
+    as they are bound to equal values (exactly the situation created by an `inout`
+    parameter, which appears in both the input and output scopes with the *same*
+    type). It is nonetheless enough to resolve `set` targets to a definite
+    `find?` (`Map.find?_of_mem_of_functional`) and is preserved by fresh
+    insertion (`Map.insert_functional_of_fresh`), so it can replace the threaded
+    `keys.Nodup` invariant throughout the command/statement soundness proofs. -/
+def Map.Functional {α β : Type} [DecidableEq α] (m : Map α β) : Prop :=
+  ∀ (x : α) (v₁ v₂ : β), List.Mem (x, v₁) m → List.Mem (x, v₂) m → v₁ = v₂
+
+/-- A `Nodup`-keyed map is functional (each key appears once, so any two entries
+    with the same key are literally the same entry). This lets a seed context
+    whose disjointness already yields `Nodup` keys satisfy the weaker
+    `Functional` invariant the soundness proofs now thread. -/
+theorem Map.functional_of_nodup {α β : Type} [DecidableEq α]
+    (m : Map α β) (hnodup : m.keys.Nodup) : Map.Functional m := by
+  intro x v₁ v₂ h₁ h₂
+  have e₁ := Map.find?_of_mem_of_nodup m x v₁ hnodup h₁
+  have e₂ := Map.find?_of_mem_of_nodup m x v₂ hnodup h₂
+  rw [e₁] at e₂
+  exact (Option.some.injEq _ _).mp e₂
+
+/-- If `find? m x = none` then `x` is not a key of `m` (no entry `(x, w)`). -/
+theorem Map.not_mem_of_find?_none {α β : Type} [DecidableEq α]
+    (m : Map α β) (x : α) (h : Map.find? m x = none) :
+    ∀ w, ¬ List.Mem (x, w) m := by
+  intro w hmem
+  induction m with
+  | nil => cases hmem
+  | cons hd rest ih =>
+    obtain ⟨a, b⟩ := hd
+    simp only [Map.find?] at h
+    split at h
+    · simp at h
+    · rename_i hne
+      cases hmem with
+      | head => exact hne rfl
+      | tail _ hmem' => exact ih h hmem'
+
+/-- In a *functional* map, membership determines `find?`: if `(x, v)` is a member
+    then `find? x = some v`. (The first entry with key `x` binds some value `v'`;
+    functionality forces `v' = v`.) This is the functional analogue of
+    `Map.find?_of_mem_of_nodup`, and is what lets the `set` cases — whose target
+    is drawn by `elements` from *any* member — recover the resolved `find?`. -/
+theorem Map.find?_of_mem_of_functional {α β : Type} [DecidableEq α]
+    (m : Map α β) (x : α) (v : β)
+    (hfun : Map.Functional m) (hmem : List.Mem (x, v) m) :
+    Map.find? m x = some v := by
+  induction m with
+  | nil => cases hmem
+  | cons hd rest ih =>
+    obtain ⟨a, b⟩ := hd
+    simp only [Map.find?]
+    cases hmem with
+    | head =>
+      simp
+    | tail _ hmem' =>
+      split
+      · -- head key `a = x`; head value `b` and tail value `v` share key `x`
+        rename_i hax; subst hax
+        have hb : b = v := hfun a b v (List.Mem.head _) (List.Mem.tail _ hmem')
+        rw [hb]
+      · -- head key differs; recurse (functionality restricts to the tail)
+        exact ih (fun y w₁ w₂ h₁ h₂ =>
+          hfun y w₁ w₂ (List.Mem.tail _ h₁) (List.Mem.tail _ h₂)) hmem'
+
+/-- Every member of `m.insert x v` is either a member of `m` or the new entry
+    `(x, v)`. (Insertion either overwrites the first `x`-entry — leaving a new
+    head `(x, v)` and the untouched tail ⊆ `m` — or appends `(x, v)`.) -/
+theorem Map.mem_insert {α β : Type} [DecidableEq α]
+    (m : Map α β) (x : α) (v : β) (y : α) (w : β)
+    (hmem : List.Mem (y, w) (m.insert x v)) :
+    List.Mem (y, w) m ∨ (y, w) = (x, v) := by
+  induction m with
+  | nil =>
+    simp only [Map.insert] at hmem
+    cases hmem with
+    | head => exact Or.inr rfl
+    | tail _ h => cases h
+  | cons hd rest ih =>
+    obtain ⟨a, b⟩ := hd
+    simp only [Map.insert] at hmem
+    split at hmem
+    · -- overwrite head: `(x, v) :: rest`
+      rename_i hax; subst hax
+      cases hmem with
+      | head => exact Or.inr rfl
+      | tail _ h => exact Or.inl (List.Mem.tail _ h)
+    · -- keep head, recurse
+      cases hmem with
+      | head => exact Or.inl (List.Mem.head _)
+      | tail _ h =>
+        rcases ih h with h' | h'
+        · exact Or.inl (List.Mem.tail _ h')
+        · exact Or.inr h'
+
+/-- Inserting a *fresh* key preserves functionality: since `x` is absent from `m`,
+    the insertion appends `(x, v)` without disturbing any existing binding, and no
+    existing entry shares its key. This carries the `Functional` invariant across
+    the `init` command (whose output context is `ctx.insert x mty` with `x` fresh
+    by `genFreshName_produces_fresh`). -/
+theorem Map.insert_functional_of_fresh {α β : Type} [DecidableEq α]
+    (m : Map α β) (x : α) (v : β)
+    (hfun : Map.Functional m) (hfresh : Map.find? m x = none) :
+    Map.Functional (m.insert x v) := by
+  intro y w₁ w₂ h₁ h₂
+  have hnotin := Map.not_mem_of_find?_none m x hfresh
+  rcases Map.mem_insert m x v y w₁ h₁ with hm₁ | he₁ <;>
+    rcases Map.mem_insert m x v y w₂ h₂ with hm₂ | he₂
+  · exact hfun y w₁ w₂ hm₁ hm₂
+  · -- `(y, w₁) ∈ m` and `(y, w₂) = (x, v)`: then `y = x`, contradicting freshness
+    obtain ⟨hy, _⟩ := Prod.mk.injEq .. |>.mp he₂
+    exact absurd (hy ▸ hm₁) (hnotin w₁)
+  · obtain ⟨hy, _⟩ := Prod.mk.injEq .. |>.mp he₁
+    exact absurd (hy ▸ hm₂) (hnotin w₂)
+  · rw [(Prod.mk.injEq ..).mp he₁ |>.2, (Prod.mk.injEq ..).mp he₂ |>.2]
+
+/-- If `(x, v)` is a member of `m₁ ++ m₂` and `x` is not a key of `m₁`, then the
+    entry lives in `m₂`. (The `x`-entry cannot be in the `m₁` half.) -/
+theorem Map.mem_of_append_not_mem_keys {α β : Type} [DecidableEq α]
+    (m₁ m₂ : Map α β) (x : α) (v : β)
+    (hmem : List.Mem (x, v) (m₁ ++ m₂)) (hnk : x ∉ Map.keys m₁) :
+    List.Mem (x, v) m₂ := by
+  rcases List.mem_append.mp hmem with h | h
+  · exact absurd (by rw [Map.keys_eq_map_fst]; exact List.mem_map.mpr ⟨(x, v), h, rfl⟩) hnk
+  · exact h
+
+/-- Symmetric to `Map.mem_of_append_not_mem_keys`: if `(x, v) ∈ m₁ ++ m₂` and `x`
+    is not a key of `m₂`, then the entry lives in `m₁`. -/
+theorem Map.mem_left_of_append_not_mem_keys {α β : Type} [DecidableEq α]
+    (m₁ m₂ : Map α β) (x : α) (v : β)
+    (hmem : List.Mem (x, v) (m₁ ++ m₂)) (hnk : x ∉ Map.keys m₂) :
+    List.Mem (x, v) m₁ := by
+  rcases List.mem_append.mp hmem with h | h
+  · exact h
+  · exact absurd (by rw [Map.keys_eq_map_fst]; exact List.mem_map.mpr ⟨(x, v), h, rfl⟩) hnk
+
+/-- If `(x, v)` is a member of `m`, then `x` is a key of `m`. -/
+theorem Map.mem_keys_of_mem {α β : Type} [DecidableEq α]
+    (m : Map α β) (x : α) (v : β) (hmem : List.Mem (x, v) m) : x ∈ Map.keys m := by
+  rw [Map.keys_eq_map_fst]; exact List.mem_map.mpr ⟨(x, v), hmem, rfl⟩
+
+/-- Functionality composes over append when the two halves *agree* on shared
+    keys: if `m₁` and `m₂` are each functional and any key common to both binds
+    equal values across them, the concatenation `m₁ ++ m₂` is functional. This is
+    the workhorse for the in-out body seed, whose scope is
+    `inputs ++ outputs ++ old`: the inout block appears in both `inputs` and
+    `outputs` bound to the *same* type (agreement), while every other overlap is
+    empty (vacuous agreement). -/
+theorem Map.functional_append {α β : Type} [DecidableEq α]
+    (m₁ m₂ : Map α β)
+    (h₁ : Map.Functional m₁) (h₂ : Map.Functional m₂)
+    (hagree : ∀ (x : α) (v₁ v₂ : β),
+      List.Mem (x, v₁) m₁ → List.Mem (x, v₂) m₂ → v₁ = v₂) :
+    Map.Functional (m₁ ++ m₂) := by
+  intro x v₁ v₂ hm₁ hm₂
+  rcases List.mem_append.mp hm₁ with p₁ | p₁ <;>
+    rcases List.mem_append.mp hm₂ with p₂ | p₂
+  · exact h₁ x v₁ v₂ p₁ p₂
+  · exact hagree x v₁ v₂ p₁ p₂
+  · exact (hagree x v₂ v₁ p₂ p₁).symm
+  · exact h₂ x v₁ v₂ p₁ p₂
 
 -- ── Per-constructor soundness ────────────────────────────────────────
 
@@ -138,13 +380,13 @@ theorem genInitNondet_sound
     against `CmdHasTypeA`). -/
 theorem genCmd_support_iff
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (r : GenCmdResult) :
-    r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) ↔
+    r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) ↔
     (r ∈ SetGen.support (genInitDet (G := SetGen.Set) fctx octx tvars ctx depth depth) ∨
      r ∈ SetGen.support (genInitNondet (G := SetGen.Set) tvars ctx depth) ∨
-     (∃ h : ctx.length > 0, r ∈ SetGen.support (genSetDet (G := SetGen.Set) fctx octx tvars ctx depth h)) ∨
-     (∃ h : ctx.length > 0, r ∈ SetGen.support (genSetNondet (G := SetGen.Set) ctx h)) ∨
+     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetDet (G := SetGen.Set) fctx octx tvars immutableVars ctx depth h)) ∨
+     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetNondet (G := SetGen.Set) immutableVars ctx h)) ∨
      r ∈ SetGen.support (genAssertCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∨
      r ∈ SetGen.support (genAssumeCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∨
      r ∈ SetGen.support (genCoverCmd (G := SetGen.Set) fctx octx tvars ctx depth)) := by
@@ -178,21 +420,21 @@ theorem genCmd_support_iff
         | exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hr)))))
   · intro hr
     rcases hr with hr | (hr | (⟨h, hr⟩ | (⟨h, hr⟩ | (hr | (hr | hr)))))
-    · by_cases h : ctx.length > 0
+    · by_cases h : (ctx.writable immutableVars).length > 0
       · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .head _, by omega, hr⟩⟩
       · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨3, _, .head _, by omega, hr⟩⟩
-    · by_cases h : ctx.length > 0
+    · by_cases h : (ctx.writable immutableVars).length > 0
       · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨1, _, .tail _ (.head _), by omega, hr⟩⟩
       · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨1, _, .tail _ (.head _), by omega, hr⟩⟩
     · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨3, _, .tail _ (.tail _ (.head _)), by omega, hr⟩⟩
     · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.head _))), by omega, hr⟩⟩
-    · by_cases h : ctx.length > 0
+    · by_cases h : (ctx.writable immutableVars).length > 0
       · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, hr⟩⟩
       · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.head _)), by omega, hr⟩⟩
-    · by_cases h : ctx.length > 0
+    · by_cases h : (ctx.writable immutableVars).length > 0
       · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, hr⟩⟩
       · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.head _))), by omega, hr⟩⟩
-    · by_cases h : ctx.length > 0
+    · by_cases h : (ctx.writable immutableVars).length > 0
       · exact Or.inl ⟨h, by rw [mem_support_frequency_iff (by show 0 < 2+1+3+2+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, hr⟩⟩
       · exact Or.inr ⟨h, by rw [mem_support_frequency_iff (by show 0 < 3+1+2+2+2; omega)]; exact ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, hr⟩⟩
 
@@ -341,13 +583,14 @@ def FreshNamesDisjointFromExprs (fctx : FVarCtx) (octx : OpCtx)
     fresh names do not collide with free variables in generated expressions. -/
 theorem genCmd_sound
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit)
     (hCorr : VarCtxCorresponds ctx Γ)
+    (hFun : Map.Functional ctx)
     (hExprSound : GenLExprSound fctx octx tvars depth)
     (hDisjoint : FreshNamesDisjointFromExprs fctx octx tvars ctx depth)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth)) :
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth)) :
     ∃ Γ', CmdHasTypeA C Γ r.cmd Γ' := by
   rw [genCmd_support_iff] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -364,17 +607,19 @@ theorem genCmd_sound
     have hfreshΓ := hCorr.2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
     exact ⟨_, CmdHasType'.init_nondet Γ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)⟩
   · -- set_det
-    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
+    simp only [genSetDet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨⟨name, mty⟩, hmem, e, he, rfl⟩ := hr
-    have hfind := hCorr.1 name mty hmem
+    have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
+    have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     have hwt := hExprSound mty e he
     exact ⟨Γ, CmdHasType'.set_det Γ name mty e default hfind hwt⟩
   · -- set_nondet
-    simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
+    simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨⟨name, mty⟩, hmem, rfl⟩ := hr
-    have hfind := hCorr.1 name mty hmem
+    have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
+    have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     exact ⟨Γ, CmdHasType'.set_nondet Γ name mty default hfind⟩
   · -- assert
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
@@ -419,7 +664,7 @@ def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     *expression* and *variable* content (but possibly different label/metadata). -/
 theorem genCmd_complete
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ Γ' : TContext Unit)
     (cmd : Cmd Expression)
     (hwt : CmdHasTypeA C Γ cmd Γ')
@@ -431,9 +676,9 @@ theorem genCmd_complete
       mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth))
     (hVarInCtx : ∀ (x : Identifier Unit) (mty : LMonoTy),
       Γ.types.find? x = some (.forAll [] mty) →
-      List.Mem (x, mty) ctx) :
+      List.Mem (x, mty) (ctx.writable immutableVars)) :
     ∃ r : GenCmdResult,
-      r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∧
+      r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) ∧
       CmdHasTypeA C Γ r.cmd Γ' := by
   cases hwt with
   | init_det x xty e mty tys md hfresh hnovar _ _ hexpr =>
@@ -441,7 +686,7 @@ theorem genCmd_complete
     have hmty := hTyReach mty
     have he := hExprComplete mty e hexpr
     have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inl (by
         simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, e, he, rfl⟩))
@@ -450,7 +695,7 @@ theorem genCmd_complete
     have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
     have hmty := hTyReach mty
     have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inl (by
         simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, rfl⟩)))
@@ -459,7 +704,7 @@ theorem genCmd_complete
     have hentry := hVarInCtx x mty hfind
     have he := hExprComplete mty e hexpr
     have hinSupport : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry, by
         simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
@@ -468,7 +713,7 @@ theorem genCmd_complete
   | set_nondet x mty md hfind =>
     have hentry := hVarInCtx x mty hfind
     have hinSupport : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry, by
         simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
@@ -477,7 +722,7 @@ theorem genCmd_complete
   | assert l e md hexpr =>
     have he := hExprComplete .bool e hexpr
     have hinSupport : (⟨.assert "" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨e, he, rfl⟩))))))
@@ -485,7 +730,7 @@ theorem genCmd_complete
   | assume l e md hexpr =>
     have he := hExprComplete .bool e hexpr
     have hinSupport : (⟨.assume "" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨e, he, rfl⟩)))))))
@@ -493,7 +738,7 @@ theorem genCmd_complete
   | cover l e md hexpr =>
     have he := hExprComplete .bool e hexpr
     have hinSupport : (⟨.cover "" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
         simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨e, he, rfl⟩)))))))
@@ -542,11 +787,12 @@ structure GenCmdSoundEnv (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     generator's output `VarCtx`. -/
 theorem genCmd_sound_env
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams)
     (env : GenCmdSoundEnv fctx octx tvars depth C)
+    (hFun : Map.Functional ctx)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars ctx depth)) :
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth)) :
     CmdHasTypeA C (env.toTCtx ctx) r.cmd (env.toTCtx r.outCtx) := by
   rw [genCmd_support_iff] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -565,17 +811,19 @@ theorem genCmd_sound_env
     rw [env.toTCtx_insert]
     exact CmdHasType'.init_nondet _ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)
   · -- set_det
-    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
+    simp only [genSetDet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨⟨name, mty⟩, hmem, e, he, rfl⟩ := hr
-    have hfind := (env.corr ctx).1 name mty hmem
+    have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
+    have hfind := (env.corr ctx).1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     have hwt := env.exprSound mty e he
     exact CmdHasType'.set_det _ name mty e default hfind hwt
   · -- set_nondet
-    simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
+    simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨⟨name, mty⟩, hmem, rfl⟩ := hr
-    have hfind := (env.corr ctx).1 name mty hmem
+    have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
+    have hfind := (env.corr ctx).1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     exact CmdHasType'.set_nondet _ name mty default hfind
   · -- assert
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
@@ -590,19 +838,65 @@ theorem genCmd_sound_env
     obtain ⟨e, he, rfl⟩ := hr
     exact CmdHasType'.cover _ "" e default (env.exprSound .bool e he)
 
+/-- `genCmd` preserves *functionality* of the context: the output `VarCtx` is
+    either the input `ctx` (for `set`/`assert`/`assume`/`cover`) or
+    `ctx.insert x mty` for a **fresh** `x` (for `init`), and a fresh insertion
+    preserves functionality (`Map.insert_functional_of_fresh`). This carries the
+    `Functional` invariant along a command sequence, so `genCmds_sound` can appeal
+    to it at every threaded context. -/
+theorem genCmd_outCtx_functional
+    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (hFun : Map.Functional ctx)
+    (r : GenCmdResult)
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth)) :
+    Map.Functional r.outCtx := by
+  rw [genCmd_support_iff] at hr
+  rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
+  · -- init_det: outCtx = ctx.insert ⟨name,()⟩ mty, with name fresh in ctx
+    simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨name, hname, mty, _, e, _, rfl⟩ := hr
+    have hfresh := genFreshName_produces_fresh ctx name hname
+    simp only [VarCtx.isFresh, VarCtx.find?, Option.isNone_iff_eq_none] at hfresh
+    exact Map.insert_functional_of_fresh ctx ⟨name, ()⟩ mty hFun hfresh
+  · -- init_nondet
+    simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨name, hname, mty, _, rfl⟩ := hr
+    have hfresh := genFreshName_produces_fresh ctx name hname
+    simp only [VarCtx.isFresh, VarCtx.find?, Option.isNone_iff_eq_none] at hfresh
+    exact Map.insert_functional_of_fresh ctx ⟨name, ()⟩ mty hFun hfresh
+  · -- set_det: outCtx = ctx
+    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
+               mem_support_elements_iff] at hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
+  · -- set_nondet
+    simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
+               mem_support_elements_iff] at hr
+    obtain ⟨_, _, rfl⟩ := hr; exact hFun
+  · -- assert
+    simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨_, _, rfl⟩ := hr; exact hFun
+  · -- assume
+    simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨_, _, rfl⟩ := hr; exact hFun
+  · -- cover
+    simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨_, _, rfl⟩ := hr; exact hFun
+
 /-- Soundness of `genCmds`: every command sequence in the generator's support
     satisfies the chained `CmdsHasTypeA` relation.
 
     The proof proceeds by induction on the fuel `n`. At each step, we use
     `genCmd_sound_env` to type the head command, then invoke the inductive
-    hypothesis on the tail with the updated context. -/
+    hypothesis on the tail with the updated context. The `Functional` invariant on
+    the threaded context is maintained via `genCmd_outCtx_functional`. -/
 theorem genCmds_sound
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) (n : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
     (C : LContext CoreLParams)
     (env : GenCmdSoundEnv fctx octx tvars depth C)
+    (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
-    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) fctx octx tvars ctx depth n)) :
+    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) fctx octx tvars immutableVars ctx depth n)) :
     CmdsHasTypeA C (env.toTCtx ctx) result.1 (env.toTCtx result.2) := by
   induction n generalizing ctx result with
   | zero =>
@@ -618,8 +912,10 @@ theorem genCmds_sound
     have heq : result = (cmd :: cmds, ctx'') := by
       cases hpure; rfl
     subst heq
-    have htyCmd := genCmd_sound_env fctx octx tvars ctx depth C env ⟨cmd, ctx'⟩ hcmd
-    exact CmdsHasTypeA.cons _ _ _ cmd cmds htyCmd (ih ctx' (cmds, ctx'') hcmds)
+    have htyCmd := genCmd_sound_env fctx octx tvars immutableVars ctx depth C env hFun ⟨cmd, ctx'⟩ hcmd
+    have hFun' : Map.Functional ctx' :=
+      genCmd_outCtx_functional fctx octx tvars immutableVars ctx depth hFun ⟨cmd, ctx'⟩ hcmd
+    exact CmdsHasTypeA.cons _ _ _ cmd cmds htyCmd (ih ctx' hFun' (cmds, ctx'') hcmds)
 
 -- ── Quick test ────────────────────────────────────────────────────────
 
@@ -629,10 +925,10 @@ instance instToFormatUnitCmdHasTypeAGen : ToFormat Unit where
 
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨cmd, _⟩ ← genCmd [] [] [] [] 2
+  let ⟨cmd, _⟩ ← genCmd [] [] [] [] [] 2
   IO.println <| Std.format cmd |>.pretty : IO Unit)
 
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨cmd, ctx'⟩ ← genCmd [] [] [] [(⟨"x", ()⟩, .int), (⟨"y", ()⟩, .bool)] 2
+  let ⟨cmd, ctx'⟩ ← genCmd [] [] [] [] [(⟨"x", ()⟩, .int), (⟨"y", ()⟩, .bool)] 2
   IO.println <| s!"{Std.format cmd |>.pretty} -- ctx: {ctx'}" : IO Unit)

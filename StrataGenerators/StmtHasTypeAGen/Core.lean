@@ -187,8 +187,9 @@ def genInvariants [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdenti
 /-- Generate a `cmd` statement by delegating to `genCmd`. The imperative command
     is wrapped as `CmdExt.cmd`; `C` is unchanged. -/
 def genCmdStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult := do
-  let r ← genCmd fctx octx tvars ctx depth
+  let r ← genCmd fctx octx tvars immutableVars ctx depth
   pure ⟨Stmt.cmd (CmdExt.cmd r.cmd), C, r.outCtx⟩
 
 /-- Generate an `exit` statement targeting an enclosing block. Under the new
@@ -251,11 +252,12 @@ mutual
     The generated statement satisfies `StmtHasTypeA P C Γ s C' Γ'` (for any
     program `P`) — see `genStmt_sound`. -/
 def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) : Nat → G GenStmtResult
   | 0 =>
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
-      [ (4, fun () => genCmdStmt fctx octx tvars C ctx 0),
+      [ (4, fun () => genCmdStmt fctx octx tvars immutableVars C ctx 0),
         (1, fun () => genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx 0),
         (1, fun () => genTypeDeclStmt C ctx 0) ]
@@ -263,7 +265,7 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     frequency gs hw
   | size + 1 =>
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
-      [ (4, fun () => genCmdStmt fctx octx tvars C ctx (size + 1)),
+      [ (4, fun () => genCmdStmt fctx octx tvars immutableVars C ctx (size + 1)),
         (1, fun () => genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx (size + 1)),
         (1, fun () => genTypeDeclStmt C ctx (size + 1)),
@@ -275,27 +277,27 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
           -- The block's own `label` becomes an enclosing label for its body, so
           -- an `exit` inside the body can break out of this block. The body is
           -- generated at the smaller `size` (guaranteeing termination).
-          let (body, _, _) ← genStmts fctx octx tvars (label :: labels) C ctx size len
+          let (body, _, _) ← genStmts fctx octx tvars immutableVars (label :: labels) C ctx size len
           pure ⟨Stmt.block label body default, C, ctx⟩),
         (2, fun () => do
           let cond ← genLExpr fctx octx [] tvars [] (size + 1) .bool
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx size tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx size elen
+          let (thenb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size elen
           pure ⟨Stmt.ite (.det cond) thenb elseb default, C, ctx⟩),
         (1, fun () => do
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmts fctx octx tvars labels C ctx size tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars labels C ctx size elen
+          let (thenb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size elen
           pure ⟨Stmt.ite .nondet thenb elseb default, C, ctx⟩),
         (2, fun () => do
           let guard ← genCondOrNondet fctx octx tvars (size + 1)
           let measure ← genOptMeasure fctx octx tvars (size + 1)
           let invariants ← genInvariants fctx octx tvars (size + 1)
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (body, _, _) ← genStmts fctx octx tvars labels C ctx size blen
+          let (body, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size blen
           pure ⟨Stmt.loop guard measure invariants body default, C, ctx⟩) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1+2+2+1+2; omega
     frequency gs hw
@@ -309,13 +311,14 @@ termination_by n => (n, 0, 0)
     Returns the statement list together with the final `(C, Γ)`. Satisfies the
     chained `StmtsHasTypeA` relation — see `genStmts_sound`. -/
 def genStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
     Nat → G (List Statement × LContext CoreLParams × VarCtx)
   | 0 => pure ([], C, ctx)
   | len + 1 => do
-    let r ← genStmt fctx octx tvars labels C ctx size
-    let (rest, C'', ctx'') ← genStmts fctx octx tvars labels r.outC r.outCtx size len
+    let r ← genStmt fctx octx tvars immutableVars labels C ctx size
+    let (rest, C'', ctx'') ← genStmts fctx octx tvars immutableVars labels r.outC r.outCtx size len
     pure (r.stmt :: rest, C'', ctx'')
 termination_by n => (size, 1, n)
 
@@ -329,7 +332,7 @@ end
     nesting/expression size, `len` bounds the top-level sequence length. -/
 def genProgramStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (size len : Nat) : G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmts fctx octx tvars [] (LContext.default) [] size len
+  genStmts fctx octx tvars [] [] (LContext.default) [] size len
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
@@ -340,14 +343,14 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of individual statements at size 2.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] [] (LContext.default) [] 2
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default) [] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
 -- Smoke test: a statement started from a non-empty variable scope, so `set`
 -- and control-flow guards over existing variables can appear.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] [] (LContext.default)
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default)
     [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
@@ -360,7 +363,7 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: with enclosing labels in scope, `exit` may target one of them.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] ["outer", "inner"] (LContext.default) [] 2
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] ["outer", "inner"] (LContext.default) [] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
 end StrataGenerators.Stmt

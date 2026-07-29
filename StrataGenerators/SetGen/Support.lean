@@ -326,6 +326,28 @@ theorem mem_support_listOfMaxLength_iff {n : Nat} {g : Set α} {xs : List α} :
     xs ∈ support (listOfMaxLength n g) ↔ xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g := by
   rw [support_listOfMaxLength]; rfl
 
+/-- Every element of a list in the support of `listOf g` is in `support g`.
+    (`listOf` either returns `[]` or draws a head from `g` and recurses; the head
+    is in `support g` and the tail is again in `support (listOf g)`.) This is the
+    forward direction needed to read off per-character facts about a generated
+    identifier's tail run. -/
+theorem mem_support_listOf {g : Set α} {xs : List α}
+    (hxs : xs ∈ support (listOf g)) :
+    ∀ x ∈ xs, x ∈ support g := by
+  induction xs with
+  | nil => intro x hx; cases hx
+  | cons y ys ih =>
+    rw [support, listOf] at hxs
+    simp only [pick_mem_iff, Set.mem_bind, Set.mem_pure] at hxs
+    rcases hxs with h | ⟨z, hz, zs, hzs, heq⟩
+    · cases h
+    · -- `y :: ys = z :: zs`, so `y = z ∈ support g` and `ys = zs ∈ support (listOf g)`
+      obtain ⟨rfl, rfl⟩ := List.cons.inj heq
+      intro x hx
+      rcases List.mem_cons.mp hx with rfl | hx
+      · exact hz
+      · exact ih (by rw [support]; exact hzs) x hx
+
 -- ── coin / biasedOptionGen / optionGen support ───────────────────────────
 -- Ported to `SetGen.Set` from the `SPMF`-based lemmas in `Basalt.SPMF.Support`.
 

@@ -39,6 +39,15 @@ def VarCtx.find? (ctx : VarCtx) (x : Identifier Unit) : Option LMonoTy :=
 def VarCtx.isFresh (ctx : VarCtx) (x : Identifier Unit) : Bool :=
   ctx.find? x |>.isNone
 
+/-- The *mutable* sub-context: the entries of `ctx` whose key is **not** among the
+    immutable names `immutableVars`. Assignment (`set`) targets are drawn from here, so a
+    generated body may freely *read* the immutable names (e.g. a procedure's input
+    parameters, which live in the threaded `ctx` for freshness and expression
+    typing) but can never *assign* to them — exactly the `modRights` obligation.
+    When `immutableVars = []` the mutable context is the whole `ctx`. -/
+def VarCtx.writable (immutableVars : List (Identifier Unit)) (ctx : VarCtx) : VarCtx :=
+  List.filter (fun p => !immutableVars.contains p.1) ctx
+
 -- ── Fresh name generation ──────────────────────────────────────────────
 
 /-- A fallback name guaranteed to be fresh: a string of `x` characters longer
@@ -89,16 +98,21 @@ def genInitNondet [Gen G] (tvars : List TyIdentifier)
   let xty : Lambda.LTy := .forAll [] mty
   pure ⟨.init ⟨name, ()⟩ xty .nondet default, ctx.insert ⟨name, ()⟩ mty⟩
 
-/-- Generate `set x (det e)` where `x` is an existing variable. -/
+/-- Generate `set x (det e)` where `x` is an existing *mutable* variable (its key
+    is not among the immutable names `immutableVars`). The target is drawn from
+    `ctx.writable immutableVars`, so immutable names are never assigned; the output
+    context is the full `ctx`. -/
 def genSetDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) (h : ctx.length > 0) : G GenCmdResult := do
-  let (name, mty) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
+    (h : (ctx.writable immutableVars).length > 0) : G GenCmdResult := do
+  let (name, mty) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
   let e ← genLExpr fctx octx [] tvars [] depth mty
   pure ⟨.set name (.det e) default, ctx⟩
 
-/-- Generate `set x nondet` where `x` is an existing variable. -/
-def genSetNondet [Gen G] (ctx : VarCtx) (h : ctx.length > 0) : G GenCmdResult := do
-  let (name, _) ← elements ctx (by apply List.ne_nil_of_length_pos; assumption)
+/-- Generate `set x nondet` where `x` is an existing *mutable* variable. -/
+def genSetNondet [Gen G] (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
+    (h : (ctx.writable immutableVars).length > 0) : G GenCmdResult := do
+  let (name, _) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
 /-- Generate `assert l e` with a boolean expression. -/
@@ -138,14 +152,14 @@ def genCoverCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
     When the context is non-empty, `set` commands get higher weight to
     compensate for the structural bias toward `init` in sequences. -/
 def genCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) : G GenCmdResult :=
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) : G GenCmdResult :=
   let tyDepth := depth
-  if h : ctx.length > 0 then
+  if h : (ctx.writable immutableVars).length > 0 then
     let gs : List (Nat × (Unit → G GenCmdResult)) :=
       [ (2, fun () => genInitDet fctx octx tvars ctx tyDepth depth),
         (1, fun () => genInitNondet tvars ctx tyDepth),
-        (3, fun () => genSetDet fctx octx tvars ctx depth h),
-        (2, fun () => genSetNondet ctx h),
+        (3, fun () => genSetDet fctx octx tvars immutableVars ctx depth h),
+        (2, fun () => genSetNondet immutableVars ctx h),
         (2, fun () => genAssertCmd fctx octx tvars ctx depth),
         (2, fun () => genAssumeCmd fctx octx tvars ctx depth),
         (2, fun () => genCoverCmd fctx octx tvars ctx depth) ]
@@ -166,9 +180,10 @@ def genCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
 /-- `genCmds n` generates a length-n sequence of well-typed commands,
     threading the context through. -/
 def genCmds [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) : Nat → G (List (Cmd Expression) × VarCtx)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
+    Nat → G (List (Cmd Expression) × VarCtx)
   | 0 => pure ([], ctx)
   | n + 1 => do
-    let ⟨cmd, ctx'⟩ ← genCmd fctx octx tvars ctx depth
-    let (rest, ctx'') ← genCmds fctx octx tvars ctx' depth n
+    let ⟨cmd, ctx'⟩ ← genCmd fctx octx tvars immutableVars ctx depth
+    let (rest, ctx'') ← genCmds fctx octx tvars immutableVars ctx' depth n
     pure (cmd :: rest, ctx'')

@@ -277,12 +277,12 @@ def shrinkCmds (inCtx : VarCtx) (cmds : List (Cmd Expression)) : List (List (Cmd
     input context, and the output context. -/
 def genCmdIO (ctx : VarCtx := []) (depth : Nat := 2) : IO (Cmd Expression × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreOpCtx tvars ctx depth
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreOpCtx tvars [] ctx depth
   return (cmd, ctx, ctx')
 
 /-- Generate a sequence of well-typed commands in IO. -/
 def genCmdsIO (n : Nat := 5) (ctx : VarCtx := []) (depth : Nat := 2) :
     IO (List (Cmd Expression) × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []
-  let (cmds, ctx') ← genCmds (G := IO) [] coreOpCtx tvars ctx depth n
+  let (cmds, ctx') ← genCmds (G := IO) [] coreOpCtx tvars [] ctx depth n
   return (cmds, ctx, ctx')

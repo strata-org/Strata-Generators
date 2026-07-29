@@ -245,14 +245,14 @@ instance : Shrinkable GenCmdWithCtx where
 private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars ctx depth
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars [] ctx depth
   pure ⟨cmd, ctx, ctx'⟩
 
 private def genCmdFromBuiltCtx (ctxSize : Nat) : Gen GenCmdWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
-  let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] depth ctxSize
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars baseCtx depth
+  let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] [] depth ctxSize
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars [] baseCtx depth
   pure ⟨cmd, baseCtx, ctx'⟩
 
 instance : Arbitrary GenCmdWithCtx where
@@ -281,7 +281,7 @@ private def genCmdsWithCtx : Gen GenCmdsWithCtx := do
   let depth := 2
   let n := 4
   let tvars : List TyIdentifier := []
-  let (cmds, ctx') ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] depth n
+  let (cmds, ctx') ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] [] depth n
   pure ⟨cmds, [], ctx'⟩
 
 instance : Arbitrary GenCmdsWithCtx where

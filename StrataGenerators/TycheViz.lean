@@ -314,8 +314,8 @@ private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCt
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
   let numCmds ← IO.rand 0 8
-  let (_, baseCtx) ← genCmds (G := IO) [] coreOpCtx tvars [] d numCmds
-  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreOpCtx tvars baseCtx d
+  let (_, baseCtx) ← genCmds (G := IO) [] coreOpCtx tvars [] [] d numCmds
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreOpCtx tvars [] baseCtx d
   return (cmd, baseCtx, ctx', d)
 
 -- ── Panels 1–4: single-verdict command properties ───────────────────

@@ -146,6 +146,45 @@ theorem genIdentName_not_keyword (s : String)
   obtain ⟨x, _, xs, _, rfl⟩ := hs
   exact dodgeKeyword_not_keyword _
 
+/-- `dodgeKeyword` never introduces a space: the keyword branch appends `"_"`
+    (no space), the fallthrough returns the string unchanged. -/
+theorem dodgeKeyword_no_space (s : String) (h : ' ' ∉ s.toList) :
+    ' ' ∉ (dodgeKeyword s).toList := by
+  unfold dodgeKeyword
+  split
+  · rw [String.toList_append]
+    intro hmem
+    rcases List.mem_append.mp hmem with h1 | h2
+    · exact h h1
+    · simp at h2
+  · exact h
+
+/-- **Space-freedom of `genIdentName`.** Every generated identifier's character
+    list contains no space: the leading char is drawn from `startChars` and the
+    rest from `remainingChars` — neither list contains `' '` — and `dodgeKeyword`
+    only ever appends `"_"`. This is the enabling fact for the in-out procedure
+    body seed: `CoreIdent.mkOld` prefixes `"old "` (which *does* contain a space),
+    so no generated parameter name can equal an `old`-binding key. -/
+theorem genIdentName_no_space (s : String)
+    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
+    ' ' ∉ s.toList := by
+  simp only [genIdentName, mem_support_bind_iff, mem_support_pure_iff] at hs
+  obtain ⟨x, hx, xs, hxs, rfl⟩ := hs
+  have hstart : x ∈ startChars := by
+    simpa only [genStartChar,
+      mem_support_elements_iff (show startChars ≠ [] from by decide +kernel)] using hx
+  have hxs' : ∀ c ∈ xs, c ∈ remainingChars := by
+    intro c hc
+    have := SetGen.mem_support_listOf hxs c hc
+    simpa only [genRemainingChar,
+      mem_support_elements_iff (show remainingChars ≠ [] from by decide +kernel)] using this
+  apply dodgeKeyword_no_space
+  rw [String.toList_ofList]
+  intro hmem
+  rcases List.mem_cons.mp hmem with rfl | hmem
+  · exact (by decide +kernel : ' ' ∉ startChars) hstart
+  · exact (by decide +kernel : ' ' ∉ remainingChars) (hxs' _ hmem)
+
 set_option linter.unusedSimpArgs false in
 /-- The `mapM` inside `genInputs` produces a `ListMap` whose keys are exactly the
     input ident list and whose values are each in `genLMonoTy tvars depth`. -/
@@ -188,6 +227,37 @@ theorem genInputs_support (tvars : List TyIdentifier) (depth : Nat)
   have hnd := genIdents_nodup depth idents hidents
   obtain ⟨hkeys, hvals⟩ := mapM_genInputs_keys_values tvars depth idents m hm
   exact ⟨hkeys ▸ hnd, hvals⟩
+
+/-- Every key of a `genInputs`-generated signature has its underlying `name`
+    reachable by `genIdentName`: the keys are the (deduped) identifier list, whose
+    names come from `genNameList`, i.e. each from `genIdentName`. -/
+theorem genInputs_key_name_reachable (tvars : List TyIdentifier) (depth : Nat)
+    (m : ListMap (Identifier Unit) LMonoTy)
+    (hm : m ∈ SetGen.support (genInputs (G := SetGen.Set) tvars depth))
+    (k : Identifier Unit) (hk : k ∈ m.keys) :
+    k.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+  simp only [genInputs, mem_support_bind_iff] at hm
+  obtain ⟨idents, hidents, hmapM⟩ := hm
+  obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values tvars depth idents m hmapM
+  rw [hkeys] at hk
+  simp only [genIdents, mem_support_map_iff] at hidents
+  obtain ⟨names, hnames, rfl⟩ := hidents
+  rw [StrataGenerators.Dedup.mem_dedup] at hk
+  obtain ⟨s, hs, rfl⟩ := List.mem_map.mp hk
+  rw [genNameList, mem_support_listOfMaxLength_iff] at hnames
+  exact hnames.2 s hs
+
+/-- Every key of a `genInputs`-generated signature is space-free (its `name`'s
+    character list contains no `' '`). Combines `genInputs_key_name_reachable` with
+    `genIdentName_no_space`. This is the fact that separates generated parameter
+    names from `CoreIdent.mkOld` keys (`"old " ++ …`), keeping the in-out body
+    seed `Functional`. -/
+theorem genInputs_key_no_space (tvars : List TyIdentifier) (depth : Nat)
+    (m : ListMap (Identifier Unit) LMonoTy)
+    (hm : m ∈ SetGen.support (genInputs (G := SetGen.Set) tvars depth))
+    (k : Identifier Unit) (hk : k ∈ m.keys) :
+    ' ' ∉ k.name.toList :=
+  genIdentName_no_space k.name (genInputs_key_name_reachable tvars depth m hm k hk)
 
 -- ── Optional-expression soundness ───────────────────────────────────
 

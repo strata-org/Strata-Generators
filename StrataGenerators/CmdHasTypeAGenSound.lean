@@ -39,14 +39,15 @@ theorem freshNamesDisjointFromExprs_nil (octx : OpCtx) (tvars : List TyIdentifie
     `freshNamesDisjointFromExprs_nil`. -/
 theorem genCmd_sound_nil
     (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit)
     (hCorr : VarCtxCorresponds ctx Γ)
+    (hFun : Map.Functional ctx)
     (hExprSound : GenLExprSound [] octx tvars depth)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) [] octx tvars ctx depth)) :
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) [] octx tvars immutableVars ctx depth)) :
     ∃ Γ', CmdHasTypeA C Γ r.cmd Γ' :=
-  genCmd_sound [] octx tvars ctx depth C Γ hCorr hExprSound
+  genCmd_sound [] octx tvars immutableVars ctx depth C Γ hCorr hFun hExprSound
     (freshNamesDisjointFromExprs_nil octx tvars ctx depth) r hr
 
 /-- A `GenCmdSoundEnv` at an empty fvar context, built from the proven
@@ -74,10 +75,11 @@ def genCmdSoundEnv_nil
     relation. -/
 theorem genCmds_sound_nil
     (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) (n : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
     (C : LContext CoreLParams)
     (env : GenCmdSoundEnv [] octx tvars depth C)
+    (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
-    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) [] octx tvars ctx depth n)) :
+    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) [] octx tvars immutableVars ctx depth n)) :
     CmdsHasTypeA C (env.toTCtx ctx) result.1 (env.toTCtx result.2) :=
-  genCmds_sound [] octx tvars ctx depth n C env result hr
+  genCmds_sound [] octx tvars immutableVars ctx depth n C env hFun result hr
