@@ -337,7 +337,7 @@ theorem genSetNondet_sound
     `RigidAnnotCompat` with itself: opening with an empty list of type arguments
     yields `mty` unchanged (the empty substitution is the identity), so the
     compatibility check reduces to reflexivity. -/
-private theorem rigidAnnotCompat_forAll_nil (mty : LMonoTy) :
+theorem rigidAnnotCompat_forAll_nil (mty : LMonoTy) :
     ∀ {aliases rigidVars},
     RigidAnnotCompat aliases rigidVars ((LTy.forAll [] mty).openFull []) mty := by
   intro aliases rigidVars
@@ -536,6 +536,64 @@ theorem genFreshName_produces_fresh (ctx : VarCtx) :
   rcases hname with ⟨hfresh, rfl⟩ | ⟨_, rfl⟩
   · exact hfresh
   · exact dodgeKeyword_fallbackFreshName_isFresh ctx
+
+-- ── The indexed fresh-name family ───────────────────────────────────────
+
+/-- `indexedFreshName base i` has length `base + 1 + i` — the single fact the
+    freshness, injectivity, and keyword-freedom lemmas below all rest on. -/
+theorem indexedFreshName_length (base i : Nat) :
+    (indexedFreshName base i).length = base + 1 + i := by
+  simp [indexedFreshName, String.length_ofList]
+
+/-- Every name in a list of `(identifier, type)` pairs is at most `maxNameLen` long. -/
+theorem length_le_maxNameLen {l : List (Identifier Unit × LMonoTy)}
+    {q : Identifier Unit × LMonoTy} (hq : q ∈ l) : q.1.name.length ≤ maxNameLen l :=
+  foldl_max_length_ge_of_mem _ q.1.name (List.mem_map.mpr ⟨q, hq, rfl⟩) 0
+
+/-- **The family is injective in the index.** Distinct indices yield names of
+    distinct lengths, hence distinct names — so `outTargets` never picks the same
+    out-argument target twice. -/
+theorem indexedFreshName_inj {base i j : Nat}
+    (h : indexedFreshName base i = indexedFreshName base j) : i = j := by
+  have hlen := congrArg String.length h
+  rw [indexedFreshName_length, indexedFreshName_length] at hlen
+  omega
+
+/-- **The family avoids a list of names.** `indexedFreshName (maxNameLen l) i` is
+    strictly longer than every name occurring in `l`, hence occurs in none of them. -/
+theorem indexedFreshName_ne_of_mem {l : List (Identifier Unit × LMonoTy)}
+    {q : Identifier Unit × LMonoTy} (hq : q ∈ l) (i : Nat) :
+    q.1.name ≠ indexedFreshName (maxNameLen l) i := by
+  intro heq
+  have hle := length_le_maxNameLen hq
+  rw [heq, indexedFreshName_length] at hle
+  omega
+
+/-- **The family is fresh for a `VarCtx`.** Taking `base := maxNameLen ctx`, every
+    member of the family is absent from `ctx`. -/
+theorem indexedFreshName_isFresh (ctx : VarCtx) (i : Nat) :
+    VarCtx.isFresh ctx ⟨indexedFreshName (maxNameLen ctx) i, ()⟩ = true := by
+  apply isFresh_of_maxlen_lt
+  rw [indexedFreshName_length]
+  show maxNameLen ctx < maxNameLen ctx + 1 + i
+  omega
+
+/-- No reserved Core keyword is a non-empty string of `x` characters — the
+    `decide`-checkable core of `indexedFreshName_not_keyword`. -/
+private theorem reservedKeyword_not_all_x : ∀ k ∈ reservedKeywordsList,
+    ¬ ((k.toList.all (· == 'x')) = true ∧ 0 < String.length k) := by decide +kernel
+
+/-- **Keyword-freedom of the indexed family.** Each member is a non-empty string of
+    `x` characters, and no reserved Core keyword has that shape — so the
+    out-argument names `outTargets` picks are never reserved words the Core parser
+    would reject in identifier position. -/
+theorem indexedFreshName_not_keyword (base i : Nat) :
+    isReservedKeyword (indexedFreshName base i) = false := by
+  rw [isReservedKeyword_eq_list_contains, Bool.eq_false_iff]
+  intro hcontains
+  refine reservedKeyword_not_all_x _ (List.mem_of_elem_eq_true hcontains) ⟨?_, ?_⟩
+  · simp [indexedFreshName, String.toList_ofList]
+  · rw [indexedFreshName_length]; omega
 
 /-- **Keyword-freedom of `genFreshName`.** Every name in the support of
     `genFreshName ctx` is a non-keyword: both exit paths (the dodged random

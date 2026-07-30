@@ -541,13 +541,14 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
       body C' ((procStmtEnv octx typeArgs).toTCtx ctx') :=
     genStmts_sound P (procStmtEnv octx typeArgs)
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) []
+      (by intro s hs; cases hs) []
       LContext.default
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
   have hmod := genStmts_mutableVars [] octx typeArgs
-      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) []
+      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) [] []
       LContext.default
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
@@ -699,7 +700,7 @@ theorem genProcedure_complete (octx : OpCtx) (size len : Nat)
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
       c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] proc.header.typeArgs [] size .bool))
     (hBodyReach : StmtsReachable [] octx proc.header.typeArgs
-      (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) []
+      (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) [] []
       LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len bodyss C' ctx') :
     proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx size len) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
@@ -729,7 +730,7 @@ theorem genProcedure_complete (octx : OpCtx) (size len : Nat)
       hPostLabels hPostAttr hPostMd hPostExpr
   · -- body reachable: the generator's filtered blocks equal `I`/`O`.
     rw [hI_eq, hO_eq]
-    exact genStmts_complete [] LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len
+    exact genStmts_complete [] [] LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len
       bodyss C' ctx' hBodyReach
   · -- the reassembled record equals `proc`.
     rw [hI_eq, hO_eq]

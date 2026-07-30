@@ -5,6 +5,7 @@ import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
+import StrataGenerators.StmtHasTypeAGen.GenCallStmtSound
 
 open Lambda RandomChoice Core Imperative ArbString
 
@@ -230,6 +231,162 @@ def genTypeDeclStmt [Gen G] (C : LContext CoreLParams) (ctx : VarCtx) (depth : N
   | .ok C' => pure ⟨Stmt.typeDecl tc default, C', ctx⟩
   | .error _ => default
 
+-- ── Procedure-call statement sub-generator ────────────────────────────────
+
+/-- Whether the name `x : τ` declared by the callee can be *reused* from the ambient
+    scope: `ctx` must bind `x` at exactly `τ`, and `x` must not be immutable (the
+    callee writes back through its in-out/out arguments, and writing an immutable
+    variable would violate the enclosing procedure's `modRights`). -/
+def reusable (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
+    (q : Identifier Unit × LMonoTy) : Bool :=
+  ctx.find? q.1 == some q.2 && !immutableVars.contains q.1
+
+/-- Whether the name `x : τ` must be **`init`ed** before the call: `x` is absent
+    from the ambient scope, so there is nothing to reuse. -/
+def needsInit (ctx : VarCtx) (q : Identifier Unit × LMonoTy) : Bool :=
+  ctx.isFresh q.1
+
+/-- A name the callee dictates is *usable* exactly when we can either reuse it or
+    `init` it. Anything else — bound at a **conflicting** type, or bound at the
+    right type but **immutable** — makes that callee genuinely uncallable at this
+    site, since the call rule gives the generator no naming freedom.
+
+    This applies to the **in-out** arguments only: the call rule pins an in-out
+    argument to the very name the callee declares for it (`CmdExtHasType'.call`'s
+    last premise). Output-only arguments are *not* name-constrained — see
+    `outTarget`. -/
+def usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
+    (q : Identifier Unit × LMonoTy) : Bool :=
+  reusable immutableVars ctx q || needsInit ctx q
+
+/-- **Choose the caller's variable that will receive one `out` result.** A call's
+    `out` arguments are not expressions but *variables the callee assigns to*, so
+    for each `out` parameter the call site has to name one such variable. This picks
+    it for the `out` parameter the callee declares as `q = (x, τ)` at position `i` of
+    its output-only block; `base` is a length past which invented names are fresh.
+
+    The name is genuinely the caller's to choose. The Core spec (§4.6.4) requires an
+    `out` argument to exist, to have the declared type, and to be writable, but says
+    **nothing about its name** — unlike an in-out argument, which the call rule pins
+    to the name the callee declares. So:
+
+    * if the callee's own name `x` happens to already be in scope at exactly `τ` and
+      is writable (`reusable`), receive the result in that `x` — the shape real
+      Strata code most often has;
+    * otherwise pick the brand-new name `indexedFreshName base i`, which the caller
+      brings into scope with an `init` just before the call.
+
+    Because a brand-new name is *always* available, an output-only parameter can
+    never make a callee uncallable — so out names need (and admit) no `usableName`
+    guard. Either way the type of the chosen variable is `τ = q.2`, so the argument
+    positions still line up with the callee's declared output types. -/
+def outTarget (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (base : Nat)
+    (q : Identifier Unit × LMonoTy) (i : Nat) : Identifier Unit × LMonoTy :=
+  if reusable immutableVars ctx q then q else (⟨indexedFreshName base i, ()⟩, q.2)
+
+/-- **Choose one receiving variable per `out` parameter**, across the callee's whole
+    output-only block `O`: `outTarget` at each position, with the base taken past
+    every name in `ctx` so that every brand-new name is genuinely fresh and distinct
+    positions get distinct names. The resulting list has the same length as `O` and
+    the same types in the same order — see `outTargets_length`, `outTargets_values` —
+    only the names may differ. -/
+def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
+    (O : @LMonoTySignature Unit) : @LMonoTySignature Unit :=
+  O.toList.zipIdx.map (fun p => outTarget immutableVars ctx (maxNameLen ctx) p.1 p.2)
+
+/-- Generate a procedure-call statement targeting one of the callable procedures
+    in `procs`. This follows the call-site recipe literally, step by step:
+
+    1. **Pick a random callee** `s` from the procedure context (`elements`).
+    2. **Examine its type signature for in-out args.** `s` is front-aligned as
+       `inputs = s.M ++ s.I` and `outputs = s.M ++ s.O`, so the in-out block is
+       exactly `s.M` (`getInoutParams = s.M`), the input-only block is `s.I`, and
+       the output-only block is `s.O`. The in-out and out args are the ones the
+       callee *writes back through*, so each needs a caller variable rather than an
+       expression: the in-out args `s.M` together with one receiving variable per out
+       arg — `inoutNames` and `outTargets` below. When `s.M = []` there are no in-out
+       args and step 3 ranges over the out targets alone.
+    3. **For each in-out arg `x : τ` (then likewise each out arg), check whether
+       `ctx` already has `x : τ`.** For an *in-out* arg the call rule forces the
+       argument to be named *exactly* as the callee declares it, at exactly the
+       declared type, so there is no naming freedom: `reusable` decides the check
+       (and additionally requires `x` be writable, since the callee may assign it).
+        * **Yes** — pass the ambient variable `x` straight through as the in-out
+          argument. Nothing is emitted for `x`.
+        * **No** — `x` must be absent (`needsInit`); we emit `init x τ *` for it
+          *before* the call. If `x` is instead bound at a conflicting type, or is
+          immutable, this callee is skipped entirely (empty generator, `default`),
+          which keeps the generator total.
+
+       For an *out* arg the same reuse-or-`init` choice is made, but the name is
+       **ours** to pick (the Core spec constrains an out argument's existence, type
+       and writability, not its name): `outTargets` reuses `x : τ` when it is in scope
+       and writable, and otherwise picks a brand-new name to `init`. Since a new name
+       is always available, an out arg never makes a callee uncallable, and the guard
+       covers `inoutNames` only.
+    4. **Generate the call.** The by-value inputs `exprs` (one per `s.I` position, at
+       the type declared there) are drawn from `genLExpr`, and the argument list is
+       assembled by `mkArgs`: `inout` args for `s.M`, `in` args for `exprs`, `out`
+       args for `outTargets`.
+
+    The emitted shape depends on step 3: if **every** in-out arg and out target was
+    reused, nothing needs initializing and the statement is the bare `call`,
+    emitted **inline** with no enclosing block or label (the common shape in real
+    Strata code). Otherwise the `init`s for just the missing names are emitted
+    first, and the whole `init`s-then-call sequence is wrapped in a fresh-label
+    `block` so the `init`s stay lexically scoped and do not leak.
+
+    Either way the generator's output context is the *input* `ctx`: reuse adds
+    nothing, and the `init`s are block-scoped.
+
+    The `init`s use the nondeterministic form `init x τ *` (a havoc), which needs
+    no initializer expression and hence no extra expression-typing obligation.
+
+    The remaining `Nodup` guard is genuinely needed: the callee's own signature may
+    repeat a key, and a reused out target may coincide with an in-out name, either
+    of which would make the `init` chain shadow a name it had already declared. -/
+def genCallStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
+    (procs : ProcSigCtx) (labels : List String)
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult :=
+  match procs with
+  | [] => default
+  | p₀ :: ps => do
+    -- Step 1: pick a random procedure to call from the procedure context.
+    let s ← elements (p₀ :: ps) (by simp)
+    -- Step 2: read the in-out args off the callee's signature. Front alignment
+    -- (`inputs = M ++ I`, `outputs = M ++ O`) makes `s.M` exactly the in-out
+    -- block; `s.O` are the output-only args. Both blocks are written back through,
+    -- so both need caller variables, but only the in-out names are dictated to us
+    -- (step 3).
+    let inoutNames : List (Identifier Unit × LMonoTy) := s.M
+    let outTargets : @LMonoTySignature Unit := outTargets immutableVars ctx s.O
+    -- Step 3: for each in-out arg, reuse the ambient `x : τ` when we have it,
+    -- otherwise plan an `init`. A name that is neither reusable nor absent makes
+    -- this callee uncallable here. (The out targets are always usable by
+    -- construction — see `outTargets_all_usableName`.)
+    if inoutNames.all (usableName immutableVars ctx) = true
+        ∧ (s.M ++ outTargets).keys.Nodup then
+      -- The in-out args we must `init` first, then the out targets we must `init`.
+      let inoutToInit := inoutNames.filter (needsInit ctx)
+      let outToInit := outTargets.filter (needsInit ctx)
+      let toInit := inoutToInit ++ outToInit
+      -- Step 4: generate the by-value inputs and assemble the call.
+      let exprs ← s.I.values.mapM (fun σ => genLExpr fctx octx [] tvars [] depth σ)
+      let theCall :=
+        Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M outTargets exprs) default
+      if toInit.isEmpty then
+        -- Every in-out arg and out target was reused ⇒ emit the call inline.
+        pure ⟨theCall, C, ctx⟩
+      else
+        -- Some names were absent ⇒ `init` them first, inside a fresh-label block.
+        let label ← genFreshLabel labels
+        pure ⟨Stmt.block label
+          (StrataGenerators.Stmt.initChain toInit ++ [theCall]) default,
+          C, ctx⟩
+    else
+      default
+
 -- ── Main mutually-recursive statement / statement-list generators ─────────
 
 mutual
@@ -253,6 +410,7 @@ mutual
     program `P`) — see `genStmt_sound`. -/
 def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
+    (procs : ProcSigCtx)
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) : Nat → G GenStmtResult
   | 0 =>
@@ -260,8 +418,9 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
       [ (4, fun () => genCmdStmt fctx octx tvars immutableVars C ctx 0),
         (1, fun () => genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx 0),
-        (1, fun () => genTypeDeclStmt C ctx 0) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1; omega
+        (1, fun () => genTypeDeclStmt C ctx 0),
+        (1, fun () => genCallStmt fctx octx tvars immutableVars procs labels C ctx 0) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1+1; omega
     frequency gs hw
   | size + 1 =>
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
@@ -269,6 +428,7 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
         (1, fun () => genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx (size + 1)),
         (1, fun () => genTypeDeclStmt C ctx (size + 1)),
+        (1, fun () => genCallStmt fctx octx tvars immutableVars procs labels C ctx (size + 1)),
         (2, fun () => do
           -- The block's `label` must not shadow an enclosing one (`label ∉ L`,
           -- the new-spec `block` premise), so it is drawn fresh from `labels`.
@@ -277,29 +437,29 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
           -- The block's own `label` becomes an enclosing label for its body, so
           -- an `exit` inside the body can break out of this block. The body is
           -- generated at the smaller `size` (guaranteeing termination).
-          let (body, _, _) ← genStmts fctx octx tvars immutableVars (label :: labels) C ctx size len
+          let (body, _, _) ← genStmts fctx octx tvars immutableVars procs (label :: labels) C ctx size len
           pure ⟨Stmt.block label body default, C, ctx⟩),
         (2, fun () => do
           let cond ← genLExpr fctx octx [] tvars [] (size + 1) .bool
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size elen
+          let (thenb, _, _) ← genStmts fctx octx tvars immutableVars procs labels C ctx size tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars immutableVars procs labels C ctx size elen
           pure ⟨Stmt.ite (.det cond) thenb elseb default, C, ctx⟩),
         (1, fun () => do
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size tlen
-          let (elseb, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size elen
+          let (thenb, _, _) ← genStmts fctx octx tvars immutableVars procs labels C ctx size tlen
+          let (elseb, _, _) ← genStmts fctx octx tvars immutableVars procs labels C ctx size elen
           pure ⟨Stmt.ite .nondet thenb elseb default, C, ctx⟩),
         (2, fun () => do
           let guard ← genCondOrNondet fctx octx tvars (size + 1)
           let measure ← genOptMeasure fctx octx tvars (size + 1)
           let invariants ← genInvariants fctx octx tvars (size + 1)
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (body, _, _) ← genStmts fctx octx tvars immutableVars labels C ctx size blen
+          let (body, _, _) ← genStmts fctx octx tvars immutableVars procs labels C ctx size blen
           pure ⟨Stmt.loop guard measure invariants body default, C, ctx⟩) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1+2+2+1+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+1+1+1+2+2+1+2; omega
     frequency gs hw
 termination_by n => (n, 0, 0)
 
@@ -312,13 +472,14 @@ termination_by n => (n, 0, 0)
     chained `StmtsHasTypeA` relation — see `genStmts_sound`. -/
 def genStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
+    (procs : ProcSigCtx)
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
     Nat → G (List Statement × LContext CoreLParams × VarCtx)
   | 0 => pure ([], C, ctx)
   | len + 1 => do
-    let r ← genStmt fctx octx tvars immutableVars labels C ctx size
-    let (rest, C'', ctx'') ← genStmts fctx octx tvars immutableVars labels r.outC r.outCtx size len
+    let r ← genStmt fctx octx tvars immutableVars procs labels C ctx size
+    let (rest, C'', ctx'') ← genStmts fctx octx tvars immutableVars procs labels r.outC r.outCtx size len
     pure (r.stmt :: rest, C'', ctx'')
 termination_by n => (size, 1, n)
 
@@ -332,7 +493,7 @@ end
     nesting/expression size, `len` bounds the top-level sequence length. -/
 def genProgramStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (size len : Nat) : G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmts fctx octx tvars [] [] (LContext.default) [] size len
+  genStmts fctx octx tvars [] [] [] (LContext.default) [] size len
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
@@ -343,14 +504,14 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of individual statements at size 2.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default) [] 2
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] [] [] (LContext.default) [] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
 -- Smoke test: a statement started from a non-empty variable scope, so `set`
 -- and control-flow guards over existing variables can appear.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default)
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] [] [] (LContext.default)
     [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
@@ -363,7 +524,7 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: with enclosing labels in scope, `exit` may target one of them.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨s, _, _⟩ ← genStmt [] [] [] [] ["outer", "inner"] (LContext.default) [] 2
+  let ⟨s, _, _⟩ ← genStmt [] [] [] [] [] ["outer", "inner"] (LContext.default) [] 2
   IO.println <| Std.format s |>.pretty : IO Unit)
 
 end StrataGenerators.Stmt

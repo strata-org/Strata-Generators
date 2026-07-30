@@ -50,10 +50,30 @@ def VarCtx.writable (immutableVars : List (Identifier Unit)) (ctx : VarCtx) : Va
 
 -- ── Fresh name generation ──────────────────────────────────────────────
 
+/-- The length of the longest name occurring in a list of `(identifier, type)`
+    pairs (`0` for the empty list). A name strictly longer than this is guaranteed
+    not to occur in the list — the length-based freshness argument used by
+    `fallbackFreshName` and `indexedFreshName`. -/
+def maxNameLen (l : List (Identifier Unit × LMonoTy)) : Nat :=
+  (l.map (fun p => p.1.name)).foldl (fun acc nm => max acc nm.length) 0
+
 /-- A fallback name guaranteed to be fresh: a string of `x` characters longer
     than any name in the context. -/
 def fallbackFreshName (ctx : VarCtx) : String :=
   String.ofList (List.replicate (ctx.names.foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
+
+/-- A *family* of names, one per index `i`, all strictly longer than `base`: the
+    string of `base + 1 + i` `x` characters. Two properties make this family useful
+    where several fresh names are needed at once with no randomness involved:
+
+    * taking `base := maxNameLen l` makes every member fresh for `l` (each is
+      strictly longer than every name in `l`);
+    * distinct indices give names of distinct lengths, hence distinct names.
+
+    See `outTargets`, which names the caller variables receiving a call's `out`
+    results — names the Core spec leaves entirely to the caller. -/
+def indexedFreshName (base i : Nat) : String :=
+  String.ofList (List.replicate (base + 1 + i) 'x')
 
 /-- Generate a fresh variable name not in `ctx`. Uses `NonEmptyString.arbitrary`
     for randomness (a variable identifier must be non-empty), maps it through

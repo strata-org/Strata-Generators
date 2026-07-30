@@ -198,7 +198,7 @@ def genIdents [Gen G] (depth : Nat) : G (List (Identifier Unit)) :=
 
 -- ── Input signature generation ──────────────────────────────────────────
 
-/-- Generate the formal-parameter signature: a `ListMap` from distinct
+/-- Generate the parameter signature: a `ListMap` from distinct
     identifiers to monotypes, where every type is drawn from `genLMonoTy tvars`
     (so its free type variables all lie in `tvars`). -/
 def genInputs [Gen G] (tvars : List TyIdentifier) (depth : Nat) :

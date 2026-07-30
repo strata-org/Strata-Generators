@@ -138,7 +138,7 @@ def genProcedure [Gen G] (octx : OpCtx) (size len : Nat) : G Procedure := do
   -- are exactly the outputs the body is entitled to assign. `VarCtx` and
   -- `LMonoTySignature` are both `List ((Identifier Unit) × LMonoTy)`.
   let (body, _, _) ← genStmts [] octx typeArgs
-    (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) []
+    (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) [] []
     (LContext.default) (inputs ++ outputs ++ oldVars inout) size len
   pure {
     header := {
