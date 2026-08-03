@@ -85,6 +85,26 @@ def checkValidExpr (e : LExpr') : IO (Except String (Option Bool)) := do
     catch ex =>
       return .error s!"discharge exception: {ex.toString}"
 
+/-- The SMT solver the `--smt` check will invoke, read from the *same*
+    `Core.VerifyOptions.default` that `checkValidExpr` passes to
+    `dischargeObligation` (default: `cvc5`). Deriving it here means the
+    availability check below can never name a different solver than the one
+    actually run. -/
+def solverName : String := Core.VerifyOptions.default.solver
+
+/-- Solver availability check for the `--smt` property: `true` iff the configured
+    `solverName` can be launched. `IO.Process.output` captures the child's streams
+    and, when the executable is missing, reports a non-zero exit code (rather than
+    throwing) — so we treat exit `0` as available and catch any spawn exception as
+    a backstop. This avoids letting each per-term discharge silently fail while
+    the suite reports a green "0/0 checked". -/
+def solverAvailable : IO Bool := do
+  try
+    let out ← IO.Process.output { cmd := solverName, args := #["--version"] }
+    return out.exitCode == 0
+  catch _ =>
+    return false
+
 /-- Generate a closed term at a base type over `intBoolOpCtx` (int arithmetic,
     comparisons, boolean ops) — all `Core.Factory` operators, hence SMT-encodable.
     Retries with fresh randomness when the generator hits its empty-support

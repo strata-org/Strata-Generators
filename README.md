@@ -82,8 +82,10 @@ Flags (all optional; the Tyche visualization pass is on by default):
 - `--tyche-samples=N` — samples per Tyche panel (default 1000)
 - `--smt` — add the SMT/concrete-eval agreement property (off by default). This
   property cross-checks the in-Lean evaluator against an SMT semantics, so it
-  needs a live `cvc5`/`z3` solver on `PATH`; it is excluded from the default run
-  and CI for that reason.
+  needs a live solver (default `cvc5`; `z3` also works) on `PATH`; it is excluded
+  from the default run and CI for that reason. If `--smt` is passed but the solver
+  cannot be launched, the driver prints an error and exits non-zero rather than
+  silently reporting a green "0 checked" suite.
 
 See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of properties tested.
 

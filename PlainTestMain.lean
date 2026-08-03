@@ -47,6 +47,16 @@ def main (args : List String) : IO UInt32 := do
   let maxSize := cli.maxSize
   let cfg : Configuration := { numInst := numTrials, maxSize }
 
+  -- `--smt` needs a live SMT solver on `PATH`. Fail fast with a clear message
+  -- and a non-zero exit code if the flag is set but the configured solver
+  -- (`StrataGenerators.SmtEval.solverName`, default `cvc5`) can't be launched,
+  -- rather than silently reporting a green "0/0 checked" suite. Mirrors `TestMain`.
+  if cli.smtEnabled then
+    unless ← StrataGenerators.SmtEval.solverAvailable do
+      IO.eprintln s!"error: --smt requires the SMT solver '{StrataGenerators.SmtEval.solverName}' on PATH, but it could not be launched."
+      IO.eprintln "Install it (e.g. cvc5 or z3) and ensure it is on PATH, or run without --smt."
+      return 1
+
   IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
   IO.println ""
 
