@@ -35,9 +35,11 @@ procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
   * `inout` (`M`)      — parameters appearing in *both* input and output roles;
   * `inputOnly` (`I`)  — input-only parameters (filtered disjoint from `M`);
   * `outputOnly` (`O`) — output-only parameters (filtered disjoint from `M ++ I`).
-  The signatures are front-aligned: `inputs := M ++ I`, `outputs := M ++ O`. So
-  `getInoutParams = M` (the shared block), discharging `inputsNodup`/`outputsNodup`
-  (each is an append of two disjoint `Nodup`-keyed blocks).
+  The shared in-out block `M` leads both signatures: `inputs := M ++ I`,
+  `outputs := M ++ O`, so the shared parameters occupy the same leading positions
+  in both lists. So `getInoutParams = M` (the shared block), discharging
+  `inputsNodup`/`outputsNodup` (each is an append of two disjoint `Nodup`-keyed
+  blocks).
 - `preconditions` / `postconditions` — labeled `bool` expressions (via
   `genChecks`). **Both** condition obligations reduce, under the annotated
   `instHasTypeA` (whose `exprTyped C Γ e mty = HasTypeA [] e mty` ignores the
@@ -121,11 +123,13 @@ def genChecks [Gen G] (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) :
       either), with the *inputs'* keys marked immutable so the body may read but
       never assign to them.
 
-    - `procs`    — the front-aligned signatures of the callable *sibling*
-      procedures (the call targets). Threaded into `genStmtChain` so the body may
-      emit `call` statements against them; the empty `[]` recovers the old
-      call-free behaviour. The generated body is sound against any program `P` for
-      which `ProcSigCorresponds procs P` holds — see `genProcedure_sound`.
+    - `procs`    — the signatures of the callable *sibling* procedures (the call
+      targets), each recorded as its in-out/input-only/output-only blocks with the
+      shared block leading both roles (`inputs = M ++ I`, `outputs = M ++ O`).
+      Threaded into `genStmtChain` so the body may emit `call` statements against
+      them; the empty `[]` recovers the old call-free behaviour. The generated body
+      is sound against any program `P` for which `ProcSigCorresponds procs P` holds
+      — see `genProcedure_sound`.
 
     `noFilter` / statement `MetaData` are at their defaults.
 
@@ -143,8 +147,9 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
   let inputOnly := disjointInputs rawInputOnly inout
   let rawOutputOnly ← genInputs typeArgs size
   let outputOnly := disjointInputs rawOutputOnly (inout ++ inputOnly)
-  -- Front-aligned layout: the shared in-out block leads both signatures, so the
-  -- call-site argument positions line up.
+  -- The shared in-out block `M` leads both signatures (`inputs = M ++ I`,
+  -- `outputs = M ++ O`), so the shared parameters occupy the same leading
+  -- positions in both and the call-site argument positions line up.
   let inputs := inout ++ inputOnly
   let outputs := inout ++ outputOnly
   let preconditions ← genChecks octx typeArgs size
@@ -173,9 +178,9 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
     body := .structured body
   }
 
-/-- Read the front-aligned `ProcSig` of a procedure header off its signature,
-    under a caller-chosen name `name` (the post-relabel `P{i}` a call site refers
-    to). The three blocks are recovered exactly as `genProcedure` lays them out:
+/-- Read the `ProcSig` of a procedure header off its signature, under a
+    caller-chosen name `name` (the post-relabel `P{i}` a call site refers to). The
+    three blocks are recovered exactly as `genProcedure` lays them out:
 
     * `M` = `getInoutParams` — the in-out block (keys shared by inputs and outputs);
     * `I` = the input-only block — inputs whose key is *not* an output key;

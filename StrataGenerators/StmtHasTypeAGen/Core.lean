@@ -307,8 +307,9 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     in `procs`. This follows the call-site recipe literally, step by step:
 
     1. **Pick a random callee** `s` from the procedure context (`elements`).
-    2. **Examine its type signature for in-out args.** `s` is front-aligned as
-       `inputs = s.M ++ s.I` and `outputs = s.M ++ s.O`, so the in-out block is
+    2. **Examine its type signature for in-out args.** `s`'s signature decomposes as
+       `inputs = s.M ++ s.I` and `outputs = s.M ++ s.O` (the shared block `s.M`
+       leading both), so the in-out block is
        exactly `s.M` (`getInoutParams = s.M`), the input-only block is `s.I`, and
        the output-only block is `s.O`. The in-out and out args are the ones the
        callee *writes back through*, so each needs a caller variable rather than an

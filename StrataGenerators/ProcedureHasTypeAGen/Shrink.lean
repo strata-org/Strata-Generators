@@ -70,7 +70,7 @@ namespace StrataGenerators.Procedure.TestSupport
 /-- Whether Strata's whole-procedure typechecker accepts `p` as a declaration of
     `prog`, in the standard Core ambient context. The `prog` argument is consulted
     only by the `call` branch of the statement typechecker; generated procedures
-    now *do* emit calls against their siblings (issue #37 — see the module doc of
+    now *do* emit calls against their siblings (see the module doc of
     `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, point 1), so the
     procedure-*list* shrinker must pass the assembled program (`mkProgram ps`) for
     the check to stay faithful — a candidate that still calls `P{j}` only

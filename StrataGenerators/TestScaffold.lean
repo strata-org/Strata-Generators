@@ -599,16 +599,16 @@ instance : Shrinkable GenProcs where
 -- budget was tuned so this never throws through max size 100.
 --
 -- The procedures are generated **left to right into an acyclic call DAG**: the
--- body of procedure `i` is generated against the front-aligned signatures of the
+-- body of procedure `i` is generated against the signatures of the
 -- already-generated *monomorphic* siblings `0..i-1` (named `P0…P{i-1}` — exactly
 -- what `relabelProcs` assigns each position below, so the `call`s and the renamed
--- headers line up). This wires `genCallStmt` up to `genProcedure` (issue #37): a
--- body may now emit `call P{j}` for `j < i`, so the assembled program's call graph
--- carries real edges and the callee-closure / call-graph dimensions of the
--- FilterProcedures/PrecondElim properties are no longer vacuous. Only monomorphic
--- siblings become call targets — the call generator and `ProcSigCorresponds` both
--- require the callee's `typeArgs = []`, and `genProcedure` does not instantiate a
--- polymorphic callee's type arguments at the call site.
+-- headers line up). This lets a body call its siblings: a body may emit `call P{j}`
+-- for `j < i`, so the assembled program's call graph carries real edges and the
+-- callee-closure / call-graph dimensions of the FilterProcedures/PrecondElim
+-- properties are no longer vacuous. Only monomorphic siblings become call targets
+-- — the call generator and `ProcSigCorresponds` both require the callee's
+-- `typeArgs = []`, and `genProcedure` does not instantiate a polymorphic callee's
+-- type arguments at the call site.
 private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
   let n := max 2 (min 4 (2 + s / 30))
   let size := max 1 (min 2 (s / 30))

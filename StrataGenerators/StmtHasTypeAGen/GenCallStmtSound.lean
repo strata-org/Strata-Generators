@@ -26,11 +26,11 @@ open Core.TypeSpec
 
 -- ── Procedure-signature context (call targets) ────────────────────────────
 
-/-- A callee's front-aligned signature description, stored *directly* (front
-    alignment is not automatic for an arbitrary `P`-procedure; it is what
-    `genProcedure` emits and what a call site must respect). `M` = in-out block,
-    `I` = input-only block, `O` = output-only block, so `inputs = M ++ I` and
-    `outputs = M ++ O`. -/
+/-- A callee's signature description, stored *directly* with the shared in-out
+    block leading both roles. This layout is not automatic for an arbitrary
+    `P`-procedure; it is what `genProcedure` emits and what a call site must
+    respect. `M` = in-out block, `I` = input-only block, `O` = output-only block,
+    so `inputs = M ++ I` and `outputs = M ++ O`. -/
 structure ProcSig where
   /-- The callee's name (matched against `Program.Procedure.find?`). -/
   pname : String
@@ -45,13 +45,15 @@ structure ProcSig where
     `elements` and its support-inversion lemma inside `genCallStmt`). -/
 instance : Inhabited ProcSig := ⟨⟨"", [], [], []⟩⟩
 
-/-- The set of callable procedures, each with its front-aligned signature. -/
+/-- The set of callable procedures, each with its signature (shared in-out block
+    leading both roles). -/
 abbrev ProcSigCtx := List ProcSig
 
 /-- `procs` faithfully describes callable procedures of `P`: each entry names a
-    monomorphic procedure of `P` whose signature front-aligns as recorded, with
-    the input-only keys disjoint from the LHS (`M ∪ O`) keys. Exactly the
-    hypotheses `call_mixed_body_sound` consumes for the `.call` case. -/
+    monomorphic procedure of `P` whose signature decomposes as recorded (shared
+    block `M` leading both `inputs` and `outputs`), with the input-only keys
+    disjoint from the LHS (`M ∪ O`) keys. Exactly the hypotheses
+    `call_mixed_body_sound` consumes for the `.call` case. -/
 def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
   ∀ s ∈ procs, ∃ proc, Program.Procedure.find? P s.pname = some proc ∧
     proc.header.typeArgs = [] ∧
@@ -127,9 +129,10 @@ theorem mem_support_mapM_iff {α β} (f : α → SetGen.Set β)
 
 -- ── The call-argument recipe ──────────────────────────────────────────────
 
-/-- Build the call arguments for a callee whose signature front-aligns as
+/-- Build the call arguments for a callee whose signature decomposes as
     `inputs = M ++ I`, `outputs = M ++ O` (`M` = in-out, `I` = input-only,
-    `O` = output-only). The in-out block leads (as `inoutArg` nodes, so each is a
+    `O` = output-only, the shared block `M` leading both). The in-out block leads
+    (as `inoutArg` nodes, so each is a
     pass-by-reference variable named exactly `M.keys[i]`, as the call rule's in-out
     premise requires), followed by the by-value inputs `exprs` (as `inArg` nodes),
     followed by the output-only *targets* `T` (as `outArg` nodes). This layout makes
@@ -370,7 +373,8 @@ theorem keyval_mem {α β} (m : ListMap α β) (i : Nat)
 
 -- ── The 7-premise call-typing obligation ─────────────────────────────────
 
-/-- Soundness of the front-aligned in-out call recipe. Given a monomorphic callee
+/-- Soundness of the in-out call recipe (shared block `M` leading both roles).
+    Given a monomorphic callee
     `proc` with `inputs = M ++ I`, `outputs = M ++ O` (M/I/O mutually key-disjoint),
     out-argument targets `T` positionally as long as `O`, every `M` name and every
     `T` name in scope at its declared type (`M.values[i]` resp. `O.values[i]`), and

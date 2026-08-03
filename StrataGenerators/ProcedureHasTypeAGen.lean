@@ -58,11 +58,11 @@ theorem ListMap_values_append (a b : ListMap (Identifier Unit) LMonoTy) :
   rw [ListMap.values_eq_map_snd, ListMap.values_eq_map_snd, ListMap.values_eq_map_snd]
   simp [List.map_append]
 
-/-- **In-out parameters.** For the front-aligned three-block layout
-    `inputs = M ++ I`, `outputs = M ++ O` with the three blocks mutually disjoint,
-    the in-out parameters (`getInoutParams`, i.e. the inputs whose key is also an
-    output key) are exactly the shared block `M`: every `M`-entry's key is an
-    output key (`hM`), every `I`-entry's is not (`hI`). -/
+/-- **In-out parameters.** For the three-block layout `inputs = M ++ I`,
+    `outputs = M ++ O` (the shared block `M` leading both) with the three blocks
+    mutually disjoint, the in-out parameters (`getInoutParams`, i.e. the inputs
+    whose key is also an output key) are exactly the shared block `M`: every
+    `M`-entry's key is an output key (`hM`), every `I`-entry's is not (`hI`). -/
 theorem getInoutParams_inout (name : String) (tyArgs : List TyIdentifier)
     (M I O : List ((Identifier Unit) × LMonoTy))
     (hI : ∀ p ∈ I, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = false)
@@ -75,7 +75,8 @@ theorem getInoutParams_inout (name : String) (tyArgs : List TyIdentifier)
       List.filter_eq_nil_iff.mpr (by intro p hp; rw [hI p hp]; simp)]
   simp
 
-/-- **Context alignment (in-out).** For the front-aligned three-block layout, the
+/-- **Context alignment (in-out).** For the three-block layout (shared block `M`
+    leading both signatures), the
     declarative body context over the *default* ambient `Γ` is exactly the
     single-scope `procToTCtx (inputs ++ outputs ++ oldVars M)`. This is the bridge
     between the generator (which threads `procToTCtx` over
@@ -627,9 +628,10 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
 -- ── Completeness ─────────────────────────────────────────────────────────
 
 /-- **Completeness of `genProcedure`.** Every procedure whose signature admits the
-    generator's front-aligned three-block decomposition — `inputs = M ++ I`,
-    `outputs = M ++ O` with `M` (in-out) shared, `I` (input-only) key-disjoint from
-    `M`, and `O` (output-only) key-disjoint from `M ++ I` — and (a) has the default
+    generator's three-block decomposition — `inputs = M ++ I`,
+    `outputs = M ++ O` with `M` (in-out) shared and leading both, `I` (input-only)
+    key-disjoint from `M`, and `O` (output-only) key-disjoint from `M ++ I` — and
+    (a) has the default
     values for the fields the generator does not vary (`noFilter := false`, a
     *structured* body) and (b) whose name, type arguments, each of the three
     signature blocks, contract, and body are individually reachable by the
@@ -643,7 +645,8 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     and `genProcedure_sound`'s only side-condition is the matching
     `ProcSigCorresponds procs P` that certifies those targets against `P`.
 
-    - `hInputsEq` / `hOutputsEq` — the front-aligned decomposition of the signature;
+    - `hInputsEq` / `hOutputsEq` — the three-block decomposition of the signature
+      (shared block `M` leading both);
     - `hName` — the procedure name is a reachable identifier string;
     - `hTyArgsLen` / `hTyArgsReach` — the (already `Nodup`) type arguments are no
       longer than `size` and each is reachable by `genIdentName`;
@@ -667,7 +670,7 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Na
     -- the generator does not vary these fields, so they must be at defaults:
     (hNoFilter : proc.header.noFilter = false)
     (hBodyEq : proc.body = .structured bodyss)
-    -- front-aligned three-block decomposition:
+    -- three-block decomposition (shared block `M` leading both):
     (hInputsEq : proc.header.inputs = M ++ I)
     (hOutputsEq : proc.header.outputs = M ++ O)
     (hIdisjM : ∀ k ∈ ListMap.keys I, k ∉ ListMap.keys M)

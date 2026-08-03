@@ -88,14 +88,14 @@ assemblies are therefore provided:
 i.e. `coreMonoOps` plus the four precondition-bearing `Int.Safe{Div,Mod,DivT,ModT}`
 operators. Three facts about that body shape bound what these properties can test:
 
-1. **Procedure calls, wired into an acyclic call DAG (issue #37).** `genCallStmt`
+1. **Procedure calls, wired into an acyclic call DAG.** `genCallStmt`
    (`StmtHasTypeAGen/Core.lean`, proven sound in `GenCallStmtSound.lean`) emits
    `call` statements against a non-empty `procs : ProcSigCtx`, and `genProcedure`
    now threads such a context into `genStmtChain`
    (`ProcedureHasTypeAGen/Core.lean`). The two harnesses (`TestScaffold.genProcsWith`
    and `TycheViz.genProcsForTyche`) exploit this by generating the procedures
-   *left to right*: body `i` is generated against the front-aligned signatures of
-   the already-generated monomorphic siblings `0..i-1` (named `P0…P{i-1}`, matching
+   *left to right*: body `i` is generated against the signatures of the
+   already-generated monomorphic siblings `0..i-1` (named `P0…P{i-1}`, matching
    the `relabelProcs` renaming), so no cycles or self-recursion arise. Only
    monomorphic siblings (`typeArgs = []`) become call targets — both `genCallStmt`
    and `ProcSigCorresponds` require the callee to be monomorphic.

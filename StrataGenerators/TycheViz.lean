@@ -850,8 +850,8 @@ open StrataGenerators.Procedure.TestSupport in
 
     Mirrors `TestScaffold.genProcsWith`: the procedures form an acyclic call DAG,
     body `i` generated against the monomorphic siblings `0..i-1` (named `P0…P{i-1}`,
-    matching `relabelProcs`), so the panels see programs with real call-graph edges
-    (issue #37). -/
+    matching `relabelProcs`), so the panels see programs with real call-graph
+    edges. -/
 def genProcsForTyche : IO (List Core.Procedure × Nat) := do
   let genSize ← IO.rand 0 60
   let n ← IO.rand 2 4
