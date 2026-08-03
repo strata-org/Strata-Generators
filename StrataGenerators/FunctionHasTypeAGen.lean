@@ -299,8 +299,11 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     FuncHasTypeA C Γ func := by
   -- Expose the components generated for each field.
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
+  -- (`preconditions` is generated too, but `FuncHasType'` has no precondition
+  -- field, so its reachability witness `_hpre` is simply unused here.)
   obtain ⟨name, _hname, typeArgs, htypeArgs, inputs, hinputs,
-          output, houtput, body, hbody, measure, hmeasure, rfl⟩ := hfunc
+          output, houtput, body, hbody, measure, hmeasure,
+          preconditions, _hpre, rfl⟩ := hfunc
   -- Facts about the generated typeArgs / inputs.
   have htyNodup : typeArgs.Nodup := genTypeArgs_nodup depth typeArgs htypeArgs
   obtain ⟨hkeysNodup, hvals⟩ := genInputs_support typeArgs depth inputs hinputs
@@ -435,6 +438,159 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     -- `some e` is reachable because `e` is reachable by `genLExpr`
     exact Or.inr ⟨e, ho e rfl, rfl⟩
 
+/-- Completeness of `genPreconditions`. The empty list is always reachable (the
+    `none` branch of `optionGen`); a *singleton* `[p]` is reachable when `p.expr`
+    is reachable by `genLExpr` at `.bool` over the formals, and `p.md = ()`
+    (forced, since the metadata type is `Unit`).
+
+    Lists of length ≥ 2 are **not** reachable — `genPreconditions` emits at most
+    one clause — which is why `genFunction_complete` carries a
+    `func.preconditions.length ≤ 1` hypothesis rather than dropping the
+    precondition side condition entirely.
+
+    The `.bool` draw named in `hreach` is the *unbiased* branch of
+    `genPrecondition`'s `frequency`. It carries weight 1 (not 0), so it is genuinely
+    reachable and this hypothesis remains sufficient: the input-mentioning branch
+    added for the "prefer inputs" bias only *adds* reachable expressions, it removes
+    none.
+
+    This lemma is deliberately one-directional and mentions only the `.bool` branch,
+    because that is all `genFunction_complete` needs. For the *exact* support —
+    including the `genInputMentioningPrecond` clauses — see
+    `mem_support_genPrecondition_iff`, which is a genuine iff. -/
+theorem genPreconditions_complete (octx : OpCtx)
+    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
+    (depth : Nat) (ps : List (Strata.DL.Util.FuncPrecondition LExpr' Unit))
+    (hlen : ps.length ≤ 1)
+    (hreach : ∀ p ∈ ps, p.expr ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool)) :
+    ps ∈ SetGen.support (genPreconditions (G := SetGen.Set) octx inputs tvars depth) := by
+  simp only [genPreconditions, genPrecondition, mem_support_map_iff,
+    mem_support_optionGen_iff]
+  match ps with
+  | [] =>
+    -- `[] = Option.toList none`, and `none` is always in `optionGen`'s support.
+    exact ⟨none, Or.inl rfl, rfl⟩
+  | [p] =>
+    -- `[p] = Option.toList (some p)`; `some p` is reachable via `p.expr`.
+    refine ⟨some p, Or.inr ⟨p, ?_, rfl⟩, rfl⟩
+    -- Reach `p.expr` through the `.bool` draw, on both sides of the
+    -- `inputs.toList ≠ []` split: it is the sole generator when there are no
+    -- formals, and the weight-1 branch of the `frequency` when there are.
+    have hbody : ∀ g : SetGen.Set LExpr',
+        p.expr ∈ SetGen.support g →
+        p ∈ SetGen.support (do let y ← g; pure ({ expr := y, md := () } :
+          Strata.DL.Util.FuncPrecondition LExpr' Unit)) := by
+      intro g hg
+      simp only [mem_support_bind_iff, mem_support_pure_iff]
+      refine ⟨p.expr, hg, ?_⟩
+      -- The record is rebuilt from `p.expr` and the unique `Unit` metadata.
+      obtain ⟨e, md⟩ := p
+      rfl
+    by_cases hne : inputs.toList ≠ []
+    · rw [dif_pos hne]
+      refine hbody _ ?_
+      rw [mem_support_frequency_iff]
+      refine ⟨1, fun _ => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool,
+        by simp, by omega, hreach p (by simp)⟩
+    · rw [dif_neg hne]
+      exact hbody _ (hreach p (by simp))
+  | _ :: _ :: _ =>
+    -- Excluded by `hlen`.
+    simp at hlen
+
+/-- **Exact** characterization of `genPrecondition`'s support: an iff, not just the
+    one-directional `genPreconditions_complete`.
+
+    Worth stating explicitly because it settles a natural worry — that a *full*
+    completeness theorem would have to quantify over the "provable" or "valid"
+    preconditions and so drag in undecidability. It does not. The support of a
+    generator is a set of `LExpr'` *syntax trees*, and `FuncWF.precond_freevars`
+    (`Func.lean:120`) constrains preconditions only syntactically (free variables ⊆
+    input names). Nothing here mentions satisfiability, validity, or provability, so
+    there is no semantic quantifier to be undecidable about.
+
+    The right-hand side is a finite disjunction over the two `frequency` branches,
+    each reduced to `genLExpr` reachability. Whether *that* is decidable is a
+    separate question about `genLExpr`, already answered by `genLExprBase_complete`
+    (whose hypotheses — `HasTypeA'`, `emptyNames`, `allVarsInCtx`, `AllTypesSimple`,
+    `termDepth ≤ depth` — are all syntactic). -/
+theorem mem_support_genPrecondition_iff (octx : OpCtx)
+    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
+    (depth : Nat) (o : Option (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :
+    o ∈ SetGen.support (genPrecondition (G := SetGen.Set) octx inputs tvars depth)
+      ↔ o = none ∨ ∃ e,
+          (-- the unbiased `.bool` draw, available whether or not there are formals
+           e ∈ SetGen.support (genLExpr (G := SetGen.Set)
+             (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool)
+           ∨ -- the input-mentioning branch: `x == e'` for a formal `(x, τ)`
+           (∃ (x : Identifier Unit) (τ : LMonoTy) (e' : LExpr'),
+             (x, τ) ∈ inputs.toList ∧
+             e' ∈ SetGen.support (genLExpr (G := SetGen.Set)
+               (inputsAsFVarCtx inputs) octx [] tvars [] depth τ) ∧
+             e = .eq () (.fvar () x (some τ)) e'))
+          ∧ o = some { expr := e, md := () } := by
+  simp only [genPrecondition, mem_support_optionGen_iff]
+  constructor
+  · rintro (rfl | ⟨p, hp, rfl⟩)
+    · exact Or.inl rfl
+    refine Or.inr ⟨p.expr, ?_, ?_⟩
+    · by_cases hne : inputs.toList ≠ []
+      · rw [dif_pos hne, mem_support_bind_iff] at hp
+        obtain ⟨e, he, hpe⟩ := hp
+        rw [mem_support_pure_iff] at hpe
+        have hexpr : p.expr = e := by subst hpe; rfl
+        rw [mem_support_frequency_iff] at he
+        obtain ⟨w, g, hmem, _, hg⟩ := he
+        -- Two branches in the `frequency` list; `simp` splits the membership.
+        simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hmem
+        rcases hmem with ⟨_, rfl⟩ | ⟨_, rfl⟩
+        · -- input-mentioning branch
+          rw [genInputMentioningPrecond, mem_support_bind_iff] at hg
+          obtain ⟨⟨x, τ⟩, hxmem, hrest⟩ := hg
+          rw [mem_support_bind_iff] at hrest
+          obtain ⟨e', he', heq⟩ := hrest
+          rw [mem_support_pure_iff] at heq
+          rw [mem_support_elements_iff] at hxmem
+          exact Or.inr ⟨x, τ, e', hxmem, he', by rw [hexpr, ← heq]⟩
+        · -- unbiased `.bool` branch
+          exact Or.inl (hexpr ▸ hg)
+      · rw [dif_neg hne, mem_support_bind_iff] at hp
+        obtain ⟨e, he, hpe⟩ := hp
+        rw [mem_support_pure_iff] at hpe
+        exact Or.inl (by rw [show p.expr = e by subst hpe; rfl]; exact he)
+    · obtain ⟨e, md⟩ := p; rfl
+  · rintro (rfl | ⟨e, hbranch, rfl⟩)
+    · exact Or.inl rfl
+    refine Or.inr ⟨{ expr := e, md := () }, ?_, rfl⟩
+    have hpure : ∀ g : SetGen.Set LExpr', e ∈ SetGen.support g →
+        ({ expr := e, md := () } : Strata.DL.Util.FuncPrecondition LExpr' Unit) ∈
+          SetGen.support (do let y ← g; pure ({ expr := y, md := () } :
+            Strata.DL.Util.FuncPrecondition LExpr' Unit)) := by
+      intro g hg
+      rw [mem_support_bind_iff]
+      exact ⟨e, hg, by rw [mem_support_pure_iff]⟩
+    rcases hbranch with hbool | ⟨x, τ, e', hxmem, he', rfl⟩
+    · by_cases hne : inputs.toList ≠ []
+      · rw [dif_pos hne]
+        refine hpure _ ?_
+        rw [mem_support_frequency_iff]
+        exact ⟨1, fun _ => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool,
+          by simp, by omega, hbool⟩
+      · rw [dif_neg hne]; exact hpure _ hbool
+    · -- an input-mentioning clause forces `inputs.toList ≠ []` (it contains `x`)
+      have hne : inputs.toList ≠ [] := by
+        intro h; rw [h] at hxmem; simp at hxmem
+      rw [dif_pos hne]
+      refine hpure _ ?_
+      rw [mem_support_frequency_iff]
+      refine ⟨3, fun _ => genInputMentioningPrecond octx inputs tvars depth hne,
+        by simp, by omega, ?_⟩
+      rw [genInputMentioningPrecond, mem_support_bind_iff]
+      refine ⟨(x, τ), by rw [mem_support_elements_iff]; exact hxmem, ?_⟩
+      rw [mem_support_bind_iff]
+      exact ⟨e', he', by rw [mem_support_pure_iff]⟩
+
 -- ── Completeness of genFunction ──────────────────────────────────────
 
 /-- **Completeness of `genFunction`.** Every well-typed function that (a) has the
@@ -452,7 +608,12 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     - `hInputNamesLen` / `hInputNamesReach` — likewise for the parameter names;
     - `hTyReach` — the output and each input type are reachable by `genLMonoTy`;
     - `hBodyReach` / `hMeasureReach` — the body/measure (when present) are
-      reachable by `genLExpr`.
+      reachable by `genLExpr`;
+    - `hPreLen` / `hPreReach` — there is at most one `requires` clause and its
+      expression is reachable by `genLExpr` at `.bool` **in the formals context**
+      `inputsAsFVarCtx func.inputs` (not `fctx`). A function whose precondition
+      mentions an ambient variable is therefore out of reach by design — such a
+      function violates `FuncWF.precond_freevars` anyway.
 
     The `typeArgs` / input-name conditions are stated concretely (a length bound
     plus per-name `genIdentName` reachability) via
@@ -473,7 +634,9 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     -- base `Func`, so `Function` no longer has that field and the former
     -- `func.concreteEval = none` hypothesis is gone.)
     (hAxioms : func.axioms = [])
-    (hPre : func.preconditions = [])
+    -- `preconditions` IS generated, but at most one clause (`genPreconditions`
+    -- emits `Option.toList`), so a longer list is out of reach:
+    (hPreLen : func.preconditions.length ≤ 1)
     -- reachability of the generated components:
     (hNameReach : func.name.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hTyArgsLen : func.typeArgs.length ≤ depth)
@@ -487,7 +650,12 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hBodyReach : ∀ b, func.body = some b →
       b ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] func.typeArgs [] depth func.output))
     (hMeasureReach : ∀ m, func.measure = some m →
-      m ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] func.typeArgs [] depth .int)) :
+      m ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] func.typeArgs [] depth .int))
+    -- A precondition is generated over the *formals* (`inputsAsFVarCtx`), not
+    -- `fctx` — see `genPrecondition` and `FuncWF.precond_freevars`.
+    (hPreReach : ∀ p ∈ func.preconditions, p.expr ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) (inputsAsFVarCtx func.inputs) octx []
+        func.typeArgs [] depth .bool)) :
     func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth) := by
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff]
   -- Witnesses: the function's own components.
@@ -496,7 +664,8 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
           func.inputs, ?_,
           func.output, hOutputReach,
           func.body, ?_,
-          func.measure, ?_, ?_⟩
+          func.measure, ?_,
+          func.preconditions, ?_, ?_⟩
   · -- typeArgs reachable via genTypeArgs (Nodup ⇒ dedup fixed point)
     exact genTypeArgs_complete depth func.typeArgs hwt.typeArgsNodup
       (mem_support_genNameList_iff depth func.typeArgs |>.mpr ⟨hTyArgsLen, hTyArgsReach⟩)
@@ -509,12 +678,15 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     exact genOptExpr_complete fctx octx func.typeArgs depth func.output func.body hBodyReach
   · -- measure reachable via genOptExpr
     exact genOptExpr_complete fctx octx func.typeArgs depth .int func.measure hMeasureReach
+  · -- preconditions reachable via genPreconditions
+    exact genPreconditions_complete octx func.inputs func.typeArgs depth
+      func.preconditions hPreLen hPreReach
   · -- the reassembled record equals `func`
     obtain ⟨fname, ftyArgs, fconstr, frec, finputs, foutput, fbody, fattr,
             faxioms, fpre, fmeasure⟩ := func
     obtain ⟨nm, nmeta⟩ := fname
-    simp only at hConstr hRec hAttr hAxioms hPre ⊢
-    subst hConstr hRec hAttr hAxioms hPre
+    simp only at hConstr hRec hAttr hAxioms ⊢
+    subst hConstr hRec hAttr hAxioms
     rfl
 
 -- ── Function-level keyword-freedom ───────────────────────────────────
@@ -558,7 +730,8 @@ theorem genFunction_names_not_keyword (fctx : FVarCtx) (octx : OpCtx) (depth : N
     (∀ x ∈ func.inputs.keys, isReservedKeyword x.name = false) := by
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
   obtain ⟨name, hname, typeArgs, htypeArgs, inputs, hinputs,
-          output, _houtput, body, _hbody, measure, _hmeasure, rfl⟩ := hfunc
+          output, _houtput, body, _hbody, measure, _hmeasure,
+          preconditions, _hpre, rfl⟩ := hfunc
   refine ⟨genIdentName_not_keyword name hname, genTypeArgs_not_keyword depth typeArgs htypeArgs, ?_⟩
   -- `inputs.keys = idents`, and each ident's name is non-keyword by `genIdents_not_keyword`.
   simp only [genInputs, mem_support_bind_iff] at hinputs

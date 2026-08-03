@@ -163,12 +163,22 @@ def corePolyOps : PolyOpCtx :=
         (.arrow (.seq (.ftvar "a")) (.seq (.ftvar "b")))))
   ]
 
-/-- Combined operator context for generation: monomorphic Core ops. -/
-def coreOpCtx : OpCtx := coreMonoOps
-
-/-- Polymorphic operators for exercising the IndirPoly generator rule.
-    Includes Map, Sequence, and identity/Church combinator operators. -/
-def defaultPolyOps : PolyOpCtx := corePolyOps
+/-- The precondition-bearing ("partial") monomorphic Core operators, layered on
+    top of `coreMonoOps`. Each `Int.Safe*` operator computes the same value as its
+    total counterpart (`Int.Div`, `Int.Mod`, …) but carries a `y ≠ 0` precondition
+    in `Core.Factory` (see `intSafeDivFunc` et al. in Strata's `IntBoolFactory`), so
+    a call to one produces a well-formedness obligation for `PrecondElim` to
+    discharge. This context is handed to `genProcedure` in place of the total-only
+    `coreMonoOps` so that generated procedures actually exercise the
+    precondition-elimination pass rather than running it as a no-op. All four names
+    resolve in `Core.Factory`, so the obligations are real; the annotation-driven
+    typing relation makes generation with these entries sound regardless. -/
+def corePartialOps : OpCtx :=
+  coreMonoOps ++
+  [ ("Int.SafeDiv",  .arrow .int (.arrow .int .int))
+  , ("Int.SafeMod",  .arrow .int (.arrow .int .int))
+  , ("Int.SafeDivT", .arrow .int (.arrow .int .int))
+  , ("Int.SafeModT", .arrow .int (.arrow .int .int)) ]
 
 -- ── Evaluator ───────────────────────────────────────────────────────────
 

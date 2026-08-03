@@ -6,9 +6,9 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
 open StrataGenerators.Stmt
 
 /-!
-# Soundness and completeness of `genStmt` / `genStmts`
+# Soundness and completeness of `genStmt` / `genStmtChain`
 
-`genStmt` / `genStmts` (in `StmtHasTypeAGen/Core.lean`) generate random Strata
+`genStmt` / `genStmtChain` (in `StmtHasTypeAGen/Core.lean`) generate random Strata
 Core statements. This file proves them **sound** and **complete** with respect to
 the `StmtHasTypeA` / `StmtsHasTypeA` typing relations of
 `Strata.Languages.Core.StatementTypeSpec`.
@@ -31,7 +31,7 @@ or functions.
 
 ## The single `size` budget
 
-`genStmt`/`genStmts` take a single `size` (the QuickCheck-style `sized` knob):
+`genStmt`/`genStmtChain` take a single `size` (the QuickCheck-style `sized` knob):
 there is no separate nesting `fuel`. `size` bounds nesting depth *and* — being
 passed on to the leaf/expression sub-generators — the size of expressions and the
 length of generated statement sequences, exactly as the single `Nat` argument of
@@ -111,6 +111,22 @@ def GenStmtSoundEnv.toCmdEnv {fctx octx tvars}
   freshDisjoint := env.freshDisjoint d
   toTCtx_insert := env.toTCtx_insert
 
+/-- `toTCtx` commutes with a *whole* `init` chain, not just one insertion: the
+    generator-side `insertAllCtx` and the semantic `insertAll` are the same `foldl`,
+    and `toTCtx_insert` matches them step by step. This is what lets the inline call
+    chunk — whose output scope is `insertAllCtx ctx toInit` — be typed by the
+    call-soundness lemmas, which speak about `insertAll Γ …`. -/
+theorem GenStmtSoundEnv.toTCtx_insertAllCtx {fctx octx tvars}
+    (env : GenStmtSoundEnv fctx octx tvars) (news : List (Identifier Unit × LMonoTy)) :
+    ∀ ctx, env.toTCtx (StrataGenerators.Stmt.insertAllCtx ctx news)
+      = StrataGenerators.Stmt.insertAll (env.toTCtx ctx) news := by
+  induction news with
+  | nil => intro ctx; rfl
+  | cons hd tl ih =>
+    intro ctx
+    rw [StrataGenerators.Stmt.insertAllCtx_cons, ih, env.toTCtx_insert]
+    simp [StrataGenerators.Stmt.insertAll]
+
 -- ── Leaf-case soundness lemmas ───────────────────────────────────────────
 
 variable {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdentifier}
@@ -125,12 +141,13 @@ theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx d)) :
-    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
   obtain ⟨rc, hrc, rfl⟩ := hr
   have hcmd := genCmd_sound_env fctx octx tvars immutableVars ctx d C (env.toCmdEnv C d) hFun rc hrc
-  exact StmtHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) labels (.cmd rc.cmd)
-    (CmdExtHasType'.cmd (env.toTCtx ctx) (env.toTCtx rc.outCtx) rc.cmd hcmd)
+  exact StmtsHasTypeA_singleton
+    (StmtHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) labels (.cmd rc.cmd)
+      (CmdExtHasType'.cmd (env.toTCtx ctx) (env.toTCtx rc.outCtx) rc.cmd hcmd))
 
 /-- Soundness of `genExitStmt`. With enclosing labels the target is drawn from
     them (`label ∈ L`, discharging the `exit` premise); with no enclosing block
@@ -139,7 +156,7 @@ theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
 theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
-    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases labels with
   | nil =>
     -- `genExitStmt [] … = default`, whose support is `∅`.
@@ -148,20 +165,21 @@ theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨l, hl, rfl⟩ := hr
-    exact StmtHasType'.exit C (env.toTCtx ctx) (hd :: tl) l default hl
+    exact StmtsHasTypeA_singleton (StmtHasType'.exit C (env.toTCtx ctx) (hd :: tl) l default hl)
 
 /-- Soundness of `genFuncDeclStmt` (at any depth `d`). -/
 theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) fctx octx C ctx d)) :
-    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
              mem_support_pure_iff] at hr
   obtain ⟨decl, ⟨f0, _hf0, rfl⟩, func, hfunc, rfl⟩ := hr
   have hwt : FuncHasTypeA C (env.toTCtx ctx) func :=
     genFunction_sound fctx octx d C (env.toTCtx ctx) func hfunc
-  exact StmtHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default
-    (by simp) hwt
+  exact StmtsHasTypeA_singleton
+    (StmtHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default
+      (by simp) hwt)
 
 /-- Soundness of `genTypeDeclStmt` (at any depth `d`). The `.ok` branch discharges
     `typeDecl`; the `.error` (name-clash) branch is the empty generator (support
@@ -169,7 +187,7 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
 theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d)) :
-    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
   obtain ⟨tc, _htc, hr⟩ := hr
   -- Branch on the same `addKnownTypeWithError` the generator computed.
@@ -178,7 +196,7 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
     rename_i C' heq
     simp only [mem_support_pure_iff] at hr
     subst hr
-    exact StmtHasType'.typeDecl C C' (env.toTCtx ctx) labels tc default heq
+    exact StmtsHasTypeA_singleton (StmtHasType'.typeDecl C C' (env.toTCtx ctx) labels tc default heq)
   · -- `.error`: the empty generator `default`, whose support is `∅`.
     rename_i heq
     simp only [SetGen.support, SetGen.bot_mem_iff] at hr
@@ -227,31 +245,6 @@ theorem genFreshLabel_not_mem (labels : List String) :
   · exact hns
 
 -- ── Procedure-call soundness ──────────────────────────────────────────────
-
-/-- Every `genCallStmt` result leaves the variable scope unchanged (`outCtx =
-    ctx`): the emitted call is a lexically-scoped block, so functionality of the
-    context is preserved. The empty-`procs`/guard-false branches are the empty
-    generator, so there is nothing to prove. -/
-theorem genCallStmt_outCtx {procs : ProcSigCtx}
-    {C : LContext CoreLParams} {ctx : VarCtx} {d : Nat} (hFun : Map.Functional ctx)
-    (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx d)) :
-    Map.Functional r.outCtx := by
-  cases procs with
-  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
-  | cons p₀ ps =>
-    simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
-    obtain ⟨s, hs, hr⟩ := hr
-    split at hr
-    · simp only [mem_support_bind_iff] at hr
-      obtain ⟨_, _, hr⟩ := hr
-      -- Both emitted shapes (inline call / init-chain block) leave `outCtx = ctx`.
-      split at hr
-      · simp only [mem_support_pure_iff] at hr
-        obtain rfl := hr; exact hFun
-      · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-        obtain ⟨_, _, rfl⟩ := hr; exact hFun
-    · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
 /-! ### Reconciling the recipe with the call-soundness lemmas
 
@@ -348,18 +341,56 @@ theorem filter_needsInit_eq_missingIn (env : GenStmtSoundEnv fctx octx tvars)
     rw [(env.corr ctx).1 q.1 τ hτ]
     simp [hfr]
 
-/-- Soundness of `genCallStmt` (at any depth `d`). Every emitted procedure call is
-    well-typed: the callee's signature is read off `hProcs`, the drawn by-value
-    inputs are typed via `env.exprSound`, and the statement is assembled by
-    `call_inline_sound` (nothing missing — a bare inline call) or `call_mixed_sound`
-    (something missing — an init-chain block). Either way the output scope is the
-    input `ctx`. The empty-`procs` and guard-false branches are the empty generator,
-    so there is nothing to prove there. -/
+/-- Every `genCallStmt` result extends the variable scope by its (inline) `init`
+    chain, and that extension preserves functionality: the declared names are
+    pairwise distinct (a sublist of the guard's `Nodup` key list) and each is fresh
+    for `ctx` (that is what `needsInit` selected them for), so
+    `insertAllCtx_functional` applies. The empty-`procs`/guard-false branches are
+    the empty generator, so there is nothing to prove. -/
+theorem genCallStmt_outCtx {procs : ProcSigCtx}
+    {C : LContext CoreLParams} {ctx : VarCtx} {d : Nat} (hFun : Map.Functional ctx)
+    (r : GenStmtResult)
+    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs C ctx d)) :
+    Map.Functional r.outCtx := by
+  cases procs with
+  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | cons p₀ ps =>
+    simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
+    obtain ⟨s, hs, hr⟩ := hr
+    split at hr
+    · rename_i hcond
+      obtain ⟨_, hNodup⟩ := hcond
+      simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
+      obtain ⟨_, _, rfl⟩ := hr
+      -- Fuse the recipe's two init-lists into one filter over `s.M ++ T`.
+      rw [filter_needsInit_append]
+      refine insertAllCtx_functional _ ctx hFun ?_ ?_
+      · -- keys of a `filter` of a `Nodup`-keyed list are `Nodup`
+        refine List.Nodup.sublist (List.Sublist.map _ List.filter_sublist) ?_
+        rw [← ListMap.keys_eq_map_fst]; exact hNodup
+      · -- every selected name passed `needsInit`, i.e. is absent from `ctx`
+        intro p hp
+        have := (List.mem_filter.mp hp).2
+        simpa [needsInit, VarCtx.isFresh, VarCtx.find?, Option.isNone_iff_eq_none] using this
+    · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+
+/-- Soundness of `genCallStmt` (at any depth `d`). Every emitted call *group* — the
+    missing-name `init`s followed by the call, spliced inline — is a well-typed
+    statement **list**: the callee's signature is read off `hProcs`, the drawn
+    by-value inputs are typed via `env.exprSound`, and the sequence is assembled by
+    `call_mixed_body_sound`. Its output scope is the `insertAllCtx`-extended `ctx`,
+    which `toTCtx_insertAllCtx` identifies with the `insertAll`-extended `Γ` the
+    lemma produces; when nothing was missing the chain is empty and this degenerates
+    to the bare call at the unchanged scope. Because no block is emitted, the
+    judgment holds at *every* enclosing-label set `labels`. The empty-`procs` and
+    guard-false branches are the empty generator, so there is nothing to prove
+    there. -/
 theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (procs : ProcSigCtx) (hProcs : ProcSigCorresponds procs P)
-    (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx d)) :
-    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
+    (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat)
+    (r : GenStmtResult)
+    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs C ctx d)) :
+    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases procs with
   | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
   | cons p₀ ps =>
@@ -420,40 +451,20 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
           have hb := (env.corr ctx).1 q.1 τ hfind_q
           rw [hτ] at hb
           exact Or.inl hb
-      -- Split on whether anything needed initializing.
-      split at hr
-      · -- Nothing missing: every required name is reused ⇒ bare inline call.
-        rename_i hempty
-        -- Fuse the recipe's in-out-then-out-target init lists into one filter.
-        rw [filter_needsInit_append] at hempty
-        simp only [mem_support_pure_iff] at hr
-        obtain rfl := hr
-        -- `missing = []` upgrades the reuse-or-absent fact to all-bound.
-        have hAllBound : ∀ p ∈ (s.M ++ T).toList,
-            (env.toTCtx ctx).types.find? p.1 = some (.forAll [] p.2) := by
-          intro q hq
-          rcases hReuse q hq with hb | habsent
-          · exact hb
-          · -- an absent name would appear in `missing`, contradicting `isEmpty`
-            exfalso
-            have hfr : VarCtx.isFresh ctx q.1 = true := by
-              rcases hfind_q : ctx.find? q.1 with _ | τ
-              · simp [VarCtx.isFresh, hfind_q]
-              · rw [(env.corr ctx).1 q.1 τ hfind_q] at habsent; simp at habsent
-            rw [List.isEmpty_iff, List.filter_eq_nil_iff] at hempty
-            exact absurd hfr (by simpa [needsInit] using hempty q hq)
-        exact call_inline_sound s.M s.I s.O T exprs hfind hInputs hOutputs
-          hExLen hTVals hExTy hIdisjOut hAllBound
-      · -- Something missing: init-chain block over just the missing names.
-        simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-        obtain ⟨label, hlabel, rfl⟩ := hr
-        have hfresh_label := genFreshLabel_not_mem labels label hlabel
-        -- The generator inits the missing in-out args then the missing out targets
-        -- and filters over `ctx`; `call_mixed_sound` takes one `missingIn` over
-        -- `env.toTCtx ctx`.
-        rw [filter_needsInit_append, filter_needsInit_eq_missingIn env ctx]
-        exact call_mixed_sound label s.M s.I s.O T exprs hfresh_label hfind hInputs hOutputs
-          hExLen hTVals hExTy hIdisjOut hNodup hReuse
+      -- One uniform shape: the (possibly empty) init chain, then the call.
+      simp only [mem_support_pure_iff] at hr
+      obtain rfl := hr
+      -- Move both the emitted chain and the output scope to the single `missingIn`
+      -- filter over `env.toTCtx ctx` that `call_mixed_body_sound` speaks about:
+      -- fuse the recipe's two per-block filters, then transport the syntactic
+      -- freshness filter to the semantic one.
+      show StmtsHasTypeA P C (env.toTCtx ctx) labels
+        (initChain (s.M.filter (needsInit ctx) ++ T.filter (needsInit ctx)) ++ _) C
+        (env.toTCtx (insertAllCtx ctx (s.M.filter (needsInit ctx) ++ T.filter (needsInit ctx))))
+      rw [env.toTCtx_insertAllCtx, filter_needsInit_append,
+        filter_needsInit_eq_missingIn env ctx]
+      exact call_mixed_body_sound s.M s.I s.O T exprs hfind hInputs hOutputs
+        hExLen hTVals hExTy hIdisjOut hNodup hReuse
     · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
 -- ── Guard / measure / invariant soundness helpers ────────────────────────
@@ -502,7 +513,7 @@ theorem genInvariants_sound (env : GenStmtSoundEnv fctx octx tvars) (d : Nat)
   obtain ⟨l, _hl, e, he, rfl⟩ := hp_supp
   exact env.exprSound d .bool e he
 
--- ── Mutual soundness of genStmt / genStmts ───────────────────────────────
+-- ── Mutual soundness of genStmt / genStmtChain ───────────────────────────────
 
 /-- `genStmt` preserves *functionality* of the context. The nesting
     constructors (`block`, `ite`, `loop`) are lexically scoped — their output
@@ -544,7 +555,7 @@ theorem genStmt_outCtx_functional
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call: outCtx = ctx (lexically scoped block)
+    · -- call: the inline `init` chain genuinely extends the scope
       exact genCallStmt_outCtx hFun r hr
   | succ size =>
     simp only [genStmt, mem_support_frequency_iff] at hr
@@ -572,7 +583,7 @@ theorem genStmt_outCtx_functional
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call: outCtx = ctx (lexically scoped block)
+    · -- call: the inline `init` chain genuinely extends the scope
       exact genCallStmt_outCtx hFun r hr
     · -- block: outCtx = ctx
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
@@ -597,7 +608,7 @@ mutual
     Proof by well-founded recursion on the `size` budget `n`. Leaf constructors
     (`cmd`, `exit`, `funcDecl`, `typeDecl`) are discharged by the per-constructor
     lemmas above (at the current depth); nesting constructors (`block`, `ite`,
-    `loop`) invert the corresponding `do`-block and appeal to `genStmts_sound` at
+    `loop`) invert the corresponding `do`-block and appeal to `genStmtChain_sound` at
     the smaller `size`. -/
 theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
@@ -605,7 +616,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n)) :
-    StmtHasTypeA P C (env.toTCtx ctx) labels r.stmt r.outC (env.toTCtx r.outCtx) := by
+    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases n with
   | zero =>
     simp only [genStmt, mem_support_frequency_iff] at hr
@@ -631,30 +642,34 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨label, hlabel, ⟨⟨len, _⟩⟩, _hlenbd, triple, htriple, rfl⟩ := hr
       have hfresh := genFreshLabel_not_mem labels label hlabel
-      have ih := genStmts_sound P env immutableVars procs hProcs (label :: labels) C ctx size len hFun triple htriple
-      exact StmtHasType'.block C (env.toTCtx ctx) triple.2.1 (env.toTCtx triple.2.2)
-        labels label triple.1 default hfresh ih
+      have ih := genStmtChain_sound P env immutableVars procs hProcs (label :: labels) C ctx size len hFun triple htriple
+      exact StmtsHasTypeA_singleton
+        (StmtHasType'.block C (env.toTCtx ctx) triple.2.1 (env.toTCtx triple.2.2)
+          labels label triple.1 default hfresh ih)
     · -- ite_det
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨cond, hcond, ⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmts_sound P env immutableVars procs hProcs labels C ctx size tlen hFun tt htt
-      have ihe := genStmts_sound P env immutableVars procs hProcs labels C ctx size elen hFun et het
-      exact StmtHasType'.ite_det C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
-        et.2.1 (env.toTCtx et.2.2) labels cond tt.1 et.1 default
-        (env.exprSound (size + 1) .bool cond hcond) iht ihe
+      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size tlen hFun tt htt
+      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size elen hFun et het
+      exact StmtsHasTypeA_singleton
+        (StmtHasType'.ite_det C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
+          et.2.1 (env.toTCtx et.2.2) labels cond tt.1 et.1 default
+          (env.exprSound (size + 1) .bool cond hcond) iht ihe)
     · -- ite_nondet
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmts_sound P env immutableVars procs hProcs labels C ctx size tlen hFun tt htt
-      have ihe := genStmts_sound P env immutableVars procs hProcs labels C ctx size elen hFun et het
-      exact StmtHasType'.ite_nondet C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
-        et.2.1 (env.toTCtx et.2.2) labels tt.1 et.1 default iht ihe
+      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size tlen hFun tt htt
+      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size elen hFun et het
+      exact StmtsHasTypeA_singleton
+        (StmtHasType'.ite_nondet C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
+          et.2.1 (env.toTCtx et.2.2) labels tt.1 et.1 default iht ihe)
     · -- loop
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨guard, hguard, measure, hmeasure, invs, hinvs, ⟨⟨blen, _⟩⟩, _, body, hbody, rfl⟩ := hr
-      have ih := genStmts_sound P env immutableVars procs hProcs labels C ctx size blen hFun body hbody
-      refine StmtHasType'.loop C (env.toTCtx ctx) body.2.1 (env.toTCtx body.2.2)
-        labels guard measure invs body.1 default ?_ ?_ ?_ ih
+      have ih := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size blen hFun body hbody
+      refine StmtsHasTypeA_singleton
+        (StmtHasType'.loop C (env.toTCtx ctx) body.2.1 (env.toTCtx body.2.2)
+          labels guard measure invs body.1 default ?_ ?_ ?_ ih)
       · intro g hg
         exact genCondOrNondet_det_sound env (size + 1) guard hguard g hg
       · intro m hm
@@ -663,34 +678,33 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
         exact genInvariants_sound env (size + 1) invs hinvs p hp
 termination_by (n, 0, 0)
 
-/-- **Soundness of `genStmts`.** Every statement sequence in the generator's
+/-- **Soundness of `genStmtChain`.** Every statement sequence in the generator's
     support satisfies the chained `StmtsHasTypeA` relation between the input
     contexts and the generator's threaded output contexts.
 
     Proof by well-founded recursion on the remaining length `len` (with the
     `size` fixed): the `nil` case is trivial, and the `cons` case types the head
     via `genStmt_sound` and the tail via the induction hypothesis. -/
-theorem genStmts_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
+theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat) (hFun : Map.Functional ctx)
     (result : List Statement × LContext CoreLParams × VarCtx)
-    (hr : result ∈ SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size len)) :
+    (hr : result ∈ SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size len)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels result.1 result.2.1 (env.toTCtx result.2.2) := by
   cases len with
   | zero =>
-    simp only [genStmts, mem_support_pure_iff] at hr
+    simp only [genStmtChain, mem_support_pure_iff] at hr
     subst hr
     exact StmtsHasType'.nil C (env.toTCtx ctx) labels
   | succ len =>
-    simp only [genStmts, mem_support_bind_iff, mem_support_pure_iff] at hr
+    simp only [genStmtChain, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨rhead, hhead, rtail, htail, rfl⟩ := hr
     have hh := genStmt_sound P env immutableVars procs hProcs labels C ctx size hFun rhead hhead
     have hFun' : Map.Functional rhead.outCtx :=
       genStmt_outCtx_functional fctx octx tvars immutableVars procs labels C ctx size hFun rhead hhead
-    have ht := genStmts_sound P env immutableVars procs hProcs labels rhead.outC rhead.outCtx size len hFun' rtail htail
-    exact StmtsHasType'.cons C rhead.outC rtail.2.1 (env.toTCtx ctx) (env.toTCtx rhead.outCtx)
-      (env.toTCtx rtail.2.2) labels rhead.stmt rtail.1 hh ht
+    have ht := genStmtChain_sound P env immutableVars procs hProcs labels rhead.outC rhead.outCtx size len hFun' rtail htail
+    exact StmtsHasTypeA_append hh ht
 termination_by (size, 1, len)
 
 end
@@ -711,10 +725,10 @@ theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
     r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) := by
   cases n with
   | zero =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1; omega)]
+    rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
     exact ⟨4, _, .head _, by omega, hr⟩
   | succ size =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
+    rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
     exact ⟨4, _, .head _, by omega, hr⟩
 
 /-- A `genExitStmt` result is reachable by `genStmt … n` at *every* size `n`. -/
@@ -722,13 +736,19 @@ theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : V
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
     r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) := by
-  cases n with
-  | zero =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1; omega)]
-    exact ⟨1, _, .tail _ (.head _), by omega, hr⟩
-  | succ size =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
-    exact ⟨1, _, .tail _ (.head _), by omega, hr⟩
+  -- With `labels = []` the `exit` branch is weighted 0, but there `genExitStmt`
+  -- is `default` (support `∅`), so `hr` is impossible; with `labels ≠ []` the
+  -- branch weight reduces to `1`.
+  cases labels with
+  | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | cons hd tl =>
+    cases n with
+    | zero =>
+      rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
+      exact ⟨_, _, .tail _ (.head _), by simp, hr⟩
+    | succ size =>
+      rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
+      exact ⟨_, _, .tail _ (.head _), by simp, hr⟩
 
 /-- A `genFuncDeclStmt` result (at depth `n`) is reachable by `genStmt … n`. -/
 theorem genFuncDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
@@ -737,10 +757,10 @@ theorem genFuncDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx
     r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) := by
   cases n with
   | zero =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1; omega)]
+    rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
     exact ⟨1, _, .tail _ (.tail _ (.head _)), by omega, hr⟩
   | succ size =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
+    rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
     exact ⟨1, _, .tail _ (.tail _ (.head _)), by omega, hr⟩
 
 /-- A `genTypeDeclStmt` result (at depth `n`) is reachable by `genStmt … n`. -/
@@ -750,38 +770,44 @@ theorem genTypeDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx
     r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) := by
   cases n with
   | zero =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1; omega)]
+    rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
     exact ⟨1, _, .tail _ (.tail _ (.tail _ (.head _))), by omega, hr⟩
   | succ size =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
+    rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
     exact ⟨1, _, .tail _ (.tail _ (.tail _ (.head _))), by omega, hr⟩
 
 /-- A `genCallStmt` result (at depth `n`) is reachable by `genStmt … n`. The call
     branch sits at frequency index 4 in both the size-0 and size+1 lists. -/
 theorem genCallStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n)) :
+    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs C ctx n)) :
     r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) := by
-  cases n with
-  | zero =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1; omega)]
-    exact ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, hr⟩
-  | succ size =>
-    rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
-    exact ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, hr⟩
+  -- With `procs = []` the `call` branch is weighted 0, but there `genCallStmt`
+  -- is `default` (support `∅`), so `hr` is impossible; with `procs ≠ []` the
+  -- branch weight reduces to `1`.
+  cases procs with
+  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | cons hd tl =>
+    cases n with
+    | zero =>
+      rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
+      exact ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by simp, hr⟩
+    | succ size =>
+      rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
+      exact ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by simp, hr⟩
 
 /-- A `block` statement is reachable by `genStmt … (size+1)` when its body (of some
-    length `len ≤ size+1`) is reachable by `genStmts … size` under the extended
+    length `len ≤ size+1`) is reachable by `genStmtChain … size` under the extended
     label scope `label :: labels`. -/
 theorem block_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat)
     (label : String) (body : List Statement) (C_body : LContext CoreLParams) (Γ_body : VarCtx)
     (len : Nat) (hlen : len ≤ size + 1)
     (hbody : (body, C_body, Γ_body) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs (label :: labels) C ctx size len))
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs (label :: labels) C ctx size len))
     (hlabel : label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels)) :
-    (⟨Stmt.block label body default, C, ctx⟩ : GenStmtResult) ∈
+    (⟨[Stmt.block label body default], C, ctx⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx (size + 1)) := by
-  rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
+  rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨label, hlabel, ⟨⟨len, Nat.zero_le _, hlen⟩⟩, ⟨Nat.zero_le _, hlen⟩,
@@ -789,19 +815,19 @@ theorem block_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx)
 
 /-- An `ite (.det cond)` statement is reachable by `genStmt … (size+1)` when the
     condition is a reachable boolean (at depth `size+1`) and both branches are
-    reachable by `genStmts … size`. -/
+    reachable by `genStmtChain … size`. -/
 theorem ite_det_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat)
     (cond : Expression.Expr) (thenb elseb : List Statement)
     (Ct : LContext CoreLParams) (Γt : VarCtx) (Ce : LContext CoreLParams) (Γe : VarCtx)
     (tlen elen : Nat) (htlen : tlen ≤ size + 1) (helen : elen ≤ size + 1)
     (hcond : cond ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] (size + 1) .bool))
     (hthen : (thenb, Ct, Γt) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size tlen))
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size tlen))
     (helse : (elseb, Ce, Γe) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size elen)) :
-    (⟨Stmt.ite (.det cond) thenb elseb default, C, ctx⟩ : GenStmtResult) ∈
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size elen)) :
+    (⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx (size + 1)) := by
-  rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
+  rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨cond, hcond, ⟨⟨tlen, Nat.zero_le _, htlen⟩⟩, ⟨Nat.zero_le _, htlen⟩,
@@ -809,18 +835,18 @@ theorem ite_det_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCt
     (thenb, Ct, Γt), hthen, (elseb, Ce, Γe), helse, rfl⟩
 
 /-- An `ite .nondet` statement is reachable by `genStmt … (size+1)` when both
-    branches are reachable by `genStmts … size`. -/
+    branches are reachable by `genStmtChain … size`. -/
 theorem ite_nondet_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat)
     (thenb elseb : List Statement)
     (Ct : LContext CoreLParams) (Γt : VarCtx) (Ce : LContext CoreLParams) (Γe : VarCtx)
     (tlen elen : Nat) (htlen : tlen ≤ size + 1) (helen : elen ≤ size + 1)
     (hthen : (thenb, Ct, Γt) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size tlen))
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size tlen))
     (helse : (elseb, Ce, Γe) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size elen)) :
-    (⟨Stmt.ite .nondet thenb elseb default, C, ctx⟩ : GenStmtResult) ∈
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size elen)) :
+    (⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx (size + 1)) := by
-  rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
+  rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨⟨⟨tlen, Nat.zero_le _, htlen⟩⟩, ⟨Nat.zero_le _, htlen⟩,
@@ -828,7 +854,7 @@ theorem ite_nondet_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
     (thenb, Ct, Γt), hthen, (elseb, Ce, Γe), helse, rfl⟩
 
 /-- A `loop` statement is reachable by `genStmt … (size+1)` when its guard, measure,
-    invariants (all at depth `size+1`), and body (by `genStmts … size`) are all
+    invariants (all at depth `size+1`), and body (by `genStmtChain … size`) are all
     reachable. -/
 theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat)
     (guard : ExprOrNondet Expression) (measure : Option Expression.Expr)
@@ -839,35 +865,35 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
     (hmeasure : measure ∈ SetGen.support (genOptMeasure (G := SetGen.Set) fctx octx tvars (size + 1)))
     (hinvs : invs ∈ SetGen.support (genInvariants (G := SetGen.Set) fctx octx tvars (size + 1)))
     (hbody : (body, C_body, Γ_body) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size blen)) :
-    (⟨Stmt.loop guard measure invs body default, C, ctx⟩ : GenStmtResult) ∈
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size blen)) :
+    (⟨[Stmt.loop guard measure invs body default], C, ctx⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx (size + 1)) := by
-  rw [genStmt, mem_support_frequency_iff (by show 0 < 4+1+1+1+1+2+2+1+2; omega)]
+  rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨guard, hguard, measure, hmeasure, invs, hinvs,
     ⟨⟨blen, Nat.zero_le _, hblen⟩⟩, ⟨Nat.zero_le _, hblen⟩,
     (body, C_body, Γ_body), hbody, rfl⟩
 
--- ── genStmts membership: cons / nil ──────────────────────────────────────
+-- ── genStmtChain membership: cons / nil ──────────────────────────────────────
 
-/-- The empty statement list is in `genStmts`'s support at length `0`. -/
-theorem genStmts_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
+/-- The empty statement list is in `genStmtChain`'s support at length `0`. -/
+theorem genStmtChain_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
     ((([] : List Statement)), C, ctx) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size 0) := by
-  rw [genStmts]; exact mem_support_pure_iff.mpr rfl
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size 0) := by
+  rw [genStmtChain]; exact mem_support_pure_iff.mpr rfl
 
 /-- If the head statement `r` is reachable by `genStmt` (at `size`) and the tail is
-    reachable by `genStmts` from the head's output contexts (at the same `size`,
+    reachable by `genStmtChain` from the head's output contexts (at the same `size`,
     length `len`), then the whole `cons` is reachable at length `len+1`. -/
-theorem genStmts_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
+theorem genStmtChain_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (r : GenStmtResult) (rest : List Statement) (C'' : LContext CoreLParams) (Γ'' : VarCtx)
     (hhead : r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size))
     (htail : (rest, C'', Γ'') ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels r.outC r.outCtx size len)) :
-    (r.stmt :: rest, C'', Γ'') ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size (len + 1)) := by
-  rw [genStmts]
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels r.outC r.outCtx size len)) :
+    (r.stmts ++ rest, C'', Γ'') ∈
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size (len + 1)) := by
+  rw [genStmtChain]
   simp only [mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨r, hhead, (rest, C'', Γ''), htail, rfl⟩
 
@@ -941,8 +967,8 @@ theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
   rfl
 
 -- ── Reachability relation ──────────────────────────────────────────────────
--- `StmtReachable`/`StmtsReachable` are a size-indexed, `VarCtx`-threaded mutual
--- inductive mirroring `genStmt`/`genStmts` *exactly*. A statement is "reachable"
+-- `StmtReachable`/`StmtChainReachable` are a size-indexed, `VarCtx`-threaded mutual
+-- inductive mirroring `genStmt`/`genStmtChain` *exactly*. A statement is "reachable"
 -- when it is in the generator's normal form (metadata `default`) and each of its
 -- components is reachable by the corresponding sub-generator (at the appropriate
 -- depth). The relation is the *specification* of completeness: `genStmt_complete`
@@ -954,58 +980,60 @@ theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
 
 mutual
 
-/-- Size-indexed reachability for a single statement. `StmtReachable labels C ctx n s C' ctx'`
-    means the result `⟨s, C', ctx'⟩` is produced by `genStmt … labels C ctx n`.
+/-- Size-indexed reachability for one generation *step*. `StmtReachable labels C ctx n ss C' ctx'`
+    means the result `⟨ss, C', ctx'⟩` is produced by `genStmt … labels C ctx n`. The
+    statement index is a *list* because `genStmt` returns one: a singleton for every
+    constructor but `call`, whose group is its inline `init`s followed by the call.
     `labels` (the enclosing block labels) is an *index* because a `block` extends it
     with its own label when descending into its body. -/
 inductive StmtReachable (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) :
-    List String → LContext CoreLParams → VarCtx → Nat → Statement →
+    List String → LContext CoreLParams → VarCtx → Nat → List Statement →
     LContext CoreLParams → VarCtx → Prop where
   /-- A `cmd` statement (generated at depth = the size `n`). -/
   | cmd : ∀ labels C ctx n (res : GenStmtResult),
       res ∈ SetGen.support (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmt res.outC res.outCtx
+      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
   /-- An `exit` statement: any result of `genExitStmt` at the enclosing `labels`. -/
   | exit : ∀ labels C ctx n (res : GenStmtResult),
       res ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmt res.outC res.outCtx
+      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
   /-- A `funcDecl` statement (generated at depth = the size `n`). -/
   | funcDecl : ∀ labels C ctx n (res : GenStmtResult),
       res ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) fctx octx C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmt res.outC res.outCtx
+      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
   /-- A `typeDecl` statement (or its `exit` fallback), generated at depth `n`. -/
   | typeDecl : ∀ labels C ctx n (res : GenStmtResult),
       res ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmt res.outC res.outCtx
+      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
   /-- A procedure `call` statement (generated at depth = the size `n`). -/
   | call : ∀ labels C ctx n (res : GenStmtResult),
-      res ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmt res.outC res.outCtx
+      res ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs C ctx n) →
+      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
   /-- A `block`, at size `size+1`, whose body is reachable at size `size`. The body
       is generated under `label :: labels`, so a nested `exit` may target this block. -/
   | block : ∀ labels C ctx size label body C_body Γ_body len,
       len ≤ size + 1 →
       label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) →
-      StmtsReachable fctx octx tvars immutableVars procs (label :: labels) C ctx size len body C_body Γ_body →
+      StmtChainReachable fctx octx tvars immutableVars procs (label :: labels) C ctx size len body C_body Γ_body →
       StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        (Stmt.block label body default) C ctx
+        [Stmt.block label body default] C ctx
   /-- A deterministic `ite`, at size `size+1`, with reachable condition (at depth
       `size+1`) and branches (at size `size`). -/
   | ite_det : ∀ labels C ctx size cond thenb elseb Ct Γt Ce Γe tlen elen,
       tlen ≤ size + 1 → elen ≤ size + 1 →
       cond ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] (size + 1) .bool) →
-      StmtsReachable fctx octx tvars immutableVars procs labels C ctx size tlen thenb Ct Γt →
-      StmtsReachable fctx octx tvars immutableVars procs labels C ctx size elen elseb Ce Γe →
+      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size tlen thenb Ct Γt →
+      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size elen elseb Ce Γe →
       StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        (Stmt.ite (.det cond) thenb elseb default) C ctx
+        [Stmt.ite (.det cond) thenb elseb default] C ctx
   /-- A non-deterministic `ite`, at size `size+1`, with reachable branches. -/
   | ite_nondet : ∀ labels C ctx size thenb elseb Ct Γt Ce Γe tlen elen,
       tlen ≤ size + 1 → elen ≤ size + 1 →
-      StmtsReachable fctx octx tvars immutableVars procs labels C ctx size tlen thenb Ct Γt →
-      StmtsReachable fctx octx tvars immutableVars procs labels C ctx size elen elseb Ce Γe →
+      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size tlen thenb Ct Γt →
+      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size elen elseb Ce Γe →
       StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        (Stmt.ite .nondet thenb elseb default) C ctx
+        [Stmt.ite .nondet thenb elseb default] C ctx
   /-- A `loop`, at size `size+1`, with reachable guard/measure/invariants (at depth
       `size+1`) and body (at size `size`). -/
   | loop : ∀ labels C ctx size guard measure invs body C_body Γ_body blen,
@@ -1013,24 +1041,25 @@ inductive StmtReachable (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
       guard ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) fctx octx tvars (size + 1)) →
       measure ∈ SetGen.support (genOptMeasure (G := SetGen.Set) fctx octx tvars (size + 1)) →
       invs ∈ SetGen.support (genInvariants (G := SetGen.Set) fctx octx tvars (size + 1)) →
-      StmtsReachable fctx octx tvars immutableVars procs labels C ctx size blen body C_body Γ_body →
+      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size blen body C_body Γ_body →
       StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        (Stmt.loop guard measure invs body default) C ctx
+        [Stmt.loop guard measure invs body default] C ctx
 
-/-- Size-indexed reachability for a statement list. `StmtsReachable labels C ctx size len ss C' ctx'`
-    means `(ss, C', ctx')` is produced by `genStmts … labels C ctx size len`. -/
-inductive StmtsReachable (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+/-- Size-indexed reachability for a statement list. `StmtChainReachable labels C ctx size len ss C' ctx'`
+    means `(ss, C', ctx')` is produced by `genStmtChain … labels C ctx size len`. -/
+inductive StmtChainReachable (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) :
     List String → LContext CoreLParams → VarCtx → Nat → Nat → List Statement →
     LContext CoreLParams → VarCtx → Prop where
   /-- The empty list, at length `0`. -/
   | nil : ∀ labels C ctx size,
-      StmtsReachable fctx octx tvars immutableVars procs labels C ctx size 0 [] C ctx
-  /-- A `cons`, at length `len+1`: reachable head threaded into a reachable tail. -/
-  | cons : ∀ labels C ctx size len s C_h Γ_h rest C'' Γ'',
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx size s C_h Γ_h →
-      StmtsReachable fctx octx tvars immutableVars procs labels C_h Γ_h size len rest C'' Γ'' →
-      StmtsReachable fctx octx tvars immutableVars procs labels C ctx size (len + 1) (s :: rest) C'' Γ''
+      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size 0 [] C ctx
+  /-- A `cons`, at length `len+1`: a reachable head *group* spliced onto a reachable
+      tail. The head is a list (usually a singleton), so it is appended, not consed. -/
+  | cons : ∀ labels C ctx size len ss C_h Γ_h rest C'' Γ'',
+      StmtReachable fctx octx tvars immutableVars procs labels C ctx size ss C_h Γ_h →
+      StmtChainReachable fctx octx tvars immutableVars procs labels C_h Γ_h size len rest C'' Γ'' →
+      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size (len + 1) (ss ++ rest) C'' Γ''
 
 end
 
@@ -1045,9 +1074,9 @@ mutual
     membership-lifting lemma of the corresponding generator branch. -/
 theorem genStmt_complete (procs : ProcSigCtx) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
-    (s : Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
-    (h : StmtReachable fctx octx tvars immutableVars procs labels C ctx n s C' ctx') :
-    (⟨s, C', ctx'⟩ : GenStmtResult) ∈
+    (ss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
+    (h : StmtReachable fctx octx tvars immutableVars procs labels C ctx n ss C' ctx') :
+    (⟨ss, C', ctx'⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) := by
   cases h with
   | cmd labels C ctx n res hres => exact genCmdStmt_mem procs C ctx n res hres
@@ -1057,36 +1086,54 @@ theorem genStmt_complete (procs : ProcSigCtx) (labels : List String)
   | call labels C ctx n res hres => exact genCallStmt_mem procs C ctx n res hres
   | block labels C ctx size label body C_body Γ_body len hlen hlabel hbody =>
     exact block_mem procs C ctx size label body C_body Γ_body len hlen
-      (genStmts_complete procs (label :: labels) C ctx size len body C_body Γ_body hbody) hlabel
+      (genStmtChain_complete procs (label :: labels) C ctx size len body C_body Γ_body hbody) hlabel
   | ite_det labels C ctx size cond thenb elseb Ct Γt Ce Γe tlen elen htlen helen hcond hthen helse =>
     exact ite_det_mem procs C ctx size cond thenb elseb Ct Γt Ce Γe tlen elen htlen helen hcond
-      (genStmts_complete procs labels C ctx size tlen thenb Ct Γt hthen)
-      (genStmts_complete procs labels C ctx size elen elseb Ce Γe helse)
+      (genStmtChain_complete procs labels C ctx size tlen thenb Ct Γt hthen)
+      (genStmtChain_complete procs labels C ctx size elen elseb Ce Γe helse)
   | ite_nondet labels C ctx size thenb elseb Ct Γt Ce Γe tlen elen htlen helen hthen helse =>
     exact ite_nondet_mem procs C ctx size thenb elseb Ct Γt Ce Γe tlen elen htlen helen
-      (genStmts_complete procs labels C ctx size tlen thenb Ct Γt hthen)
-      (genStmts_complete procs labels C ctx size elen elseb Ce Γe helse)
+      (genStmtChain_complete procs labels C ctx size tlen thenb Ct Γt hthen)
+      (genStmtChain_complete procs labels C ctx size elen elseb Ce Γe helse)
   | loop labels C ctx size guard measure invs body C_body Γ_body blen hblen hguard hmeasure hinvs hbody =>
     exact loop_mem procs C ctx size guard measure invs body C_body Γ_body blen hblen
       hguard hmeasure hinvs
-      (genStmts_complete procs labels C ctx size blen body C_body Γ_body hbody)
+      (genStmtChain_complete procs labels C ctx size blen body C_body Γ_body hbody)
+termination_by (n, 0, 0)
 
-/-- **Completeness of `genStmts`.** Every statement list reachable per
-    `StmtsReachable` is in `genStmts`'s support, with the exact list and output
+/-- **Completeness of `genStmtChain`.** Every statement list reachable per
+    `StmtChainReachable` is in `genStmtChain`'s support, with the exact list and output
     contexts. The `cons` case threads the head via `genStmt_complete` and the tail
     via the induction hypothesis, both at the same `size`. -/
-theorem genStmts_complete (procs : ProcSigCtx) (labels : List String)
+theorem genStmtChain_complete (procs : ProcSigCtx) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (ss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
-    (h : StmtsReachable fctx octx tvars immutableVars procs labels C ctx size len ss C' ctx') :
+    (h : StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size len ss C' ctx') :
     ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-      SetGen.support (genStmts (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size len) := by
+      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size len) := by
   cases h with
-  | nil => exact genStmts_nil_mem procs C ctx size
-  | cons labels _ _ _ len s C_h Γ_h rest _ _ hhead htail =>
-    have hh := genStmt_complete procs labels C ctx size s C_h Γ_h hhead
-    have ht := genStmts_complete procs labels C_h Γ_h size len rest C' ctx' htail
-    exact genStmts_cons_mem procs C ctx size len ⟨s, C_h, Γ_h⟩ rest C' ctx' hh ht
+  | nil => exact genStmtChain_nil_mem procs C ctx size
+  | cons labels _ _ _ len ss C_h Γ_h rest _ _ hhead htail =>
+    have hh := genStmt_complete procs labels C ctx size ss C_h Γ_h hhead
+    have ht := genStmtChain_complete procs labels C_h Γ_h size len rest C' ctx' htail
+    exact genStmtChain_cons_mem procs C ctx size len ⟨ss, C_h, Γ_h⟩ rest C' ctx' hh ht
+termination_by (size, 1, len)
+decreasing_by
+  -- `cases h` supplies the size/length relations as *equations* rather than
+  -- syntactically smaller arguments (the `cons` index `ss ++ rest` is not a
+  -- constructor application), so the default tactic cannot see the lexicographic
+  -- descent. Substitute the equations, then build the `Prod.Lex` witness by hand:
+  -- the `block`/`ite`/`loop` cases drop the `size` component, the `genStmt`
+  -- call keeps `size` and drops the phase `1 → 0`, and the `genStmtChain` tail
+  -- call keeps both and drops `len`.
+  all_goals
+    subst_vars
+    simp_wf
+    first
+      | omega
+      | (apply Prod.Lex.left; omega)
+      | (apply Prod.Lex.right; apply Prod.Lex.left; omega)
+      | (apply Prod.Lex.right; apply Prod.Lex.right; omega)
 
 end
 
@@ -1102,12 +1149,12 @@ theorem genStmt_complete_sound (P : Program) (env : GenStmtSoundEnv fctx octx tv
     (procs : ProcSigCtx) (hProcs : ProcSigCorresponds procs P)
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (hFun : Map.Functional ctx)
-    (s : Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
-    (h : StmtReachable fctx octx tvars immutableVars procs labels C ctx n s C' ctx') :
-    (⟨s, C', ctx'⟩ : GenStmtResult) ∈
+    (ss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
+    (h : StmtReachable fctx octx tvars immutableVars procs labels C ctx n ss C' ctx') :
+    (⟨ss, C', ctx'⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) ∧
-    StmtHasTypeA P C (env.toTCtx ctx) labels s C' (env.toTCtx ctx') := by
-  have hmem := genStmt_complete procs labels C ctx n s C' ctx' h
-  exact ⟨hmem, genStmt_sound P env immutableVars procs hProcs labels C ctx n hFun ⟨s, C', ctx'⟩ hmem⟩
+    StmtsHasTypeA P C (env.toTCtx ctx) labels ss C' (env.toTCtx ctx') := by
+  have hmem := genStmt_complete procs labels C ctx n ss C' ctx' h
+  exact ⟨hmem, genStmt_sound P env immutableVars procs hProcs labels C ctx n hFun ⟨ss, C', ctx'⟩ hmem⟩
 
 end StrataGenerators.Stmt

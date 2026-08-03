@@ -123,11 +123,24 @@ def main (args : List String) : IO UInt32 := do
     ++ [ runProperty PropertyNames.stmtKleeneDefinedIff
           (∀ gs : GenStmts, prop_stmt_kleene_defined_iff gs) cfg ]
 
+  -- Procedure-generator ↔ transform-pass properties, folded from the shared
+  -- `Properties.procTransforms` bundle (same twenty-eight checks as `TestMain`,
+  -- one per named field of the three `*PhaseCorrect` specs). Four FAIL honestly:
+  -- the hardcoded-`changed` bug in FilterProcedures, the `.funcDecl`-branch
+  -- `changed` bug in PrecondElim, and the two factory-stripping properties (an
+  -- unsatisfiable spec field, plus the pass pushing unstripped functions into the
+  -- factory).
+  let procSuite : List (IO Result) :=
+    Properties.procTransforms.map
+      (fun p => runProperty p.name
+        (∀ gp : GenProcs, p.check gp.procs = true) cfg)
+
   let exitCode ← runSuites [
     ("expr", exprSuite),
     ("cmd", cmdSuite),
     ("function", functionSuite),
-    ("stmt", stmtSuite)
+    ("stmt", stmtSuite),
+    ("proc", procSuite)
   ]
 
   -- Always-run diagnostics (do not gate the exit code):

@@ -92,8 +92,8 @@ def functionFvarsAnnotatedBy (tyMap : Map (Identifier Unit) LMonoTy) (func : Fun
 
 /-- Generate a single well-typed `Function` in `IO`, exercising `genFunction`
     directly. Defaults mirror the other harness wrappers (`defaultFCtx`,
-    `coreOpCtx`, depth 3). -/
-def genFunctionIO (fctx : FVarCtx := defaultFCtx) (octx : OpCtx := coreOpCtx)
+    `coreMonoOps`, depth 3). -/
+def genFunctionIO (fctx : FVarCtx := defaultFCtx) (octx : OpCtx := coreMonoOps)
     (depth : Nat := 3) : IO Function :=
   genFunction (G := IO) fctx octx depth
 

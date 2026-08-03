@@ -308,15 +308,15 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     rw [norm_bool'] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genBoolConst (G := SetGen.Set)),
-         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .bool),
+         (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .bool) (genLExprBase fctx (factoryOps F) tvars bctx n) .bool),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .bool)),
-         (2, fun () => genEq (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n)),
-         (2, fun () => genQuant .all (genLMonoTy tvars n)
+         (2, fun () => genEq (genGenerableTy fctx (factoryOps F) tvars bctx n) (genLExprBase fctx (factoryOps F) tvars bctx n)),
+         (2, fun () => genQuant .all (genGenerableTy fctx (factoryOps F) tvars bctx n)
            (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n)
            (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n .bool)),
-         (2, fun () => genQuant .exist (genLMonoTy tvars n)
+         (2, fun () => genQuant .exist (genGenerableTy fctx (factoryOps F) tvars bctx n)
            (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n)
            (fun τ' => genLExprBase fctx (factoryOps F) tvars (τ' :: bctx) n .bool)),
          (2, fun () =>
@@ -328,7 +328,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
          (2, fun () =>
            if ho : (opsOfType (factoryOps F) .bool).length > 0 then pickOp (factoryOps F) .bool ho
            else genBoolConst) ]
-      ) (by show 0 < 1+4+2+2+2+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+1+2+2+2+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -364,7 +364,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     rw [norm_int'] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genIntConst (G := SetGen.Set)),
-         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .int),
+         (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .int) (genLExprBase fctx (factoryOps F) tvars bctx n) .int),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .int)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .int)),
@@ -377,7 +377,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
          (2, fun () =>
            if ho : (opsOfType (factoryOps F) .int).length > 0 then pickOp (factoryOps F) .int ho
            else genIntConst) ]
-      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -407,7 +407,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     rw [norm_string'] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genStrConst (G := SetGen.Set)),
-         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .string),
+         (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .string) (genLExprBase fctx (factoryOps F) tvars bctx n) .string),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .string)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .string)),
@@ -420,7 +420,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
          (2, fun () =>
            if ho : (opsOfType (factoryOps F) .string).length > 0 then pickOp (factoryOps F) .string ho
            else genStrConst) ]
-      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -447,7 +447,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     rw [norm_real'] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genRealConst (G := SetGen.Set)),
-         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .real),
+         (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .real) (genLExprBase fctx (factoryOps F) tvars bctx n) .real),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .real)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .real)),
@@ -460,7 +460,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
          (2, fun () =>
            if ho : (opsOfType (factoryOps F) .real).length > 0 then pickOp (factoryOps F) .real ho
            else genRealConst) ]
-      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -490,7 +490,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genBitvecConst (G := SetGen.Set) n),
-         (4, fun () => genApp (genLMonoTy tvars m) (genLExprBase fctx (factoryOps F) tvars bctx m) (.bitvec n)),
+         (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx m (.bitvec n)) (genLExprBase fctx (factoryOps F) tvars bctx m) (.bitvec n)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx m .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx m (.bitvec n))
                               (genLExprBase fctx (factoryOps F) tvars bctx m (.bitvec n))),
@@ -503,7 +503,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
          (2, fun () =>
            if ho : (opsOfType (factoryOps F) (.bitvec n)).length > 0 then pickOp (factoryOps F) (.bitvec n) ho
            else genBitvecConst n) ]
-      ) (by show 0 < 1+4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -530,7 +530,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     rw [norm_arrow'] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (4, fun () => genAbs (G := SetGen.Set) (genLExprBase fctx (factoryOps F) tvars (τ₁ :: bctx) n τ₂) τ₁),
-         (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.arrow τ₁ τ₂)),
+         (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx (factoryOps F) tvars bctx n) (.arrow τ₁ τ₂)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.arrow τ₁ τ₂))
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.arrow τ₁ τ₂))),
@@ -543,7 +543,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
          (2, fun () =>
            if ho : (opsOfType (factoryOps F) (.arrow τ₁ τ₂)).length > 0 then pickOp (factoryOps F) (.arrow τ₁ τ₂) ho
            else genAbs (genLExprBase fctx (factoryOps F) tvars (τ₁ :: bctx) n τ₂) τ₁) ]
-      ) (by show 0 < 4+4+2+2+2+2; omega)) := he
+      ) (by show 0 < 4+1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -591,7 +591,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.ftvar name)),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n (.ftvar name)) (genLExprBase fctx (factoryOps F) tvars bctx n) (.ftvar name)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.ftvar name))
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.ftvar name))),
@@ -608,7 +608,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
            if ho : (opsOfType (factoryOps F) (.ftvar name)).length > 0 then pickOp (factoryOps F) (.ftvar name) ho
            else if hv : (bvarsOfType bctx (.ftvar name)).length > 0 then pickBVar bctx (.ftvar name) hv
            else default) ]
-      ) (by show 0 < 4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -658,7 +658,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) .regex),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n .regex) (genLExprBase fctx (factoryOps F) tvars bctx n) .regex),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .regex)
                               (genLExprBase fctx (factoryOps F) tvars bctx n .regex)),
@@ -675,7 +675,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
            if ho : (opsOfType (factoryOps F) .regex).length > 0 then pickOp (factoryOps F) .regex ho
            else if hv : (bvarsOfType bctx .regex).length > 0 then pickBVar bctx .regex hv
            else default) ]
-      ) (by show 0 < 4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -725,7 +725,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.map τ₁ τ₂)),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx (factoryOps F) tvars bctx n) (.map τ₁ τ₂)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.map τ₁ τ₂))
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.map τ₁ τ₂))),
@@ -742,7 +742,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
            if ho : (opsOfType (factoryOps F) (.map τ₁ τ₂)).length > 0 then pickOp (factoryOps F) (.map τ₁ τ₂) ho
            else if hv : (bvarsOfType bctx (.map τ₁ τ₂)).length > 0 then pickBVar bctx (.map τ₁ τ₂) hv
            else default) ]
-      ) (by show 0 < 4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
@@ -792,7 +792,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (4, fun () => genApp (G := SetGen.Set) (genLMonoTy tvars n) (genLExprBase fctx (factoryOps F) tvars bctx n) (.seq τ)),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n (.seq τ)) (genLExprBase fctx (factoryOps F) tvars bctx n) (.seq τ)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.seq τ))
                               (genLExprBase fctx (factoryOps F) tvars bctx n (.seq τ))),
@@ -809,7 +809,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
            if ho : (opsOfType (factoryOps F) (.seq τ)).length > 0 then pickOp (factoryOps F) (.seq τ) ho
            else if hv : (bvarsOfType bctx (.seq τ)).length > 0 then pickBVar bctx (.seq τ) hv
            else default) ]
-      ) (by show 0 < 4+2+2+2+2; omega)) := he
+      ) (by show 0 < 1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg

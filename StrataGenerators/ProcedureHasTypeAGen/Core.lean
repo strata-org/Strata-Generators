@@ -1,8 +1,19 @@
-import StrataGenerators.StmtHasTypeAGen
+-- Only the *executable* statement generator is needed here (`genStmtChain`), not its
+-- proofs: importing the proof module `StmtHasTypeAGen` would pull in Mathlib and
+-- so make this file unimportable alongside Strata's transform passes (`List.Forall₂`
+-- is defined by both Strata and Batteries). Keeping to `.Core` preserves the
+-- repo-wide "Core.lean = code, sibling = proofs" split and is what lets
+-- `ProcedureHasTypeAGen/TestSupport.lean` exist. The proof file
+-- (`ProcedureHasTypeAGen.lean`) still sees the statement proofs via `Support.lean`.
+import StrataGenerators.StmtHasTypeAGen.Core
 import Strata.Languages.Core.Procedure
 
 open Lambda LExpr RandomChoice Core Imperative ArbString Std
-open StrataGenerators.Stmt StrataGenerators.Function
+-- `StrataGenerators.Function` is *not* opened here: that namespace is introduced by
+-- the proof file `FunctionHasTypeAGen.lean`, and nothing in this file needs it (the
+-- function-generator *code* it uses — `genIdentName`, `genTypeArgs`, `genInputs` —
+-- sits at the top level of `FunctionHasTypeAGen/Core.lean`).
+open StrataGenerators.Stmt
 
 /-!
 # Core generator definition for well-typed Strata Core `Procedure`s
@@ -41,7 +52,7 @@ procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
   mutable sub-context, which excludes the immutable inputs and `old` bindings).
   This discharges `bodyTyped` (via `procBodyContext_inout`, which identifies the
   body context with `procToTCtx (inputs ++ outputs ++ oldVars M)`) and `modRights`
-  (via `genStmts_mutableVars`, whose write-target tracking is over the mutable
+  (via `genStmtChain_mutableVars`, whose write-target tracking is over the mutable
   keys, i.e. exactly the output-only keys `O ⊆ outputs.keys`).
 
 The threaded soundness invariant is the `Functional` predicate (not `Nodup`):
@@ -137,7 +148,7 @@ def genProcedure [Gen G] (octx : OpCtx) (size len : Nat) : G Procedure := do
   -- immutable, so the only writable keys are the output-only names (`O`), which
   -- are exactly the outputs the body is entitled to assign. `VarCtx` and
   -- `LMonoTySignature` are both `List ((Identifier Unit) × LMonoTy)`.
-  let (body, _, _) ← genStmts [] octx typeArgs
+  let (body, _, _) ← genStmtChain [] octx typeArgs
     (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) [] []
     (LContext.default) (inputs ++ outputs ++ oldVars inout) size len
   pure {

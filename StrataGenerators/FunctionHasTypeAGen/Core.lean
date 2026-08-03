@@ -30,6 +30,13 @@ A generated `Function` is well-typed in the sense of `FuncHasTypeA` because:
    the ambient typing context, so `bodyTyped` reduces to `HasTypeA [] body output`.
 4. Its measure (when present) is produced by `genLExpr ... .int`, hence has type
    `int`.
+
+`FuncHasTypeA` says nothing about `preconditions`, so the optional `requires`
+clause `genFunction` also emits (see `genPreconditions`) is invisible to the
+soundness proof. It is generated over the *formals only* — `FuncWF`'s
+`precond_freevars` field demands precondition free variables ⊆ input names — and
+it is what makes a generated function *partial*, hence what makes Strata's
+`PrecondElim` precondition-stripping path reachable from generated input.
 -/
 
 -- ── Name / type-argument generation ─────────────────────────────────────
@@ -218,6 +225,82 @@ def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
     (depth : Nat) (τ : LMonoTy) : G (Option LExpr') :=
   biasedOptionGen (3 / 4) (genLExpr fctx octx [] tvars [] depth τ)
 
+-- ── Precondition generation ─────────────────────────────────────────────
+
+/-- Reinterpret a formal-parameter signature as a `FVarCtx`, so that a generated
+    expression can refer to the function's own inputs by name.
+
+    This is the *only* free-variable context a precondition may be generated in.
+    `FuncWF.precond_freevars` (`Strata/DL/Util/Func.lean:120`) requires the free
+    variables of every precondition to be a subset of the formal-parameter names,
+    exactly as `body_freevars` does for the body — so handing `genLExpr` the
+    ambient `fctx` here would produce ill-formed functions rather than merely
+    uninteresting ones. -/
+def inputsAsFVarCtx (inputs : ListMap (Identifier Unit) LMonoTy) : FVarCtx :=
+  inputs.toList.map (fun (id, mty) => (id.name, mty))
+
+/-- Generate a `bool`-typed expression that is *guaranteed* to mention one of the
+    function's formals: pick a formal `(x, τ)`, then build `x == e` for `e`
+    generated at that formal's own type `τ`.
+
+    This is the mechanism behind the "prefer preconditions that mention the
+    inputs" bias. Going through `genLExpr` at `.bool` alone is not enough in
+    practice: `genLExprBase`'s `bool` rules can only reach a *variable* leaf via
+    `fvarsOfType fctx .bool`, so a formal is reachable only when it is itself
+    `bool`-typed — empirically ~2% of generated signatures. Equating a formal of
+    *any* type against a same-typed expression sidesteps that: the equality node
+    is `bool` whatever `τ` is, so every formal becomes usable.
+
+    Requires a proof that `inputs` is non-empty, which is what makes the `elements`
+    pick total; `genPrecondition` supplies it from a `dif`. -/
+def genInputMentioningPrecond [Gen G] (octx : OpCtx)
+    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
+    (depth : Nat) (hne : inputs.toList ≠ []) : G LExpr' := do
+  let (x, τ) ← elements inputs.toList hne
+  let e ← genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth τ
+  pure (.eq () (.fvar () x (some τ)) e)
+
+/-- Generate an optional `bool`-typed precondition (a `requires` clause) over the
+    function's own formals, `some` with probability 1/2 via `optionGen`.
+
+    Biased 3:1 toward clauses that mention a formal (`genInputMentioningPrecond`)
+    over a plain `genLExpr` draw at `.bool`, per the "prefer expressions that
+    mention the inputs" requirement. Both branches generate in the free-variable
+    context `inputsAsFVarCtx inputs`, so *every* free variable is a formal either
+    way — the bias is about how often a variable appears at all, not about
+    well-formedness. A function with no formals has nothing to mention, so it
+    falls back to the unbiased draw (a closed boolean expression over `octx`).
+
+    The `octx` is threaded through unchanged, so a precondition can itself call a
+    *partial* operator (e.g. `Int.SafeDiv`) when the caller supplies one — which is
+    what makes PrecondElim's precondition-stripping path reachable from generated
+    input. -/
+def genPrecondition [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
+    (tvars : List TyIdentifier) (depth : Nat) :
+    G (Option (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
+  optionGen (do
+    let e ←
+      if hne : inputs.toList ≠ [] then
+        frequency
+          [ (3, fun () => genInputMentioningPrecond octx inputs tvars depth hne),
+            (1, fun () => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool) ]
+          (by show 0 < 3 + 1; omega)
+      else
+        genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool
+    pure { expr := e, md := () })
+
+/-- The `preconditions` field for a generated function: the singleton list
+    `[p]` when `genPrecondition` yields `some p`, and `[]` otherwise.
+
+    A list (rather than an `Option`) is what the field wants, and one clause is
+    enough to make every precondition-sensitive code path non-vacuous; keeping it
+    at most one also keeps `genFunction_complete`'s reachability obligation a
+    single-expression side condition. -/
+def genPreconditions [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
+    (tvars : List TyIdentifier) (depth : Nat) :
+    G (List (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
+  (fun o => o.toList) <$> genPrecondition octx inputs tvars depth
+
 -- ── Main function generator ─────────────────────────────────────────────
 
 /-- Generate a well-typed `Function` (i.e. `LFunc CoreLParams`).
@@ -230,11 +313,20 @@ def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
     - `inputs`   — a `Nodup`-keyed signature with types over `typeArgs`,
     - `output`   — a type over `typeArgs`,
     - `body`     — an optional expression of type `output`,
-    - `measure`  — an optional expression of type `int`.
+    - `measure`  — an optional expression of type `int`,
+    - `preconditions` — at most one `bool` clause over the *formals*
+      (`genPreconditions`; `some` half the time, and biased toward clauses that
+      actually mention a formal).
 
-    All fields not constrained by the typing spec (`isConstr`, `isRecursive`,
-    `attr`, `concreteEval`, `axioms`, `preconditions`) are left at their default
-    values. -/
+    Preconditions are unconstrained by `FuncHasType'` — it has no precondition
+    field — so generating them cannot affect `genFunction_sound`. They matter
+    downstream: a function with a non-empty `preconditions` list is *partial*, so
+    this is what makes Strata's `PrecondElim` precondition-stripping path (and the
+    `preconditionsStripped` property) reachable from generated input rather than
+    only from hand-built reproducers.
+
+    The remaining fields not constrained by the typing spec (`isConstr`,
+    `isRecursive`, `attr`, `concreteEval`, `axioms`) are left at their defaults. -/
 def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) : G Function := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs depth
@@ -242,11 +334,13 @@ def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) : G Functi
   let output ← genLMonoTy typeArgs depth
   let body ← genOptExpr fctx octx typeArgs depth output
   let measure ← genOptExpr fctx octx typeArgs depth .int
+  let preconditions ← genPreconditions octx inputs typeArgs depth
   pure {
     name := ⟨name, ()⟩,
     typeArgs := typeArgs,
     inputs := inputs,
     output := output,
     body := body,
-    measure := measure
+    measure := measure,
+    preconditions := preconditions
   }

@@ -148,11 +148,35 @@ def main (args : List String) : IO UInt32 := do
       (checkIO PropertyNames.stmtKleeneDefinedIff
         (∀ gs : GenStmts, prop_stmt_kleene_defined_iff gs) (cfg := cfg))
 
+  -- Procedure-generator ↔ transform-pass properties. The twenty-eight checks
+  -- (seven FilterProcedures, thirteen PrecondElim, eight ANFEncoder — one per
+  -- named field of the three `*PhaseCorrect` structures in
+  -- `Strata/Transform/CustomSpecifications.lean`) are folded from the shared
+  -- `Properties.procTransforms` bundle. Each runs its pass on the program
+  -- assembled from a generated procedure list and inspects the result. Four checks
+  -- FAIL honestly, pinning real defects rather than masking them (exactly like the
+  -- statement `#1` and function-completeness gaps):
+  -- `proc: FilterProcedures changed flag is faithful` (the pass hardcodes
+  -- `changed := true` even when it removes nothing); `proc: PrecondElim changed
+  -- flag is faithful` (the `.funcDecl` branch inserts a `$$wf` block for
+  -- obligations in a declared function's body yet reports unchanged); `proc:
+  -- PrecondElim factory entries are stripped` (the spec field is unsatisfiable for
+  -- a run seeded with `Core.Factory`, whose partial builtins carry the very
+  -- preconditions the pass exists to discharge); and `proc: PrecondElim factory
+  -- strips declared functions` (the pass pushes each declared function into the
+  -- factory *before* stripping its preconditions).
+  let procSuite : TestSeq :=
+    Properties.procTransforms.foldr
+      (fun p rest => checkIO p.name
+        (∀ gp : GenProcs, p.check gp.procs = true) (cfg := cfg) rest)
+      .done
+
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
     ("cmd", [cmdSuite]),
     ("function", [functionSuite]),
-    ("stmt", [stmtSuite])
+    ("stmt", [stmtSuite]),
+    ("proc", [procSuite])
   ]) []
 
   -- Always-run diagnostics (do not gate the exit code):

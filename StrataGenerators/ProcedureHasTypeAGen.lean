@@ -16,8 +16,8 @@ the `ProcHasTypeA` typing relation of `Strata.Languages.Core.ProcedureTypeSpec`.
 
 The proof is *compositional*: it reuses `genInputs_support`/`genInputs_complete`
 (for the output signature, exactly as the function generator uses them for
-inputs), `genStmts_sound`/`genStmts_complete` (for the body), and
-`genStmts_mutableVars` (for the modification-rights obligation).
+inputs), `genStmtChain_sound`/`genStmtChain_complete` (for the body), and
+`genStmtChain_mutableVars` (for the modification-rights obligation).
 
 ## The context-alignment lemma
 
@@ -25,7 +25,7 @@ The one genuinely procedure-specific fact is `procBodyContext_default`: with
 empty inputs, empty type-arguments, and no in-out parameters, the declarative
 body context `procBodyContext Γ proc` (a single new scope binding inputs ++
 outputs ++ old-bindings) collapses to `procToTCtx proc.header.outputs` — the very
-context `genStmts_sound` produces when seeded with the output parameters. This is
+context `genStmtChain_sound` produces when seeded with the output parameters. This is
 what lets the generated body's `StmtsHasTypeA` line up *definitionally* with the
 `ProcBodyHasType'.structured` obligation.
 -/
@@ -175,7 +175,7 @@ theorem Map_keys_append (m₁ m₂ : Map (Identifier Unit) LMonoTy) :
     key of `inputs ++ outputs` that is not among `inputs.keys`; since the keys of
     the append split as `inputs.keys ++ outputs.keys`, dropping the input keys
     leaves exactly the output keys.) This is what turns the `writable`-based
-    `genStmts_mutableVars` invariant into the `ProcHasType'.modRights` obligation —
+    `genStmtChain_mutableVars` invariant into the `ProcHasType'.modRights` obligation —
     with **no** disjointness hypothesis needed. -/
 theorem mem_writable_append_keys (ins outs : Map (Identifier Unit) LMonoTy)
     (immutableVars : List (Identifier Unit)) (hro : immutableVars = Map.keys ins)
@@ -433,11 +433,11 @@ theorem genChecks_complete (octx : OpCtx) (tvars : List TyIdentifier) (depth : N
     - `preconditionsTyped` / `postconditionsTyped` — under `instHasTypeA` both
       reduce to `HasTypeA [] c.expr bool`, exactly what `genLExpr … .bool`
       produces.
-    - `bodyTyped` — from `genStmts_sound`, using `procBodyContext_default` (valid
+    - `bodyTyped` — from `genStmtChain_sound`, using `procBodyContext_default` (valid
       because the filtered inputs are disjoint from the outputs) to identify the
       body context with `procToTCtx (inputs ++ outputs) = procStmtEnv.toTCtx
       (inputs ++ outputs)`.
-    - `modRights` — from `genStmts_mutableVars`: every modified variable is a
+    - `modRights` — from `genStmtChain_mutableVars`: every modified variable is a
       *mutable* key of `inputs ++ outputs` (hence an output key, via
       `mem_writable_append_keys`) or a body-defined variable. -/
 theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
@@ -539,7 +539,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
         (M ++ disjointInputs rawInputOnly M ++
           (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
       body C' ((procStmtEnv octx typeArgs).toTCtx ctx') :=
-    genStmts_sound P (procStmtEnv octx typeArgs)
+    genStmtChain_sound P (procStmtEnv octx typeArgs)
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) []
       (by intro s hs; cases hs) []
       LContext.default
@@ -547,7 +547,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
-  have hmod := genStmts_mutableVars [] octx typeArgs
+  have hmod := genStmtChain_mutableVars [] octx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) [] []
       LContext.default
       (M ++ disjointInputs rawInputOnly M ++
@@ -645,7 +645,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
     - `hPre*` / `hPost*` — each contract clause is default-`attr`/empty-`md`, its
       label list is reachable by `genNameList`, and its `expr` is reachable by
       `genLExpr … .bool`;
-    - `hBodyReach` — the body statement list is reachable per `StmtsReachable`,
+    - `hBodyReach` — the body statement list is reachable per `StmtChainReachable`,
       seeded exactly as the generator seeds it (`M ++ I ++ (M ++ O) ++ oldVars M`,
       immutable names `keys (M ++ I) ++ keys (oldVars M)`), at empty label/fvar
       contexts, type-variable list `typeArgs`, and the default ambient `C`.
@@ -699,7 +699,7 @@ theorem genProcedure_complete (octx : OpCtx) (size len : Nat)
     (hPostMd : ∀ c ∈ proc.spec.postconditions.values, c.md = #[])
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
       c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] proc.header.typeArgs [] size .bool))
-    (hBodyReach : StmtsReachable [] octx proc.header.typeArgs
+    (hBodyReach : StmtChainReachable [] octx proc.header.typeArgs
       (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) [] []
       LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len bodyss C' ctx') :
     proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx size len) := by
@@ -730,7 +730,7 @@ theorem genProcedure_complete (octx : OpCtx) (size len : Nat)
       hPostLabels hPostAttr hPostMd hPostExpr
   · -- body reachable: the generator's filtered blocks equal `I`/`O`.
     rw [hI_eq, hO_eq]
-    exact genStmts_complete [] [] LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len
+    exact genStmtChain_complete [] [] LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len
       bodyss C' ctx' hBodyReach
   · -- the reassembled record equals `proc`.
     rw [hI_eq, hO_eq]

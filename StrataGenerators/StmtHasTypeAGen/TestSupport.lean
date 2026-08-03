@@ -14,7 +14,7 @@ open StrataGenerators.Stmt
 # Shared test support for the `StmtHasTypeAGen` generator
 
 Utilities shared between the LSpec property suite and the Tyche panels (both in
-the merged `TestMain` driver) for property-based testing of `genStmt` / `genStmts`
+the merged `TestMain` driver) for property-based testing of `genStmt` / `genStmtChain`
 (defined in `StmtHasTypeAGen/Core.lean`), which
 generate random well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
@@ -496,7 +496,7 @@ def shrinkStmts (ss : List Statement) : List (List Statement) :=
     statement's nesting/expression size; `len` bounds the top-level sequence
     length. Returns just the statement list (the threaded output contexts are
     discarded — the tests only need the statements). -/
-def genProgramStmtsIO (size len : Nat) (fctx : FVarCtx := []) (octx : OpCtx := coreOpCtx)
+def genProgramStmtsIO (size len : Nat) (fctx : FVarCtx := []) (octx : OpCtx := coreMonoOps)
     (tvars : List TyIdentifier := []) : IO (List Statement) := do
   let (ss, _, _) ← genProgramStmts (G := IO) fctx octx tvars size len
   pure ss

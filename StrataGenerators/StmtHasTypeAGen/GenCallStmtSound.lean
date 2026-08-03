@@ -18,7 +18,6 @@ statement-generator proof.
 - `initChain` / `insertAll` / `initChain_types` — the `init … nondet` chain that
   brings the required `M ∪ O` names into scope at their declared types.
 - `StmtsHasTypeA_append` — chaining two statement-list judgments.
-- `block_wraps` — wrapping a body judgment in a lexically-scoped block.
 -/
 
 namespace StrataGenerators.Stmt
@@ -52,7 +51,7 @@ abbrev ProcSigCtx := List ProcSig
 /-- `procs` faithfully describes callable procedures of `P`: each entry names a
     monomorphic procedure of `P` whose signature front-aligns as recorded, with
     the input-only keys disjoint from the LHS (`M ∪ O`) keys. Exactly the
-    hypotheses `call_block_sound` consumes for the `.call` case. -/
+    hypotheses `call_mixed_body_sound` consumes for the `.call` case. -/
 def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
   ∀ s ∈ procs, ∃ proc, Program.Procedure.find? P s.pname = some proc ∧
     proc.header.typeArgs = [] ∧
@@ -181,6 +180,73 @@ def initChain (news : List (Identifier Unit × LMonoTy)) : List Statement :=
 def insertAll (Γ : TContext Unit) (news : List (Identifier Unit × LMonoTy)) :
     TContext Unit :=
   news.foldl (fun Γ p => { Γ with types := Γ.types.insert p.1 (.forAll [] p.2) }) Γ
+
+/-- The flat `VarCtx` analogue of `insertAll`: the *generator-side* scope after
+    running `initChain news` in the ambient scope. Because the chain is emitted
+    **inline** (not inside a block), these declarations genuinely escape into the
+    enclosing sequence, so this — not `ctx` — is the call chunk's output scope.
+    `toTCtx_insertAllCtx` (in `StmtHasTypeAGen.lean`) relates it to `insertAll`. -/
+def insertAllCtx (ctx : VarCtx) (news : List (Identifier Unit × LMonoTy)) : VarCtx :=
+  news.foldl (fun ctx p => Map.insert ctx p.1 p.2) ctx
+
+/-- `insertAllCtx` peels one declaration off the front (it is a `foldl`). -/
+theorem insertAllCtx_cons (ctx : VarCtx) (hd : Identifier Unit × LMonoTy)
+    (tl : List (Identifier Unit × LMonoTy)) :
+    insertAllCtx ctx (hd :: tl) = insertAllCtx (Map.insert ctx hd.1 hd.2) tl := by
+  simp [insertAllCtx]
+
+/-- Looking up a name absent from `news` in `insertAllCtx ctx news` falls through
+    to `ctx` — the flat-context mirror of `insertAll_find_not_mem`. -/
+theorem insertAllCtx_find_not_mem (news : List (Identifier Unit × LMonoTy)) :
+    ∀ (ctx : VarCtx) (x : Identifier Unit),
+    x ∉ news.map Prod.fst → Map.find? (insertAllCtx ctx news) x = Map.find? ctx x := by
+  induction news with
+  | nil => intro ctx x _; rfl
+  | cons hd tl ih =>
+    intro ctx x hx
+    simp only [List.map_cons, List.mem_cons, not_or] at hx
+    rw [insertAllCtx_cons, ih _ x hx.2]
+    exact Map.find?_insert_ne ctx x hd.1 _ hx.1
+
+/-- Declaring a `Nodup` list of names, each absent from `ctx`, preserves
+    functionality: every insert is of a key fresh at the point it happens (fresh in
+    `ctx` by hypothesis, and undisturbed by the earlier — distinct — inserts). This
+    is what carries the `Map.Functional` invariant across an inline `init` chain. -/
+theorem insertAllCtx_functional (news : List (Identifier Unit × LMonoTy)) :
+    ∀ (ctx : VarCtx), Map.Functional ctx → (news.map Prod.fst).Nodup →
+    (∀ p ∈ news, Map.find? ctx p.1 = none) →
+    Map.Functional (insertAllCtx ctx news) := by
+  induction news with
+  | nil => intro ctx hFun _ _; exact hFun
+  | cons hd tl ih =>
+    intro ctx hFun hnd hfresh
+    simp only [List.map_cons, List.nodup_cons, List.mem_map, not_exists, not_and] at hnd
+    obtain ⟨hnotin, hndtl⟩ := hnd
+    rw [insertAllCtx_cons]
+    refine ih _ (Map.insert_functional_of_fresh ctx hd.1 hd.2 hFun
+      (hfresh hd (List.mem_cons_self ..))) hndtl ?_
+    intro p hp
+    -- `p.1 ≠ hd.1` (the keys are `Nodup`), so the head insert does not affect it.
+    have hne : p.1 ≠ hd.1 := fun h => hnotin p hp h
+    rw [Map.find?_insert_ne ctx p.1 hd.1 _ hne]
+    exact hfresh p (List.mem_cons_of_mem _ hp)
+
+/-- Declaring `news` can only add the declared names as keys. Used to justify the
+    call chunk's *output* scope keys against the chunk's `definedVars`. -/
+theorem insertAllCtx_keys_subset (news : List (Identifier Unit × LMonoTy)) :
+    ∀ (ctx : VarCtx),
+    Map.keys (insertAllCtx ctx news) ⊆ Map.keys ctx ++ news.map Prod.fst := by
+  induction news with
+  | nil => intro ctx k hk; exact List.mem_append_left _ hk
+  | cons hd tl ih =>
+    intro ctx k hk
+    rw [insertAllCtx_cons] at hk
+    rcases List.mem_append.mp (ih _ hk) with h | h
+    · -- a key of `ctx.insert hd.1 hd.2`: either `hd.1` or an old key
+      rcases List.mem_cons.mp (Map.insert_keys ctx h) with rfl | h'
+      · exact List.mem_append_right _ (by simp)
+      · exact List.mem_append_left _ h'
+    · exact List.mem_append_right _ (List.mem_cons_of_mem _ h)
 
 /-- Running `initChain news` from `Γ` (where each declared name is fresh at the
     point it is declared) is well-typed and yields `insertAll Γ news`. -/
@@ -540,106 +606,21 @@ theorem StmtsHasTypeA_append {P : Program} {L : List String}
     | cons _ Ca _ _ Γa _ _ _ _ hs hss =>
       exact StmtsHasType'.cons _ _ _ _ _ _ _ _ _ hs (ih hss h2)
 
-/-- Wrap a well-typed body in a fresh-label, lexically-scoped block; the block's
-    output context is its input context. -/
-theorem block_wraps {P : Program} {C : LContext CoreLParams} {L : List String}
-    {Γ Γbody : TContext Unit} {Cbody : LContext CoreLParams}
-    {label : String} {body : List Statement} {md : _}
-    (hfresh : label ∉ L)
-    (hbody : StmtsHasTypeA P C Γ (label :: L) body Cbody Γbody) :
-    StmtHasTypeA P C Γ L (Stmt.block label body md) C Γ :=
-  StmtHasType'.block C Γ Cbody Γbody L label body md hfresh hbody
-
--- ── Full block assembly ──────────────────────────────────────────────────
-
-/-- **All-fresh block assembly.** Assembles the building blocks above into the
-    block statement the call generator emits when *nothing* can be reused:
-
-        block freshLabel (initChain (M ++ T) ++ [call pname (mkArgs M T exprs)])
-
-    Assuming a monomorphic callee `proc` front-aligned as `inputs = M ++ I`,
-    `outputs = M ++ O`, out-argument targets `T` positionally type-aligned with `O`
-    (`hTVals`), and with the `M ∪ T` names all *absent* from the ambient scope `Γ`
-    and key-disjoint (`Nodup`), the emitted block type-checks and leaves `Γ`
-    unchanged (it is lexically scoped). The `init … nondet` chain brings every
-    `M ∪ T` name into scope at its declared type; the call then type-checks in that
-    extended scope. Every in-scope fact is read off the `insertAll` context the
-    chain produces — no reuse-from-`Γ` case split is needed. -/
-theorem call_block_sound
-    {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit} {L : List String}
-    {pname : String} {proc : Procedure}
-    (freshLabel : String)
-    (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
-    (hfresh : freshLabel ∉ L)
-    (hfind : Program.Procedure.find? P pname = some proc)
-    (hInputs : proc.header.inputs = M ++ I)
-    (hOutputs : proc.header.outputs = M ++ O)
-    (hExLen : exprs.length = I.length)
-    (hTVals : T.values = O.values)
-    (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      LExpr.HasTypeA [] (exprs[i]'hi) (I.values[i]'hj))
-    (hIdisjOut : ∀ i (hi : i < I.keys.length),
-      (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
-    (hNodup : (M ++ T).keys.Nodup)
-    (hAllFresh : ∀ x ∈ (M ++ T).keys, Γ.types.find? x = none) :
-    StmtHasTypeA P C Γ L
-      (Stmt.block freshLabel
-        (initChain (M ++ T) ++ [Statement.call pname (mkArgs M T exprs) default]) default)
-      C Γ := by
-  -- An unannotated `fvar` can never be typed in the empty context, so no
-  -- well-typed by-value input is a bare `fvar` — the premise `call_recipe`
-  -- needs comes free from `hExTy`.
-  have hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none := by
-    intro i hi m x heq
-    have hlen : i < I.values.length := by rw [lm_values_length, ← hExLen]; exact hi
-    have := hExTy i hi hlen
-    rw [heq] at this
-    cases this
-  -- `(M ++ T).keys` is `(M ++ T).map Prod.fst`; used repeatedly below.
-  have hNodup' : ((M ++ T).map Prod.fst).Nodup := by
-    rw [← ListMap.keys_eq_map_fst]; exact hNodup
-  -- The init-chain is well-typed and yields `insertAll Γ (M ++ T)`.
-  have hchain : StmtsHasTypeA P C Γ (freshLabel :: L)
-      (initChain (M ++ T)) C (insertAll Γ (M ++ T)) := by
-    apply initChain_types (M ++ T) Γ
-    intro i hi
-    -- the name at position i is fresh in `insertAll Γ ((M ++ T).take i)`
-    rw [insertAll_find_not_mem ((M ++ T).take i) Γ _ ?_]
-    · -- fresh in Γ because it is a `M ∪ T` key
-      refine hAllFresh _ ?_
-      rw [ListMap.keys_eq_map_fst]
-      exact List.mem_map.mpr ⟨_, List.getElem_mem hi, rfl⟩
-    · -- (M ++ T)[i].1 ∉ ((M ++ T).take i).map Prod.fst
-      rw [List.map_take]
-      have hidx : i < ((M ++ T).map Prod.fst).length := by rw [List.length_map]; exact hi
-      have := nodup_getElem_not_mem_take hNodup' i hidx
-      simpa [List.getElem_map] using this
-  -- In-scope facts, read off `insertAll Γ (M ++ T)` via membership.
-  -- (`M ++ T` as a `ListMap` is List append on the underlying pairs.)
-  have hMinΓ : ∀ i (hi : i < M.keys.length) (hj : i < M.values.length),
-      (insertAll Γ (M ++ T)).types.find? (M.keys[i]'hi) = some (.forAll [] (M.values[i]'hj)) := by
-    intro i hi hj
-    refine insertAll_find_mem (M ++ T) Γ _ _ hNodup' ?_
-    exact List.mem_append_left _ (keyval_mem M i hi hj)
-  have hTinΓ := outTargets_inΓ O T hTVals (Γ := insertAll Γ (M ++ T)) (fun p hp =>
-    insertAll_find_mem (M ++ T) Γ p.1 p.2 hNodup' (List.mem_append_right _ hp))
-  -- The lone call statement type-checks in the chained scope, leaving it unchanged.
-  have hcall : StmtHasTypeA P C (insertAll Γ (M ++ T)) (freshLabel :: L)
-      (Statement.call pname (mkArgs M T exprs) default) C (insertAll Γ (M ++ T)) :=
-    StmtHasType'.cmd C (insertAll Γ (M ++ T)) (insertAll Γ (M ++ T)) (freshLabel :: L) _
-      (call_recipe_inout_sound M I O T exprs hfind hInputs hOutputs hExLen
-        (lm_length_eq_of_values_eq hTVals) hMinΓ hTinΓ hExTy hExNoFvar hIdisjOut)
-  -- Assemble: init-chain, then the call, wrapped in a fresh-label block.
-  exact block_wraps hfresh
-    (StmtsHasTypeA_append hchain
-      (StmtsHasType'.cons _ _ _ _ _ _ _ _ _ hcall
-        (StmtsHasType'.nil C (insertAll Γ (M ++ T)) (freshLabel :: L))))
+/-- A single well-typed statement is a well-typed statement list of length one.
+    Used throughout the generator's soundness proof: every `genStmt` branch but
+    `call` produces a singleton list, so its per-constructor `StmtHasTypeA` fact is
+    lifted through this. -/
+theorem StmtsHasTypeA_singleton {P : Program} {C C' : LContext CoreLParams}
+    {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
+    (h : StmtHasTypeA P C Γ L s C' Γ') :
+    StmtsHasTypeA P C Γ L [s] C' Γ' :=
+  StmtsHasType'.cons _ _ _ _ _ _ _ _ _ h (StmtsHasType'.nil _ _ _)
 
 -- ── Reuse-or-init: the general case (block-free when nothing is missing) ──
 
 /-- The sub-list of `news` whose names are **not** yet bound in `Γ`: exactly the
     names a call site must `init` before calling. Names already bound (at the
-    right type — see `call_mixed_sound`'s `hReuse`) are reused as-is. -/
+    right type — see `call_mixed_body_sound`'s `hReuse`) are reused as-is. -/
 def missingIn (Γ : TContext Unit) (news : List (Identifier Unit × LMonoTy)) :
     List (Identifier Unit × LMonoTy) :=
   news.filter (fun p => (Γ.types.find? p.1).isNone)
@@ -680,9 +661,11 @@ theorem insertAll_missing_preserves (Γ : TContext Unit)
     chain. The emitted body is `initChain (missingIn Γ news) ++ [call …]`, well-typed
     in `insertAll Γ (missingIn Γ news)`.
 
-    When `missingIn Γ news = []` the chain is empty, so the body is the bare call —
-    this is what licenses emitting an *inline* (block-free) call; see
-    `call_inline_sound`. -/
+    When `missingIn Γ news = []` the chain is empty, so the body degenerates to the
+    bare `[call …]` and the output scope is `Γ` unchanged — the common shape in real
+    Strata code. Because this one lemma covers both the all-reused and the
+    some-missing case uniformly, it is the *sole* soundness engine for the call
+    group; `genCallStmt` needs no `isEmpty` split. -/
 theorem call_mixed_body_sound
     {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit} {L : List String}
     {pname : String} {proc : Procedure}
@@ -754,70 +737,3 @@ theorem call_mixed_body_sound
   exact StmtsHasTypeA_append hchain
     (StmtsHasType'.cons _ _ _ _ _ _ _ _ _ hcall
       (StmtsHasType'.nil C _ L))
-
-/-- **Inline (block-free) call soundness.** When every written-to name `M ∪ T` is
-    already bound in `Γ` at exactly its recorded type, `missingIn Γ (M ++ T) = []`,
-    the init-chain is empty, and the emitted statement is the *bare* call — no
-    enclosing block, no label, and the scope is unchanged. This is the "reuse"
-    half of the call generator. -/
-theorem call_inline_sound
-    {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit} {L : List String}
-    {pname : String} {proc : Procedure}
-    (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
-    (hfind : Program.Procedure.find? P pname = some proc)
-    (hInputs : proc.header.inputs = M ++ I)
-    (hOutputs : proc.header.outputs = M ++ O)
-    (hExLen : exprs.length = I.length)
-    (hTVals : T.values = O.values)
-    (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      LExpr.HasTypeA [] (exprs[i]'hi) (I.values[i]'hj))
-    (hIdisjOut : ∀ i (hi : i < I.keys.length),
-      (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
-    (hAllBound : ∀ p ∈ (M ++ T).toList, Γ.types.find? p.1 = some (.forAll [] p.2)) :
-    StmtHasTypeA P C Γ L (Statement.call pname (mkArgs M T exprs) default) C Γ := by
-  have hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none := by
-    intro i hi m x heq
-    have hlen : i < I.values.length := by rw [lm_values_length, ← hExLen]; exact hi
-    have := hExTy i hi hlen
-    rw [heq] at this
-    cases this
-  have hMinΓ : ∀ i (hi : i < M.keys.length) (hj : i < M.values.length),
-      Γ.types.find? (M.keys[i]'hi) = some (.forAll [] (M.values[i]'hj)) := fun i hi hj =>
-    hAllBound _ (List.mem_append_left _ (keyval_mem M i hi hj))
-  have hTinΓ := outTargets_inΓ O T hTVals
-    (fun p hp => hAllBound _ (List.mem_append_right _ hp))
-  exact StmtHasType'.cmd C Γ Γ L _
-    (call_recipe_inout_sound M I O T exprs hfind hInputs hOutputs hExLen
-      (lm_length_eq_of_values_eq hTVals) hMinΓ hTinΓ hExTy hExNoFvar hIdisjOut)
-
-/-- **Mixed reuse/init call soundness (block form).** When *some* written-to name is
-    missing from `Γ`, the emitted statement is a fresh-label block wrapping
-    `initChain (missingIn Γ (M ++ T)) ++ [call …]`. Reused names are read from `Γ`;
-    missing ones are `init`ed inside the block, so they do not leak (the output
-    scope is the input `Γ`). -/
-theorem call_mixed_sound
-    {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit} {L : List String}
-    {pname : String} {proc : Procedure}
-    (freshLabel : String)
-    (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
-    (hfresh : freshLabel ∉ L)
-    (hfind : Program.Procedure.find? P pname = some proc)
-    (hInputs : proc.header.inputs = M ++ I)
-    (hOutputs : proc.header.outputs = M ++ O)
-    (hExLen : exprs.length = I.length)
-    (hTVals : T.values = O.values)
-    (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      LExpr.HasTypeA [] (exprs[i]'hi) (I.values[i]'hj))
-    (hIdisjOut : ∀ i (hi : i < I.keys.length),
-      (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
-    (hNodup : (M ++ T).keys.Nodup)
-    (hReuse : ∀ p ∈ (M ++ T).toList,
-      Γ.types.find? p.1 = some (.forAll [] p.2) ∨ Γ.types.find? p.1 = none) :
-    StmtHasTypeA P C Γ L
-      (Stmt.block freshLabel
-        (initChain (missingIn Γ (M ++ T)) ++
-          [Statement.call pname (mkArgs M T exprs) default]) default)
-      C Γ :=
-  block_wraps hfresh
-    (call_mixed_body_sound M I O T exprs hfind hInputs hOutputs hExLen hTVals hExTy
-      hIdisjOut hNodup hReuse)

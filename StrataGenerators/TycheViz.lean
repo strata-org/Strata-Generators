@@ -1,11 +1,19 @@
 import StrataGenerators.Tyche
 import StrataGenerators.Properties
+import StrataGenerators.RetryGen
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import StrataGenerators.StmtHasTypeAGen.TestSupport
+-- Supplies `minimizeProcsCounterexample`, so the procedure panels can report the
+-- minimal well-typed counterexample rather than the raw generated one.
+import StrataGenerators.ProcedureHasTypeAGen.Shrink
 import Basalt.IO
+-- `Basalt.PlausibleGen` supplies the `[Gen Plausible.Gen]` instance used by the
+-- procedure-list panels, which run the backtracking `genProcedure` generator via
+-- `Plausible.Gen.run` (the direct `G := IO` path is unreliable for procedures).
+import Basalt.PlausibleGen
 import Strata.DL.Lambda.LExprT
 -- Imports for Function.typeCheck property (typeCheck_annotated_sound)
 import Strata.Languages.Core.FunctionType
@@ -121,7 +129,7 @@ def randomDepth (maxDepth : Nat := 5) : IO Nat := do
 def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithOps (G := IO) [] coreOpCtx corePolyOps tvars [] d ty
+  let expr ← genLExprWithOps (G := IO) [] coreMonoOps corePolyOps tvars [] d ty
   let evaled := eval 100 expr
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
   return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled), d⟩
@@ -161,7 +169,7 @@ instance : Tyche.TycheSample EvalProgressResult where
 def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithOps (G := IO) [] coreOpCtx corePolyOps tvars [] d ty
+  let expr ← genLExprWithOps (G := IO) [] coreMonoOps corePolyOps tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, d⟩
 
@@ -190,7 +198,7 @@ instance : Tyche.TycheSample FvarPreservationResult where
 def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO FvarPreservationResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithOps (G := IO) defaultFCtx coreOpCtx corePolyOps tvars [] d ty
+  let expr ← genLExprWithOps (G := IO) defaultFCtx coreMonoOps corePolyOps tvars [] d ty
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, d⟩
 
@@ -314,8 +322,8 @@ private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCt
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
   let numCmds ← IO.rand 0 8
-  let (_, baseCtx) ← genCmds (G := IO) [] coreOpCtx tvars [] [] d numCmds
-  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreOpCtx tvars [] baseCtx d
+  let (_, baseCtx) ← genCmds (G := IO) [] coreMonoOps tvars [] [] d numCmds
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreMonoOps tvars [] baseCtx d
   return (cmd, baseCtx, ctx', d)
 
 -- ── Panels 1–4: single-verdict command properties ───────────────────
@@ -414,7 +422,7 @@ instance : Tyche.TycheSample FunctionFvarsAnnotatedResult where
     `fvars_annotated_by` property against the matching type map. -/
 def genAndCheckFunctionFvarsAnnotated (depth : Nat := 0) : IO FunctionFvarsAnnotatedResult := do
   let d ← if depth == 0 then randomDepth else pure depth
-  let func ← genFunctionIO defaultFCtx coreOpCtx d
+  let func ← genFunctionIO defaultFCtx coreMonoOps d
   let passed := functionFvarsAnnotatedBy (fctxToTyMap defaultFCtx) func
   return { func, passed, generatorSize := d }
 
@@ -460,7 +468,7 @@ instance : Tyche.TycheSample FunctionTypeCheckSoundResult where
     whether it was accepted and whether the output satisfies `FuncHasTypeA`. -/
 def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckSoundResult := do
   let d ← if depth == 0 then randomDepth else pure depth
-  let func ← genFunctionIO [] coreOpCtx d
+  let func ← genFunctionIO [] coreMonoOps d
   match Function.typeCheck funcCheckContext TEnv.default func with
   | .ok (func', _) =>
     return { func := func', accepted := true, specHolds := checkFuncHasTypeA func', generatorSize := d }
@@ -508,7 +516,7 @@ open StrataGenerators.Stmt.TestSupport in
     (in the full Core ambient context). -/
 def genAndCheckFunctionTypeCheckComplete (depth : Nat := 0) : IO FunctionTypeCheckCompleteResult := do
   let d ← if depth == 0 then randomDepth else pure depth
-  let func ← genFunctionIO [] coreOpCtx d
+  let func ← genFunctionIO [] coreMonoOps d
   return { func, accepted := checkFunctionTypeCheckerComplete func, generatorSize := d }
 
 -- ── Function property 2: pretty-print / parse round-trip ───────────────
@@ -577,7 +585,7 @@ def mkRoundtripResult (func : Function) (d : Nat) : IO FunctionRoundtripResult :
 
 def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult := do
   let d ← if depth == 0 then randomDepth else pure depth
-  let func ← genFunctionIO [] coreOpCtx d
+  let func ← genFunctionIO [] coreMonoOps d
   -- If the function fails to round-trip, shrink it to a minimal witness and
   -- report that instead, so the Tyche `representation` shows the smallest
   -- reproducer (features / status_reason are recomputed on the shrunk func).
@@ -620,7 +628,7 @@ instance : Tyche.TycheSample FunctionBodyPreservationResult where
     still type-checks at the declared output type. -/
 def genAndCheckFunctionBodyPreservation (depth : Nat := 0) : IO FunctionBodyPreservationResult := do
   let d ← if depth == 0 then randomDepth else pure depth
-  let func ← genFunctionIO [] coreOpCtx d
+  let func ← genFunctionIO [] coreMonoOps d
   return { func, hasBody := func.body.isSome, generatorSize := d }
 
 -- ── Function property: special-character identifier round-trip ─────────
@@ -780,6 +788,159 @@ def genKleeneDefined : IO KleeneDefinedResult := do
   let (ss, d) ← genStmtsForTyche
   return { stmts := ss, defined := (kleeneStmts ss).isSome, genSize := d }
 
+-- ── Procedure ↔ transform-pass panels ────────────────────────────────
+-- One panel per procedure/transform property. Each sample is a generated
+-- procedure *list* (assembled into a `Program`), scored by the same shared
+-- `check* : List Procedure → Bool` predicate the Plausible suite uses (via the
+-- `Properties.procTransforms` bundle), so a panel and its `checkIO` counterpart
+-- always agree. Two panels visualize honest failures: `proc: FilterProcedures
+-- changed flag is faithful` (samples where nothing is removed yet the pass reports
+-- `changed = true` show up as failed marks) and `proc: PrecondElim changed flag is
+-- faithful` (the rarer samples where a declared function's body calls a partial
+-- function, so a `$$wf` block is inserted while the pass reports unchanged).
+
+open StrataGenerators.Procedure.TestSupport in
+/-- Structural features of an assembled procedure program: the procedure count and
+    a total statement-body size across all procedures. -/
+private def procListFeatures (ps : List Core.Procedure) (genSize : Nat) :
+    List (String × Tyche.Feature) :=
+  let bodyLen (p : Core.Procedure) := (bodyStmts p.body).length
+  [ ("num_procs", .ordinal ps.length),
+    ("total_body_stmts", .ordinal (ps.foldl (fun n p => n + bodyLen p) 0)),
+    ("generator_size", .ordinal genSize) ]
+
+open StrataGenerators.Procedure.TestSupport in
+/-- Render an assembled procedure program via Strata's own formatter. -/
+private def procsRepr (ps : List Core.Procedure) : String :=
+  let prog : Core.Program := { decls := ps.map (Core.Decl.proc · .empty) }
+  (Core.formatProgram prog).pretty
+
+/-- A generated procedure list paired with a single property's pass/fail verdict
+    and the property name. One structure serves every boolean procedure property;
+    the panel title distinguishes them.
+
+    `diagnostic` and `extraFeatures` let an individual panel append property-specific
+    detail to the otherwise uniform program rendering. They exist for properties
+    whose failure cause is not *in* the program — see
+    `procFactoryStrippedDiagnostic`. Both default to empty, so every other panel is
+    unaffected. -/
+structure ProcPropResult where
+  procs : List Core.Procedure
+  passed : Bool
+  genSize : Nat
+  tag : String
+  diagnostic : String := ""
+  extraFeatures : List (String × Tyche.Feature) := []
+
+instance : Tyche.TycheSample ProcPropResult where
+  toSample r :=
+    { representation :=
+        if r.diagnostic.isEmpty then procsRepr r.procs
+        else procsRepr r.procs ++ "\n\n" ++ r.diagnostic
+      status := if r.passed then .passed else .failed
+      features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
+        :: procListFeatures r.procs r.genSize ++ r.extraFeatures }
+
+open StrataGenerators.Procedure.TestSupport in
+/-- Generate a well-typed procedure list in `IO` for the Tyche panels, via
+    `Gen.run` on the same `retryGen` wrapper the Plausible harness uses (the
+    direct `G := IO` path is unreliable — nested sub-generators hit empty-support
+    fallbacks — so we run the retrying `Plausible.Gen` at a random size).
+    Names are relabelled `P0…Pk` for collision-free identities. -/
+def genProcsForTyche : IO (List Core.Procedure × Nat) := do
+  let genSize ← IO.rand 0 60
+  let n ← IO.rand 2 4
+  let ps ← (List.range n).mapM fun _ =>
+    Plausible.Gen.run
+      (retryGen 8000 (Plausible.Gen.sized fun s' => do
+        let size := max 1 (min 2 (s' / 30))
+        let len := max 1 (min 3 (s' / 25))
+        StrataGenerators.Procedure.genProcedure (G := Plausible.Gen) corePartialOps size len))
+      genSize
+  return (relabelProcs ps, genSize)
+
+open StrataGenerators.Procedure.TestSupport in
+/-- Build a `ProcPropResult` by generating a procedure list and applying a check
+    predicate under the given tag.
+
+    When the property *fails*, the list is first minimized by
+    `minimizeProcsCounterexample`, so the panel's `representation` shows the
+    smallest well-typed reproducer instead of the raw generated program — the same
+    shrink-then-report pattern `genAndCheckFunctionRoundtrip` uses. Features are
+    recomputed from the minimized list, so `num_procs` / `total_body_stmts`
+    describe what is actually displayed.
+
+    The minimized list still fails `check` (the minimizer only keeps candidates
+    that do) and is still well-typed (every candidate passes `procsTypeCheck`), so
+    the verdict is unchanged — only the witness gets smaller. Passing samples are
+    reported as generated: there is nothing to minimize, and skipping the work
+    keeps the common case cheap. -/
+def genProcProp (tag : String) (check : List Core.Procedure → Bool) : IO ProcPropResult := do
+  let (ps, d) ← genProcsForTyche
+  if check ps then
+    return { procs := ps, passed := true, genSize := d, tag }
+  else
+    return { procs := minimizeProcsCounterexample check 200 ps, passed := false, genSize := d, tag }
+
+open StrataGenerators.Procedure.TestSupport in
+/-- Render the offending factory entries for the `factoryStripped` panel: each
+    output-factory entry that still carries a precondition, with its formatted
+    preconditions and whether the program declared it.
+
+    Why this panel needs its own representation: `checkPrecondFactoryStripped`
+    fails on *every* input, so the shrinker minimizes the program all the way to
+    the empty one — an honest witness, but a mute one, because the failure cause
+    is not in the program at all. The formatted program alone therefore reads as
+    `program Core;` with no indication of what went wrong. The offenders are the
+    actual evidence, so we print them.
+
+    Entries are grouped by `declared` to keep the two independent causes visually
+    distinct, and the seeded-builtin list is truncated (58 entries on the empty
+    program) since it is long and uniform; the count is always reported in full. -/
+private def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
+  let offenders := precondFactoryStrippedOffenders ps
+  if offenders.isEmpty then
+    "-- output factory: no entry retains a precondition (property holds)"
+  else
+    let fmt (e : String × List String × Bool) : String :=
+      s!"  {e.1} requires {String.intercalate ", " e.2.1}"
+    let declared := offenders.filter (·.2.2)
+    let builtin := offenders.filter (fun e => !e.2.2)
+    let declaredBlock :=
+      if declared.isEmpty then []
+      else [s!"-- declared by this program ({declared.length}) — PASS-SIDE bug:",
+            "-- PrecondElim pushed these into the factory unstripped."]
+              ++ declared.map fmt
+    let shown := builtin.take 6
+    let builtinBlock :=
+      if builtin.isEmpty then []
+      else [s!"-- seeded Core.Factory builtins ({builtin.length}) — SPEC-SIDE bug:",
+            "-- the pass must KEEP these; they are the WF obligations it reads."]
+              ++ shown.map fmt
+              ++ (if builtin.length > shown.length
+                  then [s!"  … and {builtin.length - shown.length} more builtins"] else [])
+    String.intercalate "\n"
+      ([s!"-- factoryStripped offenders: {offenders.length} factory entries retain a precondition"]
+        ++ declaredBlock ++ builtinBlock)
+
+open StrataGenerators.Procedure.TestSupport in
+/-- The `factoryStripped` panel: as `genProcProp`, but appends the offending
+    factory entries to the representation and records their counts as features, so
+    the panel shows *why* the property fails rather than just an empty program.
+
+    The verdict still comes from the shared `checkPrecondFactoryStripped`, so this
+    panel and its Plausible counterpart continue to agree. -/
+def genProcFactoryStrippedProp (tag : String) (check : List Core.Procedure → Bool) :
+    IO ProcPropResult := do
+  let r ← genProcProp tag check
+  let offenders := precondFactoryStrippedOffenders r.procs
+  return { r with
+    diagnostic := procFactoryStrippedDiagnostic r.procs
+    extraFeatures :=
+      [ ("factory_offenders", .ordinal offenders.length),
+        ("declared_offenders", .ordinal (offenders.filter (·.2.2)).length),
+        ("builtin_offenders", .ordinal (offenders.filter (fun e => !e.2.2)).length) ] }
+
 -- ── Panel runner ────────────────────────────────────────────────────
 
 /-- Write every Tyche panel to `handle` in JSONL format, `numSamples` samples per
@@ -845,3 +1006,18 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
 
   -- #6 gets its own richer panel (definedness + why).
   panel PropertyNames.stmtKleeneDefinedIff genKleeneDefined
+
+  -- ── Procedure ↔ transform-pass panels ──────────────────────────────
+  -- One panel per property (four FilterProcedures, five PrecondElim, four
+  -- ANFEncoder), from the shared `Properties.procTransforms` bundle (also consumed
+  -- by both Plausible harnesses). The FilterProcedures changed-flag panel
+  -- visualizes the honest failure.
+  -- `factoryStripped` gets a diagnostic representation instead of the plain
+  -- program: it fails on every input, so its minimized witness is the empty
+  -- program and the cause (factory entries retaining preconditions) would
+  -- otherwise be invisible. Every other property uses the uniform renderer.
+  for p in Properties.procTransforms do
+    if p.name == PropertyNames.procPrecondFactoryStripped then
+      panel p.name (genProcFactoryStrippedProp p.name p.check)
+    else
+      panel p.name (genProcProp p.name p.check)

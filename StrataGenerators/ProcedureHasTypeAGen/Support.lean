@@ -7,9 +7,9 @@ open StrataGenerators.Stmt
 /-!
 # A concrete `GenStmtSoundEnv` for the procedure generator
 
-`genProcedure` generates a structured body via `genStmts` seeded from the
+`genProcedure` generates a structured body via `genStmtChain` seeded from the
 procedure's *output* parameters. To reuse the statement-generator soundness proof
-(`genStmt_sound` / `genStmts_sound`), we need an actual `GenStmtSoundEnv`
+(`genStmt_sound` / `genStmtChain_sound`), we need an actual `GenStmtSoundEnv`
 instance — a bundle exhibiting a semantic `TContext` for each flat `VarCtx`,
 together with the `VarCtxCorresponds` correspondence and the expression-level
 obligations.

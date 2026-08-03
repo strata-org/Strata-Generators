@@ -1,4 +1,5 @@
 import StrataGenerators.Properties
+import StrataGenerators.RetryGen
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.HasTypeAGen.SmtEval
 import StrataGenerators.CmdHasTypeAGen.TestSupport
@@ -6,6 +7,9 @@ import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import StrataGenerators.FunctionHasTypeAGen.Shrink
 import StrataGenerators.StmtHasTypeAGen.TestSupport
+-- Supplies `relabelProcs` and `shrinkProcsList`, backing the `Shrinkable GenProcs`
+-- instance so Plausible reports minimal well-typed procedure counterexamples.
+import StrataGenerators.ProcedureHasTypeAGen.Shrink
 import Basalt.PlausibleGen
 import Plausible
 import Strata.DL.Lambda.LExprT
@@ -80,14 +84,14 @@ private def genTypedExprWith (fctx : FVarCtx) : Gen TypedExpr := Gen.sized fun s
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExprWithOps (G := Plausible.Gen) fctx coreOpCtx corePolyOps tvars [] depth ty
+  let expr ← genLExprWithOps (G := Plausible.Gen) fctx coreMonoOps corePolyOps tvars [] depth ty
   pure ⟨expr, ty⟩
 
 -- `genLExpr` can fail (via `default`) when a depth-0 arrow case has no
 -- bvar/fvar/op in context. Since `Plausible.Gen` doesn't backtrack on its
--- own, we use `Gen.backtrack` to retry with fresh randomness on failure.
+-- own, we use `retryGen` to retry with fresh randomness on failure.
 instance : Arbitrary TypedExpr where
-  arbitrary := Gen.backtrack (List.replicate 500 (1, genTypedExprWith defaultFCtx))
+  arbitrary := retryGen 500 (genTypedExprWith defaultFCtx)
 
 /-- A closed generated expression (no free variables). Used for properties
     that are stated with respect to the empty typing context (progress
@@ -104,8 +108,7 @@ instance : Shrinkable ClosedTypedExpr where
   shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
 instance : Arbitrary ClosedTypedExpr where
-  arbitrary := Gen.backtrack (List.replicate 500
-    (1, (fun te => ⟨te.expr, te.ty⟩) <$> genTypedExprWith []))
+  arbitrary := retryGen 500 ((fun te => ⟨te.expr, te.ty⟩) <$> genTypedExprWith [])
 
 -- ── Pretty-printing ──────────────────────────────────────────────────
 
@@ -188,7 +191,7 @@ private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
   pure ⟨expr, ty⟩
 
 instance : Arbitrary ResolveTypedExpr where
-  arbitrary := Gen.backtrack (List.replicate 500 (1, genResolveTypedExpr))
+  arbitrary := retryGen 500 genResolveTypedExpr
 
 /-- After erasing *all* type annotations, `resolve` infers a principal type that
     may be more general than the type the expression was generated at (e.g. a
@@ -245,19 +248,18 @@ instance : Shrinkable GenCmdWithCtx where
 private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars [] ctx depth
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreMonoOps tvars [] ctx depth
   pure ⟨cmd, ctx, ctx'⟩
 
 private def genCmdFromBuiltCtx (ctxSize : Nat) : Gen GenCmdWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
-  let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] [] depth ctxSize
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreOpCtx tvars [] baseCtx depth
+  let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreMonoOps tvars [] [] depth ctxSize
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreMonoOps tvars [] baseCtx depth
   pure ⟨cmd, baseCtx, ctx'⟩
 
 instance : Arbitrary GenCmdWithCtx where
-  arbitrary := Gen.backtrack (List.replicate 1000
-    (1, genCmdFromBuiltCtx 3))
+  arbitrary := retryGen 1000 (genCmdFromBuiltCtx 3)
 
 /-- A generated command sequence paired with its context. -/
 structure GenCmdsWithCtx where
@@ -281,11 +283,11 @@ private def genCmdsWithCtx : Gen GenCmdsWithCtx := do
   let depth := 2
   let n := 4
   let tvars : List TyIdentifier := []
-  let (cmds, ctx') ← genCmds (G := Plausible.Gen) [] coreOpCtx tvars [] [] depth n
+  let (cmds, ctx') ← genCmds (G := Plausible.Gen) [] coreMonoOps tvars [] [] depth n
   pure ⟨cmds, [], ctx'⟩
 
 instance : Arbitrary GenCmdsWithCtx where
-  arbitrary := Gen.backtrack (List.replicate 1000 (1, genCmdsWithCtx))
+  arbitrary := retryGen 1000 genCmdsWithCtx
 
 -- ── Command-level properties ─────────────────────────────────────────
 
@@ -332,11 +334,11 @@ instance : Shrinkable GenFunction where
     size parameter, mirroring `genCmdWith`. -/
 private def genFunctionWith (fctx : FVarCtx) : Gen GenFunction := Gen.sized fun s => do
   let depth := max 1 (s / 20)
-  let func ← genFunction (G := Plausible.Gen) fctx coreOpCtx depth
+  let func ← genFunction (G := Plausible.Gen) fctx coreMonoOps depth
   pure ⟨func, fctx⟩
 
 instance : Arbitrary GenFunction where
-  arbitrary := Gen.backtrack (List.replicate 1000 (1, genFunctionWith defaultFCtx))
+  arbitrary := retryGen 1000 (genFunctionWith defaultFCtx)
 
 -- ── Function-level properties ────────────────────────────────────────
 
@@ -375,11 +377,11 @@ instance : Shrinkable ClosedGenFunction where
 
 private def genClosedFunctionWith : Gen ClosedGenFunction := Gen.sized fun s => do
   let depth := max 2 (s / 20)
-  let func ← genFunction (G := Plausible.Gen) [] coreOpCtx depth
+  let func ← genFunction (G := Plausible.Gen) [] coreMonoOps depth
   pure ⟨func⟩
 
 instance : Arbitrary ClosedGenFunction where
-  arbitrary := Gen.backtrack (List.replicate 2000 (1, genClosedFunctionWith))
+  arbitrary := retryGen 2000 genClosedFunctionWith
 
 -- ── Property 1: Function.typeCheck_annotated_sound ─────────────────────
 --
@@ -524,19 +526,19 @@ instance : Shrinkable GenStmts where
 -- the properties under test don't need large programs, and a bigger `size`
 -- multiplies the chance that *some* nested sub-generator hits its empty-support
 -- fallback (`default`) — e.g. a `typeDecl` name clash or an `exit` with no
--- enclosing label — which forces `Gen.backtrack` to retry the *whole* list and
--- can exhaust its fuel at large Plausible sizes.
+-- enclosing label — which forces `retryGen` to redraw the *whole* statement list
+-- and can exhaust its fuel at large Plausible sizes.
 private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
   let size := max 1 (min 3 (s / 25))
   let len := max 1 (min 4 (s / 20))
-  let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) [] coreOpCtx [] size len
+  let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) [] coreMonoOps [] size len
   pure ⟨ss⟩
 
 -- `genStmt` can hit the empty generator (`default`) in sub-cases (e.g. a
 -- `typeDecl` name clash), so — like the other generators — we retry with fresh
--- randomness via `Gen.backtrack`.
+-- randomness via `retryGen`.
 instance : Arbitrary GenStmts where
-  arbitrary := Gen.backtrack (List.replicate 4000 (1, genStmtsWith))
+  arbitrary := retryGen 4000 genStmtsWith
 
 -- ── Statement-level properties (all currently unproven) ───────────────
 
@@ -552,6 +554,70 @@ instance : Arbitrary GenStmts where
 -- when an invariant-bearing loop is present).
 @[reducible] def prop_stmt_kleene_defined_iff (gs : GenStmts) : Prop :=
   checkKleeneDefinedIff gs.stmts = true
+
+-- ── Procedure generation via Plausible.Gen ────────────────────────────
+--
+-- `genProcedure` generates a well-typed Strata Core procedure (`ProcHasTypeA`),
+-- proven sound AND complete against the declarative typing spec. We assemble a
+-- *list* of them into a multi-declaration `Program` and use it as a
+-- certified-well-typed oracle input for the three Core transform passes
+-- (FilterProcedures, PrecondElim, ANFEncoder). All check predicates live in the
+-- shared module `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, folded into
+-- the suites via the `Properties.procTransforms` bundle.
+
+open StrataGenerators.Procedure.TestSupport
+
+/-- A generated list of well-typed procedures, to be assembled into a program.
+    The names are rewritten to `P0, P1, …` so procedure identities never collide
+    (the generator draws each name independently, so two procedures could
+    otherwise share a name and confound the name-based filter/order checks). -/
+structure GenProcs where
+  procs : List Core.Procedure
+
+instance : Repr GenProcs where
+  -- Render the assembled program via Strata's own formatter (real Core concrete
+  -- syntax), so a counterexample shows exactly the program the pass ran on.
+  reprPrec gp _ :=
+    let prog : Core.Program := { decls := gp.procs.map (Core.Decl.proc · .empty) }
+    (Core.formatProgram prog).pretty
+
+-- Shrink via the shared procedure shrinker `shrinkProcsList`, which offers both
+-- dropping a whole procedure *and* reducing one procedure in place (its body via
+-- `shrinkStmtsList`, its pre/postconditions via `shrinkLExpr`), relabelling the
+-- survivors `P0…Pk`. Every candidate is re-checked with Strata's own
+-- `Procedure.typeCheck`, so a reported counterexample is always a *well-typed*
+-- program — which matters because these properties are only meaningful on
+-- well-typed input. Headers are held fixed, so each procedure keeps its signature.
+instance : Shrinkable GenProcs where
+  shrink gp := (shrinkProcsList gp.procs).map (⟨·⟩)
+
+-- Per-procedure nesting `size` is capped at 2 and body length at 3, and the
+-- procedure count at 2–4: the transform properties don't need large programs, and
+-- (as with `genStmtsWith`) a bigger `size` multiplies the chance a nested
+-- sub-generator hits its empty-support fallback, forcing a retry of the whole
+-- procedure and risking fuel exhaustion at large Plausible sizes. The 8000-retry
+-- budget was tuned so this never throws through max size 100.
+private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
+  let n := max 2 (min 4 (2 + s / 30))
+  let ps ← (List.range n).mapM fun _ =>
+    (retryGen 8000 (Gen.sized fun s' => do
+      let size := max 1 (min 2 (s' / 30))
+      let len := max 1 (min 3 (s' / 25))
+      StrataGenerators.Procedure.genProcedure (G := Plausible.Gen) corePartialOps size len) : Gen Core.Procedure)
+  pure ⟨relabelProcs ps⟩
+
+instance : Arbitrary GenProcs where
+  arbitrary := retryGen 8000 genProcsWith
+
+-- The thirteen procedure/transform properties (four FilterProcedures, five
+-- PrecondElim, four ANFEncoder) are defined by the shared
+-- `Properties.procTransforms` bundle, so they are folded directly into
+-- `procSuite` below rather than restated as `prop_*` wrappers here. Two of them
+-- are EXPECTED to fail, each stating a faithful `changed ↔ program changed`
+-- contract that the pass genuinely violates: `proc: FilterProcedures changed flag
+-- is faithful` (the pass hardcodes `changed := true` even when it removes
+-- nothing) and `proc: PrecondElim changed flag is faithful` (the `.funcDecl`
+-- branch reports unchanged while inserting a `$$wf` block).
 
 -- ── Test runner ──────────────────────────────────────────────────────
 

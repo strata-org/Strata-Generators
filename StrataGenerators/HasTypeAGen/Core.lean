@@ -188,8 +188,8 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   | n + 1 =>
     if h : tvars.length > 0 then
       frequency
-        [ (1, fun () => pickBaseType),
-          (9, fun () =>
+        [ (9, fun () => pickBaseType),
+          (1, fun () =>
             oneOf
               [ (fun () => do
                   let τ₁ ← genLMonoTy tvars n
@@ -207,8 +207,8 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
         (by simp)
     else
       frequency
-        [ (1, fun () => pickBaseType),
-          (9, fun () =>
+        [ (9, fun () => pickBaseType),
+          (1, fun () =>
             oneOf
               [ (fun () => do
                   let τ₁ ← genLMonoTy tvars n
@@ -304,6 +304,139 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let body ← genBody τ'
   pure (.quant () k "" (some τ') trigger body)
 
+/-- Collects all syntactic sub-types (i.e. sub-terms of a type expression) that appear in a type -/
+def syntacticSubtypes : LMonoTy → List LMonoTy
+  | ty@(.tcons "arrow" [a, b]) => ty :: (syntacticSubtypes a ++ syntacticSubtypes b)
+  | ty => [ty]
+
+/-- Helper function used when building the set of generable types.
+    Implements this rule: if `σ → τ` and `σ` are both in the set, then `τ` is added.
+    Uses a fuel parameter to ensure termination. -/
+def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
+  match fuel with
+  | 0 => tys
+  | fuel + 1 =>
+    let newTys := tys.filterMap fun ty =>
+      match ty with
+      | .tcons "arrow" [argTy, retTy] =>
+        if argTy ∈ tys && retTy ∉ tys then some retTy else none
+      | _ => none
+    if newTys.isEmpty then tys
+    else addNewTypes fuel (tys ++ newTys)
+
+/-- Compute the set of "generable types" (i.e. types that can be generated from the
+  current context), following Palka et al. 2011.
+
+  We begin by computing the syntactic sub-types for each types in the context,
+  then add new types to the set according to the following rule:
+  if (σ → τ) and σ are both in the set, then τ is too. -/
+def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
+  let allTys := bctx ++ fctx.map Prod.snd ++ octx.map Prod.snd
+  let initial := (allTys.flatMap syntacticSubtypes).eraseDups
+  -- Use fuel = initial.length as an upper bound on iterations
+  addNewTypes initial.length initial
+
+/-- Boolean decision procedure for "`τ` is in the support of `genLMonoTy tvars n`",
+    i.e. for `SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ`
+    (see `genLMonoTy_support`). Used to filter the context-derived generable types
+    down to those `genLMonoTy` could itself have produced, which is what makes
+    `genGenerableTy`'s support *equal* to `genLMonoTy`'s — see
+    `genGenerableTy_support`. Kept in lockstep with `SimpleType`/`monoTyDepth`:
+    `bitvec` widths must lie in `bitvecWidths`, `arrow`/`Map`/`Sequence` consume
+    one unit of depth, and every `ftvar` must be declared in `tvars`. -/
+def inGenLMonoTySupport (tvars : List TyIdentifier) : Nat → LMonoTy → Bool
+  | _, .bitvec w => bitvecWidths.contains w
+  | _, .ftvar name => tvars.contains name
+  | n + 1, .tcons "arrow" [a, b] =>
+    inGenLMonoTySupport tvars n a && inGenLMonoTySupport tvars n b
+  | n + 1, .tcons "Map" [a, b] =>
+    inGenLMonoTySupport tvars n a && inGenLMonoTySupport tvars n b
+  | n + 1, .tcons "Sequence" [a] => inGenLMonoTySupport tvars n a
+  | _, .tcons name [] => ["bool", "int", "string", "real", "regex"].contains name
+  | _, _ => false
+
+/-- Context-aware type generator: the type source used for the *argument* type of
+    `genApp`, `genEq`, and `genQuant`.
+
+    Those three combinators pick a type `τ'` and then demand a term of type `τ'`
+    (and, for `genApp`, of type `τ' → τ`). Drawing `τ'` from the context-blind
+    `genLMonoTy` is the dominant cause of generation failure: `genLExprBase` can
+    only inhabit a compound type when *something in `bctx`/`fctx`/`octx` has that
+    exact type*, so a blindly-chosen `τ'` is usually uninhabitable and the leaf
+    falls through to `default` (i.e. throws `inhabitedWitness`). Because each
+    recursive step re-draws a fresh `τ'`, the failure probability compounds with
+    depth — the superlinear blowup.
+
+    So we draw mostly from `generableTypesFromCtx` (Pałka et al. 2011: the types
+    reachable from the context by closing `σ → τ` and `σ` ⊢ `τ`), which are
+    exactly the types the leaf generator can actually inhabit.
+
+    Two details make this a drop-in replacement for `genLMonoTy` in the proofs:
+
+    1. The context-derived list is filtered by `inGenLMonoTySupport tvars n`, so it only
+       ever contains types `genLMonoTy tvars n` could itself have produced. A raw
+       context type need not be one (it can be too deep, mention an undeclared
+       `ftvar`, or use a non-simple constructor), and the soundness proofs rely on
+       the drawn argument type being `SimpleType` of depth ≤ `n`.
+    2. The `genLMonoTy` branch is *retained* with positive weight. Since
+       `frequency`'s support is the union of its positive-weight branches'
+       supports (`mem_support_frequency_iff`), the filtered branch contributes
+       nothing new and the support is exactly `genLMonoTy`'s — see
+       `genGenerableTy_support`.
+
+    So support is unchanged (every existing soundness/completeness proof still
+    applies verbatim, via that one rewrite) while the *distribution* shifts
+    decisively onto types the leaf generator can actually inhabit. This is the
+    reweighting-free part of the fix: it changes which types are likely, not
+    which are possible. -/
+def genGenerableTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (n : Nat) : G LMonoTy :=
+  let generable :=
+    (generableTypesFromCtx bctx fctx octx).filter (inGenLMonoTySupport tvars n)
+  if hg : generable.length > 0 then
+    frequency
+      [ (9, fun () => elements generable (List.ne_nil_of_length_pos hg)),
+        (1, fun () => genLMonoTy tvars n) ]
+      (by simp)
+  else
+    genLMonoTy tvars n
+
+/-- The argument-type source for `genApp` specifically.
+
+    `genApp` is harder than `genEq`/`genQuant`: having drawn an argument type `τ'`
+    it needs terms of type `τ'` *and* of type `τ' → τ`. Drawing `τ'` from the
+    generable set (as `genGenerableTy` does) only ensures the former — measured
+    against `coreMonoOps`, the function type `τ' → bool` was absent from the
+    generable set for 11 of the 16 generable `τ'`, so the *function* position was
+    then the one that failed.
+
+    So instead of choosing `τ'` and hoping `τ' → τ` is inhabited, we work
+    backwards: look for generable types of the form `σ → τ` (i.e. functions that
+    actually *return* the target type `τ`) and take `σ` as the argument type. This
+    is the Pałka et al. rule that both positions be satisfiable.
+
+    As with `genGenerableTy`, the fallback branch is retained with positive weight,
+    so the support is still exactly `genLMonoTy`'s (see `genAppArgTy_support`) and
+    the existing proofs continue to apply. -/
+def genAppArgTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) : G LMonoTy :=
+  let generable := generableTypesFromCtx bctx fctx octx
+  -- Argument types `σ` of generable function types `σ → τ` returning the target.
+  -- The `inGenLMonoTySupport` guard is a separate outer `filter` (rather than folded
+  -- into the `filterMap`) so that membership immediately yields the predicate,
+  -- which is what `genAppArgTy_support` needs.
+  let argTys := (generable.filterMap (fun ty =>
+    match ty with
+    | .tcons "arrow" [σ, ret] => if ret == τ then some σ else none
+    | _ => none)).filter (inGenLMonoTySupport tvars n)
+  if hg : argTys.length > 0 then
+    frequency
+      [ (9, fun () => elements argTys (List.ne_nil_of_length_pos hg)),
+        (1, fun () => genLMonoTy tvars n) ]
+      (by simp)
+  else
+    genGenerableTy fctx octx tvars bctx n
+
 -- ── Expression generator ─────────────────────────────────────────────
 
 /-- Generate a well-typed `LExpr` of type `τ` with term depth bounded by the
@@ -333,7 +466,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
     let gs : List (Nat × (Unit → G LExpr')) :=
       [ (4, fun () => genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
-        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂)),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))
                               (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))),
@@ -348,7 +481,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
           then pickOp octx _ ho
           else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+2+2+2+2; omega
     frequency gs hw
   -- ── Bool type ─────────────────────────────────────────────────────
   | 0, .bool =>
@@ -371,15 +504,15 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     let bvars := bvarsOfType bctx .bool
     let gs : List (Nat × (Unit → G LExpr')) :=
       [ (1, fun () => genBoolConst),
-        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .bool),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .bool) (genLExprBase fctx octx tvars bctx n) .bool),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n .bool)),
-        (2, fun () => genEq (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n)),
-        (2, fun () => genQuant .all (genLMonoTy tvars n)
+        (2, fun () => genEq (genGenerableTy fctx octx tvars bctx n) (genLExprBase fctx octx tvars bctx n)),
+        (2, fun () => genQuant .all (genGenerableTy fctx octx tvars bctx n)
           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
-        (2, fun () => genQuant .exist (genLMonoTy tvars n)
+        (2, fun () => genQuant .exist (genGenerableTy fctx octx tvars bctx n)
           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
         (2, fun () =>
@@ -393,7 +526,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .bool).length > 0
           then pickOp octx .bool ho
           else genBoolConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+2+2+2; omega
     frequency gs hw
   -- ── Int type ──────────────────────────────────────────────────────
   | 0, .int =>
@@ -416,7 +549,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     let bvars := bvarsOfType bctx .int
     let gs : List (Nat × (Unit → G LExpr')) :=
       [ (1, fun () => genIntConst),
-        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .int),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .int) (genLExprBase fctx octx tvars bctx n) .int),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n .int)
                               (genLExprBase fctx octx tvars bctx n .int)),
@@ -431,7 +564,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .int).length > 0
           then pickOp octx .int ho
           else genIntConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
     frequency gs hw
   -- ── FtVar type (rigid type variable) ────────────────────────────────
   | 0, .ftvar name =>
@@ -462,7 +595,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   | n + 1, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
     let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.ftvar name)),
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.ftvar name)) (genLExprBase fctx octx tvars bctx n) (.ftvar name)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n (.ftvar name))
                               (genLExprBase fctx octx tvars bctx n (.ftvar name))),
@@ -483,7 +616,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
     frequency gs hw
   -- ── String type ────────────────────────────────────────────────────
   | 0, .string =>
@@ -506,7 +639,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     let bvars := bvarsOfType bctx .string
     let gs : List (Nat × (Unit → G LExpr')) :=
       [ (1, fun () => genStrConst),
-        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .string),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .string) (genLExprBase fctx octx tvars bctx n) .string),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n .string)
                               (genLExprBase fctx octx tvars bctx n .string)),
@@ -521,7 +654,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .string).length > 0
           then pickOp octx .string ho
           else genStrConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
     frequency gs hw
   -- ── Real type ─────────────────────────────────────────────────────
   | 0, .real =>
@@ -544,7 +677,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     let bvars := bvarsOfType bctx .real
     let gs : List (Nat × (Unit → G LExpr')) :=
       [ (1, fun () => genRealConst),
-        (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .real),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .real) (genLExprBase fctx octx tvars bctx n) .real),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n .real)
                               (genLExprBase fctx octx tvars bctx n .real)),
@@ -559,7 +692,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .real).length > 0
           then pickOp octx .real ho
           else genRealConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
     frequency gs hw
   -- ── Bitvec type ───────────────────────────────────────────────────
   | 0, .bitvec n =>
@@ -582,7 +715,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     let bvars := bvarsOfType bctx (.bitvec n)
     let gs : List (Nat × (Unit → G LExpr')) :=
       [ (1, fun () => genBitvecConst n),
-        (4, fun () => genApp (genLMonoTy tvars m) (genLExprBase fctx octx tvars bctx m) (.bitvec n)),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx m (.bitvec n)) (genLExprBase fctx octx tvars bctx m) (.bitvec n)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx m .bool)
                               (genLExprBase fctx octx tvars bctx m (.bitvec n))
                               (genLExprBase fctx octx tvars bctx m (.bitvec n))),
@@ -597,7 +730,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx (.bitvec n)).length > 0
           then pickOp octx (.bitvec n) ho
           else genBitvecConst n) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
     frequency gs hw
   -- ── Regex type (base type, no constants) ───────────────────────────
   | 0, .regex =>
@@ -628,7 +761,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   | n + 1, .regex =>
     let bvars := bvarsOfType bctx .regex
     let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) .regex),
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .regex) (genLExprBase fctx octx tvars bctx n) .regex),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n .regex)
                               (genLExprBase fctx octx tvars bctx n .regex)),
@@ -649,7 +782,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
     frequency gs hw
   -- ── Map type ──────────────────────────────────────────────────────
   | 0, .map τ₁ τ₂ =>
@@ -680,7 +813,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   | n + 1, .map τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.map τ₁ τ₂)
     let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂)),
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))
                               (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))),
@@ -701,7 +834,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
     frequency gs hw
   -- ── Sequence type ─────────────────────────────────────────────────
   | 0, .seq τ =>
@@ -732,7 +865,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
   | n + 1, .seq τ =>
     let bvars := bvarsOfType bctx (.seq τ)
     let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (4, fun () => genApp (genLMonoTy tvars n) (genLExprBase fctx octx tvars bctx n) (.seq τ)),
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.seq τ)) (genLExprBase fctx octx tvars bctx n) (.seq τ)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n (.seq τ))
                               (genLExprBase fctx octx tvars bctx n (.seq τ))),
@@ -753,7 +886,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+2+2+2+2; omega
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
     frequency gs hw
   -- ── Fallback (other tcons — not generated) ────────────────────────
   | _, _ => default
@@ -841,37 +974,6 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
   -- Assemble everything together
   (renamedBoundVars, renamedTy)
 
-/-- Collects all syntactic sub-types (i.e. sub-terms of a type expression) that appear in a type -/
-def syntacticSubtypes : LMonoTy → List LMonoTy
-  | ty@(.tcons "arrow" [a, b]) => ty :: (syntacticSubtypes a ++ syntacticSubtypes b)
-  | ty => [ty]
-
-/-- Helper function used when building the set of generable types.
-    Implements this rule: if `σ → τ` and `σ` are both in the set, then `τ` is added.
-    Uses a fuel parameter to ensure termination. -/
-def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
-  match fuel with
-  | 0 => tys
-  | fuel + 1 =>
-    let newTys := tys.filterMap fun ty =>
-      match ty with
-      | .tcons "arrow" [argTy, retTy] =>
-        if argTy ∈ tys && retTy ∉ tys then some retTy else none
-      | _ => none
-    if newTys.isEmpty then tys
-    else addNewTypes fuel (tys ++ newTys)
-
-/-- Compute the set of "generable types" (i.e. types that can be generated from the
-  current context), following Palka et al. 2011.
-
-  We begin by computing the syntactic sub-types for each types in the context,
-  then add new types to the set according to the following rule:
-  if (σ → τ) and σ are both in the set, then τ is too. -/
-def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
-  let allTys := bctx ++ fctx.map Prod.snd ++ octx.map Prod.snd
-  let initial := (allTys.flatMap syntacticSubtypes).eraseDups
-  -- Use fuel = initial.length as an upper bound on iterations
-  addNewTypes initial.length initial
 
 /-- Collect the concrete (name, argTypes) pairs that result from instantiating
     polymorphic operators against the target type `τ`. This function
