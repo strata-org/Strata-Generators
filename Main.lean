@@ -1,4 +1,4 @@
 import StrataGenerators
 
 def main : IO Unit :=
-  IO.println "strata-generators"
+  IO.println "Run `lake test` to run test suite"
