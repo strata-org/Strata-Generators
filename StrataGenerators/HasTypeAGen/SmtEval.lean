@@ -21,7 +21,7 @@ This cross-checks the in-Lean evaluator against an independent SMT semantics.
 
 Because `checkValid` is `IO Bool` and needs a **live SMT solver** (`cvc5`/`z3`) at
 runtime, this property is opt-in: it is only added to the LSpec suite when the
-driver is run with `--smt` (see `TestMain`). It is *not* part of the default run.
+driver is run with `lake test -- --smt` (see `TestMain`). It is *not* part of the default run.
 
 Two further constraints, both matched below:
 
