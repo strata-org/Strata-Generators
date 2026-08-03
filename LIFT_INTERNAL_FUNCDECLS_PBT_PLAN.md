@@ -175,6 +175,42 @@ One-line summary: `addC` is transformed by *turning its captured variable into a
 Both papers are relevant, in different ways. Both describe a pure call-by-name `letrec` language, so
 §2's caveat applies throughout.
 
+### Reading order: Levy–Reeves in full, Fischbach–Hannan as a targeted skim
+
+The question "how do I property test lambda lifting" is a methodology question, not a
+correctness-statement question, and on that axis the two are not close.
+
+**Read Levy–Reeves properly, first.** Their §7 *is* this document's experiment, already run: generated
+test suite, implementation checked against three independent decidable oracles. That is a harness
+architecture to copy rather than derive. Their specs are decidable predicates, so they port to Lean
+`Bool`s / `DecOpt` instances directly, whereas Fischbach–Hannan gives theorems about a relation and
+leaves the decidability engineering to you. They are in Lean 4 already. And — decisively — one of
+their three oracles *is* a translation of the Fischbach–Hannan specification, so reading Levy–Reeves
+gets you Fischbach–Hannan's spec in the form actually needed. Their Def 4.6 is exactly what Phase 2
+of `hoistProcedure` computes, making it the direct oracle for P8, the algorithmically interesting part
+of the pass.
+
+Priority sections: §4 (Def 4.6, §4.1, §4.5) for the oracle and the no-shadowing preprocessing, §7 for
+the harness design, Thm 6.10 for minimality.
+
+**Then skim Fischbach–Hannan for the three things Levy–Reeves does not cover** — an afternoon, not a
+full pass:
+
+- **Thm 4 + Cor. 1** — *bidirectional* operational correctness, including termination. This is P13,
+  and it is the property that catches the dangerous direction (`run p` verifying where `p` does not).
+  Levy–Reeves does not give this framing.
+- **Fig. 3 side conditions** — `x ∈ dom(Γ)`, `y ∉ dom(Γ)`, `FV(τ) ⊆ dom(Γ)` → properties #6/#7.
+  Short enough to lift off the figure without the surrounding development.
+- **§2.2 pitfalls, pp. 513–515** — adversarial generator shapes, but see the scope limit below: most
+  are out of scope for Strata. Read for the ones that transfer.
+
+**Caveat limiting both.** Per §2, both assume immutable bindings, so neither describes snapshot
+variables — the single most important semantic fact about this pass. Their "pass the captured variable
+at the call site" formulation is *wrong* for Strata. So **P7** (snapshot definition dominates every
+use) and **P16** (snapshot-vs-call-site differential) — the two properties §8 flags as riskiest — have
+no oracle in either paper. Those come from instantiating the papers' *shape* of correctness with
+Strata's evaluator and `Core.captureFreevars`.
+
 ### Fischbach & Hannan, "Specification and correctness of lambda lifting" (JFP 13(3), 2003)
 
 Local copy: `~/Downloads/specification-and-correctness-of-lambda-lifting.pdf`
@@ -447,6 +483,9 @@ Two smaller things:
 
 ## 8. Suggested build order
 
+0. **Read Levy–Reeves §4 and §7** (see §4 above) before writing the harness — it fixes the
+   spec-satisfaction architecture and hands you P8's oracle. Fischbach–Hannan Fig. 3 and Thm 4 can
+   wait until steps 2 and 4 respectively.
 1. **P1, P2, P3, P12** with a generator covering `funcDecl` nesting and sibling call graphs. Smallest
    thing that exercises the traversal and the fixpoint, needs no evaluator, and P12 will likely find
    unintended rejections on the first substantial run.
