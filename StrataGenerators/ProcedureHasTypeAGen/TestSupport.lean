@@ -88,30 +88,31 @@ assemblies are therefore provided:
 i.e. `coreMonoOps` plus the four precondition-bearing `Int.Safe{Div,Mod,DivT,ModT}`
 operators. Three facts about that body shape bound what these properties can test:
 
-1. **No procedure calls — still, but for a new reason.** `genCallStmt` now exists
-   (`StmtHasTypeAGen/Core.lean`, proven sound in `GenCallStmtSound.lean`), so the
-   statement generator *can* emit `call` statements. It is nevertheless
-   unreachable from here: `genCallStmt` needs a non-empty `procs : ProcSigCtx`
-   describing the callable procedures, and returns the empty generator (`default`)
-   when `procs = []` — which is exactly what `genProcedure` passes
-   (`ProcedureHasTypeAGen/Core.lean:151`). Measured: 0 of 23 successfully-drawn
-   procedures contained a `call`.
+1. **Procedure calls, wired into an acyclic call DAG (issue #37).** `genCallStmt`
+   (`StmtHasTypeAGen/Core.lean`, proven sound in `GenCallStmtSound.lean`) emits
+   `call` statements against a non-empty `procs : ProcSigCtx`, and `genProcedure`
+   now threads such a context into `genStmtChain`
+   (`ProcedureHasTypeAGen/Core.lean`). The two harnesses (`TestScaffold.genProcsWith`
+   and `TycheViz.genProcsForTyche`) exploit this by generating the procedures
+   *left to right*: body `i` is generated against the front-aligned signatures of
+   the already-generated monomorphic siblings `0..i-1` (named `P0…P{i-1}`, matching
+   the `relabelProcs` renaming), so no cycles or self-recursion arise. Only
+   monomorphic siblings (`typeArgs = []`) become call targets — both `genCallStmt`
+   and `ProcSigCorresponds` require the callee to be monomorphic.
 
-   So generated bodies contain no `call` statements and every generated procedure
-   is a *leaf* in the call graph. Multi-procedure programs are assembled by
-   generating several independent procedures (see `TestScaffold`), the call-graph
-   *closure* dimension of `FilterCorrect.calleeClosureRetained` is trivial (every
-   procedure's callee-closure is empty), and `firstTargets` below is the right
-   target set: with all-leaf procedures, every non-target is unreachable and must
-   be removed, which is what makes `checkFilterUnreachableRemoved` bite. The
-   retained/removed dimensions are meaningfully exercised; the closure dimension
-   is pinned by a hand-built `#guard` instead (see `callerCalleeProgram`).
+   So a generated program's call graph now carries real edges: `call P{j}` for
+   `j < i` appears in body `i`, procedure `0` is still a leaf, and the callee-closure
+   / call-graph dimensions of `FilterCorrect.calleeClosureRetained`,
+   `FilterProcedures`/`PrecondElim` `PreservesCachedAnalysesWF` are no longer
+   vacuous on generated input. The hand-built `callerCalleeProgram` guard is kept as
+   a deterministic pin of a fixed multi-edge shape.
 
-   Closing this gap needs a change in `genProcedure`, not here: it would have to
-   thread a `ProcSigCtx` describing its sibling procedures into `genStmtChain`,
-   which also means `TestScaffold`'s `genProcsWith` generating the signature set
-   *before* the bodies so callees are known. Until then the leaf assumption these
-   properties rest on remains true, and `firstTargets` must stay.
+   Because a body may reach a non-target through the call graph, `callerTargets`
+   below (a *strict subset* of the procedures) no longer implies every non-target
+   is unreachable. That is handled where it matters: `checkFilterUnreachableRemoved`
+   already compares against the transitive *closure* `targets ++
+   cgIn.getAllCalleesClosure targets`, so a non-target reachable from a target is
+   correctly *not* obliged to disappear (see `callerTargets`).
 
 2. **Partial-function calls, but only in bodies.** Because `corePartialOps`
    carries the `Int.Safe*` operators — each of which has a `y ≠ 0` precondition in
@@ -483,28 +484,36 @@ def stripANFInits (ss : List Statement) : List Statement :=
     | _ => true
 
 -- ══ FilterProcedures check predicates ═════════════════════════════════════
--- All FilterProcedures properties below target the *first* procedure only
--- (`ps.take 1`), so that — since generated procedures are call-graph leaves —
--- every *other* procedure is unreachable and must be removed. This makes the
--- removed/retained dimensions non-trivial. The `ChangedFlagValid` property is the
--- exception: it targets *all* procedures, the scenario in which the hardcoded
--- `changed := true` is provably wrong.
+-- All FilterProcedures properties below target the *last* procedure only
+-- (`callerTargets`), a strict subset. Under the acyclic call DAG the harnesses now
+-- generate (module doc, point 1), body `i` may call only siblings `0..i-1`, so the
+-- last procedure `P{n-1}` is the one *source* of the DAG — the richest caller — and
+-- targeting it is what makes the call-graph *closure* dimension non-vacuous
+-- (`checkFilterCalleeClosureRetained`): its callee-closure is exactly the siblings
+-- it transitively calls, all of which must then be retained. The removal dimension
+-- still bites: any procedure the target does not transitively reach must be removed
+-- (and procedure `P0`, a guaranteed leaf, is never reached from anyone, so it is
+-- removed whenever it is not the target's own callee). The `ChangedFlagValid`
+-- property is the exception: it targets *all* procedures, the scenario in which the
+-- hardcoded `changed := true` is provably wrong.
 
 /-- The target set used by the removal-oriented FilterProcedures properties: the
-    first procedure name, if any.
+    *last* procedure name, if any.
 
-    Taking a *strict subset* of the procedures is the whole point: it is what makes
-    the "removed" dimension non-vacuous, since the non-targets are then obliged to
-    disappear. That obligation relies on generated procedures being call-graph
-    leaves, which — despite `genCallStmt` now existing — remains true, because
-    `genProcedure` hands `genStmtChain` an empty `ProcSigCtx` (see point 1 of the
-    module doc). Should `genProcedure` ever thread a non-empty `procs`, the
-    properties stay faithful regardless: `checkFilterUnreachableRemoved` compares
-    against the *closure* `targets ++ cg.getAllCalleesClosure targets`, not
-    against `targets`, so a target reaching a non-target through the call graph
-    would no longer oblige that non-target to disappear. -/
-private def firstTargets (ps : List Procedure) : List String :=
-  (mkProgram ps |> programProcNames).take 1
+    The last procedure is chosen deliberately: under the acyclic call DAG (body `i`
+    calls only siblings `0..i-1`) it is the DAG's source — the procedure with the
+    largest potential callee-closure — so targeting it exercises the closure
+    dimension (`checkFilterCalleeClosureRetained`) rather than leaving it vacuous,
+    which is what a leaf target (e.g. `P0`) would do.
+
+    Taking a *strict subset* keeps the "removed" dimension non-vacuous too: every
+    procedure the target does not transitively reach is obliged to disappear. All
+    removal-oriented properties stay faithful — `checkFilterUnreachableRemoved`
+    compares against the *closure* `targets ++ cg.getAllCalleesClosure targets`, not
+    against `targets`, so a non-target reachable from the target is correctly *not*
+    obliged to disappear. -/
+private def callerTargets (ps : List Procedure) : List String :=
+  (mkProgram ps |> programProcNames).reverse.take 1
 
 /-- The FilterProcedures phase under test, at the target set and the
     `respectNoFilter := true` setting the properties below fix. -/
@@ -519,7 +528,7 @@ private def filterPhase (targets : List String) : Core.PipelinePhase :=
     "bodies are preserved" and "non-procedures are preserved". -/
 def checkFilterDeclsSublist (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase (filterPhase (firstTargets ps)) prog with
+  match runPhase (filterPhase (callerTargets ps)) prog with
   | some (_, out) => decide (out.decls.Sublist prog.decls)
   | none => true
 
@@ -527,7 +536,7 @@ def checkFilterDeclsSublist (ps : List Procedure) : Bool :=
     input appears in the output. -/
 def checkFilterTargetsRetained (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  let targets := firstTargets ps
+  let targets := callerTargets ps
   match runPhase (filterPhase targets) prog with
   | some (_, out) =>
     let outNames := programProcNames out
@@ -539,13 +548,15 @@ def checkFilterTargetsRetained (ps : List Procedure) : Bool :=
     callee closure (per the *input* call graph, which is what the spec's `cgIn`
     denotes and what `mkState` seeds) is retained too.
 
-    Trivially satisfied on generated input, where every procedure is a call-graph
-    leaf and every closure is empty (module doc, point 1); the `callerCalleeProgram`
-    guard pins the non-trivial case by hand. -/
+    No longer vacuous on generated input: the harnesses generate an acyclic call
+    DAG (module doc, point 1) and `callerTargets` targets the DAG's source (the last
+    procedure), whose callee-closure is exactly the siblings it transitively calls,
+    all of which the check requires be retained. The `callerCalleeProgram` guard is
+    kept as a deterministic pin of a fixed multi-edge shape. -/
 def checkFilterCalleeClosureRetained (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
   let cgIn := prog.toProcedureCG
-  match runPhase (filterPhase (firstTargets ps)) prog with
+  match runPhase (filterPhase (callerTargets ps)) prog with
   | some (_, out) =>
     let outNames := programProcNames out
     outNames.all fun n => (cgIn.getCalleesClosure n).all fun callee => callee ∈ outNames
@@ -571,7 +582,7 @@ def checkFilterOnlyProcsRemoved (ps : List Procedure) : Bool :=
     progOut.decls` (every declaration here carries `.empty` metadata). -/
 def checkFilterUnreachableRemoved (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  let targets := firstTargets ps
+  let targets := callerTargets ps
   let cgIn := prog.toProcedureCG
   let reachable := targets ++ cgIn.getAllCalleesClosure targets
   match runPhase (filterPhase targets) prog with
@@ -602,7 +613,7 @@ def checkFilterChangedFlagValid (ps : List Procedure) : Bool :=
     call-graph divergence" in the module doc and the `noFilterProgram` guard. -/
 def checkFilterAnalysisPreserving (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  checkAnalysisPreserving (filterPhase (firstTargets ps)) prog
+  checkAnalysisPreserving (filterPhase (callerTargets ps)) prog
 
 -- ══ PrecondElim check predicates ══════════════════════════════════════════
 -- Generated bodies *do* call partial functions (`corePartialOps`), so PrecondElim
@@ -1242,17 +1253,19 @@ private def precondFuncProc : Procedure :=
 
 /-- `A` calls `B`, `B` calls `C`, and `D` is unrelated. Gives the call-graph
     closure dimension of `calleeClosureRetained` / `unreachableRemoved` something
-    to say, which all-leaf generated programs cannot. -/
+    to say. The caller `A` is listed **last** so that `callerTargets` (which picks
+    the last procedure) targets it, driving the `checkFilter*` guards below through
+    the non-empty closure `{B, C}`. -/
 private def callerCalleeProgram : List Procedure :=
-  [ procOf "A" [.call "B" [] .empty],
-    procOf "B" [.call "C" [] .empty],
+  [ procOf "D" [],
     procOf "C" [],
-    procOf "D" [] ]
+    procOf "B" [.call "C" [] .empty],
+    procOf "A" [.call "B" [] .empty] ]
 
 -- Targeting `A` keeps `A`, `B`, `C` (the closure) and drops the unrelated `D`.
 #guard (match runPhase (Core.filterProceduresPipelinePhase ["A"] true)
                 (mkProgram callerCalleeProgram) with
-        | some (_, out) => programProcNames out == ["A", "B", "C"]
+        | some (_, out) => programProcNames out == ["C", "B", "A"]
         | none => false) == true
 #guard checkFilterCalleeClosureRetained callerCalleeProgram == true
 #guard checkFilterUnreachableRemoved callerCalleeProgram == true
@@ -1270,13 +1283,19 @@ private def callerCalleeProgram : List Procedure :=
     the cached *call graph* (`isNeededProc` ignores `noFilter`), so the graph it
     caches is no longer complete for the program it returns — a real divergence
     from `PreservesCachedAnalysesWF` that generated input cannot reach, since
-    `genProcedure` always sets `noFilter := false`. -/
-private def noFilterProgram : List Procedure :=
-  [ procOf "P" [],
-    { procOf "Q" [] with header := { (procOf "Q" []).header with noFilter := true } } ]
+    `genProcedure` always sets `noFilter := false`.
 
--- `Q` survives in the declarations (targets are just `["P"]`)...
-#guard (match runPhase (Core.filterProceduresPipelinePhase ["P"] true)
+    The `noFilter` procedure `P` is listed **first**, so `callerTargets` (which
+    picks the *last* procedure — see its docstring) targets the plain procedure `Q`
+    and `P` is left as the unreached, `noFilter`-protected non-target that triggers
+    the divergence. -/
+private def noFilterProgram : List Procedure :=
+  [ { procOf "P" [] with header := { (procOf "P" []).header with noFilter := true } },
+    procOf "Q" [] ]
+
+-- `P` survives in the declarations (`callerTargets` picks the last proc, `["Q"]`,
+-- and `P` is `noFilter`-protected)...
+#guard (match runPhase (Core.filterProceduresPipelinePhase ["Q"] true)
                 (mkProgram noFilterProgram) with
         | some (_, out) => programProcNames out == ["P", "Q"]
         | none => false) == true

@@ -846,17 +846,27 @@ open StrataGenerators.Procedure.TestSupport in
     `Gen.run` on the same `retryGen` wrapper the Plausible harness uses (the
     direct `G := IO` path is unreliable — nested sub-generators hit empty-support
     fallbacks — so we run the retrying `Plausible.Gen` at a random size).
-    Names are relabelled `P0…Pk` for collision-free identities. -/
+    Names are relabelled `P0…Pk` for collision-free identities.
+
+    Mirrors `TestScaffold.genProcsWith`: the procedures form an acyclic call DAG,
+    body `i` generated against the monomorphic siblings `0..i-1` (named `P0…P{i-1}`,
+    matching `relabelProcs`), so the panels see programs with real call-graph edges
+    (issue #37). -/
 def genProcsForTyche : IO (List Core.Procedure × Nat) := do
   let genSize ← IO.rand 0 60
   let n ← IO.rand 2 4
-  let ps ← (List.range n).mapM fun _ =>
-    Plausible.Gen.run
-      (retryGen 8000 (Plausible.Gen.sized fun s' => do
-        let size := max 1 (min 2 (s' / 30))
-        let len := max 1 (min 3 (s' / 25))
-        StrataGenerators.Procedure.genProcedure (G := Plausible.Gen) corePartialOps size len))
+  let size := max 1 (min 2 (genSize / 30))
+  let len := max 1 (min 3 (genSize / 25))
+  let mut ps : List Core.Procedure := []
+  let mut sigs : StrataGenerators.Stmt.ProcSigCtx := []
+  for i in List.range n do
+    let proc ← Plausible.Gen.run
+      (retryGen 8000
+        (StrataGenerators.Procedure.genProcedure (G := Plausible.Gen) corePartialOps sigs size len))
       genSize
+    ps := ps ++ [proc]
+    if proc.header.typeArgs.isEmpty then
+      sigs := sigs ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
   return (relabelProcs ps, genSize)
 
 open StrataGenerators.Procedure.TestSupport in

@@ -597,13 +597,34 @@ instance : Shrinkable GenProcs where
 -- sub-generator hits its empty-support fallback, forcing a retry of the whole
 -- procedure and risking fuel exhaustion at large Plausible sizes. The 8000-retry
 -- budget was tuned so this never throws through max size 100.
+--
+-- The procedures are generated **left to right into an acyclic call DAG**: the
+-- body of procedure `i` is generated against the front-aligned signatures of the
+-- already-generated *monomorphic* siblings `0..i-1` (named `P0…P{i-1}` — exactly
+-- what `relabelProcs` assigns each position below, so the `call`s and the renamed
+-- headers line up). This wires `genCallStmt` up to `genProcedure` (issue #37): a
+-- body may now emit `call P{j}` for `j < i`, so the assembled program's call graph
+-- carries real edges and the callee-closure / call-graph dimensions of the
+-- FilterProcedures/PrecondElim properties are no longer vacuous. Only monomorphic
+-- siblings become call targets — the call generator and `ProcSigCorresponds` both
+-- require the callee's `typeArgs = []`, and `genProcedure` does not instantiate a
+-- polymorphic callee's type arguments at the call site.
 private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
   let n := max 2 (min 4 (2 + s / 30))
-  let ps ← (List.range n).mapM fun _ =>
-    (retryGen 8000 (Gen.sized fun s' => do
-      let size := max 1 (min 2 (s' / 30))
-      let len := max 1 (min 3 (s' / 25))
-      StrataGenerators.Procedure.genProcedure (G := Plausible.Gen) corePartialOps size len) : Gen Core.Procedure)
+  let size := max 1 (min 2 (s / 30))
+  let len := max 1 (min 3 (s / 25))
+  let (ps, _) ← (List.range n).foldlM
+    (fun (acc : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
+      let proc ← (retryGen 8000
+        (StrataGenerators.Procedure.genProcedure (G := Plausible.Gen)
+          corePartialOps acc.2 size len) : Gen Core.Procedure)
+      -- Add this procedure to the callable context only if it is monomorphic; its
+      -- post-relabel name is `P{i}` (its generated header name is discarded).
+      let sigs := if proc.header.typeArgs.isEmpty then
+          acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
+        else acc.2
+      pure (acc.1 ++ [proc], sigs))
+    (([], []) : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx)
   pure ⟨relabelProcs ps⟩
 
 instance : Arbitrary GenProcs where

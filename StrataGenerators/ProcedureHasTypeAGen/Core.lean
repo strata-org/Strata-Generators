@@ -121,10 +121,17 @@ def genChecks [Gen G] (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) :
       either), with the *inputs'* keys marked immutable so the body may read but
       never assign to them.
 
+    - `procs`    — the front-aligned signatures of the callable *sibling*
+      procedures (the call targets). Threaded into `genStmtChain` so the body may
+      emit `call` statements against them; the empty `[]` recovers the old
+      call-free behaviour. The generated body is sound against any program `P` for
+      which `ProcSigCorresponds procs P` holds — see `genProcedure_sound`.
+
     `noFilter` / statement `MetaData` are at their defaults.
 
     See `genProcedure_sound` for the well-typedness guarantee. -/
-def genProcedure [Gen G] (octx : OpCtx) (size len : Nat) : G Procedure := do
+def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
+    G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   -- Three mutually-disjoint signature blocks. `M` is the in-out block (parameters
@@ -149,7 +156,7 @@ def genProcedure [Gen G] (octx : OpCtx) (size len : Nat) : G Procedure := do
   -- are exactly the outputs the body is entitled to assign. `VarCtx` and
   -- `LMonoTySignature` are both `List ((Identifier Unit) × LMonoTy)`.
   let (body, _, _) ← genStmtChain [] octx typeArgs
-    (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) [] []
+    (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) procs []
     (LContext.default) (inputs ++ outputs ++ oldVars inout) size len
   pure {
     header := {
@@ -166,6 +173,26 @@ def genProcedure [Gen G] (octx : OpCtx) (size len : Nat) : G Procedure := do
     body := .structured body
   }
 
+/-- Read the front-aligned `ProcSig` of a procedure header off its signature,
+    under a caller-chosen name `name` (the post-relabel `P{i}` a call site refers
+    to). The three blocks are recovered exactly as `genProcedure` lays them out:
+
+    * `M` = `getInoutParams` — the in-out block (keys shared by inputs and outputs);
+    * `I` = the input-only block — inputs whose key is *not* an output key;
+    * `O` = `getOutputOnlyParams` — outputs whose key is *not* an input key.
+
+    For a header `genProcedure` produced (`inputs = M ++ I`, `outputs = M ++ O`,
+    the three key-blocks mutually disjoint) this reconstructs `(M, I, O)` verbatim,
+    so `ProcSigCorresponds [headerProcSig name h] P` holds for a monomorphic
+    procedure of that header named `name` — which is why the harnesses feed only
+    the signatures of already-generated **monomorphic** (`typeArgs = []`) siblings
+    into later bodies (see `TestScaffold.genProcsWith`). -/
+def headerProcSig (name : String) (h : Procedure.Header) : ProcSig where
+  pname := name
+  M := h.getInoutParams
+  I := h.inputs.filter (fun p => !(ListMap.keys h.outputs).contains p.1)
+  O := h.getOutputOnlyParams
+
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
 open Std in
@@ -175,7 +202,7 @@ instance instToFormatUnitProcedureHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of procedures at size 2, up to 4 body statements.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let p ← genProcedure [] 2 4
+  let p ← genProcedure [] [] 2 4
   IO.println <| Std.format p.header |>.pretty : IO Unit)
 
 end StrataGenerators.Procedure

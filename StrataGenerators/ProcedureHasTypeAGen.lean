@@ -419,9 +419,13 @@ theorem genChecks_complete (octx : OpCtx) (tvars : List TyIdentifier) (depth : N
 -- ── Soundness ────────────────────────────────────────────────────────────
 
 /-- **Soundness of `genProcedure`.** Every procedure in the generator's support
-    is well-typed w.r.t. `ProcHasTypeA` for any program `P` and any ambient
-    context `C`. Side-condition-free: the only hypothesis is membership in the
-    generator's support.
+    is well-typed w.r.t. `ProcHasTypeA` for any program `P` (and any ambient
+    context `C`) whose callable procedures the threaded call-target context `procs`
+    faithfully describes, i.e. `ProcSigCorresponds procs P`. That is the only
+    side-condition (it is *vacuous* — `∀ s ∈ [], …` — when `procs = []`, recovering
+    the old side-condition-free statement for a call-free body); it feeds straight
+    into `genStmtChain_sound`, which the `.call` case of the body soundness needs to
+    certify each emitted `call` against `P`.
 
     - `typeArgsNodup` — from `genTypeArgs_nodup`.
     - `inputsNodup` — from `genInputs_support` (input keys `Nodup`) carried across
@@ -440,9 +444,10 @@ theorem genChecks_complete (octx : OpCtx) (tvars : List TyIdentifier) (depth : N
     - `modRights` — from `genStmtChain_mutableVars`: every modified variable is a
       *mutable* key of `inputs ++ outputs` (hence an output key, via
       `mem_writable_append_keys`) or a body-defined variable. -/
-theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
+theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
+    (hProcs : ProcSigCorresponds procs P) (size len : Nat)
     (proc : Procedure)
-    (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx size len)) :
+    (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs size len)) :
     ProcHasTypeA P LContext.default (default) proc := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hproc
   obtain ⟨name, _hname, typeArgs, htypeArgs, M, hM, rawInputOnly, hrawInputOnly,
@@ -540,15 +545,15 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
           (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
       body C' ((procStmtEnv octx typeArgs).toTCtx ctx') :=
     genStmtChain_sound P (procStmtEnv octx typeArgs)
-      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) []
-      (by intro s hs; cases hs) []
+      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
+      hProcs []
       LContext.default
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
   have hmod := genStmtChain_mutableVars [] octx typeArgs
-      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) [] []
+      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
       LContext.default
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
@@ -633,7 +638,10 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
     The three-block disjointness hypotheses (`hIdisjM`, `hOdisjMI`) are the
     completeness-only side-conditions witnessing that the generator's
     `disjointInputs` filters reproduce `I` and `O` unchanged (idempotence, via
-    `disjointInputs_eq_self`). `genProcedure_sound` carries no side-conditions.
+    `disjointInputs_eq_self`). The `procs : ProcSigCtx` here is the same call-target
+    context `genProcedure` threads into the body; `hBodyReach` is stated against it,
+    and `genProcedure_sound`'s only side-condition is the matching
+    `ProcSigCorresponds procs P` that certifies those targets against `P`.
 
     - `hInputsEq` / `hOutputsEq` — the front-aligned decomposition of the signature;
     - `hName` — the procedure name is a reachable identifier string;
@@ -652,7 +660,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (size len : Nat)
 
     The block name-length / reachability conditions are stated concretely via
     `mem_support_genNameList_iff`. -/
-theorem genProcedure_complete (octx : OpCtx) (size len : Nat)
+theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat)
     (proc : Procedure)
     (M I O : ListMap (Identifier Unit) LMonoTy)
     (bodyss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
@@ -700,9 +708,9 @@ theorem genProcedure_complete (octx : OpCtx) (size len : Nat)
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
       c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] proc.header.typeArgs [] size .bool))
     (hBodyReach : StmtChainReachable [] octx proc.header.typeArgs
-      (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) [] []
+      (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
       LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len bodyss C' ctx') :
-    proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx size len) := by
+    proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs size len) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM
@@ -730,7 +738,7 @@ theorem genProcedure_complete (octx : OpCtx) (size len : Nat)
       hPostLabels hPostAttr hPostMd hPostExpr
   · -- body reachable: the generator's filtered blocks equal `I`/`O`.
     rw [hI_eq, hO_eq]
-    exact genStmtChain_complete [] [] LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len
+    exact genStmtChain_complete procs [] LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len
       bodyss C' ctx' hBodyReach
   · -- the reassembled record equals `proc`.
     rw [hI_eq, hO_eq]

@@ -70,11 +70,12 @@ namespace StrataGenerators.Procedure.TestSupport
 /-- Whether Strata's whole-procedure typechecker accepts `p` as a declaration of
     `prog`, in the standard Core ambient context. The `prog` argument is consulted
     only by the `call` branch of the statement typechecker; generated procedures
-    contain no calls (see the module doc of
-    `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, point 1), so the default
-    empty program suffices for a standalone procedure, while the procedure-*list*
-    shrinker passes the assembled program so the check stays faithful should
-    `genProcedure` ever emit calls. -/
+    now *do* emit calls against their siblings (issue #37 — see the module doc of
+    `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, point 1), so the
+    procedure-*list* shrinker must pass the assembled program (`mkProgram ps`) for
+    the check to stay faithful — a candidate that still calls `P{j}` only
+    typechecks against a program in which `P{j}` is declared. The default empty
+    program is retained only for the call-free standalone sanity `#guard`s below. -/
 def procTypeChecks (p : Procedure) (prog : Program := Program.init) : Bool :=
   match Procedure.typeCheck stmtCheckContext TEnv.default prog p .empty with
   | .ok _ => true
