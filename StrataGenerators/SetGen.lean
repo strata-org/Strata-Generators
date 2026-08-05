@@ -9,3 +9,4 @@ import StrataGenerators.SetGen.Defs
 import StrataGenerators.SetGen.Core
 import StrataGenerators.SetGen.Support
 import StrataGenerators.SetGen.Classes
+import StrataGenerators.SetGen.Tuning
