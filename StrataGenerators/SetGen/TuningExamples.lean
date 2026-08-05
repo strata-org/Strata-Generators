@@ -101,6 +101,52 @@ example (i d : Nat) :
   simp only [Tuning.weight]
   rcases i with _ | _ | i <;> simp
 
+/-! ## 5. A *tunable* option split via `weightedOptionGen`
+
+`Basalt`'s `optionGen`/`biasedOptionGen` decide `some`/`none` with a rational `coin`, which is not a
+`frequency` site — so `tunable def` cannot address it. `SetGen.weightedOptionGen` splits with a
+`frequency` over two `Nat` weights instead, so inlining that split under `tunable def` records a
+tunable site whose `some`-weight a `Tuning` can bias at runtime. This is the mechanism for
+"boost the probability of generating a precondition" (`PrecondElim`) without touching the language:
+the split stays support-total, so soundness/completeness is unchanged.
+
+Here `genOptNat` optionally wraps a `Nat` drawn from `0..3`; the split is written inline so the
+macro sees it. -/
+
+tunable def genOptNat [Gen G] : G (Option Nat) :=
+  frequency (site := `genOptNat.some) [
+    (1, fun _ => do let x ← (ULift.down · |>.val) <$> RandomChoice.choose 0 3 (by omega); pure (some x)),
+    (1, fun _ => pure none)
+  ] (by simp)
+
+/-- One tunable site, arity 2 (`some`/`none`), no recursive calls. -/
+example : genOptNat.sites = #[⟨`genOptNat.some, 0, 2, #[0, 0]⟩] := rfl
+
+/-- The defaults are the inline `1 : 1` split. -/
+example : genOptNat.defaults = ⟨#[(1, 0), (1, 0)]⟩ := rfl
+
+/-- `tuned_defaults` is definitional here too. -/
+example : (genOptNat.tuned genOptNat.defaults : SetGen.Set (Option Nat)) = genOptNat :=
+  genOptNat.tuned_defaults
+
+/-- Biasing the split (e.g. `PrecondElim` wanting `some` more often) leaves the support fixed: both
+    `none` and every reachable `some x` stay in the support for *any* `θ`, because `Tuning.weight`
+    keeps both branch weights ≥ 1. So the distribution shifts while the language does not. -/
+example (θ : Tuning) :
+    SetGen.support (genOptNat.tuned θ : SetGen.Set (Option Nat)) =
+      SetGen.support (genOptNat : SetGen.Set (Option Nat)) := by
+  rw [show (genOptNat : SetGen.Set (Option Nat)) = genOptNat.tuned genOptNat.defaults from
+      (genOptNat.tuned_defaults).symm]
+  apply SetGen.support_frequency_congr_weights
+  · rfl
+  all_goals
+    intro p hp
+    rcases List.mem_cons.mp hp with h | h
+    · cases h; exact Tuning.weight_pos ..
+    · rcases List.mem_cons.mp h with h | h
+      · cases h; exact Tuning.weight_pos ..
+      · simp at h
+
 end SetGenTunableExamples
 
 section ReweightObligation
