@@ -75,8 +75,14 @@
 - The precondition elimination transformation erroneously reports its `changed` flag as false, even though it rewrites procedures to gain an `assert` statement in its body. This happens
 for nested function declarations that don't have preconditions, but whose bodies invoke a precondition-carrying function (e.g. `Int.SafeDiv`).
 
-## Specification bugs caught
+## Specification bugs caught during testing
 - The function typing spec `FuncHasType'` permits a measure (a `decreases` clause) to exist without requiring the function body to also exist, even though the executable typechecker rejects a function if it has a measure but no body
 - The `FilterProcedures` transformation returns a Boolean flag to indicate whether the transformation changed the program: this flag is hard-coded to `true`, even though the `Bool` is meant to be interpreted
 as whether the transformation modified the analysis state (`CoreTransformState`)
 - The spec for the precondition elimination transformation expects all functions in the output factory to have no preconditions, but this is not true, since the transformation doesn't eliminate preconditions for built-ins (e.g. safeDiv, safe destructors, etc)
+
+## Specification bugs caught when trying to prove proeprties about generators
+- `MutualADTWF` doesn't require applications of type constructors to be well-kinded (i.e. match their known arities)
+- `MutualADTWF` doesn't allow arguments to constructors of algebraic data types to refer to type aliases 
+- `MutualADTWF` doesn't require free type variables in constructor argument types (for an algebraic datta type) to be among the type parameters of the type being defined 
+
