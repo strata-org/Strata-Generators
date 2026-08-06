@@ -9,7 +9,7 @@ import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.Transform.FilterProcedures
 import Strata.Transform.PrecondElim
-import Strata.Transform.ANFEncoder
+import Strata.Transform.CommonSubexprElim
 import Strata.Languages.Core.Factory
 
 open Lambda Core Imperative
@@ -480,7 +480,7 @@ end
 /-- Strip ANF-prefixed `init` statements from a statement list. -/
 def stripANFInits (ss : List Statement) : List Statement :=
   ss.filter fun
-    | .cmd (.cmd (.init name _ _ _)) => !(CoreIdent.toPretty name).startsWith Core.ANFEncoder.anfVarPrefix
+    | .cmd (.cmd (.init name _ _ _)) => !(CoreIdent.toPretty name).startsWith Core.CSE.cseVarPrefix
     | _ => true
 
 -- ══ FilterProcedures check predicates ═════════════════════════════════════
@@ -999,7 +999,7 @@ def checkPrecondAnalysisPreserving (ps : List Procedure) : Bool :=
     the output is a pointwise modification of the input. -/
 def checkAnfDeclsLength (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) => out.decls.length == prog.decls.length
   | none => true
 
@@ -1008,7 +1008,7 @@ def checkAnfDeclsLength (ps : List Procedure) : Bool :=
     `distinct` declarations are present to be left alone. -/
 def checkAnfNonProcsUnchanged (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     prog.decls.all fun d => d.kind == .proc || decide (d ∈ out.decls)
   | none => true
@@ -1017,7 +1017,7 @@ def checkAnfNonProcsUnchanged (ps : List Procedure) : Bool :=
     preserved (ANF touches only bodies). -/
 def checkAnfHeadersPreserved (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     (programProcNames prog).all fun n =>
       match findProc prog n, findProc out n with
@@ -1050,12 +1050,12 @@ end
     the top-level statements only. -/
 def checkAnfFreshVarsDet (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     out.decls.all fun
       | .proc q _ =>
         (stmtsInits (bodyStmts q.body)).all fun (name, rhs) =>
-          !(CoreIdent.toPretty name).startsWith Core.ANFEncoder.anfVarPrefix ||
+          !(CoreIdent.toPretty name).startsWith Core.CSE.cseVarPrefix ||
             (match rhs with | .det _ => true | .nondet => false)
       | _ => true
   | none => true
@@ -1066,7 +1066,7 @@ def checkAnfFreshVarsDet (ps : List Procedure) : Bool :=
     declaration kinds take part in the positional comparison. -/
 def checkAnfOrderPreserved (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     decide (out.decls.map Decl.name = prog.decls.map Decl.name)
   | none => true
@@ -1077,7 +1077,7 @@ def checkAnfOrderPreserved (ps : List Procedure) : Bool :=
     skeleton (`stmtsCFEquiv`) as the corresponding input body. -/
 def checkAnfControlFlowPreserved (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     (programProcNames prog).all fun n =>
       match findProc prog n, findProc out n with
@@ -1090,13 +1090,13 @@ def checkAnfControlFlowPreserved (ps : List Procedure) : Bool :=
     counter actually advancing (`idx' > idx`, ANFEncoder.lean:280), which is
     precisely when a body is rewritten — so this one holds. -/
 def checkAnfChangedFlagValid (ps : List Procedure) : Bool :=
-  checkChangedFlagValid Core.anfEncoderPipelinePhase (mkProgram ps)
+  checkChangedFlagValid Core.commonSubexprElimPhase (mkProgram ps)
 
 /-- **`PreservesCachedAnalysesWF` for ANFEncoder.** ANF neither renames procedures
     nor adds or removes `call` statements, so the seeded call graph it passes
     through unchanged stays well-formed. -/
 def checkAnfAnalysisPreserving (ps : List Procedure) : Bool :=
-  checkAnalysisPreserving Core.anfEncoderPipelinePhase (mkProgram ps)
+  checkAnalysisPreserving Core.commonSubexprElimPhase (mkProgram ps)
 
 -- ── Sanity guards ─────────────────────────────────────────────────────────
 -- Small hand-built programs pin the plumbing and, more importantly, pin the

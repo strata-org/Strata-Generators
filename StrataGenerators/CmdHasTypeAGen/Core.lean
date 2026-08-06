@@ -92,6 +92,39 @@ def genFreshName [Gen G] (ctx : VarCtx) : G String := do
   else
     pure (dodgeKeyword (fallbackFreshName ctx))
 
+-- ── Length-based freshness, shared across generators ────────────────────
+
+/-- The foldl-max accumulator over an arbitrary measure `f` is monotonically
+    non-decreasing. The generic core of the length-based freshness argument that
+    `fallbackFreshName` / `fallbackName` / `fallbackFreshLabel` all rest on
+    (with `f := String.length`): a name strictly longer than every name in a
+    list cannot occur in it. -/
+theorem foldl_max_ge_init {α : Type _} (f : α → Nat) (xs : List α) (init : Nat) :
+    init ≤ xs.foldl (fun acc x => max acc (f x)) init := by
+  induction xs generalizing init with
+  | nil => exact Nat.le_refl _
+  | cons hd tl ih => exact Nat.le_trans (Nat.le_max_left _ _) (ih _)
+
+/-- The foldl-max result is at least `f x` for any member `x`. Specialized to
+    `f := String.length` this bounds the length of every member; `maxNameLen`
+    lifts it to `(identifier, type)` lists via `length_le_maxNameLen`. -/
+theorem foldl_max_ge_of_mem {α : Type _} (f : α → Nat) (xs : List α) (x : α)
+    (h : x ∈ xs) (init : Nat) :
+    f x ≤ xs.foldl (fun acc y => max acc (f y)) init := by
+  induction xs generalizing init with
+  | nil => exact absurd h (by exact List.not_mem_nil)
+  | cons hd tl ih =>
+    cases h with
+    | head => exact Nat.le_trans (Nat.le_max_right _ _) (foldl_max_ge_init f tl _)
+    | tail _ hmem => exact ih hmem _
+
+/-- `indexedFreshName base i` has length `base + 1 + i` — the single fact the
+    freshness, injectivity, and keyword-freedom lemmas built on the family all
+    rest on. -/
+theorem indexedFreshName_length (base i : Nat) :
+    (indexedFreshName base i).length = base + 1 + i := by
+  simp [indexedFreshName, String.length_ofList]
+
 -- ── Command sub-generators ─────────────────────────────────────────────
 
 /-- The result of generating a command: the command itself and the output context. -/

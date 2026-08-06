@@ -455,24 +455,6 @@ private theorem VarCtx.find?_none_of_ne_all (ctx : VarCtx) (x : Identifier Unit)
 private theorem String.ne_of_length_ne {s₁ s₂ : String} (h : s₁.length ≠ s₂.length) :
     s₁ ≠ s₂ := fun heq => absurd (congrArg String.length heq) h
 
-/-- The foldl-max accumulator is monotonically non-decreasing. -/
-private theorem foldl_max_length_ge_init (xs : List String) (init : Nat) :
-    init ≤ xs.foldl (fun acc n => max acc n.length) init := by
-  induction xs generalizing init with
-  | nil => exact Nat.le_refl _
-  | cons hd tl ih => exact Nat.le_trans (Nat.le_max_left _ _) (ih _)
-
-/-- The foldl-max result is at least as large as the length of any member. -/
-private theorem foldl_max_length_ge_of_mem (xs : List String) (nm : String)
-    (h : nm ∈ xs) (init : Nat) :
-    nm.length ≤ xs.foldl (fun acc n => max acc n.length) init := by
-  induction xs generalizing init with
-  | nil => exact absurd h (by exact List.not_mem_nil)
-  | cons hd tl ih =>
-    cases h with
-    | head => exact Nat.le_trans (Nat.le_max_right _ _) (foldl_max_length_ge_init tl _)
-    | tail _ hmem => exact ih hmem _
-
 /-- Any name strictly longer than every name in `ctx` is fresh in `ctx`. -/
 private theorem isFresh_of_maxlen_lt (ctx : VarCtx) (s : String)
     (h : (VarCtx.names ctx).foldl (fun acc nm => max acc nm.length) 0 < s.length) :
@@ -486,7 +468,7 @@ private theorem isFresh_of_maxlen_lt (ctx : VarCtx) (s : String)
       apply String.ne_of_length_ne
       have hname_mem : entry.1.name ∈ VarCtx.names ctx :=
         List.mem_map.mpr ⟨entry, hmem, rfl⟩
-      have hle := foldl_max_length_ge_of_mem (VarCtx.names ctx) entry.1.name hname_mem 0
+      have hle := foldl_max_ge_of_mem String.length (VarCtx.names ctx) entry.1.name hname_mem 0
       omega
     intro heq
     exact hname_ne (congrArg Identifier.name heq)
@@ -539,16 +521,12 @@ theorem genFreshName_produces_fresh (ctx : VarCtx) :
 
 -- ── The indexed fresh-name family ───────────────────────────────────────
 
-/-- `indexedFreshName base i` has length `base + 1 + i` — the single fact the
-    freshness, injectivity, and keyword-freedom lemmas below all rest on. -/
-theorem indexedFreshName_length (base i : Nat) :
-    (indexedFreshName base i).length = base + 1 + i := by
-  simp [indexedFreshName, String.length_ofList]
-
-/-- Every name in a list of `(identifier, type)` pairs is at most `maxNameLen` long. -/
+/-- Every name in a list of `(identifier, type)` pairs is at most `maxNameLen`
+    long. A specialization of the polymorphic `foldl_max_ge_of_mem` at
+    `f := String.length` over the mapped list of names. -/
 theorem length_le_maxNameLen {l : List (Identifier Unit × LMonoTy)}
     {q : Identifier Unit × LMonoTy} (hq : q ∈ l) : q.1.name.length ≤ maxNameLen l :=
-  foldl_max_length_ge_of_mem _ q.1.name (List.mem_map.mpr ⟨q, hq, rfl⟩) 0
+  foldl_max_ge_of_mem String.length _ q.1.name (List.mem_map.mpr ⟨q, hq, rfl⟩) 0
 
 /-- **The family is injective in the index.** Distinct indices yield names of
     distinct lengths, hence distinct names — so `outTargets` never picks the same

@@ -71,22 +71,19 @@ end Lambda
 
 -- ── SimpleType and depth ─────────────────────────────────────────────
 
-/-- The fixed set of bitvector widths that `genLMonoTy` may produce. -/
-def bitvecWidths : List Nat := [1, 8, 16, 32, 64]
-
-/-- Predicate for bitvector widths producible by `genLMonoTy`. -/
-def IsGenWidth (n : Nat) : Prop := n ∈ (bitvecWidths : List Nat)
-
 /-- A monotype is *simple* if it is built from `bool`, `int`, `string`, `real`,
-    `bitvec n` (for `IsGenWidth n`), `arrow`, and `ftvar`.
-    This characterizes exactly the types produced by `genLMonoTy`. -/
+    `bitvec n` (for *any* width `n`), `arrow`, and `ftvar`.
+    This characterizes exactly the types produced by `genLMonoTy`.
+
+    Bitvector widths are unconstrained: the Strata Core AST does not restrict
+    them, so `genLMonoTy` may produce a `bitvec` of any width (see issue #38). -/
 inductive SimpleType : LMonoTy → Prop where
   | bool   : SimpleType .bool
   | int    : SimpleType .int
   | string : SimpleType .string
   | real   : SimpleType .real
   | regex  : SimpleType .regex
-  | bitvec : IsGenWidth n → SimpleType (.bitvec n)
+  | bitvec : SimpleType (.bitvec n)
   | map    : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.map τ₁ τ₂)
   | seq    : SimpleType τ → SimpleType (.seq τ)
   | arrow  : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.arrow τ₁ τ₂)
@@ -158,10 +155,20 @@ def pickTyVar [Gen G] (tvars : List TyIdentifier)
   have hne : tvars ≠ [] := List.length_pos_iff.mp h
   LMonoTy.ftvar <$> elements tvars hne
 
-/-- Pick a uniformly random bitvector width from `bitvecWidths` and return
-    it as an `LMonoTy.bitvec`. -/
+/-- Pick a random bitvector width and return it as an `LMonoTy.bitvec`. The
+    width is drawn from `Nat.arbitrary` (any natural), since the Strata Core AST
+    does not constrain bitvector widths (issue #38). -/
 def pickBitvecWidth [Gen G] : G LMonoTy :=
-  LMonoTy.bitvec <$> elements bitvecWidths (by decide)
+  LMonoTy.bitvec <$> Nat.arbitrary
+
+/-- The names of the nullary (arity-0) base type constructors Strata Core knows:
+    `bool`, `int`, `string`, `real`, `regex`. These are the ground type names
+    `pickBaseType` produces (as `.tcons name []`), the ones `inGenLMonoTySupport`
+    recognizes, and the shared base-type pool the datatype generator draws from
+    (`DatatypeGen.defaultBaseTypes`). Bitvectors are handled separately by
+    `pickBitvecWidth`, since their width is a parameter rather than a name. -/
+def nullaryBaseTypeNames : List String :=
+  ["bool", "int", "string", "real", "regex"]
 
 /-- Pick a uniformly random base type (bool, int, string, real, regex, or bitvec). -/
 def pickBaseType [Gen G] : G LMonoTy :=
@@ -342,17 +349,17 @@ def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : Lis
     down to those `genLMonoTy` could itself have produced, which is what makes
     `genGenerableTy`'s support *equal* to `genLMonoTy`'s — see
     `genGenerableTy_support`. Kept in lockstep with `SimpleType`/`monoTyDepth`:
-    `bitvec` widths must lie in `bitvecWidths`, `arrow`/`Map`/`Sequence` consume
+    a `bitvec` of any width is generable, `arrow`/`Map`/`Sequence` consume
     one unit of depth, and every `ftvar` must be declared in `tvars`. -/
 def inGenLMonoTySupport (tvars : List TyIdentifier) : Nat → LMonoTy → Bool
-  | _, .bitvec w => bitvecWidths.contains w
+  | _, .bitvec _ => true
   | _, .ftvar name => tvars.contains name
   | n + 1, .tcons "arrow" [a, b] =>
     inGenLMonoTySupport tvars n a && inGenLMonoTySupport tvars n b
   | n + 1, .tcons "Map" [a, b] =>
     inGenLMonoTySupport tvars n a && inGenLMonoTySupport tvars n b
   | n + 1, .tcons "Sequence" [a] => inGenLMonoTySupport tvars n a
-  | _, .tcons name [] => ["bool", "int", "string", "real", "regex"].contains name
+  | _, .tcons name [] => nullaryBaseTypeNames.contains name
   | _, _ => false
 
 /-- Context-aware type generator: the type source used for the *argument* type of

@@ -203,33 +203,16 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tva
 
 -- ── Fresh-label freshness (for the `block` premise) ──────────────────────
 
-/-- The foldl-max accumulator over label lengths is non-decreasing. -/
-private theorem foldl_maxlen_ge_init (xs : List String) (init : Nat) :
-    init ≤ xs.foldl (fun acc l => max acc l.length) init := by
-  induction xs generalizing init with
-  | nil => exact Nat.le_refl _
-  | cons hd tl ih => exact Nat.le_trans (Nat.le_max_left _ _) (ih _)
-
-/-- The foldl-max result bounds the length of every member. -/
-private theorem foldl_maxlen_ge_of_mem (xs : List String) (l : String)
-    (h : l ∈ xs) (init : Nat) :
-    l.length ≤ xs.foldl (fun acc l => max acc l.length) init := by
-  induction xs generalizing init with
-  | nil => exact absurd h (by exact List.not_mem_nil)
-  | cons hd tl ih =>
-    cases h with
-    | head => exact Nat.le_trans (Nat.le_max_right _ _) (foldl_maxlen_ge_init tl _)
-    | tail _ hmem => exact ih hmem _
-
 /-- `fallbackFreshLabel labels` is absent from `labels`: it is strictly longer
-    than every label in the list. -/
+    than every label in the list. Reuses the shared foldl-max bound
+    `foldl_max_ge_of_mem` from `CmdHasTypeAGen/Core.lean` at `f := String.length`. -/
 theorem fallbackFreshLabel_not_mem (labels : List String) :
     fallbackFreshLabel labels ∉ labels := by
   intro hmem
   have hlen : (fallbackFreshLabel labels).length =
       (labels.foldl (fun acc l => max acc l.length) 0) + 1 := by
     simp [fallbackFreshLabel, String.length_ofList, List.length_replicate]
-  have hle := foldl_maxlen_ge_of_mem labels (fallbackFreshLabel labels) hmem 0
+  have hle := foldl_max_ge_of_mem String.length labels (fallbackFreshLabel labels) hmem 0
   omega
 
 /-- Every label in the support of `genFreshLabel labels` is absent from `labels`,

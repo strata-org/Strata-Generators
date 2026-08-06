@@ -5,7 +5,7 @@ import Strata.Languages.Core.StatementType
 import Strata.Languages.Core.Factory
 import Strata.Transform.LoopElim
 import Strata.Transform.DetToKleene
-import Strata.Transform.ANFEncoder
+import Strata.Transform.CommonSubexprElim
 
 open Lambda RandomChoice Core Imperative
 open StrataGenerators.Stmt
@@ -206,16 +206,29 @@ end Guards
 -- `HasInit`, …) all exist, so these transforms resolve directly on
 -- `List Statement` with no procedure/program wrapper.
 
-/-- Apply loop elimination to a statement list (LoopElim `Block.removeLoopsM`,
-    run from a fresh `LoopElimState`). Operates directly on statements — no
-    `Procedure`/`Program` needed. -/
-def loopElimStmts (ss : List Statement) : List Statement :=
-  (StateT.run (Block.removeLoopsM ss) {}).fst
+/-- Apply loop elimination to a statement list, run from a fresh
+    `CoreTransformState`. Operates directly on statements — no
+    `Procedure`/`Program` needed.
 
-/-- Apply the ANF encoder to a statement list (starting fresh-var index 0),
-    discarding the returned next-index. -/
+    Strata used to expose a statement-level `Block.removeLoopsM`; the pass is now
+    structured as a single-statement `Core.removeLoop` driven over a
+    statement list by `Transform.runStmtsRec` in `CoreTransformM`. We drive it
+    the same way here and return the input unchanged if the pass throws (it does
+    so only on loops that still carry invariants/measures, or on label
+    conflicts), since these properties are all of the shape
+    "if the input type-checks, so does the output". -/
+def loopElimStmts (ss : List Statement) : List Statement :=
+  match (StateT.run (ExceptT.run
+      (Transform.runStmtsRec Core.removeLoop ss))
+      Transform.CoreTransformState.emp).fst with
+  | .ok (_, ss') => ss'
+  | .error _ => ss
+
+/-- Apply the common-subexpression eliminator (formerly the ANF encoder) to a
+    statement list, starting from fresh-var index 0 and discarding the returned
+    next-index. -/
 def anfStmts (ss : List Statement) : List Statement :=
-  (Core.ANFEncoder.anfEncodeBody ss 0).fst
+  (Core.CSE.stmtRunCSE ss 0).fst
 
 -- `StmtToKleeneStmt` operates on `Stmt Expression (Cmd Expression)`, whereas the
 -- generator produces `Statement = Stmt Expression Command` with

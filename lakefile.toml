@@ -3,10 +3,12 @@ version = "0.1.0"
 defaultTargets = ["StrataGenerators"]
 testDriver = "test"
 
+# Pinned to the commit adding the `argVarsScoped` field to `MutualADTWF`
+# (strata-generators issue #39), on the `argVarsScoped` branch of ngernest/Strata.
 [[require]]
 name = "Strata"
 git = "https://github.com/ngernest/Strata"
-rev = "7f94d01f"
+rev = "865885871f87269e075ce20ac16e502bc688d763"
 
 [[require]]
 name = "basalt"

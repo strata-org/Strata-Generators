@@ -50,8 +50,8 @@ def encodeExpr (e : LExpr') (tenv : TEnv Unit) (init_state : LState Core.CoreLPa
   match e_res with
   | .const _ _ =>
     let factory := Core.Env.init.factory
-    let (smt_term_lhs, ctx, _) ← Core.toSMTTerm factory [] e Core.SMT.Context.default []
-    let (smt_term_rhs, ctx, _) ← Core.toSMTTerm factory [] e_res ctx []
+    let (smt_term_lhs, ctx, _) ← Core.toSMTTerm factory [] e Core.SMT.Context.default .empty
+    let (smt_term_rhs, ctx, _) ← Core.toSMTTerm factory [] e_res ctx .empty
     return .some (Strata.SMT.Factory.eq smt_term_lhs smt_term_rhs, ctx)
   | _ => return .none
 

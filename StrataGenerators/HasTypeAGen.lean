@@ -303,23 +303,39 @@ private theorem allFtvarsIn_seq {tvars : List TyIdentifier} {τ : LMonoTy} :
     allFtvarsIn tvars (.seq τ) ↔ allFtvarsIn tvars τ := by
   simp [allFtvarsIn, LMonoTy.seq]
 
-/-- Every type in the support of `pickBitvecWidth` is `.bitvec n` for some `n ∈ bitvecWidths`. -/
+/-- Every natural number is in the support of `Nat.arbitrary` at `SetGen.Set`. -/
+private theorem Nat_arbitrary_support_set (n : Nat) :
+    n ∈ SetGen.support (Nat.arbitrary (G := SetGen.Set)) := by
+  induction n with
+  | zero =>
+    simp only [SetGen.support]
+    rw [Nat.arbitrary]
+    simp [pick_mem_iff]
+  | succ n ih =>
+    simp only [SetGen.support] at ih ⊢
+    rw [Nat.arbitrary]
+    simp only [pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    right
+    exact ⟨n, ih, rfl⟩
+
+/-- Every type in the support of `pickBitvecWidth` is `.bitvec n` for some width
+    `n`. Widths are unconstrained (issue #38). -/
 private theorem pickBitvecWidth_mem (τ : LMonoTy)
     (hτ : τ ∈ SetGen.support (pickBitvecWidth (G := SetGen.Set))) :
-    ∃ n, n ∈ (bitvecWidths : List Nat) ∧ τ = .bitvec n := by
-  have hne : (bitvecWidths : List Nat) ≠ [] := by decide +kernel
-  simp only [pickBitvecWidth, mem_support_map_iff, mem_support_elements_iff hne] at hτ
-  assumption
+    ∃ n, τ = .bitvec n := by
+  simp only [pickBitvecWidth, mem_support_map_iff] at hτ
+  obtain ⟨n, _, rfl⟩ := hτ
+  exact ⟨n, rfl⟩
 
-/-- Completeness of `pickBitvecWidth`: `.bitvec n` is in the support for any `n ∈ bitvecWidths`. -/
-private theorem pickBitvecWidth_complete (n : Nat) (hmem : n ∈ (bitvecWidths : List Nat)) :
+/-- Completeness of `pickBitvecWidth`: `.bitvec n` is in the support for *any*
+    width `n` (issue #38). -/
+private theorem pickBitvecWidth_complete (n : Nat) :
     LMonoTy.bitvec n ∈ SetGen.support (pickBitvecWidth (G := SetGen.Set)) := by
-  have hne : (bitvecWidths : List Nat) ≠ [] := by decide +kernel
-  simp only [pickBitvecWidth, mem_support_map_iff, mem_support_elements_iff hne]
-  exact ⟨n, hmem, rfl⟩
+  simp only [pickBitvecWidth, mem_support_map_iff]
+  exact ⟨n, Nat_arbitrary_support_set n, rfl⟩
 
 /-- Characterization of `pickBaseType` support: produces exactly
-    `bool`, `int`, `string`, `real`, and `bitvec n` for `n ∈ bitvecWidths`. -/
+    `bool`, `int`, `string`, `real`, `regex`, and `bitvec n` for any width `n`. -/
 private theorem pickBaseType_mem (tvars : List TyIdentifier) (τ : LMonoTy)
     (hτ : τ ∈ SetGen.support (pickBaseType (G := SetGen.Set))) :
     SimpleType τ ∧ monoTyDepth τ = 0 ∧ allFtvarsIn tvars τ := by
@@ -332,11 +348,11 @@ private theorem pickBaseType_mem (tvars : List TyIdentifier) (τ : LMonoTy)
   · exact ⟨.string, rfl, allFtvarsIn_string _⟩
   · exact ⟨.real, rfl, allFtvarsIn_real _⟩
   · exact ⟨.regex, rfl, allFtvarsIn_regex _⟩
-  · obtain ⟨n, hmem, rfl⟩ := pickBitvecWidth_mem τ hbv
-    exact ⟨.bitvec hmem, rfl, allFtvarsIn_bitvec _ _⟩
+  · obtain ⟨n, rfl⟩ := pickBitvecWidth_mem τ hbv
+    exact ⟨.bitvec, rfl, allFtvarsIn_bitvec _ _⟩
 
-/-- Completeness of `pickBaseType`: any base `SimpleType` with depth 0 is in the support.
-    (For bitvec, we additionally require `n ∈ bitvecWidths`.) -/
+/-- Completeness of `pickBaseType`: any base `SimpleType` with depth 0 is in the
+    support (for bitvec, at any width — issue #38). -/
 private theorem pickBaseType_complete_bool :
     LMonoTy.bool ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
   rw [pickBaseType, mem_support_oneOf_iff]
@@ -362,10 +378,10 @@ private theorem pickBaseType_complete_regex :
   rw [pickBaseType, mem_support_oneOf_iff]
   exact ⟨fun () => pure .regex, by simp, rfl⟩
 
-private theorem pickBaseType_complete_bitvec (n : Nat) (hmem : n ∈ (bitvecWidths : List Nat)) :
+private theorem pickBaseType_complete_bitvec (n : Nat) :
     LMonoTy.bitvec n ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
   rw [pickBaseType, mem_support_oneOf_iff]
-  exact ⟨fun () => pickBitvecWidth, by simp, pickBitvecWidth_complete n hmem⟩
+  exact ⟨fun () => pickBitvecWidth, by simp, pickBitvecWidth_complete n⟩
 
 
 /-- Support characterization of `genLMonoTy` at depth 0. -/
@@ -391,7 +407,7 @@ private theorem genLMonoTy_zero_mem (tvars : List TyIdentifier) (τ : LMonoTy) :
       | string => left; exact pickBaseType_complete_string
       | real => left; exact pickBaseType_complete_real
       | regex => left; exact pickBaseType_complete_regex
-      | bitvec hmem_bv => left; exact pickBaseType_complete_bitvec _ hmem_bv
+      | bitvec => left; exact pickBaseType_complete_bitvec _
       | ftvar =>
         rename_i name
         right; exact pickTyVar_complete tvars htv name (allFtvarsIn_ftvar_inv hftv)
@@ -405,7 +421,7 @@ private theorem genLMonoTy_zero_mem (tvars : List TyIdentifier) (τ : LMonoTy) :
       | string => exact pickBaseType_complete_string
       | real => exact pickBaseType_complete_real
       | regex => exact pickBaseType_complete_regex
-      | bitvec hmem_bv => exact pickBaseType_complete_bitvec _ hmem_bv
+      | bitvec => exact pickBaseType_complete_bitvec _
       | ftvar =>
         rename_i name
         exact absurd (List.length_pos_of_mem (allFtvarsIn_ftvar_inv hftv)) (by omega)
@@ -485,7 +501,7 @@ private theorem genLMonoTy_succ_mem (tvars : List TyIdentifier) (n : Nat) (τ : 
       | string => left; exact pickBaseType_complete_string
       | real => left; exact pickBaseType_complete_real
       | regex => left; exact pickBaseType_complete_regex
-      | bitvec hmem_bv => left; exact pickBaseType_complete_bitvec _ hmem_bv
+      | bitvec => left; exact pickBaseType_complete_bitvec _
       | arrow hs₁ hs₂ =>
         right; left
         rename_i τ₁ τ₂
@@ -516,7 +532,7 @@ private theorem genLMonoTy_succ_mem (tvars : List TyIdentifier) (n : Nat) (τ : 
       | string => left; exact pickBaseType_complete_string
       | real => left; exact pickBaseType_complete_real
       | regex => left; exact pickBaseType_complete_regex
-      | bitvec hmem_bv => left; exact pickBaseType_complete_bitvec _ hmem_bv
+      | bitvec => left; exact pickBaseType_complete_bitvec _
       | arrow hs₁ hs₂ =>
         right; left
         rename_i τ₁ τ₂
@@ -570,16 +586,15 @@ theorem inGenLMonoTySupport_sound (tvars : List TyIdentifier) :
   | zero =>
     match τ with
     | .bitvec w =>
-      simp only [inGenLMonoTySupport, List.contains_iff_mem] at h
-      exact ⟨SimpleType.bitvec h, Nat.le_refl _, by simp [allFtvarsIn]⟩
+      exact ⟨SimpleType.bitvec, Nat.le_refl _, by simp [allFtvarsIn]⟩
     | .ftvar name =>
       simp only [inGenLMonoTySupport, List.contains_iff_mem] at h
       exact ⟨SimpleType.ftvar, Nat.le_refl _, by simpa [allFtvarsIn] using h⟩
     | .tcons name args =>
       match args with
       | [] =>
-        simp only [inGenLMonoTySupport, List.contains_iff_mem, List.mem_cons,
-                   List.not_mem_nil, or_false] at h
+        simp only [inGenLMonoTySupport, nullaryBaseTypeNames, List.contains_iff_mem,
+                   List.mem_cons, List.not_mem_nil, or_false] at h
         rcases h with rfl | rfl | rfl | rfl | rfl
         · exact ⟨SimpleType.bool, Nat.le_refl _, by simp [allFtvarsIn]⟩
         · exact ⟨SimpleType.int, Nat.le_refl _, by simp [allFtvarsIn]⟩
@@ -590,8 +605,7 @@ theorem inGenLMonoTySupport_sound (tvars : List TyIdentifier) :
   | succ n ih =>
     match τ with
     | .bitvec w =>
-      simp only [inGenLMonoTySupport, List.contains_iff_mem] at h
-      exact ⟨SimpleType.bitvec h, Nat.zero_le _, by simp [allFtvarsIn]⟩
+      exact ⟨SimpleType.bitvec, Nat.zero_le _, by simp [allFtvarsIn]⟩
     | .ftvar name =>
       simp only [inGenLMonoTySupport, List.contains_iff_mem] at h
       exact ⟨SimpleType.ftvar, Nat.zero_le _, by simpa [allFtvarsIn] using h⟩
@@ -603,8 +617,8 @@ theorem inGenLMonoTySupport_sound (tvars : List TyIdentifier) :
       -- the nullary base types are depth-insensitive.
       match args with
       | [] =>
-        simp only [inGenLMonoTySupport, List.contains_iff_mem, List.mem_cons,
-                   List.not_mem_nil, or_false] at h
+        simp only [inGenLMonoTySupport, nullaryBaseTypeNames, List.contains_iff_mem,
+                   List.mem_cons, List.not_mem_nil, or_false] at h
         rcases h with rfl | rfl | rfl | rfl | rfl
         · exact ⟨SimpleType.bool, Nat.zero_le _, by simp [allFtvarsIn]⟩
         · exact ⟨SimpleType.int, Nat.zero_le _, by simp [allFtvarsIn]⟩
@@ -1368,21 +1382,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
   decreasing_by all_goals simp_wf; omega
 
 -- ── Nat.arbitrary support for SetGen.Set ──────────────────────────────
-
-/-- Every natural number is in the support of `Nat.arbitrary` at `SetGen.Set`. -/
-private theorem Nat_arbitrary_support_set (n : Nat) :
-    n ∈ SetGen.support (Nat.arbitrary (G := SetGen.Set)) := by
-  induction n with
-  | zero =>
-    simp only [SetGen.support]
-    rw [Nat.arbitrary]
-    simp [pick_mem_iff]
-  | succ n ih =>
-    simp only [SetGen.support] at ih ⊢
-    rw [Nat.arbitrary]
-    simp only [pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
-    right
-    exact ⟨n, ih, rfl⟩
+-- (`Nat_arbitrary_support_set` is defined earlier, alongside `pickBitvecWidth`,
+-- which now draws its width from `Nat.arbitrary`.)
 
 /-- Every integer is reachable via `pick` between `(k : Int)` and `-(k+1)`. -/
 private theorem Int_cover (z : Int) :
@@ -1575,7 +1576,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
          obtain ⟨_, _, rfl⟩ := h; rfl)
       | (rw [mem_support_pickOp_iff] at h
          obtain ⟨_, _, rfl⟩ := h; rfl))
-  | 0, _, @SimpleType.bitvec n hmem =>
+  | 0, _, @SimpleType.bitvec n =>
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
@@ -1732,7 +1733,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
         | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
         | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
       all_goals simp [termDepth])
-  | m + 1, _, @SimpleType.bitvec n hmem =>
+  | m + 1, _, @SimpleType.bitvec n =>
     simp only [genLExprBase] at he
     rw [mem_support_frequency_iff] at he
     obtain ⟨_, g, hg, _, he⟩ := he
@@ -1743,14 +1744,14 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
     · obtain ⟨_, _, rfl⟩ := he; simp [termDepth]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       show termDepth bctx (.app () fn arg) ≤ m + 1; unfold termDepth
-      have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ (SimpleType.arrow (genLMonoTy_simple tvars m _ ((genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm)) (.bitvec hmem)) _ hfn
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ (SimpleType.arrow (genLMonoTy_simple tvars m _ ((genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm)) .bitvec) _ hfn
       have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ (genLMonoTy_simple tvars m _ ((genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm)) _ harg
       omega
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
       show termDepth bctx (.ite () c t e') ≤ m + 1; unfold termDepth
       have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ SimpleType.bool _ hc
-      have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ (.bitvec hmem) _ ht
-      have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ (.bitvec hmem) _ he'
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ .bitvec _ ht
+      have := genLExprBase_termDepth_bound fctx octx tvars bctx m _ .bitvec _ he'
       omega
     all_goals (
       rcases he with ⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩
@@ -2256,7 +2257,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
           have := (opsOfType_mem_iff octx .real _).mpr hmem
           exact List.length_pos_of_mem this
         exact ⟨hlen, pickOp_complete octx .real _ hmem hlen⟩
-  | 0, _, @SimpleType.bitvec n hmem =>
+  | 0, _, @SimpleType.bitvec n =>
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
@@ -2718,7 +2719,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
           have := (opsOfType_mem_iff octx .real _).mpr hmem
           exact List.length_pos_of_mem this
         exact dif_pos hlen ▸ pickOp_complete octx .real _ hmem hlen
-  | m + 1, _, @SimpleType.bitvec n hmem =>
+  | m + 1, _, @SimpleType.bitvec n =>
     simp only [genLExprBase]
     rw [mem_support_frequency_iff]
     cases hats with
@@ -2758,7 +2759,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         simp only [genApp, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
         refine ⟨τ', (genAppArgTy_support _ _ _ _ _ _ _).mpr <| (genLMonoTy_support tvars m τ').mpr ⟨hsτ', hdτ', hftv'⟩,
                _, genLExprBase_complete fctx octx tvars bctx m τ' hsτ' _ hargw' hnames.2 hvars.2 harg_ats (by omega),
-               _, genLExprBase_complete fctx octx tvars bctx m (.arrow τ' (.bitvec n)) (SimpleType.arrow hsτ' (.bitvec hmem)) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
+               _, genLExprBase_complete fctx octx tvars bctx m (.arrow τ' (.bitvec n)) (SimpleType.arrow hsτ' .bitvec) _ hfnw hnames.1 hvars.1 hfn_ats (by omega), rfl⟩
     | ite hc ht he_ =>
       cases hwt with
       | ite hcw htw hew =>
@@ -2768,8 +2769,8 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         refine ⟨_, _, .tail _ (.tail _ (.head _)), by omega, ?_⟩
         simp only [genIte, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
         refine ⟨_, genLExprBase_complete fctx octx tvars bctx m .bool SimpleType.bool _ hcw hnames.1 hvars.1 hc (by omega),
-               _, genLExprBase_complete fctx octx tvars bctx m (.bitvec n) (.bitvec hmem) _ htw hnames.2.1 hvars.2.1 ht (by omega),
-               _, genLExprBase_complete fctx octx tvars bctx m (.bitvec n) (.bitvec hmem) _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
+               _, genLExprBase_complete fctx octx tvars bctx m (.bitvec n) .bitvec _ htw hnames.2.1 hvars.2.1 ht (by omega),
+               _, genLExprBase_complete fctx octx tvars bctx m (.bitvec n) .bitvec _ hew hnames.2.2 hvars.2.2 he_ (by omega), rfl⟩
     | bvar =>
       cases hwt with
       | bvar hget =>
@@ -3501,7 +3502,7 @@ private theorem subst_simple (S : Lambda.Subst) (ty : LMonoTy)
   | string => simp [LMonoTy.substReduce]; exact .string
   | real => simp [LMonoTy.substReduce]; exact .real
   | regex => simp [LMonoTy.substReduce]; exact .regex
-  | bitvec hmem => simp [LMonoTy.substReduce]; exact .bitvec hmem
+  | bitvec => simp [LMonoTy.substReduce]; exact .bitvec
   | ftvar =>
     simp [LMonoTy.substReduce]
     split
@@ -3536,9 +3537,9 @@ private theorem syntacticSubtypes_simple (ty : LMonoTy) (hTy : SimpleType ty)
   | regex =>
     simp [syntacticSubtypes, LMonoTy.regex] at hσ
     subst hσ; exact .regex
-  | bitvec hmem =>
+  | bitvec =>
     simp [syntacticSubtypes] at hσ
-    subst hσ; exact .bitvec hmem
+    subst hσ; exact .bitvec
   | ftvar =>
     simp [syntacticSubtypes] at hσ
     subst hσ; exact .ftvar

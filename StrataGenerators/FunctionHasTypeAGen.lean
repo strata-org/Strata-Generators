@@ -42,6 +42,24 @@ namespace StrataGenerators.Function
 
 -- ── Free-variable helpers ────────────────────────────────────────────
 
+/-- If `v ∈ LMonoTys.freeVars tys`, then some element of `tys` contains `v`.
+
+    Strata proves this as `Lambda.LMonoTys.freeVars_exists`, but it lives in
+    `Strata.DL.Lambda.LTyProps`, which has no `public section`, so it is only
+    reachable via `import all` — illegal from this non-`module` file. The proof
+    is three lines from the public `LMonoTys.freeVars_of_cons`, so we reprove it
+    locally rather than widen Strata's visibility. -/
+theorem freeVars_exists' {v : TyIdentifier} {tys : List LMonoTy}
+    (hv : v ∈ LMonoTys.freeVars tys)
+    : ∃ ty, ty ∈ tys ∧ v ∈ LMonoTy.freeVars ty := by
+  induction tys with
+  | nil => simp [LMonoTys.freeVars] at hv
+  | cons ty rest ih =>
+    simp only [LMonoTys.freeVars_of_cons, List.mem_append] at hv
+    cases hv with
+    | inl h => exact ⟨ty, .head _, h⟩
+    | inr h => obtain ⟨t, ht, hvt⟩ := ih h; exact ⟨t, .tail _ ht, hvt⟩
+
 /-- `allFtvarsIn tvars τ` says every ftvar in `τ` is drawn from `tvars`; this is
     exactly the `noUndeclaredVars`-style statement phrased via `LMonoTy.freeVars`. -/
 theorem allFtvarsIn_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
@@ -62,7 +80,7 @@ theorem allFtvarsIn_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
     -- `allFtvarsIn tvars (.tcons name args)` unfolds to a per-argument statement
     have hargs : ∀ a ∈ args, allFtvarsIn tvars a := by unfold allFtvarsIn at h; exact h
     -- reduce membership in `LMonoTys.freeVars` to some element containing `v`
-    obtain ⟨ty, hty_mem, hv_ty⟩ := LMonoTys.freeVars_exists hv
+    obtain ⟨ty, hty_mem, hv_ty⟩ := freeVars_exists' hv
     exact ih ty hty_mem (hargs ty hty_mem) v hv_ty
 
 set_option linter.unusedSimpArgs false in

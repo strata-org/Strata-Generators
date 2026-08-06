@@ -1,3 +1,5 @@
 -- This module serves as the root of the `StrataGenerators` library.
 -- Import modules here that should be built as part of the library.
 import StrataGenerators.HasTypeAGen
+import StrataGenerators.DatatypeGen
+import StrataGenerators.DatatypeGenProofs

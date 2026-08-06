@@ -2,6 +2,7 @@ module
 public import Strata.DL.Lambda.LExpr
 public import Strata.DL.Lambda.Factory
 import all Strata.DL.Lambda.Factory
+import all Strata.DL.Lambda.FactoryProps
 import Std.Data.HashMap.Lemmas
 
 /-!
