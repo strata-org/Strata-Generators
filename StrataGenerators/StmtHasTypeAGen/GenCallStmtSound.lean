@@ -61,6 +61,23 @@ def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
     proc.header.outputs = s.M ++ s.O ∧
     (∀ i (hi : i < s.I.keys.length), (s.M ++ s.O).keys.contains (s.I.keys[i]'hi) = false)
 
+/-- **The converse correspondence, for completeness (Part 1 of call completeness).**
+    Whereas `ProcSigCorresponds` says every generator-side callee `s ∈ procs`
+    resolves in `P` (what *soundness* needs — a generated call is well-typed),
+    `ProcSigComplete` says the reverse: every *monomorphic* procedure resolvable in
+    `P` whose signature admits the `M`/`I`/`O` decomposition is *listed in* `procs`
+    (what *completeness* needs — a well-typed call is reachable). The `typeArgs = []`
+    guard is essential: `genCallStmt` performs no type-argument instantiation, so it
+    can only reach calls to monomorphic callees at their declared signature. -/
+def ProcSigComplete (procs : ProcSigCtx) (P : Program) : Prop :=
+  ∀ pname proc M I O,
+    Program.Procedure.find? P pname = some proc →
+    proc.header.typeArgs = [] →
+    proc.header.inputs = M ++ I →
+    proc.header.outputs = M ++ O →
+    (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) →
+    ∃ s ∈ procs, s.pname = pname ∧ s.M = M ∧ s.I = I ∧ s.O = O
+
 -- ── filterMap helper lemmas ───────────────────────────────────────────────
 
 /-- `filterMap` of a constantly-`none` function is empty. -/

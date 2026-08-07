@@ -282,34 +282,38 @@ theorem Map.functional_append {α β : Type} [DecidableEq α]
 -- ── Per-constructor soundness ────────────────────────────────────────
 
 /-- Soundness of assert: if `e` has type `bool` (in the empty bvar context),
-    then `.assert "" e default` satisfies `CmdHasTypeA C Γ _ Γ`. -/
+    then `.assert l e default` satisfies `CmdHasTypeA C Γ _ Γ` for *any* label `l`
+    (the `assert` rule does not constrain the label). -/
 theorem genAssertCmd_sound
     (C : LContext CoreLParams)
     (Γ : TContext Unit)
+    (l : String)
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e .bool) :
-    CmdHasTypeA C Γ (.assert "" e default) Γ :=
-  CmdHasType'.assert Γ "" e default hwt
+    CmdHasTypeA C Γ (.assert l e default) Γ :=
+  CmdHasType'.assert Γ l e default hwt
 
-/-- Soundness of assume: if `e` has type `bool`, then `.assume "" e default`
-    satisfies `CmdHasTypeA C Γ _ Γ`. -/
+/-- Soundness of assume: if `e` has type `bool`, then `.assume l e default`
+    satisfies `CmdHasTypeA C Γ _ Γ` for any label `l`. -/
 theorem genAssumeCmd_sound
     (C : LContext CoreLParams)
     (Γ : TContext Unit)
+    (l : String)
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e .bool) :
-    CmdHasTypeA C Γ (.assume "" e default) Γ :=
-  CmdHasType'.assume Γ "" e default hwt
+    CmdHasTypeA C Γ (.assume l e default) Γ :=
+  CmdHasType'.assume Γ l e default hwt
 
-/-- Soundness of cover: if `e` has type `bool`, then `.cover "" e default`
-    satisfies `CmdHasTypeA C Γ _ Γ`. -/
+/-- Soundness of cover: if `e` has type `bool`, then `.cover l e default`
+    satisfies `CmdHasTypeA C Γ _ Γ` for any label `l`. -/
 theorem genCoverCmd_sound
     (C : LContext CoreLParams)
     (Γ : TContext Unit)
+    (l : String)
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e .bool) :
-    CmdHasTypeA C Γ (.cover "" e default) Γ :=
-  CmdHasType'.cover Γ "" e default hwt
+    CmdHasTypeA C Γ (.cover l e default) Γ :=
+  CmdHasType'.cover Γ l e default hwt
 
 /-- Soundness of set_det: if `x` has monotype `mty` in `Γ` and `e` has type
     `mty`, then `.set x (det e) default` satisfies `CmdHasTypeA C Γ _ Γ`. -/
@@ -657,21 +661,21 @@ theorem genCmd_sound
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     exact ⟨Γ, CmdHasType'.set_nondet Γ name mty default hfind⟩
-  · -- assert
+  · -- assert (label sampled via `String.arbitrary`, typing-irrelevant)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨e, he, rfl⟩ := hr
+    obtain ⟨l, _hl, e, he, rfl⟩ := hr
     have hwt := hExprSound .bool e he
-    exact ⟨Γ, CmdHasType'.assert Γ "" e default hwt⟩
+    exact ⟨Γ, CmdHasType'.assert Γ l e default hwt⟩
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨e, he, rfl⟩ := hr
+    obtain ⟨l, _hl, e, he, rfl⟩ := hr
     have hwt := hExprSound .bool e he
-    exact ⟨Γ, CmdHasType'.assume Γ "" e default hwt⟩
+    exact ⟨Γ, CmdHasType'.assume Γ l e default hwt⟩
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨e, he, rfl⟩ := hr
+    obtain ⟨l, _hl, e, he, rfl⟩ := hr
     have hwt := hExprSound .bool e he
-    exact ⟨Γ, CmdHasType'.cover Γ "" e default hwt⟩
+    exact ⟨Γ, CmdHasType'.cover Γ l e default hwt⟩
 
 -- ── Full completeness of genCmd ──────────────────────────────────────
 
@@ -757,27 +761,37 @@ theorem genCmd_complete
     exact ⟨_, hinSupport, CmdHasType'.set_nondet _ x mty default hfind⟩
   | assert l e md hexpr =>
     have he := hExprComplete .bool e hexpr
+    -- The empty label is alphanumeric-vacuously, so `"" ∈ support String.arbitrary`.
+    have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+      simp only [String.arbitrary, mem_support_map_iff]
+      exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
     have hinSupport : (⟨.assert "" e default, ctx⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
-        exact ⟨e, he, rfl⟩))))))
+        exact ⟨"", hemptyL, e, he, rfl⟩))))))
     exact ⟨_, hinSupport, CmdHasType'.assert _ "" e default hexpr⟩
   | assume l e md hexpr =>
     have he := hExprComplete .bool e hexpr
+    have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+      simp only [String.arbitrary, mem_support_map_iff]
+      exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
     have hinSupport : (⟨.assume "" e default, ctx⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
-        exact ⟨e, he, rfl⟩)))))))
+        exact ⟨"", hemptyL, e, he, rfl⟩)))))))
     exact ⟨_, hinSupport, CmdHasType'.assume _ "" e default hexpr⟩
   | cover l e md hexpr =>
     have he := hExprComplete .bool e hexpr
+    have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+      simp only [String.arbitrary, mem_support_map_iff]
+      exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
     have hinSupport : (⟨.cover "" e default, ctx⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
         simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
-        exact ⟨e, he, rfl⟩)))))))
+        exact ⟨"", hemptyL, e, he, rfl⟩)))))))
     exact ⟨_, hinSupport, CmdHasType'.cover _ "" e default hexpr⟩
 
 -- ── Chained typing for command sequences ────────────────────────────
@@ -861,18 +875,18 @@ theorem genCmd_sound_env
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := (env.corr ctx).1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     exact CmdHasType'.set_nondet _ name mty default hfind
-  · -- assert
+  · -- assert (label sampled via `String.arbitrary`, typing-irrelevant)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨e, he, rfl⟩ := hr
-    exact CmdHasType'.assert _ "" e default (env.exprSound .bool e he)
+    obtain ⟨l, _hl, e, he, rfl⟩ := hr
+    exact CmdHasType'.assert _ l e default (env.exprSound .bool e he)
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨e, he, rfl⟩ := hr
-    exact CmdHasType'.assume _ "" e default (env.exprSound .bool e he)
+    obtain ⟨l, _hl, e, he, rfl⟩ := hr
+    exact CmdHasType'.assume _ l e default (env.exprSound .bool e he)
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨e, he, rfl⟩ := hr
-    exact CmdHasType'.cover _ "" e default (env.exprSound .bool e he)
+    obtain ⟨l, _hl, e, he, rfl⟩ := hr
+    exact CmdHasType'.cover _ l e default (env.exprSound .bool e he)
 
 /-- `genCmd` preserves *functionality* of the context: the output `VarCtx` is
     either the input `ctx` (for `set`/`assert`/`assume`/`cover`) or
@@ -910,13 +924,13 @@ theorem genCmd_outCtx_functional
     obtain ⟨_, _, rfl⟩ := hr; exact hFun
   · -- assert
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr; exact hFun
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr; exact hFun
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr; exact hFun
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
 
 /-- Soundness of `genCmds`: every command sequence in the generator's support
     satisfies the chained `CmdsHasTypeA` relation.

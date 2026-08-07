@@ -168,23 +168,30 @@ def genSetNondet [Gen G] (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
   let (name, _) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
-/-- Generate `assert l e` with a boolean expression. -/
+/-- Generate `assert l e` with a boolean expression. The label `l` is sampled via
+    `String.arbitrary` (its typing rule constrains only the expression), so the
+    generator reaches every alphanumeric label rather than only `""`. -/
 def genAssertCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
+  let l ← String.arbitrary
   let e ← genLExpr fctx octx [] tvars [] depth .bool
-  pure ⟨.assert "" e default, ctx⟩
+  pure ⟨.assert l e default, ctx⟩
 
-/-- Generate `assume l e` with a boolean expression. -/
+/-- Generate `assume l e` with a boolean expression. The label `l` is sampled via
+    `String.arbitrary` (typing-irrelevant, as for `assert`). -/
 def genAssumeCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
+  let l ← String.arbitrary
   let e ← genLExpr fctx octx [] tvars [] depth .bool
-  pure ⟨.assume "" e default, ctx⟩
+  pure ⟨.assume l e default, ctx⟩
 
-/-- Generate `cover l e` with a boolean expression. -/
+/-- Generate `cover l e` with a boolean expression. The label `l` is sampled via
+    `String.arbitrary` (typing-irrelevant, as for `assert`). -/
 def genCoverCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
+  let l ← String.arbitrary
   let e ← genLExpr fctx octx [] tvars [] depth .bool
-  pure ⟨.cover "" e default, ctx⟩
+  pure ⟨.cover l e default, ctx⟩
 
 -- ── Main command generator ─────────────────────────────────────────────
 

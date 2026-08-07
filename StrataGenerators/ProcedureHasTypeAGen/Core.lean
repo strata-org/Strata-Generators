@@ -162,7 +162,13 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
   -- `LMonoTySignature` are both `List ((Identifier Unit) × LMonoTy)`.
   let (body, _, _) ← genStmtChain [] octx typeArgs
     (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) procs []
-    (LContext.default) (inputs ++ outputs ++ oldVars inout) size len
+    -- The procedure's type parameters are *rigid* inside its body: unification
+    -- must not refine them (a caller may instantiate them at any type), so the
+    -- body is generated under a context marking `typeArgs` rigid. This matches
+    -- `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters
+    -- before checking the body, and pins a generated `init`'s stored type to its
+    -- annotation (see `genProcedure_complete` / the statement-level `hRigid`).
+    ({ LContext.default with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) size len
   pure {
     header := {
       name := ⟨name, ()⟩,

@@ -120,14 +120,21 @@ def genFreshLabel [Gen G] (labels : List String) : G String := do
 
 -- ── TypeConstructor / declaration sub-generators ─────────────────────────
 
+/-- `Boundedness` is `Inhabited` (default `.Infinite`), needed by `elements` and its
+    support-inversion lemma `mem_support_elements_iff` when sampling `bound`. -/
+instance : Inhabited Boundedness := ⟨.Infinite⟩
+
 /-- Generate a random `TypeConstructor`: a name and a list of (up to `depth`)
     parameter names, all produced by `genIdentName` so each is a non-empty,
     non-keyword identifier (constructor and type-parameter names both appear in
-    identifier position). The `bound` field is left at its default (`.Infinite`). -/
+    identifier position). The `bound` field is sampled over both `Boundedness`
+    values: it is typing-irrelevant (the `typeDecl` rule's `addKnownTypeWithError`
+    keys only off `name`/`numargs`), so either choice is well-typed. -/
 def genTypeConstructor [Gen G] (depth : Nat) : G TypeConstructor := do
   let name ← genIdentName
   let params ← listOfMaxLength depth genIdentName
-  pure { name := name, params := params }
+  let bound ← elements [Boundedness.Infinite, Boundedness.Finite] (by simp)
+  pure { bound := bound, name := name, params := params }
 
 /-- Lift a monomorphic `Function` to a non-recursive `PureFunc Expression` (the
     syntactic declaration node stored in a `funcDecl` statement). Each monotype

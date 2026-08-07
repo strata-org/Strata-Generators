@@ -450,6 +450,47 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
         hExLen hTVals hExTy hIdisjOut hNodup hReuse
     · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
+-- ── Procedure-call completeness (forward membership) ──────────────────────
+
+/-- **Forward membership for `genCallStmt` (Part 2 of call completeness).** Given a
+    callee `s` in the procedure context, whose in-out block is usable and whose
+    combined write-key list is `Nodup` (the generator's own guard), and by-value
+    inputs `exprs` each reachable by `genLExpr` at the declared input type, the
+    generator's own recipe output — the missing-name `init` chain followed by the
+    assembled call — is in `genCallStmt`'s support.
+
+    This is the completeness analogue of `genCallStmt_sound`: it runs the
+    `genCallStmt` `do`-block *forward* (`elements` membership of `s`, the guard
+    branch, `mapM` membership of `exprs`, `pure`), rather than inverting it. The
+    emitted group and output scope are stated exactly as the generator computes
+    them, with `T := outTargets immutableVars ctx s.O`. -/
+theorem genCallStmt_mem_complete (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat)
+    (s : ProcSig) (hs : s ∈ procs) (exprs : List Expression.Expr)
+    (hMusable : s.M.all (usableName immutableVars ctx) = true)
+    (hNodup : (s.M ++ outTargets immutableVars ctx s.O).keys.Nodup)
+    (hexprs : List.Forall₂
+      (fun e σ => e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] d σ))
+      exprs s.I.values) :
+    (⟨StrataGenerators.Stmt.initChain
+        (s.M.filter (needsInit ctx) ++ (outTargets immutableVars ctx s.O).filter (needsInit ctx))
+        ++ [Statement.call s.pname
+              (StrataGenerators.Stmt.mkArgs s.M (outTargets immutableVars ctx s.O) exprs) default],
+      C, StrataGenerators.Stmt.insertAllCtx ctx
+        (s.M.filter (needsInit ctx) ++ (outTargets immutableVars ctx s.O).filter (needsInit ctx))⟩
+      : GenStmtResult) ∈
+      SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs C ctx d) := by
+  -- `procs` is non-empty (it contains `s`), so the `p₀ :: ps` branch fires.
+  cases procs with
+  | nil => exact absurd hs (by simp)
+  | cons p₀ ps =>
+    simp only [genCallStmt, mem_support_bind_iff]
+    refine ⟨s, (mem_support_elements_iff (by simp)).mpr hs, ?_⟩
+    -- Take the guard-true branch (`hMusable` and `hNodup` are exactly its condition).
+    rw [if_pos ⟨hMusable, hNodup⟩]
+    simp only [mem_support_bind_iff, mem_support_pure_iff]
+    exact ⟨exprs, (mem_support_mapM_iff _ s.I.values exprs).mpr hexprs, rfl⟩
+
 -- ── Guard / measure / invariant soundness helpers ────────────────────────
 
 /-- Any `.det`-guard produced by `genCondOrNondet` (at depth `d`) carries a
@@ -884,8 +925,8 @@ theorem genStmtChain_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (c
 -- Straightforward `pick`/`map`/`listOfMaxLength` support-inversion lemmas, one
 -- per guard/measure/invariant/type-constructor sub-generator, mirroring
 -- `genOptExpr_complete` in `FunctionHasTypeAGen.lean`. These convert typed
--- side-conditions into the raw support-membership premises of `StmtReachable`, so
--- a caller can build a reachability witness. Each is stated at an arbitrary depth.
+-- side-conditions into raw support-membership facts consumed by the spec-indexed
+-- completeness proof (`StmtHasTypeAGenComplete.lean`). Each is stated at an arbitrary depth.
 
 /-- Completeness of `genCondOrNondet`. `.nondet` is always reachable; `.det g` is
     reachable when `g` is reachable by `genLExpr` at type `bool`. -/
@@ -933,211 +974,19 @@ theorem genInvariants_complete (depth : Nat) (invs : List (String × Expression.
 
 /-- Completeness of `genTypeConstructor`. A type constructor is reachable when its
     name and each parameter name are reachable identifiers (via `genIdentName`, so
-    non-empty and non-keyword), its parameter list is no longer than `depth`, and
-    its `bound` is at the default `.Infinite`. -/
+    non-empty and non-keyword) and its parameter list is no longer than `depth`.
+    The `bound` field carries no side-condition: the generator samples over both
+    `Boundedness` values, so either is reachable. -/
 theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
-    (hbound : tc.bound = .Infinite)
     (hname : tc.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hlen : tc.params.length ≤ depth)
     (hparams : ∀ s ∈ tc.params, s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
     tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth) := by
   simp only [genTypeConstructor, mem_support_bind_iff, mem_support_pure_iff,
              mem_support_listOfMaxLength_iff]
-  refine ⟨tc.name, hname, tc.params, ⟨hlen, hparams⟩, ?_⟩
-  obtain ⟨bound, name, params⟩ := tc
-  simp only at hbound
-  subst hbound
-  rfl
-
--- ── Reachability relation ──────────────────────────────────────────────────
--- `StmtReachable`/`StmtChainReachable` are a size-indexed, `VarCtx`-threaded mutual
--- inductive mirroring `genStmt`/`genStmtChain` *exactly*. A statement is "reachable"
--- when it is in the generator's normal form (metadata `default`) and each of its
--- components is reachable by the corresponding sub-generator (at the appropriate
--- depth). The relation is the *specification* of completeness: `genStmt_complete`
--- below shows every reachable statement is in the generator's support, and
--- `genStmt_sound` shows the converse-flavored fact that support ⇒ `StmtHasTypeA`.
--- (Completeness cannot be stated directly over `StmtHasTypeA`: lexical scoping
--- makes the judgment of `block`/`ite`/`loop` `C Γ ⟶ C Γ`, so it would be vacuous
--- for the nesting constructors.)
-
-mutual
-
-/-- Size-indexed reachability for one generation *step*. `StmtReachable labels C ctx n ss C' ctx'`
-    means the result `⟨ss, C', ctx'⟩` is produced by `genStmt … labels C ctx n`. The
-    statement index is a *list* because `genStmt` returns one: a singleton for every
-    constructor but `call`, whose group is its inline `init`s followed by the call.
-    `labels` (the enclosing block labels) is an *index* because a `block` extends it
-    with its own label when descending into its body. -/
-inductive StmtReachable (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) :
-    List String → LContext CoreLParams → VarCtx → Nat → List Statement →
-    LContext CoreLParams → VarCtx → Prop where
-  /-- A `cmd` statement (generated at depth = the size `n`). -/
-  | cmd : ∀ labels C ctx n (res : GenStmtResult),
-      res ∈ SetGen.support (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
-  /-- An `exit` statement: any result of `genExitStmt` at the enclosing `labels`. -/
-  | exit : ∀ labels C ctx n (res : GenStmtResult),
-      res ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
-  /-- A `funcDecl` statement (generated at depth = the size `n`). -/
-  | funcDecl : ∀ labels C ctx n (res : GenStmtResult),
-      res ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) fctx octx C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
-  /-- A `typeDecl` statement (or its `exit` fallback), generated at depth `n`. -/
-  | typeDecl : ∀ labels C ctx n (res : GenStmtResult),
-      res ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
-  /-- A procedure `call` statement (generated at depth = the size `n`). -/
-  | call : ∀ labels C ctx n (res : GenStmtResult),
-      res ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs C ctx n) →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx n res.stmts res.outC res.outCtx
-  /-- A `block`, at size `size+1`, whose body is reachable at size `size`. The body
-      is generated under `label :: labels`, so a nested `exit` may target this block. -/
-  | block : ∀ labels C ctx size label body C_body Γ_body len,
-      len ≤ size + 1 →
-      label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) →
-      StmtChainReachable fctx octx tvars immutableVars procs (label :: labels) C ctx size len body C_body Γ_body →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        [Stmt.block label body default] C ctx
-  /-- A deterministic `ite`, at size `size+1`, with reachable condition (at depth
-      `size+1`) and branches (at size `size`). -/
-  | ite_det : ∀ labels C ctx size cond thenb elseb Ct Γt Ce Γe tlen elen,
-      tlen ≤ size + 1 → elen ≤ size + 1 →
-      cond ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] (size + 1) .bool) →
-      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size tlen thenb Ct Γt →
-      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size elen elseb Ce Γe →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        [Stmt.ite (.det cond) thenb elseb default] C ctx
-  /-- A non-deterministic `ite`, at size `size+1`, with reachable branches. -/
-  | ite_nondet : ∀ labels C ctx size thenb elseb Ct Γt Ce Γe tlen elen,
-      tlen ≤ size + 1 → elen ≤ size + 1 →
-      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size tlen thenb Ct Γt →
-      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size elen elseb Ce Γe →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        [Stmt.ite .nondet thenb elseb default] C ctx
-  /-- A `loop`, at size `size+1`, with reachable guard/measure/invariants (at depth
-      `size+1`) and body (at size `size`). -/
-  | loop : ∀ labels C ctx size guard measure invs body C_body Γ_body blen,
-      blen ≤ size + 1 →
-      guard ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) fctx octx tvars (size + 1)) →
-      measure ∈ SetGen.support (genOptMeasure (G := SetGen.Set) fctx octx tvars (size + 1)) →
-      invs ∈ SetGen.support (genInvariants (G := SetGen.Set) fctx octx tvars (size + 1)) →
-      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size blen body C_body Γ_body →
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx (size + 1)
-        [Stmt.loop guard measure invs body default] C ctx
-
-/-- Size-indexed reachability for a statement list. `StmtChainReachable labels C ctx size len ss C' ctx'`
-    means `(ss, C', ctx')` is produced by `genStmtChain … labels C ctx size len`. -/
-inductive StmtChainReachable (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) :
-    List String → LContext CoreLParams → VarCtx → Nat → Nat → List Statement →
-    LContext CoreLParams → VarCtx → Prop where
-  /-- The empty list, at length `0`. -/
-  | nil : ∀ labels C ctx size,
-      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size 0 [] C ctx
-  /-- A `cons`, at length `len+1`: a reachable head *group* spliced onto a reachable
-      tail. The head is a list (usually a singleton), so it is appended, not consed. -/
-  | cons : ∀ labels C ctx size len ss C_h Γ_h rest C'' Γ'',
-      StmtReachable fctx octx tvars immutableVars procs labels C ctx size ss C_h Γ_h →
-      StmtChainReachable fctx octx tvars immutableVars procs labels C_h Γ_h size len rest C'' Γ'' →
-      StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size (len + 1) (ss ++ rest) C'' Γ''
-
-end
-
--- ── Completeness: every reachable statement is in the generator's support ──
-
-mutual
-
-/-- **Completeness of `genStmt`.** Every statement reachable per `StmtReachable`
-    (in generator normal form with reachable components) is in `genStmt`'s support,
-    with the *exact* statement, output ambient context, and output scope. Proof by
-    induction on the reachability derivation, dispatching each constructor to the
-    membership-lifting lemma of the corresponding generator branch. -/
-theorem genStmt_complete (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
-    (ss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
-    (h : StmtReachable fctx octx tvars immutableVars procs labels C ctx n ss C' ctx') :
-    (⟨ss, C', ctx'⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) := by
-  cases h with
-  | cmd labels C ctx n res hres => exact genCmdStmt_mem procs C ctx n res hres
-  | exit labels C ctx n res hres => exact genExitStmt_mem procs C ctx n res hres
-  | funcDecl labels C ctx n res hres => exact genFuncDeclStmt_mem procs C ctx n res hres
-  | typeDecl labels C ctx n res hres => exact genTypeDeclStmt_mem procs C ctx n res hres
-  | call labels C ctx n res hres => exact genCallStmt_mem procs C ctx n res hres
-  | block labels C ctx size label body C_body Γ_body len hlen hlabel hbody =>
-    exact block_mem procs C ctx size label body C_body Γ_body len hlen
-      (genStmtChain_complete procs (label :: labels) C ctx size len body C_body Γ_body hbody) hlabel
-  | ite_det labels C ctx size cond thenb elseb Ct Γt Ce Γe tlen elen htlen helen hcond hthen helse =>
-    exact ite_det_mem procs C ctx size cond thenb elseb Ct Γt Ce Γe tlen elen htlen helen hcond
-      (genStmtChain_complete procs labels C ctx size tlen thenb Ct Γt hthen)
-      (genStmtChain_complete procs labels C ctx size elen elseb Ce Γe helse)
-  | ite_nondet labels C ctx size thenb elseb Ct Γt Ce Γe tlen elen htlen helen hthen helse =>
-    exact ite_nondet_mem procs C ctx size thenb elseb Ct Γt Ce Γe tlen elen htlen helen
-      (genStmtChain_complete procs labels C ctx size tlen thenb Ct Γt hthen)
-      (genStmtChain_complete procs labels C ctx size elen elseb Ce Γe helse)
-  | loop labels C ctx size guard measure invs body C_body Γ_body blen hblen hguard hmeasure hinvs hbody =>
-    exact loop_mem procs C ctx size guard measure invs body C_body Γ_body blen hblen
-      hguard hmeasure hinvs
-      (genStmtChain_complete procs labels C ctx size blen body C_body Γ_body hbody)
-termination_by (n, 0, 0)
-
-/-- **Completeness of `genStmtChain`.** Every statement list reachable per
-    `StmtChainReachable` is in `genStmtChain`'s support, with the exact list and output
-    contexts. The `cons` case threads the head via `genStmt_complete` and the tail
-    via the induction hypothesis, both at the same `size`. -/
-theorem genStmtChain_complete (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
-    (ss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
-    (h : StmtChainReachable fctx octx tvars immutableVars procs labels C ctx size len ss C' ctx') :
-    ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size len) := by
-  cases h with
-  | nil => exact genStmtChain_nil_mem procs C ctx size
-  | cons labels _ _ _ len ss C_h Γ_h rest _ _ hhead htail =>
-    have hh := genStmt_complete procs labels C ctx size ss C_h Γ_h hhead
-    have ht := genStmtChain_complete procs labels C_h Γ_h size len rest C' ctx' htail
-    exact genStmtChain_cons_mem procs C ctx size len ⟨ss, C_h, Γ_h⟩ rest C' ctx' hh ht
-termination_by (size, 1, len)
-decreasing_by
-  -- `cases h` supplies the size/length relations as *equations* rather than
-  -- syntactically smaller arguments (the `cons` index `ss ++ rest` is not a
-  -- constructor application), so the default tactic cannot see the lexicographic
-  -- descent. Substitute the equations, then build the `Prod.Lex` witness by hand:
-  -- the `block`/`ite`/`loop` cases drop the `size` component, the `genStmt`
-  -- call keeps `size` and drops the phase `1 → 0`, and the `genStmtChain` tail
-  -- call keeps both and drops `len`.
-  all_goals
-    subst_vars
-    simp_wf
-    first
-      | omega
-      | (apply Prod.Lex.left; omega)
-      | (apply Prod.Lex.right; apply Prod.Lex.left; omega)
-      | (apply Prod.Lex.right; apply Prod.Lex.right; omega)
-
-end
-
--- ── Capstone: reachable ⇒ in support ∧ well-typed ────────────────────────
-
-/-- **Completeness–soundness capstone for `genStmt`.** Every statement reachable
-    per `StmtReachable` is (a) in `genStmt`'s support at the exact statement/output
-    contexts (completeness), and (b) well-typed w.r.t. `StmtHasTypeA` for any
-    program `P` (soundness). Together these witness that `StmtReachable` characterizes
-    exactly the generator's *well-typed* support, confirming the reachability
-    relation is not vacuous. -/
-theorem genStmt_complete_sound (P : Program) (env : GenStmtSoundEnv fctx octx tvars)
-    (procs : ProcSigCtx) (hProcs : ProcSigCorresponds procs P)
-    (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (hFun : Map.Functional ctx)
-    (ss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
-    (h : StmtReachable fctx octx tvars immutableVars procs labels C ctx n ss C' ctx') :
-    (⟨ss, C', ctx'⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n) ∧
-    StmtsHasTypeA P C (env.toTCtx ctx) labels ss C' (env.toTCtx ctx') := by
-  have hmem := genStmt_complete procs labels C ctx n ss C' ctx' h
-  exact ⟨hmem, genStmt_sound P env immutableVars procs hProcs labels C ctx n hFun ⟨ss, C', ctx'⟩ hmem⟩
+  refine ⟨tc.name, hname, tc.params, ⟨hlen, hparams⟩, tc.bound, ?_, ?_⟩
+  · -- both `Boundedness` values are in the sampled list
+    rw [mem_support_elements_iff]; cases tc.bound <;> simp
+  · obtain ⟨bound, name, params⟩ := tc; rfl
 
 end StrataGenerators.Stmt

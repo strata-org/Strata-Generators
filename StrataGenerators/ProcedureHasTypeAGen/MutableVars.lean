@@ -141,19 +141,19 @@ theorem genCmd_mutableVars
     show name ∈ Map.keys (ctx.writable immutableVars)
     rw [VarCtx.writable, Map.keys_eq_map_fst]
     exact List.mem_map.mpr ⟨(name, mty), hmem, rfl⟩
-  · -- assert
+  · -- assert (label sampled via `String.arbitrary`)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr
     exact ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv,
            fun k hk => List.mem_append_left _ hk⟩
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr
     exact ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv,
            fun k hk => List.mem_append_left _ hk⟩
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr
     exact ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv,
            fun k hk => List.mem_append_left _ hk⟩
 

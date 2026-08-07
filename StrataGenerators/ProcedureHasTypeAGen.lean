@@ -16,8 +16,10 @@ the `ProcHasTypeA` typing relation of `Strata.Languages.Core.ProcedureTypeSpec`.
 
 The proof is *compositional*: it reuses `genInputs_support`/`genInputs_complete`
 (for the output signature, exactly as the function generator uses them for
-inputs), `genStmtChain_sound`/`genStmtChain_complete` (for the body), and
-`genStmtChain_mutableVars` (for the modification-rights obligation).
+inputs), `genStmtChain_sound` and the body's `genStmtChain` support membership
+(for the body — completeness takes that membership as a hypothesis, dischargeable
+via `spec_complete`), and `genStmtChain_mutableVars` (for the modification-rights
+obligation).
 
 ## The context-alignment lemma
 
@@ -449,7 +451,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (size len : Nat)
     (proc : Procedure)
     (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs size len)) :
-    ProcHasTypeA P LContext.default (default) proc := by
+    ProcHasTypeA P { LContext.default with rigidTypeVars := proc.header.typeArgs } (default) proc := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hproc
   obtain ⟨name, _hname, typeArgs, htypeArgs, M, hM, rawInputOnly, hrawInputOnly,
           rawOutputOnly, hrawOutputOnly, pre, hpre, post, hpost,
@@ -540,7 +542,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     rw [List.contains_iff_mem, ListMap_keys_append, List.mem_append]
     exact Or.inl (by rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨p, hp, rfl⟩)
   -- Body soundness (seeded at `inputs ++ outputs ++ oldVars M`, immutable = inputs.keys ++ old.keys).
-  have hbodyTyped : StmtsHasTypeA P LContext.default
+  have hbodyTyped : StmtsHasTypeA P { LContext.default with rigidTypeVars := typeArgs }
       ((procStmtEnv octx typeArgs).toTCtx
         (M ++ disjointInputs rawInputOnly M ++
           (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
@@ -548,14 +550,14 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     genStmtChain_sound P (procStmtEnv octx typeArgs)
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
       hProcs []
-      LContext.default
+      { LContext.default with rigidTypeVars := typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
   have hmod := genStmtChain_mutableVars [] octx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
-      LContext.default
+      { LContext.default with rigidTypeVars := typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len (body, C', ctx') hbody
@@ -656,10 +658,11 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     - `hPre*` / `hPost*` — each contract clause is default-`attr`/empty-`md`, its
       label list is reachable by `genNameList`, and its `expr` is reachable by
       `genLExpr … .bool`;
-    - `hBodyReach` — the body statement list is reachable per `StmtChainReachable`,
-      seeded exactly as the generator seeds it (`M ++ I ++ (M ++ O) ++ oldVars M`,
-      immutable names `keys (M ++ I) ++ keys (oldVars M)`), at empty label/fvar
-      contexts, type-variable list `typeArgs`, and the default ambient `C`.
+    - `hBodyReach` — the body statement list is in `genStmtChain`'s support, seeded
+      exactly as the generator seeds it (`M ++ I ++ (M ++ O) ++ oldVars M`, immutable
+      names `keys (M ++ I) ++ keys (oldVars M)`), at empty label/fvar contexts,
+      type-variable list `typeArgs`, and the rigidified ambient `C`. (A caller can
+      obtain this membership from `spec_complete` applied to each body statement.)
 
     The block name-length / reachability conditions are stated concretely via
     `mem_support_genNameList_iff`. -/
@@ -710,9 +713,11 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Na
     (hPostMd : ∀ c ∈ proc.spec.postconditions.values, c.md = #[])
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
       c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] proc.header.typeArgs [] size .bool))
-    (hBodyReach : StmtChainReachable [] octx proc.header.typeArgs
-      (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
-      LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len bodyss C' ctx') :
+    (hBodyReach : (bodyss, C', ctx') ∈ SetGen.support
+      (genStmtChain (G := SetGen.Set) [] octx proc.header.typeArgs
+        (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
+        { LContext.default with rigidTypeVars := proc.header.typeArgs }
+        (M ++ I ++ (M ++ O) ++ oldVars M) size len)) :
     proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs size len) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
@@ -739,10 +744,10 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Na
       hPreLabels hPreAttr hPreMd hPreExpr
   · exact genChecks_complete octx proc.header.typeArgs size proc.spec.postconditions
       hPostLabels hPostAttr hPostMd hPostExpr
-  · -- body reachable: the generator's filtered blocks equal `I`/`O`.
+  · -- body reachable: the generator's filtered blocks equal `I`/`O`; `hBodyReach`
+    -- is the body's `genStmtChain` support membership directly.
     rw [hI_eq, hO_eq]
-    exact genStmtChain_complete procs [] LContext.default (M ++ I ++ (M ++ O) ++ oldVars M) size len
-      bodyss C' ctx' hBodyReach
+    exact hBodyReach
   · -- the reassembled record equals `proc`.
     rw [hI_eq, hO_eq]
     obtain ⟨⟨pname, ptyArgs, pinputs, poutputs, pnoFilter⟩, ⟨ppre, ppost⟩, pbody⟩ := proc
