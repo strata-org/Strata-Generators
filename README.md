@@ -36,6 +36,8 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 - `Basalt` (used for proving generators correct)
 - `Plausible` (used to run generators)
 - `LSpec` (Lean testing framework, we use LSpec's test harnesses to run tests)
+- (Optionally) An SMT solver (cvc5 or z3) to test Strata properties related to SMT encoding, which are not run by default
+  - See the [installation instructions in the Strata repository](https://github.com/strata-org/strata#smt-solvers) on how to install cvc5/z3
 
 ## Building
 
@@ -77,15 +79,11 @@ lake build test
 
 Flags (all optional; the Tyche visualization pass is on by default):
 
-- `--no-tyche` — skip the Tyche visualization pass (property tests only)
-- `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`)
-- `--tyche-samples=N` — samples per Tyche panel (default 1000)
-- `--smt` — add the SMT/concrete-eval agreement property (off by default). This
-  property cross-checks the in-Lean evaluator against an SMT semantics, so it
-  needs a live solver (default `cvc5`; `z3` also works) on `PATH`; it is excluded
-  from the default run and CI for that reason. If `--smt` is passed but the solver
-  cannot be launched, the driver prints an error and exits non-zero rather than
-  silently reporting a green "0 checked" suite.
+- `--no-tyche` — omit Tyche visualizations (i.e. only run tests)
+- `--tyche-out=PATH` — output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
+- `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
+- `--smt` — Tests properties related to Strata SMT encodings. This CLI flag requires a local installation of an SMT solver (cvc5/z3). 
+  If `--smt` is passed but the SMT solver cannot be run, the test harness emits an error and exits with a non-zero exit code.
 
 See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of properties tested.
 
