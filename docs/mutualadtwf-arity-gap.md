@@ -21,6 +21,19 @@ check is intentional (checked in a later pipeline phase) or an oversight that
 > (`argsWF`, `argVarsScoped`), so `ArityOk` is the only ad-hoc predicate that
 > remains. If `refsKnown` becomes arity-aware (below), `ArityOk` becomes redundant
 > and can be dropped; until then it lives on the generator side.
+>
+> **Block-level completeness is now proved** on top of the per-type
+> result: `DatatypeGen.genMutuallyRecursiveDatatypes_complete` shows every target
+> block presented in any datatype order is in the generator's support, given some
+> inhabitance-topological reordering (`orderedBlock`) reachable by the ordered core
+> (`genMutuallyRecursiveDatatypesOrdered_complete`). It composes the two
+> permutation-completeness lemmas (`permutationOf_complete`, for both the block
+> shuffle and the per-datatype constructor shuffle) with the header/body assembly,
+> under existential size caps and `BodyReachable`, which bundles the per-datatype
+> reachability side conditions (name reachability/freshness — taken as hypotheses,
+> since this file's `genIdentName` has no two-directional support lemma — and the
+> `visibleRefs` inhabitance-order discipline). All axiom-clean (`propext,
+> Classical.choice, Quot.sound`).
 
 ## Background
 
