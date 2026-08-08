@@ -855,12 +855,15 @@ theorem mkApps_opsConsistentR (F : @Factory LExprParams') (base : LExpr') (args 
     · exact Lambda.OpsConsistentR.app hbase (hargs a (by simp))
     · intro x hx; exact hargs x (by simp [hx])
 
-/-- Every argument produced by `mapM (genLExprBase fctx (factoryOps F) …)` is
-    `Lambda.OpsConsistentR`. -/
-theorem mapM_genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
-    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)    (argTys : List LMonoTy) (args : List LExpr')
-    (hargs : args ∈ (List.mapM (m := SetGen.Set)
-      (genLExprBase fctx (factoryOps F) tvars bctx depth) argTys)) :
+/-- `mapM`-lifted op-consistency, parametric in the argument generator: if every
+    term `genArg σ` can produce is `OpsConsistentR`, so is every element of a list
+    the `mapM` produces. Parametric because `genLExpr` uses `genLExprBase` in
+    argument position at the depth floor and *itself* above it. -/
+theorem mapM_genArg_opsConsistentR (F : @Factory LExprParams')
+    (genArg : LMonoTy → SetGen.Set LExpr')
+    (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)
+    (argTys : List LMonoTy) (args : List LExpr')
+    (hargs : args ∈ (List.mapM (m := SetGen.Set) genArg argTys)) :
     ∀ a ∈ args, Lambda.OpsConsistentR F a := by
   induction argTys generalizing args with
   | nil =>
@@ -872,8 +875,18 @@ theorem mapM_genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVa
     intro a ha
     simp only [List.mem_cons] at ha
     rcases ha with rfl | ha
-    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth σ a hx
+    · exact hArg σ a hx
     · exact ih tl htl a ha
+
+/-- Every argument produced by `mapM (genLExprBase fctx (factoryOps F) …)` is
+    `Lambda.OpsConsistentR`. Specialization of `mapM_genArg_opsConsistentR`. -/
+theorem mapM_genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)    (argTys : List LMonoTy) (args : List LExpr')
+    (hargs : args ∈ (List.mapM (m := SetGen.Set)
+      (genLExprBase fctx (factoryOps F) tvars bctx depth) argTys)) :
+    ∀ a ∈ args, Lambda.OpsConsistentR F a :=
+  mapM_genArg_opsConsistentR F _
+    (fun σ a ha => genLExprBase_opsConsistentR F fctx tvars bctx depth σ a ha) argTys args hargs
 
 -- ── Monomorphic Indir op-node consistency ────────────────────────────
 
@@ -934,10 +947,11 @@ theorem indir_op_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
     It holds vacuously when `pctx = []` (see the `…_nil` results, which need no
     such assumption). -/
 def PolyOpsConsistentR (F : @Factory LExprParams') (pctx : PolyOpCtx)
-    (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) : Prop :=
+    (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) (maxNumArgs : Nat := 3) : Prop :=
   ∀ (sampledTys : List LMonoTy) (name : String) (concreteArgTys : List LMonoTy),
     (name, concreteArgTys) ∈
-      findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F)) sampledTys →
+      findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx (factoryOps F))
+        sampledTys maxNumArgs →
     Lambda.OpsConsistentR F
       (.op () ⟨name, ()⟩ (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)))
 
@@ -1093,10 +1107,11 @@ theorem freshenBoundVars_snd_eq_subst (boundVars : List TyIdentifier) (monoTy : 
     `composite_instance_subst` (no `SubstWF`). Annotations mentioning a free type
     variable are handled uniformly. -/
 theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpCtx)
-    (τ : LMonoTy) (generableTys sampledTys : List LMonoTy)
+    (τ : LMonoTy) (generableTys sampledTys : List LMonoTy) (maxNumArgs : Nat)
     (hPctx : PCtxWF F pctx)
     (name : String) (concreteArgTys : List LMonoTy)
-    (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ generableTys sampledTys) :
+    (hEntry : (name, concreteArgTys) ∈
+      findPolymorphicOps pctx τ generableTys sampledTys maxNumArgs) :
     ∃ (fn : LFunc LExprParams') (S : Lambda.Subst),
       F[name]? = some fn ∧
       concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
@@ -1182,11 +1197,12 @@ theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpC
     witness `OpsConsistentR.op_in` (`OpsConsistentR.op_in`) demands. No case
     split on `typeArgs`, no groundness. -/
 theorem PolyOpsConsistentR_of_PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx)
-    (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) (hPctx : PCtxWF F pctx) :
-    PolyOpsConsistentR F pctx bctx fctx τ := by
+    (bctx : BVarCtx) (fctx : FVarCtx) (τ : LMonoTy) (maxNumArgs : Nat)
+    (hPctx : PCtxWF F pctx) :
+    PolyOpsConsistentR F pctx bctx fctx τ maxNumArgs := by
   intro sampledTys name concreteArgTys hEntry
   obtain ⟨fn, S, hget, hinst⟩ :=
-    findPolymorphicOps_instanceR F pctx τ _ sampledTys hPctx name concreteArgTys hEntry
+    findPolymorphicOps_instanceR F pctx τ _ sampledTys maxNumArgs hPctx name concreteArgTys hEntry
   exact Lambda.OpsConsistentR.op_in hget hinst
 
 -- ── genIndirPoly consistency ─────────────────────────────────────────
@@ -1200,9 +1216,14 @@ set_option maxHeartbeats 800000 in
     `genLExprBase`. -/
 theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
+    (maxNumArgs : Nat)
+    (hPoly : PolyOpsConsistentR F pctx bctx fctx τ maxNumArgs)
+    (genArg : LMonoTy → SetGen.Set LExpr')
+    (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)
+    (e : LExpr')
     (he : e ∈ SetGen.support
-      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
+      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ
+        maxNumArgs genArg)) :
     Lambda.OpsConsistentR F e := by
   unfold genIndirPoly at he
   simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite] at he
@@ -1213,7 +1234,7 @@ theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
     apply mkApps_opsConsistentR
     · exact hPoly sampledTys _ _ hentry_mem
-    · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
+    · exact mapM_genArg_opsConsistentR F genArg hArg _ args hargs
   · -- fallback to genLExprBase
     exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
 
@@ -1232,37 +1253,75 @@ set_option maxHeartbeats 800000 in
     `genLExpr_opsConsistentR_nil`. -/
 theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
+    -- Quantified over *all* target types, not just `τ`: since factory applications
+    -- now nest, the arguments of an application at `τ` are themselves
+    -- generated at other types `σ`, and each needs its own polymorphic-annotation
+    -- assumption. `PolyOpsConsistentR_of_PCtxWF` provides this for every type from a
+    -- single `PCtxWF`, so the `PCtxWF`/factory-derived corollaries below are
+    -- unaffected.
+    (hPoly : ∀ σ m, PolyOpsConsistentR F pctx bctx fctx σ m) (e : LExpr')
     (he : e ∈ SetGen.support
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e := by
-  unfold genLExpr at he
-  simp only [mem_support_iff, SetGen.mem_dite] at he
-  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
-  · -- Monomorphic Indir candidates: two-element frequency, then a binary pick
-    rw [← mem_support_iff, mem_support_frequency_iff] at he
-    obtain ⟨_, g, hg, _, he⟩ := he
-    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
-    · -- genLExprBase branch (weight-1 branch of the frequency)
-      exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-    -- weight-9 branch: a binary pick between the monomorphic Indir and IndirPoly rules
-    rw [mem_support_pick_iff] at he
-    rcases he with he | he
-    · -- monomorphic Indir
-      simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
-      obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
-      rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
-      apply mkApps_opsConsistentR
-      · exact indir_op_opsConsistentR F τ _ _ hentry_mem
-      · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
-    · -- IndirPoly (with candidates)
-      exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
-  · -- No monomorphic Indir candidates: pick between genLExprBase and IndirPoly
-    rw [pick_mem_iff] at he
-    rcases he with he | he
-    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-    · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
+  -- Induction on the depth index, as in `genLExpr_sound`: the Indir/IndirPoly
+  -- arguments are drawn from `genLExpr … n`, so op-consistency of the argument
+  -- generator at the smaller index is the induction hypothesis. Note `hPoly` is
+  -- depth-independent, so it survives the generalization unchanged.
+  induction depth generalizing τ e with
+  | zero =>
+    have hArg : ∀ σ a, a ∈ SetGen.support
+        (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 σ) →
+        Lambda.OpsConsistentR F a :=
+      fun σ a ha => genLExprBase_opsConsistentR F fctx tvars bctx 0 σ a ha
+    unfold genLExpr at he
+    simp only [mem_support_iff, SetGen.mem_dite] at he
+    rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+    · rw [← mem_support_iff, mem_support_frequency_iff] at he
+      obtain ⟨_, g, hg, _, he⟩ := he
+      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+      · exact genLExprBase_opsConsistentR F fctx tvars bctx 0 τ e he
+      rw [mem_support_pick_iff] at he
+      rcases he with he | he
+      · unfold genIndir at he
+        simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+        obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
+        rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+        apply mkApps_opsConsistentR
+        · exact indir_op_opsConsistentR F τ _ _ hentry_mem
+        · exact mapM_genArg_opsConsistentR F _ hArg _ args hargs
+      · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx 0 τ _ (hPoly τ _) _ hArg e he
+    · rw [pick_mem_iff] at he
+      rcases he with he | he
+      · exact genLExprBase_opsConsistentR F fctx tvars bctx 0 τ e he
+      · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx 0 τ _ (hPoly τ _) _ hArg e he
+  | succ n ih =>
+    have hArg : ∀ σ a, a ∈ SetGen.support
+        (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx n σ) →
+        Lambda.OpsConsistentR F a :=
+      fun σ a ha => ih σ a ha
+    unfold genLExpr at he
+    simp only [mem_support_iff, SetGen.mem_dite] at he
+    rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+    · rw [← mem_support_iff, mem_support_frequency_iff] at he
+      obtain ⟨_, g, hg, _, he⟩ := he
+      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
+      · exact genLExprBase_opsConsistentR F fctx tvars bctx (n + 1) τ e he
+      rw [mem_support_pick_iff] at he
+      rcases he with he | he
+      · unfold genIndir at he
+        simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+        obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
+        rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+        apply mkApps_opsConsistentR
+        · exact indir_op_opsConsistentR F τ _ _ hentry_mem
+        · exact mapM_genArg_opsConsistentR F _ hArg _ args hargs
+      · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx (n + 1) τ _ (hPoly τ _) _ hArg e he
+    · rw [pick_mem_iff] at he
+      rcases he with he | he
+      · exact genLExprBase_opsConsistentR F fctx tvars bctx (n + 1) τ e he
+      · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx (n + 1) τ _ (hPoly τ _) _ hArg e he
 
 -- Note: `genLExpr_opsConsistentR` above proves `Lambda.OpsConsistentR F e`
 -- directly — Strata's declarative predicate, which is `public` in `Assumptions.lean`.
@@ -1274,7 +1333,7 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
     `PolyOpsConsistentR`. -/
 theorem genLExprWithFactory_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx)
-    (hPoly : PolyOpsConsistentR F pctx bctx fctx τ) (e : LExpr')
+    (hPoly : ∀ σ m, PolyOpsConsistentR F pctx bctx fctx σ m) (e : LExpr')
     (he : e ∈ SetGen.support
       (genLExprWithFactory (G := SetGen.Set) fctx F tvars bctx depth τ pctx)) :
     Lambda.OpsConsistentR F e :=
@@ -1293,7 +1352,7 @@ theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FV
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ
-    (PolyOpsConsistentR_of_PCtxWF F pctx bctx fctx τ hPctx) e he
+    (fun σ m => PolyOpsConsistentR_of_PCtxWF F pctx bctx fctx σ m hPctx) e he
 
 /-- **Main result, factory-derived polymorphic context (no hypothesis).** When the
     polymorphic operator context is extracted directly from the factory via
@@ -1328,16 +1387,18 @@ theorem genLExprWithFactory_opsConsistentR_factory (F : @Factory LExprParams') (
 -- polymorphic op and the polymorphic-annotation obligation is vacuous — giving a
 -- result that does not even need `PCtxWF`.
 
-@[simp] theorem findPolymorphicOps_nil (τ : LMonoTy) (g s : List LMonoTy) :
-    findPolymorphicOps [] τ g s = [] := by unfold findPolymorphicOps; rfl
+@[simp] theorem findPolymorphicOps_nil (τ : LMonoTy) (g s : List LMonoTy) (m : Nat) :
+    findPolymorphicOps [] τ g s m = [] := by unfold findPolymorphicOps; rfl
 
 /-- `genIndirPoly` with an empty polymorphic context always falls back to
     `genLExprBase`, hence is `OpsConsistentR`. -/
 theorem genIndirPoly_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (maxNumArgs : Nat) (genArg : LMonoTy → SetGen.Set LExpr')
     (e : LExpr')
     (he : e ∈ SetGen.support
-      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
+      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ
+        maxNumArgs genArg)) :
     Lambda.OpsConsistentR F e := by
   unfold genIndirPoly at he
   simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite] at he
@@ -1358,27 +1419,12 @@ theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (e : LExpr')
     (he : e ∈ SetGen.support
       (genLExpr (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
-    Lambda.OpsConsistentR F e := by
-  unfold genLExpr at he
-  simp only [mem_support_iff, SetGen.mem_dite] at he
-  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
-  · -- Monomorphic Indir candidates: two-element frequency, then a binary pick
-    rw [← mem_support_iff, mem_support_frequency_iff] at he
-    obtain ⟨_, g, hg, _, he⟩ := he
-    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
-    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-    rw [mem_support_pick_iff] at he
-    rcases he with he | he
-    · simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
-      obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
-      rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
-      apply mkApps_opsConsistentR
-      · exact indir_op_opsConsistentR F τ _ _ hentry_mem
-      · exact mapM_genLExprBase_opsConsistentR F fctx tvars bctx depth _ args hargs
-    · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he
-  · -- No monomorphic Indir candidates: pick between genLExprBase and IndirPoly
-    rw [pick_mem_iff] at he
-    rcases he with he | he
-    · exact genLExprBase_opsConsistentR F fctx tvars bctx depth τ e he
-    · exact genIndirPoly_opsConsistentR_nil F fctx tvars bctx depth τ e he
+    Lambda.OpsConsistentR F e :=
+  -- With `pctx = []` the polymorphic-annotation hypothesis is vacuous: there are no
+  -- `pctx` entries, so `findPolymorphicOps [] …` is empty and no `hentry_mem` can be
+  -- produced. Derive from the general theorem rather than repeating its depth
+  -- induction (which is what this proof used to do by hand).
+  genLExpr_opsConsistentR F fctx [] tvars bctx depth τ
+    (fun _ _ _ _ _ hmem => by
+      simp only [findPolymorphicOps_nil, List.not_mem_nil] at hmem)
+    e he
