@@ -617,7 +617,7 @@ private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
     (fun (acc : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
       let proc ← (retryGen 8000
         (StrataGenerators.Procedure.genProcedure (G := Plausible.Gen)
-          corePartialOps acc.2 size len) : Gen Core.Procedure)
+          corePartialOps acc.2 LContext.default {} size len) : Gen Core.Procedure)
       -- Add this procedure to the callable context (its post-relabel name is
       -- `P{i}`; its generated header name is discarded). Both monomorphic and
       -- polymorphic siblings are callable — the call site instantiates `typeArgs`.

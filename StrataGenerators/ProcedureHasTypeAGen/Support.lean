@@ -110,4 +110,67 @@ def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) :
 @[simp] theorem procStmtEnv_toTCtx (octx : OpCtx) (tvars : List TyIdentifier) :
     (procStmtEnv octx tvars).toTCtx = procToTCtx := rfl
 
+-- ── Γ-parameterized environment (ambient-context threading) ────────────────
+
+/-- The `Γ`-parameterized single-scope `TContext` for a flat `VarCtx`: one new
+    scope in which every variable is bound to its declared monotype as a trivial
+    polytype, *carrying the ambient `Γ`'s alias list*. This aligns with the
+    declarative `procBodyContext Γ proc`, which pushes the body scope onto
+    `Γ.types` and preserves `Γ.aliases`; when `Γ.types = []` the two agree. -/
+def procToTCtxΓ (Γ : TContext Unit) (ctx : VarCtx) : TContext Unit :=
+  { types := [ctx.fmap (fun mty => (LTy.forAll [] mty))], aliases := Γ.aliases }
+
+/-- Looking up `x` in `procToTCtxΓ Γ ctx` is the flat-context lookup with its
+    monotype wrapped as a trivial polytype (the `types` field is independent of
+    `Γ`, so this is `procToTCtx_find` verbatim). -/
+theorem procToTCtxΓ_find (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier Unit) :
+    (procToTCtxΓ Γ ctx).types.find? x = (Map.find? ctx x).map (fun mty => (LTy.forAll [] mty)) := by
+  show Maps.find? [ctx.fmap _] x = _
+  cases h : Map.find? ctx x <;>
+    simp [Maps.find?, Map.find?_fmap, h]
+
+/-- The `VarCtx ↔ TContext` correspondence holds for `procToTCtxΓ Γ` at *every*
+    flat context, for *any* `Γ` — the correspondence only inspects the `.types`
+    field, which is independent of `Γ.aliases`. -/
+theorem procToTCtxΓ_corr (Γ : TContext Unit) (ctx : VarCtx) :
+    VarCtxCorresponds ctx (procToTCtxΓ Γ ctx) := by
+  constructor
+  · intro x mty hfind
+    rw [procToTCtxΓ_find]
+    unfold VarCtx.find? at hfind
+    rw [hfind]; rfl
+  · intro x hfresh
+    rw [procToTCtxΓ_find]
+    unfold VarCtx.isFresh VarCtx.find? at hfresh
+    rw [Option.isNone_iff_eq_none] at hfresh
+    rw [hfresh]; rfl
+
+/-- `procToTCtxΓ Γ` commutes with `VarCtx.insert`: the `init`-command obligation
+    (aliases carry through unchanged, and the `types` update mirrors
+    `procToTCtx_insert`). -/
+theorem procToTCtxΓ_insert (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
+    procToTCtxΓ Γ (ctx.insert x mty) =
+      { procToTCtxΓ Γ ctx with types := (procToTCtxΓ Γ ctx).types.insert x (LTy.forAll [] mty) } := by
+  unfold procToTCtxΓ
+  simp only [TContext.mk.injEq]
+  show [(ctx.insert x mty).fmap _] = Maps.insert [ctx.fmap _] x (LTy.forAll [] mty) ∧ _
+  rw [Maps.insert_singleton, Map.fmap_insert]
+  exact ⟨rfl, by simp⟩
+
+/-- **The Γ-parameterized statement-generator soundness environment**: identical
+    to `procStmtEnv` except its `toTCtx` carries the ambient `Γ`'s alias list. All
+    non-`toTCtx` obligations (`corr`/`toTCtx_insert`) are unaffected by aliases,
+    and `exprSound`/`freshDisjoint` hold at every `ctx`'s own derived
+    free-variable projection `ctx.toFVarCtx` (exactly as in `procStmtEnv`). -/
+def procStmtEnvΓ (Γ : TContext Unit) (octx : OpCtx) (tvars : List TyIdentifier) :
+    GenStmtSoundEnv octx tvars where
+  toTCtx := procToTCtxΓ Γ
+  corr := procToTCtxΓ_corr Γ
+  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ e he
+  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d
+  toTCtx_insert := procToTCtxΓ_insert Γ
+
+@[simp] theorem procStmtEnvΓ_toTCtx (Γ : TContext Unit) (octx : OpCtx) (tvars : List TyIdentifier) :
+    (procStmtEnvΓ Γ octx tvars).toTCtx = procToTCtxΓ Γ := rfl
+
 end StrataGenerators.Procedure

@@ -471,7 +471,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     -- `mem_support_frequency_iff` — so this changes only the distribution, and
     -- the `rcases` arity in the soundness/completeness proofs is unchanged.)
     let wExit := if labels.isEmpty then 0 else 1
-    let wCall := if procs.isEmpty then 0 else 1
+    let wCall := if procs.isEmpty then 0 else 3
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
       [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx 0),
         (wExit, fun () => genExitStmt labels C ctx),
@@ -485,7 +485,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     -- See the `size = 0` case: `exit`/`call` are weighted 0 when their support is
     -- provably empty (no enclosing label / no callee).
     let wExit := if labels.isEmpty then 0 else 1
-    let wCall := if procs.isEmpty then 0 else 1
+    let wCall := if procs.isEmpty then 0 else 3
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
       [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1)),
         (wExit, fun () => genExitStmt labels C ctx),

@@ -142,8 +142,16 @@ def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
 
     `noFilter` / statement `MetaData` are at their defaults.
 
+    The body is generated under the *ambient* context `C` (its type parameters
+    marked rigid) rather than a hardcoded `LContext.default`, so a caller can thread
+    in the context under which the surrounding program is being checked; the ambient
+    type-scope `Γ` is likewise threaded to the soundness statement (see
+    `genProcedure_sound`). Passing `LContext.default` and `{}` recovers the old
+    behaviour.
+
     See `genProcedure_sound` for the well-typedness guarantee. -/
-def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
+def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat) :
     G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
@@ -191,7 +199,7 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
     -- `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters
     -- before checking the body, and pins a generated `init`'s stored type to its
     -- annotation (see `genProcedure_complete` / the statement-level `hRigid`).
-    ({ LContext.default with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) size len
+    ({ C with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) size len
   pure {
     header := {
       name := ⟨name, ()⟩,
@@ -237,7 +245,7 @@ instance instToFormatUnitProcedureHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of procedures at size 2, up to 4 body statements.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let p ← genProcedure [] [] 2 4
+  let p ← genProcedure [] [] LContext.default {} 2 4
   IO.println <| Std.format p.header |>.pretty : IO Unit)
 
 end StrataGenerators.Procedure

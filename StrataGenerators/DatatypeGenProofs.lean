@@ -2147,6 +2147,13 @@ theorem allDatatypes_push {C : LContext CoreLParams} {block : MutualDatatype Uni
       C.datatypes.allDatatypes ++ block := by
   simp [TypeFactory.allDatatypes, Array.toList_push, List.flatten_append]
 
+/-- `allDatatypes_push` for an arbitrary factory (not just one that is some
+    context's `datatypes` field). Used by `tySymInhab_push`, which is stated over a
+    bare `TypeFactory`. -/
+theorem allDatatypes_push' {F : @TypeFactory Unit} {block : MutualDatatype Unit} :
+    TypeFactory.allDatatypes (F.push block) = F.allDatatypes ++ block := by
+  simp [TypeFactory.allDatatypes, Array.toList_push, List.flatten_append]
+
 /-- `getType` on a factory with `block` added. A push of `block` makes the name of each member
     resolve to that member. This result needs two conditions. The name must not already
     resolve in `C.datatypes`, therefore it is fresh. The block names must be different in
@@ -2172,23 +2179,159 @@ theorem getType_push_other {C : LContext CoreLParams} {block : MutualDatatype Un
   rw [TypeFactory.getType, allDatatypes_push, List.find?_append, hnone, Option.none_or,
       find?_name_eq_none hne]
 
+/-! ### Transporting inhabitance of an *existing* datatype across a block push
+
+`MutualADTWF.inhabited` is stated in the *extended* factory
+`C.datatypes.push block`, but a datatype that is already stored in `C` carries its
+inhabitance in `C.datatypes`. Moving the latter to the former is what lets a
+generated block reference a datatype declared by an *earlier* declaration —
+interleaving direction (4) of `docs/program-gen-interleaving.md`, which the design
+doc had ruled out on the grounds that a stored datatype cannot ride
+`TySymInhab.external`. It does not need to: it rides `TySymInhab.datatype`, whose
+premise is exactly the inhabitance we already have.
+
+Inhabitance is **not** monotone under `push` in general. A derivation in
+`C.datatypes` may use `.external name` for a symbol that is absent from
+`C.datatypes` but *is* one of `block`'s names; after the push that symbol resolves
+to a block datatype, and `.external` no longer applies. The extra hypothesis
+`hstored` rules this out: no block name occurs in any constructor argument of any
+datatype stored in `C`. The fold maintains it because every block name is drawn
+fresh against a reserved set that already contains every type name referenced by
+the stored datatypes. -/
+
+/-- **Inhabitance survives a block push**, given that the pushed names are new and
+    do not occur in the existing factory's constructor arguments.
+
+    The proof is the three-relation recursor with the "no block name occurs here"
+    side condition threaded through all three motives:
+
+    * `TyInhab ty` transports when `BlockAbsent block ty`;
+    * `TySymInhab n` transports when `n` is not a block name;
+    * `ConstrInhab c` transports when no block name occurs in `c`'s arguments.
+
+    The `.external` case is where `hstored` is consumed: the symbol stayed `none`
+    after the push precisely because it is not a block name. The `.datatype` case
+    uses `hstored` to feed the induction hypothesis for the witnessing
+    constructor's arguments. -/
+theorem tySymInhab_push {adts : @TypeFactory Unit} {block : MutualDatatype Unit}
+    (hstored : ∀ d ∈ adts.allDatatypes, ∀ c ∈ d.constrs, ∀ arg ∈ c.args,
+      BlockAbsent block arg.2)
+    {name : String} (hname : name ∉ block.map (·.name))
+    (h : TySymInhab adts name) :
+    TySymInhab (adts.push block) name := by
+  -- `getType` on the pushed factory agrees with `adts` off the block names.
+  have hget : ∀ n, n ∉ block.map (·.name) →
+      TypeFactory.getType (adts.push block) n = adts.getType n := by
+    intro n hn
+    rcases hsome : adts.getType n with _ | d
+    · rw [TypeFactory.getType, allDatatypes_push', List.find?_append,
+        (show adts.allDatatypes.find? (fun d' => d'.name == n) = none from hsome),
+        Option.none_or, find?_name_eq_none hn]
+    · rw [TypeFactory.getType, allDatatypes_push', List.find?_append,
+        (show adts.allDatatypes.find? (fun d' => d'.name == n) = some d from hsome),
+        Option.some_or]
+  refine TySymInhab.rec
+    (motive_1 := fun ty _ => BlockAbsent block ty → TyInhab (adts.push block) ty)
+    (motive_2 := fun n _ => n ∉ block.map (·.name) → TySymInhab (adts.push block) n)
+    (motive_3 := fun c _ => (∀ arg ∈ c.args, BlockAbsent block arg.2) →
+      ConstrInhab (adts.push block) c)
+    ?ftvar ?bitvec ?tcons ?external ?datatype ?mk h hname
+  case ftvar => intro v _; exact .ftvar v
+  case bitvec => intro sz _; exact .bitvec sz
+  case tcons =>
+    -- The head is not a block name (no block name occurs at all), and each argument
+    -- is likewise block-absent.
+    intro nm args _ _ ihsym ihargs habs
+    exact .tcons nm args (ihsym (head_not_mem_of_blockAbsent habs))
+      (fun a ha => ihargs a ha (blockAbsent_of_mem_args habs ha))
+  case external =>
+    -- `nm` stayed unresolved after the push, because it is not a block name.
+    intro nm hnone hnm
+    exact .external nm (by rw [hget nm hnm]; exact hnone)
+  case datatype =>
+    -- `nm` resolves to the *same* stored datatype after the push. Its witnessing
+    -- constructor's arguments hold no block name (`hstored`), so the induction
+    -- hypothesis applies.
+    intro nm d c hsome hmem _ ihc hnm
+    refine .datatype nm d c (by rw [hget nm hnm]; exact hsome) hmem (ihc ?_)
+    have hd : d ∈ adts.allDatatypes := List.mem_of_find?_eq_some hsome
+    exact fun arg harg => hstored d hd c hmem arg harg
+  case mk =>
+    intro c _ ihargs habs
+    exact .mk c (fun arg harg => ihargs arg harg (habs arg harg))
+
+
+/-! #### The pool of *previously declared* datatypes (interleaving direction (4))
+
+`ContextOk`'s externality fields (`base_external` / `tyCon_external`) say that
+every referenceable head is a known primitive, *not* a datatype of `C`. That is
+how the head gets `TySymInhab` — via `.external`. It is also why a datatype
+declared by an earlier declaration cannot simply be appended to `tyCons`: it *is*
+a datatype of `C`, so the field is false for it.
+
+But externality is only a *means* to inhabitance. A stored datatype reaches
+`TySymInhab` through the other constructor, `.datatype`, and the fold already
+knows the required premise, because the datatype entered `C` only through a gated
+`addMutualBlock` whose block had been proved `MutualADTWF` (whose `inhabited`
+field is exactly this). So prior datatypes are carried in a *separate* pool with
+its own hypothesis bundle, and the inhabitance lemmas case on which pool a head
+came from. `ContextOk` and `defaultContextOk` are untouched. -/
+
+/-- What the ambient context must give about a pool of *previously declared*
+    datatype constructors that a new block may reference. Unlike `ContextOk`'s
+    `tyCons`, these names are datatypes of `C`, so they are inhabited by
+    `TySymInhab.datatype` rather than `.external`.
+
+    `known` feeds `MutualADTWF.refsKnown` (via the `allTypeNames` disjunct);
+    `inhab` feeds `MutualADTWF.inhabited` (transported across the block push by
+    `tySymInhab_push`). -/
+structure DatatypePoolOk (C : LContext CoreLParams) (dtCons : List KnownTyCon) : Prop where
+  /-- Each pool name resolves as an existing datatype of `C`. -/
+  known : ∀ kc ∈ dtCons, kc.1 ∈ C.datatypes.allTypeNames
+  /-- Each pool name is inhabited in `C`'s own factory. -/
+  inhab : ∀ kc ∈ dtCons, TySymInhab C.datatypes kc.1
+
+/-- Every constructor argument of every datatype stored in `C` is free of block
+    names. This is the side condition `tySymInhab_push` needs, packaged for reuse.
+    The fold maintains it because block names are drawn fresh against a reserved
+    set that already contains every type name the stored datatypes mention. -/
+def StoredRefsAbsent (C : LContext CoreLParams) (block : MutualDatatype Unit) : Prop :=
+  ∀ d ∈ C.datatypes.allDatatypes, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, BlockAbsent block arg.2
+
+/-- **A pool datatype is inhabited in the extended factory.** Combines
+    `DatatypePoolOk.inhab` (inhabitance in `C.datatypes`) with `tySymInhab_push`
+    (transport across the push). The pool name must not be a block name — true
+    because block names are freshly drawn while pool names are existing datatypes
+    of `C`, hence reserved. -/
+theorem datatypePool_inhab_push {C : LContext CoreLParams} {block : MutualDatatype Unit}
+    {dtCons : List KnownTyCon} (hpool : DatatypePoolOk C dtCons)
+    (hstored : StoredRefsAbsent C block)
+    {kc : KnownTyCon} (hkc : kc ∈ dtCons) (hnotblk : kc.1 ∉ block.map (·.name)) :
+    TySymInhab (C.datatypes.push block) kc.1 :=
+  tySymInhab_push hstored hnotblk (hpool.inhab kc hkc)
+
 /-- **A type that holds no block name is inhabited in the longer factory.** This result needs
-    each type constructor head of that type to be a name from `baseTypes`, from `tyCons` or
-    `"arrow"`. That name must also be external in `C`. A block name cannot be such a head,
-    because no block name is present.
+    each type constructor head of that type to be a name from `baseTypes`, from `tyCons`,
+    from the prior-datatype pool `dtCons`, or `"arrow"`. A `baseTypes`/`tyCons`/`"arrow"`
+    head must be external in `C`; a `dtCons` head is inhabited by `DatatypePoolOk`. A block
+    name cannot be such a head, because no block name is present.
 
     The proof is an induction on the structure of the type. A rigid type variable and a
-    bitvector are inhabited at once. The head of a `.tcons name args` is external, therefore
-    it is `TySymInhab`. Each argument is inhabited by the induction hypothesis, because each
-    argument also holds no block name. -/
+    bitvector are inhabited at once. The head of a `.tcons name args` is `TySymInhab` —
+    through `.external` for the first three pools, or through the pool's transported
+    `.datatype` derivation for `dtCons`. Each argument is inhabited by the induction
+    hypothesis, because each argument also holds no block name. -/
 theorem tyInhab_of_absent {C : LContext CoreLParams} {block : MutualDatatype Unit}
-    {baseTypes : List String} {tyCons : List KnownTyCon}
+    {baseTypes : List String} {tyCons dtCons : List KnownTyCon}
     {extraReserved : List String}
     (hctx : ContextOk C baseTypes tyCons extraReserved)
+    (hpool : DatatypePoolOk C dtCons)
+    (hstored : StoredRefsAbsent C block)
     (harrow_ext : TypeFactory.getType (C.datatypes.push block) "arrow" = none)
     {ty : LMonoTy}
     (hrefs : ∀ r ∈ getTypeRefs ty,
-      r ∈ baseTypes ∨ r ∈ tyCons.map (·.1) ∨ r ∈ block.map (·.name) ∨ r = "arrow")
+      r ∈ baseTypes ∨ r ∈ tyCons.map (·.1) ∨ r ∈ dtCons.map (·.1) ∨
+        r ∈ block.map (·.name) ∨ r = "arrow")
     (habsent : BlockAbsent block ty) :
     TyInhab (C.datatypes.push block) ty := by
   induction ty using LMonoTy.induct with
@@ -2196,19 +2339,19 @@ theorem tyInhab_of_absent {C : LContext CoreLParams} {block : MutualDatatype Uni
   | bitvec n => exact .bitvec n
   | tcons name args ih =>
     -- The head `name` is the first reference. It is not a block name, because no block name
-    -- is present. Each name from `baseTypes` and `tyCons`, and also `"arrow"`, is external in
-    -- the longer factory. Therefore the symbol is inhabited through `TySymInhab.external`.
+    -- is present.
     have hname_ref : name ∈ getTypeRefs (.tcons name args) := by simp [getTypeRefs]
     have hname_notmem : name ∉ block.map (·.name) := head_not_mem_of_blockAbsent habsent
     have hsym : TySymInhab (C.datatypes.push block) name := by
-      have hext : TypeFactory.getType (C.datatypes.push block) name = none := by
-        rcases hrefs name hname_ref with hb | htc | hblk | harr
-        · exact getType_push_other hname_notmem (hctx.base_external _ hb)
-        · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp htc
-          exact getType_push_other hname_notmem (hctx.tyCon_external _ hkc)
-        · exact absurd hblk hname_notmem
-        · subst harr; exact harrow_ext
-      exact .external _ hext
+      rcases hrefs name hname_ref with hb | htc | hdt | hblk | harr
+      · exact .external _ (getType_push_other hname_notmem (hctx.base_external _ hb))
+      · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp htc
+        exact .external _ (getType_push_other hname_notmem (hctx.tyCon_external _ hkc))
+      · -- A prior datatype: inhabited through the pool, transported across the push.
+        obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp hdt
+        exact datatypePool_inhab_push hpool hstored hkc hname_notmem
+      · exact absurd hblk hname_notmem
+      · exact .external _ (by subst harr; exact harrow_ext)
     refine .tcons name args hsym (fun a ha => ?_)
     -- Each argument also holds no block name, and its references are a subset of the
     -- references of the whole type.
@@ -2246,24 +2389,50 @@ theorem BlockRefsWF.mono {block : MutualDatatype Unit} {tyParams : List TyIdenti
     The proof is a strong induction on `size` through the one-step description of the
     support. -/
 theorem genArgTy_tyInhab {C : LContext CoreLParams} {block : MutualDatatype Unit}
-    {baseTypes : List String} {tyCons : List KnownTyCon}
+    {baseTypes : List String} {allTyCons tyCons dtCons : List KnownTyCon}
     {extraReserved : List String} {poolRefs : List BlockRef}
     {tyParams : List TyIdentifier}
     (hctx : ContextOk C baseTypes tyCons extraReserved)
-    (hn : NamesOk baseTypes tyCons (block.map (·.name)))
+    (hpool : DatatypePoolOk C dtCons)
+    (hstored : StoredRefsAbsent C block)
+    (hsplit : ∀ kc ∈ allTyCons, kc ∈ tyCons ∨ kc ∈ dtCons)
+    (hn : NamesOk baseTypes allTyCons (block.map (·.name)))
     (hbr : BlockRefsWF block tyParams poolRefs)
     (harrow_ext : TypeFactory.getType (C.datatypes.push block) "arrow" = none)
     (hinhab : ∀ br ∈ poolRefs, TySymInhab (C.datatypes.push block) br.1) :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons poolRefs
+      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes allTyCons poolRefs
         tyParams rca size) →
       TyInhab (C.datatypes.push block) ty := by
-  -- A head from `baseTypes` or `tyCons` is external in the longer factory. It is not a
-  -- block name, therefore `getType_push_other` applies.
+  -- A head from `baseTypes` is external in the longer factory. It is not a block name,
+  -- therefore `getType_push_other` applies.
   have hbase_ext : ∀ b ∈ baseTypes, TypeFactory.getType (C.datatypes.push block) b = none :=
     fun b hb => getType_push_other (hn.base_notMem b hb) (hctx.base_external b hb)
-  have htyCon_ext : ∀ kc ∈ tyCons, TypeFactory.getType (C.datatypes.push block) kc.1 = none :=
-    fun kc hkc => getType_push_other (hn.tyCon_notMem kc hkc) (hctx.tyCon_external kc hkc)
+  -- A head from the *combined* vocabulary is inhabited: external if it came from `tyCons`,
+  -- and a transported `.datatype` derivation if it came from the prior-datatype pool.
+  have hTyConInhab : ∀ kc ∈ allTyCons, TySymInhab (C.datatypes.push block) kc.1 := by
+    intro kc hkc
+    rcases hsplit kc hkc with hext | hdt
+    · exact .external _ (getType_push_other (hn.tyCon_notMem kc hkc)
+        (hctx.tyCon_external kc hext))
+    · exact datatypePool_inhab_push hpool hstored hdt (hn.tyCon_notMem kc hkc)
+  -- References of a generated type land in the combined vocabulary; re-route them into the
+  -- five-way disjunction `tyInhab_of_absent` expects.
+  have hrefs_split : ∀ {ty : LMonoTy},
+      (∀ r ∈ getTypeRefs ty,
+        r ∈ baseTypes ∨ r ∈ allTyCons.map (·.1) ∨ r ∈ block.map (·.name) ∨ r = "arrow") →
+      ∀ r ∈ getTypeRefs ty,
+        r ∈ baseTypes ∨ r ∈ tyCons.map (·.1) ∨ r ∈ dtCons.map (·.1) ∨
+          r ∈ block.map (·.name) ∨ r = "arrow" := by
+    intro ty href r hr
+    rcases href r hr with hb | htc | hblk | harr
+    · exact Or.inl hb
+    · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp htc
+      rcases hsplit kc hkc with hext | hdt
+      · exact Or.inr (Or.inl (List.mem_map.mpr ⟨kc, hext, rfl⟩))
+      · exact Or.inr (Or.inr (Or.inl (List.mem_map.mpr ⟨kc, hdt, rfl⟩)))
+    · exact Or.inr (Or.inr (Or.inr (Or.inl hblk)))
+    · exact Or.inr (Or.inr (Or.inr (Or.inr harr)))
   intro size
   induction size using Nat.strongRecOn with
   | _ size ih =>
@@ -2287,16 +2456,16 @@ theorem genArgTy_tyInhab {C : LContext CoreLParams} {block : MutualDatatype Unit
       rw [LMonoTy.arrow]
       refine .tcons "arrow" [t1, t2] (.external _ harrow_ext) (fun a ha => ?_)
       rcases List.mem_cons.mp ha with rfl | ha
-      · exact tyInhab_of_absent hctx harrow_ext (genArgTy_refs hbr _ h1)
-          (genArgTy_absent hn _ h1)
+      · exact tyInhab_of_absent hctx hpool hstored harrow_ext
+          (hrefs_split (genArgTy_refs hbr _ h1)) (genArgTy_absent hn _ h1)
       · rcases List.mem_cons.mp ha with rfl | ha
         · exact ih _ hhalf h2
         · cases ha
-    · -- An applied type constructor. Its head is external, and its arguments hold no block
-      -- name, because the flag is `false`.
-      refine .tcons k args (.external _ (htyCon_ext (k, args.length) hkc)) (fun a ha => ?_)
-      exact tyInhab_of_absent hctx harrow_ext (genArgTy_refs hbr _ (hall a ha))
-        (genArgTy_absent hn _ (hall a ha))
+    · -- An applied type constructor. Its head is inhabited (external, or a prior datatype),
+      -- and its arguments hold no block name, because the flag is `false`.
+      refine .tcons k args (hTyConInhab (k, args.length) hkc) (fun a ha => ?_)
+      exact tyInhab_of_absent hctx hpool hstored harrow_ext
+        (hrefs_split (genArgTy_refs hbr _ (hall a ha))) (genArgTy_absent hn _ (hall a ha))
 
 /-! ### A permutation of the block keeps `MutualADTWF`
 
@@ -2385,13 +2554,18 @@ open Core Core.TypeSpec
     The inhabited constructor of a datatype at the smallest rank refers to no block datatype.
     Each datatype at a higher rank is inhabited through the block datatypes of a lower rank,
     and those datatypes are themselves inhabited. This proof uses no order of the datatypes. -/
-theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String} {tyCons : List KnownTyCon}
+theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String}
+    {allTyCons tyCons dtCons : List KnownTyCon}
     {C : LContext CoreLParams}
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {extraReserved : List String} {block : MutualDatatype Unit}
-    (harrow : ∀ kc ∈ tyCons, kc.1 ≠ "arrow")
+    (harrow : ∀ kc ∈ allTyCons, kc.1 ≠ "arrow")
     (hctx : ContextOk C baseTypes tyCons extraReserved)
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hpool : DatatypePoolOk C dtCons)
+    (hstored : StoredRefsAbsent C block)
+    (hsplit : ∀ kc ∈ allTyCons, kc ∈ tyCons ∨ kc ∈ dtCons)
+    (hsubTC : ∀ kc ∈ tyCons, kc ∈ allTyCons)
+    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes allTyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∀ d ∈ block, TySymInhab (C.datatypes.push block) d.name := by
@@ -2421,7 +2595,7 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String} {tyCon
     rw [this]
   have hnodupH : (headers.map (·.name)).Nodup := by
     rw [hheadernames]; exact genFreshNames_nodup _ _ _ hnames
-  have hfresh : ∀ h ∈ headers, h.name ∉ initialReserved baseTypes tyCons extraReserved := by
+  have hfresh : ∀ h ∈ headers, h.name ∉ initialReserved baseTypes allTyCons extraReserved := by
     intro h hh
     have : h.name ∈ names := by rw [← hheadernames]; exact List.mem_map.mpr ⟨h, hh, rfl⟩
     exact genFreshNames_fresh _ _ _ hnames h.name this
@@ -2430,18 +2604,34 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String} {tyCon
       obtain ⟨⟨h, r⟩, hhr, h1, h2⟩ := (genConstructorsForAllTypes_shape hrhsub rankedHeaders block hrhsub hbodies d hd).1
       exact ⟨h, hrhsub (h, r) hhr, h1, h2⟩
   have hnodup : (block.map (·.name)).Nodup := by rw [hbnames]; exact hnodupH
-  have hnfresh : ∀ n ∈ block.map (·.name), n ∉ initialReserved baseTypes tyCons extraReserved := by
+  have hnfresh : ∀ n ∈ block.map (·.name), n ∉ initialReserved baseTypes allTyCons extraReserved := by
     rw [hbnames]; intro n hn; obtain ⟨h, hh, rfl⟩ := List.mem_map.mp hn; exact hfresh h hh
-  have hn : NamesOk baseTypes tyCons (block.map (·.name)) := namesOk_of_fresh harrow hnfresh
+  have hn : NamesOk baseTypes allTyCons (block.map (·.name)) := namesOk_of_fresh harrow hnfresh
   have harrow_notmem : "arrow" ∉ block.map (·.name) :=
     fun hmem => hn.block_ne_arrow _ hmem rfl
   have harrow_ext : TypeFactory.getType (C.datatypes.push block) "arrow" = none :=
     getType_push_other harrow_notmem hctx.arrow_external
+  -- `ContextOk` reserves against `tyCons`, while freshness is stated against the wider
+  -- `allTyCons`. The former's reserved set is contained in the latter's (`initialReserved`
+  -- mentions the vocabulary positively), so freshness against `allTyCons` is the stronger
+  -- fact and transfers.
+  have hinit_mono : ∀ x, x ∈ initialReserved baseTypes tyCons extraReserved →
+      x ∈ initialReserved baseTypes allTyCons extraReserved := by
+    intro x hx
+    simp only [initialReserved, List.mem_cons, List.mem_append] at hx ⊢
+    rcases hx with h | ((h | h) | h) | h
+    · exact Or.inl h
+    · exact Or.inr (Or.inl (Or.inl (Or.inl h)))
+    · exact Or.inr (Or.inl (Or.inl (Or.inr h)))
+    · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp h
+      exact Or.inr (Or.inl (Or.inr (List.mem_map.mpr ⟨kc, hsubTC kc hkc, rfl⟩)))
+    · exact Or.inr (Or.inr h)
   have hnew : ∀ d ∈ block, C.datatypes.getType d.name = none := by
     intro d hd
     rcases hsome : C.datatypes.getType d.name with _ | dd
     · rfl
-    · exact absurd (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome))
+    · exact absurd
+        (hinit_mono _ (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome)))
         (hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩))
   -- Each `d ∈ block` has a header with its rank, which is `(h, r)`. It also has an inhabited
   -- constructor, and the generator drew that constructor from the set of names for a lower
@@ -2494,7 +2684,7 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String} {tyCon
       intro arg harg
       obtain ⟨size, hsize⟩ := hwit arg harg
       rw [hwparams] at hsize
-      exact genArgTy_tyInhab hctx hn hpoolWF harrow_ext hpoolInhab size hsize
+      exact genArgTy_tyInhab hctx hpool hstored hsplit hn hpoolWF harrow_ext hpoolInhab size hsize
   -- Each `d ∈ block` has a header with its rank, and that header holds its name. Therefore
   -- `key` applies.
   intro d hd
@@ -2509,19 +2699,37 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String} {tyCon
     that the caller gives, which is `tyCon_ne_arrow`, as for `argsWF`. The second is the
     structure `ContextOk`, which says how the ambient context must relate to the names that
     the generator uses. -/
-theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String} {tyCons : List KnownTyCon}
+theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
+    {allTyCons tyCons dtCons : List KnownTyCon}
     {C : LContext CoreLParams}
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {extraReserved : List String} {block : MutualDatatype Unit}
-    (harrow : ∀ kc ∈ tyCons, kc.1 ≠ "arrow")
+    (harrow : ∀ kc ∈ allTyCons, kc.1 ≠ "arrow")
     (hctx : ContextOk C baseTypes tyCons extraReserved)
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hpool : DatatypePoolOk C dtCons)
+    (hstored : StoredRefsAbsent C block)
+    (hsplit : ∀ kc ∈ allTyCons, kc ∈ tyCons ∨ kc ∈ dtCons)
+    (hsubTC : ∀ kc ∈ tyCons, kc ∈ allTyCons)
+    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes allTyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     MutualADTWF C block := by
   obtain ⟨headers, hne, hbnames, hnodupH, hfresh, hheader, _⟩ := genMutuallyRecursiveDatatypes_shape hb
-  have hnfresh : ∀ n ∈ block.map (·.name), n ∉ initialReserved baseTypes tyCons extraReserved := by
+  have hnfresh : ∀ n ∈ block.map (·.name), n ∉ initialReserved baseTypes allTyCons extraReserved := by
     rw [hbnames]; intro n hn; obtain ⟨h, hh, rfl⟩ := List.mem_map.mp hn; exact hfresh h hh
+  -- `ContextOk` reserves against `tyCons ⊆ allTyCons`, so its reserved set is contained in
+  -- the one block names were drawn fresh against.
+  have hinit_mono : ∀ x, x ∈ initialReserved baseTypes tyCons extraReserved →
+      x ∈ initialReserved baseTypes allTyCons extraReserved := by
+    intro x hx
+    simp only [initialReserved, List.mem_cons, List.mem_append] at hx ⊢
+    rcases hx with h | ((h | h) | h) | h
+    · exact Or.inl h
+    · exact Or.inr (Or.inl (Or.inl (Or.inl h)))
+    · exact Or.inr (Or.inl (Or.inl (Or.inr h)))
+    · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp h
+      exact Or.inr (Or.inl (Or.inr (List.mem_map.mpr ⟨kc, hsubTC kc hkc, rfl⟩)))
+    · exact Or.inr (Or.inr h)
   refine
     { nonempty := hne
       namesNodup := by rw [hbnames]; exact hnodupH
@@ -2534,13 +2742,15 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String} {tyC
   · -- namesFresh: no block name is a known type of `C`.
     intro d hd hcontains
     -- A known-type name of `C` is reserved, but block names are drawn fresh.
-    exact hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩) (hctx.knownTypes_reserved _ (by
-      simpa [KnownTypes.containsName, KnownTypes.keywords] using hcontains))
+    exact hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩)
+      (hinit_mono _ (hctx.knownTypes_reserved _ (by
+        simpa [KnownTypes.containsName, KnownTypes.keywords] using hcontains)))
   · -- namesNew: no block name is an existing datatype of `C`.
     intro d hd
     rcases hsome : C.datatypes.getType d.name with _ | dd
     · rfl
-    · exact absurd (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome))
+    · exact absurd
+        (hinit_mono _ (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome)))
         (hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩))
   · -- The field `argsWF`. It is exactly `genMutuallyRecursiveDatatypes_argsWF`.
     exact genMutuallyRecursiveDatatypes_argsWF harrow hb
@@ -2553,13 +2763,17 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String} {tyC
       · exact Or.inl hk
       · exact Or.inr (Or.inl hdt)
     · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp htc
-      rcases hctx.tyCon_known kc hkc with hk | hdt
-      · exact Or.inl hk
-      · exact Or.inr (Or.inl hdt)
+      -- A vocabulary reference is either an external known type (`ContextOk`) or a
+      -- previously declared datatype (`DatatypePoolOk.known`).
+      rcases hsplit kc hkc with hext | hdt
+      · rcases hctx.tyCon_known kc hext with hk | hdt'
+        · exact Or.inl hk
+        · exact Or.inr (Or.inl hdt')
+      · exact Or.inr (Or.inl (hpool.known kc hdt))
     · exact Or.inr (Or.inr hblk)
     · subst harr; exact Or.inl hctx.arrow_known
   · -- The field `inhabited`.
-    exact genMutuallyRecursiveDatatypes_inhabited harrow hctx hb
+    exact genMutuallyRecursiveDatatypes_inhabited harrow hctx hpool hstored hsplit hsubTC hb
   · -- The field `argVarsScoped`.
     exact genMutuallyRecursiveDatatypes_argVarsScoped hb
 
@@ -2640,7 +2854,15 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
             defaultTyCons maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs
             maxArgs maxSize Core.KnownTypes.keywords)) :
     MutualADTWF coreContext block :=
-  genMutuallyRecursiveDatatypes_MutualADTWF defaultTyCons_ne_arrow defaultContextOk hb
+  -- `coreContext` holds no datatypes, so the prior-datatype pool is empty and both of its
+  -- side conditions (`DatatypePoolOk`, `StoredRefsAbsent`) are vacuous.
+  genMutuallyRecursiveDatatypes_MutualADTWF (dtCons := []) defaultTyCons_ne_arrow
+    defaultContextOk
+    { known := by simp, inhab := by simp }
+    (by
+      intro d hd
+      simp [coreContext, TypeFactory.allDatatypes] at hd)
+    (fun kc hkc => Or.inl hkc) (fun kc hkc => hkc) hb
 
 /-! ### A permutation of the block keeps `MutualADTWF`
 

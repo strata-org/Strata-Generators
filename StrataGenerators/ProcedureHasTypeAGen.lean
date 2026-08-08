@@ -105,6 +105,36 @@ theorem procBodyContext_inout (name : String) (tyArgs : List TyIdentifier)
   simp only [Map.fmap, List.map_append, List.map_map]
   rfl
 
+/-- **Context alignment (in-out), Γ-parameterized.** For the three-block layout
+    (shared block `M` leading both signatures) over an ambient type-scope `Γ` with
+    `Γ.types = []`, the declarative body context `procBodyContext Γ proc` is exactly
+    the single-scope `procToTCtxΓ Γ (inputs ++ outputs ++ oldVars M)`. `procBodyContext`
+    pushes the body scope onto `Γ.types` and preserves `Γ.aliases`; with `Γ.types = []`
+    the pushed stack is a single scope, and `procToTCtxΓ Γ` carries the same
+    `Γ.aliases`. This is the bridge between the generator (which threads
+    `procToTCtxΓ Γ` over `inputs ++ outputs ++ oldVars M` via `procStmtEnvΓ Γ`) and the
+    spec's `procBodyContext Γ`. -/
+theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
+    (name : String) (tyArgs : List TyIdentifier)
+    (M I O : List ((Identifier Unit) × LMonoTy))
+    (hI : ∀ p ∈ I, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = false)
+    (hM : ∀ p ∈ M, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = true)
+    (pre post : ListMap CoreLabel Procedure.Check) (body : Procedure.Body) :
+    procBodyContext Γ
+      { header := { name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I, outputs := M ++ O,
+                    noFilter := false },
+        spec := { preconditions := pre, postconditions := post },
+        body := body } =
+    procToTCtxΓ Γ (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))) := by
+  unfold procBodyContext procToTCtxΓ
+  rw [getInoutParams_inout name tyArgs M I O hI hM]
+  simp only [hΓtypes, Maps.push]
+  congr 1
+  show [_] = [Map.fmap _ (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))]
+  congr 1
+  simp only [Map.fmap, List.map_append, List.map_map]
+  rfl
+
 -- ── Facts about `disjointInputs` ──────────────────────────────────────────
 
 /-- After removing every input whose key collides with an output, no surviving
@@ -419,6 +449,201 @@ theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdent
   simp only [genChecks, mem_support_bind_iff]
   exact ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
 
+-- ── rigidTypeVars weakening ───────────────────────────────────────────────
+
+/-- **`RigidAnnotCompat` is antitone in `rigidVars`.** Shrinking the rigid-variable
+    set only *weakens* the "σ is identity on rigid vars" constraint on the
+    witnessing substitution, so the same σ still works. No reflexivity or
+    generator-specific fact is needed. -/
+theorem RigidAnnotCompat.weaken {aliases : List TypeAlias} {rv1 rv2 : List TyIdentifier}
+    {ann mty : LMonoTy} (h : RigidAnnotCompat aliases rv1 ann mty) (hsub : rv2 ⊆ rv1) :
+    RigidAnnotCompat aliases rv2 ann mty := by
+  obtain ⟨σ, hfix, haeq⟩ := h
+  exact ⟨σ, fun v hv => hfix v (hsub hv), haeq⟩
+
+/-- **`CmdHasType'` rigidTypeVars weakening.** The ambient `C` is consumed by
+    `CmdHasType'` (under `instHasTypeA`) only via `C.rigidTypeVars` in the
+    `RigidAnnotCompat` premise of the `init` cases (`exprTyped` ignores `C`), so
+    replacing `C.rigidTypeVars` by any subset `rv` preserves typing. `CmdHasType'`
+    leaves `C` untouched in its output, so only `Γ` threads through. -/
+theorem CmdHasTypeA_weaken_rigid {C : LContext CoreLParams}
+    {Γ Γ' : TContext Unit} {c : Cmd Expression} {rv : List TyIdentifier}
+    (h : CmdHasTypeA C Γ c Γ') (hsub : rv ⊆ C.rigidTypeVars) :
+    CmdHasTypeA { C with rigidTypeVars := rv } Γ c Γ' := by
+  cases h with
+  | init_det x xty e mty tys md hfresh hnovar hlen hcompat hexpr =>
+    exact CmdHasType'.init_det _ x xty e mty tys md hfresh hnovar hlen
+      (RigidAnnotCompat.weaken hcompat hsub) hexpr
+  | init_nondet x xty mty tys md hfresh hlen hcompat =>
+    exact CmdHasType'.init_nondet _ x xty mty tys md hfresh hlen
+      (RigidAnnotCompat.weaken hcompat hsub)
+  | set_det x mty e md hfind hexpr => exact CmdHasType'.set_det _ x mty e md hfind hexpr
+  | set_nondet x mty md hfind => exact CmdHasType'.set_nondet _ x mty md hfind
+  | assert l e md hexpr => exact CmdHasType'.assert _ l e md hexpr
+  | assume l e md hexpr => exact CmdHasType'.assume _ l e md hexpr
+  | cover l e md hexpr => exact CmdHasType'.cover _ l e md hexpr
+
+/-- **`CmdExtHasType'` rigidTypeVars weakening.** The `cmd` case delegates to
+    `CmdHasTypeA_weaken_rigid`; the `call` case's use of `C` is only through
+    `S.exprTyped C …` (which, under `instHasTypeA`, ignores `C`) and is otherwise
+    context-blind, so the very same witnesses transport. -/
+theorem CmdExtHasTypeA_weaken_rigid {P : Program} {C : LContext CoreLParams}
+    {Γ Γ' : TContext Unit} {c : Command} {rv : List TyIdentifier}
+    (h : CmdExtHasTypeA C P Γ c Γ') (hsub : rv ⊆ C.rigidTypeVars) :
+    CmdExtHasTypeA { C with rigidTypeVars := rv } P Γ c Γ' := by
+  cases h with
+  | cmd _ c0 hcmd =>
+    exact CmdExtHasType'.cmd _ _ c0 (CmdHasTypeA_weaken_rigid hcmd hsub)
+  | call pname callArgs proc md σ hfind hInLen hOutLen hLhs hIn hOut hInout =>
+    exact CmdExtHasType'.call _ pname callArgs proc md σ hfind hInLen hOutLen hLhs
+      hIn hOut hInout
+
+/-- **`FuncHasTypeA` is ambient-`C`-irrelevant.** Under `instHasTypeA`, every field
+    of `FuncHasType'` either ignores `C` (nodup/undeclared-vars are syntactic) or
+    uses it only through `S.exprTyped C … = HasTypeA [] …`, which drops `C`. So the
+    predicate transports across any change of ambient context. -/
+theorem FuncHasTypeA_C_irrel {C C' : LContext CoreLParams} {Γ : TContext Unit}
+    {func : Function} (h : FuncHasTypeA C Γ func) : FuncHasTypeA C' Γ func :=
+  { inputsNodup := h.inputsNodup
+    typeArgsNodup := h.typeArgsNodup
+    noUndeclaredVars := h.noUndeclaredVars
+    bodyTyped := h.bodyTyped
+    measureTyped := h.measureTyped }
+
+/-- **`StmtHasType'`/`StmtsHasType'` rigidTypeVars weakening** (annotated spec).
+    The ambient `C.rigidTypeVars` flows *unchanged* through every statement
+    constructor (`funcDecl` extends only `C.functions`, `typeDecl` only
+    `C.knownTypes`; neither touches `rigidTypeVars`), and it is consumed only
+    inside `cmd`'s `init` `RigidAnnotCompat`. So replacing `C.rigidTypeVars` by any
+    subset `rv` — and, in the output context, the same `rv` — preserves typing.
+    Proved by mutual induction on the derivation. -/
+theorem StmtHasTypeA_rigid_eq {P : Program} {C C' : LContext CoreLParams}
+    {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
+    (h : StmtHasTypeA P C Γ L s C' Γ') : C'.rigidTypeVars = C.rigidTypeVars := by
+  cases h with
+  | cmd => rfl
+  | block => rfl
+  | ite_det => rfl
+  | ite_nondet => rfl
+  | loop => rfl
+  | exit => rfl
+  | funcDecl _ _ _ decl func md h_nrec h_func =>
+    simp only [LContext.addFactoryFunction]; split <;> rfl
+  | typeDecl _ C0' _ _ tc md h_add =>
+    simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at h_add
+    split at h_add
+    · simp only [reduceCtorEq] at h_add
+    · injection h_add with h_add_eq; rw [← h_add_eq]
+
+theorem StmtHasTypeA_weaken_rigid {P : Program} {C C' : LContext CoreLParams}
+    {Γ Γ' : TContext Unit} {L : List String} {s : Statement} {rv : List TyIdentifier}
+    (h : StmtHasTypeA P C Γ L s C' Γ') (hsub : rv ⊆ C.rigidTypeVars) :
+    StmtHasTypeA P { C with rigidTypeVars := rv } Γ L s { C' with rigidTypeVars := rv } Γ' := by
+  revert hsub
+  induction h using StmtHasType'.rec (motive_2 := fun C Γ L ss C' Γ' _ =>
+      rv ⊆ C.rigidTypeVars →
+      StmtsHasTypeA P { C with rigidTypeVars := rv } Γ L ss { C' with rigidTypeVars := rv } Γ') with
+  | cmd C Γ Γ' L c hc =>
+    intro hsub; exact StmtHasType'.cmd _ Γ Γ' L c (CmdExtHasTypeA_weaken_rigid hc hsub)
+  | block C Γ C_body Γ_body L label body md hlab hbody ih =>
+    intro hsub
+    exact StmtHasType'.block _ Γ { C_body with rigidTypeVars := rv } Γ_body L label body md
+      hlab (ih hsub)
+  | ite_det C Γ C_t Γ_t C_e Γ_e L cond thenb elseb md hcond hthen helse iht ihe =>
+    intro hsub
+    exact StmtHasType'.ite_det _ Γ { C_t with rigidTypeVars := rv } Γ_t
+      { C_e with rigidTypeVars := rv } Γ_e L cond thenb elseb md hcond (iht hsub) (ihe hsub)
+  | ite_nondet C Γ C_t Γ_t C_e Γ_e L thenb elseb md hthen helse iht ihe =>
+    intro hsub
+    exact StmtHasType'.ite_nondet _ Γ { C_t with rigidTypeVars := rv } Γ_t
+      { C_e with rigidTypeVars := rv } Γ_e L thenb elseb md (iht hsub) (ihe hsub)
+  | loop C Γ C_body Γ_body L guard measure invariants body md hg hm hi hbody ih =>
+    intro hsub
+    exact StmtHasType'.loop _ Γ { C_body with rigidTypeVars := rv } Γ_body L guard measure
+      invariants body md hg hm hi (ih hsub)
+  | exit C Γ L label md hmem =>
+    intro _; exact StmtHasType'.exit _ Γ L label md hmem
+  | funcDecl C Γ L decl func md hrec hfunc =>
+    intro _
+    -- `addFactoryFunction` leaves `rigidTypeVars` untouched, so the output context
+    -- is `{ (C.addFactoryFunction …) with rigidTypeVars := rv }`.
+    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addFactoryFunction func.toLFunc
+        = { C.addFactoryFunction func.toLFunc with rigidTypeVars := rv } := by
+      simp only [LContext.addFactoryFunction]; split <;> rfl
+    rw [← hcong]
+    exact StmtHasType'.funcDecl _ Γ L decl func md hrec (FuncHasTypeA_C_irrel hfunc)
+  | typeDecl C C0' Γ L tc md hadd =>
+    intro _
+    -- `addKnownTypeWithError` leaves `rigidTypeVars` untouched.
+    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addKnownTypeWithError
+        { name := tc.name, metadata := tc.numargs } default
+        = .ok { C0' with rigidTypeVars := rv } := by
+      simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at hadd ⊢
+      split at hadd
+      · simp only [reduceCtorEq] at hadd
+      · injection hadd with hadd_eq; subst hadd_eq; rfl
+    exact StmtHasType'.typeDecl _ { C0' with rigidTypeVars := rv } Γ L tc md hcong
+  | nil C Γ L => exact StmtsHasType'.nil _ Γ L
+  | cons C C' C'' Γ Γ' Γ'' L s ss hs hss ihs ihss =>
+    rename_i hsub
+    -- `hs`'s output `C'` has the same rigidTypeVars as `C` (statement typing
+    -- preserves them), so the tail's subset hypothesis is discharged.
+    have hrig : C'.rigidTypeVars = C.rigidTypeVars := StmtHasTypeA_rigid_eq hs
+    exact StmtsHasType'.cons _ { C' with rigidTypeVars := rv } _ Γ Γ' Γ'' L s ss
+      (ihs hsub) (ihss (hrig ▸ hsub))
+
+/-- **`StmtsHasType'` rigidTypeVars weakening** (list form), specializing the
+    mutual induction above. -/
+theorem StmtsHasTypeA_weaken_rigid {P : Program} {C C' : LContext CoreLParams}
+    {Γ Γ' : TContext Unit} {L : List String} {ss : List Statement} {rv : List TyIdentifier}
+    (h : StmtsHasTypeA P C Γ L ss C' Γ') (hsub : rv ⊆ C.rigidTypeVars) :
+    StmtsHasTypeA P { C with rigidTypeVars := rv } Γ L ss { C' with rigidTypeVars := rv } Γ' := by
+  revert hsub
+  induction h using StmtsHasType'.rec (motive_1 := fun C Γ L s C' Γ' _ =>
+      rv ⊆ C.rigidTypeVars →
+      StmtHasTypeA P { C with rigidTypeVars := rv } Γ L s { C' with rigidTypeVars := rv } Γ') with
+  | cmd C Γ Γ' L c hc =>
+    rename_i hsub; exact StmtHasType'.cmd _ Γ Γ' L c (CmdExtHasTypeA_weaken_rigid hc hsub)
+  | block C Γ C_body Γ_body L label body md hlab hbody ih =>
+    rename_i hsub
+    exact StmtHasType'.block _ Γ { C_body with rigidTypeVars := rv } Γ_body L label body md
+      hlab (ih hsub)
+  | ite_det C Γ C_t Γ_t C_e Γ_e L cond thenb elseb md hcond hthen helse iht ihe =>
+    rename_i hsub
+    exact StmtHasType'.ite_det _ Γ { C_t with rigidTypeVars := rv } Γ_t
+      { C_e with rigidTypeVars := rv } Γ_e L cond thenb elseb md hcond (iht hsub) (ihe hsub)
+  | ite_nondet C Γ C_t Γ_t C_e Γ_e L thenb elseb md hthen helse iht ihe =>
+    rename_i hsub
+    exact StmtHasType'.ite_nondet _ Γ { C_t with rigidTypeVars := rv } Γ_t
+      { C_e with rigidTypeVars := rv } Γ_e L thenb elseb md (iht hsub) (ihe hsub)
+  | loop C Γ C_body Γ_body L guard measure invariants body md hg hm hi hbody ih =>
+    rename_i hsub
+    exact StmtHasType'.loop _ Γ { C_body with rigidTypeVars := rv } Γ_body L guard measure
+      invariants body md hg hm hi (ih hsub)
+  | exit C Γ L label md hmem =>
+    exact StmtHasType'.exit _ Γ L label md hmem
+  | funcDecl C Γ L decl func md hrec hfunc =>
+    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addFactoryFunction func.toLFunc
+        = { C.addFactoryFunction func.toLFunc with rigidTypeVars := rv } := by
+      simp only [LContext.addFactoryFunction]; split <;> rfl
+    rw [← hcong]
+    exact StmtHasType'.funcDecl _ Γ L decl func md hrec (FuncHasTypeA_C_irrel hfunc)
+  | typeDecl C C0' Γ L tc md hadd =>
+    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addKnownTypeWithError
+        { name := tc.name, metadata := tc.numargs } default
+        = .ok { C0' with rigidTypeVars := rv } := by
+      simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at hadd ⊢
+      split at hadd
+      · simp only [reduceCtorEq] at hadd
+      · injection hadd with hadd_eq; subst hadd_eq; rfl
+    exact StmtHasType'.typeDecl _ { C0' with rigidTypeVars := rv } Γ L tc md hcong
+  | nil C Γ L => intro _; exact StmtsHasType'.nil _ Γ L
+  | cons C C' C'' Γ Γ' Γ'' L s ss hs hss ihs ihss =>
+    intro hsub
+    have hrig : C'.rigidTypeVars = C.rigidTypeVars := StmtHasTypeA_rigid_eq hs
+    exact StmtsHasType'.cons _ { C' with rigidTypeVars := rv } _ Γ Γ' Γ'' L s ss
+      (ihs hsub) (ihss (hrig ▸ hsub))
+
 -- ── Soundness ────────────────────────────────────────────────────────────
 
 set_option maxHeartbeats 800000 in
@@ -450,9 +675,10 @@ set_option maxHeartbeats 800000 in
       `mem_writable_append_keys`) or a body-defined variable. -/
 theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (size len : Nat)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     (proc : Procedure)
-    (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs size len)) :
-    ProcHasTypeA P { LContext.default with rigidTypeVars := proc.header.typeArgs } (default) proc := by
+    (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len)) :
+    ProcHasTypeA P { C with rigidTypeVars := proc.header.typeArgs } Γ proc := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hproc
   obtain ⟨name, _hname, typeArgs, htypeArgs, M, hM, rawInputOnly, hrawInputOnly,
           rawOutputOnly, hrawOutputOnly, pre, hpre, post, hpost,
@@ -543,22 +769,22 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     rw [List.contains_iff_mem, ListMap_keys_append, List.mem_append]
     exact Or.inl (by rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨p, hp, rfl⟩)
   -- Body soundness (seeded at `inputs ++ outputs ++ oldVars M`, immutable = inputs.keys ++ old.keys).
-  have hbodyTyped : StmtsHasTypeA P { LContext.default with rigidTypeVars := typeArgs }
-      ((procStmtEnv octx typeArgs).toTCtx
+  have hbodyTyped : StmtsHasTypeA P { C with rigidTypeVars := typeArgs }
+      ((procStmtEnvΓ Γ octx typeArgs).toTCtx
         (M ++ disjointInputs rawInputOnly M ++
           (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
-      body C' ((procStmtEnv octx typeArgs).toTCtx ctx') :=
-    genStmtChain_sound P (procStmtEnv octx typeArgs)
+      body C' ((procStmtEnvΓ Γ octx typeArgs).toTCtx ctx') :=
+    genStmtChain_sound P (procStmtEnvΓ Γ octx typeArgs)
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
       hProcs []
-      { LContext.default with rigidTypeVars := typeArgs }
+      { C with rigidTypeVars := typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
   have hmod := genStmtChain_mutableVars octx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
-      { LContext.default with rigidTypeVars := typeArgs }
+      { C with rigidTypeVars := typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len (body, C', ctx') hbody
@@ -621,13 +847,68 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     intro c hc
     exact genLExpr_sound _ octx [] typeArgs [] size .bool c.expr
       (genChecks_support _ octx typeArgs size post hpost c hc)
-  · -- bodyTyped: align the body context via `procBodyContext_inout`.
-    refine ProcBodyHasType'.structured body C' ((procStmtEnv octx typeArgs).toTCtx ctx') ?_
-    have heq := procBodyContext_inout name typeArgs M (disjointInputs rawInputOnly M)
+  · -- bodyTyped: align the body context via `procBodyContext_inoutΓ`.
+    refine ProcBodyHasType'.structured body C' ((procStmtEnvΓ Γ octx typeArgs).toTCtx ctx') ?_
+    have heq := procBodyContext_inoutΓ Γ hΓtypes name typeArgs M (disjointInputs rawInputOnly M)
       (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) hIc hMc pre post
       (.structured body)
-    rw [procStmtEnv_toTCtx] at hbodyTyped
+    rw [procStmtEnvΓ_toTCtx] at hbodyTyped
     exact heq ▸ hbodyTyped
+
+/-- **`ProcBodyHasType'` rigidTypeVars weakening.** Only the `structured` case
+    carries a `StmtsHasTypeA` obligation (weakened via `StmtsHasTypeA_weaken_rigid`);
+    the `cfg` case is unconstrained. The body-scope `Γ_body` is independent of the
+    ambient `C`. -/
+theorem ProcBodyHasTypeA_weaken_rigid {P : Program} {C : LContext CoreLParams}
+    {Γ_body : TContext Unit} {b : Procedure.Body} {rv : List TyIdentifier}
+    (h : ProcBodyHasType' LMonoTy P C Γ_body b) (hsub : rv ⊆ C.rigidTypeVars) :
+    ProcBodyHasType' LMonoTy P { C with rigidTypeVars := rv } Γ_body b := by
+  cases h with
+  | structured ss C'' Γ'' hst =>
+    exact ProcBodyHasType'.structured ss { C'' with rigidTypeVars := rv } Γ''
+      (StmtsHasTypeA_weaken_rigid hst hsub)
+  | cfg c => exact ProcBodyHasType'.cfg c
+
+/-- **Soundness of `genProcedure` at the *ambient* context.** `genProcedure_sound`
+    concludes at the `typeArgs`-overridden rigid context (matching
+    `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters before
+    checking the body). But the program-level spec `DeclHasType'.proc` threads the
+    ambient `C` *unchanged*. This lemma bridges the two: since the body's
+    `StmtsHasTypeA` consumes `C.rigidTypeVars` only through the reflexive-friendly,
+    antitone `RigidAnnotCompat` in `init` (and the contract clauses ignore `C`
+    entirely under `instHasTypeA`), the conclusion transports down to any rigid set
+    `C.rigidTypeVars ⊆ proc.header.typeArgs` — in particular `C`'s own, via
+    `StmtsHasTypeA_weaken_rigid`.
+
+    The side-condition `C.rigidTypeVars ⊆ proc.header.typeArgs` holds vacuously when
+    the ambient `C.rigidTypeVars = []` (the program-generator fold's invariant), so
+    a caller with `hCrigid : C.rigidTypeVars = []` discharges it by
+    `hCrigid ▸ List.nil_subset _`. -/
+theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
+    (hProcs : ProcSigCorresponds procs P) (size len : Nat)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
+    (proc : Procedure)
+    (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len))
+    (hCrigid : C.rigidTypeVars ⊆ proc.header.typeArgs) :
+    ProcHasTypeA P C Γ proc := by
+  have hbase := genProcedure_sound P octx procs hProcs size len C Γ hΓtypes proc hproc
+  -- All fields except `bodyTyped` are ambient-`C`-blind (the contract clauses use
+  -- `S.exprTyped C … = HasTypeA [] …`, which drops `C`); only `bodyTyped` threads
+  -- `C.rigidTypeVars`, and it weakens down to `C`'s own rigid set.
+  refine { hbase with bodyTyped := ?_ }
+  -- `procBodyContext Γ proc` does not depend on the ambient `C`; the body typing
+  -- weakens down to `C`'s own rigid set. Weakening `{ C with rigidTypeVars := typeArgs }`
+  -- by `C.rigidTypeVars ⊆ typeArgs` yields the body typed at
+  -- `{ { C with rigidTypeVars := typeArgs } with rigidTypeVars := C.rigidTypeVars }`,
+  -- which is `C` (structure eta: all fields restored to `C`'s).
+  have hsub : C.rigidTypeVars ⊆
+      ({ C with rigidTypeVars := proc.header.typeArgs } : LContext CoreLParams).rigidTypeVars :=
+    hCrigid
+  have hw := ProcBodyHasTypeA_weaken_rigid (rv := C.rigidTypeVars) hbase.bodyTyped hsub
+  have hCeq : ({ ({ C with rigidTypeVars := proc.header.typeArgs } : LContext CoreLParams)
+      with rigidTypeVars := C.rigidTypeVars } : LContext CoreLParams) = C := rfl
+  rw [hCeq] at hw
+  exact hw
 
 -- ── Completeness ─────────────────────────────────────────────────────────
 
@@ -669,7 +950,8 @@ set_option maxHeartbeats 800000 in
 
     The block name-length / reachability conditions are stated concretely via
     `mem_support_genNameList_iff`. -/
-theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat)
+theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat)
     (proc : Procedure)
     (M I O : ListMap (Identifier Unit) LMonoTy)
     (bodyss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
@@ -721,9 +1003,9 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Na
     (hBodyReach : (bodyss, C', ctx') ∈ SetGen.support
       (genStmtChain (G := SetGen.Set) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
-        { LContext.default with rigidTypeVars := proc.header.typeArgs }
+        { C with rigidTypeVars := proc.header.typeArgs }
         (M ++ I ++ (M ++ O) ++ oldVars M) size len)) :
-    proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs size len) := by
+    proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM

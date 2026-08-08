@@ -862,7 +862,7 @@ def genProcsForTyche : IO (List Core.Procedure × Nat) := do
   for i in List.range n do
     let proc ← Plausible.Gen.run
       (retryGen 8000
-        (StrataGenerators.Procedure.genProcedure (G := Plausible.Gen) corePartialOps sigs size len))
+        (StrataGenerators.Procedure.genProcedure (G := Plausible.Gen) corePartialOps sigs LContext.default {} size len))
       genSize
     ps := ps ++ [proc]
     if proc.header.typeArgs.isEmpty then
