@@ -21,6 +21,11 @@ and it holds the contents of one `mutual … end` block. The block obeys the arg
 half of `Core.TypeSpec.MutualADTWF`. That half is the `argsWF`, `refsKnown` and
 `argVarsScoped` fields from `Strata.Languages.Core.DatatypeTypeSpec`.
 
+A **block datatype** is a datatype that this `mutual … end` block declares. The datatypes
+of one block can refer to each other, therefore they are mutually recursive. This module
+uses the term *block datatype* for each of them, and also for the datatype that the
+generator makes now.
+
 ## Shape
 
 `genArgTy` is the heart of the generator. It makes one constructor argument type. It
@@ -32,16 +37,16 @@ type constructor.
 This one flag makes the output well-formed. `DatatypeGenProofs.lean` changes the flag
 into a proof.
 
-A *recursive occurrence* is a reference to a datatype of the block. The generator emits
+A *recursive occurrence* is a reference to a block datatype. The generator emits
 more than a single self-reference. It emits any member of the supplied
-`blockRefs : List BlockRef`. These members are the block datatypes that the new
+`blockRefs : List BlockRef`. That list holds the block datatypes that the new
 datatype can refer to. Read the section "Type parameters" for the exact rule.
 
 The recursive occurrence is the one part of the generator that shows the change from a
 single datatype to a mutual block. The old code compared a head symbol against one
 `selfName`, but the conditions are now weaker. The head symbol must be a member of
 the set of block names. A recursive occurrence is `n (n's typeArgs)` for each block
-member `n`.
+datatype `n`.
 
 `genConstrArgs` and `genConstrs` make argument lists and constructors.
 `genConstructors` makes the constructors of one datatype, and
@@ -67,7 +72,7 @@ which the recursion on `size` stops, and the name `genLeafTy` comes from this pr
   `tyParams` holds these parameters. The type is `.ftvar v` for a member `v` of
   `tyParams`. The name is rigid because the datatype declares it, therefore the
   generator cannot put another type in its place.
-* A **recursive occurrence** is a reference to a datatype of the block. It is
+* A **recursive occurrence** is a reference to a block datatype. It is
   `.tcons n args` for a member `(n, args)` of `blockRefs`.
 
 A recursive occurrence is not a leaf of the type. For example, `List α` holds the type
@@ -81,7 +86,7 @@ list of type parameters independently, and the block does not share one list. Th
 generator takes all of these names from one common name space, therefore two
 different datatypes can use the same parameter names.
 
-A datatype `dᵢ` can refer to a block member `dⱼ` only when
+A datatype `dᵢ` can refer to a block datatype `dⱼ` only when
 `dⱼ.typeArgs ⊆ dᵢ.typeArgs`. The reference is the uniform occurrence
 `dⱼ (dⱼ.typeArgs)`. Each `dᵢ` obeys this test for itself. A datatype that has no
 type parameters obeys the test for each other datatype.
@@ -107,9 +112,9 @@ one of these names:
 * A base type or a type constructor that the generator can refer to, or the reserved
   arrow constructor `"arrow"`. Such a name makes a base type read as a recursive
   occurrence, or makes an application read as an arrow.
-* The name of another datatype of the block. Therefore the names of the block are
+* The name of another block datatype. Therefore the names of the block are
   different in pairs, which `namesNodup` needs. A base type or an applied type also
-  cannot read as a reference to a block member.
+  cannot read as a reference to a block datatype.
 
 The generator threads the datatype names through `reserved`, therefore these names
 stay different in pairs. The generator makes each type parameter fresh against the
@@ -259,9 +264,9 @@ def genFreshNames [Gen G] (reserved : List String) (n : Nat) : G (List String) :
 
 /-! ## Block references
 
-A recursive occurrence in a mutual block can be each member of the block that the new
-datatype can refer to. The generator records each such member as its name with its own
-type arguments as types. A uniform occurrence of that member is `name args`, with no
+A recursive occurrence in a mutual block can be each block datatype that the new datatype
+can refer to. The generator records each such datatype as its name with its own type
+arguments as types. A uniform occurrence of that datatype is `name args`, with no
 change. -/
 
 /-- A block datatype that a recursive occurrence can refer to. The pair holds the name
@@ -329,7 +334,7 @@ def genBaseTy [Gen G] (baseTypes : List String) : G LMonoTy :=
     For the same reason, the alternative for a recursive occurrence is present only when
     `blockRefs` is not empty, therefore `elements blockRefs` is correct. If `blockRefs`
     is empty, this function makes no recursive occurrence. Such a datatype can refer to
-    no block member, not even to itself. -/
+    no block datatype, not even to itself. -/
 def genLeafTy [Gen G] (baseTypes : List String)
     (blockRefs : List BlockRef) (tyParams : List TyIdentifier)
     (recCallsAllowed : Bool) : G LMonoTy :=
@@ -444,18 +449,16 @@ Each header is the name of a datatype with its own type parameters. In phase 2 i
 the body of each datatype, which is its list of constructors. For phase 2 the generator
 calculates a `blockRefs` list from the headers.
 
+A header is a `Lambda.TypeConstructor`. That structure holds a `name` and a list
+`params`. The field `bound` keeps its default value `.Infinite`. A block is
+`headers.map (fun h => { name := h.name, typeArgs := h.params, … })`.
+
 The generator draws the names different in pairs, because it threads them through
 `reserved`. Therefore the names of the block are different, which `namesNodup` needs,
 and no name is the same as a base type or an applied type. The generator draws each type
 parameter fresh against the reserved set, but it does not add the parameter back.
 Therefore two different datatypes can use the same parameter names, and one
 parameterized datatype can refer to another. -/
-
-/-- The header of a datatype. It holds the name of the datatype and the type parameters
-    that the generator made for it. A header is a `Lambda.TypeConstructor`, which holds
-    a `name` and a list `params`. The field `bound` keeps its default value `.Infinite`.
-    A block is `headers.map (fun h => { name := h.name, typeArgs := h.params, … })`. -/
-abbrev Header := TypeConstructor
 
 /-- The block references that are visible to a datatype with the type parameters
     `tyParams`. The result holds each header `⟨n, ps⟩` for which `ps ⊆ tyParams`, as the
@@ -467,8 +470,8 @@ abbrev Header := TypeConstructor
     members of the `tyParams` of that datatype. The header of a datatype always obeys
     the filter, because `ps = tyParams ⊆ tyParams`. Therefore a datatype can always refer
     to itself. A datatype that has no type parameters has `ps = []`, therefore it is
-    visible to each datatype of the block. -/
-def visibleRefs (headers : List Header) (tyParams : List TyIdentifier) :
+    visible to each block datatype. -/
+def visibleRefs (headers : List TypeConstructor) (tyParams : List TyIdentifier) :
     List BlockRef :=
   headers.filterMap (fun h =>
     if h.params ⊆ tyParams then some (h.name, h.params.map .ftvar) else none)
@@ -518,7 +521,7 @@ def permutationOf [Gen G] : (xs : List α) → G { ys // xs.Perm ys }
 *inhabitance rank* for each datatype. `genConstructors` makes the constructors of one
 datatype. It gets three inputs: the header of that datatype, the headers of the block, and
 the set of names that the inhabited constructor may use. It calculates the visible
-references from the headers of the block. That set of names holds the block members of a
+references from the headers of the block. That set of names holds the block datatypes of a
 lower rank. `genConstructorsForAllTypes` applies `genConstructors` to each header with its
 rank. `genMutuallyRecursiveDatatypes` connects phase 1, which makes the headers and the
 ranks, to phase 2, which makes the bodies.
@@ -527,21 +530,21 @@ ranks, to phase 2, which makes the bodies.
 constructor of each datatype from a smaller set of references than the other constructors.
 That first constructor is a constructor that is inhabited. For a datatype at rank `r`, the
 smaller set is `visibleRefs (lowerRankHeaders rankedHeaders r) params`. It holds each
-visible block member of a rank less than `r`. The other constructors get the full set
+visible block datatype of a rank less than `r`. The other constructors get the full set
 `visibleRefs allHeaders params`, which also holds the datatype itself.
 
 **Ranks, and not an order.** Each datatype draws one rank in the range
 `[0, blockSize-1]`. Two datatypes can draw the same rank. The inhabited constructor of a
-datatype can refer only to block members of a lower rank.
+datatype can refer only to block datatypes of a lower rank.
 
 The proofs use one graph to show that this condition is enough. The nodes of that graph are the
-datatypes of the block. Take two datatypes `d` and `d'`. The graph has one edge from `d` to `d'`
+block datatypes. Take two datatypes `d` and `d'`. The graph has one edge from `d` to `d'`
 when the argument types of the inhabited constructor of `d` hold the name of `d'`. This module
 calls that graph *the graph of name references that the inhabited constructors make*.
 
 Each edge of that graph makes the rank smaller, therefore the graph has no cycle. Therefore each
 datatype is inhabited. The inhabited constructor of a datatype at the smallest rank refers to no
-block member. The reason is that the set of names that it may use is empty.
+block datatype. The reason is that the set of names that it may use is empty.
 
 The old design gave the same guarantee of inhabitance. In that design the generator made
 the datatypes in a fixed order, and the inhabited constructor referred only to the
@@ -568,8 +571,8 @@ def genParamsList [Gen G] (reserved : List String) (maxTyParams : Nat) :
     independently in the range `[0, maxRank]`, and two datatypes can draw the same rank.
 
     The rank is the only condition that makes the datatypes inhabited. The set of names that
-    the inhabited constructor may use holds only block members of a lower rank. Therefore
-    that constructor can refer only to those members. Therefore the inhabited constructor of
+    the inhabited constructor may use holds only block datatypes of a lower rank. Therefore
+    that constructor can refer only to those datatypes. Therefore the inhabited constructor of
     a datatype at the smallest rank has no block name in it. Each datatype at a higher rank
     is inhabited through the lower ranks.
 
@@ -588,8 +591,8 @@ def genRanks [Gen G] (maxRank : Nat) : Nat → G (List Nat)
     * `allHeaders`, the full list of headers, from which it calculates the visible
       references;
     * `inhabRefs`, the set of names that the inhabited constructor may use. It holds the
-      block members that the caller lets that constructor refer to. These members have a
-      lower rank.
+      block datatypes that the caller lets that constructor refer to. These datatypes have
+      a lower rank.
     * `reserved`, which holds the block names and the reserved keywords.
 
     This function also reserves the type parameters of the datatype for its field names
@@ -597,16 +600,20 @@ def genRanks [Gen G] (maxRank : Nat) : Nat → G (List Nat)
 
     The first constructor is always present, and it is a constructor that is inhabited.
     This function makes it from `inhabRefs`, with `recCallsAllowed := true`. Therefore each
-    argument type of that constructor holds only block members of a lower rank, or no block
-    member at all. Therefore the datatype is inhabited, and no constructor must be free of
+    argument type of that constructor holds only block datatypes of a lower rank, or no block
+    datatype at all. Therefore the datatype is inhabited, and no constructor must be free of
     all block names. That first constructor also discharges `constrs_ne`, and
     `genMutuallyRecursiveDatatypes_inhabited` uses it. This function makes the other
     constructors from the full set `blockRefs`. -/
 def genConstructors [Gen G] (baseTypes : List String) (tyCons : List KnownTyCon)
-    (allHeaders : List Header) (inhabRefs : List BlockRef)
+    (allHeaders : List TypeConstructor) (inhabRefs : List BlockRef)
     (nm : String) (params : List TyIdentifier)
     (maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat)
     (reserved : List String) : G (LDatatype Unit) := do
+  -- `blockRefs` holds each visible block datatype, therefore it also holds this datatype.
+  -- `inhabRefs` is different. The caller gives it, and it holds only the visible block
+  -- datatypes of a rank less than the rank of this datatype. Read `visibleRefs` and
+  -- `lowerRankHeaders`.
   let blockRefs := visibleRefs allHeaders params
   let reserved := params ++ reserved
   -- The inhabited constructor can refer to the members of `inhabRefs`, which all have a
@@ -635,26 +642,27 @@ def genConstructors [Gen G] (baseTypes : List String) (tyCons : List KnownTyCon)
 
     The set of names that the inhabited constructor of a datatype at rank `r` may use is
     `visibleRefs (lowerRankHeaders rankedHeaders r) params`. That set holds the block
-    members that this constructor can refer to. The datatype itself is never a member of
+    datatypes that this constructor can refer to. The datatype itself is never a member of
     its own set, because `r < r` is false.
 
     Therefore each edge of the graph of name references that the inhabited constructors make
     goes from rank `r` to a rank less than `r`. Therefore that graph has no cycle, and each
     datatype is inhabited. -/
-def lowerRankHeaders (rankedHeaders : List (Header × Nat)) (r : Nat) : List Header :=
+def lowerRankHeaders (rankedHeaders : List (TypeConstructor × Nat)) (r : Nat) :
+    List TypeConstructor :=
   rankedHeaders.filterMap (fun hr => if hr.2 < r then some hr.1 else none)
 
-/-- Make the bodies of all of the datatypes of the block, one body for each pair
+/-- Make the bodies of all of the block datatypes, one body for each pair
     `(header, rank)` of the list of work. Each datatype gets its visible references from
     `allHeaders`. It gets the set of names that its inhabited constructor may use from
     `rankedHeaders`, which holds all of the headers with their ranks.
 
     For a datatype at rank `r`, that set is
     `visibleRefs (lowerRankHeaders rankedHeaders r) params`. Therefore that set holds only
-    block members of a rank less than `r`. Therefore each edge of the graph of name
+    block datatypes of a rank less than `r`. Therefore each edge of the graph of name
     references that the inhabited constructors make gets a smaller rank, and each datatype
     is inhabited. The inhabited constructor of a datatype at the smallest rank refers to no
-    block member.
+    block datatype.
 
     The old function threaded an accumulator `done` for a fixed order, but this function
     threads no such accumulator. The drawn ranks alone give that set of names, therefore
@@ -665,9 +673,9 @@ def lowerRankHeaders (rankedHeaders : List (Header × Nat)) (r : Nat) : List Hea
     list holds the block names, therefore the names and the references of each datatype
     stay separate from the names of the other datatypes. -/
 def genConstructorsForAllTypes [Gen G] (baseTypes : List String) (tyCons : List KnownTyCon)
-    (allHeaders : List Header) (rankedHeaders : List (Header × Nat))
+    (allHeaders : List TypeConstructor) (rankedHeaders : List (TypeConstructor × Nat))
     (maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat)
-    (reserved : List String) : List (Header × Nat) → G (MutualDatatype Unit)
+    (reserved : List String) : List (TypeConstructor × Nat) → G (MutualDatatype Unit)
   | [] => pure []
   | hr :: rest => do
     let d ← genConstructors baseTypes tyCons allHeaders
@@ -693,18 +701,18 @@ def genConstructorsForAllTypes [Gen G] (baseTypes : List String) (tyCons : List 
     * `maxSize`. This is the limit on the size of each argument type.
 
     The generator draws the datatype names different in pairs, and fresh against
-    `initialReserved`. In one datatype, an occurrence can refer to each block member
+    `initialReserved`. In one datatype, an occurrence can refer to each block datatype
     whose type parameters are a subset of the parameters of that datatype. Read
     `visibleRefs`.
 
     Each datatype draws one *inhabitance rank* in the range `[0, numExtra]`, and two
     datatypes can draw the same rank. The inhabited constructor of each datatype is always
-    present, and it refers only to block members of a lower rank. The set of names that it
+    present, and it refers only to block datatypes of a lower rank. The set of names that it
     may use is `visibleRefs (lowerRankHeaders …)`.
 
     Therefore each edge of the graph of name references that the inhabited constructors make
     gets a smaller rank. Therefore that graph has no cycle, and each datatype is inhabited.
-    The inhabited constructor of a datatype at the smallest rank refers to no block member.
+    The inhabited constructor of a datatype at the smallest rank refers to no block datatype.
     This result gives the inhabitance field of `MutualADTWF`. No constructor must be free of
     all block names, and the generator puts no order on the datatypes of the output.
 
@@ -735,9 +743,9 @@ def genMutuallyRecursiveDatatypes [Gen G]
   -- One rank for each datatype, in the range `[0, numExtra]`, which is
   -- `[0, blockSize - 1]`. Two datatypes can draw the same rank.
   let ranks ← genRanks numExtra names.length
-  let headers : List Header :=
+  let headers : List TypeConstructor :=
     (names.zip paramsList).map (fun p => { name := p.1, params := p.2 })
-  let rankedHeaders : List (Header × Nat) := headers.zip ranks
+  let rankedHeaders : List (TypeConstructor × Nat) := headers.zip ranks
   genConstructorsForAllTypes baseTypes tyCons headers rankedHeaders maxExtraBaseConstrs
     maxRecConstrs maxArgs maxSize reserved rankedHeaders
 
