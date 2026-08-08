@@ -332,13 +332,13 @@ theorem seed_functional
 
 /-- The `mapM` inside `genChecks` produces a `ListMap` whose every value's `expr`
     is a `bool` expression in the support of `genLExpr … .bool`. -/
-theorem mapM_genChecks_values (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (labels : List CoreLabel) (m : ListMap CoreLabel Procedure.Check)
     (hm : m ∈ SetGen.support
       (labels.mapM (m := SetGen.Set) (fun l => do
-        let e ← genLExpr (G := SetGen.Set) [] octx [] tvars [] depth .bool
+        let e ← genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check))))) :
-    ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] tvars [] depth .bool) := by
+    ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool) := by
   induction labels generalizing m with
   | nil =>
     simp only [List.mapM_nil] at hm
@@ -356,25 +356,25 @@ theorem mapM_genChecks_values (octx : OpCtx) (tvars : List TyIdentifier) (depth 
 
 /-- Membership in `genChecks octx tvars depth`: every clause's `expr` is a `bool`
     expression reachable by `genLExpr`. -/
-theorem genChecks_support (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem genChecks_support (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check)
-    (hm : m ∈ SetGen.support (genChecks (G := SetGen.Set) octx tvars depth)) :
-    ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] tvars [] depth .bool) := by
+    (hm : m ∈ SetGen.support (genChecks (G := SetGen.Set) fctx octx tvars depth)) :
+    ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool) := by
   simp only [genChecks, mem_support_bind_iff] at hm
   obtain ⟨labels, _, hm⟩ := hm
-  exact mapM_genChecks_values octx tvars depth labels m hm
+  exact mapM_genChecks_values fctx octx tvars depth labels m hm
 
 /-- Reverse of `mapM_genChecks_values`: a `ListMap` of checks whose every `expr`
     is reachable by `genLExpr … .bool` is in the support of the `mapM` inside
     `genChecks`, run over its own keys. -/
-theorem mapM_genChecks_complete (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check)
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] tvars [] depth .bool)) :
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool)) :
     m ∈ SetGen.support
       (m.keys.mapM (m := SetGen.Set) (fun l => do
-        let e ← genLExpr (G := SetGen.Set) [] octx [] tvars [] depth .bool
+        let e ← genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check)))) := by
   induction m with
   | nil =>
@@ -386,7 +386,7 @@ theorem mapM_genChecks_complete (octx : OpCtx) (tvars : List TyIdentifier) (dept
     have hc_mem : c ∈ ListMap.values ((l, c) :: rest) := by simp [ListMap.values]
     have hce := hvals c hc_mem
     have hrest : ∀ c' ∈ ListMap.values rest,
-        c'.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] tvars [] depth .bool) := by
+        c'.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool) := by
       intro c' hc'; exact hvals c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
     have hrest_attr : ∀ c' ∈ ListMap.values rest, c'.attr = .Default := by
       intro c' hc'; exact hattr c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
@@ -409,18 +409,19 @@ theorem mapM_genChecks_complete (octx : OpCtx) (tvars : List TyIdentifier) (dept
     reachable by `genNameList`, whose clauses are all default-`attr`/empty-`md`,
     and whose every `expr` is reachable by `genLExpr … .bool`, is in the support
     of `genChecks`. -/
-theorem genChecks_complete (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check)
     (hlabels : m.keys ∈ SetGen.support (genNameList (G := SetGen.Set) depth))
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] tvars [] depth .bool)) :
-    m ∈ SetGen.support (genChecks (G := SetGen.Set) octx tvars depth) := by
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool)) :
+    m ∈ SetGen.support (genChecks (G := SetGen.Set) fctx octx tvars depth) := by
   simp only [genChecks, mem_support_bind_iff]
-  exact ⟨m.keys, hlabels, mapM_genChecks_complete octx tvars depth m hattr hmd hvals⟩
+  exact ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
 
 -- ── Soundness ────────────────────────────────────────────────────────────
 
+set_option maxHeartbeats 800000 in
 /-- **Soundness of `genProcedure`.** Every procedure in the generator's support
     is well-typed w.r.t. `ProcHasTypeA` for any program `P` (and any ambient
     context `C`) whose callable procedures the threaded call-target context `procs`
@@ -555,7 +556,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
-  have hmod := genStmtChain_mutableVars [] octx typeArgs
+  have hmod := genStmtChain_mutableVars octx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
       { LContext.default with rigidTypeVars := typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
@@ -611,14 +612,15 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
         (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) ?_ v h
       rw [Map_keys_eq_ListMap_keys, Map_keys_eq_ListMap_keys]
     · exact List.mem_append_right _ h
-  · -- preconditionsTyped: under `instHasTypeA` this is `HasTypeA [] c.expr bool`.
+  · -- preconditionsTyped: under `instHasTypeA` this is `HasTypeA [] c.expr bool`
+    -- (the context — hence the clause's free-var context — is ignored by the spec).
     intro c hc
-    exact genLExpr_sound [] octx [] typeArgs [] size .bool c.expr
-      (genChecks_support octx typeArgs size pre hpre c hc)
+    exact genLExpr_sound _ octx [] typeArgs [] size .bool c.expr
+      (genChecks_support _ octx typeArgs size pre hpre c hc)
   · -- postconditionsTyped: identical reduction (the context is ignored).
     intro c hc
-    exact genLExpr_sound [] octx [] typeArgs [] size .bool c.expr
-      (genChecks_support octx typeArgs size post hpost c hc)
+    exact genLExpr_sound _ octx [] typeArgs [] size .bool c.expr
+      (genChecks_support _ octx typeArgs size post hpost c hc)
   · -- bodyTyped: align the body context via `procBodyContext_inout`.
     refine ProcBodyHasType'.structured body C' ((procStmtEnv octx typeArgs).toTCtx ctx') ?_
     have heq := procBodyContext_inout name typeArgs M (disjointInputs rawInputOnly M)
@@ -629,6 +631,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
 
 -- ── Completeness ─────────────────────────────────────────────────────────
 
+set_option maxHeartbeats 800000 in
 /-- **Completeness of `genProcedure`.** Every procedure whose signature admits the
     generator's three-block decomposition — `inputs = M ++ I`,
     `outputs = M ++ O` with `M` (in-out) shared and leading both, `I` (input-only)
@@ -706,15 +709,17 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Na
     (hPreAttr : ∀ c ∈ proc.spec.preconditions.values, c.attr = .Default)
     (hPreMd : ∀ c ∈ proc.spec.preconditions.values, c.md = #[])
     (hPreExpr : ∀ c ∈ proc.spec.preconditions.values,
-      c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] proc.header.typeArgs [] size .bool))
+      c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set)
+        (sigFctx (M ++ I)) octx [] proc.header.typeArgs [] size .bool))
     -- postconditions:
     (hPostLabels : proc.spec.postconditions.keys ∈ SetGen.support (genNameList (G := SetGen.Set) size))
     (hPostAttr : ∀ c ∈ proc.spec.postconditions.values, c.attr = .Default)
     (hPostMd : ∀ c ∈ proc.spec.postconditions.values, c.md = #[])
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
-      c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx [] proc.header.typeArgs [] size .bool))
+      c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set)
+        (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx [] proc.header.typeArgs [] size .bool))
     (hBodyReach : (bodyss, C', ctx') ∈ SetGen.support
-      (genStmtChain (G := SetGen.Set) [] octx proc.header.typeArgs
+      (genStmtChain (G := SetGen.Set) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { LContext.default with rigidTypeVars := proc.header.typeArgs }
         (M ++ I ++ (M ++ O) ++ oldVars M) size len)) :
@@ -740,9 +745,13 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx) (size len : Na
       (mem_support_genNameList_iff size _ |>.mpr ⟨hINamesLen, hINamesReach⟩) hITyReach
   · exact genInputs_complete proc.header.typeArgs size O hONodup
       (mem_support_genNameList_iff size _ |>.mpr ⟨hONamesLen, hONamesReach⟩) hOTyReach
-  · exact genChecks_complete octx proc.header.typeArgs size proc.spec.preconditions
+  · rw [hI_eq]
+    exact genChecks_complete (sigFctx (M ++ I))
+      octx proc.header.typeArgs size proc.spec.preconditions
       hPreLabels hPreAttr hPreMd hPreExpr
-  · exact genChecks_complete octx proc.header.typeArgs size proc.spec.postconditions
+  · rw [hI_eq, hO_eq]
+    exact genChecks_complete (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M))
+      octx proc.header.typeArgs size proc.spec.postconditions
       hPostLabels hPostAttr hPostMd hPostExpr
   · -- body reachable: the generator's filtered blocks equal `I`/`O`; `hBodyReach`
     -- is the body's `genStmtChain` support membership directly.

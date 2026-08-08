@@ -1102,48 +1102,56 @@ theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpC
       concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
         = LMonoTy.subst S (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd)) := by
   -- Step 1: unfold membership in `findPolymorphicOps` down to the success branch.
+  -- The generator is now `pctx.flatMap` (each scheme contributes candidates at
+  -- several split points), whose per-scheme body is `if arity > maxNumArgs then []`
+  -- else a `filterMap` over the split points `k ∈ [0, arity]`. So membership peels
+  -- as: a scheme `∈ pctx`, then (the arity guard held and) a split point `k` whose
+  -- `Option` `do`-block returned `some (name, concreteArgTys)`.
   unfold findPolymorphicOps at hEntry
-  simp only [List.mem_filterMap] at hEntry
+  simp only [List.mem_flatMap] at hEntry
   obtain ⟨⟨nm, boundVars, monoTy⟩, hmem, hfilt⟩ := hEntry
-  -- The per-operator computation runs in the `Option` monad (`filterMap`'s
-  -- callback). Its `do`-block is a chain of `guard`s and one `unifyTypes` bind;
-  -- because it equals `some (name, concreteArgTys)`, each `guard` must have held
-  -- and `unifyTypes` must have succeeded. `Option.bind_eq_some_iff` +
-  -- `Option.guard`/`ite`-to-`some` normalization peel the chain into a flat
-  -- conjunction, which we then destructure. (This replaces the old nested `split`
-  -- cascade, which relied on the pre-`do`-refactor `if`/`match` structure.)
-  simp only [guard, bind, failure, pure, Option.pure_def, Option.bind_eq_some_iff,
-    Option.ite_some_none_eq_some, Option.some.injEq, Prod.mk.injEq] at hfilt
-  obtain ⟨_, ⟨hguard1, _⟩, subst, hunif, _, ⟨hguard2, _⟩, _, ⟨hguard3, _⟩, hname, hcat⟩ := hfilt
-  subst hname
-  -- Name the freshening result and its arrow decomposition.
+  -- Name the freshening result and its arrow decomposition (so the `let`s reduce).
   obtain ⟨freshBoundVars, freshMonoTy, hfreshEq⟩ :
       ∃ a b, freshenBoundVars boundVars monoTy
         (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups = (a, b) :=
     ⟨_, _, rfl⟩
   obtain ⟨argTys, retTy, hdecEq⟩ :
       ∃ a b, decomposeArrow freshMonoTy = (a, b) := ⟨_, _, rfl⟩
-  rw [hfreshEq] at hunif hguard1 hguard2 hguard3 hcat
-  simp only at hunif hguard1 hguard2 hguard3 hcat
-  rw [hdecEq] at hunif hguard1 hguard3 hcat
-  simp only at hunif hguard1 hguard3 hcat
+  simp only [hfreshEq, hdecEq] at hfilt
+  -- The arity `if` must have taken the `else` branch (membership in `[]` is false).
+  split at hfilt
+  · exact absurd hfilt (List.not_mem_nil)
+  -- Now `hfilt` is membership in the split-point `filterMap`; extract the split
+  -- point `k` and its `Option` `do`-block equation. The `do`-block has two `guard`s
+  -- (undetermined-tyvars, then the forward-instance guard).
+  rw [List.mem_filterMap] at hfilt
+  obtain ⟨k, _, hopt⟩ := hfilt
+  simp only [guard, bind, failure, pure, Option.pure_def, Option.bind_eq_some_iff,
+    Option.ite_some_none_eq_some, Option.some.injEq, Prod.mk.injEq] at hopt
+  obtain ⟨subst, hunif, _, ⟨hguard1, _⟩, _, ⟨hguard2, _⟩, hname, hcat⟩ := hopt
+  subst hname
   -- Step 2: `PCtxWF` gives the factory function and the shape of its type.
   obtain ⟨fn, hget, hlty⟩ := hPctx nm (.forAll boundVars monoTy) hmem
   -- Injectivity of `.forAll`: boundVars = fn.typeArgs, monoTy = genericTy.
   rw [LTy.forAll.injEq] at hlty
   obtain ⟨hba, hmono⟩ := hlty
   have hgenericEq : monoTy = LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd) := hmono
-  -- Step 3: the forward-instance guard *is* `subst fullSubst retTy = τ`.
+  -- Step 3: the forward-instance guard *is* `subst fullSubst leftoverSuffix = τ`,
+  -- where `leftoverSuffix = (argTys.drop k).foldr arrow retTy` is the un-applied
+  -- suffix of the scheme's arrow type.
   have hunifEqFull : LMonoTy.subst
-      ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst) retTy = τ :=
-    beq_iff_eq.mp hguard3
+      ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+      ((argTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ :=
+    beq_iff_eq.mp hguard2
   -- Step 4: build the substitution witness.
   -- (a) `freshMonoTy = subst renameSubst monoTy` for the freshening renaming.
   obtain ⟨renameSubst, hfmt⟩ : ∃ R, freshMonoTy = LMonoTy.subst R monoTy := by
     obtain ⟨R, hR⟩ := freshenBoundVars_snd_eq_subst boundVars monoTy
       (τ.freeVars ++ List.flatMap LMonoTy.freeVars generableTys).eraseDups
     rw [hfreshEq] at hR; exact ⟨R, hR⟩
-  -- (b) `A = subst fullSubst (subst renameSubst genericTy)`.
+  -- (b) `A = subst fullSubst (subst renameSubst genericTy)`. The only delta from
+  -- the fully-applied case is one `List.foldr_append`/`take_append_drop`: the
+  -- scheme's arrow type splits as (applied prefix) ++ (leftover suffix) at `k`.
   have hAeq : concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
       = LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
           (LMonoTy.subst renameSubst
@@ -1154,7 +1162,12 @@ theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpC
         = argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) retTy := by
       have := decomposeArrow_foldr freshMonoTy
       rw [hdecEq] at this; simpa using this
-    rw [hfreshFold, subst_foldr_arrow, hunifEqFull, ← hcat]
+    -- Split the scheme's arrow type at `k`: the applied prefix, then the suffix.
+    have hsplit : argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) retTy
+        = (argTys.take k).foldr (fun σ acc => LMonoTy.arrow σ acc)
+            ((argTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) := by
+      rw [← List.foldr_append, List.take_append_drop]
+    rw [hfreshFold, hsplit, subst_foldr_arrow, hunifEqFull, ← hcat]
   -- Package into a single substitution witness (no groundness / no WF).
   obtain ⟨S, hS⟩ := composite_instance_subst
     (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)

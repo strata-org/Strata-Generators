@@ -89,20 +89,22 @@ theorem procToTCtx_insert (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
   rw [Maps.insert_singleton, Map.fmap_insert]
   exact ⟨rfl, trivial⟩
 
-/-- **The concrete statement-generator soundness environment** at an empty fvar
-    context, for any operator context `octx` and type-variable list `tvars`.
+/-- **The concrete statement-generator soundness environment**, for any operator
+    context `octx` and type-variable list `tvars`.
 
     - `toTCtx` / `corr` / `toTCtx_insert`: the single-scope construction above.
-    - `exprSound`: discharged by the unconditional `genLExpr_sound`.
-    - `freshDisjoint`: discharged by `freshNamesDisjointFromExprs_nil` (valid
-      exactly because `fctx = []`, so generated expressions have no free
-      variables). -/
+    - `exprSound`: discharged by the unconditional `genLExpr_sound` (at each scope's
+      derived free-variable context `ctx.toFVarCtx`).
+    - `freshDisjoint`: discharged by `freshNamesDisjointFromExprs_toFVarCtx` — valid
+      at *every* `ctx`, since generated free variables come from `ctx.toFVarCtx`
+      (whose names are `ctx`'s) and a fresh `init` name avoids `ctx`. This is what
+      lets a generated procedure body genuinely *read* its parameters. -/
 def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) :
-    GenStmtSoundEnv [] octx tvars where
+    GenStmtSoundEnv octx tvars where
   toTCtx := procToTCtx
   corr := procToTCtx_corr
-  exprSound := fun d τ e he => genLExpr_sound [] octx [] tvars [] d τ e he
-  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_nil octx tvars ctx d
+  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ e he
+  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d
   toTCtx_insert := procToTCtx_insert
 
 @[simp] theorem procStmtEnv_toTCtx (octx : OpCtx) (tvars : List TyIdentifier) :

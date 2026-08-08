@@ -248,14 +248,14 @@ instance : Shrinkable GenCmdWithCtx where
 private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreMonoOps tvars [] ctx depth
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) coreMonoOps tvars [] ctx depth
   pure ⟨cmd, ctx, ctx'⟩
 
 private def genCmdFromBuiltCtx (ctxSize : Nat) : Gen GenCmdWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
-  let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreMonoOps tvars [] [] depth ctxSize
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreMonoOps tvars [] baseCtx depth
+  let (_, baseCtx) ← genCmds (G := Plausible.Gen) coreMonoOps tvars [] [] depth ctxSize
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) coreMonoOps tvars [] baseCtx depth
   pure ⟨cmd, baseCtx, ctx'⟩
 
 instance : Arbitrary GenCmdWithCtx where
@@ -283,7 +283,7 @@ private def genCmdsWithCtx : Gen GenCmdsWithCtx := do
   let depth := 2
   let n := 4
   let tvars : List TyIdentifier := []
-  let (cmds, ctx') ← genCmds (G := Plausible.Gen) [] coreMonoOps tvars [] [] depth n
+  let (cmds, ctx') ← genCmds (G := Plausible.Gen) coreMonoOps tvars [] [] depth n
   pure ⟨cmds, [], ctx'⟩
 
 instance : Arbitrary GenCmdsWithCtx where
@@ -531,7 +531,7 @@ instance : Shrinkable GenStmts where
 private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
   let size := max 1 (min 3 (s / 25))
   let len := max 1 (min 4 (s / 20))
-  let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) [] coreMonoOps [] size len
+  let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) coreMonoOps [] size len
   pure ⟨ss⟩
 
 -- `genStmt` can hit the empty generator (`default`) in sub-cases (e.g. a
@@ -600,15 +600,15 @@ instance : Shrinkable GenProcs where
 --
 -- The procedures are generated **left to right into an acyclic call DAG**: the
 -- body of procedure `i` is generated against the signatures of the
--- already-generated *monomorphic* siblings `0..i-1` (named `P0…P{i-1}` — exactly
--- what `relabelProcs` assigns each position below, so the `call`s and the renamed
+-- already-generated siblings `0..i-1` (named `P0…P{i-1}` — exactly what
+-- `relabelProcs` assigns each position below, so the `call`s and the renamed
 -- headers line up). This lets a body call its siblings: a body may emit `call P{j}`
 -- for `j < i`, so the assembled program's call graph carries real edges and the
 -- callee-closure / call-graph dimensions of the FilterProcedures/PrecondElim
--- properties are no longer vacuous. Only monomorphic siblings become call targets
--- — the call generator and `ProcSigCorresponds` both require the callee's
--- `typeArgs = []`, and `genProcedure` does not instantiate a polymorphic callee's
--- type arguments at the call site.
+-- properties are no longer vacuous. **Polymorphic** siblings are now callable too
+-- (issue #28): `headerProcSig` records the callee's `typeArgs`, and `genCallStmt`
+-- samples a concrete instantiation `σ` at the call site (`ProcSigCorresponds` no
+-- longer requires `typeArgs = []`).
 private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
   let n := max 2 (min 4 (2 + s / 30))
   let size := max 1 (min 2 (s / 30))
@@ -618,11 +618,10 @@ private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
       let proc ← (retryGen 8000
         (StrataGenerators.Procedure.genProcedure (G := Plausible.Gen)
           corePartialOps acc.2 size len) : Gen Core.Procedure)
-      -- Add this procedure to the callable context only if it is monomorphic; its
-      -- post-relabel name is `P{i}` (its generated header name is discarded).
-      let sigs := if proc.header.typeArgs.isEmpty then
-          acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
-        else acc.2
+      -- Add this procedure to the callable context (its post-relabel name is
+      -- `P{i}`; its generated header name is discarded). Both monomorphic and
+      -- polymorphic siblings are callable — the call site instantiates `typeArgs`.
+      let sigs := acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
       pure (acc.1 ++ [proc], sigs))
     (([], []) : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx)
   pure ⟨relabelProcs ps⟩

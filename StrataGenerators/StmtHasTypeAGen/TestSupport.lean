@@ -509,9 +509,9 @@ def shrinkStmts (ss : List Statement) : List (List Statement) :=
     statement's nesting/expression size; `len` bounds the top-level sequence
     length. Returns just the statement list (the threaded output contexts are
     discarded — the tests only need the statements). -/
-def genProgramStmtsIO (size len : Nat) (fctx : FVarCtx := []) (octx : OpCtx := coreMonoOps)
+def genProgramStmtsIO (size len : Nat) (octx : OpCtx := coreMonoOps)
     (tvars : List TyIdentifier := []) : IO (List Statement) := do
-  let (ss, _, _) ← genProgramStmts (G := IO) fctx octx tvars size len
+  let (ss, _, _) ← genProgramStmts (G := IO) octx tvars size len
   pure ss
 
 end StrataGenerators.Stmt.TestSupport

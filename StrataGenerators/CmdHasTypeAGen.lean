@@ -383,17 +383,17 @@ theorem genInitNondet_sound
     soundness/completeness theorem at the syntactic level (before interpreting
     against `CmdHasTypeA`). -/
 theorem genCmd_support_iff
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (r : GenCmdResult) :
-    r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) ↔
-    (r ∈ SetGen.support (genInitDet (G := SetGen.Set) fctx octx tvars ctx depth depth) ∨
+    r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) ↔
+    (r ∈ SetGen.support (genInitDet (G := SetGen.Set) octx tvars ctx depth depth) ∨
      r ∈ SetGen.support (genInitNondet (G := SetGen.Set) tvars ctx depth) ∨
-     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetDet (G := SetGen.Set) fctx octx tvars immutableVars ctx depth h)) ∨
+     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetDet (G := SetGen.Set) octx tvars immutableVars ctx depth h)) ∨
      (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetNondet (G := SetGen.Set) immutableVars ctx h)) ∨
-     r ∈ SetGen.support (genAssertCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∨
-     r ∈ SetGen.support (genAssumeCmd (G := SetGen.Set) fctx octx tvars ctx depth) ∨
-     r ∈ SetGen.support (genCoverCmd (G := SetGen.Set) fctx octx tvars ctx depth)) := by
+     r ∈ SetGen.support (genAssertCmd (G := SetGen.Set) octx tvars ctx depth) ∨
+     r ∈ SetGen.support (genAssumeCmd (G := SetGen.Set) octx tvars ctx depth) ∨
+     r ∈ SetGen.support (genCoverCmd (G := SetGen.Set) octx tvars ctx depth)) := by
   simp only [genCmd, mem_support_dite_iff]
   constructor
   · intro hr
@@ -622,15 +622,15 @@ def FreshNamesDisjointFromExprs (fctx : FVarCtx) (octx : OpCtx)
     and `hCorr`. The only unproven hypothesis is `hDisjoint`, which asserts that
     fresh names do not collide with free variables in generated expressions. -/
 theorem genCmd_sound
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit)
     (hCorr : VarCtxCorresponds ctx Γ)
     (hFun : Map.Functional ctx)
-    (hExprSound : GenLExprSound fctx octx tvars depth)
-    (hDisjoint : FreshNamesDisjointFromExprs fctx octx tvars ctx depth)
+    (hExprSound : GenLExprSound ctx.toFVarCtx octx tvars depth)
+    (hDisjoint : FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth)) :
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth)) :
     ∃ Γ', CmdHasTypeA C Γ r.cmd Γ' := by
   rw [genCmd_support_iff] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -703,12 +703,12 @@ def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     conclusion states that the generator produces a command with the same
     *expression* and *variable* content (but possibly different label/metadata). -/
 theorem genCmd_complete
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ Γ' : TContext Unit)
     (cmd : Cmd Expression)
     (hwt : CmdHasTypeA C Γ cmd Γ')
-    (hExprComplete : GenLExprComplete fctx octx tvars depth)
+    (hExprComplete : GenLExprComplete ctx.toFVarCtx octx tvars depth)
     (hNameReach : ∀ x : Identifier Unit,
       (∃ xty eOrNd md, cmd = .init x xty eOrNd md) →
       x.name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx))
@@ -718,7 +718,7 @@ theorem genCmd_complete
       Γ.types.find? x = some (.forAll [] mty) →
       List.Mem (x, mty) (ctx.writable immutableVars)) :
     ∃ r : GenCmdResult,
-      r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) ∧
+      r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) ∧
       CmdHasTypeA C Γ r.cmd Γ' := by
   cases hwt with
   | init_det x xty e mty tys md hfresh hnovar _ _ hexpr =>
@@ -726,7 +726,7 @@ theorem genCmd_complete
     have hmty := hTyReach mty
     have he := hExprComplete mty e hexpr
     have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inl (by
         simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, e, he, rfl⟩))
@@ -735,7 +735,7 @@ theorem genCmd_complete
     have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
     have hmty := hTyReach mty
     have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inl (by
         simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, rfl⟩)))
@@ -744,7 +744,7 @@ theorem genCmd_complete
     have hentry := hVarInCtx x mty hfind
     have he := hExprComplete mty e hexpr
     have hinSupport : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry, by
         simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
@@ -753,7 +753,7 @@ theorem genCmd_complete
   | set_nondet x mty md hfind =>
     have hentry := hVarInCtx x mty hfind
     have hinSupport : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry, by
         simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
@@ -766,7 +766,7 @@ theorem genCmd_complete
       simp only [String.arbitrary, mem_support_map_iff]
       exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
     have hinSupport : (⟨.assert "" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"", hemptyL, e, he, rfl⟩))))))
@@ -777,7 +777,7 @@ theorem genCmd_complete
       simp only [String.arbitrary, mem_support_map_iff]
       exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
     have hinSupport : (⟨.assume "" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"", hemptyL, e, he, rfl⟩)))))))
@@ -788,7 +788,7 @@ theorem genCmd_complete
       simp only [String.arbitrary, mem_support_map_iff]
       exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
     have hinSupport : (⟨.cover "" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth) :=
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
         simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"", hemptyL, e, he, rfl⟩)))))))
@@ -813,16 +813,21 @@ inductive CmdsHasTypeA (C : LContext CoreLParams) :
     - Correspondence between them
     - Expression-level soundness (context-independent)
     - Disjointness of fresh names from expression fvars at every reachable context -/
-structure GenCmdSoundEnv (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+structure GenCmdSoundEnv (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (C : LContext CoreLParams) where
   /-- Produce the semantic `TContext` for any flat `VarCtx`. -/
   toTCtx : VarCtx → TContext Unit
   /-- The correspondence holds for every context. -/
   corr : ∀ ctx, VarCtxCorresponds ctx (toTCtx ctx)
-  /-- Expression soundness (does not depend on the variable context). -/
-  exprSound : GenLExprSound fctx octx tvars depth
-  /-- Fresh names do not appear as free variables in generated expressions. -/
-  freshDisjoint : ∀ ctx, FreshNamesDisjointFromExprs fctx octx tvars ctx depth
+  /-- Expression soundness at each context's *own* free-variable projection: the
+      command generators feed `ctx.toFVarCtx` into `genLExpr`, so soundness is
+      needed at that derived context. -/
+  exprSound : ∀ (ctx : VarCtx), GenLExprSound ctx.toFVarCtx octx tvars depth
+  /-- Fresh names do not appear as free variables in generated expressions. Because
+      the generator draws free variables from `ctx.toFVarCtx` (whose names are
+      exactly `ctx`'s) and a fresh `init` name avoids `ctx`, this now holds
+      *unconditionally* at every `ctx` — see `freshNamesDisjointFromExprs_toFVarCtx`. -/
+  freshDisjoint : ∀ (ctx : VarCtx), FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth
   /-- The `TContext` produced for `ctx.insert x mty` equals the insertion
       into the `TContext` for `ctx`. This ensures the output `Γ'` from an `init`
       command matches what `toTCtx` produces for the extended `VarCtx`. -/
@@ -836,13 +841,13 @@ structure GenCmdSoundEnv (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     but additionally shows the output context matches `toTCtx` applied to the
     generator's output `VarCtx`. -/
 theorem genCmd_sound_env
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams)
-    (env : GenCmdSoundEnv fctx octx tvars depth C)
+    (env : GenCmdSoundEnv octx tvars depth C)
     (hFun : Map.Functional ctx)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth)) :
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth)) :
     CmdHasTypeA C (env.toTCtx ctx) r.cmd (env.toTCtx r.outCtx) := by
   rw [genCmd_support_iff] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -851,7 +856,7 @@ theorem genCmd_sound_env
     obtain ⟨name, hname, mty, hmty, e, he, rfl⟩ := hr
     have hfreshΓ := (env.corr ctx).2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
     have hnovar := (env.freshDisjoint ctx) name hname mty e he
-    have hwt := env.exprSound mty e he
+    have hwt := env.exprSound ctx mty e he
     rw [env.toTCtx_insert]
     exact CmdHasType'.init_det _ ⟨name, ()⟩ _ e mty [] default hfreshΓ hnovar rfl (rigidAnnotCompat_forAll_nil mty) hwt
   · -- init_nondet
@@ -866,7 +871,7 @@ theorem genCmd_sound_env
     obtain ⟨⟨name, mty⟩, hmem, e, he, rfl⟩ := hr
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := (env.corr ctx).1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
-    have hwt := env.exprSound mty e he
+    have hwt := env.exprSound ctx mty e he
     exact CmdHasType'.set_det _ name mty e default hfind hwt
   · -- set_nondet
     simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
@@ -878,15 +883,15 @@ theorem genCmd_sound_env
   · -- assert (label sampled via `String.arbitrary`, typing-irrelevant)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
-    exact CmdHasType'.assert _ l e default (env.exprSound .bool e he)
+    exact CmdHasType'.assert _ l e default (env.exprSound ctx .bool e he)
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
-    exact CmdHasType'.assume _ l e default (env.exprSound .bool e he)
+    exact CmdHasType'.assume _ l e default (env.exprSound ctx .bool e he)
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
-    exact CmdHasType'.cover _ l e default (env.exprSound .bool e he)
+    exact CmdHasType'.cover _ l e default (env.exprSound ctx .bool e he)
 
 /-- `genCmd` preserves *functionality* of the context: the output `VarCtx` is
     either the input `ctx` (for `set`/`assert`/`assume`/`cover`) or
@@ -895,10 +900,10 @@ theorem genCmd_sound_env
     `Functional` invariant along a command sequence, so `genCmds_sound` can appeal
     to it at every threaded context. -/
 theorem genCmd_outCtx_functional
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (hFun : Map.Functional ctx)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth)) :
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth)) :
     Map.Functional r.outCtx := by
   rw [genCmd_support_iff] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -940,13 +945,13 @@ theorem genCmd_outCtx_functional
     hypothesis on the tail with the updated context. The `Functional` invariant on
     the threaded context is maintained via `genCmd_outCtx_functional`. -/
 theorem genCmds_sound
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
     (C : LContext CoreLParams)
-    (env : GenCmdSoundEnv fctx octx tvars depth C)
+    (env : GenCmdSoundEnv octx tvars depth C)
     (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
-    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) fctx octx tvars immutableVars ctx depth n)) :
+    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n)) :
     CmdsHasTypeA C (env.toTCtx ctx) result.1 (env.toTCtx result.2) := by
   induction n generalizing ctx result with
   | zero =>
@@ -962,9 +967,9 @@ theorem genCmds_sound
     have heq : result = (cmd :: cmds, ctx'') := by
       cases hpure; rfl
     subst heq
-    have htyCmd := genCmd_sound_env fctx octx tvars immutableVars ctx depth C env hFun ⟨cmd, ctx'⟩ hcmd
+    have htyCmd := genCmd_sound_env octx tvars immutableVars ctx depth C env hFun ⟨cmd, ctx'⟩ hcmd
     have hFun' : Map.Functional ctx' :=
-      genCmd_outCtx_functional fctx octx tvars immutableVars ctx depth hFun ⟨cmd, ctx'⟩ hcmd
+      genCmd_outCtx_functional octx tvars immutableVars ctx depth hFun ⟨cmd, ctx'⟩ hcmd
     exact CmdsHasTypeA.cons _ _ _ cmd cmds htyCmd (ih ctx' hFun' (cmds, ctx'') hcmds)
 
 -- ── Quick test ────────────────────────────────────────────────────────
@@ -975,10 +980,10 @@ instance instToFormatUnitCmdHasTypeAGen : ToFormat Unit where
 
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨cmd, _⟩ ← genCmd [] [] [] [] [] 2
+  let ⟨cmd, _⟩ ← genCmd [] [] [] [] 2
   IO.println <| Std.format cmd |>.pretty : IO Unit)
 
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨cmd, ctx'⟩ ← genCmd [] [] [] [] [(⟨"x", ()⟩, .int), (⟨"y", ()⟩, .bool)] 2
+  let ⟨cmd, ctx'⟩ ← genCmd [] [] [] [(⟨"x", ()⟩, .int), (⟨"y", ()⟩, .bool)] 2
   IO.println <| s!"{Std.format cmd |>.pretty} -- ctx: {ctx'}" : IO Unit)

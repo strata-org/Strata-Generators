@@ -50,7 +50,7 @@ is listed in the generator's `procs`. The `immutableVars` parameter is fixed to 
 -/
 
 namespace StrataGenerators.Stmt.SpecComplete
-variable {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdentifier}
+variable {octx : OpCtx} {tvars : List TyIdentifier}
 
 -- ── bridge lemmas ──
 theorem procToTCtx_find_rev (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy)
@@ -220,7 +220,7 @@ def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
       invs.length ≤ n + 1 ∧ (∀ p ∈ invs, p.1 ∈ SetGen.support (genIdentName (G := SetGen.Set))) ∧
       body.length ≤ n + 1 ∧ AlphabetOkList tvars n body
   | _, .exit _ _ => True
-  | n, .funcDecl decl _ => decl ∈ SetGen.support (genDecl (G := SetGen.Set) fctx octx n)
+  | n, .funcDecl decl _ => decl ∈ SetGen.support (genDecl (G := SetGen.Set) octx n)
   | n, .typeDecl tc _ =>
       tc.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧ tc.params.length ≤ n ∧
       (∀ s ∈ tc.params, s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
@@ -253,24 +253,36 @@ def stepCtxList (ctx : VarCtx) : List Statement → VarCtx
 mutual
 /-- The call-recipe side condition, threaded through the evolving scope `ctx` and at
     size `n`. A `.cmd (.call …)` is admissible only when its argument list is exactly
-    the generator's recipe — `mkArgs s.M (outTargets [] ctx s.O) exprs` for some callee
-    `s` and by-value inputs `exprs` — with the generator's guard (usable in-out block,
-    distinct write keys), the inputs reachable by `genLExpr` at the callee's declared
-    input types, and no fresh `init`s required (a well-typed call has all names in
-    scope, so the emitted group is the bare call and the output scope is `ctx`).
+    the generator's recipe for *some* sampled type-instantiation `σvals` (with
+    `σ := s.typeArgs.zip σvals`): `mkArgs s.M (outTargets [] ctx (substSig σ s.O)) exprs`
+    for some callee `s` and by-value inputs `exprs` — with the generator's guard (usable
+    instantiated in-out block, distinct write keys), the inputs reachable by `genLExpr`
+    at the callee's *instantiated* input types, and no fresh `init`s required (a
+    well-typed call has all names in scope, so the emitted group is the bare call and
+    the output scope is `ctx`). `hσvals` places `σvals` in the sampling step's support.
     `True` on every non-call leaf; nested bodies recurse with the body's own scope. -/
 def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
   | .cmd (CmdExt.call pname args _) =>
-      ∃ (s : ProcSig) (exprs : List Expression.Expr),
+      ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr),
         s ∈ procs ∧
         s.pname = pname ∧
-        args = StrataGenerators.Stmt.mkArgs s.M (outTargets [] ctx s.O) exprs ∧
-        s.M.all (usableName [] ctx) = true ∧
-        (s.M ++ outTargets [] ctx s.O).keys.Nodup ∧
+        σvals ∈ SetGen.support
+          (s.typeArgs.mapM (fun _ =>
+            if hg : (generableTypesFromCtx ctx.values [] octx).length > 0 then
+              elements (generableTypesFromCtx ctx.values [] octx)
+                (by apply List.ne_nil_of_length_pos; assumption)
+            else pure (.bool : LMonoTy)) : SetGen.Set (List LMonoTy)) ∧
+        args = StrataGenerators.Stmt.mkArgs s.M
+          (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)) exprs ∧
+        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName [] ctx) = true ∧
+        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
+          ++ outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
         List.Forall₂
-          (fun e σ => e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] n σ))
-          exprs s.I.values ∧
-        s.M.filter (needsInit ctx) ++ (outTargets [] ctx s.O).filter (needsInit ctx) = []
+          (fun e τ => e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n τ))
+          exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
+        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
+          ++ (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
+                (needsInit ctx) = []
   | .cmd (CmdExt.cmd _) => True
   -- Nested bodies are generated one size smaller, so their calls' inputs are
   -- reachable at `n-1` (mirroring `AlphabetOk` and `genStmt (size+1)` → `size`).
@@ -323,17 +335,17 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     (hRigid : C.rigidTypeVars = tvars)
     (hwt : CmdHasTypeA C (procToTCtx ctx) c Γ')
     (hshape : InGenShape (.cmd (CmdExt.cmd c)))
-    (hok : AlphabetOk (fctx := fctx) (octx := octx) tvars n (.cmd (CmdExt.cmd c)))
-    (hExprC : GenLExprComplete fctx octx tvars n) :
+    (hok : AlphabetOk (octx := octx) tvars n (.cmd (CmdExt.cmd c)))
+    (hExprC : GenLExprComplete ctx.toFVarCtx octx tvars n) :
     ∃ ctx', procToTCtx ctx' = Γ' ∧ ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
       (⟨[Stmt.cmd (CmdExt.cmd c)], C, ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars [] procs labels C ctx n) := by
+        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx n) := by
   -- Reduce the goal to membership in `genCmd`'s support via the `genCmdStmt` wrapper
   -- and the `genCmdStmt_mem` lifting into `genStmt`.
   have hlift : ∀ (r : GenCmdResult),
-      r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars [] ctx n) →
+      r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars [] ctx n) →
       (⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩ : GenStmtResult) ∈
-        SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars [] procs labels C ctx n) := by
+        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx n) := by
     intro r hr
     refine genCmdStmt_mem procs C ctx n _ ?_
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff]
@@ -454,39 +466,39 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (Γ : TContext Unit) (labels : List String)
     (s : Statement) (C' : LContext CoreLParams) (Γ' : TContext Unit)
     (h : StmtHasTypeA P C Γ labels s C' Γ')
-    (hExprC : ∀ d, GenLExprComplete fctx octx tvars d)
+    (hExprC : ∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d)
     (hFuncReach : ∀ d C Γ (func : Function), FuncHasTypeA C Γ func →
-      func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx d)) :
+      func ∈ SetGen.support (genFunction (G := SetGen.Set) [] octx d)) :
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars → Γ = procToTCtx ctx →
-      InGenShape s → AlphabetOk (fctx := fctx) (octx := octx) tvars n s → CallOk (fctx := fctx) (octx := octx) (tvars := tvars) procs ctx n s →
+      InGenShape s → AlphabetOk (octx := octx) tvars n s → CallOk (octx := octx) (tvars := tvars) procs ctx n s →
       ∃ ctx', Γ' = procToTCtx ctx' ∧ ctx' = stepCtx ctx s ∧
         (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
-          SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars [] procs labels C ctx n) := by
+          SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx n) := by
   induction h using StmtHasType'.rec (motive_2 := fun C Γ L ss C' Γ' _ =>
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars → Γ = procToTCtx ctx →
-      InGenShapeList ss → AlphabetOkList (fctx := fctx) (octx := octx) tvars n ss → CallOkList (fctx := fctx) (octx := octx) (tvars := tvars) procs ctx n ss →
+      InGenShapeList ss → AlphabetOkList (octx := octx) tvars n ss → CallOkList (octx := octx) (tvars := tvars) procs ctx n ss →
       ∃ ctx', Γ' = procToTCtx ctx' ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-          SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars [] procs L C ctx n ss.length)) with
+          SetGen.support (genStmtChain (G := SetGen.Set) octx tvars [] procs L C ctx n ss.length)) with
   | cmd C Γ Γ' L c hc =>
     intro ctx n hRig hΓ hnf hok hcall
     subst hΓ
     cases hc with
     | cmd Γ2' c2 hcmd =>
       obtain ⟨ctx', hctx', hstep, hmem⟩ :=
-        genCmdStmt_complete_spec procs L C ctx n _ c2 hRig hcmd hnf hok (hExprC n)
+        genCmdStmt_complete_spec procs L C ctx n _ c2 hRig hcmd hnf hok (hExprC n ctx)
       exact ⟨ctx', hctx'.symm, hstep, hmem⟩
     | call pname callArgs proc md σ hfind hInLen hOutLen hLhs hIn hOut hInout =>
       -- Shape gives `md = default`; `CallOk` gives membership + recipe + guard + empty chain.
       have hmdc : md = default := hnf
       subst hmdc
-      obtain ⟨s, exprs, hsmem, hpname, hargs, hMusable, hNodup, hForall, hEmpty⟩ := hcall
+      obtain ⟨s, σvals, exprs, hsmem, hpname, hσvals, hargs, hMusable, hNodup, hForall, hEmpty⟩ := hcall
       refine ⟨ctx, rfl, rfl, ?_⟩
       -- The emitted group is `initChain (…) ++ [call]`; the chain is empty (`hEmpty`),
       -- and the output scope `insertAllCtx ctx [] = ctx`.
       refine genCallStmt_mem procs C ctx n _ ?_
-      have hmem := genCallStmt_mem_complete (fctx := fctx) (octx := octx) (tvars := tvars)
-        (immutableVars := []) procs C ctx n s hsmem exprs hMusable hNodup hForall
+      have hmem := genCallStmt_mem_complete (octx := octx) (tvars := tvars)
+        (immutableVars := []) procs C ctx n s hsmem σvals hσvals exprs hMusable hNodup hForall
       rw [hEmpty] at hmem
       simpa [hargs, StrataGenerators.Stmt.initChain, StrataGenerators.Stmt.insertAllCtx, hpname] using hmem
   | exit C Γ L label md hmem =>
@@ -507,7 +519,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     subst hΓ
     have hmdc : md = default := hnf
     subst hmdc
-    have hdecl : decl ∈ SetGen.support (genDecl (G := SetGen.Set) fctx octx n) := hok
+    have hdecl : decl ∈ SetGen.support (genDecl (G := SetGen.Set) octx n) := hok
     refine ⟨ctx, rfl, rfl, ?_⟩
     refine genFuncDeclStmt_mem procs C ctx n _ ?_
     simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff]
@@ -550,7 +562,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig rfl hnfe hoke hcalle
       refine ⟨ctx, rfl, rfl, ?_⟩
       exact ite_det_mem procs C ctx m cond thenb elseb Ct ctxt Ce ctxe thenb.length elseb.length
-        htlen helen (hExprC (m+1) .bool cond hcond) htmem hemem
+        htlen helen (hExprC (m+1) ctx .bool cond hcond) htmem hemem
   | ite_nondet C Γ Ct Γt Ce Γe L thenb elseb md hthen helse iht ihe =>
     intro ctx n hRig hΓ hnf hok hcall
     subst hΓ
@@ -578,10 +590,10 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx mm hRig rfl hnfbody hokbody hcall
       refine ⟨ctx, rfl, rfl, ?_⟩
       refine loop_mem procs C ctx mm guard measure invs body Cb ctxb body.length hblen ?_ ?_ ?_ hbodymem
-      · exact genCondOrNondet_complete (mm+1) guard (fun g hgd => hExprC (mm+1) .bool g (hg g hgd))
-      · exact genOptMeasure_complete (mm+1) measure (fun mmm hmm => hExprC (mm+1) .int mmm (hm mmm hmm))
-      · exact genInvariants_complete (mm+1) invs hinvlen
-          (fun p hp => ⟨hinvname p hp, hExprC (mm+1) .bool p.2 (hi p hp)⟩)
+      · exact genCondOrNondet_complete (mm+1) ctx guard (fun g hgd => hExprC (mm+1) ctx .bool g (hg g hgd))
+      · exact genOptMeasure_complete (mm+1) ctx measure (fun mmm hmm => hExprC (mm+1) ctx .int mmm (hm mmm hmm))
+      · exact genInvariants_complete (mm+1) ctx invs hinvlen
+          (fun p hp => ⟨hinvname p hp, hExprC (mm+1) ctx .bool p.2 (hi p hp)⟩)
   | nil C Γ L =>
     rename_i ctx n hRig hΓ _ _ _
     subst hΓ

@@ -31,6 +31,26 @@ abbrev VarCtx := Map (Identifier Unit) LMonoTy
 def VarCtx.names (ctx : VarCtx) : List String :=
   ctx.map (fun p => p.1.name)
 
+/-- Project a statement-level variable scope `VarCtx` (keyed by `Identifier Unit`)
+    down to the expression-level free-variable context `FVarCtx` (keyed by `String`)
+    that `genLExpr` consumes: each entry `(⟨x, ()⟩, τ)` becomes `(x, τ)`.
+
+    The command/statement generators feed `ctx.toFVarCtx` — *not* a separately
+    threaded `fctx` — into every `genLExpr` call, so a generated expression may
+    reference exactly the variables currently in scope (procedure parameters,
+    earlier-declared locals). Deriving the free-var context from `ctx` at each step
+    makes the soundness invariant `fctx.names ⊆ ctx.names` hold *by construction*
+    (`toFVarCtx_names`: `ctx.toFVarCtx.names = ctx.names`), which is what discharges
+    the `init` rule's freshness premise (`freshNamesDisjointFromExprs_toFVarCtx`)
+    once expressions may contain free variables. -/
+def VarCtx.toFVarCtx (ctx : VarCtx) : FVarCtx :=
+  ctx.map (fun p => (p.1.name, p.2))
+
+/-- The names of `ctx.toFVarCtx` are exactly the names of `ctx`. -/
+@[simp] theorem VarCtx.toFVarCtx_names (ctx : VarCtx) :
+    ctx.toFVarCtx.map Prod.fst = ctx.names := by
+  simp only [VarCtx.toFVarCtx, VarCtx.names, List.map_map, Function.comp_def]
+
 /-- Look up a variable identifier in the context. -/
 def VarCtx.find? (ctx : VarCtx) (x : Identifier Unit) : Option LMonoTy :=
   Map.find? ctx x
@@ -134,12 +154,14 @@ structure GenCmdResult where
   /-- The output typing context after executing the command. -/
   outCtx : VarCtx
 
-/-- Generate `init x τ (det e)` with a fresh name and well-typed expression. -/
-def genInitDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+/-- Generate `init x τ (det e)` with a fresh name and well-typed expression. The
+    initializer `e` draws its free variables from the current scope
+    (`ctx.toFVarCtx`), so it may reference any in-scope variable. -/
+def genInitDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (tyDepth depth : Nat) : G GenCmdResult := do
   let name ← genFreshName ctx
   let mty ← genLMonoTy tvars tyDepth
-  let e ← genLExpr fctx octx [] tvars [] depth mty
+  let e ← genLExpr ctx.toFVarCtx octx [] tvars [] depth mty
   let xty : Lambda.LTy := .forAll [] mty
   pure ⟨.init ⟨name, ()⟩ xty (.det e) default, ctx.insert ⟨name, ()⟩ mty⟩
 
@@ -155,11 +177,11 @@ def genInitNondet [Gen G] (tvars : List TyIdentifier)
     is not among the immutable names `immutableVars`). The target is drawn from
     `ctx.writable immutableVars`, so immutable names are never assigned; the output
     context is the full `ctx`. -/
-def genSetDet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genSetDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (h : (ctx.writable immutableVars).length > 0) : G GenCmdResult := do
   let (name, mty) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
-  let e ← genLExpr fctx octx [] tvars [] depth mty
+  let e ← genLExpr ctx.toFVarCtx octx [] tvars [] depth mty
   pure ⟨.set name (.det e) default, ctx⟩
 
 /-- Generate `set x nondet` where `x` is an existing *mutable* variable. -/
@@ -171,26 +193,26 @@ def genSetNondet [Gen G] (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
 /-- Generate `assert l e` with a boolean expression. The label `l` is sampled via
     `String.arbitrary` (its typing rule constrains only the expression), so the
     generator reaches every alphanumeric label rather than only `""`. -/
-def genAssertCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genAssertCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
   let l ← String.arbitrary
-  let e ← genLExpr fctx octx [] tvars [] depth .bool
+  let e ← genLExpr ctx.toFVarCtx octx [] tvars [] depth .bool
   pure ⟨.assert l e default, ctx⟩
 
 /-- Generate `assume l e` with a boolean expression. The label `l` is sampled via
     `String.arbitrary` (typing-irrelevant, as for `assert`). -/
-def genAssumeCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genAssumeCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
   let l ← String.arbitrary
-  let e ← genLExpr fctx octx [] tvars [] depth .bool
+  let e ← genLExpr ctx.toFVarCtx octx [] tvars [] depth .bool
   pure ⟨.assume l e default, ctx⟩
 
 /-- Generate `cover l e` with a boolean expression. The label `l` is sampled via
     `String.arbitrary` (typing-irrelevant, as for `assert`). -/
-def genCoverCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) : G GenCmdResult := do
   let l ← String.arbitrary
-  let e ← genLExpr fctx octx [] tvars [] depth .bool
+  let e ← genLExpr ctx.toFVarCtx octx [] tvars [] depth .bool
   pure ⟨.cover l e default, ctx⟩
 
 -- ── Main command generator ─────────────────────────────────────────────
@@ -211,27 +233,27 @@ def genCoverCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
     Uses `frequency` for more uniform distribution across command kinds.
     When the context is non-empty, `set` commands get higher weight to
     compensate for the structural bias toward `init` in sequences. -/
-def genCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) : G GenCmdResult :=
   let tyDepth := depth
   if h : (ctx.writable immutableVars).length > 0 then
     let gs : List (Nat × (Unit → G GenCmdResult)) :=
-      [ (2, fun () => genInitDet fctx octx tvars ctx tyDepth depth),
+      [ (2, fun () => genInitDet octx tvars ctx tyDepth depth),
         (1, fun () => genInitNondet tvars ctx tyDepth),
-        (3, fun () => genSetDet fctx octx tvars immutableVars ctx depth h),
+        (3, fun () => genSetDet octx tvars immutableVars ctx depth h),
         (2, fun () => genSetNondet immutableVars ctx h),
-        (2, fun () => genAssertCmd fctx octx tvars ctx depth),
-        (2, fun () => genAssumeCmd fctx octx tvars ctx depth),
-        (2, fun () => genCoverCmd fctx octx tvars ctx depth) ]
+        (2, fun () => genAssertCmd octx tvars ctx depth),
+        (2, fun () => genAssumeCmd octx tvars ctx depth),
+        (2, fun () => genCoverCmd octx tvars ctx depth) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 2+1+3+2+2+2+2; omega
     frequency gs hw
   else
     let gs : List (Nat × (Unit → G GenCmdResult)) :=
-      [ (3, fun () => genInitDet fctx octx tvars ctx tyDepth depth),
+      [ (3, fun () => genInitDet octx tvars ctx tyDepth depth),
         (1, fun () => genInitNondet tvars ctx tyDepth),
-        (2, fun () => genAssertCmd fctx octx tvars ctx depth),
-        (2, fun () => genAssumeCmd fctx octx tvars ctx depth),
-        (2, fun () => genCoverCmd fctx octx tvars ctx depth) ]
+        (2, fun () => genAssertCmd octx tvars ctx depth),
+        (2, fun () => genAssumeCmd octx tvars ctx depth),
+        (2, fun () => genCoverCmd octx tvars ctx depth) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 3+1+2+2+2; omega
     frequency gs hw
 
@@ -239,11 +261,11 @@ def genCmd [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
 
 /-- `genCmds n` generates a length-n sequence of well-typed commands,
     threading the context through. -/
-def genCmds [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genCmds [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
     Nat → G (List (Cmd Expression) × VarCtx)
   | 0 => pure ([], ctx)
   | n + 1 => do
-    let ⟨cmd, ctx'⟩ ← genCmd fctx octx tvars immutableVars ctx depth
-    let (rest, ctx'') ← genCmds fctx octx tvars immutableVars ctx' depth n
+    let ⟨cmd, ctx'⟩ ← genCmd octx tvars immutableVars ctx depth
+    let (rest, ctx'') ← genCmds octx tvars immutableVars ctx' depth n
     pure (cmd :: rest, ctx'')

@@ -30,10 +30,19 @@ open Core.TypeSpec
     block leading both roles. This layout is not automatic for an arbitrary
     `P`-procedure; it is what `genProcedure` emits and what a call site must
     respect. `M` = in-out block, `I` = input-only block, `O` = output-only block,
-    so `inputs = M ++ I` and `outputs = M ++ O`. -/
+    so `inputs = M ++ I` and `outputs = M ++ O`.
+
+    `typeArgs` are the callee's **own** type parameters. A call site instantiates
+    them with a concrete substitution `σ` (the `CmdExtHasType'.call` rule's
+    existential `σ`), so the argument/target types the caller must supply are the
+    *instantiated* blocks `substSig σ M` etc. The declared blocks `M`/`I`/`O` are
+    stored un-instantiated (over `typeArgs`); `substSig` applies `σ` on demand.
+    `typeArgs = []` recovers the monomorphic case (`σ = []`, `substSig [] = id`). -/
 structure ProcSig where
   /-- The callee's name (matched against `Program.Procedure.find?`). -/
   pname : String
+  /-- The callee's own type parameters (empty for a monomorphic callee). -/
+  typeArgs : List TyIdentifier
   /-- The in-out (mutable) parameter block. -/
   M : @LMonoTySignature Unit
   /-- The input-only parameter block. -/
@@ -43,20 +52,84 @@ structure ProcSig where
 
 /-- The empty-signature procedure, so `ProcSig` is `Inhabited` (needed by
     `elements` and its support-inversion lemma inside `genCallStmt`). -/
-instance : Inhabited ProcSig := ⟨⟨"", [], [], []⟩⟩
+instance : Inhabited ProcSig := ⟨⟨"", [], [], [], []⟩⟩
+
+/-- Instantiate a parameter block's *types* by a substitution `σ`, leaving the
+    parameter *names* untouched. Used to turn a callee's declared (over-`typeArgs`)
+    block into the concrete block a call site must satisfy under the chosen
+    instantiation `σ`. The call rule substitutes with `[σ]` (a single-scope
+    substitution), so `substSig` does likewise. -/
+def substSig (σ : List (TyIdentifier × LMonoTy)) (block : @LMonoTySignature Unit) :
+    @LMonoTySignature Unit :=
+  block.map (fun p => (p.1, LMonoTy.subst [σ] p.2))
+
+/-- `substSig` preserves keys (it only rewrites types). -/
+@[simp] theorem substSig_keys (σ : List (TyIdentifier × LMonoTy))
+    (block : @LMonoTySignature Unit) : (substSig σ block).keys = block.keys := by
+  simp only [substSig, ListMap.keys_eq_map_fst, List.map_map, Function.comp_def]
+
+/-- `substSig` preserves length. -/
+@[simp] theorem substSig_length (σ : List (TyIdentifier × LMonoTy))
+    (block : @LMonoTySignature Unit) : (substSig σ block).length = block.length :=
+  List.length_map ..
+
+/-- The values of an instantiated block are the pointwise `subst [σ]` of the
+    declared values. -/
+theorem substSig_values (σ : List (TyIdentifier × LMonoTy))
+    (block : @LMonoTySignature Unit) :
+    (substSig σ block).values = block.values.map (LMonoTy.subst [σ]) := by
+  simp only [substSig, ListMap.values_eq_map_snd, List.map_map, Function.comp_def]
+
+/-- `substSig` distributes over block append. -/
+theorem substSig_append (σ : List (TyIdentifier × LMonoTy))
+    (a b : @LMonoTySignature Unit) :
+    substSig σ (a ++ b) = substSig σ a ++ substSig σ b :=
+  List.map_append ..
+
+/-- Pointwise key access commutes with `substSig` (keys are untouched). -/
+theorem substSig_keys_getElem (σ : List (TyIdentifier × LMonoTy))
+    (b : @LMonoTySignature Unit) (i : Nat) (h : i < (substSig σ b).keys.length)
+    (h' : i < b.keys.length) : (substSig σ b).keys[i]'h = b.keys[i]'h' := by
+  simp only [substSig_keys]
+
+/-- Pointwise value access commutes with `substSig` via `subst [σ]`. -/
+theorem substSig_values_getElem (σ : List (TyIdentifier × LMonoTy))
+    (b : @LMonoTySignature Unit) (i : Nat) (h : i < (substSig σ b).values.length)
+    (h' : i < b.values.length) :
+    (substSig σ b).values[i]'h = LMonoTy.subst [σ] (b.values[i]'h') := by
+  simp only [substSig_values, List.getElem_map]
+
+/-- With the empty (identity) instantiation, `substSig` is the identity: `subst [[]]`
+    fixes every monotype, so both name and type are unchanged. This is the bridge
+    that makes the monomorphic path (`typeArgs = []`, `σ = []`) a definitional
+    special case of the polymorphic one. -/
+@[simp] theorem substSig_nil (block : @LMonoTySignature Unit) :
+    substSig [] block = block := by
+  have hEmpty : Subst.hasEmptyScopes ([([] : List (TyIdentifier × LMonoTy))] : Subst) := by
+    simp +ground
+  simp only [substSig]
+  rw [show (fun p : Identifier Unit × LMonoTy => (p.1, LMonoTy.subst [[]] p.2)) = id from by
+    funext p; simp only [id_eq, LMonoTy.subst_emptyS hEmpty], List.map_id]
 
 /-- The set of callable procedures, each with its signature (shared in-out block
     leading both roles). -/
 abbrev ProcSigCtx := List ProcSig
 
 /-- `procs` faithfully describes callable procedures of `P`: each entry names a
-    monomorphic procedure of `P` whose signature decomposes as recorded (shared
-    block `M` leading both `inputs` and `outputs`), with the input-only keys
-    disjoint from the LHS (`M ∪ O`) keys. Exactly the hypotheses
-    `call_mixed_body_sound` consumes for the `.call` case. -/
+    procedure of `P` whose type parameters are `s.typeArgs` and whose (declared,
+    over-`typeArgs`) signature decomposes as recorded (shared block `M` leading both
+    `inputs` and `outputs`), with the input-only keys disjoint from the LHS (`M ∪ O`)
+    keys. Exactly the hypotheses `call_mixed_body_sound` consumes for the `.call`
+    case, once the caller instantiates the blocks by its chosen `σ`.
+
+    The callee may be **polymorphic** (`s.typeArgs ≠ []`): the call site picks a
+    concrete instantiation `σ` and supplies arguments/targets at `substSig σ` of the
+    declared blocks. The disjointness clause is stated over the *declared* keys, but
+    `substSig` preserves keys (`substSig_keys`), so it transfers to the instantiated
+    blocks unchanged. -/
 def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
   ∀ s ∈ procs, ∃ proc, Program.Procedure.find? P s.pname = some proc ∧
-    proc.header.typeArgs = [] ∧
+    proc.header.typeArgs = s.typeArgs ∧
     proc.header.inputs = s.M ++ s.I ∧
     proc.header.outputs = s.M ++ s.O ∧
     (∀ i (hi : i < s.I.keys.length), (s.M ++ s.O).keys.contains (s.I.keys[i]'hi) = false)
@@ -64,19 +137,18 @@ def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
 /-- **The converse correspondence, for completeness (Part 1 of call completeness).**
     Whereas `ProcSigCorresponds` says every generator-side callee `s ∈ procs`
     resolves in `P` (what *soundness* needs — a generated call is well-typed),
-    `ProcSigComplete` says the reverse: every *monomorphic* procedure resolvable in
-    `P` whose signature admits the `M`/`I`/`O` decomposition is *listed in* `procs`
-    (what *completeness* needs — a well-typed call is reachable). The `typeArgs = []`
-    guard is essential: `genCallStmt` performs no type-argument instantiation, so it
-    can only reach calls to monomorphic callees at their declared signature. -/
+    `ProcSigComplete` says the reverse: every procedure resolvable in `P` whose
+    signature admits the `M`/`I`/`O` decomposition is *listed in* `procs` (what
+    *completeness* needs — a well-typed call is reachable), recording its type
+    parameters `typeArgs` so the call site can instantiate them. -/
 def ProcSigComplete (procs : ProcSigCtx) (P : Program) : Prop :=
-  ∀ pname proc M I O,
+  ∀ pname proc typeArgs M I O,
     Program.Procedure.find? P pname = some proc →
-    proc.header.typeArgs = [] →
+    proc.header.typeArgs = typeArgs →
     proc.header.inputs = M ++ I →
     proc.header.outputs = M ++ O →
     (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) →
-    ∃ s ∈ procs, s.pname = pname ∧ s.M = M ∧ s.I = I ∧ s.O = O
+    ∃ s ∈ procs, s.pname = pname ∧ s.typeArgs = typeArgs ∧ s.M = M ∧ s.I = I ∧ s.O = O
 
 -- ── filterMap helper lemmas ───────────────────────────────────────────────
 
@@ -406,25 +478,26 @@ theorem keyval_mem {α β} (m : ListMap α β) (i : Nat)
 theorem call_recipe_inout_sound
     {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit}
     {pname : String} {proc : Procedure} {md : MetaData Expression}
+    (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
     (hfind : Program.Procedure.find? P pname = some proc)
     (hInputs : proc.header.inputs = M ++ I)
     (hOutputs : proc.header.outputs = M ++ O)
     (hExLen : exprs.length = I.length)
     (hTLen : T.length = O.length)
+    -- The variables the call writes back through are bound in `Γ` at the *instantiated*
+    -- formal type `subst [σ] (declared value)` — the type the caller supplied them at.
     (hMinΓ : ∀ i (hi : i < M.keys.length) (hj : i < M.values.length),
-      Γ.types.find? (M.keys[i]'hi) = some (.forAll [] (M.values[i]'hj)))
+      Γ.types.find? (M.keys[i]'hi) = some (.forAll [] (LMonoTy.subst [σ] (M.values[i]'hj))))
     (hTinΓ : ∀ i (hi : i < T.keys.length) (hj : i < O.values.length),
-      Γ.types.find? (T.keys[i]'hi) = some (.forAll [] (O.values[i]'hj)))
+      Γ.types.find? (T.keys[i]'hi) = some (.forAll [] (LMonoTy.subst [σ] (O.values[i]'hj))))
+    -- Each by-value input is typed at the *instantiated* formal input type.
     (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      LExpr.HasTypeA [] (exprs[i]'hi) (I.values[i]'hj))
+      LExpr.HasTypeA [] (exprs[i]'hi) (LMonoTy.subst [σ] (I.values[i]'hj)))
     (hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none)
     (hIdisjOut : ∀ i (hi : i < I.keys.length),
       (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false) :
     CmdExtHasTypeA C P Γ (CmdExt.call pname (mkArgs M T exprs) md) Γ := by
-  -- σ := [] (identity substitution), so subst is the identity on all declared types.
-  have hEmpty : Subst.hasEmptyScopes ([([] : List (TyIdentifier × LMonoTy))] : Subst) := by
-    simp +ground
   -- length facts
   have hkeysM : M.keys.length = M.length := ListMap.keys.length
   have hvalsM : M.values.length = M.length := lm_values_length M
@@ -435,7 +508,7 @@ theorem call_recipe_inout_sound
   have hkeysT : T.keys.length = O.length := by rw [ListMap.keys.length, hTLen]
   have hgetIn := getIn_mkArgs M T exprs
   have hgetLhs := getLhs_mkArgs M T exprs
-  apply CmdExtHasType'.call Γ pname (mkArgs M T exprs) proc md []
+  apply CmdExtHasType'.call Γ pname (mkArgs M T exprs) proc md σ
   case _ => -- (1) find?
     exact hfind
   case _ => -- (2) input arity
@@ -467,14 +540,11 @@ theorem call_recipe_inout_sound
     -- Rewrite the input positions and the callee's input signature.
     simp only [hgetIn] at hi ⊢
     simp only [hInputs, lm_values_append] at hj ⊢
-    -- subst [[]] is the identity on all declared types.
-    have hsubst : ∀ t : LMonoTy, LMonoTy.subst [[]] t = t := fun t => LMonoTy.subst_emptyS hEmpty
-    rw [hsubst]
     -- length of the mapped M block
     have hmaplen : (List.map (fun p => (LExpr.fvar () p.1 none : Expression.Expr)) M).length
         = M.length := List.length_map ..
-    -- pick the witness = the exact value at position i (so AliasEquiv is refl).
-    refine ⟨(M.values ++ I.values)[i]'hj, AliasEquiv.refl, ?_⟩
+    -- pick the witness = the *instantiated* value at position i (AliasEquiv is refl).
+    refine ⟨LMonoTy.subst [σ] ((M.values ++ I.values)[i]'hj), AliasEquiv.refl, ?_⟩
     by_cases hlt : i < M.length
     · -- in-out block: the argument is the bare fvar `fvar () M[i].1 none`.
       have hidxM : i < M.values.length := by rw [hvalsM]; exact hlt
@@ -523,9 +593,7 @@ theorem call_recipe_inout_sound
     intro i hi hj
     simp only [hgetLhs] at hi ⊢
     simp only [hOutputs, lm_values_append] at hj ⊢
-    have hsubst : ∀ t : LMonoTy, LMonoTy.subst [[]] t = t := fun t => LMonoTy.subst_emptyS hEmpty
-    rw [hsubst]
-    refine ⟨(M.values ++ O.values)[i]'hj, AliasEquiv.refl, ?_⟩
+    refine ⟨LMonoTy.subst [σ] ((M.values ++ O.values)[i]'hj), AliasEquiv.refl, ?_⟩
     by_cases hlt : i < M.length
     · -- in-out block
       have hidxK : i < M.keys.length := by rw [hkeysM]; exact hlt
@@ -690,71 +758,94 @@ theorem insertAll_missing_preserves (Γ : TContext Unit)
 theorem call_mixed_body_sound
     {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit} {L : List String}
     {pname : String} {proc : Procedure}
+    (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
     (hfind : Program.Procedure.find? P pname = some proc)
     (hInputs : proc.header.inputs = M ++ I)
     (hOutputs : proc.header.outputs = M ++ O)
     (hExLen : exprs.length = I.length)
-    (hTVals : T.values = O.values)
+    -- The out targets are positionally type-aligned with the *instantiated* out block.
+    (hTVals : T.values = (substSig σ O).values)
+    -- The by-value inputs are typed at the *instantiated* formal input types.
     (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      LExpr.HasTypeA [] (exprs[i]'hi) (I.values[i]'hj))
+      LExpr.HasTypeA [] (exprs[i]'hi) (LMonoTy.subst [σ] (I.values[i]'hj)))
     (hIdisjOut : ∀ i (hi : i < I.keys.length),
       (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
-    (hNodup : (M ++ T).keys.Nodup)
-    -- Each such name is *either* already bound at its recorded type, *or* absent.
-    (hReuse : ∀ p ∈ (M ++ T).toList,
+    -- The write-list is the *instantiated* in-out block followed by the targets.
+    (hNodup : (substSig σ M ++ T).keys.Nodup)
+    -- Each written-to name is *either* already bound at its recorded type, *or* absent.
+    (hReuse : ∀ p ∈ (substSig σ M ++ T).toList,
       Γ.types.find? p.1 = some (.forAll [] p.2) ∨ Γ.types.find? p.1 = none) :
     StmtsHasTypeA P C Γ L
-      (initChain (missingIn Γ (M ++ T)) ++
+      (initChain (missingIn Γ (substSig σ M ++ T)) ++
         [Statement.call pname (mkArgs M T exprs) default]) C
-      (insertAll Γ (missingIn Γ (M ++ T))) := by
+      (insertAll Γ (missingIn Γ (substSig σ M ++ T))) := by
+  -- The instantiated write-list; kept spelled out (no `set` — Mathlib absent).
   have hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none := by
     intro i hi m x heq
     have hlen : i < I.values.length := by rw [lm_values_length, ← hExLen]; exact hi
     have := hExTy i hi hlen
     rw [heq] at this
     cases this
-  have hNodup' : ((M ++ T).map Prod.fst).Nodup := by
+  have hNodup' : ((substSig σ M ++ T).map Prod.fst).Nodup := by
     rw [← ListMap.keys_eq_map_fst]; exact hNodup
   -- The missing-only chain is Nodup (a sublist of a Nodup list).
-  have hmissNodup : ((missingIn Γ (M ++ T)).map Prod.fst).Nodup :=
-    List.Nodup.sublist (List.Sublist.map _ (missingIn_sublist Γ (M ++ T))) hNodup'
+  have hmissNodup : ((missingIn Γ (substSig σ M ++ T)).map Prod.fst).Nodup :=
+    List.Nodup.sublist (List.Sublist.map _ (missingIn_sublist Γ (substSig σ M ++ T))) hNodup'
   -- The chain is well-typed: each missing name is fresh at its declaration point.
   have hchain : StmtsHasTypeA P C Γ L
-      (initChain (missingIn Γ (M ++ T))) C (insertAll Γ (missingIn Γ (M ++ T))) := by
-    apply initChain_types (missingIn Γ (M ++ T)) Γ
+      (initChain (missingIn Γ (substSig σ M ++ T))) C (insertAll Γ (missingIn Γ (substSig σ M ++ T))) := by
+    apply initChain_types (missingIn Γ (substSig σ M ++ T)) Γ
     intro i hi
-    rw [insertAll_find_not_mem ((missingIn Γ (M ++ T)).take i) Γ _ ?_]
-    · exact missingIn_find_none Γ (M ++ T) (List.getElem_mem hi)
+    rw [insertAll_find_not_mem ((missingIn Γ (substSig σ M ++ T)).take i) Γ _ ?_]
+    · exact missingIn_find_none Γ (substSig σ M ++ T) (List.getElem_mem hi)
     · rw [List.map_take]
-      have hidx : i < ((missingIn Γ (M ++ T)).map Prod.fst).length := by
+      have hidx : i < ((missingIn Γ (substSig σ M ++ T)).map Prod.fst).length := by
         rw [List.length_map]; exact hi
       have := nodup_getElem_not_mem_take hmissNodup i hidx
       simpa [List.getElem_map] using this
   -- Every written-to name is in scope at its recorded type in the chained context:
   -- reused names survive `insertAll` (they were not inserted), init'ed names are
   -- inserted at exactly that type.
-  have hInScope : ∀ p ∈ (M ++ T).toList,
-      (insertAll Γ (missingIn Γ (M ++ T))).types.find? p.1 = some (.forAll [] p.2) := by
+  have hInScope : ∀ p ∈ (substSig σ M ++ T).toList,
+      (insertAll Γ (missingIn Γ (substSig σ M ++ T))).types.find? p.1 = some (.forAll [] p.2) := by
     intro p hp
     rcases hReuse p hp with hbound | habsent
-    · exact insertAll_missing_preserves Γ (M ++ T) p.1 _ hbound
-    · refine insertAll_find_mem (missingIn Γ (M ++ T)) Γ p.1 p.2 hmissNodup ?_
+    · exact insertAll_missing_preserves Γ (substSig σ M ++ T) p.1 _ hbound
+    · refine insertAll_find_mem (missingIn Γ (substSig σ M ++ T)) Γ p.1 p.2 hmissNodup ?_
       exact List.mem_filter.mpr ⟨hp, by simp [habsent]⟩
+  -- `hMinΓ`: the in-out names are bound at their *instantiated* types. The
+  -- instantiated block `substSig σ M` has keys `= M.keys` and values `= subst [σ] …`.
   have hMinΓ : ∀ i (hi : i < M.keys.length) (hj : i < M.values.length),
-      (insertAll Γ (missingIn Γ (M ++ T))).types.find? (M.keys[i]'hi)
-        = some (.forAll [] (M.values[i]'hj)) := by
+      (insertAll Γ (missingIn Γ (substSig σ M ++ T))).types.find? (M.keys[i]'hi)
+        = some (.forAll [] (LMonoTy.subst [σ] (M.values[i]'hj))) := by
     intro i hi hj
-    exact hInScope _ (List.mem_append_left _ (keyval_mem M i hi hj))
-  have hTinΓ := outTargets_inΓ O T hTVals
-    (Γ := insertAll Γ (missingIn Γ (M ++ T)))
-    (fun p hp => hInScope _ (List.mem_append_right _ hp))
-  have hcall : StmtHasTypeA P C (insertAll Γ (missingIn Γ (M ++ T))) L
+    have hiK : i < (substSig σ M).keys.length := by rw [substSig_keys]; exact hi
+    have hiV : i < (substSig σ M).values.length := by
+      rw [lm_values_length, substSig_length, ← lm_values_length]; exact hj
+    have hmem := List.mem_append_left T.toList (keyval_mem (substSig σ M) i hiK hiV)
+    rw [substSig_keys_getElem σ M i hiK hi, substSig_values_getElem σ M i hiV hj] at hmem
+    exact hInScope _ hmem
+  -- `hTinΓ`: the targets are bound at their own recorded type, which equals the
+  -- instantiated out type positionally (`hTVals`).
+  have hTinΓ : ∀ i (hi : i < T.keys.length) (hj : i < O.values.length),
+      (insertAll Γ (missingIn Γ (substSig σ M ++ T))).types.find? (T.keys[i]'hi)
+        = some (.forAll [] (LMonoTy.subst [σ] (O.values[i]'hj))) := by
+    intro i hi hj
+    have hjOσ : i < (substSig σ O).values.length := by
+      rw [lm_values_length, substSig_length, ← lm_values_length]; exact hj
+    have h := outTargets_inΓ (substSig σ O) T hTVals
+      (Γ := insertAll Γ (missingIn Γ (substSig σ M ++ T)))
+      (fun p hp => hInScope _ (List.mem_append_right (substSig σ M).toList hp)) i hi hjOσ
+    rwa [substSig_values_getElem σ O i hjOσ hj] at h
+  have hcall : StmtHasTypeA P C (insertAll Γ (missingIn Γ (substSig σ M ++ T))) L
       (Statement.call pname (mkArgs M T exprs) default) C
-      (insertAll Γ (missingIn Γ (M ++ T))) :=
+      (insertAll Γ (missingIn Γ (substSig σ M ++ T))) :=
     StmtHasType'.cmd C _ _ L _
-      (call_recipe_inout_sound M I O T exprs hfind hInputs hOutputs hExLen
-        (lm_length_eq_of_values_eq hTVals) hMinΓ hTinΓ hExTy hExNoFvar hIdisjOut)
+      (call_recipe_inout_sound σ M I O T exprs hfind hInputs hOutputs hExLen
+        (by rw [← lm_values_length T, ← lm_values_length O, hTVals, substSig_values,
+              List.length_map])
+        hMinΓ hTinΓ hExTy hExNoFvar hIdisjOut)
   exact StmtsHasTypeA_append hchain
     (StmtsHasType'.cons _ _ _ _ _ _ _ _ _ hcall
       (StmtsHasType'.nil C _ L))

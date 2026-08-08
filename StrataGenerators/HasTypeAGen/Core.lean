@@ -982,17 +982,30 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
   (renamedBoundVars, renamedTy)
 
 
-/-- Collect the concrete (name, argTypes) pairs that result from instantiating
+/-- Collect the concrete (name, appliedArgTys) pairs that result from instantiating
     polymorphic operators against the target type `τ`. This function
     determines which polymorphic factory functions can be invoked
     if we want to generate a term of type `τ`.
 
-    The argument `generableTys` is a collection fo types that are generable given the context,
-    while `sampleTys` contains a list of random types with which to instantiate type variables with.
+    Unlike the monomorphic `findOpsInCtx`, a polymorphic operator is considered at
+    **every split point** `k ∈ [0, arity]`: we apply only the first `k` arguments
+    and leave the suffix `σ_{k+1} → … → σₙ → retTy` to unify with the target `τ`.
+    This means a single scheme may yield several candidates — one per split point at
+    which its instantiated suffix can equal `τ`. In particular:
+    - `k = 0` (the nullary/partial case) is included, so a scheme like
+      `Sequence.empty : ∀a. seq a` is reachable at `seq int` and a partially-applied
+      `Sequence.map f : seq int → seq bool` is reachable at an arrow target.
+    - the returned `appliedArgTys` are the concrete types of exactly those `k`
+      arguments, so `genIndirPoly`'s annotation `appliedArgTys.foldr arrow τ` is the
+      operator's fully-instantiated arrow type (a genuine instance of its scheme).
 
-    The argument `maxNumArgs` is an upper bound for the max no. of
-    quantified type variables that can appear in a polymorphic
-    factory function's type (by default, this is 3). -/
+    The argument `generableTys` is a collection of types that are generable given the
+    context, while `sampledTys` contains a list of random types with which to
+    instantiate type variables.
+
+    The argument `maxNumArgs` is an upper bound on the **arity** of a polymorphic
+    factory function's scheme (by default, this is 3); it bounds the number of
+    arguments the scheme takes, not the number applied at a candidate split point. -/
 def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
     (generableTys : List LMonoTy) (sampledTys : List LMonoTy) (maxNumArgs : Nat := 3)
     : List (String × List LMonoTy) :=
@@ -1005,8 +1018,8 @@ def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
   -- or in `tyVarsInGenerableSet`
   let varsAlreadyInUse := (LMonoTy.freeVars τ ++ tyVarsInGenerableSet).eraseDups
 
-  -- For each polymorphic function in the standard library:
-  pctx.filterMap fun (name, .forAll boundVars monoTy) => do
+  -- For each polymorphic factory function:
+  pctx.flatMap fun (name, .forAll boundVars monoTy) =>
 
     -- Alpha-rename bound type variables in `monoTy` (the body of the quantified type expression,
     -- i.e. the `τ` in `∀ α. τ`) away from `varsAlreadyInUse` to avoid naming collisions
@@ -1015,38 +1028,45 @@ def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
     -- Obtain the type of its arguments
     let (argTys, retTy) := decomposeArrow freshMonoTy
 
-    -- Skip over nullary functions (since they don't take any arguments)
-    -- and functions that have >= maxNumArgs
-    guard (!argTys.isEmpty && argTys.length ≤ maxNumArgs)
+    -- Skip over factory functions whose arity exceeds `maxNumArgs`
+    if argTys.length > maxNumArgs then []
+    else
+    -- Handle partial application: Consider appplying only `k` arguments for each `k ∈ [0, argTys.length]`.
+    -- Specifically, apply the first `k` args and leave the remaining args as the result type to
+    -- unify with the target type `τ`.
+    (List.range (argTys.length + 1)).filterMap fun k => do
 
-    -- Unify the function's freshened return type with our target type `τ`
-    let subst ← unifyTypes retTy τ
+      -- The first `k` argument types are applied.
+      -- Update the return type if `k != argTys.length` (i.e. partial application).
+      let appliedTys := argTys.take k
+      let updatedRetTy := (argTys.drop k).foldr (fun σ acc => .arrow σ acc) retTy
 
-    -- Find type variables which aren't mapped to anything through the substittuion
-    let uninstantiatedTyVars := findFreeTyVars freshBoundVars subst
+      -- Unify the (freshened) return type with our target type `τ`
+      let subst ← unifyTypes updatedRetTy τ
 
-    -- There must be either no type variables which aren't instantiated yet.
-    -- If not, we must be able to generate random monotypes with which to instantiate them.
-    guard (uninstantiatedTyVars.isEmpty || !generableTys.isEmpty)
+      -- Find type variables which aren't mapped to anything through the substittuion
+      let uninstantiatedTyVars := findFreeTyVars freshBoundVars subst
 
-    -- Extend substitution to map the uninstantiated type variables to these newly sampled types
-    let extendedSubst : Lambda.Subst := (uninstantiatedTyVars.zip sampledTys) :: subst
+      -- There must be either no type variables which aren't instantiated yet.
+      -- If not, we must be able to generate random monotypes with which to instantiate them.
+      guard (uninstantiatedTyVars.isEmpty || !generableTys.isEmpty)
 
-    -- Apply the substitution to each of the freshened argument types
-    -- This makes all the argument types fully instantiated (concrete)
-    let concreteArgTys := argTys.map (LMonoTy.subst extendedSubst)
+      -- Extend substitution to map the uninstantiated type variables to these newly sampled types
+      let extendedSubst : Lambda.Subst := (uninstantiatedTyVars.zip sampledTys) :: subst
 
-    -- We keep this candidate polymorphic factory function
-    -- only if the substitution we have built up so far (`extendedSubst`),
-    -- when applied to the function's return type `retTy` gives us
-    -- our  desired target type `τ`. This condition is needed
-    -- in order to ensure that the generated term (which
-    -- invokes this factory function) satisfies `OpsConsistent`,
-    -- i.e. that the annotated type is a valid instantiation
-    -- of the function's polymorphic type.
-    guard (LMonoTy.subst extendedSubst retTy == τ)
+      -- Apply the substitution to each of the applied argument types
+      -- This makes all the applied argument types fully instantiated (concrete)
+      let concreteAppliedTys := appliedTys.map (LMonoTy.subst extendedSubst)
 
-    pure (name, concreteArgTys)
+      -- We keep this candidate polymorphic factory function
+      -- only if the substitution we have built up so far (`extendedSubst`),
+      -- when applied to the return type gives us our desired target type `τ`.
+      -- This condition is needed in order to ensure that the generated term (which
+      -- invokes this factory function) satisfies `OpsConsistent`, i.e. that the
+      -- annotated type is a valid instantiation of the function's polymorphic type.
+      guard (LMonoTy.subst extendedSubst updatedRetTy == τ)
+
+      pure (name, concreteAppliedTys)
 
 /-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
     Pałka et al. (2011, Section 4). Calls polymorphic library functions by:

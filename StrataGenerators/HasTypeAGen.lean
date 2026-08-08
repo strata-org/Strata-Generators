@@ -3731,138 +3731,165 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 
 namespace Lambda.LExpr
 
+private theorem fvarsOfType_subset_keys (fctx : FVarCtx) (τ : LMonoTy) (name : String)
+    (h : name ∈ fvarsOfType fctx τ) :
+    (⟨name, ()⟩ : Lambda.Identifier Unit) ∈ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
+  simp only [fvarsOfType, List.mem_filterMap] at h
+  obtain ⟨⟨x, ty⟩, hmem, hif⟩ := h
+  simp only at hif
+  split at hif
+  · rename_i heq
+    simp at hif; subst hif
+    exact List.mem_map.mpr ⟨(x, ty), hmem, rfl⟩
+  · simp at hif
+
+private theorem getVars_fvar_subset (fctx : FVarCtx) (τ : LMonoTy) (name : String)
+    (h : name ∈ fvarsOfType fctx τ) :
+    LExpr.getVars (LExpr.fvar () ⟨name, ()⟩ (some τ) : LExpr') ⊆
+      fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
+  intro y hy
+  simp only [LExpr.getVars, List.mem_singleton] at hy
+  subst hy
+  exact fvarsOfType_subset_keys fctx τ name h
+
 set_option maxHeartbeats 1600000 in
 set_option linter.unusedSimpArgs false in
-/-- With an empty fvar context, every expression in `genLExprBase`'s support has
-    no free variables (the only source of fvars is `pickFVar`, which draws from
-    `fctx`, and `fvarsOfType [] τ = []`). -/
-theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
+/-- Every free variable appearing in an expression from `genLExprBase`'s support
+    is drawn from the fvar context `fctx` (the only source of fvars is `pickFVar`,
+    which draws names from `fctx`). -/
+theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
-    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx depth τ)) :
-    LExpr.getVars e = [] := by
+    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
+    LExpr.getVars e ⊆ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
   rw [genLExprBase.eq_def] at he
   split at he
   case h_1 τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.arrow τ₁ τ₂)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.arrow τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_arrow] at he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨hf, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact h.elim
-    · simp [fvarsOfType] at hf
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name hmem
     · exact h.elim
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact h.elim
   case h_3 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .bool) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .bool) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_bool] at he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨hf, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
-    · rfl
-    · rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rfl
-    · rfl
-    · simp [fvarsOfType] at hf
-    · rfl
-    · rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rfl
-    · rfl
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name hmem
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
   case h_5 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .int) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .int) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_int] at he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
-    · rfl
-    · rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rfl
-    · rfl
-    · simp [fvarsOfType] at hf
-    · rfl
-    · rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rfl
-    · rfl
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name hmem
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
   case h_9 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .string) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .string) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_string] at he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
-    · rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rfl
-    · simp [fvarsOfType] at hf
-    · rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rfl
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name hmem
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
   case h_11 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .real) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .real) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_real] at he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | ((⟨hf, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩)))
-    · rfl
-    · rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rfl
-    · rfl
-    · simp [fvarsOfType] at hf
-    · rfl
-    · rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rfl
-    · rfl
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name hmem
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · simp [LExpr.getVars]
   case h_13 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.bitvec n)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
-    · rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rfl
-    · simp [fvarsOfType] at hf
-    · rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rfl
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name hmem
+    · simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · simp [LExpr.getVars]
   case h_4 n =>
     -- bool, depth n+1
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) .bool) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) .bool) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_bool] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genBoolConst (G := SetGen.Set)),
-         (1, fun () => genApp (genAppArgTy [] octx tvars bctx n .bool) (genLExprBase [] octx tvars bctx n) .bool),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n .bool)),
-         (2, fun () => genEq (genGenerableTy [] octx tvars bctx n) (genLExprBase [] octx tvars bctx n)),
-         (2, fun () => genQuant .all (genGenerableTy [] octx tvars bctx n)
-           (fun τ' => genLExprBase [] octx tvars (τ' :: bctx) n)
-           (fun τ' => genLExprBase [] octx tvars (τ' :: bctx) n .bool)),
-         (2, fun () => genQuant .exist (genGenerableTy [] octx tvars bctx n)
-           (fun τ' => genLExprBase [] octx tvars (τ' :: bctx) n)
-           (fun τ' => genLExprBase [] octx tvars (τ' :: bctx) n .bool)),
+         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .bool) (genLExprBase fctx octx tvars bctx n) .bool),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .bool)),
+         (2, fun () => genEq (genGenerableTy fctx octx tvars bctx n) (genLExprBase fctx octx tvars bctx n)),
+         (2, fun () => genQuant .all (genGenerableTy fctx octx tvars bctx n)
+           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
+           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
+         (2, fun () => genQuant .exist (genGenerableTy fctx octx tvars bctx n)
+           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
+           (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
          (2, fun () =>
            if hv : (bvarsOfType bctx .bool).length > 0 then pickBVar bctx .bool hv
            else genBoolConst),
          (2, fun () =>
-           if hf : (fvarsOfType [] .bool).length > 0 then pickFVar [] .bool hf
+           if hf : (fvarsOfType fctx .bool).length > 0 then pickFVar fctx .bool hf
            else genBoolConst),
          (2, fun () =>
            if ho : (opsOfType octx .bool).length > 0 then pickOp octx .bool ho
@@ -3874,50 +3901,62 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genBoolConst, genApp, genIte, genEq, genQuant, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · rcases he with rfl | rfl <;> rfl
+    · rcases he with rfl | rfl <;> simp [LExpr.getVars]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · obtain ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ he₁,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he₂, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he₁,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he₂⟩
     · obtain ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars (τ' :: bctx) n _ _ htr,
-        genLExprBase_no_fvars octx tvars (τ' :: bctx) n _ _ hbody, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars (τ' :: bctx) n _ _ htr,
+         genLExprBase_fvars_subset fctx octx tvars (τ' :: bctx) n _ _ hbody⟩
     · obtain ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars (τ' :: bctx) n _ _ htr,
-        genLExprBase_no_fvars octx tvars (τ' :: bctx) n _ _ hbody, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars (τ' :: bctx) n _ _ htr,
+         genLExprBase_fvars_subset fctx octx tvars (τ' :: bctx) n _ _ hbody⟩
     · rcases he with ⟨_, h⟩ | ⟨_, rfl | rfl⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · rfl
-      · rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨hf, h⟩ | ⟨_, rfl | rfl⟩
-      · simp [fvarsOfType] at hf
-      · rfl
-      · rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name hmem
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨_, h⟩ | ⟨_, rfl | rfl⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rfl
-      · rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
   case h_6 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) .int) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) .int) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_int] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genIntConst (G := SetGen.Set)),
-         (1, fun () => genApp (genAppArgTy [] octx tvars bctx n .int) (genLExprBase [] octx tvars bctx n) .int),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n .int)
-                              (genLExprBase [] octx tvars bctx n .int)),
+         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .int) (genLExprBase fctx octx tvars bctx n) .int),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .int)
+                              (genLExprBase fctx octx tvars bctx n .int)),
          (2, fun () =>
            if hv : (bvarsOfType bctx .int).length > 0 then pickBVar bctx .int hv
            else genIntConst),
          (2, fun () =>
-           if hf : (fvarsOfType [] .int).length > 0 then pickFVar [] .int hf
+           if hf : (fvarsOfType fctx .int).length > 0 then pickFVar fctx .int hf
            else genIntConst),
          (2, fun () =>
            if ho : (opsOfType octx .int).length > 0 then pickOp octx .int ho
@@ -3929,41 +3968,47 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genIntConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · rcases he with ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩ <;> rfl
+    · rcases he with ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩ <;> simp [LExpr.getVars]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · rfl
-      · rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩
-      · simp [fvarsOfType] at hf
-      · rfl
-      · rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name hmem
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rfl
-      · rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
   case h_10 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) .string) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) .string) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_string] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genStrConst (G := SetGen.Set)),
-         (1, fun () => genApp (genAppArgTy [] octx tvars bctx n .string) (genLExprBase [] octx tvars bctx n) .string),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n .string)
-                              (genLExprBase [] octx tvars bctx n .string)),
+         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .string) (genLExprBase fctx octx tvars bctx n) .string),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .string)
+                              (genLExprBase fctx octx tvars bctx n .string)),
          (2, fun () =>
            if hv : (bvarsOfType bctx .string).length > 0 then pickBVar bctx .string hv
            else genStrConst),
          (2, fun () =>
-           if hf : (fvarsOfType [] .string).length > 0 then pickFVar [] .string hf
+           if hf : (fvarsOfType fctx .string).length > 0 then pickFVar fctx .string hf
            else genStrConst),
          (2, fun () =>
            if ho : (opsOfType octx .string).length > 0 then pickOp octx .string ho
@@ -3975,38 +4020,44 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genStrConst, genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · obtain ⟨s, _, rfl⟩ := he; rfl
+    · obtain ⟨s, _, rfl⟩ := he; simp [LExpr.getVars]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
-      · simp [fvarsOfType] at hf
-      · rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name hmem
+      · simp [LExpr.getVars]
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
   case h_12 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) .real) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) .real) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_real] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genRealConst (G := SetGen.Set)),
-         (1, fun () => genApp (genAppArgTy [] octx tvars bctx n .real) (genLExprBase [] octx tvars bctx n) .real),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n .real)
-                              (genLExprBase [] octx tvars bctx n .real)),
+         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .real) (genLExprBase fctx octx tvars bctx n) .real),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .real)
+                              (genLExprBase fctx octx tvars bctx n .real)),
          (2, fun () =>
            if hv : (bvarsOfType bctx .real).length > 0 then pickBVar bctx .real hv
            else genRealConst),
          (2, fun () =>
-           if hf : (fvarsOfType [] .real).length > 0 then pickFVar [] .real hf
+           if hf : (fvarsOfType fctx .real).length > 0 then pickFVar fctx .real hf
            else genRealConst),
          (2, fun () =>
            if ho : (opsOfType octx .real).length > 0 then pickOp octx .real ho
@@ -4018,41 +4069,47 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · rcases he with ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩ <;> rfl
+    · rcases he with ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩ <;> simp [LExpr.getVars]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · rfl
-      · rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
-      · simp [fvarsOfType] at hf
-      · rfl
-      · rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name hmem
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rfl
-      · rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
+      · simp [LExpr.getVars]
   case h_14 m n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (m + 1) (.bitvec n)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (m + 1) (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
       ([ (1, fun () => genBitvecConst (G := SetGen.Set) n),
-         (1, fun () => genApp (genAppArgTy [] octx tvars bctx m (.bitvec n)) (genLExprBase [] octx tvars bctx m) (.bitvec n)),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx m .bool)
-                              (genLExprBase [] octx tvars bctx m (.bitvec n))
-                              (genLExprBase [] octx tvars bctx m (.bitvec n))),
+         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx m (.bitvec n)) (genLExprBase fctx octx tvars bctx m) (.bitvec n)),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx m .bool)
+                              (genLExprBase fctx octx tvars bctx m (.bitvec n))
+                              (genLExprBase fctx octx tvars bctx m (.bitvec n))),
          (2, fun () =>
            if hv : (bvarsOfType bctx (.bitvec n)).length > 0 then pickBVar bctx (.bitvec n) hv
            else genBitvecConst n),
          (2, fun () =>
-           if hf : (fvarsOfType [] (.bitvec n)).length > 0 then pickFVar [] (.bitvec n) hf
+           if hf : (fvarsOfType fctx (.bitvec n)).length > 0 then pickFVar fctx (.bitvec n) hf
            else genBitvecConst n),
          (2, fun () =>
            if ho : (opsOfType octx (.bitvec n)).length > 0 then pickOp octx (.bitvec n) ho
@@ -4064,42 +4121,48 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genBitvecConst, genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · obtain ⟨k, _, rfl⟩ := he; rfl
+    · obtain ⟨k, _, rfl⟩ := he; simp [LExpr.getVars]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx m _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx m _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx m _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx m _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx m _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx m _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx m _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx m _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx m _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx m _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
-      · simp [fvarsOfType] at hf
-      · rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name hmem
+      · simp [LExpr.getVars]
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp [LExpr.getVars]
   case h_2 n τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) (.arrow τ₁ τ₂)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) (.arrow τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_arrow] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (4, fun () => genAbs (G := SetGen.Set) (genLExprBase [] octx tvars (τ₁ :: bctx) n τ₂) τ₁),
-         (1, fun () => genApp (genAppArgTy [] octx tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase [] octx tvars bctx n) (.arrow τ₁ τ₂)),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n (.arrow τ₁ τ₂))
-                              (genLExprBase [] octx tvars bctx n (.arrow τ₁ τ₂))),
+      ([ (4, fun () => genAbs (G := SetGen.Set) (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
+         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂)),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))
+                              (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))),
          (2, fun () =>
            if hv : (bvarsOfType bctx (.arrow τ₁ τ₂)).length > 0 then pickBVar bctx (.arrow τ₁ τ₂) hv
-           else genAbs (genLExprBase [] octx tvars (τ₁ :: bctx) n τ₂) τ₁),
+           else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
          (2, fun () =>
-           if hf : (fvarsOfType [] (.arrow τ₁ τ₂)).length > 0 then pickFVar [] (.arrow τ₁ τ₂) hf
-           else genAbs (genLExprBase [] octx tvars (τ₁ :: bctx) n τ₂) τ₁),
+           if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0 then pickFVar fctx (.arrow τ₁ τ₂) hf
+           else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
          (2, fun () =>
            if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0 then pickOp octx (.arrow τ₁ τ₂) ho
-           else genAbs (genLExprBase [] octx tvars (τ₁ :: bctx) n τ₂) τ₁) ]
+           else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁) ]
       ) (by show 0 < 4+1+2+2+2+2; omega)) := he
     rw [mem_support_frequency_iff] at hfreq
     obtain ⟨_, g, hg, _, he⟩ := hfreq
@@ -4108,25 +4171,35 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     simp only [genAbs, genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     · obtain ⟨body, hbody, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars (τ₁ :: bctx) n _ _ hbody]
+      simp only [LExpr.getVars]
+      exact genLExprBase_fvars_subset fctx octx tvars (τ₁ :: bctx) n _ _ hbody
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, body, hbody, rfl⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars (τ₁ :: bctx) n _ _ hbody]
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp only [LExpr.getVars]
+        exact genLExprBase_fvars_subset fctx octx tvars (τ₁ :: bctx) n _ _ hbody
     · rcases he with ⟨hf, h⟩ | ⟨_, body, hbody, rfl⟩
-      · simp [fvarsOfType] at hf
-      · simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars (τ₁ :: bctx) n _ _ hbody]
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name hmem
+      · simp only [LExpr.getVars]
+        exact genLExprBase_fvars_subset fctx octx tvars (τ₁ :: bctx) n _ _ hbody
     · rcases he with ⟨_, h⟩ | ⟨_, body, hbody, rfl⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars (τ₁ :: bctx) n _ _ hbody]
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · simp only [LExpr.getVars]
+        exact genLExprBase_fvars_subset fctx octx tvars (τ₁ :: bctx) n _ _ hbody
   case h_7 name =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.ftvar name)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.ftvar name)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
@@ -4134,34 +4207,37 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
     · exact absurd h (by simp)
   case h_8 n name =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) (.ftvar name)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) (.ftvar name)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy [] octx tvars bctx n (.ftvar name)) (genLExprBase [] octx tvars bctx n) (.ftvar name)),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n (.ftvar name))
-                              (genLExprBase [] octx tvars bctx n (.ftvar name))),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx octx tvars bctx n (.ftvar name)) (genLExprBase fctx octx tvars bctx n) (.ftvar name)),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.ftvar name))
+                              (genLExprBase fctx octx tvars bctx n (.ftvar name))),
          (2, fun () =>
            if hv : (bvarsOfType bctx (.ftvar name)).length > 0 then pickBVar bctx (.ftvar name) hv
-           else if hf : (fvarsOfType [] (.ftvar name)).length > 0 then pickFVar [] (.ftvar name) hf
+           else if hf : (fvarsOfType fctx (.ftvar name)).length > 0 then pickFVar fctx (.ftvar name) hf
            else if ho : (opsOfType octx (.ftvar name)).length > 0 then pickOp octx (.ftvar name) ho
            else default),
          (2, fun () =>
-           if hf : (fvarsOfType [] (.ftvar name)).length > 0 then pickFVar [] (.ftvar name) hf
+           if hf : (fvarsOfType fctx (.ftvar name)).length > 0 then pickFVar fctx (.ftvar name) hf
            else if hv : (bvarsOfType bctx (.ftvar name)).length > 0 then pickBVar bctx (.ftvar name) hv
            else default),
          (2, fun () =>
@@ -4176,27 +4252,34 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
   case h_15 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 .regex) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 .regex) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
@@ -4204,34 +4287,37 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
     · exact absurd h (by simp)
   case h_16 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) .regex) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) .regex) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy [] octx tvars bctx n .regex) (genLExprBase [] octx tvars bctx n) .regex),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n .regex)
-                              (genLExprBase [] octx tvars bctx n .regex)),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx octx tvars bctx n .regex) (genLExprBase fctx octx tvars bctx n) .regex),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n .regex)
+                              (genLExprBase fctx octx tvars bctx n .regex)),
          (2, fun () =>
            if hv : (bvarsOfType bctx .regex).length > 0 then pickBVar bctx .regex hv
-           else if hf : (fvarsOfType [] .regex).length > 0 then pickFVar [] .regex hf
+           else if hf : (fvarsOfType fctx .regex).length > 0 then pickFVar fctx .regex hf
            else if ho : (opsOfType octx .regex).length > 0 then pickOp octx .regex ho
            else default),
          (2, fun () =>
-           if hf : (fvarsOfType [] .regex).length > 0 then pickFVar [] .regex hf
+           if hf : (fvarsOfType fctx .regex).length > 0 then pickFVar fctx .regex hf
            else if hv : (bvarsOfType bctx .regex).length > 0 then pickBVar bctx .regex hv
            else default),
          (2, fun () =>
@@ -4246,27 +4332,34 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
   case h_17 τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.map τ₁ τ₂)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.map τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
@@ -4274,34 +4367,37 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
     · exact absurd h (by simp)
   case h_18 n τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) (.map τ₁ τ₂)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) (.map τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy [] octx tvars bctx n (.map τ₁ τ₂)) (genLExprBase [] octx tvars bctx n) (.map τ₁ τ₂)),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n (.map τ₁ τ₂))
-                              (genLExprBase [] octx tvars bctx n (.map τ₁ τ₂))),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx octx tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂)),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))
+                              (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))),
          (2, fun () =>
            if hv : (bvarsOfType bctx (.map τ₁ τ₂)).length > 0 then pickBVar bctx (.map τ₁ τ₂) hv
-           else if hf : (fvarsOfType [] (.map τ₁ τ₂)).length > 0 then pickFVar [] (.map τ₁ τ₂) hf
+           else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0 then pickFVar fctx (.map τ₁ τ₂) hf
            else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0 then pickOp octx (.map τ₁ τ₂) ho
            else default),
          (2, fun () =>
-           if hf : (fvarsOfType [] (.map τ₁ τ₂)).length > 0 then pickFVar [] (.map τ₁ τ₂) hf
+           if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0 then pickFVar fctx (.map τ₁ τ₂) hf
            else if hv : (bvarsOfType bctx (.map τ₁ τ₂)).length > 0 then pickBVar bctx (.map τ₁ τ₂) hv
            else default),
          (2, fun () =>
@@ -4316,27 +4412,34 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
   case h_19 τ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx 0 (.seq τ)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.seq τ)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
@@ -4344,34 +4447,37 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · simp [fvarsOfType] at hf
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
     · exact absurd h (by simp)
-    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-    · simp [fvarsOfType] at hf
+    · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+    · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+      exact getVars_fvar_subset fctx _ name' hmem
     · exact absurd h (by simp)
   case h_20 n τ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx (n + 1) (.seq τ)) := by
+    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (n + 1) (.seq τ)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
     have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy [] octx tvars bctx n (.seq τ)) (genLExprBase [] octx tvars bctx n) (.seq τ)),
-         (2, fun () => genIte (genLExprBase [] octx tvars bctx n .bool)
-                              (genLExprBase [] octx tvars bctx n (.seq τ))
-                              (genLExprBase [] octx tvars bctx n (.seq τ))),
+      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx octx tvars bctx n (.seq τ)) (genLExprBase fctx octx tvars bctx n) (.seq τ)),
+         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
+                              (genLExprBase fctx octx tvars bctx n (.seq τ))
+                              (genLExprBase fctx octx tvars bctx n (.seq τ))),
          (2, fun () =>
            if hv : (bvarsOfType bctx (.seq τ)).length > 0 then pickBVar bctx (.seq τ) hv
-           else if hf : (fvarsOfType [] (.seq τ)).length > 0 then pickFVar [] (.seq τ) hf
+           else if hf : (fvarsOfType fctx (.seq τ)).length > 0 then pickFVar fctx (.seq τ) hf
            else if ho : (opsOfType octx (.seq τ)).length > 0 then pickOp octx (.seq τ) ho
            else default),
          (2, fun () =>
-           if hf : (fvarsOfType [] (.seq τ)).length > 0 then pickFVar [] (.seq τ) hf
+           if hf : (fvarsOfType fctx (.seq τ)).length > 0 then pickFVar fctx (.seq τ) hf
            else if hv : (bvarsOfType bctx (.seq τ)).length > 0 then pickBVar bctx (.seq τ) hv
            else default),
          (2, fun () =>
@@ -4386,48 +4492,76 @@ theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
     simp only [genApp, genIte, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hfn,
-        genLExprBase_no_fvars octx tvars bctx n _ _ harg, List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hfn,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ harg⟩
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-      simp only [LExpr.getVars, genLExprBase_no_fvars octx tvars bctx n _ _ hc,
-        genLExprBase_no_fvars octx tvars bctx n _ _ ht,
-        genLExprBase_no_fvars octx tvars bctx n _ _ he', List.append_nil]
+      simp only [LExpr.getVars]
+      exact List.append_subset.mpr
+        ⟨List.append_subset.mpr
+          ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
+           genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
+         genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · simp [fvarsOfType] at hf
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+        exact getVars_fvar_subset fctx _ name' hmem
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; rfl
-      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; rfl
+      · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
+      · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
   case h_21 =>
     rw [mem_support_iff] at he; exact absurd he (bot_mem_iff e).mp
   termination_by depth
   decreasing_by all_goals simp_wf; omega
 
-private theorem mkApps_no_fvars (base : LExpr') (args : List LExpr')
-    (hbase : LExpr.getVars base = []) (hargs : ∀ a ∈ args, LExpr.getVars a = []) :
-    LExpr.getVars (mkApps base args) = [] := by
+set_option maxHeartbeats 1600000 in
+/-- With an empty fvar context, every expression in `genLExprBase`'s support has
+    no free variables (a specialization of `genLExprBase_fvars_subset`). -/
+theorem genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) [] octx tvars bctx depth τ)) :
+    LExpr.getVars e = [] := by
+  have h := genLExprBase_fvars_subset [] octx tvars bctx depth τ e he
+  simpa using List.subset_nil.mp h
+
+private theorem mkApps_fvars_subset (base : LExpr') (args : List LExpr')
+    (keys : List (Lambda.Identifier Unit))
+    (hbase : LExpr.getVars base ⊆ keys) (hargs : ∀ a ∈ args, LExpr.getVars a ⊆ keys) :
+    LExpr.getVars (mkApps base args) ⊆ keys := by
   induction args generalizing base with
   | nil => simpa [mkApps] using hbase
   | cons a rest ih =>
     simp only [mkApps, List.foldl_cons]
     apply ih
-    · simp only [LExpr.getVars, hbase, hargs a (by simp), List.append_nil]
+    · simp only [LExpr.getVars]
+      exact List.append_subset.mpr ⟨hbase, hargs a (by simp)⟩
     · intro x hx; exact hargs x (by simp [hx])
 
-/-- Every argument produced by `mapM (genLExprBase [] …)` over an empty fvar
-    context has no free variables. -/
-private theorem mapM_genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
+private theorem mkApps_no_fvars (base : LExpr') (args : List LExpr')
+    (hbase : LExpr.getVars base = []) (hargs : ∀ a ∈ args, LExpr.getVars a = []) :
+    LExpr.getVars (mkApps base args) = [] := by
+  have h := mkApps_fvars_subset base args []
+    (by rw [hbase]; exact List.Subset.refl _)
+    (by intro a ha; rw [hargs a ha]; exact List.Subset.refl _)
+  simpa using List.subset_nil.mp h
+
+/-- Every argument produced by `mapM (genLExprBase fctx …)` has all its free
+    variables drawn from `fctx`. -/
+private theorem mapM_genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (argTys : List LMonoTy) (args : List LExpr')
     (hargs : args ∈ (List.mapM (m := SetGen.Set)
-      (genLExprBase (G := SetGen.Set) [] octx tvars bctx depth) argTys)) :
-    ∀ a ∈ args, LExpr.getVars a = [] := by
+      (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth) argTys)) :
+    ∀ a ∈ args, LExpr.getVars a ⊆ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
   induction argTys generalizing args with
   | nil =>
     simp only [List.mapM_nil, SetGen.Set.mem_pure] at hargs
@@ -4437,8 +4571,36 @@ private theorem mapM_genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdenti
     obtain ⟨x, hx, tl, htl, rfl⟩ := hargs
     intro a ha
     rcases List.mem_cons.mp ha with rfl | hrest
-    · exact genLExprBase_no_fvars octx tvars bctx depth σ a hx
+    · exact genLExprBase_fvars_subset fctx octx tvars bctx depth σ a hx
     · exact ih tl htl a hrest
+
+/-- Every argument produced by `mapM (genLExprBase [] …)` over an empty fvar
+    context has no free variables. -/
+private theorem mapM_genLExprBase_no_fvars (octx : OpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (argTys : List LMonoTy) (args : List LExpr')
+    (hargs : args ∈ (List.mapM (m := SetGen.Set)
+      (genLExprBase (G := SetGen.Set) [] octx tvars bctx depth) argTys)) :
+    ∀ a ∈ args, LExpr.getVars a = [] := by
+  intro a ha
+  have h := mapM_genLExprBase_fvars_subset [] octx tvars bctx depth argTys args hargs a ha
+  simpa using List.subset_nil.mp h
+
+/-- Every free variable in an expression from `genIndirPoly`'s support is drawn
+    from the fvar context `fctx`. -/
+theorem genIndirPoly_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
+    LExpr.getVars e ⊆ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
+  unfold genIndirPoly at he
+  simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
+             SetGen.mem_dite] at he
+  obtain ⟨sampledTys, _, he⟩ := he
+  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
+  · obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
+    exact mkApps_fvars_subset _ args _ (by simp only [LExpr.getVars]; exact List.nil_subset _)
+      (mapM_genLExprBase_fvars_subset fctx octx tvars bctx depth _ args hargs)
+  · exact genLExprBase_fvars_subset fctx octx tvars bctx depth τ e he
 
 /-- With an empty fvar context, every expression in `genIndirPoly`'s support has
     no free variables. -/
@@ -4446,22 +4608,16 @@ theorem genIndirPoly_no_fvars (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List Ty
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
     (he : e ∈ SetGen.support (genIndirPoly (G := SetGen.Set) [] octx pctx tvars bctx depth τ)) :
     LExpr.getVars e = [] := by
-  unfold genIndirPoly at he
-  simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
-             SetGen.mem_dite] at he
-  obtain ⟨sampledTys, _, he⟩ := he
-  rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
-  · obtain ⟨idx, ⟨_, hidx_hi⟩, args, hargs, rfl⟩ := he
-    exact mkApps_no_fvars _ args rfl
-      (mapM_genLExprBase_no_fvars octx tvars bctx depth _ args hargs)
-  · exact genLExprBase_no_fvars octx tvars bctx depth τ e he
+  have h := genIndirPoly_fvars_subset [] octx pctx tvars bctx depth τ e he
+  simpa using List.subset_nil.mp h
 
-/-- With an empty fvar context, every expression in `genLExpr`'s support has
-    no free variables. -/
-theorem genLExpr_no_fvars (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+/-- Every free variable in an expression from `genLExpr`'s support is drawn from
+    the fvar context `fctx`. -/
+theorem genLExpr_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx pctx tvars bctx depth τ)) :
-    LExpr.getVars e = [] := by
+    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
+    LExpr.getVars e ⊆ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
   unfold genLExpr at he
   simp only [mem_support_iff, SetGen.mem_dite] at he
   rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
@@ -4470,20 +4626,29 @@ theorem genLExpr_no_fvars (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIden
     obtain ⟨_, g, hg, _, he⟩ := he
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
-    · exact genLExprBase_no_fvars octx tvars bctx depth τ e he
+    · exact genLExprBase_fvars_subset fctx octx tvars bctx depth τ e he
     -- weight-9 branch: a binary pick between the monomorphic Indir and IndirPoly rules
     rw [mem_support_pick_iff] at he
     rcases he with he | he
     · simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
       obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
-      exact mkApps_no_fvars _ args rfl
-        (mapM_genLExprBase_no_fvars octx tvars bctx depth _ args hargs)
-    · exact genIndirPoly_no_fvars octx pctx tvars bctx depth τ e he
+      exact mkApps_fvars_subset _ args _ (by simp only [LExpr.getVars]; exact List.nil_subset _)
+        (mapM_genLExprBase_fvars_subset fctx octx tvars bctx depth _ args hargs)
+    · exact genIndirPoly_fvars_subset fctx octx pctx tvars bctx depth τ e he
   · -- No monomorphic Indir candidates: pick between genLExprBase and IndirPoly
     rw [pick_mem_iff] at he
     rcases he with he | he
-    · exact genLExprBase_no_fvars octx tvars bctx depth τ e he
-    · exact genIndirPoly_no_fvars octx pctx tvars bctx depth τ e he
+    · exact genLExprBase_fvars_subset fctx octx tvars bctx depth τ e he
+    · exact genIndirPoly_fvars_subset fctx octx pctx tvars bctx depth τ e he
+
+/-- With an empty fvar context, every expression in `genLExpr`'s support has
+    no free variables. -/
+theorem genLExpr_no_fvars (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) [] octx pctx tvars bctx depth τ)) :
+    LExpr.getVars e = [] := by
+  have h := genLExpr_fvars_subset [] octx pctx tvars bctx depth τ e he
+  simpa using List.subset_nil.mp h
 
 end Lambda.LExpr
 
