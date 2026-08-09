@@ -118,6 +118,12 @@ instance : Tyche.TycheSample EvalResult where
 -- Each wrapper varies the depth parameter uniformly over [1, 5] so that
 -- Tyche visualizations cover the full range of generator behavior, not
 -- just a single fixed depth.
+--
+-- Note the expression panels below instantiate at `G := IO` and so leave
+-- `genLExpr`'s `retryCont` at its `id` default (no retrying). `retryGenArg` — the
+-- retry continuation `TestScaffold` passes — is `Plausible.Gen`-specific, since
+-- retrying needs `tryCatch`. The panels that *do* go through `Plausible.Gen`
+-- (`genProcsForTyche`, below) get the outer `retryGen` treatment instead.
 
 /-- Randomly choose a depth between 1 and `maxDepth` (inclusive). -/
 def randomDepth (maxDepth : Nat := 5) : IO Nat := do

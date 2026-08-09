@@ -1216,18 +1216,61 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
     argument — via `genLExprBase`. So factory calls nest in
     **argument position of other factory calls**, but not yet underneath binders
     introduced by the base generator. Closing that requires folding the Indir
-    rules into `genLExprBase`'s own branch lists. -/
+    rules into `genLExprBase`'s own branch lists.
+
+    ## The `retryCont` parameter
+
+    `retryCont` is a **continuation that is invoked to retry generation when it
+    fails**. It receives the argument generator this function would otherwise have
+    used in Indir/IndirPoly argument position, and returns the generator to use
+    instead — so a caller can interpose "if this sub-draw fails, draw it again with
+    fresh randomness" without this module needing to know what failure *is*.
+
+    Why it has to be a parameter, and why it has to be a *transformer* rather than
+    a plain generator: at depth `n + 1` the argument generator must be *this
+    generator itself at `n`*, so a fixed `LMonoTy → G LExpr'` value would pin the
+    caller to one particular depth. `retryCont` instead threads through the
+    recursion and is therefore applied at **every** level — which is the point,
+    since generation failure compounds multiplicatively with nesting depth and the
+    nested levels are exactly what a caller cannot otherwise reach.
+
+    Note also that `retryCont` at depth `n + 1` wraps the *whole* level-`n`
+    generator, `genIndirPoly`'s type-variable instantiation (`sampledTys`) very much
+    included. So a retrying continuation resamples unfillable instantiations at
+    every nested level, and neither `genIndir` nor `genIndirPoly` needs to change.
+
+    Retrying is meaningful only under `Plausible.Gen`, where a failed leaf throws.
+    Under `SetGen.Set` — the semantics the soundness/completeness theorems use —
+    `default` is `∅` rather than an error, so there is no failure to observe and
+    nothing to retry. The abstract `Gen` class deliberately provides no
+    `tryCatch`/`Alternative`, which is precisely why this is a caller-supplied
+    continuation rather than something this function could do itself.
+
+    It defaults to `id` (retry nothing) and is placed **last**, after the
+    `optParam` `maxNumArgs`, so every existing positional call site elaborates
+    unchanged and `genLExpr … depth τ` is definitionally what it was before.
+    The ordering matters: putting `retryCont` earlier would silently swallow
+    positional arguments. The theorems in `HasTypeAGen.lean` /
+    `HasTypeAGenOpsConsistent.lean` continue to describe the `retryCont = id` case,
+    which is the honest scope — a retry changes how many attempts a draw needs, not
+    which terms are reachable. -/
 def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier)
-    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3) : G LExpr' :=
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
+    (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G LExpr' :=
   -- The argument generator for the Indir/IndirPoly rules. At the depth floor it is
   -- the base generator (leaves); above it, `genLExpr` itself at the smaller index
   -- `n` — which is what lets factory applications nest. The recursion is structural
   -- on `depth`, so no `termination_by` is needed.
+  --
+  -- `retryCont` is the caller's retry continuation (see the docstring): it wraps
+  -- whichever generator we use in argument position, and threads into the
+  -- recursive call so it applies at every level, not just this one.
   let genArg : LMonoTy → G LExpr' :=
-    match depth with
-    | 0 => genLExprBase fctx octx tvars bctx 0
-    | n + 1 => fun σ => genLExpr fctx octx pctx tvars bctx n σ maxNumArgs
+    retryCont <|
+      match depth with
+      | 0 => genLExprBase fctx octx tvars bctx 0
+      | n + 1 => fun σ => genLExpr fctx octx pctx tvars bctx n σ maxNumArgs retryCont
   if h : (findOpsInCtx octx τ).length > 0 then
     frequency
       [ (1, fun () => genLExprBase fctx octx tvars bctx depth τ),

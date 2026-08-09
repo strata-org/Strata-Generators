@@ -68,8 +68,14 @@ def genClosedLExprWithFactory [Gen G] (F : @Factory LExprParams')
 
 /-- Generate a well-typed `LExpr` using explicit operator and polymorphic
     operator contexts. This is a convenience wrapper around `genLExpr` that
-    avoids requiring a `Factory` value. -/
+    avoids requiring a `Factory` value.
+
+    `retryCont` is forwarded verbatim to `genLExpr`: it is the continuation invoked
+    to retry generation when a subterm fails, applied at every nesting level. It
+    defaults to `id` (no retrying), so existing call sites are unaffected; the test
+    harness passes `retryGenArg` here. See `genLExpr` for the full rationale. -/
 def genLExprWithOps [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx)
-    (depth : Nat) (τ : LMonoTy) : G LExpr' :=
-  genLExpr fctx octx pctx tvars bctx depth τ
+    (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
+    (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G LExpr' :=
+  genLExpr fctx octx pctx tvars bctx depth τ maxNumArgs retryCont
