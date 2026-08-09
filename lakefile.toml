@@ -49,3 +49,13 @@ root = "TestMain"
 [[lean_exe]]
 name = "test-plain"
 root = "PlainTestMain"
+
+# The Map/Sequence property suite (strata-generators issues #5 and #69). Every
+# sample invokes an SMT solver, because `Core.Factory` declares all `Map`/
+# `Sequence` operations with `polyUneval` — axioms only, no concrete evaluator —
+# so there is no in-Lean way to decide these properties. Kept out of the `test`
+# driver for that reason: a default `lake test` must not require a solver.
+# Run: `lake build map-seq && .lake/build/bin/map-seq [numTrials] [maxLen]`
+[[lean_exe]]
+name = "map-seq"
+root = "MapSeqMain"

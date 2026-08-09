@@ -140,6 +140,20 @@ def procAnfControlFlow       : String := "proc: ANFEncoder does not change contr
 def procAnfChangedFlag       : String := "proc: ANFEncoder changed flag is faithful"
 def procAnfAnalysisPreserved : String := "proc: ANFEncoder preserves call-graph WF"
 
+-- ── `Map`/`Sequence` datatype properties (issues #5, #69) ────────────
+-- All four are opt-in and require a live SMT solver: `Core.Factory` declares
+-- every `Map`/`Sequence` operation with `polyUneval` (axioms only, no
+-- `concreteEval` and no body), so the in-Lean evaluator cannot reduce them and
+-- there is no solver-free oracle available. They run from the separate `map-seq`
+-- driver rather than `test`; see `StrataGenerators/MapSeqRunner.lean`.
+def seqModelAgreement    : String := "seq: SeqModel List differential (axioms vs Lean model)"
+def mapAxiomAgreement    : String := "map: axiom differential (select/update/mapConst)"
+/-- Expected to *report* divergences: `Factory.lean` declares no `Map`
+    extensionality axiom, so map equalities are `unknown` under the axiomatized
+    encoding and `pass` under SMT-LIB Array theory. -/
+def mapArrayTheoryMetamorphic : String := "map: useArrayTheory is outcome-preserving"
+def seqPrecondObligations : String := "seq: partial ops generate dischargeable bounds obligations"
+
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
@@ -160,7 +174,9 @@ def all : List String :=
     procPrecondDeclaredFactoryStripped, procPrecondAnalysisPreserved,
     procAnfDeclsLength, procAnfNonProcsUnchanged, procAnfHeadersPreserved,
     procAnfFreshVarsDet, procAnfOrderPreserved, procAnfControlFlow,
-    procAnfChangedFlag, procAnfAnalysisPreserved ]
+    procAnfChangedFlag, procAnfAnalysisPreserved,
+    seqModelAgreement, mapAxiomAgreement, mapArrayTheoryMetamorphic,
+    seqPrecondObligations ]
 
 -- No two properties share a name (a copy/paste slip that pointed two properties
 -- at the same label would collapse their panels/results silently).
