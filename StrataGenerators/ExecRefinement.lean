@@ -157,7 +157,7 @@ theorem refines_choose (lo hi : Nat) (h : lo ≤ hi) (size : ULift Nat) :
 theorem refines_default {α} [Inhabited α] (size : ULift Nat) :
     Refines (default : Plausible.Gen α) (default : SetGen.Set α) size := by
   rintro a ⟨sg, sg', h⟩
-  simp only [default, throw, throwThe, MonadExceptOf.throw, liftM, monadLift,
+  simp only [default, throw, throwThe, MonadExceptOf.throw,
              Function.comp_def, StateT.lift, bind, ReaderT.bind, Except.bind] at h
   exact absurd h (by simp)
 
@@ -176,7 +176,7 @@ theorem refines_pick {α} (p q : Plausible.Gen α) (s t : SetGen.Set α) (size :
     by_cases hv : v.down.val == 0
     · simp only [hv, if_pos] at h
       exact Or.inl (hp a ⟨sgmid, sg', by simpa using h⟩)
-    · simp only [hv, if_neg] at h
+    · simp only [hv] at h
       exact Or.inr (hq a ⟨sgmid, sg', by simpa using h⟩)
   · exact absurd h (by simp)
 

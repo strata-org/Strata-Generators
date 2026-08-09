@@ -318,7 +318,7 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
         (if ar = 0 then tc else (nm, ar) :: tc) R := by
     intro x hx
     simp only [DatatypeGen.initialReserved, List.mem_cons, List.mem_append] at hx ⊢
-    by_cases har0 : ar = 0 <;> simp only [har0, if_pos, if_neg, if_true, if_false] <;>
+    by_cases har0 : ar = 0 <;> simp only [har0, if_pos, if_false] <;>
       rcases hx with h | ((h | h) | h) | h
     all_goals first
       | exact Or.inl h
