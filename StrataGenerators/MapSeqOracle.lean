@@ -150,13 +150,18 @@ def mapModelProgram (m : MapLiteral) : String :=
 /-- Build a program asserting `Map` **equalities** that hold semantically but
     need *extensionality* to prove.
 
-    This is the input the `useArrayTheory` metamorphic property actually needs.
     Pointwise `select` assertions (`mapModelProgram`) are provable from
     `updateSelect`/`updatePreserve` alone and therefore agree under both encoding
-    modes — they cannot witness the divergence. Map equality can only be
-    discharged with an extensionality axiom, which SMT-LIB `Array` theory has
-    built in and `Factory.lean` does *not* declare, so this is where the two
-    modes come apart.
+    modes. Map equality can only be discharged with an extensionality axiom,
+    which SMT-LIB `Array` theory has built in and `Factory.lean` does *not*
+    declare, so this is where the two encodings' **documented completeness
+    difference** shows up (`unknown` under `useArrayTheory := false`, `pass`
+    under `true`).
+
+    That difference is intended behaviour, not a defect — see
+    `arrayTheoryMetamorphic`, which reports it rather than scoring it. This shape
+    exists so that counter stays honest: if the equality assertions stopped being
+    generated, the completeness-gap count would silently drop to zero.
 
     Three shapes, all semantically valid:
 

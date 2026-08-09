@@ -20,11 +20,12 @@ machine-checked correctness argument** (issue #69):
    claim*, not a proof. This family turns it into an executable oracle by
    asserting the `List`-predicted answer against the solver.
 
-2. **`useArrayTheory` metamorphic** (§2) — `Options.lean` documents the flag as
-   an encoding choice ("Use SMT-LIB Array theory instead of axiomatized maps")
-   and `MetaVerifier.lean` frames the two as alternative treatments of the *same*
-   semantics. If that is right, toggling it cannot change any obligation's
-   outcome. It does; see the module doc on `arrayTheoryKnownGaps` below.
+2. **`useArrayTheory` non-contradiction** (§2) — the two `Map` encodings are
+   *deliberately* differently complete (Strata's own `ModifiesArrayTheoryPerf.lean`
+   asserts that array theory proves obligations the `∀` frame cannot), so the
+   property checks only that they never *contradict* each other: no obligation
+   may `pass` under one encoding and `fail` under the other, since that could not
+   be a completeness difference. See `arrayTheoryMetamorphic`.
 
 3. **Precondition obligations** (§3) — `Sequence.select`/`update`/`take`/`drop`
    are the only *partial* Core operators with non-trivial bounds preconditions

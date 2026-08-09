@@ -14,8 +14,8 @@ alongside the existing `--smt` node.
 `Core.verify` yields one `VCResult` per obligation, and the three outcomes carry
 very different weight for these axioms:
 
-- `isFailure` — the solver *refuted* something the `List` model predicts, or the
-  two `useArrayTheory` modes disagreed. Scored as a counterexample.
+- `isFailure` — the solver *refuted* something the `List` model predicts. Scored
+  as a counterexample.
 - `isUnknown` — no verdict. Reported and counted separately; never fails the
   suite, because these axioms are genuinely incomplete in characterised places
   (see `containsKnownIncomplete`). Silently folding these into "pass" would let a
@@ -26,6 +26,16 @@ very different weight for these axioms:
 Encoder/solver *errors* are surfaced in the note but do not gate the exit code,
 matching how `SmtEval.lean` treats them: an encoding limitation is not an
 evaluator disagreement.
+
+**`unknown` is not a bug, and the `useArrayTheory` property depends on that.**
+The two `Map` encodings have deliberately different completeness — Strata's own
+`ModifiesArrayTheoryPerf.lean` asserts an obligation that fails to prove under
+the `∀` frame and verifies under array theory, calling the latter "not merely
+faster, [but] more complete". So `arrayTheoryMetamorphic` scores only
+`pass`/`fail` *contradictions* between the two modes, and reports
+`unknown`-vs-decided as the documented completeness gap. An earlier version of
+this module scored every difference and therefore reported that designed
+behaviour as a defect.
 -/
 
 namespace StrataGenerators.MapSeqRunner
@@ -156,35 +166,64 @@ instance : ToString Verdict where
   toString
     | .pass => "pass" | .fail => "fail" | .unknown => "unknown" | .error => "error"
 
-/-- **The headline property.** `useArrayTheory` is documented as an encoding
-    choice over the same semantics (`Options.lean`: "Use SMT-LIB Array theory
-    instead of axiomatized maps"; `MetaVerifier.lean` calls the two alternative
-    treatments of `Map`). If that is accurate, toggling it must not change any
-    obligation's outcome.
+/-- `useArrayTheory` must not make the two encodings *contradict* each other.
 
-    It does. On a hand-written probe against this tree, full map extensionality
+    ## What this checks, and what it deliberately does not
+
+    The two `Map` encodings have **different completeness**, by design. That is
+    not a bug and this property must not report it:
+
+    > the array-theory frame is not merely faster, it is more complete on
+    > heap-heavy code
+    > — `StrataTest/Languages/Laurel/EndToEndTests/Verification/Objects/ModifiesArrayTheoryPerf.lean`
+
+    That test *asserts* the asymmetry: an obligation that "could not be proved"
+    under the `∀` frame verifies under `--use-array-theory`. Concretely, the
+    axiomatized encoding declares `updateSelect` and `updatePreserve` for
+    `update` but **no extensionality axiom**, while SMT-LIB `Array` theory has
+    one built in — so map *equalities* are `unknown` under `false` and `pass`
+    under `true`:
 
     ```
-    assert [ext_full]: m0[1 := 10][2 := 20] == m0[2 := 20][1 := 10];
+    assert [ext_commute]: mapConst<int>(1)[3 := 9][4 := 20] == mapConst<int>(1)[4 := 20][3 := 9];
+    -- useArrayTheory := false  ⇒  unknown
+    -- useArrayTheory := true   ⇒  pass
     ```
 
-    is `unknown` under `false` and `pass` under `true`, because `Factory.lean`
-    declares `updateSelect` and `updatePreserve` for `update` but **no
-    extensionality axiom**, while SMT-LIB `Array` theory has it built in. The
-    same probe shows the flag changing *bug-finding* power: a false assertion
-    (`mapConst<int>(7)[42] == 8`) is refuted under `true` but merely `unknown`
-    under `false`.
+    Neither `Options.lean` ("Use SMT-LIB Array theory instead of axiomatized
+    maps") nor `MetaVerifier.lean` claims outcome-preservation — both describe
+    the encoding mechanism, not an invariant over verdicts. So `unknown` on one
+    side and `pass` on the other is *expected* and is only reported.
 
-    So this property is expected to report divergences, and each one is either a
-    missing `Map` axiom or a doc-comment that understates the flag. Divergences
-    are scored as failures deliberately — that is the finding. -/
+    ## The property proper: no contradiction
+
+    What would be a genuine bug is the two encodings disagreeing on a *decided*
+    verdict — one proving an obligation the other refutes. That cannot be a
+    completeness difference; it means at least one encoding is unsound with
+    respect to the `Map` axioms. So the scored condition is:
+
+    - `pass` vs `fail` (either order) ⇒ **counterexample**;
+    - `unknown` vs anything ⇒ reported as a completeness gap, not a failure;
+    - obligation-count mismatch ⇒ counterexample (the flag must not change which
+      obligations exist, only how they are encoded).
+
+    This is the sound half of #69 §3.2's metamorphic property. It is the half
+    that can actually be violated by a bug rather than by a solver heuristic,
+    which is also why it is robust to the caveat `ModifiesArrayTheoryPerf.lean`
+    records about its own annotations ("if a future solver discharges it, the
+    annotation below must be updated") — a solver that gets stronger moves
+    `unknown` verdicts, never `pass`↔`fail` ones. -/
 def arrayTheoryMetamorphic (numTrials maxSize : Nat) :
     IO (Bool × Nat × Nat × Option String) := do
   let total := min numTrials 50
   let mut agreed := 0
-  let mut diverged := 0
+  let mut contradicted := 0
+  -- One side decided, the other returned `unknown`: the documented completeness
+  -- difference. Counted and reported, never scored.
+  let mut completenessGap := 0
   let mut errored := 0
   let mut firstBad : Option String := none
+  let mut firstGap : Option String := none
   for i in List.range total do
     let size := (i % (max 1 maxSize)) + 1
     let dflt ← IO.rand 0 20
@@ -201,11 +240,13 @@ def arrayTheoryMetamorphic (numTrials maxSize : Nat) :
         expr := mapLiteralOfList intTy intTy (.intConst () (dflt : Int))
                   (raw.map (fun (k, v) => ((.intConst () k : LExpr'), (.intConst () v : LExpr')))) }
     -- Alternate between the two program shapes. Pointwise `select` assertions
-    -- are provable from `updateSelect`/`updatePreserve` in *both* modes, so on
-    -- their own they cannot witness a divergence; map *equalities* need
-    -- extensionality, which only the Array encoding has. Covering both means the
-    -- property reports the real gap without being blind to pointwise
-    -- regressions.
+    -- are provable from `updateSelect`/`updatePreserve` in *both* modes; map
+    -- *equalities* need extensionality, which only the Array encoding has, and
+    -- so are where the documented completeness difference shows up. Covering
+    -- both means the property observes each regime: pointwise assertions are
+    -- where a `pass`/`fail` contradiction would realistically surface, and the
+    -- equality shape keeps the completeness-gap counter honest rather than
+    -- silently zero.
     let src ←
       if i % 2 == 0 then pure (mapModelProgram lit)
       else do
@@ -218,9 +259,10 @@ def arrayTheoryMetamorphic (numTrials maxSize : Nat) :
         pure (mapExtensionalityProgram (dflt : Int) (k1 : Int) (v1 : Int) (k2 : Int) (v2 : Int))
     match ← verifyProgram src false, ← verifyProgram src true with
     | some rsFalse, some rsTrue =>
-      -- Compare obligation-by-obligation, matched on label.
+      -- The flag must not change *which* obligations exist, only how they are
+      -- encoded, so a count mismatch is a genuine failure regardless of verdicts.
       if rsFalse.size != rsTrue.size then
-        diverged := diverged + 1
+        contradicted := contradicted + 1
         if firstBad.isNone then
           firstBad := some s!"obligation count differs \
 ({rsFalse.size} vs {rsTrue.size})\n{src}"
@@ -228,20 +270,37 @@ def arrayTheoryMetamorphic (numTrials maxSize : Nat) :
         for (a, b) in rsFalse.zip rsTrue do
           let va := verdictOf a
           let vb := verdictOf b
-          if va != vb then
-            diverged := diverged + 1
+          -- A `pass`/`fail` disagreement cannot be explained by completeness:
+          -- one encoding proved what the other refuted, so at least one is
+          -- unsound w.r.t. the `Map` axioms. This is the only scored case.
+          if (va == .pass && vb == .fail) || (va == .fail && vb == .pass) then
+            contradicted := contradicted + 1
             if firstBad.isNone then
               firstBad := some s!"{a.obligation.label}: \
-useArrayTheory=false ⇒ {va}, true ⇒ {vb}\n{src}"
-          else
+useArrayTheory=false ⇒ {va}, true ⇒ {vb} (CONTRADICTION)\n{src}"
+          else if va == vb then
             agreed := agreed + 1
+          else
+            -- Exactly one side is `unknown` (or errored): the documented
+            -- completeness difference. Recorded for visibility, not scored.
+            completenessGap := completenessGap + 1
+            if firstGap.isNone then
+              firstGap := some s!"{a.obligation.label}: \
+useArrayTheory=false ⇒ {va}, true ⇒ {vb}"
     | _, _ => errored := errored + 1
-  let attempted := agreed + diverged
-  if diverged == 0 then
-    pure (true, agreed, attempted, some s!"{errored} verify errors")
+  let attempted := agreed + contradicted
+  -- The completeness gap is expected (see the docstring), so it is surfaced in
+  -- the note rather than hidden — a *drop* to zero would mean the equality
+  -- shapes stopped being generated, which is worth noticing.
+  let gapNote :=
+    if completenessGap == 0 then ""
+    else s!"; {completenessGap} known completeness gap(s) (unknown vs decided)"
+      ++ (match firstGap with | some g => s!" e.g. {g}" | none => "")
+  if contradicted == 0 then
+    pure (true, agreed, attempted, some s!"{errored} verify errors{gapNote}")
   else
     pure (false, agreed, attempted,
-      some (s!"{diverged} useArrayTheory divergence(s); {errored} verify errors"
+      some (s!"{contradicted} pass/fail CONTRADICTION(s); {errored} verify errors{gapNote}"
         ++ (match firstBad with | some b => s!"\n  first: {b}" | none => "")))
 
 -- ── §3. Precondition obligations ─────────────────────────────────────

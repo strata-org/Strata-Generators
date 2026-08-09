@@ -1,5 +1,6 @@
 import StrataGenerators.TestScaffold
 import StrataGenerators.TycheViz
+import StrataGenerators.MapSeqRunner
 import LSpec
 
 /-!
@@ -43,8 +44,10 @@ property, default 1000; `maxSize` = max generator size, default 100). Flags:
 - `--no-tyche` — skip the Tyche visualization pass (it runs by default).
 - `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`).
 - `--tyche-samples=N` — samples per Tyche panel (default 1000).
-- `--smt` — add the SMT/concrete-eval agreement property (off by default; needs
-  a live `cvc5`/`z3` solver on `PATH`, so it is not part of the default run or CI).
+- `--smt` — add the solver-backed properties: SMT/concrete-eval agreement for
+  expressions, and the four `Map`/`Sequence` datatype properties (#5, #69). Off by
+  default; needs a live `cvc5`/`z3` solver on `PATH`, so none of them are part of
+  the default run or CI.
 
 The exit code is always the LSpec verdict; the Tyche pass never affects it.
 
@@ -181,12 +184,32 @@ def main (args : List String) : IO UInt32 := do
         (∀ gp : GenProcs, p.check gp.procs = true) (cfg := cfg) rest)
       .done
 
+  -- `Map`/`Sequence` datatype properties (#5, #69). Like the expression
+  -- SMT/eval-agreement check above these are `.individualIO` nodes gated on
+  -- `--smt`, and for a stronger reason: `Core.Factory` declares every
+  -- `Map`/`Sequence` operation with `polyUneval` — axioms only, no
+  -- `concreteEval` and no body — so `LExpr.evalWithLState` cannot reduce them at
+  -- all and there is no solver-free oracle to fall back on. The `List` model in
+  -- `SeqModel.lean` supplies the expected answers and the solver confirms them.
+  let mapSeqSuite : TestSeq :=
+    if cli.smtEnabled then
+      .individualIO PropertyNames.seqModelAgreement none
+        (StrataGenerators.MapSeqRunner.seqModelAgreement numTrials maxSize) $
+      .individualIO PropertyNames.mapAxiomAgreement none
+        (StrataGenerators.MapSeqRunner.mapModelAgreement numTrials maxSize) $
+      .individualIO PropertyNames.mapArrayTheoryMetamorphic none
+        (StrataGenerators.MapSeqRunner.arrayTheoryMetamorphic numTrials maxSize) $
+      .individualIO PropertyNames.seqPrecondObligations none
+        (StrataGenerators.MapSeqRunner.seqPrecondObligations numTrials maxSize) .done
+    else .done
+
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
     ("cmd", [cmdSuite]),
     ("function", [functionSuite]),
     ("stmt", [stmtSuite]),
-    ("proc", [procSuite])
+    ("proc", [procSuite]),
+    ("map/seq", [mapSeqSuite])
   ]) []
 
   -- Always-run diagnostics (do not gate the exit code):

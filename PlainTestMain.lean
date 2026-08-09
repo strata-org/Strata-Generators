@@ -1,5 +1,6 @@
 import StrataGenerators.TestScaffold
 import StrataGenerators.PlainHarness
+import StrataGenerators.MapSeqRunner
 
 /-!
 # Property-based tests using the Strata generators (LSpec-free driver)
@@ -145,12 +146,29 @@ def main (args : List String) : IO UInt32 := do
       (fun p => runProperty p.name
         (∀ gp : GenProcs, p.check gp.procs = true) cfg)
 
+  -- `Map`/`Sequence` datatype properties (#5, #69), gated on `--smt` for the same
+  -- reason as the expression agreement check above — and more strongly, since
+  -- `Core.Factory` declares every `Map`/`Sequence` op with `polyUneval` (axioms
+  -- only, no `concreteEval`, no body), so there is no solver-free oracle at all.
+  let mapSeqSuite : List (IO Result) :=
+    if cli.smtEnabled then
+      [ runIOProperty PropertyNames.seqModelAgreement
+          (StrataGenerators.MapSeqRunner.seqModelAgreement numTrials maxSize),
+        runIOProperty PropertyNames.mapAxiomAgreement
+          (StrataGenerators.MapSeqRunner.mapModelAgreement numTrials maxSize),
+        runIOProperty PropertyNames.mapArrayTheoryMetamorphic
+          (StrataGenerators.MapSeqRunner.arrayTheoryMetamorphic numTrials maxSize),
+        runIOProperty PropertyNames.seqPrecondObligations
+          (StrataGenerators.MapSeqRunner.seqPrecondObligations numTrials maxSize) ]
+    else []
+
   let exitCode ← runSuites [
     ("expr", exprSuite),
     ("cmd", cmdSuite),
     ("function", functionSuite),
     ("stmt", stmtSuite),
-    ("proc", procSuite)
+    ("proc", procSuite),
+    ("map/seq", mapSeqSuite)
   ]
 
   -- Always-run diagnostics (do not gate the exit code):

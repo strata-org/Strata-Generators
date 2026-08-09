@@ -144,14 +144,16 @@ def procAnfAnalysisPreserved : String := "proc: ANFEncoder preserves call-graph 
 -- All four are opt-in and require a live SMT solver: `Core.Factory` declares
 -- every `Map`/`Sequence` operation with `polyUneval` (axioms only, no
 -- `concreteEval` and no body), so the in-Lean evaluator cannot reduce them and
--- there is no solver-free oracle available. They run from the separate `map-seq`
--- driver rather than `test`; see `StrataGenerators/MapSeqRunner.lean`.
+-- there is no solver-free oracle available. Both drivers run them behind `--smt`,
+-- alongside the expression agreement check; see `StrataGenerators/MapSeqRunner.lean`.
 def seqModelAgreement    : String := "seq: SeqModel List differential (axioms vs Lean model)"
 def mapAxiomAgreement    : String := "map: axiom differential (select/update/mapConst)"
-/-- Expected to *report* divergences: `Factory.lean` declares no `Map`
-    extensionality axiom, so map equalities are `unknown` under the axiomatized
-    encoding and `pass` under SMT-LIB Array theory. -/
-def mapArrayTheoryMetamorphic : String := "map: useArrayTheory is outcome-preserving"
+/-- Only *contradictions* are scored. The two `Map` encodings are deliberately
+    differently complete (Strata's `ModifiesArrayTheoryPerf.lean` asserts as
+    much), so `unknown` on one side and a decided verdict on the other is
+    reported as a known completeness gap rather than a failure. -/
+def mapArrayTheoryMetamorphic : String :=
+  "map: useArrayTheory encodings never contradict (no pass/fail disagreement)"
 def seqPrecondObligations : String := "seq: partial ops generate dischargeable bounds obligations"
 
 /-- Every catalog name, for the no-duplicate-names guard below. -/
