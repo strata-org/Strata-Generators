@@ -1,6 +1,12 @@
 import StrataGenerators.SetGen
 import StrataGenerators.HasTypeAGen.Core
 import Strata.DL.Lambda.LTyUnify
+-- `LTyUnifyProps` is imported for Strata's substitution lemmas. Note the unifier
+-- results below are stated as *matching* completeness, not most-generality: nothing
+-- here proves `Constraints.unify` returns a most general unifier, which is why the
+-- substitution it returns is named `Su` rather than `mgu`. Imports cleanly (no
+-- Mathlib/Batteries `List.Forall₂` clash — verified).
+import Strata.DL.Lambda.LTyUnifyProps
 -- NOTE: `Batteries.Data.List.Basic` intentionally NOT imported here. It defines
 -- its own `List.Forall₂`, which clashes with Strata's now-public `List.Forall₂`
 -- (`Strata.DL.Util.List`, reached transitively via `LTyUnify`) on the generated
@@ -3446,6 +3452,269 @@ theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
   | nil => exact hbase
   | cons harg _ ih => exact ih _ (LExpr.HasTypeA.app hbase harg)
 
+/-- **Matching-completeness of Strata's unifier `Constraints.unify` (stated, not
+    proved).**
+
+    This is the single honest gap the polymorphic-completeness proof rests on. It is
+    a statement purely about Strata's engine
+    (`Strata.DL.Lambda.LTyUnify.Constraints.unify`); the generator-local wrapper
+    `unifyTypes` inherits it as the `sorry`-free corollary `unifyTypes_matching_complete`.
+
+    `findPolymorphicOps` unifies a *pattern* `pat` (a freshened scheme suffix, whose
+    type variables are disjoint from those of the fixed target `τ`) against `τ`, and
+    then requires (`guard2`) that the result maps `pat` to `τ` *literally*. Because
+    `pat`'s variables are disjoint from `τ`'s, this is one-sided **matching**, not
+    general unification. Given any matcher `S` (`subst S pat = τ`), unifying
+    `[(pat, τ)]` from the empty substitution:
+      (i)  succeeds (`= .ok si`), and
+      (ii) its result maps `pat` to `τ`.
+
+    A third conclusion, "the result leaves `τ` fixed" (`subst si.subst τ = τ`), was
+    originally stated here but is **not** part of the interface: the sole consumer
+    (`isPolyApp_of_hasType_specShaped`, via `extended_subst_guard2`) needs only (ii).
+    It is dropped so the `sorry` states exactly what is used — a weaker obligation,
+    hence easier to discharge. Note it remains load-bearing *inside* the deferred
+    proof: Strata ships only `unify_makes_equal`, which equalizes the two sides
+    (`subst si.subst pat = subst si.subst τ`), so target-fixing is what converts
+    that into (ii). It is an intermediate step, not a conclusion.
+
+    ### Why the hypotheses are exactly `hdisj` + `hmatch` (no more, no less)
+
+    - **Matching (`hmatch`), not mere unifiability, is required.** Under bare
+      unifiability the theorem is *false*: `pat = int`, `τ = c` unify via `[c ↦ int]`,
+      and `Constraints.unify [(int, c)] .empty` binds `c ↦ int`, so
+      `subst si.subst pat = int ≠ c = τ` — conclusion (ii) fails. `hmatch` excludes
+      this: no substitution maps the concrete `int` onto the variable `c`. In general
+      `hmatch` forces every `τ`-variable to sit opposite a `pat`-variable (a concrete
+      `pat` subterm can never become a variable under substitution).
+
+    - **`hfix` (that `S` fixes `τ`) is NOT assumed** — and is deliberately absent.
+      The given witness `S` need not fix `τ` (e.g. `S = [a↦c, c↦int]` matches `pat=a`
+      to `τ=c` yet maps `c↦int`). Conclusion (ii) still holds, because the deferred
+      proof restricts `S` to `FV(pat)`: `S' := S|_{FV(pat)}` still matches
+      (`subst _ pat` only reads `FV(pat)`) and, by `hdisj`, has domain disjoint from
+      `FV(τ)`, so `S'` fixes `τ`. Strata's `unify` — calling with `pat` on the *left*,
+      where its variable branch binds the left operand — then orients every binding
+      onto a `pat`-variable and never touches `FV(τ)`. That target-fixing property is
+      what upgrades Strata's `unify_makes_equal` (which only equalizes the two sides)
+      to the literal (ii). So `hfix` about the *given* `S` is unnecessary; the
+      internal proof manufactures a target-fixing matcher itself.
+
+      `hdisj` is retained for exactly this reason: it is what makes the restricted
+      matcher fix `τ`, so it stays load-bearing in the deferred proof even though
+      the *statement* no longer mentions target-fixing.
+
+    Strata ships only forward soundness (`unify_makes_equal`, `LExprTypeSpec.lean:942`);
+    this completeness/orientation direction is provable by structural induction on
+    `Constraints.unifyCore` (maintaining "result domain ⊆ FV(pat), disjoint from
+    FV(τ)") but is left `sorry`-ed here. See `docs/poly-completeness-spec-shaped-plan.md`. -/
+theorem Constraints_unify_matching_complete
+    (pat τ : LMonoTy) (S : Lambda.Subst)
+    (hdisj  : ∀ v ∈ pat.freeVars, v ∉ τ.freeVars)
+    (hmatch : LMonoTy.subst S pat = τ) :
+    ∃ si : Lambda.SubstInfo,
+      Lambda.Constraints.unify [(pat, τ)] Lambda.SubstInfo.empty = .ok si ∧
+      LMonoTy.subst si.subst pat = τ := by
+  sorry
+
+/-- The generator's `unifyTypes` wrapper (`Core.lean:916`) inherits matching-
+    completeness from `Constraints_unify_matching_complete` by unwrapping the
+    `.ok`/`.error` adapter. Fully proved — the only gap is the Strata-level theorem. -/
+theorem unifyTypes_matching_complete
+    (pat τ : LMonoTy) (S : Lambda.Subst)
+    (hdisj  : ∀ v ∈ pat.freeVars, v ∉ τ.freeVars)
+    (hmatch : LMonoTy.subst S pat = τ) :
+    ∃ Su : Lambda.Subst,
+      unifyTypes pat τ = some Su ∧
+      LMonoTy.subst Su pat = τ := by
+  obtain ⟨si, hunify, hpat⟩ :=
+    Constraints_unify_matching_complete pat τ S hdisj hmatch
+  exact ⟨si.subst, by simp only [unifyTypes, hunify], hpat⟩
+
+/-- Prepending a scope `z` whose keys avoid `FV(t)` is a no-op: `subst (z :: Su) t
+    = subst Su t`. Proved via `agree_on_freeVars_implies_subst_eq` — on each free
+    variable of `t`, the prepended scope `z` doesn't fire (its `find?` is `none`), so
+    both substitutions look up the same binding in `Su`. -/
+theorem subst_cons_noop (z : Lambda.SubstOne) (Su : Lambda.Subst) (t : LMonoTy)
+    (hz : ∀ v ∈ t.freeVars, Map.find? z v = none) :
+    LMonoTy.subst (z :: Su) t = LMonoTy.subst Su t := by
+  apply agree_on_freeVars_implies_subst_eq
+  intro v hv
+  simp only [LMonoTy.subst_unfold]
+  rw [Maps.find?.eq_2, hz v hv]
+
+/-- If `v` is free in `t` and `Su` does not bind `v`, then `v` survives into
+    `subst Su t`. Structural induction on `t`. Used to show the sampled type
+    variables (those `Su` leaves undetermined) that occur in the leftover suffix
+    would leak into the target — contradicting freshening disjointness. -/
+theorem mem_freeVars_subst_of_find?_none (Su : Lambda.Subst) (t : LMonoTy)
+    (v : TyIdentifier) (hv : v ∈ t.freeVars) (hnone : Maps.find? Su v = none) :
+    v ∈ (LMonoTy.subst Su t).freeVars := by
+  induction t with
+  | ftvar w =>
+    simp only [LMonoTy.freeVars, List.mem_singleton] at hv
+    subst hv
+    rw [LMonoTy.subst_unfold]
+    simp only [hnone, LMonoTy.freeVars, List.mem_singleton]
+  | bitvec n => simp only [LMonoTy.freeVars, List.not_mem_nil] at hv
+  | tcons name args ih =>
+    rw [LMonoTy.subst_unfold]
+    have hsub : ∀ (a : LMonoTy), a ∈ args → v ∈ a.freeVars →
+        v ∈ LMonoTys.freeVars (args.map (LMonoTy.subst Su)) :=
+      fun a ha hva => LMonoTys.freeVars_mem_subset (List.mem_map_of_mem ha) (ih a ha hva)
+    have hex : ∃ a ∈ args, v ∈ a.freeVars := by
+      clear hsub ih hnone
+      induction args with
+      | nil =>
+        exact absurd hv (by
+          rw [show (LMonoTy.tcons name []).freeVars = ([] : List TyIdentifier) from rfl]
+          exact List.not_mem_nil)
+      | cons hd tl iht =>
+        rw [show (LMonoTy.tcons name (hd :: tl)).freeVars
+            = hd.freeVars ++ LMonoTys.freeVars tl from rfl] at hv
+        rcases List.mem_append.mp hv with h | h
+        · exact ⟨hd, List.mem_cons_self, h⟩
+        · obtain ⟨a, ha, hva⟩ := iht (by
+            rw [show (LMonoTy.tcons name tl).freeVars = LMonoTys.freeVars tl from rfl]; exact h)
+          exact ⟨a, List.mem_cons_of_mem _ ha, hva⟩
+    obtain ⟨a, ha, hva⟩ := hex
+    exact hsub a ha hva
+
+/-- **Sampling is harmless for `guard2`.** The generator extends the unifier's
+    substitution `Su` (a matcher for the suffix — not known to be *most general*)
+    with a scope binding the *undetermined* freshened variables
+    (`findFreeTyVars freshBoundVars Su`) to random samples. That extension does not
+    perturb the leftover suffix: any such variable occurring in the suffix would (as
+    `Su` leaves it unbound) survive into `subst Su leftoverSuffix = τ`, contradicting
+    freshening disjointness (`hdisjBV`: freshened bound vars avoid `FV(τ)`). Hence the
+    extended substitution still maps the suffix to the literal `τ`. This is what lets
+    the sampling fragment discharge `guard2` from the matching theorem's conclusion. -/
+theorem extended_subst_guard2 (freshBoundVars : List TyIdentifier) (Su : Lambda.Subst)
+    (sampledTys : List LMonoTy) (leftoverSuffix τ : LMonoTy)
+    (hSu : LMonoTy.subst Su leftoverSuffix = τ)
+    (hdisjBV : ∀ v ∈ freshBoundVars, v ∉ τ.freeVars) :
+    LMonoTy.subst ((findFreeTyVars freshBoundVars Su).zip sampledTys :: Su)
+      leftoverSuffix = τ := by
+  rw [subst_cons_noop]
+  · exact hSu
+  · intro v hv
+    apply Map.find?_none_of_not_mem_keys'
+    intro hmem
+    have hvin : v ∈ findFreeTyVars freshBoundVars Su := Map.keys_zip_subset _ _ hmem
+    unfold findFreeTyVars at hvin
+    rw [List.mem_filter] at hvin
+    obtain ⟨hbv, hfind⟩ := hvin
+    have hnone : Maps.find? Su v = none := by simpa using hfind
+    have hmemτ : v ∈ (LMonoTy.subst Su leftoverSuffix).freeVars :=
+      mem_freeVars_subst_of_find?_none Su leftoverSuffix v hv hnone
+    rw [hSu] at hmemτ
+    exact hdisjBV v hbv hmemτ
+
+/-- **Forward construction of a `findPolymorphicOps` candidate (bridge,
+    plumbing only).**
+
+    The existence-direction mirror of `findPolymorphicOps_instanceR`: given a scheme
+    in `pctx`, a split point `k`, the freshening/decomposition results, and the two
+    `do`-block guards *as hypotheses*, `(name, concreteArgTys)` is a member of
+    `findPolymorphicOps`. This lemma is `sorry`-free and does **not** mention the
+    unifier gap — it is pure `flatMap`/`filterMap`/`guard` plumbing. The guard
+    hypotheses (`hunify`, `hguard2`) are discharged by the caller
+    (`isPolyApp_of_hasType`) via `unifyTypes_matching_complete`, which is where the
+    single `sorry` is consumed. -/
+theorem findPolymorphicOps_complete
+    (pctx : PolyOpCtx) (τ : LMonoTy) (generableTys sampledTys : List LMonoTy)
+    (name : String) (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (hmem : (name, LTy.forAll boundVars monoTy) ∈ pctx)
+    (freshBoundVars : List TyIdentifier) (freshMonoTy : LMonoTy)
+    (argTys : List LMonoTy) (retTy : LMonoTy) (subst : Lambda.Subst)
+    (concreteArgTys : List LMonoTy) (k : Nat) (maxNumArgs : Nat)
+    (hfresh : freshenBoundVars boundVars monoTy
+      ((LMonoTy.freeVars τ ++ generableTys.flatMap LMonoTy.freeVars).eraseDups)
+      = (freshBoundVars, freshMonoTy))
+    (hdec : decomposeArrow freshMonoTy = (argTys, retTy))
+    (harity : argTys.length ≤ maxNumArgs)
+    (hk : k < argTys.length + 1)
+    (hunify : unifyTypes
+      ((argTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) τ = some subst)
+    (hguard1 : (findFreeTyVars freshBoundVars subst).isEmpty = true
+      ∨ (generableTys ≠ []))
+    (hguard2 : LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+      ((argTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ)
+    (hcat : concreteArgTys = (argTys.take k).map
+      (LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst))) :
+    (name, concreteArgTys) ∈ findPolymorphicOps pctx τ generableTys sampledTys maxNumArgs := by
+  unfold findPolymorphicOps
+  rw [List.mem_flatMap]
+  refine ⟨(name, LTy.forAll boundVars monoTy), hmem, ?_⟩
+  simp only [hfresh, hdec]
+  rw [if_neg (by omega), List.mem_filterMap]
+  refine ⟨k, List.mem_range.mpr hk, ?_⟩
+  -- Discharge the `Option` `do`-block: resolve the unify bind, then both guards.
+  rw [hunify]
+  simp only [bind, Option.bind, guard, pure]
+  rw [if_pos (by
+    rcases hguard1 with h | h
+    · simp [h]
+    · simp [List.isEmpty_iff, h])]
+  rw [if_pos (by rw [beq_iff_eq]; exact hguard2)]
+  rw [hcat]
+
+/-- Inversion of `mkApps_hasType`: a well-typed left-nested application spine
+    `mkApps base args : τ` decomposes into a list of argument types `argTys` such
+    that `base` has the curried arrow type `argTys.foldr arrow τ` and each `argᵢ`
+    is well-typed at `argTys[i]`.
+
+    This is the converse used by `isPolyApp_of_hasType` to recover, from
+    a typing derivation, the concrete argument types that `findPolymorphicOps` must
+    have produced. The `.app` rule (`HasTypeA.app`) peels one arrow per applied
+    argument; `argTys` is built outermost-first as the induction returns. -/
+theorem mkApps_hasType_inv (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
+    (τ : LMonoTy)
+    (hwt : HasTypeA' bctx (mkApps base args) τ) :
+    ∃ argTys : List LMonoTy,
+      HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∧
+      List.Forall₂ (HasTypeA' bctx) args argTys := by
+  induction args generalizing base with
+  | nil =>
+    -- `mkApps base [] = base`, so `base : τ`; no arrows to peel.
+    exact ⟨[], hwt, .nil⟩
+  | cons a as ih =>
+    -- `mkApps base (a :: as) = mkApps (.app () base a) as`.
+    obtain ⟨argTys', hbase', hargs'⟩ := ih (.app () base a) hwt
+    -- Invert the head application: `base : aty → (argTys'.foldr arrow τ)` and `a : aty`.
+    -- The binder type `aty` is left implicit; unification fills it from `hfn`
+    -- against the goal `(?aty :: argTys').foldr arrow τ = arrow ?aty (…)`.
+    cases hbase' with
+    | app hfn harg => exact ⟨_ :: argTys', hfn, .cons harg hargs'⟩
+
+/-- `argTys.foldr arrow τ` is injective in `argTys` **once the lengths agree**.
+    (It is not injective without the length constraint: e.g.
+    `[a].foldr arrow (b → c) = [a, b].foldr arrow c`.) Used by
+    `isPolyApp_of_hasType` to identify the typing-derived argument types with the
+    concrete argument types `findPolymorphicOps` emits — both fold to the same
+    annotation and have the same length (`= args.length`). -/
+theorem foldr_arrow_inj_of_length_eq (as bs : List LMonoTy) (τ : LMonoTy)
+    (hlen : as.length = bs.length)
+    (heq : as.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
+         = bs.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) :
+    as = bs := by
+  induction as generalizing bs with
+  | nil => cases bs with
+    | nil => rfl
+    | cons b bs => simp at hlen
+  | cons a as ih => cases bs with
+    | nil => simp at hlen
+    | cons b bs =>
+      simp only [List.foldr_cons] at heq
+      -- `arrow a (…) = arrow b (…)`; `arrow` is `tcons "arrow" [·, ·]`, so unfold
+      -- and use `tcons` injectivity to split head and tail equalities.
+      simp only [LMonoTy.arrow, LMonoTy.tcons.injEq, List.cons.injEq, and_true,
+        true_and] at heq
+      obtain ⟨hhd, htl⟩ := heq
+      subst hhd
+      simp only [List.length_cons, Nat.add_right_cancel_iff] at hlen
+      rw [ih bs hlen htl]
+
 /-- Membership in `List.mapM f l` on `SetGen.Set`: `args` is in the support
     iff each element is pointwise in the support of `f` at the corresponding input. -/
 private theorem mem_mapM_iff (f : LMonoTy → SetGen.Set LExpr')
@@ -3712,9 +3981,10 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     `genLExprBase_sound`. -/
 theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat)
-    (τ : LMonoTy)
+    (τ : LMonoTy) (maxNumArgs : Nat)
     (e : LExpr')
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
+    (he : e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs)) :
     HasTypeA' bctx e τ := by
   -- Induction on the depth index. `genLExpr` is structurally recursive on it (the
   -- Indir/IndirPoly *arguments* are drawn from `genLExpr … n`), so soundness of the
@@ -3747,7 +4017,8 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- Above the floor: arguments come from `genLExpr … n`; `ih` is its soundness.
     -- This is the case that makes nested factory applications sound.
     have hArg : ∀ σ a, a ∈ SetGen.support
-        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx n σ) → HasTypeA' bctx a σ :=
+        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx n σ maxNumArgs) →
+        HasTypeA' bctx a σ :=
       fun σ a ha => ih σ a ha
     unfold genLExpr at he
     simp only [mem_support_iff, SetGen.mem_dite] at he
@@ -4754,46 +5025,62 @@ end Lambda.LExpr
 -- ── Completeness for genIndirPoly and genLExpr ─────────────────────────
 
 /-- A type `σ` is in the support of the per-element type-sampling action
-    used inside `genIndirPoly` (choose a random index into `generableTys`,
-    or return `.bool` when the list is empty). -/
+    used inside `genIndirPoly` (choose a random index into `generableTys`, or
+    draw an arbitrary base type via `pickBaseType` when the list is empty).
+
+    The empty-context side condition is membership in `pickBaseType`'s support
+    rather than the former `σ = .bool`: the generator now samples any ground base
+    type there, so pinning `σ` to `.bool` would no longer describe it. -/
 private theorem single_sample_mem (generableTys : List LMonoTy) (σ : LMonoTy)
     (hpos : generableTys.length > 0 → σ ∈ generableTys)
-    (hneg : ¬(generableTys.length > 0) → σ = .bool) :
+    (hneg : ¬(generableTys.length > 0) →
+      σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))) :
     σ ∈ ((fun (_ : Unit) =>
       if hg : generableTys.length > 0 then
         elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
-      else pure .bool) () : SetGen.Set LMonoTy) := by
+      else pickBaseType) () : SetGen.Set LMonoTy) := by
   by_cases hg : generableTys.length > 0
   · simp only [dif_pos hg]
     rw [← mem_support_iff, mem_support_elements_iff]
     exact hpos hg
-  · simp only [dif_neg hg, SetGen.Set.mem_pure]
+  · simp only [dif_neg hg]
     exact hneg hg
 
 set_option linter.unusedVariables false in
 /-- Each element of the type-sampling step in `genIndirPoly` is either a member
-    of `generableTys` (when non-empty) or `.bool` (when empty). This lemma
-    establishes that a valid `sampledTys` list is in the support of the sampling
-    computation. -/
+    of `generableTys` (when non-empty) or an arbitrary base type drawn from
+    `pickBaseType` (when empty). This lemma establishes that a valid `sampledTys`
+    list is in the support of the sampling computation.
+
+    Stated for an arbitrary sample count `k` rather than the literal `3`: the
+    generator draws `maxNumArgs` samples and `maxNumArgs` is a parameter, so
+    pinning `k := 3` would specialize every downstream statement to the current
+    Strata factory's maximum arity. The proof is an induction on `k`; the previous
+    version destructured a three-element list explicitly, which is what forced the
+    literal into the completeness chain. -/
 private theorem sampledTys_mem_support (generableTys : List LMonoTy)
-    (sampledTys : List LMonoTy)
-    (hLen : sampledTys.length = 3)
+    (k : Nat) (sampledTys : List LMonoTy)
+    (hLen : sampledTys.length = k)
     (hValid : ∀ σ ∈ sampledTys,
       (generableTys.length > 0 → σ ∈ generableTys) ∧
-      (¬(generableTys.length > 0) → σ = .bool)) :
-    sampledTys ∈ ((List.replicate 3 ()).mapM (fun _ =>
+      (¬(generableTys.length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set)))) :
+    sampledTys ∈ ((List.replicate k ()).mapM (fun _ =>
       if hg : generableTys.length > 0 then
         elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
-      else pure .bool) : SetGen.Set (List LMonoTy)) := by
-  simp only [List.replicate, List.mapM_cons, List.mapM_nil,
-             SetGen.Set.mem_bind, SetGen.Set.mem_pure]
-  match sampledTys, hLen with
-  | [a, b, c], _ =>
-    have mem := fun x h => single_sample_mem generableTys x (hValid x h).1 (hValid x h).2
-    exact ⟨a, mem a (by simp),
-           [b, c], ⟨b, mem b (by simp),
-                    [c], ⟨c, mem c (by simp),
-                          [], rfl, rfl⟩, rfl⟩, rfl⟩
+      else pickBaseType) : SetGen.Set (List LMonoTy)) := by
+  induction k generalizing sampledTys with
+  | zero =>
+    match sampledTys, hLen with
+    | [], _ => simp only [List.replicate, List.mapM_nil, SetGen.Set.mem_pure]
+  | succ k ih =>
+    match sampledTys, hLen with
+    | a :: rest, hLen' =>
+      have hrest : rest.length = k := by simpa using hLen'
+      simp only [List.replicate, List.mapM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+      refine ⟨a, single_sample_mem generableTys a (hValid a (by simp)).1
+                  (hValid a (by simp)).2,
+              rest, ih rest hrest (fun σ hσ => hValid σ (by simp [hσ])), rfl⟩
 
 /-- Completeness of `genIndirPoly`: if an expression can be assembled as
     `mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args` where
@@ -4803,29 +5090,33 @@ private theorem sampledTys_mem_support (generableTys : List LMonoTy)
 theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (maxNumArgs : Nat)
     (sampledTys : List LMonoTy)
-    (hSampledLen : sampledTys.length = 3)
+    (hSampledLen : sampledTys.length = maxNumArgs)
     (hSampledValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
-      (¬((generableTypesFromCtx bctx fctx octx).length > 0) → σ = .bool))
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
     (name : String) (concreteArgTys : List LMonoTy)
     (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
-      (generableTypesFromCtx bctx fctx octx) sampledTys)
+      (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs)
     (genArg : LMonoTy → SetGen.Set LExpr')
     (args : List LExpr')
     (hArgs : List.Forall₂ (fun arg σ => arg ∈ (genArg σ)) args concreteArgTys) :
     let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
     mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args ∈
       SetGen.support
-        (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ 3 genArg) := by
+        (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs
+          genArg) := by
   simp only [SetGen.support]
   unfold genIndirPoly
   simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite]
   -- Exhibit sampledTys as the witness for the type-sampling mapM
-  refine ⟨sampledTys, sampledTys_mem_support _ _ hSampledLen hSampledValid, ?_⟩
+  refine ⟨sampledTys, sampledTys_mem_support _ _ _ hSampledLen hSampledValid, ?_⟩
   -- Take the positive branch of the dite (ops.length > 0)
-  have hOpsPos : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx) sampledTys).length > 0 :=
+  have hOpsPos : (findPolymorphicOps pctx τ (generableTypesFromCtx bctx fctx octx)
+      sampledTys maxNumArgs).length > 0 :=
     List.length_pos_of_mem hEntry
   left
   refine ⟨hOpsPos, ?_⟩
@@ -4840,21 +5131,90 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
   · -- The expression equals mkApps ...
     rfl
 
+/-- **The base generator's support is contained in `genLExpr`'s, at the same depth.**
+
+    `genLExpr` offers `genLExprBase … depth τ` as one of its branches in *both*
+    arms of its `dite`: at weight 1 in the `frequency` list when there are
+    monomorphic Indir candidates, and as the left component of the `pick`
+    otherwise. So anything the base generator can produce, `genLExpr` can produce
+    too — with no depth or context side-conditions.
+
+    This is what lets the per-argument premises of `isPolyApp_of_hasType` be stated
+    as the plain `genLExprBase_complete` bundle even though `genLExpr` draws
+    arguments from *itself* at the smaller index (post-#62). See the comment on
+    `isPolyApp_of_hasType`'s `hArgsComplete` for why the bundle is keyed to the
+    argument budget `depth - 1` rather than `depth`. -/
+theorem genLExprBase_mem_genLExpr (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (maxNumArgs : Nat) (e : LExpr')
+    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx depth τ)) :
+    e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs) := by
+  simp only [SetGen.support]
+  unfold genLExpr
+  simp only [SetGen.mem_dite]
+  by_cases hops : (findOpsInCtx octx τ).length > 0
+  · refine Or.inl ⟨hops, ?_⟩
+    rw [← mem_support_iff, mem_support_frequency_iff]
+    exact ⟨1, _, List.mem_cons_self, by omega, he⟩
+  · exact Or.inr ⟨hops, (pick_mem_iff _).mpr (Or.inl he)⟩
+
+/-- **The argument-position bridge (post-#62).**
+
+    `genLExpr` draws its Indir/IndirPoly arguments from `genLExprBase … 0` at the
+    depth floor and from *itself* at `n` above it (`Core.lean`'s `genArg`). This
+    lemma discharges membership in that depth-`match` generator — which is exactly
+    `IsPolyApp`'s argument clause — from the ordinary `genLExprBase_complete`
+    bundle, provided the bundle is keyed to the **argument budget** `depth - 1`
+    rather than to `depth`.
+
+    The `depth - 1` is not slack in the statement: an argument of a factory
+    application really does get one less unit of depth than the application
+    itself, because the spine node consumes one. At the floor (`depth = 0`),
+    `depth - 1 = 0` and the argument generator is the base generator directly.
+    Above the floor, `genLExprBase_mem_genLExpr` lifts the base generator's output
+    into `genLExpr … n`, which is where nested factory applications become
+    reachable. -/
+theorem mem_genArg_of_baseComplete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (σ : LMonoTy)
+    (maxNumArgs : Nat)
+    (hσ : SimpleType σ) (arg : LExpr')
+    (hwt : HasTypeA' bctx arg σ)
+    (hnames : emptyNames arg)
+    (hvars : allVarsInCtx fctx octx arg)
+    (hats : AllTypesSimple tvars (depth - 1) bctx arg)
+    (hdepth : termDepth bctx arg ≤ depth - 1) :
+    arg ∈ (match (motive := Nat → LMonoTy → SetGen.Set LExpr') depth with
+           | 0 => genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0
+           | n + 1 => fun σ' =>
+               genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx n σ' maxNumArgs) σ := by
+  cases depth with
+  | zero =>
+    exact genLExprBase_complete fctx octx tvars bctx 0 σ hσ arg hwt hnames hvars hats hdepth
+  | succ n =>
+    simp only [Nat.succ_sub_one] at hats hdepth
+    exact genLExprBase_mem_genLExpr fctx octx pctx tvars bctx n σ maxNumArgs arg
+      (genLExprBase_complete fctx octx tvars bctx n σ hσ arg hwt hnames hvars hats hdepth)
+
 /-- An expression is a valid polymorphic operator application reachable by
     `genIndirPoly`: there exist sampled types, an operator entry in `pctx` that
     unifies with the target, and arguments each in `genLExprBase`'s support. -/
 def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (e : LExpr') : Prop :=
+    (maxNumArgs : Nat) (e : LExpr') : Prop :=
   ∃ (sampledTys : List LMonoTy) (name : String)
     (concreteArgTys : List LMonoTy) (args : List LExpr'),
-    sampledTys.length = 3 ∧
+    -- One sample per potential type variable, i.e. `maxNumArgs` of them — the same
+    -- count `genIndirPoly` draws. Not fixed at 3: that is merely the current Strata
+    -- factory's maximum arity, and `maxNumArgs` is a generator parameter.
+    sampledTys.length = maxNumArgs ∧
     (∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
-      (¬((generableTypesFromCtx bctx fctx octx).length > 0) → σ = .bool)) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set)))) ∧
     (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
-      (generableTypesFromCtx bctx fctx octx) sampledTys ∧
+      (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs ∧
     -- The arguments come from whatever `genLExpr` uses in argument position at this
     -- depth: `genLExprBase … 0` at the floor, and `genLExpr … n` above it. The
     -- second case is what admits *nested* factory applications; it is
@@ -4862,10 +5222,218 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     List.Forall₂ (fun arg σ =>
       arg ∈ (match (motive := Nat → LMonoTy → SetGen.Set LExpr') depth with
              | 0 => genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0
-             | n + 1 => fun σ' => genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx n σ') σ)
+             | n + 1 => fun σ' =>
+                 genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx n σ' maxNumArgs) σ)
       args concreteArgTys ∧
     e = mkApps (.op () ⟨name, ()⟩
       (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args
+
+/-- **Spec-shaped backward direction for the polymorphic case.**
+
+    Derives `IsPolyApp` from the *typing judgment* for a saturated/partial
+    application spine over a polymorphic operator, given a single explicit
+    side-condition (`hEntry`) that the generator's unification search would have
+    produced the corresponding `findPolymorphicOps` entry.
+
+    This isolates the one genuinely-missing ingredient — that Strata's `unify`
+    *succeeds* at the split point (unification/matching completeness, which Strata
+    does not ship; see `docs/poly-completeness-spec-shaped-plan.md`) — into the
+    hypothesis `hEntry`, and *derives* everything else from `HasTypeA'`:
+
+    - **Argument types** come from inverting the application spine
+      (`mkApps_hasType_inv`): the derivation forces the op annotation to be
+      `argTys.foldr arrow τ` and each `argᵢ : argTysᵢ`.
+    - **Identification** of those typing-derived `argTys` with the entry's
+      `concreteArgTys` is by length-matched injectivity of `foldr arrow`
+      (`foldr_arrow_inj_of_length_eq`); both fold to the *same* annotation carried
+      by the op node, and both have length `args.length`.
+    - **Argument generability** (`IsPolyApp`'s fourth conjunct) is `derived` from
+      argument typing via `genLExprBase_complete` — this is why `HasTypeA'` is
+      load-bearing rather than decorative.
+
+    The per-argument recursive-completeness premises (`hargWt`/`hargNames`/… , the
+    same bundle `genLExprBase_complete` needs) are genuine hypotheses: an argument's
+    generability cannot follow from its type alone. -/
+theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (name : String) (annot : LMonoTy) (args : List LExpr')
+    -- The expression is a spine over an op node carrying annotation `annot`:
+    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    -- THE unification side-condition: the generator's split-point
+    -- search finds this operator at the typing-derived argument types.
+    (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
+    (hLen : sampledTys.length = maxNumArgs)
+    (hValid : ∀ σ ∈ sampledTys,
+      ((generableTypesFromCtx bctx fctx octx).length > 0 →
+        σ ∈ generableTypesFromCtx bctx fctx octx) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
+    (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
+      (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs)
+    (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (hArgLen : args.length = concreteArgTys.length)
+    -- Per-argument recursive-completeness premises (the `genLExprBase_complete`
+    -- bundle, one per argument), keyed by position against `concreteArgTys`.
+    --
+    -- NOTE (post-#62): the depth budget here is `depth - 1`, not `depth`. Since
+    -- #62 made `genLExpr` recursive, arguments are drawn from the generator at the
+    -- *smaller* index, so an argument of a factory application has one less unit
+    -- of depth than the application itself — the spine node consumes one. See
+    -- `mem_genArg_of_baseComplete`.
+    (hArgsComplete : List.Forall₂
+      (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
+        AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
+      args concreteArgTys) :
+    IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs
+      (mkApps (.op () ⟨name, ()⟩ (some annot)) args) := by
+  -- Invert the spine: recover argument types `argTys` and per-arg typings.
+  obtain ⟨argTys, hbase, hargsTyped⟩ := mkApps_hasType_inv bctx _ args τ hwt
+  -- The op node types at its annotation, so `annot = argTys.foldr arrow τ`.
+  cases hbase with
+  | op =>
+    -- Identify the typing-derived `argTys` with the entry's `concreteArgTys`:
+    -- both fold (with `τ`) to `annot`, and both have length `args.length`.
+    have hlenTyped : args.length = argTys.length := hargsTyped.length_eq
+    have hArgTysEq : argTys = concreteArgTys := by
+      apply foldr_arrow_inj_of_length_eq argTys concreteArgTys τ
+      · omega
+      · rw [← hAnnot]
+    subst hArgTysEq
+    -- Derive argument generability from argument typing. Post-#62 the target is the
+    -- depth-`match` generator `genLExpr` uses in argument position, so each argument
+    -- goes through `mem_genArg_of_baseComplete` rather than `genLExprBase_complete`
+    -- directly.
+    have hArgsGen : List.Forall₂
+        (fun arg σ =>
+          arg ∈ (match (motive := Nat → LMonoTy → SetGen.Set LExpr') depth with
+                 | 0 => genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0
+                 | n + 1 => fun σ' =>
+                     genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx n σ'
+                       maxNumArgs) σ)
+        args argTys := by
+      -- Zip the per-arg typings with the per-arg completeness premises.
+      clear hEntry hwt hAnnot hArgLen hlenTyped
+      induction hargsTyped with
+      | nil => exact .nil
+      | @cons arg σ restA restT hargWt hrestWt ih =>
+        cases hArgsComplete with
+        | @cons _ _ _ _ hpre hrestPre =>
+          obtain ⟨hσ, hnames, hvars, hats, hdepth⟩ := hpre
+          exact .cons
+            (mem_genArg_of_baseComplete fctx octx pctx tvars bctx depth σ maxNumArgs hσ arg
+              hargWt hnames hvars hats hdepth)
+            (ih hrestPre)
+    -- Package the `IsPolyApp` existential.
+    exact ⟨sampledTys, name, argTys, args, hLen, hValid, hEntry, hArgsGen, by rw [hAnnot]⟩
+
+/-- **Spec-level scheme-instance witness.**
+
+    Bundles "the op node's annotation is a genuine instance of a `pctx` scheme at
+    some split point" into a single existential — the declarative content that
+    replaces the generator-internal `hEntry`. All of the freshening/decomposition
+    witnesses (`freshBoundVars`, `freshMonoTy`, `schemeArgTys`, `retTy`) are existentially
+    bound and pinned by `rfl`-shaped equalities, so a caller supplies only the *scheme*
+    (`boundVars`, `monoTy`), *split point* `k`, and *matcher* `Sm`.
+
+    Crucially, the matcher condition (`hmatch`) is stated purely in terms of the
+    caller's substitution `Sm` — there is **no reference to the generator's `unifyTypes`
+    output `Su`**. The applied-prefix condition `hprefix` is likewise phrased against
+    `Sm`. `isPolyApp_of_hasType_specShaped` internally bridges `Sm` to the unifier's `Su`
+    (via `unifyTypes_matching_complete` + `extended_subst_guard2`), so no `Su` leaks
+    into this predicate.
+
+    Discharging `SchemeInstAt` from a caller's `OpsConsistentR F e` (which carries
+    exactly this scheme-instance witness in its `.op_in` constructor) is the intended
+    route; see the module notes / issue tracker. -/
+def SchemeInstAt (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (bctx : BVarCtx) (τ : LMonoTy) (name : String)
+    (concreteArgTys : List LMonoTy) (sampledTys : List LMonoTy)
+    (maxNumArgs : Nat) : Prop :=
+  ∃ (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (freshBoundVars : List TyIdentifier) (freshMonoTy : LMonoTy)
+    (schemeArgTys : List LMonoTy) (retTy : LMonoTy) (k : Nat) (Sm : Lambda.Subst),
+    (name, LTy.forAll boundVars monoTy) ∈ pctx ∧
+    freshenBoundVars boundVars monoTy
+      ((LMonoTy.freeVars τ ++ (generableTypesFromCtx bctx fctx octx).flatMap
+        LMonoTy.freeVars).eraseDups) = (freshBoundVars, freshMonoTy) ∧
+    decomposeArrow freshMonoTy = (schemeArgTys, retTy) ∧
+    schemeArgTys.length ≤ maxNumArgs ∧
+    k < schemeArgTys.length + 1 ∧
+    -- freshening well-formedness (see `freshenBoundVars_disjoint`, tracked separately):
+    (∀ v ∈ ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc)
+      retTy).freeVars, v ∉ τ.freeVars) ∧
+    (∀ v ∈ freshBoundVars, v ∉ τ.freeVars) ∧
+    -- the matcher (spec-level; no `Su`):
+    LMonoTy.subst Sm
+      ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ ∧
+    -- applied prefix instantiates to the argument types, under any unifier the
+    -- generator's search returns (bridged to `Sm` internally):
+    (∀ Su, unifyTypes
+        ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) τ = some Su →
+      concreteArgTys = (schemeArgTys.take k).map
+        (LMonoTy.subst ((findFreeTyVars freshBoundVars Su).zip sampledTys :: Su)))
+
+/-- **Fully spec-shaped backward direction: `hEntry` eliminated.**
+
+    Derives `IsPolyApp` from the typing judgment plus a *spec-level scheme-instance
+    witness* — no `findPolymorphicOps`-membership hypothesis. The membership is
+    *constructed* internally by `findPolymorphicOps_complete`, with its two guards
+    discharged by `unifyTypes_matching_complete` (the single `sorry`) and
+    `extended_subst_guard2` (sampling is harmless). Covers both fragments: the
+    fully-determined case and the sampling case (a scheme variable absent from the
+    return suffix).
+
+    The premises are now just three spec-level bundles:
+    - `hInst : SchemeInstAt …` — the scheme-instance witness (scheme ∈ `pctx`, split
+      point, matcher `Sm`), replacing the generator-internal `hEntry`. All freshening/
+      decomposition witnesses are existentially bound inside it; the matcher is stated
+      against `Sm` (no `Su`). Intended to be discharged from a caller's
+      `OpsConsistentR F e`.
+    - `hgen` — the generable-types context is non-empty (a cheap context fact).
+    - the per-argument recursive-completeness bundle (`hArgsComplete`), as in
+      `isPolyApp_of_hasType`; plus the `hAnnot`/`hArgLen` shape facts forced by `hwt`. -/
+theorem isPolyApp_of_hasType_specShaped
+    (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (name : String) (annot : LMonoTy) (args : List LExpr')
+    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
+    (hLen : sampledTys.length = maxNumArgs)
+    (hValid : ∀ σ ∈ sampledTys,
+      ((generableTypesFromCtx bctx fctx octx).length > 0 →
+        σ ∈ generableTypesFromCtx bctx fctx octx) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
+    (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (hArgLen : args.length = concreteArgTys.length)
+    -- Depth budget is `depth - 1`: post-#62 arguments come from the generator at
+    -- the smaller index (see `isPolyApp_of_hasType` / `mem_genArg_of_baseComplete`).
+    (hArgsComplete : List.Forall₂
+      (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
+        AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
+      args concreteArgTys)
+    (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
+    (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys sampledTys maxNumArgs) :
+    IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs
+      (mkApps (.op () ⟨name, ()⟩ (some annot)) args) := by
+  obtain ⟨boundVars, monoTy, freshBoundVars, freshMonoTy, schemeArgTys, retTy, k, Sm,
+    hmem, hfresh, hdec, harity, hk, hdisjSuffix, hdisjBV, hmatch, hcat⟩ := hInst
+  -- Obtain the unifier from the matching theorem (the single `sorry` is consumed here).
+  obtain ⟨Su, hunify, _hSupat⟩ :=
+    unifyTypes_matching_complete _ τ Sm hdisjSuffix hmatch
+  -- Discharge `guard2` for the sampled extension via `extended_subst_guard2`.
+  have hg2 : LMonoTy.subst ((findFreeTyVars freshBoundVars Su).zip sampledTys :: Su)
+      ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ :=
+    extended_subst_guard2 freshBoundVars Su sampledTys _ τ _hSupat hdisjBV
+  -- Construct the `findPolymorphicOps` membership.
+  have hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
+      (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs :=
+    findPolymorphicOps_complete pctx τ _ sampledTys name boundVars monoTy hmem
+      freshBoundVars freshMonoTy schemeArgTys retTy Su concreteArgTys k maxNumArgs
+      hfresh hdec harity hk hunify (Or.inr hgen) hg2 (hcat Su hunify)
+  -- Reuse the `hEntry`-form backward direction.
+  exact isPolyApp_of_hasType fctx octx pctx tvars bctx depth τ name annot args hwt
+    sampledTys concreteArgTys hLen hValid hEntry hAnnot hArgLen hArgsComplete
 
 /-- Completeness of `genLExpr`: an expression is in the support if it satisfies
     EITHER the `genLExprBase` completeness conditions OR it is a valid
@@ -4877,11 +5445,13 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hτ : SimpleType τ)
+    (maxNumArgs : Nat)
     (e : LExpr')
     (he : (HasTypeA' bctx e τ ∧ emptyNames e ∧ allVarsInCtx fctx octx e ∧
             AllTypesSimple tvars depth bctx e ∧ termDepth bctx e ≤ depth)
-          ∨ IsPolyApp fctx octx pctx tvars bctx depth τ e) :
-    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ) := by
+          ∨ IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs e) :
+    e ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs) := by
   simp only [SetGen.support]
   unfold genLExpr
   simp only [SetGen.mem_dite]
@@ -4903,7 +5473,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- `genLExpr` uses in argument position at this depth, so it *is* the `genArg`
     -- witness `genIndirPoly_complete` wants.
     have hindirpoly := genIndirPoly_complete fctx octx pctx tvars bctx depth τ
-      sampledTys hLen hValid name concreteArgTys hEntry _ args hArgs
+      maxNumArgs sampledTys hLen hValid name concreteArgTys hEntry _ args hArgs
     by_cases hops : (findOpsInCtx octx τ).length > 0
     · refine Or.inl ⟨hops, ?_⟩
       rw [← mem_support_iff, mem_support_frequency_iff]
@@ -4911,3 +5481,133 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       rw [mem_support_pick_iff]
       exact Or.inr hindirpoly
     · exact Or.inr ⟨hops, (pick_mem_iff _).mpr (Or.inr hindirpoly)⟩
+
+/-- **Spec-shaped completeness for the polymorphic case.**
+
+    A restatement of `genLExpr_complete` whose polymorphic disjunct is driven by
+    the *typing judgment* `HasTypeA'` rather than by the generator-internal
+    `IsPolyApp`. The polymorphic branch's premises are:
+
+    - `hwt` — the term is a well-typed spine over a `pctx`-op node (spec-shaped);
+    - `hEntry` — the split-point unification side-condition (the one piece Strata
+      does not prove; see `isPolyApp_of_hasType` and
+      `docs/poly-completeness-spec-shaped-plan.md`);
+    - the per-argument recursive-completeness bundle.
+
+    `IsPolyApp` is *derived* internally via `isPolyApp_of_hasType`, then discharged
+    through the existing `genLExpr_complete`.
+
+    ### Which one should I use?
+
+    This theorem and `genLExpr_complete_poly_fullySpecShaped` have the *same*
+    conclusion and differ in exactly one premise — with a consequence for their
+    axiom footprints that is the main thing to weigh:
+
+    | | this theorem | `…_fullySpecShaped` |
+    |---|---|---|
+    | unification premise | `hEntry` (a `findPolymorphicOps` membership) | `hInst : SchemeInstAt …` + `hgen` |
+    | that premise is | a **generator internal** | **spec-level** (scheme, split point, matcher) |
+    | axioms | `propext`, `Classical.choice`, `Quot.sound` — **`sorry`-free** | the same **plus `sorryAx`** |
+
+    **Prefer this one when you can discharge `hEntry` yourself.** It is
+    unconditional: `findPolymorphicOps` membership is a decidable list membership,
+    so for a concrete `pctx`/`τ`/`sampledTys` it is provable by `decide` or by
+    `simp [findPolymorphicOps]`. Nothing here rests on an unproved axiom.
+
+    **Prefer `…_fullySpecShaped` when you want no generator internals in the
+    hypotheses** — the honest "every well-typed spine is reachable" statement. The
+    cost is that it consumes `Constraints_unify_matching_complete`, so it inherits
+    `sorryAx` until Strata's unifier gets a matching-completeness proof. -/
+theorem genLExpr_complete_poly_specShaped
+    (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hτ : SimpleType τ)
+    (name : String) (annot : LMonoTy) (args : List LExpr')
+    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
+    (hLen : sampledTys.length = maxNumArgs)
+    (hValid : ∀ σ ∈ sampledTys,
+      ((generableTypesFromCtx bctx fctx octx).length > 0 →
+        σ ∈ generableTypesFromCtx bctx fctx octx) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
+    (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
+      (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs)
+    (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (hArgLen : args.length = concreteArgTys.length)
+    -- Depth budget is `depth - 1`: post-#62 arguments come from the generator at
+    -- the smaller index (see `isPolyApp_of_hasType` / `mem_genArg_of_baseComplete`).
+    (hArgsComplete : List.Forall₂
+      (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
+        AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
+      args concreteArgTys) :
+    (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
+      ∈ SetGen.support
+        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
+  genLExpr_complete fctx octx pctx tvars bctx depth τ hτ maxNumArgs _
+    (Or.inr (isPolyApp_of_hasType fctx octx pctx tvars bctx depth τ name annot args
+      hwt sampledTys concreteArgTys hLen hValid hEntry hAnnot hArgLen hArgsComplete))
+
+/-- **Fully spec-shaped polymorphic completeness: no `hEntry`.**
+
+    Like `genLExpr_complete_poly_specShaped`, but the generator-internal
+    `findPolymorphicOps`-membership hypothesis is *eliminated* — replaced by the
+    spec-level scheme-instance witness of `isPolyApp_of_hasType_specShaped`. This is
+    the strongest form of the result: every well-typed spine over a `pctx` scheme
+    (meeting the recursive-completeness and freshening-WF side conditions) is
+    reachable, with no generator internals in the hypotheses.
+
+    ### Which one should I use?
+
+    This theorem and `genLExpr_complete_poly_specShaped` have the *same* conclusion
+    and differ in exactly one premise. The trade:
+
+    | | this theorem | `…_specShaped` |
+    |---|---|---|
+    | unification premise | `hInst : SchemeInstAt …` + `hgen` | `hEntry` (a `findPolymorphicOps` membership) |
+    | that premise is | **spec-level** (scheme, split point, matcher) | a **generator internal** |
+    | axioms | `propext`, `Classical.choice`, `Quot.sound`, **`sorryAx`** | the same **minus `sorryAx`** — **`sorry`-free** |
+
+    **Prefer this one for the honest specification-level statement**, i.e. when the
+    point is that no `findPolymorphicOps` reference appears in the hypotheses. The
+    cost is `sorryAx`: eliminating `hEntry` means *constructing* that membership
+    internally, which consumes `Constraints_unify_matching_complete` (the unproved
+    matching-completeness of Strata's unifier). Discharging that lemma removes
+    `sorryAx` from this theorem with no change to its statement.
+
+    **Prefer `…_specShaped` if you need an axiom-free result** and can supply
+    `hEntry` yourself — it is a decidable list membership, so `decide` or
+    `simp [findPolymorphicOps]` settles it for concrete arguments.
+
+    `SchemeInstAt` is the intended discharge point for a caller's
+    `OpsConsistentR F e`, whose `.op_in` constructor carries exactly this witness. -/
+theorem genLExpr_complete_poly_fullySpecShaped
+    (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hτ : SimpleType τ)
+    (name : String) (annot : LMonoTy) (args : List LExpr')
+    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
+    (hLen : sampledTys.length = maxNumArgs)
+    (hValid : ∀ σ ∈ sampledTys,
+      ((generableTypesFromCtx bctx fctx octx).length > 0 →
+        σ ∈ generableTypesFromCtx bctx fctx octx) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
+    (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (hArgLen : args.length = concreteArgTys.length)
+    -- Depth budget is `depth - 1`: post-#62 arguments come from the generator at
+    -- the smaller index (see `isPolyApp_of_hasType` / `mem_genArg_of_baseComplete`).
+    (hArgsComplete : List.Forall₂
+      (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
+        AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
+      args concreteArgTys)
+    (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
+    (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys sampledTys maxNumArgs) :
+    (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
+      ∈ SetGen.support
+        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
+  genLExpr_complete fctx octx pctx tvars bctx depth τ hτ maxNumArgs _
+    (Or.inr (isPolyApp_of_hasType_specShaped fctx octx pctx tvars bctx depth τ
+      name annot args hwt sampledTys concreteArgTys hLen hValid hAnnot hArgLen
+      hArgsComplete hgen hInst))

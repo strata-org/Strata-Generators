@@ -1121,14 +1121,17 @@ def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
   -- Compute the set of generable types from the current context
   let generableTys := generableTypesFromCtx bctx fctx octx
 
-  -- For each possible type variable, sample a random type to instantiate it with
+  -- For each possible type variable, sample a random type to instantiate it with.
+  -- When no generable types exist, fall back to an arbitrary base type
+  -- (`pickBaseType`: bool/int/string/real/regex/bitvec) rather than always `.bool`,
+  -- so the empty-context case still explores the whole ground-type vocabulary.
   let sampledTys ← List.replicate maxNumArgs ()
     |>.mapM (fun _ =>
       if hg : generableTys.length > 0 then do
         elements generableTys (by
           apply List.ne_nil_of_length_pos
           assumption)
-      else pure .bool)
+      else pickBaseType)
   -- Find all polymorphic library functions that result in the target type `τ`
   let ops := findPolymorphicOps pctx τ generableTys sampledTys maxNumArgs
   if h : ops.length > 0 then do

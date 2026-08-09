@@ -409,7 +409,7 @@ theorem genAxiom_exprTyped {octx : OpCtx} {pctx : PolyOpCtx}
   refine ⟨{ name := nm, e := e }, hdecl, ?_⟩
   -- `instHasTypeA.exprTyped C Γ e (embed .bool) = HasTypeA' [] e .bool`
   show LExpr.HasTypeA [] e .bool
-  exact genLExpr_sound [] octx pctx [] [] depth .bool e he
+  exact genLExpr_sound [] octx pctx [] [] depth .bool _ e he
 
 /-! ## `ContextOk` monotonicity in the reserved set
 

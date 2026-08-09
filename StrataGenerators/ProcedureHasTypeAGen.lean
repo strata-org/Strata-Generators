@@ -841,11 +841,11 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
   · -- preconditionsTyped: under `instHasTypeA` this is `HasTypeA [] c.expr bool`
     -- (the context — hence the clause's free-var context — is ignored by the spec).
     intro c hc
-    exact genLExpr_sound _ octx [] typeArgs [] size .bool c.expr
+    exact genLExpr_sound _ octx [] typeArgs [] size .bool _ c.expr
       (genChecks_support _ octx typeArgs size pre hpre c hc)
   · -- postconditionsTyped: identical reduction (the context is ignored).
     intro c hc
-    exact genLExpr_sound _ octx [] typeArgs [] size .bool c.expr
+    exact genLExpr_sound _ octx [] typeArgs [] size .bool _ c.expr
       (genChecks_support _ octx typeArgs size post hpost c hc)
   · -- bodyTyped: align the body context via `procBodyContext_inoutΓ`.
     refine ProcBodyHasType'.structured body C' ((procStmtEnvΓ Γ octx typeArgs).toTCtx ctx') ?_

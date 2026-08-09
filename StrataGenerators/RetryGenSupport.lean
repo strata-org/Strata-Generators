@@ -257,12 +257,14 @@ theorem genLExpr_sound_retryCont
     (retryCont : (LMonoTy → SetGen.Set LExpr') → (LMonoTy → SetGen.Set LExpr'))
     (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
-    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (maxNumArgs : Nat) (e : LExpr')
     (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ 3 retryCont)) :
+      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs
+        retryCont)) :
     HasTypeA' bctx e τ := by
   rw [genLExpr_setSupport_retryCont retryCont hid] at he
-  exact genLExpr_sound fctx octx pctx tvars bctx depth τ e he
+  exact genLExpr_sound fctx octx pctx tvars bctx depth τ maxNumArgs e he
 
 /-- Completeness likewise: nothing becomes unreachable. Since the support is
     *literally* unchanged, the original completeness theorem applies as-is. -/
@@ -271,13 +273,14 @@ theorem genLExpr_complete_retryCont
     (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hτ : SimpleType τ) (e : LExpr')
+    (hτ : SimpleType τ) (maxNumArgs : Nat) (e : LExpr')
     (he : (HasTypeA' bctx e τ ∧ emptyNames e ∧ allVarsInCtx fctx octx e ∧
             AllTypesSimple tvars depth bctx e ∧ termDepth bctx e ≤ depth)
-          ∨ IsPolyApp fctx octx pctx tvars bctx depth τ e) :
+          ∨ IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs e) :
     e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ 3 retryCont) := by
+      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs
+        retryCont) := by
   rw [genLExpr_setSupport_retryCont retryCont hid]
-  exact genLExpr_complete fctx octx pctx tvars bctx depth τ hτ e he
+  exact genLExpr_complete fctx octx pctx tvars bctx depth τ hτ maxNumArgs e he
 
 end RetryGenSupport

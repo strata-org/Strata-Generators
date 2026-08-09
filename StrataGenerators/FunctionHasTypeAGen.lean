@@ -302,7 +302,7 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     subst heq
     have hee : e' = e := (Option.some.inj ho).symm
     subst hee
-    exact genLExpr_sound fctx octx [] tvars [] depth τ e' he'
+    exact genLExpr_sound fctx octx [] tvars [] depth τ _ e' he'
 
 -- ── Soundness of genFunction ─────────────────────────────────────────
 

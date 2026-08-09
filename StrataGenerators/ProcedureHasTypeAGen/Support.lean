@@ -103,7 +103,7 @@ def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) :
     GenStmtSoundEnv octx tvars where
   toTCtx := procToTCtx
   corr := procToTCtx_corr
-  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ e he
+  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ _ e he
   freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d
   toTCtx_insert := procToTCtx_insert
 
@@ -166,7 +166,7 @@ def procStmtEnvΓ (Γ : TContext Unit) (octx : OpCtx) (tvars : List TyIdentifier
     GenStmtSoundEnv octx tvars where
   toTCtx := procToTCtxΓ Γ
   corr := procToTCtxΓ_corr Γ
-  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ e he
+  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ _ e he
   freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d
   toTCtx_insert := procToTCtxΓ_insert Γ
 
