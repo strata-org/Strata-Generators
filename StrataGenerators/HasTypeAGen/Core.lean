@@ -1361,15 +1361,24 @@ def coreMonoOps : OpCtx :=
   , ("Re.Range", .arrow .string (.arrow .string .regex))
   ]
 
-/-- Polymorphic operators from Strata's Core.Factory. Used for the
-    IndirPoly generation rule (Pałka et al. 2011, Section 4). -/
-def corePolyOps : PolyOpCtx :=
-  -- Identity and Church booleans
-  [ ("id", .forAll ["a"] (.arrow (.ftvar "a") (.ftvar "a")))
-  , ("churchTrue", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "a"))))
-  , ("churchFalse", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "b"))))
+/-- The polymorphic operators that resolve in `Core.Factory`, with the types
+    Strata actually declares for them. Oracles that give generated terms a
+    Strata-side meaning (SMT encoding, pretty-print/parse round-trip,
+    `Program.typeCheck`) should generate with *this* context rather than the
+    larger `corePolyOps`, which also carries synthetic combinators.
+
+    Two entries here were previously wrong in `corePolyOps` and are worth
+    calling out, since both were silent until an oracle looked at them:
+
+    - the constant-map builtin is named **`mapConst`**, not `const`
+      (`Factory.lean` renamed it to avoid colliding with the `const` declaration
+      keyword in the Core grammar, which would make printed programs fail to
+      re-parse);
+    - **`Sequence.build` is snoc**, `(Sequence a, a) → Sequence a` — it appends
+      one element to an existing sequence, so it takes two arguments, not one. -/
+def corePolyFactoryOps : PolyOpCtx :=
   -- Map operations
-  , ("const", .forAll ["k", "v"] (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))
+  [ ("mapConst", .forAll ["k", "v"] (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))
   , ("select", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.ftvar "v"))))
   , ("update", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))))
   -- Sequence operations
@@ -1377,16 +1386,47 @@ def corePolyOps : PolyOpCtx :=
   , ("Sequence.empty", .forAll ["a"] (.seq (.ftvar "a")))
   , ("Sequence.append", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.seq (.ftvar "a")) (.seq (.ftvar "a")))))
   , ("Sequence.select", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.ftvar "a"))))
-  , ("Sequence.build", .forAll ["a"] (.arrow (.ftvar "a") (.seq (.ftvar "a"))))
+  , ("Sequence.build", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.ftvar "a") (.seq (.ftvar "a")))))
   , ("Sequence.update", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.arrow (.ftvar "a") (.seq (.ftvar "a"))))))
   , ("Sequence.contains", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.ftvar "a") .bool)))
   , ("Sequence.take", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
   , ("Sequence.drop", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
+  ]
+
+/-- Polymorphic operators for the IndirPoly generation rule (Pałka et al. 2011,
+    Section 4).
+
+    **Not every entry resolves in `Core.Factory`.** The table deliberately mixes
+    two kinds of operator:
+
+    - **Factory-resolvable** — everything in `corePolyFactoryOps`: `mapConst`,
+      `select`, `update`, and the nine total/partial `Sequence.*` ops declared in
+      `Strata/Languages/Core/Factory.lean`. These have real axioms and real
+      preconditions, so they are the ones worth pointing an oracle at.
+    - **Synthetic combinators** — `id`, `churchTrue`, `churchFalse`,
+      `Sequence.map`, listed below. These exist nowhere in Strata; they are here
+      to exercise the *generator's* polymorphic instantiation machinery
+      (higher-order arguments and undetermined type variables) independently of
+      what Strata happens to declare. `Core.toSMTTerm` fails on them by design —
+      an encoder limitation, not a disagreement.
+
+    Any oracle needing a Strata-side meaning must generate with
+    `corePolyFactoryOps` instead. -/
+def corePolyOps : PolyOpCtx :=
+  -- ── Synthetic combinators (absent from `Core.Factory`) ──────────────
+  -- `churchTrue` doubles as the K combinator (`const : ∀a b. a → b → a`); it is
+  -- deliberately *not* named `const`, to keep it distinct from the constant-map
+  -- builtin `mapConst` in `corePolyFactoryOps`.
+  [ ("id", .forAll ["a"] (.arrow (.ftvar "a") (.ftvar "a")))
+  , ("churchTrue", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "a"))))
+  , ("churchFalse", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "b"))))
   -- `Sequence.map : ∀α β. (α → β) → Sequence<α> → Sequence<β>`. When the target
   -- type is `Sequence<β>`, unification fixes `β` but leaves `α` undetermined, so
   -- the IndirPoly rule must *sample* a concrete type for `α` from the generable
   -- types (Pałka et al. 2011, §4) — the same `map`-style example discussed there.
+  -- This is the only entry that forces that sampling path, which is why it is
+  -- retained even though `Core.Factory` declares no such function.
   , ("Sequence.map", .forAll ["a", "b"]
       (.arrow (.arrow (.ftvar "a") (.ftvar "b"))
         (.arrow (.seq (.ftvar "a")) (.seq (.ftvar "b")))))
-  ]
+  ] ++ corePolyFactoryOps
