@@ -1,5 +1,11 @@
 import StrataGenerators.SetGen
 import StrataGenerators.HasTypeAGen.Core
+-- Coverage lemmas for `freshenBoundVars`, which include `freshenBoundVars_disjoint`.
+-- `schemeInstAt_freshening_disjoint` below uses these lemmas. It *derives* the
+-- well-formedness conditions that `SchemeInstAt` took as premises before, so callers
+-- no longer supply them. This file imports only `HasTypeAGen.Core`, so there is no
+-- cycle.
+import StrataGenerators.HasTypeAGen.Freshening
 import Strata.DL.Lambda.LTyUnify
 -- `LTyUnifyProps` is imported for Strata's substitution lemmas. Note the unifier
 -- results below are stated as *matching* completeness, not most-generality: nothing
@@ -5326,6 +5332,128 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- Package the `IsPolyApp` existential.
     exact ⟨sampledTys, name, argTys, args, hLen, hValid, hEntry, hArgsGen, by rw [hAnnot]⟩
 
+-- ── Derived well-formedness for `freshenBoundVars` ─────────────
+--
+-- `SchemeInstAt` carried the two disjointness conditions as premises before, and
+-- callers supplied them. These conditions are *consequences* of `freshenBoundVars`.
+-- Therefore this section derives them from `freshenBoundVars_disjoint`, which is in
+-- `HasTypeAGen/Freshening.lean`.
+--
+-- One true input remains: **scheme closedness**. The body of the scheme must not
+-- mention a type variable outside its own binders. Closedness is a property of the
+-- `pctx` entry and not of `freshenBoundVars`. Also, closedness holds for each real
+-- scheme. For an example, see `corePolyOps`. It also holds for `factoryPolyOps`,
+-- because each entry of `factoryPolyOps` has the form `∀ fn.typeArgs. …`.
+
+/-- Both components of `decomposeArrow` mention only the type variables that are
+    already free in the type that `decomposeArrow` breaks into parts. The free
+    variables of the return type are free in the initial type. The free variables of
+    each argument type are also free in the initial type. -/
+theorem decomposeArrow_freeVars_subset (t : LMonoTy) :
+    (∀ v ∈ (decomposeArrow t).2.freeVars, v ∈ t.freeVars) ∧
+    (∀ σ ∈ (decomposeArrow t).1, ∀ v ∈ σ.freeVars, v ∈ t.freeVars) := by
+  fun_induction decomposeArrow t with
+  | case1 σ rest args ret hrec ih =>
+    obtain ⟨ihret, iharg⟩ := ih
+    rw [hrec] at ihret iharg
+    refine ⟨?_, ?_⟩
+    · intro v hv
+      show v ∈ LMonoTys.freeVars [σ, rest]
+      simp only [LMonoTys.freeVars_of_cons]
+      exact List.mem_append_right _ (List.mem_append_left _ (ihret v hv))
+    · intro σ' hσ' v hv
+      simp only [List.mem_cons] at hσ'
+      show v ∈ LMonoTys.freeVars [σ, rest]
+      simp only [LMonoTys.freeVars_of_cons]
+      rcases hσ' with rfl | hmem
+      · exact List.mem_append_left _ hv
+      · exact List.mem_append_right _ (List.mem_append_left _ (iharg σ' hmem v hv))
+  | case2 ty hne => exact ⟨fun v hv => hv, fun σ hσ => absurd hσ (by simp)⟩
+
+/-- `l.foldr` makes a right-nested arrow type from the argument types in `l` and the
+    base type `t`. If a type variable is free in that arrow type, then it is free in
+    one of the argument types in `l`, or it is free in `t`. -/
+theorem mem_freeVars_foldr_arrow (l : List LMonoTy) (t : LMonoTy) (v : TyIdentifier)
+    (h : v ∈ (l.foldr (fun σ acc => LMonoTy.arrow σ acc) t).freeVars) :
+    (∃ σ ∈ l, v ∈ σ.freeVars) ∨ v ∈ t.freeVars := by
+  induction l with
+  | nil => exact Or.inr h
+  | cons a rest ih =>
+    simp only [List.foldr_cons] at h
+    show (∃ σ ∈ a :: rest, v ∈ σ.freeVars) ∨ v ∈ t.freeVars
+    have h' : v ∈ LMonoTys.freeVars [a, rest.foldr (fun σ acc => LMonoTy.arrow σ acc) t] := h
+    simp only [LMonoTys.freeVars_of_cons, List.mem_append] at h'
+    rcases h' with ha | hrest
+    · exact Or.inl ⟨a, List.mem_cons_self, ha⟩
+    · simp only [LMonoTys.freeVars, List.not_mem_nil, or_false] at hrest
+      rcases ih hrest with ⟨σ, hσ, hv⟩ | ht
+      · exact Or.inl ⟨σ, List.mem_cons_of_mem _ hσ, hv⟩
+      · exact Or.inr ht
+
+/-- **The two well-formedness conditions, derived.**
+
+    `hclosed` is the only input. It gives *scheme closedness*: each type variable of
+    the scheme body is one of the binders of that scheme. `freshenBoundVars` gets a
+    `varsInUse` set that contains `FV(τ)`. Therefore the fresh bound variables are
+    disjoint from `FV(τ)`, and the remaining arrow suffix is also disjoint from
+    `FV(τ)`.
+
+    These two conditions are the conjuncts that `SchemeInstAt` demanded as premises
+    before. The proof has three steps:
+    - `freshenBoundVars_disjoint` gives the disjointness for `freshBoundVars` and for
+      `FV(freshMonoTy)`.
+    - `decomposeArrow_freeVars_subset` and `mem_freeVars_foldr_arrow` move the second
+      result to the `drop k` suffix. The variables of that suffix are a subset of the
+      variables of `freshMonoTy`.
+    - `List.mem_eraseDups` shows that `FV(τ)` is a part of the `varsInUse` set that
+      the generator gives to `freshenBoundVars`. -/
+theorem schemeInstAt_freshening_disjoint
+    (fctx : FVarCtx) (octx : OpCtx) (bctx : BVarCtx) (τ : LMonoTy)
+    (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (freshBoundVars : List TyIdentifier) (freshMonoTy : LMonoTy)
+    (schemeArgTys : List LMonoTy) (retTy : LMonoTy) (k : Nat)
+    (hclosed : ∀ v ∈ monoTy.freeVars, v ∈ boundVars)
+    (hfresh : freshenBoundVars boundVars monoTy
+      ((LMonoTy.freeVars τ ++ (generableTypesFromCtx bctx fctx octx).flatMap
+        LMonoTy.freeVars).eraseDups) = (freshBoundVars, freshMonoTy))
+    (hdec : decomposeArrow freshMonoTy = (schemeArgTys, retTy)) :
+    (∀ v ∈ ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc)
+      retTy).freeVars, v ∉ τ.freeVars) ∧
+    (∀ v ∈ freshBoundVars, v ∉ τ.freeVars) := by
+  obtain ⟨hbv, hbody⟩ :=
+    freshenBoundVars_disjoint boundVars monoTy _ hclosed freshBoundVars freshMonoTy hfresh
+  -- The `varsInUse` set that the generator gives to `freshenBoundVars` contains `FV(τ)`.
+  have hτsub : ∀ v ∈ τ.freeVars, v ∈
+      ((LMonoTy.freeVars τ ++ (generableTypesFromCtx bctx fctx octx).flatMap
+        LMonoTy.freeVars).eraseDups) :=
+    fun v hv => List.mem_eraseDups.mpr (List.mem_append_left _ hv)
+  refine ⟨?_, fun v hv hc => hbv v hv (hτsub v hc)⟩
+  -- The suffix conjunct: each variable of the suffix is free in `freshMonoTy`.
+  intro v hv hc
+  have hsub : v ∈ freshMonoTy.freeVars := by
+    obtain ⟨hret, harg⟩ := decomposeArrow_freeVars_subset freshMonoTy
+    rw [hdec] at hret harg
+    rcases mem_freeVars_foldr_arrow _ _ v hv with ⟨σ, hσ, hvσ⟩ | hvret
+    · exact harg σ (List.mem_of_mem_drop hσ) v hvσ
+    · exact hret v hvret
+  exact hbody v hsub (hτsub v hc)
+
+/-- **Scheme closedness holds for the real operator vocabulary.**
+
+    The `hclosed` conjunct of `SchemeInstAt` is the one condition that stays as a
+    premise. This theorem shows that the condition is easy to satisfy: each entry of
+    `corePolyOps` satisfies it, and `decide` proves this. A caller that has a
+    concrete `pctx` can discharge `hclosed` in the same way.
+
+    This theorem also prevents a regression. If the body of a `corePolyOps` entry
+    mentioned a type variable that is not one of its binders, this theorem would fail.
+    Such an entry is also not a well-formed type scheme. -/
+theorem corePolyOps_closed :
+    ∀ p ∈ corePolyOps,
+      match p.2 with
+      | .forAll boundVars monoTy => ∀ v ∈ monoTy.freeVars, v ∈ boundVars := by
+  decide
+
 /-- **Spec-level scheme-instance witness.**
 
     Bundles "the op node's annotation is a genuine instance of a `pctx` scheme at
@@ -5344,7 +5472,15 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 
     Discharging `SchemeInstAt` from a caller's `OpsConsistentR F e` (which carries
     exactly this scheme-instance witness in its `.op_in` constructor) is the intended
-    route; see the module notes / issue tracker. -/
+    route. For more information, see the module notes and the issue tracker.
+
+    **Well-formedness for `freshenBoundVars` is no longer a premise.** Before, this
+    predicate carried two disjointness conjuncts, and callers supplied them. The first
+    conjunct said that the fresh bound variables avoid `FV(τ)`. The second said the
+    same for the remaining arrow suffix. Both conjuncts are consequences of
+    `freshenBoundVars`, and `schemeInstAt_freshening_disjoint` now derives them. In
+    their place, this predicate has the structural condition `hclosed`, which is
+    weaker: the scheme body mentions no type variable outside its own binders. -/
 def SchemeInstAt (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (bctx : BVarCtx) (τ : LMonoTy) (name : String)
     (concreteArgTys : List LMonoTy) (sampledTys : List LMonoTy)
@@ -5359,10 +5495,14 @@ def SchemeInstAt (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     decomposeArrow freshMonoTy = (schemeArgTys, retTy) ∧
     schemeArgTys.length ≤ maxNumArgs ∧
     k < schemeArgTys.length + 1 ∧
-    -- freshening well-formedness (see `freshenBoundVars_disjoint`, tracked separately):
-    (∀ v ∈ ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc)
-      retTy).freeVars, v ∉ τ.freeVars) ∧
-    (∀ v ∈ freshBoundVars, v ∉ τ.freeVars) ∧
+    -- **Scheme closedness**: the scheme body mentions no type variable outside its
+    -- own binders. This condition replaces the two disjointness premises that this
+    -- predicate carried before. `schemeInstAt_freshening_disjoint` now *derives*
+    -- those two premises from this condition. Closedness is a property of the `pctx`
+    -- entry and not of the generator. Also, closedness holds for each real scheme.
+    -- It holds for `corePolyOps`. It also holds for `factoryPolyOps`, because each
+    -- entry of `factoryPolyOps` has the form `∀ fn.typeArgs. …`.
+    (∀ v ∈ monoTy.freeVars, v ∈ boundVars) ∧
     -- the matcher (spec-level; no `Su`):
     LMonoTy.subst Sm
       ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ ∧
@@ -5417,7 +5557,13 @@ theorem isPolyApp_of_hasType_specShaped
     IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs
       (mkApps (.op () ⟨name, ()⟩ (some annot)) args) := by
   obtain ⟨boundVars, monoTy, freshBoundVars, freshMonoTy, schemeArgTys, retTy, k, Sm,
-    hmem, hfresh, hdec, harity, hk, hdisjSuffix, hdisjBV, hmatch, hcat⟩ := hInst
+    hmem, hfresh, hdec, harity, hk, hclosed, hmatch, hcat⟩ := hInst
+  -- The proof *derives* the two well-formedness conditions from scheme closedness,
+  -- and does not assume them. `freshenBoundVars` cannot add a variable that clashes
+  -- with `FV(τ)`, because it gets a `varsInUse` set that contains `FV(τ)`.
+  obtain ⟨hdisjSuffix, hdisjBV⟩ :=
+    schemeInstAt_freshening_disjoint fctx octx bctx τ boundVars monoTy freshBoundVars
+      freshMonoTy schemeArgTys retTy k hclosed hfresh hdec
   -- Obtain the unifier from the matching theorem (the single `sorry` is consumed here).
   obtain ⟨Su, hunify, _hSupat⟩ :=
     unifyTypes_matching_complete _ τ Sm hdisjSuffix hmatch
@@ -5554,8 +5700,10 @@ theorem genLExpr_complete_poly_specShaped
     `findPolymorphicOps`-membership hypothesis is *eliminated* — replaced by the
     spec-level scheme-instance witness of `isPolyApp_of_hasType_specShaped`. This is
     the strongest form of the result: every well-typed spine over a `pctx` scheme
-    (meeting the recursive-completeness and freshening-WF side conditions) is
-    reachable, with no generator internals in the hypotheses.
+    (meeting the recursive-completeness side conditions and scheme closedness) is
+    reachable, with no generator internals in the hypotheses. The proof *derives* the
+    well-formedness conditions for `freshenBoundVars` and does not assume them. For
+    the details, see `schemeInstAt_freshening_disjoint`.
 
     ### Which one should I use?
 
