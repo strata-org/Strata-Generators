@@ -79,6 +79,15 @@ lake build test
 
 Flags (all optional; the Tyche visualization pass is on by default):
 
+- `--quick` gives a fast preset for a short cycle of work. It selects 100 trials, a
+  maximum size of 40, and no Tyche pass. A measurement gives about 16 seconds for
+  the preset, against about 7 minutes for the default settings. Use `--quick` to
+  find a defect, and use the default settings to gate a merge.
+
+  A positional argument has a higher precedence than `--quick`. Therefore
+  `--quick 500` gives 500 trials, and it keeps the other two parts of the preset.
+  To get the Tyche pass together with the other parts of the preset, give the
+  trials and the size as positional arguments and do not use `--quick`.
 - `--no-tyche` — omit Tyche visualizations (i.e. only run tests)
 - `--tyche-out=PATH` — output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
 - `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
@@ -101,7 +110,7 @@ lake build test-plain
 .lake/build/bin/test-plain [numTrials] [maxSize] [--smt]
 ```
 
-It accepts the same positional args and `--smt` flag, reports the same pass/fail
+It accepts the same positional args and the `--smt` and `--quick` flags, reports the same pass/fail
 verdicts and exit code as `test`, and prints a simpler `PASS/FAIL (n/m)` line per
 property. It has no Tyche pass (the `--tyche-*` flags are accepted but ignored),
 and it is **not** registered as the `lake test` driver — `test` (LSpec) remains
@@ -178,6 +187,9 @@ Use these CLI flags to control the output:
 
 - `--tyche-samples=N` (default: 1000) — number of samples per generator
 - `--tyche-out=PATH` (default: `tyche_output.jsonl`) — output file path
+
+The Tyche pass is the larger part of the time of a run. `--no-tyche` and
+`--quick` both hold it off, and neither writes the JSONL file.
 
 ### Viewing results
 

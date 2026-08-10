@@ -3,6 +3,8 @@ import Basalt.IO
 import Basalt.Combinators
 import BasaltExamples.ArbChar.Def
 import BasaltExamples.ArbString.Def
+import StrataGenerators.PrimitiveGens
+import Strata.Languages.Core.Factory
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.DL.Lambda.LTyUnify
 
@@ -250,26 +252,58 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
     Char.arbitrary`, so this is `listOf Char.arbitrary`. -/
 abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
 
-/-- Generate a random string constant (alphanumeric strings). -/
+/-- Generate a random string constant.
+
+    The generator draws from `genInterestingString`
+    (`StrataGenerators.PrimitiveGens`), and not from `String.arbitrary` of Basalt.
+    `String.arbitrary` gives only characters that satisfy `Char.isAlphanum`, and
+    therefore it never goes outside printable ASCII. The non-ASCII pool is what
+    makes the agreement property between SMT and concrete evaluation non-vacuous
+    at type `string`. An ASCII-only pool cannot reach the defect in the SMT-LIB
+    escape function.
+
+    The code depends on the `do let s ← _; pure (.strConst () s)` shape. The support
+    proofs in `HasTypeAGen.lean` and `HasTypeAGenOpsConsistent.lean` destructure
+    it as one `bind` and then one `pure`, and they discard the inner membership
+    hypothesis. Thus they do not depend on *which* string generator supplies the
+    value, but they do depend on the shape. -/
 @[reducible] def genStrConst [Gen G] : G LExpr' := do
-  let s ← String.arbitrary
+  let s ← StrataGenerators.PrimitiveGens.genInterestingString
   pure (.strConst () s)
 
-/-- Generate a random rational constant (non-negative or negative). -/
-@[reducible] def genRealConst [Gen G] : G LExpr' :=
-  pick (fun () => do
-          let num ← Nat.arbitrary
-          let den ← Nat.arbitrary
-          pure (.realConst () (↑num / (↑den + 1 : Rat))))
-       (fun () => do
-          let num ← Nat.arbitrary
-          let den ← Nat.arbitrary
-          pure (.realConst () (-(↑num / (↑den + 1 : Rat)))))
+/-- Generate a random rational constant.
 
-/-- Generate a random bitvector constant of width `n`. -/
+    The generator draws from `genRat` (`StrataGenerators.PrimitiveGens`). `genRat`
+    builds its value with `mkRat`, the smart constructor from the standard library,
+    so the result is always in normal form. It is also biased toward a **non-zero**
+    rational: about 9% of the draws are zero. A generator that draws its numerator
+    from `Nat.arbitrary` gives a zero numerator half of the time, which makes the
+    whole value zero, and about 46% of its draws are zero.
+
+    The code depends on the shape, which is one `bind` and then one `pure`. Read
+    `genStrConst`. -/
+@[reducible] def genRealConst [Gen G] : G LExpr' := do
+  let r ← StrataGenerators.PrimitiveGens.genRat
+  pure (.realConst () r)
+
+/-- Generate a random bitvector constant of width `n`.
+
+    The generator draws from `genBiasedBitVec` (`StrataGenerators.PrimitiveGens`).
+    `genBiasedBitVec` has a weight of 7 to 1 for a boundary value over a plain
+    `Nat.arbitrary` draw. The boundary values are `INT_MIN`, `INT_MAX`, `0`, `1`,
+    `allOnes` or `-1`, and the powers of two with their neighbours. The bias is
+    important because the signed overflow predicates are true only at a boundary.
+    `BitVec.negOverflow` and `BitVec.sdivOverflow` are true *only* at `INT_MIN`. A
+    geometric generator, whose values group near zero, reaches that value with
+    probability about `2^-n`.
+
+    The unbiased tail, which is 1 draw in 8, keeps the support complete. Each
+    `BitVec n` stays reachable, so this generator narrows nothing that the
+    completeness proofs quantify over. The code depends on the shape, which is one
+    `bind` and then one `pure`. Read `genStrConst`. -/
 @[reducible] def genBitvecConst [Gen G] (n : Nat) : G LExpr' := do
-  let k ← Nat.arbitrary
-  pure (.bitvecConst () n (BitVec.ofNat n k))
+  let k ← StrataGenerators.PrimitiveGens.genBiasedBitVec n
+  pure (.bitvecConst () n k)
 
 /-- Generate an application: pick a random argument type, generate the argument
     and a function from that type to `τ`, then apply. -/
@@ -1309,57 +1343,28 @@ The monomorphic and polymorphic operator contexts drawn from Strata's
 operator vocabulary; `ProgramGen` uses them for axiom, function, and procedure
 bodies. `TestSupport` re-exports them for the property suites. -/
 
-/-- Monomorphic operators from Strata's Core.Factory, listed by
-    (name, curried type). Used for the Indir generation rule. -/
+/-- Every monomorphic operator of Strata's `Core.Factory`, as a pair of a name and
+    a curried type. The Indir generation rule uses this context.
+
+    `factoryOps` derives the list from the factory itself, so the vocabulary here
+    cannot drift from the operators that Core defines. An earlier version of this
+    definition was a hand-written list of 40 entries. Each entry named a real
+    factory operator, and each type agreed with the factory, but the list held only
+    the operators on `int`, `bool` and a few on `string` and `regex`. It therefore
+    excluded most operators on `string`, and every operator on `real` and on
+    `bitvec`, out of the 310 that the factory defines.
+
+    A generator over the smaller list cannot build a term such as `Str.Length "é"`
+    or `Bv8.SafeSDiv`, so each property about those operators passed vacuously. The
+    Tyche panels showed the same gap as an absence of coverage.
+
+    The body repeats the body of `factoryOps` rather than a call to it, because
+    `factoryOps` lives in `HasTypeAGen/Defs.lean`, and that file imports this one.
+    The two must stay the same. `coreMonoOps_eq_factoryOps` in `Defs.lean` proves
+    that they are, so a change to one of them and not the other breaks the build. -/
 def coreMonoOps : OpCtx :=
-  -- Integer arithmetic
-  [ ("Int.Add", .arrow .int (.arrow .int .int))
-  , ("Int.Sub", .arrow .int (.arrow .int .int))
-  , ("Int.Mul", .arrow .int (.arrow .int .int))
-  , ("Int.Div", .arrow .int (.arrow .int .int))
-  , ("Int.Mod", .arrow .int (.arrow .int .int))
-  , ("Int.Neg", .arrow .int .int)
-  -- Integer comparisons
-  , ("Int.Lt", .arrow .int (.arrow .int .bool))
-  , ("Int.Le", .arrow .int (.arrow .int .bool))
-  , ("Int.Gt", .arrow .int (.arrow .int .bool))
-  , ("Int.Ge", .arrow .int (.arrow .int .bool))
-  -- Real arithmetic
-  , ("Real.Add", .arrow .real (.arrow .real .real))
-  , ("Real.Sub", .arrow .real (.arrow .real .real))
-  , ("Real.Mul", .arrow .real (.arrow .real .real))
-  , ("Real.Div", .arrow .real (.arrow .real .real))
-  , ("Real.Neg", .arrow .real .real)
-  -- Real comparisons
-  , ("Real.Lt", .arrow .real (.arrow .real .bool))
-  , ("Real.Le", .arrow .real (.arrow .real .bool))
-  , ("Real.Gt", .arrow .real (.arrow .real .bool))
-  , ("Real.Ge", .arrow .real (.arrow .real .bool))
-  -- Boolean operations
-  , ("Bool.And", .arrow .bool (.arrow .bool .bool))
-  , ("Bool.Or", .arrow .bool (.arrow .bool .bool))
-  , ("Bool.Implies", .arrow .bool (.arrow .bool .bool))
-  , ("Bool.Equiv", .arrow .bool (.arrow .bool .bool))
-  , ("Bool.Not", .arrow .bool .bool)
-  -- String operations
-  , ("Str.Length", .arrow .string .int)
-  , ("Str.Concat", .arrow .string (.arrow .string .string))
-  , ("Str.ToRegEx", .arrow .string .regex)
-  , ("Str.InRegEx", .arrow .string (.arrow .regex .bool))
-  , ("Str.PrefixOf", .arrow .string (.arrow .string .bool))
-  , ("Str.SuffixOf", .arrow .string (.arrow .string .bool))
-  -- Regex operations
-  , ("Re.AllChar", .regex)
-  , ("Re.All", .regex)
-  , ("Re.None", .regex)
-  , ("Re.Star", .arrow .regex .regex)
-  , ("Re.Plus", .arrow .regex .regex)
-  , ("Re.Comp", .arrow .regex .regex)
-  , ("Re.Concat", .arrow .regex (.arrow .regex .regex))
-  , ("Re.Union", .arrow .regex (.arrow .regex .regex))
-  , ("Re.Inter", .arrow .regex (.arrow .regex .regex))
-  , ("Re.Range", .arrow .string (.arrow .string .regex))
-  ]
+  Core.Factory.toArray.toList.filterMap fun f =>
+    some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
 /-- Polymorphic operators from Strata's Core.Factory. Used for the
     IndirPoly generation rule (Pałka et al. 2011, Section 4). -/

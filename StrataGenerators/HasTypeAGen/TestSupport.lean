@@ -1,7 +1,7 @@
 import StrataGenerators.HasTypeAGen.Defs
 import Strata.DL.Lambda.LExprEval
 import Strata.DL.Lambda.LExprT
-import Strata.DL.Lambda.IntBoolFactory
+import Strata.Languages.Core.Factory
 import Plausible
 
 open Lambda
@@ -11,7 +11,8 @@ open Lambda
 
 Utilities shared between the LSpec property suite and the Tyche panels (both in
 the merged `TestMain` driver): the default free-variable context, the operator
-context from `IntBoolFactory`, the evaluator wrapper, and the value predicate.
+context from Strata's full `Core.Factory`, the evaluator wrapper, and the value
+predicate.
 -/
 
 -- ── Pretty-printers ────────────────────────────────────────────────────
@@ -75,47 +76,66 @@ def defaultFCtx : FVarCtx :=
   , ("s", .string), ("r", .regex), ("m", .map .int .bool)
   , ("q", .seq .int) ]
 
-/-- The `IntBoolFactory` instantiated at our parameter types. Provides
-    integer arithmetic (Add, Sub, Mul, ...), comparisons (Lt, Le, ...),
-    and boolean operations (And, Or, Not, ...). -/
-def intBoolFactory : Factory LExprParams' :=
-  @IntBoolFactory (T := LExprParams') ⟨()⟩ ⟨()⟩
+/-- Strata's full `Core.Factory` at our parameter types. This is the **single
+    source of truth** for the operator vocabulary of every harness in this repo.
 
-/-- The precondition-bearing ("partial") monomorphic Core operators, layered on
-    top of `coreMonoOps`. Each `Int.Safe*` operator computes the same value as its
-    total counterpart (`Int.Div`, `Int.Mod`, …) but carries a `y ≠ 0` precondition
-    in `Core.Factory` (see `intSafeDivFunc` et al. in Strata's `IntBoolFactory`), so
-    a call to one produces a well-formedness obligation for `PrecondElim` to
-    discharge. This context is handed to `genProcedure` in place of the total-only
-    `coreMonoOps` so that generated procedures actually exercise the
-    precondition-elimination pass rather than running it as a no-op. All four names
-    resolve in `Core.Factory`, so the obligations are real; the annotation-driven
-    typing relation makes generation with these entries sound regardless. -/
-def corePartialOps : OpCtx :=
-  coreMonoOps ++
-  [ ("Int.SafeDiv",  .arrow .int (.arrow .int .int))
-  , ("Int.SafeMod",  .arrow .int (.arrow .int .int))
-  , ("Int.SafeDivT", .arrow .int (.arrow .int .int))
-  , ("Int.SafeModT", .arrow .int (.arrow .int .int)) ]
+    Each harness draws its operators from this one factory, through `coreOpCtx`
+    below. Therefore a harness cannot drift from the operators that Core truly
+    defines, and a new operator in `Core.Factory` reaches each harness with no
+    change here.
+
+    This factory replaces `IntBoolFactory`, which held the operators on `int` and
+    `bool` only. `IntBoolFactory` gave a vocabulary of 21 operators, against 310
+    here, and it excluded every operator on `string`, `real`, `regex` and
+    `bitvec`. A generator over `IntBoolFactory` therefore cannot build a term such
+    as `Str.Length "é"`, and each property about those types passes vacuously.
+
+    `Core.Factory` lives at `Core.CoreLParams`, which is
+    `⟨CoreExprMetadata, Unit⟩ = ⟨Unit, Unit⟩` and therefore definitionally equal to
+    `LExprParams'`. Thus the factory needs no instantiation, unlike
+    `IntBoolFactory`, which took the two metadata values as arguments. -/
+def coreFactory : Factory LExprParams' := Core.Factory
+
+/-- The operators for the procedure generator, including the ones that carry a
+    precondition.
+
+    Each `Int.Safe*` operator computes the same value as its total counterpart,
+    such as `Int.Div` or `Int.Mod`, but it carries a `y ≠ 0` precondition in
+    `Core.Factory`. Therefore a call to one gives a well-formedness obligation for
+    `PrecondElim` to discharge, and a generated procedure exercises the pass that
+    eliminates a precondition instead of running it as a no-op.
+
+    This context is now the same as `coreMonoOps`. Earlier it was `coreMonoOps`
+    plus four hand-written entries for `Int.SafeDiv`, `Int.SafeMod`, `Int.SafeDivT`
+    and `Int.SafeModT`, because the hand-written `coreMonoOps` held only the total
+    operators. `coreMonoOps` now comes from `Core.Factory`, which defines each
+    `Int.Safe*` operator, so those four entries became duplicates.
+
+    The definition stays as a separate name, and each call site for procedures
+    keeps it. The name records the *intent* that a procedure body must be able to
+    reach an operator with a precondition. If a future change narrows
+    `coreMonoOps`, this is the definition to widen again. -/
+def corePartialOps : OpCtx := coreMonoOps
 
 -- ── Evaluator ───────────────────────────────────────────────────────────
 
-/-- An evaluation state with `IntBoolFactory` loaded. Operators like `Int.Add`
-    will reduce when applied to concrete arguments. -/
-def intBoolState : LState LExprParams' :=
+/-- An evaluation state with the full `coreFactory` loaded. An operator such as
+    `Int.Add` reduces when it has concrete arguments. The operators on `string`,
+    `real` and `bitvec` now reduce too, which `IntBoolFactory` could not do. -/
+def coreState : LState LExprParams' :=
   { state := [],
-    config := { factory := intBoolFactory,
+    config := { factory := coreFactory,
                 fuel := 200,
                 usedNames := {} } }
 
-/-- Evaluate an expression with the given fuel using `IntBoolFactory`.
-    Operators reduce when applied to constants; free variables are irreducible. -/
+/-- Evaluate an expression with the given fuel over `coreFactory`. An operator
+    reduces when it has constant arguments. A free variable is irreducible. -/
 def eval (fuel : Nat) (e : LExpr') : LExpr' :=
-  (LExpr.evalWithLState fuel intBoolState e).fst
+  (LExpr.evalWithLState fuel coreState e).fst
 
-/-- Check whether an expression is a canonical value under `IntBoolFactory`. -/
+/-- Report whether an expression is a canonical value over `coreFactory`. -/
 def isValue (e : LExpr') : Bool :=
-  LExpr.isCanonicalValue intBoolState.config.factory e
+  LExpr.isCanonicalValue coreState.config.factory e
 
 -- ── Expression property checks (shared by both harnesses) ────────────────
 -- The pass/fail decision for each expression-generator property lives here so
@@ -149,15 +169,24 @@ def resolveKnownTypes : Lambda.KnownTypes :=
     t[∀a b. Map %a %b],
     t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
 
-/-- `LContext` with `intBoolFactory` and all generator-relevant known types. -/
+/-- `LContext` with `coreFactory` and each known type that the generator needs. -/
 def resolveLContext : Lambda.LContext LExprParams' :=
   { Lambda.LContext.default with
-    functions := intBoolFactory,
+    functions := coreFactory,
     knownTypes := resolveKnownTypes }
 
-/-- The operator context of `intBoolFactory`, used to *generate* the terms whose
-    types are erased and re-inferred by the resolve-after-erase property. -/
-def intBoolOpCtx : OpCtx := factoryOps intBoolFactory
+/-- The operator context of `coreFactory`: each operator that Strata's Core truly
+    defines, as a pair of a name and a curried type.
+
+    This context is the one vocabulary that every harness generates over. It holds
+    310 operators, against 21 for the earlier `intBoolOpCtx`, and it adds every
+    operator on `string`, `real`, `regex` and `bitvec`.
+
+    `factoryOps` gives each operator its monomorphic type. An operator that is
+    polymorphic in the factory therefore appears here with type variables in its
+    type. The generator handles such an entry through its `ftvar` cases, and
+    `corePolyOps` holds the separate *schemes* for the rules about polymorphism. -/
+def coreOpCtx : OpCtx := factoryOps coreFactory
 
 /-- Erase *all* type annotations on an `LExpr`, including the binder-type
     annotations on lambdas (`abs`) and quantifiers (`quant`). After this, no node

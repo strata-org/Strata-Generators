@@ -276,17 +276,13 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | ((⟨hf, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩)))
-    · exact .const
+    rcases he with ⟨r, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩)))
     · exact .const
     · exact pickBVar_mem_opsConsistentR F bctx .real h
     · exact .const
-    · exact .const
     · exact pickFVar_mem_opsConsistentR F fctx .real h
     · exact .const
-    · exact .const
     · exact pickOp_mem_opsConsistentR F .real h
-    · exact .const
     · exact .const
   case h_13 n =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx 0 (.bitvec n)) := by
@@ -467,22 +463,19 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · rcases he with ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩ <;> exact .const
+    · obtain ⟨r, _, rfl⟩ := he; exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ harg)
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
       exact .ite (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ hc) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ ht) (genLExprBase_opsConsistentR F fctx tvars bctx n _ _ he')
-    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickBVar_mem_opsConsistentR F bctx .real h
       · exact .const
-      · exact .const
-    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickFVar_mem_opsConsistentR F fctx .real h
       · exact .const
-      · exact .const
-    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickOp_mem_opsConsistentR F .real h
-      · exact .const
       · exact .const
   case h_14 m n =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) tvars bctx (m + 1) (.bitvec n)) := by

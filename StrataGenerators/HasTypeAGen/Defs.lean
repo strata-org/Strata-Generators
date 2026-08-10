@@ -31,6 +31,15 @@ def factoryOps (F : @Factory LExprParams') : OpCtx :=
   F.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
+/-- `coreMonoOps` is `factoryOps` applied to `Core.Factory`.
+
+    `coreMonoOps` lives in `HasTypeAGen/Core.lean`, and that file cannot call
+    `factoryOps`, because this file imports it. Therefore `coreMonoOps` repeats the
+    body of `factoryOps`. This lemma pins the two together: a change to one of them
+    and not the other makes the build fail here, instead of making the operator
+    vocabulary of the generators drift from the factory in silence. -/
+theorem coreMonoOps_eq_factoryOps : coreMonoOps = factoryOps Core.Factory := rfl
+
 /-- Extract the polymorphic operator context from a `Factory` by recording each
     operation's full type *scheme*: quantify over the operation's type arguments,
     then curry its inputs to its output.

@@ -8,6 +8,10 @@ import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import StrataGenerators.StmtHasTypeAGen.TestSupport
 -- Supplies `minimizeProcsCounterexample`, so the procedure panels can report the
 -- minimal well-typed counterexample rather than the raw generated one.
+-- Supplies the two properties about the `Rat`/`Decimal` boundary, and the property
+-- about the SMT escape function.
+import StrataGenerators.HasTypeAGen.DecimalAgreement
+import StrataGenerators.HasTypeAGen.SmtStringEscaping
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
 import Basalt.IO
 -- `Basalt.PlausibleGen` supplies the `[Gen Plausible.Gen]` instance used by the
@@ -43,7 +47,7 @@ gated behind a CLI flag (Tyche visualization is on by default).
 All property *check* logic (pass/fail verdicts and the helper contexts behind them)
 is shared with the Plausible harness via the `*.TestSupport` modules — this file
 only adds the Tyche-specific visualization scaffolding (feature breakdowns, sample
-representations, and rejection-sampling for counterexample-dense panels).
+representations).
 -/
 
 -- ── Feature extraction ────────────────────────────────────────────────
@@ -209,7 +213,7 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   return ⟨expr, ty, evaled, d⟩
 
 -- ── Resolve after erasure property ──────────────────────────────────
--- `resolveLContext`, `intBoolOpCtx`, `eraseAllTypes`, and `isInstanceOf` are the
+-- `resolveLContext`, `coreOpCtx`, `eraseAllTypes`, and `isInstanceOf` are the
 -- shared definitions from `HasTypeAGen.TestSupport` — the same ones the Plausible
 -- `checkResolveAfterErase` uses, so the two harnesses score this property
 -- identically.
@@ -274,38 +278,12 @@ def genAndCheckResolveAfterErase (depth : Nat := 0) : IO ResolveAfterEraseResult
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := IO) tvars d
-  let expr ← genLExprWithOps (G := IO) [] intBoolOpCtx [] tvars [] d ty
+  let expr ← genLExprWithOps (G := IO) [] coreOpCtx [] tvars [] d ty
   let erased := eraseAllTypes expr
   let resolvedTy := match LExpr.resolve resolveLContext Lambda.TEnv.default erased with
     | .ok (resolved, _) => some resolved.toLMonoTy
     | .error _ => none
   return ⟨expr, ty, resolvedTy, d⟩
-
-/-- Whether a result is a counterexample to the resolve-after-erase property:
-    either `resolve` failed, or it inferred a type the generation type is not an
-    instance of. -/
-private def isResolveCounterexample (r : ResolveAfterEraseResult) : Bool :=
-  match r.resolvedTy with
-  | some inferred => !(isInstanceOf r.expectedTy inferred)
-  | none => true
-
-/-- Search for a *counterexample* to the resolve-after-erase property, so the
-    Tyche panel is densely populated with failing cases (counterexamples are
-    rare — well under 1% of generated terms — so an unbiased panel shows only a
-    handful). Retries generation up to `budget` times; if none is found within
-    the budget, returns the last sample generated so the run still terminates. -/
-partial def genResolveCounterexample (budget : Nat := 4000) : IO ResolveAfterEraseResult := do
-  let mut last : Option ResolveAfterEraseResult := none
-  for _ in List.range budget do
-    let r ← try some <$> genAndCheckResolveAfterErase catch _ => pure none
-    match r with
-    | some res =>
-      if isResolveCounterexample res then return res
-      last := some res
-    | none => pure ()
-  match last with
-  | some res => return res
-  | none => genAndCheckResolveAfterErase
 
 -- ── Command-level Tyche support ──────────────────────────────────────
 
@@ -957,6 +935,185 @@ def genProcFactoryStrippedProp (tag : String) (check : List Core.Procedure → B
         ("declared_offenders", .ordinal (offenders.filter (·.2.2)).length),
         ("builtin_offenders", .ordinal (offenders.filter (fun e => !e.2.2)).length) ] }
 
+-- ── Panel for the SMT escape function ───────────────────────────────
+-- Each sample is one string from `genInterestingString`, serialized through
+-- `Strata.SMTDDM.termToString`, which is the real path to the solver. A sample
+-- passes when each character of the emitted literal is printable ASCII, which is
+-- the requirement of SMT-LIB 2.6+ itself.
+
+/-- One sample for the property about the SMT escape function. -/
+structure EscapingResult where
+  /-- The drawn string. -/
+  s : String
+  /-- Whether the emitted literal holds only printable ASCII. -/
+  passed : Bool
+  /-- The codepoints that reach the literal without an escape. -/
+  offenders : List Nat
+
+/-- The highest codepoint in `s`, or `0` for the empty string. This is the feature
+    that separates a pass from a failure, because the escape function stops at
+    U+00A1. -/
+private def maxCodepoint (s : String) : Nat :=
+  s.toList.foldl (fun acc c => max acc c.toNat) 0
+
+/-- The number of UTF-8 bytes that `c` needs. The defect emits a raw UTF-8 byte, so
+    the count of bytes is what a solver measures where Lean counts one
+    codepoint. -/
+private def utf8Width (c : Char) : Nat :=
+  let n := c.toNat
+  if n < 0x80 then 1 else if n < 0x800 then 2 else if n < 0x10000 then 3 else 4
+
+/-- The widest UTF-8 encoding among the characters of `s`. -/
+private def maxUtf8Width (s : String) : Nat :=
+  s.toList.foldl (fun acc c => max acc (utf8Width c)) 1
+
+/-- Which band of codepoints the widest character of `s` falls in. The bands are
+    the ones that the escape function treats differently. -/
+private def codepointBand (s : String) : String :=
+  let m := maxCodepoint s
+  if s.isEmpty then "empty"
+  else if m < 0x20 then "ascii_control"
+  else if m < 0x80 then "ascii_printable"
+  else if m ≤ 0xA0 then "escaped_latin1"
+  -- U+00AD, the soft hyphen, is the one special case of `useXHex` above U+00A1, so
+  -- it gets an escape and its band is separate. Without this band, a sample that
+  -- holds U+00AD looks like a pass inside a failing band.
+  else if m == 0xAD then "soft_hyphen"
+  else if m < 0x100 then "unescaped_latin1"
+  else if m ≤ 0x2FFFF then "bmp_or_astral"
+  else "above_smtlib_alphabet"
+
+instance : Tyche.TycheSample EscapingResult where
+  toSample r :=
+    { representation := s!"{repr r.s}",
+      status := if r.passed then .passed else .failed,
+      statusReason :=
+        if r.passed then ""
+        else
+          let hex := String.intercalate ", " (r.offenders.map (fun n =>
+            s!"U+{(String.ofList (Nat.toDigits 16 n)).toUpper}"))
+          s!"emitted with unescaped {hex}",
+      features := [
+        ("verdict", .nominal (if r.passed then "pass" else "fail")),
+        -- The band of the widest codepoint. The boundary of the defect is between
+        -- `escaped_latin1`, which ends at U+00A0, and `unescaped_latin1`, which
+        -- starts at U+00A1.
+        ("codepoint_band", .nominal (codepointBand r.s)),
+        ("max_codepoint", .ordinal (maxCodepoint r.s)),
+        -- The widest UTF-8 encoding. A value above 1 is where a count of bytes and
+        -- a count of codepoints disagree.
+        ("max_utf8_width", .ordinal (maxUtf8Width r.s)),
+        ("num_offenders", .ordinal r.offenders.length),
+        ("string_length_codepoints", .ordinal r.s.length),
+        ("string_length_bytes", .ordinal r.s.utf8ByteSize),
+        -- Whether the two counts of length differ, which is the discriminating
+        -- case for each property about `Str.Length`.
+        ("byte_length_differs", .nominal
+          (if r.s.length == r.s.utf8ByteSize then "no" else "yes")),
+        ("is_empty", .nominal (if r.s.isEmpty then "yes" else "no")),
+        -- Whether the string holds any non-ASCII character at all. A sample with
+        -- `no` here passes for a trivial reason, so this feature separates a true
+        -- pass from a vacuous one.
+        ("has_non_ascii", .nominal
+          (if r.s.toList.any (fun c => c.toNat ≥ 0x80) then "yes" else "no"))
+      ] }
+
+/-- Draw one string and record whether its SMT-LIB literal is printable ASCII. -/
+private def genEscapingSample : IO EscapingResult := do
+  let s ← StrataGenerators.PrimitiveGens.genInterestingString (G := IO)
+  return { s := s,
+           passed := StrataGenerators.SmtStringEscaping.escapedIsPrintableAscii s,
+           offenders := StrataGenerators.SmtStringEscaping.offendingCodepoints s }
+
+-- ── Panels for the `Rat`/`Decimal` boundary ─────────────────────────
+-- Two properties about the representation of a real in the SMT dialect. Each pair
+-- of samples is two `Decimal` spellings of **one** rational value, from
+-- `genSameValuePair`. Therefore each sample is a case that must pass, and each
+-- failure is a true defect and not an artifact of the draw.
+
+/-- One sample for a property about the `Rat`/`Decimal` boundary. -/
+structure DecimalPairResult where
+  /-- The first spelling, from `Decimal.fromRat` on a drawn rational. -/
+  d₁ : StrataDDM.Decimal
+  /-- The second spelling of the *same* value, from `inflate`. -/
+  d₂ : StrataDDM.Decimal
+  /-- Whether the property holds on this pair. -/
+  passed : Bool
+  /-- Whether the fold of `Factory.eq` gave a literal `bool`, and which one. -/
+  eqFold : Option Bool
+  /-- The verdicts of the comparator, in both directions. -/
+  lt₁ : Bool
+  lt₂ : Bool
+
+/-- Render a `Decimal` as `mantissa e exponent`, the form that shows the spelling
+    rather than the value. Two samples that render differently and denote one value
+    are the whole subject of these panels. -/
+private def ppDecimal (d : StrataDDM.Decimal) : String :=
+  s!"{d.mantissa}e{d.exponent}"
+
+/-- The number of decimal digits in the mantissa, which measures how far `inflate`
+    moved the spelling away from the normal form. -/
+private def mantissaDigits (d : StrataDDM.Decimal) : Nat :=
+  (toString d.mantissa.natAbs).length
+
+/-- The sign of the value, as a nominal feature. A defect that appeared for one
+    sign only would be visible here. -/
+private def valueSign (d : StrataDDM.Decimal) : String :=
+  if d.mantissa == 0 then "zero" else if d.mantissa < 0 then "negative" else "positive"
+
+instance : Tyche.TycheSample DecimalPairResult where
+  toSample r :=
+    let value := StrataDDM.Decimal.toRat r.d₁
+    { representation :=
+        s!"{ppDecimal r.d₁} and {ppDecimal r.d₂} both denote {value}",
+      status := if r.passed then .passed else .failed,
+      statusReason :=
+        if r.passed then ""
+        else
+          s!"eq folded to {match r.eqFold with | some b => toString b | none => "no literal"}, \
+lt in both directions gave {r.lt₁} and {r.lt₂}, for two spellings of {value}",
+      features := [
+        ("verdict", .nominal (if r.passed then "pass" else "fail")),
+        -- What the fold of `eq` gave. `false` on a pair of equal value is the
+        -- defect; `no_literal` means `Factory.eq` left the comparison to the solver.
+        ("eq_fold", .nominal (match r.eqFold with
+          | some true => "true"
+          | some false => "false"
+          | none => "no_literal")),
+        -- How many of "less than", "greater than" and "equal" hold. Trichotomy
+        -- needs exactly 1, and the defect gives 0.
+        ("trichotomy_count", .ordinal
+          ((if r.lt₁ then 1 else 0) + (if r.lt₂ then 1 else 0)
+            + (if r.eqFold == some true then 1 else 0))),
+        ("value_sign", .nominal (valueSign r.d₁)),
+        -- Whether the value has an integer denominator of 1, so the panel shows
+        -- that the defect is not confined to a whole number.
+        ("value_is_integer", .nominal (if value.den == 1 then "yes" else "no")),
+        ("mantissa_digits_first", .ordinal (mantissaDigits r.d₁)),
+        ("mantissa_digits_second", .ordinal (mantissaDigits r.d₂)),
+        -- The distance in digits between the two spellings, which is the inflation
+        -- factor. A defect that needed a large factor would be visible here.
+        ("inflation_digits", .ordinal
+          (mantissaDigits r.d₂ - mantissaDigits r.d₁)),
+        ("exponent_first", .ordinal r.d₁.exponent),
+        ("exponent_second", .ordinal r.d₂.exponent),
+        -- Whether the two spellings are structurally equal. `Factory.eq` folds a
+        -- structurally equal pair correctly through its first branch, so a
+        -- non-vacuous sample needs `no` here.
+        ("structurally_equal", .nominal (if r.d₁ == r.d₂ then "yes" else "no"))
+      ] }
+
+/-- Draw one pair of equal value and record the verdict of the property that
+    `check` states. -/
+private def genDecimalPairProp
+    (check : StrataDDM.Decimal → StrataDDM.Decimal → Bool) : IO DecimalPairResult := do
+  let (d₁, d₂) ← StrataGenerators.DecimalAgreement.genSameValuePair (G := IO)
+  return { d₁ := d₁, d₂ := d₂,
+           passed := check d₁ d₂,
+           eqFold := StrataGenerators.DecimalAgreement.actualEqFold d₁ d₂,
+           lt₁ := Strata.SMT.TermPrim.lt (.real d₁) (.real d₂),
+           lt₂ := Strata.SMT.TermPrim.lt (.real d₂) (.real d₁) }
+
 -- ── Panel runner ────────────────────────────────────────────────────
 
 /-- Write every Tyche panel to `handle` in JSONL format, `numSamples` samples per
@@ -975,10 +1132,14 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   panel PropertyNames.exprPreservation genAndEval
   panel PropertyNames.exprProgress genAndCheckProgress
   panel PropertyNames.exprFvarsPreserved genAndCheckFvarPreservation
-  -- Counterexample-focused panel: every sample here is a *counterexample* to the
-  -- resolve-after-erase property (found by rejection-sampling), so the panel is
-  -- densely populated with failing cases for visualization.
-  panel PropertyNames.exprResolveAfterErase genResolveCounterexample
+  panel PropertyNames.exprResolveAfterErase genAndCheckResolveAfterErase
+
+  panel PropertyNames.exprSmtStringEscaping genEscapingSample
+
+  panel PropertyNames.realDecimalEqFold
+    (genDecimalPairProp StrataGenerators.DecimalAgreement.checkEqFold)
+  panel PropertyNames.realDecimalTrichotomy
+    (genDecimalPairProp StrataGenerators.DecimalAgreement.checkTrichotomy)
 
   -- Command-level property tests (one panel each). The first four share the
   -- `CmdPropResult` shape and a shared name↔check bundle (`Properties.cmdSingleVerdict`,

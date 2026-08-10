@@ -1084,7 +1084,7 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
     rw [norm_real] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩)))
+    rcases he with ⟨r, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩)))
     all_goals first
       | exact (by unfold LExpr.realConst; exact .const)
       | exact pickBVar_sound bctx .real _ _ h
@@ -1116,8 +1116,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · rcases he with ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩
-      all_goals exact (by unfold LExpr.realConst; exact .const)
+    · obtain ⟨r, _, rfl⟩ := he
+      exact (by unfold LExpr.realConst; exact .const)
     · obtain ⟨τ', _, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_sound fctx octx tvars bctx n _ _ hfn)
                   (genLExprBase_sound fctx octx tvars bctx n _ _ harg)
@@ -1125,15 +1125,15 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx)
       exact .ite (genLExprBase_sound fctx octx tvars bctx n _ _ hc)
                   (genLExprBase_sound fctx octx tvars bctx n _ _ ht)
                   (genLExprBase_sound fctx octx tvars bctx n _ _ he')
-    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickBVar_sound bctx .real _ _ h
-      all_goals exact (by unfold LExpr.realConst; exact .const)
-    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+      · exact (by unfold LExpr.realConst; exact .const)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickFVar_sound fctx .real _ _ h
-      all_goals exact (by unfold LExpr.realConst; exact .const)
-    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+      · exact (by unfold LExpr.realConst; exact .const)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickOp_sound octx .real _ _ h
-      all_goals exact (by unfold LExpr.realConst; exact .const)
+      · exact (by unfold LExpr.realConst; exact .const)
   case h_13 n =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
@@ -1440,6 +1440,131 @@ private theorem String_arbitrary_support_set (s : String)
   refine ⟨s.toList, genAlphanumList_support_set s.toList hs, ?_⟩
   exact String.ofList_toList.symm
 
+-- ── Support lemmas for the adversarial primitive generators ────────────
+-- `genStrConst` and `genBitvecConst` draw from `StrataGenerators.PrimitiveGens`,
+-- which gives non-ASCII strings and boundary-biased bitvectors. Thus the
+-- SMT-agreement property can reach the cases about bitvector overflow, and about
+-- strings and UTF-8. These lemmas mirror the `Char_arbitrary` and
+-- `String_arbitrary` lemmas above, with `interestingChars` in the place of
+-- `alphanumChars`.
+
+open StrataGenerators.PrimitiveGens in
+/-- Each character of `interestingChars` is in the support of
+    `genInterestingChar`. -/
+private theorem genInterestingChar_support_set (c : Char) (hc : c ∈ interestingChars) :
+    c ∈ SetGen.support (genInterestingChar (G := SetGen.Set)) := by
+  simp only [genInterestingChar]
+  rw [mem_support_elements_iff interestingChars_ne_nil]
+  exact hc
+
+open StrataGenerators.PrimitiveGens in
+/-- Each list of characters from `interestingChars` is in the support of
+    `listOf genInterestingChar`. This lemma mirrors
+    `genAlphanumList_support_set`. -/
+private theorem genInterestingCharList_support_set (cs : List Char)
+    (hcs : ∀ c ∈ cs, c ∈ interestingChars) :
+    cs ∈ SetGen.support (listOf (genInterestingChar (G := SetGen.Set))) := by
+  induction cs with
+  | nil =>
+    rw [SetGen.support, listOf]
+    simp [pick_mem_iff]
+  | cons c cs ih =>
+    rw [SetGen.support, listOf]
+    simp only [pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    right
+    refine ⟨c, ?_, cs, ?_, rfl⟩
+    · exact genInterestingChar_support_set c (hcs c List.mem_cons_self)
+    · exact ih (fun c' hc' => hcs c' (List.mem_cons_of_mem c hc'))
+
+open StrataGenerators.PrimitiveGens in
+/-- Each string over `interestingChars` is in the support of
+    `genInterestingString`, at **any** length, and this includes `""`.
+
+    The `listOf` tail with weight 1 is the witness, and this lemma is why that
+    branch exists. The primary branch limits the length to `strMaxLen`. Therefore
+    that branch alone makes this lemma false, and it forces a bound on length into
+    `AllTypesSimple.strConst`. -/
+private theorem genInterestingString_support_set (s : String)
+    (hs : ∀ c ∈ s.toList, c ∈ interestingChars) :
+    s ∈ SetGen.support (genInterestingString (G := SetGen.Set)) := by
+  rw [genInterestingString, mem_support_frequency_iff]
+  refine ⟨1, fun _ => String.ofList <$> listOf genInterestingChar,
+    by simp, Nat.one_pos, ?_⟩
+  rw [mem_support_map_iff]
+  refine ⟨s.toList, genInterestingCharList_support_set s.toList hs, ?_⟩
+  exact String.ofList_toList.symm
+
+open StrataGenerators.PrimitiveGens in
+/-- Each natural number is in the support of `natArbGeom`. `natArbGeom` is the
+    geometric generator, a `pick` between `0` and `(· + 1)`, that supports the
+    completeness tail of `genRat`. -/
+private theorem natArbGeom_support_set (n : Nat) :
+    n ∈ SetGen.support (natArbGeom (G := SetGen.Set)) := by
+  induction n with
+  | zero =>
+    simp only [SetGen.support]
+    rw [natArbGeom]
+    simp [pick_mem_iff]
+  | succ n ih =>
+    simp only [SetGen.support] at ih ⊢
+    rw [natArbGeom]
+    simp only [pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    right
+    exact ⟨n, ih, rfl⟩
+
+open StrataGenerators.PrimitiveGens in
+/-- **Each** rational is in the support of `genRat`.
+
+    The unbounded tail branch gives this result. The bounded branch samples
+    uniformly from a window, which is why about 1.5% of its draws are `0`, and not
+    the about 46% that a draw from `Nat.arbitrary` gives. But a window alone is not
+    complete. The tail reaches each `r` through
+    `Rat.mkRat_self : mkRat r.num r.den = r`. The proof splits on the sign of
+    `r.num`, so a negative rational outside the window is also reachable. -/
+private theorem genRat_support_set (r : Rat) :
+    r ∈ SetGen.support (genRat (G := SetGen.Set)) := by
+  rw [genRat, mem_support_frequency_iff]
+  refine ⟨1, fun _ => do
+    let n ← natArbGeom
+    let d ← natArbGeom
+    pick (fun _ => pure (mkRat (n : Int) d)) (fun _ => pure (mkRat (-(n : Int)) d)),
+    by simp, Nat.one_pos, ?_⟩
+  simp only [SetGen.Set.mem_bind, mem_support_iff, pick_mem_iff, SetGen.Set.mem_pure]
+  refine ⟨r.num.natAbs, natArbGeom_support_set _, r.den, natArbGeom_support_set _, ?_⟩
+  rcases Int.natAbs_eq r.num with h | h
+  · left; rw [← h]; exact (Rat.mkRat_self r).symm
+  · right
+    have hneg : -((r.num.natAbs : Int)) = r.num := by omega
+    rw [hneg]; exact (Rat.mkRat_self r).symm
+
+/-- Each `n` in `[lo, hi]` is in the support of `chooseNat lo hi` at `SetGen.Set`.
+    This lemma is the `SetGen` analogue of `SPMF.mem_support_chooseNat_iff` from
+    Basalt. It proves only the direction that the lemmas below need, which is from
+    membership in the list to membership in the support. -/
+private theorem chooseNat_support_set {lo hi n : Nat} (h : lo ≤ hi)
+    (hn : lo ≤ n ∧ n ≤ hi) :
+    n ∈ SetGen.support (chooseNat (G := SetGen.Set) lo hi h) := by
+  simp only [chooseNat, SetGen.mem_support_map_iff]
+  exact ⟨ULift.up ⟨n, hn⟩, by simp [hn], rfl⟩
+
+open StrataGenerators.PrimitiveGens in
+/-- **Each** `BitVec w` is in the support of `genBiasedBitVec w`.
+
+    The uniform fallback branch in `genBiasedBitVec` gives this result. The boundary
+    pool is a *bias*, and not a restriction, so the generator stays complete. The
+    witness is the second branch, which has weight 1, at `k = bv.toNat`. That value
+    is in range, because `2^w` bounds `BitVec.toNat`, by `bv.isLt`. This is exactly
+    why the upper bound of the fallback must be `2^w - 1`, and nothing smaller. A
+    tighter bound leaves most values of `bv` without a witness. -/
+private theorem genBiasedBitVec_support_set {w : Nat} (bv : BitVec w) :
+    bv ∈ SetGen.support (genBiasedBitVec (G := SetGen.Set) w) := by
+  rw [genBiasedBitVec, mem_support_frequency_iff]
+  refine ⟨1, fun _ => BitVec.ofNat w <$> chooseNat 0 (2 ^ w - 1) (Nat.zero_le _),
+    by simp, Nat.one_pos, ?_⟩
+  rw [mem_support_map_iff]
+  refine ⟨bv.toNat, chooseNat_support_set _ ⟨Nat.zero_le _, ?_⟩, by simp⟩
+  exact Nat.le_sub_one_of_lt bv.isLt
+
 -- ── emptyNames predicate ──────────────────────────────────────────────
 
 /-- All binder names in the expression are empty strings. -/
@@ -1488,11 +1613,11 @@ def termDepth (bctx : BVarCtx) : LExpr' → Nat
 inductive AllTypesSimple (tvars : List TyIdentifier) : Nat → BVarCtx → LExpr' → Prop where
   | boolConst   : AllTypesSimple tvars n bctx (.boolConst () b)
   | intConst    : AllTypesSimple tvars n bctx (.intConst () k)
-  | strConst    : (∀ c ∈ s.toList, c ∈ alphanumChars) →
+  | strConst    : (∀ c ∈ s.toList, c ∈ StrataGenerators.PrimitiveGens.interestingChars) →
                   AllTypesSimple tvars n bctx (.strConst () s)
-  | realConst   : (num den : Nat) → r = (↑num / (↑den + 1 : Rat)) ∨ r = -(↑num / (↑den + 1 : Rat)) →
+  | realConst   : (r : Rat) →
                   AllTypesSimple tvars n bctx (.realConst () r)
-  | bitvecConst : (w : Nat) → (bv : BitVec w) → (k : Nat) → bv = BitVec.ofNat w k →
+  | bitvecConst : (w : Nat) → (bv : BitVec w) →
                   AllTypesSimple tvars n bctx (.bitvecConst () w bv)
   | bvar      : AllTypesSimple tvars n bctx (.bvar () i)
   | fvar      : AllTypesSimple tvars n bctx (.fvar () x (some τ))
@@ -1579,7 +1704,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
     rw [norm_real] at he; simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩)⟩) | ((⟨_, h⟩ | ⟨_, (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩)⟩)))
+    rcases he with ⟨_, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩)))
     all_goals first | rfl | (
       first
       | (rw [mem_support_pickBVar_iff] at h
@@ -1726,7 +1851,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · rcases he with ⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩; all_goals simp [termDepth]
+    · obtain ⟨_, _, rfl⟩ := he; simp [termDepth]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       show termDepth bctx (.app () fn arg) ≤ n + 1; unfold termDepth
       have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ (SimpleType.arrow (genLMonoTy_simple tvars n _ ((genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm)) SimpleType.real) _ hfn
@@ -1739,12 +1864,12 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx)
       have := genLExprBase_termDepth_bound fctx octx tvars bctx n _ SimpleType.real _ he'
       omega
     all_goals (
-      rcases he with ⟨_, h⟩ | ⟨_, ⟨_, _, _, _, rfl⟩ | ⟨_, _, _, _, rfl⟩⟩
+      rcases he with ⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩
       · first
         | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
         | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
         | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-      all_goals simp [termDepth])
+      · simp [termDepth])
   | m + 1, _, @SimpleType.bitvec n =>
     simp only [genLExprBase] at he
     rw [mem_support_frequency_iff] at he
@@ -2085,10 +2210,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool])
     | bvar =>
@@ -2137,10 +2262,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int])
     | bvar =>
@@ -2179,17 +2304,17 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | const =>
         left
-        exact ⟨_, String_arbitrary_support_set _ halpha, by simp [LExpr.strConst]⟩
+        exact ⟨_, genInterestingString_support_set _ halpha, by simp [LExpr.strConst]⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string])
     | bvar =>
@@ -2224,13 +2349,11 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
-    | realConst num den hor =>
+    | realConst r =>
       cases hwt with
       | const =>
         left
-        rcases hor with rfl | rfl
-        · left; exact ⟨num, Nat_arbitrary_support_set num, den, Nat_arbitrary_support_set den, rfl⟩
-        · right; exact ⟨num, Nat_arbitrary_support_set num, den, Nat_arbitrary_support_set den, rfl⟩
+        exact ⟨r, genRat_support_set r, rfl⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.real])
@@ -2240,7 +2363,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.real])
     | bvar =>
@@ -2274,11 +2397,11 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite]
     cases hats with
-    | bitvecConst _ _ k heq =>
+    | bitvecConst _ _ =>
       cases hwt with
       | const =>
         left
-        exact ⟨k, Nat_arbitrary_support_set k, by simp [LExpr.bitvecConst, heq]⟩
+        exact ⟨_, genBiasedBitVec_support_set _, rfl⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool])
@@ -2288,7 +2411,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.real])
     | bvar =>
@@ -2333,10 +2456,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.real, LMonoTy.arrow])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.arrow])
     | bvar =>
@@ -2381,10 +2504,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool])
     | abs _ _ _ _ =>
@@ -2498,10 +2621,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int])
     | abs _ _ _ _ =>
@@ -2573,17 +2696,17 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       | const =>
         refine ⟨_, _, .head _, by omega, ?_⟩
         simp only [genStrConst, SetGen.Set.mem_bind, SetGen.Set.mem_pure, mem_support_iff]
-        exact ⟨_, String_arbitrary_support_set _ halpha, by simp [LExpr.strConst]⟩
+        exact ⟨_, genInterestingString_support_set _ halpha, by simp [LExpr.strConst]⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
     | intConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string])
     | abs _ _ _ _ =>
@@ -2651,14 +2774,12 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     simp only [genLExprBase]
     rw [mem_support_frequency_iff]
     cases hats with
-    | realConst num den hor =>
+    | realConst r =>
       cases hwt with
       | const =>
         refine ⟨_, _, .head _, by omega, ?_⟩
-        simp only [mem_support_iff, genRealConst, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
-        rcases hor with rfl | rfl
-        · left; exact ⟨num, Nat_arbitrary_support_set num, den, Nat_arbitrary_support_set den, rfl⟩
-        · right; exact ⟨num, Nat_arbitrary_support_set num, den, Nat_arbitrary_support_set den, rfl⟩
+        simp only [mem_support_iff, genRealConst, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+        exact ⟨r, genRat_support_set r, rfl⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool, LMonoTy.real])
@@ -2668,7 +2789,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.real])
     | abs _ _ _ _ =>
@@ -2735,12 +2856,12 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     simp only [genLExprBase]
     rw [mem_support_frequency_iff]
     cases hats with
-    | bitvecConst _ _ k heq =>
+    | bitvecConst _ _ =>
       cases hwt with
       | const =>
         refine ⟨_, _, .head _, by omega, ?_⟩
         simp only [genBitvecConst, SetGen.Set.mem_bind, SetGen.Set.mem_pure, mem_support_iff]
-        exact ⟨k, Nat_arbitrary_support_set k, by simp [LExpr.bitvecConst, heq]⟩
+        exact ⟨_, genBiasedBitVec_support_set _, rfl⟩
     | boolConst =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.bool])
@@ -2749,7 +2870,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
         (by simp [LConst.ty, LMonoTy.int])
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
@@ -2824,10 +2945,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.real, LMonoTy.arrow])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.arrow])
     | eq _ _ _ _ _ _ _ _ =>
@@ -2906,9 +3027,9 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int] at h)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty] at h)
     | bvar =>
       cases hwt with
@@ -2947,9 +3068,9 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int] at h)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty] at h)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
@@ -3019,9 +3140,9 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.regex] at h)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.regex] at h)
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.regex] at h)
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.regex] at h)
     | bvar =>
       cases hwt with
@@ -3059,9 +3180,9 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.regex] at h)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.regex] at h)
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.regex] at h)
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.regex] at h)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
@@ -3136,10 +3257,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.map])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.real, LMonoTy.map])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.map])
     | bvar =>
@@ -3182,10 +3303,10 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.string, LMonoTy.map])
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.real, LMonoTy.map])
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const)
         (by simp [LConst.ty, LMonoTy.map])
     | abs _ _ _ _ =>
@@ -3259,9 +3380,9 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.seq] at h)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.seq] at h)
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.seq] at h)
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.seq] at h)
     | bvar =>
       cases hwt with
@@ -3300,9 +3421,9 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.seq] at h)
     | strConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.seq] at h)
-    | realConst _ _ _ =>
+    | realConst _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.seq] at h)
-    | bitvecConst _ _ _ _ =>
+    | bitvecConst _ _ =>
       exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.seq] at h)
     | abs _ _ _ _ =>
       exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
@@ -4155,18 +4276,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (tvars : List 
     simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
       mem_support_iff, SetGen.mem_dite] at he
-    rcases he with (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | ((⟨hf, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩) | (⟨_, h⟩ | ⟨_, (⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩)⟩)))
-    · simp [LExpr.getVars]
+    rcases he with ⟨r, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩)))
     · simp [LExpr.getVars]
     · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
-    · simp [LExpr.getVars]
     · simp [LExpr.getVars]
     · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
       exact getVars_fvar_subset fctx _ name hmem
     · simp [LExpr.getVars]
-    · simp [LExpr.getVars]
     · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
-    · simp [LExpr.getVars]
     · simp [LExpr.getVars]
   case h_13 n =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx 0 (.bitvec n)) := by
@@ -4385,7 +4502,7 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (tvars : List 
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
     simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
-    · rcases he with ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩ <;> simp [LExpr.getVars]
+    · obtain ⟨r, _, rfl⟩ := he; simp [LExpr.getVars]
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       simp only [LExpr.getVars]
       exact List.append_subset.mpr
@@ -4398,18 +4515,15 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (tvars : List 
           ⟨genLExprBase_fvars_subset fctx octx tvars bctx n _ _ hc,
            genLExprBase_fvars_subset fctx octx tvars bctx n _ _ ht⟩,
          genLExprBase_fvars_subset fctx octx tvars bctx n _ _ he'⟩
-    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · simp [LExpr.getVars]
-      · simp [LExpr.getVars]
-    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+    · rcases he with ⟨hf, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · rw [mem_support_pickFVar_iff] at h; obtain ⟨name, hmem, rfl⟩ := h
         exact getVars_fvar_subset fctx _ name hmem
       · simp [LExpr.getVars]
-      · simp [LExpr.getVars]
-    · rcases he with ⟨_, h⟩ | ⟨_, ⟨num, _, den, _, rfl⟩ | ⟨num, _, den, _, rfl⟩⟩
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
-      · simp [LExpr.getVars]
       · simp [LExpr.getVars]
   case h_14 m n =>
     replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx tvars bctx (m + 1) (.bitvec n)) := by

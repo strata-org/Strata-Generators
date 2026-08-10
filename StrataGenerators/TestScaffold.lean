@@ -177,7 +177,8 @@ instance : ToFormat Unit where
 
 -- ── Resolve after erasure ────────────────────────────────────────────
 
-/-- A closed expression generated using only `intBoolFactory` ops,
+/-- A closed expression generated over `coreOpCtx`, the operators of
+    `coreFactory`,
     suitable for round-tripping through `eraseTypes` + `resolve`. -/
 structure ResolveTypedExpr where
   expr : LExpr'
@@ -195,7 +196,7 @@ private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
   -- See `genTypedExprWith`: `retryGenArg` retries failed subterms in place.
-  let expr ← genLExprWithOps (G := Plausible.Gen) [] intBoolOpCtx [] tvars [] depth ty 3
+  let expr ← genLExprWithOps (G := Plausible.Gen) [] coreOpCtx [] tvars [] depth ty 3
                (retryGenArg 20)
   pure ⟨expr, ty⟩
 
@@ -790,16 +791,39 @@ structure CliConfig where
   tycheSamples : Nat
   smtEnabled : Bool
 
-/-- Parse `args` into a `CliConfig`. Positional args are `[numTrials] [maxSize]`;
-    `--`-prefixed flags configure the Tyche visualization (on by default). -/
+/-- The number of trials that `--quick` selects. -/
+def quickNumTrials : Nat := 100
+
+/-- The maximum generator size that `--quick` selects. -/
+def quickMaxSize : Nat := 40
+
+/-- Parse `args` into a `CliConfig`. The positional arguments are
+    `[numTrials] [maxSize]`. Each flag with the prefix `--` selects an option, and
+    the pass for the Tyche visualization is on by default.
+
+    `--quick` selects a fast preset for a short cycle of work: 100 trials, a
+    maximum size of 40, and no Tyche pass. Use it to find a defect, and use the
+    default settings to gate a merge. A measurement gives about 16 seconds for the
+    preset, against about 7 minutes for the default settings.
+
+    A positional argument has a higher precedence than `--quick`, so
+    `--quick 500` gives 500 trials and keeps the other two parts of the preset.
+    Therefore a user can make one part of the preset wider without the loss of the
+    others. `--tyche-samples=N` also keeps its value, but it has no effect while
+    `--quick` holds the Tyche pass off. To get the Tyche pass together with the
+    other parts of the preset, give the trials and the size as positional
+    arguments and do not use `--quick`. -/
 def parseArgs (args : List String) : CliConfig :=
   let flags := args.filter (·.startsWith "--")
   let positional := args.filter (fun a => !a.startsWith "--")
   let flagValue (key : String) : Option String :=
     (flags.find? (·.startsWith key)).map (·.drop key.length |>.toString)
-  { numTrials := (positional[0]? >>= String.toNat?).getD 1000
-    maxSize := (positional[1]? >>= String.toNat?).getD 100
-    tycheEnabled := !flags.contains "--no-tyche"
+  let quick := flags.contains "--quick"
+  { numTrials := (positional[0]? >>= String.toNat?).getD
+                   (if quick then quickNumTrials else 1000)
+    maxSize := (positional[1]? >>= String.toNat?).getD
+                 (if quick then quickMaxSize else 100)
+    tycheEnabled := !flags.contains "--no-tyche" && !quick
     tycheOut := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
     tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
     smtEnabled := flags.contains "--smt" }

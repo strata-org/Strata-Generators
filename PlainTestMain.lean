@@ -1,5 +1,7 @@
 import StrataGenerators.TestScaffold
 import StrataGenerators.PlainHarness
+import StrataGenerators.HasTypeAGen.SmtStringEscaping
+import StrataGenerators.HasTypeAGen.DecimalAgreement
 
 /-!
 # Property-based tests using the Strata generators (LSpec-free driver)
@@ -31,8 +33,9 @@ run identically to `TestMain`, and — as there — never gate the exit code.
 lake build test-plain && .lake/build/bin/test-plain [numTrials] [maxSize] [flags]
 ```
 
-Positional args and flags mirror `TestMain` (`--smt` adds the SMT/concrete-eval
-agreement property; it needs a live solver on `PATH`). This executable is **not**
+Positional args and flags mirror `TestMain`. `--smt` adds the SMT/concrete-eval
+agreement property, and it needs a live solver on `PATH`. `--quick` selects the
+fast preset: 100 trials and a maximum size of 40. This executable is **not**
 registered as the `lake test` driver — LSpec's `test` stays the driver for now.
 -/
 
@@ -47,15 +50,21 @@ def main (args : List String) : IO UInt32 := do
   let maxSize := cli.maxSize
   let cfg : Configuration := { numInst := numTrials, maxSize }
 
-  -- `--smt` needs a live SMT solver on `PATH`. Fail fast with a clear message
-  -- and a non-zero exit code if the flag is set but the configured solver
-  -- (`StrataGenerators.SmtEval.solverName`, default `cvc5`) can't be launched,
-  -- rather than silently reporting a green "0/0 checked" suite. Mirrors `TestMain`.
+  -- `--smt` needs a live SMT solver on `PATH`. The agreement property runs each
+  -- solver in `SmtEval.agreementSolvers`, so exit with an error only when it can
+  -- launch none of them. Without this check the suite reports a green
+  -- "0/0 checked". When only some solvers are absent, the property itself names
+  -- them in its report, because each absent solver costs coverage: cvc5 and z3
+  -- give different verdicts on a malformed string literal. Mirrors `TestMain`.
   if cli.smtEnabled then
-    unless ← StrataGenerators.SmtEval.solverAvailable do
-      IO.eprintln s!"error: --smt requires the SMT solver '{StrataGenerators.SmtEval.solverName}' on PATH, but it could not be launched."
-      IO.eprintln "Install it (e.g. cvc5 or z3) and ensure it is on PATH, or run without --smt."
+    let available ← StrataGenerators.SmtEval.availableAgreementSolvers
+    if available.isEmpty then
+      IO.eprintln s!"error: --smt requires an SMT solver on PATH, but none of {String.intercalate ", " StrataGenerators.SmtEval.agreementSolvers} could be launched."
+      IO.eprintln "Install one (e.g. cvc5 or z3) and ensure it is on PATH, or run without --smt."
       return 1
+    let absent := StrataGenerators.SmtEval.agreementSolvers.filter (fun s => !available.contains s)
+    unless absent.isEmpty do
+      IO.eprintln s!"warning: --smt will skip these solvers (not on PATH): {String.intercalate ", " absent}"
 
   IO.println s!"Running property-based tests ({numTrials} trials, max size {maxSize})..."
   IO.println ""
@@ -79,7 +88,20 @@ def main (args : List String) : IO UInt32 := do
       runProperty PropertyNames.exprFvarsPreserved
         (∀ te : TypedExpr, prop_closedness_preservation te) cfg,
       runProperty PropertyNames.exprResolveAfterErase
-        (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) cfg
+        (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) cfg,
+      -- This property needs no solver, because its oracle is "printable ASCII",
+      -- which is the requirement of SMT-LIB itself. Therefore it runs always, and
+      -- not under `--smt`. EXPECT IT TO FAIL until somebody corrects the SMT
+      -- escape function.
+      runIOProperty PropertyNames.exprSmtStringEscaping
+        (StrataGenerators.SmtStringEscaping.escapingAction numTrials),
+      -- Two unit properties about the `Rat`/`Decimal` boundary. Each needs no
+      -- solver, because each states an invariant of a pure function in the SMT
+      -- dialect. EXPECT BOTH TO FAIL until `Factory.eq` compares a real by value.
+      runIOProperty PropertyNames.realDecimalEqFold
+        (StrataGenerators.DecimalAgreement.eqFoldAction numTrials),
+      runIOProperty PropertyNames.realDecimalTrichotomy
+        (StrataGenerators.DecimalAgreement.trichotomyAction numTrials)
     ] ++ exprSmtTail
 
   -- Command-generator properties. The four single-verdict properties are folded

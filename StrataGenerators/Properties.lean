@@ -54,6 +54,39 @@ def exprResolveAfterErase : String := "expr: resolve after type erasure"
 /-- Opt-in (`--smt`); requires a live SMT solver. Ported from
     `StrataTest/Languages/Core/Tests/ExprEvalTest.lean`. -/
 def exprSmtEvalAgreement  : String := "expr: SMT/concrete eval agreement (closed)"
+/-- **FAILS honestly.** The SMT-LIB escape function `escapeSMTStringLit` has a
+    guard that is a predicate for *8-bit* printability. Therefore it gives each
+    codepoint of U+00A1 or more as raw UTF-8. cvc5 rejects such a literal outright,
+    and z3 measures it incorrectly, because `str.len` counts bytes and not
+    codepoints. The property needs no solver, because its oracle is "the emitted
+    literal is printable ASCII", which is the requirement of SMT-LIB 2.6+ itself.
+    Thus the property runs in the default suite, and nobody can skip it. It is
+    non-vacuous only because `genInterestingString` draws non-ASCII characters.
+    Under `String.arbitrary` of Basalt, which is alphanumeric only, the property
+    passes on each input, and that is how the defect stayed unknown. The property
+    must turn green after a correction to the escape function. -/
+def exprSmtStringEscaping : String := "expr: SMT string literals are printable ASCII"
+
+/-- **FAILS honestly.** `Factory.eq` folds a comparison of two literals by
+    *structural* equality, and `Decimal`, the representation of a real in the SMT
+    dialect, has no normal form. Therefore two spellings of one value, such as
+    `3e0` and `30e-1`, fold to `false`, which puts a false fact into the term. The
+    path for `Int` is correct, because `Int` is canonical, and `eq_correct_int`
+    proves it. There is no `eq_correct_real`. The property needs no solver. It is
+    non-vacuous only because the generator builds a second spelling of one value; a
+    pair of independent draws is almost never equal. The defect is **latent**: each
+    real literal of Core reaches SMT through `Decimal.fromRat`, which normalizes,
+    so no path in Strata reaches it today. -/
+def realDecimalEqFold : String := "real: Decimal eq fold agrees with value equality"
+/-- **FAILS honestly.** `Factory.eq` on a real is structural, but `TermPrim.lt` is
+    by value. Therefore, for two spellings of one value, each of `lt` in both
+    directions and the fold of `eq` is `false`, so no one of the three holds and
+    the comparator is not a total order. One correction fixes this and
+    [[realDecimalEqFold]]: make `eq` compare by value. Normalization of `Decimal`
+    fixes the fold alone, and leaves `eq` and `lt` on different notions of
+    equality. Latent for the same reason, and `TermPrim.lt` has no caller in the
+    tree. -/
+def realDecimalTrichotomy : String := "real: Decimal comparator is a total order"
 
 -- ── Command-generator properties ─────────────────────────────────────
 def cmdInitFresh             : String := "cmd: init var not in RHS"
@@ -143,7 +176,8 @@ def procAnfAnalysisPreserved : String := "proc: ANFEncoder preserves call-graph 
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
-    exprResolveAfterErase, exprSmtEvalAgreement,
+    exprResolveAfterErase, exprSmtEvalAgreement, exprSmtStringEscaping,
+    realDecimalEqFold, realDecimalTrichotomy,
     cmdInitFresh, cmdExprTypecheck, cmdSetPreservesVar, cmdStoreTypePreservation,
     cmdEvalRunAgreement, cmdContextGrowth,
     fnFvarsAnnotated, fnTypeCheckSound, fnTypeCheckComplete, fnRejectionOnlyMeasure,
