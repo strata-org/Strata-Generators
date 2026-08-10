@@ -14,6 +14,12 @@ exactly what holds and what the honest side conditions are, mirroring
 
 Program completeness cannot be stronger than the sub-generators it composes:
 
+* **Names** — **no longer a side condition.**
+  `mem_support_genIdentName_iff` (`FunctionHasTypeAGen/IdentName.lean`)
+  characterises `genIdentName`'s support in both directions: exactly the legal
+  bare Core identifiers that are not reserved keywords, both conditions
+  decidable. See `genidentname-support.md`. The `∈ support genIdentName`
+  hypotheses below are therefore dischargeable rather than assumed.
 * **Expressions** (`genLExpr_complete`, `HasTypeAGen.lean`) — reachable only for
   `SimpleType` targets, with `emptyNames`/`allVarsInCtx`/`AllTypesSimple`/
   `termDepth ≤ depth` side conditions. So axiom bodies and function bodies are

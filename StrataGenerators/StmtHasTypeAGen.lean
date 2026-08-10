@@ -1049,4 +1049,20 @@ theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
     rw [mem_support_elements_iff]; cases tc.bound <;> simp
   · obtain ⟨bound, name, params⟩ := tc; rfl
 
+/-- `genTypeConstructor_complete`, and `mem_support_genIdentName_iff` discharges both of its
+    hypotheses on name reachability from syntax. Only decidable conditions remain: the name of the
+    constructor and each parameter name is a bare Core identifier and is not a reserved
+    keyword. -/
+theorem genTypeConstructor_complete_of_syntactic (depth : Nat) (tc : TypeConstructor)
+    (hnameSyn : StrataGenerators.Function.IsGenIdentName tc.name)
+    (hnameKw : isReservedKeyword tc.name = false)
+    (hlen : tc.params.length ≤ depth)
+    (hparams : ∀ s ∈ tc.params,
+      StrataGenerators.Function.IsGenIdentName s ∧ isReservedKeyword s = false) :
+    tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth) :=
+  genTypeConstructor_complete depth tc
+    (StrataGenerators.Function.mem_support_genIdentName_of_syntactic hnameSyn hnameKw) hlen
+    (fun s hs => StrataGenerators.Function.mem_support_genIdentName_of_syntactic
+      (hparams s hs).1 (hparams s hs).2)
+
 end StrataGenerators.Stmt

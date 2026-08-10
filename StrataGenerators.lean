@@ -10,6 +10,7 @@ import StrataGenerators.RetryGenSupport
 import StrataGenerators.ExecRefinement
 import StrataGenerators.DatatypeGen
 import StrataGenerators.DatatypeGenProofs
+import StrataGenerators.FunctionHasTypeAGen.IdentNameTests
 import StrataGenerators.ProgramGen
 import StrataGenerators.ProgramGen.Sound
 import StrataGenerators.ProgramGen.ContextOkPreserve

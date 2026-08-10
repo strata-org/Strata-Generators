@@ -452,6 +452,18 @@ theorem genFreshLabel_complete (labels : List String) (label : String)
   simp only [genFreshLabel, mem_support_bind_iff]
   exact ⟨label, hreach, by simp only [mem_support_ite_iff, mem_support_pure_iff]; exact Or.inr ⟨hfresh, trivial⟩⟩
 
+/-- `genFreshLabel_complete`, and `mem_support_genIdentName_iff` discharges its hypothesis on
+    reachability from syntax. All three hypotheses are then decidable conditions on `label`. It is
+    a bare Core identifier. It is not a reserved keyword. It is different from each label that
+    encloses it. -/
+theorem genFreshLabel_complete_of_syntactic (labels : List String) (label : String)
+    (hsyn : StrataGenerators.Function.IsGenIdentName label)
+    (hnotkw : isReservedKeyword label = false)
+    (hfresh : label ∉ labels) :
+    label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) :=
+  genFreshLabel_complete labels label
+    (StrataGenerators.Function.mem_support_genIdentName_of_syntactic hsyn hnotkw) hfresh
+
 -- ── Mutual statement / statement-chain completeness ─────────────────────────
 
 /-- **Completeness of `genStmt` / `genStmtChain`, indexed by the typing derivation.**

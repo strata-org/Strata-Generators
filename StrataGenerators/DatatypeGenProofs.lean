@@ -1,5 +1,6 @@
 import StrataGenerators.SetGen
 import StrataGenerators.DatatypeGen
+import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.DL.Lambda.DatatypeWF
 import Strata.Languages.Core.DatatypeTypeSpec
 import Strata.Languages.Core.Factory
@@ -3683,10 +3684,18 @@ Therefore the generator can reach a name under exactly two conditions. The name 
 identifier that the generator can draw, which is `∈ support genIdentName`. The name must also be
 absent from the reserved list. The branch that returns the raw draw is then available.
 
-This file takes the condition `∈ support genIdentName` as a hypothesis.
-`genTypeConstructor_complete` and `genStmt_complete` do the same. The reason is that
-`genIdentName` has no description of its support in both directions. Read the note in
-`FunctionHasTypeAGen.lean`. -/
+The lemmas below state the condition `∈ support genIdentName` as a hypothesis, because the callers
+give the condition in that form. `mem_support_genIdentName_iff` in
+`FunctionHasTypeAGen/IdentName.lean` gives that support in both directions, as
+
+  `IsGenIdentName s ∧ isReservedKeyword s = false`
+
+The first conjunct says that `s` is a bare Core identifier. Its first character is in
+`strataIsIdFirst` of Core, and each of the other characters is in `strataIsIdRest`. The proofs show
+that the alphabets of the generator are equal to these two classes of the lexer. The second
+conjunct says that `s` is not a reserved keyword. Both conjuncts are decidable. Therefore
+`genFreshName_complete_of_syntactic` below discharges the hypothesis, and `decide` closes it for a
+concrete name. -/
 
 /-- **`genFreshName` reaches each legal identifier that is absent from the reserved list.**
     Assume that `s` is in the support of `genIdentName`, and that `s` is absent from the
@@ -3702,6 +3711,23 @@ theorem genFreshName_complete (reserved : List String) (s : String)
   -- The goal is `¬ (reserved.contains s = true)`, and it holds because `s ∉ reserved`.
   rw [List.contains_eq_mem, decide_eq_true_eq]
   exact hnotmem
+
+/-- **`genFreshName` reaches each name that is a legal identifier and is not a keyword.** The name
+    must also be absent from the reserved list. This is `genFreshName_complete`, and
+    `mem_support_genIdentName_iff` discharges its hypothesis `∈ support genIdentName`. Therefore
+    all three hypotheses are decidable syntactic conditions on `s`.
+
+    This form removes the side conditions on name reachability from the completeness results
+    downstream. A caller that holds a name from a well-typed program does not assume that the
+    generator can draw the name. The caller only does a check that the name is a legal identifier
+    and is not a keyword. -/
+theorem genFreshName_complete_of_syntactic (reserved : List String) (s : String)
+    (hsyn : StrataGenerators.Function.IsGenIdentName s)
+    (hnotkw : isReservedKeyword s = false)
+    (hnotmem : s ∉ reserved) :
+    s ∈ SetGen.support (genFreshName (G := SetGen.Set) reserved) :=
+  genFreshName_complete reserved s
+    (StrataGenerators.Function.mem_support_genIdentName_of_syntactic hsyn hnotkw) hnotmem
 
 /-- **`genFreshNames` reaches each list of legal identifiers that are different in pairs and
     absent from the reserved list.** Take a list `names` that obeys `Nodup`. Assume that the
@@ -4720,5 +4746,19 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
     exact hNfull c (hperm.mem_iff.mp (List.mem_cons_of_mem _ hc)) arg harg
 
 end Completeness
+
+/-! ### Name reachability, discharged at a use site
+
+The example below is a machine-checked witness that the side condition on name reachability is
+gone, and is not only in a different place. It shows membership in the support of `genFreshName`
+for a concrete name, with no hypothesis `∈ support genIdentName` at any point. The equivalent
+tightness checks for `genIdentName` are in `FunctionHasTypeAGen/IdentNameTests.lean`. Those checks
+include the names that the generator provably cannot draw. -/
+
+example : "myType" ∈ SetGen.support (genFreshName (G := SetGen.Set) ["bool", "int"]) := by
+  apply genFreshName_complete_of_syntactic
+  · decide +kernel
+  · rw [isReservedKeyword_eq_list_contains]; decide +kernel
+  · decide +kernel
 
 end DatatypeGen

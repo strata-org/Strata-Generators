@@ -1,6 +1,7 @@
 import StrataGenerators.HasTypeAGen
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Dedup
+import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.Languages.Core.FunctionTypeSpec
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
@@ -120,88 +121,14 @@ theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
   obtain ⟨names, _, rfl⟩ := hl
   exact nodup_dedup _
 
--- ── Keyword-freedom of generated names ───────────────────────────────
--- `genIdentName` post-processes each candidate with `dodgeKeyword`, so it never
--- produces a reserved Strata Core keyword. These lemmas make that guarantee
--- explicit and provable (a soundness-style property of the name generator): no
--- generated function name, type argument, or parameter name is a reserved word
--- the parser would reject in identifier position.
-
-/-- No reserved keyword's character list ends in `_` (checked over the concrete
-    source list `reservedKeywordsList`). -/
-theorem no_keyword_ends_underscore :
-    ∀ k ∈ reservedKeywordsList, k.toList.getLast? ≠ some '_' := by decide +kernel
-
-/-- `s ++ "_"` is never a reserved keyword: it ends in `_`, and no keyword does.
-    Stated via `isReservedKeyword` (the `HashSet` lookup) and discharged through
-    the `isReservedKeyword_eq_list_contains` bridge to `reservedKeywordsList`. -/
-theorem append_underscore_not_keyword (s : String) :
-    isReservedKeyword (s ++ "_") = false := by
-  rw [isReservedKeyword_eq_list_contains, Bool.eq_false_iff]
-  intro hc
-  rw [List.contains_iff_mem] at hc
-  have hlast : (s ++ "_").toList.getLast? = some '_' := by
-    rw [String.toList_append]; exact List.getLast?_concat
-  exact no_keyword_ends_underscore _ hc hlast
-
-/-- `dodgeKeyword` never returns a reserved keyword: keywords are mapped to
-    `k ++ "_"` (not a keyword), non-keywords are returned unchanged. -/
-theorem dodgeKeyword_not_keyword (s : String) :
-    isReservedKeyword (dodgeKeyword s) = false := by
-  unfold dodgeKeyword
-  split
-  · rename_i h
-    exact append_underscore_not_keyword s
-  · rename_i h
-    simpa using h
-
-/-- **Keyword-freedom of `genIdentName`.** Every name in the support of
-    `genIdentName` is a non-keyword identifier. -/
-theorem genIdentName_not_keyword (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
-    isReservedKeyword s = false := by
-  simp only [genIdentName, mem_support_bind_iff, mem_support_pure_iff] at hs
-  obtain ⟨x, _, xs, _, rfl⟩ := hs
-  exact dodgeKeyword_not_keyword _
-
-/-- `dodgeKeyword` never introduces a space: the keyword branch appends `"_"`
-    (no space), the fallthrough returns the string unchanged. -/
-theorem dodgeKeyword_no_space (s : String) (h : ' ' ∉ s.toList) :
-    ' ' ∉ (dodgeKeyword s).toList := by
-  unfold dodgeKeyword
-  split
-  · rw [String.toList_append]
-    intro hmem
-    rcases List.mem_append.mp hmem with h1 | h2
-    · exact h h1
-    · simp at h2
-  · exact h
-
-/-- **Space-freedom of `genIdentName`.** Every generated identifier's character
-    list contains no space: the leading char is drawn from `startChars` and the
-    rest from `remainingChars` — neither list contains `' '` — and `dodgeKeyword`
-    only ever appends `"_"`. This is the enabling fact for the in-out procedure
-    body seed: `CoreIdent.mkOld` prefixes `"old "` (which *does* contain a space),
-    so no generated parameter name can equal an `old`-binding key. -/
-theorem genIdentName_no_space (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
-    ' ' ∉ s.toList := by
-  simp only [genIdentName, mem_support_bind_iff, mem_support_pure_iff] at hs
-  obtain ⟨x, hx, xs, hxs, rfl⟩ := hs
-  have hstart : x ∈ startChars := by
-    simpa only [genStartChar,
-      mem_support_elements_iff (show startChars ≠ [] from by decide +kernel)] using hx
-  have hxs' : ∀ c ∈ xs, c ∈ remainingChars := by
-    intro c hc
-    have := SetGen.mem_support_listOf hxs c hc
-    simpa only [genRemainingChar,
-      mem_support_elements_iff (show remainingChars ≠ [] from by decide +kernel)] using this
-  apply dodgeKeyword_no_space
-  rw [String.toList_ofList]
-  intro hmem
-  rcases List.mem_cons.mp hmem with rfl | hmem
-  · exact (by decide +kernel : ' ' ∉ startChars) hstart
-  · exact (by decide +kernel : ' ' ∉ remainingChars) (hxs' _ hmem)
+-- ── Keyword-freedom and space-freedom of generated names ─────────────
+-- `FunctionHasTypeAGen/IdentName.lean` holds these results. They are corollaries
+-- of `mem_support_genIdentName_iff`, the support lemma in both directions. That
+-- file also uses the lemma to discharge the side conditions on name reachability
+-- in the completeness proofs of this package. The results are
+-- `genIdentName_not_keyword`, `genIdentName_no_space`, `dodgeKeyword_*`,
+-- `append_underscore_not_keyword` and `no_keyword_ends_underscore`, all in the
+-- namespace `StrataGenerators.Function`.
 
 set_option linter.unusedSimpArgs false in
 /-- The `mapM` inside `genInputs` produces a `ListMap` whose keys are exactly the
