@@ -1649,12 +1649,8 @@ def coreMonoOps : OpCtx :=
 /-- Polymorphic operators from Strata's Core.Factory. Used for the
     IndirPoly generation rule (Pałka et al. 2011, Section 4). -/
 def corePolyOps : PolyOpCtx :=
-  -- Identity and Church booleans
-  [ ("id", .forAll ["a"] (.arrow (.ftvar "a") (.ftvar "a")))
-  , ("churchTrue", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "a"))))
-  , ("churchFalse", .forAll ["a", "b"] (.arrow (.ftvar "a") (.arrow (.ftvar "b") (.ftvar "b"))))
-  -- Map operations
-  , ("const", .forAll ["k", "v"] (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))
+  [ -- Map operations
+    ("const", .forAll ["k", "v"] (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))
   , ("select", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.ftvar "v"))))
   , ("update", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))))
   -- Sequence operations
@@ -1667,11 +1663,4 @@ def corePolyOps : PolyOpCtx :=
   , ("Sequence.contains", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.ftvar "a") .bool)))
   , ("Sequence.take", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
   , ("Sequence.drop", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
-  -- `Sequence.map : ∀α β. (α → β) → Sequence<α> → Sequence<β>`. When the target
-  -- type is `Sequence<β>`, unification fixes `β` but leaves `α` undetermined, so
-  -- the IndirPoly rule must *sample* a concrete type for `α` from the generable
-  -- types (Pałka et al. 2011, §4) — the same `map`-style example discussed there.
-  , ("Sequence.map", .forAll ["a", "b"]
-      (.arrow (.arrow (.ftvar "a") (.ftvar "b"))
-        (.arrow (.seq (.ftvar "a")) (.seq (.ftvar "b")))))
   ]

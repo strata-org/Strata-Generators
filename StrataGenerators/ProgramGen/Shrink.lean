@@ -282,11 +282,7 @@ def exprHasFvar : Expression.Expr → Bool
   | .ite _ a b c => exprHasFvar a || exprHasFvar b || exprHasFvar c
   | .abs _ _ _ b => exprHasFvar b
   | .quant _ _ _ _ t b => exprHasFvar t || exprHasFvar b
-/-- Whether an expression applies an operator the ambient factory does not define.
-    `corePolyOps` seeds five hypothetical schemes (`id`, `churchTrue`,
-    `churchFalse`, `const`, `Sequence.map`) that `Core.Factory` lacks; under the
-    annotated spec an `.op` node is typed from its own annotation, so generating
-    one is sound, but the algorithm cannot resolve it. -/
+/-- Whether an expression applies an operator the ambient factory does not define. -/
 def exprHasUnknownOp : Expression.Expr → Bool
   | .op _ o _ => !(o.name ∈ stmtCheckContext.functions)
   | .const _ _ | .bvar _ _ | .fvar _ _ _ => false
