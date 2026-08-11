@@ -24,40 +24,6 @@ a generator's *support* (the set of all values that can be produced by the gener
 which generators are viewed as sub-probability mass functions), but this repo does not use this interpretation at the moment. `SetGen.lean` contains `SetGen` variants of some `SPMF` results that appear 
 in the Basalt source code, which are required for proofs about Strata generators.
 
-## Shrinkers
-
-Each generator has a matching **shrinker**, used by Plausible to reduce a counterexample to
-a minimal reproducer. They form a tower, each level delegating to the one below rather than
-re-implementing its reductions:
-
-| level | shrinker | well-typedness oracle |
-| --- | --- | --- |
-| expressions | `shrinkLExpr` (`HasTypeAGen/TestSupport.lean`) | caller-supplied (usually `LExpr.typeCheck`) |
-| commands | `shrinkCmd` (`CmdHasTypeAGen/TestSupport.lean`) | the enclosing statement-list check |
-| statements | `shrinkStmts` (`StmtHasTypeAGen/TestSupport.lean`) | `Statement.typeCheck` |
-| functions | `shrinkFuncWellFormed` / `shrinkFunc` (`FunctionHasTypeAGen/Shrink.lean`) | `funcWellFormed` |
-| procedures | `shrinkProcsList` (`ProcedureHasTypeAGen/Shrink.lean`) | `Procedure.typeCheck` |
-| whole programs | `shrinkProgram` (`ProgramGen/Shrink.lean`) | `Program.typeCheck` |
-
-Every shrinker **rejection-samples on Strata's own typechecker**, so each candidate it emits
-is well-typed by the algorithm. A shrunk term need not have the same *type* as the original:
-the invariant is re-established by re-checking the whole term rather than by tracking types
-locally, and that is exactly what lets each level delegate wholesale to the level below.
-
-Well-formedness is meant to follow from well-typedness (`Program.typeCheckWF`), but that
-theorem is currently commented out in Strata and `WFProgramProp` is weaker than it looks
-(`WFFunctionProp` is an empty structure). Concretely, `Function.typeCheck` does not check a
-function's `requires` clauses at all — neither their scoping nor their type (issue #94) — so
-`funcWellFormed` enforces those two conditions itself. Details in the module doc of
-`ProgramGen/Shrink.lean`.
-
-One consequence is worth stating explicitly. Because the oracle *is* the algorithm, a
-counterexample whose failure rests on a typechecker *incompleteness* cannot be minimized —
-no smaller candidate passes the filter, so the witness is reported unshrunk. That is
-deliberate (an unshrunk counterexample is a worse report, never a wrong one). At program
-level the three known gaps are classified by `programRejectionCause`, so such a
-counterexample is tagged with the gap it hit instead of leaving the reader to guess.
-
 ### Organization
 
 Each generator is split into a `Core.lean` (containing the generator's executable code) and a
