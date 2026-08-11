@@ -855,7 +855,7 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
     which its instantiated suffix can equal `τ`. In particular:
     - `k = 0` (the nullary/partial case) is included, so a scheme like
       `Sequence.empty : ∀a. seq a` is reachable at `seq int` and a partially-applied
-      `Sequence.map f : seq int → seq bool` is reachable at an arrow target.
+      `Sequence.append s : seq int → seq int` is reachable at an arrow target.
     - the returned `appliedArgTys` are the concrete types of exactly those `k`
       arguments, so `genIndirPoly`'s annotation `appliedArgTys.foldr arrow τ` is the
       operator's fully-instantiated arrow type (a genuine instance of its scheme).
@@ -954,460 +954,43 @@ def findOpsInCtx (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :
     | some (arg :: args) => some (name, arg :: args)
     | _ => none
 
--- ── Expression generator ─────────────────────────────────────────────
+-- ── Indir / IndirPoly rules (depth-agnostic cores) ──────────────────
+--
+-- Both rules are defined *here*, ahead of `genLExprBase`, because
+-- `genLExprBase` calls them (that is what makes factory applications reachable
+-- under `ite` arms and binder bodies — issue #64). To make that possible they
+-- must not mention `genLExprBase` themselves, so every generator they need is a
+-- parameter: the argument generator `genArg`, and (for IndirPoly) the `fallback`
+-- used when no polymorphic candidate matches. Being non-recursive and
+-- generator-parametric, they impose no termination obligation of their own — the
+-- recursion measure lives entirely in the caller.
+--
+-- `genIndirPoly` (the depth-indexed wrapper that restores the historical
+-- defaults) is defined *after* `genLExprBase`, further down this file.
 
-/-- Generate a well-typed `LExpr` of type `τ` with term depth bounded by the
-    first `Nat` argument. At depth 0, only leaf expressions (bvar, fvar, op,
-    constants) are produced; at depth `n+1`, compound expressions may be
-    produced with sub-expressions at depth `n`.
+/-- The **monomorphic Indir rule** (Pałka et al. 2011): pick an operator from
+    `octx` whose result type is `τ` after full application, then generate all of
+    its arguments at the determined argument types (no type guessing needed).
 
-    The generated term satisfies `HasTypeA' bctx e τ` (see `genLExpr_sound`). -/
-def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
-  -- ── Arrow type ────────────────────────────────────────────────────
-  | 0, .arrow τ₁ τ₂ =>
-    let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
-    oneOf
-      [ (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default),
-        (fun () =>
-          if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
-          then pickFVar fctx _ hf
-          else default),
-        (fun () =>
-          if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
-          then pickOp octx _ ho
-          else default) ]
-      (by simp)
-  | n + 1, .arrow τ₁ τ₂ =>
-    let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (4, fun () => genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂)),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))
-                              (genLExprBase fctx octx tvars bctx n (.arrow τ₁ τ₂))),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
-          then pickFVar fctx _ hf
-          else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
-        (2, fun () =>
-          if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
-          then pickOp octx _ ho
-          else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+2+2+2+2; omega
-    frequency gs hw
-  -- ── Bool type ─────────────────────────────────────────────────────
-  | 0, .bool =>
-    let bvars := bvarsOfType bctx .bool
-    oneOf
-      [ (fun () => genBoolConst),
-        (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx .bool hv
-          else genBoolConst),
-        (fun () =>
-          if hf : (fvarsOfType fctx .bool).length > 0
-          then pickFVar fctx .bool hf
-          else genBoolConst),
-        (fun () =>
-          if ho : (opsOfType octx .bool).length > 0
-          then pickOp octx .bool ho
-          else genBoolConst) ]
-      (by simp)
-  | n + 1, .bool =>
-    let bvars := bvarsOfType bctx .bool
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genBoolConst),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .bool) (genLExprBase fctx octx tvars bctx n) .bool),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n .bool)),
-        (2, fun () => genEq (genGenerableTy fctx octx tvars bctx n) (genLExprBase fctx octx tvars bctx n)),
-        (2, fun () => genQuant .all (genGenerableTy fctx octx tvars bctx n)
-          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
-          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
-        (2, fun () => genQuant .exist (genGenerableTy fctx octx tvars bctx n)
-          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n)
-          (fun τ' => genLExprBase fctx octx tvars (τ' :: bctx) n .bool)),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx .bool hv
-          else genBoolConst),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx .bool).length > 0
-          then pickFVar fctx .bool hf
-          else genBoolConst),
-        (2, fun () =>
-          if ho : (opsOfType octx .bool).length > 0
-          then pickOp octx .bool ho
-          else genBoolConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+2+2+2; omega
-    frequency gs hw
-  -- ── Int type ──────────────────────────────────────────────────────
-  | 0, .int =>
-    let bvars := bvarsOfType bctx .int
-    oneOf
-      [ (fun () => genIntConst),
-        (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx .int hv
-          else genIntConst),
-        (fun () =>
-          if hf : (fvarsOfType fctx .int).length > 0
-          then pickFVar fctx .int hf
-          else genIntConst),
-        (fun () =>
-          if ho : (opsOfType octx .int).length > 0
-          then pickOp octx .int ho
-          else genIntConst) ]
-      (by simp)
-  | n + 1, .int =>
-    let bvars := bvarsOfType bctx .int
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genIntConst),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .int) (genLExprBase fctx octx tvars bctx n) .int),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n .int)
-                              (genLExprBase fctx octx tvars bctx n .int)),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else genIntConst),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx .int).length > 0
-          then pickFVar fctx .int hf
-          else genIntConst),
-        (2, fun () =>
-          if ho : (opsOfType octx .int).length > 0
-          then pickOp octx .int ho
-          else genIntConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
-  -- ── FtVar type (rigid type variable) ────────────────────────────────
-  | 0, .ftvar name =>
-    let bvars := bvarsOfType bctx (.ftvar name)
-    oneOf
-      [ (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx (.ftvar name)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if ho : (opsOfType octx (.ftvar name)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if ho : (opsOfType octx (.ftvar name)).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-          then pickFVar fctx _ hf
-          else default) ]
-      (by simp)
-  | n + 1, .ftvar name =>
-    let bvars := bvarsOfType bctx (.ftvar name)
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.ftvar name)) (genLExprBase fctx octx tvars bctx n) (.ftvar name)),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n (.ftvar name))
-                              (genLExprBase fctx octx tvars bctx n (.ftvar name))),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx (.ftvar name)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx (.ftvar name)).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default),
-        (2, fun () =>
-          if ho : (opsOfType octx (.ftvar name)).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
-  -- ── String type ────────────────────────────────────────────────────
-  | 0, .string =>
-    let bvars := bvarsOfType bctx .string
-    oneOf
-      [ (fun () => genStrConst),
-        (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx .string hv
-          else genStrConst),
-        (fun () =>
-          if hf : (fvarsOfType fctx .string).length > 0
-          then pickFVar fctx .string hf
-          else genStrConst),
-        (fun () =>
-          if ho : (opsOfType octx .string).length > 0
-          then pickOp octx .string ho
-          else genStrConst) ]
-      (by simp)
-  | n + 1, .string =>
-    let bvars := bvarsOfType bctx .string
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genStrConst),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .string) (genLExprBase fctx octx tvars bctx n) .string),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n .string)
-                              (genLExprBase fctx octx tvars bctx n .string)),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else genStrConst),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx .string).length > 0
-          then pickFVar fctx .string hf
-          else genStrConst),
-        (2, fun () =>
-          if ho : (opsOfType octx .string).length > 0
-          then pickOp octx .string ho
-          else genStrConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
-  -- ── Real type ─────────────────────────────────────────────────────
-  | 0, .real =>
-    let bvars := bvarsOfType bctx .real
-    oneOf
-      [ (fun () => genRealConst),
-        (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx .real hv
-          else genRealConst),
-        (fun () =>
-          if hf : (fvarsOfType fctx .real).length > 0
-          then pickFVar fctx .real hf
-          else genRealConst),
-        (fun () =>
-          if ho : (opsOfType octx .real).length > 0
-          then pickOp octx .real ho
-          else genRealConst) ]
-      (by simp)
-  | n + 1, .real =>
-    let bvars := bvarsOfType bctx .real
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genRealConst),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .real) (genLExprBase fctx octx tvars bctx n) .real),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n .real)
-                              (genLExprBase fctx octx tvars bctx n .real)),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else genRealConst),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx .real).length > 0
-          then pickFVar fctx .real hf
-          else genRealConst),
-        (2, fun () =>
-          if ho : (opsOfType octx .real).length > 0
-          then pickOp octx .real ho
-          else genRealConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
-  -- ── Bitvec type ───────────────────────────────────────────────────
-  | 0, .bitvec n =>
-    let bvars := bvarsOfType bctx (.bitvec n)
-    oneOf
-      [ (fun () => genBitvecConst n),
-        (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx (.bitvec n) hv
-          else genBitvecConst n),
-        (fun () =>
-          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
-          then pickFVar fctx (.bitvec n) hf
-          else genBitvecConst n),
-        (fun () =>
-          if ho : (opsOfType octx (.bitvec n)).length > 0
-          then pickOp octx (.bitvec n) ho
-          else genBitvecConst n) ]
-      (by simp)
-  | m + 1, .bitvec n =>
-    let bvars := bvarsOfType bctx (.bitvec n)
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genBitvecConst n),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx m (.bitvec n)) (genLExprBase fctx octx tvars bctx m) (.bitvec n)),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx m .bool)
-                              (genLExprBase fctx octx tvars bctx m (.bitvec n))
-                              (genLExprBase fctx octx tvars bctx m (.bitvec n))),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else genBitvecConst n),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
-          then pickFVar fctx (.bitvec n) hf
-          else genBitvecConst n),
-        (2, fun () =>
-          if ho : (opsOfType octx (.bitvec n)).length > 0
-          then pickOp octx (.bitvec n) ho
-          else genBitvecConst n) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
-  -- ── Regex type (base type, no constants) ───────────────────────────
-  | 0, .regex =>
-    let bvars := bvarsOfType bctx .regex
-    oneOf
-      [ (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx .regex).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx .regex).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if hf : (fvarsOfType fctx .regex).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if ho : (opsOfType octx .regex).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if ho : (opsOfType octx .regex).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx .regex).length > 0
-          then pickFVar fctx _ hf
-          else default) ]
-      (by simp)
-  | n + 1, .regex =>
-    let bvars := bvarsOfType bctx .regex
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .regex) (genLExprBase fctx octx tvars bctx n) .regex),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n .regex)
-                              (genLExprBase fctx octx tvars bctx n .regex)),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx .regex).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx .regex).length > 0
-          then pickOp octx _ ho
-          else default),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx .regex).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default),
-        (2, fun () =>
-          if ho : (opsOfType octx .regex).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
-  -- ── Map type ──────────────────────────────────────────────────────
-  | 0, .map τ₁ τ₂ =>
-    let bvars := bvarsOfType bctx (.map τ₁ τ₂)
-    oneOf
-      [ (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
-          then pickFVar fctx _ hf
-          else default) ]
-      (by simp)
-  | n + 1, .map τ₁ τ₂ =>
-    let bvars := bvarsOfType bctx (.map τ₁ τ₂)
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂)),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))
-                              (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default),
-        (2, fun () =>
-          if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
-  -- ── Sequence type ─────────────────────────────────────────────────
-  | 0, .seq τ =>
-    let bvars := bvarsOfType bctx (.seq τ)
-    oneOf
-      [ (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.seq τ)).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx (.seq τ)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if hf : (fvarsOfType fctx (.seq τ)).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if ho : (opsOfType octx (.seq τ)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (fun () =>
-          if ho : (opsOfType octx (.seq τ)).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.seq τ)).length > 0
-          then pickFVar fctx _ hf
-          else default) ]
-      (by simp)
-  | n + 1, .seq τ =>
-    let bvars := bvarsOfType bctx (.seq τ)
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.seq τ)) (genLExprBase fctx octx tvars bctx n) (.seq τ)),
-        (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
-                              (genLExprBase fctx octx tvars bctx n (.seq τ))
-                              (genLExprBase fctx octx tvars bctx n (.seq τ))),
-        (2, fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else if hf : (fvarsOfType fctx (.seq τ)).length > 0
-          then pickFVar fctx _ hf
-          else if ho : (opsOfType octx (.seq τ)).length > 0
-          then pickOp octx _ ho
-          else default),
-        (2, fun () =>
-          if hf : (fvarsOfType fctx (.seq τ)).length > 0
-          then pickFVar fctx _ hf
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default),
-        (2, fun () =>
-          if ho : (opsOfType octx (.seq τ)).length > 0
-          then pickOp octx _ ho
-          else if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
-  -- ── Fallback (other tcons — not generated) ────────────────────────
-  | _, _ => default
-
+    Argument generation is the parameter `genArg`, so the caller owns the
+    recursion measure and this function stays non-recursive.
+    Requires `h` witnessing that at least one such operator exists. -/
+def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
+    (genArg : LMonoTy → G LExpr')
+    (h : (findOpsInCtx octx τ).length > 0) : G LExpr' := do
+  -- Find all operators `ops` in the context that, when fully applied,
+  -- produce a term of the result type `τ`
+  let ops := findOpsInCtx octx τ
+  -- Randomly choose one of these operators
+  let (name, argTys) ← elements ops (by apply List.ne_nil_of_length_pos; assumption)
+  -- Construct the `LExpr` corresponding to the chosen `op`
+  let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
+  let opExpr := .op () ⟨name, ()⟩ (some fullArrowTy)
+  -- Iterate through the argument types in order
+  -- and generate successive random terms of those types
+  let args ← List.mapM genArg argTys
+  -- Then, apply the operator to all the args
+  pure (mkApps opExpr args)
 
 /-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
     Pałka et al. (2011, Section 4). Calls polymorphic library functions by:
@@ -1415,23 +998,24 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     2. Sampling undetermined type variables from the set of generable types
     3. Generating arguments at the resulting concrete types
 
-    The structure mirrors the monomorphic `genLExpr` Indir rule:
+    The structure mirrors the monomorphic Indir rule (`genIndir`):
     given a list of `(name, concreteArgTys)` candidates, choose one,
     generate args via `mapM genArg`, and assemble via `mkApps`.
 
-    **Argument generation is a parameter** (`genArg`), following the same
-    open-recursion style as `genApp`/`genIte`/`genEq`. It defaults to
-    `genLExprBase … depth`, which reproduces the historical behaviour exactly
-    (factory applications only at the root). `genLExprAll` overrides it with
-    itself at the smaller depth index, which is what makes factory applications
-    reachable in *argument* position. Keeping it a parameter
-    means the recursion measure lives entirely in the caller, so this function
-    stays non-recursive and needs no termination argument of its own. -/
-def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
-    (pctx : PolyOpCtx) (tvars : List TyIdentifier)
-    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
-    (genArg : LMonoTy → G LExpr' := genLExprBase fctx octx tvars bctx depth)
-    : G LExpr' := do
+    **Both the argument generator and the no-candidate fallback are parameters**
+    (`genArg`, `fallback`), following the same open-recursion style as
+    `genApp`/`genIte`/`genEq`. That is what removes every mention of
+    `genLExprBase` from this definition, which in turn is what lets
+    `genLExprBase` call *it* (issue #64). `genIndirPoly` below restores the
+    historical defaults for both.
+
+    There is deliberately **no `depth` parameter**: `depth` was only ever
+    consumed by the default argument generator and the fallback, and both are now
+    supplied by the caller. -/
+def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (bctx : BVarCtx) (τ : LMonoTy)
+    (genArg : LMonoTy → G LExpr') (fallback : G LExpr')
+    (maxNumArgs : Nat := 3) : G LExpr' := do
   -- Compute the set of generable types from the current context
   let generableTys := generableTypesFromCtx bctx fctx octx
 
@@ -1466,33 +1050,638 @@ def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     -- Fully apply the factory function (carrying a type annotation) to its random argument terms
     pure (mkApps opExpr args)
   else
-    -- No polymorphic functions available: fall back to base generator
-    genLExprBase fctx octx tvars bctx depth τ
+    -- No polymorphic functions available: defer to the caller's fallback
+    fallback
+
+-- ── Expression generator ─────────────────────────────────────────────
+
+/-- Generate a well-typed `LExpr` of type `τ` with term depth bounded by the
+    first `Nat` argument. At depth 0, only leaf expressions (bvar, fvar, op,
+    constants) are produced; at depth `n+1`, compound expressions may be
+    produced with sub-expressions at depth `n`.
+
+    The generated term satisfies `HasTypeA' bctx e τ` (see `genLExpr_sound`).
+
+    ## The Indir/IndirPoly branches (issue #64)
+
+    Each `n + 1` case carries, at the end of its `frequency` list, a
+    **monomorphic Indir** branch and a **polymorphic IndirPoly** branch. Because
+    they live *here* rather than only in `genLExpr`, a factory application — and
+    in particular a *polymorphic* one — can appear in any position this generator
+    produces: under `ite` arms, under `abs`/`quant` bodies, and in `genApp`'s
+    function and argument. Before #64 the polymorphic rule existed only at
+    `genLExpr`'s root and in Indir argument position, so
+    `if c then Sequence.length s else #0` was outside the support.
+
+    Both branches draw their arguments from `genLExprBase … n`, the *smaller*
+    depth index. That keeps this definition **structurally recursive** (`#print`
+    shows `Nat.brecOn`, not `WellFounded.fix`), so it stays reducible and the
+    ~150 `simp only [genLExprBase]` / `rw [genLExprBase]` proof sites keep
+    working. Making this and `genLExpr` *mutually* recursive would instead call
+    `genLExprBase (n + 1)` from `genLExpr (n + 1)` at an equal index, forcing a
+    lexicographic measure, turning `genLExprBase` `@[irreducible]`, and breaking
+    definitional unfolding at every one of those sites.
+
+    The depth-`0` cases deliberately have no Indir branches: a fully-applied
+    operator at the depth floor would leave no budget for its arguments. -/
+def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
+  -- ── Arrow type ────────────────────────────────────────────────────
+  | 0, .arrow τ₁ τ₂ =>
+    let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
+    oneOf
+      [ (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (fun () =>
+          if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else default),
+        (fun () =>
+          if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else default) ]
+      (by simp)
+  | n + 1, .arrow τ₁ τ₂ =>
+    let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (4, fun () => genAbs (genLExprBase fctx octx pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx octx pctx tvars bctx n) (.arrow τ₁ τ₂)),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n (.arrow τ₁ τ₂))
+                              (genLExprBase fctx octx pctx tvars bctx n (.arrow τ₁ τ₂))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genAbs (genLExprBase fctx octx pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.arrow τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else genAbs (genLExprBase fctx octx pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
+        (2, fun () =>
+          if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else genAbs (genLExprBase fctx octx pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is (.arrow τ₁ τ₂), with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx (.arrow τ₁ τ₂)).length > 0
+          then genIndir octx (.arrow τ₁ τ₂) (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n (.arrow τ₁ τ₂)),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx (.arrow τ₁ τ₂)
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n (.arrow τ₁ τ₂))) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Bool type ─────────────────────────────────────────────────────
+  | 0, .bool =>
+    let bvars := bvarsOfType bctx .bool
+    oneOf
+      [ (fun () => genBoolConst),
+        (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx .bool hv
+          else genBoolConst),
+        (fun () =>
+          if hf : (fvarsOfType fctx .bool).length > 0
+          then pickFVar fctx .bool hf
+          else genBoolConst),
+        (fun () =>
+          if ho : (opsOfType octx .bool).length > 0
+          then pickOp octx .bool ho
+          else genBoolConst) ]
+      (by simp)
+  | n + 1, .bool =>
+    let bvars := bvarsOfType bctx .bool
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genBoolConst),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .bool) (genLExprBase fctx octx pctx tvars bctx n) .bool),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n .bool)),
+        (2, fun () => genEq (genGenerableTy fctx octx tvars bctx n) (genLExprBase fctx octx pctx tvars bctx n)),
+        (2, fun () => genQuant .all (genGenerableTy fctx octx tvars bctx n)
+          (fun τ' => genLExprBase fctx octx pctx tvars (τ' :: bctx) n)
+          (fun τ' => genLExprBase fctx octx pctx tvars (τ' :: bctx) n .bool)),
+        (2, fun () => genQuant .exist (genGenerableTy fctx octx tvars bctx n)
+          (fun τ' => genLExprBase fctx octx pctx tvars (τ' :: bctx) n)
+          (fun τ' => genLExprBase fctx octx pctx tvars (τ' :: bctx) n .bool)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx .bool hv
+          else genBoolConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .bool).length > 0
+          then pickFVar fctx .bool hf
+          else genBoolConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .bool).length > 0
+          then pickOp octx .bool ho
+          else genBoolConst),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is .bool, with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx .bool).length > 0
+          then genIndir octx .bool (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n .bool),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx .bool
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n .bool)) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Int type ──────────────────────────────────────────────────────
+  | 0, .int =>
+    let bvars := bvarsOfType bctx .int
+    oneOf
+      [ (fun () => genIntConst),
+        (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx .int hv
+          else genIntConst),
+        (fun () =>
+          if hf : (fvarsOfType fctx .int).length > 0
+          then pickFVar fctx .int hf
+          else genIntConst),
+        (fun () =>
+          if ho : (opsOfType octx .int).length > 0
+          then pickOp octx .int ho
+          else genIntConst) ]
+      (by simp)
+  | n + 1, .int =>
+    let bvars := bvarsOfType bctx .int
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genIntConst),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .int) (genLExprBase fctx octx pctx tvars bctx n) .int),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n .int)
+                              (genLExprBase fctx octx pctx tvars bctx n .int)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genIntConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .int).length > 0
+          then pickFVar fctx .int hf
+          else genIntConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .int).length > 0
+          then pickOp octx .int ho
+          else genIntConst),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is .int, with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx .int).length > 0
+          then genIndir octx .int (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n .int),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx .int
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n .int)) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── FtVar type (rigid type variable) ────────────────────────────────
+  | 0, .ftvar name =>
+    let bvars := bvarsOfType bctx (.ftvar name)
+    oneOf
+      [ (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.ftvar name)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if ho : (opsOfType octx (.ftvar name)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if ho : (opsOfType octx (.ftvar name)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+          then pickFVar fctx _ hf
+          else default) ]
+      (by simp)
+  | n + 1, .ftvar name =>
+    let bvars := bvarsOfType bctx (.ftvar name)
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.ftvar name)) (genLExprBase fctx octx pctx tvars bctx n) (.ftvar name)),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n (.ftvar name))
+                              (genLExprBase fctx octx pctx tvars bctx n (.ftvar name))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.ftvar name)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.ftvar name)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx (.ftvar name)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is (.ftvar name), with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx (.ftvar name)).length > 0
+          then genIndir octx (.ftvar name) (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n (.ftvar name)),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx (.ftvar name)
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n (.ftvar name))) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── String type ────────────────────────────────────────────────────
+  | 0, .string =>
+    let bvars := bvarsOfType bctx .string
+    oneOf
+      [ (fun () => genStrConst),
+        (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx .string hv
+          else genStrConst),
+        (fun () =>
+          if hf : (fvarsOfType fctx .string).length > 0
+          then pickFVar fctx .string hf
+          else genStrConst),
+        (fun () =>
+          if ho : (opsOfType octx .string).length > 0
+          then pickOp octx .string ho
+          else genStrConst) ]
+      (by simp)
+  | n + 1, .string =>
+    let bvars := bvarsOfType bctx .string
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genStrConst),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .string) (genLExprBase fctx octx pctx tvars bctx n) .string),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n .string)
+                              (genLExprBase fctx octx pctx tvars bctx n .string)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genStrConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .string).length > 0
+          then pickFVar fctx .string hf
+          else genStrConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .string).length > 0
+          then pickOp octx .string ho
+          else genStrConst),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is .string, with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx .string).length > 0
+          then genIndir octx .string (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n .string),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx .string
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n .string)) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Real type ─────────────────────────────────────────────────────
+  | 0, .real =>
+    let bvars := bvarsOfType bctx .real
+    oneOf
+      [ (fun () => genRealConst),
+        (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx .real hv
+          else genRealConst),
+        (fun () =>
+          if hf : (fvarsOfType fctx .real).length > 0
+          then pickFVar fctx .real hf
+          else genRealConst),
+        (fun () =>
+          if ho : (opsOfType octx .real).length > 0
+          then pickOp octx .real ho
+          else genRealConst) ]
+      (by simp)
+  | n + 1, .real =>
+    let bvars := bvarsOfType bctx .real
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genRealConst),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .real) (genLExprBase fctx octx pctx tvars bctx n) .real),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n .real)
+                              (genLExprBase fctx octx pctx tvars bctx n .real)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genRealConst),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .real).length > 0
+          then pickFVar fctx .real hf
+          else genRealConst),
+        (2, fun () =>
+          if ho : (opsOfType octx .real).length > 0
+          then pickOp octx .real ho
+          else genRealConst),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is .real, with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx .real).length > 0
+          then genIndir octx .real (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n .real),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx .real
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n .real)) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Bitvec type ───────────────────────────────────────────────────
+  | 0, .bitvec n =>
+    let bvars := bvarsOfType bctx (.bitvec n)
+    oneOf
+      [ (fun () => genBitvecConst n),
+        (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx (.bitvec n) hv
+          else genBitvecConst n),
+        (fun () =>
+          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
+          then pickFVar fctx (.bitvec n) hf
+          else genBitvecConst n),
+        (fun () =>
+          if ho : (opsOfType octx (.bitvec n)).length > 0
+          then pickOp octx (.bitvec n) ho
+          else genBitvecConst n) ]
+      (by simp)
+  | m + 1, .bitvec n =>
+    let bvars := bvarsOfType bctx (.bitvec n)
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genBitvecConst n),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx m (.bitvec n)) (genLExprBase fctx octx pctx tvars bctx m) (.bitvec n)),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx m .bool)
+                              (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))
+                              (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else genBitvecConst n),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
+          then pickFVar fctx (.bitvec n) hf
+          else genBitvecConst n),
+        (2, fun () =>
+          if ho : (opsOfType octx (.bitvec n)).length > 0
+          then pickOp octx (.bitvec n) ho
+          else genBitvecConst n),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is (.bitvec n), with arguments drawn from this generator at `m`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx (.bitvec n)).length > 0
+          then genIndir octx (.bitvec n) (genLExprBase fctx octx pctx tvars bctx m) hi
+          else genLExprBase fctx octx pctx tvars bctx m (.bitvec n)),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx (.bitvec n)
+            (genLExprBase fctx octx pctx tvars bctx m)
+            (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Regex type (base type, no constants) ───────────────────────────
+  | 0, .regex =>
+    let bvars := bvarsOfType bctx .regex
+    oneOf
+      [ (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx .regex).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx .regex).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if hf : (fvarsOfType fctx .regex).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if ho : (opsOfType octx .regex).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if ho : (opsOfType octx .regex).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx .regex).length > 0
+          then pickFVar fctx _ hf
+          else default) ]
+      (by simp)
+  | n + 1, .regex =>
+    let bvars := bvarsOfType bctx .regex
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .regex) (genLExprBase fctx octx pctx tvars bctx n) .regex),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n .regex)
+                              (genLExprBase fctx octx pctx tvars bctx n .regex)),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx .regex).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx .regex).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx .regex).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx .regex).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is .regex, with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx .regex).length > 0
+          then genIndir octx .regex (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n .regex),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx .regex
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n .regex)) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Map type ──────────────────────────────────────────────────────
+  | 0, .map τ₁ τ₂ =>
+    let bvars := bvarsOfType bctx (.map τ₁ τ₂)
+    oneOf
+      [ (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else default) ]
+      (by simp)
+  | n + 1, .map τ₁ τ₂ =>
+    let bvars := bvarsOfType bctx (.map τ₁ τ₂)
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx octx pctx tvars bctx n) (.map τ₁ τ₂)),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂))
+                              (genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.map τ₁ τ₂)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx (.map τ₁ τ₂)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is (.map τ₁ τ₂), with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx (.map τ₁ τ₂)).length > 0
+          then genIndir octx (.map τ₁ τ₂) (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂)),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx (.map τ₁ τ₂)
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂))) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Sequence type ─────────────────────────────────────────────────
+  | 0, .seq τ =>
+    let bvars := bvarsOfType bctx (.seq τ)
+    oneOf
+      [ (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.seq τ)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.seq τ)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if hf : (fvarsOfType fctx (.seq τ)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if ho : (opsOfType octx (.seq τ)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if ho : (opsOfType octx (.seq τ)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.seq τ)).length > 0
+          then pickFVar fctx _ hf
+          else default) ]
+      (by simp)
+  | n + 1, .seq τ =>
+    let bvars := bvarsOfType bctx (.seq τ)
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.seq τ)) (genLExprBase fctx octx pctx tvars bctx n) (.seq τ)),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n (.seq τ))
+                              (genLExprBase fctx octx pctx tvars bctx n (.seq τ))),
+        (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx (.seq τ)).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx (.seq τ)).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx (.seq τ)).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx (.seq τ)).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else default),
+        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- result type is (.seq τ), with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx (.seq τ)).length > 0
+          then genIndir octx (.seq τ) (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n (.seq τ)),
+        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- only at `genLExpr`'s root is what makes a polymorphic factory call
+        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx (.seq τ)
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n (.seq τ))) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
+    frequency gs hw
+  -- ── Fallback (other tcons — not generated) ────────────────────────
+  | _, _ => default
 
 
-/-- The **monomorphic Indir rule** (Pałka et al. 2011): pick an operator from
-    `octx` whose result type is `τ` after full application, then generate all of
-    its arguments at the determined argument types (no type guessing needed).
+/-- The depth-indexed IndirPoly rule: `genIndirPolyCore` with its two generator
+    parameters defaulted the historical way.
 
-    As with `genIndirPoly`, argument generation is the parameter `genArg`, so the
-    caller owns the recursion measure and this function stays non-recursive.
-    Requires `h` witnessing that at least one such operator exists. -/
-def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
-    (genArg : LMonoTy → G LExpr')
-    (h : (findOpsInCtx octx τ).length > 0) : G LExpr' := do
-  -- Find all operators `ops` in the context that, when fully applied,
-  -- produce a term of the result type `τ`
-  let ops := findOpsInCtx octx τ
-  -- Randomly choose one of these operators
-  let (name, argTys) ← elements ops (by apply List.ne_nil_of_length_pos; assumption)
-  -- Construct the `LExpr` corresponding to the chosen `op`
-  let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
-  let opExpr := .op () ⟨name, ()⟩ (some fullArrowTy)
-  -- Iterate through the argument types in order
-  -- and generate successive random terms of those types
-  let args ← List.mapM genArg argTys
-  -- Then, apply the operator to all the args
-  pure (mkApps opExpr args)
+    `genArg` defaults to `genLExprBase … depth` and the no-candidate fallback is
+    `genLExprBase … depth τ`, exactly as before #64 — so every existing call site
+    and every existing proof about `genIndirPoly` continues to mean what it did.
+    `genLExpr` overrides `genArg` with itself at the smaller depth index, which is
+    what makes factory applications nest in *argument* position (#62).
+
+    The rule proper lives in `genIndirPolyCore`, defined before `genLExprBase`
+    because `genLExprBase` calls it (#64). This wrapper exists only to hold the
+    `genLExprBase`-valued defaults, which is why it has to be defined here,
+    afterwards. -/
+def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
+    (genArg : LMonoTy → G LExpr' := genLExprBase fctx octx pctx tvars bctx depth)
+    : G LExpr' :=
+  genIndirPolyCore fctx octx pctx bctx τ genArg
+    (genLExprBase fctx octx pctx tvars bctx depth τ) maxNumArgs
 
 /-- Generate a well-typed `LExpr` of type `τ` using the Indir rule from
     Pałka et al. (2011) in addition to the standard generation rules.
@@ -1522,18 +1711,26 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
     a recursive call to a higher-order helper this way does not disturb structural
     recursion (`#print genLExpr` shows `Nat.brecOn`, not `WellFounded.fix`), so no
     `termination_by`/`decreasing_by` is required. Crucially this also leaves
-    `genLExprBase` alone — it keeps its own structural recursion, so the ~112
+    `genLExprBase` alone — it keeps its own structural recursion, so the ~150
     existing `simp only [genLExprBase]` / `rw [genLExprBase]` proof sites are
     untouched. Making the two *mutually* recursive would instead force a
     lexicographic measure, turn `genLExprBase` well-founded and `@[irreducible]`,
     and break definitional unfolding (`rfl`) at all of those sites.
 
-    Known remaining gap (deliberate): the `genLExprBase` branch still generates
-    *its* subterms — `ite` arms, `abs`/`quant` bodies, `app` function and
-    argument — via `genLExprBase`. So factory calls nest in
-    **argument position of other factory calls**, but not yet underneath binders
-    introduced by the base generator. Closing that requires folding the Indir
-    rules into `genLExprBase`'s own branch lists.
+    ## What this function still adds, post-#64
+
+    Since #64, `genLExprBase` carries the Indir/IndirPoly rules in its own
+    per-type `frequency` lists, so factory applications — polymorphic ones
+    included — are reachable at *every* subterm position, `ite` arms and
+    `abs`/`quant` bodies among them. The positional gap this docstring used to
+    describe as a "known remaining gap" is closed, and it is closed *inside*
+    `genLExprBase`, not here.
+
+    What remains this function's own contribution is the **root-level
+    distribution**: a 1:9 weighting of the base rules against the Indir/IndirPoly
+    rules, against roughly 8:8 in the merged branch lists. It also owns
+    `retryCont`. So `genLExpr` is now a thin distribution-shaping wrapper rather
+    than the only place the polymorphic rule lives.
 
     ## The `retryCont` parameter
 
@@ -1586,11 +1783,11 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   let genArg : LMonoTy → G LExpr' :=
     retryCont <|
       match depth with
-      | 0 => genLExprBase fctx octx tvars bctx 0
+      | 0 => genLExprBase fctx octx pctx tvars bctx 0
       | n + 1 => fun σ => genLExpr fctx octx pctx tvars bctx n σ maxNumArgs retryCont
   if h : (findOpsInCtx octx τ).length > 0 then
     frequency
-      [ (1, fun () => genLExprBase fctx octx tvars bctx depth τ),
+      [ (1, fun () => genLExprBase fctx octx pctx tvars bctx depth τ),
         (9, fun () =>
         pick
           (fun () =>
@@ -1603,7 +1800,7 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   else
     -- No monomorphic Indir candidates; try IndirPoly or fall back to base
     pick
-      (fun () => genLExprBase fctx octx tvars bctx depth τ)
+      (fun () => genLExprBase fctx octx pctx tvars bctx depth τ)
       (fun () => genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs genArg)
 
 -- ── Top-level generators ─────────────────────────────────────────────

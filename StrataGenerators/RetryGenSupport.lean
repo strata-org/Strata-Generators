@@ -200,8 +200,8 @@ theorem genLExpr_runSupport_retryGenArg_base (n : Nat)
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (τ : LMonoTy) (size : ULift Nat) :
     runSupport (retryGenArg n
-        (genLExprBase (G := Plausible.Gen) fctx octx tvars bctx 0) τ) size
-      = runSupport (genLExprBase (G := Plausible.Gen) fctx octx tvars bctx 0 τ) size :=
+        (genLExprBase (G := Plausible.Gen) fctx octx pctx tvars bctx 0) τ) size
+      = runSupport (genLExprBase (G := Plausible.Gen) fctx octx pctx tvars bctx 0 τ) size :=
   runSupport_retryGenArg n _ τ size
 
 /-- The same for the recursive case: at depth `n + 1` the argument generator is
