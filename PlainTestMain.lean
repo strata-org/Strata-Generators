@@ -179,13 +179,46 @@ def main (args : List String) : IO UInt32 := do
       (fun p => runProperty p.name
         (∀ gp : GenProgram, p.check gp.prog = true) cfg)
 
+  -- Pipeline-phase `changed`-flag properties. The two no-op witnesses take no
+  -- generated input (each is a constructed program on which the phase provably
+  -- cannot change anything), so they run as `runUnitProperty`; the two sweeps over
+  -- generated procedure lists are folded like `procTransforms`. Three of the four
+  -- FAIL honestly, pinning the four hardcoded-`changed := true` sites
+  -- (`FilterProcedures.lean:82`, `IrrelevantAxioms.lean:81`, `Verifier.lean:1510`
+  -- and `:1517`). `phase: non-hardcoded pipeline phases have a faithful changed
+  -- flag` is the one expected to PASS — the regression guard on the phases that
+  -- compute the flag correctly today.
+  let phaseSuite : List (IO Result) :=
+    Properties.phaseNoOpWitnesses.map
+      (fun (nc : String × Bool) => runUnitProperty nc.1 nc.2)
+    ++ Properties.phaseChangedFlags.map
+      (fun p => runProperty p.name
+        (∀ gp : GenProcs, p.check gp.procs = true) cfg)
+
+  -- Printer-expressiveness properties (#69 P2, #48). Two targeted witnesses (a
+  -- `bitvec 128` literal; the eighteen `Bv↔Int` conversion operators) plus the
+  -- whole-program property over `GenProgram` — the same wrapper as `programSuite`,
+  -- so its counterexamples shrink whenever the draw typechecks. All three FAIL
+  -- honestly: the printer substitutes a placeholder and logs an error instead of
+  -- failing, so an unprintable construct can round-trip as a *different* program.
+  -- See `printerErrorDiagnostic` below for which constructs are responsible.
+  let printerSuite : List (IO Result) :=
+    Properties.printerWitnesses.map
+      (fun (nc : String × Bool) => runUnitProperty nc.1 nc.2)
+    ++ [ runProperty PropertyNames.printerNoConversionError
+           (∀ gp : GenProgram,
+             StrataGenerators.PrinterCoverage.checkProgramPrintsWithoutError gp.prog = true)
+           cfg ]
+
   let exitCode ← runSuites [
     ("expr", exprSuite),
     ("cmd", cmdSuite),
     ("function", functionSuite),
     ("stmt", stmtSuite),
     ("proc", procSuite),
-    ("program", programSuite)
+    ("program", programSuite),
+    ("phase", phaseSuite),
+    ("printer", printerSuite)
   ]
 
   -- Always-run diagnostics (do not gate the exit code):
@@ -206,6 +239,14 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  -- Printer conversion-error tally: which constructs `Core.formatProgram` cannot
+  -- express, most frequent first. This is the localisation behind the `printer:`
+  -- suite — the gating property says *that* the printer failed, this says *what*
+  -- it could not print. Not gated (the property above does the gating).
+  IO.println ""
+  IO.println "Printer conversion-error diagnostics:"
+  let _ ← printerErrorDiagnostic numTrials maxSize
 
   -- Whole-program shrinker diagnostic (same as `TestMain`): exercises the
   -- `Shrinkable GenProgram` instance, which a green run of the program properties

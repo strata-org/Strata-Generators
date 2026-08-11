@@ -1,6 +1,8 @@
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.StmtHasTypeAGen.TestSupport
 import StrataGenerators.ProcedureHasTypeAGen.TestSupport
+import StrataGenerators.PhaseChangedFlag
+import StrataGenerators.PrinterCoverage
 -- Supplies the six whole-program check predicates (and the shrinker backing the
 -- `Shrinkable GenProgram` instance).
 import StrataGenerators.ProgramGen.Shrink
@@ -28,9 +30,9 @@ which check a name denotes. Properties whose harness shapes genuinely differ
 keep only a shared *name* here; their test logic stays with each view.
 
 Naming scheme: `area: description`, where `area` is one of `expr` / `cmd` /
-`function` / `stmt` / `proc` / `program`. A handful of properties are exercised by
-only one harness (noted per entry); they still live here so the catalog is the one
-place property names are spelled.
+`function` / `stmt` / `proc` / `program` / `phase` / `printer`. A handful of
+properties are exercised by only one harness (noted per entry); they still live
+here so the catalog is the one place property names are spelled.
 -/
 
 open Lambda Core Imperative
@@ -177,6 +179,57 @@ def procAnfControlFlow       : String := "proc: ANFEncoder does not change contr
 def procAnfChangedFlag       : String := "proc: ANFEncoder changed flag is faithful"
 def procAnfAnalysisPreserved : String := "proc: ANFEncoder preserves call-graph WF"
 
+-- ── Pipeline-phase `changed`-flag properties (uniform over every phase) ───
+-- See `StrataGenerators.PhaseChangedFlag`. Four phases hardcode `changed := true`
+-- (`FilterProcedures`, `RemoveIrrelevantAxioms`, `typeCheck`, `symbolicEval`).
+-- The `proc:` catalog above pins `FilterProcedures` and `PrecondElim`
+-- individually; these state the contract *uniformly over a phase list*, so a
+-- phase added later is covered without a new property being written.
+
+/-- **FAILS honestly.** `RemoveIrrelevantAxioms` on a program with no axioms at
+    all cannot prune anything, yet `IrrelevantAxioms.lean:81` returns
+    `(true, pruned)` unconditionally. -/
+def phaseIrrelevantAxiomsNoOp : String :=
+  "phase: RemoveIrrelevantAxioms changed flag is faithful on a no-op"
+/-- **FAILS honestly.** Restates the already-reported `FilterProcedures` bug on a
+    constructed all-targets witness, so the uniform sweep is self-contained. -/
+def phaseFilterNoOp : String :=
+  "phase: FilterProcedures changed flag is faithful on a no-op"
+/-- **FAILS honestly.** Uniform sweep over every phase of `corePipelinePhases`
+    plus `RemoveIrrelevantAxioms`; red while any of the four known sites stands.
+    This is the regression gate that catches a *newly added* hardcoding phase. -/
+def phaseAllChangedFlag : String :=
+  "phase: every pipeline phase has a faithful changed flag"
+/-- Every phase *except* the four known hardcoded-`true` sites. Expected to PASS;
+    it is what guards the honestly-computing phases against regression. -/
+def phaseHonestChangedFlag : String :=
+  "phase: non-hardcoded pipeline phases have a faithful changed flag"
+
+-- ── Printer-expressiveness properties (#69 P2, #48) ──────────────────────
+-- See `StrataGenerators.PrinterCoverage`. The oracle is "the printer logged no
+-- conversion error", which needs no parser and names the offending construct.
+
+/-- **FAILS honestly (~50% of programs at the `GenProgram` bounds; ~86% at
+    `numDecls = 6`).** `Core.formatProgram` substitutes a placeholder and logs an
+    error rather than failing, so an unprintable construct can round-trip
+    "successfully" as a *different* program. -/
+def printerNoConversionError : String :=
+  "printer: no conversion error on generated programs"
+/-- **FAILS honestly.** `bitvec 128` is factory-registered with a grammar
+    production, but `lconstToExpr` logs `unsupported bitvec width: 128`. -/
+def printerBv128Literal : String :=
+  "printer: bitvec 128 literals are printable"
+/-- **FAILS honestly (18/18).** No `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}`
+    is printable at any registered width — no grammar production, no printer arm. -/
+def printerBvIntConversions : String :=
+  "printer: Bv/Int conversion operators are printable"
+/-- **FAILS honestly (60/64 widths) — closes out #48.** `Function.typeCheck`
+    accepts `bitvec w` for every `w`, but the printer supports exactly
+    `[1, 8, 16, 32, 64]`. Note this is *not* the powers of two: `2`, `4` and `128`
+    all typecheck and all fail to print. -/
+def printerBvWidthAgreement : String :=
+  "printer: every typecheckable bitvec width is printable"
+
 -- ── Whole-program-generator properties ───────────────────────────────
 -- `genProgram` produces a whole `Program` (every declaration kind, real ambient
 -- context threaded across the fold) and is proven sound against `ProgramHasTypeA`.
@@ -225,6 +278,10 @@ def all : List String :=
     procAnfDeclsLength, procAnfNonProcsUnchanged, procAnfHeadersPreserved,
     procAnfFreshVarsDet, procAnfOrderPreserved, procAnfControlFlow,
     procAnfChangedFlag, procAnfAnalysisPreserved,
+    phaseIrrelevantAxiomsNoOp, phaseFilterNoOp, phaseAllChangedFlag,
+    phaseHonestChangedFlag,
+    printerNoConversionError, printerBv128Literal, printerBvIntConversions,
+    printerBvWidthAgreement,
     programTypecheck, programRejectionKnownGap, programNamesNodup,
     programTypeCheckIdem, programStripMeta, programEraseTypes ]
 
@@ -315,6 +372,42 @@ def procTransforms : List (Property (List Core.Procedure)) :=
     ⟨PropertyNames.procAnfControlFlow,          checkAnfControlFlowPreserved⟩,
     ⟨PropertyNames.procAnfChangedFlag,          checkAnfChangedFlagValid⟩,
     ⟨PropertyNames.procAnfAnalysisPreserved,    checkAnfAnalysisPreserving⟩ ]
+
+/-- The two `changed`-flag properties that quantify over generated procedure
+    lists. Same input shape as `procTransforms`, so both harnesses fold them the
+    same way; kept in a separate bundle because they sweep *phase lists* rather
+    than testing one named pass.
+
+    `phaseAllChangedFlag` is expected to FAIL (`typeCheck` and `symbolicEval` are
+    in the swept list and both hardcode `true`); `phaseHonestChangedFlag` is
+    expected to PASS and is the actual regression guard. -/
+def phaseChangedFlags : List (Property (List Core.Procedure)) :=
+  [ ⟨PropertyNames.phaseAllChangedFlag,
+     StrataGenerators.PhaseChangedFlag.checkAllPhasesChangedFlag⟩,
+    ⟨PropertyNames.phaseHonestChangedFlag,
+     StrataGenerators.PhaseChangedFlag.checkHonestPhasesChangedFlag⟩ ]
+
+/-- The `changed`-flag properties with **no** generated input: each is a single
+    constructed no-op witness, so the check is a closed `Bool`. Paired with names
+    here for the same reason as the bundles above — neither harness ever handles
+    the bare string. -/
+def phaseNoOpWitnesses : List (String × Bool) :=
+  [ (PropertyNames.phaseIrrelevantAxiomsNoOp,
+     StrataGenerators.PhaseChangedFlag.checkIrrelevantAxiomsNoOpFlag),
+    (PropertyNames.phaseFilterNoOp,
+     StrataGenerators.PhaseChangedFlag.checkFilterNoOpFlag) ]
+
+/-- The printer-expressiveness properties with no generated input: the two
+    confirmed gaps at factory-registered widths, plus the typechecker-vs-printer
+    width divergence of #48 — each a closed `Bool`, since each is a claim about a
+    specific width or operator rather than about a sampled program. -/
+def printerWitnesses : List (String × Bool) :=
+  [ (PropertyNames.printerBv128Literal,
+     StrataGenerators.PrinterCoverage.checkBv128LiteralPrints),
+    (PropertyNames.printerBvIntConversions,
+     StrataGenerators.PrinterCoverage.checkBvIntConversionsPrint),
+    (PropertyNames.printerBvWidthAgreement,
+     StrataGenerators.PrinterCoverage.checkAllWidthsAgree) ]
 
 /-- The six whole-program properties, each a generated `Program` scored by a shared
     predicate. The first FAILS honestly on the three program-level completeness

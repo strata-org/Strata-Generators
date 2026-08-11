@@ -661,6 +661,13 @@ instance : Arbitrary GenProcs where
 -- (`ProgramGen.SoundProgram`). Unlike `GenProcs`, which assembles a program out of
 -- procedures only, this exercises abstract types, aliases, axioms, `distinct`,
 -- datatype blocks and functions as well.
+--
+-- Two suites quantify over this type: the whole-program checks of
+-- `Properties.programChecks`, and the printer-expressiveness property of
+-- `StrataGenerators.PrinterCoverage` — the latter needs a whole `Program` because
+-- the unprintable constructs are spread across type declarations (`bitvec` widths
+-- in a signature), expressions (`Bv↔Int` operators) and statements (bodiless
+-- `funcDecl`), and `genProgram` reaches all three.
 
 open StrataGenerators.Program.TestSupport
 
@@ -895,6 +902,62 @@ def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
           else
             IO.println s!"           reparsed: {outcome.replace "\n" " "}"
   return (probeFail, probeOk)
+
+/-- Printer-expressiveness diagnostic: sample whole programs, and tally the
+    *distinct* conversion-error messages `Core.formatProgram` logs, most frequent
+    first. Also reports, of the programs that logged an error, how many still
+    re-parse — those are the dangerous ones, where a placeholder produced a
+    syntactically valid but **different** program, which the string round-trip
+    property cannot detect.
+
+    A **diagnostic**: it does not gate the exit code (the gating statement is
+    `printer: no conversion error on generated programs`). Its job is
+    localisation — naming the offending *constructs* across a whole sample, which
+    the per-counterexample view cannot give. The whole-program shrinker (#72) does
+    minimize the gating property's witness, but only when the draw typechecks: its
+    candidate filter is `Program.typeCheck`, so on a gap-bearing draw (~60%) the
+    witness is reported unshrunk and this tally is the only localisation available.
+
+    Returns `(programsWithErrors, programsSampled, reparsedDespiteError)`. -/
+def printerErrorDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat × Nat) := do
+  let total := min numTrials 60
+  let mut withErrors := 0
+  let mut reparsed := 0
+  let mut sampled := 0
+  let mut tally : List (String × Nat) := []
+  for i in List.range total do
+    let size := i % (maxSize + 1)
+    let gp ← try Gen.run (Arbitrary.arbitrary (α := GenProgram)) size
+             catch _ => pure ⟨{ decls := [] }⟩
+    -- A retry-exhausted draw yields the empty program; don't score it either way.
+    if gp.prog.decls.isEmpty then continue
+    sampled := sampled + 1
+    let s := (Core.formatProgram gp.prog).pretty
+    let lines := StrataGenerators.PrinterCoverage.strataErrorLines s
+    if !lines.isEmpty then
+      withErrors := withErrors + 1
+      for line in lines.dedup do
+        tally := match tally.find? (·.1 == line) with
+          | some _ => tally.map (fun (m, c) => if m == line then (m, c + 1) else (m, c))
+          | none => (line, 1) :: tally
+      -- Did the text the printer *claims* to have produced still parse?
+      match ← parseCoreProgram (StrataGenerators.PrinterCoverage.printedText s) with
+      | some _ => reparsed := reparsed + 1
+      | none => pure ()
+  IO.println s!"    {withErrors}/{sampled} programs logged a conversion error"
+  IO.println s!"    {reparsed} of those still re-parsed (placeholder ⇒ silently different program)"
+  IO.println s!"    distinct messages ({tally.length}), most frequent first:"
+  for (m, c) in (tally.mergeSort (fun a b => a.2 > b.2)) do
+    IO.println s!"      [{c}×] {m}"
+  -- Bitvector width divergence (#48), reported alongside because several of the
+  -- messages above are instances of it. Deterministic, so it is a scan rather
+  -- than a sample: `Function.typeCheck` accepts every width, the printer supports
+  -- five, and the five are *not* the powers of two.
+  let divergent := StrataGenerators.PrinterCoverage.divergentBvWidths 64
+  IO.println s!"    bitvec widths 0..63: {64 - divergent.length} printable, {divergent.length} typecheck-but-unprintable"
+  IO.println s!"      printable: {StrataGenerators.PrinterCoverage.printableBvWidths}"
+  IO.println s!"      first divergent: {divergent.take 12}{if divergent.length > 12 then " …" else ""}"
+  return (withErrors, sampled, reparsed)
 
 -- ── CLI ────────────────────────────────────────────────────────────────
 

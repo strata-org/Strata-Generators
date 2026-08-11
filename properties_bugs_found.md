@@ -61,6 +61,27 @@
 - Result of the symbolic evaluator is the same before/after CSE
   - (By the same, we mean that the path-condition expressions and the stores are the same after resolving the value of new variables that are created during CSE)
 
+**Uniform `changed`-flag contract over every pipeline phase**
+
+Rather than one property per pass, these quantify over a *phase list*, so a phase
+added to `corePipelinePhases` later is covered with no new property written.
+
+- Every phase of the Core pipeline (plus `RemoveIrrelevantAxioms`) reports `changed = true` exactly when it changed the program
+- The phases that do *not* hardcode their flag all report it faithfully (the regression guard; this one passes)
+- `RemoveIrrelevantAxioms` reports `changed = false` on a program with no axioms
+- `FilterProcedures` reports `changed = false` when every procedure is a target
+
+**Pretty-printer expressiveness**
+
+The oracle is "the printer logged no conversion error", which needs no parser and
+names the offending construct — strictly stronger than a string round-trip, since
+the printer substitutes a syntactically valid placeholder rather than failing.
+
+- Formatting a generated program logs no conversion error
+- `bitvec 128` literals are printable
+- Every `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operator is printable
+- Every bitvector width the typechecker accepts is one the printer can express (#48)
+
 **Whole programs**
 
 - Completeness of the whole-program typechecker (`Program.typeCheck`) with respect to the declarative typing spec `ProgramHasTypeA`
@@ -90,6 +111,11 @@ for nested function declarations that don't have preconditions, but whose bodies
 - Non-ASCII strings are not escaped when passed to SMT-Lib, so the Core partial evaluator and SMT solvers disagree on the length of non-ASCII strings (The Core evaluator reports `Str.Length "é" = 1`, but Z3 says `Str.Length "é" = 2` and CVC5 reports `Parse Error: Non-printable character in string literal`)
 - The SMT dialect's comparison operator on real numbers (represented as decimal orders) isn't a total order, i.e. it is possible for `r1 <= r2`, `r2 <= r1` and `r1 == r2` to all be false, violating trichotomy
 - The SMT dialect's equality check returns false on two decimals that are mathematically equal but have different mantissa-exponent representations (e.g. `3.0` can be represented as `3 * 10^0` or `30 * 10^-1` , which are mathematically the same but considered to be not equal)
+- Two more pipeline phases hardcode their `changed` flag to `true`, beyond the already-reported `FilterProcedures`: `RemoveIrrelevantAxioms` (`IrrelevantAxioms.lean:81`) reports `changed = true` even on a program containing *no axioms at all*, and the `typeCheck` / `symbolicEval` phases of `corePipelinePhases` (`Verifier.lean:1510`, `:1517`) do the same. Every other phase computes the flag honestly, which is what makes these read as oversights rather than a convention. No consumer reads the flag today (both call sites discard it), so nothing misbehaves at runtime — the defect is that the field is *specified* to mean something it does not mean.
+- `bitvec 128` literals cannot be pretty-printed, even though the width is registered in the factory (`Factory.lean:872`) and has a grammar production (`bv128Lit`, `Grammar.lean:113`): `lconstToExpr` logs `unsupported bitvec width: 128`. Every other registered width prints.
+- **None** of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean:850–872`) but have no grammar production and no arm in `handleUnaryOps`, so each falls through to `mkGenericCall` and is rendered as a call to a fresh free variable. A systematic hole rather than a missing case.
+- The pretty-printer does not fail when it cannot express a construct: it substitutes a *syntactically valid* placeholder (`$__unknown_type` for a type, a generic call for an operator) and appends its errors to the output. So an unprintable program can round-trip "successfully" while denoting a **different** program — observed on 5 of 198 affected programs, which is exactly the case a string round-trip check structurally cannot detect. Conversion errors fire on ~50% of generated programs at the 2–5 declarations the shared whole-program wrapper samples (rising to ~86% at 6 declarations), spanning seven distinct printer sites.
+- `Function.typeCheck` accepts `bitvec w` for **every** width `w` (checked 0–199, since `LMonoTy.bitvec` is unconstrained in the AST and the known type is the polymorphic `∀n. bitvec n`), but the pretty-printer supports exactly `[1, 8, 16, 32, 64]` — so 60 of the first 64 widths typecheck yet cannot be printed. This resolves issue #48, and **corrects its framing**: the supported set is not "the powers of two" (`bitvec 2`, `4` and `128` are all powers of two and all fail to print), it is the five arms hardcoded in `lmonoTyToCoreType` / `lconstToExpr` / `bvTypeOfWidth`. Note the three sites differ in how they fail: the first two substitute a placeholder, whereas `bvTypeOfWidth` silently returns `.bv64`, so an operator at an unsupported width is printed as a *64-bit* operator.
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
 
 ```

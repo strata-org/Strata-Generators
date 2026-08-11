@@ -17,3 +17,5 @@ import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProgramGen.ProcSigThread
 import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
+import StrataGenerators.PhaseChangedFlag
+import StrataGenerators.PrinterCoverage

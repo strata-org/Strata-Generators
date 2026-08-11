@@ -63,7 +63,7 @@ custom `TestSeq.individualIO` nodes so they join the same `lspecIO` suite.
 open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible Core Imperative
 open Strata Strata.CoreDDM
 open StrataDDM (initDialect)
-open LSpec (TestSeq checkIO lspecIO group)
+open LSpec (TestSeq checkIO lspecIO group test)
 
 def main (args : List String) : IO UInt32 := do
   let cli := parseArgs args
@@ -221,13 +221,53 @@ def main (args : List String) : IO UInt32 := do
         (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
       .done
 
+  -- Pipeline-phase `changed`-flag properties. Two shapes:
+  --
+  --   * the two no-op witnesses, which take no generated input at all — each is a
+  --     single constructed program on which the phase provably cannot change
+  --     anything, so the check is a closed `Bool` asserted with `test`;
+  --   * the two sweeps over generated procedure lists, folded like `procTransforms`.
+  --
+  -- Three of the four FAIL honestly, pinning the four hardcoded-`changed := true`
+  -- sites (`FilterProcedures.lean:82`, `IrrelevantAxioms.lean:81`,
+  -- `Verifier.lean:1510` and `:1517`). `phase: non-hardcoded pipeline phases have
+  -- a faithful changed flag` is the one expected to PASS: it is the regression
+  -- guard on the phases that compute the flag correctly today.
+  let phaseSuite : TestSeq :=
+    Properties.phaseNoOpWitnesses.foldr
+      (fun (nameAndCheck : String × Bool) rest =>
+        test nameAndCheck.1 nameAndCheck.2 rest)
+      (Properties.phaseChangedFlags.foldr
+        (fun p rest => checkIO p.name
+          (∀ gp : GenProcs, p.check gp.procs = true) (cfg := cfg) rest)
+        .done)
+
+  -- Printer-expressiveness properties (#69 P2, #48). The two targeted witnesses
+  -- are closed `Bool`s (a `bitvec 128` literal; the eighteen `Bv↔Int` conversion
+  -- operators), and the whole-program property quantifies over `GenProgram` — the
+  -- same wrapper as `programSuite`, so its counterexamples shrink whenever the
+  -- draw typechecks. All three FAIL honestly: the printer substitutes a
+  -- placeholder and logs an error instead of failing, so an unprintable construct
+  -- can round-trip as a *different* program. See `printerErrorDiagnostic` below
+  -- for which constructs are responsible.
+  let printerSuite : TestSeq :=
+    Properties.printerWitnesses.foldr
+      (fun (nameAndCheck : String × Bool) rest =>
+        test nameAndCheck.1 nameAndCheck.2 rest)
+      (checkIO PropertyNames.printerNoConversionError
+        (∀ gp : GenProgram,
+          StrataGenerators.PrinterCoverage.checkProgramPrintsWithoutError gp.prog = true)
+        (cfg := cfg) .done)
+
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
     ("cmd", [cmdSuite]),
     ("function", [functionSuite]),
     ("stmt", [stmtSuite]),
     ("proc", [procSuite]),
-    ("program", [programSuite])
+    ("program", [programSuite]),
+    ("phase", [phaseSuite]),
+    ("printer", [printerSuite])
   ]) []
 
   -- Always-run diagnostics (do not gate the exit code):
@@ -250,6 +290,14 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  -- Printer conversion-error tally: which constructs `Core.formatProgram` cannot
+  -- express, most frequent first. This is the localisation behind the `printer:`
+  -- suite — the gating property says *that* the printer failed, this says *what*
+  -- it could not print. Not gated (the property above does the gating).
+  IO.println ""
+  IO.println "Printer conversion-error diagnostics:"
+  let _ ← printerErrorDiagnostic numTrials maxSize
 
   -- Whole-program shrinker diagnostic. The program properties exercise the
   -- `Shrinkable GenProgram` instance only unreliably — the reliable failure is

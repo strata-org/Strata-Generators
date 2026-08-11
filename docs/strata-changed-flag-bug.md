@@ -15,16 +15,40 @@ get wrong answers.
 
 ## Summary
 
-`Core.PipelinePhase.transform` returns `Bool × Program`. Two phases return the
+`Core.PipelinePhase.transform` returns `Bool × Program`. **Four** phases return the
 `Bool` as the literal `true` regardless of whether they changed the program:
 
-| Phase | Site | Code |
-|---|---|---|
-| `FilterProcedures` | `Strata/Transform/FilterProcedures.lean:82` | `return (true, filtered)` |
-| `RemoveIrrelevantAxioms` | `Strata/Transform/IrrelevantAxioms.lean:82` | `return (true, pruned)` |
+| Phase | Site | Code | Reported? |
+|---|---|---|---|
+| `FilterProcedures` | `Strata/Transform/FilterProcedures.lean:82` | `return (true, filtered)` | yes, via private correspondence |
+| `RemoveIrrelevantAxioms` | `Strata/Transform/IrrelevantAxioms.lean:81` | `return (true, pruned)` | **not yet** |
+| `typeCheck` | `Strata/Languages/Core/Verifier.lean:1510` | `return (true, prog')` | **not yet** |
+| `symbolicEval` | `Strata/Languages/Core/Verifier.lean:1517` | `return (true, prog')` | **not yet** |
 
-Both phases are no-ops on inputs where there is nothing to remove, and both
-report `true` on those inputs.
+`FilterProcedures` and `RemoveIrrelevantAxioms` are no-ops on inputs where there
+is nothing to remove, and both report `true` on those inputs.
+
+The two `Verifier.lean` phases are `let`-bound inside `corePipelinePhases`, i.e.
+they are part of the *real* verification pipeline rather than optional passes.
+`typeCheck` is the most defensible of the four — it annotates, so it usually does
+change the program — but it is still unconditional, and reports `true` even when
+type checking is a no-op.
+
+### Why these read as oversights rather than a convention
+
+Every *other* phase computes the flag honestly:
+
+- `CSE.runCSE` (`CommonSubexprElim.lean:375`) uses `changed || idx' > idx`, i.e.
+  "did the fresh-variable counter advance";
+- `loopElim`, `insertLoopInvariantAsserts`, `CallElim` and `ProcedureInlining` all
+  thread it through `Transform.runProgramUntil` (`CoreTransform.lean:406`), which
+  accumulates `anyChanged` across iterations;
+- `PrecondElim` and `TermCheck` compute theirs (`TerminationCheck.lean:333` returns
+  the `changed` its `transformDecls` accumulated).
+
+So four sites out of twelve hardcode, and the eight that do not all bother to get
+it right. `IrrelevantAxioms.run` and `FilterProcedures.run` already compute enough
+information to return the correct value.
 
 ---
 
@@ -71,6 +95,36 @@ IrrelevantAxioms: changed = true
 ```
 
 So `changed = true` while `progOut = progIn`.
+
+**Re-confirmed** at the currently pinned rev (`865885871`) with a sharper witness
+for `RemoveIrrelevantAxioms`: a program containing **no axiom declarations at
+all**, so the phase cannot prune anything regardless of which axioms it considers
+irrelevant.
+
+```
+RemoveIrrelevantAxioms on an axiom-free program:
+  changed flag      = true
+  output == input ? = true
+```
+
+## Regression tests
+
+All four sites are now pinned by properties in the test suite
+(`StrataGenerators/PhaseChangedFlag.lean`), run by both harnesses:
+
+| Property | Status |
+|---|---|
+| `phase: RemoveIrrelevantAxioms changed flag is faithful on a no-op` | FAILS (pins `IrrelevantAxioms.lean:81`) |
+| `phase: FilterProcedures changed flag is faithful on a no-op` | FAILS (pins `FilterProcedures.lean:82`) |
+| `phase: every pipeline phase has a faithful changed flag` | FAILS (`typeCheck`, `symbolicEval`) |
+| `phase: non-hardcoded pipeline phases have a faithful changed flag` | PASSES |
+
+The third is deliberately stated over the *whole phase list* rather than over the
+four known offenders, so a phase added to `corePipelinePhases` later that
+hardcodes its flag is caught without a new property being written. The fourth is
+the complement, and it passing is what makes the other three informative: it
+establishes that the eight honestly-computing phases really are honest, so the
+failures above localise to exactly the four sites in the table.
 
 ---
 

@@ -68,6 +68,20 @@ def runIOProperty (name : String)
       | none   => ""
     pure ⟨false, s!"  × FAIL ({numSamples}/{totalTests}) {name}{suffix}"⟩
 
+/-- Assert a closed `Bool` — a property with no generated input, whose verdict is
+    a single constructed witness rather than a sample. The plain-harness analogue
+    of `LSpec.test`.
+
+    Used by the pipeline-phase no-op witnesses and the two targeted printer
+    witnesses: in each case the sharp statement of the defect is one specific
+    program or operator, so sampling would only obscure it. There is no trial
+    count to report, hence the bare `PASS`/`FAIL` line. -/
+def runUnitProperty (name : String) (verdict : Bool) : IO Result :=
+  if verdict then
+    pure ⟨true, s!"  ✓ PASS {name}"⟩
+  else
+    pure ⟨false, s!"  × FAIL {name}"⟩
+
 /-- Run one named suite: print its header, run each property in order (printing
     each result line as it completes), and return whether every property in the
     suite passed. Mirrors the per-suite structure of `LSpec.lspecIO`. -/
