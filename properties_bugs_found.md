@@ -61,11 +61,19 @@
 - Result of the symbolic evaluator is the same before/after CSE
   - (By the same, we mean that the path-condition expressions and the stores are the same after resolving the value of new variables that are created during CSE)
 
+**Whole programs**
+
+- Completeness of the whole-program typechecker (`Program.typeCheck`) with respect to the declarative typing spec `ProgramHasTypeA`
+- `getNames` of a well-typed program contains no duplicates (the first conjunct of `ProgramHasType'`, checked directly against the flat namespace rather than via the checker's incremental fold)
+- If `Program.typeCheck` succeeds and produces an elaborated program, the elaborated program also typechecks
+- `stripMetaData` preserves typeability
+- `eraseTypes` preserves typeability 
+
 ## Implementation bugs caught
 
 - `LExpr` type inference is incomplete (if we erase type annotations on a well-typed term, if the resultant term contains an unannotated quantified free variable e.g. `\forall x. x`, type inference fails to reconstruct a type)
 - Progress doesn't hold for `LExpr`s (this was previously known, due to uninterpreted functions, the fact that `\forall` and `\exists` quantifiers don't evaluate under `if` and equality of lambda expressions is conservative)
-- 7 situations in which the parser + pretty-printer round-trip for functions fails:
+- 11 situations in which the parser + pretty-printer round-trip fails:
   - Type parameters to functions can't begin with `s` in their name (conflicts with `<s` signed less-than operator):
   - Pretty-printer mis-prints `real` numbers that are represented as rationals with a non-terminating decimal representation (e.g. `1/3` is `0.333...`, but is printed as `0.0` instead)
   - Unapplied unary operators can't be pretty-printed (e.g. `Bool.Not` can't be printed if it's not applied to an argument)
@@ -73,17 +81,70 @@
   - Pipe-escaping identifiers for types (wrapping identifiers with `|...|` to handle SMTLib names) is not done uniformly (only done for type annotations but not the return type for functions)
   - Periods are allowed in the grammar for identifiers but not accepted by the parser (which uses them to resolve namespaces)
   - Applying the factory function `Real.Neg` on a negative real number literal fails the round-trip property due to missing parenthesization (`Real.Neg (-3.0)` is printed as `--3.0`, which re-parses as `-(-3.0)`; note `Int.Neg (-3)` correctly prints as `-(-3)`)
+  - Typechecker accepts bit-vector types with non-power-of-2 lengths, but the printer only supports printing the types `bv{1, 8, 16, 32, 64} `-- unsupported bitvec types are printed as `$__unknown_type` instead
+  - Bit-vector literals with some width `n`, where `n` is not a power of 2, are printed as `bv{64}(n) `(i.e. the width `n` becomes the value, and the actual value of the bit-vector is discarded), changing the meaning of the term
+  - `bv128` is registered in the Core factory & the DDM, but `bv128` literals are unprintable / unparseable 
+  - Core contains factory functions `Bv{n}.ToInt` and `Int.ToBv{n}` for converting from bitvec <-> int, but these functions are unprintable
 - The precondition elimination transformation erroneously reports its `changed` flag as false, even though it rewrites procedures to gain an `assert` statement in its body. This happens
 for nested function declarations that don't have preconditions, but whose bodies invoke a precondition-carrying function (e.g. `Int.SafeDiv`).
 - Non-ASCII strings are not escaped when passed to SMT-Lib, so the Core partial evaluator and SMT solvers disagree on the length of non-ASCII strings (The Core evaluator reports `Str.Length "é" = 1`, but Z3 says `Str.Length "é" = 2` and CVC5 reports `Parse Error: Non-printable character in string literal`)
 - The SMT dialect's comparison operator on real numbers (represented as decimal orders) isn't a total order, i.e. it is possible for `r1 <= r2`, `r2 <= r1` and `r1 == r2` to all be false, violating trichotomy
 - The SMT dialect's equality check returns false on two decimals that are mathematically equal but have different mantissa-exponent representations (e.g. `3.0` can be represented as `3 * 10^0` or `30 * 10^-1` , which are mathematically the same but considered to be not equal)
+- For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
+
+```
+-- Note that the type parameter `a` only appears in the type annotation for the exists-quantified variable 
+function s<a> () : bool {
+  exists q : (a) :: false
+}
+```
+
+`Program.typeCheck` produces the following elaborated program
+
+```
+function s () : bool {
+  exists q : ($__ty1) :: false        -- the type variable `a` was rewritten to `$__ty1`
+}
+```
+
+which fails to parse, with the error message `Undeclared type or category $__ty1`
+
+
+- `Function.typeCheck` never inspects a function's `preconditions` field at all, so the typechecker can accept functions whose preconditions can:
+  + refer to free variables not in the ambient typing context
+  + have type other than Bool
+  + refer to non-existent operators (i.e. operators that are not in the factory)
+The function typing spec (`FuncHasType`) also does not enforce conditions on functions' preconditions, so this omission occurs both in the executable typechecker and its speccification.
+
+One consequence is that the `PrecondElim` pass can turn a well-typed function (accpeted by the typechecker) into an ill-typed procedure. For example, given this function:
+
+```
+-- Precondition refers to a nonexistent variable `y`
+function f5 () : bool requires Int.SafeDiv(1, 1) == y { true }
+```
+
+the `PrecondElim` pass produces the following:
+
+```
+-- Typechecker rejects this function with the error message: 
+-- "rejected: [assume [precond_f5_0] ((~Int.SafeDiv #1 #1) == (y : int))] No free variables are allowed here!"
+procedure f5$$wf ()
+{
+  assert [f5_precond_calls_Int.SafeDiv_0]: !(1 == 0);
+  assume [precond_f5_0]: 1 / 1 == y;
+};
+function f5 () : bool {
+  true
+}
+```
 
 ## Specification bugs caught during testing
 - The function typing spec `FuncHasType'` permits a measure (a `decreases` clause) to exist without requiring the function body to also exist, even though the executable typechecker rejects a function if it has a measure but no body
+  - The same gap is reachable at whole-program level, via both a top-level `function` declaration and an inline `funcDecl` inside a procedure body: it accounts for ~28% of generated programs being rejected by `Program.typeCheck`
 - The `FilterProcedures` transformation returns a Boolean flag to indicate whether the transformation changed the program: this flag is hard-coded to `true`, even though the `Bool` is meant to be interpreted
 as whether the transformation modified the analysis state (`CoreTransformState`)
-- The spec for the precondition elimination transformation expects all functions in the output factory to have no preconditions, but this is not true, since the transformation doesn't eliminate preconditions for built-ins (e.g. safeDiv, safe destructors, etc)
+- The spec for the precondition elimination transformation expects all functions in the output factory to have no preconditions, but this is not true, since the transformation doesn't eliminate preconditions for built-ins (e.g. `safeDiv`, safe destructors, etc)
+
 
 ## Specification bugs caught when trying to prove completeness about generators
 - `MutualADTWF` doesn't require applications of type constructors to be well-kinded (i.e. match their known arities)

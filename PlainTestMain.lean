@@ -167,12 +167,25 @@ def main (args : List String) : IO UInt32 := do
       (fun p => runProperty p.name
         (∀ gp : GenProcs, p.check gp.procs = true) cfg)
 
+  -- Whole-program-generator properties, folded from the shared
+  -- `Properties.programChecks` bundle (the same six checks as `TestMain`).
+  -- Counterexamples are minimized by the whole-program shrinker, which keeps every
+  -- candidate well-typed via Strata's own `Program.typeCheck`. Two checks FAIL
+  -- honestly: `typechecker accepts generated programs` on any of three documented
+  -- rejection causes, and `typeCheck output re-typechecks` intermittently (~1 draw
+  -- in 500, and unlike the former its witness does shrink).
+  let programSuite : List (IO Result) :=
+    Properties.programChecks.map
+      (fun p => runProperty p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) cfg)
+
   let exitCode ← runSuites [
     ("expr", exprSuite),
     ("cmd", cmdSuite),
     ("function", functionSuite),
     ("stmt", stmtSuite),
-    ("proc", procSuite)
+    ("proc", procSuite),
+    ("program", programSuite)
   ]
 
   -- Always-run diagnostics (do not gate the exit code):
@@ -193,5 +206,16 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  -- Whole-program shrinker diagnostic (same as `TestMain`): exercises the
+  -- `Shrinkable GenProgram` instance, which a green run of the program properties
+  -- would otherwise leave untouched. Diagnostic, not gated.
+  IO.println ""
+  IO.println "Whole-program shrinker diagnostics:"
+  let (_, shrinkIllTyped, shrinkStranded) ← programShrinkDiagnostic numTrials
+  if shrinkIllTyped == 0 && shrinkStranded == 0 then
+    IO.println "    PASS (every candidate well-typed, no stranded `requires`)"
+  else
+    IO.println "    SHRINKER BUG — see counts above"
 
   return exitCode

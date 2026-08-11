@@ -13,6 +13,10 @@ import StrataGenerators.StmtHasTypeAGen.TestSupport
 import StrataGenerators.HasTypeAGen.DecimalAgreement
 import StrataGenerators.HasTypeAGen.SmtStringEscaping
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
+-- The whole-program generator, and `minimizeProgramCounterexample` so the program
+-- panels report the minimal well-typed counterexample rather than the raw draw.
+import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.Shrink
 import Basalt.IO
 -- `Basalt.PlausibleGen` supplies the `[Gen Plausible.Gen]` instance used by the
 -- procedure-list panels, which run the backtracking `genProcedure` generator via
@@ -935,6 +939,91 @@ def genProcFactoryStrippedProp (tag : String) (check : List Core.Procedure → B
         ("declared_offenders", .ordinal (offenders.filter (·.2.2)).length),
         ("builtin_offenders", .ordinal (offenders.filter (fun e => !e.2.2)).length) ] }
 
+-- ── Whole-program panels ────────────────────────────────────────────
+-- One panel per property in `Properties.programChecks`. Each sample is a whole
+-- generated `Program` (every declaration kind, ambient context threaded across the
+-- fold) with a pass/fail verdict.
+--
+-- The `typechecker accepts generated programs` panel visualizes the honest failure:
+-- ~60% of draws are rejected on one of three known causes, and the
+-- `rejection_cause` feature below is what makes the breakdown legible — the panel
+-- separates the three causes rather than showing one undifferentiated block of
+-- failures. Those failures are also the ones the shrinker cannot minimize (its
+-- oracle is the checker under test), so `num_decls` on a failed sample is the
+-- generated size, not a reduced one.
+
+open StrataGenerators.Program.TestSupport in
+/-- Structural features of a generated program: declaration count, reducible size,
+    which declaration kinds it contains, and — the discriminating feature for the
+    completeness panel — which known gap (if any) it bears. -/
+private def programFeatures (p : Core.Program) (genSize : Nat) :
+    List (String × Tyche.Feature) :=
+  let kind : Core.Decl → String
+    | .type (.con _) _ => "type.con"
+    | .type (.syn _) _ => "type.syn"
+    | .type (.data _) _ => "type.data"
+    | .ax _ _ => "axiom"
+    | .distinct _ _ _ => "distinct"
+    | .proc _ _ => "proc"
+    | .func _ _ => "func"
+    | .recFuncBlock _ _ => "recFuncBlock"
+  let causes := programRejectionCause p
+  [ ("num_decls", .ordinal p.decls.length),
+    ("program_size", .ordinal (sizeProgram p)),
+    ("decl_kinds", .nominal (" ".intercalate (p.decls.map kind).eraseDups)),
+    ("rejection_cause", .nominal (if causes.isEmpty then "none" else "+".intercalate causes)),
+    ("generator_size", .ordinal genSize) ]
+
+/-- A generated program paired with one property's verdict and the property name. -/
+structure ProgramPropResult where
+  prog : Core.Program
+  passed : Bool
+  genSize : Nat
+  tag : String
+
+open StrataGenerators.Program.TestSupport in
+instance : Tyche.TycheSample ProgramPropResult where
+  toSample r :=
+    -- Render via Strata's own formatter, annotating a typechecker-rejected program
+    -- with the gap it bears via the *shared* `programStatusNote` — the same function
+    -- the Plausible `Repr` uses, so a counterexample reads identically in both views.
+    { representation := (Core.formatProgram r.prog).pretty ++ programStatusNote r.prog
+      status := if r.passed then .passed else .failed
+      features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
+        :: programFeatures r.prog r.genSize }
+
+/-- Generate a whole program in `IO` for the Tyche panels, via `ProgramGen.sample`
+    (which runs the generator through the retrying `Plausible.Gen` interpretation —
+    the direct `G := IO` path is unreliable, as `ProgramGen.sample`'s docstring
+    records). Mirrors `TestScaffold.genProgramWith`'s bounds. -/
+def genProgramForTyche : IO (Core.Program × Nat) := do
+  let genSize ← IO.rand 0 60
+  let numDecls := max 2 (min 5 (2 + genSize / 25))
+  let prog ← ProgramGen.sample numDecls {} 8000 genSize
+  return (prog, genSize)
+
+open StrataGenerators.Program.TestSupport in
+/-- Build a `ProgramPropResult` by generating a program and applying a check
+    predicate under the given tag.
+
+    A failing sample is first minimized by `minimizeProgramCounterexample`, so the
+    panel shows the smallest well-typed reproducer rather than the raw draw — the
+    same shrink-then-report pattern `genProcProp` uses. The minimized program still
+    fails `check` and is still well-typed, so the verdict is unchanged; features are
+    recomputed from it, so `num_decls`/`program_size` describe what is displayed.
+
+    For `programTypecheck` specifically the minimizer is a no-op by construction
+    (the failure *is* oracle rejection, so no candidate survives the filter) and the
+    raw draw is shown — which is the honest thing to display, and why the
+    `rejection_cause` feature exists. Passing samples are reported as generated. -/
+def genProgramProp (tag : String) (check : Core.Program → Bool) : IO ProgramPropResult := do
+  let (p, d) ← genProgramForTyche
+  if check p then
+    return { prog := p, passed := true, genSize := d, tag }
+  else
+    return { prog := minimizeProgramCounterexample check 400 p, passed := false,
+             genSize := d, tag }
+
 -- ── Panel for the SMT escape function ───────────────────────────────
 -- Each sample is one string from `genInterestingString`, serialized through
 -- `Strata.SMTDDM.termToString`, which is the real path to the solver. A sample
@@ -1198,3 +1287,12 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
       panel p.name (genProcFactoryStrippedProp p.name p.check)
     else
       panel p.name (genProcProp p.name p.check)
+
+  -- ── Whole-program panels ───────────────────────────────────────────
+  -- One panel per property in the shared `Properties.programChecks` bundle (also
+  -- consumed by both Plausible harnesses). A failing sample is minimized by the
+  -- whole-program shrinker before display, except for `programTypecheck`, whose
+  -- failures are oracle rejections and so cannot shrink — there the
+  -- `rejection_cause` feature is what makes the three gaps legible.
+  for p in Properties.programChecks do
+    panel p.name (genProgramProp p.name p.check)

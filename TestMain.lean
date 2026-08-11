@@ -205,12 +205,29 @@ def main (args : List String) : IO UInt32 := do
         (∀ gp : GenProcs, p.check gp.procs = true) (cfg := cfg) rest)
       .done
 
+  -- Whole-program-generator properties, folded from the shared
+  -- `Properties.programChecks` bundle. Counterexamples are minimized by the
+  -- whole-program shrinker (`Shrinkable GenProgram`), which keeps every candidate
+  -- well-typed by re-running Strata's own `Program.typeCheck`. Two checks FAIL
+  -- honestly. `typechecker accepts generated programs` fails on any of three
+  -- documented rejection causes (two generator limitations, one genuine Strata
+  -- gap); each counterexample's `Repr` tags which cause it hit, since those are
+  -- precisely the programs the shrinker cannot minimize (its oracle is the checker
+  -- under test). `typeCheck output re-typechecks` fails
+  -- intermittently (~1 draw in 500) and its witness *does* shrink.
+  let programSuite : TestSeq :=
+    Properties.programChecks.foldr
+      (fun p rest => checkIO p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
+      .done
+
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
     ("cmd", [cmdSuite]),
     ("function", [functionSuite]),
     ("stmt", [stmtSuite]),
-    ("proc", [procSuite])
+    ("proc", [procSuite]),
+    ("program", [programSuite])
   ]) []
 
   -- Always-run diagnostics (do not gate the exit code):
@@ -233,6 +250,20 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  -- Whole-program shrinker diagnostic. The program properties exercise the
+  -- `Shrinkable GenProgram` instance only unreliably — the reliable failure is
+  -- unshrinkable by construction, and the shrinkable one fires on ~1 draw in 500 —
+  -- so without this the instance can go untouched for a whole run. Reports the
+  -- reduction achieved and the two invariants (all emitted candidates well-typed;
+  -- none stranding a `requires`). Diagnostic, not gated.
+  IO.println ""
+  IO.println "Whole-program shrinker diagnostics:"
+  let (_, shrinkIllTyped, shrinkStranded) ← programShrinkDiagnostic numTrials
+  if shrinkIllTyped == 0 && shrinkStranded == 0 then
+    IO.println "    PASS (every candidate well-typed, no stranded `requires`)"
+  else
+    IO.println "    SHRINKER BUG — see counts above"
 
   -- Tyche visualization pass (on by default; disable with `--no-tyche`). Writes
   -- one JSONL panel per property to `cli.tycheOut`, using the *same* shared

@@ -1,6 +1,9 @@
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.StmtHasTypeAGen.TestSupport
 import StrataGenerators.ProcedureHasTypeAGen.TestSupport
+-- Supplies the six whole-program check predicates (and the shrinker backing the
+-- `Shrinkable GenProgram` instance).
+import StrataGenerators.ProgramGen.Shrink
 
 /-!
 # Shared property catalog
@@ -25,14 +28,15 @@ which check a name denotes. Properties whose harness shapes genuinely differ
 keep only a shared *name* here; their test logic stays with each view.
 
 Naming scheme: `area: description`, where `area` is one of `expr` / `cmd` /
-`function` / `stmt` / `proc`. A handful of properties are exercised by only one
-harness (noted per entry); they still live here so the catalog is the one place
-property names are spelled.
+`function` / `stmt` / `proc` / `program`. A handful of properties are exercised by
+only one harness (noted per entry); they still live here so the catalog is the one
+place property names are spelled.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Stmt.TestSupport
 open StrataGenerators.Procedure.TestSupport
+open StrataGenerators.Program.TestSupport
 
 /-- A property under test, bundling its canonical name with the shared boolean
     check both harnesses evaluate on a generated `α`. Pairing name↔check in one
@@ -173,6 +177,32 @@ def procAnfControlFlow       : String := "proc: ANFEncoder does not change contr
 def procAnfChangedFlag       : String := "proc: ANFEncoder changed flag is faithful"
 def procAnfAnalysisPreserved : String := "proc: ANFEncoder preserves call-graph WF"
 
+-- ── Whole-program-generator properties ───────────────────────────────
+-- `genProgram` produces a whole `Program` (every declaration kind, real ambient
+-- context threaded across the fold) and is proven sound against `ProgramHasTypeA`.
+-- The first property below therefore SHOULD hold and FAILS honestly, on any of
+-- three documented rejection causes; the second pins those three as the complete
+-- list of causes; the remaining four are invariants of a well-typed program, three
+-- of which hold while `programTypeCheckIdem` fails intermittently. See the module
+-- doc of `ProgramGen/Shrink`.
+
+/-- **FAILS honestly** (~60% of draws) on the three program-level completeness
+    gaps. -/
+def programTypecheck : String := "program: typechecker accepts generated programs"
+def programRejectionKnownGap : String :=
+  "program: typechecker rejections are only the known gaps"
+-- The four invariants of a well-typed program. Each is conditional on the input
+-- typechecking (so vacuous on a gap-bearing draw, a genuine claim otherwise), and
+-- — unlike `programTypecheck` — a counterexample to any of them IS shrinkable,
+-- since its failure does not depend on the oracle rejecting the program.
+def programNamesNodup      : String := "program: getNames of a well-typed program are distinct"
+/-- **FAILS intermittently** (~1 in 500 single-function draws): the checker's output
+    keeps a freshened type variable for a type parameter used only in a body binder
+    annotation, while restoring `typeArgs` without it. -/
+def programTypeCheckIdem   : String := "program: typeCheck output re-typechecks"
+def programStripMeta       : String := "program: stripMetaData preserves typeability"
+def programEraseTypes      : String := "program: eraseTypes preserves typeability"
+
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
@@ -194,7 +224,9 @@ def all : List String :=
     procPrecondDeclaredFactoryStripped, procPrecondAnalysisPreserved,
     procAnfDeclsLength, procAnfNonProcsUnchanged, procAnfHeadersPreserved,
     procAnfFreshVarsDet, procAnfOrderPreserved, procAnfControlFlow,
-    procAnfChangedFlag, procAnfAnalysisPreserved ]
+    procAnfChangedFlag, procAnfAnalysisPreserved,
+    programTypecheck, programRejectionKnownGap, programNamesNodup,
+    programTypeCheckIdem, programStripMeta, programEraseTypes ]
 
 -- No two properties share a name (a copy/paste slip that pointed two properties
 -- at the same label would collapse their panels/results silently).
@@ -283,5 +315,27 @@ def procTransforms : List (Property (List Core.Procedure)) :=
     ⟨PropertyNames.procAnfControlFlow,          checkAnfControlFlowPreserved⟩,
     ⟨PropertyNames.procAnfChangedFlag,          checkAnfChangedFlagValid⟩,
     ⟨PropertyNames.procAnfAnalysisPreserved,    checkAnfAnalysisPreserving⟩ ]
+
+/-- The six whole-program properties, each a generated `Program` scored by a shared
+    predicate. The first FAILS honestly on the three program-level completeness
+    gaps; the second pins those three as the complete list of causes; the last four
+    are invariants of a well-typed program (vacuous on a gap-bearing draw), three of
+    which hold while `programTypeCheckIdem` FAILS intermittently — the checker's own
+    output is not always re-checkable.
+
+    Counterexamples are minimized by the whole-program shrinker
+    (`StrataGenerators.ProgramGen.Shrink`), which keeps every candidate well-typed
+    by re-running Strata's own `Program.typeCheck`. The one exception is
+    `programTypecheck`: its failures rest on the oracle *rejecting* the program, so
+    no smaller candidate survives the filter and the witness is reported
+    unshrunk — with a tag naming the gap (see the `Repr` for `GenProgram`). The
+    other five shrink normally. -/
+def programChecks : List (Property Core.Program) :=
+  [ ⟨PropertyNames.programTypecheck,          checkProgramTypeCheckerComplete⟩,
+    ⟨PropertyNames.programRejectionKnownGap,  checkProgramRejectionIsKnownGap⟩,
+    ⟨PropertyNames.programNamesNodup,         checkProgramNamesNodup⟩,
+    ⟨PropertyNames.programTypeCheckIdem,      checkProgramTypeCheckIdempotent⟩,
+    ⟨PropertyNames.programStripMeta,          checkProgramStripMetaPreservesTyping⟩,
+    ⟨PropertyNames.programEraseTypes,         checkProgramEraseTypesPreservesTyping⟩ ]
 
 end Properties

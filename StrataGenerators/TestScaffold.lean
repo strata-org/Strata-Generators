@@ -10,6 +10,10 @@ import StrataGenerators.StmtHasTypeAGen.TestSupport
 -- Supplies `relabelProcs` and `shrinkProcsList`, backing the `Shrinkable GenProcs`
 -- instance so Plausible reports minimal well-typed procedure counterexamples.
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
+-- The whole-program generator, and the whole-program shrinker backing the
+-- `Shrinkable GenProgram` instance (plus the `checkProgram*` predicates).
+import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.Shrink
 import Basalt.PlausibleGen
 import Plausible
 import Strata.DL.Lambda.LExprT
@@ -648,6 +652,118 @@ instance : Arbitrary GenProcs where
 -- is faithful` (the pass hardcodes `changed := true` even when it removes
 -- nothing) and `proc: PrecondElim changed flag is faithful` (the `.funcDecl`
 -- branch reports unchanged while inserting a `$$wf` block).
+
+-- ── Whole-program generation via Plausible.Gen ─────────────────────────
+--
+-- `genProgram` generates a whole well-typed Strata Core `Program` — every
+-- declaration kind, with the ambient context threaded across the declaration fold
+-- — and is proven sound against the declarative spec `ProgramHasTypeA`
+-- (`ProgramGen.SoundProgram`). Unlike `GenProcs`, which assembles a program out of
+-- procedures only, this exercises abstract types, aliases, axioms, `distinct`,
+-- datatype blocks and functions as well.
+
+open StrataGenerators.Program.TestSupport
+
+/-- A generated whole program. -/
+structure GenProgram where
+  prog : Core.Program
+
+instance : Repr GenProgram where
+  -- Render via Strata's own formatter (real Core concrete syntax), so a
+  -- counterexample shows exactly the program under test, followed by the shared
+  -- `programStatusNote`. That note matters because a typechecker-rejected program
+  -- (~60% of draws) is one the shrinker cannot minimize — its oracle *is* that
+  -- typechecker — so the note names the gap responsible instead of leaving the
+  -- reader to infer it from an unreduced program, and falls back to the checker's
+  -- verbatim diagnostic when the rejection matches no known gap. Sharing the
+  -- function with the Tyche panel renderer keeps the two views from drifting.
+  reprPrec gp _ :=
+    (Core.formatProgram gp.prog).pretty ++ programStatusNote gp.prog
+
+-- Shrink via the whole-program shrinker `shrinkProgram`: drop a declaration,
+-- truncate to a prefix, cut every gap-bearing declaration at once, or reduce one
+-- declaration in place (delegating to the procedure / function / statement /
+-- expression shrinkers below it). Every candidate is re-checked with Strata's own
+-- `Program.typeCheck`, so a reported counterexample is always a well-typed
+-- program; declaration order is preserved and nothing is renamed.
+instance : Shrinkable GenProgram where
+  shrink gp := (shrinkProgram gp.prog).map (⟨·⟩)
+
+-- `numDecls` is capped at 2–5 and scales with Plausible's size parameter. As with
+-- `genProcsWith`, the retry budget has to absorb the residual `inhabitedWitness`
+-- failure in the expression generator (a compound argument type nothing in scope
+-- inhabits): each declaration is an independent chance to hit it, so whole-program
+-- success decays geometrically in `numDecls`. `ProgramGen.sample`'s own measurements
+-- put `fuel = 2000` comfortably inside the plateau at `numDecls = 12`, so 8000 at
+-- `numDecls ≤ 5` is ample.
+private def genProgramWith : Gen GenProgram := Gen.sized fun s => do
+  let numDecls := max 2 (min 5 (2 + s / 25))
+  let prog ← (retryGen 8000 (ProgramGen.genProgram (G := Plausible.Gen) numDecls {})
+    : Gen Core.Program)
+  pure ⟨prog⟩
+
+instance : Arbitrary GenProgram where
+  arbitrary := retryGen 8000 genProgramWith
+
+-- ── Whole-program shrinker diagnostic ─────────────────────────────────
+--
+-- The six whole-program properties come from the shared `Properties.programChecks`
+-- bundle, so they are folded directly into each driver's `programSuite` rather than
+-- restated as `prop_*` wrappers here.
+--
+-- What the bundle cannot show is how well the *shrinker* works. Its one reliable
+-- failure (`programTypecheck`) fails only on gap-bearing programs, which are
+-- precisely the ones no shrinker with this oracle can minimize; the one shrinkable
+-- failure (`programTypeCheckIdem`) fires on roughly 1 draw in 500, so most runs do
+-- not see it. On a run that hits neither, the `Shrinkable GenProgram` instance goes
+-- unexercised and a regression in it would pass unnoticed until the day it matters.
+--
+-- This diagnostic closes that hole: it minimizes each sampled program against a
+-- deliberately-always-failing property, and reports the reduction achieved plus the
+-- two invariants that matter. It is a diagnostic, not a gated property — it
+-- measures shrinker quality rather than asserting a fact about Strata.
+
+/-- Exercise the whole-program shrinker on freshly sampled programs and report how
+    far it reduces them, checking on the way that every candidate it emits is
+    well-typed and that no reduction leaves a `requires` clause stranded.
+
+    The target property is `sizeProgram p ≤ 3`, chosen because it fails on
+    essentially every generated program and keeps failing as the program shrinks, so
+    the minimizer runs to its fixpoint and the reported ratio measures the
+    shrinker's reach rather than an early exit.
+
+    Returns `(candidates, illTyped, stranded)` — the second and third must be 0. -/
+def programShrinkDiagnostic (numTrials : Nat) : IO (Nat × Nat × Nat) := do
+  let samples := max 1 (min 20 numTrials)
+  let mut candidates := 0
+  let mut illTyped := 0
+  let mut stranded := 0
+  let mut sizeBefore := 0
+  let mut sizeAfter := 0
+  let mut declsBefore := 0
+  let mut declsAfter := 0
+  for _ in [0:samples] do
+    let prog ← ProgramGen.sample 6
+    -- Every one-step candidate must be well-typed, and none may strand a
+    -- `requires` clause (the one ill-formedness the typechecker does not catch —
+    -- see `funcPreconditionsScoped`).
+    let cands := shrinkProgram prog
+    candidates := candidates + cands.length
+    illTyped := illTyped + (cands.filter (!progTypeChecks ·)).length
+    stranded := stranded + (cands.filter (fun c => c.decls.any fun
+      | .func f _ => !funcPreconditionsScoped f
+      | .recFuncBlock fs _ => fs.any (!funcPreconditionsScoped ·)
+      | _ => false)).length
+    let minimized := minimizeProgramCounterexample (fun p => sizeProgram p ≤ 3) 400 prog
+    sizeBefore := sizeBefore + sizeProgram prog
+    sizeAfter := sizeAfter + sizeProgram minimized
+    declsBefore := declsBefore + prog.decls.length
+    declsAfter := declsAfter + minimized.decls.length
+  IO.println s!"    {samples} programs: size {sizeBefore} → {sizeAfter}, \
+    decls {declsBefore} → {declsAfter}"
+  IO.println s!"    {candidates} candidates emitted; {illTyped} ill-typed, \
+    {stranded} with a stranded `requires` (both must be 0)"
+  pure (candidates, illTyped, stranded)
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
