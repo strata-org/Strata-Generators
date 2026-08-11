@@ -1,3 +1,4 @@
+import Std.Data.HashMap
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
@@ -52,9 +53,98 @@ instance : BEq LMonoTy := instBEqOfDecidableEq
 abbrev BVarCtx := List LMonoTy
 /-- Free-variable context: maps variable names to their types (locally nameless). -/
 abbrev FVarCtx := List (String × LMonoTy)
-/-- Flattened representation of a factory's operators as (name, curried type) pairs.
-    Used internally by the generator and proofs. -/
-abbrev OpCtx := List (String × LMonoTy)
+
+/-- The operators of a factory, as a list of (name, curried type) pairs.
+
+    This is the plain list. `OpCtx` below holds this list with an index by type. -/
+abbrev OpList := List (String × LMonoTy)
+
+/-- Each operator name in `ops` that has the curried type `τ`. A linear scan finds
+    the names.
+
+    This function is the specification of an operator lookup by type.
+    `OpCtx.opsOfType` is the fast form. `OpCtx.agrees` shows that the two functions
+    give the same list, in the same order. Each proof in this package uses this scan.
+    No proof uses the hash map. -/
+def opsOfTypeList (ops : OpList) (τ : LMonoTy) : List String :=
+  ops.filterMap (fun (x, ty) => if ty == τ then some x else none)
+
+/-- One step of the fold in `OpCtx.ofList`. The step appends the name in `p` to the
+    entry for the type in `p`.
+
+    The append keeps the order of the scan. Therefore `agrees` can be an equality of
+    lists. This form of the invariant is the most convenient one. A proof can rewrite a
+    lookup into the scan, and back, with no side condition.
+
+    The order is not necessary for the distribution of the generator. The names in one
+    of these lists are all different. `pickOp` draws a uniform index. Therefore
+    `pickOp` is uniform over the elements for each possible order. -/
+private def opIndexStep (m : Std.HashMap LMonoTy (List String)) (p : String × LMonoTy) :
+    Std.HashMap LMonoTy (List String) :=
+  m.insert p.2 (m.getD p.2 [] ++ [p.1])
+
+/-- The fold of `opIndexStep` over `l` adds the scan of `l` at `τ` to the entry that
+    `m` holds for `τ`.
+
+    The lemma applies to an arbitrary start map `m`. This generality makes the
+    induction step possible, because the recursive call gets the extended map and not
+    `∅`. -/
+private theorem getD_foldl_opIndexStep (l : OpList)
+    (m : Std.HashMap LMonoTy (List String)) (τ : LMonoTy) :
+    (l.foldl opIndexStep m).getD τ [] = m.getD τ [] ++ opsOfTypeList l τ := by
+  induction l generalizing m with
+  | nil => simp [opsOfTypeList]
+  | cons p rest ih =>
+    simp only [List.foldl_cons, ih, opIndexStep, opsOfTypeList, List.filterMap_cons]
+    by_cases h : p.2 = τ
+    · subst h; simp
+    · rw [Std.HashMap.getD_insert]; simp [h, beq_iff_eq]
+
+/-- An operator context. It holds the operators of a factory as (name, curried type)
+    pairs, together with an index from a type to the operators of that type.
+
+    A generator looks for an operator by type one time at each candidate leaf. The
+    context holds each function of `Core.Factory`, which is 310 entries. The index
+    makes each lookup one hash instead of a linear scan. The index is also small,
+    because the 310 entries have only 81 different curried types. In compiled code,
+    one lookup takes 0.005 ms with the index and 0.103 ms with a scan.
+
+    The index does not make the whole generator faster, because a lookup is not the
+    largest cost. `generableTypesFromCtx` costs about 0.092 ms for each call, and a
+    generator calls it at each node.
+
+    The `agrees` field connects the index to the scan that specifies it. Therefore the
+    index cannot disagree with `ops`. `Lambda.Factory`
+    (`Strata/DL/Lambda/Factory.lean`) uses the same pattern: it holds `toArray` with
+    `nameMap : Std.HashMap String Nat` and three invariants between them. The key here
+    is the curried type, because a generator looks for an operator by type. Strata
+    looks for an operator by name, and therefore Strata needs no index by type.
+
+    `OpCtx` holds the index. A separate `OpIndex` structure beside `OpCtx` is also
+    possible, but then `opsOfType`, `pickOp` and each lemma about them need a new
+    signature. With the index inside `OpCtx`, these signatures do not change, and the
+    proofs that use an operator context stay the same. -/
+structure OpCtx where
+  /-- The operators, in the order of the factory. The proofs use this list. -/
+  ops : OpList
+  /-- The index. It maps a type to the names of the operators of that type. -/
+  byType : Std.HashMap LMonoTy (List String)
+  /-- The index gives the same list as the scan, in the same order. -/
+  agrees : ∀ τ, byType.getD τ [] = opsOfTypeList ops τ
+
+/-- Make an operator context. This function computes the index from the list. -/
+def OpCtx.ofList (ops : OpList) : OpCtx :=
+  { ops := ops
+    byType := ops.foldl opIndexStep ∅
+    agrees := fun τ => by simpa using getD_foldl_opIndexStep ops ∅ τ }
+
+/-- The empty operator context. -/
+instance : Inhabited OpCtx := ⟨OpCtx.ofList []⟩
+instance : EmptyCollection OpCtx := ⟨OpCtx.ofList []⟩
+
+@[simp] theorem OpCtx.ops_ofList (ops : OpList) : (OpCtx.ofList ops).ops = ops := rfl
+
+@[simp] theorem OpCtx.ops_empty : (∅ : OpCtx).ops = [] := rfl
 
 -- ── Type abbreviations ──────────────────────────────────────────────
 
@@ -136,9 +226,31 @@ def pickFVar [Gen G] (fctx : FVarCtx) (τ : LMonoTy)
     exact List.length_pos_iff.mp h
   elements _ hne
 
-/-- All operator names in `octx` whose curried type equals `τ`. -/
+/-- Each operator name in `octx` that has the curried type `τ`.
+
+    This function reads the index and does no scan. Therefore the cost does not
+    increase with the size of the context. `opsOfType_eq_scan` below shows that the
+    result is the same list, in the same order, as the linear scan
+    `opsOfTypeList octx.ops τ`. Therefore each proof that unfolds a lookup uses the
+    scan and never the hash map. -/
 def opsOfType (octx : OpCtx) (τ : LMonoTy) : List String :=
-  octx.filterMap (fun (x, ty) => if ty == τ then some x else none)
+  octx.byType.getD τ []
+
+/-- The fast lookup is equal to the scan. This lemma is the only connection that the
+    proofs need. A proof that must see the contents of a lookup uses
+    `simp only [opsOfType_eq_scan, opsOfTypeList, …]`.
+
+    This lemma is not a `@[simp]` lemma, and this is deliberate. Almost every proof
+    about the generator holds `opsOfType octx τ` as an opaque list. The list is the
+    guard of an `if`, or the argument of `pickOp`. A rewrite to a `filterMap` in all of
+    those goals changes their shape and gives no benefit. Only the few proofs that must
+    see the contents of the lookup name this lemma. -/
+theorem opsOfType_eq_scan (octx : OpCtx) (τ : LMonoTy) :
+    opsOfType octx τ = opsOfTypeList octx.ops τ :=
+  octx.agrees τ
+
+theorem opsOfType_empty (τ : LMonoTy) : opsOfType ∅ τ = [] := by
+  rw [opsOfType_eq_scan]; simp [opsOfTypeList]
 
 /-- Pick a uniformly random operator of type `τ` from `octx`. -/
 def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
@@ -365,16 +477,184 @@ def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
     if newTys.isEmpty then tys
     else addNewTypes fuel (tys ++ newTys)
 
+/-! ### Fast forms of the two helpers with a quadratic cost
+
+A generator calls `generableTypesFromCtx` at each node of each draw. With the 310
+operators of `Core.Factory`, this function is the largest cost in generation. Two
+linear scans, one inside the other, are the reason:
+
+- `List.eraseDups` over the subtype list, which has 1404 elements.
+- The membership tests `argTy ∈ tys` and `retTy ∉ tys` in the loop of `addNewTypes`.
+
+The fast forms below give 0.092 ms for each call to `generableTypesFromCtx`. They give
+44 ms for 300 draws at depth 2. They give 4.9 s for the LSpec suite at `100 5`. A context of 40
+operators needs 12 ms for the same 300 draws. The difference is proportional to the
+number of operators, because the subtype list gets larger with the context.
+
+Each fast form holds a `Std.HashSet` as a membership index. `OpCtx` holds a hash map
+for a lookup by type in the same way. The two functions keep their lists, and the
+dedup keeps the order of the input.
+
+The order is not necessary for the distribution. `elements` gets the result, draws a
+uniform index, and returns that element. The list has no duplicate elements, because a
+dedup makes it. Therefore a uniform index is a uniform element for each possible order,
+and the support is the same set. A list from `Std.HashSet.toList` gives the same
+distribution and the same speed. The measurements are 2.43 ms and 2.47 ms for each
+call.
+
+The order gives one other property: the draws are a function of the seed only.
+`Std.HashSet` does not specify its order. The order can change with a new version of
+the toolchain, a new hash function, or a different sequence of insertions. This
+property is useful if the suite has a seed. The suite has no seed now. This is also why
+two of its properties give different results in different runs.
+
+A `@[csimp]` lemma connects each fast form to the original function. Therefore the
+compiler uses the fast form, but `simp`, `rw` and `unfold` use the original definition.
+Each proof about `addNewTypes` and `generableTypesFromCtx` stays the same. These proofs
+include `addNewTypes_simple` and `generableTypesFromCtx_simple` in `HasTypeAGen.lean`.
+The fast forms add no `sorry` and no axiom. -/
+
+/-- A dedup that keeps the order. It keeps the first occurrence of each element, in the
+    same way as `List.eraseDups`. The cost is linear and not quadratic. -/
+def dedupTys (l : List LMonoTy) : List LMonoTy := go l ∅ []
+where
+  go : List LMonoTy → Std.HashSet LMonoTy → List LMonoTy → List LMonoTy
+    | [], _, acc => acc.reverse
+    | x :: rest, seen, acc =>
+      if seen.contains x then go rest seen acc else go rest (seen.insert x) (x :: acc)
+
+/-- The invariant of the accumulator: `seen` holds the elements of `acc` and no other
+    element.
+
+    The lemma applies to an arbitrary pair of `seen` and `acc`. This generality makes
+    the induction step possible, because the recursive call gets the extended pair. -/
+private theorem dedupTys_go_eq (l : List LMonoTy) (seen : Std.HashSet LMonoTy)
+    (acc : List LMonoTy) (hinv : ∀ x, seen.contains x = true ↔ x ∈ acc) :
+    dedupTys.go l seen acc = List.eraseDupsBy.loop (· == ·) l acc := by
+  induction l generalizing seen acc with
+  | nil => simp [dedupTys.go, List.eraseDupsBy.loop]
+  | cons x rest ih =>
+    rw [dedupTys.go, List.eraseDupsBy.loop]
+    by_cases hx : seen.contains x = true
+    · have : acc.any (x == ·) = true := by
+        simp only [List.any_eq_true, beq_iff_eq]
+        exact ⟨x, (hinv x).mp hx, rfl⟩
+      simp only [hx, this, if_true]
+      exact ih seen acc hinv
+    · have hnot : acc.any (x == ·) = false := by
+        simp only [Bool.eq_false_iff, ne_eq, List.any_eq_true, beq_iff_eq, not_exists]
+        rintro y ⟨hy, rfl⟩
+        exact hx ((hinv _).mpr hy)
+      simp only [hx, hnot, Bool.false_eq_true, if_false]
+      refine ih (seen.insert x) (x :: acc) ?_
+      intro y
+      rw [Std.HashSet.contains_insert]
+      simp only [Bool.or_eq_true, beq_iff_eq, List.mem_cons, hinv y]
+      exact ⟨fun h => h.imp Eq.symm id, fun h => h.imp Eq.symm id⟩
+
+/-- `dedupTys` is equal to `List.eraseDups`, and the order is also equal.
+
+    `csimp` accepts only the replacement of a complete constant, in the form
+    `@f = @g`. `List.eraseDups` is polymorphic, but `dedupTys` applies only to
+    `LMonoTy`, because it needs a `Hashable` instance. Therefore a `csimp` lemma
+    cannot replace `List.eraseDups`. Instead, `generableTypesFromCtx` calls `dedupTys`,
+    and the proofs rewrite with this lemma. -/
+theorem dedupTys_eq (l : List LMonoTy) : dedupTys l = l.eraseDups := by
+  rw [List.eraseDups, List.eraseDupsBy, dedupTys]
+  exact dedupTys_go_eq l ∅ [] (by intro x; simp)
+
+/-- `addNewTypes` with a `Std.HashSet` membership index beside `tys`. The two functions
+    give the same list, element for element. -/
+def fastAddNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
+  go fuel tys (Std.HashSet.ofList tys)
+where
+  go : Nat → List LMonoTy → Std.HashSet LMonoTy → List LMonoTy
+    | 0, tys, _ => tys
+    | fuel + 1, tys, seen =>
+      let newTys := tys.filterMap fun ty =>
+        match ty with
+        | .tcons "arrow" [argTy, retTy] =>
+          if seen.contains argTy && !seen.contains retTy then some retTy else none
+        | _ => none
+      if newTys.isEmpty then tys
+      else go fuel (tys ++ newTys) (newTys.foldl (·.insert ·) seen)
+
+/-- A fold that inserts the elements of a list into a set adds those elements and no
+    other element. -/
+private theorem contains_foldl_insert (l : List LMonoTy) (s : Std.HashSet LMonoTy)
+    (x : LMonoTy) :
+    (l.foldl (·.insert ·) s).contains x = true ↔ (s.contains x = true ∨ x ∈ l) := by
+  induction l generalizing s with
+  | nil => simp
+  | cons a rest ih =>
+    rw [List.foldl_cons, ih]
+    simp only [Std.HashSet.contains_insert, Bool.or_eq_true, beq_iff_eq, List.mem_cons]
+    constructor
+    · rintro ((rfl | h) | h)
+      · exact Or.inr (Or.inl rfl)
+      · exact Or.inl h
+      · exact Or.inr (Or.inr h)
+    · rintro (h | rfl | h)
+      · exact Or.inl (Or.inr h)
+      · exact Or.inl (Or.inl rfl)
+      · exact Or.inr h
+
+private theorem fastAddNewTypes_go_eq (fuel : Nat) (tys : List LMonoTy)
+    (seen : Std.HashSet LMonoTy) (hinv : ∀ x, seen.contains x = true ↔ x ∈ tys) :
+    fastAddNewTypes.go fuel tys seen = addNewTypes fuel tys := by
+  induction fuel generalizing tys seen with
+  | zero => simp [fastAddNewTypes.go, addNewTypes]
+  | succ n ih =>
+    rw [fastAddNewTypes.go]
+    -- The two predicates of `filterMap` are equal at each type, because `seen` gives
+    -- membership in `tys`.
+    have hfun : (fun ty : LMonoTy =>
+                  match ty with
+                  | .tcons "arrow" [argTy, retTy] =>
+                    if seen.contains argTy && !seen.contains retTy then some retTy else none
+                  | _ => none)
+              = (fun ty : LMonoTy =>
+                  match ty with
+                  | .tcons "arrow" [argTy, retTy] =>
+                    if argTy ∈ tys && retTy ∉ tys then some retTy else none
+                  | _ => none) := by
+      funext ty
+      split
+      · rename_i a b
+        rw [show seen.contains a = decide (a ∈ tys) by
+              rw [Bool.eq_iff_iff, decide_eq_true_eq]; exact hinv a,
+            show seen.contains b = decide (b ∈ tys) by
+              rw [Bool.eq_iff_iff, decide_eq_true_eq]; exact hinv b]
+        simp
+      · rfl
+    simp only [hfun]
+    rw [addNewTypes]
+    -- The two conditions are equal, and therefore one `split` gives both branches.
+    split
+    · rfl
+    · refine ih _ _ ?_
+      intro x
+      rw [contains_foldl_insert, List.mem_append, hinv x]
+
+@[csimp] theorem addNewTypes_eq_fast : addNewTypes = fastAddNewTypes := by
+  funext fuel tys
+  rw [fastAddNewTypes]
+  exact (fastAddNewTypes_go_eq fuel tys _ (by intro x; simp)).symm
+
 /-- Compute the set of "generable types" (i.e. types that can be generated from the
   current context), following Palka et al. 2011.
 
   We begin by computing the syntactic sub-types for each types in the context,
   then add new types to the set according to the following rule:
-  if (σ → τ) and σ are both in the set, then τ is too. -/
+  if (σ → τ) and σ are both in the set, then τ is too.
+
+  The `@[csimp]` lemmas above apply to the dedup and to `addNewTypes`. Therefore the
+  cost is linear in the size of the context at run time, and this definition stays the
+  one that each proof uses. -/
 def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
-  let allTys := bctx ++ fctx.map Prod.snd ++ octx.map Prod.snd
-  let initial := (allTys.flatMap syntacticSubtypes).eraseDups
-  -- Use fuel = initial.length as an upper bound on iterations
+  let allTys := bctx ++ fctx.map Prod.snd ++ octx.ops.map Prod.snd
+  let initial := dedupTys (allTys.flatMap syntacticSubtypes)
+  -- The fuel `initial.length` is an upper limit on the number of rounds.
   addNewTypes initial.length initial
 
 /-- Boolean decision procedure for "`τ` is in the support of `genLMonoTy tvars n`",
@@ -669,7 +949,7 @@ def argsForResult (fullTy : LMonoTy) (τ : LMonoTy) : Option (List LMonoTy) :=
 /-- All (name, argTypes) pairs from `octx` for operators that return `τ`
     after they have been fully applied. -/
 def findOpsInCtx (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :=
-  octx.filterMap fun (name, ty) =>
+  octx.ops.filterMap fun (name, ty) =>
     match argsForResult ty τ with
     | some (arg :: args) => some (name, arg :: args)
     | _ => none
@@ -1333,7 +1613,7 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat)
     (maxNumArgs : Nat := 3) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
-  genLExpr [] [] [] tvars [] depth τ maxNumArgs
+  genLExpr [] ∅ [] tvars [] depth τ maxNumArgs
 
 /-! ## Core operator vocabularies
 
@@ -1363,7 +1643,7 @@ bodies. `TestSupport` re-exports them for the property suites. -/
     The two must stay the same. `coreMonoOps_eq_factoryOps` in `Defs.lean` proves
     that they are, so a change to one of them and not the other breaks the build. -/
 def coreMonoOps : OpCtx :=
-  Core.Factory.toArray.toList.filterMap fun f =>
+  OpCtx.ofList <| Core.Factory.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
 /-- Polymorphic operators from Strata's Core.Factory. Used for the

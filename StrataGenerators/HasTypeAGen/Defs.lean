@@ -28,7 +28,7 @@ export ArbNat (Nat.arbitrary)
     reconciliation (nor an `ArrowSpineOK`/`FactoryOutputWF` side condition) is
     needed to see it is op-consistent. -/
 def factoryOps (F : @Factory LExprParams') : OpCtx :=
-  F.toArray.toList.filterMap fun f =>
+  OpCtx.ofList <| F.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
 /-- `coreMonoOps` is `factoryOps` applied to `Core.Factory`.

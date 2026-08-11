@@ -202,10 +202,14 @@ private theorem pickFVar_complete (fctx : FVarCtx) (τ : LMonoTy) (x : String)
 
 -- ── pickOp soundness/completeness ─────────────────────────────────────
 
-/-- `x ∈ opsOfType octx τ` iff `(x, τ) ∈ octx`. -/
+/-- `x ∈ opsOfType octx τ` if and only if `(x, τ) ∈ octx.ops`.
+
+    `opsOfType` reads the index. Therefore the proof first uses the `agrees` invariant,
+    in the form `opsOfType_eq_scan`, to get the scan that `agrees` specifies. The other
+    steps of the proof then apply to the scan. -/
 private theorem opsOfType_mem_iff (octx : OpCtx) (τ : LMonoTy) (x : String) :
-    x ∈ opsOfType octx τ ↔ (x, τ) ∈ octx := by
-  simp only [opsOfType, List.mem_filterMap]
+    x ∈ opsOfType octx τ ↔ (x, τ) ∈ octx.ops := by
+  simp only [opsOfType_eq_scan, opsOfTypeList, List.mem_filterMap]
   constructor
   · rintro ⟨⟨y, ty⟩, hmem, hif⟩
     simp only at hif
@@ -232,7 +236,7 @@ private theorem pickOp_sound (octx : OpCtx) (τ : LMonoTy)
 
 /-- Completeness of `pickOp`: any op with the right type is in the support. -/
 private theorem pickOp_complete (octx : OpCtx) (τ : LMonoTy) (x : String)
-    (hmem : (x, τ) ∈ octx)
+    (hmem : (x, τ) ∈ octx.ops)
     (hv : (opsOfType octx τ).length > 0) :
     .op () ⟨x, ()⟩ (some τ) ∈ SetGen.support (pickOp (G := SetGen.Set) octx τ hv) := by
   exact mem_support_pickOp_iff.mpr ⟨x, (opsOfType_mem_iff octx τ x).mpr hmem, rfl⟩
@@ -2163,7 +2167,7 @@ def allVarsInCtx (fctx : FVarCtx) (octx : OpCtx) : LExpr' → Prop
   | .bvar () _                   => True
   | .fvar () x (some τ)         => (x.name, τ) ∈ fctx
   | .fvar () _ none              => True
-  | .op () o (some τ)           => (o.name, τ) ∈ octx
+  | .op () o (some τ)           => (o.name, τ) ∈ octx.ops
   | .op () _ none                => True
   | .abs () _ _ body             => allVarsInCtx fctx octx body
   | .app () fn arg               => allVarsInCtx fctx octx fn ∧ allVarsInCtx fctx octx arg
@@ -2237,7 +2241,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .bool).length > 0 := by
           have := (opsOfType_mem_iff octx .bool _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2289,7 +2293,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .int).length > 0 := by
           have := (opsOfType_mem_iff octx .int _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2338,7 +2342,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .string).length > 0 := by
           have := (opsOfType_mem_iff octx .string _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2387,7 +2391,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .real).length > 0 := by
           have := (opsOfType_mem_iff octx .real _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2435,7 +2439,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.bitvec n)).length > 0 := by
           have := (opsOfType_mem_iff octx (.bitvec n) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2483,7 +2487,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.arrow τ₁ τ₂)).length > 0 := by
           have := (opsOfType_mem_iff octx (.arrow τ₁ τ₂) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2596,7 +2600,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .bool).length > 0 := by
           have := (opsOfType_mem_iff octx .bool _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2682,7 +2686,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .int).length > 0 := by
           have := (opsOfType_mem_iff octx .int _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2764,7 +2768,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .string).length > 0 := by
           have := (opsOfType_mem_iff octx .string _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2847,7 +2851,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .real).length > 0 := by
           have := (opsOfType_mem_iff octx .real _).mpr hmem
           exact List.length_pos_of_mem this
@@ -2925,7 +2929,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
-        have hmem' : (_, _) ∈ octx := hvars
+        have hmem' : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.bitvec n)).length > 0 := by
           have := (opsOfType_mem_iff octx (.bitvec n) _).mpr hmem'
           exact List.length_pos_of_mem this
@@ -3011,7 +3015,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.arrow τ₁ τ₂)).length > 0 := by
           have := (opsOfType_mem_iff octx (.arrow τ₁ τ₂) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3052,7 +3056,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.ftvar name)).length > 0 := by
           have := (opsOfType_mem_iff octx (.ftvar name) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3125,7 +3129,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.ftvar name)).length > 0 := by
           have := (opsOfType_mem_iff octx (.ftvar name) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3165,7 +3169,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .regex).length > 0 := by
           have := (opsOfType_mem_iff octx .regex _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3237,7 +3241,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx .regex).length > 0 := by
           have := (opsOfType_mem_iff octx .regex _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3284,7 +3288,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.map τ₁ τ₂)).length > 0 := by
           have := (opsOfType_mem_iff octx (.map τ₁ τ₂) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3364,7 +3368,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.map τ₁ τ₂)).length > 0 := by
           have := (opsOfType_mem_iff octx (.map τ₁ τ₂) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3405,7 +3409,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         right; right; left
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.seq τ₁)).length > 0 := by
           have := (opsOfType_mem_iff octx (.seq τ₁) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3478,7 +3482,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx)
       cases hwt with
       | op =>
         refine ⟨_, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, ?_⟩
-        have hmem : (_, _) ∈ octx := hvars
+        have hmem : (_, _) ∈ octx.ops := hvars
         have hlen : (opsOfType octx (.seq τ₁)).length > 0 := by
           have := (opsOfType_mem_iff octx (.seq τ₁) _).mpr hmem
           exact List.length_pos_of_mem this
@@ -3864,12 +3868,12 @@ private theorem mem_mapM_iff (f : LMonoTy → SetGen.Set LExpr')
       | _ :: _, .cons harg htail =>
         exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
 
-/-- If `(name, argTys) ∈ findOpsInCtx octx τ`, then `(name, argTys.foldr arrow τ) ∈ octx`
-    and `argTys` is non-empty. -/
+/-- If `(name, argTys) ∈ findOpsInCtx octx τ`, then
+    `(name, argTys.foldr arrow τ) ∈ octx.ops`, and `argTys` has one element or more. -/
 private theorem findOpsInCtx_mem {octx : OpCtx} {τ : LMonoTy}
     {name : String} {argTys : List LMonoTy}
     (h : (name, argTys) ∈ findOpsInCtx octx τ) :
-    (name, argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∈ octx ∧ argTys ≠ [] := by
+    (name, argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∈ octx.ops ∧ argTys ≠ [] := by
   simp only [findOpsInCtx, List.mem_filterMap] at h
   obtain ⟨⟨n, ty⟩, hmem, hfilt⟩ := h
   simp only at hfilt
@@ -3984,12 +3988,15 @@ theorem generableTypesFromCtx_simple
     (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx)
     (hBctx : ∀ τ ∈ bctx, SimpleType τ)
     (hFctx : ∀ p ∈ fctx, SimpleType p.2)
-    (hOctx : ∀ p ∈ octx, SimpleType p.2) :
+    (hOctx : ∀ p ∈ octx.ops, SimpleType p.2) :
     ∀ σ ∈ generableTypesFromCtx bctx fctx octx, SimpleType σ := by
   intro σ hσ
   unfold generableTypesFromCtx at hσ
   apply addNewTypes_simple _ _ _ σ hσ
   intro τ hτ
+  -- `generableTypesFromCtx` uses `dedupTys`, which has a linear cost. `dedupTys_eq`
+  -- gives `List.eraseDups`, and the membership lemma applies to that function.
+  rw [dedupTys_eq] at hτ
   have hτ' := List.mem_eraseDups.mp hτ
   rw [List.mem_flatMap] at hτ'
   obtain ⟨ty, hty_mem, hty_sub⟩ := hτ'

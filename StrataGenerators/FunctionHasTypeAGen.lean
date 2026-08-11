@@ -277,9 +277,9 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
 theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit)
     (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx [] depth)) :
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx ∅ depth)) :
     FuncHasTypeA C Γ func :=
-  genFunction_sound fctx [] depth C Γ func hfunc
+  genFunction_sound fctx ∅ depth C Γ func hfunc
 
 -- ── Completeness helpers ─────────────────────────────────────────────
 

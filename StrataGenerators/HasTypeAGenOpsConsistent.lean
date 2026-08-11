@@ -62,10 +62,10 @@ All compound cases (`.app`, `.ite`, `.abs`, `.eq`, `.quant`) are structural.
     now builds the type as `mkArrow' fn.output fn.inputs.values` directly, the
     type equality is immediate — no arrow-spine reconciliation is needed. -/
 theorem factoryOps_mem_char (F : @Factory LExprParams') (nm : String) (τ : LMonoTy)
-    (h : (nm, τ) ∈ factoryOps F) :
+    (h : (nm, τ) ∈ (factoryOps F).ops) :
     ∃ fn, F[nm]? = some fn ∧ τ = LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd) := by
   unfold factoryOps at h
-  simp only [List.mem_filterMap] at h
+  simp only [OpCtx.ops_ofList, List.mem_filterMap] at h
   obtain ⟨fn, hfn_mem, hfn_eq⟩ := h
   simp only [Option.some.injEq, Prod.mk.injEq] at hfn_eq
   obtain ⟨hnm, hτ⟩ := hfn_eq
@@ -116,11 +116,11 @@ theorem PCtxWF_factoryPolyOps (F : @Factory LExprParams') :
 
 -- ── Leaf-op consistency (`pickOp`) ───────────────────────────────────
 
-/-- Membership in `opsOfType octx τ` implies `(name, τ) ∈ octx`. -/
+/-- Membership in `opsOfType octx τ` implies `(name, τ) ∈ octx.ops`. -/
 theorem mem_opsOfType (octx : OpCtx) (τ : LMonoTy) (name : String)
-    (h : name ∈ opsOfType octx τ) : (name, τ) ∈ octx := by
-  unfold opsOfType at h
-  simp only [List.mem_filterMap] at h
+    (h : name ∈ opsOfType octx τ) : (name, τ) ∈ octx.ops := by
+  rw [opsOfType_eq_scan] at h
+  simp only [opsOfTypeList, List.mem_filterMap] at h
   obtain ⟨⟨x, ty⟩, hmem, heq⟩ := h
   split at heq
   · rename_i hty; simp only [Option.some.injEq] at heq
@@ -135,7 +135,7 @@ theorem mem_opsOfType (octx : OpCtx) (τ : LMonoTy) (name : String)
 theorem pickOp_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy) (name : String)
     (hmem : name ∈ opsOfType (factoryOps F) τ) :
     Lambda.OpsConsistentR F (.op () ⟨name, ()⟩ (some τ)) := by
-  have hoctx : (name, τ) ∈ factoryOps F := mem_opsOfType _ _ _ hmem
+  have hoctx : (name, τ) ∈ (factoryOps F).ops := mem_opsOfType _ _ _ hmem
   obtain ⟨fn, hget, hτ⟩ := factoryOps_mem_char F name τ hoctx
   -- `τ = genericTy` is the identity instance `genericTy.subst []`.
   exact .op_in (tySubst := []) hget (by rw [hτ]; exact (LMonoTy.subst_emptyS (by simp)).symm)
@@ -888,7 +888,7 @@ theorem mapM_genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVa
 theorem findOpsInCtx_mem' {octx : OpCtx} {τ : LMonoTy}
     {name : String} {argTys : List LMonoTy}
     (h : (name, argTys) ∈ findOpsInCtx octx τ) :
-    (name, argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∈ octx ∧ argTys ≠ [] := by
+    (name, argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∈ octx.ops ∧ argTys ≠ [] := by
   simp only [findOpsInCtx, List.mem_filterMap] at h
   obtain ⟨⟨n, ty⟩, hmem, hfilt⟩ := h
   simp only at hfilt
