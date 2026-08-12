@@ -8,8 +8,8 @@
 - Progress (counterexamples found, known)
 - Completeness of `LExpr.resolve` type inference (counterexamples found, previously unknown)
 - `LExpr.eval` doesn't introduce any new free variables
-- The concrete evaluator agrees with the SMT semantics: for a closed term `e`, if `LExpr.evalWithLState` reduces `e` to a constant, then the solver confirms that `e = eval e`
-  - Restricted to base types (`int` / `bool`) over `Core.Factory` operators, so that every subterm is SMT-encodable; terms that don't reduce to a constant are skipped rather than counted as counterexamples
+- The concrete evaluator agrees with the SMT semantics: for a closed term `e`, if `LExpr.evalWithLState` reduces `e` to a constant, then the solver confirms that `SMTEncode(e) = SMTEncode(eval e)`
+  - Restricted to base types (`int`, `string`, `bool`, `bitvec`) over `Core.Factory` operators, so that every subterm is SMT-encodable; terms that don't reduce to a constant are skipped rather than counted as counterexamples
   - Opt-in (`lake test -- --smt`), since it needs a live `cvc5` / `z3` on `PATH`
 
 **Commands**
