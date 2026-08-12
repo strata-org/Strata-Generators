@@ -266,6 +266,39 @@ def main (args : List String) : IO UInt32 := do
           StrataGenerators.PrinterCoverage.checkProgramPrintsWithoutError gp.prog = true)
         (cfg := cfg) .done)
 
+  -- Properties for the eight Core transform passes that carry no correctness proof
+  -- (issue #69: `StructuredToUnstructured`, `LoopElim`,
+  -- `InsertLoopInvariantAsserts`, `CommonSubexprElim`, `FunctionInlining`,
+  -- `ProcedureInlining`, `IrrelevantAxioms`, plus the unproven postconditions of
+  -- `NondetElim` and `LoopInitHoist`), folded from the shared
+  -- `Properties.unprovenTransforms` bundle. Each runs its pass on a whole generated
+  -- program — needed because three of the passes read a declaration other than a
+  -- procedure — and counterexamples are minimized by the whole-program shrinker.
+  --
+  -- SEVERAL FAIL honestly. Four are the defects the bug report files
+  -- (`docs/strata-unproven-transform-bugs.md`): `loop: LoopElim mints distinct block
+  -- labels` (the pass puts one `loopElim_havoc_{n}` block statement into its output
+  -- two times); `procInline: inlining introduces no duplicate label` (the wrapper
+  -- label reaches no counter, and the label renaming sits inside the fold over
+  -- `var_map`); `procInline: the output typechecks` (an `old x` expression is copied
+  -- verbatim while `x` is renamed); and `procInline: symbolic evaluation loses no
+  -- obligation` (the callee's `requires` is dropped — the unsound one, repo issue
+  -- #107). The three `procInline` ones are rare on generated input, so a short run
+  -- may show them green.
+  --
+  -- The two `s2u:` failures — `every block is reachable from the entry` and `a
+  -- cfg-bodied procedure prints` — are expected red ticks that the report
+  -- deliberately does NOT file as defects. Do not read them as findings.
+  --
+  -- `CommonSubexprElim` fires on 0 of 200 generated programs, since no generated
+  -- body holds a duplicated subexpression, so all four CSE properties are vacuous
+  -- here and the `#guard`s in `ProgramGen/UnprovenTransforms` are what test them.
+  let unprovenSuite : TestSeq :=
+    Properties.unprovenTransforms.foldr
+      (fun p rest => checkIO p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
+      .done
+
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
     ("cmd", [cmdSuite]),
@@ -274,7 +307,8 @@ def main (args : List String) : IO UInt32 := do
     ("proc", [procSuite]),
     ("program", [programSuite]),
     ("phase", [phaseSuite]),
-    ("printer", [printerSuite])
+    ("printer", [printerSuite]),
+    ("transforms", [unprovenSuite])
   ]) []
 
   -- Always-run diagnostics (do not gate the exit code):

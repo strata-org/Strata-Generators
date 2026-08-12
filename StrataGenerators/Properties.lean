@@ -8,6 +8,9 @@ import StrataGenerators.PrinterCoverage
 import StrataGenerators.ProgramGen.Shrink
 -- Supplies the ADT-derived-call check predicates.
 import StrataGenerators.ProgramGen.TestSupport
+-- Supplies the forty-two check predicates for the Core transform passes that have
+-- no correctness proof (issue #69).
+import StrataGenerators.ProgramGen.UnprovenTransforms
 
 /-!
 # Shared property catalog
@@ -42,6 +45,7 @@ open StrataGenerators.Stmt.TestSupport
 open StrataGenerators.Procedure.TestSupport
 open StrataGenerators.Program.TestSupport
 open ProgramGen.TestSupport
+open StrataGenerators.Program.UnprovenTransforms
 
 /-- A property under test, bundling its canonical name with the shared boolean
     check both harnesses evaluate on a generated `α`. Pairing name↔check in one
@@ -272,6 +276,134 @@ def programBlocksAccepted  : String := "program: datatype blocks pass addMutualB
 def programDerivedResolve  : String := "program: called ADT functions are declared"
 def programDerivedOrdered  : String := "program: ADT calls follow the datatype declaration"
 
+-- ── The eight unproven Core transform passes (issue #69) ─────────────
+-- `Strata/Transform/` holds 23 files, and only four passes have a correctness
+-- companion. These properties cover the eight that have no correctness file and no
+-- theorem in-file (`StructuredToUnstructured`, `LoopElim`,
+-- `InsertLoopInvariantAsserts`, `CommonSubexprElim`, `FunctionInlining`,
+-- `ProcedureInlining`, `IrrelevantAxioms`), plus the two whose headline
+-- postcondition is stated in a module doc but never proven (`NondetElim`,
+-- `LoopInitHoist`). `TerminationCheck` is not covered: its properties need a
+-- recursive function to be non-vacuous, which the generator cannot make yet
+-- (#15/#29).
+--
+-- Each property takes a whole generated `Program`, so the passes that read a
+-- declaration other than a procedure (the axioms and the function call graph for
+-- `IrrelevantAxioms`, the callee declaration for `ProcedureInlining`, a function
+-- body for `FunctionInlining`) are exercised on real input rather than on a
+-- statement list that cannot express them.
+--
+-- EIGHT of these FAIL, and the failures split two ways. FOUR are the defects the
+-- bug report files (`docs/strata-unproven-transform-bugs.md`), all on generated
+-- input: `loopBlockLabelsNodup`, `inlineProcLabelsNodup`, `inlineProcTypechecks` and
+-- `inlineProcSymbolicAgreement` (the unsound one). The other four are red ticks the
+-- report deliberately does NOT file as defects: the two `s2u:` failures, and the two
+-- `cse:` ones, which need a hand-built body at all — `CommonSubexprElim` fires on 0
+-- of 200 generated programs, since no generated body holds a duplicated
+-- subexpression. See `ProgramGen/UnprovenTransforms` for the analysis of each.
+
+-- IrrelevantAxioms — the relevance oracle (#91 covers the `changed` flag)
+def axiomsOnlyAxRemoved      : String := "axioms: IrrelevantAxioms removes only axioms"
+def axiomsOrderPreserved     : String := "axioms: IrrelevantAxioms preserves declaration order"
+def axiomsRetainedRelevant   : String := "axioms: every retained axiom is relevant"
+def axiomsRemovedIrrelevant  : String := "axioms: every removed axiom is irrelevant"
+def axiomsRemovedUnreachable : String :=
+  "axioms: a removed axiom mentions no reachable function"
+def axiomsPrunedTypechecks   : String := "axioms: the pruned program typechecks"
+/-- The semantic counterpart to the five syntactic axiom properties: an axiom is an
+    assumption, never an obligation, so pruning one must leave the proof obligations
+    *exactly* equal. Necessary but not sufficient for the pass's `modelPreserving`
+    annotation — pruning an axiom some obligation needed leaves that obligation
+    present but unprovable, which only a solver can see. -/
+def axiomsObligationsUnchanged : String :=
+  "axioms: pruning leaves the proof obligations unchanged"
+
+-- StructuredToUnstructured — structural properties of the emitted CFG
+def s2uNoDanglingLabel : String := "s2u: every goto target is a block label"
+def s2uLabelsNodup     : String := "s2u: block labels are distinct"
+def s2uEntryExists     : String := "s2u: the entry label exists"
+def s2uOneFinish       : String := "s2u: exactly one finish block"
+/-- **FAILS honestly** (10 of 40 draws): every source `.block l` becomes an
+    unreachable block, because the pass gives `l` a landing site for an `.exit l`
+    and returns a different entry. -/
+def s2uAllReachable    : String := "s2u: every block is reachable from the entry"
+def s2uCmdCountGrows   : String := "s2u: the command count does not shrink"
+/-- **FAILS honestly** (31 of 40 draws): `procToCST` logs "CFG bodies not yet
+    supported" and emits an empty body. This pass is the only route to a `.cfg`
+    body, so no other property can reach the hole. -/
+def s2uCfgPrintable    : String := "s2u: a cfg-bodied procedure prints"
+
+-- DetToKleene — the measure the transform silently drops
+def kleeneMeasureAccepted : String :=
+  "kleene: a measure-carrying loop translates (the measure is dropped)"
+
+-- LoopElim + InsertLoopInvariantAsserts — accounting of the verification conditions
+def loopVcAssertCount     : String := "loop: the inserted assert count is exact"
+def loopBareAfterPass     : String := "loop: every loop is bare after the pass"
+def loopVcIdempotent      : String := "loop: InsertLoopInvariantAsserts is idempotent"
+def loopVcStatFaithful    : String := "loop: insertedAssertAssumes is faithful"
+def loopVcSurvivesElim    : String := "loop: no verification condition is lost through LoopElim"
+def loopNondetMeasure     : String := "loop: a nondet loop with a measure is rejected"
+/-- **FAILS honestly** (4 of 40 draws): `LoopElim` puts one `loopElim_havoc_{n}`
+    block statement into its output two times, so two blocks share a label. -/
+def loopBlockLabelsNodup  : String := "loop: LoopElim mints distinct block labels"
+def loopElimStatFaithful  : String := "loop: erasedLoops is faithful"
+
+-- CommonSubexprElim — fresh names and ordering. All four are VACUOUS on generated
+-- input: CSE fires on 0 of 200 draws, since no generated body holds a duplicated
+-- subexpression. `#guard`s pin each one on a hand-built body that does.
+/-- **FAILS honestly** on a body that already declares `$__cse.0`: the pass declares
+    the name a second time. -/
+def cseFreshNamesFresh      : String := "cse: no fresh name is declared twice"
+def cseAssertLabelsPreserved : String := "cse: the assert labels are preserved"
+/-- The order claim, and not "bound before its first use": stating the latter
+    exactly needs a scope-aware traversal. `cseOutputTypechecks` covers part of it,
+    since the checker rejects a reference that precedes its declaration. -/
+def cseFreshDeclOrder       : String := "cse: the fresh declarations are in index order"
+/-- **FAILS honestly** when the extracted subexpression's operator carries no type
+    annotation: `LExpr.typeOf` gives `none` and the pass falls back to a polymorphic
+    `∀α. α` annotation, which the typechecker forbids in variable position. -/
+def cseOutputTypechecks     : String := "cse: the output typechecks"
+
+-- FunctionInlining — a pure expression transform
+def inlineFuelZeroIdentity : String := "funcInline: fuel 0 is the identity"
+def inlineFuelMonotone     : String := "funcInline: more fuel never un-inlines"
+def inlineTypePreserved    : String := "funcInline: the type is preserved"
+def inlineCaptureFree      : String := "funcInline: no free variable is introduced"
+/-- Value preservation under the concrete evaluator — the sharpest of the five, since
+    it constrains the *meaning* of the result and not only its shape. Requires the
+    evaluator to be allowed to unfold the same functions the transform does; see
+    `inlineEvalFactory`. -/
+def inlineEvalAgreement    : String := "funcInline: evaluation agrees before/after inlining"
+
+-- ProcedureInlining — freshening of the labels
+/-- **FAILS honestly** (2 of 400 draws) on two call sites of one procedure, for two
+    independent reasons: the wrapper label `procName ++ "$inlined"` reaches no
+    counter, and the label renaming sits inside the fold over `var_map`, so a callee
+    with no variable keeps its labels. -/
+def inlineProcLabelsNodup      : String := "procInline: inlining introduces no duplicate label"
+def inlineProcAssertsNotLost   : String := "procInline: no assert is lost"
+def inlineProcStatsFaithful    : String := "procInline: visitedCalls and inlinedCalls are faithful"
+/-- **FAILS honestly** (1 of 400 draws): an `old x` expression is copied verbatim,
+    because `substFvar` runs over `var_map`, whose keys are the plain parameter
+    names, so `x` is renamed and `"old x"` is not. -/
+def inlineProcTypechecks       : String := "procInline: the output typechecks"
+def inlineProcAnalysisPreserved : String := "procInline: preserves call-graph WF"
+/-- **FAILS honestly, and it is the most serious finding in the set:**
+    `ProcedureInlining` silently discards the callee's `requires` obligation, so a
+    program that must fail verification becomes one that passes. Agreement is stated
+    under Strata's executable *symbolic* evaluator (the `symbolicEval` phase of
+    `corePipelinePhases`), as containment rather than equality, because inlining
+    duplicates the callee's obligations at each call site by design. -/
+def inlineProcSymbolicAgreement : String :=
+  "procInline: symbolic evaluation loses no obligation"
+
+-- NondetElim + LoopInitHoist — the postconditions neither file proves
+def nondetElimNoNondetGuard : String := "nondetElim: no nondet guard is left"
+def nondetElimFreshNames    : String := "nondetElim: the fresh guard names are distinct"
+def hoistNoLoopBodyInits    : String := "hoist: no loop body holds an init"
+def hoistPreservesUniqueInits : String := "hoist: uniqueInits is preserved"
+
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
@@ -301,7 +433,22 @@ def all : List String :=
     programTypecheck, programRejectionKnownGap, programNamesNodup,
     programTypeCheckIdem, programStripMeta, programEraseTypes,
     programAllNamesNodup, programBlocksAccepted, programDerivedResolve,
-    programDerivedOrdered ]
+    programDerivedOrdered,
+    axiomsOnlyAxRemoved, axiomsOrderPreserved, axiomsRetainedRelevant,
+    axiomsRemovedIrrelevant, axiomsRemovedUnreachable, axiomsPrunedTypechecks,
+    axiomsObligationsUnchanged,
+    s2uNoDanglingLabel, s2uLabelsNodup, s2uEntryExists, s2uOneFinish,
+    s2uAllReachable, s2uCmdCountGrows, s2uCfgPrintable,
+    kleeneMeasureAccepted,
+    loopVcAssertCount, loopBareAfterPass, loopVcIdempotent, loopVcStatFaithful,
+    loopVcSurvivesElim, loopNondetMeasure, loopBlockLabelsNodup, loopElimStatFaithful,
+    cseFreshNamesFresh, cseAssertLabelsPreserved, cseFreshDeclOrder, cseOutputTypechecks,
+    inlineFuelZeroIdentity, inlineFuelMonotone, inlineTypePreserved, inlineCaptureFree,
+    inlineEvalAgreement,
+    inlineProcLabelsNodup, inlineProcAssertsNotLost, inlineProcStatsFaithful,
+    inlineProcTypechecks, inlineProcAnalysisPreserved, inlineProcSymbolicAgreement,
+    nondetElimNoNondetGuard, nondetElimFreshNames,
+    hoistNoLoopBodyInits, hoistPreservesUniqueInits ]
 
 -- No two properties share a name (a copy/paste slip that pointed two properties
 -- at the same label would collapse their panels/results silently).
@@ -470,5 +617,83 @@ def programADTProps : List (Property Core.Program) :=
     ⟨PropertyNames.programBlocksAccepted, checkDatatypeBlocksAccepted⟩,
     ⟨PropertyNames.programDerivedResolve, checkCalledDerivedAreDeclared⟩,
     ⟨PropertyNames.programDerivedOrdered, checkDerivedCallsFollowDeclaration⟩ ]
+
+/-- The forty-two properties for the Core transform passes that carry no
+    correctness proof (issue #69), each a generated `Program` scored by a shared
+    predicate from `ProgramGen/UnprovenTransforms`. The shapes are identical across
+    both harnesses, so name↔check is paired once here.
+
+    Counterexamples are minimized by the same whole-program shrinker the
+    `programChecks` bundle uses (`Shrinkable GenProgram`), which keeps every
+    candidate well-typed by re-running Strata's own `Program.typeCheck`. Unlike
+    `programTypecheck`, whose failure *is* oracle rejection, each failure here is a
+    property of a pass applied to a well-typed program, so a smaller well-typed
+    witness exists and the minimizer reports it.
+
+    EIGHT fail. FOUR are the defects the bug report files, all on generated input:
+    `loopBlockLabelsNodup` (`LoopElim` emits one minted label two times),
+    `inlineProcLabelsNodup` (`ProcedureInlining` gives two call sites the same
+    labels, for two independent reasons), `inlineProcTypechecks` (an `old x`
+    expression escapes the renaming) and `inlineProcSymbolicAgreement` (the callee's
+    `requires` obligation is dropped — unsound, and the pass claims to be
+    model-preserving).
+
+    The other four are red ticks the report deliberately does NOT file as defects:
+    `s2uAllReachable` (every source `.block` becomes an orphan) and `s2uCfgPrintable`
+    (a `.cfg` body does not print), plus `cseOutputTypechecks` (a polymorphic
+    annotation for an unannotated subexpression) and `cseFreshNamesFresh` (a
+    redeclared `$__cse.0`) — the last two only under a `#guard`, since
+    `CommonSubexprElim` fires on no generated program at all. -/
+def unprovenTransforms : List (Property Core.Program) :=
+  [ -- IrrelevantAxioms (§2.1) — the relevance oracle
+    ⟨PropertyNames.axiomsOnlyAxRemoved,      checkAxiomsOnlyAxRemoved⟩,
+    ⟨PropertyNames.axiomsOrderPreserved,     checkAxiomsOrderPreserved⟩,
+    ⟨PropertyNames.axiomsRetainedRelevant,   checkAxiomsRetainedRelevant⟩,
+    ⟨PropertyNames.axiomsRemovedIrrelevant,  checkAxiomsRemovedIrrelevant⟩,
+    ⟨PropertyNames.axiomsRemovedUnreachable, checkAxiomsRemovedNotSeedReachable⟩,
+    ⟨PropertyNames.axiomsPrunedTypechecks,   checkAxiomsPrunedTypechecks⟩,
+    ⟨PropertyNames.axiomsObligationsUnchanged, checkAxiomsObligationsUnchanged⟩,
+    -- StructuredToUnstructured (§2.2) — the emitted CFG
+    ⟨PropertyNames.s2uNoDanglingLabel,       checkS2uNoDanglingLabel⟩,
+    ⟨PropertyNames.s2uLabelsNodup,           checkS2uLabelsNodup⟩,
+    ⟨PropertyNames.s2uEntryExists,           checkS2uEntryExists⟩,
+    ⟨PropertyNames.s2uOneFinish,             checkS2uOneFinish⟩,
+    ⟨PropertyNames.s2uAllReachable,          checkS2uAllReachable⟩,
+    ⟨PropertyNames.s2uCmdCountGrows,         checkS2uCmdCountGrows⟩,
+    ⟨PropertyNames.s2uCfgPrintable,          checkS2uCfgPrintable⟩,
+    -- DetToKleene (§2.3) — the dropped measure
+    ⟨PropertyNames.kleeneMeasureAccepted,    checkKleeneMeasureAccepted⟩,
+    -- LoopElim + InsertLoopInvariantAsserts (§2.4) — the verification conditions
+    ⟨PropertyNames.loopVcAssertCount,        checkLoopVcAssertCount⟩,
+    ⟨PropertyNames.loopBareAfterPass,        checkLoopBareAfterPass⟩,
+    ⟨PropertyNames.loopVcIdempotent,         checkLoopVcIdempotent⟩,
+    ⟨PropertyNames.loopVcStatFaithful,       checkLoopVcStatFaithful⟩,
+    ⟨PropertyNames.loopVcSurvivesElim,       checkLoopVcSurvivesElim⟩,
+    ⟨PropertyNames.loopNondetMeasure,        checkLoopNondetMeasureThrows⟩,
+    ⟨PropertyNames.loopBlockLabelsNodup,     checkLoopBlockLabelsNodup⟩,
+    ⟨PropertyNames.loopElimStatFaithful,     checkLoopElimStatFaithful⟩,
+    -- CommonSubexprElim (§2.5) — fresh names and ordering
+    ⟨PropertyNames.cseFreshNamesFresh,       checkCseFreshNamesFresh⟩,
+    ⟨PropertyNames.cseAssertLabelsPreserved, checkCseAssertLabelsPreserved⟩,
+    ⟨PropertyNames.cseFreshDeclOrder,        checkCseFreshDeclOrder⟩,
+    ⟨PropertyNames.cseOutputTypechecks,      checkCseOutputTypechecks⟩,
+    -- FunctionInlining (§2.6) — a pure expression transform
+    ⟨PropertyNames.inlineFuelZeroIdentity,   checkInlineFuelZeroIdentity⟩,
+    ⟨PropertyNames.inlineFuelMonotone,       checkInlineFuelMonotone⟩,
+    ⟨PropertyNames.inlineTypePreserved,      checkInlineTypePreserved⟩,
+    ⟨PropertyNames.inlineCaptureFree,        checkInlineCaptureFree⟩,
+    ⟨PropertyNames.inlineEvalAgreement,      checkInlineEvalAgreement⟩,
+    -- ProcedureInlining (§2.7) — freshening of the labels
+    ⟨PropertyNames.inlineProcLabelsNodup,    checkInlineProcLabelsNodup⟩,
+    ⟨PropertyNames.inlineProcAssertsNotLost, checkInlineProcAssertsNotLost⟩,
+    ⟨PropertyNames.inlineProcStatsFaithful,  checkInlineProcStatsFaithful⟩,
+    ⟨PropertyNames.inlineProcTypechecks,     checkInlineProcTypechecks⟩,
+    ⟨PropertyNames.inlineProcAnalysisPreserved, checkInlineProcAnalysisPreserved⟩,
+    ⟨PropertyNames.inlineProcSymbolicAgreement, checkInlineProcSymbolicAgreement⟩,
+    -- NondetElim + LoopInitHoist (§2.8) — the unproven postconditions
+    ⟨PropertyNames.nondetElimNoNondetGuard,  checkNondetElimNoNondetGuard⟩,
+    ⟨PropertyNames.nondetElimFreshNames,     checkNondetElimFreshNames⟩,
+    ⟨PropertyNames.hoistNoLoopBodyInits,     checkHoistNoLoopBodyInits⟩,
+    ⟨PropertyNames.hoistPreservesUniqueInits, checkHoistPreservesUniqueInits⟩ ]
 
 end Properties

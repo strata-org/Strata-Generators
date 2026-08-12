@@ -1651,3 +1651,22 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
          passed := StrataGenerators.PrinterCoverage.checkBvLitPrints w } : BvLitWidthResult))
   enumerate PropertyNames.printerBvIntConversions bvIntConversionSamples
   enumerate PropertyNames.printerBvWidthAgreement bvWidthAgreementSamples
+
+  -- ── Panels for the eight unproven Core transform passes ────────────
+  -- One panel per property in the shared `Properties.unprovenTransforms` bundle
+  -- (also consumed by both Plausible harnesses), for the passes in
+  -- `Strata/Transform/` that carry no correctness proof (issue #69). Each sample is
+  -- a whole generated program, so the `programFeatures` breakdown
+  -- (`num_decls`, `decl_kinds`, `program_size`, `rejection_cause`) applies
+  -- unchanged, and `decl_kinds` is what makes a vacuous panel legible: a property
+  -- about the axioms is uninformative on a sample that declares none.
+  --
+  -- Several of these panels show honest failures: `s2u: every block is reachable
+  -- from the entry` fails on each sample whose body holds a labelled block, `s2u: a
+  -- cfg-bodied procedure prints` fails on each sample that declares a procedure,
+  -- `loop: LoopElim mints distinct block labels` fails on each sample that holds a
+  -- loop, and the two `procInline` failures (duplicate labels, and the dropped
+  -- `requires` obligation) fire on the rarer samples that hold a call. So
+  -- `decl_kinds` and `program_size` separate a real pass from a vacuous one on each.
+  for p in Properties.unprovenTransforms do
+    panel p.name (genProgramProp p.name p.check)

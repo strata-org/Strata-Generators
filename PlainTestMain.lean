@@ -216,6 +216,26 @@ def main (args : List String) : IO UInt32 := do
              StrataGenerators.PrinterCoverage.checkProgramPrintsWithoutError gp.prog = true)
            cfg ]
 
+  -- Properties for the eight Core transform passes that have no correctness proof
+  -- (issue #69), folded from the shared `Properties.unprovenTransforms` bundle (the
+  -- same forty-two checks as `TestMain`). Each runs its pass on a whole generated
+  -- program; counterexamples shrink through the same whole-program shrinker.
+  -- The four defects the bug report files all show up here as honest failures:
+  -- `loop: LoopElim mints distinct block labels` (the pass emits one minted label two
+  -- times), `procInline: inlining introduces no duplicate label` (two independent
+  -- causes), `procInline: the output typechecks` (an `old x` expression escapes the
+  -- renaming) and `procInline: symbolic evaluation loses no obligation` (the callee's
+  -- `requires` is dropped — the unsound one, repo issue #107). The `procInline` three
+  -- are rare on generated input, so a short run may show them green. The two `s2u:`
+  -- failures (`every block is reachable from the entry`, `a cfg-bodied procedure
+  -- prints`) are expected red ticks the report does NOT file as defects.
+  -- `CommonSubexprElim` fires on 0 of 200 generated programs, so all four CSE
+  -- properties are vacuous here and `#guard`s test them instead.
+  let unprovenSuite : List (IO Result) :=
+    Properties.unprovenTransforms.map
+      (fun p => runProperty p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) cfg)
+
   let exitCode ← runSuites [
     ("expr", exprSuite),
     ("cmd", cmdSuite),
@@ -224,7 +244,8 @@ def main (args : List String) : IO UInt32 := do
     ("proc", procSuite),
     ("program", programSuite),
     ("phase", phaseSuite),
-    ("printer", printerSuite)
+    ("printer", printerSuite),
+    ("transforms", unprovenSuite)
   ]
 
   -- Always-run diagnostics (do not gate the exit code):

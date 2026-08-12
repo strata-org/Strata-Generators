@@ -116,11 +116,21 @@ def stmtKind : Statement → String
   | .funcDecl _ _ => "funcDecl"
   | .typeDecl _ _ => "typeDecl"
 
-/-- Whether a statement list contains any `exit`/`funcDecl`/`typeDecl` node —
-    exactly the constructors `StmtToKleeneStmt` has no Kleene counterpart for.
-    Used to state the "defined ⟺ supported" property (#6). -/
+/-- Whether a statement list contains any `exit`/`funcDecl`/`typeDecl` node, or a
+    procedure `call` — exactly the constructors that make `kleeneStmts` return
+    `none` other than an invariant-bearing loop (`hasInvLoopStmts`). Used to state
+    the "defined ⟺ supported" property (#6).
+
+    The `call` case is unreachable from the *statement* generator, which is why
+    `toCmdStmt`'s note calls it vacuous. It is **not** vacuous for a whole generated
+    *program*: `ProgramGen` emits `call` commands, so a property that screens on this
+    predicate over program bodies (`checkKleeneMeasureAccepted`) needs the case, or a
+    draw containing a call is scored as a Kleene failure that has nothing to do with
+    the construct under test. -/
 def hasKleeneUnsupported (ss : List Statement) : Bool :=
-  countStmtsByList (fun | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => true | _ => false) ss != 0
+  countStmtsByList
+    (fun | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ | .cmd (.call _ _ _) => true
+         | _ => false) ss != 0
 
 /-- Whether a statement list contains any `loop` node carrying a non-empty
     invariant list. `StmtToKleeneStmt` returns `none` for such loops (Kleene has

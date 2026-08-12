@@ -35,8 +35,10 @@ The declaration fold threads:
 * `baseTypes` / `tyCons` — the referenceable type-constructor vocabulary, grown
                by abstract-type declarations.
 
-`octx` / `pctx` (the operator contexts feeding expression generation) are fixed
-across the fold. -/
+* `octx` / `pctx` — the operator vocabularies feeding expression generation, grown
+               by each function declaration (`octx` for a monomorphic function,
+               `pctx` for a polymorphic one), so a later body may call any function
+               the program declares. -/
 
 structure GenState where
   C : LContext CoreLParams
@@ -53,24 +55,37 @@ structure GenState where
   /-- Monomorphic operator vocabulary for generated expressions (axiom bodies,
       function bodies, procedure contracts/bodies).
 
-      Seeded with Core's primitives (`coreMonoOps`) and **grown by each datatype
-      step** with the ground-typed derived functions of the block just declared —
-      its constructors, testers, and safe/unsafe field accessors
-      (`adtDerivedOps`). This is what lets a later function or procedure body
-      genuinely call into an earlier ADT; before, the list was fixed for the whole
-      fold and no body ever mentioned a datatype.
+      Seeded with Core's primitives (`coreMonoOps`) and grown from **two** sources,
+      which between them are what let a later body call anything the program
+      declared earlier:
+
+      * each **datatype step**, with the ground-typed derived functions of the block
+        just declared — its constructors, testers, and safe/unsafe field accessors
+        (`adtDerivedOps`). Before this the list was fixed for the whole fold and no
+        body ever mentioned a datatype;
+      * each **monomorphic function declaration** (`genDeclFunction`), so a body
+        generated later may call a function the program declares. Without it a
+        program declared functions none of its own bodies could name, and
+        `FunctionInlining` ran as the identity on every draw.
 
       Soundness is *indifferent* to this list: under the annotated spec an `.op`
       node is typed from its own annotation (`genLExpr_sound` quantifies over an
-      arbitrary `octx`), so growing it widens the support without touching any
-      proof obligation — which is why `Inv` needs no field for it. -/
+      arbitrary `octx`), and `Inv` never mentions the field, which is why it needs
+      none. So growing it widens the support without touching any proof obligation —
+      unlike `procs`, whose threading needed a new invariant field. That is what made
+      both growths plumbing changes rather than proof efforts. -/
   octx : OpCtx
-  /-- Polymorphic operator vocabulary (the `IndirPoly` rule). Same remark as
-      `octx`: arbitrary values are sound, and each datatype step grows it with the
-      block's derived functions under their full type *schemes*
-      (`adtDerivedPolyOps`) — the projection that makes a *polymorphic* datatype's
-      accessors and testers reachable, since `IndirPoly` unifies the scheme's
-      return type against the target instead of comparing types with `==`. -/
+  /-- Polymorphic operator vocabulary (the `IndirPoly` rule), grown from the same two
+      sources as `octx`: each datatype step adds the block's derived functions under
+      their full type *schemes* (`adtDerivedPolyOps`) — the projection that makes a
+      *polymorphic* datatype's accessors and testers reachable, since `IndirPoly`
+      unifies the scheme's return type against the target instead of comparing types
+      with `==` — and each **polymorphic function declaration** registers here rather
+      than in `octx`, so every declared function becomes callable by a later body
+      rather than only the monomorphic minority.
+
+      Same soundness remark as `octx`: arbitrary values are sound, because
+      `genLExpr_sound` quantifies over `pctx` and `Inv` never mentions it. -/
   pctx : PolyOpCtx
   /-- The **datatype-derived** polymorphic schemes only — `pctx` minus Core's
       primitives. This, not `pctx`, is what generated *function* and *procedure*
@@ -312,16 +327,114 @@ known-unsound. It is parked pending a question to the Strata team about whether
 positivity is meant to be checked pre- or post-resolution — see repo issue #65 and
 `docs/program-gen-interleaving.md`. -/
 
+/-- How many times a declared function's operator entry is repeated in `octx` /
+    `pctx`.
+
+    **Why a repeat rather than a single entry.** `genIndir` and `genIndirPoly` pick an
+    operator with `elements`, which is **uniform** over the candidates
+    `findOpsInCtx` / `findPolymorphicOps` return for the target type. Those candidate
+    lists are large: 105 operators of `Core.Factory` produce `bool` when fully
+    applied, and 27 produce `int`. So a single entry for a declared function gives it
+    a ~1% chance at a `bool`-typed leaf, and the measured result was 1 mention across
+    200 programs — the function was registered correctly and simply never drawn.
+
+    Repeating the entry `n` times multiplies its share, because `elements` is uniform
+    over a list that now holds it `n` times. This is the same trick the weighted
+    `frequency` calls use elsewhere, expressed through list multiplicity because
+    `OpCtx` has no weight field.
+
+    **Soundness is unaffected**, for the same reason the vocabularies can be grown at
+    all: `genLExpr_sound` quantifies over an arbitrary `octx`/`pctx`, and a repeated
+    entry changes only the distribution, not the support (`opsOfTypeList` is a
+    `filterMap`, so a duplicate contributes a duplicate candidate naming the same
+    operator at the same type — an expression the generator could already produce).
+    `OpCtx.agrees` still holds by construction, since `OpCtx.ofList` recomputes the
+    index from the list it is given.
+
+    The value 24 is chosen to put a declared function at roughly 1-in-5 odds at a
+    `bool` leaf (24 of 105 + 24) and near even odds at `int`. -/
+def declaredFuncWeight : Nat := 24
+
+/-- The curried type of a function: `in₁ → ⋯ → inₙ → out`, built exactly as
+    `coreMonoOps` builds it for a `Core.Factory` function. -/
+def funcCurriedTy (f : Function) : LMonoTy :=
+  LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)
+
+/-- The `OpCtx` entry for a **monomorphic** declared function: its name paired with
+    its curried type.
+
+    `none` for a polymorphic function. `OpCtx` holds a monotype per operator, so a
+    function with a non-empty `typeArgs` would have to be recorded at a type
+    mentioning a free type variable, which `findOpsOfType` would then match by
+    accident. A polymorphic function goes to `funcPolyOpEntry` instead. -/
+def funcOpEntry (f : Function) : Option (String × LMonoTy) :=
+  if f.typeArgs.isEmpty then some (f.name.name, funcCurriedTy f) else none
+
+/-- The `PolyOpCtx` entry for a **polymorphic** declared function: its name paired
+    with its type *scheme*, `∀ typeArgs. in₁ → ⋯ → inₙ → out`.
+
+    `none` for a monomorphic function, which belongs in `octx` instead — an entry
+    with an empty binder list would make `findPolymorphicOps` do the work of
+    `findOpsOfType` with extra steps, and would double-register the operator.
+
+    The binder list is the function's own `typeArgs`, which is what makes the entry
+    well formed for `findPolymorphicOps`: that function alpha-renames `boundVars`
+    away from the type variables already in use, decomposes the arrow, and unifies
+    the residual result type against the target. So the binders must be exactly the
+    variables of the body that are meant to be instantiable — which for a generated
+    function is `typeArgs`, since `FuncWF` requires the signature's free type
+    variables to be a subset of them.
+
+    A function whose `typeArgs` contains a variable the signature never mentions is
+    still fine here: `findPolymorphicOps` samples an instantiation per bound
+    variable and the unused one simply has no effect on the result type. -/
+def funcPolyOpEntry (f : Function) : Option (String × LTy) :=
+  if f.typeArgs.isEmpty then none
+  else some (f.name.name, .forAll f.typeArgs (funcCurriedTy f))
+
 /-- Generate a non-recursive function, rename it to a globally fresh name (so the
     program's names stay distinct without touching `FuncHasType'`, which does not
     constrain the name), and — if `addFactoryFunctionWithError` accepts it — emit
-    it and grow the context's function factory. -/
+    it, grow the context's function factory, and register it in the operator
+    vocabulary.
+
+    **The `octx` growth is what lets a later body call this function.** Growing `C`
+    alone registers the function with the *typechecker*; expression generation draws
+    its `.op` nodes from `octx`, so without this a generated program declared
+    functions that none of its own bodies could mention, and every pass that needs a
+    call to a declared function (`FunctionInlining`, through
+    `Factory.callOfLFunc`) ran as the identity. See
+    `StrataGenerators/ProgramGen/UnprovenTransforms.lean` §2.6.
+
+    This is **soundness-neutral**, which is what makes it a one-line change rather
+    than a proof effort: under the annotated spec an `.op` node is typed from its own
+    annotation, so `genLExpr_sound` quantifies over an arbitrary `octx` and the
+    `Inv` invariant never mentions the field. Seeding it widens the support without
+    touching any obligation. Contrast `procs`, whose threading *did* need a new
+    invariant field (`Inv.procsResolve`) because `genProcedure_sound` requires every
+    entry to resolve in the enclosing program.
+
+    Registration goes to `octx` for a monomorphic function and to `pctx` for a
+    polymorphic one, so **every** declared function becomes callable rather than only
+    the monomorphic minority (measured: 44 of 158 declared functions are
+    monomorphic, so the `pctx` half covers the other 114). Both are registered only
+    on the `.ok` branch: a function the context rejects is not emitted, so recording
+    it would offer a call target the program does not declare. -/
 def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let func₀ ← genFunction [] s.octx b.funcDepth s.derivedPctx
   let name ← DatatypeGen.genFreshName s.reserved
   let func := { func₀ with name := ⟨name, ()⟩ }
   match s.C.addFactoryFunctionWithError func.toLFunc with
-  | .ok C' => pure ([.func func .empty], { s with C := C', reserved := name :: s.reserved })
+  | .ok C' =>
+    let octx' := match funcOpEntry func with
+      | some entry => OpCtx.ofList (s.octx.ops ++ List.replicate declaredFuncWeight entry)
+      | none => s.octx
+    let pctx' := match funcPolyOpEntry func with
+      | some entry => s.pctx ++ List.replicate declaredFuncWeight entry
+      | none => s.pctx
+    pure ([.func func .empty],
+          { s with C := C', reserved := name :: s.reserved,
+                   octx := octx', pctx := pctx' })
   | .error _ => pure ([], s)
 
 /-- Generate a procedure and rename it to a globally fresh name (the program's
@@ -351,6 +464,16 @@ def genDeclProcedure [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   pure ([.proc proc .empty],
         { s with reserved := name :: s.reserved, procs := sig :: s.procs })
 
+/-- Whether the fold has yet declared a function that a later body could call.
+
+    `genDeclFunction` registers each accepted function in `octx` or `pctx`, so the
+    combined vocabulary size exceeding the seed's is exactly "some function has been
+    declared and accepted". Used only to steer the weights below; nothing about
+    correctness depends on it. -/
+def hasCallableFunc (s : GenState) : Bool :=
+  s.octx.ops.length + s.pctx.length >
+    initState.octx.ops.length + initState.pctx.length
+
 /-- The declaration-kind selector: pick one of the seven declaration kinds and run
     its step generator. Every kind here is covered by `genProgram_sound`.
 
@@ -362,23 +485,42 @@ def genDeclProcedure [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     `procs = []`), so the odds of a call scale roughly with the square of this
     weight's share.
 
-    This is a **distribution-only** change. `frequency` and `oneOf` have the same
-    support whenever every weight is positive (`mem_support_frequency_iff` /
-    `mem_support_oneOf_iff` both reduce to "some branch produced it"), so no
-    soundness or completeness statement changes — only how often each kind is
-    drawn. The same argument licenses the `wExit`/`wCall` weights inside
-    `genStmt`. -/
+    **Order-aware bias toward functions first.** A body can only call a function the
+    fold has *already* declared, because `genDeclFunction` registers it in
+    `octx`/`pctx` after the fact. Under uniform-at-weight selection a bodied function
+    preceded the first procedure in only 4 of 200 draws, so `FunctionInlining` had
+    almost nothing to inline. While no function is yet callable
+    (`hasCallableFunc s = false`) the function weight is therefore raised to 6 and
+    the procedure weight dropped to 1; once one exists the original 3-and-4 weights
+    resume. The effect is to front-load functions without removing procedures from
+    the early positions.
+
+    This is a **distribution-only** change, and that is what keeps it out of the
+    proofs: `frequency` and `oneOf` have the same support whenever every weight is
+    positive (`mem_support_frequency_iff` / `mem_support_oneOf_iff` both reduce to
+    "some branch produced it"), so no soundness or completeness statement changes —
+    only how often each kind is drawn. Both weight vectors keep every entry
+    positive, so the support is the same in either phase. `genDeclStep_sound`
+    discards the weight it inverts out of the `frequency` (`_hw`) and pins each
+    branch by the list's structure, so it is unaffected. The same argument licenses
+    the `wExit`/`wCall` weights inside `genStmt`. -/
 def genDeclStep [Gen G] (s : GenState) (b : Bounds) : G StepResult :=
+  -- `(wFunc, wProc)`: front-load functions until one is callable.
+  let (wFunc, wProc) := if hasCallableFunc s then (3, 4) else (6, 1)
   let gs : List (Nat × (Unit → G StepResult)) :=
     [ (1, fun () => genDeclAbstract s b)
     , (1, fun () => genDeclAlias s b)
     , (1, fun () => genDeclAxiom s b)
     , (1, fun () => genDeclDistinct s b)
     , (3, fun () => genDeclDatatype s b)
-    , (3, fun () => genDeclFunction s b)
-    , (4, fun () => genDeclProcedure s b) ]
-  frequency gs (by simp only [gs, List.map_cons, List.map_nil, List.sum_cons,
-    List.sum_nil]; omega)
+    , (wFunc, fun () => genDeclFunction s b)
+    , (wProc, fun () => genDeclProcedure s b) ]
+  frequency gs (by
+    -- The four fixed weight-1 entries and the datatype weight already make the sum
+    -- positive, so this holds whatever phase `(wFunc, wProc)` is in — no case split
+    -- on the `if` is needed.
+    simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+    omega)
 
 /-- Fold `n` declaration steps, threading state and accumulating (in order) the
     emitted declarations. -/

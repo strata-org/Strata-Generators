@@ -84,15 +84,23 @@ theorem genDeclStep_complete_of_mem {s s' : GenState} {b : Bounds} {ds : List De
   simp only [genDeclStep, mem_support_frequency_iff]
   -- One branch per kind, each naming its generator and that generator's weight.
   -- The weights appear *only here*, never in the statement, so re-tuning the
-  -- dispatch touches at most these seven literals and no downstream user.
+  -- dispatch touches at most these seven witnesses and no downstream user.
+  --
+  -- The last two are `wFunc`/`wProc`, which `genDeclStep` picks by phase
+  -- (`(3, 4)` once a function is callable, `(6, 1)` before), so their witness is
+  -- the projection of that `if` rather than a literal. `split` takes the
+  -- positivity goal to one per phase, which is the whole content of "reachability
+  -- does not depend on the weights": both phases keep every entry positive.
   rcases hmem with h | h | h | h | h | h | h
   · exact ⟨1, fun () => genDeclAbstract s b, by simp, by omega, h⟩
   · exact ⟨1, fun () => genDeclAlias s b, by simp, by omega, h⟩
   · exact ⟨1, fun () => genDeclAxiom s b, by simp, by omega, h⟩
   · exact ⟨1, fun () => genDeclDistinct s b, by simp, by omega, h⟩
   · exact ⟨3, fun () => genDeclDatatype s b, by simp, by omega, h⟩
-  · exact ⟨3, fun () => genDeclFunction s b, by simp, by omega, h⟩
-  · exact ⟨4, fun () => genDeclProcedure s b, by simp, by omega, h⟩
+  · exact ⟨(if hasCallableFunc s then (3, 4) else (6, 1)).fst,
+           fun () => genDeclFunction s b, by simp, by split <;> decide, h⟩
+  · exact ⟨(if hasCallableFunc s then (3, 4) else (6, 1)).snd,
+           fun () => genDeclProcedure s b, by simp, by split <;> decide, h⟩
 
 /-! ## Representative per-step reachability: axioms
 

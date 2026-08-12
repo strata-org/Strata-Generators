@@ -839,6 +839,21 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
       typesNil := hinv.typesNil
       rigidNil := hinv.rigidNil }
 
+/-- **`Inv` is preserved by any change to the operator vocabularies.** No `Inv`
+    field mentions `octx`, `pctx` or `derivedPctx` — under the annotated spec an
+    `.op` node is typed from its own annotation, so the vocabularies constrain which
+    programs are *drawn*, never which are well-typed — hence every field of `hinv`
+    transfers verbatim and `{ hinv with }` copies them.
+
+    Needed because two steps now grow a vocabulary while `Inv` is being re-established:
+    the datatype step (with the block's derived functions) and the function step
+    (registering the declared function so a later body can call it). Compose with
+    `inv_addFactory` / `inv_grow_reserved`, which cover the fields that *do* move. -/
+theorem inv_setVocab {s : GenState} (hinv : Inv s)
+    (octx : OpCtx) (pctx derivedPctx : PolyOpCtx) :
+    Inv { s with octx := octx, pctx := pctx, derivedPctx := derivedPctx } :=
+  { hinv with }
+
 /-- **`Inv` is preserved by a factory add alone.** A successful
     `addFactoryFunctionWithError` touches only `C.functions`, and no `Inv` field
     mentions the function factory (`knownTypes`, `datatypes`, `rigidTypeVars` and
@@ -1105,10 +1120,11 @@ theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
       exact DeclsHasType'.cons _ _ _ _ _ _ _ _
         (DeclHasType'.func s.C C' s.Γ func .empty hnonrec hwt hext)
         (DeclsHasType'.nil _ _)
-    · -- `Inv` preserved: only `functions` changed (`inv_addFactory`), plus one
-      -- reserved name (`inv_grow_reserved` at `[nm]`).
+    · -- `Inv` preserved: `functions` changed (`inv_addFactory`), one reserved name
+      -- (`inv_grow_reserved` at `[nm]`), and the operator vocabularies grew with the
+      -- function just declared, which no `Inv` field mentions (`inv_setVocab`).
       have := inv_grow_reserved (s := { s with C := C' }) (inv_addFactory hinv hadd) [nm]
-      simpa using this
+      simpa using inv_setVocab this _ _ _
 
 /-! ## Per-declaration soundness: abstract types
 
