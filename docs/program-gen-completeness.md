@@ -30,8 +30,9 @@ Program completeness cannot be stronger than the sub-generators it composes:
   `genLExpr` reachability. The generator only ever produces `.func` (never
   `.recFuncBlock`), so recursive function blocks are out of range by construction.
 * **Datatypes** (`genArgTy_complete_of_MutualADTWF`) — complete against
-  `MutualADTWF` only with the `ArityOk` side condition (see
-  `mutualadtwf-arity-gap.md`); `MutualADTWF`-alone completeness is provably false.
+  `MutualADTWF` with the `BitvecWidthOnly` side condition and `VocabOk` (see
+  `mutualadtwf-arity-gap.md`; the old hand-written `ArityOk` is gone, closed by
+  upstream's `argsWellKinded`); `MutualADTWF`-alone completeness is provably false.
 * **Type aliases** — the generator stores the body verbatim with
   `typeArgs := (freeVars body).dedup`. It therefore reaches exactly the aliases
   whose declared `typeArgs` are the dedup'd free vars in the *written* order the
@@ -67,7 +68,8 @@ to bounded sampling rather than hiding them behind `sorry`.
 
 A monolithic `genProgram_complete` (every `ProgramHasTypeA` program is reachable)
 is **not** claimed, because it is false without the union of all the side
-conditions above — exactly analogous to why datatype completeness needs `ArityOk`.
+conditions above — exactly analogous to why datatype completeness needs
+`BitvecWidthOnly`.
 
 ## Procedures / recursive-function blocks
 
@@ -91,7 +93,7 @@ the datatype step still calls `genMutuallyRecursiveDatatypes`, only with a wider
 applied-constructor vocabulary (`s.tyCons ++ s.dtCons` instead of
 `defaultTyCons`).
 
-That widening does not weaken the documented `ArityOk` side condition
+That widening does not weaken the documented side conditions
 (`mutualadtwf-arity-gap.md`): prior datatypes and abstract types enter the
 vocabulary *with* their arities and are drawn through the same
 `vectorOf arity …` application branch as the primitives, so the arity discipline

@@ -179,18 +179,64 @@ emits only these constructors, the name of the datatype and `"arrow"`. Therefore
 /-- An applied type constructor that the generator can refer to, with its arity. -/
 abbrev KnownTyCon := String × Nat
 
-/-- The names of the base types that the generator can refer to. Each of these base
-    types has arity `0`. The `LMonoTy` generator in `HasTypeAGen/Core.lean` uses the same
-    names. `nullaryBaseTypeNames` holds `bool`, `int`, `string`, `real` and `regex`.
-    `pickBitvecWidth` draws the bitvectors separately, as in that generator. -/
-def defaultBaseTypes : List String :=
-  nullaryBaseTypeNames
+/-! ### The vocabulary, read off `Core.KnownTypes`
 
-/-- The applied type constructors that the generator can refer to. These are the
-    parameterized primitives that Strata Core knows. Read `Core.KnownLTys`. This list
-    does not hold `"arrow"`, because `genArgTy` has a separate branch for an arrow. -/
+Both lists below are **derived** from `Core.KnownTypes` — the register Strata Core itself
+consults — rather than written by hand. Two reasons:
+
+* a hand-written list drifts (the same lesson as `coreMonoOps`/`corePolyOps`); and
+* the derivation is what makes the *arity* side condition provable rather than assumed.
+  `MutualADTWF.argsWellKinded` says every type-constructor occurrence is applied at the
+  arity `C.knownTypes` records. If the vocabulary *is* that register split by arity, the
+  converse holds too, so `genArgTy_complete_of_MutualADTWF` no longer needs a hand-written
+  `ArityOk` restating the whole arity discipline. See `docs/mutualadtwf-arity-gap.md`.
+
+`Core.KnownTypes` is a `HashMap`, whose `toList` order is unspecified, so both lists are
+sorted: the generator's distribution must not depend on hash iteration order. -/
+
+/-- The nullary type constructors Strata Core knows, i.e. the base types the generator may
+    refer to. Currently `TriggerGroup`, `Triggers`, `bool`, `int`, `real`, `regex`,
+    `string` — the five scalars this list used to be written as by hand, plus the two
+    quantifier-trigger types it had omitted.
+
+    Every entry is included: `coreNullary_arity` needs the list to be *exactly* the arity-0
+    register, since that is the direction that turns `argsWellKinded` back into
+    "this name is one of ours".
+
+    `pickBitvecWidth` draws bitvectors separately (see `genBaseTy`), because a bitvector
+    type is `LMonoTy.bitvec n` for a *width* `n` and not a type application. -/
+def defaultBaseTypes : List String :=
+  -- `KnownTypes = Std.HashMap String Nat`, key = name, value = arity.
+  ((Std.HashMap.toList Core.KnownTypes).filterMap
+    (fun k => if k.2 == 0 then some k.1 else none)).mergeSort (· ≤ ·)
+
+/-- The applied (arity ≥ 1) type constructors Strata Core knows, minus `arrow`. This is the
+    register `MutualADTWF.argsWellKinded` speaks about, restricted to the applications
+    `genArgTy` does not give a dedicated branch. `defaultTyCons` is this list minus
+    `bitvec`. -/
+def coreAppliedTyCons : List KnownTyCon :=
+  -- `KnownTypes = Std.HashMap String Nat`, key = name, value = arity.
+  ((Std.HashMap.toList Core.KnownTypes).filter
+    (fun k => k.2 != 0 && k.1 != "arrow")).mergeSort (fun a b => a.1 ≤ b.1)
+
+/-- The applied (arity ≥ 1) type constructors Strata Core knows, as `(name, arity)` pairs.
+    `arrow` is excluded because `genArgTy` has a dedicated branch for it, and `bitvec`
+    because its argument is a *width* and not a type — `genBaseTy` emits `LMonoTy.bitvec n`
+    for it. `coreAppliedTyCons` keeps `bitvec`, and the `BitvecWidthOnly` side condition is
+    what bridges the two (see `genArgTy_complete_of_MutualADTWF`).
+
+    Currently `[("Map", 2), ("Sequence", 1)]`, the same pair this list used to name by
+    hand. -/
 def defaultTyCons : List KnownTyCon :=
-  [("Sequence", 1), ("Map", 2)]
+  coreAppliedTyCons.filter (fun kc => kc.1 != "bitvec")
+
+-- Drift pins. These are `#guard`s (evaluation) and not `decide` (kernel reduction), because
+-- `Core.KnownTypes` is a `HashMap`. If upstream registers a new primitive, the guard that
+-- fires tells you which list grew; nothing else in the build depends on these values.
+#guard defaultBaseTypes ==
+  ["TriggerGroup", "Triggers", "bool", "int", "real", "regex", "string"]
+#guard coreAppliedTyCons == [("Map", 2), ("Sequence", 1), ("bitvec", 1)]
+#guard defaultTyCons == [("Map", 2), ("Sequence", 1)]
 
 /-! ## How the generator makes a name
 

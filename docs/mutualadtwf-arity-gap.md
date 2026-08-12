@@ -1,39 +1,69 @@
-# `MutualADTWF` does not check arity / kinding — and this blocks generator completeness
+# `MutualADTWF` and generator completeness — the arity gap, now closed
 
 **Audience:** authors of `Core.TypeSpec.MutualADTWF` and the `Lambda`-level
 datatype well-formedness predicates (`Strata.DL.Lambda.DatatypeWF`).
 
-**TL;DR:** `MutualADTWF` accepts constructor-argument types that apply a type
-constructor at the *wrong arity* (e.g. `Sequence a b`, where `Sequence` is
-arity-1). These types are ill-kinded and no well-typed program can use them, yet
-they satisfy every field of `MutualADTWF`. This is the one and only remaining
-obstacle to proving our ADT generator **complete** with respect to `MutualADTWF`
-without an ad-hoc side condition. We would like to know whether omitting the arity
-check is intentional (checked in a later pipeline phase) or an oversight that
-`MutualADTWF` should close — analogous to the recently-added `argVarsScoped` field.
-
-> **Status (current state of the proof).** We have proved completeness against
-> `MutualADTWF` with a **single** side condition, `ArityOk`, isolating exactly
-> this gap — see `DatatypeGen.genArgTy_complete_of_MutualADTWF` in
-> `StrataGenerators/DatatypeGenProofs.lean`, and `not_complete_without_arity` for
-> the `Sequence a a` witness that shows the side condition is necessary. Every
-> other generator restriction is discharged by an existing `MutualADTWF` field
-> (`argsWF`, `argVarsScoped`), so `ArityOk` is the only ad-hoc predicate that
-> remains. If `refsKnown` becomes arity-aware (below), `ArityOk` becomes redundant
-> and can be dropped; until then it lives on the generator side.
+> ## RESOLVED (2026-08-12)
 >
-> **Block-level completeness is now proved** on top of the per-type
-> result: `DatatypeGen.genMutuallyRecursiveDatatypes_complete` shows every target
-> block presented in any datatype order is in the generator's support, given some
-> inhabitance-topological reordering (`orderedBlock`) reachable by the ordered core
-> (`genMutuallyRecursiveDatatypesOrdered_complete`). It composes the two
-> permutation-completeness lemmas (`permutationOf_complete`, for both the block
-> shuffle and the per-datatype constructor shuffle) with the header/body assembly,
-> under existential size caps and `BodyReachable`, which bundles the per-datatype
-> reachability side conditions (name reachability/freshness — taken as hypotheses,
-> since this file's `genIdentName` has no two-directional support lemma — and the
-> `visibleRefs` inhabitance-order discipline). All axiom-clean (`propext,
-> Classical.choice, Quot.sound`).
+> **The gap this document reported is closed upstream.** `MutualADTWF` gained the
+> field `argsWellKinded`, which pairs every type-constructor reference in a
+> constructor argument with the argument count at that occurrence
+> (`getTypeConsArities`) and requires it to match the referent's declared arity —
+> a `C.knownTypes` arity, or a datatype's `typeArgs` count. That is exactly the
+> check we asked for below.
+>
+> **Our side is now aligned.** The hand-written `ArityOk` side condition is
+> **deleted** (strata-generators issue #101). Two changes made that possible:
+>
+> 1. `DatatypeGen.defaultBaseTypes` and `DatatypeGen.defaultTyCons` are now
+>    *derived* from `Core.KnownTypes` — the very register `argsWellKinded` speaks
+>    about — rather than written by hand. `mem_defaultBaseTypes_iff` and
+>    `mem_defaultTyCons_iff` read the derivation back in both directions, so an
+>    arity fact about `Core.KnownTypes` becomes membership in the generator's
+>    vocabulary. That is what turns `argsWellKinded` into everything `ArityOk`
+>    used to assert.
+> 2. What `ArityOk` was *also* silently covering is now split out and named, so
+>    both residual gaps are visible instead of hidden inside an arity recursion:
+>
+>    * **`BitvecWidthOnly`** (a condition on the type) — `Core.KnownTypes`
+>      registers `("bitvec", 1)`, so `argsWellKinded` accepts `bitvec τ` for a
+>      *type* `τ`, and `LContext.addMutualBlock` really does accept such a block.
+>      But a bitvector type is `LMonoTy.bitvec n` for a **width** `n : Nat`, and no
+>      `LMonoTy` argument position can hold a natural number — so the arity `1`
+>      recorded for `bitvec` is not an arity over types at all. `genBaseTy` emits
+>      bitvectors through `pickBitvecWidth`; `genArgTy` never applies the *name*
+>      `bitvec`. `not_complete_without_bitvecWidthOnly` is the machine-checked
+>      witness that this one condition is still needed.
+>    * **`VocabOk.noStoredDatatypes`** (a condition on the context) —
+>      `argsWellKinded` is a three-way disjunction, and its middle disjunct admits
+>      references to datatypes *already stored* in `C`. The generator's vocabulary
+>      is `baseTypes`/`tyCons`/`arrow`/`blockRefs`; it cannot emit such a
+>      reference. This holds for `coreContext` (`datatypes := #[]`), which is where
+>      the capstone is instantiated, but not part-way through the whole-program
+>      generator. That is a genuine limit of the result, not an artefact of how it
+>      is stated.
+>
+> `Sequence a a` — the counterexample this document was written around — is now
+> rejected by `MutualADTWF` itself; an `example` next to
+> `not_complete_without_bitvecWidthOnly` records that.
+>
+> **Side benefit.** Deriving the vocabulary removed most of the `native_decide` in
+> `defaultContextOk`: its four vocabulary fields are now proven from the shape of
+> the `filter` and hold for whatever `Core.KnownTypes` contains, so they need no
+> revisiting when upstream registers a new primitive. Only the two `arrow` lookups
+> remain, because `genArgTy` hardcodes that name.
+>
+> **One behavioural consequence.** `defaultBaseTypes` must be *exactly* the arity-0
+> part of `Core.KnownTypes` for the implication to go through, so it now also
+> contains `Triggers` and `TriggerGroup`. The generator therefore emits datatype
+> fields at those types, and the Core printer cannot render them
+> (`lmonoTyToCoreType: unknown type`). That widens the already-failing
+> `printer: no conversion error on generated programs` property — the printer's
+> existing gap on most `bitvec` widths — rather than breaking a passing one.
+>
+> The rest of this document is kept as the original report.
+
+---
 
 ## Background
 
@@ -178,7 +208,21 @@ If `refsKnown` becomes arity-aware, that last row is subsumed too, and we can
 `MutualADTWF` with no ad-hoc predicates. The arity check is the single missing
 piece.
 
+**Update.** This is what happened, via the new `argsWellKinded` field rather than
+by changing `refsKnown`. The table now reads:
+
+| generator restriction | subsumed by | still ad-hoc? |
+| --- | --- | --- |
+| ftvar `v ∈ tyParams` | `argVarsScoped` | no |
+| recursive occurrence is `d.name` applied to `typeArgs` | `argsWF` (`StrictPosUnif` / `UniformOccur.self`) | no |
+| referenced name in vocabulary | `refsKnown` against a concrete `C` | no |
+| base type at arity 0 / constructor at declared arity | **`argsWellKinded`**, plus the vocabulary being derived from `Core.KnownTypes` | no |
+| a bitvector is a width, not an application | none — see `BitvecWidthOnly` | yes (one condition on the type) |
+| no reference to a datatype stored in `C` | none — see `VocabOk.noStoredDatatypes` | yes (one condition on the context) |
+
 ## Question for the authors
+
+*(Answered: `argsWellKinded` was added. Kept for the record.)*
 
 Is the absence of an arity/kinding check in `MutualADTWF` intentional — i.e. is
 well-kindedness of constructor-argument types deliberately deferred to a later

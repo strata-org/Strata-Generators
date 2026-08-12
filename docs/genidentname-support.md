@@ -140,7 +140,8 @@ and namespace, so all use sites still resolve). `genIdentName_ne_empty` is new.
 
 ## What this does *not* close
 
-Item 1 only. The rest of #66 stands: `ArityOk` (#65, needs a Strata-side fix),
+Item 1 only. The rest of #66 stands *except* `ArityOk` (#65), which upstream's
+`argsWellKinded` closed — see `mutualadtwf-arity-gap.md` and issue #101:
 the four missing per-step reachability lemmas, the `recFuncBlock` generator, and
 expression-level incompleteness (#64) — which remains the strict prerequisite for
 a *tight* program-level statement.

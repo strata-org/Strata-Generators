@@ -593,14 +593,18 @@ theorem simpleTyArities_of_inv {s : GenState} (hinv : Inv s) : SimpleTyArities s
     fun b hb => hinv.ctxOk.base_arity b (hinv.baseSupset hb)
   have htc : ∀ kc ∈ DatatypeGen.defaultTyCons, s.C.knownTypes[kc.1]? = some kc.2 :=
     fun kc hkc => hinv.ctxOk.tyCon_arity kc (hinv.tyConsSupset hkc)
+  -- Membership in the *derived* vocabulary is now an arity lookup in `Core.KnownTypes`
+  -- (`mem_defaultBaseTypes_iff` / `mem_defaultTyCons_iff`), which `native_decide` settles.
   refine ⟨?_, ?_, ?_, ?_, ?_, hinv.ctxOk.arrow_arity, ?_, ?_⟩
-  · exact hb "bool" (by simp [DatatypeGen.defaultBaseTypes, nullaryBaseTypeNames])
-  · exact hb "int" (by simp [DatatypeGen.defaultBaseTypes, nullaryBaseTypeNames])
-  · exact hb "string" (by simp [DatatypeGen.defaultBaseTypes, nullaryBaseTypeNames])
-  · exact hb "real" (by simp [DatatypeGen.defaultBaseTypes, nullaryBaseTypeNames])
-  · exact hb "regex" (by simp [DatatypeGen.defaultBaseTypes, nullaryBaseTypeNames])
-  · exact htc ("Map", 2) (by simp [DatatypeGen.defaultTyCons])
-  · exact htc ("Sequence", 1) (by simp [DatatypeGen.defaultTyCons])
+  · exact hb "bool" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
+  · exact hb "int" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
+  · exact hb "string" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
+  · exact hb "real" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
+  · exact hb "regex" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
+  · exact htc ("Map", 2) (DatatypeGen.mem_defaultTyCons_iff.mpr
+      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨by native_decide, by simp, by simp⟩, by simp⟩)
+  · exact htc ("Sequence", 1) (DatatypeGen.mem_defaultTyCons_iff.mpr
+      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨by native_decide, by simp, by simp⟩, by simp⟩)
 
 /-! ## Vocabulary-type reference confinement -/
 

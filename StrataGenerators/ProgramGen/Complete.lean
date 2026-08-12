@@ -6,7 +6,7 @@ import StrataGenerators.ProgramGen
 As documented in `docs/program-gen-completeness.md`, a monolithic
 "every `ProgramHasTypeA` program is reachable" theorem is inherently false for a
 *bounded sampler* without a union of per-declaration reachability side conditions
-(the same reason datatype completeness needs `ArityOk`; see
+(the same reason datatype completeness needs `BitvecWidthOnly`; see
 `docs/mutualadtwf-arity-gap.md`).
 
 What *is* cleanly provable — and is the useful completeness contribution — is that
@@ -28,9 +28,10 @@ the *reduction* half of completeness, waiting on the per-declaration reachabilit
 lemmas that do not exist yet. Only `genDeclAxiom_complete` (one of seven kinds) is
 written; abstract types, aliases, `distinct`, datatype blocks, functions and
 procedures still need theirs. Repo issue #66 catalogues that, along with the other
-blockers (`genIdentName` has no two-directional support lemma, `ArityOk` needs a
-Strata-side fix, `recFuncBlock` is not generated, and `genLExpr` is itself
-incomplete — issue #64).
+blockers (`genIdentName` has no two-directional support lemma, `recFuncBlock` is
+not generated, and `genLExpr` is itself incomplete — issue #64). The `ArityOk`
+blocker is **gone**: upstream's `argsWellKinded` plus a vocabulary derived from
+`Core.KnownTypes` discharged it (issue #101).
 
 Two consequences worth knowing before building on this:
 
