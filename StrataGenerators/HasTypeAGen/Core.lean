@@ -1911,21 +1911,33 @@ def coreMonoOps : OpCtx :=
   OpCtx.ofList <| Core.Factory.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
-/-- Polymorphic operators from Strata's Core.Factory. Used for the
-    IndirPoly generation rule (Pałka et al. 2011, Section 4). -/
+/-- Every **polymorphic** operator of Strata's `Core.Factory`, as a name paired with its
+    full type scheme `∀ typeArgs. mkArrow' output inputs`. The IndirPoly generation rule
+    uses this context (Pałka et al. 2011, Section 4).
+
+    Derived from the factory for exactly the reason `coreMonoOps` is (see there): a
+    hand-written list drifts. The list this replaced had drifted three ways against
+    `strata-org/Strata` `main`:
+
+    * it was **missing** `mapConst`, `Sequence.select!` and `TriggerGroup.addTrigger`, so
+      no generated term could apply them and every property about them passed vacuously;
+    * it carried a `const : ∀ k v. v → Map k v` that `Core.Factory` does **not** define —
+      the real entry is `mapConst`; and
+    * its `Sequence.build` was `∀ a. a → Sequence a`, while the factory's takes *two*
+      arguments (`∀ a. Sequence a → a → Sequence a`). A generated `Sequence.build e` was
+      therefore annotated at an arity the factory disagrees with, which is what the
+      printer reported as "unknown operation, rendering as generic call: Sequence.build".
+
+    Monomorphic factory entries are excluded (`typeArgs ≠ []`): `coreMonoOps` already
+    covers them through the Indir rule, and admitting them here would only duplicate that
+    work at every draw.
+
+    The body repeats the body of `factoryPolyOps` (restricted to the polymorphic entries)
+    rather than calling it, because `factoryPolyOps` lives in `HasTypeAGen/Defs.lean` and
+    that file imports this one. `corePolyOps_eq_factoryPolyOps` in `Defs.lean` proves the
+    two agree, so a change to one and not the other breaks the build. -/
 def corePolyOps : PolyOpCtx :=
-  [ -- Map operations
-    ("const", .forAll ["k", "v"] (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))
-  , ("select", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.ftvar "v"))))
-  , ("update", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))))
-  -- Sequence operations
-  , ("Sequence.length", .forAll ["a"] (.arrow (.seq (.ftvar "a")) .int))
-  , ("Sequence.empty", .forAll ["a"] (.seq (.ftvar "a")))
-  , ("Sequence.append", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.seq (.ftvar "a")) (.seq (.ftvar "a")))))
-  , ("Sequence.select", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.ftvar "a"))))
-  , ("Sequence.build", .forAll ["a"] (.arrow (.ftvar "a") (.seq (.ftvar "a"))))
-  , ("Sequence.update", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.arrow (.ftvar "a") (.seq (.ftvar "a"))))))
-  , ("Sequence.contains", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.ftvar "a") .bool)))
-  , ("Sequence.take", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
-  , ("Sequence.drop", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
-  ]
+  Core.Factory.toArray.toList.filterMap fun f =>
+    if f.typeArgs.isEmpty then none
+    else some (f.name.name,
+      Lambda.LTy.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)))

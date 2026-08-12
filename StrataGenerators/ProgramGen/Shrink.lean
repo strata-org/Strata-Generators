@@ -807,8 +807,13 @@ private def measureNoBodyDecl : Decl :=
   .func { name := ⟨"f1", ()⟩, typeArgs := [], inputs := [], output := .bool,
           body := none, measure := some (.const () (.intConst 0)) } .empty
 
-/-- An axiom applying `id`, one of the five `corePolyOps` schemes `Core.Factory`
-    does not define (~6%). -/
+/-- An axiom applying `id`, a name `Core.Factory` does not define.
+
+    Hand-built only: the generator can no longer produce this shape. Both operator
+    vocabularies are derived from `Core.Factory` (`coreMonoOps_eq_factoryOps`,
+    `corePolyOps_subset_factoryPolyOps`), so every operator a generated term applies
+    resolves. The old hand-written `corePolyOps` carried a `const` the factory does not
+    define, which is what used to make this gap reachable from the generator. -/
 private def unknownOpDecl : Decl :=
   .ax { name := "a1",
         e := .app () (.op () ⟨"id", ()⟩ (some (.arrow .bool .bool))) trueExpr } .empty

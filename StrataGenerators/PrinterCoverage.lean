@@ -61,15 +61,22 @@ non-power-of-2 story (#48 / #38):
    constructed and typechecked but not printed. This is a systematic hole rather
    than a missing case, which is what makes it the more interesting of the two.
 
-## The synthetic-operator caveat, and why it is not a false positive here
+## The synthetic-operator caveat, now vacuous
 
-Our own `corePolyOps` (`HasTypeAGen/Core.lean:1374`) contains synthetic
-combinators — `id`, `churchTrue`, `churchFalse` — that are deliberately *not*
-Strata operators. The printer is right to reject them, so counting them would
-make this property fail for a reason that is our fault, not Strata's.
+This section used to explain a caveat: `corePolyOps` was a hand-written list that
+held synthetic combinators (`id`, `churchTrue`, `churchFalse`) which are
+deliberately *not* Strata operators, so the printer was right to reject them and
+counting them would have failed this property for our own reasons.
 
-`syntheticOps` below lists them and `strataErrorLines` filters them out, so the
-whole-program property scores only genuine Strata gaps. The filter is on the
+That caveat no longer applies. `coreMonoOps` and `corePolyOps` are both **derived
+from `Core.Factory`** (`coreMonoOps_eq_factoryOps`,
+`corePolyOps_subset_factoryPolyOps`, plus the `#guard` that nothing is missing),
+so every operator a generated term can apply is a real Strata operator. No
+synthetic name can reach the printer.
+
+`syntheticOps` and the `strataErrorLines` filter are kept as a no-op safety net,
+so that re-introducing a synthetic entry cannot silently turn into a spurious
+Strata defect. The filter is on the
 *error line*, not on the program, so a program containing a synthetic op still
 has its other errors scored.
 -/
@@ -94,9 +101,11 @@ def errorLinePrefix : String := "Unsupported construct in "
 def printedText (s : String) : String :=
   (s.splitOn s!"\n\n-- {errorMarker}:").headD s
 
-/-- Operator names that are ours, not Strata's: synthetic combinators in
-    `corePolyOps` used to exercise polymorphic instantiation. The printer is
-    *correct* to reject these, so they must not be scored as Strata defects. -/
+/-- Operator names that would be ours rather than Strata's. **Now vacuous**: both
+    operator vocabularies are derived from `Core.Factory`, so no generated term can
+    mention a name Strata does not define. Retained as a safety net — if a synthetic
+    entry is ever added back, the printer is *correct* to reject it and it must not be
+    scored as a Strata defect. -/
 def syntheticOps : List String := ["id", "churchTrue", "churchFalse"]
 
 /-- The conversion-error lines of a formatted program, excluding those caused by

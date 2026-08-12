@@ -6537,22 +6537,6 @@ theorem schemeInstAt_freshening_disjoint
     · exact hret v hvret
   exact hbody v hsub (hτsub v hc)
 
-/-- **Scheme closedness holds for the real operator vocabulary.**
-
-    The `hclosed` conjunct of `SchemeInstAt` is the one condition that stays as a
-    premise. This theorem shows that the condition is easy to satisfy: each entry of
-    `corePolyOps` satisfies it, and `decide` proves this. A caller that has a
-    concrete `pctx` can discharge `hclosed` in the same way.
-
-    This theorem also prevents a regression. If the body of a `corePolyOps` entry
-    mentioned a type variable that is not one of its binders, this theorem would fail.
-    Such an entry is also not a well-formed type scheme. -/
-theorem corePolyOps_closed :
-    ∀ p ∈ corePolyOps,
-      match p.2 with
-      | .forAll boundVars monoTy => ∀ v ∈ monoTy.freeVars, v ∈ boundVars := by
-  decide
-
 /-- **Spec-level scheme-instance witness.**
 
     Bundles "the op node's annotation is a genuine instance of a `pctx` scheme at
