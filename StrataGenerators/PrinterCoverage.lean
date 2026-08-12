@@ -106,6 +106,16 @@ def strataErrorLines (s : String) : List String :=
     line.startsWith errorLinePrefix
       && !(syntheticOps.any fun op => line.endsWith s!": {op}")
 
+/-- The printer function an error line blames, from a line of the shape
+    `Unsupported construct in {site}: {detail}` (`ASTToCSTError.toString`). Used to
+    group errors by *site* rather than by full message: `lconstToExpr` failing on
+    width 3 and on width 129 are one gap, not two. -/
+def errorSite (line : String) : String :=
+  let afterPrefix :=
+    if line.startsWith errorLinePrefix then (line.drop errorLinePrefix.length).toString
+    else line
+  ((afterPrefix.splitOn ":").headD afterPrefix).trimAscii.toString
+
 /-- **The #69 P2 oracle.** `true` when formatting `prog` logs no conversion error
     attributable to Strata. -/
 def printsWithoutError (prog : Program) : Bool :=
@@ -159,16 +169,21 @@ def exprPrintsCleanly (e : Expression.Expr) : Bool :=
 def bvLit (w : Nat) : Expression.Expr :=
   .const () (.bitvecConst w (BitVec.ofNat w 1))
 
+/-- Does a `bitvec w` literal print without a conversion error? The per-width
+    check behind `checkBv128LiteralPrints`, named separately so a report can score
+    each registered width by the same function the property applies at 128. -/
+def checkBvLitPrints (w : Nat) : Bool := exprPrintsCleanly (bvLit w)
+
 /-- **HONEST FAILURE — pins finding (1).** A `bitvec 128` literal is registered by
     the factory and has a grammar production (`bv128Lit`, `Grammar.lean:113`), but
     `lconstToExpr` logs `unsupported bitvec width: 128`. Every *other* registered
     width prints, which is what makes 128 an omission rather than a design
     boundary. -/
-def checkBv128LiteralPrints : Bool := exprPrintsCleanly (bvLit 128)
+def checkBv128LiteralPrints : Bool := checkBvLitPrints 128
 
 /-- The registered widths whose literals fail to print. Expected: `[128]`. -/
 def unprintableBvLiteralWidths : List Nat :=
-  factoryBvWidths.filter (fun w => !exprPrintsCleanly (bvLit w))
+  factoryBvWidths.filter (fun w => !checkBvLitPrints w)
 
 /-- The `Bv↔Int` conversion operator names the factory registers at width `w`. -/
 def bvIntConversionOps (w : Nat) : List String :=
@@ -185,17 +200,24 @@ def allBvIntConversionOps : List String :=
 def unaryApp (name : String) : Expression.Expr :=
   .app () (.op () ⟨name, ()⟩ none) (.const () (.intConst 1))
 
+/-- Does an application of the named operator print without a conversion error?
+    The per-operator check behind `checkBvIntConversionsPrint`, named separately so
+    a report can score each of the eighteen operators individually — an aggregate
+    `18/18` says a family is missing, but only the per-operator verdicts show that
+    it is *every* width and *every* direction. -/
+def checkBvIntConversionPrints (op : String) : Bool := exprPrintsCleanly (unaryApp op)
+
 /-- **HONEST FAILURE — pins finding (2).** Not one of the eighteen registered
     `Bv↔Int` conversion operators is printable, at any width. This is the
     systematic half of the report: `handleUnaryOps` enumerates `.Not`, `.Neg`,
     `SafeNeg`, the overflow predicates and nine `bvExtract` shapes, but has no arm
     for the conversions, so all of them fall through to `mkGenericCall`. -/
 def checkBvIntConversionsPrint : Bool :=
-  allBvIntConversionOps.all (fun op => exprPrintsCleanly (unaryApp op))
+  allBvIntConversionOps.all checkBvIntConversionPrints
 
 /-- The `Bv↔Int` conversion operators that fail to print. Expected: **all 18**. -/
 def unprintableBvIntConversions : List String :=
-  allBvIntConversionOps.filter (fun op => !exprPrintsCleanly (unaryApp op))
+  allBvIntConversionOps.filter (fun op => !checkBvIntConversionPrints op)
 
 -- ── Bitvector widths: typechecker vs printer (#48) ────────────────────────
 /-!

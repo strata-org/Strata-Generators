@@ -17,6 +17,11 @@ import StrataGenerators.ProcedureHasTypeAGen.Shrink
 -- panels report the minimal well-typed counterexample rather than the raw draw.
 import StrataGenerators.ProgramGen
 import StrataGenerators.ProgramGen.Shrink
+-- Supplies the phase-sweep checks and their reporting helpers, and the printer
+-- oracle with its per-width / per-operator checks. (Both arrive via `Properties`
+-- too; named here because the panels below use them directly.)
+import StrataGenerators.PhaseChangedFlag
+import StrataGenerators.PrinterCoverage
 import Basalt.IO
 -- `Basalt.PlausibleGen` supplies the `[Gen Plausible.Gen]` instance used by the
 -- procedure-list panels, which run the backtracking `genProcedure` generator via
@@ -40,8 +45,12 @@ open StrataDDM (initDialect)
 /-!
 # Tyche Visualization Panels
 
-Generates samples from the `HasTypeA` / command / function / statement generators
-and writes them in Tyche JSONL format for visualization.
+Generates samples from the `HasTypeA` / command / function / statement / procedure
+/ whole-program generators and writes them in Tyche JSONL format for
+visualization, plus panels for the properties whose input space is a fixed finite
+set (the pipeline-phase no-op witnesses, and the printer's bitvector widths and
+`Bv↔Int` operators) rather than a distribution — those are *enumerated* via
+`Tyche.writeInto` rather than sampled.
 
 This module holds every Tyche panel (feature extractors, `TycheSample` instances,
 `IO` generator wrappers, and `runTychePanels`). It is *not* an executable root: the
@@ -1024,6 +1033,318 @@ def genProgramProp (tag : String) (check : Core.Program → Bool) : IO ProgramPr
     return { prog := minimizeProgramCounterexample check 400 p, passed := false,
              genSize := d, tag }
 
+-- ── Pipeline-phase `changed`-flag panels ────────────────────────────
+-- One panel per property in `Properties.phaseNoOpWitnesses` / `phaseChangedFlags`
+-- (see `StrataGenerators.PhaseChangedFlag`). The properties have two shapes and so
+-- do the panels:
+--
+--   * the two no-op witnesses take no generated input at all — each is one
+--     constructed program on which one phase provably cannot change anything — so
+--     their panels *enumerate* their single witness rather than sample it. Drawing
+--     it a thousand times would give a thousand identical marks;
+--   * the two sweeps quantify over generated procedure lists, so they sample like
+--     the `proc:` panels, with the offending phases as the discriminating feature.
+--
+-- Three of the four visualize honest failures (the four hardcoded
+-- `changed := true` sites). `phase: non-hardcoded pipeline phases have a faithful
+-- changed flag` is the one whose panel should be all green — it is the regression
+-- guard, so a single red mark in it is the interesting event.
+
+open StrataGenerators.PhaseChangedFlag in
+/-- One constructed no-op witness. The verdict is the shared `NoOpWitness.check`,
+    and the reported/actual flags come from the same `phaseOutcome` that check
+    reads, so the panel cannot display a flag other than the one it scored. -/
+structure PhaseNoOpResult where
+  witness : NoOpWitness
+
+open StrataGenerators.PhaseChangedFlag in
+instance : Tyche.TycheSample PhaseNoOpResult where
+  toSample r :=
+    let passed := r.witness.check
+    let outcome := phaseOutcome r.witness.phase r.witness.prog
+    let flag (b : Option Bool) : String := match b with
+      | some true => "yes" | some false => "no" | none => "—"
+    { representation :=
+        (Core.formatProgram r.witness.prog).pretty
+          ++ s!"\n-- {r.witness.label}: {outcomeDescription r.witness.named r.witness.prog}"
+      status := if passed then .passed else .failed
+      statusReason :=
+        if passed then ""
+        else s!"{r.witness.label} cannot have changed this program, yet reported changed = true"
+      features := [
+        ("verdict", .nominal (if passed then "pass" else "fail")),
+        ("phase", .nominal r.witness.label),
+        -- The flag the phase reported against what it actually did: the whole
+        -- content of the finding is that these two disagree.
+        ("reported_changed", .nominal (flag (outcome.map (·.1)))),
+        ("program_changed", .nominal (flag (outcome.map (·.2)))),
+        ("num_decls", .ordinal r.witness.prog.decls.length) ] }
+
+open StrataGenerators.PhaseChangedFlag in
+/-- A generated procedure list swept by a phase list, with the sweep's verdict and
+    the labels of the phases that violated it.
+
+    `violatingPhases` and `diagnostic` are what make a failed mark legible. Like the
+    `factoryStripped` panel, the failure cause is not *in* the program — every phase
+    of `allCorePhases` sees the same program, and the two `Verifier.lean` phases
+    report `changed = true` on all of them — so the minimized witness is nearly
+    empty and the program alone would say nothing about which phase lied. -/
+structure PhaseSweepResult where
+  procs : List Core.Procedure
+  passed : Bool
+  genSize : Nat
+  tag : String
+  /-- Labels of the swept phases whose flag was unfaithful, deduplicated. -/
+  violatingPhases : List String
+  /-- How many phases this property sweeps, for context on the count above. -/
+  numSwept : Nat
+  /-- Per-violator detail, from the shared `phaseChangedFlagDiagnostic`. -/
+  diagnostic : String
+  /-- Whether the program contains a loop — i.e. whether `symbolicEval` was skipped
+      on this sample rather than scored. -/
+  hasLoop : Bool
+
+instance : Tyche.TycheSample PhaseSweepResult where
+  toSample r :=
+    { representation := procsRepr r.procs ++ "\n\n" ++ r.diagnostic
+      status := if r.passed then .passed else .failed
+      statusReason :=
+        if r.passed then ""
+        else s!"unfaithful changed flag in: {" ".intercalate r.violatingPhases}"
+      features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
+        :: procListFeatures r.procs r.genSize ++ [
+        ("num_violators", .ordinal r.violatingPhases.length),
+        -- Which phases lied on this sample. On the full sweep this should be
+        -- constantly the known set; a *new* label appearing here is the regression
+        -- the property exists to catch, and this feature is where it shows up.
+        ("violating_phases", .nominal
+          (if r.violatingPhases.isEmpty then "none"
+           else " ".intercalate r.violatingPhases)),
+        ("num_phases_swept", .ordinal r.numSwept),
+        -- `symbolicEval` is skipped (not scored) on a program with a loop, so a
+        -- `yes` here marks a sample that is vacuous for that one phase.
+        ("symbolic_eval_skipped", .nominal (if r.hasLoop then "yes" else "no")) ] }
+
+open StrataGenerators.Procedure.TestSupport StrataGenerators.PhaseChangedFlag in
+/-- Build a `PhaseSweepResult` by generating a procedure list, scoring it with the
+    shared sweep check, and recording which of `phases` violated the contract.
+
+    Generation and minimization are `genProcProp`'s, so this panel draws from the
+    same distribution as the `proc:` ones. The violators are recomputed from the
+    (possibly minimized) list the panel actually displays, so the diagnostic always
+    describes the program on screen. -/
+def genPhaseSweepProp (tag : String) (check : List Core.Procedure → Bool)
+    (phases : List NamedPhase) : IO PhaseSweepResult := do
+  let r ← genProcProp tag check
+  let prog := mkProgram r.procs
+  return { procs := r.procs, passed := r.passed, genSize := r.genSize, tag,
+           violatingPhases := violators phases prog,
+           numSwept := phases.length,
+           diagnostic := phaseChangedFlagDiagnostic phases prog,
+           hasLoop := programHasLoop prog }
+
+open StrataGenerators.PhaseChangedFlag in
+/-- The phase list a sweep property quantifies over, so the panel's diagnostic
+    reports on *exactly* the phases its check scored. Keyed on the property name
+    because the check is a `List Procedure → Bool` that has already closed over its
+    list; the honest sweep is the one that excludes `knownDefectivePhases`. -/
+def sweptPhasesFor (name : String) : List NamedPhase :=
+  if name == PropertyNames.phaseHonestChangedFlag then honestPhases else allCorePhases
+
+-- ── Printer-expressiveness panels (#69 P2, #48) ─────────────────────
+-- One panel per property in `Properties.printerWitnesses` / the whole-program
+-- printer property (see `StrataGenerators.PrinterCoverage`). All four visualize
+-- honest failures.
+--
+-- The three witness panels enumerate a *fixed finite* input space — the registered
+-- bitvector widths, the eighteen `Bv↔Int` operators, the widths `0..63` — rather
+-- than sampling it, and score each element with the shared per-element check whose
+-- conjunction *is* the property. So the panel shows the shape of the gap (which
+-- widths, which directions) where the property's single `Bool` can only report that
+-- a gap exists.
+
+/-- Is `n` a power of two? The panels record this because #48's own framing
+    predicts the printable widths are the powers of two, and they are not: `2`, `4`
+    and `128` are powers of two that do not print. Seeing that in the panel is the
+    point. -/
+private def isPowerOfTwo (n : Nat) : Bool := n != 0 && (n &&& (n - 1)) == 0
+
+/-- A generated whole program, scored by the #69 P2 oracle ("the printer logged no
+    conversion error"). -/
+structure PrinterProgramResult where
+  prog : Core.Program
+  passed : Bool
+  genSize : Nat
+  /-- The distinct Strata-attributable conversion-error lines. -/
+  errorLines : List String
+  /-- Whether the text the printer *claims* to have produced still re-parses.
+      `none` when nothing went wrong, so there was nothing to ask. -/
+  reparsedDespiteError : Option Bool
+
+open StrataGenerators.PrinterCoverage in
+instance : Tyche.TycheSample PrinterProgramResult where
+  toSample r :=
+    -- Show the printer's *whole* output, error block included: that block is the
+    -- evidence, and the placeholders it explains (`$__unknown_type`,
+    -- `mkGenericCall`) are visible in the program text right above it.
+    { representation := (Core.formatProgram r.prog).pretty
+      status := if r.passed then .passed else .failed
+      statusReason := " ".intercalate r.errorLines
+      features := [
+        ("verdict", .nominal (if r.passed then "pass" else "fail")),
+        ("num_error_sites", .ordinal r.errorLines.length),
+        -- Which printer functions failed, e.g. `lconstToExpr` or `handleUnaryOps`.
+        -- Grouped by site rather than by message so that one gap hit at two widths
+        -- reads as one gap.
+        ("error_sites", .nominal
+          (if r.errorLines.isEmpty then "none"
+           else " ".intercalate (r.errorLines.map errorSite).eraseDups)),
+        -- **The dangerous case.** A program that logged an error and still
+        -- re-parses is one where a placeholder silently produced a *different*
+        -- program — precisely what a string round-trip cannot detect, and the reason
+        -- this property is worth having alongside the round-trip one.
+        ("silently_different", .nominal (match r.reparsedDespiteError with
+          | some true => "yes" | some false => "no" | none => "—")),
+        ("reparsed", .nominal (match r.reparsedDespiteError with
+          | some true => "yes" | some false => "no" | none => "—"))
+      ] ++ programFeatures r.prog r.genSize }
+
+open StrataGenerators.Program.TestSupport StrataGenerators.PrinterCoverage in
+/-- Generate a whole program and score it with the shared printer oracle.
+
+    A failing draw is minimized first, as in `genProgramProp` — and unlike
+    `programTypecheck`, these failures *do* shrink: the oracle is the printer, not
+    the typechecker the shrinker uses to keep candidates well-typed, so a smaller
+    unprintable program survives the filter. What the panel shows is therefore a
+    minimal unprintable program, and the error lines and re-parse verdict are
+    recomputed from it.
+
+    Read `error_sites` accordingly: it is which site the *minimal* witness blames,
+    not which site fires most often across raw draws — shrinking keeps one of
+    several independent gaps and discards the rest. The unbiased cross-sample tally
+    is the ungated `printerErrorDiagnostic`. -/
+def genPrinterProgramProp : IO PrinterProgramResult := do
+  let (raw, d) ← genProgramForTyche
+  let passed := checkProgramPrintsWithoutError raw
+  let prog :=
+    if passed then raw
+    else minimizeProgramCounterexample checkProgramPrintsWithoutError 400 raw
+  let errorLines := programErrorLines prog
+  -- Only ask the parser when the printer already logged something: a `no` here is
+  -- the ordinary case (the round-trip property is red too) and a `yes` is the
+  -- silently-different one. With no error there is no question to ask.
+  let reparsedDespiteError ←
+    if errorLines.isEmpty then pure none
+    else pure (some (← parseCoreProgram (printedText (Core.formatProgram prog).pretty)).isSome)
+  -- `passed` describes `prog`: minimization only ever returns a candidate that
+  -- still fails the check, so the verdict survives it unchanged.
+  return { prog, passed, genSize := d, errorLines, reparsedDespiteError }
+
+/-- One bitvector literal width, scored by the shared per-width check whose
+    instance at `128` *is* `checkBv128LiteralPrints`. -/
+structure BvLitWidthResult where
+  width : Nat
+  passed : Bool
+
+open StrataGenerators.PrinterCoverage in
+instance : Tyche.TycheSample BvLitWidthResult where
+  toSample r :=
+    { representation := (Core.formatExprs [bvLit r.width]).pretty
+      status := if r.passed then .passed else .failed
+      statusReason :=
+        if r.passed then "" else s!"lconstToExpr cannot print a bitvec {r.width} literal"
+      features := [
+        ("verdict", .nominal (if r.passed then "pass" else "fail")),
+        ("width", .ordinal r.width),
+        ("power_of_two", .nominal (if isPowerOfTwo r.width then "yes" else "no")),
+        -- The width this panel's property is about. It is the *only* registered
+        -- width that fails, which is what makes it an omission rather than a
+        -- design boundary — and that is legible only next to its siblings.
+        ("pinned_by_property", .nominal (if r.width == 128 then "yes" else "no"))
+      ] }
+
+/-- One `Bv↔Int` conversion operator, scored by the shared per-operator check whose
+    conjunction over all eighteen *is* `checkBvIntConversionsPrint`. -/
+structure BvIntConversionResult where
+  op : String
+  width : Nat
+  /-- Which of the three registered directions this operator is. -/
+  direction : String
+  passed : Bool
+
+open StrataGenerators.PrinterCoverage in
+instance : Tyche.TycheSample BvIntConversionResult where
+  toSample r :=
+    { representation := (Core.formatExprs [unaryApp r.op]).pretty
+      status := if r.passed then .passed else .failed
+      statusReason :=
+        if r.passed then ""
+        else s!"no grammar production and no printer arm for {r.op}; falls through to mkGenericCall"
+      features := [
+        ("verdict", .nominal (if r.passed then "pass" else "fail")),
+        ("operator", .nominal r.op),
+        ("width", .ordinal r.width),
+        -- The gap is the whole family: every direction at every width. Splitting
+        -- the panel by these two features is what shows that, rather than an
+        -- undifferentiated block of eighteen failures.
+        ("direction", .nominal r.direction)
+      ] }
+
+/-- Labels for the three conversion directions, in the order
+    `PrinterCoverage.bvIntConversionOps` returns them. -/
+private def conversionDirections : List String := ["bv_to_int", "bv_to_uint", "int_to_bv"]
+
+-- The zip below silently drops operators if these two lists ever disagree in
+-- length, which would understate the finding.
+#guard (StrataGenerators.PrinterCoverage.bvIntConversionOps 8).length
+         == conversionDirections.length
+
+open StrataGenerators.PrinterCoverage in
+/-- Every registered `Bv↔Int` conversion operator, scored individually. -/
+def bvIntConversionSamples : List BvIntConversionResult :=
+  factoryBvWidths.flatMap fun w =>
+    ((bvIntConversionOps w).zip conversionDirections).map fun (op, direction) =>
+      { op, width := w, direction, passed := checkBvIntConversionPrints op }
+
+/-- One bitvector width in *type* position, scored by the shared per-width
+    implication (`typechecks → prints`) whose conjunction over `0..63` *is*
+    `checkAllWidthsAgree`. -/
+structure BvWidthAgreementResult where
+  width : Nat
+  typechecks : Bool
+  prints : Bool
+  passed : Bool
+
+open StrataGenerators.PrinterCoverage in
+instance : Tyche.TycheSample BvWidthAgreementResult where
+  toSample r :=
+    { representation := formatFuncAsProgram (bvIdentityFunc r.width)
+      status := if r.passed then .passed else .failed
+      statusReason :=
+        if r.passed then ""
+        else s!"Function.typeCheck accepts bitvec {r.width}, the printer substitutes $__unknown_type"
+      features := [
+        ("verdict", .nominal (if r.passed then "pass" else "fail")),
+        ("width", .ordinal r.width),
+        -- Read these two together: `typechecks = yes, prints = no` is the
+        -- divergence, and it is 60 of the first 64 widths.
+        ("typechecks", .nominal (if r.typechecks then "yes" else "no")),
+        ("prints", .nominal (if r.prints then "yes" else "no")),
+        -- #48 predicts the printable set is the powers of two. Grouping by this
+        -- feature is what refutes that: `2`, `4` and `128` are red.
+        ("power_of_two", .nominal (if isPowerOfTwo r.width then "yes" else "no")),
+        ("factory_registered", .nominal
+          (if factoryBvWidths.contains r.width then "yes" else "no"))
+      ] }
+
+open StrataGenerators.PrinterCoverage in
+/-- The widths `0..63`, each scored individually — the same range
+    `checkAllWidthsAgree` conjoins over. -/
+def bvWidthAgreementSamples : List BvWidthAgreementResult :=
+  (List.range 64).map fun w =>
+    { width := w, typechecks := widthTypeChecks w, prints := widthPrintsCleanly w,
+      passed := checkWidthTypeCheckPrinterAgreement w }
+
 -- ── Panel for the SMT escape function ───────────────────────────────
 -- Each sample is one string from `genInterestingString`, serialized through
 -- `Strata.SMTDDM.termToString`, which is the real path to the solver. A sample
@@ -1217,6 +1538,11 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   let panel {α} [Tyche.TycheSample α] (title : String) (gen : IO α)
       (count : Nat := numSamples) : IO Unit :=
     Tyche.runInto handle gen title count startTime
+  -- For a property whose input space is a fixed finite set rather than a
+  -- distribution: enumerate it once instead of sampling it `numSamples` times.
+  let enumerate {α} [Tyche.TycheSample α] (title : String) (samples : List α) :
+      IO Unit :=
+    Tyche.writeInto handle samples title startTime
 
   panel PropertyNames.exprPreservation genAndEval
   panel PropertyNames.exprProgress genAndCheckProgress
@@ -1300,3 +1626,28 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   -- block for the ADT-derived-call path to be exercised.
   for p in Properties.programChecks ++ Properties.programADTProps do
     panel p.name (genProgramProp p.name p.check)
+
+  -- ── Pipeline-phase `changed`-flag panels ───────────────────────────
+  -- The two no-op witnesses are enumerated (one constructed program each, from the
+  -- shared `Properties.phaseNoOpWitnesses` bundle, so the panel scores the same
+  -- `NoOpWitness.check` both Plausible harnesses assert). The two sweeps sample
+  -- generated procedure lists from the shared `Properties.phaseChangedFlags`
+  -- bundle, each reporting which of the phases *it* sweeps were unfaithful.
+  for (name, witness) in Properties.phaseNoOpWitnesses do
+    enumerate name [({ witness } : PhaseNoOpResult)]
+  for p in Properties.phaseChangedFlags do
+    panel p.name (genPhaseSweepProp p.name p.check (sweptPhasesFor p.name))
+
+  -- ── Printer-expressiveness panels ──────────────────────────────────
+  -- The whole-program property samples (and shrinks, since its oracle is the
+  -- printer rather than the typechecker); the three witness properties enumerate
+  -- their fixed input space — the six registered widths, the eighteen `Bv↔Int`
+  -- operators, the widths `0..63` — scoring each element with the shared per-element
+  -- check whose conjunction is the property the Plausible harnesses assert.
+  panel PropertyNames.printerNoConversionError genPrinterProgramProp
+  enumerate PropertyNames.printerBv128Literal
+    (StrataGenerators.PrinterCoverage.factoryBvWidths.map fun w =>
+      ({ width := w,
+         passed := StrataGenerators.PrinterCoverage.checkBvLitPrints w } : BvLitWidthResult))
+  enumerate PropertyNames.printerBvIntConversions bvIntConversionSamples
+  enumerate PropertyNames.printerBvWidthAgreement bvWidthAgreementSamples

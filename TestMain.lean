@@ -242,8 +242,8 @@ def main (args : List String) : IO UInt32 := do
   -- guard on the phases that compute the flag correctly today.
   let phaseSuite : TestSeq :=
     Properties.phaseNoOpWitnesses.foldr
-      (fun (nameAndCheck : String × Bool) rest =>
-        test nameAndCheck.1 nameAndCheck.2 rest)
+      (fun (nameAndWitness : String × StrataGenerators.PhaseChangedFlag.NoOpWitness) rest =>
+        test nameAndWitness.1 nameAndWitness.2.check rest)
       (Properties.phaseChangedFlags.foldr
         (fun p rest => checkIO p.name
           (∀ gp : GenProcs, p.check gp.procs = true) (cfg := cfg) rest)
@@ -341,6 +341,14 @@ def main (args : List String) : IO UInt32 := do
     IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"
   else
     IO.println ""
-    IO.println "Tyche visualizations disabled (--no-tyche)."
+    -- Name the flag that actually held the pass off. `--quick` disables it too, and
+    -- reporting `--no-tyche` for a `--quick` run sends you looking for a flag you
+    -- did not pass — or, worse, at a stale `tycheOut` from an earlier run, since no
+    -- file is written here at all.
+    if args.contains "--quick" then
+      IO.println s!"Tyche visualizations disabled (--quick); no file written, so {cli.tycheOut} — if it exists — is from an earlier run."
+      IO.println "For the preset's trials/size *with* panels, pass them positionally instead: 100 40"
+    else
+      IO.println "Tyche visualizations disabled (--no-tyche)."
 
   return exitCode

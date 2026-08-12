@@ -406,14 +406,20 @@ def phaseChangedFlags : List (Property (List Core.Procedure)) :=
      StrataGenerators.PhaseChangedFlag.checkHonestPhasesChangedFlag⟩ ]
 
 /-- The `changed`-flag properties with **no** generated input: each is a single
-    constructed no-op witness, so the check is a closed `Bool`. Paired with names
-    here for the same reason as the bundles above — neither harness ever handles
-    the bare string. -/
-def phaseNoOpWitnesses : List (String × Bool) :=
+    constructed no-op witness (a phase plus a program it provably cannot change),
+    whose verdict is the closed `Bool` `NoOpWitness.check`. Paired with names here
+    for the same reason as the bundles above — neither harness ever handles the bare
+    string.
+
+    The bundle carries the whole witness rather than just its `Bool` so the Tyche
+    panel can *display* the program the verdict was computed on: the two Plausible
+    harnesses read `.check`, the panel reads `.check` and the phase/program too, and
+    there is still only one copy of each witness. -/
+def phaseNoOpWitnesses : List (String × StrataGenerators.PhaseChangedFlag.NoOpWitness) :=
   [ (PropertyNames.phaseIrrelevantAxiomsNoOp,
-     StrataGenerators.PhaseChangedFlag.checkIrrelevantAxiomsNoOpFlag),
+     StrataGenerators.PhaseChangedFlag.irrelevantAxiomsNoOp),
     (PropertyNames.phaseFilterNoOp,
-     StrataGenerators.PhaseChangedFlag.checkFilterNoOpFlag) ]
+     StrataGenerators.PhaseChangedFlag.filterNoOp) ]
 
 /-- The printer-expressiveness properties with no generated input: the two
     confirmed gaps at factory-registered widths, plus the typechecker-vs-printer

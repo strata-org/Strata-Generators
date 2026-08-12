@@ -129,6 +129,16 @@ def allCorePhases : List NamedPhase :=
 
 -- ── The contract ──────────────────────────────────────────────────────────
 
+/-- What one phase did to one program: the `changed` flag it *reported*, paired
+    with whether the program *actually* changed (full structural equality of
+    `Program`). `none` when the phase raised a diagnostic.
+
+    Both the verdict (`changedFlagValid`) and the reporting (`outcomeDescription`,
+    and the Tyche panels' features) read this one function, so a panel can never
+    display a flag other than the one its verdict was computed from. -/
+def phaseOutcome (ph : Core.PipelinePhase) (prog : Program) : Option (Bool × Bool) :=
+  (runPhase ph prog).map (fun (changed, out) => (changed, !decide (out = prog)))
+
 /-- `ChangedFlagValid` for one phase on one program: `changed = true ↔
     progOut ≠ progIn`, on full structural equality of `Program`.
 
@@ -138,8 +148,8 @@ def allCorePhases : List NamedPhase :=
     `changed`-flag violation. This is the same convention as
     `Procedure.TestSupport.checkChangedFlagValid`. -/
 def changedFlagValid (ph : Core.PipelinePhase) (prog : Program) : Bool :=
-  match runPhase ph prog with
-  | some (changed, out) => changed == decide (out ≠ prog)
+  match phaseOutcome ph prog with
+  | some (reported, actuallyChanged) => reported == actuallyChanged
   | none => true
 
 /-- Does any procedure in `prog` contain a `loop` statement, at any depth?
@@ -181,6 +191,39 @@ def violators (phases : List NamedPhase) (prog : Program) : List String :=
   (phases.filterMap fun np =>
     if changedFlagValidGuarded np prog then none else some np.label).dedup
 
+-- ── Reporting ─────────────────────────────────────────────────────────────
+-- A failing sweep says only *that* some phase's flag is unfaithful. These render
+-- *which* phase and *how*, for the Tyche panels and for anyone debugging a run.
+
+/-- What `np` did to `prog`, in one line: the flag it reported against whether the
+    program actually changed, or why the sweep skipped it. Reads `phaseOutcome`, so
+    it reports exactly what `changedFlagValidGuarded` scored. -/
+def outcomeDescription (np : NamedPhase) (prog : Program) : String :=
+  if requiresLoopFree.contains np.label && programHasLoop prog then
+    "skipped — the input has a loop, which this phase's evaluator cannot answer"
+  else match phaseOutcome np.phase prog with
+    | none => "skipped — the phase raised a diagnostic"
+    | some (reported, actuallyChanged) =>
+      s!"reported changed = {reported}, program {if actuallyChanged then "differs" else "unchanged"}"
+
+/-- The sweep's offenders on `prog`, one line each, naming the phase and what it
+    reported. This is the localisation behind a failing sweep: the property says
+    the flag is unfaithful somewhere, this says where and how.
+
+    A label is described by the *first* phase carrying it, since `violators`
+    deduplicates and `FilterProcedures` occurs twice in `corePipelinePhases`. -/
+def phaseChangedFlagDiagnostic (phases : List NamedPhase) (prog : Program) : String :=
+  let bad := violators phases prog
+  if bad.isEmpty then
+    s!"-- changed flag: faithful on every one of the {phases.length} swept phases"
+  else
+    String.intercalate "\n"
+      (s!"-- changed-flag violators: {bad.length} of {phases.length} swept phases"
+        :: bad.map fun label =>
+             match phases.find? (fun np => np.label == label) with
+             | some np => s!"  {label}: {outcomeDescription np prog}"
+             | none => s!"  {label}")
+
 -- ── Constructed no-op witnesses ───────────────────────────────────────────
 
 /-- A minimal procedure with an empty structured body. -/
@@ -195,19 +238,50 @@ def mkProc (n : String) : Procedure :=
 def axiomFreeProgram : Program :=
   { decls := [Decl.proc (mkProc "A") .empty] }
 
+/-- One constructed witness: a phase applied to a program on which it provably
+    cannot change anything, so a faithful flag must be `false`.
+
+    Bundling the phase *with* its program — rather than leaving each check a
+    standalone closed `Bool` — is what lets a Tyche panel display the very
+    program the verdict was computed on. `check` below is the verdict; nothing
+    else recomputes it. -/
+structure NoOpWitness where
+  /-- The phase's own name, for display. -/
+  label : String
+  phase : Core.PipelinePhase
+  /-- The program on which `phase` is provably a no-op. -/
+  prog : Program
+
+/-- `ChangedFlagValid` on the witness: `false` exactly when the phase claims to
+    have changed a program it cannot have changed. -/
+def NoOpWitness.check (w : NoOpWitness) : Bool := changedFlagValid w.phase w.prog
+
+/-- The witness's phase as a `NamedPhase`, so the reporting helpers above apply to
+    a witness as they do to a swept phase. -/
+def NoOpWitness.named (w : NoOpWitness) : NamedPhase := ⟨w.label, w.phase⟩
+
+/-- `RemoveIrrelevantAxioms` on a program with no axioms — it has nothing to
+    prune, whatever "irrelevant" means. -/
+def irrelevantAxiomsNoOp : NoOpWitness :=
+  ⟨"RemoveIrrelevantAxioms", Core.irrelevantAxiomsPipelinePhase [], axiomFreeProgram⟩
+
+/-- `FilterProcedures` with every procedure of the program in the target set —
+    nothing is removable. -/
+def filterNoOp : NoOpWitness :=
+  ⟨"FilterProcedures",
+   Core.filterProceduresPipelinePhase (programProcNames axiomFreeProgram) true,
+   axiomFreeProgram⟩
+
 /-- **HONEST FAILURE — pins `IrrelevantAxioms.lean:81`.** `RemoveIrrelevantAxioms`
     on an axiom-free program is necessarily a no-op, so the flag must be `false`.
     The phase returns `(true, pruned)` unconditionally, so this **fails**. -/
-def checkIrrelevantAxiomsNoOpFlag : Bool :=
-  changedFlagValid (Core.irrelevantAxiomsPipelinePhase []) axiomFreeProgram
+def checkIrrelevantAxiomsNoOpFlag : Bool := irrelevantAxiomsNoOp.check
 
 /-- **HONEST FAILURE — pins `FilterProcedures.lean:82`.** With every procedure in
     the target set nothing can be removed, so the flag must be `false`. Restates
     the already-pinned `proc:` property on the constructed witness, so the
     uniform sweep is self-contained. -/
-def checkFilterNoOpFlag : Bool :=
-  let prog := axiomFreeProgram
-  changedFlagValid (Core.filterProceduresPipelinePhase (programProcNames prog) true) prog
+def checkFilterNoOpFlag : Bool := filterNoOp.check
 
 -- ── The uniform sweep over generated input ────────────────────────────────
 
@@ -249,6 +323,12 @@ def knownDefectivePhases : List String :=
     -- computes the flag, but misses the `.funcDecl` `$$wf` insertion (false negative)
     "PrecondElim" ]
 
+/-- The phases the honest half of the sweep covers: every phase of the pipeline
+    with a known defect removed. Named so that a report can sweep *exactly* the
+    list the property scores rather than a hand-copied approximation of it. -/
+def honestPhases : List NamedPhase :=
+  allCorePhases.filter (fun np => !knownDefectivePhases.contains np.label)
+
 /-- The honest half of the sweep: every phase *except* those with a known defect
     must have a faithful flag. Expected to **pass**, and it is what actually
     guards against a regression in the honestly-computing phases — `CallElim`,
@@ -259,7 +339,6 @@ def knownDefectivePhases : List String :=
     change in the detail of an already-red one. That only works if this property
     is reliably green, hence `knownDefectivePhases` above. -/
 def checkHonestPhasesChangedFlag (ps : List Procedure) : Bool :=
-  let honest := allCorePhases.filter (fun np => !knownDefectivePhases.contains np.label)
-  (violators honest (mkProgram ps)).isEmpty
+  (violators honestPhases (mkProgram ps)).isEmpty
 
 end StrataGenerators.PhaseChangedFlag

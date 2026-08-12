@@ -195,7 +195,8 @@ def main (args : List String) : IO UInt32 := do
   -- compute the flag correctly today.
   let phaseSuite : List (IO Result) :=
     Properties.phaseNoOpWitnesses.map
-      (fun (nc : String × Bool) => runUnitProperty nc.1 nc.2)
+      (fun (nw : String × StrataGenerators.PhaseChangedFlag.NoOpWitness) =>
+        runUnitProperty nw.1 nw.2.check)
     ++ Properties.phaseChangedFlags.map
       (fun p => runProperty p.name
         (∀ gp : GenProcs, p.check gp.procs = true) cfg)

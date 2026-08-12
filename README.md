@@ -163,7 +163,10 @@ never drift apart. To add one:
 
 5. **(Optional) Add a Tyche panel** in
    [`TycheViz.lean`](./StrataGenerators/TycheViz.lean), referencing the same
-   `PropertyNames.*` constant so the LSpec result and the panel share a label.
+   `PropertyNames.*` constant so the LSpec result and the panel share a label, and
+   scoring the sample with the same `check*` predicate so the two views cannot
+   disagree. See [Adding a panel for a new
+   property](#adding-a-panel-for-a-new-property) for the walkthrough.
 
 The exit code is the LSpec verdict, so any property added to a `*Suite` gates
 `lake test`; always-run *diagnostics* (which report but don't gate) are called
@@ -191,7 +194,14 @@ Use these CLI flags to control the output:
 - `--tyche-out=PATH` (default: `tyche_output.jsonl`) — output file path
 
 The Tyche pass is the larger part of the time of a run. `--no-tyche` and
-`--quick` both hold it off, and neither writes the JSONL file.
+`--quick` both hold it off, and **neither writes the JSONL file** — so a file left
+at `--tyche-out` by an earlier run stays there, and opening it shows that older
+run's panels with no indication they are stale. To get `--quick`'s trials and size
+*with* panels, pass them positionally instead of using the flag:
+
+```bash
+.lake/build/bin/test 100 40 --tyche-samples=200
+```
 
 ### Viewing results
 
@@ -199,20 +209,152 @@ Open VS Code, press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS), run
 `Tyche: Open`, and select the generated `.jsonl` file. Tyche displays
 interactive histograms and distribution charts for each property.
 
-### Adding Tyche support to a new generator
+### Adding a panel for a new property
 
-1. Import `StrataGenerators.Tyche`.
-2. Implement a `Tyche.TycheSample` instance for your generated type:
-   ```lean
-   instance : Tyche.TycheSample MyType where
-     toSample x :=
-       { representation := toString x
-         features := [
-           ("size", .ordinal (computeSize x)),
-           ("kind", .nominal (classifyKind x))
-         ] }
-   ```
-3. Call `Tyche.run` with your `IO` generator action and a `Tyche.Config`.
+Every panel lives in
+[`TycheViz.lean`](./StrataGenerators/TycheViz.lean) — one per property — and
+`runTychePanels` writes them all into a single JSONL handle after the LSpec suite.
+Adding one is four steps. (This assumes the property itself already exists; see
+[Adding a new property](#adding-a-new-property) for that half, and note the panel
+must *reuse* that property's `check*` predicate rather than restate it.)
+
+#### 1. Define the sample type
+
+A structure holding the generated value plus anything the features need that
+cannot be recomputed purely. `TycheSample.toSample` is a **pure** function, so
+any `IO` fact — a parse attempt, a solver call — has to be computed in the
+generator and stored:
+
+```lean
+structure MyPropResult where
+  value   : MyThing
+  passed  : Bool          -- from the shared `check*`, see below
+  genSize : Nat           -- the generator size this was drawn at
+```
+
+If several properties share a sample shape, give the structure a `tag` field and
+let the panel title distinguish them — `StmtPropResult` and `ProcPropResult` do
+this, using the tag as the name of the pass/fail feature.
+
+#### 2. Implement `Tyche.TycheSample`
+
+```lean
+instance : Tyche.TycheSample MyPropResult where
+  toSample r :=
+    { representation := formatMyThing r.value              -- a reproducer
+      status         := if r.passed then .passed else .failed
+      statusReason   := if r.passed then "" else explainFailure r.value
+      features := [
+        ("verdict", .nominal (if r.passed then "pass" else "fail")),
+        ("cause",   .nominal (classifyCause r.value)),     -- *why* it is red
+        ("size",    .ordinal (sizeOf r.value)) ] }
+```
+
+- **`representation`** — prefer Strata's own printer (`Core.formatProgram`,
+  `formatStmts`, `formatFunc`), so a mark is text you can paste back into a file
+  and re-run. `stmtRepr` / `procsRepr` are the in-repo helpers for this.
+- **`status`** — must be the shared `check*` predicate from the relevant
+  `*.TestSupport` module: the *same function* the Plausible harness asserts.
+  Re-deriving a verdict here is the one thing that breaks the invariant that a
+  panel and its `checkIO` counterpart always agree, and it breaks it silently.
+- **`statusReason`** — Tyche shows it on the mark; put the one-line "why" there
+  (the offending codepoints, the parser's error, the phases that lied).
+- **`features`** — `.nominal` for grouping, `.ordinal` / `.continuous` for
+  distributions. Include at least one feature that explains why a mark is red
+  (`rejection_cause`, `measure_no_body`, `violating_phases`, `error_sites` are the
+  existing ones), and give **vacuous** samples an explicit `"—"` rather than
+  scoring them as passes — a property that holds trivially on most draws should
+  look different from one that holds substantively.
+
+#### 3. Write the generator wrapper
+
+An `IO MyPropResult`. Reuse an existing draw (`genStmtsForTyche`,
+`genProcsForTyche`, `genProgramForTyche`) rather than a fresh generator call, so
+the panel samples the same distribution as its neighbours, and vary the generator
+size per sample. If the property's counterexamples are shrinkable, minimize on
+failure and recompute the features from the minimized value, so they describe what
+is actually displayed:
+
+```lean
+def genMyProp (check : MyThing → Bool) : IO MyPropResult := do
+  let (x, genSize) ← genMyThingForTyche
+  if check x then
+    return { value := x, passed := true, genSize }
+  else
+    -- `minimizeProcsCounterexample` / `minimizeProgramCounterexample` keep every
+    -- candidate well-typed *and* still-failing, so the verdict is unchanged.
+    return { value := minimizeMyCounterexample check 200 x, passed := false, genSize }
+```
+
+#### 4. Register it in `runTychePanels`
+
+```lean
+panel PropertyNames.myProperty (genMyProp myCheck)
+```
+
+If the property belongs to a shared `Property` bundle in
+[`Properties.lean`](./StrataGenerators/Properties.lean), iterate the bundle
+instead, so name↔check stays paired in exactly one place:
+
+```lean
+for p in Properties.stmtTransforms do
+  panel p.name (genStmtProp p.name p.check)
+```
+
+`panel` defaults to `--tyche-samples` marks; pass `(count := n)` to override.
+
+#### Fixed finite input spaces: `enumerate`, not `panel`
+
+A property whose input space is a fixed finite set rather than a distribution — a
+constructed witness, the registered bitvector widths, the eighteen `Bv↔Int`
+operators — uses `enumerate` (`Tyche.writeInto`) instead of `panel`
+(`Tyche.runInto`). It emits one mark per element, once, because sampling a
+constant space just repeats the same few marks `--tyche-samples` times:
+
+```lean
+enumerate PropertyNames.printerBvIntConversions bvIntConversionSamples
+```
+
+Score each element with the shared **per-element** check whose conjunction *is*
+the property (`checkBvIntConversionPrints` vs `checkBvIntConversionsPrint`), so
+the panel and the Plausible verdict still come from one function — and so the
+panel shows the *shape* of a gap where the property's single `Bool` can only
+report that a gap exists.
+
+#### When the failure cause is not in the value
+
+Some properties fail for a reason the generated value does not contain — the
+shrinker then minimizes to an empty program, which is an honest witness but a mute
+one. Those panels append a rendered diagnostic to `representation` and record its
+counts as extra features: see `procFactoryStrippedDiagnostic` (factory entries
+retaining preconditions) and `phaseChangedFlagDiagnostic` (which pipeline phase
+misreported its `changed` flag). If a red mark would otherwise show nothing but
+`program Core;`, this is the pattern to follow.
+
+#### Checking that the panel actually appears
+
+`--quick` and `--no-tyche` write **no file**, so verify with a run that does:
+
+```bash
+lake build test
+.lake/build/bin/test 100 40 --tyche-samples=200
+python3 -c "
+import json, collections
+c = collections.Counter(json.loads(l)['property'] for l in open('tyche_output.jsonl'))
+print(len(c), 'panels'); [print(f'{n:5d}  {p}') for p, n in c.items()]
+"
+```
+
+Then open it: `Ctrl+Shift+P` → `Tyche: Open`. The extension groups by property and
+keeps the latest `run_start` per property, with no minimum-sample filter, so even a
+one-mark panel is listed.
+
+#### One-off panels outside the suite
+
+To explore a single generator without adding it to the suite, implement
+`TycheSample` as above and call `Tyche.run` with your `IO` action and a
+`Tyche.Config` — it writes its own standalone JSONL file rather than joining
+`runTychePanels`' shared one.
 
 ## License
 
