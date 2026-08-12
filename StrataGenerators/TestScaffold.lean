@@ -504,7 +504,7 @@ open StrataGenerators.Stmt.TestSupport in
 -- ── Statement generation via Plausible.Gen ────────────────────────────
 --
 -- `genProgramStmts` generates a well-typed Strata Core statement list
--- (`StmtsHasTypeA`), proven sound AND complete against the declarative typing
+-- (`StatementsHasTypeA`), proven sound AND complete against the declarative typing
 -- spec. We use it as a certified-well-typed oracle input for the statement
 -- typechecker (property #1) and the Core statement-level transformations
 -- (properties #3–#6, #9). All check predicates live in the shared module

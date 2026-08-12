@@ -4,10 +4,10 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
-# Completeness of `genStmt` / `genStmtChain`, indexed directly by `StmtHasTypeA`
+# Completeness of `genStmt` / `genStmtChain`, indexed directly by `StatementHasTypeA`
 
 `spec_complete` proves that every well-typed statement (per the declarative
-`StmtHasTypeA` relation of `Strata.Languages.Core.StatementTypeSpec`) is in
+`StatementHasTypeA` relation of `Strata.Languages.Core.StatementTypeSpec`) is in
 `genStmt`'s support — **without** an auxiliary, generator-mirroring `StmtReachable`
 relation. The proof runs by induction on the *typing derivation* itself, via the
 two mutually recursive theorems `genStmt_spec_complete` / `genStmtChain_spec_complete`
@@ -91,12 +91,15 @@ theorem subst_ground {S : Subst} {ann : LMonoTy} (hg : ann.freeVars = []) :
     LMonoTy.subst S ann = ann := by
   have h : LMonoTy.subst S ann = LMonoTy.subst [] ann :=
     agree_on_freeVars_implies_subst_eq (fun v hv => by rw [hg] at hv; simp at hv)
-  rw [h, LMonoTy.subst_emptyS (by simp [Subst.hasEmptyScopes])]
+  rw [h, LMonoTy.subst_of_hasEmptyScopes (by simp [Subst.hasEmptyScopes]) _]
 
 theorem openFull_forAll_nil (mty : LMonoTy) (tys : List LMonoTy) :
     (LTy.forAll [] mty).openFull tys = mty := by
-  simp only [LTy.openFull, LTy.boundVars]
-  rw [LMonoTy.subst_emptyS (by simp [Subst.hasEmptyScopes, Map.isEmpty])]; rfl
+  simp only [LTy.openFull, LTy.boundVars, List.zip_nil_left]
+  -- `ofScopes [[]]` is the one-element stack holding the empty scope.
+  rw [show Strata.Util.HMaps.ofScopes [([] : List (TyIdentifier × LMonoTy))]
+        = [Strata.Util.HMap.empty] from rfl, LMonoTy.subst_single_empty]
+  rfl
 
 theorem init_stored_eq {rigid : List TyIdentifier} {mty mtyS : LMonoTy} {tys : List LMonoTy}
     (hground : mty.freeVars = [])
@@ -110,10 +113,10 @@ theorem writable_nil_eq (ctx : VarCtx) : ctx.writable [] = ctx := by
 /-- Statement typing preserves the ambient `rigidTypeVars`: `funcDecl` extends only
     the factory functions and `typeDecl` only the known types, neither touching the
     rigid set; every other constructor leaves `C` unchanged. (Local copy of Strata's
-    `StmtHasType'_rigid_eq`, whose file is not imported here.) -/
+    `StatementHasType'_rigid_eq`, whose file is not imported here.) -/
 theorem stmtHasType_rigid_eq {P : Program} {C C' : LContext CoreLParams}
     {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
-    (h : StmtHasTypeA P C Γ L s C' Γ') : C'.rigidTypeVars = C.rigidTypeVars := by
+    (h : StatementHasTypeA P C Γ L s C' Γ') : C'.rigidTypeVars = C.rigidTypeVars := by
   cases h with
   | cmd => rfl
   | block => rfl
@@ -121,9 +124,9 @@ theorem stmtHasType_rigid_eq {P : Program} {C C' : LContext CoreLParams}
   | ite_nondet => rfl
   | loop => rfl
   | exit => rfl
-  | funcDecl _ _ _ decl func md h_nrec h_func =>
+  | funcDecl _ _ _ decl func md _ h_nrec h_func _ =>
     simp only [LContext.addFactoryFunction]; split <;> rfl
-  | typeDecl _ C0' _ _ tc md h_add =>
+  | typeDecl _ C0' _ _ tc md _ h_add _ =>
     simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at h_add
     split at h_add
     · simp only [reduceCtorEq] at h_add
@@ -151,8 +154,8 @@ theorem init_stored_eq_rigid {rigid : List TyIdentifier} {mty mtyS : LMonoTy} {t
   have hfix : LMonoTy.subst [σ] mty = mty := by
     have hpt : LMonoTy.subst [σ] mty = LMonoTy.subst [] mty :=
       agree_on_freeVars_implies_subst_eq (fun v hv => by
-        rw [hσrigid v (hrigid v hv), LMonoTy.subst_emptyS (by simp [Subst.hasEmptyScopes])])
-    rw [hpt, LMonoTy.subst_emptyS (by simp [Subst.hasEmptyScopes])]
+        rw [hσrigid v (hrigid v hv), LMonoTy.subst_of_hasEmptyScopes (by simp [Subst.hasEmptyScopes]) _])
+    rw [hpt, LMonoTy.subst_of_hasEmptyScopes (by simp [Subst.hasEmptyScopes]) _]
   rw [hfix] at hae
   exact (aliasEquiv_nil_eq hae).symm
 
@@ -337,7 +340,8 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     (hshape : InGenShape (.cmd (CmdExt.cmd c)))
     (hok : AlphabetOk (octx := octx) tvars n (.cmd (CmdExt.cmd c)))
     (hExprC : GenLExprComplete ctx.toFVarCtx octx tvars n) :
-    ∃ ctx', procToTCtx ctx' = Γ' ∧ ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
+    ∃ ctx', TContext.Equiv (T := CoreLParams) (procToTCtx ctx') Γ' ∧
+      ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
       (⟨[Stmt.cmd (CmdExt.cmd c)], C, ctx'⟩ : GenStmtResult) ∈
         SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
   -- Reduce the goal to membership in `genCmd`'s support via the `genCmdStmt` wrapper
@@ -351,7 +355,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨r, hr, rfl⟩
   cases hwt with
-  | init_det x xty e mty tys md hfresh hnovar hlen hcompat hexpr =>
+  | init_det x xty e mty tys md Δ hfresh hnovar hlen hcompat hwk hexpr hequiv =>
     -- Shape: annotation `.forAll [] mtyA`; Alphabet: name reachable + dodges keyword + mty reachable.
     obtain ⟨mtyA, rfl, hmdc⟩ : ∃ m, xty = .forAll [] m ∧ md = default := by
       cases xty with
@@ -366,13 +370,14 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     have hstored : mty = mtyA := init_stored_eq_rigid hrigidfv hcompat
     subst hstored; subst hmdc
     obtain ⟨nm, u⟩ := x; cases u
-    refine ⟨ctx.insert ⟨nm, ()⟩ mty, by rw [procToTCtx_insert], rfl, ?_⟩
+    refine ⟨ctx.insert ⟨nm, ()⟩ mty,
+      (procToTCtx_insert ctx ⟨nm, ()⟩ mty).trans hequiv.symm, rfl, ?_⟩
     exact hlift ⟨.init ⟨nm,()⟩ (.forAll [] mty) (.det e) default, ctx.insert ⟨nm,()⟩ mty⟩ (by
       rw [genCmd_support_iff]; refine Or.inl ?_
       simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
       exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname hdodge (procToTCtx_fresh_rev ctx ⟨nm,()⟩ hfresh),
         mty, hmtyReach, e, hExprC mty e hexpr, rfl⟩)
-  | init_nondet x xty mty tys md hfresh hlen hcompat =>
+  | init_nondet x xty mty tys md Δ hfresh hlen hcompat hwk hequiv =>
     obtain ⟨mtyA, rfl, hmdc⟩ : ∃ m, xty = .forAll [] m ∧ md = default := by
       cases xty with
       | forAll bs body =>
@@ -385,17 +390,18 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     have hstored : mty = mtyA := init_stored_eq_rigid hrigidfv hcompat
     subst hstored; subst hmdc
     obtain ⟨nm, u⟩ := x; cases u
-    refine ⟨ctx.insert ⟨nm, ()⟩ mty, by rw [procToTCtx_insert], rfl, ?_⟩
+    refine ⟨ctx.insert ⟨nm, ()⟩ mty,
+      (procToTCtx_insert ctx ⟨nm, ()⟩ mty).trans hequiv.symm, rfl, ?_⟩
     exact hlift ⟨.init ⟨nm,()⟩ (.forAll [] mty) .nondet default, ctx.insert ⟨nm,()⟩ mty⟩ (by
       rw [genCmd_support_iff]; refine Or.inr (Or.inl ?_)
       simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
       exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname hdodge (procToTCtx_fresh_rev ctx ⟨nm,()⟩ hfresh),
         mty, hmtyReach, rfl⟩)
-  | set_det x mty e md hfind hexpr =>
+  | set_det x mty e md Δ hfind hexpr hequiv =>
     have hmdc : md = default := hshape
     have hmem : List.Mem (x, mty) (ctx.writable []) := by
       rw [writable_nil_eq]; exact Map.find?_mem ctx x mty (procToTCtx_find_rev ctx x mty hfind)
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.set x (.det e) default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩))
@@ -403,11 +409,11 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
       refine ⟨(x, mty), ?_, e, hExprC mty e hexpr, rfl⟩
       rw [show List.filter (fun p => !([].contains p.1)) ctx = ctx from List.filter_eq_self.mpr (fun _ _ => rfl)]
       exact Map.find?_mem ctx x mty (procToTCtx_find_rev ctx x mty hfind)
-  | set_nondet x mty md hfind =>
+  | set_nondet x mty md Δ hfind hequiv =>
     have hmdc : md = default := hshape
     have hmem : List.Mem (x, mty) (ctx.writable []) := by
       rw [writable_nil_eq]; exact Map.find?_mem ctx x mty (procToTCtx_find_rev ctx x mty hfind)
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.set x .nondet default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩)))
@@ -415,28 +421,28 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
       refine ⟨(x, mty), ?_, rfl⟩
       rw [show List.filter (fun p => !([].contains p.1)) ctx = ctx from List.filter_eq_self.mpr (fun _ _ => rfl)]
       exact Map.find?_mem ctx x mty (procToTCtx_find_rev ctx x mty hfind)
-  | assert l e md hexpr =>
+  | assert l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
     have hlreach : l ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := hok
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.assert l e default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ?_))))
       simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
       exact ⟨l, hlreach, e, hExprC .bool e hexpr, rfl⟩
-  | assume l e md hexpr =>
+  | assume l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
     have hlreach : l ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := hok
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.assume l e default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ?_)))))
       simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
       exact ⟨l, hlreach, e, hExprC .bool e hexpr, rfl⟩
-  | cover l e md hexpr =>
+  | cover l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
     have hlreach : l ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := hok
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.cover l e default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ?_)))))
@@ -477,35 +483,38 @@ theorem genFreshLabel_complete_of_syntactic (labels : List String) (label : Stri
 theorem spec_complete (P : Program) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (Γ : TContext Unit) (labels : List String)
     (s : Statement) (C' : LContext CoreLParams) (Γ' : TContext Unit)
-    (h : StmtHasTypeA P C Γ labels s C' Γ')
+    (h : StatementHasTypeA P C Γ labels s C' Γ')
     (hExprC : ∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d)
     (hFuncReach : ∀ d C Γ (func : Function), FuncHasTypeA C Γ func →
       func ∈ SetGen.support (genFunction (G := SetGen.Set) [] octx d)) :
-    ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars → Γ = procToTCtx ctx →
+    ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars →
+      TContext.Equiv (T := CoreLParams) Γ (procToTCtx ctx) →
       InGenShape s → AlphabetOk (octx := octx) tvars n s → CallOk (octx := octx) (tvars := tvars) procs ctx n s →
-      ∃ ctx', Γ' = procToTCtx ctx' ∧ ctx' = stepCtx ctx s ∧
+      ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
+        ctx' = stepCtx ctx s ∧
         (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
           SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
-  induction h using StmtHasType'.rec (motive_2 := fun C Γ L ss C' Γ' _ =>
-    ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars → Γ = procToTCtx ctx →
+  induction h using StatementHasType'.rec (motive_2 := fun C Γ L ss C' Γ' _ =>
+    ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars →
+      TContext.Equiv (T := CoreLParams) Γ (procToTCtx ctx) →
       InGenShapeList ss → AlphabetOkList (octx := octx) tvars n ss → CallOkList (octx := octx) (tvars := tvars) procs ctx n ss →
-      ∃ ctx', Γ' = procToTCtx ctx' ∧ ctx' = stepCtxList ctx ss ∧
+      ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
+        ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
           SetGen.support (genStmtChain (G := SetGen.Set) octx tvars [] procs L C ctx [] n ss.length)) with
-  | cmd C Γ Γ' L c hc =>
+  | cmd C Γ Γ2 L c Δ hc hequiv =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
-    cases hc with
-    | cmd Γ2' c2 hcmd =>
+    cases cmdExtHasTypeA_equiv_congr hc hΓ.symm with
+    | cmd Γ3 c2 hcmd =>
       obtain ⟨ctx', hctx', hstep, hmem⟩ :=
         genCmdStmt_complete_spec procs L C ctx n _ c2 hRig hcmd hnf hok (hExprC n ctx)
-      exact ⟨ctx', hctx'.symm, hstep, hmem⟩
-    | call pname callArgs proc md σ hfind hInLen hOutLen hLhs hIn hOut hInout =>
+      exact ⟨ctx', hequiv.trans hctx'.symm, hstep, hmem⟩
+    | call pname callArgs proc md σ Δ2 hfind hInLen hOutLen hLhs hIn hOut hInout hequiv2 =>
       -- Shape gives `md = default`; `CallOk` gives membership + recipe + guard + empty chain.
       have hmdc : md = default := hnf
       subst hmdc
       obtain ⟨s, σvals, exprs, hsmem, hpname, hσvals, hargs, hMusable, hNodup, hForall, hEmpty⟩ := hcall
-      refine ⟨ctx, rfl, rfl, ?_⟩
+      refine ⟨ctx, hequiv.trans hequiv2, rfl, ?_⟩
       -- The emitted group is `initChain (…) ++ [call]`; the chain is empty (`hEmpty`),
       -- and the output scope `insertAllCtx ctx [] = ctx`.
       refine genCallStmt_mem procs C ctx n _ ?_
@@ -513,12 +522,11 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
         (immutableVars := []) procs C ctx n s hsmem σvals hσvals exprs hMusable hNodup hForall
       rw [hEmpty] at hmem
       simpa [hargs, StrataGenerators.Stmt.initChain, StrataGenerators.Stmt.insertAllCtx, hpname] using hmem
-  | exit C Γ L label md hmem =>
+  | exit C Γ L label md Δ hmem hequiv =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     have hmdc : md = default := hnf
     subst hmdc
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine genExitStmt_mem procs C ctx n _ ?_
     simp only [genExitStmt]
     cases L with
@@ -526,43 +534,39 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     | cons hd tl =>
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff]
       exact ⟨label, hmem, rfl⟩
-  | funcDecl C Γ L decl func md hrec hfunc =>
+  | funcDecl C Γ L decl func md Δ hrec hfunc hequiv =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     have hmdc : md = default := hnf
     subst hmdc
     have hdecl : decl ∈ SetGen.support (genDecl (G := SetGen.Set) octx n) := hok
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine genFuncDeclStmt_mem procs C ctx n _ ?_
     simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff]
-    exact ⟨decl, hdecl, func, hFuncReach n C (procToTCtx ctx) func hfunc, rfl⟩
-  | typeDecl C C' Γ L tc md hoktc =>
+    exact ⟨decl, hdecl, func, hFuncReach n C (procToTCtx ctx) func (funcHasTypeA_ctx_irrel hfunc), rfl⟩
+  | typeDecl C C' Γ L tc md Δ hoktc hequiv =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     have hmdc : md = default := hnf
     subst hmdc
     obtain ⟨hname_tc, hlen, hparams⟩ := hok
-    refine ⟨ctx, rfl, rfl, ?_⟩
+    refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine genTypeDeclStmt_mem procs C ctx n _ ?_
     simp only [genTypeDeclStmt, mem_support_bind_iff]
     refine ⟨tc, genTypeConstructor_complete n tc hname_tc hlen hparams, ?_⟩
     rw [hoktc]; simp only [mem_support_pure_iff]
-  | block C Γ Cb Γb L label body md hlabel hbody ihbody =>
+  | block C Γ Cb Γb L label body md Δ hlabel hbody hequiv ihbody =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ m =>
       obtain ⟨hlabelname, hlen, hokbody⟩ := hok
       obtain ⟨hmdc, hnfbody⟩ := hnf
       subst hmdc
-      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx m hRig rfl hnfbody hokbody hcall
-      refine ⟨ctx, rfl, rfl, ?_⟩
+      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx m hRig hΓ hnfbody hokbody hcall
+      refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       exact block_mem procs C ctx m label body Cb ctxb body.length hlen hbodymem
         (genFreshLabel_complete L label hlabelname hlabel)
-  | ite_det C Γ Ct Γt Ce Γe L cond thenb elseb md hcond hthen helse iht ihe =>
+  | ite_det C Γ Ct Γt Ce Γe L cond thenb elseb md Δ hcond hthen helse hequiv iht ihe =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ m =>
@@ -570,14 +574,13 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       obtain ⟨hmdc, hnft, hnfe⟩ := hnf
       subst hmdc
       obtain ⟨hcallt, hcalle⟩ := hcall
-      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig rfl hnft hokt hcallt
-      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig rfl hnfe hoke hcalle
-      refine ⟨ctx, rfl, rfl, ?_⟩
+      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig hΓ hnft hokt hcallt
+      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig hΓ hnfe hoke hcalle
+      refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       exact ite_det_mem procs C ctx m cond thenb elseb Ct ctxt Ce ctxe thenb.length elseb.length
         htlen helen (hExprC (m+1) ctx .bool cond hcond) htmem hemem
-  | ite_nondet C Γ Ct Γt Ce Γe L thenb elseb md hthen helse iht ihe =>
+  | ite_nondet C Γ Ct Γt Ce Γe L thenb elseb md Δ hthen helse hequiv iht ihe =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ m =>
@@ -585,40 +588,37 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       obtain ⟨hmdc, hnft, hnfe⟩ := hnf
       subst hmdc
       obtain ⟨hcallt, hcalle⟩ := hcall
-      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig rfl hnft hokt hcallt
-      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig rfl hnfe hoke hcalle
-      refine ⟨ctx, rfl, rfl, ?_⟩
+      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig hΓ hnft hokt hcallt
+      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig hΓ hnfe hoke hcalle
+      refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       exact ite_nondet_mem procs C ctx m thenb elseb Ct ctxt Ce ctxe thenb.length elseb.length
         htlen helen htmem hemem
-  | loop C Γ Cb Γb L guard measure invs body md hg hm hi hbody ihbody =>
+  | loop C Γ Cb Γb L guard measure invs body md Δ hg hm hi hbody hequiv ihbody =>
     intro ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ mm =>
       obtain ⟨hinvlen, hinvname, hblen, hokbody⟩ := hok
       obtain ⟨hmdc, hnfbody⟩ := hnf
       subst hmdc
-      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx mm hRig rfl hnfbody hokbody hcall
-      refine ⟨ctx, rfl, rfl, ?_⟩
+      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx mm hRig hΓ hnfbody hokbody hcall
+      refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       refine loop_mem procs C ctx mm guard measure invs body Cb ctxb body.length hblen ?_ ?_ ?_ hbodymem
       · exact genCondOrNondet_complete (mm+1) ctx guard (fun g hgd => hExprC (mm+1) ctx .bool g (hg g hgd))
       · exact genOptMeasure_complete (mm+1) ctx measure (fun mmm hmm => hExprC (mm+1) ctx .int mmm (hm mmm hmm))
       · exact genInvariants_complete (mm+1) ctx invs hinvlen
           (fun p hp => ⟨hinvname p hp, hExprC (mm+1) ctx .bool p.2 (hi p hp)⟩)
-  | nil C Γ L =>
+  | nil C Γ L Δ hequiv =>
     rename_i ctx n hRig hΓ _ _ _
-    subst hΓ
-    exact ⟨ctx, rfl, rfl, genStmtChain_nil_mem procs C ctx n⟩
+    exact ⟨ctx, hequiv.trans hΓ, rfl, genStmtChain_nil_mem procs C ctx n⟩
   | cons C C1 C2 Γ Γ1 Γ2 L s ss hs hss ihs ihss =>
     rename_i ctx n hRig hΓ hnf hok hcall
-    subst hΓ
     obtain ⟨hnfs, hnfss⟩ := hnf
     obtain ⟨hoks, hokss⟩ := hok
     obtain ⟨hcalls, hcallss⟩ := hcall
     -- The head produces `[s]` at scope `ctx1 = stepCtx ctx s` (pinned by `ihs`); the
     -- tail continues from there, so its threaded `CallOkList`/scope line up exactly.
-    obtain ⟨ctx1, hctx1, hstep1, hsmem⟩ := ihs ctx n hRig rfl hnfs hoks hcalls
+    obtain ⟨ctx1, hctx1, hstep1, hsmem⟩ := ihs ctx n hRig hΓ hnfs hoks hcalls
     subst hstep1
     -- `hRig` transfers to `C1`: statement typing preserves `rigidTypeVars`
     -- (`funcDecl`/`typeDecl` extend only the factory/known-types).

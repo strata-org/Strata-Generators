@@ -1935,6 +1935,82 @@ theorem genArgTy_refs {baseTypes : List String} {tyCons : List KnownTyCon}
       · exact Or.inr (Or.inl (List.mem_map.mpr ⟨_, hkc, rfl⟩))
       · exact ih _ hhalf (hall a ha) r hr
 
+/-! ### `argsWellKinded`, which says that each application has the declared arity
+
+`getTypeConsArities` pairs each type constructor reference with the number of arguments at
+that occurrence. This section shows that each such pair is one of four things: a
+`baseTypes` name at arity 0, a `tyCons` entry with its own arity, a block datatype with its
+own number of `typeArgs`, or `"arrow"` at arity 2.
+
+Upstream added the field `argsWellKinded` to `MutualADTWF` (`strata-org/Strata` PR
+"Reject known type constructors applied at wrong arity"). That field closes exactly the
+specification gap this file used to document, and which `ArityOk` had to state by hand for
+the completeness direction. Read `docs/mutualadtwf-arity-gap.md`. -/
+
+/-- Each type-constructor occurrence in a generated type is applied at the arity that its
+    name declares. This lemma is the half of the field `argsWellKinded` of `MutualADTWF`
+    that speaks about the generator: it is the arity-aware refinement of `genArgTy_refs`,
+    and its proof has the same shape.
+
+    Each branch of the generator is arity-correct by construction. A base type is
+    `.tcons b []`, therefore its arity is 0. An application draws `(k, arity)` from
+    `tyCons` and then `vectorOf arity` arguments, therefore its arity is `arity`. An arrow
+    is `.tcons "arrow" [t1, t2]`, therefore its arity is 2. A recursive occurrence applies a
+    block name to exactly its own `typeArgs`, which `BlockRefsWF.uniform` gives. -/
+theorem genArgTy_arities {baseTypes : List String} {tyCons : List KnownTyCon}
+    {block : MutualDatatype Unit} {blockRefs : List BlockRef}
+    {tyParams : List TyIdentifier}
+    (hbr : BlockRefsWF block tyParams blockRefs) :
+    ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
+      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+        tyParams rca size) →
+      ∀ ref n, (ref, n) ∈ getTypeConsArities ty →
+        (ref ∈ baseTypes ∧ n = 0) ∨ (ref, n) ∈ tyCons ∨
+        (∃ d ∈ block, d.name = ref ∧ d.typeArgs.length = n) ∨ (ref = "arrow" ∧ n = 2) := by
+  intro size
+  induction size using Nat.strongRecOn with
+  | _ size ih =>
+    intro rca ty h
+    rcases (genArgTy_mem_iff _ _ _ _ _ _ _).mp h with
+      hleaf | ⟨hsz', t1, t2, rfl, h1, h2⟩ | ⟨hsz, k, args, rfl, hkc, hall⟩
+    · rcases (genLeafTy_mem_iff _ _ _ _ _).mp hleaf with
+        ⟨w, rfl⟩ | ⟨b, hb, rfl⟩ | ⟨v, _, rfl⟩ | ⟨_, br, hbrmem, rfl⟩
+      · intro ref n hn; simp [getTypeConsArities] at hn
+      · intro ref n hn
+        -- A base type is nullary: `getTypeConsArities (.tcons b []) = [(b, 0)]`.
+        simp only [getTypeConsArities, List.flatMap_nil, List.length_nil,
+          List.mem_singleton, Prod.mk.injEq] at hn
+        exact Or.inl ⟨hn.1 ▸ hb, hn.2⟩
+      · intro ref n hn; simp [getTypeConsArities] at hn
+      · intro ref n hn
+        -- The head is a block name applied to its own `typeArgs`. The arguments are type
+        -- variables, therefore they add no occurrence of their own.
+        simp only [getTypeConsArities, List.mem_cons, List.mem_flatMap, Prod.mk.injEq] at hn
+        rcases hn with ⟨rfl, rfl⟩ | ⟨a, ha, hn⟩
+        · obtain ⟨d, hd, hdname⟩ := List.mem_map.mp (hbr.mem br hbrmem)
+          refine Or.inr (Or.inr (Or.inl ⟨d, hd, hdname, ?_⟩))
+          rw [hbr.uniform br hbrmem d hd hdname, List.length_map]
+        · obtain ⟨v, rfl⟩ := hbr.ftvarArgs br hbrmem a ha
+          simp [getTypeConsArities] at hn
+    · have hhalf : size / 2 < size :=
+        Nat.div_lt_self (Nat.pos_of_ne_zero hsz') (by omega)
+      intro ref n hn
+      rw [LMonoTy.arrow] at hn
+      simp only [getTypeConsArities, List.length_cons, List.length_nil, List.flatMap_cons,
+        List.flatMap_nil, List.append_nil, List.mem_cons, List.mem_append,
+        Prod.mk.injEq] at hn
+      rcases hn with ⟨rfl, rfl⟩ | hn | hn
+      · exact Or.inr (Or.inr (Or.inr ⟨rfl, rfl⟩))
+      · exact ih _ hhalf h1 ref n hn
+      · exact ih _ hhalf h2 ref n hn
+    · have hhalf : size / 2 < size :=
+        Nat.div_lt_self (Nat.pos_of_ne_zero hsz) (by omega)
+      intro ref n hn
+      simp only [getTypeConsArities, List.mem_cons, List.mem_flatMap, Prod.mk.injEq] at hn
+      rcases hn with ⟨rfl, rfl⟩ | ⟨a, ha, hn⟩
+      · exact Or.inr (Or.inl hkc)
+      · exact ih _ hhalf (hall a ha) ref n hn
+
 /-! ### `argVarsScoped`, which says that a constructor argument adds no type variable
 
 This field of `MutualADTWF` says that each free type variable of a constructor argument type
@@ -2006,6 +2082,27 @@ theorem genMutuallyRecursiveDatatypes_refsKnown {baseTypes : List String} {tyCon
   obtain ⟨_, size, hty⟩ := hconstrs d hd c hc arg harg
   exact genArgTy_refs hbr size hty r hr
 
+/-- **`argsWellKinded`.** Take a constructor argument of a generated block. Each type
+    constructor occurrence in it is applied at the arity that its name declares: a
+    `baseTypes` name at 0, a `tyCons` entry at its own arity, a block datatype at its own
+    number of `typeArgs`, or `"arrow"` at 2. This theorem takes `genArgTy_arities` to the
+    full block, exactly as `genMutuallyRecursiveDatatypes_refsKnown` takes
+    `genArgTy_refs`. -/
+theorem genMutuallyRecursiveDatatypes_arities {baseTypes : List String} {tyCons : List KnownTyCon}
+    {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
+    {extraReserved : List String} {block : MutualDatatype Unit}
+    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+            maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
+            maxSize extraReserved)) :
+    ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∀ ref n, (ref, n) ∈ getTypeConsArities arg.2 →
+      (ref ∈ baseTypes ∧ n = 0) ∨ (ref, n) ∈ tyCons ∨
+      (∃ d' ∈ block, d'.name = ref ∧ d'.typeArgs.length = n) ∨ (ref = "arrow" ∧ n = 2) := by
+  obtain ⟨headers, _, hnames, hnodup, _, hheader, hconstrs⟩ := genMutuallyRecursiveDatatypes_shape hb
+  intro d hd c hc arg harg ref n hn
+  have hbr := visibleRefs_blockRefsWF hnames hnodup hheader hd
+  obtain ⟨_, size, hty⟩ := hconstrs d hd c hc arg harg
+  exact genArgTy_arities hbr size hty ref n hn
+
 /-- **`argVarsScoped`.** Each free type variable of a constructor argument type of a generated
     block is a declared member of `typeArgs` of the datatype around it. This theorem takes
     `genArgTy_freeVars` to the full block, in the way that
@@ -2062,6 +2159,22 @@ structure ContextOk (C : LContext CoreLParams) (baseTypes : List String)
     kc.1 ∈ C.knownTypes.keywords ∨ kc.1 ∈ C.datatypes.allTypeNames
   /-- `"arrow"` resolves as a known type of `C`. Strata Core always knows that name. -/
   arrow_known : "arrow" ∈ C.knownTypes.keywords
+  /-- Each base type is a **nullary known type constructor** of `C`. The field
+      `argsWellKinded` of `MutualADTWF` needs the arity and not only the name, because the
+      generator emits a base type as `.tcons b []`.
+
+      Unlike `base_known` this has no "or a datatype of `C`" disjunct: the vocabulary the
+      generators draw from is always backed by `knownTypes` (datatype names are threaded
+      separately, through `DatatypePoolOk`), and `LContext.WellKindedTy` — which upstream's
+      `init` and `signatureWellKinded` rules use — reads only `knownTypes`. -/
+  base_arity : ∀ b ∈ baseTypes, C.knownTypes[b]? = some 0
+  /-- Each applied type constructor is a known type constructor of `C` at **its own
+      arity**. The generator draws `(kc.1, kc.2)` from the pool and then makes exactly
+      `kc.2` arguments. -/
+  tyCon_arity : ∀ kc ∈ tyCons, C.knownTypes[kc.1]? = some kc.2
+  /-- `"arrow"` is registered at **arity 2**, which is the arity at which the generator
+      applies it. -/
+  arrow_arity : C.knownTypes["arrow"]? = some 2
   /-- Each known type name of `C` is a reserved name. It is reserved by `baseTypes`, by
       `tyCons`, by `"arrow"` or by `extraReserved`. Therefore a fresh name is not one of
       them. -/
@@ -2289,6 +2402,11 @@ came from. `ContextOk` and `defaultContextOk` are untouched. -/
 structure DatatypePoolOk (C : LContext CoreLParams) (dtCons : List KnownTyCon) : Prop where
   /-- Each pool name resolves as an existing datatype of `C`. -/
   known : ∀ kc ∈ dtCons, kc.1 ∈ C.datatypes.allTypeNames
+  /-- Each pool name resolves as an existing datatype of `C` *at the pool's arity*: the
+      datatype declares exactly `kc.2` type parameters. This is the arity-aware form of
+      `known`, and it is what `MutualADTWF.argsWellKinded` needs. -/
+  arity : ∀ kc ∈ dtCons,
+    ∃ d ∈ C.datatypes.allDatatypes, d.name = kc.1 ∧ d.typeArgs.length = kc.2
   /-- Each pool name is inhabited in `C`'s own factory. -/
   inhab : ∀ kc ∈ dtCons, TySymInhab C.datatypes kc.1
 
@@ -2736,10 +2854,12 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
       namesNodup := by rw [hbnames]; exact hnodupH
       namesFresh := ?_
       namesNew := ?_
-      argsWF := ?_
+      argVarsScoped := genMutuallyRecursiveDatatypes_argVarsScoped hb
+      argsWF := genMutuallyRecursiveDatatypes_argsWF harrow hb
       refsKnown := ?_
-      inhabited := ?_
-      argVarsScoped := ?_ }
+      argsWellKinded := ?_
+      inhabited :=
+        genMutuallyRecursiveDatatypes_inhabited harrow hctx hpool hstored hsplit hsubTC hb }
   · -- namesFresh: no block name is a known type of `C`.
     intro d hd hcontains
     -- A known-type name of `C` is reserved, but block names are drawn fresh.
@@ -2753,8 +2873,6 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
     · exact absurd
         (hinit_mono _ (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome)))
         (hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩))
-  · -- The field `argsWF`. It is exactly `genMutuallyRecursiveDatatypes_argsWF`.
-    exact genMutuallyRecursiveDatatypes_argsWF harrow hb
   · -- The field `refsKnown`. Each reference resolves in `C`, or it is a block name, or it is
     -- `"arrow"`.
     intro d hd c hc arg harg r hr
@@ -2773,10 +2891,20 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
       · exact Or.inr (Or.inl (hpool.known kc hdt))
     · exact Or.inr (Or.inr hblk)
     · subst harr; exact Or.inl hctx.arrow_known
-  · -- The field `inhabited`.
-    exact genMutuallyRecursiveDatatypes_inhabited harrow hctx hpool hstored hsplit hsubTC hb
-  · -- The field `argVarsScoped`.
-    exact genMutuallyRecursiveDatatypes_argVarsScoped hb
+  · -- The field `argsWellKinded`. The generator is arity-correct by construction
+    -- (`genMutuallyRecursiveDatatypes_arities`); the arity fields of `ContextOk` and
+    -- `DatatypePoolOk` say that `C` registers each of those names at that same arity.
+    intro d hd c hc arg harg ref n hn
+    rcases genMutuallyRecursiveDatatypes_arities hb d hd c hc arg harg ref n hn with
+      ⟨hbt, rfl⟩ | htc | hblk | ⟨rfl, rfl⟩
+    · exact Or.inl (hctx.base_arity ref hbt)
+    · -- A vocabulary entry is either an external known type (`ContextOk.tyCon_arity`) or a
+      -- previously declared datatype (`DatatypePoolOk.arity`), at the pool's arity.
+      rcases hsplit (ref, n) htc with hext | hdt
+      · exact Or.inl (hctx.tyCon_arity (ref, n) hext)
+      · exact Or.inr (Or.inl (hpool.arity (ref, n) hdt))
+    · exact Or.inr (Or.inr hblk)
+    · exact Or.inl hctx.arrow_arity
 
 /-! ### The corollary for the default parameters and the true Strata Core context
 
@@ -2809,6 +2937,7 @@ theorem defaultContextOk :
     ContextOk coreContext defaultBaseTypes defaultTyCons Core.KnownTypes.keywords := by
   refine
     { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
+      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
   · -- Each default base type is a known primitive of `coreContext`.
@@ -2821,6 +2950,17 @@ theorem defaultContextOk :
     rcases hkc with rfl | rfl <;> (show _ ∈ Core.KnownTypes.keywords; native_decide)
   · -- `"arrow"` is a known primitive of `coreContext`.
     show "arrow" ∈ Core.KnownTypes.keywords; native_decide
+  · -- Each default base type is registered at arity 0.
+    intro b hb
+    simp [defaultBaseTypes, nullaryBaseTypeNames] at hb
+    rcases hb with rfl | rfl | rfl | rfl | rfl <;>
+      (show Core.KnownTypes[_]? = some 0; native_decide)
+  · -- `Map` has arity 2 and `Sequence` has arity 1, which is what `defaultTyCons` records.
+    intro kc hkc
+    simp [defaultTyCons] at hkc
+    rcases hkc with rfl | rfl <;> (show Core.KnownTypes[_]? = some _; native_decide)
+  · -- `"arrow"` is registered at arity 2.
+    show Core.KnownTypes["arrow"]? = some 2; native_decide
   · -- Each known type of `coreContext` is a member of the extra reserved list, with no
     -- change.
     intro k hk
@@ -2859,7 +2999,7 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
   -- side conditions (`DatatypePoolOk`, `StoredRefsAbsent`) are vacuous.
   genMutuallyRecursiveDatatypes_MutualADTWF (dtCons := []) defaultTyCons_ne_arrow
     defaultContextOk
-    { known := by simp, inhab := by simp }
+    { known := by simp, arity := by simp, inhab := by simp }
     (by
       intro d hd
       simp [coreContext, TypeFactory.allDatatypes] at hd)
@@ -2896,10 +3036,11 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
       namesNodup := (hnamesperm.nodup_iff).mp h.namesNodup
       namesFresh := fun d hd => h.namesFresh d (hmem hd)
       namesNew := fun d hd => h.namesNew d (hmem hd)
+      argVarsScoped := fun d hd => h.argVarsScoped d (hmem hd)
       argsWF := ?_
       refsKnown := ?_
-      inhabited := ?_
-      argVarsScoped := fun d hd => h.argVarsScoped d (hmem hd) }
+      argsWellKinded := ?_
+      inhabited := ?_ }
   · -- The field `nonempty`. `block'` is not empty, because `block` is not empty and the two
     -- lists are permutations of each other.
     intro hnil
@@ -2915,6 +3056,14 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
     · exact Or.inl hk
     · exact Or.inr (Or.inl hdt)
     · exact Or.inr (Or.inr (hnamesperm.mem_iff.mp hblk))
+  · -- The field `argsWellKinded`. `getTypeConsArities` reads only the argument type, and a
+    -- permutation keeps the disjunct about a block datatype.
+    intro d hd c hc arg harg ref n hn
+    rcases h.argsWellKinded d (hmem hd) c hc arg harg ref n hn with
+      hk | hdt | ⟨d', hd', hname, hlen⟩
+    · exact Or.inl hk
+    · exact Or.inr (Or.inl hdt)
+    · exact Or.inr (Or.inr ⟨d', hperm.mem_iff.mp hd', hname, hlen⟩)
   · -- The field `inhabited`. A permutation keeps the `getType` of the longer factory, and
     -- this proof carries inhabitance along that agreement.
     intro d hd

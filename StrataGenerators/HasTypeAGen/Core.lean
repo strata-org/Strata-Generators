@@ -786,10 +786,21 @@ def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
     (σ :: args, ret)
   | ty => ([], ty)
 
+/-- Build a single-scope `Lambda.Subst` from an association list of type-variable
+    bindings.
+
+    `Lambda.Subst` is a stack of scopes; upstream made each scope an opaque
+    hash map (`Strata.Util.HMap`) rather than an association list, so a scope can
+    no longer be written as a list literal. Reversing before `HMap.ofList`
+    preserves the association-list convention that the *first* binding for a key
+    wins (`HMap.ofList` would otherwise let the last one win). -/
+def substScope (bindings : List (TyIdentifier × LMonoTy)) : Lambda.Subst :=
+  [Strata.Util.HMap.ofList bindings.reverse]
+
 /-- Find free type variables that haven't been instantiated in a substituion,
     i.e. `findFreeTyVars boundVars subst` elements of `boundVars` that don't appear as keys in `subst`. -/
 def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List TyIdentifier :=
-  boundVars.filter (fun v => Maps.find? subst v == none)
+  boundVars.filter (fun v => Strata.Util.HMaps.find? subst v == none)
 
 -- ── Alpha-renaming for polymorphic operators (OpsConsistent fix) ──────
 -- Without freshening type variables, a polymorphic factory
@@ -837,7 +848,8 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
 
   -- Apply the `subst` to `monoTy` (the body of the universally quantified type)
   -- using the substitution
-  let renamedTy := LMonoTy.subst [subst.map (fun (old, new) => (old, LMonoTy.ftvar new))]  monoTy
+  let renamedTy :=
+    LMonoTy.subst (substScope (subst.map (fun (old, new) => (old, LMonoTy.ftvar new)))) monoTy
 
   -- Assemble everything together
   (renamedBoundVars, renamedTy)
@@ -913,7 +925,7 @@ def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
       guard (uninstantiatedTyVars.isEmpty || !generableTys.isEmpty)
 
       -- Extend substitution to map the uninstantiated type variables to these newly sampled types
-      let extendedSubst : Lambda.Subst := (uninstantiatedTyVars.zip sampledTys) :: subst
+      let extendedSubst : Lambda.Subst := substScope (uninstantiatedTyVars.zip sampledTys) ++ subst
 
       -- Apply the substitution to each of the applied argument types
       -- This makes all the applied argument types fully instantiated (concrete)

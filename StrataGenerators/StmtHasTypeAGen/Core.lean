@@ -15,7 +15,7 @@ open Lambda RandomChoice Core Imperative ArbString
 This file contains the canonical definition of `genStmt` / `genStmtChain`, mutually
 recursive generators of well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
-`StmtHasTypeA` / `StmtsHasTypeA` relations of
+`StatementHasTypeA` / `StatementsHasTypeA` relations of
 `Strata.Languages.Core.StatementTypeSpec`.
 
 ## Reuse of existing generators
@@ -33,7 +33,7 @@ component generators:
 
 ## The three threaded contexts
 
-`StmtHasType'` is a 6-place relation `C Γ L s C' Γ'` (post-#1392: the spec now
+`StatementHasType'` is a 6-place relation `C Γ L s C' Γ'` (post-#1392: the spec now
 tracks the set `L` of enclosing-block labels). The generator threads a
 representation of all three:
 
@@ -217,7 +217,7 @@ def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement targeting an enclosing block. Under the new
-    typing spec `StmtHasType'.exit` requires `label ∈ L`, so the target label is
+    typing spec `StatementHasType'.exit` requires `label ∈ L`, so the target label is
     sampled (via `elements`) from the enclosing-block `labels` — the generated
     `exit` genuinely breaks out of a live enclosing block. When no block encloses
     the current point (`labels = []`, e.g. at top level) *no* well-typed `exit`
@@ -460,7 +460,7 @@ mutual
     output scope (see `genCallStmt`). This is why the result type is a statement
     *list*; every other branch returns a singleton.
 
-    The generated statements satisfy `StmtsHasTypeA P C Γ ss C' Γ'` (for any
+    The generated statements satisfy `StatementsHasTypeA P C Γ ss C' Γ'` (for any
     program `P`) — see `genStmt_sound`. -/
 def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
@@ -544,7 +544,7 @@ termination_by n => (n, 0, 0)
     generation steps, not the statement count.
 
     Returns the statement list together with the final `(C, Γ)`. Satisfies the
-    chained `StmtsHasTypeA` relation — see `genStmtChain_sound`. -/
+    chained `StatementsHasTypeA` relation — see `genStmtChain_sound`. -/
 def genStmtChain [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)

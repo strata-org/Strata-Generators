@@ -12,6 +12,21 @@ open Lambda RandomChoice Core Core.TypeSpec Imperative
 open DatatypeGen
 open StrataGenerators.Procedure
 
+namespace Lambda
+
+/-- The erroring form of `LContext.addFactoryFunction`.
+
+    Upstream `strata-org/Strata` keeps only the *total* `LContext.addFactoryFunction`
+    (a no-op on a name clash); the generator needs the erroring form, because that is the
+    gate the program checker applies — and `ProgramTypeSpec`'s `FactoryExtendedBy` describes
+    exactly its successful outcome. It is a thin wrapper over `Factory.tryPush`, which
+    upstream does provide. -/
+def LContext.addFactoryFunctionWithError (C : LContext CoreLParams) (fn : LFunc CoreLParams) :
+    Except Strata.Message (LContext CoreLParams) := do
+  .ok { C with functions := (← C.functions.tryPush fn) }
+
+end Lambda
+
 /-!
 # Generator definitions for random well-typed Strata Core *programs*
 

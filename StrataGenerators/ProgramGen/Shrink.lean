@@ -774,11 +774,12 @@ private def nestedPrecondFunc : Function :=
               && f.typeArgs == precondFunc.typeArgs) == true
 #guard (shrinkFuncWellFormed precondFunc).all funcWellFormed == true
 
--- By contrast the analogous *measure* reduction needs no filter: the measure IS
--- free-var checked, so the oracle rejects the dangling form on its own.
+-- The analogous *measure* reduction: dropping the inputs leaves the measure's `y`
+-- dangling. `strata-org/Strata` `main` accepts this shape (it used to reject it), so the
+-- reduction needs no filter for the opposite reason — the oracle no longer refuses it.
 private def measureFunc : Function :=
   { precondFunc with preconditions := [], measure := some (.fvar () ⟨"y", ()⟩ (some .int)) }
-#guard progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == false
+#guard progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == true
 
 -- A `recFuncBlock` never shrinks to the empty block (the spec forbids it).
 private def recBlock : Decl :=
@@ -827,9 +828,13 @@ private def opDistinctDecls : List Decl :=
 -- which is why `genDeclDistinct` emits the two together or not at all.
 #guard progTypeChecks (prog [opDistinctDecls[2]!]) == false
 
--- Each gap is genuinely rejected, so the cases below are not vacuous...
+-- `distinct-fvar` and `unknown-op` are still genuinely rejected, so the cases below are
+-- not vacuous. `measure-no-body` is **accepted on `strata-org/Strata` `main`** — that gap
+-- is closed — so the tag below now classifies a shape the checker no longer refuses;
+-- `programStatusNote` only consults the classifier on a *rejected* program, so it stays
+-- silent on this one.
 #guard progTypeChecks (prog [fvarDistinctDecl]) == false
-#guard progTypeChecks (prog [measureNoBodyDecl]) == false
+#guard progTypeChecks (prog [measureNoBodyDecl]) == true
 #guard progTypeChecks (prog [unknownOpDecl]) == false
 -- ...and each is classified, with no false positive on the accepted mixed program.
 #guard programRejectionCause (prog [fvarDistinctDecl]) == ["distinct-fvar"]
@@ -841,8 +846,8 @@ private def opDistinctDecls : List Decl :=
 -- The shared status note: silent on an accepted program, tagged on a known gap.
 #guard programStatusNote mixed == ""
 #guard programStatusNote Program.init == ""
-#guard programStatusNote (prog [measureNoBodyDecl]) ==
-  "\n  -- typechecker-rejected, known gap(s): measure-no-body"
+-- `measureNoBodyDecl` now typechecks, so the note is silent on it.
+#guard programStatusNote (prog [measureNoBodyDecl]) == ""
 -- Two gaps at once are both reported.
 #guard programStatusNote (prog [fvarDistinctDecl, measureNoBodyDecl]) ==
   "\n  -- typechecker-rejected, known gap(s): distinct-fvar measure-no-body"
@@ -872,9 +877,9 @@ private def opDistinctDecls : List Decl :=
 private def illTyped : Program := prog [fvarDistinctDecl, measureNoBodyDecl, axDecl]
 #guard progTypeChecks illTyped == false
 #guard (shrinkProgram illTyped).all progTypeChecks == true
-#guard (shrinkProgram illTyped).all
-  (fun c => !(c.decls.contains fvarDistinctDecl) && !(c.decls.contains measureNoBodyDecl))
-  == true
+-- Only the still-rejected `distinct-fvar` declaration has to go; `measureNoBodyDecl`
+-- typechecks on `main`, so a candidate may legitimately keep it.
+#guard (shrinkProgram illTyped).all (fun c => !(c.decls.contains fvarDistinctDecl)) == true
 -- THE `cutGaps` REGRESSION: two *independent* gaps. No single drop can fix this
 -- (dropping either leaves the other), so with only the one-at-a-time families the
 -- candidate list would be empty and the minimizer would stall on the input. The

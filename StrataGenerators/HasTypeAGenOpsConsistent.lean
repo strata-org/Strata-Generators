@@ -72,7 +72,7 @@ theorem factoryOps_mem_char (F : @Factory LExprParams') (nm : String) (τ : LMon
   obtain ⟨hnm, hτ⟩ := hfn_eq
   subst hnm
   have hfn_mem' : fn ∈ F.toArray := Array.mem_def.mpr hfn_mem
-  obtain ⟨hs, hget⟩ := Factory.mem_name_eq_getElem hfn_mem' rfl
+  obtain ⟨hs, hget⟩ := Factory.memNameGetElem hfn_mem' rfl
   exact ⟨fn, Lambda.mem_get?_eq hs hget, hτ.symm⟩
 
 -- ── Well-formedness of `pctx` and the factory ────────────────────────
@@ -112,7 +112,7 @@ theorem PCtxWF_factoryPolyOps (F : @Factory LExprParams') :
   obtain ⟨hnm, hlty⟩ := hfn_eq
   subst hnm
   have hfn_mem' : fn ∈ F.toArray := Array.mem_def.mpr hfn_mem
-  obtain ⟨hs, hget⟩ := Factory.mem_name_eq_getElem hfn_mem' rfl
+  obtain ⟨hs, hget⟩ := Factory.memNameGetElem hfn_mem' rfl
   exact ⟨fn, Lambda.mem_get?_eq hs hget, hlty.symm⟩
 
 -- ── Leaf-op consistency (`pickOp`) ───────────────────────────────────
@@ -139,7 +139,7 @@ theorem pickOp_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy) (name :
   have hoctx : (name, τ) ∈ (factoryOps F).ops := mem_opsOfType _ _ _ hmem
   obtain ⟨fn, hget, hτ⟩ := factoryOps_mem_char F name τ hoctx
   -- `τ = genericTy` is the identity instance `genericTy.subst []`.
-  exact .op_in (tySubst := []) hget (by rw [hτ]; exact (LMonoTy.subst_emptyS (by simp)).symm)
+  exact .op_in (tySubst := []) hget (by rw [hτ]; exact (LMonoTy.subst_of_hasEmptyScopes (by simp) _).symm)
 
 -- ── Public support characterizations for pick* (mirror private ones) ──
 
@@ -276,7 +276,7 @@ theorem indir_op_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
       (.op () ⟨name, ()⟩ (some (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) := by
   obtain ⟨hoctx, _⟩ := findOpsInCtx_mem' hmem
   obtain ⟨fn, hget, hty⟩ := factoryOps_mem_char F name _ hoctx
-  exact .op_in (tySubst := []) hget (by rw [hty]; exact (LMonoTy.subst_emptyS (by simp)).symm)
+  exact .op_in (tySubst := []) hget (by rw [hty]; exact (LMonoTy.subst_of_hasEmptyScopes (by simp) _).symm)
 
 -- ── Polymorphic IndirPoly op-node consistency ────────────────────────
 
@@ -323,7 +323,19 @@ theorem decomposeArrow_foldr (t : LMonoTy) :
     rw [hrec] at ih; simpa using ih
   | case2 ty hne => rfl
 
-/-- Substitution distributes over a right-nested arrow fold. -/
+/-- `LMonoTys.subst` is the pointwise `map` of `LMonoTy.subst` (public restatement,
+    since Strata's `LMonoTys.subst_eq_map` lives in a `module` file). -/
+theorem LMonoTys_subst_map (S : Lambda.Subst) (args : List LMonoTy) :
+    LMonoTys.subst S args = args.map (LMonoTy.subst S) := by
+  have h := LMonoTy.subst_unfold S (LMonoTy.tcons "x" args)
+  rw [LMonoTy.subst_tcons] at h
+  simp only at h
+  injection h with _ hh
+
+/-- Substitution distributes over a right-nested arrow fold.
+
+    `LMonoTys_subst_map` handles the `hasEmptyScopes` short-circuit once and for all, so
+    unlike the previous version this proof needs no case split on it. -/
 theorem subst_foldr_arrow (S : Lambda.Subst) (l : List LMonoTy) (t : LMonoTy) :
     LMonoTy.subst S (l.foldr (fun σ acc => LMonoTy.arrow σ acc) t)
       = (l.map (LMonoTy.subst S)).foldr (fun σ acc => LMonoTy.arrow σ acc)
@@ -332,101 +344,81 @@ theorem subst_foldr_arrow (S : Lambda.Subst) (l : List LMonoTy) (t : LMonoTy) :
   | nil => simp
   | cons a as ih =>
     simp only [List.foldr_cons, List.map_cons]
-    rw [LMonoTy.arrow, LMonoTy.subst_tcons]
-    show LMonoTy.tcons "arrow"
-        (LMonoTys.subst S [a, as.foldr (fun σ acc => LMonoTy.arrow σ acc) t]) = _
-    rw [LMonoTys.subst_eq_substLogic]
-    by_cases hS : Subst.hasEmptyScopes S
-    · simp only [LMonoTys.substLogic_emptyS hS, LMonoTy.subst_emptyS hS]
-      simp only [LMonoTy.subst_emptyS hS] at ih
-      rw [ih]; rfl
-    · simp only [LMonoTys.substLogic, hS, Bool.false_eq_true, ↓reduceIte]
-      rw [ih]; rfl
+    rw [LMonoTy.arrow, LMonoTy.subst_tcons, LMonoTys_subst_map]
+    simp only [List.map_cons, List.map_nil]
+    rw [ih]
+    rfl
 
-/-- `LMonoTys.subst` is the pointwise `map` of `LMonoTy.subst` (public restatement,
-    since Strata's `LMonoTys_subst_eq_map` lives in a `module` file). -/
-theorem LMonoTys_subst_map (S : Lambda.Subst) (args : List LMonoTy) :
-    LMonoTys.subst S args = args.map (LMonoTy.subst S) := by
-  have h := LMonoTy.subst_unfold S (LMonoTy.tcons "x" args)
-  rw [LMonoTy.subst_tcons] at h
-  simp only at h
-  injection h with _ hh
+/-- The association list sending each free variable `v` of `P` to its image under the
+    composite `subst T2 ∘ subst T1`. -/
+def composeWitnessBindings (P : LMonoTy) (T1 T2 : Lambda.Subst) :
+    List (TyIdentifier × LMonoTy) :=
+  (LMonoTy.freeVars P).map (fun v => (v, LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))))
 
 /-- The single-scope substitution that sends each free variable `v` of `P` to its
     image under the composite `subst T2 ∘ subst T1`. Applied to `P` (or any type
     whose free variables are all free in `P`) it reconstructs the composite; that
     is all `OpsConsistentR`'s existence witness needs — no groundness or
-    well-formedness is required. -/
-def composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst) : Lambda.SubstOne :=
-  (LMonoTy.freeVars P).map (fun v => (v, LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))))
+    well-formedness is required.
+
+    A `Subst` scope is an opaque `Strata.Util.HMap`, so the scope is built from
+    `composeWitnessBindings` through `substScope` rather than written as a list. -/
+def composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst) : Lambda.Subst :=
+  substScope (composeWitnessBindings P T1 T2)
 
 /-- Looking up a free variable `v` of `P` in `composeWitnessScope P T1 T2` returns
     its composite image. -/
 theorem find?_composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst)
     (v : TyIdentifier) (hv : v ∈ LMonoTy.freeVars P) :
-    Maps.find? [composeWitnessScope P T1 T2] v
+    Strata.Util.HMaps.find? (composeWitnessScope P T1 T2) v
       = some (LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))) := by
-  unfold composeWitnessScope Maps.find?
-  -- `Map.find?` over `l.map (fun v => (v, g v))` at a key `v ∈ l` returns `g v`.
+  rw [composeWitnessScope, Freshening.find?_substScope_eq_lookup, composeWitnessBindings]
+  -- `List.lookup` over `l.map (fun v => (v, g v))` at a key `v ∈ l` returns `g v`.
   have key : ∀ (l : List TyIdentifier), v ∈ l →
-      Map.find? (l.map (fun v => (v, LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))))) v
+      (l.map (fun v => (v, LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))))).lookup v
         = some (LMonoTy.subst T2 (LMonoTy.subst T1 (.ftvar v))) := by
     intro l hl
     induction l with
     | nil => simp at hl
     | cons w ws ih =>
-      simp only [List.map_cons, Map.find?]
-      by_cases hvw : w = v
+      simp only [List.map_cons, List.lookup_cons]
+      by_cases hvw : v = w
       · subst hvw; simp
-      · rw [if_neg hvw]
+      · simp only [show (v == w) = false from by simp [hvw]]
         rw [List.mem_cons] at hl
         rcases hl with h | h
-        · exact absurd h.symm hvw
+        · exact absurd h hvw
         · exact ih h
-  rw [key (LMonoTy.freeVars P) hv]
+  exact key (LMonoTy.freeVars P) hv
 
 /-- **Composite-to-single-scope collapse.** If `mty`'s free variables are all free
-    variables of `P`, then applying the ground-valued single scope
-    `composeWitnessScope P T1 T2` to `mty` equals applying the composite
-    `subst T2 ∘ subst T1`. -/
+    variables of `P`, then applying the single scope `composeWitnessScope P T1 T2` to
+    `mty` equals applying the composite `subst T2 ∘ subst T1`.
+
+    `LMonoTy.subst_unfold` absorbs the `hasEmptyScopes` short-circuit, so — unlike the
+    previous version — the proof is a plain structural induction with no case split on
+    whether the witness scope happens to be empty. -/
 theorem subst_composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst) :
     ∀ (mty : LMonoTy), (∀ v, v ∈ LMonoTy.freeVars mty → v ∈ LMonoTy.freeVars P) →
-      LMonoTy.subst [composeWitnessScope P T1 T2] mty
+      LMonoTy.subst (composeWitnessScope P T1 T2) mty
         = LMonoTy.subst T2 (LMonoTy.subst T1 mty) := by
-  intro mty hsub
-  by_cases hE : Subst.hasEmptyScopes [composeWitnessScope P T1 T2]
-  · -- Empty scope ⇒ `P` has no free variables ⇒ `mty` has none ⇒ both sides fixed.
-    have hPnil : LMonoTy.freeVars P = [] := by
-      cases hfv : LMonoTy.freeVars P with
-      | nil => rfl
-      | cons w ws =>
-        exfalso
-        change Subst.hasEmptyScopes [composeWitnessScope P T1 T2] = true at hE
-        simp only [composeWitnessScope, hfv, List.map_cons, Subst.hasEmptyScopes,
-          List.all_cons, Map.isEmpty] at hE
-        simp at hE
-    have hmtynil : ∀ v, v ∈ LMonoTy.freeVars mty → False := by
-      intro v hv; have := hsub v hv; rw [hPnil] at this; simp at this
-    rw [LMonoTy.subst_emptyS hE]
-    rw [LMonoTy.subst_no_relevant_keys T1 mty (fun v hv _ => (hmtynil v hv).elim)]
-    exact (LMonoTy.subst_no_relevant_keys T2 mty (fun v hv _ => (hmtynil v hv).elim)).symm
-  · have hEne : Subst.hasEmptyScopes [composeWitnessScope P T1 T2] = false :=
-      Bool.eq_false_iff.mpr hE
-    induction mty with
-    | ftvar v =>
-      have hv := hsub v (by simp [LMonoTy.freeVars])
-      rw [LMonoTy.subst]
-      simp only [hEne, Bool.false_eq_true, ↓reduceIte]
-      rw [find?_composeWitnessScope P T1 T2 v hv]
-    | bitvec n => simp [LMonoTy.subst_bitvec]
-    | tcons name args ih =>
-      rw [LMonoTy.subst_tcons, LMonoTy.subst_tcons, LMonoTy.subst_tcons]
-      congr 1
-      rw [LMonoTys_subst_map, LMonoTys_subst_map, LMonoTys_subst_map, List.map_map]
-      apply List.map_congr_left
-      intro a ha
-      exact ih a ha (fun v hv => hsub v (by
-        simp only [LMonoTy.freeVars]; exact LMonoTys.freeVars_mem_subset ha hv))
+  intro mty
+  induction mty with
+  | ftvar v =>
+    intro hsub
+    have hv := hsub v (by simp [LMonoTy.freeVars])
+    rw [LMonoTy.subst_unfold]
+    simp only [find?_composeWitnessScope P T1 T2 v hv]
+  | bitvec n => intro _; simp [LMonoTy.subst_bitvec]
+  | tcons name args ih =>
+    intro hsub
+    rw [LMonoTy.subst_tcons, LMonoTy.subst_tcons, LMonoTy.subst_tcons]
+    congr 1
+    rw [LMonoTys_subst_map, LMonoTys_subst_map, LMonoTys_subst_map, List.map_map]
+    apply List.map_congr_left
+    intro a ha
+    exact ih a ha (fun v hv => hsub v (by
+      simp only [LMonoTy.freeVars]; exact Freshening.freeVars_mem_of_mem ha hv))
 
 /-- **Composite-instance packaging (declarative).** If `A` equals the composite
     `subst T2 (subst T1 P)`, then there is a *raw* substitution `S` with
@@ -436,7 +428,7 @@ theorem subst_composeWitnessScope (P : LMonoTy) (T1 T2 : Lambda.Subst) :
 theorem composite_instance_subst (A P : LMonoTy) (T1 T2 : Lambda.Subst)
     (hA : A = LMonoTy.subst T2 (LMonoTy.subst T1 P)) :
     ∃ S : Lambda.Subst, A = LMonoTy.subst S P := by
-  refine ⟨[composeWitnessScope P T1 T2], ?_⟩
+  refine ⟨composeWitnessScope P T1 T2, ?_⟩
   rw [hA]
   exact (subst_composeWitnessScope P T1 T2 P (fun v hv => hv)).symm
 
@@ -512,7 +504,7 @@ theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpC
   -- where `leftoverSuffix = (argTys.drop k).foldr arrow retTy` is the un-applied
   -- suffix of the scheme's arrow type.
   have hunifEqFull : LMonoTy.subst
-      ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+      (substScope ((findFreeTyVars freshBoundVars subst).zip sampledTys) ++ subst)
       ((argTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ :=
     beq_iff_eq.mp hguard2
   -- Step 4: build the substitution witness.
@@ -525,7 +517,7 @@ theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpC
   -- the fully-applied case is one `List.foldr_append`/`take_append_drop`: the
   -- scheme's arrow type splits as (applied prefix) ++ (leftover suffix) at `k`.
   have hAeq : concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
-      = LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+      = LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars subst).zip sampledTys) ++ subst)
           (LMonoTy.subst renameSubst
             (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))) := by
     rw [← hgenericEq, ← hfmt]
@@ -544,7 +536,7 @@ theorem findPolymorphicOps_instanceR (F : @Factory LExprParams') (pctx : PolyOpC
   obtain ⟨S, hS⟩ := composite_instance_subst
     (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd))
-    renameSubst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+    renameSubst (substScope ((findFreeTyVars freshBoundVars subst).zip sampledTys) ++ subst)
     hAeq
   exact ⟨fn, S, hget, hS⟩
 

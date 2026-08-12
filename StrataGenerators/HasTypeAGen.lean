@@ -4364,74 +4364,18 @@ theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
   | nil => exact hbase
   | cons harg _ ih => exact ih _ (LExpr.HasTypeA.app hbase harg)
 
-/-- **Matching-completeness of Strata's unifier `Constraints.unify` (stated, not
-    proved).**
-
-    This is the single honest gap the polymorphic-completeness proof rests on. It is
-    a statement purely about Strata's engine
-    (`Strata.DL.Lambda.LTyUnify.Constraints.unify`); the generator-local wrapper
-    `unifyTypes` inherits it as the `sorry`-free corollary `unifyTypes_matching_complete`.
-
-    `findPolymorphicOps` unifies a *pattern* `pat` (a freshened scheme suffix, whose
-    type variables are disjoint from those of the fixed target `τ`) against `τ`, and
-    then requires (`guard2`) that the result maps `pat` to `τ` *literally*. Because
-    `pat`'s variables are disjoint from `τ`'s, this is one-sided **matching**, not
-    general unification. Given any matcher `S` (`subst S pat = τ`), unifying
-    `[(pat, τ)]` from the empty substitution:
-      (i)  succeeds (`= .ok si`), and
-      (ii) its result maps `pat` to `τ`.
-
-    A third conclusion, "the result leaves `τ` fixed" (`subst si.subst τ = τ`), was
-    originally stated here but is **not** part of the interface: the sole consumer
-    (`isPolyApp_of_hasType_specShaped`, via `extended_subst_guard2`) needs only (ii).
-    It is dropped so the `sorry` states exactly what is used — a weaker obligation,
-    hence easier to discharge. Note it remains load-bearing *inside* the deferred
-    proof: Strata ships only `unify_makes_equal`, which equalizes the two sides
-    (`subst si.subst pat = subst si.subst τ`), so target-fixing is what converts
-    that into (ii). It is an intermediate step, not a conclusion.
-
-    ### Why the hypotheses are exactly `hdisj` + `hmatch` (no more, no less)
-
-    - **Matching (`hmatch`), not mere unifiability, is required.** Under bare
-      unifiability the theorem is *false*: `pat = int`, `τ = c` unify via `[c ↦ int]`,
-      and `Constraints.unify [(int, c)] .empty` binds `c ↦ int`, so
-      `subst si.subst pat = int ≠ c = τ` — conclusion (ii) fails. `hmatch` excludes
-      this: no substitution maps the concrete `int` onto the variable `c`. In general
-      `hmatch` forces every `τ`-variable to sit opposite a `pat`-variable (a concrete
-      `pat` subterm can never become a variable under substitution).
-
-    - **`hfix` (that `S` fixes `τ`) is NOT assumed** — and is deliberately absent.
-      The given witness `S` need not fix `τ` (e.g. `S = [a↦c, c↦int]` matches `pat=a`
-      to `τ=c` yet maps `c↦int`). Conclusion (ii) still holds, because the deferred
-      proof restricts `S` to `FV(pat)`: `S' := S|_{FV(pat)}` still matches
-      (`subst _ pat` only reads `FV(pat)`) and, by `hdisj`, has domain disjoint from
-      `FV(τ)`, so `S'` fixes `τ`. Strata's `unify` — calling with `pat` on the *left*,
-      where its variable branch binds the left operand — then orients every binding
-      onto a `pat`-variable and never touches `FV(τ)`. That target-fixing property is
-      what upgrades Strata's `unify_makes_equal` (which only equalizes the two sides)
-      to the literal (ii). So `hfix` about the *given* `S` is unnecessary; the
-      internal proof manufactures a target-fixing matcher itself.
-
-      `hdisj` is retained for exactly this reason: it is what makes the restricted
-      matcher fix `τ`, so it stays load-bearing in the deferred proof even though
-      the *statement* no longer mentions target-fixing.
-
-    Strata ships only forward soundness (`unify_makes_equal`, `LExprTypeSpec.lean:942`);
-    this completeness/orientation direction is provable by structural induction on
-    `Constraints.unifyCore` (maintaining "result domain ⊆ FV(pat), disjoint from
-    FV(τ)") but is left `sorry`-ed here. See `docs/poly-completeness-spec-shaped-plan.md`. -/
-theorem Constraints_unify_matching_complete
-    (pat τ : LMonoTy) (S : Lambda.Subst)
-    (hdisj  : ∀ v ∈ pat.freeVars, v ∉ τ.freeVars)
-    (hmatch : LMonoTy.subst S pat = τ) :
-    ∃ si : Lambda.SubstInfo,
-      Lambda.Constraints.unify [(pat, τ)] Lambda.SubstInfo.empty = .ok si ∧
-      LMonoTy.subst si.subst pat = τ := by
-  sorry
+-- **Matching-completeness of `Constraints.unify` now comes from upstream.** This repo used
+-- to state `Constraints_unify_matching_complete` here with a `sorry`, together with a long
+-- note on why the hypotheses are exactly `hdisj` + `hmatch` and why the third
+-- "result leaves `τ` fixed" conclusion is not part of the interface. That obligation is
+-- discharged on `strata-org/Strata` `main` (`Lambda.Constraints_unify_matching_complete`,
+-- in `Strata.DL.Lambda.LTyUnifyProps`, with the identical statement), so the local copy is
+-- gone and `unifyTypes_matching_complete` below consumes the upstream theorem directly.
+-- (The old local statement's rationale is in this file's git history.)
 
 /-- The generator's `unifyTypes` wrapper (`Core.lean:916`) inherits matching-
-    completeness from `Constraints_unify_matching_complete` by unwrapping the
-    `.ok`/`.error` adapter. Fully proved — the only gap is the Strata-level theorem. -/
+    completeness from upstream's `Constraints_unify_matching_complete` by unwrapping the
+    `.ok`/`.error` adapter. -/
 theorem unifyTypes_matching_complete
     (pat τ : LMonoTy) (S : Lambda.Subst)
     (hdisj  : ∀ v ∈ pat.freeVars, v ∉ τ.freeVars)
@@ -4443,24 +4387,33 @@ theorem unifyTypes_matching_complete
     Constraints_unify_matching_complete pat τ S hdisj hmatch
   exact ⟨si.subst, by simp only [unifyTypes, hunify], hpat⟩
 
-/-- Prepending a scope `z` whose keys avoid `FV(t)` is a no-op: `subst (z :: Su) t
-    = subst Su t`. Proved via `agree_on_freeVars_implies_subst_eq` — on each free
-    variable of `t`, the prepended scope `z` doesn't fire (its `find?` is `none`), so
-    both substitutions look up the same binding in `Su`. -/
-theorem subst_cons_noop (z : Lambda.SubstOne) (Su : Lambda.Subst) (t : LMonoTy)
-    (hz : ∀ v ∈ t.freeVars, Map.find? z v = none) :
-    LMonoTy.subst (z :: Su) t = LMonoTy.subst Su t := by
+/-- Prepending a scope built from `z`, whose keys avoid `FV(t)`, is a no-op:
+    `subst (substScope z ++ Su) t = subst Su t`. Proved via
+    `agree_on_freeVars_implies_subst_eq` — on each free variable of `t` the prepended scope
+    doesn't fire (its `find?` is `none`), so both substitutions look up the same binding in
+    `Su`.
+
+    The new scope is given as an association list and pushed with `substScope`, because a
+    `Subst` scope is now an opaque `Strata.Util.HMap` and cannot be written as a list
+    literal. `Freshening.find?_substScope_eq_lookup` turns the `List.lookup` hypothesis into
+    the `find?` fact the proof needs. -/
+theorem subst_substScope_noop (z : List (TyIdentifier × LMonoTy)) (Su : Lambda.Subst)
+    (t : LMonoTy) (hz : ∀ v ∈ t.freeVars, z.lookup v = none) :
+    LMonoTy.subst (substScope z ++ Su) t = LMonoTy.subst Su t := by
   apply agree_on_freeVars_implies_subst_eq
   intro v hv
-  simp only [LMonoTy.subst_unfold]
-  rw [Maps.find?.eq_2, hz v hv]
+  have hnone : Strata.Util.HMap.find? (Strata.Util.HMap.ofList z.reverse) v = none := by
+    rw [← Strata.Util.HMaps.find?_single_scope]
+    exact (Freshening.find?_substScope_eq_lookup z v).trans (hz v hv)
+  simp only [LMonoTy.subst_unfold, substScope, List.cons_append, List.nil_append,
+    Strata.Util.HMaps.find?, hnone]
 
 /-- If `v` is free in `t` and `Su` does not bind `v`, then `v` survives into
     `subst Su t`. Structural induction on `t`. Used to show the sampled type
     variables (those `Su` leaves undetermined) that occur in the leftover suffix
     would leak into the target — contradicting freshening disjointness. -/
 theorem mem_freeVars_subst_of_find?_none (Su : Lambda.Subst) (t : LMonoTy)
-    (v : TyIdentifier) (hv : v ∈ t.freeVars) (hnone : Maps.find? Su v = none) :
+    (v : TyIdentifier) (hv : v ∈ t.freeVars) (hnone : Strata.Util.HMaps.find? Su v = none) :
     v ∈ (LMonoTy.subst Su t).freeVars := by
   induction t with
   | ftvar w =>
@@ -4473,7 +4426,7 @@ theorem mem_freeVars_subst_of_find?_none (Su : Lambda.Subst) (t : LMonoTy)
     rw [LMonoTy.subst_unfold]
     have hsub : ∀ (a : LMonoTy), a ∈ args → v ∈ a.freeVars →
         v ∈ LMonoTys.freeVars (args.map (LMonoTy.subst Su)) :=
-      fun a ha hva => LMonoTys.freeVars_mem_subset (List.mem_map_of_mem ha) (ih a ha hva)
+      fun a ha hva => Freshening.freeVars_mem_of_mem (List.mem_map_of_mem ha) (ih a ha hva)
     have hex : ∃ a ∈ args, v ∈ a.freeVars := by
       clear hsub ih hnone
       induction args with
@@ -4505,18 +4458,22 @@ theorem extended_subst_guard2 (freshBoundVars : List TyIdentifier) (Su : Lambda.
     (sampledTys : List LMonoTy) (leftoverSuffix τ : LMonoTy)
     (hSu : LMonoTy.subst Su leftoverSuffix = τ)
     (hdisjBV : ∀ v ∈ freshBoundVars, v ∉ τ.freeVars) :
-    LMonoTy.subst ((findFreeTyVars freshBoundVars Su).zip sampledTys :: Su)
+    LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su)
       leftoverSuffix = τ := by
-  rw [subst_cons_noop]
+  rw [subst_substScope_noop]
   · exact hSu
   · intro v hv
-    apply Map.find?_none_of_not_mem_keys'
-    intro hmem
-    have hvin : v ∈ findFreeTyVars freshBoundVars Su := Map.keys_zip_subset _ _ hmem
+    -- `lookup v = none`: a successful lookup would make `v` a key of the `zip`, hence a
+    -- freshened bound variable that `Su` leaves unbound.
+    rcases hlk : ((findFreeTyVars freshBoundVars Su).zip sampledTys).lookup v with _ | t
+    · rfl
+    exfalso
+    have hvin : v ∈ findFreeTyVars freshBoundVars Su :=
+      (List.of_mem_zip (Freshening.lookup_mem _ _ _ hlk)).1
     unfold findFreeTyVars at hvin
     rw [List.mem_filter] at hvin
     obtain ⟨hbv, hfind⟩ := hvin
-    have hnone : Maps.find? Su v = none := by simpa using hfind
+    have hnone : Strata.Util.HMaps.find? Su v = none := by simpa using hfind
     have hmemτ : v ∈ (LMonoTy.subst Su leftoverSuffix).freeVars :=
       mem_freeVars_subst_of_find?_none Su leftoverSuffix v hv hnone
     rw [hSu] at hmemτ
@@ -4528,11 +4485,9 @@ theorem extended_subst_guard2 (freshBoundVars : List TyIdentifier) (Su : Lambda.
     The existence-direction mirror of `findPolymorphicOps_instanceR`: given a scheme
     in `pctx`, a split point `k`, the freshening/decomposition results, and the two
     `do`-block guards *as hypotheses*, `(name, concreteArgTys)` is a member of
-    `findPolymorphicOps`. This lemma is `sorry`-free and does **not** mention the
-    unifier gap — it is pure `flatMap`/`filterMap`/`guard` plumbing. The guard
+    `findPolymorphicOps`. It is pure `flatMap`/`filterMap`/`guard` plumbing. The guard
     hypotheses (`hunify`, `hguard2`) are discharged by the caller
-    (`isPolyApp_of_hasType`) via `unifyTypes_matching_complete`, which is where the
-    single `sorry` is consumed. -/
+    (`isPolyApp_of_hasType`) via `unifyTypes_matching_complete`. -/
 theorem findPolymorphicOps_complete
     (pctx : PolyOpCtx) (τ : LMonoTy) (generableTys sampledTys : List LMonoTy)
     (name : String) (boundVars : List TyIdentifier) (monoTy : LMonoTy)
@@ -4550,10 +4505,10 @@ theorem findPolymorphicOps_complete
       ((argTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) τ = some subst)
     (hguard1 : (findFreeTyVars freshBoundVars subst).isEmpty = true
       ∨ (generableTys ≠ []))
-    (hguard2 : LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst)
+    (hguard2 : LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars subst).zip sampledTys) ++ subst)
       ((argTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ)
     (hcat : concreteArgTys = (argTys.take k).map
-      (LMonoTy.subst ((findFreeTyVars freshBoundVars subst).zip sampledTys :: subst))) :
+      (LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars subst).zip sampledTys) ++ subst))) :
     (name, concreteArgTys) ∈ findPolymorphicOps pctx τ generableTys sampledTys maxNumArgs := by
   unfold findPolymorphicOps
   rw [List.mem_flatMap]
@@ -4668,35 +4623,106 @@ private theorem findOpsInCtx_mem {octx : OpCtx} {τ : LMonoTy}
     exact hmem
   · simp at hfilt
 
+-- ── Well-kindedness of the generated types ──────────────────────────
+
+/-- The arities an ambient context must register for the eight type constructors that a
+    `SimpleType` can mention. Every type the generators build is a `SimpleType`
+    (`genLMonoTy_support`), so this is the whole content of the `signatureWellKinded` fields
+    that upstream added to `Core.TypeSpec.FuncHasType'` and `Core.TypeSpec.ProcHasType'`:
+    those fields ask that each signature type be well-kinded in `C`, i.e. that each type
+    constructor be applied at the arity `C.knownTypes` records for it.
+
+    `bitvec` needs no entry: `.bitvec n` is its own `LMonoTy` constructor and contributes no
+    `getTypeConsArities` pair. `coreContextSimpleTyArities` discharges this for the Strata
+    Core context. -/
+structure SimpleTyArities (C : LContext CoreLParams) : Prop where
+  bool : C.knownTypes["bool"]? = some 0
+  int : C.knownTypes["int"]? = some 0
+  string : C.knownTypes["string"]? = some 0
+  real : C.knownTypes["real"]? = some 0
+  regex : C.knownTypes["regex"]? = some 0
+  arrow : C.knownTypes["arrow"]? = some 2
+  map : C.knownTypes["Map"]? = some 2
+  seq : C.knownTypes["Sequence"]? = some 1
+
+/-- **A `SimpleType` is well-kinded in any context that registers the `SimpleType` arities.**
+    Structural induction on the `SimpleType` derivation: each constructor contributes exactly
+    one `getTypeConsArities` pair at its own arity, plus the pairs of its arguments. -/
+theorem simpleType_wellKindedTy {C : LContext CoreLParams} (hC : SimpleTyArities C) :
+    ∀ {ty : LMonoTy}, SimpleType ty → C.WellKindedTy ty := by
+  intro ty hTy
+  unfold LContext.WellKindedTy LMonoTy.WellKinded
+  induction hTy with
+  | bool | int | string | real | regex =>
+    intro ref n hn
+    simp only [LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real, LMonoTy.regex,
+      getTypeConsArities, List.flatMap_nil, List.length_nil, List.mem_singleton,
+      Prod.mk.injEq] at hn
+    obtain ⟨rfl, rfl⟩ := hn
+    first
+      | exact hC.bool | exact hC.int | exact hC.string | exact hC.real | exact hC.regex
+  | bitvec => intro ref n hn; simp [getTypeConsArities] at hn
+  | ftvar => intro ref n hn; simp [getTypeConsArities] at hn
+  | arrow h₁ h₂ ih₁ ih₂ =>
+    intro ref n hn
+    simp only [LMonoTy.arrow, getTypeConsArities, List.length_cons, List.length_nil,
+      List.flatMap_cons, List.flatMap_nil, List.append_nil, List.mem_cons, List.mem_append,
+      Prod.mk.injEq] at hn
+    rcases hn with ⟨rfl, rfl⟩ | hn | hn
+    · exact hC.arrow
+    · exact ih₁ ref n hn
+    · exact ih₂ ref n hn
+  | map h₁ h₂ ih₁ ih₂ =>
+    intro ref n hn
+    simp only [LMonoTy.map, getTypeConsArities, List.length_cons, List.length_nil,
+      List.flatMap_cons, List.flatMap_nil, List.append_nil, List.mem_cons, List.mem_append,
+      Prod.mk.injEq] at hn
+    rcases hn with ⟨rfl, rfl⟩ | hn | hn
+    · exact hC.map
+    · exact ih₁ ref n hn
+    · exact ih₂ ref n hn
+  | seq h ih =>
+    intro ref n hn
+    simp only [LMonoTy.seq, getTypeConsArities, List.length_cons, List.length_nil,
+      List.flatMap_cons, List.flatMap_nil, List.append_nil, List.mem_cons,
+      Prod.mk.injEq] at hn
+    rcases hn with ⟨rfl, rfl⟩ | hn
+    · exact hC.seq
+    · exact ih ref n hn
+
 -- ── Helper lemmas for SimpleType preservation ───────────────────────
 
 /-- `LMonoTy.subst` preserves `SimpleType` when the substitution maps
     all type variables to `SimpleType` values. -/
-private theorem subst_simple (S : Lambda.Subst) (ty : LMonoTy)
+theorem subst_simple (S : Lambda.Subst) (ty : LMonoTy)
     (hTy : SimpleType ty)
-    (hSubst : ∀ v t, Maps.find? S v = some t → SimpleType t) :
+    (hSubst : ∀ v t, Strata.Util.HMaps.find? S v = some t → SimpleType t) :
     SimpleType (LMonoTy.subst S ty) := by
-  rw [LMonoTy.subst_eq_substReduce]
+  -- `LMonoTy.subst_unfold` is the one-level unfolding that hides the `hasEmptyScopes`
+  -- short-circuit, so each case reduces exactly as a structural recursion would.
   induction hTy with
-  | bool => simp [LMonoTy.substReduce]; exact .bool
-  | int => simp [LMonoTy.substReduce]; exact .int
-  | string => simp [LMonoTy.substReduce]; exact .string
-  | real => simp [LMonoTy.substReduce]; exact .real
-  | regex => simp [LMonoTy.substReduce]; exact .regex
-  | bitvec => simp [LMonoTy.substReduce]; exact .bitvec
+  | bool => simp only [LMonoTy.bool, LMonoTy.subst_unfold, List.map_nil]; exact .bool
+  | int => simp only [LMonoTy.int, LMonoTy.subst_unfold, List.map_nil]; exact .int
+  | string => simp only [LMonoTy.string, LMonoTy.subst_unfold, List.map_nil]; exact .string
+  | real => simp only [LMonoTy.real, LMonoTy.subst_unfold, List.map_nil]; exact .real
+  | regex => simp only [LMonoTy.regex, LMonoTy.subst_unfold, List.map_nil]; exact .regex
+  | bitvec => simp only [LMonoTy.subst_unfold]; exact .bitvec
   | ftvar =>
-    simp [LMonoTy.substReduce]
+    simp only [LMonoTy.subst_unfold]
     split
     · exact hSubst _ _ ‹_›
     · exact .ftvar
   | arrow h₁ h₂ ih₁ ih₂ =>
-    simp [LMonoTy.substReduce, LMonoTy.substReduce.substReduceList]
+    rw [LMonoTy.arrow, LMonoTy.subst_tcons, LMonoTys.subst_eq_map]
+    simp only [List.map_cons, List.map_nil]
     exact .arrow ih₁ ih₂
   | map h₁ h₂ ih₁ ih₂ =>
-    simp [LMonoTy.substReduce, LMonoTy.substReduce.substReduceList]
+    rw [LMonoTy.map, LMonoTy.subst_tcons, LMonoTys.subst_eq_map]
+    simp only [List.map_cons, List.map_nil]
     exact .map ih₁ ih₂
   | seq h₁ ih₁ =>
-    simp [LMonoTy.substReduce, LMonoTy.substReduce.substReduceList]
+    rw [LMonoTy.seq, LMonoTy.subst_tcons, LMonoTys.subst_eq_map]
+    simp only [List.map_cons, List.map_nil]
     exact .seq ih₁
 
 /-- All syntactic subtypes of a `SimpleType` are themselves `SimpleType`. -/
@@ -6313,10 +6339,11 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     side-condition (`hEntry`) that the generator's unification search would have
     produced the corresponding `findPolymorphicOps` entry.
 
-    This isolates the one genuinely-missing ingredient — that Strata's `unify`
-    *succeeds* at the split point (unification/matching completeness, which Strata
-    does not ship; see `docs/poly-completeness-spec-shaped-plan.md`) — into the
-    hypothesis `hEntry`, and *derives* everything else from `HasTypeA'`:
+    This isolates the split-point unification ingredient — that Strata's `unify`
+    *succeeds* there — into the hypothesis `hEntry`, and *derives* everything else from
+    `HasTypeA'`. (`hEntry` no longer marks a gap: upstream proves matching-completeness as
+    `Constraints_unify_matching_complete`, which is what `…_fullySpecShaped` uses to
+    discharge it; keeping it as a hypothesis here just avoids the detour.)
 
     - **Argument types** come from inverting the application spine
       (`mkApps_hasType_inv`): the derivation forces the op annotation to be
@@ -6583,14 +6610,14 @@ def SchemeInstAt (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (∀ Su, unifyTypes
         ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) τ = some Su →
       concreteArgTys = (schemeArgTys.take k).map
-        (LMonoTy.subst ((findFreeTyVars freshBoundVars Su).zip sampledTys :: Su)))
+        (LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su)))
 
 /-- **Fully spec-shaped backward direction: `hEntry` eliminated.**
 
     Derives `IsPolyApp` from the typing judgment plus a *spec-level scheme-instance
     witness* — no `findPolymorphicOps`-membership hypothesis. The membership is
     *constructed* internally by `findPolymorphicOps_complete`, with its two guards
-    discharged by `unifyTypes_matching_complete` (the single `sorry`) and
+    discharged by `unifyTypes_matching_complete` (upstream's matching-completeness) and
     `extended_subst_guard2` (sampling is harmless). Covers both fragments: the
     fully-determined case and the sampling case (a scheme variable absent from the
     return suffix).
@@ -6636,11 +6663,11 @@ theorem isPolyApp_of_hasType_specShaped
   obtain ⟨hdisjSuffix, hdisjBV⟩ :=
     schemeInstAt_freshening_disjoint fctx octx bctx τ boundVars monoTy freshBoundVars
       freshMonoTy schemeArgTys retTy k hclosed hfresh hdec
-  -- Obtain the unifier from the matching theorem (the single `sorry` is consumed here).
+  -- Obtain the unifier from upstream's matching-completeness theorem.
   obtain ⟨Su, hunify, _hSupat⟩ :=
     unifyTypes_matching_complete _ τ Sm hdisjSuffix hmatch
   -- Discharge `guard2` for the sampled extension via `extended_subst_guard2`.
-  have hg2 : LMonoTy.subst ((findFreeTyVars freshBoundVars Su).zip sampledTys :: Su)
+  have hg2 : LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su)
       ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ :=
     extended_subst_guard2 freshBoundVars Su sampledTys _ τ _hSupat hdisjBV
   -- Construct the `findPolymorphicOps` membership.
@@ -6707,9 +6734,9 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     `IsPolyApp`. The polymorphic branch's premises are:
 
     - `hwt` — the term is a well-typed spine over a `pctx`-op node (spec-shaped);
-    - `hEntry` — the split-point unification side-condition (the one piece Strata
-      does not prove; see `isPolyApp_of_hasType` and
-      `docs/poly-completeness-spec-shaped-plan.md`);
+    - `hEntry` — the split-point unification side-condition (see
+      `isPolyApp_of_hasType`; discharged from upstream's
+      `Constraints_unify_matching_complete` in the `…_fullySpecShaped` variant);
     - the per-argument recursive-completeness bundle.
 
     `IsPolyApp` is *derived* internally via `isPolyApp_of_hasType`, then discharged
@@ -6725,17 +6752,19 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     |---|---|---|
     | unification premise | `hEntry` (a `findPolymorphicOps` membership) | `hInst : SchemeInstAt …` + `hgen` |
     | that premise is | a **generator internal** | **spec-level** (scheme, split point, matcher) |
-    | axioms | `propext`, `Classical.choice`, `Quot.sound` — **`sorry`-free** | the same **plus `sorryAx`** |
+    | axioms | `propext`, `Classical.choice`, `Quot.sound` | the same |
 
-    **Prefer this one when you can discharge `hEntry` yourself.** It is
-    unconditional: `findPolymorphicOps` membership is a decidable list membership,
-    so for a concrete `pctx`/`τ`/`sampledTys` it is provable by `decide` or by
-    `simp [findPolymorphicOps]`. Nothing here rests on an unproved axiom.
+    Both are `sorry`-free and have the *same* axiom footprint: matching-completeness of
+    Strata's unifier (`Constraints_unify_matching_complete`), which `…_fullySpecShaped`
+    consumes, is proved upstream. The choice is therefore purely about which premise you
+    would rather supply.
+
+    **Prefer this one when you can discharge `hEntry` yourself.** `findPolymorphicOps`
+    membership is a decidable list membership, so for a concrete `pctx`/`τ`/`sampledTys` it
+    is provable by `decide` or by `simp [findPolymorphicOps]`.
 
     **Prefer `…_fullySpecShaped` when you want no generator internals in the
-    hypotheses** — the honest "every well-typed spine is reachable" statement. The
-    cost is that it consumes `Constraints_unify_matching_complete`, so it inherits
-    `sorryAx` until Strata's unifier gets a matching-completeness proof. -/
+    hypotheses** — the honest "every well-typed spine is reachable" statement. -/
 theorem genLExpr_complete_poly_specShaped
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
@@ -6786,18 +6815,19 @@ theorem genLExpr_complete_poly_specShaped
     |---|---|---|
     | unification premise | `hInst : SchemeInstAt …` + `hgen` | `hEntry` (a `findPolymorphicOps` membership) |
     | that premise is | **spec-level** (scheme, split point, matcher) | a **generator internal** |
-    | axioms | `propext`, `Classical.choice`, `Quot.sound`, **`sorryAx`** | the same **minus `sorryAx`** — **`sorry`-free** |
+    | axioms | `propext`, `Classical.choice`, `Quot.sound` | the same |
 
-    **Prefer this one for the honest specification-level statement**, i.e. when the
-    point is that no `findPolymorphicOps` reference appears in the hypotheses. The
-    cost is `sorryAx`: eliminating `hEntry` means *constructing* that membership
-    internally, which consumes `Constraints_unify_matching_complete` (the unproved
-    matching-completeness of Strata's unifier). Discharging that lemma removes
-    `sorryAx` from this theorem with no change to its statement.
+    Both are `sorry`-free and share the same axiom footprint. Eliminating `hEntry` means
+    *constructing* that membership internally, which consumes
+    `Constraints_unify_matching_complete` — matching-completeness of Strata's unifier, which
+    is **proved upstream** (`Strata.DL.Lambda.LTyUnifyProps`), so it costs no extra axiom.
 
-    **Prefer `…_specShaped` if you need an axiom-free result** and can supply
-    `hEntry` yourself — it is a decidable list membership, so `decide` or
-    `simp [findPolymorphicOps]` settles it for concrete arguments.
+    **Prefer this one for the honest specification-level statement**, i.e. when the point is
+    that no `findPolymorphicOps` reference appears in the hypotheses.
+
+    **Prefer `…_specShaped`** if you would rather supply `hEntry` yourself — it is a
+    decidable list membership, so `decide` or `simp [findPolymorphicOps]` settles it for
+    concrete arguments.
 
     `SchemeInstAt` is the intended discharge point for a caller's
     `OpsConsistentR F e`, whose `.op_in` constructor carries exactly this witness. -/
