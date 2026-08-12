@@ -99,13 +99,14 @@ structure Bounds where
   maxTyConArity : Nat := 2
   /-- Max number of type parameters of an alias. -/
   maxAliasTyParams : Nat := 2
-  /-- Size budget for alias bodies / distinct variable types. -/
+  /-- Size budget for alias bodies / `distinct` element types. -/
   tySize : Nat := 3
   /-- Depth budget for axiom expressions. -/
   exprDepth : Nat := 3
   /-- Depth budget for function bodies. -/
   funcDepth : Nat := 3
-  /-- Max number of variables in a `distinct` assertion. -/
+  /-- Max number of elements (hence declared constants) in a `distinct`
+      assertion. -/
   maxDistinctVars : Nat := 3
   /-- Datatype-block knobs (forwarded to `genMutuallyRecursiveDatatypes`). -/
   maxExtraDatatypes : Nat := 1
@@ -170,10 +171,40 @@ def genDeclAxiom [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let (decl, name) ← genAxiom s.octx s.pctx s.reserved b.exprDepth
   pure ([decl], { s with reserved := name :: s.reserved })
 
-/-- Generate a `distinct` declaration and emit it. Context/scope unchanged. -/
+/-- Declare a run of 0-ary constants at type `τ`, one per name, using the
+    checker's own `addFactoryFunctionWithError` — the same gate as the function
+    step. Returns the grown context and the emitted declarations, or `none` if any
+    name clashes in the factory (in which case the whole `distinct` step is
+    abandoned, so the group never references an undeclared constant).
+
+    All-or-nothing rather than skip-the-clashing-one: a `distinct` whose elements
+    are only *partly* declared would be exactly the bug this replaces. -/
+def addConstants (C : LContext CoreLParams) (τ : LMonoTy) :
+    List String → Option (LContext CoreLParams × List Decl)
+  | [] => some (C, [])
+  | c :: cs =>
+    match C.addFactoryFunctionWithError (constantFunc c τ).toLFunc with
+    | .ok C₁ =>
+      match addConstants C₁ τ cs with
+      | some (C', ds) => some (C', mkConstantDecl c τ :: ds)
+      | none => none
+    | .error _ => none
+
+/-- Generate a `distinct` declaration together with the constants it ranges over:
+    `function c₀ () : τ; … distinct [d]: [c₀, …];`. The constants precede the
+    `distinct` in the emitted list, so every `.op` element refers to a function
+    declared earlier in the program.
+
+    This step grows `C` (by the constants' factory entries) and reserves
+    `numVars + 1` names; `Γ` and the type vocabulary are unchanged. -/
 def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
-  let (decl, name) ← genDistinct s.baseTypes s.tyCons s.reserved b.maxDistinctVars b.tySize
-  pure ([decl], { s with reserved := name :: s.reserved })
+  let (name, τ, constNames) ←
+    genDistinctAssertion s.baseTypes s.tyCons s.reserved b.maxDistinctVars b.tySize
+  match addConstants s.C τ constNames with
+  | some (C', constDecls) =>
+    pure (constDecls ++ [mkDistinctDecl name (distinctElems τ constNames)],
+          { s with C := C', reserved := constNames ++ name :: s.reserved })
+  | none => pure ([], s)
 
 /-- Generate a datatype block and, if `addMutualBlock` accepts it, emit it and
     grow the context. The block references the *threaded* vocabulary

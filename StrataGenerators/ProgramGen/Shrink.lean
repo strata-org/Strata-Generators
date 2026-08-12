@@ -270,11 +270,19 @@ def shrinkDecl : Decl → List Decl
 -- reader to guess from an unreduced program. Each was validated against the
 -- typechecker over 100 generated programs: every rejection matched at least one,
 -- and no accepted program matched any.
+--
+-- The `distinct-fvar` class is not *reachable* from `genProgram`:
+-- `genDistinctAssertion` emits `.op` nodes at constants the step also declares,
+-- never bare `.fvar`s. The predicate is kept because it classifies
+-- hand-written and shrunk-from-elsewhere programs correctly, and because
+-- `declHasGap`/`cutGaps` treat all three classes uniformly; the `#guard`s below
+-- exercise it on a hand-built declaration.
 
 mutual
-/-- Whether an expression mentions a free variable. A generated `distinct` element
-    is exactly `.fvar () ⟨v, ()⟩ (some τ)` for a variable the program never
-    declares, which is what the algorithm rejects. -/
+/-- Whether an expression mentions a free variable. A top-level `distinct` element
+    of the form `.fvar () ⟨v, ()⟩ (some τ)` names a variable no legal Core program
+    can bind, which is what the algorithm rejects. (`genDistinctAssertion` does not
+    produce this shape.) -/
 def exprHasFvar : Expression.Expr → Bool
   | .fvar _ _ _ => true
   | .op _ _ _ | .const _ _ | .bvar _ _ => false
@@ -282,14 +290,20 @@ def exprHasFvar : Expression.Expr → Bool
   | .ite _ a b c => exprHasFvar a || exprHasFvar b || exprHasFvar c
   | .abs _ _ _ b => exprHasFvar b
   | .quant _ _ _ _ t b => exprHasFvar t || exprHasFvar b
-/-- Whether an expression applies an operator the ambient factory does not define. -/
-def exprHasUnknownOp : Expression.Expr → Bool
-  | .op _ o _ => !(o.name ∈ stmtCheckContext.functions)
+/-- Whether an expression applies an operator that neither the ambient factory nor
+    the enclosing program defines. `declared` is the program's own function names
+    (`programFuncNames`): an `.op` at one of those resolves even though the factory
+    does not know it — which is exactly how a generated `distinct` refers to the
+    constants its step declares, so omitting `declared` would report a
+    false `unknown-op` on every such program. -/
+def exprHasUnknownOp (declared : List String) : Expression.Expr → Bool
+  | .op _ o _ => !(o.name ∈ stmtCheckContext.functions) && !(declared.contains o.name)
   | .const _ _ | .bvar _ _ | .fvar _ _ _ => false
-  | .app _ a b | .eq _ a b => exprHasUnknownOp a || exprHasUnknownOp b
-  | .ite _ a b c => exprHasUnknownOp a || exprHasUnknownOp b || exprHasUnknownOp c
-  | .abs _ _ _ b => exprHasUnknownOp b
-  | .quant _ _ _ _ t b => exprHasUnknownOp t || exprHasUnknownOp b
+  | .app _ a b | .eq _ a b => exprHasUnknownOp declared a || exprHasUnknownOp declared b
+  | .ite _ a b c =>
+    exprHasUnknownOp declared a || exprHasUnknownOp declared b || exprHasUnknownOp declared c
+  | .abs _ _ _ b => exprHasUnknownOp declared b
+  | .quant _ _ _ _ t b => exprHasUnknownOp declared t || exprHasUnknownOp declared b
 end
 
 /-- Whether a function has a `decreases` clause but no body — the spec-permitted,
@@ -319,20 +333,29 @@ def declDistinctFvar : Decl → Bool
     Procedure bodies are *not* inspected: a body's operators are drawn from
     `coreMonoOps` (all of which the factory defines), so there is nothing to find,
     and a full traversal of a procedure body would be dead weight. -/
-def declUnknownOp : Decl → Bool
-  | .ax a _ => exprHasUnknownOp a.e
-  | .distinct _ es _ => es.any exprHasUnknownOp
-  | .func f _ => (f.body.map exprHasUnknownOp).getD false
-  | .recFuncBlock fs _ => fs.any fun f => (f.body.map exprHasUnknownOp).getD false
+def declUnknownOp (declared : List String) : Decl → Bool
+  | .ax a _ => exprHasUnknownOp declared a.e
+  | .distinct _ es _ => es.any (exprHasUnknownOp declared)
+  | .func f _ => (f.body.map (exprHasUnknownOp declared)).getD false
+  | .recFuncBlock fs _ =>
+    fs.any fun f => (f.body.map (exprHasUnknownOp declared)).getD false
   | _ => false
+
+/-- Every function name the program declares itself: top-level functions (including
+    the 0-ary constants a `distinct` step emits) and `recFuncBlock` members. -/
+def programFuncNames (p : Program) : List String :=
+  p.decls.flatMap fun
+    | .func f _ => [f.name.name]
+    | .recFuncBlock fs _ => fs.map (·.name.name)
+    | _ => []
 
 /-- Whether a declaration bears any of the three known rejection causes, i.e. is a
     declaration on whose account `Program.typeCheck` will reject the whole program
     (two generator limitations and one Strata gap — see the module doc). Used both
     to classify an unshrinkable counterexample and to drive the `cutGaps` candidate
     family. -/
-def declHasGap (d : Decl) : Bool :=
-  declDistinctFvar d || declMeasureNoBody d || declUnknownOp d
+def declHasGap (declared : List String) (d : Decl) : Bool :=
+  declDistinctFvar d || declMeasureNoBody d || declUnknownOp declared d
 
 /-- Whether any declaration of `p` is a `distinct` mentioning an undeclared
     global. -/
@@ -341,8 +364,10 @@ def hasUndeclaredDistinctFvar (p : Program) : Bool := p.decls.any declDistinctFv
 /-- Whether any declaration of `p` carries a measure-without-body function. -/
 def hasMeasureNoBody (p : Program) : Bool := p.decls.any declMeasureNoBody
 
-/-- Whether any declaration of `p` applies an operator outside `Core.Factory`. -/
-def hasUnknownOp (p : Program) : Bool := p.decls.any declUnknownOp
+/-- Whether any declaration of `p` applies an operator neither `Core.Factory` nor
+    `p` itself defines. -/
+def hasUnknownOp (p : Program) : Bool :=
+  p.decls.any (declUnknownOp (programFuncNames p))
 
 /-- The known rejection causes present in `p`, as short tags, most common first
     (`[]` when none is). A harness reporting an unshrunk counterexample can print
@@ -494,7 +519,9 @@ def shrinkProgramDecls (p : Program) : List Program :=
   -- Family 1: drop every gap-bearing declaration in one step (offered only when
   -- that is a genuine reduction, i.e. at least one such declaration exists).
   let cutGaps :=
-    if p.decls.any declHasGap then [mk (p.decls.filter (!declHasGap ·))] else []
+    let declared := programFuncNames p
+    if p.decls.any (declHasGap declared) then
+      [mk (p.decls.filter (!declHasGap declared ·))] else []
   -- Family 2: every proper prefix, longest first (so the smallest reduction that
   -- still fails is preferred among prefixes).
   let prefixes :=
@@ -767,8 +794,9 @@ private def recBlock : Decl :=
 
 -- ── The oracle really does reject, and the shrinker never emits, the gaps ──
 
-/-- A `distinct` mentioning an undeclared global — the shape `genDistinct`
-    produces (~39% of generated programs), spec-well-typed but algorithm-rejected. -/
+/-- A `distinct` mentioning an undeclared global: spec-well-typed but
+    algorithm-rejected. Hand-built here, since `genDistinctAssertion` emits `.op`s
+    at declared constants instead. -/
 private def fvarDistinctDecl : Decl :=
   .distinct ⟨"d1", ()⟩ [.fvar () ⟨"v", ()⟩ (some .int)] .empty
 
@@ -783,6 +811,21 @@ private def measureNoBodyDecl : Decl :=
 private def unknownOpDecl : Decl :=
   .ax { name := "a1",
         e := .app () (.op () ⟨"id", ()⟩ (some (.arrow .bool .bool))) trueExpr } .empty
+
+/-- The `distinct` shape the generator emits: `.op` elements at 0-ary constants
+    (Core's constants) that the same step declares just before the `distinct`.
+    Hand-built here in the same style as `fvarDistinctDecl`: this program is
+    ACCEPTED where the `.fvar` version is rejected. -/
+private def opDistinctDecls : List Decl :=
+  [ .func { name := ⟨"c0", ()⟩, typeArgs := [], inputs := [], output := .int } .empty,
+    .func { name := ⟨"c1", ()⟩, typeArgs := [], inputs := [], output := .int } .empty,
+    .distinct ⟨"d2", ()⟩
+      [.op () ⟨"c0", ()⟩ (some .int), .op () ⟨"c1", ()⟩ (some .int)] .empty ]
+#guard progTypeChecks (prog opDistinctDecls) == true
+#guard programRejectionCause (prog opDistinctDecls) == []
+-- The constants have to be *there*: the same `distinct` without them is rejected,
+-- which is why `genDeclDistinct` emits the two together or not at all.
+#guard progTypeChecks (prog [opDistinctDecls[2]!]) == false
 
 -- Each gap is genuinely rejected, so the cases below are not vacuous...
 #guard progTypeChecks (prog [fvarDistinctDecl]) == false
@@ -813,8 +856,15 @@ private def unknownOpDecl : Decl :=
 
 -- `declHasGap` fires on exactly the gap-bearing declarations, which is what the
 -- `cutGaps` family keys off.
-#guard [fvarDistinctDecl, measureNoBodyDecl, unknownOpDecl].all declHasGap == true
-#guard [conDecl, synDecl, axDecl, distinctDecl, procDecl, funcDecl].any declHasGap == false
+#guard [fvarDistinctDecl, measureNoBodyDecl, unknownOpDecl].all
+  (declHasGap (programFuncNames (prog [fvarDistinctDecl, measureNoBodyDecl,
+                                       unknownOpDecl]))) == true
+#guard [conDecl, synDecl, axDecl, distinctDecl, procDecl, funcDecl].any
+  (declHasGap (programFuncNames (prog [conDecl, synDecl, axDecl, distinctDecl,
+                                       procDecl, funcDecl]))) == false
+-- ...and it does NOT fire on the generator's `distinct` shape, whose `.op`
+-- elements resolve at the constants the same program declares.
+#guard opDistinctDecls.any (declHasGap (programFuncNames (prog opDistinctDecls))) == false
 
 -- Crucially: shrinking an ill-typed program never *emits* an ill-typed one. The
 -- only way past the filter is to remove the offending declarations, so no

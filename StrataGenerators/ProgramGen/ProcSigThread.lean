@@ -302,9 +302,13 @@ theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
   · simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff,
       Prod.mk.injEq] at hmem
     obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; exact fun _ h => h
-  · simp only [genDeclDistinct, genDistinct, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; exact fun _ h => h
+  -- Distinct: gated on the constants' factory adds; both branches copy `procs`.
+  · simp only [genDeclDistinct, mem_support_bind_iff] at hmem
+    obtain ⟨pr, _, hmatch⟩ := hmem
+    split at hmatch
+    all_goals (
+      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+      obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
   -- Datatype: gated; both branches copy `procs`.
   · simp only [genDeclDatatype, mem_support_bind_iff] at hmem
     obtain ⟨block, _, hmatch⟩ := hmem
@@ -470,9 +474,11 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
       Prod.mk.injEq] at hmem
     obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; rfl
   · left
-    simp only [genDeclDistinct, genDistinct, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; rfl
+    simp only [genDeclDistinct, mem_support_bind_iff] at hmem
+    obtain ⟨pr, _, hmatch⟩ := hmem
+    split at hmatch
+    all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+               obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
   · left
     simp only [genDeclDatatype, mem_support_bind_iff] at hmem
     obtain ⟨block, _, hmatch⟩ := hmem

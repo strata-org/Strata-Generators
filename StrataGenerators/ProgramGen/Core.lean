@@ -97,6 +97,21 @@ def mkAxiomDecl (name : String) (e : PExpr) : Decl :=
 def mkDistinctDecl (name : String) (es : List PExpr) : Decl :=
   .distinct ⟨name, ()⟩ es .empty
 
+/-- A Strata Core **constant**: a 0-ary, body-less function at type `τ`
+    ("constants are 0-ary functions", `Core/Program.lean`). Core has no
+    global-variable declaration form, so this is the only way to name a top-level
+    value — which is what a `distinct` group ranges over (see `genDistinctAssertion`).
+
+    Body-less and measure-less by construction, so `FuncHasType'`'s `bodyTyped` /
+    `measureTyped` obligations are vacuous and `isRecursive` stays at its `false`
+    default. -/
+def constantFunc (name : String) (τ : LMonoTy) : Function :=
+  { name := ⟨name, ()⟩, typeArgs := [], inputs := [], output := τ }
+
+/-- A constant declaration `function name () : τ;`. -/
+def mkConstantDecl (name : String) (τ : LMonoTy) : Decl :=
+  .func (constantFunc name τ) .empty
+
 /-! ## Referenceable type-constructor vocabulary
 
 As the program grows, later ADT blocks and alias bodies may reference the type
@@ -168,24 +183,51 @@ def genAxiom [Gen G] (octx : OpCtx) (pctx : PolyOpCtx)
 
 /-! ## Distinct generation
 
-For `distinct` it suffices to generate variables (per the task). We pick a single
-monotype `τ` and emit a list of annotated free variables all at type `τ`; each is
-well-typed at `τ` by `pickFVar_sound`-style annotation reasoning, discharging the
-`∃ mty, HasTypeA [] e mty` obligation of `DeclHasType'.distinct`. -/
+A `distinct` group ranges over *named top-level values*, and in Strata Core those
+are 0-ary functions — Core has no global-variable declaration form. So the step
+emits one constant declaration per element and lets the `distinct` reference them
+as `.op` nodes:
 
-/-- Generate a `distinct` declaration over `numVars` fresh annotated variables,
-    all at a single monotype `τ` drawn over `tyParams := []`. Each variable is
-    `.fvar () ⟨v, ()⟩ (some τ)`, which is well-typed at `τ`. The variable names
-    are drawn fresh against `reserved` but need not be globally reserved (they are
-    not declaration names). -/
-def genDistinct [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
-    (reserved : List String) (maxVars size : Nat) : G (Decl × String) := do
+```
+function c₀ () : τ;   function c₁ () : τ;   distinct [d]: [c₀, c₁];
+```
+
+Annotated *free* variables (`.fvar () ⟨v, ()⟩ (some τ)`) would also be well-typed
+under the annotated spec — `HasTypeA.fvar` types an fvar from its annotation alone,
+with no reference to scope — but no legal Core program can bind such a variable at
+top level, so `LExpr.resolve` rejects one ("Cannot find this fvar in the context").
+`HasTypeA.op` has the same annotation-only shape as `HasTypeA.fvar`, so soundness is
+discharged just as cheaply, by a term the checker can also resolve.
+
+The element type `τ` is drawn over `tyParams := []`, hence *ground*, which is also
+what each constant's `FuncHasType'.noUndeclaredVars` needs (a constant declares no
+type arguments). -/
+
+/-- The elements of a generated `distinct`: one `.op` node per constant name,
+    each annotated at the shared monotype `τ`. Well-typed at `τ` by
+    `HasTypeA.op`, and resolvable by the checker because `genDeclDistinct`
+    declares every `c ∈ names` as a 0-ary function at `τ` first. -/
+def distinctElems (τ : LMonoTy) (names : List String) : List PExpr :=
+  names.map (fun c => (.op () ⟨c, ()⟩ (some τ) : PExpr))
+
+/-- Draw the ingredients of a `distinct` declaration: a fresh declaration name, a
+    ground element type `τ`, and `numVars` fresh constant names.
+
+    The constant names are drawn against `name :: reserved`, so they are distinct
+    from each other *and* from the declaration's own name — all `numVars + 1` names
+    become program-level declaration names, so they must all be globally distinct
+    (`getNames.Nodup`).
+
+    Turning these parts into declarations needs the ambient `LContext` (each
+    constant is added with the checker's own `addFactoryFunctionWithError`), so it
+    happens in `genDeclDistinct`. -/
+def genDistinctAssertion [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
+    (reserved : List String) (maxVars size : Nat) : G (String × LMonoTy × List String) := do
   let name ← DatatypeGen.genFreshName reserved
   let τ ← genVocabTy baseTypes tyCons [] size
   let numVars ← chooseNat 0 maxVars (by omega)
-  let varNames ← DatatypeGen.genFreshNames reserved numVars
-  let es := varNames.map (fun v => (.fvar () ⟨v, ()⟩ (some τ) : PExpr))
-  pure (mkDistinctDecl name es, name)
+  let constNames ← DatatypeGen.genFreshNames (name :: reserved) numVars
+  pure (name, τ, constNames)
 
 
 /-! ## Recovering a procedure's `M`/`I`/`O` split

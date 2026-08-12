@@ -233,14 +233,15 @@ def printerBvWidthAgreement : String :=
 -- ── Whole-program-generator properties ───────────────────────────────
 -- `genProgram` produces a whole `Program` (every declaration kind, real ambient
 -- context threaded across the fold) and is proven sound against `ProgramHasTypeA`.
--- The first property below therefore SHOULD hold and FAILS honestly, on any of
--- three documented rejection causes; the second pins those three as the complete
--- list of causes; the remaining four are invariants of a well-typed program, three
--- of which hold while `programTypeCheckIdem` fails intermittently. See the module
--- doc of `ProgramGen/Shrink`.
+-- The first property below therefore SHOULD hold and FAILS honestly, on either of
+-- two reachable rejection causes (the third classified cause, `distinct-fvar`, is
+-- unreachable from `genProgram`); the second pins the classified
+-- causes as the complete list; the remaining four are invariants of a well-typed
+-- program, three of which hold while `programTypeCheckIdem` fails intermittently.
+-- See the module doc of `ProgramGen/Shrink`.
 
-/-- **FAILS honestly** (~60% of draws) on the three program-level completeness
-    gaps. -/
+/-- **FAILS honestly** (~40% of draws) on the program-level completeness gaps:
+    measure-without-body and the hypothetical `corePolyOps` schemes. -/
 def programTypecheck : String := "program: typechecker accepts generated programs"
 def programRejectionKnownGap : String :=
   "program: typechecker rejections are only the known gaps"

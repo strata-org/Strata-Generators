@@ -209,9 +209,10 @@ def main (args : List String) : IO UInt32 := do
   -- `Properties.programChecks` bundle. Counterexamples are minimized by the
   -- whole-program shrinker (`Shrinkable GenProgram`), which keeps every candidate
   -- well-typed by re-running Strata's own `Program.typeCheck`. Two checks FAIL
-  -- honestly. `typechecker accepts generated programs` fails on any of three
-  -- documented rejection causes (two generator limitations, one genuine Strata
-  -- gap); each counterexample's `Repr` tags which cause it hit, since those are
+  -- honestly. `typechecker accepts generated programs` fails on either of two
+  -- reachable rejection causes (one generator limitation, one genuine Strata gap —
+  -- the third classified cause, `distinct-fvar`, is unreachable from `genProgram`);
+  -- each counterexample's `Repr` tags which cause it hit, since those are
   -- precisely the programs the shrinker cannot minimize (its oracle is the checker
   -- under test). `typeCheck output re-typechecks` fails
   -- intermittently (~1 draw in 500) and its witness *does* shrink.
