@@ -1451,7 +1451,26 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_21 =>
-    rw [mem_support_iff] at he; exact absurd he (bot_mem_iff e).mp
+    -- Other type constructors (datatypes, abstract types, aliases). The branch is
+    -- the three context leaves. A `pickOp` leaf's annotation is the operator's
+    -- *generic* factory type, so it is the identity instance `OpsConsistentR.op_in`
+    -- accepts; bvar/fvar leaves carry no `.op` node at all.
+    --
+    -- Since #64 every *named* case also carries Indir/IndirPoly branches, whose
+    -- sub-cases need `hPoly` and the recursive hypothesis. This case needs neither:
+    -- it is leaf-only by construction (see `genLExprBase`'s docstring there), which
+    -- is why the discharge is three `pick*` lemmas and no induction.
+    simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
+    all_goals first
+      | exact pickBVar_mem_opsConsistentR F bctx _ h
+      | exact pickFVar_mem_opsConsistentR F fctx _ h
+      | exact pickOp_mem_opsConsistentR F _ h
+      | exact absurd h (by simp)
   termination_by depth
   decreasing_by all_goals simp_wf; omega
 

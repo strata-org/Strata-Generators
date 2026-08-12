@@ -110,10 +110,10 @@ def sigFctx (sig : @LMonoTySignature Unit) : FVarCtx :=
     context, so it satisfies both `preconditionsTyped` and `postconditionsTyped`
     under the annotated typing spec (which ignores the ambient context). -/
 def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) : G (ListMap CoreLabel Procedure.Check) := do
+    (depth : Nat) (pctx : PolyOpCtx := []) : G (ListMap CoreLabel Procedure.Check) := do
   let labels ← genNameList depth
   labels.mapM (fun l => do
-    let e ← genLExpr fctx octx [] tvars [] depth .bool
+    let e ← genLExpr fctx octx pctx tvars [] depth .bool
     pure (l, ({ expr := e } : Procedure.Check)))
 
 /-- Generate a well-typed `Procedure`.
@@ -151,8 +151,8 @@ def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
 
     See `genProcedure_sound` for the well-typedness guarantee. -/
 def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat) :
-    G Procedure := do
+    (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
+    (pctx : PolyOpCtx := []) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   -- Three mutually-disjoint signature blocks. `M` is the in-out block (parameters
@@ -174,8 +174,9 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
   --   * preconditions see the **inputs** only (`procInputContext`);
   --   * postconditions see **inputs ++ outputs ++ old(inout)** (`procBodyContext`).
   -- A signature entry `(⟨x, ()⟩, τ)` becomes the `FVarCtx` entry `(x, τ)`.
-  let preconditions ← genChecks (sigFctx inputs) octx typeArgs size
-  let postconditions ← genChecks (sigFctx (inputs ++ outputs ++ oldVars inout)) octx typeArgs size
+  let preconditions ← genChecks (sigFctx inputs) octx typeArgs size pctx
+  let postconditions ←
+    genChecks (sigFctx (inputs ++ outputs ++ oldVars inout)) octx typeArgs size pctx
   -- Seed the body's variable scope with the inputs, outputs, and the `old`
   -- bindings of the in-out block (`old g` for each `g ∈ M`) — mirroring the
   -- declarative `procBodyContext`. The inputs *and* the `old` bindings are marked
@@ -199,7 +200,7 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     -- `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters
     -- before checking the body, and pins a generated `init`'s stored type to its
     -- annotation (see `genProcedure_complete` / the statement-level `hRigid`).
-    ({ C with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) size len
+    ({ C with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) pctx size len
   pure {
     header := {
       name := ⟨name, ()⟩,

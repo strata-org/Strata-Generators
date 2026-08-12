@@ -51,16 +51,43 @@ structure GenState where
       `Inv.dtPoolOk`) rather than `.external`. Grown by each datatype step. -/
   dtCons : TyCons
   /-- Monomorphic operator vocabulary for generated expressions (axiom bodies,
-      function bodies, procedure contracts/bodies). Fixed across the fold.
+      function bodies, procedure contracts/bodies).
+
+      Seeded with Core's primitives (`coreMonoOps`) and **grown by each datatype
+      step** with the ground-typed derived functions of the block just declared —
+      its constructors, testers, and safe/unsafe field accessors
+      (`adtDerivedOps`). This is what lets a later function or procedure body
+      genuinely call into an earlier ADT; before, the list was fixed for the whole
+      fold and no body ever mentioned a datatype.
 
       Soundness is *indifferent* to this list: under the annotated spec an `.op`
       node is typed from its own annotation (`genLExpr_sound` quantifies over an
-      arbitrary `octx`), so seeding it widens the support without touching any
-      proof obligation. -/
+      arbitrary `octx`), so growing it widens the support without touching any
+      proof obligation — which is why `Inv` needs no field for it. -/
   octx : OpCtx
   /-- Polymorphic operator vocabulary (the `IndirPoly` rule). Same remark as
-      `octx`: arbitrary values are sound. -/
+      `octx`: arbitrary values are sound, and each datatype step grows it with the
+      block's derived functions under their full type *schemes*
+      (`adtDerivedPolyOps`) — the projection that makes a *polymorphic* datatype's
+      accessors and testers reachable, since `IndirPoly` unifies the scheme's
+      return type against the target instead of comparing types with `==`. -/
   pctx : PolyOpCtx
+  /-- The **datatype-derived** polymorphic schemes only — `pctx` minus Core's
+      primitives. This, not `pctx`, is what generated *function* and *procedure*
+      bodies receive.
+
+      Function and procedure bodies previously ran at `pctx = []` (only axioms saw a
+      polymorphic vocabulary). Handing them the whole of `pctx` would newly expose
+      Core's 16 primitive schemes (`Sequence.map`, `select`, `update`, …) there, and
+      that is expensive out of proportion to its value: `IndirPoly` alpha-renames,
+      unifies at every split point, and samples instantiations for each candidate, so
+      a procedure draw went from ~60 ms to ~7 s — a change nothing in this task asks
+      for. Keeping the primitives where they were and forwarding only the derived
+      schemes gives bodies exactly the new reach they need (an earlier datatype's
+      testers and accessors) at a fraction of the cost.
+
+      Soundness is indifferent, as for `octx`/`pctx`. -/
+  derivedPctx : PolyOpCtx
   /-- The procedures declared *so far*, as callable signatures. Passed to
       `genProcedure` so a generated body may `call` them — this is what makes the
       emitted program contain genuine inter-procedure calls.
@@ -87,6 +114,7 @@ def initState : GenState :=
     dtCons := []
     octx := coreMonoOps
     pctx := corePolyOps
+    derivedPctx := []
     procs := [] }
 
 /-! ## Bounds bundle
@@ -120,6 +148,10 @@ structure Bounds where
   procSize : Nat := 3
   /-- Max body statement count for a generated procedure. -/
   procLen : Nat := 3
+  /-- Which families of a datatype's auto-generated functions later declarations
+      may call: constructors, testers, and safe/unsafe field accessors by default;
+      eliminators excluded (see `DerivedOpFamilies`). -/
+  derivedFamilies : DerivedOpFamilies := {}
   deriving Inhabited
 
 /-! ## Emitting declarations while threading state
@@ -239,9 +271,23 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     -- Grow the prior-datatype pool by this block's datatypes, so a *later* block may
     -- reference them. Each enters at its own arity (`typeArgs.length`).
     let newPool := block.map (fun d => (d.name, d.typeArgs.length))
+    -- Grow the operator vocabularies by the block's *derived* functions —
+    -- constructors, testers, and both accessor variants — so every *later*
+    -- declaration's expressions can call them. `addMutualBlock` has just pushed
+    -- these very functions into `C'.functions` (it runs the same
+    -- `genBlockFactory` that `adtDerivedOps`/`adtDerivedPolyOps` read), so the
+    -- vocabulary and the context stay in step by construction.
     pure ([.type (.data block) .empty],
           { s with C := C', reserved := names ++ s.reserved
-                   dtCons := newPool ++ s.dtCons })
+                   dtCons := newPool ++ s.dtCons
+                   -- Rebuild the context (rather than mutating a list) so the
+                   -- by-type index covers the merged vocabulary: `OpCtx` holds a
+                   -- hash map from a type to its operators, plus the `agrees` proof
+                   -- tying it to the list, and `ofList` is what re-establishes both.
+                   octx := OpCtx.ofList (adtDerivedOps block b.derivedFamilies ++ s.octx.ops)
+                   pctx := adtDerivedPolyOps block b.derivedFamilies ++ s.pctx
+                   derivedPctx :=
+                     adtDerivedPolyOps block b.derivedFamilies ++ s.derivedPctx })
   | .error _ => pure ([], s)
 
 /-! ### A block that mentions a prior *alias* — deliberately not generated
@@ -271,7 +317,7 @@ positivity is meant to be checked pre- or post-resolution — see repo issue #65
     constrain the name), and — if `addFactoryFunctionWithError` accepts it — emit
     it and grow the context's function factory. -/
 def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
-  let func₀ ← genFunction [] s.octx b.funcDepth
+  let func₀ ← genFunction [] s.octx b.funcDepth s.derivedPctx
   let name ← DatatypeGen.genFreshName s.reserved
   let func := { func₀ with name := ⟨name, ()⟩ }
   match s.C.addFactoryFunctionWithError func.toLFunc with
@@ -292,7 +338,7 @@ def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     longest common prefix of `inputs`/`outputs`, which is exact for a generated
     procedure (see `commonPrefix` in `ProgramGen.Core`). -/
 def genDeclProcedure [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
-  let proc₀ ← genProcedure s.octx s.procs s.C s.Γ b.procSize b.procLen
+  let proc₀ ← genProcedure s.octx s.procs s.C s.Γ b.procSize b.procLen s.derivedPctx
   let name ← DatatypeGen.genFreshName s.reserved
   let proc := { proc₀ with header := { proc₀.header with name := ⟨name, ()⟩ } }
   let M := commonPrefix proc.header.inputs proc.header.outputs
@@ -404,9 +450,25 @@ semantics) and are interpretation-independent. -/
     interpretation with retries.
 
     `fuel` bounds the retries per draw — it must grow with `numDecls`, see the
-    table above; `size` is Plausible's size parameter. -/
+    table above; `size` is Plausible's size parameter.
+
+    **The default rose from 4000 to 30000** when datatype-derived functions became
+    callable. A body that calls a *polymorphic* datatype's tester or accessor goes
+    through the `IndirPoly` rule, whose candidate instantiation is sampled and so
+    is often unfillable — the same `inhabitedWitness` failure mode the table above
+    describes, just hit more often now that there is more to reach. Measured at
+    `numDecls = 12`, default bounds:
+
+    | configuration | `fuel = 4000` | `fuel = 30000` |
+    | --- | --- | --- |
+    | `derivedFamilies` all off (no ADT calls) | 8/8 | 8/8 |
+    | default (ADT calls enabled) | 1/8 | 8/8 |
+
+    Setting every `Bounds.derivedFamilies` flag to `false` recovers the old
+    behaviour *and* the old fuel requirement, which is the knob to reach for if a
+    consumer needs the cheaper draw more than it needs ADT coverage. -/
 def sample (numDecls : Nat := 12) (b : Bounds := {})
-    (fuel : Nat := 4000) (size : Nat := 10) : IO Program :=
+    (fuel : Nat := 30000) (size : Nat := 10) : IO Program :=
   Plausible.Gen.run (retryGen fuel (genProgram (G := Plausible.Gen) numDecls b)) size
 
 end ProgramGen

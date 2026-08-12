@@ -339,13 +339,13 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     (hExprC : GenLExprComplete ctx.toFVarCtx octx tvars n) :
     ∃ ctx', procToTCtx ctx' = Γ' ∧ ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
       (⟨[Stmt.cmd (CmdExt.cmd c)], C, ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx n) := by
+        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
   -- Reduce the goal to membership in `genCmd`'s support via the `genCmdStmt` wrapper
   -- and the `genCmdStmt_mem` lifting into `genStmt`.
   have hlift : ∀ (r : GenCmdResult),
       r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars [] ctx n) →
       (⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩ : GenStmtResult) ∈
-        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx n) := by
+        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
     intro r hr
     refine genCmdStmt_mem procs C ctx n _ ?_
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff]
@@ -485,13 +485,13 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       InGenShape s → AlphabetOk (octx := octx) tvars n s → CallOk (octx := octx) (tvars := tvars) procs ctx n s →
       ∃ ctx', Γ' = procToTCtx ctx' ∧ ctx' = stepCtx ctx s ∧
         (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
-          SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx n) := by
+          SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
   induction h using StmtHasType'.rec (motive_2 := fun C Γ L ss C' Γ' _ =>
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars → Γ = procToTCtx ctx →
       InGenShapeList ss → AlphabetOkList (octx := octx) tvars n ss → CallOkList (octx := octx) (tvars := tvars) procs ctx n ss →
       ∃ ctx', Γ' = procToTCtx ctx' ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-          SetGen.support (genStmtChain (G := SetGen.Set) octx tvars [] procs L C ctx n ss.length)) with
+          SetGen.support (genStmtChain (G := SetGen.Set) octx tvars [] procs L C ctx [] n ss.length)) with
   | cmd C Γ Γ' L c hc =>
     intro ctx n hRig hΓ hnf hok hcall
     subst hΓ

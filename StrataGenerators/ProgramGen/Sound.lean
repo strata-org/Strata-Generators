@@ -1076,7 +1076,8 @@ theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
   -- It is well-typed for any `C`/`Γ` (rename-invariance of `genFunction_sound`).
   have hwt : FuncHasTypeA s.C s.Γ func :=
     funcHasTypeA_rename
-      (StrataGenerators.Function.genFunction_sound [] s.octx b.funcDepth s.C s.Γ func₀ hfunc₀)
+      (StrataGenerators.Function.genFunction_sound [] s.octx b.funcDepth s.C s.Γ
+        s.derivedPctx func₀ hfunc₀)
   -- Non-recursive: `genFunction` leaves `isRecursive` at its `false` default.
   have hnonrec : ¬ func.isRecursive := by
     -- `func.isRecursive = func₀.isRecursive`; extract from `genFunction`'s support.

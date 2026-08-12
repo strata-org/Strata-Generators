@@ -245,7 +245,8 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
   -- `hProcs` rather than the vacuous `ProcSigCorresponds [] P`.
   have hpt : ProcHasTypeA P s.C s.Γ proc₀ :=
     genProcedure_sound_ambient P s.octx s.procs hProcs b.procSize b.procLen s.C s.Γ
-      hinv.typesNil proc₀ hproc₀ (by rw [hinv.rigidNil]; exact List.nil_subset _)
+      hinv.typesNil proc₀ s.derivedPctx hproc₀
+      (by rw [hinv.rigidNil]; exact List.nil_subset _)
   -- Rename to the fresh name; `ProcHasTypeA` is name-invariant.
   have hpt' : ProcHasTypeA P s.C s.Γ
       { proc₀ with header := { proc₀.header with name := ⟨nm, ()⟩ } } :=

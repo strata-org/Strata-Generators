@@ -363,12 +363,13 @@ theorem seed_functional
 /-- The `mapM` inside `genChecks` produces a `ListMap` whose every value's `expr`
     is a `bool` expression in the support of `genLExpr … .bool`. -/
 theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
-    (labels : List CoreLabel) (m : ListMap CoreLabel Procedure.Check)
+    (labels : List CoreLabel) (m : ListMap CoreLabel Procedure.Check) (pctx : PolyOpCtx := [])
     (hm : m ∈ SetGen.support
       (labels.mapM (m := SetGen.Set) (fun l => do
-        let e ← genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool
+        let e ← genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check))))) :
-    ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool) := by
+    ∀ c ∈ m.values, c.expr ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .bool) := by
   induction labels generalizing m with
   | nil =>
     simp only [List.mapM_nil] at hm
@@ -387,12 +388,13 @@ theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyId
 /-- Membership in `genChecks octx tvars depth`: every clause's `expr` is a `bool`
     expression reachable by `genLExpr`. -/
 theorem genChecks_support (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
-    (m : ListMap CoreLabel Procedure.Check)
-    (hm : m ∈ SetGen.support (genChecks (G := SetGen.Set) fctx octx tvars depth)) :
-    ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool) := by
+    (m : ListMap CoreLabel Procedure.Check) (pctx : PolyOpCtx := [])
+    (hm : m ∈ SetGen.support (genChecks (G := SetGen.Set) fctx octx tvars depth pctx)) :
+    ∀ c ∈ m.values, c.expr ∈ SetGen.support
+      (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .bool) := by
   simp only [genChecks, mem_support_bind_iff] at hm
   obtain ⟨labels, _, hm⟩ := hm
-  exact mapM_genChecks_values fctx octx tvars depth labels m hm
+  exact mapM_genChecks_values fctx octx tvars depth labels m pctx hm
 
 /-- Reverse of `mapM_genChecks_values`: a `ListMap` of checks whose every `expr`
     is reachable by `genLExpr … .bool` is in the support of the `mapM` inside
@@ -676,8 +678,9 @@ set_option maxHeartbeats 800000 in
 theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (size len : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
-    (proc : Procedure)
-    (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len)) :
+    (proc : Procedure) (pctx : PolyOpCtx := [])
+    (hproc : proc ∈ SetGen.support
+      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
     ProcHasTypeA P { C with rigidTypeVars := proc.header.typeArgs } Γ proc := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hproc
   obtain ⟨name, _hname, typeArgs, htypeArgs, M, hM, rawInputOnly, hrawInputOnly,
@@ -770,11 +773,11 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     exact Or.inl (by rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨p, hp, rfl⟩)
   -- Body soundness (seeded at `inputs ++ outputs ++ oldVars M`, immutable = inputs.keys ++ old.keys).
   have hbodyTyped : StmtsHasTypeA P { C with rigidTypeVars := typeArgs }
-      ((procStmtEnvΓ Γ octx typeArgs).toTCtx
+      ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx
         (M ++ disjointInputs rawInputOnly M ++
           (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
-      body C' ((procStmtEnvΓ Γ octx typeArgs).toTCtx ctx') :=
-    genStmtChain_sound P (procStmtEnvΓ Γ octx typeArgs)
+      body C' ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx ctx') :=
+    genStmtChain_sound P (procStmtEnvΓ Γ octx typeArgs pctx)
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
       hProcs []
       { C with rigidTypeVars := typeArgs }
@@ -782,7 +785,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
-  have hmod := genStmtChain_mutableVars octx typeArgs
+  have hmod := genStmtChain_mutableVars octx pctx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
       { C with rigidTypeVars := typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
@@ -841,14 +844,14 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
   · -- preconditionsTyped: under `instHasTypeA` this is `HasTypeA [] c.expr bool`
     -- (the context — hence the clause's free-var context — is ignored by the spec).
     intro c hc
-    exact genLExpr_sound _ octx [] typeArgs [] size .bool _ c.expr
-      (genChecks_support _ octx typeArgs size pre hpre c hc)
+    exact genLExpr_sound _ octx pctx typeArgs [] size .bool _ c.expr
+      (genChecks_support _ octx typeArgs size pre pctx hpre c hc)
   · -- postconditionsTyped: identical reduction (the context is ignored).
     intro c hc
-    exact genLExpr_sound _ octx [] typeArgs [] size .bool _ c.expr
-      (genChecks_support _ octx typeArgs size post hpost c hc)
+    exact genLExpr_sound _ octx pctx typeArgs [] size .bool _ c.expr
+      (genChecks_support _ octx typeArgs size post pctx hpost c hc)
   · -- bodyTyped: align the body context via `procBodyContext_inoutΓ`.
-    refine ProcBodyHasType'.structured body C' ((procStmtEnvΓ Γ octx typeArgs).toTCtx ctx') ?_
+    refine ProcBodyHasType'.structured body C' ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx ctx') ?_
     have heq := procBodyContext_inoutΓ Γ hΓtypes name typeArgs M (disjointInputs rawInputOnly M)
       (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) hIc hMc pre post
       (.structured body)
@@ -887,11 +890,12 @@ theorem ProcBodyHasTypeA_weaken_rigid {P : Program} {C : LContext CoreLParams}
 theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (size len : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
-    (proc : Procedure)
-    (hproc : proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len))
+    (proc : Procedure) (pctx : PolyOpCtx := [])
+    (hproc : proc ∈ SetGen.support
+      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx))
     (hCrigid : C.rigidTypeVars ⊆ proc.header.typeArgs) :
     ProcHasTypeA P C Γ proc := by
-  have hbase := genProcedure_sound P octx procs hProcs size len C Γ hΓtypes proc hproc
+  have hbase := genProcedure_sound P octx procs hProcs size len C Γ hΓtypes proc pctx hproc
   -- All fields except `bodyTyped` are ambient-`C`-blind (the contract clauses use
   -- `S.exprTyped C … = HasTypeA [] …`, which drops `C`); only `bodyTyped` threads
   -- `C.rigidTypeVars`, and it weakens down to `C`'s own rigid set.
@@ -1004,7 +1008,7 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
       (genStmtChain (G := SetGen.Set) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { C with rigidTypeVars := proc.header.typeArgs }
-        (M ++ I ++ (M ++ O) ++ oldVars M) size len)) :
+        (M ++ I ++ (M ++ O) ++ oldVars M) [] size len)) :
     proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.

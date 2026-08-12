@@ -162,9 +162,9 @@ def Function.toPureFuncDecl (f : Function) : Imperative.PureFunc Expression :=
     only requires `¬decl.isRecursive` and `FuncHasType' func`. The generator
     therefore samples them independently (see `genStmt`); this helper just
     supplies non-recursive `decl` nodes. -/
-def genDecl [Gen G] (octx : OpCtx) (depth : Nat) :
+def genDecl [Gen G] (octx : OpCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (Imperative.PureFunc Expression) :=
-  Function.toPureFuncDecl <$> genFunction [] octx depth
+  Function.toPureFuncDecl <$> genFunction [] octx depth pctx
 
 -- ── Guard / measure / invariant sub-generators ───────────────────────────
 
@@ -175,10 +175,10 @@ def genDecl [Gen G] (octx : OpCtx) (depth : Nat) :
     weight, so the support — hence the soundness/completeness statements — is
     unchanged (see `genCondOrNondet_det_sound` / `genCondOrNondet_complete`). -/
 def genCondOrNondet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) : G (ExprOrNondet Expression) :=
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (ExprOrNondet Expression) :=
   frequency
     [ (1, fun () => pure .nondet),
-      (4, fun () => (fun e => ExprOrNondet.det e) <$> genLExpr ctx.toFVarCtx octx [] tvars [] depth .bool) ]
+      (4, fun () => (fun e => ExprOrNondet.det e) <$> genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool) ]
     (by simp)
 
 /-- Generate an optional loop measure: either `none`, or `some m` for an
@@ -186,23 +186,24 @@ def genCondOrNondet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     `1` for `none` versus `3` for `some`), so generated loops usually carry a
     measure. -/
 def genOptMeasure [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) : G (Option Expression.Expr) :=
-  biasedOptionGen (3 / 4) (genLExpr ctx.toFVarCtx octx [] tvars [] depth .int)
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (Option Expression.Expr) :=
+  biasedOptionGen (3 / 4) (genLExpr ctx.toFVarCtx octx pctx tvars [] depth .int)
 
 /-- Generate a single loop invariant: a label (a non-empty, non-keyword
     identifier via `genIdentName`, since an invariant label appears in identifier
     position) paired with a boolean expression. -/
 def genInvariant [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) : G (String × Expression.Expr) := do
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (String × Expression.Expr) := do
   let l ← genIdentName
-  let e ← genLExpr ctx.toFVarCtx octx [] tvars [] depth .bool
+  let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure (l, e)
 
 /-- Generate a list of (up to `depth`) loop invariants, each a
     `(label, boolean expression)` pair. -/
 def genInvariants [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) : G (List (String × Expression.Expr)) :=
-  listOfMaxLength depth (genInvariant octx tvars ctx depth)
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
+    G (List (String × Expression.Expr)) :=
+  listOfMaxLength depth (genInvariant octx tvars ctx depth pctx)
 
 -- ── Non-nesting (leaf) statement sub-generators ──────────────────────────
 
@@ -210,8 +211,9 @@ def genInvariants [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     is wrapped as `CmdExt.cmd`; `C` is unchanged. -/
 def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult := do
-  let r ← genCmd octx tvars immutableVars ctx depth
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G GenStmtResult := do
+  let r ← genCmd octx tvars immutableVars ctx depth pctx
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement targeting an enclosing block. Under the new
@@ -235,9 +237,10 @@ def genExitStmt [Gen G] (labels : List String)
     are sampled independently, mirroring the declarative rule's decoupling of the
     two. `Γ` is unchanged; `C` becomes `C.addFactoryFunction func`. -/
 def genFuncDeclStmt [Gen G] (octx : OpCtx)
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult := do
-  let decl ← genDecl octx depth
-  let func ← genFunction [] octx depth
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G GenStmtResult := do
+  let decl ← genDecl octx depth pctx
+  let func ← genFunction [] octx depth pctx
   pure ⟨[Stmt.funcDecl decl default], C.addFactoryFunction func.toLFunc, ctx⟩
 
 /-- Generate a `typeDecl` statement. A random `TypeConstructor` is generated and
@@ -378,7 +381,8 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
 def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult :=
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G GenStmtResult :=
   match procs with
   | [] => default
   | p₀ :: ps => do
@@ -422,7 +426,7 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
       -- Step 5: generate the by-value inputs (at the *instantiated* input types)
       -- and assemble the call. The `mkArgs` in-out/out names come from key-position
       -- only, and `substSig` preserves keys, so passing `s.M` is the same as `Mσ`.
-      let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx [] tvars [] depth τ)
+      let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx pctx tvars [] depth τ)
       let theCall :=
         Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M outTargets exprs) default
       -- The `init`s (possibly none) then the call, inline in the ambient scope.
@@ -462,7 +466,8 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) : Nat → G GenStmtResult
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) :
+    Nat → G GenStmtResult
   | 0 =>
     -- `exit` needs an enclosing block label and `call` needs a callee: with
     -- `labels = []` / `procs = []` those branches have *empty support* and can
@@ -473,11 +478,11 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     let wExit := if labels.isEmpty then 0 else 1
     let wCall := if procs.isEmpty then 0 else 3
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
-      [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx 0),
+      [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx 0 pctx),
         (wExit, fun () => genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt octx C ctx 0),
+        (1, fun () => genFuncDeclStmt octx C ctx 0 pctx),
         (1, fun () => genTypeDeclStmt C ctx 0),
-        (wCall, fun () => genCallStmt octx tvars immutableVars procs C ctx 0) ]
+        (wCall, fun () => genCallStmt octx tvars immutableVars procs C ctx 0 pctx) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by
       simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega
     frequency gs hw
@@ -487,11 +492,11 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     let wExit := if labels.isEmpty then 0 else 1
     let wCall := if procs.isEmpty then 0 else 3
     let gs : List (Nat × (Unit → G GenStmtResult)) :=
-      [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1)),
+      [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
         (wExit, fun () => genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt octx C ctx (size + 1)),
+        (1, fun () => genFuncDeclStmt octx C ctx (size + 1) pctx),
         (1, fun () => genTypeDeclStmt C ctx (size + 1)),
-        (wCall, fun () => genCallStmt octx tvars immutableVars procs C ctx (size + 1)),
+        (wCall, fun () => genCallStmt octx tvars immutableVars procs C ctx (size + 1) pctx),
         (2, fun () => do
           -- The block's `label` must not shadow an enclosing one (`label ∉ L`,
           -- the new-spec `block` premise), so it is drawn fresh from `labels`.
@@ -500,27 +505,27 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
           -- The block's own `label` becomes an enclosing label for its body, so
           -- an `exit` inside the body can break out of this block. The body is
           -- generated at the smaller `size` (guaranteeing termination).
-          let (body, _, _) ← genStmtChain octx tvars immutableVars procs (label :: labels) C ctx size len
+          let (body, _, _) ← genStmtChain octx tvars immutableVars procs (label :: labels) C ctx pctx size len
           pure ⟨[Stmt.block label body default], C, ctx⟩),
         (2, fun () => do
-          let cond ← genLExpr ctx.toFVarCtx octx [] tvars [] (size + 1) .bool
+          let cond ← genLExpr ctx.toFVarCtx octx pctx tvars [] (size + 1) .bool
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx size tlen
-          let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx size elen
+          let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size tlen
+          let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size elen
           pure ⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩),
         (1, fun () => do
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx size tlen
-          let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx size elen
+          let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size tlen
+          let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size elen
           pure ⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩),
         (2, fun () => do
-          let guard ← genCondOrNondet octx tvars ctx (size + 1)
-          let measure ← genOptMeasure octx tvars ctx (size + 1)
-          let invariants ← genInvariants octx tvars ctx (size + 1)
+          let guard ← genCondOrNondet octx tvars ctx (size + 1) pctx
+          let measure ← genOptMeasure octx tvars ctx (size + 1) pctx
+          let invariants ← genInvariants octx tvars ctx (size + 1) pctx
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (body, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx size blen
+          let (body, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size blen
           pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by
       simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega
@@ -544,12 +549,13 @@ def genStmtChain [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat) :
     Nat → G (List Statement × LContext CoreLParams × VarCtx)
   | 0 => pure ([], C, ctx)
   | len + 1 => do
-    let r ← genStmt octx tvars immutableVars procs labels C ctx size
-    let (rest, C'', ctx'') ← genStmtChain octx tvars immutableVars procs labels r.outC r.outCtx size len
+    let r ← genStmt octx tvars immutableVars procs labels C ctx pctx size
+    let (rest, C'', ctx'') ←
+      genStmtChain octx tvars immutableVars procs labels r.outC r.outCtx pctx size len
     pure (r.stmts ++ rest, C'', ctx'')
 termination_by n => (size, 1, n)
 
@@ -562,8 +568,9 @@ end
     scope. The two knobs are orthogonal: `size` bounds each statement's
     nesting/expression size, `len` bounds the top-level sequence length. -/
 def genProgramStmts [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (size len : Nat) : G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmtChain octx tvars [] [] [] (LContext.default) [] size len
+    (size len : Nat) (pctx : PolyOpCtx := []) :
+    G (List Statement × LContext CoreLParams × VarCtx) :=
+  genStmtChain octx tvars [] [] [] (LContext.default) [] pctx size len
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
@@ -574,7 +581,7 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of individual statements at size 2.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨ss, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default) [] 2
+  let ⟨ss, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default) [] [] 2
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 -- Smoke test: a statement started from a non-empty variable scope, so `set`
@@ -583,7 +590,7 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
   let ⟨ss, _, _⟩ ← genStmt [] [] [] [] (LContext.default)
-    [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] 2
+    [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] [] 2
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 -- Smoke test: a whole statement sequence (size 2, up to 4 statements).
@@ -595,7 +602,7 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: with enclosing labels in scope, `exit` may target one of them.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨ss, _, _⟩ ← genStmt [] [] [] ["outer", "inner"] (LContext.default) [] 2
+  let ⟨ss, _, _⟩ ← genStmt [] [] [] ["outer", "inner"] (LContext.default) [] [] 2
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 end StrataGenerators.Stmt

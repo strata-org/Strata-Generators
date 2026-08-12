@@ -83,7 +83,8 @@ open StrataGenerators.Function
 
     None of the fields mention a specific `C`, so the same environment types
     statements at *every* ambient context reached while threading a sequence. -/
-structure GenStmtSoundEnv (octx : OpCtx) (tvars : List TyIdentifier) where
+structure GenStmtSoundEnv (octx : OpCtx) (tvars : List TyIdentifier)
+    (pctx : PolyOpCtx := []) where
   /-- Produce the semantic `TContext` for any flat `VarCtx`. -/
   toTCtx : VarCtx → TContext Unit
   /-- The `VarCtx ↔ TContext` correspondence holds for every context. -/
@@ -91,11 +92,12 @@ structure GenStmtSoundEnv (octx : OpCtx) (tvars : List TyIdentifier) where
   /-- Expression-level soundness at *every* depth, at each context's own derived
       free-variable projection `ctx.toFVarCtx` (the statement generators feed that
       into `genLExpr`). -/
-  exprSound : ∀ d (ctx : VarCtx), GenLExprSound ctx.toFVarCtx octx tvars d
+  exprSound : ∀ d (ctx : VarCtx), GenLExprSound ctx.toFVarCtx octx tvars d pctx
   /-- Fresh names never collide with the free variables of generated expressions, at
       every depth — now unconditional at each `ctx`, since free variables are drawn
       from `ctx.toFVarCtx` (whose names are `ctx`'s) and a fresh name avoids `ctx`. -/
-  freshDisjoint : ∀ d (ctx : VarCtx), FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx d
+  freshDisjoint :
+    ∀ d (ctx : VarCtx), FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx d pctx
   /-- `toTCtx` commutes with `VarCtx.insert` (needed for the `init` command case). -/
   toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
     toTCtx (ctx.insert x mty) =
@@ -104,9 +106,9 @@ structure GenStmtSoundEnv (octx : OpCtx) (tvars : List TyIdentifier) where
 /-- Reinterpret a `GenStmtSoundEnv` as a `GenCmdSoundEnv` at an arbitrary ambient
     context `C` and depth `d`. Legal because no `GenCmdSoundEnv` field references
     `C`, and the environment supplies its expression obligations at every depth. -/
-def GenStmtSoundEnv.toCmdEnv {octx tvars}
-    (env : GenStmtSoundEnv octx tvars) (C : LContext CoreLParams) (d : Nat) :
-    GenCmdSoundEnv octx tvars d C where
+def GenStmtSoundEnv.toCmdEnv {octx tvars pctx}
+    (env : GenStmtSoundEnv octx tvars pctx) (C : LContext CoreLParams) (d : Nat) :
+    GenCmdSoundEnv octx tvars d C pctx where
   toTCtx := env.toTCtx
   corr := env.corr
   exprSound := fun ctx => env.exprSound d ctx
@@ -118,8 +120,8 @@ def GenStmtSoundEnv.toCmdEnv {octx tvars}
     and `toTCtx_insert` matches them step by step. This is what lets the inline call
     chunk — whose output scope is `insertAllCtx ctx toInit` — be typed by the
     call-soundness lemmas, which speak about `insertAll Γ …`. -/
-theorem GenStmtSoundEnv.toTCtx_insertAllCtx {octx tvars}
-    (env : GenStmtSoundEnv octx tvars) (news : List (Identifier Unit × LMonoTy)) :
+theorem GenStmtSoundEnv.toTCtx_insertAllCtx {octx tvars pctx}
+    (env : GenStmtSoundEnv octx tvars pctx) (news : List (Identifier Unit × LMonoTy)) :
     ∀ ctx, env.toTCtx (StrataGenerators.Stmt.insertAllCtx ctx news)
       = StrataGenerators.Stmt.insertAll (env.toTCtx ctx) news := by
   induction news with
@@ -131,7 +133,7 @@ theorem GenStmtSoundEnv.toTCtx_insertAllCtx {octx tvars}
 
 -- ── Leaf-case soundness lemmas ───────────────────────────────────────────
 
-variable {octx : OpCtx} {tvars : List TyIdentifier}
+variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
   {immutableVars : List (Identifier Unit)} {labels : List String}
 
 /-- `toPureFuncDecl` always produces a non-recursive declaration. -/
@@ -139,14 +141,15 @@ variable {octx : OpCtx} {tvars : List TyIdentifier}
     (Function.toPureFuncDecl f).isRecursive = false := rfl
 
 /-- Soundness of `genCmdStmt` (at any depth `d`). -/
-theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
+theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d)) :
+    (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d pctx)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
   obtain ⟨rc, hrc, rfl⟩ := hr
-  have hcmd := genCmd_sound_env octx tvars immutableVars ctx d C (env.toCmdEnv C d) hFun rc hrc
+  have hcmd :=
+    genCmd_sound_env octx tvars immutableVars ctx d C pctx (env.toCmdEnv C d) hFun rc hrc
   exact StmtsHasTypeA_singleton
     (StmtHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) labels (.cmd rc.cmd)
       (CmdExtHasType'.cmd (env.toTCtx ctx) (env.toTCtx rc.outCtx) rc.cmd hcmd))
@@ -155,7 +158,7 @@ theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
     them (`label ∈ L`, discharging the `exit` premise); with no enclosing block
     (`labels = []`) the generator is empty (support `∅`), so there is nothing to
     prove. -/
-theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
+theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
@@ -170,15 +173,15 @@ theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
     exact StmtsHasTypeA_singleton (StmtHasType'.exit C (env.toTCtx ctx) (hd :: tl) l default hl)
 
 /-- Soundness of `genFuncDeclStmt` (at any depth `d`). -/
-theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
+theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx d)) :
+    (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx d pctx)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
              mem_support_pure_iff] at hr
   obtain ⟨decl, ⟨f0, _hf0, rfl⟩, func, hfunc, rfl⟩ := hr
   have hwt : FuncHasTypeA C (env.toTCtx ctx) func :=
-    genFunction_sound [] octx d C (env.toTCtx ctx) func hfunc
+    genFunction_sound [] octx d C (env.toTCtx ctx) pctx func hfunc
   exact StmtsHasTypeA_singleton
     (StmtHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default
       (by simp) hwt)
@@ -186,7 +189,7 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
 /-- Soundness of `genTypeDeclStmt` (at any depth `d`). The `.ok` branch discharges
     `typeDecl`; the `.error` (name-clash) branch is the empty generator (support
     `∅`), so there is nothing to prove. -/
-theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
+theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
@@ -309,7 +312,7 @@ theorem filter_needsInit_append (ctx : VarCtx) (M T : @LMonoTySignature Unit) :
     the semantic `missingIn` filter (over the `TContext`). Both directions
     come from `VarCtxCorresponds`: fresh names are absent from `Γ`, and a bound
     `ctx` entry maps to a `some` in `Γ`. -/
-theorem filter_needsInit_eq_missingIn (env : GenStmtSoundEnv octx tvars)
+theorem filter_needsInit_eq_missingIn (env : GenStmtSoundEnv octx tvars pctx)
     (ctx : VarCtx) (names : List (Identifier Unit × LMonoTy)) :
     names.filter (needsInit ctx)
       = StrataGenerators.Stmt.missingIn (env.toTCtx ctx) names := by
@@ -335,7 +338,8 @@ theorem filter_needsInit_eq_missingIn (env : GenStmtSoundEnv octx tvars)
 theorem genCallStmt_outCtx {procs : ProcSigCtx}
     {C : LContext CoreLParams} {ctx : VarCtx} {d : Nat} (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d)) :
+    (hr : r ∈ SetGen.support
+      (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d pctx)) :
     Map.Functional r.outCtx := by
   cases procs with
   | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
@@ -372,11 +376,11 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
     judgment holds at *every* enclosing-label set `labels`. The empty-`procs` and
     guard-false branches are the empty generator, so there is nothing to prove
     there. -/
-theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
+theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (procs : ProcSigCtx) (hProcs : ProcSigCorresponds procs P)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d)) :
+    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d pctx)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases procs with
   | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
@@ -411,7 +415,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
       obtain ⟨proc, hfind, _htyargs, hInputs, hOutputs, hIdisjOut⟩ := hProcs s hs
       -- The drawn inputs are pointwise reachable, at the *instantiated* input types.
       have hF₂ := (mem_support_mapM_iff
-        (fun τ => genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] d τ) Iσ.values exprs).mp hexprs
+        (fun τ => genLExpr (G := SetGen.Set) ctx.toFVarCtx octx pctx tvars [] d τ) Iσ.values exprs).mp hexprs
       have hExLen : exprs.length = s.I.length := by
         rw [hF₂.length_eq, ← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length]
       -- `hExTy` at the instantiated input types `subst [σ] (s.I.values[i])`.
@@ -544,9 +548,9 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
 
 /-- Any `.det`-guard produced by `genCondOrNondet` (at depth `d`) carries a
     boolean expression. -/
-theorem genCondOrNondet_det_sound (env : GenStmtSoundEnv octx tvars) (d : Nat) (ctx : VarCtx)
+theorem genCondOrNondet_det_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (ctx : VarCtx)
     (cond : ExprOrNondet Expression)
-    (hc : cond ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) octx tvars ctx d))
+    (hc : cond ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) octx tvars ctx d pctx))
     (g : Expression.Expr) (hg : cond = .det g) :
     HasTypeA' [] g .bool := by
   rw [genCondOrNondet, mem_support_frequency_iff] at hc
@@ -565,9 +569,9 @@ theorem genCondOrNondet_det_sound (env : GenStmtSoundEnv octx tvars) (d : Nat) (
 
 /-- Any `some`-measure produced by `genOptMeasure` (at depth `d`) carries an
     integer expression. -/
-theorem genOptMeasure_some_sound (env : GenStmtSoundEnv octx tvars) (d : Nat) (ctx : VarCtx)
+theorem genOptMeasure_some_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (ctx : VarCtx)
     (m? : Option Expression.Expr)
-    (hm : m? ∈ SetGen.support (genOptMeasure (G := SetGen.Set) octx tvars ctx d))
+    (hm : m? ∈ SetGen.support (genOptMeasure (G := SetGen.Set) octx tvars ctx d pctx))
     (m : Expression.Expr) (hmeq : m? = some m) :
     HasTypeA' [] m .int := by
   simp only [genOptMeasure,
@@ -581,9 +585,9 @@ theorem genOptMeasure_some_sound (env : GenStmtSoundEnv octx tvars) (d : Nat) (c
 
 /-- Every invariant produced by `genInvariants` (at depth `d`) carries a boolean
     expression. -/
-theorem genInvariants_sound (env : GenStmtSoundEnv octx tvars) (d : Nat) (ctx : VarCtx)
+theorem genInvariants_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (ctx : VarCtx)
     (invs : List (String × Expression.Expr))
-    (hinv : invs ∈ SetGen.support (genInvariants (G := SetGen.Set) octx tvars ctx d))
+    (hinv : invs ∈ SetGen.support (genInvariants (G := SetGen.Set) octx tvars ctx d pctx))
     (p : String × Expression.Expr) (hp : p ∈ invs) :
     HasTypeA' [] p.2 .bool := by
   simp only [genInvariants, mem_support_listOfMaxLength_iff] at hinv
@@ -601,11 +605,12 @@ theorem genInvariants_sound (env : GenStmtSoundEnv octx tvars) (d : Nat) (ctx : 
     the context is `cmd`, handled by `genCmd_outCtx_functional`. No recursion into
     the body is needed, so this stands outside the soundness `mutual` block. -/
 theorem genStmt_outCtx_functional
-    (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx n)) :
+    (hr : r ∈ SetGen.support
+      (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
     Map.Functional r.outCtx := by
   cases n with
   | zero =>
@@ -616,7 +621,7 @@ theorem genStmt_outCtx_functional
     · -- cmd
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
-      exact genCmd_outCtx_functional octx tvars immutableVars ctx 0 hFun rc hrc
+      exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx 0 hFun rc hrc
     · -- exit
       cases labels with
       | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
@@ -644,7 +649,7 @@ theorem genStmt_outCtx_functional
     · -- cmd
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
-      exact genCmd_outCtx_functional octx tvars immutableVars ctx (size + 1) hFun rc hrc
+      exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx (size + 1) hFun rc hrc
     · -- exit
       cases labels with
       | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
@@ -689,12 +694,12 @@ mutual
     lemmas above (at the current depth); nesting constructors (`block`, `ite`,
     `loop`) invert the corresponding `do`-block and appeal to `genStmtChain_sound` at
     the smaller `size`. -/
-theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
+theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx n)) :
+    (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases n with
   | zero =>
@@ -764,12 +769,12 @@ termination_by (n, 0, 0)
     Proof by well-founded recursion on the remaining length `len` (with the
     `size` fixed): the `nil` case is trivial, and the `cons` case types the head
     via `genStmt_sound` and the tail via the induction hypothesis. -/
-theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
+theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat) (hFun : Map.Functional ctx)
     (result : List Statement × LContext CoreLParams × VarCtx)
-    (hr : result ∈ SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size len)) :
+    (hr : result ∈ SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx size len)) :
     StmtsHasTypeA P C (env.toTCtx ctx) labels result.1 result.2.1 (env.toTCtx result.2.2) := by
   cases len with
   | zero =>
@@ -781,7 +786,8 @@ theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv octx tvars)
     obtain ⟨rhead, hhead, rtail, htail, rfl⟩ := hr
     have hh := genStmt_sound P env immutableVars procs hProcs labels C ctx size hFun rhead hhead
     have hFun' : Map.Functional rhead.outCtx :=
-      genStmt_outCtx_functional octx tvars immutableVars procs labels C ctx size hFun rhead hhead
+      genStmt_outCtx_functional octx pctx tvars immutableVars procs labels C ctx size hFun
+        rhead hhead
     have ht := genStmtChain_sound P env immutableVars procs hProcs labels rhead.outC rhead.outCtx size len hFun' rtail htail
     exact StmtsHasTypeA_append hh ht
 termination_by (size, 1, len)
@@ -801,7 +807,7 @@ end
 theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx n) := by
+    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -814,7 +820,7 @@ theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
 theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx n) := by
+    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
   -- With `labels = []` the `exit` branch is weighted 0, but there `genExitStmt`
   -- is `default` (support `∅`), so `hr` is impossible; with `labels ≠ []` the
   -- branch weight reduces to `1`.
@@ -833,7 +839,7 @@ theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : V
 theorem genFuncDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx n) := by
+    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -846,7 +852,7 @@ theorem genFuncDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx
 theorem genTypeDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx n) := by
+    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -860,7 +866,7 @@ theorem genTypeDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx
 theorem genCallStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx n) := by
+    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
   -- With `procs = []` the `call` branch is weighted 0, but there `genCallStmt`
   -- is `default` (support `∅`), so `hr` is impossible; with `procs ≠ []` the
   -- branch weight reduces to `1`.
@@ -882,10 +888,10 @@ theorem block_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx)
     (label : String) (body : List Statement) (C_body : LContext CoreLParams) (Γ_body : VarCtx)
     (len : Nat) (hlen : len ≤ size + 1)
     (hbody : (body, C_body, Γ_body) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs (label :: labels) C ctx size len))
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs (label :: labels) C ctx [] size len))
     (hlabel : label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels)) :
     (⟨[Stmt.block label body default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx (size + 1)) := by
+      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -901,11 +907,11 @@ theorem ite_det_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCt
     (tlen elen : Nat) (htlen : tlen ≤ size + 1) (helen : elen ≤ size + 1)
     (hcond : cond ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] (size + 1) .bool))
     (hthen : (thenb, Ct, Γt) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size tlen))
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size tlen))
     (helse : (elseb, Ce, Γe) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size elen)) :
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size elen)) :
     (⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx (size + 1)) := by
+      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -920,11 +926,11 @@ theorem ite_nondet_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
     (Ct : LContext CoreLParams) (Γt : VarCtx) (Ce : LContext CoreLParams) (Γe : VarCtx)
     (tlen elen : Nat) (htlen : tlen ≤ size + 1) (helen : elen ≤ size + 1)
     (hthen : (thenb, Ct, Γt) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size tlen))
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size tlen))
     (helse : (elseb, Ce, Γe) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size elen)) :
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size elen)) :
     (⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx (size + 1)) := by
+      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -944,9 +950,9 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
     (hmeasure : measure ∈ SetGen.support (genOptMeasure (G := SetGen.Set) octx tvars ctx (size + 1)))
     (hinvs : invs ∈ SetGen.support (genInvariants (G := SetGen.Set) octx tvars ctx (size + 1)))
     (hbody : (body, C_body, Γ_body) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size blen)) :
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size blen)) :
     (⟨[Stmt.loop guard measure invs body default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx (size + 1)) := by
+      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -959,7 +965,7 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
 /-- The empty statement list is in `genStmtChain`'s support at length `0`. -/
 theorem genStmtChain_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
     ((([] : List Statement)), C, ctx) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size 0) := by
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size 0) := by
   rw [genStmtChain]; exact mem_support_pure_iff.mpr rfl
 
 /-- If the head statement `r` is reachable by `genStmt` (at `size`) and the tail is
@@ -967,11 +973,11 @@ theorem genStmtChain_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ct
     length `len`), then the whole `cons` is reachable at length `len+1`. -/
 theorem genStmtChain_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (r : GenStmtResult) (rest : List Statement) (C'' : LContext CoreLParams) (Γ'' : VarCtx)
-    (hhead : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size))
+    (hhead : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size))
     (htail : (rest, C'', Γ'') ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels r.outC r.outCtx size len)) :
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels r.outC r.outCtx [] size len)) :
     (r.stmts ++ rest, C'', Γ'') ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx size (len + 1)) := by
+      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size (len + 1)) := by
   rw [genStmtChain]
   simp only [mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨r, hhead, (rest, C'', Γ''), htail, rfl⟩

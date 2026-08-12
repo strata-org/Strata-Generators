@@ -1594,7 +1594,24 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_sound fctx octx pctx tvars bctx n _ a ha) e he
   case h_21 =>
-    rw [mem_support_iff] at he; exact absurd he (bot_mem_iff e).mp
+    -- Other type constructors (datatypes, abstract types, aliases). The branch is
+    -- the three context leaves — bvar / fvar / nullary op of type `τ` — exactly as
+    -- the *depth-0* `.regex` case (`h_15`), so the same `pick*_sound` lemmas
+    -- discharge it. Each leaf carries the annotation `τ`, so it is well-typed at `τ`.
+    -- (The `n + 1` regex arm `h_16` is no longer an analogue: #64 gave every named
+    -- `n + 1` case Indir/IndirPoly branches. This case stays leaf-only at both
+    -- depths, which is what keeps the discharge non-inductive.)
+    simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
+    all_goals first
+      | exact pickBVar_sound bctx _ _ _ h
+      | exact pickFVar_sound fctx _ _ _ h
+      | exact pickOp_sound octx _ _ _ h
+      | exact absurd h (by simp)
   termination_by (depth, sizeOf τ)
   decreasing_by all_goals simp_wf; omega
 
@@ -5877,7 +5894,21 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
   case h_21 =>
-    rw [mem_support_iff] at he; exact absurd he (bot_mem_iff e).mp
+    -- Other type constructors: the three context leaves, as in the depth-0 `.regex`
+    -- case `h_15` (not the `n + 1` arm, which #64 gave Indir/IndirPoly branches).
+    -- A bvar/op leaf has no free variables; an fvar leaf's name comes from `fctx`.
+    simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
+               bot_mem_iff] at he
+    rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+      ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
+       (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
+    all_goals first
+      | (rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars])
+      | (rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars])
+      | (rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+         exact getVars_fvar_subset fctx _ name' hmem)
+      | exact absurd h (by simp)
   termination_by depth
   decreasing_by all_goals simp_wf; omega
 

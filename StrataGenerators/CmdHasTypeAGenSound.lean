@@ -31,11 +31,11 @@ avoids the (empty) free variables.
     from `ctx` (`genFreshName_produces_fresh`); hence disjoint. This discharges the
     `FreshNamesDisjointFromExprs` hypothesis of `genCmd_sound` for *every* `ctx`. -/
 theorem freshNamesDisjointFromExprs_toFVarCtx (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) :
-    FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth := by
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
+    FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth pctx := by
   intro name hname τ e he hmem
   -- The generated expression's free vars are ⊆ the (identifier) keys of `ctx.toFVarCtx`.
-  have hsub := Lambda.LExpr.genLExpr_fvars_subset ctx.toFVarCtx octx [] tvars [] depth τ e he
+  have hsub := Lambda.LExpr.genLExpr_fvars_subset ctx.toFVarCtx octx pctx tvars [] depth τ e he
   have hmem' : (⟨name, ()⟩ : Identifier Unit)
       ∈ ctx.toFVarCtx.map (fun p => (⟨p.1, ()⟩ : Identifier Unit)) := by
     have : (⟨name, ()⟩ : Identifier Unit) ∈ LExpr.getVars e := by

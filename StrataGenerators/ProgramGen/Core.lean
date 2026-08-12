@@ -229,6 +229,167 @@ def genDistinctAssertion [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
   let constNames ← DatatypeGen.genFreshNames (name :: reserved) numVars
   pure (name, τ, constNames)
 
+/-! ## Operator vocabulary derived from a datatype block
+
+When a datatype block is declared, `LContext.addMutualBlock` runs Strata's
+`genBlockFactory` and pushes the derived functions into `C.functions`:
+**eliminators** (`D$Elim`), **constructors** (`c`), **testers** (`c.testerName`,
+e.g. `isCons` for a generated block or `List..isCons` for a parsed one),
+and **field accessors** in both a *safe* variant (`D..head`, carrying the
+precondition `D..isCons(x)`) and an *unsafe* variant (`D..head!`, no
+precondition — the result is an arbitrary value of the field type when applied to
+the wrong constructor).
+
+The fold *did* thread the grown context, but the operator vocabularies feeding
+expression generation (`GenState.octx`/`pctx`) were pinned to Core's primitives
+for the whole fold — so no generated function or procedure body ever mentioned an
+earlier datatype. The definitions below build the vocabulary a block contributes,
+which `ProgramGen.genDeclDatatype` then merges into `octx`/`pctx`.
+
+The vocabulary is read out of `genBlockFactory` rather than re-derived here. That
+is deliberate on two counts: it is the *same* function `addMutualBlock` runs, so
+the vocabulary cannot drift from what the context actually holds (including the
+tester-naming convention, which differs between generated and parsed blocks); and
+projecting it with the existing `factoryOps`/`factoryPolyOps` builds each type
+with `mkArrow'`, the exact *generic type* form `OpsConsistentR` canonicalizes an
+operator to. -/
+
+/-- Which family of derived functions an entry belongs to. Used by
+    `DerivedOpFamilies` to select what enters the operator vocabulary. -/
+inductive DerivedOpFamily where
+  /-- The eliminator `D$Elim`. -/
+  | elim
+  /-- A constructor (`None`, `Cons`, …). -/
+  | constr
+  /-- A tester (`isCons` / `List..isCons`). -/
+  | tester
+  /-- A safe field accessor (`List..head`), which carries a tester precondition. -/
+  | accessor
+  /-- An unsafe field accessor (`List..head!`), which carries no precondition. -/
+  | unsafeAccessor
+  deriving DecidableEq, Repr, Inhabited
+
+/-- Classify a derived function name against the block it came from.
+
+    Testers are matched by *name*, against the block's own `testerName` fields,
+    rather than by Strata's `isTesterName` predicate: `isTesterName` looks for a
+    `..is` prefix after the `..` separator, which recognizes a parsed block's
+    `List..isCons` but not a generated block's default `isCons` (the generator
+    keeps `LConstr.testerName`'s default, `"is" ++ name`). Matching the block's
+    actual fields covers both. -/
+def classifyDerivedOp (block : MutualDatatype Unit) (name : String) : DerivedOpFamily :=
+  let testerNames := block.flatMap (fun d => d.constrs.map (·.testerName))
+  let constrNames := block.flatMap (fun d => d.constrs.map (·.name.name))
+  if block.any (fun d => (Lambda.elimFuncName (IDMeta := Unit) d).name == name) then .elim
+  else if testerNames.contains name then .tester
+  else if constrNames.contains name then .constr
+  else if name.endsWith Lambda.unsafeDestructorSuffix then .unsafeAccessor
+  else .accessor
+
+/-- Which derived families to admit into the operator vocabulary.
+
+    The eliminator is excluded by default. Its type quantifies over a
+    `freshTypeArgs`-generated result variable (`$__ty0`) that is unconstrained by
+    the target type, so `IndirPoly` must *sample* it, and its case arguments are
+    higher-order (one lambda per constructor of the whole block) — which the
+    expression generator can rarely fill. It is also not one of the three families
+    the language docs describe. The remaining four are exactly those. -/
+structure DerivedOpFamilies where
+  elim : Bool := false
+  constr : Bool := true
+  tester : Bool := true
+  accessor : Bool := true
+  unsafeAccessor : Bool := true
+  deriving Inhabited
+
+/-- Whether `sel` admits family `f`. -/
+def DerivedOpFamilies.admits (sel : DerivedOpFamilies) : DerivedOpFamily → Bool
+  | .elim => sel.elim
+  | .constr => sel.constr
+  | .tester => sel.tester
+  | .accessor => sel.accessor
+  | .unsafeAccessor => sel.unsafeAccessor
+
+/-- The factory of derived functions a datatype block contributes, as Strata's own
+    `addMutualBlock` computes it. `none` when `genBlockFactory` rejects the block
+    (a name clash among the derived functions) — the caller then contributes no
+    operators, exactly as it emits no declaration.
+
+    The instances are pinned explicitly (rather than left to synthesis) to the
+    `CoreLParams`-native ones, matching `genDeclDatatype`'s `addMutualBlock` call,
+    so the vocabulary is read off the very factory the context received. -/
+def blockDerivedFactory (block : MutualDatatype Unit) :
+    Option (@Lambda.Factory LExprParams') :=
+  (@Lambda.genBlockFactory LExprParams' instInhabitedPUnit instInhabitedPUnit
+    instToFormatIDMetaCoreLParams _ block).toOption
+
+/-- The quantified type variables of a type scheme. `[]` exactly when the scheme
+    is ground, i.e. when the datatype it came from has no type parameters. -/
+def polySchemeVars : Lambda.LTy → List TyIdentifier
+  | .forAll vars _ => vars
+
+/-- The **monomorphic** operator entries a datatype block contributes: each
+    admitted derived function under its curried generic type.
+
+    For a datatype with no type parameters these types are ground, so the `Indir`
+    rule can fully apply them (`findOpsInCtx` compares result types with `==`). For
+    a *polymorphic* datatype the types mention the datatype's type variables and so
+    match no concrete target — such a block's useful entries are the `pctx` ones
+    below. Entries are emitted either way: an unusable `octx` entry is inert, and
+    keeping the two projections uniform avoids a special case.
+
+    The result is an `OpList` (the plain (name, curried type) list), not an `OpCtx`:
+    the caller *appends* it to the state's existing operators and rebuilds the
+    context with `OpCtx.ofList`, so the type index is recomputed over the merged
+    vocabulary. Returning an `OpCtx` here would mean building an index that is
+    immediately discarded, and `OpCtx` carries an `agrees` proof field, so it is not
+    appendable as a list in any case. -/
+def adtDerivedOps (block : MutualDatatype Unit)
+    (sel : DerivedOpFamilies := {}) : OpList :=
+  match blockDerivedFactory block with
+  | none => []
+  | some F =>
+    (factoryOps F).ops.filter (fun e => sel.admits (classifyDerivedOp block e.1))
+
+/-- The **polymorphic** operator entries a datatype block contributes: each
+    admitted derived function of a *type-parameterized* datatype, under its full
+    type scheme (`∀ d.typeArgs. …`).
+
+    This is the projection that matters for a polymorphic datatype: `IndirPoly`
+    unifies the scheme's return type with the target and samples any variable left
+    undetermined, so `List..head : ∀α. List<α> → α` is reachable at *any* target
+    type, and `List..isCons : ∀α. List<α> → bool` at `bool`.
+
+    **Ground schemes are deliberately excluded** (the `typeArgs`-nonempty filter).
+    A datatype with no type parameters yields derived functions whose types are
+    already concrete, and those are fully served by the `octx` projection above via
+    the much cheaper monomorphic `Indir` rule. Admitting them here as degenerate
+    `∀[]. τ` schemes would add nothing reachable while pushing every draw through
+    `findPolymorphicOps` — which alpha-renames, unifies at every split point, and
+    samples instantiations. That cost is real and measurable: routing a
+    *monomorphic* block's derived ops through `pctx` as well as `octx` made a
+    procedure draw roughly 30× slower for no gain in coverage. -/
+def adtDerivedPolyOps (block : MutualDatatype Unit)
+    (sel : DerivedOpFamilies := {}) : PolyOpCtx :=
+  match blockDerivedFactory block with
+  | none => []
+  | some F =>
+    (factoryPolyOps F).filter (fun e =>
+      sel.admits (classifyDerivedOp block e.1) && !(polySchemeVars e.2).isEmpty)
+
+/-- Every entry of `adtDerivedPolyOps` comes from `factoryPolyOps` of the block's
+    own derived factory. This is the membership fact the op-consistency corollary
+    needs (`adtDerivedPolyOps_pctxWF` in `ProgramGen.OpsConsistent`, which cannot
+    live here: `PCtxWF` is defined in the Mathlib-importing proof module, while
+    this file is code-only). -/
+theorem mem_adtDerivedPolyOps {block : MutualDatatype Unit}
+    {sel : DerivedOpFamilies} {F : @Lambda.Factory LExprParams'}
+    (hF : blockDerivedFactory block = some F)
+    {e : String × Lambda.LTy} (hmem : e ∈ adtDerivedPolyOps block sel) :
+    e ∈ factoryPolyOps F := by
+  unfold adtDerivedPolyOps at hmem
+  rw [hF] at hmem
+  exact (List.mem_filter.mp hmem).1
 
 /-! ## Recovering a procedure's `M`/`I`/`O` split
 

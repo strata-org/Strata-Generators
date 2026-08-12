@@ -215,9 +215,9 @@ theorem polyOpsForResult_nil (τ : LMonoTy) (generableTys sampledTys : List LMon
 /-- Soundness of `genOptExpr`: any `some e` it produces is well-typed at `τ`
     (empty bvar context). The `none` case is vacuous. -/
 theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) (τ : LMonoTy)
+    (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx)
     (o : Option LExpr')
-    (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ))
+    (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ pctx))
     (e : LExpr') (heq : o = some e) :
     HasTypeA' [] e τ := by
   simp only [genOptExpr,
@@ -229,7 +229,7 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     subst heq
     have hee : e' = e := (Option.some.inj ho).symm
     subst hee
-    exact genLExpr_sound fctx octx [] tvars [] depth τ _ e' he'
+    exact genLExpr_sound fctx octx pctx tvars [] depth τ _ e' he'
 
 -- ── Soundness of genFunction ─────────────────────────────────────────
 
@@ -238,9 +238,9 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     spec ignores it) and *any* operator context — `genLExpr_sound` is now
     unconditional. -/
 theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (pctx : PolyOpCtx)
     (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth)) :
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth pctx)) :
     FuncHasTypeA C Γ func := by
   -- Expose the components generated for each field.
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
@@ -267,10 +267,10 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
       exact allFtvarsIn_freeVars ht_ftv v hvt
   · -- bodyTyped
     intro b hb
-    exact genOptExpr_sound fctx octx typeArgs depth output body hbody b hb
+    exact genOptExpr_sound fctx octx typeArgs depth output pctx body hbody b hb
   · -- measureTyped
     intro m hm _
-    exact genOptExpr_sound fctx octx typeArgs depth .int measure hmeasure m hm
+    exact genOptExpr_sound fctx octx typeArgs depth .int pctx measure hmeasure m hm
 
 /-- Hypothesis-free soundness of `genFunction` at an empty operator context.
     (Now a special case of `genFunction_sound`, which is unconditional in `octx`.) -/
@@ -279,7 +279,7 @@ theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
     (func : Function)
     (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx ∅ depth)) :
     FuncHasTypeA C Γ func :=
-  genFunction_sound fctx ∅ depth C Γ func hfunc
+  genFunction_sound fctx ∅ depth C Γ [] func hfunc
 
 -- ── Completeness helpers ─────────────────────────────────────────────
 

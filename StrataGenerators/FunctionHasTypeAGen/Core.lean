@@ -222,8 +222,8 @@ def genInputs [Gen G] (tvars : List TyIdentifier) (depth : Nat) :
     empty polymorphic-op context). Biased 3:1 toward `some` (≈75%), so measures
     and bodies are usually present rather than absent. -/
 def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) (τ : LMonoTy) : G (Option LExpr') :=
-  biasedOptionGen (3 / 4) (genLExpr fctx octx [] tvars [] depth τ)
+    (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx := []) : G (Option LExpr') :=
+  biasedOptionGen (3 / 4) (genLExpr fctx octx pctx tvars [] depth τ)
 
 -- ── Precondition generation ─────────────────────────────────────────────
 
@@ -255,9 +255,9 @@ def inputsAsFVarCtx (inputs : ListMap (Identifier Unit) LMonoTy) : FVarCtx :=
     pick total; `genPrecondition` supplies it from a `dif`. -/
 def genInputMentioningPrecond [Gen G] (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
-    (depth : Nat) (hne : inputs.toList ≠ []) : G LExpr' := do
+    (depth : Nat) (hne : inputs.toList ≠ []) (pctx : PolyOpCtx := []) : G LExpr' := do
   let (x, τ) ← elements inputs.toList hne
-  let e ← genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth τ
+  let e ← genLExpr (inputsAsFVarCtx inputs) octx pctx tvars [] depth τ
   pure (.eq () (.fvar () x (some τ)) e)
 
 /-- Generate an optional `bool`-typed precondition (a `requires` clause) over the
@@ -276,17 +276,17 @@ def genInputMentioningPrecond [Gen G] (octx : OpCtx)
     what makes PrecondElim's precondition-stripping path reachable from generated
     input. -/
 def genPrecondition [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) :
+    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (Option (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
   optionGen (do
     let e ←
       if hne : inputs.toList ≠ [] then
         frequency
-          [ (3, fun () => genInputMentioningPrecond octx inputs tvars depth hne),
-            (1, fun () => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool) ]
+          [ (3, fun () => genInputMentioningPrecond octx inputs tvars depth hne pctx),
+            (1, fun () => genLExpr (inputsAsFVarCtx inputs) octx pctx tvars [] depth .bool) ]
           (by show 0 < 3 + 1; omega)
       else
-        genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool
+        genLExpr (inputsAsFVarCtx inputs) octx pctx tvars [] depth .bool
     pure { expr := e, md := () })
 
 /-- The `preconditions` field for a generated function: the singleton list
@@ -297,9 +297,9 @@ def genPrecondition [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) L
     at most one also keeps `genFunction_complete`'s reachability obligation a
     single-expression side condition. -/
 def genPreconditions [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) :
+    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (List (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
-  (fun o => o.toList) <$> genPrecondition octx inputs tvars depth
+  (fun o => o.toList) <$> genPrecondition octx inputs tvars depth pctx
 
 -- ── Main function generator ─────────────────────────────────────────────
 
@@ -327,14 +327,15 @@ def genPreconditions [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) 
 
     The remaining fields not constrained by the typing spec (`isConstr`,
     `isRecursive`, `attr`, `concreteEval`, `axioms`) are left at their defaults. -/
-def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) : G Function := do
+def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G Function := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs depth
   let inputs ← genInputs typeArgs depth
   let output ← genLMonoTy typeArgs depth
-  let body ← genOptExpr fctx octx typeArgs depth output
-  let measure ← genOptExpr fctx octx typeArgs depth .int
-  let preconditions ← genPreconditions octx inputs typeArgs depth
+  let body ← genOptExpr fctx octx typeArgs depth output pctx
+  let measure ← genOptExpr fctx octx typeArgs depth .int pctx
+  let preconditions ← genPreconditions octx inputs typeArgs depth pctx
   pure {
     name := ⟨name, ()⟩,
     typeArgs := typeArgs,

@@ -14,6 +14,8 @@ import StrataGenerators.ProcedureHasTypeAGen.Shrink
 -- `Shrinkable GenProgram` instance (plus the `checkProgram*` predicates).
 import StrataGenerators.ProgramGen
 import StrataGenerators.ProgramGen.Shrink
+-- The ADT-derived-call test support (`checkProgramADTCalls*` predicates).
+import StrataGenerators.ProgramGen.TestSupport
 import Basalt.PlausibleGen
 import Plausible
 import Strata.DL.Lambda.LExprT
@@ -662,14 +664,22 @@ instance : Arbitrary GenProcs where
 -- procedures only, this exercises abstract types, aliases, axioms, `distinct`,
 -- datatype blocks and functions as well.
 --
--- Two suites quantify over this type: the whole-program checks of
--- `Properties.programChecks`, and the printer-expressiveness property of
--- `StrataGenerators.PrinterCoverage` — the latter needs a whole `Program` because
+-- Three suites quantify over this type: the whole-program checks of
+-- `Properties.programChecks`, the ADT-derived-call checks of
+-- `Properties.programADTProps`, and the printer-expressiveness property of
+-- `StrataGenerators.PrinterCoverage` — the last needs a whole `Program` because
 -- the unprintable constructs are spread across type declarations (`bitvec` widths
 -- in a signature), expressions (`Bv↔Int` operators) and statements (bodiless
 -- `funcDecl`), and `genProgram` reaches all three.
+--
+-- This is also the only place the ADT-derived-function work is observable
+-- end-to-end: a datatype block extends the operator vocabulary, and *later*
+-- functions and procedures draw from it, so their bodies can call the block's
+-- constructors, testers, and safe/unsafe field accessors. `derivedCallCoverage`
+-- below reports that as a statistic.
 
 open StrataGenerators.Program.TestSupport
+open ProgramGen.TestSupport
 
 /-- A generated whole program. -/
 structure GenProgram where
@@ -700,12 +710,19 @@ instance : Shrinkable GenProgram where
 -- `genProcsWith`, the retry budget has to absorb the residual `inhabitedWitness`
 -- failure in the expression generator (a compound argument type nothing in scope
 -- inhabits): each declaration is an independent chance to hit it, so whole-program
--- success decays geometrically in `numDecls`. `ProgramGen.sample`'s own measurements
--- put `fuel = 2000` comfortably inside the plateau at `numDecls = 12`, so 8000 at
--- `numDecls ≤ 5` is ample.
+-- success decays geometrically in `numDecls`.
+--
+-- The fuel is 30000, matching `ProgramGen.sample`'s default. That default rose from
+-- 4000 once function and procedure bodies could call a datatype's derived functions:
+-- a call to a *polymorphic* datatype's tester or accessor goes through `IndirPoly`,
+-- which samples instantiations, and an unfillable sample is another `inhabitedWitness`
+-- failure for the retry loop to absorb (measured 1/8 versus 8/8 draws surviving at
+-- `numDecls = 12` — see the `sample` docstring and
+-- `docs/adt-derived-function-calls.md`). `numDecls ≤ 5` here is far below that, so
+-- 30000 is ample rather than tight.
 private def genProgramWith : Gen GenProgram := Gen.sized fun s => do
   let numDecls := max 2 (min 5 (2 + s / 25))
-  let prog ← (retryGen 8000 (ProgramGen.genProgram (G := Plausible.Gen) numDecls {})
+  let prog ← (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) numDecls {})
     : Gen Core.Program)
   pure ⟨prog⟩
 
@@ -771,6 +788,64 @@ def programShrinkDiagnostic (numTrials : Nat) : IO (Nat × Nat × Nat) := do
   IO.println s!"    {candidates} candidates emitted; {illTyped} ill-typed, \
     {stranded} with a stranded `requires` (both must be 0)"
   pure (candidates, illTyped, stranded)
+
+-- ── ADT-derived-call coverage ─────────────────────────────────────────
+
+/-- Sample programs and report how often a generated function/procedure/axiom
+    body actually **calls** a derived function of an earlier datatype, broken down
+    by family (constructor / tester / safe accessor / unsafe accessor).
+
+    This is a *coverage statistic*, not a pass/fail property: the generator is free
+    to draw a program whose bodies happen to call nothing. It is reported because
+    the interesting failure mode for the ADT work is silent regression to zero —
+    which no `True`-valued property would catch. Returns
+    `(programs, withDatatype, withCall, ctors, testers, accessors, unsafeAccessors)`. -/
+def derivedCallCoverage (samples maxSize : Nat) (coverageNumDecls : Nat := 10) :
+    IO (Nat × Nat × Nat × Nat × Nat × Nat × Nat) := do
+  let mut drawn := 0
+  let mut withDt := 0
+  let mut withCall := 0
+  let mut ctors := 0
+  let mut testers := 0
+  let mut accs := 0
+  let mut uaccs := 0
+  -- Deliberately *not* the size-scaled `Arbitrary GenProgram`: a derived call needs
+  -- a datatype block AND a later function/procedure in the same program, so the
+  -- property suite's small draws (`numDecls` ~3 at default sizes) essentially never
+  -- exhibit one. Coverage is measured at a fixed, realistic declaration count.
+  for i in [:samples] do
+    let r ← (try
+      let prog ← Plausible.Gen.run
+        (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) coverageNumDecls {})
+         : Gen Core.Program) (4 + i % (maxSize + 1))
+      pure (some prog)
+     catch _ => pure none)
+    match r with
+    | none => pure ()
+    | some prog =>
+      drawn := drawn + 1
+      unless (datatypeBlocks prog).isEmpty do withDt := withDt + 1
+      if mentionsDerivedFunction prog then
+        withCall := withCall + 1
+        let (c, t, a, u) := calledByFamily prog
+        unless c.isEmpty do ctors := ctors + 1
+        unless t.isEmpty do testers := testers + 1
+        unless a.isEmpty do accs := accs + 1
+        unless u.isEmpty do uaccs := uaccs + 1
+  pure (drawn, withDt, withCall, ctors, testers, accs, uaccs)
+
+/-- Print the `derivedCallCoverage` report. Never gates the exit code — it is a
+    distribution, not an assertion. -/
+def printDerivedCallCoverage (samples maxSize : Nat) : IO Unit := do
+  let (drawn, withDt, withCall, ctors, testers, accs, uaccs) ←
+    derivedCallCoverage samples maxSize
+  IO.println s!"  programs drawn: {drawn}/{samples} (declaring >= 1 datatype: {withDt})"
+  IO.println s!"  bodies calling an ADT-derived function: {withCall}"
+  IO.println s!"    constructors {ctors} | testers {testers} \
+| safe accessors {accs} | unsafe accessors {uaccs}"
+  if withDt > 0 && withCall == 0 then
+    IO.println "  NOTE: no derived calls in this run -- if persistent, this is the \
+regression the ADT-derived-function work fixed (see docs/adt-derived-function-calls.md)."
 
 -- ── Test runner ──────────────────────────────────────────────────────
 

@@ -206,7 +206,7 @@ def main (args : List String) : IO UInt32 := do
       .done
 
   -- Whole-program-generator properties, folded from the shared
-  -- `Properties.programChecks` bundle. Counterexamples are minimized by the
+  -- `Properties.programChecks` and `Properties.programADTProps` bundles. Counterexamples are minimized by the
   -- whole-program shrinker (`Shrinkable GenProgram`), which keeps every candidate
   -- well-typed by re-running Strata's own `Program.typeCheck`. Two checks FAIL
   -- honestly. `typechecker accepts generated programs` fails on either of two
@@ -216,8 +216,14 @@ def main (args : List String) : IO UInt32 := do
   -- precisely the programs the shrinker cannot minimize (its oracle is the checker
   -- under test). `typeCheck output re-typechecks` fails
   -- intermittently (~1 draw in 500) and its witness *does* shrink.
+  --
+  -- `programADTProps` adds the four across-declaration checks that watch the
+  -- ADT-derived-call path: a function/procedure body may call the constructors,
+  -- testers and field accessors of a datatype declared *earlier* in the same
+  -- program. All four pass, and unlike the five conditional invariants above they
+  -- are unconditional, so they stay non-vacuous on a gap-bearing draw.
   let programSuite : TestSeq :=
-    Properties.programChecks.foldr
+    (Properties.programChecks ++ Properties.programADTProps).foldr
       (fun p rest => checkIO p.name
         (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
       .done
@@ -291,6 +297,14 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  -- ADT-derived-call coverage: how often a generated body actually calls a
+  -- constructor / tester / field accessor of an earlier datatype. A distribution,
+  -- not an assertion, so it never gates the exit code — but a silent regression to
+  -- zero is exactly the failure mode no passing property would catch.
+  IO.println ""
+  IO.println "ADT-derived-function call coverage:"
+  printDerivedCallCoverage (min numTrials 60) (min maxSize 20)
 
   -- Printer conversion-error tally: which constructs `Core.formatProgram` cannot
   -- express, most frequent first. This is the localisation behind the `printer:`

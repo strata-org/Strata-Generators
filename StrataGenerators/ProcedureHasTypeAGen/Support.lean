@@ -99,16 +99,17 @@ theorem procToTCtx_insert (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
       at *every* `ctx`, since generated free variables come from `ctx.toFVarCtx`
       (whose names are `ctx`'s) and a fresh `init` name avoids `ctx`. This is what
       lets a generated procedure body genuinely *read* its parameters. -/
-def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) :
-    GenStmtSoundEnv octx tvars where
+def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx := []) :
+    GenStmtSoundEnv octx tvars pctx where
   toTCtx := procToTCtx
   corr := procToTCtx_corr
-  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ _ e he
-  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d
+  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx pctx tvars [] d τ _ e he
+  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d pctx
   toTCtx_insert := procToTCtx_insert
 
-@[simp] theorem procStmtEnv_toTCtx (octx : OpCtx) (tvars : List TyIdentifier) :
-    (procStmtEnv octx tvars).toTCtx = procToTCtx := rfl
+@[simp] theorem procStmtEnv_toTCtx (octx : OpCtx) (tvars : List TyIdentifier)
+    (pctx : PolyOpCtx) :
+    (procStmtEnv octx tvars pctx).toTCtx = procToTCtx := rfl
 
 -- ── Γ-parameterized environment (ambient-context threading) ────────────────
 
@@ -162,15 +163,16 @@ theorem procToTCtxΓ_insert (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier 
     non-`toTCtx` obligations (`corr`/`toTCtx_insert`) are unaffected by aliases,
     and `exprSound`/`freshDisjoint` hold at every `ctx`'s own derived
     free-variable projection `ctx.toFVarCtx` (exactly as in `procStmtEnv`). -/
-def procStmtEnvΓ (Γ : TContext Unit) (octx : OpCtx) (tvars : List TyIdentifier) :
-    GenStmtSoundEnv octx tvars where
+def procStmtEnvΓ (Γ : TContext Unit) (octx : OpCtx) (tvars : List TyIdentifier)
+    (pctx : PolyOpCtx := []) : GenStmtSoundEnv octx tvars pctx where
   toTCtx := procToTCtxΓ Γ
   corr := procToTCtxΓ_corr Γ
-  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx [] tvars [] d τ _ e he
-  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d
+  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx pctx tvars [] d τ _ e he
+  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d pctx
   toTCtx_insert := procToTCtxΓ_insert Γ
 
-@[simp] theorem procStmtEnvΓ_toTCtx (Γ : TContext Unit) (octx : OpCtx) (tvars : List TyIdentifier) :
-    (procStmtEnvΓ Γ octx tvars).toTCtx = procToTCtxΓ Γ := rfl
+@[simp] theorem procStmtEnvΓ_toTCtx (Γ : TContext Unit) (octx : OpCtx)
+    (tvars : List TyIdentifier) (pctx : PolyOpCtx) :
+    (procStmtEnvΓ Γ octx tvars pctx).toTCtx = procToTCtxΓ Γ := rfl
 
 end StrataGenerators.Procedure

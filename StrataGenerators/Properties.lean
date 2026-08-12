@@ -6,6 +6,8 @@ import StrataGenerators.PrinterCoverage
 -- Supplies the six whole-program check predicates (and the shrinker backing the
 -- `Shrinkable GenProgram` instance).
 import StrataGenerators.ProgramGen.Shrink
+-- Supplies the ADT-derived-call check predicates.
+import StrataGenerators.ProgramGen.TestSupport
 
 /-!
 # Shared property catalog
@@ -39,6 +41,7 @@ open Lambda Core Imperative
 open StrataGenerators.Stmt.TestSupport
 open StrataGenerators.Procedure.TestSupport
 open StrataGenerators.Program.TestSupport
+open ProgramGen.TestSupport
 
 /-- A property under test, bundling its canonical name with the shared boolean
     check both harnesses evaluate on a generated `α`. Pairing name↔check in one
@@ -257,6 +260,18 @@ def programTypeCheckIdem   : String := "program: typeCheck output re-typechecks"
 def programStripMeta       : String := "program: stripMetaData preserves typeability"
 def programEraseTypes      : String := "program: eraseTypes preserves typeability"
 
+-- ── ADT-derived-call properties ──────────────────────────────────────
+-- `ProgramGen.genProgram` folds every declaration kind into one `Program`. These
+-- are the properties that only make sense *across* declarations, so no
+-- sub-generator suite can express them. Unlike `programNamesNodup` above, the
+-- name-distinctness claim here is *unconditional*: the generator threads one
+-- reserved-name set across the whole fold, so it holds even on a draw the
+-- typechecker rejects.
+def programAllNamesNodup   : String := "program: declared names are globally distinct"
+def programBlocksAccepted  : String := "program: datatype blocks pass addMutualBlock"
+def programDerivedResolve  : String := "program: called ADT functions are declared"
+def programDerivedOrdered  : String := "program: ADT calls follow the datatype declaration"
+
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
@@ -284,7 +299,9 @@ def all : List String :=
     printerNoConversionError, printerBv128Literal, printerBvIntConversions,
     printerBvWidthAgreement,
     programTypecheck, programRejectionKnownGap, programNamesNodup,
-    programTypeCheckIdem, programStripMeta, programEraseTypes ]
+    programTypeCheckIdem, programStripMeta, programEraseTypes,
+    programAllNamesNodup, programBlocksAccepted, programDerivedResolve,
+    programDerivedOrdered ]
 
 -- No two properties share a name (a copy/paste slip that pointed two properties
 -- at the same label would collapse their panels/results silently).
@@ -431,5 +448,21 @@ def programChecks : List (Property Core.Program) :=
     ⟨PropertyNames.programTypeCheckIdem,      checkProgramTypeCheckIdempotent⟩,
     ⟨PropertyNames.programStripMeta,          checkProgramStripMetaPreservesTyping⟩,
     ⟨PropertyNames.programEraseTypes,         checkProgramEraseTypesPreservesTyping⟩ ]
+
+/-- **ADT-derived-call properties.** Both harnesses run the identical
+    `Bool` check on a generated `Core.Program`, so name↔check is paired once here.
+
+    All four pass on generated input, and — unlike the five conditional invariants
+    in `programChecks` — they are *unconditional*: each is established by the fold
+    itself rather than by the typechecker accepting the draw, so they stay
+    non-vacuous on the ~60% of programs that trip one of the documented
+    completeness gaps. That is what makes them the checks that actually watch the
+    ADT-derived-call path; `programTypecheck` cannot, since it fails on those
+    draws for reasons unrelated to this generator. -/
+def programADTProps : List (Property Core.Program) :=
+  [ ⟨PropertyNames.programAllNamesNodup,  checkNamesNodup⟩,
+    ⟨PropertyNames.programBlocksAccepted, checkDatatypeBlocksAccepted⟩,
+    ⟨PropertyNames.programDerivedResolve, checkCalledDerivedAreDeclared⟩,
+    ⟨PropertyNames.programDerivedOrdered, checkDerivedCallsFollowDeclaration⟩ ]
 
 end Properties

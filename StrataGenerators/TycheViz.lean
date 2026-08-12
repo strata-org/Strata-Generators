@@ -999,7 +999,7 @@ instance : Tyche.TycheSample ProgramPropResult where
 def genProgramForTyche : IO (Core.Program × Nat) := do
   let genSize ← IO.rand 0 60
   let numDecls := max 2 (min 5 (2 + genSize / 25))
-  let prog ← ProgramGen.sample numDecls {} 8000 genSize
+  let prog ← ProgramGen.sample numDecls {} 30000 genSize
   return (prog, genSize)
 
 open StrataGenerators.Program.TestSupport in
@@ -1289,10 +1289,14 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
       panel p.name (genProcProp p.name p.check)
 
   -- ── Whole-program panels ───────────────────────────────────────────
-  -- One panel per property in the shared `Properties.programChecks` bundle (also
-  -- consumed by both Plausible harnesses). A failing sample is minimized by the
-  -- whole-program shrinker before display, except for `programTypecheck`, whose
-  -- failures are oracle rejections and so cannot shrink — there the
-  -- `rejection_cause` feature is what makes the three gaps legible.
-  for p in Properties.programChecks do
+  -- One panel per property in the shared `Properties.programChecks` and
+  -- `Properties.programADTProps` bundles (both also consumed by both Plausible
+  -- harnesses, so the LSpec suite and these panels cover the same ten checks). A
+  -- failing sample is minimized by the whole-program shrinker before display, except
+  -- for `programTypecheck`, whose failures are oracle rejections and so cannot
+  -- shrink — there the `rejection_cause` feature is what makes the three gaps
+  -- legible. The `programADTProps` panels pass on every draw; their value is the
+  -- `decl_kinds` feature, which shows whether a sample even contained a datatype
+  -- block for the ADT-derived-call path to be exercised.
+  for p in Properties.programChecks ++ Properties.programADTProps do
     panel p.name (genProgramProp p.name p.check)

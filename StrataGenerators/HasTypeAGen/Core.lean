@@ -1658,8 +1658,64 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
             (genLExprBase fctx octx pctx tvars bctx n (.seq τ))) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
     frequency gs hw
-  -- ── Fallback (other tcons — not generated) ────────────────────────
-  | _, _ => default
+  -- ── Other type constructors (datatypes, abstract types, aliases) ──
+  -- Reached for any `tcons` the cases above do not name — in practice a
+  -- *datatype* declared earlier in the program (`List<int>`, `Opt<a>`, …), an
+  -- abstract type, or an alias body.
+  --
+  -- This used to be `default` (empty support / a thrown `inhabitedWitness`), which
+  -- made every such type **uninhabitable by the base generator**. That is what
+  -- stopped a generated function or procedure body from ever calling a datatype's
+  -- derived functions: a tester `D..isC : D → bool` or accessor `D..hd : D → int`
+  -- is only useful if the argument position — of type `D` — can be filled, and at
+  -- the depth floor arguments come from *this* generator. So the Indir rule kept
+  -- picking those candidates and kept dead-ending.
+  --
+  -- There are no *constants* at such a type, so the only leaves available are the
+  -- context ones: a bound variable, a free variable, or a nullary operator of that
+  -- exact type — the last being precisely a nullary constructor (`Nil : List<a>`,
+  -- `None : Opt<a>`). The branch is still `default` when nothing in scope has the
+  -- type, so support is empty exactly when it was unreachable anyway.
+  --
+  -- **This case is deliberately leaf-only, and so is depth-agnostic** (`| _, τ`),
+  -- unlike every named case above, which #64 gave `genApp`/`genIte`/Indir/IndirPoly
+  -- branches at `n + 1`. The consequence is precise and worth stating: a
+  -- datatype-typed *argument* is drawn from the context, never built up, so
+  -- `isCons(xs)` is reachable with `xs` a variable or `Nil`, while `isCons(Cons(1,
+  -- Nil))` is not. Extending this case with Indir/IndirPoly branches — letting a
+  -- non-nullary constructor application fill a datatype position — is a real
+  -- coverage gain and is *not* done here. Three proofs discharge this arm by "leaves
+  -- only" (`case h_21` of `genLExprBase_sound`, `_fvars_subset` and
+  -- `_opsConsistentR`), and each would need the inductive hypothesis plus, for
+  -- IndirPoly, the `hPoly` premise. `genLExprBase_termDepth_bound` is unaffected
+  -- either way: it is indexed by `SimpleType τ`, which has no datatype `tcons` case,
+  -- so no depth bound is stated for a datatype target at all. Tracked as issue #104;
+  -- see also `docs/adt-derived-function-calls.md`.
+  | _, τ =>
+    let bvars := bvarsOfType bctx τ
+    oneOf
+      [ (fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else default),
+        (fun () =>
+          if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else default) ]
+      (by simp)
 
 
 /-- The depth-indexed IndirPoly rule: `genIndirPolyCore` with its two generator

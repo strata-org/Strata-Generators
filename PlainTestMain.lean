@@ -168,14 +168,19 @@ def main (args : List String) : IO UInt32 := do
         (∀ gp : GenProcs, p.check gp.procs = true) cfg)
 
   -- Whole-program-generator properties, folded from the shared
-  -- `Properties.programChecks` bundle (the same six checks as `TestMain`).
+  -- `Properties.programChecks` and `Properties.programADTProps` bundles (the same
+  -- ten checks as `TestMain`).
   -- Counterexamples are minimized by the whole-program shrinker, which keeps every
   -- candidate well-typed via Strata's own `Program.typeCheck`. Two checks FAIL
   -- honestly: `typechecker accepts generated programs` on any of three documented
   -- rejection causes, and `typeCheck output re-typechecks` intermittently (~1 draw
-  -- in 500, and unlike the former its witness does shrink).
+  -- in 500, and unlike the former its witness does shrink). The four
+  -- `programADTProps` checks all pass: they watch the across-declaration
+  -- ADT-derived-call path (a body calling the constructors, testers and accessors of
+  -- a datatype declared earlier) and, being unconditional, stay non-vacuous on a
+  -- gap-bearing draw.
   let programSuite : List (IO Result) :=
-    Properties.programChecks.map
+    (Properties.programChecks ++ Properties.programADTProps).map
       (fun p => runProperty p.name
         (∀ gp : GenProgram, p.check gp.prog = true) cfg)
 
@@ -239,6 +244,12 @@ def main (args : List String) : IO UInt32 := do
     IO.println s!"  PASS ({probeOk} ident/position round-trips)"
   else
     IO.println s!"  FOUND {probeFail} failing ident/position cases ({probeOk} ok) — see reproducers above"
+
+  -- ADT-derived-call coverage, identical to `TestMain`'s (the two drivers share
+  -- the report so they cannot drift). A distribution, never gated.
+  IO.println ""
+  IO.println "ADT-derived-function call coverage:"
+  printDerivedCallCoverage (min numTrials 60) (min maxSize 20)
 
   -- Printer conversion-error tally: which constructs `Core.formatProgram` cannot
   -- express, most frequent first. This is the localisation behind the `printer:`

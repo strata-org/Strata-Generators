@@ -139,9 +139,10 @@ def procSigOf (p : Procedure) (M I O : @LMonoTySignature Unit) :
     `disjointInputs_key_not_output` says a surviving `I` key is not an `M` key.
     Avoiding the `O` keys is the symmetric fact, since `O` was itself filtered
     against `M ++ I`. -/
-theorem genProcedure_sig_decomp {octx : OpCtx} {procs : ProcSigCtx}
+theorem genProcedure_sig_decomp {octx : OpCtx} {pctx : PolyOpCtx} {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
-    (hp : p ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len)) :
+    (hp : p ∈ SetGen.support
+      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
     ∃ M I O : @LMonoTySignature Unit,
       p.header.inputs = M ++ I ∧ p.header.outputs = M ++ O ∧
       (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) := by
@@ -418,9 +419,11 @@ theorem keys_disjoint_of_decomp {M I O : @LMonoTySignature Unit}
 /-- **The registered signature is correct.** For a procedure in `genProcedure`'s
     support, `commonPrefix inputs outputs` is the shared block `M`, and dropping
     its length off each signature yields `I` and `O`. -/
-theorem genProcedure_commonPrefix_decomp {octx : OpCtx} {procs : ProcSigCtx}
+theorem genProcedure_commonPrefix_decomp {octx : OpCtx} {pctx : PolyOpCtx}
+    {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
-    (hp : p ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len)) :
+    (hp : p ∈ SetGen.support
+      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
     ∃ M I O : @LMonoTySignature Unit,
       ProgramGen.commonPrefix p.header.inputs p.header.outputs = M ∧
       p.header.inputs.drop M.length = I ∧
