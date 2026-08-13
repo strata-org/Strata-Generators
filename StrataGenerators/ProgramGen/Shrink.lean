@@ -37,9 +37,11 @@ licenses the wholesale delegation, and it decides several obligations for free:
 
 - **Global name distinctness.** `ProgramHasType'` requires `P.getNames.Nodup`, and
   the checker enforces it incrementally (`C.idents.addListWithError decl.names`).
-  Since candidates only ever *drop* or *shrink* declarations and never rename or
-  duplicate one, distinctness is preserved anyway; the filter makes it
-  unconditional even on input that did not have it.
+  This is a case where the filter does real work rather than confirming an
+  invariant: `shrinkFunc` renames a function to the canonical `"f"` (see "What is
+  preserved, and what is not"), which can collide with a declaration already called
+  `f`. Such a candidate is rejected here. The filter also makes distinctness
+  unconditional on input that did not have it.
 - **Later declarations keep resolving.** Dropping a `type`/`func` declaration can
   orphan a later declaration that referenced it (an alias body mentioning a
   dropped abstract type, a procedure body calling a dropped procedure). That is
@@ -52,10 +54,32 @@ licenses the wholesale delegation, and it decides several obligations for free:
 
 ## What is preserved, and what is not
 
-The **program's declaration order is preserved** (candidates are sublists /
-in-place replacements, never reorderings), and no declaration is ever renamed —
-which keeps a counterexample readable against the original and keeps the
-`Nodup` obligation trivially maintained.
+The **program's declaration order is preserved**: candidates are sublists or
+in-place replacements, never reorderings. So a shrunk program reads against the
+original positionally, which is what makes a reduced counterexample legible.
+
+**One declaration kind is renamed.** `shrinkFunc`'s last reduction family
+(`FunctionHasTypeAGen/Roundtrip.lean:236`) rewrites a function's name to the single
+canonical `"f"`:
+
+```lean
+let shrinkName := if f.name.name.length > 1 then [{ f with name := ⟨"f", ()⟩ }] else []
+```
+
+`shrinkDecl` reaches it for a top-level `.func` and for each member of a
+`.recFuncBlock`, so those are the only declarations whose name can change — and only
+ever to `"f"`. Every other kind keeps its name: `shrinkTypeDecl` rebuilds a `.con` /
+`.syn` / `.data` with `{ tc with … }`, `shrinkProcCandidates` never touches the
+header, and the `.ax` / `.distinct` cases thread the name through untouched. (A name
+can still *disappear* — a dropped declaration, a dropped datatype, a dropped
+constructor and its tester/accessors — which is not a rename.)
+
+`Nodup` is therefore **not** maintained by an absence of renaming; it is maintained
+by the oracle. `progTypeChecks` runs `Core.Program.typeCheck`, which enforces
+`P.getNames.Nodup` incrementally, so a rename to `"f"` that collides with a
+declaration already called `f` is filtered out — as is one that orphans a caller of
+the old name, since the reference then fails to resolve. Both are rejections rather
+than things the candidate generator avoids proposing.
 
 Nothing else is preserved, and per the requirement nothing else needs to be: a
 shrunk program need not declare the same names, expose the same procedure
@@ -632,6 +656,19 @@ private def mixed : Program :=
 #guard (shrinkProgram mixed).all
   (fun c => (c.decls.map (fun d => d.name.name)).all
     (fun n => n ∈ ["G", "S", "a0", "d0", "P0", "f0", "f"])) == true
+
+-- The rename is genuinely *reachable* through the program shrinker, not just an
+-- allowance the guard above tolerates: some candidate rewrites `f0` to `f`. This
+-- pins the module doc's "one declaration kind is renamed" — the claim it replaced
+-- ("no declaration is ever renamed") had gone stale unnoticed because every other
+-- guard here only ever *permitted* the rename.
+#guard (shrinkProgram mixed).any
+  (fun c => (c.decls.map (fun d => d.name.name)).contains "f") == true
+-- ...and it is the only name it can be renamed to, and only a function can be:
+-- every candidate's name multiset is the original's with at most `f0` replaced by `f`.
+#guard (shrinkProgram mixed).all
+  (fun c => (c.decls.map (fun d => d.name.name)).all
+    (fun n => n == "f" || ["G", "S", "a0", "d0", "P0", "f0"].contains n)) == true
 
 -- Dropping a declaration is offered: a property that fails on every program
 -- minimizes all the way to the empty program.
