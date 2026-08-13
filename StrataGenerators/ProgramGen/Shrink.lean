@@ -650,25 +650,27 @@ private def mixed : Program :=
 #guard (shrinkProgram mixed).all progTypeChecks == true
 -- ...and every candidate is strictly smaller, so the minimizer terminates.
 #guard (shrinkProgram mixed).all (fun c => sizeProgram c < sizeProgram mixed) == true
--- Declaration order is preserved: no candidate reorders what it keeps. (Checked
--- via names, which are never rewritten except by `shrinkFunc`'s rename — hence
--- the `f`/`f0` allowance.)
-#guard (shrinkProgram mixed).all
-  (fun c => (c.decls.map (fun d => d.name.name)).all
-    (fun n => n ∈ ["G", "S", "a0", "d0", "P0", "f0", "f"])) == true
+-- Undo `shrinkFunc`'s rename, so a candidate's names can be compared against the
+-- input's positionally. `mixed` declares no `f`, so this is unambiguous here.
+private def unrenameF (n : String) : String := if n == "f" then "f0" else n
 
--- The rename is genuinely *reachable* through the program shrinker, not just an
--- allowance the guard above tolerates: some candidate rewrites `f0` to `f`. This
--- pins the module doc's "one declaration kind is renamed" — the claim it replaced
--- ("no declaration is ever renamed") had gone stale unnoticed because every other
--- guard here only ever *permitted* the rename.
+-- **Declaration order is preserved, and `f0 -> f` is the only rewrite.** Both halves
+-- in one check: after undoing the rename, every candidate's name list is a *sublist*
+-- of the input's. Being a sublist forbids reordering, forbids introducing a name,
+-- and — because the input holds one `f0` — forbids two declarations both becoming
+-- `f`. A set-membership check (`.all (· ∈ [...])`), which is what stood here, tests
+-- none of the three: it accepts `["f0", "G"]` and `["G", "f", "f"]` alike.
+#guard (shrinkProgram mixed).all
+  (fun c => (c.decls.map (fun d => unrenameF d.name.name)).isSublist
+              (mixed.decls.map (fun d => d.name.name))) == true
+
+-- The rename is genuinely *reachable*, not merely tolerated by the check above:
+-- some candidate rewrites `f0` to `f`. This is the pin the module doc's "one
+-- declaration kind is renamed" rests on. Its predecessor ("no declaration is ever
+-- renamed") drifted unnoticed precisely because every guard here only *permitted*
+-- the rename, so nothing failed when the prose stopped matching the code.
 #guard (shrinkProgram mixed).any
   (fun c => (c.decls.map (fun d => d.name.name)).contains "f") == true
--- ...and it is the only name it can be renamed to, and only a function can be:
--- every candidate's name multiset is the original's with at most `f0` replaced by `f`.
-#guard (shrinkProgram mixed).all
-  (fun c => (c.decls.map (fun d => d.name.name)).all
-    (fun n => n == "f" || ["G", "S", "a0", "d0", "P0", "f0"].contains n)) == true
 
 -- Dropping a declaration is offered: a property that fails on every program
 -- minimizes all the way to the empty program.
