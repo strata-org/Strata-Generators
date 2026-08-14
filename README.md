@@ -136,14 +136,16 @@ never drift apart. To add one:
 
 2. **Name it.** Add a `String` constant to the matching `PropertyNames.*` group
    in `Properties.lean` (naming scheme: `"area: description"`, where `area` is
-   one of `expr` / `cmd` / `function` / `stmt` / `proc`), then add the constant to
+   one of `expr` / `cmd` / `function` / `stmt` / `proc` / `program` / `phase` /
+   `printer` / `adt` / `alias` / `mutual`), then add the constant to
    `PropertyNames.all` — the `#guard` there enforces that no two properties share
    a name.
 
 3. **Pair name ↔ check (when both harnesses run the identical `Bool` check).**
    If the LSpec assertion and the Tyche panel run a byte-identical predicate, add
    a `Property` bundle entry to the appropriate list in the `Properties`
-   namespace (`cmdSingleVerdict`, `stmtTransforms`, or `procTransforms`). Each
+   namespace (`cmdSingleVerdict`, `stmtTransforms`, `procTransforms`,
+   `adtBlockChecks`, `mutualIndepChecks`, or `aliasChecks`). Each
    harness iterates that list, so the pairing is defined exactly once. Properties
    whose two views genuinely differ (or that only one harness runs) keep just the
    shared *name* here and state their logic in `TestMain.lean`.

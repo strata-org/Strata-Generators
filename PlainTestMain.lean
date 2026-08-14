@@ -2,6 +2,7 @@ import StrataGenerators.TestScaffold
 import StrataGenerators.PlainHarness
 import StrataGenerators.HasTypeAGen.SmtStringEscaping
 import StrataGenerators.HasTypeAGen.DecimalAgreement
+import StrataGenerators.AdtLawsSmt
 
 /-!
 # Property-based tests using the Strata generators (LSpec-free driver)
@@ -236,6 +237,48 @@ def main (args : List String) : IO UInt32 := do
       (fun p => runProperty p.name
         (∀ gp : GenProgram, p.check gp.prog = true) cfg)
 
+  -- The two laws of an algebraic datatype (injectivity, disjointness), in the same
+  -- three shapes as `TestMain`'s `adtSuite`: the pure companions and the
+  -- eliminator-scoping property over ordinary generated blocks (only the last
+  -- fails, on a real defect), then — under `--smt` — the two solver-backed law
+  -- properties sharing one pipeline run per block, and the unscreened
+  -- query-acceptance property, which fails on the two encoder defects.
+  let adtTallies ← if cli.smtEnabled then
+      (StrataGenerators.AdtLawsSmt.runLawTallies numTrials
+        StrataGenerators.SmtEval.solverName).map some
+    else pure none
+  let adtSmtTail : List (IO Result) :=
+    match adtTallies with
+    | none => []
+    | some (inj, disjT, _, notes) =>
+      [ runIOProperty PropertyNames.adtInjSmt
+          (pure (StrataGenerators.AdtLawsSmt.tallyToNode "injectivity" inj notes)),
+        runIOProperty PropertyNames.adtDisjSmt
+          (pure (StrataGenerators.AdtLawsSmt.tallyToNode
+                   "disjointness (tester form)" disjT notes)),
+        runIOProperty PropertyNames.adtSolverAcceptsQuery
+          (StrataGenerators.AdtLawsSmt.adtSolverAcceptsQueryAction numTrials
+            StrataGenerators.SmtEval.solverName) ]
+  let adtSuite : List (IO Result) :=
+    Properties.adtBlockChecks.map
+      (fun p => runProperty p.name
+        (∀ gb : GenAdtBlock, p.check gb.block = true) cfg)
+    ++ adtSmtTail
+
+  -- Eager versus incremental type-alias resolution, over the same `GenProgram`
+  -- wrapper as `programSuite`. Both pass.
+  let aliasSuite : List (IO Result) :=
+    Properties.aliasChecks.map
+      (fun p => runProperty p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) cfg)
+
+  -- `mutual … end` blocks whose datatypes are not mutually recursive: accepted,
+  -- usable, interchangeable with the split form, printable. All four pass.
+  let mutualSuite : List (IO Result) :=
+    Properties.mutualIndepChecks.map
+      (fun p => runProperty p.name
+        (∀ gb : GenIndepBlock, p.check gb.block = true) cfg)
+
   let exitCode ← runSuites [
     ("expr", exprSuite),
     ("cmd", cmdSuite),
@@ -245,7 +288,10 @@ def main (args : List String) : IO UInt32 := do
     ("program", programSuite),
     ("phase", phaseSuite),
     ("printer", printerSuite),
-    ("transforms", unprovenSuite)
+    ("transforms", unprovenSuite),
+    ("adt", adtSuite),
+    ("alias", aliasSuite),
+    ("mutual", mutualSuite)
   ]
 
   -- Always-run diagnostics (do not gate the exit code):
@@ -269,6 +315,10 @@ def main (args : List String) : IO UInt32 := do
 
   -- ADT-derived-call coverage, identical to `TestMain`'s (the two drivers share
   -- the report so they cannot drift). A distribution, never gated.
+  IO.println ""
+  IO.println "Datatype-block coverage (adt: / mutual: suites):"
+  printDatatypeBlockCoverage (min numTrials 40)
+
   IO.println ""
   IO.println "ADT-derived-function call coverage:"
   printDerivedCallCoverage (min numTrials 60) (min maxSize 20)

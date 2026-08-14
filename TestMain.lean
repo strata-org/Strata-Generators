@@ -2,6 +2,7 @@ import StrataGenerators.TestScaffold
 import StrataGenerators.TycheViz
 import StrataGenerators.HasTypeAGen.SmtStringEscaping
 import StrataGenerators.HasTypeAGen.DecimalAgreement
+import StrataGenerators.AdtLawsSmt
 import LSpec
 
 /-!
@@ -299,6 +300,66 @@ def main (args : List String) : IO UInt32 := do
         (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
       .done
 
+  -- The two laws of an algebraic datatype (injectivity, disjointness). Three
+  -- shapes:
+  --
+  --   * the two pure companions plus the eliminator-scoping property, folded from
+  --     `Properties.adtBlockChecks` over ordinary generated blocks. Only the last
+  --     FAILS, and it is a real defect: `elimFuncs` leaves another datatype's type
+  --     parameters free in `d$Elim`'s type whenever the block's parameter lists
+  --     differ (28 of 60 ordinary blocks);
+  --   * the two solver-backed law properties, appended only under `--smt`, which
+  --     share one run of the pipeline per block (one program yields the obligations
+  --     of every family, so splitting them would double the solver work) and are
+  --     tallied per family;
+  --   * the unscreened query-acceptance property, also `--smt`, which FAILS on the
+  --     two encoder defects (`bitvec 0`; a name that is not a bare SMT-LIB symbol).
+  -- The law tallies are computed *before* the suite is assembled rather than inside
+  -- the two nodes, because one run of the pipeline per block yields the obligations
+  -- of every law family at once: computing them per node would run every solver
+  -- query twice for identical coverage.
+  let adtTallies ← if cli.smtEnabled then
+      (StrataGenerators.AdtLawsSmt.runLawTallies numTrials
+        StrataGenerators.SmtEval.solverName).map some
+    else pure none
+  let adtSmtTail : TestSeq :=
+    match adtTallies with
+    | none => .done
+    | some (inj, disjT, _, notes) =>
+      .individualIO PropertyNames.adtInjSmt none
+        (pure (StrataGenerators.AdtLawsSmt.tallyToNode "injectivity" inj notes))
+        (.individualIO PropertyNames.adtDisjSmt none
+          (pure (StrataGenerators.AdtLawsSmt.tallyToNode
+                   "disjointness (tester form)" disjT notes))
+          (.individualIO PropertyNames.adtSolverAcceptsQuery none
+            (StrataGenerators.AdtLawsSmt.adtSolverAcceptsQueryAction numTrials
+              StrataGenerators.SmtEval.solverName)
+            .done))
+  let adtSuite : TestSeq :=
+    Properties.adtBlockChecks.foldr
+      (fun p rest => checkIO p.name
+        (∀ gb : GenAdtBlock, p.check gb.block = true) (cfg := cfg) rest)
+      adtSmtTail
+
+  -- Eager versus incremental type-alias resolution. Same input shape as
+  -- `programSuite`, so counterexamples go through the whole-program shrinker. Both
+  -- pass; the work that makes them non-vacuous is `introduceAlias`, since a raw
+  -- generated program never *uses* the aliases it declares.
+  let aliasSuite : TestSeq :=
+    Properties.aliasChecks.foldr
+      (fun p rest => checkIO p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
+      .done
+
+  -- `mutual … end` blocks whose datatypes are *not* mutually recursive: accepted,
+  -- usable, interchangeable with the split form, and printable. All four pass —
+  -- which is the answer to the question the suite was written to ask.
+  let mutualSuite : TestSeq :=
+    Properties.mutualIndepChecks.foldr
+      (fun p rest => checkIO p.name
+        (∀ gb : GenIndepBlock, p.check gb.block = true) (cfg := cfg) rest)
+      .done
+
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
     ("cmd", [cmdSuite]),
@@ -308,7 +369,10 @@ def main (args : List String) : IO UInt32 := do
     ("program", [programSuite]),
     ("phase", [phaseSuite]),
     ("printer", [printerSuite]),
-    ("transforms", [unprovenSuite])
+    ("transforms", [unprovenSuite]),
+    ("adt", [adtSuite]),
+    ("alias", [aliasSuite]),
+    ("mutual", [mutualSuite])
   ]) []
 
   -- Always-run diagnostics (do not gate the exit code):
@@ -336,6 +400,10 @@ def main (args : List String) : IO UInt32 := do
   -- constructor / tester / field accessor of an earlier datatype. A distribution,
   -- not an assertion, so it never gates the exit code — but a silent regression to
   -- zero is exactly the failure mode no passing property would catch.
+  IO.println ""
+  IO.println "Datatype-block coverage (adt: / mutual: suites):"
+  printDatatypeBlockCoverage (min numTrials 40)
+
   IO.println ""
   IO.println "ADT-derived-function call coverage:"
   printDerivedCallCoverage (min numTrials 60) (min maxSize 20)
