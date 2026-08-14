@@ -11,6 +11,8 @@ import StrataGenerators.ProgramGen.TestSupport
 -- Supplies the forty-two check predicates for the Core transform passes that have
 -- no correctness proof (issue #69).
 import StrataGenerators.ProgramGen.UnprovenTransforms
+-- Supplies the thirteen check predicates for `LiftInternalFuncDecls` (issue #33).
+import StrataGenerators.ProgramGen.LiftFuncDecls
 
 /-!
 # Shared property catalog
@@ -46,6 +48,7 @@ open StrataGenerators.Procedure.TestSupport
 open StrataGenerators.Program.TestSupport
 open ProgramGen.TestSupport
 open StrataGenerators.Program.UnprovenTransforms
+open StrataGenerators.Program.LiftFuncDecls
 
 /-- A property under test, bundling its canonical name with the shared boolean
     check both harnesses evaluate on a generated `α`. Pairing name↔check in one
@@ -422,6 +425,21 @@ def nondetElimSymbolicNoLoss : String :=
 def hoistSymbolicNoLoss : String :=
   "hoist: symbolic evaluation loses no obligation"
 
+-- LiftInternalFuncDecls (issue #33) — lambda lifting with declaration-site capture
+def liftInjectionFires     : String := "lift: the injected declaration is really lifted"
+def liftFuncsClosed        : String := "lift: every hoisted function is closed"
+def liftStrataClosed       : String := "lift: every function satisfies LFuncClosed"
+def liftNoResidualDecl     : String := "lift: no procedure body holds a funcDecl"
+def liftIdempotent         : String := "lift: the pass is idempotent"
+def liftIdentityNoDecl     : String := "lift: a funcDecl-free program is unchanged"
+def liftParamsLead         : String := "lift: the captured parameters lead"
+def liftFreshNames         : String := "lift: the minted snapshot names are fresh"
+def liftOutputTypechecks   : String := "lift: the output typechecks"
+def liftSnapshotsInScope   : String := "lift: every snapshot is used in scope"
+def liftFixpointMatchesRef : String := "lift: the fixpoint matches Def 4.6"
+def liftTypeArgsClosed     : String := "lift: no hoisted function has a free type var"
+def liftRejectsOnlyKnown   : String := "lift: only the documented triggers are rejected"
+
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
@@ -467,7 +485,11 @@ def all : List String :=
     inlineProcTypechecks, inlineProcAnalysisPreserved, inlineProcSymbolicAgreement,
     nondetElimNoNondetGuard, nondetElimFreshNames,
     hoistNoLoopBodyInits, hoistPreservesUniqueInits,
-    loopVcSymbolicNoLoss, nondetElimSymbolicNoLoss, hoistSymbolicNoLoss ]
+    loopVcSymbolicNoLoss, nondetElimSymbolicNoLoss, hoistSymbolicNoLoss,
+    liftInjectionFires, liftFuncsClosed, liftStrataClosed, liftNoResidualDecl,
+    liftIdempotent, liftIdentityNoDecl, liftParamsLead, liftFreshNames,
+    liftOutputTypechecks, liftSnapshotsInScope, liftFixpointMatchesRef,
+    liftTypeArgsClosed, liftRejectsOnlyKnown ]
 
 -- No two properties share a name (a copy/paste slip that pointed two properties
 -- at the same label would collapse their panels/results silently).
@@ -726,5 +748,54 @@ def unprovenTransforms : List (Property Core.Program) :=
     ⟨PropertyNames.loopVcSymbolicNoLoss,     checkLoopVcSymbolicNoLoss⟩,
     ⟨PropertyNames.nondetElimSymbolicNoLoss, checkNondetElimSymbolicNoLoss⟩,
     ⟨PropertyNames.hoistSymbolicNoLoss,      checkHoistSymbolicNoLoss⟩ ]
+
+/-- The thirteen properties for `LiftInternalFuncDecls` (issue #33), the lambda
+    lifting pass that hoists internal `funcDecl`s to closed top-level functions.
+    Each takes a generated `Program`, injects a *capturing* internal function into
+    it — `genFuncDeclStmt` draws its bodies with `genFunction []`, so a generated
+    `funcDecl` is always closed and the pass would have nothing to capture — and
+    sweeps the fifteen shapes of `LiftFuncDecls.allScenarios`.
+
+    Only `LiftInternalFuncDeclsCorrect.lean`'s `run_noFuncDecl` is proved upstream
+    (that is `liftNoResidualDecl`); the other twelve claims are unproved.
+
+    THREE FAIL, deterministically, on 6 of the 15 injected shapes:
+
+    * `liftOutputTypechecks` and `liftSnapshotsInScope` are one defect seen two
+      ways — a `funcDecl` nested in a `block` / `ite` / `loop` and called outside
+      that construct has its function hoisted to the top level while its snapshot
+      `init` is left behind in the nested scope, so the rewritten call site names an
+      out-of-scope variable and `Program.typeCheck` rejects an output whose input it
+      accepted. `docs/strata-lift-funcdecls-bugs.md` files it.
+    * `liftFreshNames` is the documented `$__liftfncl`-prefix assumption: the minted
+      names come from a bare counter that never reads a program identifier, so a
+      program already using that prefix gets a duplicate declaration. The same
+      defect class as `cseFreshNamesFresh`.
+
+    `liftInjectionFires` is coverage rather than a claim about the pass: it scores
+    that the injection really was lifted, so a draw the pass refuses cannot make the
+    other twelve vacuously green in silence (it did, on 5 of 20 draws, before
+    `normalizeAmbient`). -/
+def liftFuncDecls : List (Property Core.Program) :=
+  [ -- coverage first: the rest mean nothing without it
+    ⟨PropertyNames.liftInjectionFires,     checkLiftInjectionFires⟩,
+    -- P1 — closedness, the property the pass exists for
+    ⟨PropertyNames.liftFuncsClosed,        checkLiftAllFuncsClosed⟩,
+    ⟨PropertyNames.liftStrataClosed,       checkLiftStrataClosed⟩,
+    -- P2/P3/P4 — the traversal
+    ⟨PropertyNames.liftNoResidualDecl,     checkLiftNoResidualFuncDecl⟩,
+    ⟨PropertyNames.liftIdempotent,         checkLiftIdempotent⟩,
+    ⟨PropertyNames.liftIdentityNoDecl,     checkLiftIdentityWithoutFuncDecl⟩,
+    -- P5/P10 — the emitted signature
+    ⟨PropertyNames.liftParamsLead,         checkLiftParamsLead⟩,
+    ⟨PropertyNames.liftTypeArgsClosed,     checkLiftTypeArgsClosed⟩,
+    -- P6/P7 — name hygiene and scope correctness (the two defects)
+    ⟨PropertyNames.liftFreshNames,         checkLiftFreshSnapshotNames⟩,
+    ⟨PropertyNames.liftOutputTypechecks,   checkLiftOutputTypechecks⟩,
+    ⟨PropertyNames.liftSnapshotsInScope,   checkLiftSnapshotsInScope⟩,
+    -- P8 — the Johnsson fixpoint against an independent Def 4.6 implementation
+    ⟨PropertyNames.liftFixpointMatchesRef, checkLiftFixpointMatchesReference⟩,
+    -- P12 — rejection completeness
+    ⟨PropertyNames.liftRejectsOnlyKnown,   checkLiftRejectsOnlyKnownTriggers⟩ ]
 
 end Properties

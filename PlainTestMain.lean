@@ -241,6 +241,20 @@ def main (args : List String) : IO UInt32 := do
       (fun p => runProperty p.name
         (∀ gp : GenProgram, p.check gp.prog = true) cfg)
 
+  -- The thirteen `LiftInternalFuncDecls` properties (issue #33), folded from the
+  -- shared `Properties.liftFuncDecls` bundle — the same checks as `TestMain`. Each
+  -- injects a capturing internal function into the generated program, since
+  -- `genFuncDeclStmt` draws its bodies with `genFunction []` and so every generated
+  -- `funcDecl` is closed. THREE FAIL deterministically: `lift: the output
+  -- typechecks` and `lift: every snapshot is used in scope` are one defect (the
+  -- snapshot `init` is left in a nested scope while the function is hoisted out of
+  -- it — `docs/strata-lift-funcdecls-bugs.md`), and `lift: the minted snapshot names
+  -- are fresh` is the documented `$__liftfncl` prefix assumption.
+  let liftSuite : List (IO Result) :=
+    Properties.liftFuncDecls.map
+      (fun p => runProperty p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) cfg)
+
   let exitCode ← runSuites [
     ("expr", exprSuite),
     ("cmd", cmdSuite),
@@ -250,7 +264,8 @@ def main (args : List String) : IO UInt32 := do
     ("program", programSuite),
     ("phase", phaseSuite),
     ("printer", printerSuite),
-    ("transforms", unprovenSuite)
+    ("transforms", unprovenSuite),
+    ("lift", liftSuite)
   ]
 
   -- Always-run diagnostics (do not gate the exit code):

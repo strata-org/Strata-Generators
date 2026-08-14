@@ -1,5 +1,45 @@
 # Property-Based Testing Plan: `LiftInternalFuncDecls`
 
+> **STATUS (2026-08-12): the structural tier is implemented.** Thirteen properties in
+> `StrataGenerators/ProgramGen/LiftFuncDecls.lean`, registered as
+> `Properties.liftFuncDecls` and run by both harnesses. They found **two defects**,
+> reported in `docs/strata-lift-funcdecls-bugs.md`:
+>
+> * **P7 confirmed — the plan's own prediction.** "Write this one first" was right: a
+>   `funcDecl` nested in a `block`/`ite`/`loop` and called outside that construct has
+>   its function hoisted to the top level while its snapshot `init` is left behind, so
+>   the pass turns a well-typed program into an ill-typed one. Fails on 6 of the 15
+>   injected shapes, on every draw.
+> * **P6 confirmed**, as a documented gap: minted `$__liftfncl` names are never
+>   checked against the program's own identifiers.
+>
+> Passing: P1, P2 (proved upstream since this plan was written), P3, P4, P5, P8, P10,
+> P11, P12. **Three of this plan's predictions were wrong**, so §4 and §6 should be
+> read with that in mind:
+>
+> * §6.2's "most likely coverage gap" — capture through `axioms` / `preconditions` /
+>   `measure` — is handled correctly by the pass.
+> * P8's fixpoint agrees with an independent Def 4.6 implementation, chain and star
+>   shapes included.
+> * P11's `substOps` binder side condition holds.
+>
+> **The pass has moved on since CR revision 6**, so §5 is stale in two places:
+> `processDecl` now rejects **four** conditions, not two (adding a recursive internal
+> function, and an internal name clashing with a top-level `Decl.func`), and call
+> sites are re-annotated with the instantiated arrow type rather than having the
+> annotation dropped to `none`. One of the four triggers (`isRecursive`) is
+> unreachable from well-typed input.
+>
+> **Still open:** the semantic tier — P13, P14, P16 — and P9. See the bug report's
+> "Not covered", which also notes that fixing the P7 defect has to settle what the
+> `elseArm` shape *means* before P16 can be written.
+>
+> One thing the plan did not anticipate: the generator cannot produce a capturing
+> `funcDecl` at all. `genFuncDeclStmt` draws its bodies with `genFunction []`, an
+> empty free-variable context, so every generated internal function is closed. Each
+> property therefore injects a capturing declaration into the generated program rather
+> than relying on the draw.
+
 **Target:** CR-292807021 — "[Strata] feat(core): Add internal funcDecl lifting pass"
 (`https://code.amazon.com/reviews/CR-292807021/revisions/6#/details`, author `lebjuney`, revision 6)
 

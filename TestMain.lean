@@ -311,6 +311,33 @@ def main (args : List String) : IO UInt32 := do
         (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
       .done
 
+  -- The thirteen properties for `LiftInternalFuncDecls` (issue #33), the lambda
+  -- lifting pass that hoists internal `funcDecl`s to closed top-level functions.
+  -- Each injects a *capturing* internal function into the generated program — a
+  -- generated `funcDecl` is always closed, since `genFuncDeclStmt` draws its bodies
+  -- with `genFunction []`, so without the injection the pass has nothing to capture
+  -- and every property would be vacuous — and sweeps the fifteen shapes of
+  -- `LiftFuncDecls.allScenarios`.
+  --
+  -- THREE FAIL, deterministically (0 of 20 draws), on 6 of the 15 shapes.
+  -- `lift: the output typechecks` and `lift: every snapshot is used in scope` are one
+  -- defect seen two ways — a `funcDecl` nested in a `block`/`ite`/`loop` and called
+  -- outside it has its function hoisted while its snapshot `init` stays behind, so
+  -- the rewritten call site names an out-of-scope variable and the typechecker
+  -- rejects an output whose input it accepted (`docs/strata-lift-funcdecls-bugs.md`).
+  -- `lift: the minted snapshot names are fresh` is the documented `$__liftfncl`
+  -- prefix assumption — the counter never reads a program identifier, the same
+  -- defect class as `cse: the fresh names are fresh`.
+  --
+  -- `lift: the injected declaration is really lifted` is coverage, not a claim about
+  -- the pass: it is what keeps the other twelve honest, since each of them skips a
+  -- run the pass refused.
+  let liftSuite : TestSeq :=
+    Properties.liftFuncDecls.foldr
+      (fun p rest => checkIO p.name
+        (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
+      .done
+
   let exitCode ← lspecIO (.ofList [
     ("expr", [exprSuite]),
     ("cmd", [cmdSuite]),
@@ -320,7 +347,8 @@ def main (args : List String) : IO UInt32 := do
     ("program", [programSuite]),
     ("phase", [phaseSuite]),
     ("printer", [printerSuite]),
-    ("transforms", [unprovenSuite])
+    ("transforms", [unprovenSuite]),
+    ("lift", [liftSuite])
   ]) []
 
   -- Always-run diagnostics (do not gate the exit code):
