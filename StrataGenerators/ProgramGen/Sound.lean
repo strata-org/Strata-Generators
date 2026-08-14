@@ -293,11 +293,11 @@ theorem contextOk_addKnownType {C C' : LContext CoreLParams} {nm : String} {ar :
   · rw [hdt]; exact hok.tyCon_external
   · rw [hdt]; exact hok.arrow_external
 
-/-! ## `ContextOk` at a *grown* vocabulary (interleaving direction (2))
+/-! ## `ContextOk` at a *grown* pool (interleaving direction (2))
 
-`contextOk_addKnownType` keeps `ContextOk` at a *fixed* vocabulary across an
+`contextOk_addKnownType` keeps `ContextOk` at a *fixed* pool across an
 abstract-type add. To let a later datatype block *reference* the new abstract
-type, the vocabulary itself must grow — so `ContextOk` has to be re-established
+type, the pool itself must grow — so `ContextOk` has to be re-established
 with `nm` added to `baseTypes` (arity 0) or `tyCons` (arity ≥ 1).
 
 Two facts about the new entry carry it:
@@ -325,15 +325,15 @@ theorem getType_ne_none_of_mem_allTypeNames {F : @TypeFactory Unit} {name : Stri
   intro hnone
   exact absurd (List.find?_eq_none.mp hnone d hd) (by simp [hdname])
 
-/-- **`ContextOk` under an abstract-type add that also grows the vocabulary.**
+/-- **`ContextOk` under an abstract-type add that also grows the pool.**
     The new name `nm` joins `baseTypes` (if `ar = 0`) or `tyCons` (otherwise), and
-    `ContextOk` is re-established at that grown vocabulary.
+    `ContextOk` is re-established at that grown pool.
 
     `hnmR : nm ∈ R` keeps the reserved fields true; `hnm_ext` is the externality
     of the new entry (from the caller's `datatypesReserved` + freshness). Note
     `initialReserved` grows too (it mentions `baseTypes`/`tyCons`), so the old
-    reserved facts are re-routed through the vocabulary clauses of the *grown*
-    `initialReserved` rather than transported verbatim. -/
+    reserved facts are re-routed through the `baseTypes`/`tyCons` clauses of the
+    *grown* `initialReserved` rather than transported verbatim. -/
 theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} {ar : Nat}
     {bt : List String} {tc : List DatatypeGen.KnownTyCon} {R : List String}
     (hok : DatatypeGen.ContextOk C bt tc R) (hnmR : nm ∈ R)
@@ -348,8 +348,8 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
     rw [hkt, KnownTypes.keywords, Std.HashMap.mem_keys]
     exact Std.HashMap.mem_insertIfNew.mpr (Or.inl (by simp))
   -- `nm ∈ R`, so `nm` is in the grown `initialReserved` via its `R` tail; and every
-  -- member of the *old* `initialReserved` stays in the grown one (the vocabulary
-  -- clauses only gained an element).
+  -- member of the *old* `initialReserved` stays in the grown one (the
+  -- `baseTypes`/`tyCons` clauses only gained an element).
   have hres_mono : ∀ x, x ∈ DatatypeGen.initialReserved bt tc R →
       x ∈ DatatypeGen.initialReserved (if ar = 0 then nm :: bt else bt)
         (if ar = 0 then tc else (nm, ar) :: tc) R := by
@@ -513,14 +513,15 @@ Everything a per-step soundness proof needs about the incoming state, bundled.
 Maintained from `initState` across every `genDecl*` step. -/
 
 structure Inv (s : GenState) : Prop where
-  /-- The context is `ContextOk` for the *threaded* vocabulary, reserved against
-      the threaded `reserved` set (what the datatype generator needs).
+  /-- The context is `ContextOk` for the *threaded* pool of type constructors,
+      reserved against the threaded `reserved` set (what the datatype generator
+      needs).
 
-      This is stated at `s.baseTypes`/`s.tyCons` — the vocabulary grown by
-      abstract-type declarations — rather than at the fixed default, which is what
-      lets a datatype block reference a previously declared abstract type
-      (interleaving direction (2), see `docs/program-gen-interleaving.md`). The
-      abstract-type step re-establishes it at the grown vocabulary via
+      This is stated at `s.baseTypes`/`s.tyCons` — the pool grown by abstract-type
+      declarations — rather than at the fixed default, which is what lets a
+      datatype block reference a previously declared abstract type (interleaving
+      direction (2), see `docs/program-gen-interleaving.md`). The abstract-type
+      step re-establishes it at the grown pool via
       `contextOk_addKnownType_grow`. -/
   ctxOk : DatatypeGen.ContextOk s.C s.baseTypes s.tyCons s.reserved
   /-- Every type name the context knows is reserved (needed for the alias/type-con
@@ -529,21 +530,21 @@ structure Inv (s : GenState) : Prop where
   /-- No alias name in `Γ` is a base type, applied constructor, or `"arrow"` — so
       an alias-body reference (confined to those) never matches an alias name,
       giving `aliasFree`. -/
-  aliasVocabDisjoint : ∀ a ∈ s.Γ.aliases,
+  aliasPoolDisjoint : ∀ a ∈ s.Γ.aliases,
     a.name ∉ s.baseTypes ∧ a.name ∉ s.tyCons.map (·.1) ∧ a.name ≠ "arrow"
   /-- Every alias name in `Γ` is reserved (it was added to `reserved` when the
       alias was declared). Combined with a freshly drawn name being unreserved,
       this keeps a new abstract type's name distinct from every alias name. -/
   aliasNamesReserved : ∀ a ∈ s.Γ.aliases, a.name ∈ s.reserved
-  /-- The referenceable base/applied vocabulary is a superset of the default (the
-      datatype generator uses the default vocabulary; alias/distinct bodies use
+  /-- The referenceable base/applied pool is a superset of the default (the
+      datatype generator uses the default pool; alias/distinct bodies use
       the growing one). Grown only by abstract types. -/
   baseSupset : DatatypeGen.defaultBaseTypes ⊆ s.baseTypes
   tyConsSupset : DatatypeGen.defaultTyCons ⊆ s.tyCons
-  /-- The *current* vocabulary names are all reserved — so a freshly drawn name
+  /-- The *current* pool names are all reserved — so a freshly drawn name
       (∉ reserved) differs from every base type, applied constructor, and
       `"arrow"`. This is what a new alias/abstract-type name uses to stay
-      vocab-disjoint. -/
+      disjoint from the pool. -/
   baseReserved : ∀ x ∈ s.baseTypes, x ∈ s.reserved
   tyConReserved : ∀ x ∈ s.tyCons.map (·.1), x ∈ s.reserved
   arrowReserved : "arrow" ∈ s.reserved
@@ -557,16 +558,16 @@ structure Inv (s : GenState) : Prop where
       So `s.C.rigidTypeVars = [] ⊆ proc.header.typeArgs`, which discharges the
       rigidvar side condition of `genProcedure_sound_ambient`. -/
   rigidNil : s.C.rigidTypeVars = []
-  /-- No applied constructor in the threaded vocabulary is named `"arrow"`. At the
-      default vocabulary this was the `decide`-able `defaultTyCons_ne_arrow`; with
-      a growing vocabulary it must be carried, since
+  /-- No applied constructor in the threaded pool is named `"arrow"`. At the
+      default pool this was the `decide`-able `defaultTyCons_ne_arrow`; with
+      a growing pool it must be carried, since
       `genMutuallyRecursiveDatatypes_MutualADTWF` needs it. Re-established at each
       abstract step from `arrowReserved` plus the drawn name's freshness. -/
   tyConsNeArrow : ∀ kc ∈ s.tyCons, kc.1 ≠ "arrow"
   /-- Every datatype name the context knows is reserved. Needed by the
       abstract-type step: a freshly drawn name is then absent from
       `C.datatypes`, which is exactly the `getType … = none` that `ContextOk`'s
-      externality fields demand of the new vocabulary entry. -/
+      externality fields demand of the new pool entry. -/
   datatypesReserved : ∀ n ∈ s.C.datatypes.allTypeNames, n ∈ s.reserved
   /-- The prior-datatype pool resolves and is inhabited in `C` — the hypothesis
       that lets a new block reference a *previously declared* datatype
@@ -584,7 +585,7 @@ structure Inv (s : GenState) : Prop where
   storedRefsReserved : ∀ d ∈ s.C.datatypes.allDatatypes, ∀ c ∈ d.constrs,
     ∀ arg ∈ c.args, ∀ r ∈ getTypeRefs arg.2, r ∈ s.reserved
 
-/-- **The fold's invariant already pins the `SimpleType` arities.** The default vocabulary
+/-- **The fold's invariant already pins the `SimpleType` arities.** The default pool
     is contained in the threaded one (`baseSupset` / `tyConsSupset`), and `ContextOk`'s
     arity fields register each of its members at its own arity — which is exactly
     `SimpleTyArities`, the premise upstream's `init` and `signatureWellKinded` rules need. -/
@@ -593,7 +594,7 @@ theorem simpleTyArities_of_inv {s : GenState} (hinv : Inv s) : SimpleTyArities s
     fun b hb => hinv.ctxOk.base_arity b (hinv.baseSupset hb)
   have htc : ∀ kc ∈ DatatypeGen.defaultTyCons, s.C.knownTypes[kc.1]? = some kc.2 :=
     fun kc hkc => hinv.ctxOk.tyCon_arity kc (hinv.tyConsSupset hkc)
-  -- Membership in the *derived* vocabulary is now an arity lookup in `Core.KnownTypes`
+  -- Membership in the *derived* pool is now an arity lookup in `Core.KnownTypes`
   -- (`mem_defaultBaseTypes_iff` / `mem_defaultTyCons_iff`), which `native_decide` settles.
   refine ⟨?_, ?_, ?_, ?_, ?_, hinv.ctxOk.arrow_arity, ?_, ?_⟩
   · exact hb "bool" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
@@ -606,19 +607,19 @@ theorem simpleTyArities_of_inv {s : GenState} (hinv : Inv s) : SimpleTyArities s
   · exact htc ("Sequence", 1) (DatatypeGen.mem_defaultTyCons_iff.mpr
       ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨by native_decide, by simp, by simp⟩, by simp⟩)
 
-/-! ## Vocabulary-type reference confinement -/
+/-! ## Reference confinement for `genNonRecursiveArgTy` -/
 
 /-- `BlockRefsWF [] tyParams []` holds vacuously. -/
 theorem blockRefsWF_empty (tyParams : List TyIdentifier) :
     DatatypeGen.BlockRefsWF [] tyParams [] :=
   { mem := by simp, uniform := by simp, ftvarArgs := by simp, argsScoped := by simp }
 
-/-- Every type-constructor name referenced in a type from `genVocabTy`'s support
+/-- Every type-constructor name referenced in a type from `genNonRecursiveArgTy`'s support
     is a base type, a `tyCons` name, or `"arrow"`. Specialization of
     `genArgTy_refs` at `block := []`, `blockRefs := []`. -/
-theorem genVocabTy_refs {baseTypes : BaseTys} {tyCons : TyCons}
+theorem genNonRecursiveArgTy_refs {baseTypes : BaseTys} {tyCons : TyCons}
     {tyParams : List TyIdentifier} {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genVocabTy (G := SetGen.Set) baseTypes tyCons tyParams size)) :
+    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) baseTypes tyCons tyParams size)) :
     ∀ r ∈ getTypeRefs ty,
       r ∈ baseTypes ∨ r ∈ tyCons.map (·.1) ∨ r = "arrow" := by
   intro r hr
@@ -627,21 +628,21 @@ theorem genVocabTy_refs {baseTypes : BaseTys} {tyCons : TyCons}
 
 /-- A type drawn over *no* type parameters is ground. Specialization of
     `genArgTy_freeVars` at `blockRefs := []`, `tyParams := []`. -/
-theorem genVocabTy_ground {baseTypes : BaseTys} {tyCons : TyCons}
+theorem genNonRecursiveArgTy_ground {baseTypes : BaseTys} {tyCons : TyCons}
     {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genVocabTy (G := SetGen.Set) baseTypes tyCons [] size)) :
+    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) baseTypes tyCons [] size)) :
     LMonoTy.freeVars ty = [] := by
   refine List.eq_nil_iff_forall_not_mem.mpr (fun v hv => ?_)
   have := DatatypeGen.genArgTy_freeVars (block := []) (blockRefsWF_empty []) size h v hv
   simp at this
 
-/-- Every type-constructor occurrence in a `genVocabTy`-reachable type is applied at its own
+/-- Every type-constructor occurrence in a `genNonRecursiveArgTy`-reachable type is applied at its own
     arity: a `baseTypes` name at 0, a `tyCons` entry at its recorded arity, or `"arrow"` at 2.
     Specialization of `genArgTy_arities` at `blockRefs := []` (so the block disjunct is
     unreachable). -/
-theorem genVocabTy_arities {baseTypes : BaseTys} {tyCons : TyCons}
+theorem genNonRecursiveArgTy_arities {baseTypes : BaseTys} {tyCons : TyCons}
     {tyParams : List TyIdentifier} {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genVocabTy (G := SetGen.Set) baseTypes tyCons tyParams size)) :
+    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) baseTypes tyCons tyParams size)) :
     ∀ ref n, (ref, n) ∈ getTypeConsArities ty →
       (ref ∈ baseTypes ∧ n = 0) ∨ (ref, n) ∈ tyCons ∨ (ref = "arrow" ∧ n = 2) := by
   intro ref n hn
@@ -652,19 +653,19 @@ theorem genVocabTy_arities {baseTypes : BaseTys} {tyCons : TyCons}
   · obtain ⟨d, hd, _⟩ := h3; simp at hd
   · exact Or.inr (Or.inr h4)
 
-/-- **A `genVocabTy`-reachable type is well-kinded in any `ContextOk` context.** The
-    vocabulary's arities are exactly what `ContextOk`'s three arity fields record, and
+/-- **A `genNonRecursiveArgTy`-reachable type is well-kinded in any `ContextOk` context.** The
+    pool's arities are exactly what `ContextOk`'s three arity fields record, and
     `LContext.WellKindedTy` asks for nothing else. This is what discharges upstream's
-    `WellKindedTy`/`signatureWellKinded` obligations for the vocabulary-typed declarations
-    (constants of a `distinct` group, alias bodies). -/
-theorem wellKindedTy_of_genVocabTy {C : LContext CoreLParams}
+    `WellKindedTy`/`signatureWellKinded` obligations for the declarations typed over the
+    pool (constants of a `distinct` group, alias bodies). -/
+theorem wellKindedTy_of_genNonRecursiveArgTy {C : LContext CoreLParams}
     {bt : BaseTys} {tc : TyCons} {R : List String}
     (hok : DatatypeGen.ContextOk C bt tc R)
     {tyParams : List TyIdentifier} {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genVocabTy (G := SetGen.Set) bt tc tyParams size)) :
+    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) bt tc tyParams size)) :
     C.WellKindedTy ty := by
   intro ref n hn
-  rcases genVocabTy_arities h ref n hn with ⟨hb, rfl⟩ | htc | ⟨rfl, rfl⟩
+  rcases genNonRecursiveArgTy_arities h ref n hn with ⟨hb, rfl⟩ | htc | ⟨rfl, rfl⟩
   · exact hok.base_arity ref hb
   · exact hok.tyCon_arity (ref, n) htc
   · exact hok.arrow_arity
@@ -740,7 +741,7 @@ theorem genDistinctAssertion_ground {bt : BaseTys} {tc : TyCons}
     Prod.mk.injEq] at h
   obtain ⟨_nm, _hnm, τ', hτ', _k, _hk, _cs, _hcs, _, hτ_eq, _⟩ := h
   subst hτ_eq
-  exact genVocabTy_ground hτ'
+  exact genNonRecursiveArgTy_ground hτ'
 
 /-- The names a `genDistinctAssertion` draw produces are all fresh and pairwise
     distinct: the declaration name avoids `reserved`, and each constant name avoids
@@ -800,14 +801,14 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
   have haliasFree : LMonoTy.aliasFree s.Γ.aliases ts.type := by
     apply aliasFree_of_refs_disjoint
     intro r hr
-    have hrefs := genVocabTy_refs (baseTypes := s.baseTypes) (tyCons := s.tyCons)
+    have hrefs := genNonRecursiveArgTy_refs (baseTypes := s.baseTypes) (tyCons := s.tyCons)
       (tyParams := tyParams) (size := b.tySize) hbody r hr
     rw [List.find?_eq_none]
     intro a ha
     rw [Bool.not_eq_true, beq_eq_false_iff_ne]
     intro hcontra
     subst hcontra
-    obtain ⟨hb1, hb2, hb3⟩ := hinv.aliasVocabDisjoint a ha
+    obtain ⟨hb1, hb2, hb3⟩ := hinv.aliasPoolDisjoint a ha
     rcases hrefs with hbase | htc | harr
     · exact hb1 hbase
     · exact hb2 htc
@@ -825,12 +826,12 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
   refine ⟨?_, ?_⟩
   · -- `DeclsHasTypeA` for the singleton list.
     exact DeclsHasType'.cons _ _ _ _ _ _ _ _ hdecl (DeclsHasType'.nil _ _)
-  · -- `Inv` preserved: `C`, vocab unchanged; `reserved` grows; new alias respects
-    -- vocab-disjointness (its name is fresh, so avoids the vocab).
+  · -- `Inv` preserved: `C`, pool unchanged; `reserved` grows; new alias respects
+    -- pool-disjointness (its name is fresh, so avoids the pool).
     refine
       { ctxOk := ?_
         knownReserved := ?_
-        aliasVocabDisjoint := ?_
+        aliasPoolDisjoint := ?_
         aliasNamesReserved := ?_
         tyConsNeArrow := hinv.tyConsNeArrow
         datatypesReserved := fun n hn => List.mem_cons_of_mem _ (hinv.datatypesReserved n hn)
@@ -852,12 +853,12 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
       -- `a ∈ (new alias) :: s.Γ.aliases`; reduce the `match` on `mkAliasDecl`.
       simp only [mkAliasDecl, List.mem_cons] at ha
       rcases ha with rfl | ha
-      · -- the new alias: name `nm` is fresh, so avoids the vocab (all reserved).
+      · -- the new alias: name `nm` is fresh, so avoids the pool (all reserved).
         refine ⟨?_, ?_, ?_⟩
         · intro hb; simp only at hb; exact hnm_fresh (hinv.baseReserved _ hb)
         · intro hb; simp only at hb; exact hnm_fresh (hinv.tyConReserved _ hb)
         · intro hb; simp only at hb; exact hnm_fresh (hb ▸ hinv.arrowReserved)
-      · exact hinv.aliasVocabDisjoint a ha
+      · exact hinv.aliasPoolDisjoint a ha
     · -- alias names reserved: the new alias's name is `nm` (just added); old ones grow.
       intro a ha
       simp only [mkAliasDecl, List.mem_cons] at ha
@@ -870,7 +871,8 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
 
 /-! ## Per-declaration soundness: axioms and distinct
 
-Both leave `C`, `Γ`, and the vocabulary unchanged; only `reserved` grows. So
+Both leave `C`, `Γ`, and the type-constructor pool unchanged; only `reserved`
+grows. So
 `Inv` preservation is `contextOk_reserved_mono` plus monotonicity of the reserved
 facts, and the `DeclHasType'` derivation comes from the expression bridge. -/
 
@@ -881,7 +883,7 @@ theorem inv_cons_reserved {s : GenState} (hinv : Inv s) (name : String) :
   refine
     { ctxOk := contextOk_reserved_mono hinv.ctxOk (fun x hx => List.mem_cons_of_mem _ hx)
       knownReserved := fun k hk => List.mem_cons_of_mem _ (hinv.knownReserved k hk)
-      aliasVocabDisjoint := hinv.aliasVocabDisjoint
+      aliasPoolDisjoint := hinv.aliasPoolDisjoint
       aliasNamesReserved := fun a ha => List.mem_cons_of_mem _ (hinv.aliasNamesReserved a ha)
       tyConsNeArrow := hinv.tyConsNeArrow
       datatypesReserved := fun n hn => List.mem_cons_of_mem _ (hinv.datatypesReserved n hn)
@@ -910,7 +912,7 @@ theorem inv_cons_reserved_procs {s : GenState} (hinv : Inv s) (name : String)
   exact
     { ctxOk := h.ctxOk
       knownReserved := h.knownReserved
-      aliasVocabDisjoint := h.aliasVocabDisjoint
+      aliasPoolDisjoint := h.aliasPoolDisjoint
       aliasNamesReserved := h.aliasNamesReserved
       baseSupset := h.baseSupset
       tyConsSupset := h.tyConsSupset
@@ -936,7 +938,7 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
   refine
     { ctxOk := contextOk_reserved_mono hinv.ctxOk mono
       knownReserved := fun k hk => mono _ (hinv.knownReserved k hk)
-      aliasVocabDisjoint := hinv.aliasVocabDisjoint
+      aliasPoolDisjoint := hinv.aliasPoolDisjoint
       aliasNamesReserved := fun a ha => mono _ (hinv.aliasNamesReserved a ha)
       tyConsNeArrow := hinv.tyConsNeArrow
       datatypesReserved := fun n hn => mono _ (hinv.datatypesReserved n hn)
@@ -952,17 +954,18 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
       typesNil := hinv.typesNil
       rigidNil := hinv.rigidNil }
 
-/-- **`Inv` is preserved by any change to the operator vocabularies.** No `Inv`
+/-- **`Inv` is preserved by any change to the operator contexts.** No `Inv`
     field mentions `octx`, `pctx` or `derivedPctx` — under the annotated spec an
-    `.op` node is typed from its own annotation, so the vocabularies constrain which
-    programs are *drawn*, never which are well-typed — hence every field of `hinv`
-    transfers verbatim and `{ hinv with }` copies them.
+    `.op` node is typed from its own annotation, so the operator contexts constrain
+    which programs are *drawn*, never which are well-typed — hence every field of
+    `hinv` transfers verbatim and `{ hinv with }` copies them.
 
-    Needed because two steps now grow a vocabulary while `Inv` is being re-established:
-    the datatype step (with the block's derived functions) and the function step
-    (registering the declared function so a later body can call it). Compose with
-    `inv_addFactory` / `inv_grow_reserved`, which cover the fields that *do* move. -/
-theorem inv_setVocab {s : GenState} (hinv : Inv s)
+    Needed because two steps now grow an operator context while `Inv` is being
+    re-established: the datatype step (with the block's derived functions) and the
+    function step (registering the declared function so a later body can call it).
+    Compose with `inv_addFactory` / `inv_grow_reserved`, which cover the fields that
+    *do* move. -/
+theorem inv_setOpCtxs {s : GenState} (hinv : Inv s)
     (octx : OpCtx) (pctx derivedPctx : PolyOpCtx) :
     Inv { s with octx := octx, pctx := pctx, derivedPctx := derivedPctx } :=
   { hinv with }
@@ -983,7 +986,7 @@ theorem inv_addFactory {s : GenState} (hinv : Inv s) {fn : LFunc CoreLParams}
   refine
     { ctxOk := contextOk_addFactory hinv.ctxOk hadd
       knownReserved := fun k hk => hinv.knownReserved k (by rw [hkt] at hk; exact hk)
-      aliasVocabDisjoint := hinv.aliasVocabDisjoint
+      aliasPoolDisjoint := hinv.aliasPoolDisjoint
       aliasNamesReserved := hinv.aliasNamesReserved
       baseSupset := hinv.baseSupset
       tyConsSupset := hinv.tyConsSupset
@@ -1167,12 +1170,12 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
   simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, constNames⟩, hparts, hmatch⟩ := h
   have hτ : LMonoTy.freeVars τ = [] := genDistinctAssertion_ground hparts
-  -- The group's type comes from `genVocabTy`, so it is well-kinded in `s.C` by `ctxOk`.
+  -- The group's type comes from `genNonRecursiveArgTy`, so it is well-kinded in `s.C` by `ctxOk`.
   have hτwk : s.C.WellKindedTy τ := by
     simp only [genDistinctAssertion, mem_support_bind_iff, mem_support_pure_iff,
       Prod.mk.injEq] at hparts
     obtain ⟨_nm, _hnm, τ', hτ', _k, _hk, _cs, _hcs, _, hτ_eq, _⟩ := hparts
-    exact hτ_eq ▸ wellKindedTy_of_genVocabTy hinv.ctxOk hτ'
+    exact hτ_eq ▸ wellKindedTy_of_genNonRecursiveArgTy hinv.ctxOk hτ'
   cases hadd : addConstants s.C τ constNames with
   | none =>
     rw [hadd] at hmatch
@@ -1259,15 +1262,15 @@ theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
         (DeclHasType'.func s.C C' s.Γ func .empty hnonrec hwt hext)
         (DeclsHasType'.nil _ _)
     · -- `Inv` preserved: `functions` changed (`inv_addFactory`), one reserved name
-      -- (`inv_grow_reserved` at `[nm]`), and the operator vocabularies grew with the
-      -- function just declared, which no `Inv` field mentions (`inv_setVocab`).
+      -- (`inv_grow_reserved` at `[nm]`), and the operator contexts grew with the
+      -- function just declared, which no `Inv` field mentions (`inv_setOpCtxs`).
       have := inv_grow_reserved (s := { s with C := C' }) (inv_addFactory hinv hadd) [nm]
-      simpa using inv_setVocab this _ _ _
+      simpa using inv_setOpCtxs this _ _ _
 
 /-! ## Per-declaration soundness: abstract types
 
 The abstract-type step draws a fresh name, gates on `addKnownTypeWithError`, and
-(on success) grows the context's known types and the referenceable vocabulary. -/
+(on success) grows the context's known types and the referenceable pool. -/
 
 theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
@@ -1303,14 +1306,14 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
         { name := nm, params := List.replicate ar "_" } .empty
       rw [harw] at this
       exact this hadd
-    · -- `Inv` preserved via `contextOk_addKnownType`, growing the vocabulary.
+    · -- `Inv` preserved via `contextOk_addKnownType`, growing the pool.
       obtain ⟨hkt, hdt⟩ := addKnownType_fields hadd
       -- `s' = s.addAbstract nm ar C'`.
       simp only [GenState.addAbstract]
       refine
         { ctxOk := ?_
           knownReserved := ?_
-          aliasVocabDisjoint := ?_
+          aliasPoolDisjoint := ?_
           aliasNamesReserved := ?_
           baseSupset := ?_
           tyConsSupset := ?_
@@ -1324,7 +1327,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
           dtPoolOk := ?_
           dtConsReserved := fun x hx => List.mem_cons_of_mem _ (hinv.dtConsReserved x hx)
           storedRefsReserved := ?_ }
-      · -- `ContextOk C'` at the *grown* vocabulary (interleaving direction (2)).
+      · -- `ContextOk C'` at the *grown* pool (interleaving direction (2)).
         -- Externality of the new entry: `nm` is fresh, and every datatype name of
         -- `C` is reserved, so `nm` is not one of them.
         have hnmR : nm ∈ (nm :: s.reserved) := List.mem_cons_self
@@ -1339,10 +1342,10 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
         rcases mem_keys_insertIfNew_cases hk with rfl | hold
         · exact List.mem_cons_self
         · exact List.mem_cons_of_mem _ (hinv.knownReserved k hold)
-      · -- alias-vocab disjointness: the vocab grew by `nm`; existing aliases still
+      · -- alias-pool disjointness: the pool grew by `nm`; existing aliases still
         -- avoid it because `nm ∉ reserved` while every alias name *is* reserved.
         intro a ha
-        obtain ⟨hb1, hb2, hb3⟩ := hinv.aliasVocabDisjoint a ha
+        obtain ⟨hb1, hb2, hb3⟩ := hinv.aliasPoolDisjoint a ha
         have hane : a.name ≠ nm := fun heq => hnm_fresh (heq ▸ hinv.aliasNamesReserved a ha)
         by_cases har0 : ar = 0
         · subst har0
@@ -1420,7 +1423,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
 /-! ## Datatype block: `MutualADTWF` from the invariant
 
 Given `Inv s`, any block in the datatype generator's support (at the default
-vocabulary, reserved against `s.reserved`) is `MutualADTWF s.C`. This is the
+pool, reserved against `s.reserved`) is `MutualADTWF s.C`. This is the
 `ContextOk`-consuming half; the checker-success half comes from gating. -/
 
 /-! ## Datatype block: names are globally fresh
@@ -1470,7 +1473,7 @@ theorem storedRefsAbsent_of_inv {s : GenState} {block : MutualDatatype Unit}
   exact hfresh d' hd' (hinv.storedRefsReserved d hd c hc arg harg _
     (DatatypeGen.mem_getTypeRefs_of_tyNameAppears happ))
 
-/-- The vocabulary the datatype step hands the generator, split back into the
+/-- The pool the datatype step hands the generator, split back into the
     external part (`ContextOk`) and the prior-datatype pool (`DatatypePoolOk`). -/
 theorem tyCons_append_split {s : GenState} :
     ∀ kc ∈ s.tyCons ++ s.dtCons, kc ∈ s.tyCons ∨ kc ∈ s.dtCons :=
@@ -1493,7 +1496,7 @@ theorem genDatatypeBlock_MutualADTWF {s : GenState} {b : Bounds}
   refine DatatypeGen.genMutuallyRecursiveDatatypes_MutualADTWF
     ?_ hinv.ctxOk hinv.dtPoolOk (storedRefsAbsent_of_inv hinv hfresh_res)
     tyCons_append_split (fun kc hkc => List.mem_append_left _ hkc) hblock
-  -- No name in the combined vocabulary is `"arrow"`: external ones by
+  -- No name in the combined pool is `"arrow"`: external ones by
   -- `tyConsNeArrow`, pool ones because they are reserved while `"arrow"`… is too —
   -- so instead use that a pool name is a *datatype* of `C` and `"arrow"` is not.
   intro kc hkc
@@ -1807,7 +1810,7 @@ theorem inv_initState : Inv initState := by
   refine
     { ctxOk := ?_
       knownReserved := ?_
-      aliasVocabDisjoint := ?_
+      aliasPoolDisjoint := ?_
       aliasNamesReserved := ?_
       baseSupset := ?_
       tyConsSupset := ?_

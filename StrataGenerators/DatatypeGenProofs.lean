@@ -2593,7 +2593,7 @@ theorem genArgTy_tyInhab {C : LContext CoreLParams} {block : MutualDatatype Unit
   -- therefore `getType_push_other` applies.
   have hbase_ext : ∀ b ∈ baseTypes, TypeFactory.getType (C.datatypes.push block) b = none :=
     fun b hb => getType_push_other (hn.base_notMem b hb) (hctx.base_external b hb)
-  -- A head from the *combined* vocabulary is inhabited: external if it came from `tyCons`,
+  -- A head from the *combined* pool is inhabited: external if it came from `tyCons`,
   -- and a transported `.datatype` derivation if it came from the prior-datatype pool.
   have hTyConInhab : ∀ kc ∈ allTyCons, TySymInhab (C.datatypes.push block) kc.1 := by
     intro kc hkc
@@ -2601,7 +2601,7 @@ theorem genArgTy_tyInhab {C : LContext CoreLParams} {block : MutualDatatype Unit
     · exact .external _ (getType_push_other (hn.tyCon_notMem kc hkc)
         (hctx.tyCon_external kc hext))
     · exact datatypePool_inhab_push hpool hstored hdt (hn.tyCon_notMem kc hkc)
-  -- References of a generated type land in the combined vocabulary; re-route them into the
+  -- References of a generated type land in the combined pool; re-route them into the
   -- five-way disjunction `tyInhab_of_absent` expects.
   have hrefs_split : ∀ {ty : LMonoTy},
       (∀ r ∈ getTypeRefs ty,
@@ -2798,7 +2798,7 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String}
     getType_push_other harrow_notmem hctx.arrow_external
   -- `ContextOk` reserves against `tyCons`, while freshness is stated against the wider
   -- `allTyCons`. The former's reserved set is contained in the latter's (`initialReserved`
-  -- mentions the vocabulary positively), so freshness against `allTyCons` is the stronger
+  -- mentions the type constructors positively), so freshness against `allTyCons` is the stronger
   -- fact and transfers.
   have hinit_mono : ∀ x, x ∈ initialReserved baseTypes tyCons extraReserved →
       x ∈ initialReserved baseTypes allTyCons extraReserved := by
@@ -2948,7 +2948,7 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
       · exact Or.inl hk
       · exact Or.inr (Or.inl hdt)
     · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp htc
-      -- A vocabulary reference is either an external known type (`ContextOk`) or a
+      -- A reference into the pool is either an external known type (`ContextOk`) or a
       -- previously declared datatype (`DatatypePoolOk.known`).
       rcases hsplit kc hkc with hext | hdt
       · rcases hctx.tyCon_known kc hext with hk | hdt'

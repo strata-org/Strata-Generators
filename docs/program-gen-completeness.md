@@ -66,6 +66,64 @@ the sub-generators' completeness lemmas at the program-step level where they app
 without new side conditions, and document (here) the conditions that are inherent
 to bounded sampling rather than hiding them behind `sorry`.
 
+### Per-step reachability: 5 of the 7 kinds
+
+`ProgramGen/Complete.lean` has per-step reachability lemmas for **axioms, abstract
+types, aliases, `distinct` and datatype blocks**:
+
+| kind | lemma | needs `genLExpr`? | needs an arity hypothesis? |
+| --- | --- | --- | --- |
+| axiom | `genDeclAxiom_complete` | yes, as a hypothesis | no |
+| abstract type | `genDeclAbstract_complete` | no | no |
+| alias | `genDeclAlias_complete`, `…_of_body` | no | yes, through the body |
+| `distinct` | `genDeclDistinct_complete` | no, only `.op` nodes | yes, through `τ` |
+| datatype | `genDeclDatatype_complete`, `…_of_MutualADTWF` | no, types only | yes, through the block |
+| function / procedure | none | yes | — |
+
+The arity hypotheses are `VocabOk` on the pool the generator draws from, plus
+`ArgsWellKinded` and `BitvecWidthOnly` on the type. `VocabOk` ties the pool to `C`'s
+arity register, so upstream's `argsWellKinded` carries the arity discipline and only
+`BitvecWidthOnly` remains as a condition on the type itself.
+
+The four non-axiom lemmas are provable because none of those four generators makes
+a general expression. The two kinds that have no lemma are the two whose bodies are
+general expressions.
+
+`genNonRecursiveArgTy_complete` is a support lemma. An alias body and the monotype
+of `distinct` both come from `genNonRecursiveArgTy`, which is `genArgTy` at the
+empty block. The lemma gives `genArgTy_complete_of_wf` at that block. The
+block-shaped hypotheses degenerate there: see `constrArgWF_nil`, and note that
+three of the four fields of `NamesOk` become vacuous. Only the free-variable
+condition and the arity hypotheses remain.
+
+The datatype step has two lemmas. `genDeclDatatype_complete` takes reachability of
+the block at `b.maxDatatypeSize` and the `.ok` branch of the `LContext.addMutualBlock`
+gate, and it pins the same `CoreLParams`-native instances that the generator pins, so
+the hypothesis matches the gate with no instance-diamond bridge.
+`genDeclDatatype_complete_of_MutualADTWF` discharges the block hypothesis from
+`MutualADTWF` alone, through the capstone
+`genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`. The caller gives no order of
+the datatypes and no rank; the capstone builds both. The side conditions are stated at
+the *combined* pool `s.tyCons ++ s.dtCons`, which is what the step draws over
+(interleaving direction (4)), and at `extraReserved := s.reserved`. The size is
+existential for the same reason it is existential in the capstone, so the conclusion
+varies `b.maxDatatypeSize`.
+
+The arity hypotheses are at the same position as in the datatype development, and
+they need no more plumbing. The hand-written `ArityOk` predicate these lemmas used to
+carry is gone, closed by `VocabOk` plus upstream's `argsWellKinded`.
+
+**The reduction is in use from end to end.** Two `example`s at the end of
+`Complete.lean` compose a per-step lemma through the weighted dispatch, the fold
+and the assembly of the program. The result is a reachable whole `Program`. One
+takes the abstract-type step, which grows one field of the generator state; the
+other takes the datatype step, which grows six (`C`, `reserved`, `dtCons` and the
+three operator contexts) and passes the `addMutualBlock`
+gate, and so is the one that checks that the state a per-step lemma names is the
+state the fold threads onward. Both paths remain narrow, because each has a single
+declaration. But they show that the interface of the reduction lemmas has the
+correct shape.
+
 A monolithic `genProgram_complete` (every `ProgramHasTypeA` program is reachable)
 is **not** claimed, because it is false without the union of all the side
 conditions above — exactly analogous to why datatype completeness needs

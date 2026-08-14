@@ -127,7 +127,7 @@ def constantFunc (name : String) (τ : LMonoTy) : Function :=
 def mkConstantDecl (name : String) (τ : LMonoTy) : Decl :=
   .func (constantFunc name τ) .empty
 
-/-! ## Referenceable type-constructor vocabulary
+/-! ## The pool of referenceable type constructors
 
 As the program grows, later ADT blocks and alias bodies may reference the type
 constructors declared earlier. We track the referenceable *applied* constructors
@@ -142,19 +142,19 @@ abbrev BaseTys := List String
 /-- The applied (arity ≥ 1) referenceable type constructors with their arity. -/
 abbrev TyCons := List KnownTyCon
 
-/-! ## Generating a type over a vocabulary
+/-! ## Types over the declared type constructors
 
-Alias bodies and (via the datatype generator) constructor arguments are types
-over the current vocabulary. We reuse `DatatypeGen.genArgTy` with an empty
-`blockRefs` (an alias body has no recursive self-reference) to produce a type
-mentioning only base types, applied constructors, and the supplied type
-parameters. -/
+An alias body is a type over the base types and the applied type constructors that
+are in scope. A constructor argument is such a type also. `DatatypeGen.genArgTy`
+generates these types. We call it with an empty `blockRefs`, because an alias body
+has no recursive self-reference. -/
 
-/-- Generate a type mentioning only `baseTypes`, `tyCons`, and the type variables
-    `tyParams` (no block/self references). Reuses the datatype generator's
-    argument-type generator with `blockRefs := []` and `recCallsAllowed := false`
-    (there is nothing to recurse into). -/
-def genVocabTy [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
+/-- Generate a type that mentions only `baseTypes`, `tyCons`, and the type
+    variables `tyParams`. The type has no block references and no self-references.
+    This is the argument-type generator of the datatype development with
+    `blockRefs := []` and `recCallsAllowed := false`, because there is nothing to
+    recurse into. -/
+def genNonRecursiveArgTy [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
     (tyParams : List TyIdentifier) (size : Nat) : G LMonoTy :=
   genArgTy baseTypes tyCons [] tyParams false size
 
@@ -162,7 +162,7 @@ def genVocabTy [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
 
 /-- Generate an abstract type declaration with a fresh name (drawn against
     `reserved`) and an arity in `[0, maxArity]`. Returns the declaration, its
-    name, and its arity (the caller uses the arity to extend the vocabulary). -/
+    name, and its arity (the caller uses the arity to extend the pool). -/
 def genAbstractType [Gen G] (reserved : List String) (maxArity : Nat) :
     G (Decl × String × Nat) := do
   let name ← DatatypeGen.genFreshName reserved
@@ -172,8 +172,8 @@ def genAbstractType [Gen G] (reserved : List String) (maxArity : Nat) :
 /-! ## Type-alias generation -/
 
 /-- Generate a type-alias declaration. Draws a fresh name and a fresh list of
-    type parameters (in `[0, maxTyParams]`), then a body over the current
-    vocabulary *and* those type parameters. The stored `typeArgs` are re-derived
+    type parameters (in `[0, maxTyParams]`), then a body over the type
+    constructors in scope *and* those type parameters. The stored `typeArgs` are re-derived
     from the body's free variables (`mkAliasDecl`), so the alias is well-formed by
     construction even though the drawn parameters may not all appear in the body. -/
 def genAlias [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
@@ -181,7 +181,7 @@ def genAlias [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
   let name ← DatatypeGen.genFreshName reserved
   let numTyParams ← chooseNat 0 maxTyParams (by omega)
   let tyParams ← DatatypeGen.genFreshNames reserved numTyParams
-  let body ← genVocabTy baseTypes tyCons tyParams size
+  let body ← genNonRecursiveArgTy baseTypes tyCons tyParams size
   pure (mkAliasDecl name body, name)
 
 /-! ## Axiom generation -/
@@ -239,7 +239,7 @@ def distinctElems (τ : LMonoTy) (names : List String) : List PExpr :=
 def genDistinctAssertion [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
     (reserved : List String) (maxVars size : Nat) : G (String × LMonoTy × List String) := do
   let name ← DatatypeGen.genFreshName reserved
-  let τ ← genVocabTy baseTypes tyCons [] size
+  let τ ← genNonRecursiveArgTy baseTypes tyCons [] size
   let numVars ← chooseNat 0 maxVars (by omega)
   let constNames ← DatatypeGen.genFreshNames (name :: reserved) numVars
   pure (name, τ, constNames)

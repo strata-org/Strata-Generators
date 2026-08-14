@@ -77,7 +77,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
         (DeclsHasType'.nil _ _)
     · -- `Inv` preserved.
       -- Grown reserved set is `block.map (·.name) ++ s.reserved`.
-      -- Block names avoid `initialReserved` over the *combined* vocabulary; the
+      -- Block names avoid `initialReserved` over the *combined* pool; the
       -- external-only reserved set is contained in it, so freshness transfers.
       have hfresh' : ∀ d ∈ block, d.name ∉
           DatatypeGen.initialReserved s.baseTypes s.tyCons s.reserved := by
@@ -106,7 +106,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
       refine
         { ctxOk := hctx'
           knownReserved := ?_
-          aliasVocabDisjoint := ?_
+          aliasPoolDisjoint := ?_
           aliasNamesReserved := ?_
           baseSupset := hinv.baseSupset
           tyConsSupset := hinv.tyConsSupset
@@ -125,8 +125,8 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
         rcases (hkw k).mp hk with hblk | hold
         · exact List.mem_append_left _ hblk
         · exact List.mem_append_right _ (hinv.knownReserved k hold)
-      · -- alias-vocab disjointness unchanged (`Γ` and vocab unchanged).
-        exact hinv.aliasVocabDisjoint
+      · -- alias-pool disjointness unchanged (`Γ` and pool unchanged).
+        exact hinv.aliasPoolDisjoint
       · -- alias names still reserved (reserved only grew).
         intro a ha
         exact List.mem_append_right _ (hinv.aliasNamesReserved a ha)
@@ -197,7 +197,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
             (hinv.dtConsReserved x (List.mem_map.mpr ⟨kc, hold, hkceq⟩))
       · -- storedRefsReserved: the stored datatypes of `C'` are the old ones plus the
         -- block. Old references were reserved; the block's own references are
-        -- confined to the vocabulary ∪ block names ∪ {"arrow"}, all reserved.
+        -- confined to the pool ∪ block names ∪ {"arrow"}, all reserved.
         intro d hd c hc arg harg r hr
         rw [addMutualBlock_datatypes hadd, allDatatypes_push, List.mem_append] at hd
         rcases hd with hold | hblk
@@ -290,7 +290,7 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
   refine ⟨?_, ?_⟩
   · exact DeclsHasType'.cons _ _ _ _ _ _ _ _
       (DeclHasType'.proc s.C s.Γ _ .empty hpt') (DeclsHasType'.nil _ _)
-  · -- `Inv` ignores `procs` (it constrains only `C`/`Γ`/vocabulary/reserved), and
+  · -- `Inv` ignores `procs` (it constrains only `C`/`Γ`/pool/reserved), and
     -- the step changes `procs` and `reserved` only.
     exact inv_cons_reserved_procs hinv _ _
 

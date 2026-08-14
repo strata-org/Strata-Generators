@@ -188,13 +188,13 @@ theorem addMutualBlock_knownTypes_getElem? {C C' : LContext CoreLParams}
   apply foldlM_add_toKnownType_getElem? (block := block) (hk := hk)
   assumption
 
-/-! ## Default-vocabulary membership in `initialReserved`
+/-! ## Membership of the default type names in `initialReserved`
 
-Every name in the default vocabulary (`defaultBaseTypes`, `defaultTyCons` names,
-`"arrow"`) lies in `initialReserved defaultBaseTypes defaultTyCons R`. Combined
-with the freshness hypothesis (block names avoid `initialReserved`), this shows a
-default-vocabulary name is never a block name — the fact `getType_push_other`
-needs to keep the "external" fields true. -/
+Every default type name (`defaultBaseTypes`, `defaultTyCons` names, `"arrow"`)
+lies in `initialReserved defaultBaseTypes defaultTyCons R`. Combined with the
+freshness hypothesis (block names avoid `initialReserved`), this shows a default
+type name is never a block name — the fact `getType_push_other` needs to keep the
+"external" fields true. -/
 
 theorem base_mem_initialReserved {b : String} {baseTypes : List String}
     {tyCons : List KnownTyCon} {R : List String} (hb : b ∈ baseTypes) :
@@ -277,9 +277,9 @@ theorem simpleTyArities_of_addMutualBlock {C C' : LContext CoreLParams}
       (`addMutualBlock_knownTypes`).
     * `knownTypes_reserved` / `datatypes_reserved`: block names are in the grown
       reserved set by construction; old keys/names are in `R ⊆` grown set.
-    * "external" fields: `datatypes = C.datatypes.push block`, and a
-      default-vocabulary name is never a block name (freshness vs.
-      `initialReserved`), so `getType_push_other` keeps it external. -/
+    * "external" fields: `datatypes = C.datatypes.push block`, and a default type
+      name is never a block name (freshness vs. `initialReserved`), so
+      `getType_push_other` keeps it external. -/
 theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     {baseTypes : List String} {tyCons : List KnownTyCon}
     {block : MutualDatatype Unit}
@@ -311,7 +311,7 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     unfold initialReserved
     apply List.mem_cons_of_mem
     exact List.mem_append_right _ (List.mem_append_left _ hn)
-  -- A default-vocabulary name is never a block name: it is in `initialReserved`,
+  -- A default type name is never a block name: it is in `initialReserved`,
   -- which the block names avoid.
   have hnotblk : ∀ x, x ∈ initialReserved baseTypes tyCons R →
       x ∉ block.map (·.name) := by

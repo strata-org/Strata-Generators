@@ -15,7 +15,7 @@ open StrataGenerators.Procedure
 Ties the per-declaration generators in `StrataGenerators.ProgramGen.Core`
 together into a `Program` generator, threading the real ambient context
 (`LContext CoreLParams`), type scope (`TContext Unit`), reserved-name set, and
-referenceable type-constructor vocabulary across a declaration fold.
+pool of referenceable type constructors across a declaration fold.
 
 Soundness (every generated program is `ProgramHasTypeA coreContext {} P`) and
 completeness live in `StrataGenerators.ProgramGen.Sound` /
@@ -32,7 +32,7 @@ The declaration fold threads:
 * `Γ`        — the type scope (grows on alias adds);
 * `reserved` — every name declared so far, plus the seed reserved set, so newly
                drawn declaration names are globally distinct (`getNames.Nodup`);
-* `baseTypes` / `tyCons` — the referenceable type-constructor vocabulary, grown
+* `baseTypes` / `tyCons` — the pool of referenceable type constructors, grown
                by abstract-type declarations.
 
 * `octx` / `pctx` — the operator vocabularies feeding expression generation, grown
@@ -52,7 +52,7 @@ structure GenState where
       external known types: they reach `TySymInhab` through `.datatype` (carried by
       `Inv.dtPoolOk`) rather than `.external`. Grown by each datatype step. -/
   dtCons : TyCons
-  /-- Monomorphic operator vocabulary for generated expressions (axiom bodies,
+  /-- Monomorphic operator context for generated expressions (axiom bodies,
       function bodies, procedure contracts/bodies).
 
       Seeded with Core's primitives (`coreMonoOps`) and grown from **two** sources,
@@ -75,7 +75,7 @@ structure GenState where
       unlike `procs`, whose threading needed a new invariant field. That is what made
       both growths plumbing changes rather than proof efforts. -/
   octx : OpCtx
-  /-- Polymorphic operator vocabulary (the `IndirPoly` rule), grown from the same two
+  /-- Polymorphic operator context (the `IndirPoly` rule), grown from the same two
       sources as `octx`: each datatype step adds the block's derived functions under
       their full type *schemes* (`adtDerivedPolyOps`) — the projection that makes a
       *polymorphic* datatype's accessors and testers reachable, since `IndirPoly`
@@ -117,9 +117,9 @@ structure GenState where
   deriving Inhabited
 
 /-- The initial fold state: the Strata Core reference context `coreContext`, an
-    empty type scope, the reserved seed (`initialReserved` over the default
-    vocabulary, plus every name Core already knows so generated names dodge them),
-    and the default referenceable vocabulary. -/
+    empty type scope, the reserved seed (`initialReserved` over the default type
+    constructors, plus every name Core already knows so generated names dodge
+    them), and the default pool of referenceable type constructors. -/
 def initState : GenState :=
   { C := coreContext
     Γ := {}
@@ -180,7 +180,7 @@ and keeps the soundness proof a clean `DeclsHasType'` cons/nil split. -/
     state. -/
 abbrev StepResult := List Decl × GenState
 
-/-- Add each of `names` to the reserved set, and grow the vocabulary by an
+/-- Add each of `names` to the reserved set, and grow the referenceable pool by an
     abstract type of the given `arity` (nullary → base type, else applied
     constructor). -/
 def GenState.addAbstract (s : GenState) (name : String) (arity : Nat)
@@ -192,7 +192,7 @@ def GenState.addAbstract (s : GenState) (name : String) (arity : Nat)
     tyCons := if arity = 0 then s.tyCons else (name, arity) :: s.tyCons }
 
 /-- Generate an abstract-type declaration and, if its name does not clash in `C`,
-    emit it and grow both the context and the vocabulary. On a clash (impossible
+    emit it and grow both the context and the referenceable pool. On a clash (impossible
     for a freshly drawn name, but handled uniformly) the state is unchanged. -/
 def genDeclAbstract [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let (decl, name, arity) ← genAbstractType s.reserved b.maxTyConArity
@@ -254,11 +254,11 @@ def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   | none => pure ([], s)
 
 /-- Generate a datatype block and, if `addMutualBlock` accepts it, emit it and
-    grow the context. The block references the *threaded* vocabulary
+    grow the context. The block references the *threaded* pool
     (`s.baseTypes`/`s.tyCons`), so it may mention any abstract type declared
     earlier in the program — interleaving direction (2) of
     `docs/program-gen-interleaving.md`. The fold invariant carries `ContextOk` at
-    that grown vocabulary (`Inv.ctxOk`), re-established at each abstract-type step
+    that grown pool (`Inv.ctxOk`), re-established at each abstract-type step
     by `contextOk_addKnownType_grow`.
 
     Its names are drawn fresh against the whole threaded `reserved` set (which by
@@ -267,7 +267,7 @@ def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     types (→ `MutualADTWF`) and every other declaration's name (→
     `getNames.Nodup`). -/
 def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
-  -- The applied-constructor vocabulary is the external one *plus* the prior-datatype
+  -- The applied-constructor pool is the external one *plus* the prior-datatype
   -- pool (direction (4)). A prior datatype is drawn exactly like any other applied
   -- constructor — at its declared arity, with `recCallsAllowed := false` inside its
   -- arguments — so `argsWF`/`argVarsScoped` are unaffected; only the inhabitance
@@ -307,10 +307,10 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
 
 /-! ### A block that mentions a prior *alias* — deliberately not generated
 
-`genDeclDatatype` draws its block over a vocabulary of type *constructors*, which
+`genDeclDatatype` draws its block over a pool of type *constructors*, which
 never contains an alias name: `genDeclAlias` extends only `Γ.aliases` and
 `reserved`, never `baseTypes`/`tyCons`/`dtCons` (the invariant recorded by
-`Inv.aliasVocabDisjoint`). So no generated block mentions an alias.
+`Inv.aliasPoolDisjoint`). So no generated block mentions an alias.
 
 A step that *did* draw over the alias names and then de-aliased with the checker's
 own `MutualDatatype.resolveAliases` was prototyped and **removed**, because it

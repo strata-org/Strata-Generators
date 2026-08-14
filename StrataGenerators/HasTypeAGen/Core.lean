@@ -1034,7 +1034,7 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
   -- For each possible type variable, sample a random type to instantiate it with.
   -- When no generable types exist, fall back to an arbitrary base type
   -- (`pickBaseType`: bool/int/string/real/regex/bitvec) rather than always `.bool`,
-  -- so the empty-context case still explores the whole ground-type vocabulary.
+  -- so the empty-context case still explores every ground type.
   let sampledTys ← List.replicate maxNumArgs ()
     |>.mapM (fun _ =>
       if hg : generableTys.length > 0 then do
@@ -1880,13 +1880,13 @@ def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat)
   let τ ← genLMonoTy tvars depth
   genLExpr [] ∅ [] tvars [] depth τ maxNumArgs
 
-/-! ## Core operator vocabularies
+/-! ## Core operator contexts
 
 The monomorphic and polymorphic operator contexts drawn from Strata's
 `Core.Factory`. These live here (rather than in `TestSupport`) so that
-*generators* — not just the test harness — can be seeded with a realistic
-operator vocabulary; `ProgramGen` uses them for axiom, function, and procedure
-bodies. `TestSupport` re-exports them for the property suites. -/
+*generators* — not just the test harness — can be seeded with a realistic set of
+operators; `ProgramGen` uses them for axiom, function, and procedure bodies.
+`TestSupport` re-exports them for the property suites. -/
 
 /-- Every monomorphic operator of Strata's `Core.Factory`, as a pair of a name and
     a curried type. The Indir generation rule uses this context.
