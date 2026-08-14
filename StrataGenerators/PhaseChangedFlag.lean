@@ -9,7 +9,7 @@ import Strata.Languages.Core.Verifier
 # `changed`-flag faithfulness across *every* `PipelinePhase`
 
 `Core.PipelinePhase.transform` returns `Bool × Program`. The `Bool` is specified
-by `ChangedFlagValid` (`Strata/Transform/CustomSpecifications.lean:97`) to mean
+by `ChangedFlagValid` (`Strata/Transform/CustomSpecifications.lean`) to mean
 "this phase changed the program", i.e. `changed = true ↔ progOut ≠ progIn`.
 
 Four phases return it as the literal `true` regardless of whether they changed
@@ -21,10 +21,10 @@ phase added later is covered without anyone writing a new property.
 
 | Phase | Site | Flag |
 |---|---|---|
-| `FilterProcedures` | `FilterProcedures.lean:82` | `return (true, filtered)` |
-| `RemoveIrrelevantAxioms` | `IrrelevantAxioms.lean:81` | `return (true, pruned)` |
-| `typeCheck` | `Verifier.lean:1510` | `return (true, prog')` |
-| `symbolicEval` | `Verifier.lean:1517` | `return (true, prog')` |
+| `FilterProcedures` | `FilterProcedures.lean` | `return (true, filtered)` |
+| `RemoveIrrelevantAxioms` | `IrrelevantAxioms.lean` | `return (true, pruned)` |
+| `typeCheck` | `Verifier.lean` | `return (true, prog')` |
+| `symbolicEval` | `Verifier.lean` | `return (true, prog')` |
 
 Every *other* phase computes the flag honestly, which is what makes these four
 read as oversights rather than a different convention: `CSE.runCSE` uses
@@ -35,8 +35,8 @@ read as oversights rather than a different convention: `CSE.runCSE` uses
 ## Severity, stated honestly
 
 No consumer reads the flag today. Both call sites discard it —
-`PipelinePhase.lean:101` (`let (_, next) ← pp.transform prog`) and
-`CoreToGOTOPipeline.lean:583`. So nothing misbehaves at runtime; the defect is
+`PipelinePhase.lean` (`let (_, next) ← pp.transform prog`) and
+`CoreToGOTOPipeline.lean`. So nothing misbehaves at runtime; the defect is
 that the field is *specified* to mean something it does not mean, and the first
 consumer to trust it gets wrong answers silently. These properties are a
 regression gate on the eventual fix, not a report of live breakage.
@@ -76,21 +76,21 @@ structure NamedPhase where
 
 /-- The options used to build the pipeline. `.quiet` matters: `typeCheck` and
     `symbolicEval` `dbg_trace` their progress at `verbose ≥ .normal`
-    (`Verifier.lean:660`, `:833`), which would interleave "[Strata.Core] Type
+    (`Verifier.lean`), which would interleave "[Strata.Core] Type
     checking succeeded." and a VC dump into the harness output on every trial. -/
 def phaseOptions : Core.VerifyOptions := Core.VerifyOptions.quiet
 
 /-- A representative target list. Supplying `procs` is what makes
     `corePipelinePhases` include the two `FilterProcedures` phases at all
-    (`Verifier.lean:1487–1493`); with `procs := none` they are absent and the
+    (`Verifier.lean`); with `procs := none` they are absent and the
     sweep would silently omit the one site that is already known-and-reported.
     `"P0"` is the first procedure name `relabelProcs` assigns, so on generated
     input this is a real target rather than a name that filters everything. -/
 def phaseTargets : List String := ["P0"]
 
 /-- `typeCheck` and `symbolicEval` are not exported as top-level definitions:
-    they are `let`-bound inside `Core.corePipelinePhases` (`Verifier.lean:1507`,
-    `:1512`). Rather than duplicate their bodies — which would test our copy
+    they are `let`-bound inside `Core.corePipelinePhases` (`Verifier.lean`).
+    Rather than duplicate their bodies — which would test our copy
     instead of Strata's — we recover them positionally from
     `corePipelinePhases`, keying on `phase.name`. If Strata renames or drops a
     phase this returns `none` and the corresponding property is skipped rather
@@ -115,7 +115,7 @@ def hardcodedPhases : List NamedPhase :=
 
     `RemoveIrrelevantAxioms` is appended because it is *not* part of
     `corePipelinePhases` — it is offered as `Core.passRemoveIrrelevantAxioms`
-    (`Core.lean:174`) for a caller to compose in — so a sweep of the standard
+    (`Core.lean`) for a caller to compose in — so a sweep of the standard
     pipeline alone would miss it.
 
     Note `FilterProcedures` appears **twice** in `corePipelinePhases` (once
@@ -156,7 +156,7 @@ def changedFlagValid (ph : Core.PipelinePhase) (prog : Program) : Bool :=
 
     **This is a precondition of `symbolicEval`, not a stylistic filter.**
     `Core.Statement.evalOneStmt` answers a `.loop` with `panic!`
-    (`StatementEval.lean:605`), whose message says "transform your program to
+    (`StatementEval.lean`), whose message says "transform your program to
     eliminate loops before calling `Core.Statement.evalAux`". The real pipeline
     satisfies this by running `loopElimPipelinePhase` first; a sweep that applies
     each phase *independently* to raw generated input does not, so running
@@ -272,12 +272,12 @@ def filterNoOp : NoOpWitness :=
    Core.filterProceduresPipelinePhase (programProcNames axiomFreeProgram) true,
    axiomFreeProgram⟩
 
-/-- **HONEST FAILURE — pins `IrrelevantAxioms.lean:81`.** `RemoveIrrelevantAxioms`
+/-- **HONEST FAILURE — pins `IrrelevantAxioms.lean`.** `RemoveIrrelevantAxioms`
     on an axiom-free program is necessarily a no-op, so the flag must be `false`.
     The phase returns `(true, pruned)` unconditionally, so this **fails**. -/
 def checkIrrelevantAxiomsNoOpFlag : Bool := irrelevantAxiomsNoOp.check
 
-/-- **HONEST FAILURE — pins `FilterProcedures.lean:82`.** With every procedure in
+/-- **HONEST FAILURE — pins `FilterProcedures.lean`.** With every procedure in
     the target set nothing can be removed, so the flag must be `false`. Restates
     the already-pinned `proc:` property on the constructed witness, so the
     uniform sweep is self-contained. -/
@@ -306,7 +306,7 @@ def checkAllPhasesChangedFlag (ps : List Procedure) : Bool :=
     The first four hardcode the flag to `true` (see the module doc). `PrecondElim`
     is different and must not be conflated with them: it *computes* its flag, but
     computes it wrongly in one branch — `transformStmt`'s `.funcDecl` case
-    (`PrecondElim.lean:318–338`) inserts a `{name}$$wf` block for obligations found
+    (`PrecondElim.lean`) inserts a `{name}$$wf` block for obligations found
     in a declared function's **body** while returning a flag derived only from
     `!decl.preconditions.isEmpty`. So it reports `changed = false` having rewritten
     the program: a false *negative*, where the other four are false positives.

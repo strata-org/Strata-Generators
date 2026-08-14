@@ -33,8 +33,8 @@ component generators:
 
 ## The three threaded contexts
 
-`StatementHasType'` is a 6-place relation `C Γ L s C' Γ'` (post-#1392: the spec now
-tracks the set `L` of enclosing-block labels). The generator threads a
+`StatementHasType'` is a 6-place relation `C Γ L s C' Γ'` (the spec tracks the set
+`L` of enclosing-block labels). The generator threads a
 representation of all three:
 
 - `Γ` (variable type-scope) is threaded via the flat `VarCtx` from

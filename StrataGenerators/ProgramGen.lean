@@ -318,13 +318,13 @@ could not be proved sound: generator soundness gives `MutualADTWF s.C block₀` 
 the block *drawn*, while `DeclHasType'.type_data` needs it for the block *stored*
 (`resolveAliases block₀`), and `MutualADTWF` is **not** preserved by alias
 resolution — an arrow-bodied alias can move a block name into an arrow's domain,
-breaking strict positivity (worked example in repo issue #65).
+breaking strict positivity (worked example in `docs/program-gen-interleaving.md`).
 
 That gap is not reachable by *this* generator (`genArgTy` draws application
 arguments at `recCallsAllowed := false`, so a block name never appears inside an
 alias application's arguments), so the removed step was unproven rather than
 known-unsound. It is parked pending a question to the Strata team about whether
-positivity is meant to be checked pre- or post-resolution — see repo issue #65 and
+positivity is meant to be checked pre- or post-resolution — see
 `docs/program-gen-interleaving.md`. -/
 
 /-- How many times a declared function's operator entry is repeated in `octx` /
@@ -564,7 +564,7 @@ This is the same pattern the Tyche procedure panels use
 
 **Retry fuel has to scale with `numDecls`.** The residual failure mode is
 `inhabitedWitness` from the expression generator (a compound argument type that
-nothing in scope inhabits — the incompleteness tracked in repo issue #64). Each
+nothing in scope inhabits — a known incompleteness). Each
 declaration is an independent chance to hit it, so whole-program success decays
 geometrically in `numDecls` and the fuel must absorb it. Measured, default bounds,
 `size = 10`:

@@ -2,10 +2,10 @@ import StrataGenerators.ProgramGen
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 
 /-!
-# The printer expresses what the language admits (#69 P2, #48)
+# The printer expresses what the language admits
 
 `Core.formatProgram` does **not** fail when it cannot express something. Via
-`formatWithDDM` (`ASTtoCST.lean:289` → `FormatCore.lean:1179`) it appends
+`formatWithDDM` (`ASTtoCST.lean` → `FormatCore.lean`) it appends
 
 ```
 -- Errors encountered during conversion:
@@ -14,10 +14,10 @@ import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 to its output and substitutes a placeholder. Two placeholders are especially
 dangerous because they are *syntactically valid*:
 
-- `unknownTypeVar = "$__unknown_type"` (`FormatCore.lean:80`) — an unprintable
+- `unknownTypeVar = "$__unknown_type"` (`FormatCore.lean`) — an unprintable
   type becomes a **type variable**, so the result can round-trip "successfully"
   while denoting a different program;
-- `mkGenericCall` (`FormatCore.lean:225`) renders an unknown operator as a call
+- `mkGenericCall` (`FormatCore.lean`) renders an unknown operator as a call
   to a fresh free variable, so an unprintable *operator* becomes an ordinary
   application.
 
@@ -47,17 +47,17 @@ alongside `function: pretty-print/parse round-trip` rather than instead of it.
 ## Two confirmed gaps at *supported* widths
 
 Both are pinned by the unit-style checks below, and neither is the known
-non-power-of-2 story (#48 / #38):
+non-power-of-2 story:
 
 1. **`bv128` literals are unprintable.** The grammar has `bv128Lit`
-   (`Grammar.lean:113`) and the factory registers `bv128ToIntFunc`
-   (`Factory.lean:872`), but `lconstToExpr` logs `unsupported bitvec width: 128`.
+   (`Grammar.lean`) and the factory registers `bv128ToIntFunc`
+   (`Factory.lean`), but `lconstToExpr` logs `unsupported bitvec width: 128`.
 
 2. **The whole `Bv↔Int` conversion family is unprintable at *every* width.**
-   `Factory.lean:850–872` registers `Bv{w}.ToInt` / `Bv{w}.ToUInt` /
+   `Factory.lean` registers `Bv{w}.ToInt` / `Bv{w}.ToUInt` /
    `Int.ToBv{w}` for `w ∈ {1, 8, 16, 32, 64, 128}`. There is **no grammar
    production and no printer case for any of them** — `handleUnaryOps` falls
-   through to `mkGenericCall` (`FormatCore.lean:407`). So these operators can be
+   through to `mkGenericCall` (`FormatCore.lean`). So these operators can be
    constructed and typechecked but not printed. This is a systematic hole rather
    than a missing case, which is what makes it the more interesting of the two.
 
@@ -89,11 +89,11 @@ open StrataGenerators
 -- ── Detecting conversion errors ───────────────────────────────────────────
 
 /-- The marker `formatWithDDM` appends when `finalCtx.errors` is non-empty
-    (`FormatCore.lean:1168`). Matching on this rather than on any particular
+    (`FormatCore.lean`). Matching on this rather than on any particular
     message keeps the oracle robust to Strata rewording an individual error. -/
 def errorMarker : String := "Errors encountered during conversion"
 
-/-- The per-error line prefix (`ASTToCSTError.toString`, `FormatCore.lean:61`). -/
+/-- The per-error line prefix (`ASTToCSTError.toString`, `FormatCore.lean`). -/
 def errorLinePrefix : String := "Unsupported construct in "
 
 /-- The program text the printer claims to have produced, with the appended error
@@ -125,8 +125,8 @@ def errorSite (line : String) : String :=
     else line
   ((afterPrefix.splitOn ":").headD afterPrefix).trimAscii.toString
 
-/-- **The #69 P2 oracle.** `true` when formatting `prog` logs no conversion error
-    attributable to Strata. -/
+/-- **The printer-expressiveness oracle.** `true` when formatting `prog` logs no
+    conversion error attributable to Strata. -/
 def printsWithoutError (prog : Program) : Bool :=
   (strataErrorLines (Core.formatProgram prog).pretty).isEmpty
 
@@ -160,7 +160,7 @@ def programErrorLines (prog : Program) : List String :=
 -- stable statement of the defect than "some generated program hit it" — and it
 -- keeps the report reproducible if the generator's distribution shifts.
 
-/-- The bitvector widths Strata's factory registers (`Factory.lean:867–872`).
+/-- The bitvector widths Strata's factory registers (`Factory.lean`).
     Note `128` is present here but absent from the printer's `lconstToExpr` and
     from `bvTypeOfWidth`'s enumeration — that mismatch *is* finding (1). -/
 def factoryBvWidths : List Nat := [1, 8, 16, 32, 64, 128]
@@ -184,7 +184,7 @@ def bvLit (w : Nat) : Expression.Expr :=
 def checkBvLitPrints (w : Nat) : Bool := exprPrintsCleanly (bvLit w)
 
 /-- **HONEST FAILURE — pins finding (1).** A `bitvec 128` literal is registered by
-    the factory and has a grammar production (`bv128Lit`, `Grammar.lean:113`), but
+    the factory and has a grammar production (`bv128Lit`, `Grammar.lean`), but
     `lconstToExpr` logs `unsupported bitvec width: 128`. Every *other* registered
     width prints, which is what makes 128 an omission rather than a design
     boundary. -/
@@ -204,7 +204,7 @@ def allBvIntConversionOps : List String :=
 
 /-- An application of a named unary operator to a placeholder argument. The
     argument is an `int` literal: `handleUnaryOps` dispatches on the *operator
-    name* alone (`FormatCore.lean:357`), so the argument's type does not affect
+    name* alone (`FormatCore.lean`), so the argument's type does not affect
     whether the operator is printable. -/
 def unaryApp (name : String) : Expression.Expr :=
   .app () (.op () ⟨name, ()⟩ none) (.const () (.intConst 1))
@@ -228,23 +228,24 @@ def checkBvIntConversionsPrint : Bool :=
 def unprintableBvIntConversions : List String :=
   allBvIntConversionOps.filter (fun op => !checkBvIntConversionPrints op)
 
--- ── Bitvector widths: typechecker vs printer (#48) ────────────────────────
+-- ── Bitvector widths: typechecker vs printer ──────────────────────────────
 /-!
-## The width divergence (#48)
+## The width divergence
 
-Issue #48 asks two questions: does the Strata typechecker *accept* bitvectors of
-non-power-of-2 width, and if so do round-trip properties fail on them?
+Two questions motivate this section: does the Strata typechecker *accept*
+bitvectors of non-power-of-2 width, and if so do round-trip properties fail on
+them?
 
 **Both answers are yes, and the interesting finding is the divergence itself.**
 `Function.typeCheck` accepts `bitvec w` for **every** `w` tested (0–199), because
-`LMonoTy.bitvec` is unconstrained in the AST (issue #38) and the known-type entry
+`LMonoTy.bitvec` is unconstrained in the AST and the known-type entry
 is the polymorphic `t[∀n. bitvec n]`. The printer supports **five** widths.
 
-### One correction to the issue's framing
+### One correction to the usual framing
 
-#48 says round-trips fail because "the DDM expects bit-vector widths to be a power
-of 2". That predicate is **wrong**, and measurably so: `bitvec 2`, `bitvec 4` and
-`bitvec 128` are all powers of two and all fail to print. Scanning `0..199`
+The usual account says round-trips fail because "the DDM expects bit-vector widths
+to be a power of 2". That predicate is **wrong**, and measurably so: `bitvec 2`,
+`bitvec 4` and `bitvec 128` are all powers of two and all fail to print. Scanning `0..199`
 exhaustively, the widths that print cleanly are exactly
 
 ```
@@ -252,8 +253,8 @@ exhaustively, the widths that print cleanly are exactly
 ```
 
 which is not "the powers of two" but *the five arms hardcoded in the printer* —
-`lmonoTyToCoreType` (`FormatCore.lean:243–247`) for types, `lconstToExpr`
-(`:319–323`) for literals, and `bvTypeOfWidth` (`:343–350`) for operator type
+`lmonoTyToCoreType` for types, `lconstToExpr` for literals, and
+`bvTypeOfWidth` for operator type
 arguments. So the correct statement of the defect is "the printer supports a
 hardcoded five-element set of widths, while the typechecker and the AST admit
 every width", and the fix is not a power-of-2 guard.
@@ -265,7 +266,7 @@ the printer is out of step with the rest of Strata rather than merely narrow.
 ### Two distinct failure modes, and why the type case is the dangerous one
 
 `bvTypeOfWidth` does **not** emit a placeholder type — it logs an error and
-returns `.bv64` (`FormatCore.lean:349`). So an operator at an unsupported width is
+returns `.bv64` (`FormatCore.lean`). So an operator at an unsupported width is
 printed as though it were a **64-bit** operator: a silent width change, not a
 visible hole.
 
@@ -306,8 +307,8 @@ def widthTypeChecks (w : Nat) : Bool :=
 def widthPrintsCleanly (w : Nat) : Bool :=
   (strataErrorLines (formatFuncAsProgram (bvIdentityFunc w))).isEmpty
 
-/-- **The #48 property, HONEST FAILURE.** Every width the *typechecker* accepts
-    should be one the *printer* can express: a program Strata admits should be a
+/-- **The width-agreement property, HONEST FAILURE.** Every width the *typechecker*
+    accepts should be one the *printer* can express: a program Strata admits should be a
     program Strata can write down.
 
     Stated as an implication (`typechecks → prints`) rather than as an equality
@@ -317,8 +318,8 @@ def widthPrintsCleanly (w : Nat) : Bool :=
 
     Quantified over a width rather than over a generated function because the
     defect is a property *of the width*: `genLMonoTyBitvec` draws from
-    `Nat.arbitrary` (`HasTypeAGen/Core.lean:164`), which is exactly the generator
-    #48 proposes, so the whole-program property above already samples this space —
+    `Nat.arbitrary` (`HasTypeAGen/Core.lean`), which samples every width, so the
+    whole-program property above already covers this space —
     but a generated hit does not say *which* width is at fault. This does. -/
 def checkWidthTypeCheckPrinterAgreement (w : Nat) : Bool :=
   !widthTypeChecks w || widthPrintsCleanly w
@@ -328,7 +329,7 @@ def checkWidthTypeCheckPrinterAgreement (w : Nat) : Bool :=
 def divergentBvWidths (bound : Nat) : List Nat :=
   (List.range bound).filter (fun w => !checkWidthTypeCheckPrinterAgreement w)
 
-/-- **HONEST FAILURE — the `#48` claim as one closed `Bool`**, over `0..63`
+/-- **HONEST FAILURE — the width-agreement claim as one closed `Bool`**, over `0..63`
     (enough to include several powers of two and both parities, while staying
     cheap: each width runs `Function.typeCheck` plus a format). -/
 def checkAllWidthsAgree : Bool :=

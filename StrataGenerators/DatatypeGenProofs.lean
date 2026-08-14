@@ -425,7 +425,7 @@ induction on `size` through these two lemmas. -/
 section Support
 
 /-- Each natural number is in the support of `Nat.arbitrary` at `SetGen.Set`. Therefore the
-    width generator inside `pickBitvecWidth` can make each width. Read issue #38.
+    width generator inside `pickBitvecWidth` can make each width.
 
     A private lemma of the same shape is in `HasTypeAGen.lean`. That file does not export
     it, therefore this file states it again. -/
@@ -3920,7 +3920,7 @@ example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") 
 
     * `Sequence a a` — the old counterexample — is now excluded by `MutualADTWF` itself, since
       `argsWellKinded` checks the argument count. Read the `example` above.
-    * `bitvec 7` was the standard example before issue #38, when `bitvecWidths` was a fixed
+    * `bitvec 7` was the standard example back when `bitvecWidths` was a fixed
       list. The widths now have no limit, so the generator makes every bitvector.
     * A type with an undeclared free variable is excluded by `argVarsScoped`.
 

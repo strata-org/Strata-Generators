@@ -336,7 +336,7 @@ private theorem Nat_arbitrary_support_set (n : Nat) :
     exact ⟨n, ih, rfl⟩
 
 /-- Every type in the support of `pickBitvecWidth` is `.bitvec n` for some width
-    `n`. Widths are unconstrained (issue #38). -/
+    `n`. Widths are unconstrained. -/
 private theorem pickBitvecWidth_mem (τ : LMonoTy)
     (hτ : τ ∈ SetGen.support (pickBitvecWidth (G := SetGen.Set))) :
     ∃ n, τ = .bitvec n := by
@@ -345,7 +345,7 @@ private theorem pickBitvecWidth_mem (τ : LMonoTy)
   exact ⟨n, rfl⟩
 
 /-- Completeness of `pickBitvecWidth`: `.bitvec n` is in the support for *any*
-    width `n` (issue #38). -/
+    width `n`. -/
 private theorem pickBitvecWidth_complete (n : Nat) :
     LMonoTy.bitvec n ∈ SetGen.support (pickBitvecWidth (G := SetGen.Set)) := by
   simp only [pickBitvecWidth, mem_support_map_iff]
@@ -369,7 +369,7 @@ private theorem pickBaseType_mem (tvars : List TyIdentifier) (τ : LMonoTy)
     exact ⟨.bitvec, rfl, allFtvarsIn_bitvec _ _⟩
 
 /-- Completeness of `pickBaseType`: any base `SimpleType` with depth 0 is in the
-    support (for bitvec, at any width — issue #38). -/
+    support (for bitvec, at any width). -/
 private theorem pickBaseType_complete_bool :
     LMonoTy.bool ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
   rw [pickBaseType, mem_support_oneOf_iff]
@@ -841,14 +841,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, body, hbody, rfl⟩
       · exact pickOp_sound octx _ _ _ h
       · exact .abs (genLExprBase_sound fctx octx pctx tvars (τ₁ :: bctx) n _ _ hbody)
-    -- Indir branch (#64): the operator spine is well-typed because the op node
+    -- Indir branch: the operator spine is well-typed because the op node
     -- types at its annotation and every argument comes from `genLExprBase … n`,
     -- whose soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the fallback also handled by the
+    -- IndirPoly branch: same, with the fallback also handled by the
     -- recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -933,14 +933,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, rfl | rfl⟩
       · exact pickOp_sound octx .bool _ _ h
       all_goals exact (by unfold LExpr.boolConst; exact .const)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1009,14 +1009,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩
       · exact pickOp_sound octx .int _ _ h
       all_goals exact (by unfold LExpr.intConst; exact .const)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1095,14 +1095,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         | exact pickBVar_sound bctx _ _ _ h
         | exact pickOp_sound octx _ _ _ h
         | exact absurd h (by simp)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1171,14 +1171,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
       · exact pickOp_sound octx .string _ _ h
       · exact (by unfold LExpr.strConst; exact .const)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1247,14 +1247,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickOp_sound octx .real _ _ h
       · exact (by unfold LExpr.realConst; exact .const)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1323,14 +1323,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
       · exact pickOp_sound octx _ _ _ h
       · exact (by unfold LExpr.bitvecConst; exact .const)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx m σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx m _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx m σ a ha)
@@ -1409,14 +1409,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         | exact pickBVar_sound bctx _ _ _ h
         | exact pickOp_sound octx _ _ _ h
         | exact absurd h (by simp)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1495,14 +1495,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         | exact pickBVar_sound bctx _ _ _ h
         | exact pickOp_sound octx _ _ _ h
         | exact absurd h (by simp)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1581,14 +1581,14 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         | exact pickBVar_sound bctx _ _ _ h
         | exact pickOp_sound octx _ _ _ h
         | exact absurd h (by simp)
-    -- Indir branch (#64): the spine is well-typed because the op node types at
+    -- Indir branch: the spine is well-typed because the op node types at
     -- its annotation and each argument comes from `genLExprBase … n`, whose
     -- soundness is this theorem's own recursive call.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
           (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, with the no-candidate fallback likewise
+    -- IndirPoly branch: same, with the no-candidate fallback likewise
     -- discharged by the recursive call.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
@@ -1598,8 +1598,8 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- the three context leaves — bvar / fvar / nullary op of type `τ` — exactly as
     -- the *depth-0* `.regex` case (`h_15`), so the same `pick*_sound` lemmas
     -- discharge it. Each leaf carries the annotation `τ`, so it is well-typed at `τ`.
-    -- (The `n + 1` regex arm `h_16` is no longer an analogue: #64 gave every named
-    -- `n + 1` case Indir/IndirPoly branches. This case stays leaf-only at both
+    -- (The `n + 1` regex arm `h_16` is no longer an analogue: every named
+    -- `n + 1` case has Indir/IndirPoly branches. This case stays leaf-only at both
     -- depths, which is what keeps the discharge non-inductive.)
     simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
@@ -1875,7 +1875,7 @@ open StrataGenerators.IndirSupport in
     maximum of the head's and the arguments' own depths.
 
     This is the fact that forces `genLExprBase_termDepth_bound`'s statement to
-    change under #64 (see the comment on that theorem): a fully-applied operator
+    change (see the comment on that theorem): a fully-applied operator
     of arity `k` costs `k` levels of `termDepth`, not one. -/
 theorem termDepth_mkApps_le (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
     (d : Nat) (hbase : termDepth bctx base ≤ d)
@@ -1916,9 +1916,9 @@ open StrataGenerators.IndirSupport in
     `K = max (opCtxArity octx) maxNumArgs` (at least 1) is the largest arity any
     single level can emit.
 
-    ## Why the bound is `depthBudget K depth` and not `depth` (#64)
+    ## Why the bound is `depthBudget K depth` and not `depth`
 
-    Before #64 this theorem read `termDepth bctx e ≤ depth`, and that was correct
+    Formerly this theorem read `termDepth bctx e ≤ depth`, and that was correct
     because every `genLExprBase` branch emitted exactly one constructor per level.
     Folding the Indir/IndirPoly rules into `genLExprBase` breaks it — and breaks it
     *semantically*, not just in the proof:
@@ -2092,7 +2092,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
       have := le_depthBudget_self K hK n
       omega
 
-    -- Five residual goals: the three leaf `pick*` branches plus, since #64, the
+    -- Five residual goals: the three leaf `pick*` branches plus the
     -- Indir and IndirPoly branches. They are dispatched by a `first`-combinator
     -- rather than positional bullets, because the goal order varies by type case
     -- and a positional script silently mis-assigns them.
@@ -2104,7 +2104,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
            | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
            | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
          all_goals simp [termDepth])
-      -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+      -- Indir / IndirPoly branches: each emits an application spine, costing
       -- one `termDepth` level per argument on top of the argument depth at `n`. The
       -- arity ceilings (`opCtxArity octx ≤ K` for the monomorphic rule, `3 ≤ K` for
       -- `maxNumArgs`) are what let a spine fit inside one `K`-sized budget level.
@@ -2200,7 +2200,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
           | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
         all_goals simp [termDepth]
 )
-      -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+      -- Indir / IndirPoly branches: each emits an application spine, costing
       -- one `termDepth` level per argument on top of the argument depth at `n`. The
       -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
       -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2275,7 +2275,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
           | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
         · simp [termDepth]
 )
-      -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+      -- Indir / IndirPoly branches: each emits an application spine, costing
       -- one `termDepth` level per argument on top of the argument depth at `n`. The
       -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
       -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2350,7 +2350,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
           | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
         · simp [termDepth]
 )
-      -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+      -- Indir / IndirPoly branches: each emits an application spine, costing
       -- one `termDepth` level per argument on top of the argument depth at `n`. The
       -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
       -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2424,7 +2424,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
           | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
         · simp [termDepth]
 )
-      -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+      -- Indir / IndirPoly branches: each emits an application spine, costing
       -- one `termDepth` level per argument on top of the argument depth at `m`. The
       -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
       -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2507,7 +2507,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
           have := genLExprBase_termDepth_bound fctx octx pctx tvars (τ₁ :: bctx) n K hK hKops hKpoly hSimpleArgs _ hs₂ _ hbody
           omega
 )
-      -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+      -- Indir / IndirPoly branches: each emits an application spine, costing
       -- one `termDepth` level per argument on top of the argument depth at `n`. The
       -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
       -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2604,7 +2604,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
         | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+    -- Indir / IndirPoly branches: each emits an application spine, costing
     -- one `termDepth` level per argument on top of the argument depth at `n`. The
     -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
     -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2697,7 +2697,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
         | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+    -- Indir / IndirPoly branches: each emits an application spine, costing
     -- one `termDepth` level per argument on top of the argument depth at `n`. The
     -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
     -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2792,7 +2792,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
         | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+    -- Indir / IndirPoly branches: each emits an application spine, costing
     -- one `termDepth` level per argument on top of the argument depth at `n`. The
     -- arity ceilings (`opCtxArity octx ≤ K` monomorphically, `3 ≤ K` for
     -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -2887,7 +2887,7 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
         | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
         | exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64): each emits an application spine, costing
+    -- Indir / IndirPoly branches: each emits an application spine, costing
     -- one `termDepth` level per argument on top of the argument depth at `n`. The
     -- arity ceilings (`opCtxArity octx ≤ K` for the monomorphic rule, `3 ≤ K` for
     -- `maxNumArgs`) are what let a whole spine fit in one `K`-sized budget level.
@@ -4373,7 +4373,7 @@ theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
 -- gone and `unifyTypes_matching_complete` below consumes the upstream theorem directly.
 -- (The old local statement's rationale is in this file's git history.)
 
-/-- The generator's `unifyTypes` wrapper (`Core.lean:916`) inherits matching-
+/-- The generator's `unifyTypes` wrapper (`Core.lean`) inherits matching-
     completeness from upstream's `Constraints_unify_matching_complete` by unwrapping the
     `.ok`/`.error` adapter. -/
 theorem unifyTypes_matching_complete
@@ -4877,7 +4877,7 @@ theorem genIndirPoly_sound (fctx : FVarCtx) (octx : OpCtx)
     (he : e ∈ SetGen.support
       (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs genArg)) :
     HasTypeA' bctx e τ := by
-  -- `genIndirPoly` is now the thin wrapper around `genIndirPolyCore` (#64), so the
+  -- `genIndirPoly` is now the thin wrapper around `genIndirPolyCore`, so the
   -- generator-parametric result applies directly: `genArg` soundness is `hArg`,
   -- and the fallback is `genLExprBase … depth`, handled by `genLExprBase_sound`.
   exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx τ
@@ -5164,14 +5164,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · simp [LExpr.getVars]
       · simp [LExpr.getVars]
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5235,14 +5235,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · simp [LExpr.getVars]
       · simp [LExpr.getVars]
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5303,14 +5303,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · simp [LExpr.getVars]
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5371,14 +5371,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · simp [LExpr.getVars]
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5439,14 +5439,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · simp [LExpr.getVars]
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx m σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx m _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx m σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx m _ a ha) e he
@@ -5512,14 +5512,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · simp only [LExpr.getVars]
         exact genLExprBase_fvars_subset fctx octx pctx tvars (τ₁ :: bctx) n _ _ hbody
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5611,14 +5611,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5710,14 +5710,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5809,14 +5809,14 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
@@ -5908,20 +5908,20 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       · rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars]
       · rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars]
       · exact absurd h (by simp)
-    -- Indir branch (#64): the head is an `.op` node (no free variables) and each
+    -- Indir branch: the head is an `.op` node (no free variables) and each
     -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
     -- bounds their free variables.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
           (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
       · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
-    -- IndirPoly branch (#64): same, fallback included.
+    -- IndirPoly branch: same, fallback included.
     · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx _ _ _ _ _
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
   case h_21 =>
     -- Other type constructors: the three context leaves, as in the depth-0 `.regex`
-    -- case `h_15` (not the `n + 1` arm, which #64 gave Indir/IndirPoly branches).
+    -- case `h_15` (not the `n + 1` arm, which has Indir/IndirPoly branches).
     -- A bvar/op leaf has no free variables; an fvar leaf's name comes from `fctx`.
     simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
@@ -6028,7 +6028,7 @@ theorem genIndirPoly_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
     (he : e ∈ SetGen.support
       (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs genArg)) :
     LExpr.getVars e ⊆ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) := by
-  -- As with `genIndirPoly_sound`: post-#64 `genIndirPoly` is the wrapper around
+  -- As with `genIndirPoly_sound`: `genIndirPoly` is now the wrapper around
   -- `genIndirPolyCore`, so the generator-parametric lemma applies, with
   -- `genLExprBase_fvars_subset` discharging the fallback.
   exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx τ _
@@ -6212,7 +6212,7 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
         (genIndirPoly (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs
           genArg) := by
   simp only [SetGen.support]
-  -- Post-#64 `genIndirPoly` is a wrapper, so unfold the core too (it is where the
+  -- `genIndirPoly` is now a wrapper, so unfold the core too (it is where the
   -- sampling `mapM` and the candidate `dite` actually live).
   unfold genIndirPoly genIndirPolyCore
   simp only [SetGen.Set.mem_bind, SetGen.Set.mem_pure, SetGen.mem_dite]
@@ -6245,7 +6245,7 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
 
     This is what lets the per-argument premises of `isPolyApp_of_hasType` be stated
     as the plain `genLExprBase_complete` bundle even though `genLExpr` draws
-    arguments from *itself* at the smaller index (post-#62). See the comment on
+    arguments from *itself* at the smaller index. See the comment on
     `isPolyApp_of_hasType`'s `hArgsComplete` for why the bundle is keyed to the
     argument budget `depth - 1` rather than `depth`. -/
 theorem genLExprBase_mem_genLExpr (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
@@ -6263,7 +6263,7 @@ theorem genLExprBase_mem_genLExpr (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
     exact ⟨1, _, List.mem_cons_self, by omega, he⟩
   · exact Or.inr ⟨hops, (pick_mem_iff _).mpr (Or.inl he)⟩
 
-/-- **The argument-position bridge (post-#62).**
+/-- **The argument-position bridge.**
 
     `genLExpr` draws its Indir/IndirPoly arguments from `genLExprBase … 0` at the
     depth floor and from *itself* at `n` above it (`Core.lean`'s `genArg`). This
@@ -6380,8 +6380,8 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- Per-argument recursive-completeness premises (the `genLExprBase_complete`
     -- bundle, one per argument), keyed by position against `concreteArgTys`.
     --
-    -- NOTE (post-#62): the depth budget here is `depth - 1`, not `depth`. Since
-    -- #62 made `genLExpr` recursive, arguments are drawn from the generator at the
+    -- NOTE: the depth budget here is `depth - 1`, not `depth`. Because
+    -- `genLExpr` is recursive, arguments are drawn from the generator at the
     -- *smaller* index, so an argument of a factory application has one less unit
     -- of depth than the application itself — the spine node consumes one. See
     -- `mem_genArg_of_baseComplete`.
@@ -6404,7 +6404,7 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       · omega
       · rw [← hAnnot]
     subst hArgTysEq
-    -- Derive argument generability from argument typing. Post-#62 the target is the
+    -- Derive argument generability from argument typing. The target is the
     -- depth-`match` generator `genLExpr` uses in argument position, so each argument
     -- goes through `mem_genArg_of_baseComplete` rather than `genLExprBase_complete`
     -- directly.
@@ -6629,7 +6629,7 @@ theorem isPolyApp_of_hasType_specShaped
         σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hArgLen : args.length = concreteArgTys.length)
-    -- Depth budget is `depth - 1`: post-#62 arguments come from the generator at
+    -- Depth budget is `depth - 1`: arguments come from the generator at
     -- the smaller index (see `isPolyApp_of_hasType` / `mem_genArg_of_baseComplete`).
     (hArgsComplete : List.Forall₂
       (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
@@ -6766,7 +6766,7 @@ theorem genLExpr_complete_poly_specShaped
       (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs)
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hArgLen : args.length = concreteArgTys.length)
-    -- Depth budget is `depth - 1`: post-#62 arguments come from the generator at
+    -- Depth budget is `depth - 1`: arguments come from the generator at
     -- the smaller index (see `isPolyApp_of_hasType` / `mem_genArg_of_baseComplete`).
     (hArgsComplete : List.Forall₂
       (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
@@ -6830,7 +6830,7 @@ theorem genLExpr_complete_poly_fullySpecShaped
         σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hArgLen : args.length = concreteArgTys.length)
-    -- Depth budget is `depth - 1`: post-#62 arguments come from the generator at
+    -- Depth budget is `depth - 1`: arguments come from the generator at
     -- the smaller index (see `isPolyApp_of_hasType` / `mem_genArg_of_baseComplete`).
     (hArgsComplete : List.Forall₂
       (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
@@ -6847,15 +6847,15 @@ theorem genLExpr_complete_poly_fullySpecShaped
       hArgsComplete hgen hInst))
 
 
--- ── #52 part B: polymorphic applications at every subterm position ────
+-- ── Polymorphic applications at every subterm position ────────────────
 --
--- Before #64, `genLExpr_complete` had the shape
+-- Formerly, `genLExpr_complete` had the shape
 --
 --     (base conditions) ∨ IsPolyApp …
 --
 -- and that disjunction *was* the positional incompleteness. `IsPolyApp` describes
 -- a polymorphic application at the **root** of the generated term, so the theorem
--- said nothing about one sitting under an `ite` arm or a binder body. #52's scope
+-- said nothing about one sitting under an `ite` arm or a binder body. The scope
 -- decision — factory applications at *every* subterm position — is therefore a
 -- claim about where the polymorphic case may appear, and these results discharge it.
 --
@@ -6874,14 +6874,14 @@ theorem genLExpr_complete_poly_fullySpecShaped
 
 open StrataGenerators.IndirSupport in
 set_option maxHeartbeats 800000 in
-/-- **#52 part B, the key step: a polymorphic factory application is in
+/-- **The key step: a polymorphic factory application is in
     `genLExprBase`'s own support** — the statement the two-disjunct
     `genLExpr_complete` could not make.
 
     Its conclusion is about `genLExprBase … (n + 1) .bool`, so it composes with the
     structural rules: wherever `genLExprBase` recurses (an `ite` arm, an
     `abs`/`quant` body, `genApp`'s function or argument), *this* is available at
-    that position. Before #64 no such theorem existed, because `genLExprBase` had
+    that position. Formerly no such theorem existed, because `genLExprBase` had
     no rule that could instantiate a `∀`-scheme.
 
     Premises are `genIndirPoly_complete`'s, with the argument generator fixed to
@@ -6937,10 +6937,10 @@ theorem genLExprBase_complete_polyApp (fctx : FVarCtx) (octx : OpCtx)
   right; right; right; right; right; right; right; right; right; right
   trivial
 
-/-- **#52 part B: a polymorphic application under an `ite` arm.**
+/-- **A polymorphic application under an `ite` arm.**
 
     Composition of `genLExprBase_complete_polyApp` with the structural `ite` rule,
-    which draws both arms from `genLExprBase … n`. Before #64 the analogous
+    which draws both arms from `genLExprBase … n`. Formerly the analogous
     statement was unprovable: `genLExprBase` could not instantiate a `∀`-scheme, so
     no polymorphic call was reachable here at any depth — measured 0/400 on
     `corePartialOps`/`corePolyOps` for every target type tried. -/
@@ -6968,11 +6968,11 @@ theorem genLExprBase_polyApp_under_ite (fctx : FVarCtx) (octx : OpCtx)
   · simp only [genIte, mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
     exact ⟨c, hc, polyApp, hpoly, elseArm, helse, rfl⟩
 
-/-- **#52 part B: a polymorphic application under a `quant` body.**
+/-- **A polymorphic application under a `quant` body.**
 
     The `quant` rule generates its body via `genLExprBase … n` in the *extended*
     binder context `τ' :: bctx`, so `genLExprBase_complete_polyApp` applies there
-    with `bctx := τ' :: bctx`. This is the binder case #64's issue text calls out
+    with `bctx := τ' :: bctx`. This is the binder case the scope decision calls out
     specifically. -/
 theorem genLExprBase_polyApp_under_quant (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier)
@@ -7022,7 +7022,7 @@ theorem genLExprBase_polyApp_under_quant (fctx : FVarCtx) (octx : OpCtx)
 -- weaker than the depth-indexed originals — `termDepth bctx e` is itself the witness
 -- — so they are corollaries, not new arguments, and they cost nothing to maintain.
 --
--- Why this is worth having *since #64*: the depth-indexed statement's companion
+-- Why this is worth having: the depth-indexed statement's companion
 -- bound (`genLExprBase_termDepth_bound`) is no longer tight. It reads
 -- `termDepth e ≤ depthBudget K depth` rather than `≤ depth`, because a
 -- fully-applied operator of arity `k` costs `k` levels of `termDepth`. So `hdepth`

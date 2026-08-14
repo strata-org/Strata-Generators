@@ -15,12 +15,12 @@ open StrataGenerators.Program.UnprovenTransforms
 /-!
 # Properties for `LiftInternalFuncDecls` — lambda lifting with declaration-site capture
 
-This module holds the check predicates for strata-generators issue #33
-(`LIFT_INTERNAL_FUNCDECLS_PBT_PLAN.md`): property tests for
+This module holds the check predicates described in
+`LIFT_INTERNAL_FUNCDECLS_PBT_PLAN.md`: property tests for
 `Strata/Transform/LiftInternalFuncDecls.lean`, which hoists every internal
 `Stmt.funcDecl` out of a procedure body into a closed top-level `Decl.func`.
 
-It is a companion to `ProgramGen/UnprovenTransforms` (issue #69) and follows the
+It is a companion to `ProgramGen/UnprovenTransforms` and follows the
 same shape: each predicate takes a whole generated `Core.Program` and returns a
 `Bool`, both harnesses score the identical predicate, and the whole-program
 shrinker minimizes a counterexample.
@@ -110,15 +110,15 @@ really ran and really hoisted a function on 20/20, so none of the greens is vacu
 
   Severity: `liftInternalFuncDeclsPipelinePhase` is the **first** phase of
   `transformPipelinePhases` and the pipeline's own `typeCheck` phase runs after all
-  of them (`Verifier.lean:1502–1536`), so this surfaces to a user as
+  of them (`Verifier.lean`), so this surfaces to a user as
   `❌ Type checking error` on a program that was well typed as written.
 
 * `checkLiftFreshSnapshotNames` — **the minted names are not checked against the
   program's own identifiers.** A procedure that already declares
   `$__liftfncl_0` gets a *second* declaration of it, and the typechecker rejects the
   output with `Variable $__liftfncl_0 of type int already in context.`
-  `CoreGenState.gen` (`CoreGen.lean:45`) delegates to `StringGenState.gen`
-  (`StringGen.lean:46`), which is a bare counter: it guarantees uniqueness only
+  `CoreGenState.gen` (`CoreGen.lean`) delegates to `StringGenState.gen`
+  (`StringGen.lean`), which is a bare counter: it guarantees uniqueness only
   among the names *it* minted, never against the program.
 
   The pass's module doc states the assumption honestly ("it is assumed that the
@@ -228,7 +228,7 @@ def anyResidualFuncDecl (p : Program) : Bool :=
 Two notions, because Strata's own one is weaker than what the pass computes.
 
 `Lambda.LFuncClosed` constrains only `body` and `preconditions`
-(`FuncClosed`, `Func.lean:122`). But `capturedVars` unions the free variables of
+(`FuncClosed`, `Func.lean`). But `capturedVars` unions the free variables of
 `body`, `axioms`, `preconditions` **and** `measure`, and `rewritePureFunc`
 rewrites all four. So a function with an open `axioms` field would satisfy
 `LFuncClosed` while still mentioning a variable that no longer exists. Both are

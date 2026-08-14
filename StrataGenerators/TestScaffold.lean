@@ -150,7 +150,7 @@ instance : ToFormat Unit where
 --
 --   • `eval_eraseMetadata_invariant` (Semantics.lean): eval is invariant
 --     under metadata changes. Since our metadata type is `Unit`, eraseMetadata
---     is the identity (proved in LExprEvalTests.lean:106), so this property
+--     is the identity (proved in LExprEvalTests.lean), so this property
 --     holds trivially and we omit it.
 
 -- Properties are `@[reducible]` so that Lean's typeclass resolution can
@@ -402,7 +402,7 @@ instance : Arbitrary ClosedGenFunction where
 -- ── Property 1: Function.typeCheck_annotated_sound ─────────────────────
 --
 -- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound` at
--- `Strata/Languages/Core/FunctionTypeSpecSound.lean:31`:
+-- `Strata/Languages/Core/FunctionTypeSpecSound.lean`:
 --
 --   If `Function.typeCheck C Env func = .ok (func', _)` then `func'` satisfies
 --   `FuncHasTypeA C Γ` for any Γ.
@@ -487,7 +487,7 @@ def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
 -- rejects it. Checks live in `StrataGenerators.StmtHasTypeAGen.TestSupport`
 -- (`checkFunctionTypeCheckerComplete` / `funcRejectionImpliesMeasureNoBody`), run
 -- against the full `Core.Factory` context so no operator spuriously fails to
--- resolve. The `funcDecl` gap in the statement test (#1) is the syntactic-statement
+-- resolve. The `funcDecl` gap in the statement test is the syntactic-statement
 -- analogue of exactly this.
 
 open StrataGenerators.Stmt.TestSupport in
@@ -506,8 +506,8 @@ open StrataGenerators.Stmt.TestSupport in
 -- `genProgramStmts` generates a well-typed Strata Core statement list
 -- (`StatementsHasTypeA`), proven sound AND complete against the declarative typing
 -- spec. We use it as a certified-well-typed oracle input for the statement
--- typechecker (property #1) and the Core statement-level transformations
--- (properties #3–#6, #9). All check predicates live in the shared module
+-- typechecker and the Core statement-level transformations. All check predicates
+-- live in the shared module
 -- `StrataGenerators.StmtHasTypeAGen.TestSupport`.
 
 open StrataGenerators.Stmt.TestSupport
@@ -558,14 +558,14 @@ instance : Arbitrary GenStmts where
 
 -- ── Statement-level properties (all currently unproven) ───────────────
 
--- The six statement-transform / typechecker properties (#1, #3, #4, #5a, #5b, #9)
+-- The six statement-transform / typechecker properties
 -- are defined by the shared `Properties.stmtTransforms` bundle (see
 -- `StrataGenerators.Properties`), which pairs each name with its check in one
 -- place, so they are folded directly into `stmtSuite` below rather than restated
--- as `prop_*` wrappers here. Only #6 keeps a wrapper — its Tyche panel records
--- extra breakdown, so it is not part of the shared bundle.
+-- as `prop_*` wrappers here. Only Kleene definedness keeps a wrapper — its Tyche
+-- panel records extra breakdown, so it is not part of the shared bundle.
 
--- #6: `StmtToKleeneStmt` is defined exactly when the block has no
+-- Kleene definedness: `StmtToKleeneStmt` is defined exactly when the block has no
 -- `exit`/`funcDecl`/`typeDecl` (and, for the invariant-loop caveat, not defined
 -- when an invariant-bearing loop is present).
 @[reducible] def prop_stmt_kleene_defined_iff (gs : GenStmts) : Prop :=
@@ -622,7 +622,7 @@ instance : Shrinkable GenProcs where
 -- for `j < i`, so the assembled program's call graph carries real edges and the
 -- callee-closure / call-graph dimensions of the FilterProcedures/PrecondElim
 -- properties are no longer vacuous. **Polymorphic** siblings are now callable too
--- (issue #28): `headerProcSig` records the callee's `typeArgs`, and `genCallStmt`
+--: `headerProcSig` records the callee's `typeArgs`, and `genCallStmt`
 -- samples a concrete instantiation `σ` at the call site (`ProcSigCorresponds` no
 -- longer requires `typeArgs = []`).
 private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
@@ -988,7 +988,7 @@ def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
     A **diagnostic**: it does not gate the exit code (the gating statement is
     `printer: no conversion error on generated programs`). Its job is
     localisation — naming the offending *constructs* across a whole sample, which
-    the per-counterexample view cannot give. The whole-program shrinker (#72) does
+    the per-counterexample view cannot give. The whole-program shrinker does
     minimize the gating property's witness, but only when the draw typechecks: its
     candidate filter is `Program.typeCheck`, so on a gap-bearing draw (~60%) the
     witness is reported unshrunk and this tally is the only localisation available.
@@ -1024,7 +1024,7 @@ def printerErrorDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat × Nat) :=
   IO.println s!"    distinct messages ({tally.length}), most frequent first:"
   for (m, c) in (tally.mergeSort (fun a b => a.2 > b.2)) do
     IO.println s!"      [{c}×] {m}"
-  -- Bitvector width divergence (#48), reported alongside because several of the
+  -- Bitvector width divergence, reported alongside because several of the
   -- messages above are instances of it. Deterministic, so it is a scan rather
   -- than a sample: `Function.typeCheck` accepts every width, the printer supports
   -- five, and the five are *not* the powers of two.

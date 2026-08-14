@@ -200,7 +200,7 @@ private theorem norm_arrow' (τ₁ τ₂ : LMonoTy) :
 
 -- ── Indir/IndirPoly support, needed by `genLExprBase_opsConsistentR` ──
 --
--- Since #64 the Indir/IndirPoly rules live inside `genLExprBase`, so everything
+-- The Indir/IndirPoly rules live inside `genLExprBase`, so everything
 -- below is consumed by `genLExprBase_opsConsistentR` and has to precede it.
 -- Previously it sat after that theorem, which was fine while the rules existed
 -- only in `genLExpr`.
@@ -597,7 +597,7 @@ theorem genIndirPolyCore_opsConsistentR (F : @Factory LExprParams') (fctx : FVar
 
 set_option maxHeartbeats 1600000 in
 theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
-    -- Since #64 the IndirPoly rule lives inside `genLExprBase`, so the
+    -- The IndirPoly rule lives inside `genLExprBase`, so the
     -- polymorphic-annotation assumption this theorem needs is the same one
     -- `genLExpr_opsConsistentR` already takes — quantified over all binder
     -- contexts and target types, because the rule now fires at every subterm
@@ -768,7 +768,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F .bool h
       · exact .const
       · exact .const
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -832,7 +832,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F .int h
       · exact .const
       · exact .const
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -893,7 +893,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨s, _, rfl⟩⟩
       · exact pickOp_mem_opsConsistentR F .string h
       · exact .const
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -954,7 +954,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickOp_mem_opsConsistentR F .real h
       · exact .const
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -1015,7 +1015,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩
       · exact pickOp_mem_opsConsistentR F (.bitvec n) h
       · exact .const
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … m`,
     -- whose consistency is this theorem's own recursive call.
@@ -1077,7 +1077,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · rcases he with ⟨_, h⟩ | ⟨_, body, hbody, rfl⟩
       · exact pickOp_mem_opsConsistentR F (.arrow τ₁ τ₂) h
       · exact .abs (genLExprBase_opsConsistentR F fctx pctx tvars hPoly (τ₁ :: bctx) n _ _ hbody)
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -1165,7 +1165,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F (.ftvar name) h
       · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
       · exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -1253,7 +1253,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F .regex h
       · exact pickBVar_mem_opsConsistentR F bctx .regex h
       · exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -1341,7 +1341,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
       · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
       · exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -1429,7 +1429,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F (.seq τ) h
       · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
       · exact absurd h (by simp)
-    -- Indir / IndirPoly branches (#64). The op node's annotation is a genuine
+    -- Indir / IndirPoly branches. The op node's annotation is a genuine
     -- instance of the operator's scheme (`indir_op_opsConsistentR` monomorphically,
     -- `hPoly` polymorphically) and the arguments come from `genLExprBase … n`,
     -- whose consistency is this theorem's own recursive call.
@@ -1448,7 +1448,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     -- *generic* factory type, so it is the identity instance `OpsConsistentR.op_in`
     -- accepts; bvar/fvar leaves carry no `.op` node at all.
     --
-    -- Since #64 every *named* case also carries Indir/IndirPoly branches, whose
+    -- Every *named* case also carries Indir/IndirPoly branches, whose
     -- sub-cases need `hPoly` and the recursive hypothesis. This case needs neither:
     -- it is leaf-only by construction (see `genLExprBase`'s docstring there), which
     -- is why the discharge is three `pick*` lemmas and no induction.
@@ -1492,7 +1492,7 @@ theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (maxNumArgs : Nat)
     -- All-contexts/all-types form: `genLExprBase` now fires IndirPoly at every
-    -- subterm position (#64), so the fallback needs the assumption at those types
+    -- subterm position, so the fallback needs the assumption at those types
     -- too, not just at `τ`. `PolyOpsConsistentR_of_PCtxWF` supplies all of them
     -- from one `PCtxWF`.
     (hPoly : ∀ bc σ m, PolyOpsConsistentR F pctx bc fctx σ m)
@@ -1503,7 +1503,7 @@ theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ
         maxNumArgs genArg)) :
     Lambda.OpsConsistentR F e := by
-  -- Post-#64 `genIndirPoly` is the thin wrapper around `genIndirPolyCore`, so the
+  -- `genIndirPoly` is a thin wrapper around `genIndirPolyCore`, so the
   -- generator-parametric result applies: `genArg` consistency is `hArg` and the
   -- fallback is `genLExprBase … depth`.
   exact genIndirPolyCore_opsConsistentR F fctx pctx bctx τ maxNumArgs (hPoly bctx τ maxNumArgs)
@@ -1667,7 +1667,7 @@ theorem genLExprWithFactory_opsConsistentR_factory (F : @Factory LExprParams') (
 theorem genIndirPoly_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (maxNumArgs : Nat) (genArg : LMonoTy → SetGen.Set LExpr')
-    -- Needed since #64: `genIndirPolyCore`'s *arguments* also come from `genArg`,
+    -- Needed because `genIndirPolyCore`'s *arguments* also come from `genArg`,
     -- and with `pctx = []` only the fallback fires, but the lemma is stated
     -- uniformly over both branches.
     (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)

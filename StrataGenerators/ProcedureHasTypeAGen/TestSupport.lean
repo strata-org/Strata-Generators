@@ -141,12 +141,12 @@ operators. Three facts about that body shape bound what these properties can tes
 ### `ChangedFlagValid` for FilterProcedures
 
 `filterProceduresPipelinePhase` hardcodes its return to `(true, filtered)`
-(FilterProcedures.lean:82). So when the target set already covers every
+(FilterProcedures.lean). So when the target set already covers every
 procedure — nothing is removed and `progOut = progIn` — the pass *still* reports
 `changed = true`, violating `ChangedFlagValid` (`changed ↔ progOut ≠ progIn`).
 `checkFilterChangedFlagValid` states that property honestly against the
 all-targets scenario and therefore **fails**, surfacing the real bug exactly as
-the repo's other honest-gap properties (`stmt #1`, function completeness) do.
+the repo's other honest-gap properties (statement and function completeness) do.
 
 ### `ChangedFlagValid` for PrecondElim
 
@@ -154,7 +154,7 @@ the repo's other honest-gap properties (`stmt #1`, function completeness) do.
 contract for PrecondElim, and it too **fails** — but for a different, narrower
 reason, and this one is a *false negative* (the pass rewrites the program while
 reporting `changed = false`). The culprit is the `.funcDecl` branch of
-`PrecondElim.transformStmt` (`PrecondElim.lean:318–338`): when a statement declares
+`PrecondElim.transformStmt` (`PrecondElim.lean`): when a statement declares
 an inline function, the branch emits a `{name}$$wf` block holding the asserts
 collected from the function's **preconditions and body**, but returns
 `(hasPreconds, …)` — a flag computed *only* from `!decl.preconditions.isEmpty`.
@@ -166,7 +166,7 @@ generated programs, against ~6% on which the pass fires correctly.
 Both `changed`-flag properties use full structural equality on `Program`, which
 is available: `Program`, `Decl` and `Procedure.Header` all derive `DecidableEq`,
 and `Strata.DL.Imperative.Stmt` supplies a hand-rolled `DecidableEq (Stmt P C)`
-instance (`Stmt.lean:194`) that the derived `Decl` instance uses. This comparison
+instance (`Stmt.lean`) that the derived `Decl` instance uses. This comparison
 includes metadata, which is what we want and is not a source of spurious
 failures: `transformStmt` re-emits every unchanged statement with its original
 `md` untouched, and only the freshly generated asserts carry the
@@ -186,9 +186,9 @@ input, including the empty program**, for two independent reasons:
    cannot hold for any seeded run.
 2. Independently, the pass pushes each declared function into the factory
    **before** stripping it: both `precondElim`'s `.func` branch
-   (`PrecondElim.lean:412`, `F.push func.toLFunc` then `func' := {func with
+   (`PrecondElim.lean`, `F.push func.toLFunc` then `func' := {func with
    preconditions := []}`) and `transformStmt`'s `.funcDecl` branch
-   (`PrecondElim.lean:326`) leave the *declaration* stripped in the program but
+   (`PrecondElim.lean`) leave the *declaration* stripped in the program but
    the *factory copy* carrying its preconditions.
 
 Cause (1) says the field as written is unsatisfiable for a realistically seeded
@@ -206,9 +206,9 @@ generated input, but it is **not** vacuous and it does catch a real divergence
 that generated input cannot reach: `FilterProcedures.run` retains a procedure
 with `noFilter := true` in the declaration list while filtering it *out* of the
 cached call graph (both maps are filtered by `isNeededProc`, which ignores
-`noFilter` — FilterProcedures.lean:47–66). The retained procedure then has no
+`noFilter` — FilterProcedures.lean). The retained procedure then has no
 `callees` entry, breaking `CallGraphWF.complete` for the output pair. Generated
-procedures all carry `noFilter := false` (`ProcedureHasTypeAGen/Core.lean:160`),
+procedures all carry `noFilter := false` (`ProcedureHasTypeAGen/Core.lean`),
 so the property cannot fail on generated input; the hand-built
 `noFilterProgram` guard at the end of the file pins the divergence
 deterministically instead.
@@ -601,7 +601,7 @@ def checkFilterUnreachableRemoved (ps : List Procedure) : Bool :=
 /-- **`ChangedFlagValid` for FilterProcedures — HONEST FAILURE.** With the target
     set covering *every* procedure, nothing is removed, so `progOut = progIn` and
     the pass *should* report `changed = false`. It hardcodes `changed = true`
-    instead (FilterProcedures.lean:82), so this property genuinely FAILS, pinning
+    instead (FilterProcedures.lean), so this property genuinely FAILS, pinning
     the real bug. -/
 def checkFilterChangedFlagValid (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
@@ -851,7 +851,7 @@ def checkPrecondOrderPreserved (ps : List Procedure) : Bool :=
 
 /-- **`ChangedFlagValid` for PrecondElim — HONEST FAILURE.** `changed ↔ progOut ≠
     progIn`. This **fails**: the `.funcDecl` branch of `transformStmt`
-    (`PrecondElim.lean:318–338`) inserts a `{name}$$wf` block for obligations found
+    (`PrecondElim.lean`) inserts a `{name}$$wf` block for obligations found
     in a declared function's *body* but derives `changed` solely from whether the
     declaration had preconditions of its own, so a precondition-free function whose
     body calls `Int.SafeDiv` is rewritten and reported unchanged. -/
@@ -941,7 +941,7 @@ def checkPrecondFactoryStripped (ps : List Procedure) : Bool :=
     `false` entries are the spec-side bug (builtins whose preconditions the pass
     must *keep*, since they are the very WF obligations it reads to emit asserts),
     and `true` entries are the pass-side bug (a declared function pushed into the
-    factory unstripped, `PrecondElim.lean:326`/`:412`) that
+    factory unstripped, in `PrecondElim.lean`) that
     `checkPrecondDeclaredFactoryStripped` isolates. -/
 def precondFactoryStrippedOffenders (ps : List Procedure) :
     List (String × List String × Bool) :=
@@ -962,7 +962,7 @@ def precondFactoryStrippedOffenders (ps : List Procedure) :
     program declares — HONEST FAILURE (pass side only).** Drops the seeded
     builtins from the claim, so the only way to fail is the pass pushing a
     declared function's *unstripped* copy into the factory
-    (`PrecondElim.lean:326` and `:412`). Fails exactly on the programs that
+    (`PrecondElim.lean`). Fails exactly on the programs that
     declare a function with a precondition, which `genFunction` produces (module
     doc, point 3). -/
 def checkPrecondDeclaredFactoryStripped (ps : List Procedure) : Bool :=
@@ -1079,7 +1079,7 @@ def checkAnfControlFlowPreserved (ps : List Procedure) : Bool :=
 
 /-- **`ChangedFlagValid` for ANFEncoder.** `changed ↔ progOut ≠ progIn`. Unlike
     the other two passes, ANFEncoder derives its flag from the fresh-variable
-    counter actually advancing (`idx' > idx`, ANFEncoder.lean:280), which is
+    counter actually advancing (`idx' > idx`, ANFEncoder.lean), which is
     precisely when a body is rewritten — so this one holds. -/
 def checkAnfChangedFlagValid (ps : List Procedure) : Bool :=
   checkChangedFlagValid Core.commonSubexprElimPhase (mkProgram ps)

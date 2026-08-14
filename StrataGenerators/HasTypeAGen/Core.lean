@@ -168,7 +168,7 @@ end Lambda
     This characterizes exactly the types produced by `genLMonoTy`.
 
     Bitvector widths are unconstrained: the Strata Core AST does not restrict
-    them, so `genLMonoTy` may produce a `bitvec` of any width (see issue #38). -/
+    them, so `genLMonoTy` may produce a `bitvec` of any width. -/
 inductive SimpleType : LMonoTy → Prop where
   | bool   : SimpleType .bool
   | int    : SimpleType .int
@@ -271,7 +271,7 @@ def pickTyVar [Gen G] (tvars : List TyIdentifier)
 
 /-- Pick a random bitvector width and return it as an `LMonoTy.bitvec`. The
     width is drawn from `Nat.arbitrary` (any natural), since the Strata Core AST
-    does not constrain bitvector widths (issue #38). -/
+    does not constrain bitvector widths. -/
 def pickBitvecWidth [Gen G] : G LMonoTy :=
   LMonoTy.bitvec <$> Nat.arbitrary
 
@@ -970,7 +970,7 @@ def findOpsInCtx (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :
 --
 -- Both rules are defined *here*, ahead of `genLExprBase`, because
 -- `genLExprBase` calls them (that is what makes factory applications reachable
--- under `ite` arms and binder bodies — issue #64). To make that possible they
+-- under `ite` arms and binder bodies). To make that possible they
 -- must not mention `genLExprBase` themselves, so every generator they need is a
 -- parameter: the argument generator `genArg`, and (for IndirPoly) the `fallback`
 -- used when no polymorphic candidate matches. Being non-recursive and
@@ -1018,7 +1018,7 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
     (`genArg`, `fallback`), following the same open-recursion style as
     `genApp`/`genIte`/`genEq`. That is what removes every mention of
     `genLExprBase` from this definition, which in turn is what lets
-    `genLExprBase` call *it* (issue #64). `genIndirPoly` below restores the
+    `genLExprBase` call *it*. `genIndirPoly` below restores the
     historical defaults for both.
 
     There is deliberately **no `depth` parameter**: `depth` was only ever
@@ -1074,14 +1074,14 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
 
     The generated term satisfies `HasTypeA' bctx e τ` (see `genLExpr_sound`).
 
-    ## The Indir/IndirPoly branches (issue #64)
+    ## The Indir/IndirPoly branches
 
     Each `n + 1` case carries, at the end of its `frequency` list, a
     **monomorphic Indir** branch and a **polymorphic IndirPoly** branch. Because
     they live *here* rather than only in `genLExpr`, a factory application — and
     in particular a *polymorphic* one — can appear in any position this generator
     produces: under `ite` arms, under `abs`/`quant` bodies, and in `genApp`'s
-    function and argument. Before #64 the polymorphic rule existed only at
+    function and argument. Formerly the polymorphic rule existed only at
     `genLExpr`'s root and in Indir argument position, so
     `if c then Sequence.length s else #0` was outside the support.
 
@@ -1133,13 +1133,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
           then pickOp octx _ ho
           else genAbs (genLExprBase fctx octx pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is (.arrow τ₁ τ₂), with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.arrow τ₁ τ₂)).length > 0
           then genIndir octx (.arrow τ₁ τ₂) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.arrow τ₁ τ₂)),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1191,13 +1191,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .bool).length > 0
           then pickOp octx .bool ho
           else genBoolConst),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is .bool, with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx .bool).length > 0
           then genIndir octx .bool (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .bool),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1242,13 +1242,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .int).length > 0
           then pickOp octx .int ho
           else genIntConst),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is .int, with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx .int).length > 0
           then genIndir octx .int (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .int),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1307,13 +1307,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is (.ftvar name), with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.ftvar name)).length > 0
           then genIndir octx (.ftvar name) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.ftvar name)),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1358,13 +1358,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .string).length > 0
           then pickOp octx .string ho
           else genStrConst),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is .string, with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx .string).length > 0
           then genIndir octx .string (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .string),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1409,13 +1409,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .real).length > 0
           then pickOp octx .real ho
           else genRealConst),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is .real, with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx .real).length > 0
           then genIndir octx .real (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .real),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1460,13 +1460,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx (.bitvec n)).length > 0
           then pickOp octx (.bitvec n) ho
           else genBitvecConst n),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is (.bitvec n), with arguments drawn from this generator at `m`.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.bitvec n)).length > 0
           then genIndir octx (.bitvec n) (genLExprBase fctx octx pctx tvars bctx m) hi
           else genLExprBase fctx octx pctx tvars bctx m (.bitvec n)),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1525,13 +1525,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is .regex, with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx .regex).length > 0
           then genIndir octx .regex (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .regex),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1590,13 +1590,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is (.map τ₁ τ₂), with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.map τ₁ τ₂)).length > 0
           then genIndir octx (.map τ₁ τ₂) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂)),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1655,13 +1655,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule (issue #64): a fully-applied operator whose
+        -- Monomorphic Indir rule: a fully-applied operator whose
         -- result type is (.seq τ), with arguments drawn from this generator at `n`.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.seq τ)).length > 0
           then genIndir octx (.seq τ) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.seq τ)),
-        -- Polymorphic IndirPoly rule (issue #64). Having it *here* rather than
+        -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
@@ -1690,7 +1690,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   -- type, so support is empty exactly when it was unreachable anyway.
   --
   -- **This case is deliberately leaf-only, and so is depth-agnostic** (`| _, τ`),
-  -- unlike every named case above, which #64 gave `genApp`/`genIte`/Indir/IndirPoly
+  -- unlike every named case above, each of which has `genApp`/`genIte`/Indir/IndirPoly
   -- branches at `n + 1`. The consequence is precise and worth stating: a
   -- datatype-typed *argument* is drawn from the context, never built up, so
   -- `isCons(xs)` is reachable with `xs` a variable or `Nil`, while `isCons(Cons(1,
@@ -1701,8 +1701,8 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   -- `_opsConsistentR`), and each would need the inductive hypothesis plus, for
   -- IndirPoly, the `hPoly` premise. `genLExprBase_termDepth_bound` is unaffected
   -- either way: it is indexed by `SimpleType τ`, which has no datatype `tcons` case,
-  -- so no depth bound is stated for a datatype target at all. Tracked as issue #104;
-  -- see also `docs/adt-derived-function-calls.md`.
+  -- so no depth bound is stated for a datatype target at all. See
+  -- `docs/adt-derived-function-calls.md`.
   | _, τ =>
     let bvars := bvarsOfType bctx τ
     oneOf
@@ -1734,13 +1734,13 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     parameters defaulted the historical way.
 
     `genArg` defaults to `genLExprBase … depth` and the no-candidate fallback is
-    `genLExprBase … depth τ`, exactly as before #64 — so every existing call site
+    `genLExprBase … depth τ`, exactly as before — so every existing call site
     and every existing proof about `genIndirPoly` continues to mean what it did.
     `genLExpr` overrides `genArg` with itself at the smaller depth index, which is
-    what makes factory applications nest in *argument* position (#62).
+    what makes factory applications nest in *argument* position.
 
     The rule proper lives in `genIndirPolyCore`, defined before `genLExprBase`
-    because `genLExprBase` calls it (#64). This wrapper exists only to hold the
+    because `genLExprBase` calls it. This wrapper exists only to hold the
     `genLExprBase`-valued defaults, which is why it has to be defined here,
     afterwards. -/
 def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
@@ -1785,9 +1785,9 @@ def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     lexicographic measure, turn `genLExprBase` well-founded and `@[irreducible]`,
     and break definitional unfolding (`rfl`) at all of those sites.
 
-    ## What this function still adds, post-#64
+    ## What this function still adds
 
-    Since #64, `genLExprBase` carries the Indir/IndirPoly rules in its own
+    `genLExprBase` now carries the Indir/IndirPoly rules in its own
     per-type `frequency` lists, so factory applications — polymorphic ones
     included — are reachable at *every* subterm position, `ite` arms and
     `abs`/`quant` bodies among them. The positional gap this docstring used to

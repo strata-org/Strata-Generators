@@ -410,7 +410,7 @@ open Freshening in
     still leaves at least one fresh name per conflicting bound variable, so the
     `zip` in `freshenBoundVars` truncates nothing.
 
-    The quantities here mirror `freshenBoundVars` exactly (`Core.lean:958`). -/
+    The quantities here mirror `freshenBoundVars` exactly (`Core.lean`). -/
 theorem freshNames_covers (boundVars varsAlreadyInUse : List TyIdentifier) :
     let conflictingTyVars := boundVars.filter (· ∈ varsAlreadyInUse)
     let allTypeVarsInUse := varsAlreadyInUse ++ conflictingTyVars

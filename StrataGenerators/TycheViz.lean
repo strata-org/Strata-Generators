@@ -425,7 +425,7 @@ def genAndCheckFunctionFvarsAnnotated (depth : Nat := 0) : IO FunctionFvarsAnnot
 
 -- ── Function property 1: typeCheck_annotated_sound ─────────────────────
 -- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound`
--- (`Strata/Languages/Core/FunctionTypeSpecSound.lean:31`): when
+-- (`Strata/Languages/Core/FunctionTypeSpecSound.lean`): when
 -- `Function.typeCheck` accepts a generated (spec-well-typed) function, the
 -- output satisfies the declarative spec `FuncHasTypeA`. Generated with an
 -- *empty* fvar context so bodies are closed (no ambient-context dependency).
@@ -759,7 +759,7 @@ def genStmtProp (tag : String) (check : List Statement → Bool) : IO StmtPropRe
 
 -- ── The `StmtToKleeneStmt` definedness panel (extra breakdown) ────────
 -- Unlike the pass/fail panels, this one also records *why* the transform was (un)
--- defined, so the definedness contract (#6) is eyeballable.
+-- defined, so the definedness contract is eyeballable.
 
 structure KleeneDefinedResult where
   stmts : List Statement
@@ -1151,7 +1151,7 @@ open StrataGenerators.PhaseChangedFlag in
 def sweptPhasesFor (name : String) : List NamedPhase :=
   if name == PropertyNames.phaseHonestChangedFlag then honestPhases else allCorePhases
 
--- ── Printer-expressiveness panels (#69 P2, #48) ─────────────────────
+-- ── Printer-expressiveness panels ───────────────────────────────────
 -- One panel per property in `Properties.printerWitnesses` / the whole-program
 -- printer property (see `StrataGenerators.PrinterCoverage`). All four visualize
 -- honest failures.
@@ -1163,14 +1163,14 @@ def sweptPhasesFor (name : String) : List NamedPhase :=
 -- widths, which directions) where the property's single `Bool` can only report that
 -- a gap exists.
 
-/-- Is `n` a power of two? The panels record this because #48's own framing
+/-- Is `n` a power of two? The panels record this because the usual framing
     predicts the printable widths are the powers of two, and they are not: `2`, `4`
     and `128` are powers of two that do not print. Seeing that in the panel is the
     point. -/
 private def isPowerOfTwo (n : Nat) : Bool := n != 0 && (n &&& (n - 1)) == 0
 
-/-- A generated whole program, scored by the #69 P2 oracle ("the printer logged no
-    conversion error"). -/
+/-- A generated whole program, scored by the printer-expressiveness oracle ("the
+    printer logged no conversion error"). -/
 structure PrinterProgramResult where
   prog : Core.Program
   passed : Bool
@@ -1330,8 +1330,8 @@ instance : Tyche.TycheSample BvWidthAgreementResult where
         -- divergence, and it is 60 of the first 64 widths.
         ("typechecks", .nominal (if r.typechecks then "yes" else "no")),
         ("prints", .nominal (if r.prints then "yes" else "no")),
-        -- #48 predicts the printable set is the powers of two. Grouping by this
-        -- feature is what refutes that: `2`, `4` and `128` are red.
+        -- The usual framing predicts the printable set is the powers of two.
+        -- Grouping by this feature is what refutes that: `2`, `4` and `128` are red.
         ("power_of_two", .nominal (if isPowerOfTwo r.width then "yes" else "no")),
         ("factory_registered", .nominal
           (if factoryBvWidths.contains r.width then "yes" else "no"))
@@ -1558,7 +1558,8 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
 
   -- Command-level property tests (one panel each). The first four share the
   -- `CmdPropResult` shape and a shared name↔check bundle (`Properties.cmdSingleVerdict`,
-  -- also consumed by the Plausible harness); #5 has its own richer panel.
+  -- also consumed by the Plausible harness); eval/run agreement has its own
+  -- richer panel.
   for p in Properties.cmdSingleVerdict do
     panel p.name (genCmdProp (fun c ctx => p.check (c, ctx)))
   panel PropertyNames.cmdEvalRunAgreement genAndCheckEvalRunAgreement
@@ -1588,7 +1589,7 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   panel PropertyNames.fnIdentProbe genAndCheckIdentProbe
 
   -- ── Statement generator panels (transforms + typechecker) ───────────
-  -- One panel per property (#1, #3, #4, #5a, #5b, #6, #9). Each generates a
+  -- One panel per property. Each generates a
   -- well-typed statement list (proven sound+complete against `StatementsHasTypeA`) and
   -- visualizes the property's pass/fail against structural features.
   -- Shared name↔check bundles (`Properties.stmtTransforms`), also consumed by the
@@ -1596,7 +1597,7 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   for p in Properties.stmtTransforms do
     panel p.name (genStmtProp p.name p.check)
 
-  -- #6 gets its own richer panel (definedness + why).
+  -- Kleene definedness gets its own richer panel (definedness + why).
   panel PropertyNames.stmtKleeneDefinedIff genKleeneDefined
 
   -- ── Procedure ↔ transform-pass panels ──────────────────────────────
@@ -1638,7 +1639,7 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   for p in Properties.phaseChangedFlags do
     panel p.name (genPhaseSweepProp p.name p.check (sweptPhasesFor p.name))
 
-  -- ── Printer-expressiveness panels ──────────────────────────────────
+  -- ── Printer-expressiveness panels ───────────────────────────────────
   -- The whole-program property samples (and shrinks, since its oracle is the
   -- printer rather than the typechecker); the three witness properties enumerate
   -- their fixed input space — the six registered widths, the eighteen `Bv↔Int`
@@ -1655,7 +1656,7 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   -- ── Panels for the eight unproven Core transform passes ────────────
   -- One panel per property in the shared `Properties.unprovenTransforms` bundle
   -- (also consumed by both Plausible harnesses), for the passes in
-  -- `Strata/Transform/` that carry no correctness proof (issue #69). Each sample is
+  -- `Strata/Transform/` that carry no correctness proof. Each sample is
   -- a whole generated program, so the `programFeatures` breakdown
   -- (`num_decls`, `decl_kinds`, `program_size`, `rejection_cause`) applies
   -- unchanged, and `decl_kinds` is what makes a vacuous panel legible: a property

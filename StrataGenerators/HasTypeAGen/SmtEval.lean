@@ -239,8 +239,8 @@ def registeredBvWidths : List Nat := [1, 8, 16, 32, 64]
     warning about vacuity. That warning must stay believable. `regex` still occurs
     as the type of a *subterm*, through `Str.InRegEx` and `Str.ToRegEx`. To test it
     directly, use a solver-only property about the regex laws. Two structural facts
-    support this decision: `Denote.lean:155` gives `regex` no denotation, and
-    `SMT/Translate.lean:292` refuses to reflect it. -/
+    support this decision: `Denote.lean` gives `regex` no denotation, and
+    `SMT/Translate.lean` refuses to reflect it. -/
 def baseTypeSchedule : List (String × LMonoTy × OpCtx) :=
   [ ("int",    .int,    coreOpCtx)
   , ("bool",   .bool,   coreOpCtx)

@@ -9,9 +9,9 @@ import StrataGenerators.ProgramGen.Shrink
 -- Supplies the ADT-derived-call check predicates.
 import StrataGenerators.ProgramGen.TestSupport
 -- Supplies the forty-two check predicates for the Core transform passes that have
--- no correctness proof (issue #69).
+-- no correctness proof.
 import StrataGenerators.ProgramGen.UnprovenTransforms
--- Supplies the thirteen check predicates for `LiftInternalFuncDecls` (issue #33).
+-- Supplies the thirteen check predicates for `LiftInternalFuncDecls`.
 import StrataGenerators.ProgramGen.LiftFuncDecls
 
 /-!
@@ -124,13 +124,13 @@ def fnBodyPreservation  : String := "function: body type preserved under eval"
 def fnIdentProbe        : String := "function: special-character identifier round-trip"
 
 -- ── Statement-generator properties ───────────────────────────────────
-def stmtTypecheck          : String := "stmt: typechecker accepts generated statements (#1)"
-def stmtLoopElimPreserves  : String := "stmt: LoopElim preserves typeability (#3)"
-def stmtLoopElimZeroLoops  : String := "stmt: LoopElim eliminates all loops (#4)"
-def stmtAnfIdempotent      : String := "stmt: ANF is idempotent (#5a)"
-def stmtAnfPreservesTyping : String := "stmt: ANF preserves typeability (#5b)"
-def stmtKleeneDefinedIff   : String := "stmt: DetToKleene defined iff supported (#6)"
-def stmtMapExprsId         : String := "stmt: mapExprs id = id (#9)"
+def stmtTypecheck          : String := "stmt: typechecker accepts generated statements"
+def stmtLoopElimPreserves  : String := "stmt: LoopElim preserves typeability"
+def stmtLoopElimZeroLoops  : String := "stmt: LoopElim eliminates all loops"
+def stmtAnfIdempotent      : String := "stmt: ANF is idempotent"
+def stmtAnfPreservesTyping : String := "stmt: ANF preserves typeability"
+def stmtKleeneDefinedIff   : String := "stmt: DetToKleene defined iff supported"
+def stmtMapExprsId         : String := "stmt: mapExprs id = id"
 
 -- ── Procedure-generator ↔ transform-pass properties ──────────────────
 -- Exercised against three Core transform passes (FilterProcedures, PrecondElim,
@@ -197,7 +197,7 @@ def procAnfAnalysisPreserved : String := "proc: ANFEncoder preserves call-graph 
 -- phase added later is covered without a new property being written.
 
 /-- **FAILS honestly.** `RemoveIrrelevantAxioms` on a program with no axioms at
-    all cannot prune anything, yet `IrrelevantAxioms.lean:81` returns
+    all cannot prune anything, yet `IrrelevantAxioms.lean` returns
     `(true, pruned)` unconditionally. -/
 def phaseIrrelevantAxiomsNoOp : String :=
   "phase: RemoveIrrelevantAxioms changed flag is faithful on a no-op"
@@ -215,7 +215,7 @@ def phaseAllChangedFlag : String :=
 def phaseHonestChangedFlag : String :=
   "phase: non-hardcoded pipeline phases have a faithful changed flag"
 
--- ── Printer-expressiveness properties (#69 P2, #48) ──────────────────────
+-- ── Printer-expressiveness properties ────────────────────────────────
 -- See `StrataGenerators.PrinterCoverage`. The oracle is "the printer logged no
 -- conversion error", which needs no parser and names the offending construct.
 
@@ -233,7 +233,7 @@ def printerBv128Literal : String :=
     is printable at any registered width — no grammar production, no printer arm. -/
 def printerBvIntConversions : String :=
   "printer: Bv/Int conversion operators are printable"
-/-- **FAILS honestly (60/64 widths) — closes out #48.** `Function.typeCheck`
+/-- **FAILS honestly (60/64 widths).** `Function.typeCheck`
     accepts `bitvec w` for every `w`, but the printer supports exactly
     `[1, 8, 16, 32, 64]`. Note this is *not* the powers of two: `2`, `4` and `128`
     all typecheck and all fail to print. -/
@@ -279,7 +279,7 @@ def programBlocksAccepted  : String := "program: datatype blocks pass addMutualB
 def programDerivedResolve  : String := "program: called ADT functions are declared"
 def programDerivedOrdered  : String := "program: ADT calls follow the datatype declaration"
 
--- ── The eight unproven Core transform passes (issue #69) ─────────────
+-- ── The eight unproven Core transform passes ─────────────────────────
 -- `Strata/Transform/` holds 23 files, and only four passes have a correctness
 -- companion. These properties cover the eight that have no correctness file and no
 -- theorem in-file (`StructuredToUnstructured`, `LoopElim`,
@@ -288,7 +288,7 @@ def programDerivedOrdered  : String := "program: ADT calls follow the datatype d
 -- postcondition is stated in a module doc but never proven (`NondetElim`,
 -- `LoopInitHoist`). `TerminationCheck` is not covered: its properties need a
 -- recursive function to be non-vacuous, which the generator cannot make yet
--- (#15/#29).
+--.
 --
 -- Each property takes a whole generated `Program`, so the passes that read a
 -- declaration other than a procedure (the axioms and the function call graph for
@@ -305,7 +305,7 @@ def programDerivedOrdered  : String := "program: ADT calls follow the datatype d
 -- of 200 generated programs, since no generated body holds a duplicated
 -- subexpression. See `ProgramGen/UnprovenTransforms` for the analysis of each.
 
--- IrrelevantAxioms — the relevance oracle (#91 covers the `changed` flag)
+-- IrrelevantAxioms — the relevance oracle (the `changed` flag is covered separately)
 def axiomsOnlyAxRemoved      : String := "axioms: IrrelevantAxioms removes only axioms"
 def axiomsOrderPreserved     : String := "axioms: IrrelevantAxioms preserves declaration order"
 def axiomsRetainedRelevant   : String := "axioms: every retained axiom is relevant"
@@ -415,7 +415,7 @@ def hoistPreservesUniqueInits : String := "hoist: uniqueInits is preserved"
 def loopVcSymbolicNoLoss : String :=
   "loop: symbolic evaluation loses no obligation through InsertLoopInvariantAsserts"
 /-- Containment and not equality *because of a defect in the evaluator, not the
-    pass*: `StatementEval.lean:586` names a nondeterministic guard after the
+    pass*: `StatementEval.lean` names a nondeterministic guard after the
     current path-condition depth instead of using a counter, so a second `if *` at
     the same depth re-declares the name, the path errors, and every obligation from
     there to the end of the procedure is dropped with no diagnostic. `NondetElim`
@@ -425,7 +425,7 @@ def nondetElimSymbolicNoLoss : String :=
 def hoistSymbolicNoLoss : String :=
   "hoist: symbolic evaluation loses no obligation"
 
--- LiftInternalFuncDecls (issue #33) — lambda lifting with declaration-site capture
+-- LiftInternalFuncDecls — lambda lifting with declaration-site capture
 def liftInjectionFires     : String := "lift: the injected declaration is really lifted"
 def liftFuncsClosed        : String := "lift: every hoisted function is closed"
 def liftStrataClosed       : String := "lift: every function satisfies LFuncClosed"
@@ -510,7 +510,7 @@ namespace Properties
 
 /-- The four single-verdict command properties: each is a command paired with its
     generating context, scored by a shared predicate (the first two ignore the
-    context). The richer eval-agreement panel (#5) is *not* here — its Tyche shape
+    context). The richer eval-agreement panel is *not* here — its Tyche shape
     differs — but shares its name via `PropertyNames.cmdEvalRunAgreement`. -/
 def cmdSingleVerdict : List (Property (Cmd Expression × VarCtx)) :=
   [ ⟨PropertyNames.cmdInitFresh,             fun (c, _)   => checkInitFreshNotInRhs c⟩,
@@ -520,7 +520,7 @@ def cmdSingleVerdict : List (Property (Cmd Expression × VarCtx)) :=
 
 /-- The six statement-transform / typechecker properties, each a well-typed
     statement list scored by a shared predicate. The Kleene-definedness property
-    (#6) is *not* here — its Tyche panel records extra breakdown — but shares its
+    is *not* here — its Tyche panel records extra breakdown — but shares its
     name via `PropertyNames.stmtKleeneDefinedIff`. -/
 def stmtTransforms : List (Property (List Statement)) :=
   [ ⟨PropertyNames.stmtTypecheck,          checkTypeCheckerComplete⟩,
@@ -611,7 +611,7 @@ def phaseNoOpWitnesses : List (String × StrataGenerators.PhaseChangedFlag.NoOpW
 
 /-- The printer-expressiveness properties with no generated input: the two
     confirmed gaps at factory-registered widths, plus the typechecker-vs-printer
-    width divergence of #48 — each a closed `Bool`, since each is a claim about a
+    width divergence — each a closed `Bool`, since each is a claim about a
     specific width or operator rather than about a sampled program. -/
 def printerWitnesses : List (String × Bool) :=
   [ (PropertyNames.printerBv128Literal,
@@ -660,7 +660,7 @@ def programADTProps : List (Property Core.Program) :=
     ⟨PropertyNames.programDerivedOrdered, checkDerivedCallsFollowDeclaration⟩ ]
 
 /-- The forty-five properties for the Core transform passes that carry no
-    correctness proof (issue #69), each a generated `Program` scored by a shared
+    correctness proof, each a generated `Program` scored by a shared
     predicate from `ProgramGen/UnprovenTransforms`. The shapes are identical across
     both harnesses, so name↔check is paired once here.
 
@@ -749,7 +749,7 @@ def unprovenTransforms : List (Property Core.Program) :=
     ⟨PropertyNames.nondetElimSymbolicNoLoss, checkNondetElimSymbolicNoLoss⟩,
     ⟨PropertyNames.hoistSymbolicNoLoss,      checkHoistSymbolicNoLoss⟩ ]
 
-/-- The thirteen properties for `LiftInternalFuncDecls` (issue #33), the lambda
+/-- The thirteen properties for `LiftInternalFuncDecls`, the lambda
     lifting pass that hoists internal `funcDecl`s to closed top-level functions.
     Each takes a generated `Program`, injects a *capturing* internal function into
     it — `genFuncDeclStmt` draws its bodies with `genFunction []`, so a generated

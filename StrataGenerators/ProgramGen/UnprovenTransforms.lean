@@ -35,10 +35,9 @@ open StrataGenerators.Stmt.TestSupport
 /-!
 # Properties for the eight Core transform passes that have no correctness proof
 
-This module holds the check predicates for strata-generators issue #69: property
-tests for the parts of `Strata/Transform/` that carry no machine-checked
-correctness argument. Each predicate takes a **whole generated program**
-(`Core.Program` from `ProgramGen.genProgram`, which is proven sound against
+This module holds the check predicates for the parts of `Strata/Transform/` that
+carry no machine-checked correctness argument. Each predicate takes a **whole
+generated program** (`Core.Program` from `ProgramGen.genProgram`, proven sound against
 `ProgramHasTypeA`) and returns a `Bool`. Both harnesses evaluate the same
 predicate, and the whole-program shrinker minimizes a counterexample.
 
@@ -55,7 +54,7 @@ syntactic preservation lemmas, but neither one proves its own headline
 postcondition, so both are here too.
 
 `TerminationCheck` is **not** covered. Its properties need a recursive function
-to be non-vacuous, and the generator cannot make one yet (issues #15 and #29), so
+to be non-vacuous, and the generator cannot make one yet, so
 each property would pass on empty input and give a false signal of coverage.
 
 ## Why the input is a whole program, and not a statement list
@@ -99,8 +98,8 @@ not weakened, so the property reports the defect instead of hiding it.
 Five fail on **generated** input, at the rate given:
 
 * `checkLoopBlockLabelsNodup` (4 of 40 draws) — `LoopElim` mints the block label
-  `loopElim_havoc_{loop_num}` **two times** for one loop. `LoopElim.lean:126`
-  builds one `havocd` statement, and `:139` puts it in the output two times: once
+  `loopElim_havoc_{loop_num}` **two times** for one loop. `LoopElim.lean`
+  builds one `havocd` statement, then puts it in the output two times: once
   inside the `arbitrary_iter_facts` block, and once after it, to model the exit
   state. So the output holds two blocks under one label, for each loop the pass
   erases. The pass carries a collision *detector* (`hasLabelConflict`) for a label
@@ -115,7 +114,7 @@ Five fail on **generated** input, at the rate given:
 
 * `checkS2uCfgPrintable` (31 of 40 draws) — a procedure with a `.cfg` body does
   not print. `procToCST` writes the error "CFG bodies not yet supported in CST
-  conversion" and emits an empty body (`FormatCore.lean:1112`).
+  conversion" and emits an empty body (`FormatCore.lean`).
   `StructuredToUnstructured` is the only pass in the tree that makes a `.cfg`
   body, so no other property can reach this hole. The same program with a
   structured body prints with no error.
@@ -123,8 +122,8 @@ Five fail on **generated** input, at the rate given:
 * `checkInlineProcLabelsNodup` (2 of 400 draws) — `ProcedureInlining` gives two
   call sites of one procedure the same labels, in two independent ways. The wrapper
   block label `procName ++ "$inlined"` is a string concatenation that reaches no
-  counter (`ProcedureInlining.lean:288`). And `renameAllLocalNames` folds the
-  *label* renaming inside the fold over `var_map` (`:110`), so a callee that
+  counter (`ProcedureInlining.lean`). And `renameAllLocalNames` folds the
+  *label* renaming inside the fold over `var_map`, so a callee that
   declares no variable has an empty `var_map`, the fold body never runs, and the
   callee's labels are copied verbatim at every call site. A callee that does
   declare a variable gets its labels freshened correctly, which shows the renaming
@@ -148,7 +147,7 @@ a hand-built body, and a deterministic `#guard` at the end of this file pins eac
   type with `LExpr.typeOf`, which reads an annotation rather than inferring one, so
   the read gives `none` for a term as ordinary as `Int.Add(3, 4)` with a bare `.op`
   node, and the pass falls back to `LTy.forAll ["α"] (.ftvar "α")`
-  (`CommonSubexprElim.lean:335`). The typechecker rejects that outright: "Variable
+  (`CommonSubexprElim.lean`). The typechecker rejects that outright: "Variable
   annotation must be monomorphic, but got polymorphic type ∀[α]. α". The same body
   with the operator annotated gets `var $__cse.0 : int` and typechecks, which
   isolates the fallback as the cause. The fix is to infer the type rather than to
@@ -156,7 +155,7 @@ a hand-built body, and a deterministic `#guard` at the end of this file pins eac
 
 * `checkCseFreshNamesFresh` — CSE declares `$__cse.0` a second time on a body that
   already declares it. The counter that mints the index never reads a program name
-  (`CommonSubexprElim.lean:331`). The output then holds two declarations under that
+  (`CommonSubexprElim.lean`). The output then holds two declarations under that
   name, and the references the pass inserted resolve to the wrong one, so the
   rewrite changes what the program means. `Program.typeCheck` accepts the input and
   rejects the output.
@@ -167,7 +166,7 @@ the only ones here that ask what obligations actually reach SMT:
 
 * **`Core.Statement.evalOneStmt` silently drops every proof obligation after a
   second `if *`.** The variable standing for a nondeterministic guard is named
-  `$__nondet_cond_{pathConditions.scopes.length}` (`StatementEval.lean:586`) — from
+  `$__nondet_cond_{pathConditions.scopes.length}` (`StatementEval.lean`) — from
   the current path-condition *depth*, not from a counter. Entering a `.block`
   pushes only a variable scope, and `Env.performMerge` pops the branch scope again,
   so two `if *` at the same depth are handed the same name; the second one's
@@ -176,8 +175,8 @@ the only ones here that ask what obligations actually reach SMT:
   assert b }` yields the obligations `[a]`. `toCoreProofObligationProgram` returns
   `.ok`, so the verifier reports success on assertions it never checked. Pinned by
   the §2.9 `#guard`s, including a source program that declares the minted name
-  itself and thereby loses **all** of its obligations. Tracked as repo issue #113
-  and documented in `docs/strata-symbolic-eval-nondet-collision.md`.
+  itself and thereby loses **all** of its obligations. Documented in
+  `docs/strata-symbolic-eval-nondet-collision.md`.
 
   This is also why `checkNondetElimSymbolicNoLoss` is containment and not equality:
   `NondetElim` removes every `if *`, so the dropped obligations come back and the
@@ -204,10 +203,10 @@ measure; 28 hold a nondeterministic guard; 7 hold an `init` in a loop body.
 
 ## What each property family checks
 
-The families follow the sections of issue #69:
+The families follow the sections of the test plan:
 
 * **IrrelevantAxioms** (§2.1) — the *relevance* oracle, and not the `changed`
-  flag (issue #91 covers the flag). Five properties: only an `.ax` declaration
+  flag (covered separately). Five properties: only an `.ax` declaration
   is ever removed, declaration order holds, each retained axiom is relevant, each
   removed axiom is irrelevant, and the pruned program still typechecks.
 * **StructuredToUnstructured** (§2.2) — seven structural properties over the
@@ -326,7 +325,7 @@ rely on the `none` branch. -/
     `corePipelinePhases`, called directly.
 
     Run at `VerifyOptions.quiet`, not `.default`: the evaluator `dbg_trace`s the whole
-    obligation list at `.normal` verbosity or above (`Verifier.lean:832`), which would
+    obligation list at `.normal` verbosity or above (`Verifier.lean`), which would
     dump a VC listing into the build output on every `#guard` and every property
     sample. `.quiet` differs from `.default` only in that field.
 
@@ -439,8 +438,8 @@ end
 /-! ## §2.1 `IrrelevantAxioms` — the relevance oracle
 
 `irrelevantAxiomsPipelinePhase` prunes each axiom that its fixed-point relevance
-computation finds irrelevant to a seed set of function names. Issue #91 pins the
-`changed` flag, which the pass hardcodes to `true`. What no property covers yet is
+computation finds irrelevant to a seed set of function names. The `changed` flag,
+which the pass hardcodes to `true`, is pinned separately. What no property covers yet is
 whether the pass prunes the **right** axioms, which is what this family checks.
 
 The seed set is each function the program declares (`axiomSeedFunctions`). That is
@@ -522,7 +521,7 @@ def checkAxiomsRemovedIrrelevant (p : Program) : Bool :=
     the call-graph closure of the seed set. `getCalleesClosure` and
     `getCallersClosure` over the program's own function call graph give the
     closure, which is what `getIrrelevantAxioms` starts from
-    (`IrrelevantAxioms.lean:52`), and `LExpr.getOps` gives the functions of the
+    (`IrrelevantAxioms.lean`), and `LExpr.getOps` gives the functions of the
     axiom body, which is what `functionImmediateAxiomMap` reads.
 
     A builtin is excluded, in the same way the axiom map excludes one: a builtin
@@ -605,7 +604,7 @@ def checkAxiomsObligationsUnchanged (p : Program) : Bool :=
 
 /-! ## §2.2 `StructuredToUnstructured` — the structural properties
 
-`stmtsToBlocks` (`StructuredToUnstructured.lean:58`) threads a continuation label
+`stmtsToBlocks` (`StructuredToUnstructured.lean`) threads a continuation label
 `k` and an `exitConts` association list by hand across eight statement cases, and
 mints labels from a `StringGenState`. It has no theorem at all. The seven
 properties below are the structural claims that need no CFG interpreter: Strata
@@ -679,7 +678,7 @@ def stmtCmdCount (s : Statement) : Nat :=
     The list **stops at the first `.exit`**, because an `.exit` is unconditional:
     each statement after it in the same list is unreachable, and the pass drops
     them ("Any statements after the `.exit` are skipped",
-    `StructuredToUnstructured.lean:167`). A nested list under a `.block`, an `.ite`
+    `StructuredToUnstructured.lean`). A nested list under a `.block`, an `.ite`
     branch or a loop body is counted on its own, which matches the pass: each one
     is a separate `stmtsToBlocks` call with its own continuation. -/
 def stmtsCmdCount (ss : List Statement) : Nat :=
@@ -692,7 +691,7 @@ end
 /-- **No dangling label.** Each `.goto` or `.condGoto` target of the emitted CFG
     occurs as a block label. Given the manual threading of `k` and `exitConts`
     across eight cases, and the `.exit` fallback that silently continues on an
-    invalid exit (`| .none => k`, line 163, with the comment "We assume a prior
+    invalid exit (`| .none => k`, with the comment "We assume a prior
     check to avoid this"), this is where a defect is most likely. -/
 def checkS2uNoDanglingLabel (p : Program) : Bool :=
   (programBodies p).all fun ss =>
@@ -704,7 +703,7 @@ def checkS2uNoDanglingLabel (p : Program) : Bool :=
     ill-defined: `blocks.lookup` would find the first one and drop the second.
 
     Conditional on the source body already having distinct `.block` labels, and it
-    must be: `genFreshLabel` (`StmtHasTypeAGen/Core.lean:114`) draws a label fresh
+    must be: `genFreshLabel` (`StmtHasTypeAGen/Core.lean`) draws a label fresh
     against the *enclosing* labels only, which is what the `block` premise of the
     typing spec requires, so two **sibling** blocks may share a label. A body such as
     `j: { } j: { }` is therefore generatable, and it makes the emitted CFG hold two
@@ -741,7 +740,7 @@ def checkS2uOneFinish (p : Program) : Bool :=
     continuation the threading dropped.
 
     Every source `.block l` becomes an orphan. The `.block` case
-    (`StructuredToUnstructured.lean:78`) emits a block `(l, goto bl)` whose only job
+    (`StructuredToUnstructured.lean`) emits a block `(l, goto bl)` whose only job
     is to give the source label a landing site for an `.exit l`, and separately
     flushes the accumulated commands into `accumEntry`, which is what the case
     returns as its own entry. So the caller jumps to `accumEntry` and never to `l`,
@@ -780,11 +779,11 @@ def checkS2uCmdCountGrows (p : Program) : Bool :=
 
 /-- **A `.cfg` body prints.** FAILS honestly. `procToCST` writes the error "CFG
     bodies not yet supported in CST conversion" and emits an empty body
-    (`FormatCore.lean:1112`), so a procedure that this pass rewrote cannot be
+    (`FormatCore.lean`), so a procedure that this pass rewrote cannot be
     printed at all.
 
     `StructuredToUnstructured` is the only pass in the tree that makes a `.cfg`
-    body, so issue #91's printer oracle cannot reach this hole: nothing else
+    body, so the printer oracle cannot reach this hole: nothing else
     produces the constructor. The oracle here is the formatter's own error banner,
     which `Core.formatProgram` appends when the conversion collected an error, so
     the property needs no access to the private error array.
@@ -834,7 +833,7 @@ def programMeasureLoopCount (p : Program) : Nat :=
 
 /-- Whether the program holds a nondeterministic loop that carries a measure.
     `insertInvariantAsserts` rejects such a loop with a diagnostic
-    (`InsertLoopInvariantAsserts.lean:113`), so a property about the pass's output
+    (`InsertLoopInvariantAsserts.lean`), so a property about the pass's output
     is vacuous on such a program and `checkLoopNondetMeasureThrows` states the
     rejection itself. -/
 def hasNondetMeasureLoop (p : Program) : Bool :=
@@ -951,7 +950,7 @@ def checkLoopVcSurvivesElim (p : Program) : Bool :=
 /-- **A nondeterministic loop that carries a measure is rejected.** A `while *`
     loop iterates an arbitrary number of times, so no measure can show that it
     terminates, and the pass throws rather than dropping the measure silently
-    (`InsertLoopInvariantAsserts.lean:113`). The generator can draw exactly this
+    (`InsertLoopInvariantAsserts.lean`). The generator can draw exactly this
     shape: `genCondOrNondet` gives `.nondet` about 20 percent of the time and
     `genOptMeasure` gives a measure about 75 percent of the time.
 
@@ -962,8 +961,8 @@ def checkLoopNondetMeasureThrows (p : Program) : Bool :=
 
 /-- **`LoopElim` mints distinct block labels.** FAILS honestly.
     `removeLoop` builds one `havocd` block statement labeled
-    `loopElim_havoc_{loop_num}` (`LoopElim.lean:126`) and puts it into the output
-    **two times** (`:139`): once inside the `arbitrary_iter_facts` block, and once
+    `loopElim_havoc_{loop_num}` (`LoopElim.lean`) and puts it into the output
+    **two times**: once inside the `arbitrary_iter_facts` block, and once
     after it, to model the exit state. So the output holds two blocks with one
     label, for each loop the pass erases.
 
@@ -1011,7 +1010,7 @@ def checkLoopElimStatFaithful (p : Program) : Bool :=
 
 /-! ## §2.3 `DetToKleene` — the measure the transform drops
 
-`StmtToKleeneStmt` (`DetToKleene.lean:37`) rejects a loop that carries an
+`StmtToKleeneStmt` (`DetToKleene.lean`) rejects a loop that carries an
 invariant (`if !inv.isEmpty then none`) and explains why: the deterministic
 semantics can signal `hasFailure` when an invariant evaluates to false, and Kleene
 has no invariant, so it cannot reproduce that failure.
@@ -1068,7 +1067,7 @@ def checkKleeneMeasureAccepted (p : Program) : Bool :=
 The repository already checks that CSE leaves no dangling bound variable and that
 symbolic evaluation agrees. What remains is the fresh-name discipline. CSE mints
 `$__cse.{idx}` from a counter that never reads the program's names
-(`CommonSubexprElim.lean:331`), and it prepends each new `var` declaration to the
+(`CommonSubexprElim.lean`), and it prepends each new `var` declaration to the
 body, so both a collision and a wrong order are possible in principle.
 
 **These four properties are vacuous on generated input, and the number is 0 of
@@ -1077,14 +1076,13 @@ and no generated body does: each expression is drawn independently, so two
 identical subterms of a non-trivial size essentially never coincide. The four
 properties are therefore regression gates that the `#guard`s at the end of this
 file make real, on a hand-built body that does hold a duplicate. The same
-condition is recorded for the `ANFEncoder` properties (issue #36 measured 599 of
-600 vacuous), so this is a known limit of the generator and not of the properties.
+condition is recorded for the `ANFEncoder` properties (599 of 600 measured
+vacuous), so this is a known limit of the generator and not of the properties.
 
 Making them non-vacuous needs a generator that plants a repeated subterm on
-purpose. Tracked in **repo issue #105**, which notes that this is the one item of
-the four whose likely route (a sharing construct in `genLExpr`) adds a case to
-`genLExpr_sound`, and suggests a post-processing alternative that avoids proof work
-at the cost of a less principled distribution. -/
+purpose. This is the one item of the four whose likely route (a sharing construct
+in `genLExpr`) adds a case to `genLExpr_sound`; a post-processing alternative
+avoids that proof work at the cost of a less principled distribution. -/
 
 /-- Each `init` name of a statement list, at any depth, in order of appearance.
     Reuses the procedure test support's `stmtsInits`, whose traversal the ANF
@@ -1095,7 +1093,7 @@ def bodyInitNames (ss : List Statement) : List String :=
 /-- **A fresh CSE name does not collide.** No `$__cse.N` name may be declared two
     times in an output body. The index comes from a counter that starts at 0 for
     each program and never reads a program name
-    (`CommonSubexprElim.lean:331`), so a body that already declares `$__cse.0`
+    (`CommonSubexprElim.lean`), so a body that already declares `$__cse.0`
     gets a second declaration of that name when the pass mints its first fresh
     variable, and the reference the pass inserts then resolves to whichever
     declaration is in scope rather than to the extracted subexpression.
@@ -1133,7 +1131,7 @@ def checkCseAssertLabelsPreserved (p : Program) : Bool :=
 
 /-- **The fresh declarations appear in the order the counter minted them.** The
     pass builds the new `var` declarations in a fold over the extraction targets
-    (`CommonSubexprElim.lean:329`) and accumulates them **reversed**, then
+    (`CommonSubexprElim.lean`) and accumulates them **reversed**, then
     un-reverses them onto the rewritten body with `reverseAux`. So an inversion in
     the output order would mean that un-reversing step is wrong.
 
@@ -1166,7 +1164,7 @@ def checkCseFreshDeclOrder (p : Program) : Bool :=
     whose operator carries no type annotation. CSE binds each extracted
     subexpression to a fresh `var` whose type it reads off the subexpression
     (`dup.typeOf`), and when that read gives `none` it falls back to
-    `LTy.forAll ["α"] (.ftvar "α")` (`CommonSubexprElim.lean:335`), a *polymorphic*
+    `LTy.forAll ["α"] (.ftvar "α")` (`CommonSubexprElim.lean`), a *polymorphic*
     annotation. The typechecker then rejects the declaration outright:
     "Variable annotation must be monomorphic, but got polymorphic type ∀[α]. α".
 
@@ -1194,7 +1192,7 @@ def checkCseOutputTypechecks (p : Program) : Bool :=
 
 /-! ## §2.6 `FunctionInlining` — a pure expression transform
 
-`inlineFuncDefs` (`FunctionInlining.lean:76`) is a pure `LExpr → LExpr` transform,
+`inlineFuncDefs` (`FunctionInlining.lean`) is a pure `LExpr → LExpr` transform,
 which makes it the pass that is easiest to test well. It relies on
 `substFvarsLifting` for capture safety under a binder, and on
 `LFunc.computeTypeSubst` for polymorphic instantiation.
@@ -1217,13 +1215,13 @@ because three of the four addressed a bottleneck that was *not* the obvious one:
    or `requires` clause, since a function declared later in the fold sees the grown
    vocabulary. It now reads function bodies, preconditions and axiom bodies too.
    Rate after: 1 of 400.
-3. **Polymorphic functions could not be registered at all** (issue #105 item A). 114
+3. **Polymorphic functions could not be registered at all.** 114
    of 158 declared functions are polymorphic, and `OpCtx` holds one monotype per
    operator, so `funcOpEntry` skipped them; `funcPolyOpEntry` now sends them to
-   `pctx`. Combined with order-aware declaration weights (#105 item B), the rate
+   `pctx`. Combined with order-aware declaration weights, the rate
    reached 4 of 400 — an improvement, but nowhere near enough.
-4. **The real bottleneck was operator-selection dilution, which #105 did not
-   identify.** `genIndir` and `genIndirPoly` pick with `elements`, which is
+4. **The real bottleneck was operator-selection dilution, which none of the
+   above identified.** `genIndir` and `genIndirPoly` pick with `elements`, which is
    *uniform* over the candidates for the target type — and `Core.Factory` supplies
    105 operators returning `bool` and 27 returning `int`. So one entry for a declared
    function gave it ~1% odds at a `bool` leaf: it was registered correctly and simply
@@ -1308,7 +1306,7 @@ def inlineIn (p : Program) (e : Expression.Expr) : Expression.Expr :=
   Strata.inlineFuncDefs (programFactory p) (e := e)
 
 /-- **Fuel 0 is the identity.** `inlineFuncDefsBounded factory 0 e = e` is what
-    the docstring states (`FunctionInlining.lean:119`), which the `maxDepth`
+    the docstring states (`FunctionInlining.lean`), which the `maxDepth`
     match makes true by construction. A regression gate on that match. -/
 def checkInlineFuelZeroIdentity (p : Program) : Bool :=
   let F := programFactory p
@@ -1389,7 +1387,7 @@ asks for: inlining a call must not change what the expression *evaluates to*.
 
 **Making the comparison meaningful takes one step.** `LExprEval.eval` unfolds a
 function body only when the function carries the `.inline` attribute, or an
-`inlineIf*` variant whose side condition holds (`LExprEval.lean:274`).
+`inlineIf*` variant whose side condition holds (`LExprEval.lean`).
 `inlineFuncDefs` unfolds **any** fully applied call whose function has a body — that
 asymmetry is deliberate and documented in `FunctionInlining`'s module note ("Unlike
 the attribute-gated inlining inside `LExprEval.eval` … these transforms are explicit,
@@ -1427,7 +1425,7 @@ def evalOver (F : Lambda.Factory CoreLParams) (e : Expression.Expr) : Expression
 /-- Whether `e` holds a `.abs` or `.quant` node anywhere.
 
     `LExprEval.eval` treats a binder as opaque: the `.abs` and `.quant` cases
-    substitute the environment and stop (`LExprEval.lean:333-338`) rather than
+    substitute the environment and stop (`LExprEval.lean`) rather than
     evaluating the body. `inlineFuncDefs` recurses under a binder. So a call *inside* a
     binder is rewritten by the transform and left alone by the evaluator, and the two
     results differ for a documented reason rather than a defect. The eval-agreement
@@ -1448,7 +1446,7 @@ where
     term, when the evaluator is allowed to unfold the same functions the transform
     does (see `inlineEvalFactory`).
 
-    This is the property §2.6 of issue #69 asks for, in the form the two evaluators
+    This is the property §2.6 of the test plan asks for, in the form the two evaluators
     make available. It is stronger than the four syntactic properties beside it: those
     constrain the *shape* of the result (its type, its free variables, its remaining
     inlinable calls), whereas this one constrains its *meaning*. A substitution that
@@ -1465,7 +1463,7 @@ where
     `LExprEval.eval` rather than defects, so the claim is scoped around them:
 
     1. **`eval` does not descend under a binder.** The `.abs` and `.quant` cases
-       substitute the environment and stop (`LExprEval.lean:333-338`); they do not
+       substitute the environment and stop (`LExprEval.lean`); they do not
        evaluate the body. `inlineFuncDefs` *does* recurse under a binder. So on
        `fun q : bool => P` the evaluator leaves `P` in place while the transform
        rewrites it to `false`, and the two results differ for a legitimate reason.
@@ -1495,13 +1493,13 @@ def checkInlineEvalAgreement (p : Program) : Bool :=
 
 /-! ## §2.7 `ProcedureInlining` — freshening of the labels
 
-`replaceLabelsOfBlocksAndAssertAssumes` (`ProcedureInlining.lean:52`) renames each
+`replaceLabelsOfBlocksAndAssertAssumes` (`ProcedureInlining.lean`) renames each
 block, `assert`, `assume` and `cover` label when it inlines a body. The classic
 defect is a name that is not unique when one procedure is inlined at two call
 sites, so the properties below are about the labels and about the statistics
 counters the pass maintains by hand.
 
-`genCallStmt` is wired into `genProcedure` (issue #37) and the whole-program
+`genCallStmt` is wired into `genProcedure` and the whole-program
 generator threads a procedure signature context across the declaration fold, so a
 generated program does hold real call edges: body `i` may call any monomorphic
 procedure `0` to `i - 1`. -/
@@ -1531,13 +1529,13 @@ def programLabelsNodup (p : Program) : Bool :=
 
     1. **The wrapper block label is a constant.** `inlineCallCmd` wraps each
        inlined body in `.block (procName ++ "$inlined")`
-       (`ProcedureInlining.lean:288`), which is a plain string concatenation and
+       (`ProcedureInlining.lean`), which is a plain string concatenation and
        reaches no counter. So two calls to `Callee` both produce a block labeled
        `Callee$inlined`, in one caller body.
 
     2. **A callee with no local variable keeps its original labels.**
        `renameAllLocalNames` folds the label renaming *inside* the fold over
-       `var_map` (`ProcedureInlining.lean:110`), so when the callee declares no
+       `var_map` (`ProcedureInlining.lean`), so when the callee declares no
        variable, `var_map` is empty, the fold body never runs, and
        `replaceLabelsOfBlocksAndAssertAssumes` is never applied. The callee's
        labels are then copied verbatim at every call site. A callee that declares
@@ -1585,7 +1583,7 @@ def checkInlineProcAssertsNotLost (p : Program) : Bool :=
     increments `visitedCalls` once per call site it examines and `inlinedCalls`
     once per call site it expands. Two claims follow, and the check states both:
     `inlinedCalls` never exceeds `visitedCalls`, because the pass increments the
-    first only after the second (`ProcedureInlining.lean:218,222`), and the call
+    first only after the second (`ProcedureInlining.lean`), and the call
     count of the program never grows, because a call is only ever replaced by a
     body.
 
@@ -1670,7 +1668,7 @@ That difference is the *point* of inlining, not a defect. Before inlining a call
 verified once, modularly, and each call site assumes its contract; after inlining the
 callee's body is verified again at every call site. So the obligation multiset grows,
 and an equality claim would report correct behaviour as a bug — the same trap the
-`useArrayTheory` property in #79 fell into before being restated.
+`useArrayTheory` property fell into before being restated.
 
 What holds, and is worth pinning:
 
@@ -1703,7 +1701,7 @@ What holds, and is worth pinning:
     A procedure's `requires` clause is an obligation on its *callers*. Before
     inlining, `Program.eval` emits it as
     `assert [(Origin_Callee_Requires)pre]` at the call site. `inlineCallCmd`
-    (`ProcedureInlining.lean:207-289`) builds the replacement block out of the
+    (`ProcedureInlining.lean`) builds the replacement block out of the
     callee's **body** plus argument/output plumbing, and never reads
     `proc.spec.preconditions` — so the assertion is not carried over, and nothing
     else re-derives it, because after inlining there is no `call` left for a later
@@ -1913,7 +1911,7 @@ containment, so that the property keeps reporting the direction that matters (a
 
 ### The evaluator defect that `NondetElim` hides
 
-`StatementEval.lean:586` mints the variable standing for a nondeterministic guard
+`StatementEval.lean` mints the variable standing for a nondeterministic guard
 as
 
     $__nondet_cond_{Ewn.env.pathConditions.scopes.length}
@@ -2251,7 +2249,7 @@ private def cseFiringBody : List Statement :=
     Statement.init ⟨"b", ()⟩ (.forAll [] .int) (.det cseDup) .empty ]
 
 /-- The same body, with `$__cse.0` already declared. The counter that mints the
-    index never reads a program name (`CommonSubexprElim.lean:331`), so this is
+    index never reads a program name (`CommonSubexprElim.lean`), so this is
     where the collision lands. `genIdentName` draws no `$`-prefixed name, so only
     a hand-built program reaches it. -/
 private def cseCollisionBody : List Statement :=
@@ -2713,7 +2711,7 @@ private def nfCall : Expression.Expr := .op () ⟨"NF", ()⟩ (some .bool)
   (nullaryFuncProgram (.ite () nfCall trueLit (.const () (.boolConst false))))
 
 -- Under a binder they legitimately diverge: `eval` substitutes and stops
--- (`LExprEval.lean:333`) while `inlineFuncDefs` recurses, so `fun q => NF` evaluates
+-- (`LExprEval.lean`) while `inlineFuncDefs` recurses, so `fun q => NF` evaluates
 -- to itself on the left and to `fun q => false` on the right. `exprHasBinder`
 -- excludes it, which is why the property still passes on such a program — the guard
 -- records that this exclusion is doing real work and is not dead weight.
@@ -2862,7 +2860,7 @@ private def obligationsOf (ss : List Statement) : Option (List String) :=
 #guard obligationsOf [.ite .nondet [guardAssert "a", ndIte "b"] [] .empty] == some ["a", "b"]
 
 -- The mechanism, pinned directly: the name the evaluator mints for the guard is
--- `$__nondet_cond_{path-condition depth}` (`StatementEval.lean:586`), so a source
+-- `$__nondet_cond_{path-condition depth}` (`StatementEval.lean`), so a source
 -- program that declares that very name collides with the *first* `if *` — and the
 -- whole procedure's obligation list goes empty, with no diagnostic anywhere.
 private def collidingNondetName : Statement :=
@@ -2930,7 +2928,7 @@ private def hoistObligationBody : List Statement :=
 -- they only consume the minted name. The obligation list comes back **empty**, so
 -- a verifier has nothing to prove and reports success. See
 -- `docs/measurements/nondet-cond-collision-witnesses.lean` for the search that
--- found it and repo issue #113 for the report.
+-- found it.
 
 /-- `procedure P (out r : int) ensures [post]: false { ss }`. The postcondition
     makes the procedure unverifiable, so its obligation must reach the evaluator. -/

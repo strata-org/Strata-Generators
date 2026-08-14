@@ -10,7 +10,7 @@ suites as the LSpec-based `TestMain`, using the combinators here instead of
 `LSpec.checkIO`/`LSpec.lspecIO`, and both drivers must report the same
 pass/fail verdicts and the same exit code.
 
-The key observation (see the discussion in issue #21) is that LSpec's runtime
+The key observation is that LSpec's runtime
 harness is a thin wrapper over Plausible: `checkIO` runs `Plausible`'s testable
 runner and packages the result, `TestSeq.individualIO` merely holds an
 `IO (Bool × Nat × Nat × Option String)` action, and `lspecIO` iterates suites,

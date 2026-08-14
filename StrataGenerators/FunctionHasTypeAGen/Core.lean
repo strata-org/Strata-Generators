@@ -187,7 +187,7 @@ def genQuotedName [Gen G] : G String := do
 
 /-- Generate a random list of alphanumeric names of length ≤ `depth`.
 
-    Defined via the `listOfMaxLength` combinator (vendored from Basalt PR #8); its
+    Defined via the `listOfMaxLength` combinator (vendored from Basalt); its
     support is characterized by `SetGen.mem_support_listOfMaxLength_iff`. -/
 def genNameList [Gen G] (depth : Nat) : G (List String) :=
   listOfMaxLength depth genIdentName
@@ -231,7 +231,7 @@ def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifie
     expression can refer to the function's own inputs by name.
 
     This is the *only* free-variable context a precondition may be generated in.
-    `FuncWF.precond_freevars` (`Strata/DL/Util/Func.lean:120`) requires the free
+    `FuncWF.precond_freevars` (`Strata/DL/Util/Func.lean`) requires the free
     variables of every precondition to be a subset of the formal-parameter names,
     exactly as `body_freevars` does for the body — so handing `genLExpr` the
     ambient `fctx` here would produce ill-formed functions rather than merely

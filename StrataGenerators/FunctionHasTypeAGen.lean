@@ -465,7 +465,7 @@ theorem genPreconditions_complete (octx : OpCtx)
     completeness theorem would have to quantify over the "provable" or "valid"
     preconditions and so drag in undecidability. It does not. The support of a
     generator is a set of `LExpr'` *syntax trees*, and `FuncWF.precond_freevars`
-    (`Func.lean:120`) constrains preconditions only syntactically (free variables ⊆
+    (`Func.lean`) constrains preconditions only syntactically (free variables ⊆
     input names). Nothing here mentions satisfiability, validity, or provability, so
     there is no semantic quantifier to be undecidable about.
 

@@ -5,7 +5,7 @@ import Strata.DL.Lambda.LTyUnify
 /-!
 # Generator-parametric support lemmas for the Indir / IndirPoly rules
 
-Since #64, `genLExprBase` itself carries the Indir/IndirPoly rules in its
+`genLExprBase` itself carries the Indir/IndirPoly rules in its
 per-type `frequency` lists. That creates a proof-order problem: the four
 "forward" results about `genLExprBase` —
 
@@ -262,12 +262,12 @@ end StrataGenerators.IndirSupport
 -- ── Spine arity, and the depth budget a spine actually needs ─────────
 --
 -- `termDepth` charges **one level per `app` node**, so a fully-applied operator
--- of arity `k` costs `k` levels, not one. Before #64 that did not matter: the
+-- of arity `k` costs `k` levels, not one. Formerly that did not matter: the
 -- Indir rules lived only in `genLExpr`, and `genLExprBase_termDepth_bound` — the
 -- theorem asserting `termDepth e ≤ depth` — only ever saw `genLExprBase`, whose
 -- every branch is a single constructor.
 --
--- With the rules folded into `genLExprBase` (#64) that statement is no longer
+-- With the rules folded into `genLExprBase` that statement is no longer
 -- merely unproved, it is **false**: at `depth = 1` the Indir branch can emit
 -- `Int.Add #1 #2`, whose `termDepth` is `2`. So the bound has to be restated
 -- rather than re-proved, and the honest restatement charges each level the

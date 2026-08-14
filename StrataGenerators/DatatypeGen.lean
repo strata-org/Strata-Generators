@@ -349,7 +349,7 @@ abbrev BlockRef := String × LMonoTys
 
     This function uses `pickBitvecWidth` from `HasTypeAGen/Core.lean`. The `LMonoTy`
     generator uses the same width generator, and it now draws a width with no limit.
-    Read issue #38. `pickBitvecWidth` is at the head of the list, therefore the list is
+    `pickBitvecWidth` is at the head of the list, therefore the list is
     clearly a `::`. Therefore `simp` can prove that `oneOf` gets a list that is not
     empty, and an empty `baseTypes` does no damage.
 

@@ -31,12 +31,12 @@ Checking the *whole* procedure rather than tracking per-node types is what makes
 the delegation above sound, and it is what decides several obligations for free:
 
 - **Contract clauses stay Boolean.** `Procedure.typeCheck`'s `typeCheckConditions`
-  rejects any pre/postcondition whose type is not `bool` (ProcedureType.lean:93),
+  rejects any pre/postcondition whose type is not `bool` (ProcedureType.lean),
   so a clause reduced to a non-Boolean subterm is filtered out rather than
   emitted. Clauses may therefore be shrunk freely.
 - **Modification rights stay valid.** Dropping a body statement can leave a `set x`
   whose defining `init x` is gone, which `checkModificationRights` rejects
-  (ProcedureType.lean:55) — again caught by the filter, not by local reasoning.
+  (ProcedureType.lean) — again caught by the filter, not by local reasoning.
 - **`old v` stays in scope.** Postconditions may mention `old v` for in-out
   parameters; since the header is held fixed (below), those bindings survive every
   reduction.

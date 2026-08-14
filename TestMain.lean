@@ -157,7 +157,7 @@ def main (args : List String) : IO UInt32 := do
       (∀ gf : ClosedGenFunction, prop_function_body_preservation gf) (cfg := cfg) $
     -- Function typechecker completeness. FAILS on the measure-without-body gap
     -- (spec permits it, algorithm rejects it) — the function-level analogue of the
-    -- statement `funcDecl` gap (#1), asserted honestly as a real failure.
+    -- statement `funcDecl` gap, asserted honestly as a real failure.
     checkIO PropertyNames.fnTypeCheckComplete
       (∀ gf : ClosedGenFunction, prop_function_typeCheck_complete gf) (cfg := cfg) $
     -- Every typeCheck rejection is a measure-without-body function (pins the gap).
@@ -168,12 +168,12 @@ def main (args : List String) : IO UInt32 := do
       (roundtripFunctionAction numTrials maxSize) .done
 
   -- Statement-generator properties (transforms + typechecker). The six transform
-  -- / typechecker properties (#1, #3, #4, #5a, #5b, #9) are folded from the shared
+  -- / typechecker properties are folded from the shared
   -- `Properties.stmtTransforms` bundle (name↔check paired in one place, also
   -- driving the Tyche panels), so their names can never be attached to the wrong
-  -- check. #1 FAILS honestly on the funcDecl gap (the spec's funcDecl rule is
-  -- strictly more permissive than the algorithm) — a genuine spec/algorithm
-  -- divergence surfaced as a real failure. #6 (Kleene definedness) has a richer
+  -- check. Typechecker completeness FAILS honestly on the funcDecl gap (the spec's
+  -- funcDecl rule is strictly more permissive than the algorithm) — a genuine
+  -- spec/algorithm divergence surfaced as a real failure. Kleene definedness has a richer
   -- Tyche panel, so it is stated directly here.
   let stmtSuite : TestSeq :=
     Properties.stmtTransforms.foldr
@@ -189,7 +189,7 @@ def main (args : List String) : IO UInt32 := do
   -- `Properties.procTransforms` bundle. Each runs its pass on the program
   -- assembled from a generated procedure list and inspects the result. Four checks
   -- FAIL honestly, pinning real defects rather than masking them (exactly like the
-  -- statement `#1` and function-completeness gaps):
+  -- statement and function completeness gaps):
   -- `proc: FilterProcedures changed flag is faithful` (the pass hardcodes
   -- `changed := true` even when it removes nothing); `proc: PrecondElim changed
   -- flag is faithful` (the `.funcDecl` branch inserts a `$$wf` block for
@@ -236,8 +236,8 @@ def main (args : List String) : IO UInt32 := do
   --   * the two sweeps over generated procedure lists, folded like `procTransforms`.
   --
   -- Three of the four FAIL honestly, pinning the four hardcoded-`changed := true`
-  -- sites (`FilterProcedures.lean:82`, `IrrelevantAxioms.lean:81`,
-  -- `Verifier.lean:1510` and `:1517`). `phase: non-hardcoded pipeline phases have
+  -- sites (`FilterProcedures.lean`, `IrrelevantAxioms.lean`,
+  -- and the two in `Verifier.lean`). `phase: non-hardcoded pipeline phases have
   -- a faithful changed flag` is the one expected to PASS: it is the regression
   -- guard on the phases that compute the flag correctly today.
   let phaseSuite : TestSeq :=
@@ -249,7 +249,7 @@ def main (args : List String) : IO UInt32 := do
           (∀ gp : GenProcs, p.check gp.procs = true) (cfg := cfg) rest)
         .done)
 
-  -- Printer-expressiveness properties (#69 P2, #48). The two targeted witnesses
+  -- Printer-expressiveness properties. The two targeted witnesses
   -- are closed `Bool`s (a `bitvec 128` literal; the eighteen `Bv↔Int` conversion
   -- operators), and the whole-program property quantifies over `GenProgram` — the
   -- same wrapper as `programSuite`, so its counterexamples shrink whenever the
@@ -267,7 +267,7 @@ def main (args : List String) : IO UInt32 := do
         (cfg := cfg) .done)
 
   -- Properties for the eight Core transform passes that carry no correctness proof
-  -- (issue #69: `StructuredToUnstructured`, `LoopElim`,
+  -- (`StructuredToUnstructured`, `LoopElim`,
   -- `InsertLoopInvariantAsserts`, `CommonSubexprElim`, `FunctionInlining`,
   -- `ProcedureInlining`, `IrrelevantAxioms`, plus the unproven postconditions of
   -- `NondetElim` and `LoopInitHoist`), folded from the shared
@@ -282,8 +282,8 @@ def main (args : List String) : IO UInt32 := do
   -- label reaches no counter, and the label renaming sits inside the fold over
   -- `var_map`); `procInline: the output typechecks` (an `old x` expression is copied
   -- verbatim while `x` is renamed); and `procInline: symbolic evaluation loses no
-  -- obligation` (the callee's `requires` is dropped — the unsound one, repo issue
-  -- #107). The three `procInline` ones are rare on generated input, so a short run
+  -- obligation` (the callee's `requires` is dropped — the unsound one).
+  -- The three `procInline` ones are rare on generated input, so a short run
   -- may show them green.
   --
   -- The two `s2u:` failures — `every block is reachable from the entry` and `a
@@ -311,7 +311,7 @@ def main (args : List String) : IO UInt32 := do
         (∀ gp : GenProgram, p.check gp.prog = true) (cfg := cfg) rest)
       .done
 
-  -- The thirteen properties for `LiftInternalFuncDecls` (issue #33), the lambda
+  -- The thirteen properties for `LiftInternalFuncDecls`, the lambda
   -- lifting pass that hoists internal `funcDecl`s to closed top-level functions.
   -- Each injects a *capturing* internal function into the generated program — a
   -- generated `funcDecl` is always closed, since `genFuncDeclStmt` draws its bodies

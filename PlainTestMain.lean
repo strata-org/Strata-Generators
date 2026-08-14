@@ -145,9 +145,9 @@ def main (args : List String) : IO UInt32 := do
         (roundtripFunctionAction numTrials maxSize) ]
 
   -- Statement-generator properties (transforms + typechecker). The six transform
-  -- / typechecker properties (#1, #3, #4, #5a, #5b, #9) are folded from the shared
-  -- `Properties.stmtTransforms` bundle. #1 FAILS honestly on the funcDecl gap. #6
-  -- (Kleene definedness) is stated directly.
+  -- / typechecker properties are folded from the shared
+  -- `Properties.stmtTransforms` bundle. Typechecker completeness FAILS honestly on
+  -- the funcDecl gap. Kleene definedness is stated directly.
   let stmtSuite : List (IO Result) :=
     Properties.stmtTransforms.map
       (fun p => runProperty p.name
@@ -189,8 +189,8 @@ def main (args : List String) : IO UInt32 := do
   -- cannot change anything), so they run as `runUnitProperty`; the two sweeps over
   -- generated procedure lists are folded like `procTransforms`. Three of the four
   -- FAIL honestly, pinning the four hardcoded-`changed := true` sites
-  -- (`FilterProcedures.lean:82`, `IrrelevantAxioms.lean:81`, `Verifier.lean:1510`
-  -- and `:1517`). `phase: non-hardcoded pipeline phases have a faithful changed
+  -- (`FilterProcedures.lean`, `IrrelevantAxioms.lean`, and the two in
+  -- `Verifier.lean`). `phase: non-hardcoded pipeline phases have a faithful changed
   -- flag` is the one expected to PASS — the regression guard on the phases that
   -- compute the flag correctly today.
   let phaseSuite : List (IO Result) :=
@@ -201,7 +201,7 @@ def main (args : List String) : IO UInt32 := do
       (fun p => runProperty p.name
         (∀ gp : GenProcs, p.check gp.procs = true) cfg)
 
-  -- Printer-expressiveness properties (#69 P2, #48). Two targeted witnesses (a
+  -- Printer-expressiveness properties. Two targeted witnesses (a
   -- `bitvec 128` literal; the eighteen `Bv↔Int` conversion operators) plus the
   -- whole-program property over `GenProgram` — the same wrapper as `programSuite`,
   -- so its counterexamples shrink whenever the draw typechecks. All three FAIL
@@ -217,7 +217,7 @@ def main (args : List String) : IO UInt32 := do
            cfg ]
 
   -- Properties for the eight Core transform passes that have no correctness proof
-  -- (issue #69), folded from the shared `Properties.unprovenTransforms` bundle (the
+  --, folded from the shared `Properties.unprovenTransforms` bundle (the
   -- same forty-five checks as `TestMain`). Each runs its pass on a whole generated
   -- program; counterexamples shrink through the same whole-program shrinker.
   -- The four defects the bug report files all show up here as honest failures:
@@ -225,7 +225,7 @@ def main (args : List String) : IO UInt32 := do
   -- times), `procInline: inlining introduces no duplicate label` (two independent
   -- causes), `procInline: the output typechecks` (an `old x` expression escapes the
   -- renaming) and `procInline: symbolic evaluation loses no obligation` (the callee's
-  -- `requires` is dropped — the unsound one, repo issue #107). The `procInline` three
+  -- `requires` is dropped — the unsound one). The `procInline` three
   -- are rare on generated input, so a short run may show them green. The two `s2u:`
   -- failures (`every block is reachable from the entry`, `a cfg-bodied procedure
   -- prints`) are expected red ticks the report does NOT file as defects.
@@ -241,7 +241,7 @@ def main (args : List String) : IO UInt32 := do
       (fun p => runProperty p.name
         (∀ gp : GenProgram, p.check gp.prog = true) cfg)
 
-  -- The thirteen `LiftInternalFuncDecls` properties (issue #33), folded from the
+  -- The thirteen `LiftInternalFuncDecls` properties, folded from the
   -- shared `Properties.liftFuncDecls` bundle — the same checks as `TestMain`. Each
   -- injects a capturing internal function into the generated program, since
   -- `genFuncDeclStmt` draws its bodies with `genFunction []` and so every generated

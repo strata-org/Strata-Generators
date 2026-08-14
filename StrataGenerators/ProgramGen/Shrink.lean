@@ -59,7 +59,7 @@ in-place replacements, never reorderings. So a shrunk program reads against the
 original positionally, which is what makes a reduced counterexample legible.
 
 **One declaration kind is renamed.** `shrinkFunc`'s last reduction family
-(`FunctionHasTypeAGen/Roundtrip.lean:236`) rewrites a function's name to the single
+(`FunctionHasTypeAGen/Roundtrip.lean`) rewrites a function's name to the single
 canonical `"f"`:
 
 ```lean
@@ -212,7 +212,7 @@ def shrinkTypeDecl : TypeDecl → List TypeDecl
 
     **Nothing in Strata enforces this.** `Function.typeCheck` never inspects
     `preconditions` at all: its `freeVarChecks` guard covers the body and the measure
-    only (`FunctionType.lean:130`), and no other line of the file mentions the field.
+    only (`FunctionType.lean`), and no other line of the file mentions the field.
     So `function f0() : bool requires y == 0 { true }`, where `y` is declared
     nowhere, typechecks — as does a non-Boolean clause. `WFFunctionProp` is an empty
     structure, so `WF.lean` does not rule it out either. The consequence reaches
@@ -479,7 +479,7 @@ def checkProgramNamesNodup (p : Program) : Bool :=
     which is accepted, but whose returned form is not: the body's annotation comes
     back freshened to `$__ty1` while `typeArgs` comes back `[]`, so the output trips
     the declaration-level guard ("body contains undeclared type variables") that the
-    input passed. The rename-back step (`FunctionType.lean:91`, `:96-98`, `:184-189`)
+    input passed. The rename-back step (`FunctionType.lean`)
     is driven by the type variables of the *signature*, and a type parameter that
     occurs only in a body binder annotation is invisible to it.
 
