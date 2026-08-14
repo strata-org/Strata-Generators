@@ -1,0 +1,22 @@
+name: Lean Action CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: leanprover/lean-action@v1
+        with:
+          # Run `lake build` but don't run `lake test`: the test suite
+          # reports known/expected counterexamples, which would fail CI. 
+          # We only want CI to confirm the repo builds.
+          test: false
+      # Verify the `lake test` driver is properly configured. This does not run the test suite.
+      - name: Check test driver is configured
+        run: lake check-test
