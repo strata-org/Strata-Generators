@@ -1054,7 +1054,7 @@ theorem constantFunc_hasTypeA {C : LContext CoreLParams} {Γ : TContext Unit}
   · -- signatureWellKinded: `tyCompat` is equality here, and the only signature type is `τ`.
     intro ty hty
     refine ⟨ty, rfl, ?_⟩
-    simp only [constantFunc, ListMap.values, List.map_nil, List.mem_singleton] at hty
+    simp only [constantFunc, ListMap.values, List.mem_singleton] at hty
     rw [hty]; exact hwk
 
 /-- **The constants are well-typed and extend the context.** A successful

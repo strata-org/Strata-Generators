@@ -116,8 +116,7 @@ theorem find?_ofList_perm_of_functional {α β} [BEq α] [LawfulBEq α] [Hashabl
         · exact absurd (congrArg Prod.fst heq) hk
         · obtain ⟨w, hw⟩ := ih hv'
           exact ⟨w, by
-            simp only [List.lookup_cons, show (k == a) = false from by simp [hk],
-              Bool.false_eq_true, if_false, hw]⟩
+            simp only [List.lookup_cons, show (k == a) = false from by simp [hk], hw]⟩
   have hmem1 : ∀ v, (k, v) ∈ L2 → (k, v) ∈ L1 := fun v hv => hperm.mem_iff.mpr hv
   have hmem2 : ∀ v, (k, v) ∈ L1 → (k, v) ∈ L2 := fun v hv => hperm.mem_iff.mp hv
   rw [hrev L1, hrev L2]

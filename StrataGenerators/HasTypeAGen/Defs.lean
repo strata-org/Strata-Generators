@@ -115,7 +115,7 @@ theorem factoryPolyOps_closed {F : @Lambda.Factory LExprParams'}
           simp only [LMonoTys.freeVars] at hv
           rcases hv with hv | hv
           · exact hv
-          · simp [LMonoTys.freeVars] at hv) with h | ⟨t', ht', hv'⟩
+          · simp at hv) with h | ⟨t', ht', hv'⟩
         · exact Or.inl h
         · exact Or.inr ⟨t', List.mem_cons_of_mem _ ht', hv'⟩
   intro p hp

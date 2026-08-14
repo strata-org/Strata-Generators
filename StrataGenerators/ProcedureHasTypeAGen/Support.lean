@@ -97,7 +97,7 @@ theorem HMaps.insert_singleton {α β} [BEq α] [LawfulBEq α] [Hashable α] [La
   simp only [Strata.Util.HMaps.insert, Strata.Util.HMaps.find?]
   cases hm : Strata.Util.HMap.find? m x with
   | none =>
-    simp only [hm, Strata.Util.HMaps.pop, Strata.Util.HMaps.push, Strata.Util.HMaps.newest]
+    simp only [Strata.Util.HMaps.pop, Strata.Util.HMaps.push, Strata.Util.HMaps.newest]
   | some w =>
     simp only [hm, Strata.Util.HMaps.update]
 
