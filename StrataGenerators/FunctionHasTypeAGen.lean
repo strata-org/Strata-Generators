@@ -236,9 +236,16 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
 /-- **Soundness of `genFunction`.** Every function in the generator's support is
     well-typed w.r.t. `FuncHasTypeA` for *any* ambient context `Γ` (the annotated
     spec ignores it) and *any* operator context — `genLExpr_sound` is now
-    unconditional. -/
+    unconditional.
+
+    The one condition on `C` is `SimpleTyArities`, for upstream's `signatureWellKinded`
+    field: it asks that each signature type be well-kinded in `C`, and the generator only
+    ever builds `SimpleType`s, so it is enough that `C` register the eight `SimpleType`
+    constructors at their own arities. The Strata Core context does
+    (`coreContextSimpleTyArities`). -/
 theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit) (pctx : PolyOpCtx)
+    (hC : SimpleTyArities C)
     (func : Function)
     (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth pctx)) :
     FuncHasTypeA C Γ func := by
@@ -255,7 +262,7 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
   have houtputFtv : allFtvarsIn typeArgs output :=
     (genLMonoTy_support typeArgs depth output |>.mp houtput).2.2
   -- Build the `FuncHasType'` structure.
-  refine ⟨hkeysNodup, htyNodup, ?_, ?_, ?_⟩
+  refine ⟨hkeysNodup, htyNodup, ?_, ?_, ?_, ?_⟩
   · -- noUndeclaredVars
     intro v hv
     rcases freeVars_mkArrow' output inputs.values v hv with hout | ⟨t, ht_mem, hvt⟩
@@ -265,6 +272,13 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
       have ht_ftv : allFtvarsIn typeArgs t :=
         (genLMonoTy_support typeArgs depth t |>.mp ht_supp).2.2
       exact allFtvarsIn_freeVars ht_ftv v hvt
+  · -- signatureWellKinded: every generated signature type is a `SimpleType`, and
+    -- `HasTypeA`'s `tyCompat` is plain equality, so `ty' := ty` works.
+    intro ty hty
+    refine ⟨ty, rfl, simpleType_wellKindedTy hC ?_⟩
+    rcases List.mem_cons.mp hty with rfl | hty
+    · exact genLMonoTy_simple typeArgs depth _ houtput
+    · exact genLMonoTy_simple typeArgs depth _ (hvals ty hty)
   · -- bodyTyped
     intro b hb
     exact genOptExpr_sound fctx octx typeArgs depth output pctx body hbody b hb
@@ -275,11 +289,11 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
 /-- Hypothesis-free soundness of `genFunction` at an empty operator context.
     (Now a special case of `genFunction_sound`, which is unconditional in `octx`.) -/
 theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (hC : SimpleTyArities C)
     (func : Function)
     (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx ∅ depth)) :
     FuncHasTypeA C Γ func :=
-  genFunction_sound fctx ∅ depth C Γ [] func hfunc
+  genFunction_sound fctx ∅ depth C Γ [] hC func hfunc
 
 -- ── Completeness helpers ─────────────────────────────────────────────
 

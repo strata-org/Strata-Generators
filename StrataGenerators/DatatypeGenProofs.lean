@@ -84,24 +84,18 @@ specification needs.
 The support of the generator is smaller than the set of constructor argument types that
 `MutualADTWF` accepts. Therefore completeness needs more hypotheses. The result of the
 completeness half of this file is that all of those hypotheses except one are already
-fields of `MutualADTWF`. Only one side condition is new. That condition is about the one
-rule that `MutualADTWF` does not apply, which is the **arity** of an applied type
-constructor.
+fields of `MutualADTWF`, and the one that is not is about the **width** of a bitvector.
 
-`refsKnown` in `MutualADTWF` uses `getTypeRefs`. That function collects only the names of the
-referenced type constructors, and it discards the number of their arguments.
+This file used to carry a hand-written `ArityOk` predicate, because `refsKnown` uses
+`getTypeRefs`, which collects only the *names* of the referenced type constructors and
+discards the number of their arguments — so `MutualADTWF` accepted an argument type of the
+wrong kind, such as `Sequence a a`. The field `argsWellKinded` now checks the argument count
+against `C.knownTypes`, and `defaultBaseTypes` / `defaultTyCons` are *derived* from that same
+register (`Core.KnownTypes`), so the specification discharges the whole arity discipline by
+itself and `ArityOk` is gone. Read `docs/mutualadtwf-arity-gap.md`.
 
-Therefore `MutualADTWF C block` accepts an argument type of the wrong kind, such as
-`Sequence a a`. That type applies `Sequence` to 2 arguments, but its arity is 1. The name
-`"Sequence"` resolves, and each other field holds. But the generator never makes that type,
-because its branch for an application draws `vectorOf arity` arguments.
-
-Read `docs/mutualadtwf-arity-gap.md` for the full report on this gap in the specification.
-
-The one new side condition is `ArityOk`. It is a `def`, and not an inductive relation. It
-recurses on the shape of a type, and it needs each applied type constructor to have the
-number of arguments that its arity gives. An existing field of `MutualADTWF` discharges
-each other difference between the specification and the generator:
+An existing field of `MutualADTWF` discharges every difference between the specification and
+the generator except one:
 
 | condition on the generator | field of `MutualADTWF` that gives it |
 | --- | --- |
@@ -109,21 +103,26 @@ each other difference between the specification and the generator:
 | a recursive occurrence is a block name with exactly its `typeArgs` | `argsWF`, through `StrictPosUnif` and `UniformOccur.self` |
 | strict positivity, and no nested occurrence | `argsWF`, through `ConstrArgWF` |
 | each referenced name resolves | `refsKnown`, against one concrete ambient context |
-| **the arity of an application is correct** | **none. This is `ArityOk`.** |
+| the arity of an application is correct | `argsWellKinded`, against `C.knownTypes` |
+| **a bitvector is a width, not an application** | **none. This is `BitvecWidthOnly`.** |
 
 * **Soundness.** Each type in the support obeys all nine fields of
   `Core.TypeSpec.MutualADTWF`. Read `genArgTy_constrArgWF` and
   `genMutuallyRecursiveDatatypes_MutualADTWF`.
 * **Completeness.** Read `genArgTy_complete_of_MutualADTWF`. Take a block that is
-  `MutualADTWF` and that also obeys `ArityOk`. Then the generator can make each
-  constructor argument type of that block, at some size. The size is an existential
+  `MutualADTWF` and whose bitvectors are widths (`BitvecWidthOnly`). Then the generator can
+  make each constructor argument type of that block, at some size. The size is an existential
   value, and `genArgTy_mono` with `genArgTy_common_size` puts the sizes of the subterms
   at one value. This result also needs the references of the block to be visible to the
-  generator, which `BlockRefsWF` gives.
+  generator, which `BlockRefsWF` gives, and the generator's vocabulary to be `C`'s arity
+  register split by arity, which `VocabOk` states and `defaultVocabOk` proves.
 
-`not_complete_without_arity` shows why the hypothesis `ArityOk` must stay. The type
-`Sequence a a` obeys each field of `MutualADTWF`, and its variables are even in scope. But
-the generator cannot make it, and `ArityOk` rejects exactly this type.
+`not_complete_without_bitvecWidthOnly` shows why `BitvecWidthOnly` must stay. `Core.KnownTypes`
+registers `("bitvec", 1)`, so `MutualADTWF` accepts `bitvec a` for a *type* `a`; but a
+bitvector type is `LMonoTy.bitvec n` for a width `n : Nat`, and no `LMonoTy` argument position
+can hold a natural number. The generator therefore never makes that type. The same theorem's
+neighbouring `example` records that `Sequence a a` — the old counterexample — is now rejected
+by `MutualADTWF` itself.
 
 ## Completeness for a full block
 
@@ -141,7 +140,7 @@ has two layers:
 * `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF` is the **capstone, and it is free
   of any order**. It takes only `MutualADTWF`, together with the side conditions about the
   terms of the generator. Those side conditions are the reachability of the names and the
-  parameters, `hasDefaultTesterName` and `ArityOk`. The capstone then builds the rank and
+  parameters, `hasDefaultTesterName`, `VocabOk` and `BitvecWidthOnly`. The capstone then builds the rank and
   the division of the constructors itself. It uses `rankExists` for the rank, and the
   lemmas about coverage for the division. Read `visibleRefs_cover_of_appears`. The caller
   gives no order of the datatypes, no rank and no set of names for one position.
@@ -849,7 +848,7 @@ theorem constrArgWF_arrow {block : MutualDatatype Unit} {t1 t2 : LMonoTy}
     This lemma reads the rule `UniformOccur.self` back from the specification. The case `base`
     of `StrictPosUnif` needs uniformity for each block datatype. The only uniform occurrence with
     `d.name` at the head is the application to its own type arguments.
-    Therefore the side condition `ArityOk` says nothing about a block occurrence, because
+    Therefore the residual side condition says nothing about a block occurrence, because
     `ConstrArgWF` already fixes its shape. -/
 theorem constrArgWF_self_uniform {block : MutualDatatype Unit} {d : LDatatype Unit}
     {args : LMonoTys} (hd : d ∈ block)
@@ -1129,11 +1128,77 @@ theorem namesOk_of_fresh {baseTypes : List String} {tyCons : List KnownTyCon}
   · intro b hb hmem
     exact (fresh_name_conds (hfresh b hmem)).2.2 b hb rfl
 
+/-! ### The default vocabulary is `Core.KnownTypes`, split by arity
+
+`defaultBaseTypes` and `defaultTyCons` are `filter`s of `Core.KnownTypes`
+(`StrataGenerators/DatatypeGen.lean`). The three `_iff` lemmas here read those filters back,
+in *both* directions.
+
+The `mpr` direction is the interesting one. It turns an arity fact about `Core.KnownTypes` —
+which is exactly what `MutualADTWF.argsWellKinded` hands out — into membership in the
+generator's own vocabulary. That is what lets completeness drop the hand-written arity side
+condition this file used to carry: read `VocabOk` and `BitvecWidthOnly` below.
+
+All three are proven from the shape of the `filter`, not by `decide`/`native_decide`: they
+hold for whatever `Core.KnownTypes` happens to contain, so they do not have to be revisited
+when upstream registers a new primitive. -/
+
+/-- Reading `defaultBaseTypes` back: it is exactly the arity-`0` part of `Core.KnownTypes`. -/
+theorem mem_defaultBaseTypes_iff {b : String} :
+    b ∈ defaultBaseTypes ↔ Core.KnownTypes[b]? = some 0 := by
+  rw [defaultBaseTypes, List.mem_mergeSort, List.mem_filterMap]
+  constructor
+  · rintro ⟨⟨k, ar⟩, hmem, hb⟩
+    split at hb
+    · rename_i har
+      injection hb with hb
+      subst hb
+      have : ar = 0 := by simpa using har
+      subst this
+      exact Std.HashMap.mem_toList_iff_getElem?_eq_some.mp hmem
+    · exact absurd hb (by simp)
+  · intro h
+    exact ⟨(b, 0), Std.HashMap.mem_toList_iff_getElem?_eq_some.mpr h, by simp⟩
+
+/-- Reading `coreAppliedTyCons` back: it is exactly the part of `Core.KnownTypes` of positive
+    arity, minus `arrow`. -/
+theorem mem_coreAppliedTyCons_iff {kc : KnownTyCon} :
+    kc ∈ coreAppliedTyCons ↔
+      Core.KnownTypes[kc.1]? = some kc.2 ∧ kc.2 ≠ 0 ∧ kc.1 ≠ "arrow" := by
+  obtain ⟨k, ar⟩ := kc
+  rw [coreAppliedTyCons, List.mem_mergeSort, List.mem_filter,
+    Std.HashMap.mem_toList_iff_getElem?_eq_some]
+  simp only [bne_iff_ne, ne_eq, Bool.and_eq_true]
+
+/-- Reading `defaultTyCons` back: `coreAppliedTyCons` minus `bitvec`. -/
+theorem mem_defaultTyCons_iff {kc : KnownTyCon} :
+    kc ∈ defaultTyCons ↔ kc ∈ coreAppliedTyCons ∧ kc.1 ≠ "bitvec" := by
+  rw [defaultTyCons, List.mem_filter]
+  simp only [bne_iff_ne, ne_eq]
+
 /-- The default pool of type constructors holds no constructor with the name `"arrow"`.
     Therefore it discharges the one condition of `NamesOk` that a fresh name does not
-    give. -/
-theorem defaultTyCons_ne_arrow : ∀ kc ∈ defaultTyCons, kc.1 ≠ "arrow" := by
-  decide
+    give. This now holds by construction: `coreAppliedTyCons` filters `arrow` out. -/
+theorem defaultTyCons_ne_arrow : ∀ kc ∈ defaultTyCons, kc.1 ≠ "arrow" :=
+  fun _ hkc => (mem_coreAppliedTyCons_iff.mp (mem_defaultTyCons_iff.mp hkc).1).2.2
+
+/-- Every default type constructor is registered in `Core.KnownTypes` at its recorded arity. -/
+theorem defaultTyCons_arity : ∀ kc ∈ defaultTyCons, Core.KnownTypes[kc.1]? = some kc.2 :=
+  fun _ hkc => (mem_coreAppliedTyCons_iff.mp (mem_defaultTyCons_iff.mp hkc).1).1
+
+/-- Every default base type is registered in `Core.KnownTypes` at arity `0`. -/
+theorem defaultBaseTypes_arity : ∀ b ∈ defaultBaseTypes, Core.KnownTypes[b]? = some 0 :=
+  fun _ hb => mem_defaultBaseTypes_iff.mp hb
+
+/-- `Sequence` at **2** arguments is not in the default vocabulary, because `Core.KnownTypes`
+    registers it at arity `1`. This is the counterexample behind
+    `not_complete_without_arity`; `native_decide` is only for the one arity lookup. -/
+theorem seq_two_not_mem_defaultTyCons : ("Sequence", 2) ∉ defaultTyCons := by
+  intro h
+  have h1 := defaultTyCons_arity _ h
+  have h2 : Core.KnownTypes["Sequence"]? = some 1 := by native_decide
+  rw [h2] at h1
+  exact absurd h1 (by simp)
 
 /-! ### From one type to a full constructor and a full datatype -/
 
@@ -1935,6 +2000,83 @@ theorem genArgTy_refs {baseTypes : List String} {tyCons : List KnownTyCon}
       · exact Or.inr (Or.inl (List.mem_map.mpr ⟨_, hkc, rfl⟩))
       · exact ih _ hhalf (hall a ha) r hr
 
+/-! ### `argsWellKinded`, which says that each application has the declared arity
+
+`getTypeConsArities` pairs each type constructor reference with the number of arguments at
+that occurrence. This section shows that each such pair is one of four things: a
+`baseTypes` name at arity 0, a `tyCons` entry with its own arity, a block datatype with its
+own number of `typeArgs`, or `"arrow"` at arity 2.
+
+Upstream added the field `argsWellKinded` to `MutualADTWF` (`strata-org/Strata` PR
+"Reject known type constructors applied at wrong arity"). That field closes exactly the
+specification gap this file used to document, and which a hand-written `ArityOk` predicate
+had to state for the completeness direction. `ArityOk` is now deleted: read the prose above
+`ArgsWellKinded`, and `docs/mutualadtwf-arity-gap.md`. -/
+
+/-- Each type-constructor occurrence in a generated type is applied at the arity that its
+    name declares. This lemma is the half of the field `argsWellKinded` of `MutualADTWF`
+    that speaks about the generator: it is the arity-aware refinement of `genArgTy_refs`,
+    and its proof has the same shape.
+
+    Each branch of the generator is arity-correct by construction. A base type is
+    `.tcons b []`, therefore its arity is 0. An application draws `(k, arity)` from
+    `tyCons` and then `vectorOf arity` arguments, therefore its arity is `arity`. An arrow
+    is `.tcons "arrow" [t1, t2]`, therefore its arity is 2. A recursive occurrence applies a
+    block name to exactly its own `typeArgs`, which `BlockRefsWF.uniform` gives. -/
+theorem genArgTy_arities {baseTypes : List String} {tyCons : List KnownTyCon}
+    {block : MutualDatatype Unit} {blockRefs : List BlockRef}
+    {tyParams : List TyIdentifier}
+    (hbr : BlockRefsWF block tyParams blockRefs) :
+    ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
+      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+        tyParams rca size) →
+      ∀ ref n, (ref, n) ∈ getTypeConsArities ty →
+        (ref ∈ baseTypes ∧ n = 0) ∨ (ref, n) ∈ tyCons ∨
+        (∃ d ∈ block, d.name = ref ∧ d.typeArgs.length = n) ∨ (ref = "arrow" ∧ n = 2) := by
+  intro size
+  induction size using Nat.strongRecOn with
+  | _ size ih =>
+    intro rca ty h
+    rcases (genArgTy_mem_iff _ _ _ _ _ _ _).mp h with
+      hleaf | ⟨hsz', t1, t2, rfl, h1, h2⟩ | ⟨hsz, k, args, rfl, hkc, hall⟩
+    · rcases (genLeafTy_mem_iff _ _ _ _ _).mp hleaf with
+        ⟨w, rfl⟩ | ⟨b, hb, rfl⟩ | ⟨v, _, rfl⟩ | ⟨_, br, hbrmem, rfl⟩
+      · intro ref n hn; simp [getTypeConsArities] at hn
+      · intro ref n hn
+        -- A base type is nullary: `getTypeConsArities (.tcons b []) = [(b, 0)]`.
+        simp only [getTypeConsArities, List.flatMap_nil, List.length_nil,
+          List.mem_singleton, Prod.mk.injEq] at hn
+        exact Or.inl ⟨hn.1 ▸ hb, hn.2⟩
+      · intro ref n hn; simp [getTypeConsArities] at hn
+      · intro ref n hn
+        -- The head is a block name applied to its own `typeArgs`. The arguments are type
+        -- variables, therefore they add no occurrence of their own.
+        simp only [getTypeConsArities, List.mem_cons, List.mem_flatMap, Prod.mk.injEq] at hn
+        rcases hn with ⟨rfl, rfl⟩ | ⟨a, ha, hn⟩
+        · obtain ⟨d, hd, hdname⟩ := List.mem_map.mp (hbr.mem br hbrmem)
+          refine Or.inr (Or.inr (Or.inl ⟨d, hd, hdname, ?_⟩))
+          rw [hbr.uniform br hbrmem d hd hdname, List.length_map]
+        · obtain ⟨v, rfl⟩ := hbr.ftvarArgs br hbrmem a ha
+          simp [getTypeConsArities] at hn
+    · have hhalf : size / 2 < size :=
+        Nat.div_lt_self (Nat.pos_of_ne_zero hsz') (by omega)
+      intro ref n hn
+      rw [LMonoTy.arrow] at hn
+      simp only [getTypeConsArities, List.length_cons, List.length_nil, List.flatMap_cons,
+        List.flatMap_nil, List.append_nil, List.mem_cons, List.mem_append,
+        Prod.mk.injEq] at hn
+      rcases hn with ⟨rfl, rfl⟩ | hn | hn
+      · exact Or.inr (Or.inr (Or.inr ⟨rfl, rfl⟩))
+      · exact ih _ hhalf h1 ref n hn
+      · exact ih _ hhalf h2 ref n hn
+    · have hhalf : size / 2 < size :=
+        Nat.div_lt_self (Nat.pos_of_ne_zero hsz) (by omega)
+      intro ref n hn
+      simp only [getTypeConsArities, List.mem_cons, List.mem_flatMap, Prod.mk.injEq] at hn
+      rcases hn with ⟨rfl, rfl⟩ | ⟨a, ha, hn⟩
+      · exact Or.inr (Or.inl hkc)
+      · exact ih _ hhalf (hall a ha) ref n hn
+
 /-! ### `argVarsScoped`, which says that a constructor argument adds no type variable
 
 This field of `MutualADTWF` says that each free type variable of a constructor argument type
@@ -2006,6 +2148,27 @@ theorem genMutuallyRecursiveDatatypes_refsKnown {baseTypes : List String} {tyCon
   obtain ⟨_, size, hty⟩ := hconstrs d hd c hc arg harg
   exact genArgTy_refs hbr size hty r hr
 
+/-- **`argsWellKinded`.** Take a constructor argument of a generated block. Each type
+    constructor occurrence in it is applied at the arity that its name declares: a
+    `baseTypes` name at 0, a `tyCons` entry at its own arity, a block datatype at its own
+    number of `typeArgs`, or `"arrow"` at 2. This theorem takes `genArgTy_arities` to the
+    full block, exactly as `genMutuallyRecursiveDatatypes_refsKnown` takes
+    `genArgTy_refs`. -/
+theorem genMutuallyRecursiveDatatypes_arities {baseTypes : List String} {tyCons : List KnownTyCon}
+    {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
+    {extraReserved : List String} {block : MutualDatatype Unit}
+    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+            maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
+            maxSize extraReserved)) :
+    ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∀ ref n, (ref, n) ∈ getTypeConsArities arg.2 →
+      (ref ∈ baseTypes ∧ n = 0) ∨ (ref, n) ∈ tyCons ∨
+      (∃ d' ∈ block, d'.name = ref ∧ d'.typeArgs.length = n) ∨ (ref = "arrow" ∧ n = 2) := by
+  obtain ⟨headers, _, hnames, hnodup, _, hheader, hconstrs⟩ := genMutuallyRecursiveDatatypes_shape hb
+  intro d hd c hc arg harg ref n hn
+  have hbr := visibleRefs_blockRefsWF hnames hnodup hheader hd
+  obtain ⟨_, size, hty⟩ := hconstrs d hd c hc arg harg
+  exact genArgTy_arities hbr size hty ref n hn
+
 /-- **`argVarsScoped`.** Each free type variable of a constructor argument type of a generated
     block is a declared member of `typeArgs` of the datatype around it. This theorem takes
     `genArgTy_freeVars` to the full block, in the way that
@@ -2062,6 +2225,22 @@ structure ContextOk (C : LContext CoreLParams) (baseTypes : List String)
     kc.1 ∈ C.knownTypes.keywords ∨ kc.1 ∈ C.datatypes.allTypeNames
   /-- `"arrow"` resolves as a known type of `C`. Strata Core always knows that name. -/
   arrow_known : "arrow" ∈ C.knownTypes.keywords
+  /-- Each base type is a **nullary known type constructor** of `C`. The field
+      `argsWellKinded` of `MutualADTWF` needs the arity and not only the name, because the
+      generator emits a base type as `.tcons b []`.
+
+      Unlike `base_known` this has no "or a datatype of `C`" disjunct: the vocabulary the
+      generators draw from is always backed by `knownTypes` (datatype names are threaded
+      separately, through `DatatypePoolOk`), and `LContext.WellKindedTy` — which upstream's
+      `init` and `signatureWellKinded` rules use — reads only `knownTypes`. -/
+  base_arity : ∀ b ∈ baseTypes, C.knownTypes[b]? = some 0
+  /-- Each applied type constructor is a known type constructor of `C` at **its own
+      arity**. The generator draws `(kc.1, kc.2)` from the pool and then makes exactly
+      `kc.2` arguments. -/
+  tyCon_arity : ∀ kc ∈ tyCons, C.knownTypes[kc.1]? = some kc.2
+  /-- `"arrow"` is registered at **arity 2**, which is the arity at which the generator
+      applies it. -/
+  arrow_arity : C.knownTypes["arrow"]? = some 2
   /-- Each known type name of `C` is a reserved name. It is reserved by `baseTypes`, by
       `tyCons`, by `"arrow"` or by `extraReserved`. Therefore a fresh name is not one of
       them. -/
@@ -2289,6 +2468,11 @@ came from. `ContextOk` and `defaultContextOk` are untouched. -/
 structure DatatypePoolOk (C : LContext CoreLParams) (dtCons : List KnownTyCon) : Prop where
   /-- Each pool name resolves as an existing datatype of `C`. -/
   known : ∀ kc ∈ dtCons, kc.1 ∈ C.datatypes.allTypeNames
+  /-- Each pool name resolves as an existing datatype of `C` *at the pool's arity*: the
+      datatype declares exactly `kc.2` type parameters. This is the arity-aware form of
+      `known`, and it is what `MutualADTWF.argsWellKinded` needs. -/
+  arity : ∀ kc ∈ dtCons,
+    ∃ d ∈ C.datatypes.allDatatypes, d.name = kc.1 ∧ d.typeArgs.length = kc.2
   /-- Each pool name is inhabited in `C`'s own factory. -/
   inhab : ∀ kc ∈ dtCons, TySymInhab C.datatypes kc.1
 
@@ -2736,10 +2920,12 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
       namesNodup := by rw [hbnames]; exact hnodupH
       namesFresh := ?_
       namesNew := ?_
-      argsWF := ?_
+      argVarsScoped := genMutuallyRecursiveDatatypes_argVarsScoped hb
+      argsWF := genMutuallyRecursiveDatatypes_argsWF harrow hb
       refsKnown := ?_
-      inhabited := ?_
-      argVarsScoped := ?_ }
+      argsWellKinded := ?_
+      inhabited :=
+        genMutuallyRecursiveDatatypes_inhabited harrow hctx hpool hstored hsplit hsubTC hb }
   · -- namesFresh: no block name is a known type of `C`.
     intro d hd hcontains
     -- A known-type name of `C` is reserved, but block names are drawn fresh.
@@ -2753,8 +2939,6 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
     · exact absurd
         (hinit_mono _ (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome)))
         (hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩))
-  · -- The field `argsWF`. It is exactly `genMutuallyRecursiveDatatypes_argsWF`.
-    exact genMutuallyRecursiveDatatypes_argsWF harrow hb
   · -- The field `refsKnown`. Each reference resolves in `C`, or it is a block name, or it is
     -- `"arrow"`.
     intro d hd c hc arg harg r hr
@@ -2773,10 +2957,20 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
       · exact Or.inr (Or.inl (hpool.known kc hdt))
     · exact Or.inr (Or.inr hblk)
     · subst harr; exact Or.inl hctx.arrow_known
-  · -- The field `inhabited`.
-    exact genMutuallyRecursiveDatatypes_inhabited harrow hctx hpool hstored hsplit hsubTC hb
-  · -- The field `argVarsScoped`.
-    exact genMutuallyRecursiveDatatypes_argVarsScoped hb
+  · -- The field `argsWellKinded`. The generator is arity-correct by construction
+    -- (`genMutuallyRecursiveDatatypes_arities`); the arity fields of `ContextOk` and
+    -- `DatatypePoolOk` say that `C` registers each of those names at that same arity.
+    intro d hd c hc arg harg ref n hn
+    rcases genMutuallyRecursiveDatatypes_arities hb d hd c hc arg harg ref n hn with
+      ⟨hbt, rfl⟩ | htc | hblk | ⟨rfl, rfl⟩
+    · exact Or.inl (hctx.base_arity ref hbt)
+    · -- A vocabulary entry is either an external known type (`ContextOk.tyCon_arity`) or a
+      -- previously declared datatype (`DatatypePoolOk.arity`), at the pool's arity.
+      rcases hsplit (ref, n) htc with hext | hdt
+      · exact Or.inl (hctx.tyCon_arity (ref, n) hext)
+      · exact Or.inr (Or.inl (hpool.arity (ref, n) hdt))
+    · exact Or.inr (Or.inr hblk)
+    · exact Or.inl hctx.arrow_arity
 
 /-! ### The corollary for the default parameters and the true Strata Core context
 
@@ -2809,18 +3003,29 @@ theorem defaultContextOk :
     ContextOk coreContext defaultBaseTypes defaultTyCons Core.KnownTypes.keywords := by
   refine
     { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
+      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · -- Each default base type is a known primitive of `coreContext`.
+  · -- Each default base type is a known primitive of `coreContext`: it was *read off*
+    -- `Core.KnownTypes`, so this needs no case analysis on the list's contents.
     intro b hb
-    left; simp [defaultBaseTypes, nullaryBaseTypeNames] at hb
-    rcases hb with rfl | rfl | rfl | rfl | rfl <;> (show _ ∈ Core.KnownTypes.keywords; native_decide)
+    refine Or.inl (Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_))
+    show Core.KnownTypes[b]?.isSome = true
+    rw [defaultBaseTypes_arity b hb]; rfl
   · -- Each default type constructor is a known primitive of `coreContext`.
     intro kc hkc
-    left; simp [defaultTyCons] at hkc
-    rcases hkc with rfl | rfl <;> (show _ ∈ Core.KnownTypes.keywords; native_decide)
-  · -- `"arrow"` is a known primitive of `coreContext`.
+    refine Or.inl (Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_))
+    show Core.KnownTypes[kc.1]?.isSome = true
+    rw [defaultTyCons_arity kc hkc]; rfl
+  · -- `"arrow"` is a known primitive of `coreContext`. This one *is* a fact about the
+    -- particular contents of `Core.KnownTypes`, because `genArgTy` hardcodes the name.
     show "arrow" ∈ Core.KnownTypes.keywords; native_decide
+  · -- Each default base type is registered at arity 0, by construction of the list.
+    exact defaultBaseTypes_arity
+  · -- Each default type constructor is registered at its own arity, by construction.
+    exact defaultTyCons_arity
+  · -- `"arrow"` is registered at arity 2.
+    show Core.KnownTypes["arrow"]? = some 2; native_decide
   · -- Each known type of `coreContext` is a member of the extra reserved list, with no
     -- change.
     intro k hk
@@ -2859,7 +3064,7 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
   -- side conditions (`DatatypePoolOk`, `StoredRefsAbsent`) are vacuous.
   genMutuallyRecursiveDatatypes_MutualADTWF (dtCons := []) defaultTyCons_ne_arrow
     defaultContextOk
-    { known := by simp, inhab := by simp }
+    { known := by simp, arity := by simp, inhab := by simp }
     (by
       intro d hd
       simp [coreContext, TypeFactory.allDatatypes] at hd)
@@ -2896,10 +3101,11 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
       namesNodup := (hnamesperm.nodup_iff).mp h.namesNodup
       namesFresh := fun d hd => h.namesFresh d (hmem hd)
       namesNew := fun d hd => h.namesNew d (hmem hd)
+      argVarsScoped := fun d hd => h.argVarsScoped d (hmem hd)
       argsWF := ?_
       refsKnown := ?_
-      inhabited := ?_
-      argVarsScoped := fun d hd => h.argVarsScoped d (hmem hd) }
+      argsWellKinded := ?_
+      inhabited := ?_ }
   · -- The field `nonempty`. `block'` is not empty, because `block` is not empty and the two
     -- lists are permutations of each other.
     intro hnil
@@ -2915,6 +3121,14 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
     · exact Or.inl hk
     · exact Or.inr (Or.inl hdt)
     · exact Or.inr (Or.inr (hnamesperm.mem_iff.mp hblk))
+  · -- The field `argsWellKinded`. `getTypeConsArities` reads only the argument type, and a
+    -- permutation keeps the disjunct about a block datatype.
+    intro d hd c hc arg harg ref n hn
+    rcases h.argsWellKinded d (hmem hd) c hc arg harg ref n hn with
+      hk | hdt | ⟨d', hd', hname, hlen⟩
+    · exact Or.inl hk
+    · exact Or.inr (Or.inl hdt)
+    · exact Or.inr (Or.inr ⟨d', hperm.mem_iff.mp hd', hname, hlen⟩)
   · -- The field `inhabited`. A permutation keeps the `getType` of the longer factory, and
     -- this proof carries inhabitance along that agreement.
     intro d hd
@@ -3088,68 +3302,148 @@ end InhabRank
 
 /-! ## Completeness, and the exact sense in which it holds
 
-Completeness holds against `MutualADTWF` with the one side condition `ArityOk`. Read
-`genArgTy_complete_of_MutualADTWF`. The stronger statement is completeness against
-`MutualADTWF` alone, and that statement is false. Read `not_complete_without_arity`. The
-reason is that `MutualADTWF` does not check the arity. -/
+Completeness holds against `MutualADTWF` plus premises that are all about the *context* and
+the *names the generator uses*, and one residual side condition on the type itself:
+`BitvecWidthOnly`. Read `genArgTy_complete_of_MutualADTWF`. Completeness against
+`MutualADTWF` alone is false — read `not_complete_without_arity`. -/
 
 section Completeness
 
-/-! ### The one gap in `MutualADTWF`, which is the arity
+/-! ### What `MutualADTWF` gives, and the one thing it does not
 
-`MutualADTWF` gives each condition that the generator applies, except the arity of an applied
-type constructor. Read `docs/mutualadtwf-arity-gap.md`. `ArityOk` states exactly that one
-gap, and nothing more:
+This file used to carry a hand-written `ArityOk` predicate: a recursion over the type
+restating the whole arity discipline (base types nullary, applied constructors at their
+declared arity, `arrow` binary) against the generator's vocabulary. Upstream's
+`MutualADTWF.argsWellKinded` now states the arity discipline itself, and `defaultBaseTypes` /
+`defaultTyCons` are *derived* from the very register `argsWellKinded` speaks about
+(`Core.KnownTypes`), so the whole predicate is redundant and is gone. What replaces it:
 
-* It says nothing about a free type variable, because `MutualADTWF.argVarsScoped` keeps such a
-  variable in scope.
-* It says nothing about which occurrence of a block name is uniform. The generator emits a
-  block name with exactly the `typeArgs` of that datatype. `ConstrArgWF` forces that shape for
-  each argument type with a block name at the head, through `StrictPosUnif` and
-  `UniformOccur.self`. `constrArgWF_self_uniform` reads that shape back.
-* It fixes only the number of arguments of an application whose head is not a block name and
-  is not `"arrow"`.
+* `ArgsWellKinded` — the `argsWellKinded` field, restated as a predicate on one type so the
+  recursion can carry it. This is *not* a new assumption: `MutualADTWF` hands it out.
+* `VocabOk` — the generator's vocabulary is exactly `C`'s arity register, split by arity.
+  This is a fact about the *context*, not the type, and it is **proven** for the default
+  vocabulary (`defaultVocabOk`), not assumed.
+* `BitvecWidthOnly` — the one residual condition on the type, and the only hand-written one
+  left.
 
-The caller gives the constructors that the generator can refer to as a register of names with
-their arities. `baseTypes` holds the names of arity `0`, and `tyCons` holds the pairs
-`(name, arity)`. Therefore `ArityOk` states the condition against that register. An
-application with no argument needs `k ∈ baseTypes`. An application with `n` arguments needs
-`(k, n) ∈ tyCons`.
+### Why `bitvec` needs its own side condition
 
-The size at which the generator can make a type is an existential value. This file gives
-some size, and it does not relate the size to the depth of the type by arithmetic. -/
+`Core.KnownTypes` registers `("bitvec", 1)`, so `argsWellKinded` accepts `bitvec τ` for a
+*type* `τ` — and `LContext.addMutualBlock` really does accept such a block. But a bitvector
+type is `LMonoTy.bitvec n` for a **width** `n : Nat`, not a type application: the argument
+`bitvec` takes is a natural number, and `LMonoTy` has no way to spell one in an argument
+position. `genBaseTy` therefore emits bitvectors through `pickBitvecWidth`, and `genArgTy`
+never applies the name `bitvec` to a type. `BitvecWidthOnly` records exactly that reading —
+"any `bitvec` here is a width, not an application" — and is what `defaultTyCons` excluding
+`bitvec` is paid for with. `coreAppliedTyCons` keeps `bitvec`, so no *arity* fact is lost.
 
-/-- **The one side condition about the arity.** This definition is a recursion over the type,
-    and its result is a `Prop`. It needs each applied type constructor to have the number of
-    arguments that its arity gives. That rule is the one rule that `MutualADTWF` does not
-    apply. This is a `def`, and not an inductive relation.
+### Why `C` must have no stored datatypes
 
-    * A bitvector and a rigid type variable always obey the condition.
-      `MutualADTWF.argVarsScoped` keeps a variable in scope, and this definition does not
-      follow that condition.
-    * An application with a block name at the head, which is `k ∈ blockNames`, has no
-      condition here. `ConstrArgWF` already forces it to be the uniform recursive occurrence.
-    * An `arrow t1 t2`, which is `"arrow"` at exactly 2 arguments, needs both sides to obey the
-      condition.
-    * Each other `tcons k args` must have the number of arguments that its arity gives. It
-      needs `(k, args.length) ∈ tyCons` when `args` is not empty, and `k ∈ baseTypes` when
-      `args` is empty. Each argument must also obey the condition. -/
-def ArityOk (baseTypes : List String) (tyCons : List KnownTyCon)
-    (blockNames : List String) :
-    LMonoTy → Prop
+`argsWellKinded` is a three-way disjunction: a reference may be resolved by `C.knownTypes`,
+by an *existing* datatype of `C`, or by the block. `genArgTy`'s vocabulary is
+`baseTypes`/`tyCons`/`arrow`/`blockRefs` — it has no way to emit a reference to a datatype
+already stored in `C`. `VocabOk.noStoredDatatypes` rules that middle disjunct out. It holds
+for `coreContext` (whose `datatypes` is `#[]`), which is the context Core programs start
+from; it does *not* hold part-way through the whole-program generator, and that is a genuine
+limit of this completeness result rather than an artefact of how it is stated.
+
+`ArityOk` used to hide this second gap inside its arity recursion, because requiring
+`k ∈ baseTypes` / `(k, n) ∈ tyCons` silently excluded stored-datatype names too. Splitting it
+out makes both gaps visible. -/
+
+/-- **`MutualADTWF.argsWellKinded`, as a predicate on one type.** Every type-constructor
+    reference in `ty` is applied at the arity its referent declares: a `C.knownTypes` arity,
+    the `typeArgs` count of a datatype already stored in `C`, or the `typeArgs` count of a
+    datatype declared in `block`.
+
+    This is a restatement, not a new condition. `MutualADTWF.argsWellKinded` gives it for
+    every constructor argument of the block — read `argsWellKinded_ty`. -/
+def ArgsWellKinded (C : LContext Core.CoreLParams) (block : MutualDatatype Unit)
+    (ty : LMonoTy) : Prop :=
+  ∀ ref n, (ref, n) ∈ Lambda.getTypeConsArities ty →
+    C.knownTypes[ref]? = some n ∨
+    (∃ d' ∈ C.datatypes.allDatatypes, d'.name = ref ∧ d'.typeArgs.length = n) ∨
+    (∃ d' ∈ block, d'.name = ref ∧ d'.typeArgs.length = n)
+
+/-- `ArgsWellKinded` at the head of an application. -/
+theorem ArgsWellKinded.head {C : LContext Core.CoreLParams} {block : MutualDatatype Unit}
+    {k : String} {args : List LMonoTy} (h : ArgsWellKinded C block (.tcons k args)) :
+    C.knownTypes[k]? = some args.length ∨
+    (∃ d' ∈ C.datatypes.allDatatypes, d'.name = k ∧ d'.typeArgs.length = args.length) ∨
+    (∃ d' ∈ block, d'.name = k ∧ d'.typeArgs.length = args.length) :=
+  h k args.length (by simp [Lambda.getTypeConsArities])
+
+/-- `ArgsWellKinded` passes to each argument of an application: `getTypeConsArities` of an
+    application holds the arities of every argument. -/
+theorem ArgsWellKinded.arg {C : LContext Core.CoreLParams} {block : MutualDatatype Unit}
+    {k : String} {args : List LMonoTy} {a : LMonoTy}
+    (h : ArgsWellKinded C block (.tcons k args)) (ha : a ∈ args) :
+    ArgsWellKinded C block a := by
+  intro ref n hmem
+  refine h ref n ?_
+  simp only [Lambda.getTypeConsArities, List.mem_cons]
+  exact Or.inr (List.mem_flatMap.mpr ⟨a, ha, hmem⟩)
+
+/-- `MutualADTWF.argsWellKinded`, packaged as `ArgsWellKinded` per argument type. -/
+theorem argsWellKinded_ty {C : LContext Core.CoreLParams} {block : MutualDatatype Unit}
+    (hwf : Core.TypeSpec.MutualADTWF C block) :
+    ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ArgsWellKinded C block arg.2 :=
+  fun d hd c hc arg harg ref n hmem => hwf.argsWellKinded d hd c hc arg harg ref n hmem
+
+/-- **The one residual side condition on the type.** Every `bitvec` in `ty` is a *width*
+    (`LMonoTy.bitvec n`, which carries a `Nat`), and not the name `bitvec` applied to a type.
+
+    `Core.KnownTypes` registers `bitvec` at arity `1`, so `MutualADTWF` accepts `bitvec τ` for
+    a type `τ`; but the argument `bitvec` takes is a natural-number width, which no `LMonoTy`
+    argument position can hold. `genBaseTy` emits bitvectors as `LMonoTy.bitvec n` through
+    `pickBitvecWidth`, and `genArgTy` never applies the *name* `bitvec`. Read the section
+    prose above. -/
+def BitvecWidthOnly : LMonoTy → Prop
   | .bitvec _ => True
   | .ftvar _ => True
-  | .tcons k args =>
-    if k ∈ blockNames then True
-    else if k = "arrow" then
-      match args with
-      | [t1, t2] =>
-        ArityOk baseTypes tyCons blockNames t1 ∧
-        ArityOk baseTypes tyCons blockNames t2
-      | _ => False
-    else if args = [] then k ∈ baseTypes
-    else (k, args.length) ∈ tyCons ∧
-      ∀ a ∈ args, ArityOk baseTypes tyCons blockNames a
+  | .tcons k args => k ≠ "bitvec" ∧ ∀ a ∈ args, BitvecWidthOnly a
+
+/-- **The generator's vocabulary is exactly `C`'s arity register, split by arity.** This is a
+    fact about the context and the generator's parameters — not about any type — and it is
+    *proven* for the default vocabulary (`defaultVocabOk`), because `defaultBaseTypes` and
+    `defaultTyCons` are derived from `Core.KnownTypes`.
+
+    * `base` / `tyCon`: every arity `C` registers is one the generator can draw, `arrow`
+      (which `genArgTy` has a dedicated branch for) and `bitvec` (whose argument is a width)
+      excepted.
+    * `arrow`: `C` registers `arrow` binary, so `argsWellKinded` pins an arrow to 2 arguments.
+    * `noStoredDatatypes`: `C` stores no datatype, so `argsWellKinded`'s middle disjunct is
+      empty. `genArgTy` cannot refer to a stored datatype. -/
+structure VocabOk (C : LContext Core.CoreLParams) (baseTypes : List String)
+    (tyCons : List KnownTyCon) : Prop where
+  base : ∀ k, C.knownTypes[k]? = some 0 → k ∈ baseTypes
+  tyCon : ∀ k n, C.knownTypes[k]? = some n → n ≠ 0 → k ≠ "arrow" → k ≠ "bitvec" →
+    (k, n) ∈ tyCons
+  arrow : C.knownTypes["arrow"]? = some 2
+  noStoredDatatypes : C.datatypes.allDatatypes = []
+
+/-- **The default vocabulary satisfies `VocabOk` in `coreContext`.** `base` and `tyCon` hold
+    by construction — the lists *are* `Core.KnownTypes` split by arity, read back by
+    `mem_defaultBaseTypes_iff` / `mem_defaultTyCons_iff`. Only `arrow`'s arity needs a lookup
+    (`native_decide`), because `genArgTy` hardcodes that name. -/
+theorem defaultVocabOk : VocabOk coreContext defaultBaseTypes defaultTyCons where
+  base := fun _ h => mem_defaultBaseTypes_iff.mpr h
+  tyCon := fun k n h hn harrow hbv =>
+    mem_defaultTyCons_iff.mpr ⟨mem_coreAppliedTyCons_iff.mpr ⟨h, hn, harrow⟩, hbv⟩
+  arrow := by show Core.KnownTypes["arrow"]? = some 2; native_decide
+  noStoredDatatypes := by simp [coreContext, TypeFactory.allDatatypes]
+
+/-- The head of a non-block application is registered in `C.knownTypes` at its argument
+    count: `VocabOk.noStoredDatatypes` kills `argsWellKinded`'s stored-datatype disjunct and
+    `hself` kills its block disjunct. -/
+theorem ArgsWellKinded.knownArity {C : LContext Core.CoreLParams} {block : MutualDatatype Unit}
+    {baseTypes : List String} {tyCons : List KnownTyCon} {k : String} {args : List LMonoTy}
+    (hv : VocabOk C baseTypes tyCons) (h : ArgsWellKinded C block (.tcons k args))
+    (hself : k ∉ block.map (·.name)) : C.knownTypes[k]? = some args.length := by
+  rcases h.head with hk | ⟨d', hd', hname, _⟩ | ⟨d', hd', hname, _⟩
+  · exact hk
+  · exact absurd hd' (by rw [hv.noStoredDatatypes]; simp)
+  · exact absurd (hname ▸ List.mem_map.mpr ⟨d', hd', rfl⟩) hself
 
 /-- **The support of `genArgTy` grows with the size.** The generator can make a type at the
     size `size`. Then it can also make that type at each larger size. The three kinds from
@@ -3227,9 +3521,11 @@ theorem genArgTy_common_size {baseTypes : List String} {tyCons : List KnownTyCon
     · exact genArgTy_mono _ (hTl a ha) (Nat.le_max_right _ _)
 
 /-- **Completeness of `genArgTy` against the specification.** Take a constructor argument type
-    that obeys three conditions. It is `ConstrArgWF block`. Each of its free type variables is
-    declared, which `MutualADTWF.argVarsScoped` gives. It obeys the one side condition about the
-    arity, which is `ArityOk`.
+    that obeys four conditions. It is `ConstrArgWF block`. Each of its free type variables is
+    declared, which `MutualADTWF.argVarsScoped` gives. Its type-constructor references are
+    applied at their declared arities, which `MutualADTWF.argsWellKinded` gives
+    (`ArgsWellKinded`). And every `bitvec` in it is a width rather than an application, which
+    is `BitvecWidthOnly`.
 
     Then the generator can make that type at some size. This result also needs the uniform
     reference of each block datatype to be a member of `blockRefs`, which is `hcover`.
@@ -3243,35 +3539,39 @@ theorem genArgTy_common_size {baseTypes : List String} {tyCons : List KnownTyCon
     Two facts work together here. `ConstrArgWF` forbids a block name in exactly the positions
     that the generator draws at the flag `false`. `ConstrArgWF` also fixes each occurrence with
     a block name at the head to the uniform form `n (n's typeArgs)`, through
-    `constrArgWF_self_uniform`. `hcover` puts that form in `blockRefs`. Therefore `ArityOk` says
-    nothing about such an occurrence. -/
+    `constrArgWF_self_uniform`. `hcover` puts that form in `blockRefs`. Therefore the arity
+    premise says nothing about such an occurrence. -/
 theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTyCon}
+    {C : LContext Core.CoreLParams}
     {block : MutualDatatype Unit} {blockRefs : List BlockRef}
     {tyParams : List TyIdentifier}
     (hn : NamesOk baseTypes tyCons (block.map (·.name)))
+    (hvocab : VocabOk C baseTypes tyCons)
     (hcover : ∀ d ∈ block, (d.name, d.typeArgs.map .ftvar) ∈ blockRefs) :
     ∀ (ty : LMonoTy),
       ConstrArgWF block ty →
       (∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams) →
-      ArityOk baseTypes tyCons (block.map (·.name)) ty →
+      ArgsWellKinded C block ty →
+      BitvecWidthOnly ty →
       ∀ (rca : Bool), (rca = false → BlockAbsent block ty) →
       ∃ size, ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
         tyParams rca size) := by
   intro ty
   induction ty using LMonoTy.induct with
   | ftvar v =>
-    intro _ hvars _ rca _
+    intro _ hvars _ _ rca _
     -- `argVarsScoped` gives `v ∈ tyParams`. That type is the rigid type variable, at the
     -- size 0.
-    have hv : v ∈ tyParams := hvars v (by simp [LMonoTy.freeVars])
+    have hmemv : v ∈ tyParams := hvars v (by simp [LMonoTy.freeVars])
     refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-    exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inl ⟨v, hv, rfl⟩)))
+    exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inl ⟨v, hmemv, rfl⟩)))
   | bitvec n =>
-    intro _ _ _ rca _
+    -- A bitvector is a *width*, therefore `genBaseTy` draws it through `pickBitvecWidth`.
+    intro _ _ _ _ rca _
     refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
     exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inl ⟨n, rfl⟩)
   | tcons k args ih =>
-    intro hwf hvars hari rca habs
+    intro hwf hvars hwk hbv rca habs
     by_cases hself : k ∈ block.map (·.name)
     · -- An occurrence with a block name at the head. `ConstrArgWF` forces it to be uniform,
       -- therefore `args = d.typeArgs.map .ftvar` for the block datatype `d` with the name `k`.
@@ -3292,15 +3592,26 @@ theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTy
       refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
       exact (genLeafTy_mem_iff _ _ _ _ _).mpr
         (Or.inr (Or.inr (Or.inr ⟨rfl, (d.name, d.typeArgs.map .ftvar), hcover d hd, rfl⟩)))
-    · unfold ArityOk at hari
-      rw [if_neg hself] at hari
+    · -- The head is not a block name, therefore `argsWellKinded` resolves it against
+      -- `C.knownTypes`: `VocabOk.noStoredDatatypes` kills the stored-datatype disjunct and
+      -- `hself` kills the block disjunct.
+      have hk : C.knownTypes[k]? = some args.length := hwk.knownArity hvocab hself
+      unfold BitvecWidthOnly at hbv
+      obtain ⟨hkbv, hbvargs⟩ := hbv
       by_cases harrow : k = "arrow"
-      · -- An arrow `t1 → t2`.
+      · -- An arrow `t1 → t2`. `VocabOk.arrow` registers `arrow` binary, therefore
+        -- `argsWellKinded` pins the argument count to 2.
         subst harrow
-        rw [if_pos rfl] at hari
-        match args, hari, hwf, hvars, habs, ih with
-        | [t1, t2], hari, hwf, hvars, habs, ih =>
-          obtain ⟨ha1, ha2⟩ := hari
+        have hlen : args.length = 2 := by
+          rw [hvocab.arrow] at hk
+          exact (by simpa using hk : (2 : Nat) = args.length).symm
+        obtain ⟨t1, t2, rfl⟩ : ∃ t1 t2, args = [t1, t2] := by
+          match args, hlen with
+          | [t1, t2], _ => exact ⟨t1, t2, rfl⟩
+        · have ha1 : ArgsWellKinded C block t1 := hwk.arg (by simp)
+          have ha2 : ArgsWellKinded C block t2 := hwk.arg (by simp)
+          have hb1 : BitvecWidthOnly t1 := hbvargs t1 (by simp)
+          have hb2 : BitvecWidthOnly t2 := hbvargs t2 (by simp)
           have harr : LMonoTy.tcons "arrow" [t1, t2] = LMonoTy.arrow t1 t2 := rfl
           rw [harr] at hwf
           obtain ⟨hdom_abs, hwf1, hwf2⟩ := constrArgWF_arrow
@@ -3312,8 +3623,8 @@ theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTy
           have hvars2 : ∀ v ∈ LMonoTy.freeVars t2, v ∈ tyParams := fun v hv =>
             hvars v (by rw [harr]; simp only [LMonoTy.freeVars, LMonoTys.freeVars,
               List.append_nil, List.mem_append]; exact Or.inr hv)
-          obtain ⟨s1, h1⟩ := ih t1 (by simp) hwf1 hvars1 ha1 false (fun _ => hdom_abs)
-          obtain ⟨s2, h2⟩ := ih t2 (by simp) hwf2 hvars2 ha2 rca
+          obtain ⟨s1, h1⟩ := ih t1 (by simp) hwf1 hvars1 ha1 hb1 false (fun _ => hdom_abs)
+          obtain ⟨s2, h2⟩ := ih t2 (by simp) hwf2 hvars2 ha2 hb2 rca
             (fun hr => by
               subst hr
               intro d' hd'
@@ -3323,17 +3634,23 @@ theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTy
           refine ⟨2 * (max s1 s2) + 1,
             (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inl ⟨by omega, t1, t2, rfl,
               genArgTy_mono _ h1 (by omega), genArgTy_mono _ h2 (by omega)⟩))⟩
-      · rw [if_neg harrow] at hari
-        by_cases hnil : args = []
-        · -- A base leaf `k` with no arguments, `k ∈ baseTypes`.
+      · by_cases hnil : args = []
+        · -- A base leaf `k` with no arguments. `C` registers it at arity 0, and `VocabOk.base`
+          -- turns that into `k ∈ baseTypes` — the derivation of `defaultBaseTypes` from
+          -- `Core.KnownTypes` is what makes this step available.
           subst hnil
-          rw [if_pos rfl] at hari
           refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-          exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inl ⟨k, hari, rfl⟩))
-        · rw [if_neg hnil] at hari
-          obtain ⟨hkc, hall⟩ := hari
-          -- An applied known type constructor at its declared arity. Every block
-          -- name is absent from every argument (the `headOther` case of `NotNested`).
+          exact (genLeafTy_mem_iff _ _ _ _ _).mpr
+            (Or.inr (Or.inl ⟨k, hvocab.base k (by simpa using hk), rfl⟩))
+        · -- An applied known type constructor. `C` registers it at its argument count, and
+          -- `VocabOk.tyCon` turns that into `(k, args.length) ∈ tyCons`; `k ≠ "bitvec"` comes
+          -- from `BitvecWidthOnly`, which is the one condition `MutualADTWF` does not give.
+          have hkc : (k, args.length) ∈ tyCons :=
+            hvocab.tyCon k args.length hk
+              (fun h0 => hnil (List.eq_nil_of_length_eq_zero h0)) harrow hkbv
+          have hall : ∀ a ∈ args, ArgsWellKinded C block a := fun a ha => hwk.arg ha
+          -- Every block name is absent from every argument (the `headOther` case of
+          -- `NotNested`).
           have hargs_abs : ∀ a ∈ args, BlockAbsent block a := by
             intro a ha
             obtain ⟨hnn, _⟩ := hwf
@@ -3345,7 +3662,7 @@ theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTy
           obtain ⟨S, hS⟩ := genArgTy_common_size (args := args) (fun a ha =>
             ih a ha (absent_constrArgWF (hargs_abs a ha)) (fun v hv =>
               hvars v (by rw [freeVars_tcons_eq_flatMap]; exact List.mem_flatMap.mpr ⟨a, ha, hv⟩))
-              (hall a ha) false (fun _ => hargs_abs a ha))
+              (hall a ha) (hbvargs a ha) false (fun _ => hargs_abs a ha))
           refine ⟨2 * S + 1,
             (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inr ⟨by omega, k, args, rfl,
               hkc, fun a ha => genArgTy_mono _ (hS a ha) (by omega)⟩))⟩
@@ -3364,30 +3681,33 @@ open Core Core.TypeSpec in
     name in a subterm also appears in the whole type, which `TyNameAppears.arg` gives. Therefore
     the coverage for each subterm follows. -/
 theorem genArgTy_complete_of_wf_partial {baseTypes : List String} {tyCons : List KnownTyCon}
+    {C : LContext Core.CoreLParams}
     {block : MutualDatatype Unit} {blockRefs : List BlockRef}
     {tyParams : List TyIdentifier}
-    (hn : NamesOk baseTypes tyCons (block.map (·.name))) :
+    (hn : NamesOk baseTypes tyCons (block.map (·.name)))
+    (hvocab : VocabOk C baseTypes tyCons) :
     ∀ (ty : LMonoTy),
       (∀ d ∈ block, TyNameAppears d.name ty → (d.name, d.typeArgs.map .ftvar) ∈ blockRefs) →
       ConstrArgWF block ty →
       (∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams) →
-      ArityOk baseTypes tyCons (block.map (·.name)) ty →
+      ArgsWellKinded C block ty →
+      BitvecWidthOnly ty →
       ∀ (rca : Bool), (rca = false → BlockAbsent block ty) →
       ∃ size, ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
         tyParams rca size) := by
   intro ty
   induction ty using LMonoTy.induct with
   | ftvar v =>
-    intro _ _ hvars _ rca _
-    have hv : v ∈ tyParams := hvars v (by simp [LMonoTy.freeVars])
+    intro _ _ hvars _ _ rca _
+    have hmemv : v ∈ tyParams := hvars v (by simp [LMonoTy.freeVars])
     refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-    exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inl ⟨v, hv, rfl⟩)))
+    exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inl ⟨v, hmemv, rfl⟩)))
   | bitvec n =>
-    intro _ _ _ _ rca _
+    intro _ _ _ _ _ rca _
     refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
     exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inl ⟨n, rfl⟩)
   | tcons k args ih =>
-    intro hcover hwf hvars hari rca habs
+    intro hcover hwf hvars hwk hbv rca habs
     by_cases hself : k ∈ block.map (·.name)
     · obtain ⟨d, hd, hdname⟩ := List.mem_map.mp hself
       subst hdname
@@ -3404,14 +3724,22 @@ theorem genArgTy_complete_of_wf_partial {baseTypes : List String} {tyCons : List
       exact (genLeafTy_mem_iff _ _ _ _ _).mpr
         (Or.inr (Or.inr (Or.inr ⟨rfl, (d.name, d.typeArgs.map .ftvar),
           hcover d hd (.head _), rfl⟩)))
-    · unfold ArityOk at hari
-      rw [if_neg hself] at hari
+    · -- Not a block name, therefore `argsWellKinded` resolves the head in `C.knownTypes`.
+      have hk : C.knownTypes[k]? = some args.length := hwk.knownArity hvocab hself
+      unfold BitvecWidthOnly at hbv
+      obtain ⟨hkbv, hbvargs⟩ := hbv
       by_cases harrow : k = "arrow"
       · subst harrow
-        rw [if_pos rfl] at hari
-        match args, hari, hwf, hvars, habs, hcover, ih with
-        | [t1, t2], hari, hwf, hvars, habs, hcover, ih =>
-          obtain ⟨ha1, ha2⟩ := hari
+        have hlen : args.length = 2 := by
+          rw [hvocab.arrow] at hk
+          exact (by simpa using hk : (2 : Nat) = args.length).symm
+        obtain ⟨t1, t2, rfl⟩ : ∃ t1 t2, args = [t1, t2] := by
+          match args, hlen with
+          | [t1, t2], _ => exact ⟨t1, t2, rfl⟩
+        · have ha1 : ArgsWellKinded C block t1 := hwk.arg (by simp)
+          have ha2 : ArgsWellKinded C block t2 := hwk.arg (by simp)
+          have hb1 : BitvecWidthOnly t1 := hbvargs t1 (by simp)
+          have hb2 : BitvecWidthOnly t2 := hbvargs t2 (by simp)
           have harr : LMonoTy.tcons "arrow" [t1, t2] = LMonoTy.arrow t1 t2 := rfl
           rw [harr] at hwf
           obtain ⟨hdom_abs, hwf1, hwf2⟩ := constrArgWF_arrow
@@ -3429,8 +3757,9 @@ theorem genArgTy_complete_of_wf_partial {baseTypes : List String} {tyCons : List
           have hcover2 : ∀ d ∈ block, TyNameAppears d.name t2 →
               (d.name, d.typeArgs.map .ftvar) ∈ blockRefs :=
             fun d hd hap => hcover d hd (.arg _ _ _ (by simp) hap)
-          obtain ⟨s1, h1⟩ := ih t1 (by simp) hcover1 hwf1 hvars1 ha1 false (fun _ => hdom_abs)
-          obtain ⟨s2, h2⟩ := ih t2 (by simp) hcover2 hwf2 hvars2 ha2 rca
+          obtain ⟨s1, h1⟩ := ih t1 (by simp) hcover1 hwf1 hvars1 ha1 hb1 false
+            (fun _ => hdom_abs)
+          obtain ⟨s2, h2⟩ := ih t2 (by simp) hcover2 hwf2 hvars2 ha2 hb2 rca
             (fun hr => by
               subst hr
               intro d' hd'
@@ -3440,14 +3769,15 @@ theorem genArgTy_complete_of_wf_partial {baseTypes : List String} {tyCons : List
           refine ⟨2 * (max s1 s2) + 1,
             (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inl ⟨by omega, t1, t2, rfl,
               genArgTy_mono _ h1 (by omega), genArgTy_mono _ h2 (by omega)⟩))⟩
-      · rw [if_neg harrow] at hari
-        by_cases hnil : args = []
+      · by_cases hnil : args = []
         · subst hnil
-          rw [if_pos rfl] at hari
           refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-          exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inl ⟨k, hari, rfl⟩))
-        · rw [if_neg hnil] at hari
-          obtain ⟨hkc, hall⟩ := hari
+          exact (genLeafTy_mem_iff _ _ _ _ _).mpr
+            (Or.inr (Or.inl ⟨k, hvocab.base k (by simpa using hk), rfl⟩))
+        · have hkc : (k, args.length) ∈ tyCons :=
+            hvocab.tyCon k args.length hk
+              (fun h0 => hnil (List.eq_nil_of_length_eq_zero h0)) harrow hkbv
+          have hall : ∀ a ∈ args, ArgsWellKinded C block a := fun a ha => hwk.arg ha
           have hargs_abs : ∀ a ∈ args, BlockAbsent block a := by
             intro a ha
             obtain ⟨hnn, _⟩ := hwf
@@ -3461,65 +3791,74 @@ theorem genArgTy_complete_of_wf_partial {baseTypes : List String} {tyCons : List
             ih a ha (fun d hd hap => absurd hap (hargs_abs a ha d hd))
               (absent_constrArgWF (hargs_abs a ha)) (fun v hv =>
               hvars v (by rw [freeVars_tcons_eq_flatMap]; exact List.mem_flatMap.mpr ⟨a, ha, hv⟩))
-              (hall a ha) false (fun _ => hargs_abs a ha))
+              (hall a ha) (hbvargs a ha) false (fun _ => hargs_abs a ha))
           refine ⟨2 * S + 1,
             (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inr ⟨by omega, k, args, rfl,
               hkc, fun a ha => genArgTy_mono _ (hS a ha) (by omega)⟩))⟩
 
-/-- **Completeness for one type, from the fields of `MutualADTWF` and the arity.** Take a
-    constructor argument type that obeys three conditions. It is `ConstrArgWF block`, which the
-    field `argsWF` gives. Each of its free variables is declared, which the field
-    `argVarsScoped` gives. It obeys the one side condition `ArityOk`.
+/-- **Completeness for one type, from the fields of `MutualADTWF`.** Take a constructor
+    argument type that obeys four conditions. It is `ConstrArgWF block`, which the field
+    `argsWF` gives. Each of its free variables is declared, which the field `argVarsScoped`
+    gives. Its type-constructor references are applied at their declared arities, which the
+    field `argsWellKinded` gives. And every `bitvec` in it is a width and not an application,
+    which is `BitvecWidthOnly` — the one condition `MutualADTWF` does not give.
 
     Then `genArgTy` draws that type at some size, with `rca := true`, which lets it emit a
     recursive occurrence. This result also needs `blockRefs` to hold the references of the
-    block, which is `hcover`.
+    block, which is `hcover`, and the vocabulary to match `C`, which is `hvocab`.
 
     The value `rca := true` discharges the premise about the flag with no content. Therefore
     this theorem needs no separate hypothesis about absence. -/
 theorem genArgTy_complete_of_arity {baseTypes : List String} {tyCons : List KnownTyCon}
+    {C : LContext Core.CoreLParams}
     {block : MutualDatatype Unit} {blockRefs : List BlockRef}
     {tyParams : List TyIdentifier} {ty : LMonoTy}
     (hn : NamesOk baseTypes tyCons (block.map (·.name)))
+    (hvocab : VocabOk C baseTypes tyCons)
     (hcover : ∀ d ∈ block, (d.name, d.typeArgs.map .ftvar) ∈ blockRefs)
     (hwf : ConstrArgWF block ty)
     (hvars : ∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams)
-    (hari : ArityOk baseTypes tyCons (block.map (·.name)) ty) :
+    (hwk : ArgsWellKinded C block ty)
+    (hbv : BitvecWidthOnly ty) :
     ∃ size, ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
       tyParams true size) :=
-  genArgTy_complete_of_wf hn hcover ty hwf hvars hari true (by simp)
+  genArgTy_complete_of_wf hn hvocab hcover ty hwf hvars hwk hbv true (by simp)
 
 open Core Core.TypeSpec in
 /-- **Completeness against `MutualADTWF`.** Take a block that is well-formed, which is
-    `MutualADTWF C block`, and that also obeys the one side condition `ArityOk`. Then `genArgTy`
-    can make each constructor argument type of that block, at some size. This result needs
-    `blockRefs` to hold the references of the block, which is `hcover`. The field
-    `argVarsScoped` keeps the constructor arguments of each datatype in the scope of its own
-    parameters.
+    `MutualADTWF C block`. Then `genArgTy` can make each constructor argument type of that
+    block, at some size.
 
-    This theorem states completeness against the specification `MutualADTWF` itself. The field
-    `argsWF` gives `ConstrArgWF`, and the field `argVarsScoped` keeps each variable in scope.
-    Therefore only three hypotheses are more than `MutualADTWF`.
+    Three hypotheses are more than `MutualADTWF`, and **none of them is an arity condition**.
+    The generator's vocabulary is derived from `Core.KnownTypes`, so the field `argsWellKinded`
+    now discharges the whole arity discipline by itself; the hand-written `ArityOk` predicate
+    this theorem used to carry is gone. Read `docs/mutualadtwf-arity-gap.md`.
 
-    The first is `ArityOk`, which is exactly the rule about the arity that `MutualADTWF` does not
-    apply. Read `docs/mutualadtwf-arity-gap.md`. The other two are `NamesOk` and `hcover`, and
-    they are about the names that the generator uses. `hcover` says that the set of references of
-    the generator holds the block. None of these three is a fact about the type alone. -/
+    * `hbv` is the one residual condition on the type: every `bitvec` in it is a *width* and
+      not the name `bitvec` applied to a type. `Core.KnownTypes` registers `bitvec` at arity
+      `1`, so `MutualADTWF` accepts `bitvec τ`, but no `LMonoTy` argument position can hold a
+      natural-number width. Read `BitvecWidthOnly`.
+    * `hvocab` and `hn`/`hcover` are about the *context* and the *names the generator uses*,
+      not about any type. `hvocab` says the vocabulary is `C`'s arity register split by arity
+      and that `C` stores no datatype (`genArgTy` cannot refer to one); `defaultVocabOk`
+      proves it for the default vocabulary in `coreContext`. `hcover` says the generator's
+      set of references holds the block. -/
 theorem genArgTy_complete_of_MutualADTWF {baseTypes : List String}
     {tyCons : List KnownTyCon} {C : LContext CoreLParams} {block : MutualDatatype Unit}
     {blockRefs : List BlockRef}
     (hn : NamesOk baseTypes tyCons (block.map (·.name)))
+    (hvocab : VocabOk C baseTypes tyCons)
     (hcover : ∀ d ∈ block, (d.name, d.typeArgs.map .ftvar) ∈ blockRefs)
     (hwf : MutualADTWF C block)
-    (hari : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args,
-      ArityOk baseTypes tyCons (block.map (·.name)) arg.2) :
+    (hbv : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, BitvecWidthOnly arg.2) :
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ size, arg.2 ∈ SetGen.support
       (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs d.typeArgs true size) := by
   intro d hd c hc arg harg
-  refine genArgTy_complete_of_arity hn hcover
+  refine genArgTy_complete_of_arity hn hvocab hcover
     (hwf.argsWF d hd c hc arg harg)
     (hwf.argVarsScoped d hd c hc arg harg)
-    (hari d hd c hc arg harg)
+    (argsWellKinded_ty hwf d hd c hc arg harg)
+    (hbv d hd c hc arg harg)
 
 /-- One example of completeness. Take a datatype `MyList a`, which is like a list. The generator
     can make the argument type `a → MyList a` at the size 1. That type holds a self-reference in
@@ -3545,110 +3884,120 @@ example : (LMonoTy.arrow (.ftvar "a") (.tcons "MyList" [.ftvar "a"])) ∈
     exact (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl
       ((genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inr ⟨rfl, ("MyList", [.ftvar "a"]), by simp, rfl⟩)))))
 
-/-- **The reason that completeness needs the side condition `ArityOk`. This reason is the gap
-    about the arity in `MutualADTWF`.** Take the type `Sequence a a`, which applies `Sequence` to
-    2 arguments. The arity of `Sequence` is 1, therefore that type has the wrong kind.
+/-- **The `Sequence a a` gap is closed.** `Sequence` applied to 2 arguments has the wrong
+    kind, and this used to be the standard counterexample to completeness against
+    `MutualADTWF` alone: `refsKnown` only checked that `"Sequence"` resolves, never the
+    argument count. Upstream's `argsWellKinded` now checks the count, so `MutualADTWF` itself
+    rejects this type and the hand-written arity side condition is no longer needed. This
+    `example` records that fact. -/
+example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") :
+    ¬ ArgsWellKinded coreContext [d] (.tcons "Sequence" [.ftvar a, .ftvar a]) := by
+  intro h
+  have h1 : coreContext.knownTypes["Sequence"]? = some 1 := by
+    show Core.KnownTypes["Sequence"]? = some 1; native_decide
+  rcases h.head with hk | ⟨d', hd', _⟩ | ⟨d', hd', hname, _⟩
+  · -- `argsWellKinded` would need `Sequence` registered at arity 2; it is registered at 1.
+    rw [h1] at hk; simp at hk
+  · -- `coreContext` stores no datatype.
+    exact absurd hd' (by simp [coreContext, TypeFactory.allDatatypes])
+  · -- The only remaining escape is the block itself declaring a datatype named `Sequence`.
+    simp only [List.mem_singleton] at hd'; subst hd'; exact hd_ne hname
 
-    But it is a well-formed constructor argument. The name of the datatype does not occur in it,
-    because `d.name ≠ "Sequence"`. Therefore `absent_constrArgWF` gives `ConstrArgWF [d]`, and its
-    one free variable `a` is declared.
+/-- **The reason that completeness needs `BitvecWidthOnly`. This is the one gap about the type
+    that stays.** Take the type `bitvec a`, which applies the *name* `bitvec` to a type.
 
-    Therefore each field of `MutualADTWF` that reads this type holds. In particular,
-    `refsKnown` checks only that `"Sequence"` resolves, and it never checks the number of
-    arguments. But no `genArgTy` can make that type. The branch for an application draws
-    `vectorOf arity` arguments, therefore the generator emits `Sequence` at its arity 1, and
-    never at 2.
+    `Core.KnownTypes` registers `("bitvec", 1)`, so every field of `MutualADTWF` accepts this
+    type: `refsKnown` resolves the name, `argsWellKinded` sees one argument at arity `1`, and
+    the one free variable `a` is declared. `LContext.addMutualBlock` accepts such a block too.
 
-    `ArityOk` closes exactly this gap. Its case for `tcons` needs
-    `("Sequence", 2) ∈ defaultTyCons`, and that statement is false, because `defaultTyCons`
-    holds `Sequence` at arity 1. `genArgTy_complete_of_MutualADTWF` adds `ArityOk` as the one
-    hypothesis more than `MutualADTWF`, and this type fails it. Read
-    `docs/mutualadtwf-arity-gap.md`.
+    But no `genArgTy` can make it. A bitvector type is `LMonoTy.bitvec n` for a *width*
+    `n : Nat`, and no `LMonoTy` argument position can hold a natural number, so the arity `1`
+    that `Core.KnownTypes` records is not an arity over *types* at all. `genBaseTy` therefore
+    emits bitvectors through `pickBitvecWidth`, `defaultTyCons` excludes `bitvec`, and the
+    generator never applies the name.
 
-    Before issue #38, the standard example of a type that the generator cannot make was
-    `bitvec 7`. That width was absent from the fixed list `bitvecWidths`. The widths now have
-    no limit, therefore the generator makes each bitvector.
+    `BitvecWidthOnly` closes exactly this gap, and nothing more:
 
-    Another possible example is a type with a free variable that no datatype declares. The
-    statement of completeness now uses the field `argVarsScoped` of `MutualADTWF`, and not a
-    separate relation. Therefore that field excludes such a type, and the side condition does
-    not need to exclude it. The gap about the arity is the one gap that stays, and `ArityOk`
-    excludes it. -/
-theorem not_complete_without_arity (d : LDatatype Unit)
-    (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") (blockRefs : List BlockRef)
+    * `Sequence a a` — the old counterexample — is now excluded by `MutualADTWF` itself, since
+      `argsWellKinded` checks the argument count. Read the `example` above.
+    * `bitvec 7` was the standard example before issue #38, when `bitvecWidths` was a fixed
+      list. The widths now have no limit, so the generator makes every bitvector.
+    * A type with an undeclared free variable is excluded by `argVarsScoped`.
+
+    One further gap is *not* about the type: `argsWellKinded` also admits references to
+    datatypes already stored in `C`, which the generator cannot emit. `VocabOk.noStoredDatatypes`
+    states that, and it holds for `coreContext`. Read `docs/mutualadtwf-arity-gap.md`. -/
+theorem not_complete_without_bitvecWidthOnly (d : LDatatype Unit)
+    (a : TyIdentifier) (hd_ne : d.name ≠ "bitvec") (blockRefs : List BlockRef)
     (hbr : ∀ br ∈ blockRefs, br.1 = d.name) (rca : Bool) (size : Nat) :
-    -- The type is `ConstrArgWF`, and its variables are in scope for each `tyParams` that
-    -- holds `a`. Therefore the content of `MutualADTWF` for one type holds.
-    ConstrArgWF [d] (.tcons "Sequence" [.ftvar a, .ftvar a]) ∧
-    (∀ v ∈ LMonoTy.freeVars (.tcons "Sequence" [.ftvar a, .ftvar a]), v = a) ∧
-    -- But the type breaks the side condition about the arity.
-    ¬ ArityOk defaultBaseTypes defaultTyCons [d.name]
-        (.tcons "Sequence" [.ftvar a, .ftvar a]) ∧
+    -- The type is `ConstrArgWF`, its variables are in scope for each `tyParams` that holds
+    -- `a`, and it is well-kinded. Therefore the content of `MutualADTWF` for one type holds.
+    ConstrArgWF [d] (.tcons "bitvec" [.ftvar a]) ∧
+    (∀ v ∈ LMonoTy.freeVars (.tcons "bitvec" [.ftvar a]), v = a) ∧
+    ArgsWellKinded coreContext [d] (.tcons "bitvec" [.ftvar a]) ∧
+    -- But the type breaks the side condition about the width.
+    ¬ BitvecWidthOnly (.tcons "bitvec" [.ftvar a]) ∧
     -- The generator also cannot make it at any flag and at any size. This result holds for
     -- each set of references whose names are `d.name`, such as the set that
     -- `genMutuallyRecursiveDatatypes` gives for `[d]`.
-    (.tcons "Sequence" [.ftvar a, .ftvar a]) ∉ SetGen.support
+    (.tcons "bitvec" [.ftvar a]) ∉ SetGen.support
       (genArgTy (G := SetGen.Set) defaultBaseTypes defaultTyCons blockRefs
         d.typeArgs rca size) := by
-  -- `d.name` is absent from the type. It is not the head, because `d.name ≠ "Sequence"`, and
+  -- `d.name` is absent from the type. It is not the head, because `d.name ≠ "bitvec"`, and
   -- it is not in a type variable.
-  have habsent : BlockAbsent [d] (.tcons "Sequence" [.ftvar a, .ftvar a]) := by
+  have habsent : BlockAbsent [d] (.tcons "bitvec" [.ftvar a]) := by
     intro d' hd'
     simp only [List.mem_singleton] at hd'; subst hd'
     intro hap
-    generalize hty : LMonoTy.tcons "Sequence" [LMonoTy.ftvar a, LMonoTy.ftvar a] = t at hap
+    generalize hty : LMonoTy.tcons "bitvec" [LMonoTy.ftvar a] = t at hap
     cases hap with
     | head _ => injection hty with hn _; exact hd_ne hn.symm
     | arg _ _ t ht hat =>
       injection hty with _ hargs; subst hargs
       rcases List.mem_cons.mp ht with rfl | ht
       · cases hat
-      · rcases List.mem_cons.mp ht with rfl | ht
-        · cases hat
-        · cases ht
-  refine ⟨absent_constrArgWF habsent, ?_, ?_, ?_⟩
+      · cases ht
+  refine ⟨absent_constrArgWF habsent, ?_, ?_, ?_, ?_⟩
   · -- The free variables of the type are exactly `a`.
     intro v hv
     simp only [LMonoTy.freeVars, LMonoTys.freeVars, List.append_nil,
-               List.mem_append, List.mem_singleton] at hv
-    rcases hv with rfl | rfl <;> rfl
-  · -- `ArityOk` fails, because `("Sequence", 2) ∉ defaultTyCons`. That list holds `Sequence`
-    -- at arity 1.
-    unfold ArityOk
-    rw [if_neg (by simp only [List.mem_singleton]; exact fun h => hd_ne h.symm),
-        if_neg (by decide : ¬ ("Sequence" = "arrow")),
-        if_neg (by simp : ¬ ([LMonoTy.ftvar a, LMonoTy.ftvar a] = []))]
-    rintro ⟨hkc, _⟩
-    -- After the proof computes the length, `hkc` is `("Sequence", 2) ∈ defaultTyCons`.
-    simp only [List.length_cons, List.length_nil] at hkc
-    exact absurd hkc (by decide)
-  · -- The generator cannot make the type, because `Sequence` at 2 arguments matches no
-    -- branch of the generator.
+               List.mem_singleton] at hv
+    exact hv
+  · -- The type *is* well-kinded: `Core.KnownTypes` registers `bitvec` at arity 1.
+    intro ref n hmem
+    simp only [Lambda.getTypeConsArities, List.length_cons, List.length_nil,
+      List.flatMap_cons, List.flatMap_nil, List.append_nil, List.mem_singleton,
+      Prod.mk.injEq] at hmem
+    obtain ⟨rfl, rfl⟩ := hmem
+    refine Or.inl ?_
+    show Core.KnownTypes["bitvec"]? = some 1
+    native_decide
+  · -- `BitvecWidthOnly` fails immediately: its `tcons` case needs `k ≠ "bitvec"`.
+    unfold BitvecWidthOnly
+    exact fun h => h.1 rfl
+  · -- The generator cannot make the type, because the name `bitvec` matches no branch.
     intro hmem
     rcases (genArgTy_mem_iff _ _ _ _ _ _ _).mp hmem with
       hleaf | ⟨_, _, _, hcon, _⟩ | ⟨_, k, args, hcon, hkc, _⟩
-    · -- The type is not one of the three kinds from `genLeafTy`. A `.tcons` with 2 arguments
-      -- is not a bitvector, and it is not a base type with no argument, and it is not a rigid
-      -- type variable. It is also not a block occurrence, because the head of such an
-      -- occurrence is `d.name`, and `"Sequence" ≠ d.name`.
+    · -- The type is not one of the three kinds from `genLeafTy`. A `.tcons` with 1 argument
+      -- is not an `LMonoTy.bitvec`, and it is not a base type with no argument, and it is not
+      -- a rigid type variable. It is also not a block occurrence, because the head of such an
+      -- occurrence is `d.name`, and `"bitvec" ≠ d.name`.
       rcases (genLeafTy_mem_iff _ _ _ _ _).mp hleaf with
         ⟨_, hcon⟩ | ⟨_, _, hcon⟩ | ⟨_, _, hcon⟩ | ⟨_, br, hbrmem, hcon⟩
       · exact absurd hcon (by simp)
       · exact absurd hcon (by simp)
       · exact absurd hcon (by simp)
-      · -- Here `hcon` says that the type is `br.1 br.2`, with `br.1 = d.name`. But
-        -- `d.name ≠ "Sequence"`.
-        rw [hbr br hbrmem] at hcon
+      · rw [hbr br hbrmem] at hcon
         exact hd_ne (by injection hcon with h _; exact h.symm)
-    · -- The type is not an arrow, because `"Sequence" ≠ "arrow"`.
+    · -- The type is not an arrow, because `"bitvec" ≠ "arrow"`.
       exact absurd hcon (by simp [LMonoTy.arrow])
-    · -- The type is an application. That case needs `("Sequence", 2) ∈ defaultTyCons`, and
-      -- that statement is false.
+    · -- The type is an application. That case needs `("bitvec", 1) ∈ defaultTyCons`, and
+      -- `defaultTyCons` filters `bitvec` out — by construction, not by `decide`.
       injection hcon with hk hargs
       subst hk hargs
-      -- The argument list is `[ftvar a, ftvar a]`, therefore its length is 2.
       simp only [List.length_cons, List.length_nil] at hkc
-      exact absurd hkc (by decide)
+      exact (mem_defaultTyCons_iff.mp hkc).2 rfl
 
 /-! ### How to rebuild a list of constructor arguments
 
@@ -4559,8 +4908,8 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
     (hnames_fresh : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
       nm' ∉ d.typeArgs ++ (block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved))
     (hreclen : ∀ d ∈ block, d.constrs.length ≤ maxRecConstrs + 1)
-    (hari : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args,
-      ArityOk baseTypes tyCons (block.map (·.name)) arg.2) :
+    (hvocab : VocabOk C baseTypes tyCons)
+    (hbv : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, BitvecWidthOnly arg.2) :
     ∃ maxSize, block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
       maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
       maxSize extraReserved) := by
@@ -4669,10 +5018,10 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
     have hwit_some : ∀ arg ∈ cw.args, ∃ s, arg.2 ∈ SetGen.support
         (genArgTy (G := SetGen.Set) baseTypes tyCons (witPool d) d.typeArgs true s) := by
       intro arg harg
-      exact genArgTy_complete_of_wf_partial hn arg.2
+      exact genArgTy_complete_of_wf_partial hn hvocab arg.2
         (fun d' hd' happ => hcover_wit d hd cw hcw hcwlower arg harg d' hd' happ)
         (hwf.argsWF d hd cw hcw arg harg) (hwf.argVarsScoped d hd cw hcw arg harg)
-        (hari d hd cw hcw arg harg) true (by simp)
+        (argsWellKinded_ty hwf d hd cw hcw arg harg) (hbv d hd cw hcw arg harg) true (by simp)
     obtain ⟨Sw, hSw⟩ := exists_uniform_bound cw.args
       (fun arg s => arg.2 ∈ SetGen.support
         (genArgTy (G := SetGen.Set) baseTypes tyCons (witPool d) d.typeArgs true s))
@@ -4685,10 +5034,10 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
       intro ty hty
       simp only [fullArgs, List.mem_flatMap, List.mem_map] at hty
       obtain ⟨c, hc, arg, harg, rfl⟩ := hty
-      exact genArgTy_complete_of_wf_partial hn arg.2
+      exact genArgTy_complete_of_wf_partial hn hvocab arg.2
         (fun d' hd' happ => hcover_full d hd c hc arg harg d' hd' happ)
         (hwf.argsWF d hd c hc arg harg) (hwf.argVarsScoped d hd c hc arg harg)
-        (hari d hd c hc arg harg) true (by simp)
+        (argsWellKinded_ty hwf d hd c hc arg harg) (hbv d hd c hc arg harg) true (by simp)
     obtain ⟨Sf, hSf⟩ := exists_uniform_bound fullArgs
       (fun ty s => ty ∈ SetGen.support
         (genArgTy (G := SetGen.Set) baseTypes tyCons (fullPool d) d.typeArgs true s))

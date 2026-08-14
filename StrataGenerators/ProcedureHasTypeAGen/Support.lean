@@ -26,7 +26,7 @@ satisfies the correspondence *unconditionally*, via `Map.find?_fmap`.
 The single scope is exactly the shape `procBodyContext` produces for a procedure
 with empty `typeArgs` / `inputs` / in-out params (its body scope is then just the
 output parameters pushed as one new scope onto the empty ambient `Γ`), which is
-what lets `genProcedure_sound` line up the body's `StmtsHasTypeA` with the
+what lets `genProcedure_sound` line up the body's `StatementsHasTypeA` with the
 declarative `ProcBodyHasType'.structured` obligation.
 -/
 
@@ -43,26 +43,37 @@ theorem Map.fmap_insert [DecidableEq α] (m : Map α β) (x : α) (v : β) (f : 
     simp only [Map.insert, Map.fmap, List.map]
     split <;> simp_all [Map.fmap]
 
-/-- Inserting into a single-scope stack `[m]` updates that one scope. -/
-theorem Maps.insert_singleton [DecidableEq α] (m : Map α β) (x : α) (v : β) :
-    Maps.insert [m] x v = [m.insert x v] := by
-  simp only [Maps.insert, Maps.find?]
-  cases h : Map.find? m x <;>
-    simp [Maps.pop, Maps.push, Maps.newest, Maps.update, h]
+/-- Strata's first-match `Map.find?` is `List.lookup`. Bridges the flat `VarCtx` lookup to
+    `Freshening.find?_ofList_reverse`, which speaks about `List.lookup`. -/
+theorem Map.find?_eq_lookup {β} (m : Map (Identifier Unit) β) (x : Identifier Unit) :
+    Map.find? m x = m.lookup x := by
+  induction m with
+  | nil => rfl
+  | cons p rest ih =>
+    obtain ⟨k, v⟩ := p
+    simp only [Map.find?, List.lookup_cons]
+    by_cases hk : k = x
+    · subst hk; simp
+    · rw [if_neg hk, show (x == k) = false from by simp [Ne.symm hk], ih]
 
 /-- The concrete single-scope `TContext` for a flat `VarCtx`: one new scope in
     which every variable is bound to its declared monotype as a trivial polytype
-    (`LTy.forAll []`). -/
+    (`LTy.forAll []`).
+
+    A `TContext` scope is an opaque `Strata.Util.HMap` upstream, so the flat context is
+    reversed before `HMap.ofList`: `ofList` keeps the *last* binding for a key, while
+    `Map.find?` returns the *first*, and reversing makes the two agree
+    (`Freshening.find?_ofList_reverse`). -/
 def procToTCtx (ctx : VarCtx) : TContext Unit :=
-  { types := [ctx.fmap (fun mty => (LTy.forAll [] mty))] }
+  { types := [Strata.Util.HMap.ofList (ctx.fmap (fun mty => (LTy.forAll [] mty))).reverse] }
 
 /-- Looking up `x` in `procToTCtx ctx` is exactly the flat-context lookup with its
     monotype wrapped as a trivial polytype. Follows from `Map.find?_fmap`. -/
 theorem procToTCtx_find (ctx : VarCtx) (x : Identifier Unit) :
     (procToTCtx ctx).types.find? x = (Map.find? ctx x).map (fun mty => (LTy.forAll [] mty)) := by
-  show Maps.find? [ctx.fmap _] x = _
-  cases h : Map.find? ctx x <;>
-    simp [Maps.find?, Map.find?_fmap, h]
+  show Strata.Util.HMaps.find? [_] x = _
+  rw [Strata.Util.HMaps.find?_single_scope, Freshening.find?_ofList_reverse,
+    ← Map.find?_eq_lookup, Map.find?_fmap]
 
 /-- The `VarCtx ↔ TContext` correspondence holds for `procToTCtx` at *every* flat
     context — unconditionally, thanks to the find?-based `VarCtxCorresponds`. -/
@@ -78,16 +89,53 @@ theorem procToTCtx_corr (ctx : VarCtx) : VarCtxCorresponds ctx (procToTCtx ctx) 
     rw [Option.isNone_iff_eq_none] at hfresh
     rw [hfresh]; rfl
 
-/-- `procToTCtx` commutes with `VarCtx.insert`: this is the `init`-command
-    obligation of `GenCmdSoundEnv`/`GenStmtSoundEnv`. -/
+/-- Inserting into a single-scope stack updates that one scope (an equality, since both
+    branches of `HMaps.insert` collapse to the same list on a singleton). -/
+theorem HMaps.insert_singleton {α β} [BEq α] [LawfulBEq α] [Hashable α] [LawfulHashable α]
+    (m : Strata.Util.HMap α β) (x : α) (v : β) :
+    Strata.Util.HMaps.insert [m] x v = [m.insert x v] := by
+  simp only [Strata.Util.HMaps.insert, Strata.Util.HMaps.find?]
+  cases hm : Strata.Util.HMap.find? m x with
+  | none =>
+    simp only [hm, Strata.Util.HMaps.pop, Strata.Util.HMaps.push, Strata.Util.HMaps.newest]
+  | some w =>
+    simp only [hm, Strata.Util.HMaps.update]
+
+/-- The single scope `procToTCtx ctx` is built from. -/
+private theorem procToTCtx_types (ctx : VarCtx) :
+    (procToTCtx ctx).types
+      = [Strata.Util.HMap.ofList (ctx.fmap (fun mty => (LTy.forAll [] mty))).reverse] := rfl
+
+/-- `procToTCtx`'s single scope looks up exactly like the flat context. -/
+private theorem procToTCtx_scope_find (ctx : VarCtx) (k : Identifier Unit) :
+    Strata.Util.HMap.find?
+        (Strata.Util.HMap.ofList (ctx.fmap (fun mty => (LTy.forAll [] mty))).reverse) k
+      = (Map.find? ctx k).map (fun mty => (LTy.forAll [] mty)) := by
+  rw [Freshening.find?_ofList_reverse, ← Map.find?_eq_lookup, Map.find?_fmap]
+
+/-- `procToTCtx` commutes with `VarCtx.insert` up to `TContext.Equiv`: this is the
+    `init`-command obligation of `GenCmdSoundEnv`/`GenStmtSoundEnv`. Only `Equiv` is
+    available — and only `Equiv` is needed — because a scope is an opaque hash map, so
+    `ofList` of an extended list is not the same *map value* as an insertion. -/
 theorem procToTCtx_insert (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
-    procToTCtx (ctx.insert x mty) =
+    TContext.Equiv (T := CoreLParams) (procToTCtx (ctx.insert x mty))
       { procToTCtx ctx with types := (procToTCtx ctx).types.insert x (LTy.forAll [] mty) } := by
-  unfold procToTCtx
-  simp only [TContext.mk.injEq]
-  show [(ctx.insert x mty).fmap _] = Maps.insert [ctx.fmap _] x (LTy.forAll [] mty) ∧ _
-  rw [Maps.insert_singleton, Map.fmap_insert]
-  exact ⟨rfl, trivial⟩
+  -- One scope on each side, so scope-stack equivalence is pointwise `find?` agreement.
+  have hpt : Strata.Util.HMap.Equiv
+      (Strata.Util.HMap.ofList
+        ((ctx.insert x mty).fmap (fun t => (LTy.forAll [] t))).reverse)
+      ((Strata.Util.HMap.ofList
+        (ctx.fmap (fun t => (LTy.forAll [] t))).reverse).insert x (LTy.forAll [] mty)) := by
+    intro k
+    rw [procToTCtx_scope_find (ctx.insert x mty) k]
+    by_cases hk : k = x
+    · subst hk
+      rw [Strata.Util.HMap.find?_insert_self, Map.find?_insert_self]; rfl
+    · rw [Strata.Util.HMap.find?_insert_ne _ x k _ (by simp [bne]; exact hk),
+        Map.find?_insert_ne ctx k x mty hk, procToTCtx_scope_find ctx k]
+  refine ⟨?_, rfl⟩
+  rw [procToTCtx_types ctx, procToTCtx_types (ctx.insert x mty), HMaps.insert_singleton]
+  exact ⟨hpt, True.intro⟩
 
 /-- **The concrete statement-generator soundness environment**, for any operator
     context `octx` and type-variable list `tvars`.
@@ -119,16 +167,14 @@ def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx := 
     declarative `procBodyContext Γ proc`, which pushes the body scope onto
     `Γ.types` and preserves `Γ.aliases`; when `Γ.types = []` the two agree. -/
 def procToTCtxΓ (Γ : TContext Unit) (ctx : VarCtx) : TContext Unit :=
-  { types := [ctx.fmap (fun mty => (LTy.forAll [] mty))], aliases := Γ.aliases }
+  { types := (procToTCtx ctx).types, aliases := Γ.aliases }
 
 /-- Looking up `x` in `procToTCtxΓ Γ ctx` is the flat-context lookup with its
     monotype wrapped as a trivial polytype (the `types` field is independent of
     `Γ`, so this is `procToTCtx_find` verbatim). -/
 theorem procToTCtxΓ_find (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier Unit) :
-    (procToTCtxΓ Γ ctx).types.find? x = (Map.find? ctx x).map (fun mty => (LTy.forAll [] mty)) := by
-  show Maps.find? [ctx.fmap _] x = _
-  cases h : Map.find? ctx x <;>
-    simp [Maps.find?, Map.find?_fmap, h]
+    (procToTCtxΓ Γ ctx).types.find? x = (Map.find? ctx x).map (fun mty => (LTy.forAll [] mty)) :=
+  procToTCtx_find ctx x
 
 /-- The `VarCtx ↔ TContext` correspondence holds for `procToTCtxΓ Γ` at *every*
     flat context, for *any* `Γ` — the correspondence only inspects the `.types`
@@ -150,13 +196,11 @@ theorem procToTCtxΓ_corr (Γ : TContext Unit) (ctx : VarCtx) :
     (aliases carry through unchanged, and the `types` update mirrors
     `procToTCtx_insert`). -/
 theorem procToTCtxΓ_insert (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
-    procToTCtxΓ Γ (ctx.insert x mty) =
-      { procToTCtxΓ Γ ctx with types := (procToTCtxΓ Γ ctx).types.insert x (LTy.forAll [] mty) } := by
-  unfold procToTCtxΓ
-  simp only [TContext.mk.injEq]
-  show [(ctx.insert x mty).fmap _] = Maps.insert [ctx.fmap _] x (LTy.forAll [] mty) ∧ _
-  rw [Maps.insert_singleton, Map.fmap_insert]
-  exact ⟨rfl, by simp⟩
+    TContext.Equiv (T := CoreLParams) (procToTCtxΓ Γ (ctx.insert x mty))
+      { procToTCtxΓ Γ ctx with
+        types := (procToTCtxΓ Γ ctx).types.insert x (LTy.forAll [] mty) } :=
+  -- Only `types` is at stake, and it is `procToTCtx`'s verbatim.
+  ⟨(procToTCtx_insert ctx x mty).1, rfl⟩
 
 /-- **The Γ-parameterized statement-generator soundness environment**: identical
     to `procStmtEnv` except its `toTCtx` carries the ambient `Γ`'s alias list. All

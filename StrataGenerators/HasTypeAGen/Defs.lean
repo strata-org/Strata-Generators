@@ -1,5 +1,6 @@
 import StrataGenerators.HasTypeAGen.Core
 import Strata.DL.Lambda.Factory
+import Strata.Languages.Core.FactoryWF
 
 open Lambda RandomChoice
 
@@ -55,6 +56,83 @@ def factoryPolyOps (F : @Factory LExprParams') : PolyOpCtx :=
   F.toArray.toList.filterMap fun f =>
     some (f.name.name,
       Lambda.LTy.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)))
+
+/-- Every `corePolyOps` entry is a genuine `factoryPolyOps Core.Factory` entry.
+
+    `corePolyOps` has to repeat `factoryPolyOps`' body (it lives in `HasTypeAGen/Core.lean`,
+    which this file imports), so this is what keeps the two from drifting. It is also the
+    fact `PCtxWF Core.Factory corePolyOps` needs: an entry of `corePolyOps` is the generic
+    type of a real factory function, not a hand-written approximation of one. -/
+theorem corePolyOps_subset_factoryPolyOps :
+    ∀ e ∈ corePolyOps, e ∈ factoryPolyOps Core.Factory := by
+  intro e he
+  simp only [corePolyOps, List.mem_filterMap] at he
+  obtain ⟨f, hf, hfe⟩ := he
+  refine List.mem_filterMap.mpr ⟨f, hf, ?_⟩
+  split at hfe
+  · exact absurd hfe (by simp)
+  · exact hfe
+
+-- …and nothing is *missing*: `corePolyOps` is exactly the polymorphic part of the factory.
+-- Checked by evaluation rather than `rfl`, which does not reduce through the 353-entry
+-- factory. This is the guard that would have caught `Sequence.select!`, `mapConst` and
+-- `TriggerGroup.addTrigger` being absent from the old hand-written list.
+#guard corePolyOps ==
+  (factoryPolyOps Core.Factory).filter (fun e => !(e.2.boundVars.isEmpty))
+
+/-- **Scheme closedness holds for the real operator vocabulary.**
+
+    The `hclosed` conjunct of `SchemeInstAt` is the one condition that stays as a
+    premise. This theorem shows that the condition is easy to satisfy: every entry of
+    `corePolyOps` satisfies it. A caller that has a concrete `pctx` can discharge
+    `hclosed` the same way.
+
+    Now that `corePolyOps` is derived from `Core.Factory`, this is *proved* rather than
+    `decide`d — and from an upstream invariant rather than by enumeration. `FuncWF` (which
+    `LFuncWF` extends) carries `inputs_typevars_in_typeArgs` and
+    `output_typevars_in_typeArgs`, and upstream proves `Core.Factory_wf`, so scheme
+    closedness holds for *any* well-formed factory (`factoryPolyOps_closed`). The old
+    `by decide` could not survive the change anyway: the kernel does not reduce through the
+    353-entry factory. -/
+theorem factoryPolyOps_closed {F : @Lambda.Factory LExprParams'}
+    (hwf : Lambda.FactoryWF F) :
+    ∀ p ∈ factoryPolyOps F,
+      match p.2 with
+      | .forAll boundVars monoTy => ∀ v ∈ monoTy.freeVars, v ∈ boundVars := by
+  -- `freeVars (mkArrow' out ins)` splits into the output's and the inputs' free vars.
+  have hsplit : ∀ (out : LMonoTy) (vals : List LMonoTy) (v : TyIdentifier),
+      v ∈ LMonoTy.freeVars (LMonoTy.mkArrow' out vals) →
+      v ∈ LMonoTy.freeVars out ∨ ∃ t ∈ vals, v ∈ LMonoTy.freeVars t := by
+    intro out vals v hv
+    induction vals with
+    | nil => exact Or.inl (by rwa [LMonoTy.mkArrow'_nil] at hv)
+    | cons t rest ih =>
+      rw [LMonoTy.mkArrow'_cons, LMonoTy.arrow] at hv
+      simp only [LMonoTy.freeVars, LMonoTys.freeVars_of_cons, List.mem_append] at hv
+      rcases hv with hv | hv
+      · exact Or.inr ⟨t, List.mem_cons_self, hv⟩
+      · rcases ih (by
+          simp only [LMonoTys.freeVars] at hv
+          rcases hv with hv | hv
+          · exact hv
+          · simp [LMonoTys.freeVars] at hv) with h | ⟨t', ht', hv'⟩
+        · exact Or.inl h
+        · exact Or.inr ⟨t', List.mem_cons_of_mem _ ht', hv'⟩
+  intro p hp
+  simp only [factoryPolyOps, List.mem_filterMap, Option.some.injEq] at hp
+  obtain ⟨f, hf, rfl⟩ := hp
+  intro v hv
+  have hfwf := hwf.lfuncs_wf f (Array.mem_def.mpr hf)
+  rcases hsplit f.output (f.inputs.map Prod.snd) v hv with hout | ⟨t, htmem, hvt⟩
+  · exact hfwf.output_typevars_in_typeArgs hout
+  · exact hfwf.inputs_typevars_in_typeArgs t (by rwa [ListMap.values_eq_map_snd]) hvt
+
+theorem corePolyOps_closed :
+    ∀ p ∈ corePolyOps,
+      match p.2 with
+      | .forAll boundVars monoTy => ∀ v ∈ monoTy.freeVars, v ∈ boundVars :=
+  fun p hp => factoryPolyOps_closed Core.Factory_wf p
+    (corePolyOps_subset_factoryPolyOps p hp)
 
 -- ── Factory-accepting wrappers ──────────────────────────────────────
 

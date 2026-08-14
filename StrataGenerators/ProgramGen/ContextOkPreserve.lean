@@ -1,4 +1,5 @@
 import StrataGenerators.DatatypeGenProofs
+import StrataGenerators.HasTypeAGen
 import Std.Data.HashMap.Lemmas
 
 open Lambda Core DatatypeGen
@@ -36,7 +37,7 @@ in `keywords` grows by exactly the new key. -/
 
 /-- A successful `Identifiers.addWithError` is an `insertIfNew` of the key. -/
 theorem addWithError_eq_insertIfNew {m m' : Identifiers Nat} {x : Identifier Nat}
-    {f : Strata.DiagnosticModel} (h : m.addWithError x f = .ok m') :
+    {f : Strata.Message} (h : m.addWithError x f = .ok m') :
     m' = m.insertIfNew x.name x.metadata := by
   unfold Identifiers.addWithError at h
   have hsnd := Std.HashMap.containsThenInsertIfNew_snd (m := m) (k := x.name) (v := x.metadata)
@@ -53,6 +54,39 @@ theorem mem_keys_insertIfNew {m : Identifiers Nat} {nm : String} {ar : Nat} {n :
     n ∈ (m.insertIfNew nm ar).keys ↔ nm = n ∨ n ∈ m.keys := by
   rw [Std.HashMap.mem_keys, Std.HashMap.mem_insertIfNew, Std.HashMap.mem_keys]
   simp only [beq_iff_eq]
+
+/-- `insertIfNew` never overwrites, therefore an existing binding survives it. This is the
+    value-level counterpart of `mem_keys_insertIfNew`, needed by the *arity* fields of
+    `ContextOk`, which speak about `knownTypes[·]?` and not only about its key set. -/
+theorem getElem?_insertIfNew_of_getElem? {m : Identifiers Nat} {nm : String} {ar : Nat}
+    {k : String} {v : Nat} (h : m[k]? = some v) : (m.insertIfNew nm ar)[k]? = some v := by
+  rw [Std.HashMap.getElem?_insertIfNew]
+  split
+  · -- `nm == k` and `nm ∉ m`, but `h` puts `k` — hence `nm` — in `m`.
+    rename_i hc
+    refine absurd ?_ hc.2
+    rw [(by simpa using hc.1 : nm = k)]
+    exact Std.HashMap.mem_iff_isSome_getElem?.mpr (by rw [h]; rfl)
+  · exact h
+
+/-- Folding `Identifiers.add`-of-`toKnownType` over `block` preserves every binding that is
+    already present, because each step is an `insertIfNew`. -/
+theorem foldlM_add_toKnownType_getElem? {m m' : Identifiers Nat} {block : MutualDatatype Unit}
+    (h : block.foldlM (fun ks d => Identifiers.add ks (LDatatype.toKnownType d)) m = .ok m')
+    {k : String} {v : Nat} (hk : m[k]? = some v) : m'[k]? = some v := by
+  induction block generalizing m with
+  | nil => simp only [List.foldlM_nil] at h; injection h with h; subst h; exact hk
+  | cons d tl ih =>
+    simp only [List.foldlM_cons, bind, Except.bind] at h
+    cases hstep : Identifiers.add m (LDatatype.toKnownType d) with
+    | error e => rw [hstep] at h; simp at h
+    | ok m1 =>
+      rw [hstep] at h
+      simp only at h
+      have hm1 : m1 = m.insertIfNew (LDatatype.toKnownType d).name
+          (LDatatype.toKnownType d).metadata :=
+        addWithError_eq_insertIfNew (by unfold Identifiers.add at hstep; exact hstep)
+      exact ih h (hm1 ▸ getElem?_insertIfNew_of_getElem? hk)
 
 /-- Folding `Identifiers.add`-of-`toKnownType` over `block` grows the key set by
     exactly the block's names. Proven by induction over the fold, using
@@ -98,7 +132,7 @@ We extract the two fields `ContextOk` reasons about by casing on the inner
 
 /-- On success, `TypeFactory.addMutualBlock` is exactly `push`. -/
 theorem typeFactory_addMutualBlock_eq_push {t t' : @TypeFactory Unit}
-    {block : MutualDatatype Unit} {kw : List String}
+    {block : MutualDatatype Unit} {kw : Std.HashMap String Nat}
     (h : t.addMutualBlock block kw = .ok t') :
     t' = t.push block := by
   unfold TypeFactory.addMutualBlock at h
@@ -109,7 +143,9 @@ theorem typeFactory_addMutualBlock_eq_push {t t' : @TypeFactory Unit}
 /-- **Datatype field-effect of `addMutualBlock`.** On success the datatype factory
     is exactly `C.datatypes.push block`. -/
 theorem addMutualBlock_datatypes {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
-    (h : C.addMutualBlock block = .ok C') :
+    {i₁ : DecidableEq CoreLParams.IDMeta} {i₂ : Inhabited CoreLParams.IDMeta}
+    {i₃ : Inhabited CoreLParams.Metadata} {i₄ : Std.ToFormat CoreLParams.IDMeta}
+    (h : @LContext.addMutualBlock CoreLParams i₁ i₂ i₃ i₄ C block = .ok C') :
     C'.datatypes = C.datatypes.push block := by
   unfold LContext.addMutualBlock at h
   simp only [bind, Except.bind, pure, Except.pure] at h
@@ -123,7 +159,10 @@ theorem addMutualBlock_datatypes {C C' : LContext CoreLParams} {block : MutualDa
 /-- **Known-type field-effect of `addMutualBlock`.** On success the known-type key
     set grows by exactly the block's names. -/
 theorem addMutualBlock_knownTypes {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
-    (h : C.addMutualBlock block = .ok C') (n : String) :
+    {i₁ : DecidableEq CoreLParams.IDMeta} {i₂ : Inhabited CoreLParams.IDMeta}
+    {i₃ : Inhabited CoreLParams.Metadata} {i₄ : Std.ToFormat CoreLParams.IDMeta}
+    (h : @LContext.addMutualBlock CoreLParams i₁ i₂ i₃ i₄ C block = .ok C')
+    (n : String) :
     n ∈ C'.knownTypes.keywords ↔ n ∈ block.map (·.name) ∨ n ∈ C.knownTypes.keywords := by
   unfold LContext.addMutualBlock at h
   simp only [bind, Except.bind, pure, Except.pure] at h
@@ -133,31 +172,21 @@ theorem addMutualBlock_knownTypes {C C' : LContext CoreLParams} {block : MutualD
   apply foldlM_add_toKnownType_keys
   assumption
 
-/-! ## Instance-diamond bridge for the spec constructor
-
-The *generator* resolves `addMutualBlock`'s `[Inhabited]`/`[ToFormat Unit]`
-arguments to the repo-local shadowing instances
-(`instInhabitedMetadataMkExpressionMetadataCoreIdent`,
-`instToFormatUnit_strataGenerators`), while the spec constructor
-`Core.TypeSpec.DeclHasType'.type_data` uses the `CoreLParams`-native ones
-(`instInhabitedPUnit`, `instToFormatIDMetaCoreLParams`). These two
-`addMutualBlock` forms share every sub-call and differ only in the guard
-for-loop's (`ToFormat Unit`) error payload and the unused `Inhabited` default —
-and since `CoreLParams.Metadata = Unit`, the `.default` used by `genBlockFactory`
-is defeq across both instances. Hence on the `.ok` path both forms compute the
-*same* record, so a generator-supplied `.ok` transfers to the spec-native form by
-reflexivity. -/
-
-/-- **Spec-instance bridge.** A `.ok` from `addMutualBlock` at the generator's
-    default instances also holds at the `CoreLParams`-native instances the spec's
-    `DeclHasType'.type_data` uses. The two forms are definitionally equal on the
-    `.ok` path (the differing instances feed only the unreached error payload and
-    a defeq `.default`). -/
-theorem addMutualBlock_ok_spec {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
-    (hadd : C.addMutualBlock block = .ok C') :
-    @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams C block = .ok C' :=
-  hadd
+/-- **Known-type value-effect of `addMutualBlock`.** On success every arity already
+    registered in `C.knownTypes` is still registered, at the same value: the block's names
+    are added with `insertIfNew`, which never overwrites. -/
+theorem addMutualBlock_knownTypes_getElem? {C C' : LContext CoreLParams}
+    {block : MutualDatatype Unit}
+    {i₁ : DecidableEq CoreLParams.IDMeta} {i₂ : Inhabited CoreLParams.IDMeta}
+    {i₃ : Inhabited CoreLParams.Metadata} {i₄ : Std.ToFormat CoreLParams.IDMeta}
+    (h : @LContext.addMutualBlock CoreLParams i₁ i₂ i₃ i₄ C block = .ok C')
+    {k : String} {v : Nat} (hk : C.knownTypes[k]? = some v) : C'.knownTypes[k]? = some v := by
+  unfold LContext.addMutualBlock at h
+  simp only [bind, Except.bind, pure, Except.pure] at h
+  repeat (split at h <;> try contradiction)
+  injection h with h; subst h
+  apply foldlM_add_toKnownType_getElem? (block := block) (hk := hk)
+  assumption
 
 /-! ## Default-vocabulary membership in `initialReserved`
 
@@ -191,6 +220,50 @@ theorem arrow_mem_initialReserved {baseTypes : List String}
   unfold initialReserved
   exact List.mem_cons_self ..
 
+/-! ## `SimpleTyArities` preservation
+
+Upstream's `init` rules and `signatureWellKinded` need the ambient context to register the
+`SimpleType` constructors at their own arities. The fold only ever *grows* `knownTypes`
+(with `insertIfNew`, which never overwrites), so the property is preserved at every step. -/
+
+/-- `coreContext` registers every `SimpleType` constructor at its own arity. Discharged by
+    `native_decide` on `Core.KnownTypes`, like `defaultContextOk`. -/
+theorem coreContextSimpleTyArities : SimpleTyArities DatatypeGen.coreContext := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  all_goals (show Core.KnownTypes[_]? = some _; native_decide)
+
+/-- `SimpleTyArities` survives an `insertIfNew` on `knownTypes`: the eight bindings it
+    asserts are already present, and `insertIfNew` never overwrites. -/
+theorem simpleTyArities_of_insertIfNew {C C' : LContext CoreLParams} {nm : String} {ar : Nat}
+    (h : C'.knownTypes = C.knownTypes.insertIfNew nm ar) (hC : SimpleTyArities C) :
+    SimpleTyArities C' := by
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.bool
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.int
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.string
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.real
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.regex
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.arrow
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.map
+  · rw [h]; exact getElem?_insertIfNew_of_getElem? hC.seq
+
+/-- `SimpleTyArities` survives `addMutualBlock`: the block's names are added with
+    `insertIfNew`, which never overwrites. -/
+theorem simpleTyArities_of_addMutualBlock {C C' : LContext CoreLParams}
+    {block : MutualDatatype Unit}
+    {i₁ : DecidableEq CoreLParams.IDMeta} {i₂ : Inhabited CoreLParams.IDMeta}
+    {i₃ : Inhabited CoreLParams.Metadata} {i₄ : Std.ToFormat CoreLParams.IDMeta}
+    (h : @LContext.addMutualBlock CoreLParams i₁ i₂ i₃ i₄ C block = .ok C')
+    (hC : SimpleTyArities C) : SimpleTyArities C' :=
+  ⟨addMutualBlock_knownTypes_getElem? h hC.bool,
+   addMutualBlock_knownTypes_getElem? h hC.int,
+   addMutualBlock_knownTypes_getElem? h hC.string,
+   addMutualBlock_knownTypes_getElem? h hC.real,
+   addMutualBlock_knownTypes_getElem? h hC.regex,
+   addMutualBlock_knownTypes_getElem? h hC.arrow,
+   addMutualBlock_knownTypes_getElem? h hC.map,
+   addMutualBlock_knownTypes_getElem? h hC.seq⟩
+
 /-! ## The preservation lemma -/
 
 /-- **Preservation under `addMutualBlock`.** Given `ContextOk C … R`, a successful
@@ -210,8 +283,10 @@ theorem arrow_mem_initialReserved {baseTypes : List String}
 theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     {baseTypes : List String} {tyCons : List KnownTyCon}
     {block : MutualDatatype Unit}
+    {i₁ : DecidableEq CoreLParams.IDMeta} {i₂ : Inhabited CoreLParams.IDMeta}
+    {i₃ : Inhabited CoreLParams.Metadata} {i₄ : Std.ToFormat CoreLParams.IDMeta}
     (hctx : ContextOk C baseTypes tyCons R)
-    (h : C.addMutualBlock block = .ok C')
+    (h : @LContext.addMutualBlock CoreLParams i₁ i₂ i₃ i₄ C block = .ok C')
     (hfresh : ∀ d ∈ block, d.name ∉ initialReserved baseTypes tyCons R) :
     ContextOk C' baseTypes tyCons (block.map (·.name) ++ R) := by
   have hdt : C'.datatypes = C.datatypes.push block := addMutualBlock_datatypes h
@@ -243,8 +318,16 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     intro x hx hmem
     obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hmem
     exact hfresh d hd hx
+  -- The arity disjuncts transfer the same way as the "known" ones: `knownTypes` keeps every
+  -- old binding (`addMutualBlock_knownTypes_getElem?`), and `allDatatypes` only grows.
+  have hdt_mono : ∀ {d : LDatatype Unit}, d ∈ C.datatypes.allDatatypes →
+      d ∈ C'.datatypes.allDatatypes := by
+    intro d hd
+    rw [hdt, allDatatypes_push]
+    exact List.mem_append_left _ hd
   refine
     { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
+      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
   · intro b hb
@@ -260,6 +343,11 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
         rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
         exact List.mem_append_left _ hd)
   · exact (hkt "arrow").mpr (Or.inr hctx.arrow_known)
+  · intro b hb
+    exact addMutualBlock_knownTypes_getElem? h (hctx.base_arity b hb)
+  · intro kc hkc
+    exact addMutualBlock_knownTypes_getElem? h (hctx.tyCon_arity kc hkc)
+  · exact addMutualBlock_knownTypes_getElem? h hctx.arrow_arity
   · intro key hkey
     rcases (hkt key).mp hkey with hblk | hold
     · exact hblk_res key hblk

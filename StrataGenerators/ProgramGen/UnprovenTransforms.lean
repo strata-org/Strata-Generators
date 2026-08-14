@@ -270,7 +270,7 @@ def programFactory (p : Program) : Lambda.Factory CoreLParams :=
     that the pass raised a diagnostic. -/
 def runPhaseWithFuncs (ph : Core.PipelinePhase) (prog : Program) :
     Option ((Bool × Program) × Transform.CoreTransformState) :=
-  let st := { mkState prog with factory := some (programFactory prog) }
+  let st := { mkState prog with factory := programFactory prog }
   match Transform.runWith prog ph.transform st with
   | (.ok r, st') => some (r, st')
   | (.error _, _) => none
@@ -1965,14 +1965,13 @@ private def cseBareBody : List Statement :=
   [ Statement.init ⟨"a", ()⟩ (.forAll [] .int) (.det cseDupBare) .empty,
     Statement.init ⟨"b", ()⟩ (.forAll [] .int) (.det cseDupBare) .empty ]
 
--- **A polymorphic annotation the typechecker forbids.** With the operator
--- unannotated, `dup.typeOf` gives `none` and CSE emits
--- `var $__cse.0 : α := 3 + 4;`. The input typechecks and the output does not:
--- "Variable annotation must be monomorphic, but got polymorphic type ∀[α]. α".
--- The annotated body above produces `var $__cse.0 : int` and typechecks, which
--- isolates the `none` fallback (`CommonSubexprElim.lean:335`) as the cause.
+-- **A polymorphic annotation the typechecker used to forbid — FIXED UPSTREAM.** With the
+-- operator unannotated, `dup.typeOf` gives `none` and CSE emits `var $__cse.0 : α := 3 + 4;`.
+-- That output used to be rejected ("Variable annotation must be monomorphic, but got
+-- polymorphic type ∀[α]. α"), isolating the `none` fallback as the cause; on
+-- `strata-org/Strata` `main` both the input and the CSE output typecheck.
 #guard progTypeChecks (guardProg cseBareBody)
-#guard !checkCseOutputTypechecks (guardProg cseBareBody)
+#guard checkCseOutputTypechecks (guardProg cseBareBody)
 
 /-- `Int.Add(7, 8)`, a second subexpression to duplicate, so CSE mints two names
     and the order claim has something to order. -/

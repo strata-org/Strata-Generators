@@ -786,10 +786,21 @@ def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
     (σ :: args, ret)
   | ty => ([], ty)
 
+/-- Build a single-scope `Lambda.Subst` from an association list of type-variable
+    bindings.
+
+    `Lambda.Subst` is a stack of scopes; upstream made each scope an opaque
+    hash map (`Strata.Util.HMap`) rather than an association list, so a scope can
+    no longer be written as a list literal. Reversing before `HMap.ofList`
+    preserves the association-list convention that the *first* binding for a key
+    wins (`HMap.ofList` would otherwise let the last one win). -/
+def substScope (bindings : List (TyIdentifier × LMonoTy)) : Lambda.Subst :=
+  [Strata.Util.HMap.ofList bindings.reverse]
+
 /-- Find free type variables that haven't been instantiated in a substituion,
     i.e. `findFreeTyVars boundVars subst` elements of `boundVars` that don't appear as keys in `subst`. -/
 def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List TyIdentifier :=
-  boundVars.filter (fun v => Maps.find? subst v == none)
+  boundVars.filter (fun v => Strata.Util.HMaps.find? subst v == none)
 
 -- ── Alpha-renaming for polymorphic operators (OpsConsistent fix) ──────
 -- Without freshening type variables, a polymorphic factory
@@ -837,7 +848,8 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
 
   -- Apply the `subst` to `monoTy` (the body of the universally quantified type)
   -- using the substitution
-  let renamedTy := LMonoTy.subst [subst.map (fun (old, new) => (old, LMonoTy.ftvar new))]  monoTy
+  let renamedTy :=
+    LMonoTy.subst (substScope (subst.map (fun (old, new) => (old, LMonoTy.ftvar new)))) monoTy
 
   -- Assemble everything together
   (renamedBoundVars, renamedTy)
@@ -913,7 +925,7 @@ def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
       guard (uninstantiatedTyVars.isEmpty || !generableTys.isEmpty)
 
       -- Extend substitution to map the uninstantiated type variables to these newly sampled types
-      let extendedSubst : Lambda.Subst := (uninstantiatedTyVars.zip sampledTys) :: subst
+      let extendedSubst : Lambda.Subst := substScope (uninstantiatedTyVars.zip sampledTys) ++ subst
 
       -- Apply the substitution to each of the applied argument types
       -- This makes all the applied argument types fully instantiated (concrete)
@@ -1899,21 +1911,33 @@ def coreMonoOps : OpCtx :=
   OpCtx.ofList <| Core.Factory.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
-/-- Polymorphic operators from Strata's Core.Factory. Used for the
-    IndirPoly generation rule (Pałka et al. 2011, Section 4). -/
+/-- Every **polymorphic** operator of Strata's `Core.Factory`, as a name paired with its
+    full type scheme `∀ typeArgs. mkArrow' output inputs`. The IndirPoly generation rule
+    uses this context (Pałka et al. 2011, Section 4).
+
+    Derived from the factory for exactly the reason `coreMonoOps` is (see there): a
+    hand-written list drifts. The list this replaced had drifted three ways against
+    `strata-org/Strata` `main`:
+
+    * it was **missing** `mapConst`, `Sequence.select!` and `TriggerGroup.addTrigger`, so
+      no generated term could apply them and every property about them passed vacuously;
+    * it carried a `const : ∀ k v. v → Map k v` that `Core.Factory` does **not** define —
+      the real entry is `mapConst`; and
+    * its `Sequence.build` was `∀ a. a → Sequence a`, while the factory's takes *two*
+      arguments (`∀ a. Sequence a → a → Sequence a`). A generated `Sequence.build e` was
+      therefore annotated at an arity the factory disagrees with, which is what the
+      printer reported as "unknown operation, rendering as generic call: Sequence.build".
+
+    Monomorphic factory entries are excluded (`typeArgs ≠ []`): `coreMonoOps` already
+    covers them through the Indir rule, and admitting them here would only duplicate that
+    work at every draw.
+
+    The body repeats the body of `factoryPolyOps` (restricted to the polymorphic entries)
+    rather than calling it, because `factoryPolyOps` lives in `HasTypeAGen/Defs.lean` and
+    that file imports this one. `corePolyOps_eq_factoryPolyOps` in `Defs.lean` proves the
+    two agree, so a change to one and not the other breaks the build. -/
 def corePolyOps : PolyOpCtx :=
-  [ -- Map operations
-    ("const", .forAll ["k", "v"] (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))
-  , ("select", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.ftvar "v"))))
-  , ("update", .forAll ["k", "v"] (.arrow (.map (.ftvar "k") (.ftvar "v")) (.arrow (.ftvar "k") (.arrow (.ftvar "v") (.map (.ftvar "k") (.ftvar "v"))))))
-  -- Sequence operations
-  , ("Sequence.length", .forAll ["a"] (.arrow (.seq (.ftvar "a")) .int))
-  , ("Sequence.empty", .forAll ["a"] (.seq (.ftvar "a")))
-  , ("Sequence.append", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.seq (.ftvar "a")) (.seq (.ftvar "a")))))
-  , ("Sequence.select", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.ftvar "a"))))
-  , ("Sequence.build", .forAll ["a"] (.arrow (.ftvar "a") (.seq (.ftvar "a"))))
-  , ("Sequence.update", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.arrow (.ftvar "a") (.seq (.ftvar "a"))))))
-  , ("Sequence.contains", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow (.ftvar "a") .bool)))
-  , ("Sequence.take", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
-  , ("Sequence.drop", .forAll ["a"] (.arrow (.seq (.ftvar "a")) (.arrow .int (.seq (.ftvar "a")))))
-  ]
+  Core.Factory.toArray.toList.filterMap fun f =>
+    if f.typeArgs.isEmpty then none
+    else some (f.name.name,
+      Lambda.LTy.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)))

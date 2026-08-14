@@ -151,8 +151,9 @@ set across *all* declaration generation, adding each declared name, so
 
 ## Completeness
 
-Program-level completeness inherits the datatype generator's documented `ArityOk`
-side condition (see `mutualadtwf-arity-gap.md`) plus per-declaration reachability
+Program-level completeness inherits the datatype generator's residual
+`BitvecWidthOnly` / `VocabOk.noStoredDatatypes` side conditions — the hand-written
+`ArityOk` is gone (see `mutualadtwf-arity-gap.md`) — plus per-declaration reachability
 side conditions of the form used by `genFunction_complete`. It is stated in
 `∃`-budget form. Where a gap is inherent to bounded sampling, it is documented,
 not hidden behind a `sorry`.

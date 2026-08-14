@@ -37,9 +37,11 @@ licenses the wholesale delegation, and it decides several obligations for free:
 
 - **Global name distinctness.** `ProgramHasType'` requires `P.getNames.Nodup`, and
   the checker enforces it incrementally (`C.idents.addListWithError decl.names`).
-  Since candidates only ever *drop* or *shrink* declarations and never rename or
-  duplicate one, distinctness is preserved anyway; the filter makes it
-  unconditional even on input that did not have it.
+  This is a case where the filter does real work rather than confirming an
+  invariant: `shrinkFunc` renames a function to the canonical `"f"` (see "What is
+  preserved, and what is not"), which can collide with a declaration already called
+  `f`. Such a candidate is rejected here. The filter also makes distinctness
+  unconditional on input that did not have it.
 - **Later declarations keep resolving.** Dropping a `type`/`func` declaration can
   orphan a later declaration that referenced it (an alias body mentioning a
   dropped abstract type, a procedure body calling a dropped procedure). That is
@@ -52,10 +54,32 @@ licenses the wholesale delegation, and it decides several obligations for free:
 
 ## What is preserved, and what is not
 
-The **program's declaration order is preserved** (candidates are sublists /
-in-place replacements, never reorderings), and no declaration is ever renamed —
-which keeps a counterexample readable against the original and keeps the
-`Nodup` obligation trivially maintained.
+The **program's declaration order is preserved**: candidates are sublists or
+in-place replacements, never reorderings. So a shrunk program reads against the
+original positionally, which is what makes a reduced counterexample legible.
+
+**One declaration kind is renamed.** `shrinkFunc`'s last reduction family
+(`FunctionHasTypeAGen/Roundtrip.lean:236`) rewrites a function's name to the single
+canonical `"f"`:
+
+```lean
+let shrinkName := if f.name.name.length > 1 then [{ f with name := ⟨"f", ()⟩ }] else []
+```
+
+`shrinkDecl` reaches it for a top-level `.func` and for each member of a
+`.recFuncBlock`, so those are the only declarations whose name can change — and only
+ever to `"f"`. Every other kind keeps its name: `shrinkTypeDecl` rebuilds a `.con` /
+`.syn` / `.data` with `{ tc with … }`, `shrinkProcCandidates` never touches the
+header, and the `.ax` / `.distinct` cases thread the name through untouched. (A name
+can still *disappear* — a dropped declaration, a dropped datatype, a dropped
+constructor and its tester/accessors — which is not a rename.)
+
+`Nodup` is therefore **not** maintained by an absence of renaming; it is maintained
+by the oracle. `progTypeChecks` runs `Core.Program.typeCheck`, which enforces
+`P.getNames.Nodup` incrementally, so a rename to `"f"` that collides with a
+declaration already called `f` is filtered out — as is one that orphans a caller of
+the old name, since the reference then fails to resolve. Both are rejections rather
+than things the candidate generator avoids proposing.
 
 Nothing else is preserved, and per the requirement nothing else needs to be: a
 shrunk program need not declare the same names, expose the same procedure
@@ -626,12 +650,27 @@ private def mixed : Program :=
 #guard (shrinkProgram mixed).all progTypeChecks == true
 -- ...and every candidate is strictly smaller, so the minimizer terminates.
 #guard (shrinkProgram mixed).all (fun c => sizeProgram c < sizeProgram mixed) == true
--- Declaration order is preserved: no candidate reorders what it keeps. (Checked
--- via names, which are never rewritten except by `shrinkFunc`'s rename — hence
--- the `f`/`f0` allowance.)
+-- Undo `shrinkFunc`'s rename, so a candidate's names can be compared against the
+-- input's positionally. `mixed` declares no `f`, so this is unambiguous here.
+private def unrenameF (n : String) : String := if n == "f" then "f0" else n
+
+-- **Declaration order is preserved, and `f0 -> f` is the only rewrite.** Both halves
+-- in one check: after undoing the rename, every candidate's name list is a *sublist*
+-- of the input's. Being a sublist forbids reordering, forbids introducing a name,
+-- and — because the input holds one `f0` — forbids two declarations both becoming
+-- `f`. A set-membership check (`.all (· ∈ [...])`), which is what stood here, tests
+-- none of the three: it accepts `["f0", "G"]` and `["G", "f", "f"]` alike.
 #guard (shrinkProgram mixed).all
-  (fun c => (c.decls.map (fun d => d.name.name)).all
-    (fun n => n ∈ ["G", "S", "a0", "d0", "P0", "f0", "f"])) == true
+  (fun c => (c.decls.map (fun d => unrenameF d.name.name)).isSublist
+              (mixed.decls.map (fun d => d.name.name))) == true
+
+-- The rename is genuinely *reachable*, not merely tolerated by the check above:
+-- some candidate rewrites `f0` to `f`. This is the pin the module doc's "one
+-- declaration kind is renamed" rests on. Its predecessor ("no declaration is ever
+-- renamed") drifted unnoticed precisely because every guard here only *permitted*
+-- the rename, so nothing failed when the prose stopped matching the code.
+#guard (shrinkProgram mixed).any
+  (fun c => (c.decls.map (fun d => d.name.name)).contains "f") == true
 
 -- Dropping a declaration is offered: a property that fails on every program
 -- minimizes all the way to the empty program.
@@ -774,11 +813,12 @@ private def nestedPrecondFunc : Function :=
               && f.typeArgs == precondFunc.typeArgs) == true
 #guard (shrinkFuncWellFormed precondFunc).all funcWellFormed == true
 
--- By contrast the analogous *measure* reduction needs no filter: the measure IS
--- free-var checked, so the oracle rejects the dangling form on its own.
+-- The analogous *measure* reduction: dropping the inputs leaves the measure's `y`
+-- dangling. `strata-org/Strata` `main` accepts this shape (it used to reject it), so the
+-- reduction needs no filter for the opposite reason — the oracle no longer refuses it.
 private def measureFunc : Function :=
   { precondFunc with preconditions := [], measure := some (.fvar () ⟨"y", ()⟩ (some .int)) }
-#guard progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == false
+#guard progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == true
 
 -- A `recFuncBlock` never shrinks to the empty block (the spec forbids it).
 private def recBlock : Decl :=
@@ -806,8 +846,13 @@ private def measureNoBodyDecl : Decl :=
   .func { name := ⟨"f1", ()⟩, typeArgs := [], inputs := [], output := .bool,
           body := none, measure := some (.const () (.intConst 0)) } .empty
 
-/-- An axiom applying `id`, one of the five `corePolyOps` schemes `Core.Factory`
-    does not define (~6%). -/
+/-- An axiom applying `id`, a name `Core.Factory` does not define.
+
+    Hand-built only: the generator can no longer produce this shape. Both operator
+    vocabularies are derived from `Core.Factory` (`coreMonoOps_eq_factoryOps`,
+    `corePolyOps_subset_factoryPolyOps`), so every operator a generated term applies
+    resolves. The old hand-written `corePolyOps` carried a `const` the factory does not
+    define, which is what used to make this gap reachable from the generator. -/
 private def unknownOpDecl : Decl :=
   .ax { name := "a1",
         e := .app () (.op () ⟨"id", ()⟩ (some (.arrow .bool .bool))) trueExpr } .empty
@@ -827,9 +872,13 @@ private def opDistinctDecls : List Decl :=
 -- which is why `genDeclDistinct` emits the two together or not at all.
 #guard progTypeChecks (prog [opDistinctDecls[2]!]) == false
 
--- Each gap is genuinely rejected, so the cases below are not vacuous...
+-- `distinct-fvar` and `unknown-op` are still genuinely rejected, so the cases below are
+-- not vacuous. `measure-no-body` is **accepted on `strata-org/Strata` `main`** — that gap
+-- is closed — so the tag below now classifies a shape the checker no longer refuses;
+-- `programStatusNote` only consults the classifier on a *rejected* program, so it stays
+-- silent on this one.
 #guard progTypeChecks (prog [fvarDistinctDecl]) == false
-#guard progTypeChecks (prog [measureNoBodyDecl]) == false
+#guard progTypeChecks (prog [measureNoBodyDecl]) == true
 #guard progTypeChecks (prog [unknownOpDecl]) == false
 -- ...and each is classified, with no false positive on the accepted mixed program.
 #guard programRejectionCause (prog [fvarDistinctDecl]) == ["distinct-fvar"]
@@ -841,8 +890,8 @@ private def opDistinctDecls : List Decl :=
 -- The shared status note: silent on an accepted program, tagged on a known gap.
 #guard programStatusNote mixed == ""
 #guard programStatusNote Program.init == ""
-#guard programStatusNote (prog [measureNoBodyDecl]) ==
-  "\n  -- typechecker-rejected, known gap(s): measure-no-body"
+-- `measureNoBodyDecl` now typechecks, so the note is silent on it.
+#guard programStatusNote (prog [measureNoBodyDecl]) == ""
 -- Two gaps at once are both reported.
 #guard programStatusNote (prog [fvarDistinctDecl, measureNoBodyDecl]) ==
   "\n  -- typechecker-rejected, known gap(s): distinct-fvar measure-no-body"
@@ -872,9 +921,9 @@ private def opDistinctDecls : List Decl :=
 private def illTyped : Program := prog [fvarDistinctDecl, measureNoBodyDecl, axDecl]
 #guard progTypeChecks illTyped == false
 #guard (shrinkProgram illTyped).all progTypeChecks == true
-#guard (shrinkProgram illTyped).all
-  (fun c => !(c.decls.contains fvarDistinctDecl) && !(c.decls.contains measureNoBodyDecl))
-  == true
+-- Only the still-rejected `distinct-fvar` declaration has to go; `measureNoBodyDecl`
+-- typechecks on `main`, so a candidate may legitimately keep it.
+#guard (shrinkProgram illTyped).all (fun c => !(c.decls.contains fvarDistinctDecl)) == true
 -- THE `cutGaps` REGRESSION: two *independent* gaps. No single drop can fix this
 -- (dropping either leaves the other), so with only the one-at-a-time families the
 -- candidate list would be empty and the minimizer would stall on the input. The

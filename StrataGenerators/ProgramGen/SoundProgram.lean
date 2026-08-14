@@ -154,7 +154,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
         have hdt : C'.datatypes = s.C.datatypes.push block := addMutualBlock_datatypes hadd
         have hstored : DatatypeGen.StoredRefsAbsent s.C block :=
           storedRefsAbsent_of_inv hinv hfresh_res
-        refine { known := ?_, inhab := ?_ }
+        refine { known := ?_, arity := ?_, inhab := ?_ }
         · intro kc hkc
           rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
           rcases List.mem_append.mp hkc with hnew | hold
@@ -162,6 +162,15 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
             obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
             exact List.mem_append_right _ (List.mem_map.mpr ⟨d, hd, by rw [← hdeq]⟩)
           · exact List.mem_append_left _ (hinv.dtPoolOk.known kc hold)
+        · -- Arity: a new entry records its datatype's own `typeArgs` count; old entries
+          -- keep theirs, and `push` only grows `allDatatypes`.
+          intro kc hkc
+          rw [hdt, allDatatypes_push]
+          rcases List.mem_append.mp hkc with hnew | hold
+          · obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
+            exact ⟨d, List.mem_append_right _ hd, by rw [← hdeq], by rw [← hdeq]⟩
+          · obtain ⟨d, hd, hrest⟩ := hinv.dtPoolOk.arity kc hold
+            exact ⟨d, List.mem_append_left _ hd, hrest⟩
         · intro kc hkc
           rw [hdt]
           rcases List.mem_append.mp hkc with hnew | hold
@@ -208,6 +217,30 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
 
 /-! ## Procedure per-declaration soundness -/
 
+/-! ## The assumed statement-level well-kindedness discipline
+
+Upstream's `init` rules and `signatureWellKinded` fields require every stored / declared
+monotype to be well-kinded in the ambient context. For the procedure step that reduces to
+`StmtHasTypeAGen.WellKindedOk` at the contexts the statement generator reaches, whose two
+type-level fields (`generable`, `sigs`) are properties of the threaded operator context and
+procedure-signature context.
+
+Establishing them needs `SimpleType`-closure results for `generableTypesFromCtx` and for the
+operator vocabulary a datatype block contributes — generator theory this port does not add.
+They are therefore **assumed**, guarded by `Inv` so the assumption ranges only over states
+the fold can actually reach, and threaded unchanged through the fold. Discharging
+`ProgramWellKindedAssumption` is a local change here plus those closure lemmas. -/
+
+/-- Assumed: at every state the declaration fold reaches, the statement generator's
+    well-kindedness discipline holds. See the note above. -/
+def ProgramWellKindedAssumption : Prop :=
+  ∀ s : GenState, Inv s →
+    (∀ (rv : List TyIdentifier) (ctx : VarCtx),
+      StrataGenerators.Stmt.WellKindedOk s.octx s.procs
+        { s.C with rigidTypeVars := rv } ctx) ∧
+    (∀ (tvars : List TyIdentifier) (iv : List (Identifier Unit)) (pctx' : PolyOpCtx),
+      StrataGenerators.Stmt.WellKindedPreserved s.octx tvars iv s.procs pctx')
+
 /-- `ProcHasTypeA` is invariant under renaming the procedure's header name: no
     `ProcHasType'` field mentions `proc.header.name` (they read
     `inputs`/`outputs`/`typeArgs`/`getInoutParams`, `body`, and `spec`, all
@@ -220,6 +253,7 @@ theorem procHasTypeA_rename {P : Program} {C : LContext CoreLParams} {Γ : TCont
     outputsNodup := h.outputsNodup
     typeArgsNodup := h.typeArgsNodup
     noUndeclaredVars := h.noUndeclaredVars
+    signatureWellKinded := h.signatureWellKinded
     modRights := h.modRights
     preconditionsTyped := h.preconditionsTyped
     postconditionsTyped := h.postconditionsTyped
@@ -233,7 +267,8 @@ theorem procHasTypeA_rename {P : Program} {C : LContext CoreLParams} {Γ : TCont
     constructor leaves `C`/`Γ` unchanged, so `Inv` survives (only `reserved`
     grows). -/
 theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
-    (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
+    (hinv : Inv s) (hWKA : ProgramWellKindedAssumption)
+    (hProcs : ProcSigCorresponds s.procs P)
     {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
@@ -245,7 +280,8 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
   -- `hProcs` rather than the vacuous `ProcSigCorresponds [] P`.
   have hpt : ProcHasTypeA P s.C s.Γ proc₀ :=
     genProcedure_sound_ambient P s.octx s.procs hProcs b.procSize b.procLen s.C s.Γ
-      hinv.typesNil proc₀ s.derivedPctx hproc₀
+      hinv.typesNil (simpleTyArities_of_inv hinv) (hWKA s hinv).1 (hWKA s hinv).2
+      proc₀ s.derivedPctx hproc₀
       (by rw [hinv.rigidNil]; exact List.nil_subset _)
   -- Rename to the fresh name; `ProcHasTypeA` is name-invariant.
   have hpt' : ProcHasTypeA P s.C s.Γ
@@ -263,7 +299,8 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
 /-- Soundness of one declaration step: whichever kind `oneOf` selects, the emitted
     declarations are `DeclsHasTypeA` from `s` to `s'`, and `Inv` is preserved. -/
 theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
-    (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
+    (hinv : Inv s) (hWKA : ProgramWellKindedAssumption)
+    (hProcs : ProcSigCorresponds s.procs P)
     {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
@@ -279,7 +316,7 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
   · exact genDeclDistinct_sound P hinv hmem
   · exact genDeclDatatype_sound P hinv hmem
   · exact genDeclFunction_sound P hinv hmem
-  · exact genDeclProcedure_sound P hinv hProcs hmem
+  · exact genDeclProcedure_sound P hinv hWKA hProcs hmem
 
 /-! ## The declaration fold -/
 
@@ -287,7 +324,7 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     `DeclsHasTypeA` from the initial state to the final state, for any enclosing
     program `P`, and `Inv` is preserved throughout. -/
 theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
-    (hinv : Inv s) {ds : List Decl} {s' : GenState}
+    (hinv : Inv s) (hWKA : ProgramWellKindedAssumption) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n))
     (hProcs : ProcSigCorresponds s'.procs P) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
@@ -309,7 +346,8 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
       genDeclStep_procs_mono hstep
     -- First step.
     obtain ⟨hstep_sound, hinv₁⟩ :=
-      genDeclStep_sound P hinv (ProcSigCorresponds.mono hProcs (fun sig hsig => hsub₁ sig (hsub₀ sig hsig))) hstep
+      genDeclStep_sound P hinv hWKA
+        (ProcSigCorresponds.mono hProcs (fun sig hsig => hsub₁ sig (hsub₀ sig hsig))) hstep
     -- Rest.
     obtain ⟨hrest_sound, hinv₂⟩ := ih hinv₁ hrest hProcs
     refine ⟨?_, hinv₂⟩
@@ -330,6 +368,7 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     * `∃ C' Γ', DeclsHasType' … P.decls C' Γ'` — the declarations are well-typed
       (the fold). -/
 theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
+    (hWKA : ProgramWellKindedAssumption)
     (h : P ∈ SetGen.support (genProgram (G := SetGen.Set) numDecls b)) :
     ProgramHasTypeA DatatypeGen.coreContext {} P := by
   simp only [genProgram, mem_support_bind_iff, mem_support_pure_iff] at h
@@ -353,7 +392,7 @@ theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
     have hProcs : ProcSigCorresponds sf.procs { decls := decls } :=
       procSigCorresponds_of_emitted hem (genProgram_getNames_nodup hfold)
     obtain ⟨hsound, _⟩ :=
-      genDeclsFold_sound { decls := decls } numDecls inv_initState hfold hProcs
+      genDeclsFold_sound { decls := decls } numDecls inv_initState hWKA hfold hProcs
     exact ⟨sf.C, sf.Γ, hsound⟩
 
 end ProgramGen

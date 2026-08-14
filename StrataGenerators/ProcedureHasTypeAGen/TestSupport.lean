@@ -313,13 +313,16 @@ def mkMixedProgram (ps : List Procedure) : Program :=
   { decls := fixedNonProcDecls ++ fs.map (Decl.func · .empty) ++ procs }
 
 /-- The transform state a pass is run in: the `Factory` is seeded with
-    `Core.Factory` (PrecondElim early-returns `(false, prog)` if it is `none`, so
-    an unseeded factory would make every PrecondElim property vacuous), and the
-    cached call graph is seeded with the program's own `toProcedureCG` (which
-    FilterProcedures consults, falling back to recomputing it only if absent). -/
+    `Core.Factory` (an unseeded factory has no builtin to read WF obligations off,
+    so it would make every PrecondElim property vacuous), and the cached call graph
+    is seeded with the program's own `toProcedureCG` (which FilterProcedures
+    consults, falling back to recomputing it only if absent).
+
+    `CoreTransformState.factory` is a plain `Factory` upstream (it used to be an
+    `Option`), so the seeding — and every read of it below — is unwrapped. -/
 def mkState (prog : Program) : Transform.CoreTransformState :=
   { Transform.CoreTransformState.emp with
-    factory := some Core.Factory,
+    factory := Core.Factory,
     cachedAnalyses := { callGraph := some prog.toProcedureCG } }
 
 /-- Run a pipeline phase on a program from a freshly-seeded state, returning the
@@ -889,10 +892,9 @@ def checkPrecondFactoryGrows (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
   match runPhaseSt Core.precondElimPipelinePhase prog with
   | some (_, st') =>
-    match (mkState prog).factory, st'.factory with
-    | some fIn, some fOut =>
-      (factoryNames fIn).all fun n => decide (n ∈ fOut)
-    | _, _ => true
+    let fIn := (mkState prog).factory
+    let fOut := st'.factory
+    (factoryNames fIn).all fun n => decide (n ∈ fOut)
   | none => true
 
 /-- **`PrecondElimFactoryCorrect.factoryComplete`.** Every function the output
@@ -902,13 +904,11 @@ def checkPrecondFactoryGrows (ps : List Procedure) : Bool :=
 def checkPrecondFactoryComplete (ps : List Procedure) : Bool :=
   match runPhaseSt Core.precondElimPipelinePhase (mkMixedProgram ps) with
   | some ((_, out), st') =>
-    match st'.factory with
-    | some fOut =>
-      out.decls.all fun
-        | .func f _ => decide (f.name.name ∈ fOut)
-        | .recFuncBlock fs _ => fs.all fun f => decide (f.name.name ∈ fOut)
-        | _ => true
-    | none => true
+    let fOut := st'.factory
+    out.decls.all fun
+      | .func f _ => decide (f.name.name ∈ fOut)
+      | .recFuncBlock fs _ => fs.all fun f => decide (f.name.name ∈ fOut)
+      | _ => true
   | none => true
 
 /-- **`PrecondElimFactoryCorrect.factoryStripped` — HONEST FAILURE (spec bug +
@@ -922,9 +922,7 @@ def checkPrecondFactoryComplete (ps : List Procedure) : Bool :=
 def checkPrecondFactoryStripped (ps : List Procedure) : Bool :=
   match runPhaseSt Core.precondElimPipelinePhase (mkMixedProgram ps) with
   | some (_, st') =>
-    match st'.factory with
-    | some fOut => fOut.toArray.toList.all (·.preconditions.isEmpty)
-    | none => true
+    st'.factory.toArray.toList.all (·.preconditions.isEmpty)
   | none => true
 
 /-- The factory entries that make `checkPrecondFactoryStripped` fail: every entry
@@ -950,17 +948,14 @@ def precondFactoryStrippedOffenders (ps : List Procedure) :
   let prog := mkMixedProgram ps
   match runPhaseSt Core.precondElimPipelinePhase prog with
   | some (_, st') =>
-    match st'.factory with
-    | some fOut =>
-      let declared := prog.decls.filterMap fun
-        | .func f _ => some f.name.name
-        | _ => none
-      fOut.toArray.toList.filterMap fun lf =>
-        if lf.preconditions.isEmpty then none
-        else some (lf.name.name,
-                   lf.preconditions.map fun p => toString (Std.format p.expr),
-                   declared.contains lf.name.name)
-    | none => []
+    let declared := prog.decls.filterMap fun
+      | .func f _ => some f.name.name
+      | _ => none
+    st'.factory.toArray.toList.filterMap fun lf =>
+      if lf.preconditions.isEmpty then none
+      else some (lf.name.name,
+                 lf.preconditions.map fun p => toString (Std.format p.expr),
+                 declared.contains lf.name.name)
   | none => []
 
 /-- **`PrecondElimFactoryCorrect.factoryStripped`, restricted to the functions the
@@ -974,14 +969,11 @@ def checkPrecondDeclaredFactoryStripped (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
   match runPhaseSt Core.precondElimPipelinePhase prog with
   | some (_, st') =>
-    match st'.factory with
-    | some fOut =>
-      let declared := prog.decls.filterMap fun
-        | .func f _ => some f.name.name
-        | _ => none
-      fOut.toArray.toList.all fun lf =>
-        !declared.contains lf.name.name || lf.preconditions.isEmpty
-    | none => true
+    let declared := prog.decls.filterMap fun
+      | .func f _ => some f.name.name
+      | _ => none
+    st'.factory.toArray.toList.all fun lf =>
+      !declared.contains lf.name.name || lf.preconditions.isEmpty
   | none => true
 
 /-- **`PreservesCachedAnalysesWF` for PrecondElim.** The pass registers each
@@ -1210,24 +1202,24 @@ private def liftMeProc : Procedure :=
 -- Scenarios the *generator* cannot currently reach, pinned deterministically so
 -- the behaviour is regression-tested even though no property covers it.
 
--- ① THE `changed`-FLAG BUG (`PrecondElim.lean:318–338`). `function f() : int {
+-- ① THE `changed`-FLAG BUG — **FIXED UPSTREAM.** `function f() : int {
 -- Int.SafeDiv(1, 0) }` has no preconditions of its own, but its *body* calls a
 -- partial function. The pass inserts an `f$$wf` block holding the obligation
--- assert — so the program provably changes — yet reports `changed = false`,
--- because that branch returns `hasPreconds`. `checkPrecondChangedFlagValid`
--- therefore fails on this input, which is exactly the honest failure the property
--- is there to pin.
+-- assert, so the program provably changes; it used to report `changed = false`
+-- anyway (that branch returned `hasPreconds`), which is the honest failure this
+-- reproducer pinned. On `strata-org/Strata` `main` the flag is correct, so the
+-- guard now records the *fixed* behaviour.
 private def bodyCallProc : Procedure :=
   procOf "P" [funcDeclOf "f" (some (callOp "Int.SafeDiv" (intLit 1) (intLit 0))) []]
 
-#guard checkPrecondChangedFlagValid [bodyCallProc] == false
--- The obligation is real and the assert *is* emitted (so the flag is the only
--- thing wrong here — the pass does the right rewrite, it just misreports it).
+#guard checkPrecondChangedFlagValid [bodyCallProc] == true
+-- The obligation is real and the assert *is* emitted.
 #guard programObligations (mkProgram [bodyCallProc]) == 1
 #guard checkPrecondCallSiteAsserts [bodyCallProc] == true
--- ...and the rewrite is genuinely visible in the output program.
+-- ...the rewrite is genuinely visible in the output program, and `changed` now
+-- agrees with it.
 #guard (match runPhase Core.precondElimPipelinePhase (mkProgram [bodyCallProc]) with
-        | some (changed, out) => changed == false && out != mkProgram [bodyCallProc]
+        | some (changed, out) => changed == true && out != mkProgram [bodyCallProc]
         | none => false) == true
 
 -- ② `preconditionsStripped` with a declaration that *does* carry a precondition.
@@ -1241,9 +1233,12 @@ private def precondFuncProc : Procedure :=
 #guard checkPrecondPreconditionsStripped [precondFuncProc] == true
 
 -- ③ Cause (2) of the `factoryStripped` failure, isolated from the seeded
--- builtins: the *declaration* is stripped in the output program, but the copy the
--- pass pushed into the factory still carries the precondition.
-#guard checkPrecondDeclaredFactoryStripped [precondFuncProc] == false
+-- builtins: the copy the pass pushed into the factory used to keep the
+-- precondition that the output *declaration* had dropped. **FIXED UPSTREAM** — the
+-- declared function's factory entry is stripped too, so only cause (1) (the seeded
+-- builtins, whose preconditions the pass must keep) is left in
+-- `checkPrecondFactoryStripped`.
+#guard checkPrecondDeclaredFactoryStripped [precondFuncProc] == true
 #guard checkPrecondPreconditionsStripped [precondFuncProc] == true
 -- The `$$wf` procedure generated for that declared precondition is well-formed
 -- (`noFilter`, empty spec) — `generatedWF` bites here.
@@ -1306,10 +1301,11 @@ private def noFilterProgram : List Procedure :=
 -- `unreachableRemoved` still holds — it exempts `noFilter` procedures by design.
 #guard checkFilterUnreachableRemoved noFilterProgram == true
 
--- The hardcoded `changed := true` (FilterProcedures.lean:82) misreports the
--- all-targets scenario, in which nothing is removed.
-#guard checkFilterChangedFlagValid noFilterProgram == false
-#guard checkFilterChangedFlagValid callerCalleeProgram == false
+-- FilterProcedures used to hardcode `changed := true`, misreporting the
+-- all-targets scenario in which nothing is removed. **FIXED UPSTREAM** — the flag
+-- now tracks whether the pass actually dropped a procedure.
+#guard checkFilterChangedFlagValid noFilterProgram == true
+#guard checkFilterChangedFlagValid callerCalleeProgram == true
 
 end Guards
 

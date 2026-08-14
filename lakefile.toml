@@ -3,12 +3,15 @@ version = "0.1.0"
 defaultTargets = ["StrataGenerators"]
 testDriver = "test"
 
-# Pinned to the commit adding the `argVarsScoped` field to `MutualADTWF`
-# (strata-generators issue #39), on the `argVarsScoped` branch of ngernest/Strata.
+# Tracks upstream `strata-org/Strata` directly: every Core typing spec the
+# generators depend on (including the `argVarsScoped` field of `MutualADTWF`,
+# strata-generators issue #39) has landed on `main`, so the `ngernest/Strata`
+# fork is no longer needed. `rev = "main"` follows the branch tip; run
+# `lake update Strata` to move the pin recorded in `lake-manifest.json`.
 [[require]]
 name = "Strata"
-git = "https://github.com/ngernest/Strata"
-rev = "865885871f87269e075ce20ac16e502bc688d763"
+git = "https://github.com/strata-org/Strata"
+rev = "main"
 
 [[require]]
 name = "basalt"

@@ -80,13 +80,14 @@ theorem genCmd_sound_nil
     (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit)
+    (hC : SimpleTyArities C)
     (hCorr : VarCtxCorresponds ctx Γ)
     (hFun : Map.Functional ctx)
     (hExprSound : GenLExprSound ctx.toFVarCtx octx tvars depth)
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth)) :
     ∃ Γ', CmdHasTypeA C Γ r.cmd Γ' :=
-  genCmd_sound octx tvars immutableVars ctx depth C Γ hCorr hFun hExprSound
+  genCmd_sound octx tvars immutableVars ctx depth C Γ hC hCorr hFun hExprSound
     (freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx depth) r hr
 
 /-- A `GenCmdSoundEnv` built from the proven disjointness fact. The remaining
@@ -100,7 +101,7 @@ def genCmdSoundEnv_nil
     (corr : ∀ ctx, VarCtxCorresponds ctx (toTCtx ctx))
     (exprSound : ∀ (ctx : VarCtx), GenLExprSound ctx.toFVarCtx octx tvars depth)
     (toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
-      toTCtx (ctx.insert x mty) =
+      TContext.Equiv (T := CoreLParams) (toTCtx (ctx.insert x mty))
         { toTCtx ctx with types := (toTCtx ctx).types.insert x (.forAll [] mty) }) :
     GenCmdSoundEnv octx tvars depth C where
   toTCtx := toTCtx
@@ -116,8 +117,9 @@ theorem genCmds_sound_nil
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
     (C : LContext CoreLParams)
     (env : GenCmdSoundEnv octx tvars depth C)
+    (hC : SimpleTyArities C)
     (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
     (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n)) :
     CmdsHasTypeA C (env.toTCtx ctx) result.1 (env.toTCtx result.2) :=
-  genCmds_sound octx tvars immutableVars ctx depth n C env hFun result hr
+  genCmds_sound octx tvars immutableVars ctx depth n C env hC hFun result hr

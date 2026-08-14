@@ -10,7 +10,7 @@ open StrataGenerators.Stmt
 
 `genStmt` / `genStmtChain` (in `StmtHasTypeAGen/Core.lean`) generate random Strata
 Core statements. This file proves them **sound** and **complete** with respect to
-the `StmtHasTypeA` / `StmtsHasTypeA` typing relations of
+the `StatementHasTypeA` / `StatementsHasTypeA` typing relations of
 `Strata.Languages.Core.StatementTypeSpec`.
 
 ## Compositional structure
@@ -59,7 +59,7 @@ Both proofs thread three contexts, mirroring the generator:
 - `C` is threaded as an honest `LContext CoreLParams`; the generator's output
   `outC` field *is* the output ambient context of the typing relation.
 - `L` (the enclosing-block labels, `labels`) is threaded as a `List String`. It is
-  the fifth argument of the 6-place `StmtHasTypeA` relation. Its typing role is in
+  the fifth argument of the 6-place `StatementHasTypeA` relation. Its typing role is in
   two constructors: `exit label` requires `label ∈ L`, discharged by the
   `elements` support of `genExitStmt`; `block label` requires `label ∉ L`,
   discharged by the freshness of `genFreshLabel` (see `genFreshLabel_fresh`).
@@ -98,9 +98,11 @@ structure GenStmtSoundEnv (octx : OpCtx) (tvars : List TyIdentifier)
       from `ctx.toFVarCtx` (whose names are `ctx`'s) and a fresh name avoids `ctx`. -/
   freshDisjoint :
     ∀ d (ctx : VarCtx), FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx d pctx
-  /-- `toTCtx` commutes with `VarCtx.insert` (needed for the `init` command case). -/
+  /-- `toTCtx` commutes with `VarCtx.insert` up to `TContext.Equiv` (needed for the `init`
+      command case). Equality is unavailable now that a scope is an opaque hash map —
+      see `GenCmdSoundEnv.toTCtx_insert`. -/
   toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
-    toTCtx (ctx.insert x mty) =
+    TContext.Equiv (T := CoreLParams) (toTCtx (ctx.insert x mty))
       { toTCtx ctx with types := (toTCtx ctx).types.insert x (.forAll [] mty) }
 
 /-- Reinterpret a `GenStmtSoundEnv` as a `GenCmdSoundEnv` at an arbitrary ambient
@@ -122,19 +124,74 @@ def GenStmtSoundEnv.toCmdEnv {octx tvars pctx}
     call-soundness lemmas, which speak about `insertAll Γ …`. -/
 theorem GenStmtSoundEnv.toTCtx_insertAllCtx {octx tvars pctx}
     (env : GenStmtSoundEnv octx tvars pctx) (news : List (Identifier Unit × LMonoTy)) :
-    ∀ ctx, env.toTCtx (StrataGenerators.Stmt.insertAllCtx ctx news)
-      = StrataGenerators.Stmt.insertAll (env.toTCtx ctx) news := by
+    ∀ ctx, TContext.Equiv (T := CoreLParams)
+      (env.toTCtx (StrataGenerators.Stmt.insertAllCtx ctx news))
+      (StrataGenerators.Stmt.insertAll (env.toTCtx ctx) news) := by
   induction news with
-  | nil => intro ctx; rfl
+  | nil => intro ctx; exact TContext.Equiv.refl (T := CoreLParams) _
   | cons hd tl ih =>
     intro ctx
-    rw [StrataGenerators.Stmt.insertAllCtx_cons, ih, env.toTCtx_insert]
-    simp [StrataGenerators.Stmt.insertAll]
+    rw [StrataGenerators.Stmt.insertAllCtx_cons]
+    -- `insertAll (…insert…) tl` on the right; step past the head insertion with
+    -- `toTCtx_insert`, then `insertAll` congruence for the tail.
+    refine (ih _).trans ?_
+    rw [show StrataGenerators.Stmt.insertAll (env.toTCtx ctx) (hd :: tl)
+          = StrataGenerators.Stmt.insertAll
+              { env.toTCtx ctx with
+                types := (env.toTCtx ctx).types.insert hd.1 (.forAll [] hd.2) } tl from by
+        simp [StrataGenerators.Stmt.insertAll]]
+    exact StrataGenerators.Stmt.insertAll_equiv tl (env.toTCtx_insert ctx hd.1 hd.2)
 
 -- ── Leaf-case soundness lemmas ───────────────────────────────────────────
 
 variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
   {immutableVars : List (Identifier Unit)} {labels : List String}
+
+-- ── The well-kindedness premises upstream's `init` rules impose ──────────
+--
+-- `CmdHasType'.init_det`/`init_nondet` now require the stored monotype to be well-kinded
+-- in the ambient context (`C.WellKindedTy`), i.e. every type constructor applied at the
+-- arity `C.knownTypes` records for it. Two of the statement generators store types:
+--
+-- * `genCmdStmt`, whose `init` types come from `genLMonoTy` — always `SimpleType`s, so
+--   `SimpleTyArities C` suffices (`wellKindedTy_of_genLMonoTy`);
+-- * `genCallStmt`, whose inline `init` chain stores the *callee's* signature types
+--   instantiated by a sampled `σ`. Those are `SimpleType`s only if the callable
+--   signatures and the sampled instantiation are, which depends on `procs`, `ctx` and
+--   `octx` rather than on the generator alone.
+--
+-- `WellKindedOk` bundles exactly those facts, and `WellKindedPreserved` says a generated
+-- statement carries them to its output context. Both are taken as **premises**: proving
+-- the second needs `SimpleType`-closure results for `generableTypesFromCtx` and for the
+-- contexts `typeDecl`/`funcDecl` produce, which is generator theory this port does not
+-- add. Everything downstream threads them unchanged, so discharging them later is a
+-- local change here and at the two `ProgramGen` call sites.
+
+/-- The well-kindedness discipline the statement generators need at an ambient context `C`
+    and variable scope `ctx`: `C` registers the `SimpleType` constructors at their own
+    arities, every type reachable as a sampled instantiation is a `SimpleType`, and so is
+    every type in a callable procedure's written-to blocks. -/
+structure WellKindedOk (octx : OpCtx) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (ctx : VarCtx) : Prop where
+  /-- `C` registers `bool`/`int`/`string`/`real`/`regex` at 0, `arrow`/`Map` at 2 and
+      `Sequence` at 1 — enough to make every `SimpleType` well-kinded in `C`. -/
+  arities : SimpleTyArities C
+  /-- Every type the call generator can sample for a callee's type parameter is a
+      `SimpleType`. -/
+  generable : ∀ ty ∈ generableTypesFromCtx ctx.values [] octx, SimpleType ty
+  /-- Every type in a callable procedure's in-out and out-only blocks — the blocks the
+      call generator writes back through, and therefore `init`s — is a `SimpleType`. -/
+  sigs : ∀ s ∈ procs, ∀ ty ∈ (s.M ++ s.O).values, SimpleType ty
+
+/-- `WellKindedOk` is carried from a statement's input context to its output context.
+    Taken as a premise; see the note above. -/
+def WellKindedPreserved (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx) : Prop :=
+  ∀ (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
+    (r : GenStmtResult),
+    r ∈ SetGen.support
+      (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n) →
+    WellKindedOk octx procs C ctx → WellKindedOk octx procs r.outC r.outCtx
 
 /-- `toPureFuncDecl` always produces a non-recursive declaration. -/
 @[simp] theorem toPureFuncDecl_not_isRecursive (f : Function) :
@@ -142,17 +199,18 @@ variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
 
 /-- Soundness of `genCmdStmt` (at any depth `d`). -/
 theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
-    (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (hFun : Map.Functional ctx)
+    (C : LContext CoreLParams) (hC : SimpleTyArities C) (ctx : VarCtx) (d : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d pctx)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
+    StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
   obtain ⟨rc, hrc, rfl⟩ := hr
   have hcmd :=
-    genCmd_sound_env octx tvars immutableVars ctx d C pctx (env.toCmdEnv C d) hFun rc hrc
-  exact StmtsHasTypeA_singleton
-    (StmtHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) labels (.cmd rc.cmd)
-      (CmdExtHasType'.cmd (env.toTCtx ctx) (env.toTCtx rc.outCtx) rc.cmd hcmd))
+    genCmd_sound_env octx tvars immutableVars ctx d C pctx (env.toCmdEnv C d) hC hFun rc hrc
+  exact StatementsHasTypeA_singleton
+    (StatementHasType'.cmd C (env.toTCtx ctx) (env.toTCtx rc.outCtx) labels (.cmd rc.cmd) _
+      (CmdExtHasType'.cmd (env.toTCtx ctx) (env.toTCtx rc.outCtx) rc.cmd hcmd)
+      (tctxEquivRefl _))
 
 /-- Soundness of `genExitStmt`. With enclosing labels the target is drawn from
     them (`label ∈ L`, discharging the `exit` premise); with no enclosing block
@@ -161,7 +219,7 @@ theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
 theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
+    StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases labels with
   | nil =>
     -- `genExitStmt [] … = default`, whose support is `∅`.
@@ -170,21 +228,22 @@ theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨l, hl, rfl⟩ := hr
-    exact StmtsHasTypeA_singleton (StmtHasType'.exit C (env.toTCtx ctx) (hd :: tl) l default hl)
+    exact StatementsHasTypeA_singleton (StatementHasType'.exit C (env.toTCtx ctx) (hd :: tl) l default _ hl
+      (tctxEquivRefl _))
 
 /-- Soundness of `genFuncDeclStmt` (at any depth `d`). -/
 theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
-    (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
+    (C : LContext CoreLParams) (hC : SimpleTyArities C) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx d pctx)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
+    StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
              mem_support_pure_iff] at hr
   obtain ⟨decl, ⟨f0, _hf0, rfl⟩, func, hfunc, rfl⟩ := hr
   have hwt : FuncHasTypeA C (env.toTCtx ctx) func :=
-    genFunction_sound [] octx d C (env.toTCtx ctx) pctx func hfunc
-  exact StmtsHasTypeA_singleton
-    (StmtHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default
-      (by simp) hwt)
+    genFunction_sound [] octx d C (env.toTCtx ctx) pctx hC func hfunc
+  exact StatementsHasTypeA_singleton
+    (StatementHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default _
+      (by simp) hwt (tctxEquivRefl _))
 
 /-- Soundness of `genTypeDeclStmt` (at any depth `d`). The `.ok` branch discharges
     `typeDecl`; the `.error` (name-clash) branch is the empty generator (support
@@ -192,7 +251,7 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pc
 theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
+    StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
   obtain ⟨tc, _htc, hr⟩ := hr
   -- Branch on the same `addKnownTypeWithError` the generator computed.
@@ -201,7 +260,8 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pc
     rename_i C' heq
     simp only [mem_support_pure_iff] at hr
     subst hr
-    exact StmtsHasTypeA_singleton (StmtHasType'.typeDecl C C' (env.toTCtx ctx) labels tc default heq)
+    exact StatementsHasTypeA_singleton (StatementHasType'.typeDecl C C' (env.toTCtx ctx) labels tc default _ heq
+      (tctxEquivRefl _))
   · -- `.error`: the empty generator `default`, whose support is `∅`.
     rename_i heq
     simp only [SetGen.support, SetGen.bot_mem_iff] at hr
@@ -347,7 +407,7 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
     simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
     -- Peel the type-instantiation (`σvals`) sampling `mapM`.
-    obtain ⟨σvals, _, hr⟩ := hr
+    obtain ⟨σvals, hσvals, hr⟩ := hr
     split at hr
     · rename_i hcond
       obtain ⟨_, hNodup⟩ := hcond
@@ -379,9 +439,13 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
 theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (procs : ProcSigCtx) (hProcs : ProcSigCorresponds procs P)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat)
+    -- The inline `init` chain a call emits stores the callee's σ-instantiated written-to
+    -- types, and upstream's `init` rules require the stored monotype to be well-kinded
+    -- in `C`. `WellKindedOk` is exactly what that needs.
+    (hWK : WellKindedOk octx procs C ctx)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d pctx)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
+    StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases procs with
   | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
   | cons p₀ ps =>
@@ -389,7 +453,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     obtain ⟨s, hs, hr⟩ := hr
     rw [mem_support_elements_iff] at hs
     -- Peel the type-instantiation sampling; name the chosen instantiation `σ`.
-    obtain ⟨σvals, _, hr⟩ := hr
+    obtain ⟨σvals, hσvals, hr⟩ := hr
     obtain ⟨σ, hσ⟩ : ∃ σ, s.typeArgs.zip σvals = σ := ⟨_, rfl⟩
     -- Name the instantiated signature blocks the generator uses.
     obtain ⟨Mσ, hMσ⟩ : ∃ Mσ, StrataGenerators.Stmt.substSig σ s.M = Mσ := ⟨_, rfl⟩
@@ -420,7 +484,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
         rw [hF₂.length_eq, ← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length]
       -- `hExTy` at the instantiated input types `subst [σ] (s.I.values[i])`.
       have hExTy : ∀ i (hi : i < exprs.length) (hj : i < s.I.values.length),
-          LExpr.HasTypeA [] (exprs[i]'hi) (LMonoTy.subst [σ] (s.I.values[i]'hj)) := by
+          LExpr.HasTypeA [] (exprs[i]'hi) (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj)) := by
         intro i hi hj
         have hjσ : i < Iσ.values.length := by
           rw [← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length, ← lm_values_length]
@@ -432,7 +496,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
         have hbind := env.exprSound d ctx (Iσ.values[i]'hjσ) (exprs[i]'hi) hmem
         -- `Iσ.values[i] = subst [σ] (s.I.values[i])` (as a value equation, so the
         -- index proof `hjσ` is untouched).
-        have hval : Iσ.values[i]'hjσ = LMonoTy.subst [σ] (s.I.values[i]'hj) := by
+        have hval : Iσ.values[i]'hjσ = LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj) := by
           have hjσ' : i < (StrataGenerators.Stmt.substSig σ s.I).values.length := by rw [hIσ]; exact hjσ
           rw [← StrataGenerators.Stmt.substSig_values_getElem σ s.I i hjσ' hj]
           congr 1 <;> rw [hIσ]
@@ -461,6 +525,36 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
           have hb := (env.corr ctx).1 q.1 τ hfind_q
           rw [hτ] at hb
           exact Or.inl hb
+      -- Every type the init chain stores is well-kinded in `C`: the sampled `σ` values
+      -- come from the generable set (or are `bool`), so they are `SimpleType`s, and
+      -- `substSig` preserves that.
+      have hσSimple : ∀ t ∈ σ.map Prod.snd, SimpleType t := by
+        intro t ht
+        -- A value of `σ = s.typeArgs.zip σvals` is one of the sampled `σvals` …
+        obtain ⟨q, hq, rfl⟩ := List.mem_map.mp (hσ ▸ ht)
+        have hqσ : q.2 ∈ σvals := (List.of_mem_zip hq).2
+        -- … and each of those is drawn from `generableTys` or is the `bool` fallback.
+        obtain ⟨τ0, _, hmem⟩ :=
+          forall₂_mem_left ((mem_support_mapM_iff _ s.typeArgs σvals).mp hσvals) q.2 hqσ
+        split at hmem
+        · exact hWK.generable q.2 (by rwa [mem_support_elements_iff] at hmem)
+        · rw [mem_support_pure_iff] at hmem; rw [hmem]; exact .bool
+      have hwk : ∀ p ∈ (StrataGenerators.Stmt.substSig σ s.M ++ T).toList,
+          C.WellKindedTy p.2 := by
+        intro q hq
+        refine simpleType_wellKindedTy hWK.arities ?_
+        rcases List.mem_append.mp hq with hqM | hqT
+        · exact substSig_values_simple σ s.M hσSimple
+            (fun ty hty => hWK.sigs s hs ty (by
+              rw [lm_values_append]; exact List.mem_append_left _ hty))
+            q.2 (by rw [ListMap.values_eq_map_snd]; exact List.mem_map_of_mem hqM)
+        · have : q.2 ∈ T.values := by
+            rw [ListMap.values_eq_map_snd]; exact List.mem_map_of_mem hqT
+          rw [hTVals, ← hOσ] at this
+          exact substSig_values_simple σ s.O hσSimple
+            (fun ty hty => hWK.sigs s hs ty (by
+              rw [lm_values_append]; exact List.mem_append_right _ hty))
+            q.2 this
       -- One uniform shape: the (possibly empty) init chain, then the call.
       simp only [mem_support_pure_iff] at hr
       obtain rfl := hr
@@ -468,17 +562,20 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       -- filter over `env.toTCtx ctx` that `call_mixed_body_sound` speaks about:
       -- fuse the recipe's two per-block filters, then transport the syntactic
       -- freshness filter to the semantic one.
-      show StmtsHasTypeA P C (env.toTCtx ctx) labels
+      show StatementsHasTypeA P C (env.toTCtx ctx) labels
         (initChain (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)) ++ _) C
         (env.toTCtx (insertAllCtx ctx (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx))))
-      rw [env.toTCtx_insertAllCtx, filter_needsInit_append,
-        filter_needsInit_eq_missingIn env ctx]
+      -- The generator-side scope and the semantic one agree only up to `TContext.Equiv`
+      -- (opaque hash-map scopes), so move the output along it.
+      refine StatementsHasTypeA_out_equiv ?_
+        (env.toTCtx_insertAllCtx (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)) ctx)
+      rw [filter_needsInit_append, filter_needsInit_eq_missingIn env ctx]
       -- `call_mixed_body_sound` takes declared blocks + `σ`; `Mσ`/`Oσ` are the
       -- instantiated ones the generator used. Rewrite them back to `substSig σ …`.
       rw [← hMσ] at hNodup hReuse ⊢
       rw [← hOσ] at hTVals
       exact call_mixed_body_sound σ s.M s.I s.O T exprs hfind hInputs hOutputs
-        hExLen hTVals hExTy hIdisjOut hNodup hReuse
+        hExLen hTVals hExTy hIdisjOut hNodup hReuse hwk
     · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
 -- ── Procedure-call completeness (forward membership) ──────────────────────
@@ -685,7 +782,7 @@ theorem genStmt_outCtx_functional
 mutual
 
 /-- **Soundness of `genStmt`.** Every statement in the generator's support is
-    well-typed w.r.t. `StmtHasTypeA` (for any program `P`), with the generator's
+    well-typed w.r.t. `StatementHasTypeA` (for any program `P`), with the generator's
     output ambient context `r.outC` and output scope `env.toTCtx r.outCtx` being
     exactly the output contexts of the typing relation.
 
@@ -697,63 +794,70 @@ mutual
 theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (hFun : Map.Functional ctx)
+    (C : LContext CoreLParams) (ctx : VarCtx)
+    (hWK : WellKindedOk octx procs C ctx)
+    (hWKpres : WellKindedPreserved octx tvars immutableVars procs pctx)
+    (n : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
+    StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases n with
   | zero =>
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
-    · exact genCmdStmt_sound P env C ctx 0 hFun r hr
+    · exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
     · exact genExitStmt_sound P env C ctx r hr
-    · exact genFuncDeclStmt_sound P env C ctx 0 r hr
+    · exact genFuncDeclStmt_sound P env C hWK.arities ctx 0 r hr
     · exact genTypeDeclStmt_sound P env C ctx 0 r hr
-    · exact genCallStmt_sound P env procs hProcs C ctx 0 r hr
+    · exact genCallStmt_sound P env procs hProcs C ctx 0 hWK r hr
   | succ size =>
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
-    · exact genCmdStmt_sound P env C ctx (size + 1) hFun r hr
+    · exact genCmdStmt_sound P env C hWK.arities ctx (size + 1) hFun r hr
     · exact genExitStmt_sound P env C ctx r hr
-    · exact genFuncDeclStmt_sound P env C ctx (size + 1) r hr
+    · exact genFuncDeclStmt_sound P env C hWK.arities ctx (size + 1) r hr
     · exact genTypeDeclStmt_sound P env C ctx (size + 1) r hr
-    · exact genCallStmt_sound P env procs hProcs C ctx (size + 1) r hr
+    · exact genCallStmt_sound P env procs hProcs C ctx (size + 1) hWK r hr
     · -- block
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨label, hlabel, ⟨⟨len, _⟩⟩, _hlenbd, triple, htriple, rfl⟩ := hr
       have hfresh := genFreshLabel_not_mem labels label hlabel
-      have ih := genStmtChain_sound P env immutableVars procs hProcs (label :: labels) C ctx size len hFun triple htriple
-      exact StmtsHasTypeA_singleton
-        (StmtHasType'.block C (env.toTCtx ctx) triple.2.1 (env.toTCtx triple.2.2)
-          labels label triple.1 default hfresh ih)
+      have ih := genStmtChain_sound P env immutableVars procs hProcs (label :: labels) C ctx hWK hWKpres size len hFun triple htriple
+      exact StatementsHasTypeA_singleton
+        (StatementHasType'.block C (env.toTCtx ctx) triple.2.1 (env.toTCtx triple.2.2)
+          labels label triple.1 default _ hfresh ih
+          (tctxEquivRefl _))
     · -- ite_det
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨cond, hcond, ⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size tlen hFun tt htt
-      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size elen hFun et het
-      exact StmtsHasTypeA_singleton
-        (StmtHasType'.ite_det C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
-          et.2.1 (env.toTCtx et.2.2) labels cond tt.1 et.1 default
-          (env.exprSound (size + 1) ctx .bool cond hcond) iht ihe)
+      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hWKpres size tlen hFun tt htt
+      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hWKpres size elen hFun et het
+      exact StatementsHasTypeA_singleton
+        (StatementHasType'.ite_det C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
+          et.2.1 (env.toTCtx et.2.2) labels cond tt.1 et.1 default _
+          (env.exprSound (size + 1) ctx .bool cond hcond) iht ihe
+          (tctxEquivRefl _))
     · -- ite_nondet
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size tlen hFun tt htt
-      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size elen hFun et het
-      exact StmtsHasTypeA_singleton
-        (StmtHasType'.ite_nondet C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
-          et.2.1 (env.toTCtx et.2.2) labels tt.1 et.1 default iht ihe)
+      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hWKpres size tlen hFun tt htt
+      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hWKpres size elen hFun et het
+      exact StatementsHasTypeA_singleton
+        (StatementHasType'.ite_nondet C (env.toTCtx ctx) tt.2.1 (env.toTCtx tt.2.2)
+          et.2.1 (env.toTCtx et.2.2) labels tt.1 et.1 default _ iht ihe
+          (tctxEquivRefl _))
     · -- loop
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨guard, hguard, measure, hmeasure, invs, hinvs, ⟨⟨blen, _⟩⟩, _, body, hbody, rfl⟩ := hr
-      have ih := genStmtChain_sound P env immutableVars procs hProcs labels C ctx size blen hFun body hbody
-      refine StmtsHasTypeA_singleton
-        (StmtHasType'.loop C (env.toTCtx ctx) body.2.1 (env.toTCtx body.2.2)
-          labels guard measure invs body.1 default ?_ ?_ ?_ ih)
+      have ih := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hWKpres size blen hFun body hbody
+      refine StatementsHasTypeA_singleton
+        (StatementHasType'.loop C (env.toTCtx ctx) body.2.1 (env.toTCtx body.2.2)
+          labels guard measure invs body.1 default _ ?_ ?_ ?_ ih
+          (tctxEquivRefl _))
       · intro g hg
         exact genCondOrNondet_det_sound env (size + 1) ctx guard hguard g hg
       · intro m hm
@@ -763,7 +867,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
 termination_by (n, 0, 0)
 
 /-- **Soundness of `genStmtChain`.** Every statement sequence in the generator's
-    support satisfies the chained `StmtsHasTypeA` relation between the input
+    support satisfies the chained `StatementsHasTypeA` relation between the input
     contexts and the generator's threaded output contexts.
 
     Proof by well-founded recursion on the remaining length `len` (with the
@@ -772,24 +876,28 @@ termination_by (n, 0, 0)
 theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat) (hFun : Map.Functional ctx)
+    (C : LContext CoreLParams) (ctx : VarCtx)
+    (hWK : WellKindedOk octx procs C ctx)
+    (hWKpres : WellKindedPreserved octx tvars immutableVars procs pctx)
+    (size len : Nat) (hFun : Map.Functional ctx)
     (result : List Statement × LContext CoreLParams × VarCtx)
     (hr : result ∈ SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx size len)) :
-    StmtsHasTypeA P C (env.toTCtx ctx) labels result.1 result.2.1 (env.toTCtx result.2.2) := by
+    StatementsHasTypeA P C (env.toTCtx ctx) labels result.1 result.2.1 (env.toTCtx result.2.2) := by
   cases len with
   | zero =>
     simp only [genStmtChain, mem_support_pure_iff] at hr
     subst hr
-    exact StmtsHasType'.nil C (env.toTCtx ctx) labels
+    exact StatementsHasType'.nil C (env.toTCtx ctx) labels _ (tctxEquivRefl _)
   | succ len =>
     simp only [genStmtChain, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨rhead, hhead, rtail, htail, rfl⟩ := hr
-    have hh := genStmt_sound P env immutableVars procs hProcs labels C ctx size hFun rhead hhead
+    have hh := genStmt_sound P env immutableVars procs hProcs labels C ctx hWK hWKpres size hFun rhead hhead
     have hFun' : Map.Functional rhead.outCtx :=
       genStmt_outCtx_functional octx pctx tvars immutableVars procs labels C ctx size hFun
         rhead hhead
-    have ht := genStmtChain_sound P env immutableVars procs hProcs labels rhead.outC rhead.outCtx size len hFun' rtail htail
-    exact StmtsHasTypeA_append hh ht
+    have ht := genStmtChain_sound P env immutableVars procs hProcs labels rhead.outC rhead.outCtx
+      (hWKpres labels C ctx size rhead hhead hWK) hWKpres size len hFun' rtail htail
+    exact StatementsHasTypeA_append hh ht
 termination_by (size, 1, len)
 
 end

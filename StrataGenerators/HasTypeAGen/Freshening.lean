@@ -251,33 +251,78 @@ theorem lookup_zip_of_length_le {α β} [BEq α] [LawfulBEq α]
 
 -- ── Substitution plumbing ─────────────────────────────────────────────
 
-/-- `Maps.find?` on a one-scope substitution is just `List.lookup`. -/
-theorem find?_single_eq_lookup (m : List (TyIdentifier × LMonoTy)) (x : TyIdentifier) :
-    Maps.find? [m] x = m.lookup x := by
-  unfold Maps.find?
-  induction m with
+/-- `HMap.find?` on a *reversed* association list is the first-match lookup on the original:
+    `HMap.ofList` keeps the *last* binding for a key, which is the *first* binding in the
+    reversed list — exactly what `List.lookup` returns. This is the bridge every
+    construction that has to hand an assoc list to an opaque `HMap` scope goes through. -/
+theorem find?_ofList_reverse {α β} [BEq α] [LawfulBEq α] [Hashable α] [LawfulHashable α]
+    (l : List (α × β)) (x : α) :
+    Strata.Util.HMap.find? (Strata.Util.HMap.ofList l.reverse) x = l.lookup x := by
+  simp only [Strata.Util.HMap.find?, Strata.Util.HMap.ofList, Std.HashMap.get?_eq_getElem?,
+    Std.HashMap.ofList_eq_insertMany_empty, Std.HashMap.getElem?_insertMany_list,
+    Std.HashMap.getElem?_empty, Option.or_none]
+  rw [List.findSomeRev?_eq_findSome?_reverse, List.reverse_reverse]
+  induction l with
   | nil => rfl
   | cons p rest ih =>
     obtain ⟨k, v⟩ := p
-    simp only [Map.find?, List.lookup_cons]
+    simp only [List.findSome?_cons, List.lookup_cons]
     by_cases hk : k = x
     · subst hk; simp
-    · rw [if_neg hk]
-      have : (x == k) = false := by simp [Ne.symm hk]
-      rw [this]
-      simpa using ih
+    · have h1 : (k == x) = false := by simp [hk]
+      have h2 : (x == k) = false := by simp [Ne.symm hk]
+      simp only [h1, Bool.false_eq_true, if_false, h2, ih]
+
+/-- `HMaps.find?` on a `substScope` is just `List.lookup` on the association list
+    it was built from. `substScope` reverses before `HMap.ofList` precisely so
+    that the binding the hash map keeps (the *last* one for a key) is the binding
+    `List.lookup` finds (the *first* one). -/
+theorem find?_substScope_eq_lookup (m : List (TyIdentifier × LMonoTy)) (x : TyIdentifier) :
+    Strata.Util.HMaps.find? (substScope m) x = m.lookup x := by
+  rw [substScope, Strata.Util.HMaps.find?_single_scope]
+  exact find?_ofList_reverse m x
+
+/-- Each element's free type variables are among the whole list's.
+
+    Upstream proves this as `LMonoTys.freeVars_mem_subset`, but that lives in
+    `Strata.DL.Lambda.LTyProps`, whose theorems are not `public` under Strata's
+    module system and hence invisible here, so we reprove it. -/
+theorem freeVars_mem_of_mem {ty : LMonoTy} {tys : List LMonoTy} (ht : ty ∈ tys)
+    {v : TyIdentifier} (hv : v ∈ LMonoTy.freeVars ty) : v ∈ LMonoTys.freeVars tys := by
+  induction tys with
+  | nil => cases ht
+  | cons x rest ih =>
+    rw [LMonoTys.freeVars_of_cons, List.mem_append]
+    rcases List.mem_cons.mp ht with heq | hmem
+    · exact Or.inl (heq ▸ hv)
+    · exact Or.inr (ih hmem)
+
+/-- If `v` is free in a list of monotypes, some element of the list has it free.
+
+    Upstream proves this as `LMonoTys.freeVars_exists`, in the non-`public`
+    `Strata.DL.Lambda.LTyProps`, so it is reproved here (like `freeVars_mem_of_mem`). -/
+theorem exists_of_freeVars_mem {v : TyIdentifier} {tys : List LMonoTy}
+    (hv : v ∈ LMonoTys.freeVars tys) : ∃ ty ∈ tys, v ∈ LMonoTy.freeVars ty := by
+  induction tys with
+  | nil => simp [LMonoTys.freeVars] at hv
+  | cons t rest ih =>
+    rw [LMonoTys.freeVars_of_cons, List.mem_append] at hv
+    rcases hv with h | h
+    · exact ⟨t, List.mem_cons_self, h⟩
+    · obtain ⟨ty, hty, hv'⟩ := ih h
+      exact ⟨ty, List.mem_cons_of_mem _ hty, hv'⟩
 
 /-- Every free variable of `LMonoTy.subst S mty` either comes from a value that `S`
     maps something to, or is a free variable of `mty` that `S` leaves alone. -/
 theorem freeVars_subst_cases (S : Subst) (mty : LMonoTy) (tv : TyIdentifier)
     (h : tv ∈ LMonoTy.freeVars (LMonoTy.subst S mty)) :
-    (∃ x t, Maps.find? S x = some t ∧ tv ∈ LMonoTy.freeVars t)
-      ∨ (tv ∈ LMonoTy.freeVars mty ∧ Maps.find? S tv = none) := by
+    (∃ x t, Strata.Util.HMaps.find? S x = some t ∧ tv ∈ LMonoTy.freeVars t)
+      ∨ (tv ∈ LMonoTy.freeVars mty ∧ Strata.Util.HMaps.find? S tv = none) := by
   induction mty with
   | ftvar x =>
     rw [LMonoTy.subst_unfold] at h
     simp only at h
-    generalize hf : Maps.find? S x = fo at h
+    generalize hf : Strata.Util.HMaps.find? S x = fo at h
     cases fo with
     | none =>
       simp only [LMonoTy.freeVars, List.mem_singleton] at h
@@ -293,11 +338,16 @@ theorem freeVars_subst_cases (S : Subst) (mty : LMonoTy) (tv : TyIdentifier)
     simp only [LMonoTy.freeVars] at h
     have hex : ∃ a ∈ args, tv ∈ LMonoTy.freeVars (LMonoTy.subst S a) := by
       clear ih
+      -- Restate `h` in the `map`-shaped form that `subst_unfold` now produces (and
+      -- drop the original), so the inner induction hypothesis is a one-argument
+      -- statement about `arest`.
+      have hfv : tv ∈ LMonoTys.freeVars (args.map (LMonoTy.subst S)) := h
+      clear h
       induction args with
-      | nil => simp [LMonoTys.freeVars] at h
+      | nil => simp [LMonoTys.freeVars] at hfv
       | cons a arest iha =>
-        simp only [List.map_cons, LMonoTys.freeVars_of_cons, List.mem_append] at h
-        rcases h with ha | hrest
+        simp only [List.map_cons, LMonoTys.freeVars_of_cons, List.mem_append] at hfv
+        rcases hfv with ha | hrest
         · exact ⟨a, List.mem_cons_self, ha⟩
         · obtain ⟨a', hm, hf⟩ := iha hrest
           exact ⟨a', List.mem_cons_of_mem _ hm, hf⟩
@@ -306,7 +356,7 @@ theorem freeVars_subst_cases (S : Subst) (mty : LMonoTy) (tv : TyIdentifier)
     · exact Or.inl hl
     · refine Or.inr ⟨?_, hn⟩
       simp only [LMonoTy.freeVars]
-      exact LMonoTys.freeVars_mem_subset ham hb
+      exact freeVars_mem_of_mem ham hb
 
 theorem suffixes_nodup (n : Nat) : (suffixes n).Nodup := by
   unfold suffixes
@@ -390,8 +440,8 @@ private theorem disjoint_core (boundVars varsInUse freshNames : List TyIdentifie
         (((boundVars.filter (fun x => decide (x ∈ varsInUse))).zip freshNames).lookup v).getD v),
         v ∉ varsInUse) ∧
     (∀ v ∈ (LMonoTy.subst
-        [((boundVars.filter (fun x => decide (x ∈ varsInUse))).zip freshNames).map
-          (fun p => (p.1, LMonoTy.ftvar p.2))] monoTy).freeVars, v ∉ varsInUse) := by
+        (substScope (((boundVars.filter (fun x => decide (x ∈ varsInUse))).zip freshNames).map
+          (fun p => (p.1, LMonoTy.ftvar p.2)))) monoTy).freeVars, v ∉ varsInUse) := by
   have hmap : ∀ v ∈ boundVars,
       (((boundVars.filter (fun x => decide (x ∈ varsInUse))).zip freshNames).lookup v).getD v
         ∉ varsInUse := by
@@ -411,7 +461,7 @@ private theorem disjoint_core (boundVars varsInUse freshNames : List TyIdentifie
   · obtain ⟨b, hb, hbv⟩ := List.mem_map.mp hv
     exact hbv ▸ hmap b hb
   · rcases freeVars_subst_cases _ _ _ hv with ⟨x, t, hfind, htv⟩ | ⟨hfv, hnone⟩
-    · rw [find?_single_eq_lookup, lookup_map_snd] at hfind
+    · rw [find?_substScope_eq_lookup, lookup_map_snd] at hfind
       cases hlk : (((boundVars.filter (fun x => decide (x ∈ varsInUse))).zip freshNames).lookup x) with
       | none => rw [hlk] at hfind; exact absurd hfind (by simp)
       | some w =>
@@ -421,7 +471,7 @@ private theorem disjoint_core (boundVars varsInUse freshNames : List TyIdentifie
         rw [← hfind] at htv
         simp only [LMonoTy.freeVars, List.mem_singleton] at htv
         exact htv ▸ hfnotin w hwfresh
-    · rw [find?_single_eq_lookup, lookup_map_snd] at hnone
+    · rw [find?_substScope_eq_lookup, lookup_map_snd] at hnone
       have hlknone : (((boundVars.filter (fun x => decide (x ∈ varsInUse))).zip freshNames).lookup v) = none := by
         cases hlk : (((boundVars.filter (fun x => decide (x ∈ varsInUse))).zip freshNames).lookup v) with
         | none => rfl

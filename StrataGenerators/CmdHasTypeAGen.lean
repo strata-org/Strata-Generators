@@ -281,6 +281,17 @@ theorem Map.functional_append {α β : Type} [DecidableEq α]
 
 -- ── Per-constructor soundness ────────────────────────────────────────
 
+/-- Reflexivity of `TContext.Equiv` at `CoreLParams`.
+
+    Upstream's command rules constrain the output context only up to `TContext.Equiv`
+    (the `HMap`-backed context ignores insertion order, so structural equality is too
+    strong). Every rule we build hands back the canonical output context, so reflexivity
+    discharges that premise. The parameter `T` is not determined by `TContext Unit`, so it
+    has to be supplied explicitly — hence this wrapper. -/
+theorem tctxEquivRefl (Γ : TContext Unit) : TContext.Equiv (T := CoreLParams) Γ Γ :=
+  TContext.Equiv.refl (T := CoreLParams) Γ
+
+
 /-- Soundness of assert: if `e` has type `bool` (in the empty bvar context),
     then `.assert l e default` satisfies `CmdHasTypeA C Γ _ Γ` for *any* label `l`
     (the `assert` rule does not constrain the label). -/
@@ -291,7 +302,7 @@ theorem genAssertCmd_sound
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e .bool) :
     CmdHasTypeA C Γ (.assert l e default) Γ :=
-  CmdHasType'.assert Γ l e default hwt
+  CmdHasType'.assert Γ l e default Γ hwt (tctxEquivRefl Γ)
 
 /-- Soundness of assume: if `e` has type `bool`, then `.assume l e default`
     satisfies `CmdHasTypeA C Γ _ Γ` for any label `l`. -/
@@ -302,7 +313,7 @@ theorem genAssumeCmd_sound
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e .bool) :
     CmdHasTypeA C Γ (.assume l e default) Γ :=
-  CmdHasType'.assume Γ l e default hwt
+  CmdHasType'.assume Γ l e default Γ hwt (tctxEquivRefl Γ)
 
 /-- Soundness of cover: if `e` has type `bool`, then `.cover l e default`
     satisfies `CmdHasTypeA C Γ _ Γ` for any label `l`. -/
@@ -313,7 +324,7 @@ theorem genCoverCmd_sound
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e .bool) :
     CmdHasTypeA C Γ (.cover l e default) Γ :=
-  CmdHasType'.cover Γ l e default hwt
+  CmdHasType'.cover Γ l e default Γ hwt (tctxEquivRefl Γ)
 
 /-- Soundness of set_det: if `x` has monotype `mty` in `Γ` and `e` has type
     `mty`, then `.set x (det e) default` satisfies `CmdHasTypeA C Γ _ Γ`. -/
@@ -325,7 +336,7 @@ theorem genSetDet_sound
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e mty) :
     CmdHasTypeA C Γ (.set x (.det e) default) Γ :=
-  CmdHasType'.set_det Γ x mty e default hfind hwt
+  CmdHasType'.set_det Γ x mty e default Γ hfind hwt (tctxEquivRefl Γ)
 
 /-- Soundness of set_nondet: if `x` has monotype `mty` in `Γ`,
     then `.set x nondet default` satisfies `CmdHasTypeA C Γ _ Γ`. -/
@@ -335,7 +346,7 @@ theorem genSetNondet_sound
     (x : Identifier Unit) (mty : LMonoTy)
     (hfind : Γ.types.find? x = some (.forAll [] mty)) :
     CmdHasTypeA C Γ (.set x .nondet default) Γ :=
-  CmdHasType'.set_nondet Γ x mty default hfind
+  CmdHasType'.set_nondet Γ x mty default Γ hfind (tctxEquivRefl Γ)
 
 /-- A monomorphic type scheme `∀ []. mty` (no bound variables) is trivially
     `RigidAnnotCompat` with itself: opening with an empty list of type arguments
@@ -347,8 +358,11 @@ theorem rigidAnnotCompat_forAll_nil (mty : LMonoTy) :
   intro aliases rigidVars
   have h : (LTy.forAll [] mty).openFull [] = mty := by
     simp only [LTy.openFull, LTy.boundVars, LTy.toMonoTypeUnsafe, List.zip_nil_left]
-    exact LMonoTy.subst_emptyS Subst.hasEmptyScopes_emptyScope
-  rw [h]; exact RigidAnnotCompat.of_eq
+    exact LMonoTy.subst_single_empty mty
+  rw [h]
+  -- `RigidAnnotCompat` is an existential over a single scope; the empty scope works.
+  exact ⟨Strata.Util.HMap.empty, fun v _ => LMonoTy.subst_single_empty _,
+    by rw [LMonoTy.subst_single_empty]; exact AliasEquiv.refl⟩
 
 /-- Soundness of init_det: if `x` is fresh in `Γ`, `x ∉ vars(e)`, and `e`
     has type `mty`, then `init x (.forAll [] mty) (det e) default` is well-typed
@@ -360,10 +374,12 @@ theorem genInitDet_sound
     (hfresh : Γ.types.find? x = none)
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e mty)
-    (hnovar : x ∉ HasVarsPure.getVars (P := Expression) e) :
+    (hnovar : x ∉ HasVarsPure.getVars (P := Expression) e)
+    (hwk : C.WellKindedTy mty) :
     CmdHasTypeA C Γ (.init x (.forAll [] mty) (.det e) default)
       { Γ with types := Γ.types.insert x (.forAll [] mty) } :=
-  CmdHasType'.init_det Γ x (.forAll [] mty) e mty [] default hfresh hnovar rfl (rigidAnnotCompat_forAll_nil mty) hwt
+  CmdHasType'.init_det Γ x (.forAll [] mty) e mty [] default _ hfresh hnovar rfl
+    (rigidAnnotCompat_forAll_nil mty) hwk hwt (tctxEquivRefl _)
 
 /-- Soundness of init_nondet: if `x` is fresh in `Γ`,
     then `init x (.forAll [] mty) nondet default` is well-typed. -/
@@ -371,10 +387,11 @@ theorem genInitNondet_sound
     (C : LContext CoreLParams)
     (Γ : TContext Unit)
     (x : Identifier Unit) (mty : LMonoTy)
-    (hfresh : Γ.types.find? x = none) :
+    (hfresh : Γ.types.find? x = none) (hwk : C.WellKindedTy mty) :
     CmdHasTypeA C Γ (.init x (.forAll [] mty) .nondet default)
       { Γ with types := Γ.types.insert x (.forAll [] mty) } :=
-  CmdHasType'.init_nondet Γ x (.forAll [] mty) mty [] default hfresh rfl (rigidAnnotCompat_forAll_nil mty)
+  CmdHasType'.init_nondet Γ x (.forAll [] mty) mty [] default _ hfresh rfl
+    (rigidAnnotCompat_forAll_nil mty) hwk (tctxEquivRefl _)
 
 -- ── Support characterization of genCmd ──────────────────────────────
 
@@ -594,6 +611,15 @@ theorem genFreshName_not_keyword (ctx : VarCtx) :
   · exact StrataGenerators.Function.dodgeKeyword_not_keyword s
   · exact StrataGenerators.Function.dodgeKeyword_not_keyword _
 
+/-- The `WellKindedTy` premise that upstream added to the two `init` rules, discharged for
+    any type the generator can emit: `genLMonoTy` produces only `SimpleType`s, and
+    `SimpleTyArities C` says `C` registers each `SimpleType` constructor at its own arity. -/
+theorem wellKindedTy_of_genLMonoTy {C : LContext CoreLParams} (hC : SimpleTyArities C)
+    (tvars : List TyIdentifier) (depth : Nat) (mty : LMonoTy)
+    (hmty : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth)) :
+    C.WellKindedTy mty :=
+  simpleType_wellKindedTy hC (genLMonoTy_simple tvars depth mty hmty)
+
 -- ── Full soundness of genCmd ─────────────────────────────────────────
 
 /-- Predicate asserting that `genLExpr` is sound at type `τ`: every expression
@@ -626,6 +652,7 @@ theorem genCmd_sound
     (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit)
+    (hC : SimpleTyArities C)
     (hCorr : VarCtxCorresponds ctx Γ)
     (hFun : Map.Functional ctx)
     (hExprSound : GenLExprSound ctx.toFVarCtx octx tvars depth)
@@ -641,12 +668,16 @@ theorem genCmd_sound
     have hfreshΓ := hCorr.2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
     have hnovar := hDisjoint name hname mty e he
     have hwt := hExprSound mty e he
-    exact ⟨_, CmdHasType'.init_det Γ ⟨name, ()⟩ _ e mty [] default hfreshΓ hnovar rfl (rigidAnnotCompat_forAll_nil mty) hwt⟩
+    exact ⟨_, CmdHasType'.init_det Γ ⟨name, ()⟩ _ e mty [] default _ hfreshΓ hnovar rfl
+      (rigidAnnotCompat_forAll_nil mty) (wellKindedTy_of_genLMonoTy hC tvars depth mty hmty) hwt
+      (tctxEquivRefl _)⟩
   · -- init_nondet
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, hname, mty, _, rfl⟩ := hr
+    obtain ⟨name, hname, mty, hmty, rfl⟩ := hr
     have hfreshΓ := hCorr.2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
-    exact ⟨_, CmdHasType'.init_nondet Γ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)⟩
+    exact ⟨_, CmdHasType'.init_nondet Γ ⟨name, ()⟩ _ mty [] default _ hfreshΓ rfl
+      (rigidAnnotCompat_forAll_nil mty) (wellKindedTy_of_genLMonoTy hC tvars depth mty hmty)
+      (tctxEquivRefl _)⟩
   · -- set_det
     simp only [genSetDet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
@@ -654,29 +685,29 @@ theorem genCmd_sound
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     have hwt := hExprSound mty e he
-    exact ⟨Γ, CmdHasType'.set_det Γ name mty e default hfind hwt⟩
+    exact ⟨Γ, CmdHasType'.set_det Γ name mty e default Γ hfind hwt (tctxEquivRefl Γ)⟩
   · -- set_nondet
     simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨⟨name, mty⟩, hmem, rfl⟩ := hr
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
-    exact ⟨Γ, CmdHasType'.set_nondet Γ name mty default hfind⟩
+    exact ⟨Γ, CmdHasType'.set_nondet Γ name mty default Γ hfind (tctxEquivRefl Γ)⟩
   · -- assert (label sampled via `String.arbitrary`, typing-irrelevant)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
     have hwt := hExprSound .bool e he
-    exact ⟨Γ, CmdHasType'.assert Γ l e default hwt⟩
+    exact ⟨Γ, CmdHasType'.assert Γ l e default Γ hwt (tctxEquivRefl Γ)⟩
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
     have hwt := hExprSound .bool e he
-    exact ⟨Γ, CmdHasType'.assume Γ l e default hwt⟩
+    exact ⟨Γ, CmdHasType'.assume Γ l e default Γ hwt (tctxEquivRefl Γ)⟩
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
     have hwt := hExprSound .bool e he
-    exact ⟨Γ, CmdHasType'.cover Γ l e default hwt⟩
+    exact ⟨Γ, CmdHasType'.cover Γ l e default Γ hwt (tctxEquivRefl Γ)⟩
 
 -- ── Full completeness of genCmd ──────────────────────────────────────
 
@@ -722,7 +753,7 @@ theorem genCmd_complete
       r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) ∧
       CmdHasTypeA C Γ r.cmd Γ' := by
   cases hwt with
-  | init_det x xty e mty tys md hfresh hnovar _ _ hexpr =>
+  | init_det x xty e mty tys md Δ hfresh hnovar _ _ hwk hexpr hequiv =>
     have hname := hNameReach x ⟨xty, .det e, md, rfl⟩
     have hmty := hTyReach mty
     have he := hExprComplete mty e hexpr
@@ -731,8 +762,9 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inl (by
         simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, e, he, rfl⟩))
-    exact ⟨_, hinSupport, CmdHasType'.init_det _ x _ e mty [] default hfresh hnovar rfl (rigidAnnotCompat_forAll_nil mty) hexpr⟩
-  | init_nondet x xty mty tys md hfresh _ _ =>
+    exact ⟨_, hinSupport, CmdHasType'.init_det _ x _ e mty [] default _ hfresh hnovar rfl
+      (rigidAnnotCompat_forAll_nil mty) hwk hexpr hequiv⟩
+  | init_nondet x xty mty tys md Δ hfresh _ _ hwk hequiv =>
     have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
     have hmty := hTyReach mty
     have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
@@ -740,8 +772,9 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inr (Or.inl (by
         simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, rfl⟩)))
-    exact ⟨_, hinSupport, CmdHasType'.init_nondet _ x _ mty [] default hfresh rfl (rigidAnnotCompat_forAll_nil mty)⟩
-  | set_det x mty e md hfind hexpr =>
+    exact ⟨_, hinSupport, CmdHasType'.init_nondet _ x _ mty [] default _ hfresh rfl
+      (rigidAnnotCompat_forAll_nil mty) hwk hequiv⟩
+  | set_det x mty e md Δ hfind hexpr hequiv =>
     have hentry := hVarInCtx x mty hfind
     have he := hExprComplete mty e hexpr
     have hinSupport : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈
@@ -750,8 +783,8 @@ theorem genCmd_complete
         simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
         exact ⟨(x, mty), hentry, e, he, rfl⟩⟩)))
-    exact ⟨_, hinSupport, CmdHasType'.set_det _ x mty e default hfind hexpr⟩
-  | set_nondet x mty md hfind =>
+    exact ⟨_, hinSupport, CmdHasType'.set_det _ x mty e default _ hfind hexpr hequiv⟩
+  | set_nondet x mty md Δ hfind hequiv =>
     have hentry := hVarInCtx x mty hfind
     have hinSupport : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
@@ -759,8 +792,8 @@ theorem genCmd_complete
         simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
         exact ⟨(x, mty), hentry, rfl⟩⟩))))
-    exact ⟨_, hinSupport, CmdHasType'.set_nondet _ x mty default hfind⟩
-  | assert l e md hexpr =>
+    exact ⟨_, hinSupport, CmdHasType'.set_nondet _ x mty default _ hfind hequiv⟩
+  | assert l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
     -- The empty label is alphanumeric-vacuously, so `"" ∈ support String.arbitrary`.
     have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
@@ -771,8 +804,8 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"", hemptyL, e, he, rfl⟩))))))
-    exact ⟨_, hinSupport, CmdHasType'.assert _ "" e default hexpr⟩
-  | assume l e md hexpr =>
+    exact ⟨_, hinSupport, CmdHasType'.assert _ "" e default _ hexpr hequiv⟩
+  | assume l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
     have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
       simp only [String.arbitrary, mem_support_map_iff]
@@ -782,8 +815,8 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"", hemptyL, e, he, rfl⟩)))))))
-    exact ⟨_, hinSupport, CmdHasType'.assume _ "" e default hexpr⟩
-  | cover l e md hexpr =>
+    exact ⟨_, hinSupport, CmdHasType'.assume _ "" e default _ hexpr hequiv⟩
+  | cover l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
     have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
       simp only [String.arbitrary, mem_support_map_iff]
@@ -793,7 +826,7 @@ theorem genCmd_complete
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
         simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"", hemptyL, e, he, rfl⟩)))))))
-    exact ⟨_, hinSupport, CmdHasType'.cover _ "" e default hexpr⟩
+    exact ⟨_, hinSupport, CmdHasType'.cover _ "" e default _ hexpr hequiv⟩
 
 -- ── Chained typing for command sequences ────────────────────────────
 
@@ -830,11 +863,17 @@ structure GenCmdSoundEnv (octx : OpCtx) (tvars : List TyIdentifier)
       *unconditionally* at every `ctx` — see `freshNamesDisjointFromExprs_toFVarCtx`. -/
   freshDisjoint :
     ∀ (ctx : VarCtx), FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth pctx
-  /-- The `TContext` produced for `ctx.insert x mty` equals the insertion
-      into the `TContext` for `ctx`. This ensures the output `Γ'` from an `init`
-      command matches what `toTCtx` produces for the extended `VarCtx`. -/
+  /-- The `TContext` produced for `ctx.insert x mty` agrees with the insertion into the
+      `TContext` for `ctx`. This is what makes the output context of an `init` command
+      match what `toTCtx` produces for the extended `VarCtx`.
+
+      Agreement is `TContext.Equiv`, not equality: a `TContext`'s scopes are opaque
+      hash maps upstream, and building one by `HMap.ofList` of an already-extended
+      association list is not *structurally* the same map as inserting into the
+      un-extended one. `Equiv` (pointwise `find?` agreement) is exactly what upstream's
+      `init` rules ask for, so nothing is lost. -/
   toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
-    toTCtx (ctx.insert x mty) =
+    TContext.Equiv (T := CoreLParams) (toTCtx (ctx.insert x mty))
       { toTCtx ctx with types := (toTCtx ctx).types.insert x (.forAll [] mty) }
 
 /-- Lifted soundness of `genCmd` using a `GenCmdSoundEnv`: every result in the
@@ -847,6 +886,7 @@ theorem genCmd_sound_env
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (C : LContext CoreLParams) (pctx : PolyOpCtx)
     (env : GenCmdSoundEnv octx tvars depth C pctx)
+    (hC : SimpleTyArities C)
     (hFun : Map.Functional ctx)
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support
@@ -860,14 +900,16 @@ theorem genCmd_sound_env
     have hfreshΓ := (env.corr ctx).2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
     have hnovar := (env.freshDisjoint ctx) name hname mty e he
     have hwt := env.exprSound ctx mty e he
-    rw [env.toTCtx_insert]
-    exact CmdHasType'.init_det _ ⟨name, ()⟩ _ e mty [] default hfreshΓ hnovar rfl (rigidAnnotCompat_forAll_nil mty) hwt
+    exact CmdHasType'.init_det _ ⟨name, ()⟩ _ e mty [] default _ hfreshΓ hnovar rfl
+      (rigidAnnotCompat_forAll_nil mty) (wellKindedTy_of_genLMonoTy hC tvars depth mty hmty) hwt
+      (env.toTCtx_insert ctx ⟨name, ()⟩ mty)
   · -- init_nondet
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, hname, mty, _, rfl⟩ := hr
+    obtain ⟨name, hname, mty, hmty, rfl⟩ := hr
     have hfreshΓ := (env.corr ctx).2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
-    rw [env.toTCtx_insert]
-    exact CmdHasType'.init_nondet _ ⟨name, ()⟩ _ mty [] default hfreshΓ rfl (rigidAnnotCompat_forAll_nil mty)
+    exact CmdHasType'.init_nondet _ ⟨name, ()⟩ _ mty [] default _ hfreshΓ rfl
+      (rigidAnnotCompat_forAll_nil mty) (wellKindedTy_of_genLMonoTy hC tvars depth mty hmty)
+      (env.toTCtx_insert ctx ⟨name, ()⟩ mty)
   · -- set_det
     simp only [genSetDet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
@@ -875,26 +917,26 @@ theorem genCmd_sound_env
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := (env.corr ctx).1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     have hwt := env.exprSound ctx mty e he
-    exact CmdHasType'.set_det _ name mty e default hfind hwt
+    exact CmdHasType'.set_det _ name mty e default _ hfind hwt (tctxEquivRefl _)
   · -- set_nondet
     simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨⟨name, mty⟩, hmem, rfl⟩ := hr
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := (env.corr ctx).1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
-    exact CmdHasType'.set_nondet _ name mty default hfind
+    exact CmdHasType'.set_nondet _ name mty default _ hfind (tctxEquivRefl _)
   · -- assert (label sampled via `String.arbitrary`, typing-irrelevant)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
-    exact CmdHasType'.assert _ l e default (env.exprSound ctx .bool e he)
+    exact CmdHasType'.assert _ l e default _ (env.exprSound ctx .bool e he) (tctxEquivRefl _)
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
-    exact CmdHasType'.assume _ l e default (env.exprSound ctx .bool e he)
+    exact CmdHasType'.assume _ l e default _ (env.exprSound ctx .bool e he) (tctxEquivRefl _)
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
-    exact CmdHasType'.cover _ l e default (env.exprSound ctx .bool e he)
+    exact CmdHasType'.cover _ l e default _ (env.exprSound ctx .bool e he) (tctxEquivRefl _)
 
 /-- `genCmd` preserves *functionality* of the context: the output `VarCtx` is
     either the input `ctx` (for `set`/`assert`/`assume`/`cover`) or
@@ -953,6 +995,7 @@ theorem genCmds_sound
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
     (C : LContext CoreLParams)
     (env : GenCmdSoundEnv octx tvars depth C)
+    (hC : SimpleTyArities C)
     (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
     (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n)) :
@@ -971,7 +1014,7 @@ theorem genCmds_sound
     have heq : result = (cmd :: cmds, ctx'') := by
       cases hpure; rfl
     subst heq
-    have htyCmd := genCmd_sound_env octx tvars immutableVars ctx depth C [] env hFun ⟨cmd, ctx'⟩ hcmd
+    have htyCmd := genCmd_sound_env octx tvars immutableVars ctx depth C [] env hC hFun ⟨cmd, ctx'⟩ hcmd
     have hFun' : Map.Functional ctx' :=
       genCmd_outCtx_functional octx [] tvars immutableVars ctx depth hFun ⟨cmd, ctx'⟩ hcmd
     exact CmdsHasTypeA.cons _ _ _ cmd cmds htyCmd (ih ctx' hFun' (cmds, ctx'') hcmds)

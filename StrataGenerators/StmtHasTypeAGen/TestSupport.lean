@@ -18,7 +18,7 @@ the merged `TestMain` driver) for property-based testing of `genStmt` / `genStmt
 (defined in `StmtHasTypeAGen/Core.lean`), which
 generate random well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
-`StmtHasTypeA` / `StmtsHasTypeA` typing relations. The generator is proven both
+`StatementHasTypeA` / `StatementsHasTypeA` typing relations. The generator is proven both
 **sound** and **complete** w.r.t. those relations (see `StmtHasTypeAGen.lean`), so
 every generated statement is a certified well-typed input — an ideal oracle input
 for the statement typechecker and the Core statement-level transformations.
@@ -302,7 +302,7 @@ def checkTypeChecks (ss : List Statement) : Bool :=
 def stmtsHaveFuncDecl (ss : List Statement) : Bool := countFuncDeclStmts ss != 0
 
 /-- **Property #1 (typechecker completeness).** The generator is proven *sound*:
-    every statement list it produces satisfies `StmtsHasTypeA`. So the algorithmic
+    every statement list it produces satisfies `StatementsHasTypeA`. So the algorithmic
     typechecker — whose *soundness* (`typeCheck_annotated_sound`) is proven but
     whose *completeness* is not — should accept every one of them. A rejection is a
     genuine incompleteness of the algorithm relative to the declarative spec. This
@@ -317,7 +317,7 @@ abbrev checkTypeCheckerComplete (ss : List Statement) : Bool := checkTypeChecks 
     has produced a spec-well-typed statement the algorithm rejects for some reason
     *other* than `funcDecl` — a new, unclassified completeness bug.
 
-    The `funcDecl` discrepancy itself: the declarative `StmtHasType'.funcDecl` rule
+    The `funcDecl` discrepancy itself: the declarative `StatementHasType'.funcDecl` rule
     requires only that the *witness* `func` added to `C` is well-typed and the
     syntactic `decl` node is non-recursive — the two are **independent** (no premise
     ties `decl` to `func`). The generator faithfully samples them independently. The

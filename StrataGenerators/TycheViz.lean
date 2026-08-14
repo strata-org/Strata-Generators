@@ -697,7 +697,7 @@ def genAndCheckIdentProbe : IO IdentProbeResult := do
 -- ── Statement-level Tyche support ────────────────────────────────────
 -- Panels visualizing the six statement-transform / typechecker properties on
 -- well-typed statement lists from `genProgramStmts` (proven sound+complete
--- against `StmtsHasTypeA`). The `check*` predicates and measurements are shared
+-- against `StatementsHasTypeA`). The `check*` predicates and measurements are shared
 -- with the Plausible harness via `StrataGenerators.StmtHasTypeAGen.TestSupport`.
 
 open StrataGenerators.Stmt.TestSupport
@@ -1589,7 +1589,7 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
 
   -- ── Statement generator panels (transforms + typechecker) ───────────
   -- One panel per property (#1, #3, #4, #5a, #5b, #6, #9). Each generates a
-  -- well-typed statement list (proven sound+complete against `StmtsHasTypeA`) and
+  -- well-typed statement list (proven sound+complete against `StatementsHasTypeA`) and
   -- visualizes the property's pass/fail against structural features.
   -- Shared name↔check bundles (`Properties.stmtTransforms`), also consumed by the
   -- Plausible harness, so a name is never paired with the wrong check.
