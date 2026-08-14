@@ -3,11 +3,6 @@ version = "0.1.0"
 defaultTargets = ["StrataGenerators"]
 testDriver = "test"
 
-# Tracks upstream `strata-org/Strata` directly: every Core typing spec the
-# generators depend on (including the `argVarsScoped` field of `MutualADTWF`,
-# strata-generators issue #39) has landed on `main`, so the `ngernest/Strata`
-# fork is no longer needed. `rev = "main"` follows the branch tip; run
-# `lake update Strata` to move the pin recorded in `lake-manifest.json`.
 [[require]]
 name = "Strata"
 git = "https://github.com/strata-org/Strata"
@@ -23,9 +18,6 @@ name = "LSpec"
 git = "https://github.com/ngernest/LSpec"
 rev = "aa07f8c"
 
-# A single library covering every module under `StrataGenerators/`. The glob
-# `StrataGenerators.*` selects `StrataGenerators` and all of its submodules, so
-# new files are picked up automatically without adding a stanza per module.
 [[lean_lib]]
 name = "StrataGenerators"
 globs = ["StrataGenerators.*"]
@@ -34,21 +26,11 @@ globs = ["StrataGenerators.*"]
 name = "strata-generators"
 root = "Main"
 
-# The single merged test driver (registered as the `lake test` driver above). It
-# exercises the expr/command/function/statement generators via Plausible + LSpec
-# and — unless `--no-tyche` is passed — also writes Tyche visualization panels.
-# Run: `lake test -- [numTrials] [maxSize] [--no-tyche] [--tyche-out=PATH] [--tyche-samples=N]`
 [[lean_exe]]
 name = "test"
 root = "TestMain"
 
-# A second test driver that reproduces the same suite *without* the LSpec
-# dependency, to de-risk dropping LSpec in the future (see issue #21). It imports
-# the same shared `StrataGenerators.TestScaffold` as `test`, so the two cannot
-# drift, and runs the properties through the ~small Plausible-only harness in
-# `StrataGenerators.PlainHarness` instead of `LSpec.checkIO`/`lspecIO`. It is
-# deliberately NOT the registered `lake test` driver (that stays `test`).
-# Run: `lake build test-plain && .lake/build/bin/test-plain [numTrials] [maxSize] [--smt]`
+# Alternate test driver without LSpec dependency
 [[lean_exe]]
 name = "test-plain"
 root = "PlainTestMain"
