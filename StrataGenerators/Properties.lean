@@ -404,6 +404,24 @@ def nondetElimFreshNames    : String := "nondetElim: the fresh guard names are d
 def hoistNoLoopBodyInits    : String := "hoist: no loop body holds an init"
 def hoistPreservesUniqueInits : String := "hoist: uniqueInits is preserved"
 
+-- The three loop passes under the symbolic evaluator. Each runs `LoopElim` after
+-- the pass to get the loop-free program the evaluator requires, and compares the
+-- obligations it emits against the same chain without the pass. All three are
+-- stated as containment ("no obligation is lost"), since each pass may
+-- legitimately add one; see §2.9 of `ProgramGen/UnprovenTransforms`.
+def loopVcSymbolicNoLoss : String :=
+  "loop: symbolic evaluation loses no obligation through InsertLoopInvariantAsserts"
+/-- Containment and not equality *because of a defect in the evaluator, not the
+    pass*: `StatementEval.lean:586` names a nondeterministic guard after the
+    current path-condition depth instead of using a counter, so a second `if *` at
+    the same depth re-declares the name, the path errors, and every obligation from
+    there to the end of the procedure is dropped with no diagnostic. `NondetElim`
+    removes every `if *`, so the dropped obligations come back and the set grows. -/
+def nondetElimSymbolicNoLoss : String :=
+  "nondetElim: symbolic evaluation loses no obligation"
+def hoistSymbolicNoLoss : String :=
+  "hoist: symbolic evaluation loses no obligation"
+
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
   [ exprTypecheck, exprPreservation, exprProgress, exprFvarsPreserved,
@@ -448,7 +466,8 @@ def all : List String :=
     inlineProcLabelsNodup, inlineProcAssertsNotLost, inlineProcStatsFaithful,
     inlineProcTypechecks, inlineProcAnalysisPreserved, inlineProcSymbolicAgreement,
     nondetElimNoNondetGuard, nondetElimFreshNames,
-    hoistNoLoopBodyInits, hoistPreservesUniqueInits ]
+    hoistNoLoopBodyInits, hoistPreservesUniqueInits,
+    loopVcSymbolicNoLoss, nondetElimSymbolicNoLoss, hoistSymbolicNoLoss ]
 
 -- No two properties share a name (a copy/paste slip that pointed two properties
 -- at the same label would collapse their panels/results silently).
@@ -618,10 +637,18 @@ def programADTProps : List (Property Core.Program) :=
     ⟨PropertyNames.programDerivedResolve, checkCalledDerivedAreDeclared⟩,
     ⟨PropertyNames.programDerivedOrdered, checkDerivedCallsFollowDeclaration⟩ ]
 
-/-- The forty-two properties for the Core transform passes that carry no
+/-- The forty-five properties for the Core transform passes that carry no
     correctness proof (issue #69), each a generated `Program` scored by a shared
     predicate from `ProgramGen/UnprovenTransforms`. The shapes are identical across
     both harnesses, so name↔check is paired once here.
+
+    The last three are the obligation-preservation properties of §2.9, which run
+    `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` each through
+    `LoopElim` and then Strata's symbolic evaluator, and check that no proof
+    obligation is lost. They pin a soundness defect in the **evaluator** that no
+    other property here sees: a nondeterministic guard is named after the current
+    path-condition depth rather than by a counter, so a second `if *` at the same
+    depth silently drops every obligation to the end of the procedure.
 
     Counterexamples are minimized by the same whole-program shrinker the
     `programChecks` bundle uses (`Shrinkable GenProgram`), which keeps every
@@ -694,6 +721,10 @@ def unprovenTransforms : List (Property Core.Program) :=
     ⟨PropertyNames.nondetElimNoNondetGuard,  checkNondetElimNoNondetGuard⟩,
     ⟨PropertyNames.nondetElimFreshNames,     checkNondetElimFreshNames⟩,
     ⟨PropertyNames.hoistNoLoopBodyInits,     checkHoistNoLoopBodyInits⟩,
-    ⟨PropertyNames.hoistPreservesUniqueInits, checkHoistPreservesUniqueInits⟩ ]
+    ⟨PropertyNames.hoistPreservesUniqueInits, checkHoistPreservesUniqueInits⟩,
+    -- The three loop passes under the symbolic evaluator (§2.9)
+    ⟨PropertyNames.loopVcSymbolicNoLoss,     checkLoopVcSymbolicNoLoss⟩,
+    ⟨PropertyNames.nondetElimSymbolicNoLoss, checkNondetElimSymbolicNoLoss⟩,
+    ⟨PropertyNames.hoistSymbolicNoLoss,      checkHoistSymbolicNoLoss⟩ ]
 
 end Properties

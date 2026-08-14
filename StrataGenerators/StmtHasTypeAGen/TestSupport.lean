@@ -272,6 +272,36 @@ def toCmdStmts : List Statement → Option (List (Stmt Expression (Cmd Expressio
       pure (s' :: ss')
 end
 
+-- The other direction. `toCmdStmt` is partial because `CmdExt.call` has no `Cmd`
+-- counterpart; re-wrapping is total, since every `Cmd` is a `CmdExt.cmd`. A pass
+-- that acts on `Stmt Expression (Cmd Expression)` (`nondetElim`,
+-- `hoistLoopPrefixInits`) needs both directions to be liftable to a whole
+-- `Program`, whose procedure bodies are `Statement`s.
+
+mutual
+/-- Re-wrap every atomic command as `CmdExt.cmd`, yielding a `Statement`. Left
+    inverse of `toCmdStmt` on its domain: `toCmdStmt s = some s'` implies
+    `ofCmdStmt s' = s`. -/
+def ofCmdStmt : Stmt Expression (Cmd Expression) → Statement
+  | .cmd c => .cmd (.cmd c)
+  | .block label body md => .block label (ofCmdStmts body) md
+  | .ite cond thenb elseb md => .ite cond (ofCmdStmts thenb) (ofCmdStmts elseb) md
+  | .loop guard measure inv body md => .loop guard measure inv (ofCmdStmts body) md
+  | .exit label md => .exit label md
+  | .funcDecl decl md => .funcDecl decl md
+  | .typeDecl tc md => .typeDecl tc md
+/-- List analogue of `ofCmdStmt`. -/
+def ofCmdStmts : List (Stmt Expression (Cmd Expression)) → List Statement
+  | [] => []
+  | s :: ss => ofCmdStmt s :: ofCmdStmts ss
+end
+
+-- The round trip really is the identity on the shapes the generator makes, which
+-- is what lets a `Cmd P`-shaped pass be lifted to a `Program` without changing
+-- anything the pass did not touch.
+#guard (toCmdStmts [Statement.assert "a" (.const () (.boolConst true)) .empty]).map
+  ofCmdStmts == some [Statement.assert "a" (.const () (.boolConst true)) .empty]
+
 /-- The deterministic-to-Kleene transform on a statement list. `none` iff the
     block contains a construct with no Kleene counterpart (`exit`/`funcDecl`/
     `typeDecl`, or a loop carrying an invariant), or — vacuously for generated

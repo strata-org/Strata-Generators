@@ -218,7 +218,7 @@ def main (args : List String) : IO UInt32 := do
 
   -- Properties for the eight Core transform passes that have no correctness proof
   -- (issue #69), folded from the shared `Properties.unprovenTransforms` bundle (the
-  -- same forty-two checks as `TestMain`). Each runs its pass on a whole generated
+  -- same forty-five checks as `TestMain`). Each runs its pass on a whole generated
   -- program; counterexamples shrink through the same whole-program shrinker.
   -- The four defects the bug report files all show up here as honest failures:
   -- `loop: LoopElim mints distinct block labels` (the pass emits one minted label two
@@ -231,6 +231,11 @@ def main (args : List String) : IO UInt32 := do
   -- prints`) are expected red ticks the report does NOT file as defects.
   -- `CommonSubexprElim` fires on 0 of 200 generated programs, so all four CSE
   -- properties are vacuous here and `#guard`s test them instead.
+  -- The last three (`… symbolic evaluation loses no obligation`, §2.9) run each of
+  -- `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` through `LoopElim`
+  -- and then Strata's symbolic evaluator; all three pass, and they found the eighth
+  -- defect — in the evaluator, not the passes
+  -- (`docs/strata-symbolic-eval-nondet-collision.md`).
   let unprovenSuite : List (IO Result) :=
     Properties.unprovenTransforms.map
       (fun p => runProperty p.name

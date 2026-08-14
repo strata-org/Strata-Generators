@@ -93,7 +93,7 @@ inlining properties bite.
 
 ## Findings
 
-The properties found **seven** defects. Each one is stated as the true claim, and
+The properties found **eight** defects. Each one is stated as the true claim, and
 not weakened, so the property reports the defect instead of hiding it.
 
 Five fail on **generated** input, at the rate given:
@@ -161,6 +161,28 @@ a hand-built body, and a deterministic `#guard` at the end of this file pins eac
   rewrite changes what the program means. `Program.typeCheck` accepts the input and
   rejects the output.
 
+The eighth is **not** in any of the eight passes — it is in the symbolic
+**evaluator**, and it is unsound. It was found by the §2.9 properties, which are
+the only ones here that ask what obligations actually reach SMT:
+
+* **`Core.Statement.evalOneStmt` silently drops every proof obligation after a
+  second `if *`.** The variable standing for a nondeterministic guard is named
+  `$__nondet_cond_{pathConditions.scopes.length}` (`StatementEval.lean:586`) — from
+  the current path-condition *depth*, not from a counter. Entering a `.block`
+  pushes only a variable scope, and `Env.performMerge` pops the branch scope again,
+  so two `if *` at the same depth are handed the same name; the second one's
+  synthesized `init` re-declares a name already in scope, the path takes an error,
+  and `evalAuxGo` stops without reporting anything. `if * { assert a }; if * {
+  assert b }` yields the obligations `[a]`. `toCoreProofObligationProgram` returns
+  `.ok`, so the verifier reports success on assertions it never checked. Pinned by
+  the §2.9 `#guard`s, including a source program that declares the minted name
+  itself and thereby loses **all** of its obligations. Tracked as repo issue #113
+  and documented in `docs/strata-symbolic-eval-nondet-collision.md`.
+
+  This is also why `checkNondetElimSymbolicNoLoss` is containment and not equality:
+  `NondetElim` removes every `if *`, so the dropped obligations come back and the
+  set legitimately grows.
+
 Each other property passes on generated input. Three caveats, each recorded where
 it belongs so a green tick is not read as more than it is:
 
@@ -209,6 +231,15 @@ The families follow the sections of issue #69:
 * **NondetElim and LoopInitHoist** (§2.8) — the headline postcondition of each
   pass, which neither file proves: no `.nondet` guard is left, and each loop body
   holds no `init`.
+* **The three loop passes under the symbolic evaluator** (§2.9) — whether
+  `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` change the proof
+  obligations that reach SMT. §2.4 and §2.8 state their claims syntactically; these
+  three go through Strata's executable evaluator instead, which is the only oracle
+  that can see an obligation surviving as *syntax* but never being emitted. Since
+  the evaluator refuses a loop, each side runs `LoopElim` first. All three are
+  stated as "no obligation is lost", and the §2.9 note gives the reason equality
+  would be wrong for each. **These found the eighth defect, and it is in the
+  evaluator rather than in any of the three passes** — see the findings note above.
 -/
 
 namespace StrataGenerators.Program.UnprovenTransforms
@@ -1832,6 +1863,283 @@ def checkHoistPreservesUniqueInits (p : Program) : Bool :=
   (cmdShapedBodies p).all fun ss =>
     !uniqueInitsB ss || uniqueInitsB (Imperative.Block.hoistLoopPrefixInits ss)
 
+/-! ## §2.9 The three loop passes under the symbolic evaluator
+
+§2.4 and §2.8 state each loop pass's claim **syntactically**: a count of inserted
+statements, a `Bool` postcondition, a survival check on assert *labels*. None of
+them asks the question the pipeline actually cares about — whether the pass
+changes the **proof obligations that reach SMT**. That is what this section adds,
+for `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist`.
+
+### Running the evaluator on a program that holds a loop
+
+The evaluator does not accept a loop: `Core.Statement.evalOneStmt` *panics* on one
+(see the oracle note above `symbolicObligations`), which is why
+`loopElimPipelinePhase` sits immediately before `symbolicEval` in
+`transformPipelinePhases`. All three passes here act on loops and leave loops
+behind, so neither side of the comparison can go straight to the evaluator:
+`LoopElim` has to run first, on the pass's output *and* on the baseline. That is
+what `elimObligationLabels` does, and it screens the `LoopElim` output for
+loop-freedom before calling the evaluator rather than trusting it, because the
+failure mode is an uncatchable `PANIC` and not a `false`.
+
+`LoopElim` in turn *throws* on a loop that still carries an invariant or a
+measure, so a baseline has to be made loop-eliminable first. The two structural
+passes get `InsertLoopInvariantAsserts` in front of them, which is the production
+order. `InsertLoopInvariantAsserts` cannot use itself as its own baseline, so
+there the invariants and the measures are stripped with `bareLoopsProgram`, which
+is sound as a baseline precisely because an invariant is an *annotation*: `while
+(c) invariant I { B }` and `while (c) { B }` run the same, so they owe the same
+obligations, and the pass's whole job is to add the ones `I` licenses.
+
+### Containment, not equality
+
+For all three the claim is that **no obligation is lost**, plus that the
+evaluator does not start failing. Equality is wrong in all three cases, for two
+different reasons:
+
+* `InsertLoopInvariantAsserts` *adds* obligations by design — that is the pass.
+  So the obligation set must grow, and an equality claim would report the pass
+  working as a bug (the trap §2.7 records).
+
+* `NondetElim` also makes the obligation set grow, but for a reason that is *not*
+  by design: it **repairs a soundness defect in the evaluator**. See the note
+  below, and the `#guard`s at the end of this file.
+
+`LoopInitHoist` is the one pass here whose obligation set is expected to be
+exactly preserved, and measurement agrees — but it is still stated as
+containment, so that the property keeps reporting the direction that matters (a
+*lost* obligation is a lost proof) rather than turning red on a benign addition.
+
+### The evaluator defect that `NondetElim` hides
+
+`StatementEval.lean:586` mints the variable standing for a nondeterministic guard
+as
+
+    $__nondet_cond_{Ewn.env.pathConditions.scopes.length}
+
+— a name derived from the current path-condition **depth**, not from a monotone
+counter. Entering a `.block` pushes a *variable* scope and no path-condition
+scope (`Env.pushEmptyScope` touches `exprEnv.state` only), and
+`Env.performMerge` pops the branch scope again after an `.ite`, so two `if *`
+statements sitting at the same path-condition depth are handed the **same** name.
+The second one's synthesized `init` then re-declares a name already in scope, the
+path takes an error, and `evalAuxGo` — whose first act is
+`if good.isEmpty then return` — stops. Every obligation from that point to the
+end of the procedure is dropped, and `toCoreProofObligationProgram` still returns
+`.ok`, so nothing reports it.
+
+Measured, on a one-procedure program:
+
+| body | obligations |
+| --- | --- |
+| `if * { assert a }; assert after` | `[a, after]` |
+| `if * { assert a }; if * { assert b }` | `[a]` |
+| `if * { assert a }; if * { assert b }; assert after` | `[a]` |
+| `if (true) { assert a }; if (true) { assert b }` | `[a, b]` |
+
+and the mechanism is confirmed against a source program that declares the name
+itself: prefixing `init $__nondet_cond_2 : bool := true` to
+`if * { assert a }; assert after` drops the obligation list to `[]` — a program
+whose every assertion silently goes unchecked.
+
+`NondetElim` replaces each `if *` with a havoc of its own freshly generated
+`$__ndelim_ite$` variable, drawn from a `StringGenState` counter that *is*
+monotone, so after the pass no `$__nondet_cond_` is ever minted and the dropped
+obligations come back. That is why `checkNondetElimSymbolicNoLoss` is stated as
+containment: the growth it sees is the evaluator being repaired, and an equality
+claim would blame the pass for fixing a bug. -/
+
+/-- A program's procedure bodies rewritten by `f`, every other declaration left
+    alone. A `.cfg` body is left alone too: `bodyStmts` reads nothing out of one,
+    so there is nothing for a structured pass to rewrite. -/
+def mapProgramBodies (f : List Statement → List Statement) (p : Program) : Program :=
+  { p with decls := p.decls.map fun
+      | .proc q md =>
+        .proc { q with body := match q.body with
+                  | .structured ss => .structured (f ss)
+                  | cfg => cfg } md
+      | other => other }
+
+/-- Lift a pass on `Stmt Expression (Cmd Expression)` to one on `Statement`s.
+    A body holding a procedure call does not convert (`toCmdStmts` gives `none`),
+    and is then returned unchanged rather than dropped — the pass simply does not
+    apply there, which is what `cmdShapedBodies` measures. -/
+def onCmdShaped
+    (f : List (Stmt Expression (Cmd Expression)) → List (Stmt Expression (Cmd Expression)))
+    (ss : List Statement) : List Statement :=
+  match toCmdStmts ss with
+  | some cs => ofCmdStmts (f cs)
+  | none => ss
+
+/-- `NondetElim` as a whole-program transform. The pass itself is
+    `Imperative.Block.nondetElim`, which has no `PipelinePhase`. -/
+def nondetElimProgram (p : Program) : Program :=
+  mapProgramBodies (onCmdShaped Imperative.Block.nondetElim) p
+
+/-- `LoopInitHoist` as a whole-program transform. The pass itself is
+    `Imperative.Block.hoistLoopPrefixInits`, which has no `PipelinePhase`. -/
+def loopInitHoistProgram (p : Program) : Program :=
+  mapProgramBodies (onCmdShaped Imperative.Block.hoistLoopPrefixInits) p
+
+mutual
+/-- Clear the invariants and the measure of every loop of a statement, at any
+    depth. -/
+def bareLoopsStmt (s : Statement) : Statement :=
+  match s with
+  | .loop g _ _ b md => .loop g none [] (bareLoopsStmts b) md
+  | .block l b md => .block l (bareLoopsStmts b) md
+  | .ite g t e md => .ite g (bareLoopsStmts t) (bareLoopsStmts e) md
+  | .cmd c => .cmd c
+  | .exit l md => .exit l md
+  | .funcDecl d md => .funcDecl d md
+  | .typeDecl t md => .typeDecl t md
+/-- List analogue of `bareLoopsStmt`. -/
+def bareLoopsStmts (ss : List Statement) : List Statement :=
+  match ss with
+  | [] => []
+  | s :: rest => bareLoopsStmt s :: bareLoopsStmts rest
+end
+
+/-- The program with every loop annotation dropped. `LoopElim` throws on a loop
+    that still carries an invariant or a measure, so this is what makes a
+    *pre*-`InsertLoopInvariantAsserts` baseline loop-eliminable at all. Dropping
+    an annotation does not change what the program does, so the baseline owes
+    exactly the obligations the source program owes minus the ones the invariants
+    license. -/
+def bareLoopsProgram (p : Program) : Program := mapProgramBodies bareLoopsStmts p
+
+/-- The `assert` labels of the proof obligations of `p` after loop elimination, or
+    `none` when the chain never reaches a program the evaluator can read: either
+    `LoopElim` threw, or it left a loop behind, or the evaluator raised a
+    diagnostic.
+
+    The loop-freedom of the `LoopElim` output is *checked*, not assumed. The
+    evaluator answers a loop with an uncatchable `PANIC`, so a `LoopElim` that
+    ever failed to remove one would abort the whole test run instead of reporting
+    a counterexample. -/
+def elimObligationLabels (p : Program) : Option (List String) :=
+  match runPhase Core.loopElimPipelinePhase p with
+  | none => none
+  | some (_, out) =>
+    if programHasLoop out then none
+    else
+      match symbolicObligations out with
+      | none => none
+      | some ob => some ((programBodies ob).flatMap stmtsAssertLabels)
+
+/-- The obligation labels of `p` after `InsertLoopInvariantAsserts` and then
+    `LoopElim` — the production order, and the chain the two structural passes of
+    this section are measured through on both sides. -/
+def vcElimObligationLabels (p : Program) : Option (List String) :=
+  match runPhase loopInvPhase p with
+  | none => none
+  | some (_, mid) => elimObligationLabels mid
+
+/-- Whether `after` holds every label of `before`, **with at least its
+    multiplicity**. Containment and not equality: each of the three passes may
+    legitimately *add* an obligation (see the section note), while a lost one is
+    always a lost proof.
+
+    Counted rather than set-based, which `checkInlineProcSymbolicAgreement` is not:
+    two obligations can share a label (an `assert` inside a loop body reaches the
+    evaluator once per encoding branch), and plain `List.contains` would call a
+    drop from two copies to one "retained". Comparing counts is the same claim on
+    labels that occur once, and strictly sharper on the rest. -/
+def labelsRetained (before after : List String) : Bool :=
+  before.all fun l => before.count l ≤ after.count l
+
+/-- **`InsertLoopInvariantAsserts` loses no proof obligation under the symbolic
+    evaluator.** The syntactic version of this claim is
+    `checkLoopVcSurvivesElim`, which follows the pass's own minted labels through
+    `LoopElim`. This one is sharper in the direction that matters: it asks what
+    the *evaluator* still emits, so an obligation that survives as syntax but is
+    dropped during evaluation is caught here and nowhere else.
+
+    The baseline is `bareLoopsProgram p`, the same program with the loop
+    annotations cleared, which is what makes it loop-eliminable without running
+    the pass under test. Both sides then go through `LoopElim` and the evaluator.
+
+    Vacuous when the input does not typecheck, when a nondeterministic loop
+    carries a measure (the pass throws, which `checkLoopNondetMeasureThrows`
+    states), or when the baseline itself never reaches the evaluator — there is
+    then nothing to compare against. A pass output that *stops* reaching the
+    evaluator is a failure, not a skip.
+
+    Coverage, measured over 400 draws
+    (`docs/measurements/loop-pass-symeval-coverage.lean`): the claim is live on
+    390, and the pass has an invariant or a measure to insert on 10 of those. So
+    the guards are cheap but the interesting subset is small, which is what the
+    `#guard`s at the end of this file are for. Passes on every draw. -/
+def checkLoopVcSymbolicNoLoss (p : Program) : Bool :=
+  !progTypeChecks p || hasNondetMeasureLoop p ||
+    (match elimObligationLabels (bareLoopsProgram p) with
+     | none => true   -- no baseline: no claim to make
+     | some before =>
+       match vcElimObligationLabels p with
+       | none => false   -- the pass broke the chain to the evaluator
+       | some after => labelsRetained before after)
+
+/-- **`NondetElim` loses no proof obligation under the symbolic evaluator.**
+    Both sides run the production chain `InsertLoopInvariantAsserts` then
+    `LoopElim` and then the evaluator; the two differ only in whether
+    `Imperative.Block.nondetElim` ran on the procedure bodies first.
+
+    Stated as containment because the pass makes the obligation set **grow**, and
+    the growth is the evaluator's `$__nondet_cond_` collision being repaired
+    rather than anything the pass does wrong — see the section note and the
+    `#guard`s. Equality would report the repair as a defect.
+
+    Vacuous when the input does not typecheck or holds a nondeterministic loop
+    carrying a measure. That second guard is doing real work here and is not
+    symmetric: `insertInvariantAsserts` throws on such a loop, and `NondetElim`
+    makes every guard deterministic, so the pass would *remove* the rejection —
+    the after-side would run where the before-side threw, and there would be no
+    baseline to compare with.
+
+    Coverage over 400 draws: live on 390, and the pass has a nondeterministic
+    guard to rewrite on 8 of those. Passes on every draw — the growth the
+    evaluator defect causes is real but always in the safe direction, so only the
+    `#guard`s pin the defect itself. -/
+def checkNondetElimSymbolicNoLoss (p : Program) : Bool :=
+  !progTypeChecks p || hasNondetMeasureLoop p ||
+    (match vcElimObligationLabels p with
+     | none => true   -- no baseline: no claim to make
+     | some before =>
+       match vcElimObligationLabels (nondetElimProgram p) with
+       | none => false   -- the pass broke the chain to the evaluator
+       | some after => labelsRetained before after)
+
+/-- **`LoopInitHoist` loses no proof obligation under the symbolic evaluator.**
+    The same chain as `checkNondetElimSymbolicNoLoss`, with
+    `Imperative.Block.hoistLoopPrefixInits` as the pass.
+
+    Conditional on `uniqueInitsB`, exactly as `checkHoistPreservesUniqueInits`
+    is: the pass lifts a loop-body `init` to a prelude havoc under the **same**
+    name, and its module doc records that this is sound only under
+    `Block.uniqueInits`, "which rules out two hoisted preludes colliding". On a
+    body that violates it the pass makes no promise, so neither does this
+    property.
+
+    Of the three passes in this section this is the one whose obligation set is
+    expected to be preserved *exactly*, and measurement agrees. It is still
+    stated as containment, so a benign addition cannot turn it red while a lost
+    obligation — a lost proof — still does.
+
+    Coverage over 400 draws: live on 390, and a loop body holds an `init` for the
+    pass to hoist on only 2 of those — the thinnest of the three, since it needs a
+    loop *and* a declaration inside it. `uniqueInitsB` rejected none of the 390,
+    so that guard costs no coverage here. Passes on every draw. -/
+def checkHoistSymbolicNoLoss (p : Program) : Bool :=
+  !progTypeChecks p || hasNondetMeasureLoop p ||
+    !((cmdShapedBodies p).all uniqueInitsB) ||
+    (match vcElimObligationLabels p with
+     | none => true   -- no baseline: no claim to make
+     | some before =>
+       match vcElimObligationLabels (loopInitHoistProgram p) with
+       | none => false   -- the pass broke the chain to the evaluator
+       | some after => labelsRetained before after)
+
 /-! ## Deterministic guards
 
 Small hand-built programs that pin each dimension generated input cannot reach,
@@ -2519,6 +2827,149 @@ private def hoistBody : List Statement :=
 -- Non-vacuous: the input violates the postcondition the pass establishes.
 #guard (cmdShapedBodies (guardProg hoistBody)).all fun ss =>
   !Imperative.Block.loopBodyNoInits ss
+
+-- ── §2.9 Obligation preservation under the symbolic evaluator ─────────────
+
+/-- A nondeterministic `if *` whose then-branch asserts `l`. -/
+private def ndIte (l : String) : Statement :=
+  .ite .nondet [guardAssert l] [] .empty
+
+/-- The deterministic counterpart, for the contrast below. -/
+private def detIte (l : String) : Statement :=
+  .ite (.det trueLit) [guardAssert l] [] .empty
+
+/-- The obligation labels the evaluator emits for a body, with no pass in
+    between. The bodies below are loop-free, so `LoopElim` is a no-op on them and
+    `elimObligationLabels` is just "evaluate this". -/
+private def obligationsOf (ss : List Statement) : Option (List String) :=
+  elimObligationLabels (guardProg ss)
+
+-- **The evaluator drops proof obligations after a second `if *`.** Pinned here
+-- because it is the reason `checkNondetElimSymbolicNoLoss` is containment and not
+-- equality, and because nothing else in the tree records it. One `if *` is fine:
+#guard obligationsOf [ndIte "a", guardAssert "after"] == some ["a", "after"]
+-- Two are not — `b` is gone, and so is the `assert` that follows both:
+#guard obligationsOf [ndIte "a", ndIte "b"] == some ["a"]
+#guard obligationsOf [ndIte "a", ndIte "b", guardAssert "after"] == some ["a"]
+-- The obligation *before* the second `if *` survives, which locates the stop
+-- exactly at the second nondeterministic guard:
+#guard obligationsOf [ndIte "a", guardAssert "mid", ndIte "b"] == some ["a", "mid"]
+-- Deterministic guards at the same depth are unaffected, so the defect is about
+-- the nondet path and not about `.ite` in general:
+#guard obligationsOf [detIte "a", detIte "b"] == some ["a", "b"]
+-- And it is not depth as such: nesting one `if *` inside another gives the two of
+-- them different path-condition depths, so both obligations survive.
+#guard obligationsOf [.ite .nondet [guardAssert "a", ndIte "b"] [] .empty] == some ["a", "b"]
+
+-- The mechanism, pinned directly: the name the evaluator mints for the guard is
+-- `$__nondet_cond_{path-condition depth}` (`StatementEval.lean:586`), so a source
+-- program that declares that very name collides with the *first* `if *` — and the
+-- whole procedure's obligation list goes empty, with no diagnostic anywhere.
+private def collidingNondetName : Statement :=
+  Statement.init ⟨"$__nondet_cond_2", ()⟩ (.forAll [] .bool) (.det trueLit) .empty
+
+/-- The same declaration under a name the evaluator will never mint — the control
+    for the guard below, so the effect is attributed to the collision and not to
+    the extra `init`. -/
+private def innocentNondetName : Statement :=
+  Statement.init ⟨"$__nondet_cond_99", ()⟩ (.forAll [] .bool) (.det trueLit) .empty
+
+#guard progTypeChecks (guardProg [collidingNondetName, ndIte "a", guardAssert "after"])
+#guard obligationsOf [collidingNondetName, ndIte "a", guardAssert "after"] == some []
+#guard obligationsOf [innocentNondetName, ndIte "a", guardAssert "after"]
+        == some ["a", "after"]
+
+-- `NondetElim` repairs it: after the pass there is no `if *` left for the
+-- evaluator to mint a name for, so both obligations come back. This is the growth
+-- that makes an equality claim wrong.
+#guard (nondetElimProgram (guardProg [ndIte "a", ndIte "b"]) |> fun p =>
+  (cmdShapedBodies p).all fun ss => !stmtsHaveNondetGuard ss)
+#guard vcElimObligationLabels (guardProg [ndIte "a", ndIte "b"]) == some ["a"]
+#guard (vcElimObligationLabels (nondetElimProgram (guardProg [ndIte "a", ndIte "b"]))).any
+  fun ls => ls.contains "a" && ls.contains "b"
+-- So the property holds, and holds because nothing was lost — not because the two
+-- sides agree.
+#guard checkNondetElimSymbolicNoLoss (guardProg [ndIte "a", ndIte "b"])
+
+-- `InsertLoopInvariantAsserts`: the baseline owes `a`, and the pass's output owes
+-- `a` plus the six verification conditions the two invariants and the measure
+-- license. Growth in the right direction, and nothing dropped.
+#guard checkLoopVcSymbolicNoLoss (guardProg [twoInvariantLoop])
+#guard elimObligationLabels (bareLoopsProgram (guardProg [twoInvariantLoop])) == some ["a"]
+#guard (vcElimObligationLabels (guardProg [twoInvariantLoop])).any fun ls =>
+  ls.contains "a" &&
+    (countPrefixed Core.insertLoopInvAssertPrefix ls) == 6
+-- The baseline really is loop-eliminable only because the annotations were
+-- stripped: `LoopElim` throws on the annotated program.
+#guard (runPhase Core.loopElimPipelinePhase (guardProg [twoInvariantLoop])).isNone
+#guard (runPhase Core.loopElimPipelinePhase (bareLoopsProgram (guardProg [twoInvariantLoop]))).isSome
+
+-- `LoopInitHoist`: the obligation set is preserved exactly here, on a loop that
+-- declares an `init` the pass has to hoist and an `assert` after the loop.
+private def hoistObligationBody : List Statement :=
+  [ .loop (.det trueLit) none []
+      [ Statement.init ⟨"y", ()⟩ (.forAll [] .int) (.det (intLit 1)) .empty,
+        guardAssert "b" ] .empty,
+    guardAssert "after" ]
+
+#guard checkHoistSymbolicNoLoss (guardProg hoistObligationBody)
+-- Non-vacuous, and exact: both sides emit the same two obligations, and the pass
+-- really did move the `init` out of the loop body.
+#guard vcElimObligationLabels (guardProg hoistObligationBody) == some ["b", "after"]
+#guard vcElimObligationLabels (loopInitHoistProgram (guardProg hoistObligationBody))
+        == some ["b", "after"]
+#guard (cmdShapedBodies (guardProg hoistObligationBody)).all fun ss =>
+  !Imperative.Block.loopBodyNoInits ss
+#guard (cmdShapedBodies (loopInitHoistProgram (guardProg hoistObligationBody))).all
+  Imperative.Block.loopBodyNoInits
+
+-- The sharpest form of the evaluator defect, and the one the random generator
+-- actually produced (a draw of size 129, shrunk to 16 and then tidied): a
+-- procedure whose postcondition is `false` — unverifiable by construction —
+-- together with two *empty* `if *`. The blocks assert nothing and assign nothing;
+-- they only consume the minted name. The obligation list comes back **empty**, so
+-- a verifier has nothing to prove and reports success. See
+-- `docs/measurements/nondet-cond-collision-witnesses.lean` for the search that
+-- found it and repo issue #113 for the report.
+
+/-- `procedure P (out r : int) ensures [post]: false { ss }`. The postcondition
+    makes the procedure unverifiable, so its obligation must reach the evaluator. -/
+private def ensuresFalseProg (ss : List Statement) : Program :=
+  { decls := [.proc
+      { header := { name := ⟨"P", ()⟩, typeArgs := [], inputs := [],
+                    outputs := [(⟨"r", ()⟩, .int)], noFilter := false }
+        spec := { preconditions := [],
+                  postconditions := [("post", { expr := .const () (.boolConst false) })] }
+        body := .structured ss } .empty] }
+
+/-- An empty nondeterministic `if *`, which contributes nothing but the name. -/
+private def emptyNdIte : Statement := .ite .nondet [] [] .empty
+
+-- Varying only the number of empty `if *` isolates the defect: zero and one are
+-- correct, two loses the postcondition entirely, and a deterministic guard never
+-- loses it.
+#guard vcElimObligationLabels (ensuresFalseProg []) == some ["post"]
+#guard vcElimObligationLabels (ensuresFalseProg [emptyNdIte]) == some ["post"]
+#guard vcElimObligationLabels (ensuresFalseProg [emptyNdIte, emptyNdIte]) == some []
+#guard vcElimObligationLabels
+  (ensuresFalseProg [.ite (.det trueLit) [] [] .empty, .ite (.det trueLit) [] [] .empty])
+    == some ["post"]
+-- `NondetElim` brings it back, which is the growth that makes an equality claim
+-- wrong for `checkNondetElimSymbolicNoLoss`.
+#guard vcElimObligationLabels (nondetElimProgram (ensuresFalseProg [emptyNdIte, emptyNdIte]))
+    == some ["post"]
+#guard checkNondetElimSymbolicNoLoss (ensuresFalseProg [emptyNdIte, emptyNdIte])
+
+-- All three are vacuous on a program with a nondeterministic measure-carrying
+-- loop, since `InsertLoopInvariantAsserts` throws on it and neither side reaches
+-- the evaluator. Pinned so the guard is not silently doing nothing.
+private def nondetMeasureProg : Program :=
+  guardProg [.loop .nondet (some (intLit 3)) [] [guardAssert "a"] .empty]
+
+#guard hasNondetMeasureLoop nondetMeasureProg
+#guard checkLoopVcSymbolicNoLoss nondetMeasureProg
+#guard checkNondetElimSymbolicNoLoss nondetMeasureProg
+#guard checkHoistSymbolicNoLoss nondetMeasureProg
 
 end Guards
 
