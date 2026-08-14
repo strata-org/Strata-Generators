@@ -83,10 +83,9 @@ are stated unconditionally and stay non-vacuous on every draw.
 
 ## Findings
 
-Measured over 20 draws at `numDecls := 6`, `size := 8`. Ten of the thirteen
-properties hold on **20/20**; three fail on **0/20**, i.e. deterministically, and on
-6 of the 15 injected shapes each time. `checkLiftInjectionFires` confirms the pass
-really ran and really hoisted a function on 20/20, so none of the greens is vacuous.
+Measured over 20 draws at `numDecls := 6`, `size := 8`, and deterministic on 6 of
+the 15 injected shapes. `checkLiftInjectionFires` confirms the pass really ran and
+really hoisted a function on 20/20, so no property is scored vacuously.
 
 **Two defects, both machine-checked, both reachable from a well-typed program.**
 
@@ -101,9 +100,9 @@ really ran and really hoisted a function on 20/20, so none of the greens is vacu
   No free variables are allowed here! Free Variables: [$__liftfncl_0]
   ```
 
-  All four nesting shapes fail (`Placement.block`, `.ite`, `.elseArm`, `.loop`);
-  the two same-scope shapes (`.top`, `.blockIn`) pass, which isolates the escape
-  from the declaring scope as the cause. Core's own typechecker puts a `funcDecl`'s
+  The four nesting shapes (`Placement.block`, `.ite`, `.elseArm`, `.loop`) reach it
+  and the two same-scope shapes (`.top`, `.blockIn`) do not, which isolates the
+  escape from the declaring scope as the cause. Core's own typechecker puts a `funcDecl`'s
   name in scope for the whole enclosing procedure — that is *why* the input is
   well-typed — so a call outside the declaring block is legal input, not a
   malformed program.
@@ -151,15 +150,15 @@ one fails `Program.typeCheck` before the pass sees it. The
 `Scenario.recursiveDecl` case is therefore scored only by a `#guard`, and
 `checkLiftRejectsOnlyKnownTriggers` treats it as a skip.
 
-**A methodological finding worth keeping.** The first run of this suite read 6/20
-on all three failing properties, and the first draw's diagnostic said everything
-passed — signal that turned out to be noise. `run` folds `processDecl` over the
-declarations with `foldlM`, so a rejection in *any* procedure aborts the whole
-program, and 5 of 20 draws carried their own trigger (a generated internal function
-name clashing with a top-level one, or sitting beside a local `typeDecl`). Those
-draws took the injected scenario down with them and every property scored
-vacuously green. `normalizeAmbient` fixes the cause and `checkLiftInjectionFires`
-scores the symptom, so the same masking cannot come back unnoticed.
+**A methodological finding worth keeping.** The first run of this suite read 6 of
+20 draws on the three properties that bear on the defects — signal that turned out
+to be noise. `run` folds `processDecl` over the declarations with `foldlM`, so a
+rejection in *any* procedure aborts the whole program, and 5 of 20 draws carried
+their own trigger (a generated internal function name clashing with a top-level one,
+or sitting beside a local `typeDecl`). Those draws took the injected scenario down
+with them, and every property was then scored vacuously. `normalizeAmbient` fixes
+the cause and `checkLiftInjectionFires` scores the symptom, so the same masking
+cannot come back unnoticed.
 
 **Not covered here.** The plan's semantic tier — P13 (bidirectional operational
 correctness), P14 (verification-outcome preservation) and P16 (the
@@ -232,9 +231,9 @@ Two notions, because Strata's own one is weaker than what the pass computes.
 `body`, `axioms`, `preconditions` **and** `measure`, and `rewritePureFunc`
 rewrites all four. So a function with an open `axioms` field would satisfy
 `LFuncClosed` while still mentioning a variable that no longer exists. Both are
-checked: Strata's notion, so a green tick means the real predicate the pass is
-supposed to establish, and the stronger all-four-fields notion, so the gap in
-`LFuncClosed` cannot hide a defect. -/
+checked: Strata's notion, which is the real predicate the pass is supposed to
+establish, and the stronger all-four-fields notion, so the gap in `LFuncClosed`
+cannot hide a defect. -/
 
 /-- Every free variable of every one of `f`'s four expression-carrying fields that
     is not one of `f`'s own inputs. Empty is the strong closedness the pass's
@@ -687,7 +686,7 @@ def injectStmts (extra : List Statement) (p : Program) : Program :=
 *any* procedure aborts the whole program. A draw whose own internal functions
 happen to trip one of the four rejection conditions therefore takes the injected
 scenario down with it: the pass returns a diagnostic, and every property below is
-vacuously green without saying so. Measured on 20 draws, 5 were lost this way.
+vacuous without saying so. Measured on 20 draws, 5 were lost this way.
 
 `stripInternalDecls` removes the draw's own `funcDecl` and local `typeDecl`
 statements before injecting, which is what the three reachable triggers need
@@ -757,10 +756,10 @@ def onOutput (f : Program → Program → Bool) :
     This exists because every other property here is stated to *skip* a run that
     returned a diagnostic — which is right (a rejection is scored by
     `checkLiftRejectsOnlyKnownTriggers`, not by the closedness properties) but
-    means a draw the pass refuses makes them all vacuously green in silence. That
-    is not hypothetical: before `normalizeAmbient` existed, 5 of 20 draws were lost
-    that way, and three properties read 6/20 for reasons that had nothing to do
-    with the pass. Scoring coverage as its own property turns that failure mode
+    means a draw the pass refuses makes them all vacuous in silence. That is not
+    hypothetical: before `normalizeAmbient` existed, 5 of 20 draws were lost that
+    way, and three properties read 6 of 20 for reasons that had nothing to do with
+    the pass. Scoring coverage as its own property turns that failure mode
     from invisible into red. -/
 def checkLiftInjectionFires (p : Program) : Bool :=
   (scenarioFails p (fun _ q r =>
@@ -1062,7 +1061,7 @@ private def binderChain : Scenario := ⟨"top/chain/binder", .top, .body, .chain
 #guard progTypeChecks (soleScenario binderChain)
 
 -- The pass really fires on the injection (`changed = true` and a function is
--- hoisted), so none of the properties above is vacuously green.
+-- hoisted), so none of the properties above is vacuous.
 #guard (runLift (soleScenario topBody)).any (·.1)
 #guard match runLift (soleScenario topBody) with
        | some (_, out) => (liftedFuncs (soleScenario topBody) out).length == 1
@@ -1102,9 +1101,8 @@ private def binderChain : Scenario := ⟨"top/chain/binder", .top, .body, .chain
 
 /-! ### The two defects, minimally -/
 
--- **HONEST FAILURE — the snapshot escapes its declaring scope.** A `funcDecl`
--- inside a labelled block, called after the block: the input typechecks, the
--- output does not.
+-- **The snapshot escapes its declaring scope.** A `funcDecl` inside a labelled
+-- block, called after the block: the input typechecks, the output does not.
 #guard progTypeChecks (soleScenario blockBody)
 #guard match runLift (soleScenario blockBody) with
        | some (_, out) => !progTypeChecks out
@@ -1118,7 +1116,7 @@ private def binderChain : Scenario := ⟨"top/chain/binder", .top, .body, .chain
        | some (_, out) => progTypeChecks out
        | none => false
 
--- **HONEST FAILURE — a minted snapshot name collides with a program name.**
+-- **A minted snapshot name collides with a program name.**
 #guard !checkLiftFreshSnapshotNames emptyProg
 
 /-! ### The four rejection triggers, in the positive direction

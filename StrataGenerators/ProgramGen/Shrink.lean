@@ -427,9 +427,9 @@ def programStatusNote (p : Program) : String :=
 
 /-- **Whole-program typechecker completeness.** `genProgram` is proven sound (its
     output satisfies `ProgramHasTypeA`), so the algorithmic `Program.typeCheck`
-    should accept every generated program. This states that HONESTLY and so FAILS
-    on each of the three gaps in the module doc — a genuine spec/algorithm
-    divergence, reported as a real failure rather than masked. The program-level
+    should accept every generated program. This states that unweakened, so each of
+    the three gaps in the module doc — a genuine spec/algorithm divergence — is
+    reported rather than masked. The program-level
     analogue of `checkTypeCheckerComplete` (statements) and
     `checkFunctionTypeCheckerComplete` (functions). -/
 abbrev checkProgramTypeCheckerComplete (p : Program) : Bool := progTypeChecks p
@@ -451,9 +451,8 @@ rest. Unlike `checkProgramTypeCheckerComplete`, a counterexample to any of them 
 *shrinkable*: the failure does not depend on the oracle rejecting the program, so
 smaller candidates are available and the minimizer reports a minimal witness.
 
-Three of the four hold on generated input. `checkProgramTypeCheckIdempotent` **fails
-intermittently** — roughly 1 in 500 single-function draws — and its docstring records
-the cause. -/
+`checkProgramTypeCheckIdempotent` is the sharpest of the four: it bears on roughly 1
+in 500 single-function draws, and its docstring records the cause. -/
 
 /-- **`getNames` distinctness.** `ProgramHasType'`'s first conjunct is
     `P.getNames.Nodup`, which the checker enforces incrementally via
@@ -469,10 +468,10 @@ def checkProgramNamesNodup (p : Program) : Bool :=
     re-checking the output succeeds: the checker's output is in its own input
     language.
 
-    **FAILS intermittently** — measured at 1 of 482 accepted single-function draws,
-    and 0 of 244 accepted multi-declaration programs. Every instance observed is a
-    polymorphic function whose type parameter is used *only* as a quantifier binder
-    annotation in the body, e.g.
+    Measured as live on 1 of 482 accepted single-function draws, and 0 of 244
+    accepted multi-declaration programs. Every instance observed is a polymorphic
+    function whose type parameter is used *only* as a quantifier binder annotation in
+    the body, e.g.
 
         function s<a>() : bool { exists q : a :: false }
 
@@ -483,10 +482,10 @@ def checkProgramNamesNodup (p : Program) : Bool :=
     is driven by the type variables of the *signature*, and a type parameter that
     occurs only in a body binder annotation is invisible to it.
 
-    Stated honestly, so it reports the failure rather than masking it — the same
-    convention as `checkProgramTypeCheckerComplete`. Unlike that one, a counterexample
-    here *is* shrinkable, since the failure is in the checker's output rather than in
-    its verdict on the input. -/
+    Stated unweakened rather than masked — the same convention as
+    `checkProgramTypeCheckerComplete`. Unlike that one, a counterexample here *is*
+    shrinkable, since the divergence is in the checker's output rather than in its
+    verdict on the input. -/
 def checkProgramTypeCheckIdempotent (p : Program) : Bool :=
   match Program.typeCheck stmtCheckContext TEnv.default p with
   | .error _ => true
@@ -691,7 +690,7 @@ private def unrenameF (n : String) : String := if n == "f" then "f0" else n
 #guard (shrinkDecl distinctDecl).isEmpty == false   -- drop/reduce an element
 #guard (shrinkDecl funcDecl).isEmpty == false       -- drop the body
 -- `axDecl`'s body is already a leaf and `procDecl` is already empty, so those two
--- are droppable but not reducible — asserted so the guard above is honest.
+-- are droppable but not reducible — asserted so the guard above is not vacuous.
 #guard (shrinkDecl axDecl).isEmpty == true
 #guard (shrinkDecl procDecl).isEmpty == true
 

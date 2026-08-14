@@ -15,11 +15,10 @@ accepts the query, but it reads each byte as a separate character. Thus
 `str.len "é"` is `2` for z3, and the interpreted `Str.Length` of Strata, which is
 `Int.ofNat s.length` and counts *codepoints*, gives `1`.
 
-**This property FAILS until somebody corrects the escape function.** It fails
-honestly: it pins a true defect, and it does not mask one. This is the same
-convention as the four `proc:` properties that `Properties.lean` documents. After
-the correction, the property must turn green with no change to this file, which is
-what makes it a regression test.
+The property is stated unweakened, so it pins a true defect rather than masking
+one — the same convention as the four `proc:` properties that `Properties.lean`
+documents. A correction to the escape function needs no change to this file, which
+is what makes it a regression test.
 
 ## Why the test has this shape
 

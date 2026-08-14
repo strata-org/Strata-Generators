@@ -179,9 +179,8 @@ def actualEqFold (d₁ d₂ : Decimal) : Option Bool :=
     fold to the *wrong* boolean is the failure, because it puts a false fact into
     the term.
 
-    This property **fails** today. For each pair from `genSameValuePair` the two
-    `Decimal`s denote one value, so a correct fold gives `true`. `Factory.eq`
-    compares the pair structurally, finds it unequal, and folds to `false`. -/
+    For each pair from `genSameValuePair` the two `Decimal`s denote one value, so a
+    correct fold gives `true`. -/
 def checkEqFold (d₁ d₂ : Decimal) : Bool :=
   match actualEqFold d₁ d₂ with
   | none => true
@@ -192,10 +191,10 @@ def checkEqFold (d₁ d₂ : Decimal) : Bool :=
     Exactly one of `lt d₁ d₂`, `lt d₂ d₁` and `eq d₁ d₂` must hold. This is
     trichotomy, and each order needs it.
 
-    This property **fails** today. For a pair of equal value with different
-    spellings, `lt` is `false` in each direction, because it compares by value, and
-    the fold of `eq` is `false`, because it compares structurally. Therefore no one
-    of the three holds, and the count is 0 instead of 1. -/
+    For a pair of equal value with different spellings, `lt` is `false` in each
+    direction, because it compares by value, and the fold of `eq` is `false`, because
+    it compares structurally. Therefore no one of the three holds, and the count is 0
+    instead of 1. -/
 def checkTrichotomy (d₁ d₂ : Decimal) : Bool :=
   let lt₁ := TermPrim.lt (.real d₁) (.real d₂)
   let lt₂ := TermPrim.lt (.real d₂) (.real d₁)

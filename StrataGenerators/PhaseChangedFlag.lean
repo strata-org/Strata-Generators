@@ -32,7 +32,7 @@ read as oversights rather than a different convention: `CSE.runCSE` uses
 `ProcedureInlining` thread it through `runProgramUntil`, which accumulates
 `anyChanged`; `PrecondElim` and `TermCheck` compute theirs.
 
-## Severity, stated honestly
+## Severity
 
 No consumer reads the flag today. Both call sites discard it —
 `PipelinePhase.lean` (`let (_, next) ← pp.transform prog`) and
@@ -272,12 +272,12 @@ def filterNoOp : NoOpWitness :=
    Core.filterProceduresPipelinePhase (programProcNames axiomFreeProgram) true,
    axiomFreeProgram⟩
 
-/-- **HONEST FAILURE — pins `IrrelevantAxioms.lean`.** `RemoveIrrelevantAxioms`
-    on an axiom-free program is necessarily a no-op, so the flag must be `false`.
-    The phase returns `(true, pruned)` unconditionally, so this **fails**. -/
+/-- Pins `IrrelevantAxioms.lean`: `RemoveIrrelevantAxioms` on an axiom-free
+    program is necessarily a no-op, so the flag must be `false`, yet the phase
+    returns `(true, pruned)` unconditionally. -/
 def checkIrrelevantAxiomsNoOpFlag : Bool := irrelevantAxiomsNoOp.check
 
-/-- **HONEST FAILURE — pins `FilterProcedures.lean`.** With every procedure in
+/-- Pins `FilterProcedures.lean`: with every procedure in
     the target set nothing can be removed, so the flag must be `false`. Restates
     the already-pinned `proc:` property on the constructed witness, so the
     uniform sweep is self-contained. -/
@@ -292,10 +292,9 @@ def checkFilterNoOpFlag : Bool := filterNoOp.check
     it quantifies over `corePipelinePhases`. A phase added later that hardcodes
     its flag is caught here with no new property written.
 
-    **Expected to FAIL** while the four known sites stand — `typeCheck` and
-    `symbolicEval` are in this list and both hardcode `true`. Use
+    `typeCheck` and `symbolicEval` are in this list and both hardcode `true`. Use
     `phaseChangedFlagDiagnostic` to see which phases are responsible on a given
-    program; the failure is only informative if the offender set is exactly the
+    program; the result is only informative if the offender set is exactly the
     known one. -/
 def checkAllPhasesChangedFlag (ps : List Procedure) : Bool :=
   (violators allCorePhases (mkProgram ps)).isEmpty
@@ -315,8 +314,7 @@ def checkAllPhasesChangedFlag (ps : List Procedure) : Bool :=
     and it fires on only ~0.5% of generated programs (it needs a declared function
     with no preconditions of its own whose body calls a partial function, e.g.
     `Int.SafeDiv`), which is exactly why it must be excluded here by name rather
-    than left to chance: otherwise this property is *intermittently* red and its
-    green runs mean nothing. -/
+    than left to chance. -/
 def knownDefectivePhases : List String :=
   [ -- hardcode `true` (false positives)
     "FilterProcedures", "RemoveIrrelevantAxioms", "typeCheck", "symbolicEval",
@@ -330,14 +328,14 @@ def honestPhases : List NamedPhase :=
   allCorePhases.filter (fun np => !knownDefectivePhases.contains np.label)
 
 /-- The honest half of the sweep: every phase *except* those with a known defect
-    must have a faithful flag. Expected to **pass**, and it is what actually
-    guards against a regression in the honestly-computing phases — `CallElim`,
-    `TermCheck`, `InsertLoopInvariantAsserts`, `LoopElim` and `CommonSubexprElim`.
+    must have a faithful flag. This is what guards against a regression in the
+    honestly-computing phases — `CallElim`, `TermCheck`,
+    `InsertLoopInvariantAsserts`, `LoopElim` and `CommonSubexprElim`.
 
     Keeping the two directions in separate properties means a new violation among
-    the honest phases shows up as a *newly failing* property rather than as a
-    change in the detail of an already-red one. That only works if this property
-    is reliably green, hence `knownDefectivePhases` above. -/
+    the honest phases shows up as a distinct property rather than as a change in
+    the detail of another one. That only works if this property's scope is
+    deterministic, hence `knownDefectivePhases` above. -/
 def checkHonestPhasesChangedFlag (ps : List Procedure) : Bool :=
   (violators honestPhases (mkProgram ps)).isEmpty
 

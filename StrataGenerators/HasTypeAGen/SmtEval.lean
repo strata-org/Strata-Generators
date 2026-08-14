@@ -59,11 +59,11 @@ The defect emits a non-ASCII literal as raw UTF-8. Then:
 
 - **cvc5** rejects the literal with a parse error. The harness reports that error,
   but it does not score it, because an unencodable term is a limit of the encoder
-  and not a disagreement of the evaluator. Therefore the property reports **green**
-  at type `string` against cvc5, although the defect is present.
+  and not a disagreement of the evaluator. So nothing is scored at type `string`
+  against cvc5, although the defect is present.
 - **z3** accepts the literal, and it then measures `str.len` in bytes. That
   contradicts the count of codepoints from `Str.Length` in Lean. The harness
-  *scores* that contradiction, so the property **fails** and names the term.
+  *scores* that contradiction and names the term.
 
 A run against cvc5 alone therefore hides a true defect behind an unscored error.
 For this reason the check runs each solver in `agreementSolvers` on each term. It
@@ -72,9 +72,9 @@ does not become a silent loss of coverage.
 
 The harness reports a tally for each type, and it names each type that gave no
 checkable term. It does so because silent vacuity, which is a property that
-passes because it never truly ran, is the failure mode that this suite is most
-exposed to. In an earlier example of that failure mode, the ANF properties passed
-on 599 of 600 inputs that were no-ops.
+holds because it never truly ran, is the failure mode that this suite is most
+exposed to. In an earlier example of that failure mode, 599 of 600 inputs to the
+ANF properties were no-ops.
 -/
 
 namespace StrataGenerators.SmtEval

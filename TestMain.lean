@@ -112,13 +112,12 @@ def main (args : List String) : IO UInt32 := do
       (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) (cfg := cfg) ++
     -- This property needs no solver, because its oracle is "printable ASCII",
     -- which is the requirement of SMT-LIB itself. Therefore it joins the suite
-    -- always, and not under `--smt`. EXPECT IT TO FAIL until somebody corrects the
-    -- SMT escape function.
+    -- always, and not under `--smt`.
     .individualIO PropertyNames.exprSmtStringEscaping none
       (StrataGenerators.SmtStringEscaping.escapingAction numTrials) .done ++
     -- Two unit properties about the `Rat`/`Decimal` boundary. Each needs no
     -- solver, because each states an invariant of a pure function in the SMT
-    -- dialect. EXPECT BOTH TO FAIL until `Factory.eq` compares a real by value.
+    -- dialect.
     .individualIO PropertyNames.realDecimalEqFold none
       (StrataGenerators.DecimalAgreement.eqFoldAction numTrials) .done ++
     .individualIO PropertyNames.realDecimalTrichotomy none
@@ -155,9 +154,8 @@ def main (args : List String) : IO UInt32 := do
     -- Property 3: type preservation under evaluation (Step.type_preserved / StepStar.type_preserved)
     checkIO PropertyNames.fnBodyPreservation
       (∀ gf : ClosedGenFunction, prop_function_body_preservation gf) (cfg := cfg) $
-    -- Function typechecker completeness. FAILS on the measure-without-body gap
-    -- (spec permits it, algorithm rejects it) — the function-level analogue of the
-    -- statement `funcDecl` gap, asserted honestly as a real failure.
+    -- Function typechecker completeness — the function-level analogue of the
+    -- statement `funcDecl` gap.
     checkIO PropertyNames.fnTypeCheckComplete
       (∀ gf : ClosedGenFunction, prop_function_typeCheck_complete gf) (cfg := cfg) $
     -- Every typeCheck rejection is a measure-without-body function (pins the gap).
@@ -171,10 +169,8 @@ def main (args : List String) : IO UInt32 := do
   -- / typechecker properties are folded from the shared
   -- `Properties.stmtTransforms` bundle (name↔check paired in one place, also
   -- driving the Tyche panels), so their names can never be attached to the wrong
-  -- check. Typechecker completeness FAILS honestly on the funcDecl gap (the spec's
-  -- funcDecl rule is strictly more permissive than the algorithm) — a genuine
-  -- spec/algorithm divergence surfaced as a real failure. Kleene definedness has a richer
-  -- Tyche panel, so it is stated directly here.
+  -- check. Kleene definedness has a richer Tyche panel, so it is stated directly
+  -- here.
   let stmtSuite : TestSeq :=
     Properties.stmtTransforms.foldr
       (fun p rest => checkIO p.name
@@ -187,18 +183,7 @@ def main (args : List String) : IO UInt32 := do
   -- named field of the three `*PhaseCorrect` structures in
   -- `Strata/Transform/CustomSpecifications.lean`) are folded from the shared
   -- `Properties.procTransforms` bundle. Each runs its pass on the program
-  -- assembled from a generated procedure list and inspects the result. Four checks
-  -- FAIL honestly, pinning real defects rather than masking them (exactly like the
-  -- statement and function completeness gaps):
-  -- `proc: FilterProcedures changed flag is faithful` (the pass hardcodes
-  -- `changed := true` even when it removes nothing); `proc: PrecondElim changed
-  -- flag is faithful` (the `.funcDecl` branch inserts a `$$wf` block for
-  -- obligations in a declared function's body yet reports unchanged); `proc:
-  -- PrecondElim factory entries are stripped` (the spec field is unsatisfiable for
-  -- a run seeded with `Core.Factory`, whose partial builtins carry the very
-  -- preconditions the pass exists to discharge); and `proc: PrecondElim factory
-  -- strips declared functions` (the pass pushes each declared function into the
-  -- factory *before* stripping its preconditions).
+  -- assembled from a generated procedure list and inspects the result.
   let procSuite : TestSeq :=
     Properties.procTransforms.foldr
       (fun p rest => checkIO p.name
@@ -208,20 +193,16 @@ def main (args : List String) : IO UInt32 := do
   -- Whole-program-generator properties, folded from the shared
   -- `Properties.programChecks` and `Properties.programADTProps` bundles. Counterexamples are minimized by the
   -- whole-program shrinker (`Shrinkable GenProgram`), which keeps every candidate
-  -- well-typed by re-running Strata's own `Program.typeCheck`. Two checks FAIL
-  -- honestly. `typechecker accepts generated programs` fails on either of two
-  -- reachable rejection causes (one generator limitation, one genuine Strata gap —
-  -- the third classified cause, `distinct-fvar`, is unreachable from `genProgram`);
-  -- each counterexample's `Repr` tags which cause it hit, since those are
-  -- precisely the programs the shrinker cannot minimize (its oracle is the checker
-  -- under test). `typeCheck output re-typechecks` fails
-  -- intermittently (~1 draw in 500) and its witness *does* shrink.
+  -- well-typed by re-running Strata's own `Program.typeCheck`. For
+  -- `typechecker accepts generated programs`, each counterexample's `Repr` tags
+  -- which of the classified rejection causes it hit, since those are precisely the
+  -- programs the shrinker cannot minimize (its oracle is the checker under test).
   --
   -- `programADTProps` adds the four across-declaration checks that watch the
   -- ADT-derived-call path: a function/procedure body may call the constructors,
   -- testers and field accessors of a datatype declared *earlier* in the same
-  -- program. All four pass, and unlike the five conditional invariants above they
-  -- are unconditional, so they stay non-vacuous on a gap-bearing draw.
+  -- program. Unlike the five conditional invariants above these are
+  -- unconditional, so they stay non-vacuous on a gap-bearing draw.
   let programSuite : TestSeq :=
     (Properties.programChecks ++ Properties.programADTProps).foldr
       (fun p rest => checkIO p.name
@@ -235,11 +216,11 @@ def main (args : List String) : IO UInt32 := do
   --     anything, so the check is a closed `Bool` asserted with `test`;
   --   * the two sweeps over generated procedure lists, folded like `procTransforms`.
   --
-  -- Three of the four FAIL honestly, pinning the four hardcoded-`changed := true`
-  -- sites (`FilterProcedures.lean`, `IrrelevantAxioms.lean`,
-  -- and the two in `Verifier.lean`). `phase: non-hardcoded pipeline phases have
-  -- a faithful changed flag` is the one expected to PASS: it is the regression
-  -- guard on the phases that compute the flag correctly today.
+  -- The first three pin the four hardcoded-`changed := true` sites
+  -- (`FilterProcedures.lean`, `IrrelevantAxioms.lean`, and the two in
+  -- `Verifier.lean`). `phase: non-hardcoded pipeline phases have a faithful changed
+  -- flag` is the regression guard on the phases that compute the flag correctly
+  -- today.
   let phaseSuite : TestSeq :=
     Properties.phaseNoOpWitnesses.foldr
       (fun (nameAndWitness : String × StrataGenerators.PhaseChangedFlag.NoOpWitness) rest =>
@@ -253,10 +234,10 @@ def main (args : List String) : IO UInt32 := do
   -- are closed `Bool`s (a `bitvec 128` literal; the eighteen `Bv↔Int` conversion
   -- operators), and the whole-program property quantifies over `GenProgram` — the
   -- same wrapper as `programSuite`, so its counterexamples shrink whenever the
-  -- draw typechecks. All three FAIL honestly: the printer substitutes a
-  -- placeholder and logs an error instead of failing, so an unprintable construct
-  -- can round-trip as a *different* program. See `printerErrorDiagnostic` below
-  -- for which constructs are responsible.
+  -- draw typechecks. The printer substitutes a placeholder and logs an error
+  -- instead of failing, so an unprintable construct can round-trip as a *different*
+  -- program. See `printerErrorDiagnostic` below for which constructs are
+  -- responsible.
   let printerSuite : TestSeq :=
     Properties.printerWitnesses.foldr
       (fun (nameAndCheck : String × Bool) rest =>
@@ -275,20 +256,8 @@ def main (args : List String) : IO UInt32 := do
   -- program — needed because three of the passes read a declaration other than a
   -- procedure — and counterexamples are minimized by the whole-program shrinker.
   --
-  -- SEVERAL FAIL honestly. Four are the defects the bug report files
-  -- (`docs/strata-unproven-transform-bugs.md`): `loop: LoopElim mints distinct block
-  -- labels` (the pass puts one `loopElim_havoc_{n}` block statement into its output
-  -- two times); `procInline: inlining introduces no duplicate label` (the wrapper
-  -- label reaches no counter, and the label renaming sits inside the fold over
-  -- `var_map`); `procInline: the output typechecks` (an `old x` expression is copied
-  -- verbatim while `x` is renamed); and `procInline: symbolic evaluation loses no
-  -- obligation` (the callee's `requires` is dropped — the unsound one).
-  -- The three `procInline` ones are rare on generated input, so a short run
-  -- may show them green.
-  --
-  -- The two `s2u:` failures — `every block is reachable from the entry` and `a
-  -- cfg-bodied procedure prints` — are expected red ticks that the report
-  -- deliberately does NOT file as defects. Do not read them as findings.
+  -- The three `procInline` properties are rare on generated input, so a short run
+  -- may not reach them.
   --
   -- `CommonSubexprElim` fires on 0 of 200 generated programs, since no generated
   -- body holds a duplicated subexpression, so all four CSE properties are vacuous
@@ -297,9 +266,9 @@ def main (args : List String) : IO UInt32 := do
   -- The last three (`loop:`/`nondetElim:`/`hoist: symbolic evaluation loses no
   -- obligation`, §2.9) run each loop pass through `LoopElim` — the evaluator refuses
   -- a loop — and then through Strata's symbolic evaluator, comparing the obligations
-  -- it emits against the same chain without the pass. All three PASS on generated
-  -- input (live on 390 of 400 draws), and they are what found the eighth defect,
-  -- which is in the **evaluator** rather than in any pass: a nondeterministic guard
+  -- it emits against the same chain without the pass. All three are live on 390 of
+  -- 400 draws, and they are what found the eighth defect, which is in the
+  -- **evaluator** rather than in any pass: a nondeterministic guard
   -- is named after the current path-condition depth instead of by a counter, so a
   -- second `if *` at the same depth silently drops every obligation to the end of
   -- the procedure (`docs/strata-symbolic-eval-nondet-collision.md`). It surfaced as
@@ -319,19 +288,9 @@ def main (args : List String) : IO UInt32 := do
   -- and every property would be vacuous — and sweeps the fifteen shapes of
   -- `LiftFuncDecls.allScenarios`.
   --
-  -- THREE FAIL, deterministically (0 of 20 draws), on 6 of the 15 shapes.
-  -- `lift: the output typechecks` and `lift: every snapshot is used in scope` are one
-  -- defect seen two ways — a `funcDecl` nested in a `block`/`ite`/`loop` and called
-  -- outside it has its function hoisted while its snapshot `init` stays behind, so
-  -- the rewritten call site names an out-of-scope variable and the typechecker
-  -- rejects an output whose input it accepted (`docs/strata-lift-funcdecls-bugs.md`).
-  -- `lift: the minted snapshot names are fresh` is the documented `$__liftfncl`
-  -- prefix assumption — the counter never reads a program identifier, the same
-  -- defect class as `cse: the fresh names are fresh`.
-  --
   -- `lift: the injected declaration is really lifted` is coverage, not a claim about
-  -- the pass: it is what keeps the other twelve honest, since each of them skips a
-  -- run the pass refused.
+  -- the pass: it is what keeps the other twelve meaningful, since each of them skips
+  -- a run the pass refused.
   let liftSuite : TestSeq :=
     Properties.liftFuncDecls.foldr
       (fun p rest => checkIO p.name

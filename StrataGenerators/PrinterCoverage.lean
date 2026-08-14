@@ -132,19 +132,10 @@ def printsWithoutError (prog : Program) : Bool :=
 
 -- ── The whole-program property ────────────────────────────────────────────
 
-/-- **HONEST FAILURE (~50% of programs at the shared `GenProgram` bounds, ~86% at
-    `numDecls = 6`) — the printer cannot express constructs the generator
-    legitimately produces.** Every declaration here is well-typed
-    by construction (`genProgram` maintains that invariant and the harness
-    re-checks it), so an inexpressible construct is a printer gap, not an invalid
-    input.
-
-    Known contributors, each independently confirmed: `bitvec` widths outside
-    `{1, 8, 16, 32, 64}` including **`bitvec 128`** (see `checkBv128LiteralPrints`);
-    the entire `Bv↔Int` family at **every** width (see `checkBvIntConversionsPrint`);
-    bodiless `funcDecl` statements (`funcDeclToStatement`, already documented in
-    `FunctionHasTypeAGen/Roundtrip.lean`); and quantifier triggers over operators
-    `extractTriggerPatterns` does not enumerate. -/
+/-- **The printer can express every construct the generator produces.** Every
+    declaration here is well-typed by construction (`genProgram` maintains that
+    invariant and the harness re-checks it), so an inexpressible construct is a
+    printer gap, not an invalid input. -/
 def checkProgramPrintsWithoutError (prog : Program) : Bool :=
   printsWithoutError prog
 
@@ -183,14 +174,13 @@ def bvLit (w : Nat) : Expression.Expr :=
     each registered width by the same function the property applies at 128. -/
 def checkBvLitPrints (w : Nat) : Bool := exprPrintsCleanly (bvLit w)
 
-/-- **HONEST FAILURE — pins finding (1).** A `bitvec 128` literal is registered by
-    the factory and has a grammar production (`bv128Lit`, `Grammar.lean`), but
-    `lconstToExpr` logs `unsupported bitvec width: 128`. Every *other* registered
-    width prints, which is what makes 128 an omission rather than a design
+/-- **A `bitvec 128` literal prints.** It is registered by the factory and has a
+    grammar production (`bv128Lit`, `Grammar.lean`). Every *other* registered width
+    prints, which is what would make 128 an omission rather than a design
     boundary. -/
 def checkBv128LiteralPrints : Bool := checkBvLitPrints 128
 
-/-- The registered widths whose literals fail to print. Expected: `[128]`. -/
+/-- The registered widths whose literals do not print. -/
 def unprintableBvLiteralWidths : List Nat :=
   factoryBvWidths.filter (fun w => !checkBvLitPrints w)
 
@@ -216,15 +206,14 @@ def unaryApp (name : String) : Expression.Expr :=
     it is *every* width and *every* direction. -/
 def checkBvIntConversionPrints (op : String) : Bool := exprPrintsCleanly (unaryApp op)
 
-/-- **HONEST FAILURE — pins finding (2).** Not one of the eighteen registered
-    `Bv↔Int` conversion operators is printable, at any width. This is the
-    systematic half of the report: `handleUnaryOps` enumerates `.Not`, `.Neg`,
-    `SafeNeg`, the overflow predicates and nine `bvExtract` shapes, but has no arm
-    for the conversions, so all of them fall through to `mkGenericCall`. -/
+/-- **Every registered `Bv↔Int` conversion operator is printable, at every width.**
+    `handleUnaryOps` enumerates `.Not`, `.Neg`, `SafeNeg`, the overflow predicates
+    and nine `bvExtract` shapes; anything it has no arm for falls through to
+    `mkGenericCall`. -/
 def checkBvIntConversionsPrint : Bool :=
   allBvIntConversionOps.all checkBvIntConversionPrints
 
-/-- The `Bv↔Int` conversion operators that fail to print. Expected: **all 18**. -/
+/-- The `Bv↔Int` conversion operators that do not print. -/
 def unprintableBvIntConversions : List String :=
   allBvIntConversionOps.filter (fun op => !checkBvIntConversionPrints op)
 
@@ -307,17 +296,16 @@ def widthTypeChecks (w : Nat) : Bool :=
 def widthPrintsCleanly (w : Nat) : Bool :=
   (strataErrorLines (formatFuncAsProgram (bvIdentityFunc w))).isEmpty
 
-/-- **The width-agreement property, HONEST FAILURE.** Every width the *typechecker*
+/-- **The width-agreement property.** Every width the *typechecker*
     accepts should be one the *printer* can express: a program Strata admits should be a
     program Strata can write down.
 
     Stated as an implication (`typechecks → prints`) rather than as an equality
     with `printableBvWidths`, so it is a claim about Strata's own consistency
-    rather than a restatement of the printer's arm list. It fails for every width
-    outside `[1, 8, 16, 32, 64]`.
+    rather than a restatement of the printer's arm list.
 
     Quantified over a width rather than over a generated function because the
-    defect is a property *of the width*: `genLMonoTyBitvec` draws from
+    property is one *of the width*: `genLMonoTyBitvec` draws from
     `Nat.arbitrary` (`HasTypeAGen/Core.lean`), which samples every width, so the
     whole-program property above already covers this space —
     but a generated hit does not say *which* width is at fault. This does. -/
@@ -329,7 +317,7 @@ def checkWidthTypeCheckPrinterAgreement (w : Nat) : Bool :=
 def divergentBvWidths (bound : Nat) : List Nat :=
   (List.range bound).filter (fun w => !checkWidthTypeCheckPrinterAgreement w)
 
-/-- **HONEST FAILURE — the width-agreement claim as one closed `Bool`**, over `0..63`
+/-- **The width-agreement claim as one closed `Bool`**, over `0..63`
     (enough to include several powers of two and both parities, while staying
     cheap: each width runs `Function.typeCheck` plus a format). -/
 def checkAllWidthsAgree : Bool :=

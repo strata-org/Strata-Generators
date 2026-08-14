@@ -91,13 +91,12 @@ def main (args : List String) : IO UInt32 := do
         (∀ te : ResolveTypedExpr, prop_resolve_after_erase te) cfg,
       -- This property needs no solver, because its oracle is "printable ASCII",
       -- which is the requirement of SMT-LIB itself. Therefore it runs always, and
-      -- not under `--smt`. EXPECT IT TO FAIL until somebody corrects the SMT
-      -- escape function.
+      -- not under `--smt`.
       runIOProperty PropertyNames.exprSmtStringEscaping
         (StrataGenerators.SmtStringEscaping.escapingAction numTrials),
       -- Two unit properties about the `Rat`/`Decimal` boundary. Each needs no
       -- solver, because each states an invariant of a pure function in the SMT
-      -- dialect. EXPECT BOTH TO FAIL until `Factory.eq` compares a real by value.
+      -- dialect.
       runIOProperty PropertyNames.realDecimalEqFold
         (StrataGenerators.DecimalAgreement.eqFoldAction numTrials),
       runIOProperty PropertyNames.realDecimalTrichotomy
@@ -133,8 +132,8 @@ def main (args : List String) : IO UInt32 := do
       -- Property 3: type preservation under evaluation
       runProperty PropertyNames.fnBodyPreservation
         (∀ gf : ClosedGenFunction, prop_function_body_preservation gf) cfg,
-      -- Function typechecker completeness. FAILS on the measure-without-body gap
-      -- (spec permits it, algorithm rejects it), asserted honestly as a real failure.
+      -- Function typechecker completeness — the measure-without-body gap (the spec
+      -- permits it, the algorithm rejects it).
       runProperty PropertyNames.fnTypeCheckComplete
         (∀ gf : ClosedGenFunction, prop_function_typeCheck_complete gf) cfg,
       -- Every typeCheck rejection is a measure-without-body function (pins the gap).
@@ -146,8 +145,7 @@ def main (args : List String) : IO UInt32 := do
 
   -- Statement-generator properties (transforms + typechecker). The six transform
   -- / typechecker properties are folded from the shared
-  -- `Properties.stmtTransforms` bundle. Typechecker completeness FAILS honestly on
-  -- the funcDecl gap. Kleene definedness is stated directly.
+  -- `Properties.stmtTransforms` bundle. Kleene definedness is stated directly.
   let stmtSuite : List (IO Result) :=
     Properties.stmtTransforms.map
       (fun p => runProperty p.name
@@ -157,11 +155,7 @@ def main (args : List String) : IO UInt32 := do
 
   -- Procedure-generator ↔ transform-pass properties, folded from the shared
   -- `Properties.procTransforms` bundle (same twenty-eight checks as `TestMain`,
-  -- one per named field of the three `*PhaseCorrect` specs). Four FAIL honestly:
-  -- the hardcoded-`changed` bug in FilterProcedures, the `.funcDecl`-branch
-  -- `changed` bug in PrecondElim, and the two factory-stripping properties (an
-  -- unsatisfiable spec field, plus the pass pushing unstripped functions into the
-  -- factory).
+  -- one per named field of the three `*PhaseCorrect` specs).
   let procSuite : List (IO Result) :=
     Properties.procTransforms.map
       (fun p => runProperty p.name
@@ -171,14 +165,10 @@ def main (args : List String) : IO UInt32 := do
   -- `Properties.programChecks` and `Properties.programADTProps` bundles (the same
   -- ten checks as `TestMain`).
   -- Counterexamples are minimized by the whole-program shrinker, which keeps every
-  -- candidate well-typed via Strata's own `Program.typeCheck`. Two checks FAIL
-  -- honestly: `typechecker accepts generated programs` on any of three documented
-  -- rejection causes, and `typeCheck output re-typechecks` intermittently (~1 draw
-  -- in 500, and unlike the former its witness does shrink). The four
-  -- `programADTProps` checks all pass: they watch the across-declaration
-  -- ADT-derived-call path (a body calling the constructors, testers and accessors of
-  -- a datatype declared earlier) and, being unconditional, stay non-vacuous on a
-  -- gap-bearing draw.
+  -- candidate well-typed via Strata's own `Program.typeCheck`. The four
+  -- `programADTProps` checks watch the across-declaration ADT-derived-call path (a
+  -- body calling the constructors, testers and accessors of a datatype declared
+  -- earlier) and, being unconditional, stay non-vacuous on a gap-bearing draw.
   let programSuite : List (IO Result) :=
     (Properties.programChecks ++ Properties.programADTProps).map
       (fun p => runProperty p.name
@@ -187,12 +177,11 @@ def main (args : List String) : IO UInt32 := do
   -- Pipeline-phase `changed`-flag properties. The two no-op witnesses take no
   -- generated input (each is a constructed program on which the phase provably
   -- cannot change anything), so they run as `runUnitProperty`; the two sweeps over
-  -- generated procedure lists are folded like `procTransforms`. Three of the four
-  -- FAIL honestly, pinning the four hardcoded-`changed := true` sites
-  -- (`FilterProcedures.lean`, `IrrelevantAxioms.lean`, and the two in
-  -- `Verifier.lean`). `phase: non-hardcoded pipeline phases have a faithful changed
-  -- flag` is the one expected to PASS — the regression guard on the phases that
-  -- compute the flag correctly today.
+  -- generated procedure lists are folded like `procTransforms`. The first three pin
+  -- the four hardcoded-`changed := true` sites (`FilterProcedures.lean`,
+  -- `IrrelevantAxioms.lean`, and the two in `Verifier.lean`); `phase: non-hardcoded
+  -- pipeline phases have a faithful changed flag` is the regression guard on the
+  -- phases that compute the flag correctly today.
   let phaseSuite : List (IO Result) :=
     Properties.phaseNoOpWitnesses.map
       (fun (nw : String × StrataGenerators.PhaseChangedFlag.NoOpWitness) =>
@@ -204,9 +193,9 @@ def main (args : List String) : IO UInt32 := do
   -- Printer-expressiveness properties. Two targeted witnesses (a
   -- `bitvec 128` literal; the eighteen `Bv↔Int` conversion operators) plus the
   -- whole-program property over `GenProgram` — the same wrapper as `programSuite`,
-  -- so its counterexamples shrink whenever the draw typechecks. All three FAIL
-  -- honestly: the printer substitutes a placeholder and logs an error instead of
-  -- failing, so an unprintable construct can round-trip as a *different* program.
+  -- so its counterexamples shrink whenever the draw typechecks. The printer
+  -- substitutes a placeholder and logs an error instead of failing, so an
+  -- unprintable construct can round-trip as a *different* program.
   -- See `printerErrorDiagnostic` below for which constructs are responsible.
   let printerSuite : List (IO Result) :=
     Properties.printerWitnesses.map
@@ -220,20 +209,13 @@ def main (args : List String) : IO UInt32 := do
   --, folded from the shared `Properties.unprovenTransforms` bundle (the
   -- same forty-five checks as `TestMain`). Each runs its pass on a whole generated
   -- program; counterexamples shrink through the same whole-program shrinker.
-  -- The four defects the bug report files all show up here as honest failures:
-  -- `loop: LoopElim mints distinct block labels` (the pass emits one minted label two
-  -- times), `procInline: inlining introduces no duplicate label` (two independent
-  -- causes), `procInline: the output typechecks` (an `old x` expression escapes the
-  -- renaming) and `procInline: symbolic evaluation loses no obligation` (the callee's
-  -- `requires` is dropped — the unsound one). The `procInline` three
-  -- are rare on generated input, so a short run may show them green. The two `s2u:`
-  -- failures (`every block is reachable from the entry`, `a cfg-bodied procedure
-  -- prints`) are expected red ticks the report does NOT file as defects.
+  -- The three `procInline` properties are rare on generated input, so a short run
+  -- may not reach them.
   -- `CommonSubexprElim` fires on 0 of 200 generated programs, so all four CSE
   -- properties are vacuous here and `#guard`s test them instead.
   -- The last three (`… symbolic evaluation loses no obligation`, §2.9) run each of
   -- `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` through `LoopElim`
-  -- and then Strata's symbolic evaluator; all three pass, and they found the eighth
+  -- and then Strata's symbolic evaluator; they found the eighth
   -- defect — in the evaluator, not the passes
   -- (`docs/strata-symbolic-eval-nondet-collision.md`).
   let unprovenSuite : List (IO Result) :=
@@ -245,11 +227,7 @@ def main (args : List String) : IO UInt32 := do
   -- shared `Properties.liftFuncDecls` bundle — the same checks as `TestMain`. Each
   -- injects a capturing internal function into the generated program, since
   -- `genFuncDeclStmt` draws its bodies with `genFunction []` and so every generated
-  -- `funcDecl` is closed. THREE FAIL deterministically: `lift: the output
-  -- typechecks` and `lift: every snapshot is used in scope` are one defect (the
-  -- snapshot `init` is left in a nested scope while the function is hoisted out of
-  -- it — `docs/strata-lift-funcdecls-bugs.md`), and `lift: the minted snapshot names
-  -- are fresh` is the documented `$__liftfncl` prefix assumption.
+  -- `funcDecl` is closed.
   let liftSuite : List (IO Result) :=
     Properties.liftFuncDecls.map
       (fun p => runProperty p.name

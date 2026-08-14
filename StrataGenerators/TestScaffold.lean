@@ -491,8 +491,8 @@ def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
 -- analogue of exactly this.
 
 open StrataGenerators.Stmt.TestSupport in
--- Completeness: the typechecker accepts every generated function. FAILS on the
--- measure-without-body gap — asserted honestly, so a real failure is reported.
+-- Completeness: the typechecker accepts every generated function. Asserted
+-- unweakened, so the measure-without-body gap is reported rather than masked.
 @[reducible] def prop_function_typeCheck_complete (gf : ClosedGenFunction) : Prop :=
   checkFunctionTypeCheckerComplete gf.func = true
 
@@ -649,11 +649,11 @@ instance : Arbitrary GenProcs where
 -- PrecondElim, four ANFEncoder) are defined by the shared
 -- `Properties.procTransforms` bundle, so they are folded directly into
 -- `procSuite` below rather than restated as `prop_*` wrappers here. Two of them
--- are EXPECTED to fail, each stating a faithful `changed ↔ program changed`
--- contract that the pass genuinely violates: `proc: FilterProcedures changed flag
--- is faithful` (the pass hardcodes `changed := true` even when it removes
--- nothing) and `proc: PrecondElim changed flag is faithful` (the `.funcDecl`
--- branch reports unchanged while inserting a `$$wf` block).
+-- state a faithful `changed ↔ program changed` contract that the pass violates:
+-- `proc: FilterProcedures changed flag is faithful` (the pass hardcodes
+-- `changed := true` even when it removes nothing) and `proc: PrecondElim changed
+-- flag is faithful` (the `.funcDecl` branch reports unchanged while inserting a
+-- `$$wf` block).
 
 -- ── Whole-program generation via Plausible.Gen ─────────────────────────
 --

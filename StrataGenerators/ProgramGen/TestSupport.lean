@@ -28,8 +28,7 @@ ADT work and are not defects in it:
 * `Function 'f': a decreases clause was supplied but the function has no body` —
   `genFunction` draws `body` and `measure` independently, so a bodiless function
   can carry a measure. This is the known function-typechecker-completeness gap
-  the function suite already pins as an honest failure
-  (`prop_function_rejection_only_measure`).
+  the function suite already pins (`prop_function_rejection_only_measure`).
 * `Cannot find this fvar in the context! v` — `genDistinct` emits fresh
   *variables*, which the declarative spec accepts (it asks only for
   `∃ mty, HasTypeA [] e mty`, and an annotated `fvar` supplies it) but the

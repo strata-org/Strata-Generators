@@ -70,38 +70,17 @@ def exprResolveAfterErase : String := "expr: resolve after type erasure"
 /-- Opt-in (`--smt`); requires a live SMT solver. Ported from
     `StrataTest/Languages/Core/Tests/ExprEvalTest.lean`. -/
 def exprSmtEvalAgreement  : String := "expr: SMT/concrete eval agreement (closed)"
-/-- **FAILS honestly.** The SMT-LIB escape function `escapeSMTStringLit` has a
-    guard that is a predicate for *8-bit* printability. Therefore it gives each
-    codepoint of U+00A1 or more as raw UTF-8. cvc5 rejects such a literal outright,
-    and z3 measures it incorrectly, because `str.len` counts bytes and not
-    codepoints. The property needs no solver, because its oracle is "the emitted
-    literal is printable ASCII", which is the requirement of SMT-LIB 2.6+ itself.
-    Thus the property runs in the default suite, and nobody can skip it. It is
-    non-vacuous only because `genInterestingString` draws non-ASCII characters.
-    Under `String.arbitrary` of Basalt, which is alphanumeric only, the property
-    passes on each input, and that is how the defect stayed unknown. The property
-    must turn green after a correction to the escape function. -/
+/-- The oracle is "the emitted literal is printable ASCII", which is the
+    requirement of SMT-LIB 2.6+ itself, so the property needs no solver and runs in
+    the default suite. It is non-vacuous only because `genInterestingString` draws
+    non-ASCII characters; under Basalt's alphanumeric `String.arbitrary` it would
+    not be. -/
 def exprSmtStringEscaping : String := "expr: SMT string literals are printable ASCII"
 
-/-- **FAILS honestly.** `Factory.eq` folds a comparison of two literals by
-    *structural* equality, and `Decimal`, the representation of a real in the SMT
-    dialect, has no normal form. Therefore two spellings of one value, such as
-    `3e0` and `30e-1`, fold to `false`, which puts a false fact into the term. The
-    path for `Int` is correct, because `Int` is canonical, and `eq_correct_int`
-    proves it. There is no `eq_correct_real`. The property needs no solver. It is
-    non-vacuous only because the generator builds a second spelling of one value; a
-    pair of independent draws is almost never equal. The defect is **latent**: each
-    real literal of Core reaches SMT through `Decimal.fromRat`, which normalizes,
-    so no path in Strata reaches it today. -/
+/-- The property needs no solver. It is non-vacuous only because the generator
+    builds a second spelling of one value; a pair of independent draws is almost
+    never equal. -/
 def realDecimalEqFold : String := "real: Decimal eq fold agrees with value equality"
-/-- **FAILS honestly.** `Factory.eq` on a real is structural, but `TermPrim.lt` is
-    by value. Therefore, for two spellings of one value, each of `lt` in both
-    directions and the fold of `eq` is `false`, so no one of the three holds and
-    the comparator is not a total order. One correction fixes this and
-    [[realDecimalEqFold]]: make `eq` compare by value. Normalization of `Decimal`
-    fixes the fold alone, and leaves `eq` and `lt` on different notions of
-    equality. Latent for the same reason, and `TermPrim.lt` has no caller in the
-    tree. -/
 def realDecimalTrichotomy : String := "real: Decimal comparator is a total order"
 
 -- ── Command-generator properties ─────────────────────────────────────
@@ -138,18 +117,6 @@ def stmtMapExprsId         : String := "stmt: mapExprs id = id"
 -- three `*PhaseCorrect` structures in `Strata/Transform/CustomSpecifications.lean`
 -- — including the `ChangedFlagValid` and `PreservesCachedAnalysesWF` fields shared
 -- by all three — so the coverage of those specs is complete rather than partial.
--- FOUR of these FAIL honestly, pinning real defects rather than masking them:
---   * `procFilterChangedFlag` — FilterProcedures hardcodes `changed := true` even
---     when it removes nothing;
---   * `procPrecondChangedFlag` — PrecondElim's `.funcDecl` branch inserts a `$$wf`
---     block for obligations in a declared function's *body* while deriving
---     `changed` only from the declaration's own preconditions;
---   * `procPrecondFactoryStripped` — the field as written is unsatisfiable for a
---     realistically seeded run: `Core.Factory`'s 58 partial builtins keep the very
---     preconditions the pass exists to discharge (a spec bug);
---   * `procPrecondDeclaredFactoryStripped` — the same claim restricted to the
---     program's *own* declarations, which isolates the pass-side cause: each
---     declared function is pushed into the factory before being stripped.
 -- See the module doc of `ProcedureHasTypeAGen/TestSupport` for the full analysis
 -- and for which properties run on the mixed-declaration program shape.
 
@@ -196,22 +163,17 @@ def procAnfAnalysisPreserved : String := "proc: ANFEncoder preserves call-graph 
 -- individually; these state the contract *uniformly over a phase list*, so a
 -- phase added later is covered without a new property being written.
 
-/-- **FAILS honestly.** `RemoveIrrelevantAxioms` on a program with no axioms at
-    all cannot prune anything, yet `IrrelevantAxioms.lean` returns
-    `(true, pruned)` unconditionally. -/
 def phaseIrrelevantAxiomsNoOp : String :=
   "phase: RemoveIrrelevantAxioms changed flag is faithful on a no-op"
-/-- **FAILS honestly.** Restates the already-reported `FilterProcedures` bug on a
-    constructed all-targets witness, so the uniform sweep is self-contained. -/
 def phaseFilterNoOp : String :=
   "phase: FilterProcedures changed flag is faithful on a no-op"
-/-- **FAILS honestly.** Uniform sweep over every phase of `corePipelinePhases`
-    plus `RemoveIrrelevantAxioms`; red while any of the four known sites stands.
-    This is the regression gate that catches a *newly added* hardcoding phase. -/
+/-- Uniform sweep over every phase of `corePipelinePhases` plus
+    `RemoveIrrelevantAxioms`. This is the regression gate that catches a *newly
+    added* hardcoding phase. -/
 def phaseAllChangedFlag : String :=
   "phase: every pipeline phase has a faithful changed flag"
-/-- Every phase *except* the four known hardcoded-`true` sites. Expected to PASS;
-    it is what guards the honestly-computing phases against regression. -/
+/-- Every phase *except* the four known hardcoded-`true` sites; it is what guards
+    the honestly-computing phases against regression. -/
 def phaseHonestChangedFlag : String :=
   "phase: non-hardcoded pipeline phases have a faithful changed flag"
 
@@ -219,39 +181,22 @@ def phaseHonestChangedFlag : String :=
 -- See `StrataGenerators.PrinterCoverage`. The oracle is "the printer logged no
 -- conversion error", which needs no parser and names the offending construct.
 
-/-- **FAILS honestly (~50% of programs at the `GenProgram` bounds; ~86% at
-    `numDecls = 6`).** `Core.formatProgram` substitutes a placeholder and logs an
-    error rather than failing, so an unprintable construct can round-trip
-    "successfully" as a *different* program. -/
 def printerNoConversionError : String :=
   "printer: no conversion error on generated programs"
-/-- **FAILS honestly.** `bitvec 128` is factory-registered with a grammar
-    production, but `lconstToExpr` logs `unsupported bitvec width: 128`. -/
 def printerBv128Literal : String :=
   "printer: bitvec 128 literals are printable"
-/-- **FAILS honestly (18/18).** No `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}`
-    is printable at any registered width — no grammar production, no printer arm. -/
 def printerBvIntConversions : String :=
   "printer: Bv/Int conversion operators are printable"
-/-- **FAILS honestly (60/64 widths).** `Function.typeCheck`
-    accepts `bitvec w` for every `w`, but the printer supports exactly
-    `[1, 8, 16, 32, 64]`. Note this is *not* the powers of two: `2`, `4` and `128`
-    all typecheck and all fail to print. -/
 def printerBvWidthAgreement : String :=
   "printer: every typecheckable bitvec width is printable"
 
 -- ── Whole-program-generator properties ───────────────────────────────
 -- `genProgram` produces a whole `Program` (every declaration kind, real ambient
 -- context threaded across the fold) and is proven sound against `ProgramHasTypeA`.
--- The first property below therefore SHOULD hold and FAILS honestly, on either of
--- two reachable rejection causes (the third classified cause, `distinct-fvar`, is
--- unreachable from `genProgram`); the second pins the classified
--- causes as the complete list; the remaining four are invariants of a well-typed
--- program, three of which hold while `programTypeCheckIdem` fails intermittently.
--- See the module doc of `ProgramGen/Shrink`.
+-- The first property below states that the typechecker accepts them; the second
+-- pins the classified rejection causes as the complete list; the remaining four are
+-- invariants of a well-typed program. See the module doc of `ProgramGen/Shrink`.
 
-/-- **FAILS honestly** (~40% of draws) on the program-level completeness gaps:
-    measure-without-body and the hypothetical `corePolyOps` schemes. -/
 def programTypecheck : String := "program: typechecker accepts generated programs"
 def programRejectionKnownGap : String :=
   "program: typechecker rejections are only the known gaps"
@@ -260,9 +205,6 @@ def programRejectionKnownGap : String :=
 -- — unlike `programTypecheck` — a counterexample to any of them IS shrinkable,
 -- since its failure does not depend on the oracle rejecting the program.
 def programNamesNodup      : String := "program: getNames of a well-typed program are distinct"
-/-- **FAILS intermittently** (~1 in 500 single-function draws): the checker's output
-    keeps a freshened type variable for a type parameter used only in a body binder
-    annotation, while restoring `typeArgs` without it. -/
 def programTypeCheckIdem   : String := "program: typeCheck output re-typechecks"
 def programStripMeta       : String := "program: stripMetaData preserves typeability"
 def programEraseTypes      : String := "program: eraseTypes preserves typeability"
@@ -296,14 +238,10 @@ def programDerivedOrdered  : String := "program: ADT calls follow the datatype d
 -- body for `FunctionInlining`) are exercised on real input rather than on a
 -- statement list that cannot express them.
 --
--- EIGHT of these FAIL, and the failures split two ways. FOUR are the defects the
--- bug report files (`docs/strata-unproven-transform-bugs.md`), all on generated
--- input: `loopBlockLabelsNodup`, `inlineProcLabelsNodup`, `inlineProcTypechecks` and
--- `inlineProcSymbolicAgreement` (the unsound one). The other four are red ticks the
--- report deliberately does NOT file as defects: the two `s2u:` failures, and the two
--- `cse:` ones, which need a hand-built body at all — `CommonSubexprElim` fires on 0
--- of 200 generated programs, since no generated body holds a duplicated
--- subexpression. See `ProgramGen/UnprovenTransforms` for the analysis of each.
+-- `CommonSubexprElim` fires on 0 of 200 generated programs, since no generated
+-- body holds a duplicated subexpression, so the two `cse:` properties that need a
+-- duplicate are pinned by a hand-built body instead. See
+-- `ProgramGen/UnprovenTransforms` for the analysis of each.
 
 -- IrrelevantAxioms — the relevance oracle (the `changed` flag is covered separately)
 def axiomsOnlyAxRemoved      : String := "axioms: IrrelevantAxioms removes only axioms"
@@ -326,14 +264,8 @@ def s2uNoDanglingLabel : String := "s2u: every goto target is a block label"
 def s2uLabelsNodup     : String := "s2u: block labels are distinct"
 def s2uEntryExists     : String := "s2u: the entry label exists"
 def s2uOneFinish       : String := "s2u: exactly one finish block"
-/-- **FAILS honestly** (10 of 40 draws): every source `.block l` becomes an
-    unreachable block, because the pass gives `l` a landing site for an `.exit l`
-    and returns a different entry. -/
 def s2uAllReachable    : String := "s2u: every block is reachable from the entry"
 def s2uCmdCountGrows   : String := "s2u: the command count does not shrink"
-/-- **FAILS honestly** (31 of 40 draws): `procToCST` logs "CFG bodies not yet
-    supported" and emits an empty body. This pass is the only route to a `.cfg`
-    body, so no other property can reach the hole. -/
 def s2uCfgPrintable    : String := "s2u: a cfg-bodied procedure prints"
 
 -- DetToKleene — the measure the transform silently drops
@@ -347,25 +279,18 @@ def loopVcIdempotent      : String := "loop: InsertLoopInvariantAsserts is idemp
 def loopVcStatFaithful    : String := "loop: insertedAssertAssumes is faithful"
 def loopVcSurvivesElim    : String := "loop: no verification condition is lost through LoopElim"
 def loopNondetMeasure     : String := "loop: a nondet loop with a measure is rejected"
-/-- **FAILS honestly** (4 of 40 draws): `LoopElim` puts one `loopElim_havoc_{n}`
-    block statement into its output two times, so two blocks share a label. -/
 def loopBlockLabelsNodup  : String := "loop: LoopElim mints distinct block labels"
 def loopElimStatFaithful  : String := "loop: erasedLoops is faithful"
 
 -- CommonSubexprElim — fresh names and ordering. All four are VACUOUS on generated
 -- input: CSE fires on 0 of 200 draws, since no generated body holds a duplicated
 -- subexpression. `#guard`s pin each one on a hand-built body that does.
-/-- **FAILS honestly** on a body that already declares `$__cse.0`: the pass declares
-    the name a second time. -/
 def cseFreshNamesFresh      : String := "cse: no fresh name is declared twice"
 def cseAssertLabelsPreserved : String := "cse: the assert labels are preserved"
 /-- The order claim, and not "bound before its first use": stating the latter
     exactly needs a scope-aware traversal. `cseOutputTypechecks` covers part of it,
     since the checker rejects a reference that precedes its declaration. -/
 def cseFreshDeclOrder       : String := "cse: the fresh declarations are in index order"
-/-- **FAILS honestly** when the extracted subexpression's operator carries no type
-    annotation: `LExpr.typeOf` gives `none` and the pass falls back to a polymorphic
-    `∀α. α` annotation, which the typechecker forbids in variable position. -/
 def cseOutputTypechecks     : String := "cse: the output typechecks"
 
 -- FunctionInlining — a pure expression transform
@@ -380,24 +305,15 @@ def inlineCaptureFree      : String := "funcInline: no free variable is introduc
 def inlineEvalAgreement    : String := "funcInline: evaluation agrees before/after inlining"
 
 -- ProcedureInlining — freshening of the labels
-/-- **FAILS honestly** (2 of 400 draws) on two call sites of one procedure, for two
-    independent reasons: the wrapper label `procName ++ "$inlined"` reaches no
-    counter, and the label renaming sits inside the fold over `var_map`, so a callee
-    with no variable keeps its labels. -/
 def inlineProcLabelsNodup      : String := "procInline: inlining introduces no duplicate label"
 def inlineProcAssertsNotLost   : String := "procInline: no assert is lost"
 def inlineProcStatsFaithful    : String := "procInline: visitedCalls and inlinedCalls are faithful"
-/-- **FAILS honestly** (1 of 400 draws): an `old x` expression is copied verbatim,
-    because `substFvar` runs over `var_map`, whose keys are the plain parameter
-    names, so `x` is renamed and `"old x"` is not. -/
 def inlineProcTypechecks       : String := "procInline: the output typechecks"
 def inlineProcAnalysisPreserved : String := "procInline: preserves call-graph WF"
-/-- **FAILS honestly, and it is the most serious finding in the set:**
-    `ProcedureInlining` silently discards the callee's `requires` obligation, so a
-    program that must fail verification becomes one that passes. Agreement is stated
-    under Strata's executable *symbolic* evaluator (the `symbolicEval` phase of
-    `corePipelinePhases`), as containment rather than equality, because inlining
-    duplicates the callee's obligations at each call site by design. -/
+/-- Agreement is stated under Strata's executable *symbolic* evaluator (the
+    `symbolicEval` phase of `corePipelinePhases`), as containment rather than
+    equality, because inlining duplicates the callee's obligations at each call site
+    by design. -/
 def inlineProcSymbolicAgreement : String :=
   "procInline: symbolic evaluation loses no obligation"
 
@@ -539,11 +455,7 @@ def stmtTransforms : List (Property (List Statement)) :=
     non-procedure-declaration fields are not vacuous — see
     `ProcedureHasTypeAGen/TestSupport`); the shapes are identical across both
     harnesses, so name↔check is paired once here.
-
-    All pass on generated input EXCEPT four, which fail honestly: the two
-    `*ChangedFlag` properties (real `changed`-flag bugs in FilterProcedures and
-    PrecondElim) and the two `*FactoryStripped` properties (an unsatisfiable spec
-    field, and the pass pushing unstripped functions into the factory). -/
+ -/
 def procTransforms : List (Property (List Core.Procedure)) :=
   [ -- FilterProcedures
     ⟨PropertyNames.procFilterDeclsSublist,      checkFilterDeclsSublist⟩,
@@ -584,9 +496,9 @@ def procTransforms : List (Property (List Core.Procedure)) :=
     same way; kept in a separate bundle because they sweep *phase lists* rather
     than testing one named pass.
 
-    `phaseAllChangedFlag` is expected to FAIL (`typeCheck` and `symbolicEval` are
-    in the swept list and both hardcode `true`); `phaseHonestChangedFlag` is
-    expected to PASS and is the actual regression guard. -/
+    `phaseAllChangedFlag` sweeps every phase, including `typeCheck` and
+    `symbolicEval`; `phaseHonestChangedFlag` sweeps only the rest and is the
+    regression guard. -/
 def phaseChangedFlags : List (Property (List Core.Procedure)) :=
   [ ⟨PropertyNames.phaseAllChangedFlag,
      StrataGenerators.PhaseChangedFlag.checkAllPhasesChangedFlag⟩,
@@ -622,11 +534,10 @@ def printerWitnesses : List (String × Bool) :=
      StrataGenerators.PrinterCoverage.checkAllWidthsAgree) ]
 
 /-- The six whole-program properties, each a generated `Program` scored by a shared
-    predicate. The first FAILS honestly on the three program-level completeness
-    gaps; the second pins those three as the complete list of causes; the last four
-    are invariants of a well-typed program (vacuous on a gap-bearing draw), three of
-    which hold while `programTypeCheckIdem` FAILS intermittently — the checker's own
-    output is not always re-checkable.
+    predicate. The first states that the typechecker accepts them; the second pins
+    the three program-level completeness gaps as the complete list of rejection
+    causes; the last four are invariants of a well-typed program (vacuous on a
+    gap-bearing draw).
 
     Counterexamples are minimized by the whole-program shrinker
     (`StrataGenerators.ProgramGen.Shrink`), which keeps every candidate well-typed
@@ -646,13 +557,11 @@ def programChecks : List (Property Core.Program) :=
 /-- **ADT-derived-call properties.** Both harnesses run the identical
     `Bool` check on a generated `Core.Program`, so name↔check is paired once here.
 
-    All four pass on generated input, and — unlike the five conditional invariants
-    in `programChecks` — they are *unconditional*: each is established by the fold
-    itself rather than by the typechecker accepting the draw, so they stay
-    non-vacuous on the ~60% of programs that trip one of the documented
-    completeness gaps. That is what makes them the checks that actually watch the
-    ADT-derived-call path; `programTypecheck` cannot, since it fails on those
-    draws for reasons unrelated to this generator. -/
+    Unlike the five conditional invariants in `programChecks`, these are
+    *unconditional*: each is established by the fold itself rather than by the
+    typechecker accepting the draw, so they stay non-vacuous on the ~60% of programs
+    that trip one of the documented completeness gaps. That is what makes them the
+    checks that actually watch the ADT-derived-call path. -/
 def programADTProps : List (Property Core.Program) :=
   [ ⟨PropertyNames.programAllNamesNodup,  checkNamesNodup⟩,
     ⟨PropertyNames.programBlocksAccepted, checkDatatypeBlocksAccepted⟩,
@@ -679,20 +588,8 @@ def programADTProps : List (Property Core.Program) :=
     property of a pass applied to a well-typed program, so a smaller well-typed
     witness exists and the minimizer reports it.
 
-    EIGHT fail. FOUR are the defects the bug report files, all on generated input:
-    `loopBlockLabelsNodup` (`LoopElim` emits one minted label two times),
-    `inlineProcLabelsNodup` (`ProcedureInlining` gives two call sites the same
-    labels, for two independent reasons), `inlineProcTypechecks` (an `old x`
-    expression escapes the renaming) and `inlineProcSymbolicAgreement` (the callee's
-    `requires` obligation is dropped — unsound, and the pass claims to be
-    model-preserving).
-
-    The other four are red ticks the report deliberately does NOT file as defects:
-    `s2uAllReachable` (every source `.block` becomes an orphan) and `s2uCfgPrintable`
-    (a `.cfg` body does not print), plus `cseOutputTypechecks` (a polymorphic
-    annotation for an unannotated subexpression) and `cseFreshNamesFresh` (a
-    redeclared `$__cse.0`) — the last two only under a `#guard`, since
-    `CommonSubexprElim` fires on no generated program at all. -/
+    `cseOutputTypechecks` and `cseFreshNamesFresh` are reachable only under a
+    `#guard`, since `CommonSubexprElim` fires on no generated program at all. -/
 def unprovenTransforms : List (Property Core.Program) :=
   [ -- IrrelevantAxioms (§2.1) — the relevance oracle
     ⟨PropertyNames.axiomsOnlyAxRemoved,      checkAxiomsOnlyAxRemoved⟩,
@@ -759,22 +656,9 @@ def unprovenTransforms : List (Property Core.Program) :=
     Only `LiftInternalFuncDeclsCorrect.lean`'s `run_noFuncDecl` is proved upstream
     (that is `liftNoResidualDecl`); the other twelve claims are unproved.
 
-    THREE FAIL, deterministically, on 6 of the 15 injected shapes:
-
-    * `liftOutputTypechecks` and `liftSnapshotsInScope` are one defect seen two
-      ways — a `funcDecl` nested in a `block` / `ite` / `loop` and called outside
-      that construct has its function hoisted to the top level while its snapshot
-      `init` is left behind in the nested scope, so the rewritten call site names an
-      out-of-scope variable and `Program.typeCheck` rejects an output whose input it
-      accepted. `docs/strata-lift-funcdecls-bugs.md` files it.
-    * `liftFreshNames` is the documented `$__liftfncl`-prefix assumption: the minted
-      names come from a bare counter that never reads a program identifier, so a
-      program already using that prefix gets a duplicate declaration. The same
-      defect class as `cseFreshNamesFresh`.
-
     `liftInjectionFires` is coverage rather than a claim about the pass: it scores
-    that the injection really was lifted, so a draw the pass refuses cannot make the
-    other twelve vacuously green in silence (it did, on 5 of 20 draws, before
+    that the injection really was lifted, so a draw the pass refuses cannot leave the
+    other twelve vacuous in silence (it did, on 5 of 20 draws, before
     `normalizeAmbient`). -/
 def liftFuncDecls : List (Property Core.Program) :=
   [ -- coverage first: the rest mean nothing without it

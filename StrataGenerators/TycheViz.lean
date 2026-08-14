@@ -790,11 +790,11 @@ def genKleeneDefined : IO KleeneDefinedResult := do
 -- procedure *list* (assembled into a `Program`), scored by the same shared
 -- `check* : List Procedure → Bool` predicate the Plausible suite uses (via the
 -- `Properties.procTransforms` bundle), so a panel and its `checkIO` counterpart
--- always agree. Two panels visualize honest failures: `proc: FilterProcedures
--- changed flag is faithful` (samples where nothing is removed yet the pass reports
--- `changed = true` show up as failed marks) and `proc: PrecondElim changed flag is
--- faithful` (the rarer samples where a declared function's body calls a partial
--- function, so a `$$wf` block is inserted while the pass reports unchanged).
+-- always agree. The two `changed`-flag panels discriminate the samples that bear on
+-- the flag: for `proc: FilterProcedures changed flag is faithful`, those where
+-- nothing is removed; for `proc: PrecondElim changed flag is faithful`, the rarer
+-- ones where a declared function's body calls a partial function and a `$$wf` block
+-- is inserted.
 
 open StrataGenerators.Procedure.TestSupport in
 /-- Structural features of an assembled procedure program: the procedure count and
@@ -894,12 +894,10 @@ open StrataGenerators.Procedure.TestSupport in
     output-factory entry that still carries a precondition, with its formatted
     preconditions and whether the program declared it.
 
-    Why this panel needs its own representation: `checkPrecondFactoryStripped`
-    fails on *every* input, so the shrinker minimizes the program all the way to
-    the empty one — an honest witness, but a mute one, because the failure cause
-    is not in the program at all. The formatted program alone therefore reads as
-    `program Core;` with no indication of what went wrong. The offenders are the
-    actual evidence, so we print them.
+    Why this panel needs its own representation: the relevant cause is not in the
+    program at all, so the shrinker minimizes the program all the way to the empty
+    one and the formatted program reads as `program Core;` with no indication of what
+    bore on the result. The offenders are the actual evidence, so we print them.
 
     Entries are grouped by `declared` to keep the two independent causes visually
     distinct, and the seeded-builtin list is truncated (58 entries on the empty
@@ -953,13 +951,12 @@ def genProcFactoryStrippedProp (tag : String) (check : List Core.Procedure → B
 -- generated `Program` (every declaration kind, ambient context threaded across the
 -- fold) with a pass/fail verdict.
 --
--- The `typechecker accepts generated programs` panel visualizes the honest failure:
--- ~60% of draws are rejected on one of three known causes, and the
--- `rejection_cause` feature below is what makes the breakdown legible — the panel
--- separates the three causes rather than showing one undifferentiated block of
--- failures. Those failures are also the ones the shrinker cannot minimize (its
--- oracle is the checker under test), so `num_decls` on a failed sample is the
--- generated size, not a reduced one.
+-- For the `typechecker accepts generated programs` panel, ~60% of draws are
+-- rejected on one of three known causes, and the `rejection_cause` feature below is
+-- what makes the breakdown legible — the panel separates the three causes rather
+-- than showing one undifferentiated block. Those rejections are also the ones the
+-- shrinker cannot minimize (its oracle is the checker under test), so `num_decls`
+-- on a rejected sample is the generated size, not a reduced one.
 
 open StrataGenerators.Program.TestSupport in
 /-- Structural features of a generated program: declaration count, reducible size,
@@ -1022,9 +1019,9 @@ open StrataGenerators.Program.TestSupport in
     recomputed from it, so `num_decls`/`program_size` describe what is displayed.
 
     For `programTypecheck` specifically the minimizer is a no-op by construction
-    (the failure *is* oracle rejection, so no candidate survives the filter) and the
-    raw draw is shown — which is the honest thing to display, and why the
-    `rejection_cause` feature exists. Passing samples are reported as generated. -/
+    (the negative result *is* oracle rejection, so no candidate survives the filter)
+    and the raw draw is shown, which is why the `rejection_cause` feature exists.
+    Other samples are reported as generated. -/
 def genProgramProp (tag : String) (check : Core.Program → Bool) : IO ProgramPropResult := do
   let (p, d) ← genProgramForTyche
   if check p then
@@ -1045,10 +1042,10 @@ def genProgramProp (tag : String) (check : Core.Program → Bool) : IO ProgramPr
 --   * the two sweeps quantify over generated procedure lists, so they sample like
 --     the `proc:` panels, with the offending phases as the discriminating feature.
 --
--- Three of the four visualize honest failures (the four hardcoded
--- `changed := true` sites). `phase: non-hardcoded pipeline phases have a faithful
--- changed flag` is the one whose panel should be all green — it is the regression
--- guard, so a single red mark in it is the interesting event.
+-- The first three discriminate the four hardcoded `changed := true` sites.
+-- `phase: non-hardcoded pipeline phases have a faithful changed flag` is the
+-- regression guard, so a single discriminating mark in its panel is the interesting
+-- event.
 
 open StrataGenerators.PhaseChangedFlag in
 /-- One constructed no-op witness. The verdict is the shared `NoOpWitness.check`,
@@ -1147,14 +1144,13 @@ open StrataGenerators.PhaseChangedFlag in
 /-- The phase list a sweep property quantifies over, so the panel's diagnostic
     reports on *exactly* the phases its check scored. Keyed on the property name
     because the check is a `List Procedure → Bool` that has already closed over its
-    list; the honest sweep is the one that excludes `knownDefectivePhases`. -/
+    list; the narrower sweep is the one that excludes `knownDefectivePhases`. -/
 def sweptPhasesFor (name : String) : List NamedPhase :=
   if name == PropertyNames.phaseHonestChangedFlag then honestPhases else allCorePhases
 
 -- ── Printer-expressiveness panels ───────────────────────────────────
 -- One panel per property in `Properties.printerWitnesses` / the whole-program
--- printer property (see `StrataGenerators.PrinterCoverage`). All four visualize
--- honest failures.
+-- printer property (see `StrataGenerators.PrinterCoverage`).
 --
 -- The three witness panels enumerate a *fixed finite* input space — the registered
 -- bitvector widths, the eighteen `Bv↔Int` operators, the widths `0..63` — rather
@@ -1603,10 +1599,9 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   -- ── Procedure ↔ transform-pass panels ──────────────────────────────
   -- One panel per property (four FilterProcedures, five PrecondElim, four
   -- ANFEncoder), from the shared `Properties.procTransforms` bundle (also consumed
-  -- by both Plausible harnesses). The FilterProcedures changed-flag panel
-  -- visualizes the honest failure.
+  -- by both Plausible harnesses).
   -- `factoryStripped` gets a diagnostic representation instead of the plain
-  -- program: it fails on every input, so its minimized witness is the empty
+  -- program: its minimized witness is the empty
   -- program and the cause (factory entries retaining preconditions) would
   -- otherwise be invisible. Every other property uses the uniform renderer.
   for p in Properties.procTransforms do
@@ -1662,12 +1657,11 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   -- unchanged, and `decl_kinds` is what makes a vacuous panel legible: a property
   -- about the axioms is uninformative on a sample that declares none.
   --
-  -- Several of these panels show honest failures: `s2u: every block is reachable
-  -- from the entry` fails on each sample whose body holds a labelled block, `s2u: a
-  -- cfg-bodied procedure prints` fails on each sample that declares a procedure,
-  -- `loop: LoopElim mints distinct block labels` fails on each sample that holds a
-  -- loop, and the two `procInline` failures (duplicate labels, and the dropped
-  -- `requires` obligation) fire on the rarer samples that hold a call. So
-  -- `decl_kinds` and `program_size` separate a real pass from a vacuous one on each.
+  -- Several of these panels are discriminated by shape: `s2u: every block is
+  -- reachable from the entry` by whether a body holds a labelled block, `s2u: a
+  -- cfg-bodied procedure prints` by whether a procedure is declared, `loop: LoopElim
+  -- mints distinct block labels` by whether a loop is present, and the two
+  -- `procInline` ones by the rarer samples that hold a call. So `decl_kinds` and
+  -- `program_size` separate a live sample from a vacuous one on each.
   for p in Properties.unprovenTransforms do
     panel p.name (genProgramProp p.name p.check)

@@ -336,8 +336,8 @@ def stmtsHaveFuncDecl (ss : List Statement) : Bool := countFuncDeclStmts ss != 0
     typechecker — whose *soundness* (`typeCheck_annotated_sound`) is proven but
     whose *completeness* is not — should accept every one of them. A rejection is a
     genuine incompleteness of the algorithm relative to the declarative spec. This
-    predicate makes that honest claim (no masking), so it will FAIL on the known
-    `funcDecl` discrepancy — see `rejectionImpliesFuncDecl`. -/
+    predicate makes that claim unweakened, and does not mask the known `funcDecl`
+    discrepancy — see `rejectionImpliesFuncDecl`. -/
 abbrev checkTypeCheckerComplete (ss : List Statement) : Bool := checkTypeChecks ss
 
 /-- **Characterization of the completeness gap.** `true` when the typechecker
@@ -438,8 +438,8 @@ def funcMeasureWithoutBody (func : Function) : Bool :=
 
 /-- **Function typechecker completeness.** `genFunction` is sound (output satisfies
     `FuncHasType'`), so the algorithm should accept every generated function. This
-    asserts that HONESTLY and so FAILS on the measure-without-body gap — a genuine
-    spec/algorithm divergence, reported as a real failure with a minimal witness. -/
+    asserts it unweakened, so the measure-without-body gap — a genuine
+    spec/algorithm divergence — is reported with a minimal witness. -/
 abbrev checkFunctionTypeCheckerComplete (func : Function) : Bool := checkFunctionTypeChecks func
 
 /-- **Characterization of the function-completeness gap.** "Every rejection is a
