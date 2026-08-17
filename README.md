@@ -13,6 +13,9 @@ Specifically, the repo contains generators for the following fragment of Strata 
 - Procedures (typing relation: `ProcHasTypeA`)
 - Whole programs (typing relation: `ProgramHasTypeA`)
 
+## Properties tested & bugs found
+See `properties_bugs_found.md` for a complete list!
+
 ## Generator Interpretations
 Basalt generators are polymorphic in their monad (see the [Basalt repo](https://github.com/hgoldstein95/basalt) for more details): this means they can be interpreted differently for execution / proofs. 
 
