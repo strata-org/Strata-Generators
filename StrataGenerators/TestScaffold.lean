@@ -846,6 +846,114 @@ def printDerivedCallCoverage (samples maxSize : Nat) : IO Unit := do
     IO.println "  NOTE: no derived calls in this run -- if persistent, this is the \
 regression the ADT-derived-function work fixed."
 
+-- ── Datatype-block generation via Plausible.Gen ───────────────────────
+--
+-- Two wrappers over the *same* generator, differing only in how a block is
+-- assembled, because the properties they feed ask different questions:
+--
+--   * `GenAdtBlock` is one draw of `DatatypeGen.genMutuallyRecursiveDatatypes` —
+--     an ordinary, usually connected block. It feeds `Properties.adtBlockChecks`
+--     (the two pure companions to the SMT law properties, plus the
+--     eliminator-scoping property, which is *not* specific to the independent
+--     shape).
+--   * `GenIndepBlock` concatenates independent one-datatype draws
+--     (`MutualBlockShape.genIndependentBlock`), so no field can mention a sibling.
+--     It feeds `Properties.mutualIndepChecks`.
+--
+-- Both are drawn at `maxSize := 0`. At a larger size `genArgTy` emits arrows, and
+-- `validateDatatypesForSMT` refuses a function-typed field for the whole block, so
+-- the arrow-free fraction falls from 40/40 to about 5/40 — three quarters of the
+-- budget would go to blocks no solver ever sees. The larger sizes are exercised
+-- where they are the point: `AdtLawsSmt.adtSolverAcceptsQueryAction` draws over a
+-- size schedule, since it *wants* the refusals.
+
+/-- A generated `mutual … end` block (ordinary shape). -/
+structure GenAdtBlock where
+  block : Lambda.MutualDatatype Unit
+
+/-- A generated `mutual … end` block whose datatypes are pairwise independent. -/
+structure GenIndepBlock where
+  block : Lambda.MutualDatatype Unit
+
+instance : Repr GenAdtBlock where
+  reprPrec b _ := StrataGenerators.MutualBlockShape.renderBlock b.block
+
+instance : Repr GenIndepBlock where
+  reprPrec b _ := StrataGenerators.MutualBlockShape.renderBlock b.block
+
+/-- Shrink a block by dropping one datatype. `MutualDatatype` is a plain `List`, so
+    no proof obligation travels with the drop (each datatype carries its own
+    `constrs_ne`); the empty list is excluded, since `validateMutualBlock` rejects
+    an empty block. A candidate that drops below two datatypes makes the `mutual:`
+    properties vacuously true, and Plausible discards a candidate that no longer
+    fails — so the shrinker cannot report a one-datatype "counterexample". -/
+private def shrinkBlock (block : Lambda.MutualDatatype Unit) :
+    List (Lambda.MutualDatatype Unit) :=
+  if block.length ≤ 1 then []
+  else (List.range block.length).map (fun i => block.eraseIdx i)
+
+instance : Shrinkable GenAdtBlock where
+  shrink b := (shrinkBlock b.block).map (⟨·⟩)
+
+instance : Shrinkable GenIndepBlock where
+  shrink b := (shrinkBlock b.block).map (⟨·⟩)
+
+instance : Arbitrary GenAdtBlock where
+  arbitrary := do
+    let block ← DatatypeGen.genMutuallyRecursiveDatatypes (G := Plausible.Gen)
+      (maxSize := 0)
+    pure ⟨block⟩
+
+instance : Arbitrary GenIndepBlock where
+  arbitrary := Gen.sized fun s => do
+    -- Two to four datatypes: `mutual` is vacuous for one, and the properties need
+    -- at least a pair to be about the *block* rather than about a datatype.
+    let extra := min 2 (s / 30)
+    let block ← StrataGenerators.MutualBlockShape.genIndependentBlock
+      (G := Plausible.Gen) (extra + 1) (maxSize := 0)
+    pure ⟨block⟩
+
+-- ── Datatype-block coverage diagnostic ────────────────────────────────
+
+/-- Report what the block-based suites actually drew: how many blocks held two or
+    more datatypes, how many had uniform type parameters (the condition `elimFuncs`
+    assumes), how many Strata's `addMutualBlock` accepted, how many passed the
+    `blockIsSmtSafe` screen the `--smt` law properties apply, and how many
+    independent draws really were independent.
+
+    Printed as a diagnostic, never gating the exit code, for the reason the rest of
+    this suite reports coverage: a green block property on blocks that are all
+    single-datatype, or all rejected, is a property that tested nothing. -/
+def datatypeBlockCoverage (samples : Nat) : IO (Nat × Nat × Nat × Nat × Nat) := do
+  let mut multi := 0
+  let mut uniform := 0
+  let mut accepted := 0
+  let mut smtSafe := 0
+  let mut indep := 0
+  for i in List.range samples do
+    let block ← DatatypeGen.sample (maxSize := i % 3)
+    if block.length ≥ 2 then multi := multi + 1
+    if StrataGenerators.MutualBlockShape.blockParamsUniform block then
+      uniform := uniform + 1
+    if StrataGenerators.AdtLaws.blockAccepted block then accepted := accepted + 1
+    if StrataGenerators.AdtLaws.blockIsSmtSafe block then smtSafe := smtSafe + 1
+    let ind ← StrataGenerators.MutualBlockShape.genIndependentBlock (G := IO) 1
+    if StrataGenerators.MutualBlockShape.isIndependentBlock ind then indep := indep + 1
+  pure (multi, uniform, accepted, smtSafe, indep)
+
+/-- Print the block coverage report. -/
+def printDatatypeBlockCoverage (samples : Nat) : IO Unit := do
+  let (multi, uniform, accepted, smtSafe, indep) ← datatypeBlockCoverage samples
+  IO.println s!"  ordinary blocks drawn: {samples} \
+(>= 2 datatypes: {multi} | uniform type params: {uniform})"
+  IO.println s!"    accepted by addMutualBlock: {accepted} | \
+SMT-safe (arrow-free, no bitvec 0, bare SMT symbols): {smtSafe}"
+  IO.println s!"  independent blocks drawn: {samples} (actually independent: {indep})"
+  if accepted < samples then
+    IO.println s!"  NOTE: {samples - accepted} block(s) rejected by addMutualBlock -- \
+DatatypeGen does not thread reserved names across the datatypes of one block, so two \
+of them can declare a constructor of the same name (docs/adt-laws-alias-mutual-blocks.md)."
+
 -- ── Test runner ──────────────────────────────────────────────────────
 
 /-- Sample erased terms and print the `resolve` error messages behind any

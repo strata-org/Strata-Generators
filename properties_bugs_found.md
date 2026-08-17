@@ -124,7 +124,36 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 
   All three are stated as containment ("no obligation is lost"), for two different reasons. `InsertLoopInvariantAsserts` adds obligations *by design*. `NondetElim` also makes the set grow — but because it **repairs a soundness defect in the evaluator**, which is how that defect was found (see below). `LoopInitHoist` is the one whose obligation set is preserved exactly, and measurement agrees; it is still stated as containment so a benign addition cannot turn it red while a lost obligation — a lost proof — still does.
 
-  Live on 390 of 400 draws; the pass has something to do on 10 / 8 / 2 of those respectively (`docs/measurements/loop-pass-symeval-coverage.lean`). All three pass, so the small "fires" counts are what the `#guard`s exist to cover.
+  Live on 390 of 400 draws; the pass has something to do on 10 / 8 / 2 of those respectively. All three pass, so the small "fires" counts are what the `#guard`s exist to cover.
+
+**Algebraic datatypes: injectivity and disjointness (`adt:`)**
+
+Every generated `mutual … end` block denotes an initial algebra, so its constructors satisfy the `injection` and `discriminate` facts of [Software Foundations' `Tactics` chapter](https://softwarefoundations.cis.upenn.edu/lf-current/Tactics.html). The claims are about **Strata's SMT encoding of a datatype**, not about the generator, and the oracle is a real solver run through the whole Core pipeline (`Core.verify`). Universal quantification is expressed without quantifiers: each variable is an uninitialised local, which symbolic evaluation turns into an unconstrained symbolic constant. Uniformness is not covered — `addMutualBlock` already checks it syntactically.
+
+- Constructor **injectivity** — `C x⃗ = C y⃗ → x_i = y_i`, one `assert` per field so a verdict names the field: **74/74 obligations proved by cvc5, 75/75 by z3** (opt-in, `--smt`)
+- Constructor **disjointness** — in the *tester* form `!(isC u && isD u)` on a symbolic `u`: **45/45 and 53/53 proved** (opt-in, `--smt`)
+  - The constructor-application form `!(C x⃗ == D y⃗)` never reaches the solver: Strata's partial evaluator folds it to `true`, so `symbolicEval` emits `assert: true`. That is asserted as a property of its own (and so is the fact that the tester form is *not* folded, which is what keeps the solver property non-vacuous)
+- The law program typechecks — the screen that keeps the solver properties from being handed an ill-typed program
+- No datatype derives the same function name twice (**fails honestly**, see below — though only on a rare draw: the deterministic pin is a `#guard`ed witness)
+- Every emitted law query reaches a solver *verdict* — the deliberately unscreened property, which **fails honestly** on two encoder defects and reports them by cause (opt-in, `--smt`)
+
+**Type aliases: eager versus incremental resolution (`alias:`)**
+
+Strata resolves a type alias *during* typechecking, one declaration at a time. Both properties say this is equivalent to expanding every alias up front — that an alias is the transparent abbreviation it is documented to be. Both hold on every draw.
+
+- The two resolution orders agree on **acceptance**
+- The two resolution orders give the **same proof obligations** (the "evaluates the same" half, under Strata's own symbolic evaluator, with both sides normalised so a difference cannot be one of spelling)
+- Non-vacuity took work: a generated program declares aliases that nothing *uses* (the generator's type vocabulary is kept disjoint from the alias names, repo issue #65), so resolution on a raw draw is the identity. `introduceAlias` adds the use — it aliases a ground type the program mentions and rewrites every occurrence. Introducible on 29/30 draws; 27/30 reach the obligation comparison
+
+**`mutual … end` blocks of non-mutually-recursive datatypes (`mutual:`)**
+
+Drawn by concatenating *independently* generated datatypes, so no field can name a sibling (verified per sample, so the properties cannot degrade into claims about connected blocks). All four hold.
+
+- Joining datatypes that are each accepted alone into one `mutual` block keeps them accepted
+- The block survives `Program.typeCheck` and its constructors are callable
+- Splitting the block into one-datatype blocks preserves the derived vocabulary — the "same meaning" half (excluding the eliminators, which are block-wide by design)
+- The block prints without a conversion error (screened against the printer gaps of #48, so the claim is about the block)
+- Derived functions bind every type variable they mention (**fails honestly**, see below)
 
 ## Implementation bugs caught
 
@@ -230,6 +259,11 @@ the pass produces a caller body containing `assert [Callee_inner_2]: old T;` alo
 
   It is silent in every channel: `toCoreProofObligationProgram` returns `.ok`, no `Message` is raised, the obligation program is well formed, and no statistic records it (it is not fuel exhaustion — `simulatingStmtHitOutOfFuel` stays at 0; `simulatedStmts` simply stops rising). And after `LoopElim` every `while *` **becomes** an `if *` (`LoopElim.lean:139`), so two sibling nondeterministic loops reach this on the standard pipeline. The fix is a monotone counter — the evaluator already threads `nextSplitId` for this purpose, and `NondetElim` does the same desugaring correctly with a `StringGenState`
 Coverage note, recorded because a green tick on the `CommonSubexprElim` properties should not be read as coverage: **CSE fires on 0 of 200 generated programs**, because no generated procedure body contains a duplicated subexpression (each expression is drawn independently, so two identical non-trivial subterms essentially never coincide). All four CSE properties are therefore vacuous on generated input and are tested by `#guard`s on hand-built bodies instead, and no finding above is attributed to them. This is the same limitation issue #36 measured for the `ANFEncoder` properties (599 of 600 vacuous). Making them non-vacuous needs a generator that plants a repeated subterm deliberately, which would change the expression generator and its soundness proof
+
+- (#118) **`bitvec 0` is legal in Core and illegal in SMT-LIB.** `datatype AdtBv0 { Bv0Zero(w : bitvec 0), Bv0One() }` typechecks and is accepted by `addMutualBlock`; the encoder emits `(_ BitVec 0)`, whose index SMT-LIB 2.6 requires to be positive. cvc5 answers `Parse Error: Illegal bitvector size: 0` and z3 `bit-vector size must be greater than zero`, so every obligation mentioning the datatype is lost — never answered rather than answered wrongly
+- (#119) **A legal Core identifier need not be a bare SMT-LIB symbol, and the datatype emitters do not quote.** Core's identifier alphabet includes `'`, and `_` alone is a legal Core name; neither is usable bare in SMT-LIB (§3.1). `datatype Qu { c'x(g'y : int), d() }` emits `(declare-datatype Qu ( (c'x (Qu..g'y Int)) (d)))` and cvc5 stops at `Error finding token`. The inconsistency is visible within a single line for a type parameter — pipe-quoted where it occurs in a field type, bare in the `par` binder that introduces it: `(par (vx' NK) (… (U |vx'| NK) …))`. Field types go through the DDM SMT dialect formatter, which quotes; the datatype name, the `par` list and the constructor/selector names are raw `s!"…"` interpolations (`DL/SMT/Solver.lean:244`, `DL/SMT/IncrementalSolver.lean:254`). Of the special characters the generator draws, `'` is the only offending character — `. ? @ ! $ _` all pass inside a name
+- (#120) **A field named `f!` collides with the unsafe destructor of a field named `f`.** Strata derives `d..f` (safe) and `d..f!` (unsafe) per field, appending `!` (`TypeFactory.lean:539`), and `!` is a legal Core identifier character. So `datatype AdtBang { mkBang(f : int, f! : int) }` derives `AdtBang..f!` twice and `Factory.tryAddAll` rejects the whole declaration with `A function of name AdtBang..f! already exists!` — a legal datatype that cannot be declared, reported by the name of the derived function rather than by the two fields responsible
+- (#121) **`d$Elim` leaves the other datatypes' type parameters free** whenever a `mutual` block's datatypes do not all declare the same type parameters — which `addMutualBlock` permits (`validateMutualBlock` checks only duplicate datatype *names*). `elimFuncs` builds `d$Elim`'s case-function arguments from every constructor of every datatype in the block but binds only `d`'s own parameters, so for `datatype Aa x { mkA(fa : x) }` and `datatype Bb y z { mkB(fb : y), nilB() }` in one block, `Aa$Elim` mentions an unbound `y` and `Bb$Elim` an unbound `x`. The site states the assumption in a comment (`let typeArgs := block[0].typeArgs`, "OK because all must have same typevars") and nothing enforces it. **Latent**: a program calling such an eliminator still typechecks, so what is lost is the constraint that a case function has the right argument type. Fires on 28 of 60 ordinary generated blocks
 
 ## Specification bugs caught during testing
 - The function typing spec `FuncHasType'` permits a measure (a `decreases` clause) to exist without requiring the function body to also exist, even though the executable typechecker rejects a function if it has a measure but no body
