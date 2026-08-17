@@ -36,9 +36,6 @@ directly as annotated `.fvar` nodes; and a datatype block is types only. The axi
 lemma is the exception — it is stated *relative to* a `genLExpr` reachability
 hypothesis on the body, which the caller discharges from `genLExpr_complete`.
 
-The two kinds that have no lemma are the two whose bodies are general expressions
-and which the axiom step's hypothesis-shaped treatment does not yet cover.
-
 `genNonRecursiveArgTy_complete` is a support lemma. It gives
 `genArgTy_complete_of_wf` at the empty block, which is what an alias body and the
 monotype of `distinct` need.

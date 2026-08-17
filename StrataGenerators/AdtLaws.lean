@@ -15,7 +15,7 @@ such block denotes an *initial* algebra, so — exactly as in Software Foundatio
 * **injectivity.** For each constructor `C` of arity `k ≥ 1`,
   `C x₁ … x_k = C y₁ … y_k → x₁ = y₁ ∧ … ∧ x_k = y_k`.
 * **disjointness.** For each pair of *distinct* constructors `C ≠ D` of the same
-  datatype, `C x⃗ ≠ D y⃗`.
+  datatype, `C x_1 ... x_k ≠ D y_1 ... y_k`.
 
 Uniformness is deliberately not covered here (`TypeFactory.addMutualBlock`
 already checks it syntactically, via `checkConstructorArgsWF`).
@@ -49,7 +49,7 @@ and the disjointness obligation for `C ≠ D` is
 ```
 procedure disj_0_0_1 () {
   var x0 : int;  var x1 : bool;  var y0 : …;
-  assert [disj_0_0_1]: !(C(x0, x1) == D(y⃗));
+  assert [disj_0_0_1]: !(C(x0, x1) == D(y0));
 }
 ```
 
