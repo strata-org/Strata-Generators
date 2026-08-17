@@ -18,7 +18,7 @@
    "rev": "3da2b2482e6d57cb01362e190a0ff7d9e90ec58a",
    "name": "basalt",
    "manifestFile": "lake-manifest.json",
-   "inputRev": "3da2b2482e6d57cb01362e190a0ff7d9e90ec58a",
+   "inputRev": "lean-4.29",
    "inherited": false,
    "configFile": "lakefile.toml"},
   {"url": "https://github.com/ngernest/Strata",
