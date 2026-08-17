@@ -248,9 +248,13 @@ question rather than a mechanical edit:
    weight of `0`, used to prune the `exit` and `call` branches when their support is provably empty.
    `@[tunable]` rejects a literal `0` (it would break support-completeness) and rejects a non-literal
    weight, so those two branches would have to move out of the weight and into the *list*: build one
-   literal branch list per case of `labels.isEmpty`/`procs.isEmpty`. That gives up to four sites with
-   different arities, and a `Tuning` would have to address each — which is why the mirror below is a
-   standalone prototype rather than an edit to `genStmt`.
+   literal branch list per case of `labels.isEmpty`/`procs.isEmpty`. That is four lists per `size`
+   arm, and `genStmt` has two arms (5 branches at `0`, 9 at `size + 1`), so eight sites of arity
+   3–9 — 48 schedule entries where there are now 14. The cost is not the count but the addressing:
+   "the weight of the `loop` branch" stops being one index and becomes one per case, and a `Tuning`
+   that sets them inconsistently makes the distribution depend on `labels`/`procs` in a way nobody
+   wrote down. That is why the mirror below is a standalone prototype rather than an edit to
+   `genStmt`.
 
 `genStmtLoopy` therefore reproduces `genStmt`'s branch structure — the part tuning addresses — in a
 form the attribute accepts. -/
