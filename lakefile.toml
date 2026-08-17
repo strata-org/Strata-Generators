@@ -11,10 +11,6 @@ rev = "7f94d01f"
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
-# Tracks the `lean-4.29` branch; `lake-manifest.json` records the commit actually
-# in use (3da2b248 at the time of writing), so `lake update basalt` is what moves
-# it. The tuning machinery here needs the `@[tunable]` attribute
-# (Basalt/Tuning/Attr.lean), which replaced the older `tunable def` macro.
 rev = "lean-4.29"
 
 [[require]]
