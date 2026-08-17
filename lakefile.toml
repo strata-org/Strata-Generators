@@ -13,6 +13,8 @@ name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
 
+# Note: Strata is on Lean 4.29.1, but mainline LSpec is on 4.31,
+# so we currently depend on a custom fork of LSpec that is on 4.29
 [[require]]
 name = "LSpec"
 git = "https://github.com/ngernest/LSpec"

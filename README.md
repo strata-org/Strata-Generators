@@ -52,11 +52,17 @@ in the same file, as `List.Forall₂` is defined by both libraries.
    ```bash
    lake build
    ```
+3. Run a small amount of tests (note the `--quick` flag):
+   ```
+   lake test -- --quick
+   ```
+
 
 ## Running tests using these generators 
 
 To run a test executable, which tests a variety of properties using these Strata Core generators,
-run `lake test`. 
+run `lake test -- --quick`. (The `--quick` flag minimizes the no. of tests run, if we omit this flag,
+the entire test suite, consisting of 80+ properites, takes 10+ minutes to run.)
 
 This executable runs a Plausible test suite via LSpec, and visualizes test results using [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
 inspecting property-based testing generators.
@@ -81,17 +87,11 @@ lake build test
 
 Flags (all optional; the Tyche visualization pass is on by default):
 
-- `--quick` gives a fast preset for a short cycle of work. It selects 100 trials, a
-  maximum size of 40, and no Tyche pass. A measurement gives about 16 seconds for
-  the preset, against about 7 minutes for the default settings. Use `--quick` to
-  find a defect, and use the default settings to gate a merge.
-
-  A positional argument has a higher precedence than `--quick`. Therefore
-  `--quick 500` gives 500 trials, and it keeps the other two parts of the preset.
-  To get the Tyche pass together with the other parts of the preset, give the
-  trials and the size as positional arguments and do not use `--quick`.
-- `--no-tyche` — omit Tyche visualizations (i.e. only run tests)
-- `--tyche-out=PATH` — output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
+- `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
+  Currently, this flag runs 100 trials for each property, where each input has a maximum size of 40.
+  This flag omits Tyche visualizations:
+- `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
+- `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
 - `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
 - `--smt` — Tests properties related to Strata SMT encodings. This CLI flag requires a local installation of an SMT solver (cvc5/z3). 
   If `--smt` is passed but the SMT solver cannot be run, the test harness emits an error and exits with a non-zero exit code.
@@ -100,77 +100,43 @@ See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of
 
 ### LSpec-free harness (`test-plain`)
 
-There is a second test executable, `test-plain`, that runs the exact same
-properties without depending on LSpec, to evaluate whether the LSpec dependency
-could be dropped. It shares all its properties, generators, and CLI with the
-LSpec driver via [`TestScaffold.lean`](./StrataGenerators/TestScaffold.lean), and
-runs them through a small Plausible-only harness
-([`PlainHarness.lean`](./StrataGenerators/PlainHarness.lean)) instead of LSpec:
+There is a second test executable, `test-plain`, that does not depend on LSpec. 
+All properties, generators and CLI flags are shared with the default test runner (the one inovked by doing `lake test`).
 
+To run the alternate `test-plain` harness, do:
 ```bash
 lake build test-plain
 .lake/build/bin/test-plain [numTrials] [maxSize] [--smt]
 ```
 
-It accepts the same positional args and the `--smt` and `--quick` flags, reports the same pass/fail
-verdicts and exit code as `test`, and prints a simpler `PASS/FAIL (n/m)` line per
-property. It has no Tyche pass (the `--tyche-*` flags are accepted but ignored),
-and it is **not** registered as the `lake test` driver — `test` (LSpec) remains
-the driver.
-
 ## Adding a new property
 
-Properties are catalogued in
-[`Properties.lean`](./StrataGenerators/Properties.lean) and run from the single
-test driver [`TestMain.lean`](./TestMain.lean). The name and the pass/fail check
-are kept separate so the LSpec assertion and the Tyche panel for a property can
-never drift apart. To add one:
+Properties are listed in
+[`Properties.lean`](./StrataGenerators/Properties.lean) and invoked from [`TestMain.lean`](./TestMain.lean). 
 
-1. **Write the check.** Put the decision procedure — a `check* : α → Bool` on
-   whatever the generator produces (`LExpr'`, `Cmd Expression`, `List Statement`,
-   `Function`, `List Procedure`, …) — in the relevant `*.TestSupport` module (e.g.
-   `HasTypeAGen/TestSupport.lean`, `CmdHasTypeAGen/TestSupport.lean`,
-   `StmtHasTypeAGen/TestSupport.lean`, `ProcedureHasTypeAGen/TestSupport.lean`).
-   Keeping the check there means both the LSpec suite and the Tyche panel evaluate
-   the *same* function.
+To add a new property:
 
-2. **Name it.** Add a `String` constant to the matching `PropertyNames.*` group
-   in `Properties.lean` (naming scheme: `"area: description"`, where `area` is
-   one of `expr` / `cmd` / `function` / `stmt` / `proc`), then add the constant to
-   `PropertyNames.all` — the `#guard` there enforces that no two properties share
-   a name.
+1. Put the property (an `α → Bool` function, where `α` is the type 
+   produced by the generator) in the relevant `*.TestSupport` module (e.g.
+   `ProcedureHasTypeAGen/TestSupport.lean`).
+   
+2. Define a string containing the name of the property in `PropertyNames` namespace
+   in `Properties.lean` (e.g. `expr`, `cmd`, ...), then add this string to
+   `PropertyNames.all` (at the bottom of `Properties.lean`). This string is the name of the
+   property that is displayed in `stdout` / Tyche when the test harness is run.
 
-3. **Pair name ↔ check (when both harnesses run the identical `Bool` check).**
-   If the LSpec assertion and the Tyche panel run a byte-identical predicate, add
-   a `Property` bundle entry to the appropriate list in the `Properties`
-   namespace (`cmdSingleVerdict`, `stmtTransforms`, or `procTransforms`). Each
-   harness iterates that list, so the pairing is defined exactly once. Properties
-   whose two views genuinely differ (or that only one harness runs) keep just the
-   shared *name* here and state their logic in `TestMain.lean`.
-
-4. **Add it to the suite in `TestMain.lean`.**
-   - For a pure `α → Bool` property, wrap it as a `Prop` (`prop_* te := check* … = true`)
-     and add a `checkIO PropertyNames.yourName (∀ x, prop_your x)` node to the
-     relevant `*Suite`. Properties from a `Property` bundle are folded in
-     automatically via `foldr` over the bundle list.
-   - For an `IO`-based check (one that runs in `IO`, shrinks its own
-     counterexamples, or needs an external tool), give it the
-     `(success, passed, attempted, errorMsg)` shape and add it as a
-     `.individualIO PropertyNames.yourName none action .done` node. The
-     SMT/concrete-eval agreement property
+3. Add the property to the test suite in `TestMain.lean`:
+   - For a pure `α → Bool` property, wrap it as a `Prop` (e.g. `def prop_foo : Prop := check_foo … = true`), 
+     and add a `checkIO PropertyNames.yourName (∀ x, your_prop x)` expression to the relevant 
+     test suite in `TestMain.lean`.
+   - For an `IO`-based check (e.g. a property that requires an external tool to run, like an SMT solver), 
+     add the property using an `.individualIO PropertyNames.yourName none action .done` expression in `TestMain.lean`. 
+     The SMT/concrete-eval agreement property
      ([`HasTypeAGen/SmtEval.lean`](./StrataGenerators/HasTypeAGen/SmtEval.lean),
      gated behind `--smt`) is a worked example.
 
-5. **(Optional) Add a Tyche panel** in
-   [`TycheViz.lean`](./StrataGenerators/TycheViz.lean), referencing the same
-   `PropertyNames.*` constant so the LSpec result and the panel share a label, and
-   scoring the sample with the same `check*` predicate so the two views cannot
-   disagree. See [Adding a panel for a new
-   property](#adding-a-panel-for-a-new-property) for the walkthrough.
-
-The exit code is the LSpec verdict, so any property added to a `*Suite` gates
-`lake test`; always-run *diagnostics* (which report but don't gate) are called
-after `lspecIO` in `main`.
+4. (Optional, for visualizing test results in Tyche) See [Adding a panel for a new
+   property](#adding-a-panel-for-a-new-property) for details.
 
 ## Tyche visualization
 
@@ -193,78 +159,66 @@ Use these CLI flags to control the output:
 - `--tyche-samples=N` (default: 1000) — number of samples per generator
 - `--tyche-out=PATH` (default: `tyche_output.jsonl`) — output file path
 
-The Tyche pass is the larger part of the time of a run. `--no-tyche` and
-`--quick` both hold it off, and **neither writes the JSONL file** — so a file left
-at `--tyche-out` by an earlier run stays there, and opening it shows that older
-run's panels with no indication they are stale. To get `--quick`'s trials and size
-*with* panels, pass them positionally instead of using the flag:
+The Tyche visualizations dominate the runtime of the `lake test` executable. 
+By default, the `--quick` CLI flag suppresses Tyche visualizations.
+To get the smaller no. of trials via the `--quick` flag while still 
+having Tyche visualizations, pass the following CLI args manually
+to the test executable:
 
 ```bash
 .lake/build/bin/test 100 40 --tyche-samples=200
 ```
 
-### Viewing results
+### Viewing Tyche visualizations
 
-Open VS Code, press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS), run
+Open VS Code, press `Cmd+Shift+P` (on macOS), run
 `Tyche: Open`, and select the generated `.jsonl` file. Tyche displays
 interactive histograms and distribution charts for each property.
 
-### Adding a panel for a new property
+### Adding a Tyche visualization for a new property
 
-Every panel lives in
-[`TycheViz.lean`](./StrataGenerators/TycheViz.lean) — one per property — and
-`runTychePanels` writes them all into a single JSONL handle after the LSpec suite.
-Adding one is four steps. (This assumes the property itself already exists; see
-[Adding a new property](#adding-a-new-property) for that half, and note the panel
-must *reuse* that property's `check*` predicate rather than restate it.)
+Note: the following steps assume the property is already defined in the test harness
+(see [Adding a new property](#adding-a-new-property) on how to add a new property).
 
-#### 1. Define the sample type
+#### 1. Define the type containing the data to be visualized
 
-A structure holding the generated value plus anything the features need that
-cannot be recomputed purely. `TycheSample.toSample` is a **pure** function, so
-any `IO` fact — a parse attempt, a solver call — has to be computed in the
-generator and stored:
+This type is typically a `structure` that contains the generated value,
+along with auxiliary featuers that cannot be recomputed, e.g.:
 
 ```lean
-structure MyPropResult where
-  value   : MyThing
-  passed  : Bool          -- from the shared `check*`, see below
-  genSize : Nat           -- the generator size this was drawn at
+structure PropResult where
+  value   : MyThing       -- Value produced by generator
+  passed  : Bool          -- No. of trials passed
+  genSize : Nat           -- The generator size `value` was sampled at
 ```
 
-If several properties share a sample shape, give the structure a `tag` field and
-let the panel title distinguish them — `StmtPropResult` and `ProcPropResult` do
-this, using the tag as the name of the pass/fail feature.
+If several properties share the same `PropResult` type, define an extra `tag` field 
+in the `structure` and distinguish them using the name of the visualization distinguish 
+(see `StmtPropResult` and `ProcPropResult` for an example of how this is done).
 
-#### 2. Implement `Tyche.TycheSample`
+#### 2. Implement an instance of `Tyche.TycheSample` typeclass for the type defined in step (1)
 
 ```lean
-instance : Tyche.TycheSample MyPropResult where
+instance : Tyche.TycheSample PropResult where
   toSample r :=
-    { representation := formatMyThing r.value              -- a reproducer
+    { representation := formatMyThing r.value              -- Function for serializing `r.value`
       status         := if r.passed then .passed else .failed
       statusReason   := if r.passed then "" else explainFailure r.value
       features := [
         ("verdict", .nominal (if r.passed then "pass" else "fail")),
-        ("cause",   .nominal (classifyCause r.value)),     -- *why* it is red
+        ("cause",   .nominal (classifyCause r.value)),     -- Why a property failed
         ("size",    .ordinal (sizeOf r.value)) ] }
 ```
 
-- **`representation`** — prefer Strata's own printer (`Core.formatProgram`,
-  `formatStmts`, `formatFunc`), so a mark is text you can paste back into a file
-  and re-run. `stmtRepr` / `procsRepr` are the in-repo helpers for this.
-- **`status`** — must be the shared `check*` predicate from the relevant
-  `*.TestSupport` module: the *same function* the Plausible harness asserts.
-  Re-deriving a verdict here is the one thing that breaks the invariant that a
-  panel and its `checkIO` counterpart always agree, and it breaks it silently.
-- **`statusReason`** — Tyche shows it on the mark; put the one-line "why" there
-  (the offending codepoints, the parser's error, the phases that lied).
-- **`features`** — `.nominal` for grouping, `.ordinal` / `.continuous` for
-  distributions. Include at least one feature that explains why a mark is red
-  (`rejection_cause`, `measure_no_body`, `violating_phases`, `error_sites` are the
-  existing ones), and give **vacuous** samples an explicit `"—"` rather than
-  scoring them as passes — a property that holds trivially on most draws should
-  look different from one that holds substantively.
+- **`representation`**: If generating random Strata Core programs, use 
+  Strata Core's own pretty-printer (`Core.formatProgram`, `formatStmts`, `formatFunc`) .
+- **`status`**: this must be the same property function that is invoked by the test harnes
+  (i.e. a function in the relevant `*.TestSupport` module).
+- **`features`**: `.nominal` for grouping, `.ordinal` / `.continuous` for
+  distributions. Include at least one field that explains why a property failed
+  (e.g. `rejection_cause`, `measure_no_body`, `violating_phases`, `error_sites`).
+  For samples that pass a property vacuously, use an explicit `"—"` indicator
+  rather than treating them as trials that passed.
 
 #### 3. Write the generator wrapper
 
@@ -276,85 +230,58 @@ failure and recompute the features from the minimized value, so they describe wh
 is actually displayed:
 
 ```lean
-def genMyProp (check : MyThing → Bool) : IO MyPropResult := do
-  let (x, genSize) ← genMyThingForTyche
-  if check x then
+def generatorWrapper (prop : MyThing → Bool) : IO PropResult := do
+  let (x, genSize) ← genMyThingForTyche -- Invoke the actual generator`
+  if prop x then
     return { value := x, passed := true, genSize }
   else
     -- `minimizeProcsCounterexample` / `minimizeProgramCounterexample` keep every
     -- candidate well-typed *and* still-failing, so the verdict is unchanged.
-    return { value := minimizeMyCounterexample check 200 x, passed := false, genSize }
+    return { value := minimizeMyCounterexample prop 200 x, passed := false, genSize }
 ```
 
 #### 4. Register it in `runTychePanels`
 
+Add the following expression in the `runTychePanels` function in `TycheViz.lean`:
 ```lean
-panel PropertyNames.myProperty (genMyProp myCheck)
+panel PropertyNames.myProperty (generatorWrapper myProperty)
 ```
 
-If the property belongs to a shared `Property` bundle in
-[`Properties.lean`](./StrataGenerators/Properties.lean), iterate the bundle
-instead, so name↔check stays paired in exactly one place:
+Alternatively, if the property belongs to an existing list of `Property`s in
+[`Properties.lean`](./StrataGenerators/Properties.lean) 
+(e.g. `StmtTransforms`), you can iterate over them like so:
+
 
 ```lean
 for p in Properties.stmtTransforms do
   panel p.name (genStmtProp p.name p.check)
 ```
 
-`panel` defaults to `--tyche-samples` marks; pass `(count := n)` to override.
+Note that `panel` defaults to `--tyche-samples` samples. 
+To override this option, pass `(count := n)` .
 
-#### Fixed finite input spaces: `enumerate`, not `panel`
-
-A property whose input space is a fixed finite set rather than a distribution — a
-constructed witness, the registered bitvector widths, the eighteen `Bv↔Int`
-operators — uses `enumerate` (`Tyche.writeInto`) instead of `panel`
-(`Tyche.runInto`). It emits one mark per element, once, because sampling a
-constant space just repeats the same few marks `--tyche-samples` times:
+**For properties with a finite and small no. of inputs**:
+For properties whose input space is finite and small (e.g., all bitvectors of width 4),
+use the `enumerate` function instead of `panel`. 
+The `enumerate` function performs one trial per element in the input space, 
+as opposed to running `--tyche-samples` times:
 
 ```lean
 enumerate PropertyNames.printerBvIntConversions bvIntConversionSamples
 ```
 
-Score each element with the shared **per-element** check whose conjunction *is*
-the property (`checkBvIntConversionPrints` vs `checkBvIntConversionsPrint`), so
-the panel and the Plausible verdict still come from one function — and so the
-panel shows the *shape* of a gap where the property's single `Bool` can only
-report that a gap exists.
+The test oracle for these properties is a conjunction over all elements
+in the input space (e.g. `checkBvIntConversionsPrint`). 
 
-#### When the failure cause is not in the value
-
-Some properties fail for a reason the generated value does not contain — the
-shrinker then minimizes to an empty program, which is an honest witness but a mute
-one. Those panels append a rendered diagnostic to `representation` and record its
-counts as extra features: see `procFactoryStrippedDiagnostic` (factory entries
-retaining preconditions) and `phaseChangedFlagDiagnostic` (which pipeline phase
-misreported its `changed` flag). If a red mark would otherwise show nothing but
-`program Core;`, this is the pattern to follow.
-
-#### Checking that the panel actually appears
-
-`--quick` and `--no-tyche` write **no file**, so verify with a run that does:
+#### Checking that the Tyche visualizations appear
+Run the following to produce the Tyche visualizations with a small no. of tests:
 
 ```bash
 lake build test
 .lake/build/bin/test 100 40 --tyche-samples=200
-python3 -c "
-import json, collections
-c = collections.Counter(json.loads(l)['property'] for l in open('tyche_output.jsonl'))
-print(len(c), 'panels'); [print(f'{n:5d}  {p}') for p, n in c.items()]
-"
 ```
 
-Then open it: `Ctrl+Shift+P` → `Tyche: Open`. The extension groups by property and
-keeps the latest `run_start` per property, with no minimum-sample filter, so even a
-one-mark panel is listed.
-
-#### One-off panels outside the suite
-
-To explore a single generator without adding it to the suite, implement
-`TycheSample` as above and call `Tyche.run` with your `IO` action and a
-`Tyche.Config` — it writes its own standalone JSONL file rather than joining
-`runTychePanels`' shared one.
+Then, in VS Code, do `Cmd+Shift+P` → `Tyche: Open`, and click on the relevant panel.
 
 ## License
 

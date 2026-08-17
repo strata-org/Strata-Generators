@@ -122,9 +122,8 @@ def interestingCodepoints : List Nat :=
   , 0x5D0     -- א   HEBREW LETTER ALEF (RTL)
   , 0x4E2D    -- 中  CJK
   , 0xFFFD    -- �   REPLACEMENT CHARACTER
-  -- 6. Astral plane (4 UTF-8 bytes)
-  , 0x1D54A   -- 𝕊   MATHEMATICAL DOUBLE-STRUCK CAPITAL S
-  , 0x1F600   -- 😀  EMOJI
+  , 0x1D54A   --  MATHEMATICAL DOUBLE-STRUCK CAPITAL S
+  , 0x1F600   --  EMOJI
   -- 7. Above the SMT-LIB string alphabet (0x0–0x2FFFF)
   , 0x30000
   , 0x10FFFF ]
