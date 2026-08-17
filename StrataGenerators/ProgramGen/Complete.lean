@@ -22,12 +22,12 @@ caller composes with it.
 
 This file has per-step reachability lemmas for **axioms, abstract types, aliases,
 `distinct` and datatype blocks** (the `genDecl*_complete` theorems below). Two
-kinds have no lemma: functions and procedures. Repo issue #66 catalogues what the
-remaining two need, along with the other blockers (`genIdentName` has no
-two-directional support lemma, `recFuncBlock` is not generated, and `genLExpr` is
-itself incomplete — issue #64). The `ArityOk` blocker is **gone**: upstream's
-`argsWellKinded` plus a vocabulary derived from `Core.KnownTypes` discharged it
-(issue #101).
+kinds have no lemma: functions and procedures. What the remaining two need is
+catalogued in the repo's issue tracker, along with the other blockers
+(`genIdentName` has no two-directional support lemma, `recFuncBlock` is not
+generated, and `genLExpr` is itself incomplete). The `ArityOk` blocker is
+**gone**: upstream's `argsWellKinded` plus a vocabulary derived from
+`Core.KnownTypes` discharged it.
 
 Four of the five lemmas have a useful property: their generators never call
 `genLExpr`, so they do not depend on the completeness of the expression generator

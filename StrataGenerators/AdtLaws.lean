@@ -151,9 +151,7 @@ def groundFieldTys (d : LDatatype Unit) (c : LConstr Unit) : List LMonoTy :=
       blocks. Screened rather than asserted, since it is this repo's generator to
       fix, not Strata's; threading `reserved` through
       `genConstructorsForAllTypes` would change the shape the soundness proofs in
-      `DatatypeGenProofs` are stated against, so it is left as follow-up work.
-
-    See `docs/adt-laws-alias-mutual-blocks.md`. -/
+      `DatatypeGenProofs` are stated against, so it is left as follow-up work. -/
 def blockAccepted (block : MutualDatatype Unit) : Bool :=
   match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams DatatypeGen.coreContext block with
@@ -183,7 +181,7 @@ def blockNames (block : MutualDatatype Unit) : List String :=
 /-- Whether `τ` mentions `bitvec 0` anywhere.
 
     **`bitvec 0` is legal in Core and illegal in SMT-LIB.** `pickBitvecWidth`
-    draws a width with no bound (repo issue #38), so a field of type `bitvec 0`
+    draws a width with no bound, so a field of type `bitvec 0`
     occurs; `Function.typeCheck` and `addMutualBlock` both accept it, and the
     encoder emits `(_ BitVec 0)`, whose index SMT-LIB 2.6 requires to be positive.
     cvc5 answers `Parse Error: Illegal bitvector size: 0` and z3

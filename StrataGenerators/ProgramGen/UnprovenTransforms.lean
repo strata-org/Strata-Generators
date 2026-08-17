@@ -104,8 +104,8 @@ the extent of the coverage is not overstated:
   generator work the `FunctionInlining` note describes — a real negative result for that pass
   rather than an absence of testing.
 
-The defect analysis these properties produced is recorded in
-`properties_bugs_found.md`.
+The defect analysis these properties produced is recorded in the repo's findings
+write-up.
 
 `#guard`s cover the four `CommonSubexprElim` properties on hand-built input, and
 also back the `FunctionInlining` four (including a two-function chain on which the
@@ -153,7 +153,7 @@ The families follow the sections of the test plan:
   the evaluator refuses a loop, each side runs `LoopElim` first. All three are
   stated as "no obligation is lost", and their section note gives the reason equality
   would be wrong for each. **These found the eighth defect, and it is in the
-  evaluator rather than in any of the three passes** — see `properties_bugs_found.md`.
+  evaluator rather than in any of the three passes.**
 -/
 
 namespace StrataGenerators.Program.UnprovenTransforms

@@ -149,8 +149,8 @@ differences: `transformStmt` re-emits every unchanged statement with its origina
 
 Each property is stated verbatim from its spec field rather than quietly weakened,
 and the deterministic `#guard`s at the end of the file pin each cause
-independently. The defect analysis these properties produced is recorded in
-`properties_bugs_found.md`.
+independently. The defect analysis these properties produced is recorded in the
+repo's findings write-up.
 
 ## The FilterProcedures `noFilter` / call-graph divergence
 

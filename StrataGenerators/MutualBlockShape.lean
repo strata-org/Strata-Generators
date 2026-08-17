@@ -249,7 +249,7 @@ def checkSplitBlockAgrees (block : MutualDatatype Unit) : Bool :=
     *already known* to be unable to render, so that a print failure is about the
     block's shape rather than about a defect the suite reports elsewhere:
 
-    * a `bitvec w` at a width outside `[1, 8, 16, 32, 64]` — repo issue #48,
+    * a `bitvec w` at a width outside `[1, 8, 16, 32, 64]` — the subject of the
       property `printer: every typecheckable bitvec width is printable`;
     * a `regex`, which has no literal form;
     * an arrow, i.e. a function-typed field;
@@ -258,9 +258,9 @@ def checkSplitBlockAgrees (block : MutualDatatype Unit) : Bool :=
       among them, so a field at either logs
       `unsupported construct in lmonoTyToCoreType: unknown type`. They reach a
       *field* position only because `defaultBaseTypes` is derived from
-      `Core.KnownTypes` (issue #101), which registers both; a single datatype with
-      such a field fails to print identically, so the gap is the printer's and not
-      the block's.
+      `Core.KnownTypes`, which registers both; a single datatype with such a field
+      fails to print identically, so the gap is the printer's and not the
+      block's.
 
     Without this screen the property is red on about 16 of 26 independent blocks
     for reasons that have nothing to do with `mutual`. -/

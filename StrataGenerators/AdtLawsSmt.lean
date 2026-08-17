@@ -35,7 +35,7 @@ blocks with no safety screen at all and asks only whether every emitted query
 reached a verdict. It **fails honestly**, on two independent defects that a legal
 Core datatype triggers:
 
-1. **`bitvec 0`.** `pickBitvecWidth` draws an unbounded width (#38), so a field of
+1. **`bitvec 0`.** `pickBitvecWidth` draws an unbounded width, so a field of
    type `bitvec 0` occurs. Core typechecks it; the encoder emits `(_ BitVec 0)`,
    whose index SMT-LIB 2.6 requires to be positive. cvc5: `Illegal bitvector size:
    0`; z3: `bit-vector size must be greater than zero`.

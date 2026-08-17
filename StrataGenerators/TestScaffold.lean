@@ -952,7 +952,7 @@ SMT-safe (arrow-free, no bitvec 0, bare SMT symbols): {smtSafe}"
   if accepted < samples then
     IO.println s!"  NOTE: {samples - accepted} block(s) rejected by addMutualBlock -- \
 DatatypeGen does not thread reserved names across the datatypes of one block, so two \
-of them can declare a constructor of the same name (docs/adt-laws-alias-mutual-blocks.md)."
+of them can declare a constructor of the same name."
 
 -- ── Test runner ──────────────────────────────────────────────────────
 

@@ -381,9 +381,7 @@ def adtLawTypeChecks : String := "adt: the law program typechecks"
 /-- **FAILS honestly, but only on a rare draw.** A datatype with a field `f` *and* a
     field `f!` derives the name `d..f!` twice — once as `f!`'s safe destructor, once
     as `f`'s unsafe one — and the whole declaration is then rejected. Both field
-    names are legal Core identifiers.
-
-    Reported as repo issue #120.
+    names are legal Core identifiers. Reported upstream.
 
     The collision needs two field names that differ by exactly a trailing `!`, which
     a random draw almost never produces (0 in a dedicated sweep of 400 blocks; it
@@ -412,13 +410,14 @@ def adtDisjSmt : String := "adt: constructor disjointness is provable by SMT"
 
     1. a `bitvec 0` field is emitted as `(_ BitVec 0)`, whose index SMT-LIB 2.6
        requires to be positive (cvc5 `Illegal bitvector size: 0`, z3
-       `bit-vector size must be greater than zero`) — repo issue #118;
+       `bit-vector size must be greater than zero`);
     2. a name that is not a bare SMT-LIB symbol — one containing `'`, or one that
        is an SMT-LIB reserved word such as `_` — is interpolated verbatim into
        `declare-datatype`, while the *same* name is pipe-quoted where it occurs in
-       a field type (`(par (vx' NK) (… (U |vx'| NK) …))`) — repo issue #119.
+       a field type (`(par (vx' NK) (… (U |vx'| NK) …))`).
 
-    Both are pinned by hand-built witnesses as well as by generated blocks. -/
+    Both are reported upstream, and pinned by hand-built witnesses as well as by
+    generated blocks. -/
 def adtSolverAcceptsQuery : String :=
   "adt: every emitted law query reaches a solver verdict"
 
@@ -464,7 +463,7 @@ def mutualIndepPrints : String :=
     parameters, so another datatype's parameters occur free:
     `Aa$Elim : ∀[$__ty0,$__ty1,x]. Aa x → (x → $__ty0) → (y → $__ty1) → …` with `y`
     unbound. The comment at the site states the assumption ("OK because all must
-    have same typevars"); nothing enforces it. Reported as repo issue #121. -/
+    have same typevars"); nothing enforces it. Reported upstream. -/
 def mutualElimWellScoped : String :=
   "mutual: derived functions bind every type variable they mention"
 

@@ -25,10 +25,9 @@ Both directions matter and the module states both:
   under Strata's own symbolic evaluator (`toCoreProofObligationProgram`, the
   `symbolicEval` phase). This is the "evaluates the same" half.
 
-This is the *semantic* counterpart to the typing-spec gap the repo already
-records: `docs/program-gen-interleaving.md` §"Direction (3)" gives a
-machine-checked counterexample to `MutualADTWF` being preserved by alias
-resolution (repo issue #65). That is about which programs the spec calls
+This is the *semantic* counterpart to a typing-spec gap the repo already records
+elsewhere: there is a machine-checked counterexample to `MutualADTWF` being
+preserved by alias resolution. That is about which programs the spec calls
 well-formed; this is about whether the two resolution orders *mean* the same
 thing.
 
