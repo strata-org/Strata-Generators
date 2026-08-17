@@ -47,9 +47,9 @@ structure GenState where
   baseTypes : BaseTys
   tyCons : TyCons
   /-- The *previously declared datatypes* a new block may reference, with their
-      arities — interleaving direction (4) of `docs/program-gen-interleaving.md`.
-      Kept separate from `tyCons` because these names are datatypes of `C`, not
-      external known types: they reach `TySymInhab` through `.datatype` (carried by
+      arities: interleaving direction (4). Kept separate from `tyCons` because these
+      names are datatypes of `C`, not external known types: they reach
+      `TySymInhab` through `.datatype` (carried by
       `Inv.dtPoolOk`) rather than `.external`. Grown by each datatype step. -/
   dtCons : TyCons
   /-- Monomorphic operator context for generated expressions (axiom bodies,
@@ -256,8 +256,8 @@ def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
 /-- Generate a datatype block and, if `addMutualBlock` accepts it, emit it and
     grow the context. The block references the *threaded* pool
     (`s.baseTypes`/`s.tyCons`), so it may mention any abstract type declared
-    earlier in the program — interleaving direction (2) of
-    `docs/program-gen-interleaving.md`. The fold invariant carries `ContextOk` at
+    earlier in the program: interleaving direction (2).
+    The fold invariant carries `ContextOk` at
     that grown pool (`Inv.ctxOk`), re-established at each abstract-type step
     by `contextOk_addKnownType_grow`.
 
@@ -318,14 +318,13 @@ could not be proved sound: generator soundness gives `MutualADTWF s.C block₀` 
 the block *drawn*, while `DeclHasType'.type_data` needs it for the block *stored*
 (`resolveAliases block₀`), and `MutualADTWF` is **not** preserved by alias
 resolution — an arrow-bodied alias can move a block name into an arrow's domain,
-breaking strict positivity (worked example in `docs/program-gen-interleaving.md`).
+breaking strict positivity.
 
 That gap is not reachable by *this* generator (`genArgTy` draws application
 arguments at `recCallsAllowed := false`, so a block name never appears inside an
 alias application's arguments), so the removed step was unproven rather than
 known-unsound. It is parked pending a question to the Strata team about whether
-positivity is meant to be checked pre- or post-resolution — see
-`docs/program-gen-interleaving.md`. -/
+positivity is meant to be checked pre- or post-resolution. -/
 
 /-- How many times a declared function's operator entry is repeated in `octx` /
     `pctx`.
@@ -403,8 +402,8 @@ def funcPolyOpEntry (f : Function) : Option (String × LTy) :=
     its `.op` nodes from `octx`, so without this a generated program declared
     functions that none of its own bodies could mention, and every pass that needs a
     call to a declared function (`FunctionInlining`, through
-    `Factory.callOfLFunc`) ran as the identity. See
-    `StrataGenerators/ProgramGen/UnprovenTransforms.lean` §2.6.
+    `Factory.callOfLFunc`) ran as the identity. See the `FunctionInlining` notes in
+    `StrataGenerators/ProgramGen/UnprovenTransforms.lean`.
 
     This is **soundness-neutral**, which is what makes it a one-line change rather
     than a proof effort: under the annotated spec an `.op` node is typed from its own

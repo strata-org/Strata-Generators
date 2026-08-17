@@ -289,7 +289,7 @@ def usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     it for the `out` parameter the callee declares as `q = (x, τ)` at position `i` of
     its output-only block; `base` is a length past which invented names are fresh.
 
-    The name is genuinely the caller's to choose. The Core spec (§4.6.4) requires an
+    The name is genuinely the caller's to choose. The Core spec requires an
     `out` argument to exist, to have the declared type, and to be writable, but says
     **nothing about its name** — unlike an in-out argument, which the call rule pins
     to the name the callee declares. So:

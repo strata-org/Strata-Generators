@@ -273,7 +273,7 @@ theorem substSig_values_simple (σ : List (TyIdentifier × LMonoTy))
     see `getIn_mkArgs` / `getLhs_mkArgs`.
 
     `T` is a **separate** argument rather than the callee's own `O`, because the
-    Core spec (§4.6.4) does not constrain an out argument's *name*: any writable
+    Core spec does not constrain an out argument's *name*: any writable
     variable of the declared type will do. `T` is therefore a caller-chosen list of
     receiving variables, required only to be as long as `O` and to match it
     *positionally in type* — see `outTargets` (the generator's choice) and the

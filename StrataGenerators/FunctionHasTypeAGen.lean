@@ -302,9 +302,8 @@ theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
     `genIdentName`. This concretizes the opaque `∈ support (genNameList …)`
     reachability side-conditions of `genFunction_complete`.
 
-    (The remaining `∈ support genIdentName` per-name obligation is the
-    residual bottleneck noted in `docs/vectorof-listofmaxlength-integration.md`
-    §4/§5 — it awaits a public two-directional `genIdentName` support lemma.) -/
+    (The remaining `∈ support genIdentName` per-name obligation is the residual
+    bottleneck. It awaits a public two-directional `genIdentName` support lemma.) -/
 theorem mem_support_genNameList_iff (depth : Nat) (l : List String) :
     l ∈ SetGen.support (genNameList (G := SetGen.Set) depth) ↔
       l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by

@@ -44,8 +44,7 @@ Every `.op` node a generated term can contain comes from one of two places:
 
 * **`genIndirPoly`**: the annotation is `concreteArgTys.foldr arrow τ`, built as a
   substitution instance of the operator's generic type (a bound-variable freshening
-  renaming composed with the generator's own substitution — see
-  `docs/ops-consistent-capture-bug.md`). The forward-instance guard in
+  renaming composed with the generator's own substitution). The forward-instance guard in
   `findPolymorphicOps` (`subst fullSubst retTy == τ`) ensures the instance targets `τ`;
   `findPolymorphicOps_instanceR` recovers a single witnessing substitution, discharged
   from a factory-well-formedness hypothesis `PCtxWF` (via
@@ -88,8 +87,7 @@ theorem factoryOps_mem_char (F : @Factory LExprParams') (nm : String) (τ : LMon
     type into the annotation, and the generator builds its annotation as exactly
     such a substitution instance (see `findPolymorphicOps_instanceR`); it never runs
     `opTypeSubst`, so the monomorphic short-circuit that forced the extra invariant
-    in the operational proof (`docs/ops-consistent-polymorphic-gap.md`) does not
-    arise here. -/
+    in the operational proof does not arise here. -/
 def PCtxWF (F : @Factory LExprParams') (pctx : PolyOpCtx) : Prop :=
   ∀ (name : String) (lty : Lambda.LTy),
     (name, lty) ∈ pctx →

@@ -264,16 +264,16 @@ def main (args : List String) : IO UInt32 := do
   -- here and the `#guard`s in `ProgramGen/UnprovenTransforms` are what test them.
   --
   -- The last three (`loop:`/`nondetElim:`/`hoist: symbolic evaluation loses no
-  -- obligation`, §2.9) run each loop pass through `LoopElim` — the evaluator refuses
-  -- a loop — and then through Strata's symbolic evaluator, comparing the obligations
-  -- it emits against the same chain without the pass. All three are live on 390 of
-  -- 400 draws, and they are what found the eighth defect, which is in the
-  -- **evaluator** rather than in any pass: a nondeterministic guard
+  -- obligation`) run each loop pass through `LoopElim`, because the evaluator
+  -- refuses a loop, and then through Strata's symbolic evaluator. Each compares
+  -- the obligations it emits against the same chain without the pass. All three
+  -- are live on 390 of 400 draws, and they are what found the eighth defect, which
+  -- is in the **evaluator** rather than in any pass: a nondeterministic guard
   -- is named after the current path-condition depth instead of by a counter, so a
   -- second `if *` at the same depth silently drops every obligation to the end of
-  -- the procedure (`docs/strata-symbolic-eval-nondet-collision.md`). It surfaced as
-  -- obligations *reappearing* after `NondetElim`, which is why all three are stated
-  -- as containment; the `#guard`s pin the defect itself.
+  -- the procedure. It surfaced as obligations *reappearing* after `NondetElim`,
+  -- which is why all three are stated as containment; the `#guard`s pin the defect
+  -- itself.
   let unprovenSuite : TestSeq :=
     Properties.unprovenTransforms.foldr
       (fun p rest => checkIO p.name

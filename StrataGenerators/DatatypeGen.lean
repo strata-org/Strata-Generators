@@ -189,7 +189,7 @@ consults — rather than written by hand. Two reasons:
   `MutualADTWF.argsWellKinded` says every type-constructor occurrence is applied at the
   arity `C.knownTypes` records. If the vocabulary *is* that register split by arity, the
   converse holds too, so `genArgTy_complete_of_MutualADTWF` no longer needs a hand-written
-  `ArityOk` restating the whole arity discipline. See `docs/mutualadtwf-arity-gap.md`.
+  `ArityOk` restating the whole arity discipline.
 
 `Core.KnownTypes` is a `HashMap`, whose `toList` order is unspecified, so both lists are
 sorted: the generator's distribution must not depend on hash iteration order. -/

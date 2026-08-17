@@ -213,11 +213,10 @@ def main (args : List String) : IO UInt32 := do
   -- may not reach them.
   -- `CommonSubexprElim` fires on 0 of 200 generated programs, so all four CSE
   -- properties are vacuous here and `#guard`s test them instead.
-  -- The last three (`… symbolic evaluation loses no obligation`, §2.9) run each of
-  -- `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` through `LoopElim`
-  -- and then Strata's symbolic evaluator; they found the eighth
-  -- defect — in the evaluator, not the passes
-  -- (`docs/strata-symbolic-eval-nondet-collision.md`).
+  -- The last three (`… symbolic evaluation loses no obligation`) run each of
+  -- `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` through
+  -- `LoopElim` and then Strata's symbolic evaluator. They found the eighth
+  -- defect, which is in the evaluator and not in the passes.
   let unprovenSuite : List (IO Result) :=
     Properties.unprovenTransforms.map
       (fun p => runProperty p.name

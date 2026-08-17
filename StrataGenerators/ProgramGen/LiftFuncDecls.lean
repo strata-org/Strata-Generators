@@ -40,7 +40,7 @@ at the call site — that would read a later value. Instead it emits
 there, and passes that snapshot at every call site. Textbook lifting would be
 observably wrong whenever `c` is reassigned between the declaration and the call.
 
-That design is what §"Findings" below turns out to hinge on: the *function* is
+That design is what the "Findings" below turn out to hinge on: the *function* is
 hoisted to the top level, but the *snapshot* stays at the original program point.
 
 ## What is already proved upstream, and what is not
@@ -132,7 +132,7 @@ really hoisted a function on 20/20, so no property is scored vacuously.
 
 **Everything else passes, including three things the plan expected to be weak:**
 
-* Capture through `axioms`, `preconditions` and `measure` — the plan's §6.2 calls a
+* Capture through `axioms`, `preconditions` and `measure` — the plan calls a
   body-only generator "the most likely coverage gap". The pass handles all four
   fields correctly: each is rewritten to the snapshot parameter and survives into
   the emitted function. `CaptureVia` covers all four.
@@ -391,7 +391,7 @@ def procSnapshotsInScope (q : Procedure) : Bool :=
 each property injects one. A `Scenario` is the dimensions worth varying, and
 `allScenarios` is the curated cross-product every property sweeps.
 
-The four dimensions come straight from the plan's §6 generator requirements:
+The four dimensions come straight from the plan's generator requirements:
 
 * `Placement` — where the `funcDecl` sits relative to its call sites. The plan's
   P7 names the three escaping shapes (declared in a branch and used after the
@@ -399,7 +399,7 @@ The four dimensions come straight from the plan's §6 generator requirements:
   labelled-`block` case. `.top` and `.blockIn` are the controls where the call is
   in the declaring scope.
 * `CaptureVia` — which of the four fields `capturedVars` unions carries the
-  captured variable. §6.2 calls a body-only generator "the most likely coverage
+  captured variable. The plan calls a body-only generator "the most likely coverage
   gap".
 * `CallShape` — the sibling call graph the Johnsson fixpoint runs over. `.chain`
   is a capturing function called by a non-capturing one (the case where the
@@ -1157,7 +1157,7 @@ private def rejProg (ss : List Statement) (extra : List Decl := []) : Program :=
 
 /-! ### Capture through each of the four fields
 
-The plan's §6.2 calls a body-only generator "the most likely coverage gap". It is
+The plan calls a body-only generator "the most likely coverage gap". It is
 not one: each field is rewritten to the snapshot parameter and survives into the
 emitted function. Pinned per field, since the printed program shows neither
 `axioms` nor `measure` and a regression there would otherwise be invisible. -/

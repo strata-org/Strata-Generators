@@ -717,8 +717,7 @@ instance : Shrinkable GenProgram where
 -- a call to a *polymorphic* datatype's tester or accessor goes through `IndirPoly`,
 -- which samples instantiations, and an unfillable sample is another `inhabitedWitness`
 -- failure for the retry loop to absorb (measured 1/8 versus 8/8 draws surviving at
--- `numDecls = 12` — see the `sample` docstring and
--- `docs/adt-derived-function-calls.md`). `numDecls ≤ 5` here is far below that, so
+-- `numDecls = 12` — see the `sample` docstring). `numDecls ≤ 5` here is far below that, so
 -- 30000 is ample rather than tight.
 private def genProgramWith : Gen GenProgram := Gen.sized fun s => do
   let numDecls := max 2 (min 5 (2 + s / 25))
@@ -845,7 +844,7 @@ def printDerivedCallCoverage (samples maxSize : Nat) : IO Unit := do
 | safe accessors {accs} | unsafe accessors {uaccs}"
   if withDt > 0 && withCall == 0 then
     IO.println "  NOTE: no derived calls in this run -- if persistent, this is the \
-regression the ADT-derived-function work fixed (see docs/adt-derived-function-calls.md)."
+regression the ADT-derived-function work fixed."
 
 -- ── Test runner ──────────────────────────────────────────────────────
 

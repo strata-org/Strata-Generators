@@ -99,9 +99,9 @@ the extent of the coverage is not overstated:
 * `checkKleeneMeasureAccepted` is a characterization and not a bug oracle, for the
   reason its docstring gives.
 * the four `CommonSubexprElim` properties are vacuous on generated input (the pass
-  fires on 0 of 200 draws), for the reason the §2.5 note gives.
+  fires on 0 of 200 draws), for the reason the `CommonSubexprElim` note gives.
 * the four `FunctionInlining` properties now fire on **231 of 400** draws, after the
-  generator work the §2.6 note describes — a real negative result for that pass
+  generator work the `FunctionInlining` note describes — a real negative result for that pass
   rather than an absence of testing.
 
 The defect analysis these properties produced is recorded in
@@ -119,38 +119,39 @@ measure; 28 hold a nondeterministic guard; 7 hold an `init` in a loop body.
 
 The families follow the sections of the test plan:
 
-* **IrrelevantAxioms** (§2.1) — the *relevance* oracle, and not the `changed`
+* **IrrelevantAxioms** — the *relevance* oracle, and not the `changed`
   flag (covered separately). Five properties: only an `.ax` declaration
   is ever removed, declaration order holds, each retained axiom is relevant, each
   removed axiom is irrelevant, and the pruned program still typechecks.
-* **StructuredToUnstructured** (§2.2) — seven structural properties over the
+* **StructuredToUnstructured** — seven structural properties over the
   emitted CFG: no dangling target, distinct labels, the entry label exists,
   exactly one `.finish` block, each block is reachable from the entry, the
   command count holds modulo the commands the pass synthesizes, and the `.cfg`
   body prints.
-* **LoopElim and InsertLoopInvariantAsserts** (§2.4) — the accounting of the
+* **LoopElim and InsertLoopInvariantAsserts** — the accounting of the
   verification conditions: the exact count of each inserted `assert` and
   `assume` as a function of the invariant count, a bare loop after the pass,
   idempotence, the statistics counter, and the survival of each verification
   condition through `LoopElim`.
-* **CommonSubexprElim** (§2.5) — a fresh name that does not collide, the
+* **CommonSubexprElim** — a fresh name that does not collide, the
   `assert` labels, the order of the fresh declarations, and a typecheckable
   output.
-* **FunctionInlining** (§2.6) — identity at fuel 0, monotonicity in the fuel,
+* **FunctionInlining** — identity at fuel 0, monotonicity in the fuel,
   type preservation, and freedom from capture.
-* **ProcedureInlining** (§2.7) — distinct labels after two call sites, the
+* **ProcedureInlining** — distinct labels after two call sites, the
   count of the `assert` labels, the statistics counters, and a well-formed call
   graph.
-* **NondetElim and LoopInitHoist** (§2.8) — the headline postcondition of each
+* **NondetElim and LoopInitHoist** — the headline postcondition of each
   pass, which neither file proves: no `.nondet` guard is left, and each loop body
   holds no `init`.
-* **The three loop passes under the symbolic evaluator** (§2.9) — whether
+* **The three loop passes under the symbolic evaluator** — whether
   `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` change the proof
-  obligations that reach SMT. §2.4 and §2.8 state their claims syntactically; these
+  obligations that reach SMT. The loop-accounting and postcondition families state
+  their claims syntactically; these
   three go through Strata's executable evaluator instead, which is the only oracle
   that can see an obligation surviving as *syntax* but never being emitted. Since
   the evaluator refuses a loop, each side runs `LoopElim` first. All three are
-  stated as "no obligation is lost", and the §2.9 note gives the reason equality
+  stated as "no obligation is lost", and their section note gives the reason equality
   would be wrong for each. **These found the eighth defect, and it is in the
   evaluator rather than in any of the three passes** — see `properties_bugs_found.md`.
 -/
@@ -222,8 +223,8 @@ def runPhaseWithFuncs (ph : Core.PipelinePhase) (prog : Program) :
 /-! ## The symbolic evaluator as a differential oracle
 
 Two families below compare a pass's *proof obligations* before and after it runs:
-`IrrelevantAxioms` (§2.1), where the obligation set must be **unchanged**, and
-`ProcedureInlining` (§2.7), where it must not **shrink**. Both use Strata's own
+`IrrelevantAxioms`, where the obligation set must be **unchanged**, and
+`ProcedureInlining`, where it must not **shrink**. Both use Strata's own
 executable symbolic evaluator, which is the `symbolicEval` phase of
 `corePipelinePhases`.
 
@@ -349,7 +350,7 @@ def stmtsBlockLabels (ss : List Statement) : List String :=
   | s :: rest => stmtBlockLabels s ++ stmtsBlockLabels rest
 end
 
-/-! ## §2.1 `IrrelevantAxioms` — the relevance oracle
+/-! ## `IrrelevantAxioms` — the relevance oracle
 
 `irrelevantAxiomsPipelinePhase` prunes each axiom that its fixed-point relevance
 computation finds irrelevant to a seed set of function names. The `changed` flag,
@@ -516,7 +517,7 @@ def checkAxiomsObligationsUnchanged (p : Program) : Bool :=
         | none, none => true   -- the oracle read neither side; no claim to make
         | _, _ => false))      -- it read one side only: the pass changed its verdict
 
-/-! ## §2.2 `StructuredToUnstructured` — the structural properties
+/-! ## `StructuredToUnstructured` — the structural properties
 
 `stmtsToBlocks` (`StructuredToUnstructured.lean`) threads a continuation label
 `k` and an `exitConts` association list by hand across eight statement cases, and
@@ -693,7 +694,7 @@ def checkS2uCfgPrintable (p : Program) : Bool :=
         | other => other }
   (toString (Core.formatProgram cfgProg)).splitOn "Errors encountered" |>.length == 1
 
-/-! ## §2.4 `LoopElim` and `InsertLoopInvariantAsserts` — accounting of the
+/-! ## `LoopElim` and `InsertLoopInvariantAsserts` — accounting of the
 verification conditions
 
 The repository already checks that `LoopElim` preserves typeability and removes
@@ -878,7 +879,7 @@ def checkLoopElimStatFaithful (p : Program) : Bool :=
         | none => true)
      | none => true)
 
-/-! ## §2.3 `DetToKleene` — the measure the transform drops
+/-! ## `DetToKleene` — the measure the transform drops
 
 `StmtToKleeneStmt` (`DetToKleene.lean`) rejects a loop that carries an
 invariant (`if !inv.isEmpty then none`) and explains why: the deterministic
@@ -932,7 +933,7 @@ def checkKleeneMeasureAccepted (p : Program) : Bool :=
     !(hasMeasureOnlyLoop ss && !hasKleeneUnsupported ss && !hasInvLoopStmts ss) ||
       (kleeneStmts ss).isSome
 
-/-! ## §2.5 `CommonSubexprElim` — fresh names and ordering
+/-! ## `CommonSubexprElim` — fresh names and ordering
 
 The repository already checks that CSE leaves no dangling bound variable and that
 symbolic evaluation agrees. What remains is the fresh-name discipline. CSE mints
@@ -1043,7 +1044,7 @@ def checkCseOutputTypechecks (p : Program) : Bool :=
      | some (_, out) => progTypeChecks out
      | none => true)
 
-/-! ## §2.6 `FunctionInlining` — a pure expression transform
+/-! ## `FunctionInlining` — a pure expression transform
 
 `inlineFuncDefs` (`FunctionInlining.lean`) is a pure `LExpr → LExpr` transform,
 which makes it the pass that is easiest to test well. It relies on
@@ -1234,8 +1235,8 @@ def checkInlineCaptureFree (p : Program) : Bool :=
 
 /-! ### Value preservation under the concrete evaluator
 
-The sharpest oracle available for `FunctionInlining`, and the one §2.6 of the issue
-asks for: inlining a call must not change what the expression *evaluates to*.
+The sharpest oracle available for `FunctionInlining`, and the one the issue asks
+for: inlining a call must not change what the expression *evaluates to*.
 
 **Making the comparison meaningful takes one step.** `LExprEval.eval` unfolds a
 function body only when the function carries the `.inline` attribute, or an
@@ -1298,7 +1299,7 @@ where
     term, when the evaluator is allowed to unfold the same functions the transform
     does (see `inlineEvalFactory`).
 
-    This is the property §2.6 of the test plan asks for, in the form the two evaluators
+    This is the property the test plan asks for, in the form the two evaluators
     make available. It is stronger than the four syntactic properties beside it: those
     constrain the *shape* of the result (its type, its free variables, its remaining
     inlinable calls), whereas this one constrains its *meaning*. A substitution that
@@ -1332,7 +1333,7 @@ where
     at all, so the original side stays stuck on the call and never reaches a value
     (measured: 0 of 296 originals reduced). Confirming the equality at the level of
     *values* rather than terms needs the SMT oracle (`--smt`), which is the other half
-    of what §2.6 proposes and is left to follow-up work. -/
+    of what the test plan proposes and is left to follow-up work. -/
 def checkInlineEvalAgreement (p : Program) : Bool :=
   let Fplain := programFactory p
   let Finl := inlineEvalFactory p
@@ -1343,7 +1344,7 @@ def checkInlineEvalAgreement (p : Program) : Bool :=
     decide (out = e) || exprHasBinder e ||
       decide (evalOver Finl e = evalOver Finl out)
 
-/-! ## §2.7 `ProcedureInlining` — freshening of the labels
+/-! ## `ProcedureInlining` — freshening of the labels
 
 `replaceLabelsOfBlocksAndAssertAssumes` (`ProcedureInlining.lean`) renames each
 block, `assert`, `assume` and `cover` label when it inlines a body. The classic
@@ -1541,7 +1542,7 @@ def checkInlineProcSymbolicAgreement (p : Program) : Bool :=
              let lb := (programBodies after).flatMap stmtsAssertLabels
              la.all lb.contains)))
 
-/-! ## §2.8 `NondetElim` and `LoopInitHoist` — the unproven postconditions
+/-! ## `NondetElim` and `LoopInitHoist` — the unproven postconditions
 
 Both files prove syntactic *preservation* lemmas (`noFuncDecl`,
 `noMeasureLoops`), but neither proves its own headline postcondition. Each
@@ -1658,9 +1659,9 @@ def checkHoistPreservesUniqueInits (p : Program) : Bool :=
   (cmdShapedBodies p).all fun ss =>
     !uniqueInitsB ss || uniqueInitsB (Imperative.Block.hoistLoopPrefixInits ss)
 
-/-! ## §2.9 The three loop passes under the symbolic evaluator
+/-! ## The three loop passes under the symbolic evaluator
 
-§2.4 and §2.8 state each loop pass's claim **syntactically**: a count of inserted
+The two sections above state each loop pass's claim **syntactically**: a count of inserted
 statements, a `Bool` postcondition, a survival check on assert *labels*. None of
 them asks the question the pipeline actually cares about — whether the pass
 changes the **proof obligations that reach SMT**. That is what this section adds,
@@ -1695,7 +1696,7 @@ different reasons:
 
 * `InsertLoopInvariantAsserts` *adds* obligations by design — that is the pass.
   So the obligation set must grow, and an equality claim would report the pass
-  working as a bug (the trap §2.7 records).
+  working as a bug (the trap the `ProcedureInlining` note records).
 
 * `NondetElim` also makes the obligation set grow, but for a reason that is *not*
   by design: it **repairs a soundness defect in the evaluator**. See the note
@@ -1861,8 +1862,7 @@ def labelsRetained (before after : List String) : Bool :=
     then nothing to compare against. A pass output that *stops* reaching the
     evaluator is a failure, not a skip.
 
-    Coverage, measured over 400 draws
-    (`docs/measurements/loop-pass-symeval-coverage.lean`): the claim is live on
+    Coverage, measured over 400 draws: the claim is live on
     390, and the pass has an invariant or a measure to insert on 10 of those. So
     the guards are cheap but the interesting subset is small, which is what the
     `#guard`s at the end of this file are for. Passes on every draw. -/
@@ -2523,7 +2523,7 @@ private def nfCall : Expression.Expr := .op () ⟨"NF", ()⟩ (some .bool)
 -- ── The measure that `DetToKleene` drops ──────────────────────────────────
 
 -- A loop with a measure and no invariant: the transform is defined, and the
--- measure is gone from the result. This is the §2.3 characterization, pinned on
+-- measure is gone from the result. This is the `DetToKleene` characterization, pinned on
 -- the exact shape rather than left to the generator's 8 percent hit rate.
 #guard checkKleeneMeasureAccepted (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])
 
@@ -2622,7 +2622,7 @@ private def hoistBody : List Statement :=
 #guard (cmdShapedBodies (guardProg hoistBody)).all fun ss =>
   !Imperative.Block.loopBodyNoInits ss
 
--- ── §2.9 Obligation preservation under the symbolic evaluator ─────────────
+-- ── Obligation preservation under the symbolic evaluator ──────────────────
 
 /-- A nondeterministic `if *` whose then-branch asserts `l`. -/
 private def ndIte (l : String) : Statement :=
@@ -2722,9 +2722,7 @@ private def hoistObligationBody : List Statement :=
 -- procedure whose postcondition is `false` — unverifiable by construction —
 -- together with two *empty* `if *`. The blocks assert nothing and assign nothing;
 -- they only consume the minted name. The obligation list comes back **empty**, so
--- a verifier has nothing to prove and reports success. See
--- `docs/measurements/nondet-cond-collision-witnesses.lean` for the search that
--- found it.
+-- a verifier has nothing to prove and reports success.
 
 /-- `procedure P (out r : int) ensures [post]: false { ss }`. The postcondition
     makes the procedure unverifiable, so its obligation must reach the evaluator. -/

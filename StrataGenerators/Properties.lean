@@ -327,7 +327,7 @@ def hoistPreservesUniqueInits : String := "hoist: uniqueInits is preserved"
 -- the pass to get the loop-free program the evaluator requires, and compares the
 -- obligations it emits against the same chain without the pass. All three are
 -- stated as containment ("no obligation is lost"), since each pass may
--- legitimately add one; see §2.9 of `ProgramGen/UnprovenTransforms`.
+-- legitimately add one; see `ProgramGen/UnprovenTransforms`.
 def loopVcSymbolicNoLoss : String :=
   "loop: symbolic evaluation loses no obligation through InsertLoopInvariantAsserts"
 /-- Containment and not equality *because of a defect in the evaluator, not the
@@ -573,7 +573,7 @@ def programADTProps : List (Property Core.Program) :=
     predicate from `ProgramGen/UnprovenTransforms`. The shapes are identical across
     both harnesses, so name↔check is paired once here.
 
-    The last three are the obligation-preservation properties of §2.9, which run
+    The last three are the obligation-preservation properties, which run
     `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` each through
     `LoopElim` and then Strata's symbolic evaluator, and check that no proof
     obligation is lost. They pin a soundness defect in the **evaluator** that no
@@ -591,7 +591,7 @@ def programADTProps : List (Property Core.Program) :=
     `cseOutputTypechecks` and `cseFreshNamesFresh` are reachable only under a
     `#guard`, since `CommonSubexprElim` fires on no generated program at all. -/
 def unprovenTransforms : List (Property Core.Program) :=
-  [ -- IrrelevantAxioms (§2.1) — the relevance oracle
+  [ -- IrrelevantAxioms — the relevance oracle
     ⟨PropertyNames.axiomsOnlyAxRemoved,      checkAxiomsOnlyAxRemoved⟩,
     ⟨PropertyNames.axiomsOrderPreserved,     checkAxiomsOrderPreserved⟩,
     ⟨PropertyNames.axiomsRetainedRelevant,   checkAxiomsRetainedRelevant⟩,
@@ -599,7 +599,7 @@ def unprovenTransforms : List (Property Core.Program) :=
     ⟨PropertyNames.axiomsRemovedUnreachable, checkAxiomsRemovedNotSeedReachable⟩,
     ⟨PropertyNames.axiomsPrunedTypechecks,   checkAxiomsPrunedTypechecks⟩,
     ⟨PropertyNames.axiomsObligationsUnchanged, checkAxiomsObligationsUnchanged⟩,
-    -- StructuredToUnstructured (§2.2) — the emitted CFG
+    -- StructuredToUnstructured — the emitted CFG
     ⟨PropertyNames.s2uNoDanglingLabel,       checkS2uNoDanglingLabel⟩,
     ⟨PropertyNames.s2uLabelsNodup,           checkS2uLabelsNodup⟩,
     ⟨PropertyNames.s2uEntryExists,           checkS2uEntryExists⟩,
@@ -607,9 +607,9 @@ def unprovenTransforms : List (Property Core.Program) :=
     ⟨PropertyNames.s2uAllReachable,          checkS2uAllReachable⟩,
     ⟨PropertyNames.s2uCmdCountGrows,         checkS2uCmdCountGrows⟩,
     ⟨PropertyNames.s2uCfgPrintable,          checkS2uCfgPrintable⟩,
-    -- DetToKleene (§2.3) — the dropped measure
+    -- DetToKleene — the dropped measure
     ⟨PropertyNames.kleeneMeasureAccepted,    checkKleeneMeasureAccepted⟩,
-    -- LoopElim + InsertLoopInvariantAsserts (§2.4) — the verification conditions
+    -- LoopElim + InsertLoopInvariantAsserts — the verification conditions
     ⟨PropertyNames.loopVcAssertCount,        checkLoopVcAssertCount⟩,
     ⟨PropertyNames.loopBareAfterPass,        checkLoopBareAfterPass⟩,
     ⟨PropertyNames.loopVcIdempotent,         checkLoopVcIdempotent⟩,
@@ -618,30 +618,30 @@ def unprovenTransforms : List (Property Core.Program) :=
     ⟨PropertyNames.loopNondetMeasure,        checkLoopNondetMeasureThrows⟩,
     ⟨PropertyNames.loopBlockLabelsNodup,     checkLoopBlockLabelsNodup⟩,
     ⟨PropertyNames.loopElimStatFaithful,     checkLoopElimStatFaithful⟩,
-    -- CommonSubexprElim (§2.5) — fresh names and ordering
+    -- CommonSubexprElim — fresh names and ordering
     ⟨PropertyNames.cseFreshNamesFresh,       checkCseFreshNamesFresh⟩,
     ⟨PropertyNames.cseAssertLabelsPreserved, checkCseAssertLabelsPreserved⟩,
     ⟨PropertyNames.cseFreshDeclOrder,        checkCseFreshDeclOrder⟩,
     ⟨PropertyNames.cseOutputTypechecks,      checkCseOutputTypechecks⟩,
-    -- FunctionInlining (§2.6) — a pure expression transform
+    -- FunctionInlining — a pure expression transform
     ⟨PropertyNames.inlineFuelZeroIdentity,   checkInlineFuelZeroIdentity⟩,
     ⟨PropertyNames.inlineFuelMonotone,       checkInlineFuelMonotone⟩,
     ⟨PropertyNames.inlineTypePreserved,      checkInlineTypePreserved⟩,
     ⟨PropertyNames.inlineCaptureFree,        checkInlineCaptureFree⟩,
     ⟨PropertyNames.inlineEvalAgreement,      checkInlineEvalAgreement⟩,
-    -- ProcedureInlining (§2.7) — freshening of the labels
+    -- ProcedureInlining — freshening of the labels
     ⟨PropertyNames.inlineProcLabelsNodup,    checkInlineProcLabelsNodup⟩,
     ⟨PropertyNames.inlineProcAssertsNotLost, checkInlineProcAssertsNotLost⟩,
     ⟨PropertyNames.inlineProcStatsFaithful,  checkInlineProcStatsFaithful⟩,
     ⟨PropertyNames.inlineProcTypechecks,     checkInlineProcTypechecks⟩,
     ⟨PropertyNames.inlineProcAnalysisPreserved, checkInlineProcAnalysisPreserved⟩,
     ⟨PropertyNames.inlineProcSymbolicAgreement, checkInlineProcSymbolicAgreement⟩,
-    -- NondetElim + LoopInitHoist (§2.8) — the unproven postconditions
+    -- NondetElim + LoopInitHoist — the unproven postconditions
     ⟨PropertyNames.nondetElimNoNondetGuard,  checkNondetElimNoNondetGuard⟩,
     ⟨PropertyNames.nondetElimFreshNames,     checkNondetElimFreshNames⟩,
     ⟨PropertyNames.hoistNoLoopBodyInits,     checkHoistNoLoopBodyInits⟩,
     ⟨PropertyNames.hoistPreservesUniqueInits, checkHoistPreservesUniqueInits⟩,
-    -- The three loop passes under the symbolic evaluator (§2.9)
+    -- The three loop passes under the symbolic evaluator
     ⟨PropertyNames.loopVcSymbolicNoLoss,     checkLoopVcSymbolicNoLoss⟩,
     ⟨PropertyNames.nondetElimSymbolicNoLoss, checkNondetElimSymbolicNoLoss⟩,
     ⟨PropertyNames.hoistSymbolicNoLoss,      checkHoistSymbolicNoLoss⟩ ]

@@ -3,11 +3,9 @@ import StrataGenerators.ProgramGen
 /-!
 # Completeness of the whole-program generator (fold inversion)
 
-As documented in `docs/program-gen-completeness.md`, a monolithic
-"every `ProgramHasTypeA` program is reachable" theorem is inherently false for a
-*bounded sampler* without a union of per-declaration reachability side conditions
-(the same reason datatype completeness needs `BitvecWidthOnly`; see
-`docs/mutualadtwf-arity-gap.md`).
+A monolithic "every `ProgramHasTypeA` program is reachable" theorem is inherently
+false for a *bounded sampler* without a union of per-declaration reachability side
+conditions (the same reason datatype completeness needs `BitvecWidthOnly`).
 
 What *is* cleanly provable — and is the useful completeness contribution — is that
 the **fold composes**: if each declaration step is individually reachable from its
@@ -57,7 +55,7 @@ Three items block a tighter result:
 * `BitvecWidthOnly` is a hypothesis of each lemma that generates a type. It is the
   one residual condition of the arity discipline, because `Core.KnownTypes`
   registers `bitvec` at arity 1 but no `LMonoTy` argument position can hold a
-  width. See `docs/mutualadtwf-arity-gap.md`. The hand-written `ArityOk` predicate
+  width. The hand-written `ArityOk` predicate
   that these lemmas used to carry is gone: `VocabOk` plus upstream's
   `argsWellKinded` discharge the rest of the arity discipline.
 * The generator does not emit `recFuncBlock`, so the eighth constructor of
@@ -170,8 +168,7 @@ supplied parameters, the type obeys the arities of `C` (`ArgsWellKinded`), and e
 The arity hypotheses are at the same position as in the datatype development, and
 they need no more plumbing. `VocabOk` ties the pool the generator draws from to the
 arity register of `C`, so upstream's `argsWellKinded` carries the arity discipline.
-`BitvecWidthOnly` is the one residual condition. See
-`docs/mutualadtwf-arity-gap.md`. -/
+`BitvecWidthOnly` is the one residual condition. -/
 
 /-- `NotNested` is unconditional at the empty block: there are no block datatypes
     to nest. The arrow case recurses, hence the induction. -/

@@ -520,7 +520,7 @@ structure Inv (s : GenState) : Prop where
       This is stated at `s.baseTypes`/`s.tyCons` — the pool grown by abstract-type
       declarations — rather than at the fixed default, which is what lets a
       datatype block reference a previously declared abstract type (interleaving
-      direction (2), see `docs/program-gen-interleaving.md`). The abstract-type
+      direction (2)). The abstract-type
       step re-establishes it at the grown pool via
       `contextOk_addKnownType_grow`. -/
   ctxOk : DatatypeGen.ContextOk s.C s.baseTypes s.tyCons s.reserved

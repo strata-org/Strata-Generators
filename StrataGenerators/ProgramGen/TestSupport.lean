@@ -137,7 +137,7 @@ def checkNamesNodup (P : Program) : Bool :=
     `initState`) and must also thread the program's **abstract type**
     declarations, because a later block may reference one: `genDeclDatatype` draws
     its block over the *threaded* vocabulary, which abstract types extend
-    (interleaving direction (2) of `docs/program-gen-interleaving.md`). Replaying
+    (interleaving direction (2)). Replaying
     the blocks alone spuriously fails on exactly those programs — measured 28/40
     without the abstract-type adds versus 40/40 with them. -/
 def checkDatatypeBlocksAccepted (P : Program) : Bool :=

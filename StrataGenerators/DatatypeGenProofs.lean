@@ -92,7 +92,7 @@ discards the number of their arguments — so `MutualADTWF` accepted an argument
 wrong kind, such as `Sequence a a`. The field `argsWellKinded` now checks the argument count
 against `C.knownTypes`, and `defaultBaseTypes` / `defaultTyCons` are *derived* from that same
 register (`Core.KnownTypes`), so the specification discharges the whole arity discipline by
-itself and `ArityOk` is gone. Read `docs/mutualadtwf-arity-gap.md`.
+itself and `ArityOk` is gone.
 
 An existing field of `MutualADTWF` discharges every difference between the specification and
 the generator except one:
@@ -2011,7 +2011,7 @@ Upstream added the field `argsWellKinded` to `MutualADTWF` (`strata-org/Strata` 
 "Reject known type constructors applied at wrong arity"). That field closes exactly the
 specification gap this file used to document, and which a hand-written `ArityOk` predicate
 had to state for the completeness direction. `ArityOk` is now deleted: read the prose above
-`ArgsWellKinded`, and `docs/mutualadtwf-arity-gap.md`. -/
+`ArgsWellKinded`. -/
 
 /-- Each type-constructor occurrence in a generated type is applied at the arity that its
     name declares. This lemma is the half of the field `argsWellKinded` of `MutualADTWF`
@@ -2364,9 +2364,9 @@ theorem getType_push_other {C : LContext CoreLParams} {block : MutualDatatype Un
 `MutualADTWF.inhabited` is stated in the *extended* factory
 `C.datatypes.push block`, but a datatype that is already stored in `C` carries its
 inhabitance in `C.datatypes`. Moving the latter to the former is what lets a
-generated block reference a datatype declared by an *earlier* declaration —
-interleaving direction (4) of `docs/program-gen-interleaving.md`, which the design
-doc had ruled out on the grounds that a stored datatype cannot ride
+generated block reference a datatype declared by an *earlier* declaration:
+interleaving direction (4), which the design
+had ruled out on the grounds that a stored datatype cannot ride
 `TySymInhab.external`. It does not need to: it rides `TySymInhab.datatype`, whose
 premise is exactly the inhabitance we already have.
 
@@ -3832,7 +3832,7 @@ open Core Core.TypeSpec in
     Three hypotheses are more than `MutualADTWF`, and **none of them is an arity condition**.
     The generator's vocabulary is derived from `Core.KnownTypes`, so the field `argsWellKinded`
     now discharges the whole arity discipline by itself; the hand-written `ArityOk` predicate
-    this theorem used to carry is gone. Read `docs/mutualadtwf-arity-gap.md`.
+    this theorem used to carry is gone.
 
     * `hbv` is the one residual condition on the type: every `bitvec` in it is a *width* and
       not the name `bitvec` applied to a type. `Core.KnownTypes` registers `bitvec` at arity
@@ -3926,7 +3926,7 @@ example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") 
 
     One further gap is *not* about the type: `argsWellKinded` also admits references to
     datatypes already stored in `C`, which the generator cannot emit. `VocabOk.noStoredDatatypes`
-    states that, and it holds for `coreContext`. Read `docs/mutualadtwf-arity-gap.md`. -/
+    states that, and it holds for `coreContext`. -/
 theorem not_complete_without_bitvecWidthOnly (d : LDatatype Unit)
     (a : TyIdentifier) (hd_ne : d.name ≠ "bitvec") (blockRefs : List BlockRef)
     (hbr : ∀ br ∈ blockRefs, br.1 = d.name) (rca : Bool) (size : Nat) :

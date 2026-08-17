@@ -1701,8 +1701,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   -- `_opsConsistentR`), and each would need the inductive hypothesis plus, for
   -- IndirPoly, the `hPoly` premise. `genLExprBase_termDepth_bound` is unaffected
   -- either way: it is indexed by `SimpleType τ`, which has no datatype `tcons` case,
-  -- so no depth bound is stated for a datatype target at all. See
-  -- `docs/adt-derived-function-calls.md`.
+  -- so no depth bound is stated for a datatype target at all.
   | _, τ =>
     let bvars := bvarsOfType bctx τ
     oneOf
