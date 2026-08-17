@@ -11,7 +11,10 @@ rev = "7f94d01f"
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
-rev = "lean-4.29"
+# `lean-4.29` HEAD as of 2026-08-17. Pinned to a commit rather than the branch
+# name so the `@[tunable]` attribute (Basalt/Tuning/Attr.lean, which replaced the
+# older `tunable def` macro) stays at a known revision.
+rev = "3da2b2482e6d57cb01362e190a0ff7d9e90ec58a"
 
 [[require]]
 name = "LSpec"

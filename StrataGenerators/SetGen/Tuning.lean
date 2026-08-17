@@ -14,28 +14,63 @@ open scoped SetGen.Set
 
 Basalt's tuning infrastructure has two halves:
 
-* the data and the `tunable def` command (`Basalt.Tuning` / `Basalt.Tuning.Macro`) — `Tuning`,
-  `Site`, `Tuning.weight`, `Tuning.weight_pos`, and the macro that threads a `Tuning` through a
-  generator's `frequency` sites. All of it is generic over `[Gen G]`, with no `SPMF` dependency, so
-  it applies to any `Gen`, including `SetGen.Set` (see `StrataGenerators.SetGen.Core`), with no
-  changes. `tunable def genFoo … : SetGen.Set α := …` already elaborates, emitting
-  `genFoo.tuned/.defaults/.sites/.tuned_defaults`.
+* the data and the `@[tunable]` attribute (`Basalt.Tuning` / `Basalt.Tuning.Attr`) — `Tuning`,
+  `Site`, `Tuning.weight`, `Tuning.weight_pos`, `Tuning.sum_map_fst_pos`, and the attribute that
+  threads a `Tuning` through a generator's `frequency` sites. All of it is generic over `[Gen G]`,
+  with no `SPMF` dependency, so it applies to any `Gen` — including `SetGen.Set` (see
+  `StrataGenerators.SetGen.Core`) — with no changes. Tagging `@[tunable] def genFoo … : G α := …`
+  emits `genFoo.tuned/.defaults/.sites/.tuned_defaults`, and those all specialize to
+  `G := SetGen.Set`.
+
+  (`@[tunable]` replaced the older `tunable def` macro in
+  [basalt@5d23328](https://github.com/hgoldstein95/basalt/commit/5d233281209442f6edc2d776993fe04bc39cb06c).
+  Because it rewrites the *elaborated* body rather than the surface syntax, it no longer constrains
+  the recursion form — structural, well-founded and `partial_fixpoint` generators are all tunable —
+  and it can be applied from another module, with `attribute [tunable] genFoo`, to a generator whose
+  source you do not want to touch. `StrataGenerators.SetGen.TuningPrototypes` does exactly that to
+  the shipping `genPrecondition`.)
 
 * the proof-side reweight lemmas, which in Basalt live in `Basalt.SPMF.Support` and `Basalt.Laws`
-  and are stated for `SPMF`. This file ports exactly those to `SetGen.Set`, reusing the existing
-  `SetGen.support_frequency` / `SetGen.support_oneOf` characterizations:
+  and are stated for `SPMF`. This file ports those to `SetGen.Set` and then strengthens them, since
+  `Set`'s support *is* the generator:
 
-  - `SetGen.support_frequency_reweight` — replacing a uniform `oneOf` by a `frequency` over the same
-    branches (with positive weights) leaves the support unchanged;
-  - `SetGen.support_frequency_congr_weights` — changing the weights of a `frequency` in place (the
-    shape a `tunable def` rewrite takes) leaves the support unchanged;
-  - `SetGen.IsSoundAndComplete.of_support_eq` — soundness-and-completeness transfers along a support
-    equation, so a `tunable def`'s `tuned_support` fact lifts an untuned `IsSoundAndComplete` to the
-    tuned generator in one step.
+  - `SetGen.support_frequency_reweight` / `SetGen.support_frequency_congr_weights` — the direct
+    ports: reweighting a `frequency` (from a uniform `oneOf`, or in place) leaves the support
+    unchanged, given positive weights.
+  - `SetGen.frequency_eq_oneOf` / `SetGen.frequency_congr_weights` — the same two facts as
+    *generator* equalities rather than support equalities. `SetGen.support` is the identity
+    (`SetGen.support s = s` by definition), so the support-level statements already prove these;
+    they are worth stating separately because an equality of generators rewrites anywhere a
+    `frequency` occurs, including under the `Bind.bind`s and `dite`s of a `do` block, where a
+    support-level equation does not apply.
+  - `SetGen.fix_congr` — `Lean.Order.fix` respects equality of its functional (the monotonicity
+    proof is a `Prop`, hence irrelevant). This is what lifts the per-site facts above to a whole
+    `partial_fixpoint` generator.
+  - `SetGen.IsSoundAndComplete.of_support_eq` — soundness-and-completeness transfers along a
+    support equation, so a tuned generator's support fact lifts an untuned `IsSoundAndComplete` in
+    one step.
 
-`Tuning.weight_pos` (from `Basalt.Tuning`) discharges the positivity hypotheses of the first two for
-*every* runtime `θ`, exactly as it does on the `SPMF` side, so there is no weighting a user can
-supply that fails them.
+`Tuning.weight_pos` (from `Basalt.Tuning`) discharges the positivity hypotheses for *every* runtime
+`θ`, exactly as it does on the `SPMF` side, so there is no weighting a user can supply that fails
+them. In practice `simp [Tuning.weight_pos]` closes them: the obligation
+`∀ p ∈ [(θ.weight i d, g), …], 0 < p.1` reduces to a conjunction of `0 < θ.weight _ _`.
+
+## Proving a tuned generator θ-invariant
+
+The `Set` interpretation is weight-blind, so for every `θ` the tuned generator denotes the *same
+set* as the untuned one. Two recipes, both in `StrataGenerators.SetGen.TuningExamples`:
+
+* **Non-recursive, body is the `frequency`** — `unfold` both sides and
+  `apply SetGen.frequency_congr_weights`.
+* **`partial_fixpoint`** — `apply SetGen.fix_congr` (after `unseal genFoo genFoo.tuned`, since
+  `partial_fixpoint` definitions are irreducible and `@[tunable]` copies that status onto `.tuned`),
+  then `funext` and reweight the functional's site.
+* **A `frequency` buried in a `do` block** — `rw [SetGen.frequency_eq_oneOf, …]` once per site,
+  which canonicalizes every positively-weighted `frequency` to the uniform `oneOf` over its
+  branches; both sides then close by `rfl`.
+
+The payoff is that the generator equality, not merely a support equality, is what transfers: every
+existing lemma about the untuned generator applies to the tuned one by `rw`.
 -/
 
 namespace SetGen
@@ -64,7 +99,7 @@ theorem support_frequency_reweight
     cases hg
     exact ⟨w, g', hmem, hpos _ hmem, ha⟩
 
-/-- The same, between two `frequency`s. This is the shape a tuning rewrite has: `tunable def`
+/-- The same, between two `frequency`s. This is the shape a tuning rewrite has: `@[tunable]`
 replaces literal weights by `Tuning.weight θ i d` in place, so both sides are already `frequency`s
 and only the weights differ.
 
@@ -90,11 +125,55 @@ theorem support_frequency_congr_weights
     cases hg
     exact ⟨w', g', hmem', hpos _ hmem', ha⟩
 
+/-! ### The same facts as generator equalities
+
+`SetGen.support` is the identity function on `Set α`, so each of the two lemmas above *is* an
+equality of generators — no additional argument is needed, only a restatement. The restatement
+matters in practice: `rw` and `simp only` can use an equation between generators to rewrite a
+`frequency` sitting inside a `do` block or a `dite`, which is where the sites of a realistic
+generator live. -/
+
+/-- **Canonical form of a `frequency` at `Set`.** Every positively-weighted `frequency` is *equal*
+to the uniform `oneOf` over its branches: the weights are invisible to the `Set` interpretation.
+
+This is the workhorse for θ-invariance of a generator whose sites are buried inside a `do` block:
+rewriting with it once per site sends both the tuned and the untuned generator to the same
+weight-free normal form, whatever `θ` is. -/
+theorem frequency_eq_oneOf {gs : List (Nat × (Unit → Set α))}
+    (hpos : ∀ p ∈ gs, 0 < p.1) (h : 0 < List.sum (List.map Prod.fst gs))
+    (hne : gs.map Prod.snd ≠ []) :
+    frequency gs h = oneOf (gs.map Prod.snd) hne :=
+  support_frequency_reweight rfl hpos hne h
+
+/-- `support_frequency_congr_weights` as an equality of generators: at `Set`, changing the weights
+of a `frequency` in place — the rewrite `@[tunable]` performs — changes nothing at all. -/
+theorem frequency_congr_weights {gs gs' : List (Nat × (Unit → Set α))}
+    (hsnd : gs'.map Prod.snd = gs.map Prod.snd)
+    (hpos : ∀ p ∈ gs', 0 < p.1) (hpos' : ∀ p ∈ gs, 0 < p.1)
+    (h : 0 < List.sum (List.map Prod.fst gs)) (h' : 0 < List.sum (List.map Prod.fst gs')) :
+    frequency gs' h' = frequency gs h :=
+  support_frequency_congr_weights hsnd hpos hpos' h h'
+
 end reweight
 
+/-- `Lean.Order.fix` depends on its functional only, not on the monotonicity proof (which is a
+`Prop`, so proof irrelevance applies). This is what turns a per-site reweighting fact into a fact
+about a whole `partial_fixpoint` generator: `@[tunable]` binds `θ` *outside* the fix and re-proves
+monotonicity for the rewritten functional, so `genFoo.tuned θ` and `genFoo` are `Lean.Order.fix`
+applied to two functionals that differ only in their `frequency` weights — and at `Set` those
+functionals are equal (`SetGen.frequency_congr_weights`).
+
+Not `Set`-specific; stated here because the tuning port is its only consumer so far, and it belongs
+upstream in Basalt alongside the reweight lemmas. -/
+theorem fix_congr {α : Sort u} [Lean.Order.CCPO α] {f g : α → α}
+    (hf : Lean.Order.monotone f) (hg : Lean.Order.monotone g) (h : f = g) :
+    Lean.Order.fix f hf = Lean.Order.fix g hg := by
+  subst h; rfl
+
 /-- Soundness-and-completeness transfers along a support equation. Given a proof that the tuned
-generator has the same support as the untuned one (`SetGen.support_frequency_congr_weights` supplies
-exactly this, per site), an `IsSoundAndComplete` for the untuned generator lifts to the tuned one.
+generator has the same support as the untuned one (`SetGen.frequency_congr_weights` and
+`SetGen.fix_congr` supply the stronger *generator* equality, whose `congrArg support` is exactly
+this), an `IsSoundAndComplete` for the untuned generator lifts to the tuned one.
 
 Ported from `IsSoundAndComplete.of_support_eq` (`Basalt.Laws`) to `SetGen.Set`; here
 `IsSoundAndComplete` is a class, so this is a derived instance-producing lemma. -/

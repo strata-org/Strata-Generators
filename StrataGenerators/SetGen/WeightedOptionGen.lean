@@ -13,17 +13,22 @@ open scoped SetGen.Set
 # `weightedOptionGen`: a tunable option combinator
 
 `Basalt.Combinators.biasedOptionGen`/`optionGen` decide the `some`/`none` split with a rational
-`RandomChoice.coin`, which is *not* a `frequency` site — so `tunable def` (which only rewrites
+`RandomChoice.coin`, which is *not* a `frequency` site — so `@[tunable]` (which only rewrites
 `frequency`) cannot expose that split as a tunable knob.
 
 `weightedOptionGen` is a drop-in with the same support but a `frequency`-based split over two `Nat`
-weights, so a `tunable def` that inlines it (or writes the two-branch `frequency` directly) records
-a tunable site and a `Tuning` can bias the `some` rate at runtime. This is the combinator to reach
-for when the *presence* of an optional clause (e.g. a function precondition, for `PrecondElim`)
-is what you want to tune.
+weights. This is the combinator to reach for when the *presence* of an optional clause (e.g. a
+function precondition, for `PrecondElim`) is what you want to tune.
+
+To make the split *addressable*, write it out in the generator being tagged: `@[tunable]` collects
+the `frequency` calls in the tagged declaration's own body (inlining only its own compiler-generated
+auxiliaries), and this combinator's weights are variables rather than literals, so tagging
+`weightedOptionGen` itself is rejected. `TuningPrototypes.genPreconditionW` writes the two-branch
+`frequency` inline and records — by `rfl` — that the result is this combinator at weights `1 : 1`, so
+`mem_support_weightedOptionGen_iff` still characterizes its support.
 
 Both weights must be positive for the support to match `optionGen`'s (`none` and every `some a`
-reachable); `Tuning.weight` clamps to ≥ 1, so a `tunable def` wrapping this stays total for every
+reachable); `Tuning.weight` clamps to ≥ 1, so a tuned generator wrapping this stays total for every
 runtime `θ`, exactly as the `frequency`-site story guarantees elsewhere.
 
 Meant to live in `Basalt.Combinators` next to `biasedOptionGen`; kept here for now to avoid a Basalt
@@ -33,7 +38,7 @@ change (see the tuning-for-SetGen PR).
 namespace SetGen
 
 /-- Like `biasedOptionGen`, but the `some`/`none` split is a `frequency` over `Nat` weights rather
-than a rational `coin` — so a `tunable def` inlining this split exposes the bias as a tunable site.
+than a rational `coin` — so a `@[tunable]` generator inlining this split exposes the bias as a site.
 `some <$> g` is written with an explicit `bind` (as in `biasedOptionGen`) because `Lean.Order` has
 no monotonicity lemma for `<$>`. -/
 def weightedOptionGen [Gen G] (wSome wNone : Nat) (g : G α)
