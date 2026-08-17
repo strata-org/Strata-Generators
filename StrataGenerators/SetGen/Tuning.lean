@@ -55,10 +55,21 @@ Basalt's tuning infrastructure has two halves:
 them. In practice `simp [Tuning.weight_pos]` closes them: the obligation
 `∀ p ∈ [(θ.weight i d, g), …], 0 < p.1` reduces to a conjunction of `0 < θ.weight _ _`.
 
+## Where to look
+
+* `StrataGenerators.SetGen.TuningWalkthrough` — the end-user walkthrough: tag a generator, find the
+  flat index of the branch you want, write a `Tuning`, draw from it, and check nothing broke. Start
+  here if you want to *use* tuning.
+* `StrataGenerators.SetGen.TuningExamples` — what the attribute emits, exhaustively: site tables,
+  both error cases, and every recursion form.
+* `StrataGenerators.SetGen.TuningPrototypes` — the same steps applied to this repo's shipping
+  generators, and why one of them cannot be tagged as written.
+
 ## Proving a tuned generator θ-invariant
 
 The `Set` interpretation is weight-blind, so for every `θ` the tuned generator denotes the *same
-set* as the untuned one. Two recipes, both in `StrataGenerators.SetGen.TuningExamples`:
+set* as the untuned one. Three recipes, all exercised in
+`StrataGenerators.SetGen.TuningExamples`/`TuningPrototypes`:
 
 * **Non-recursive, body is the `frequency`** — `unfold` both sides and
   `apply SetGen.frequency_congr_weights`.
