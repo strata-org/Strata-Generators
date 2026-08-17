@@ -12,6 +12,9 @@ import StrataGenerators.StmtHasTypeAGen.TestSupport
 -- about the SMT escape function.
 import StrataGenerators.HasTypeAGen.DecimalAgreement
 import StrataGenerators.HasTypeAGen.SmtStringEscaping
+import StrataGenerators.AdtLaws
+import StrataGenerators.MutualBlockShape
+import StrataGenerators.AliasResolution
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
 -- The whole-program generator, and `minimizeProgramCounterexample` so the program
 -- panels report the minimal well-typed counterexample rather than the raw draw.
@@ -1520,6 +1523,54 @@ private def genDecimalPairProp
            lt₁ := Strata.SMT.TermPrim.lt (.real d₁) (.real d₂),
            lt₂ := Strata.SMT.TermPrim.lt (.real d₂) (.real d₁) }
 
+-- ── ADT-law / mutual-block panels ──────────────────────────────────
+--
+-- The `adt:` and `mutual:` properties quantify over a generated `mutual … end`
+-- block rather than over a program, so they need their own sample type. The
+-- features are the ones that separate a real pass from a vacuous one: how many
+-- datatypes the block held (a `mutual:` property is vacuous below two), whether the
+-- datatypes' type parameters agree (the condition `elimFuncs` assumes, and the
+-- discriminator for the eliminator-scoping failure), whether the block is
+-- cross-referenced at all, whether Strata accepted it, and whether it passed the
+-- SMT-safety screen the `--smt` law properties apply.
+
+/-- A generated datatype block paired with one property's verdict. -/
+structure AdtBlockPropResult where
+  block : Lambda.MutualDatatype Unit
+  passed : Bool
+  tag : String
+
+open StrataGenerators.MutualBlockShape StrataGenerators.AdtLaws in
+instance : Tyche.TycheSample AdtBlockPropResult where
+  toSample r :=
+    { representation := renderBlock r.block
+      status := if r.passed then .passed else .failed
+      features :=
+        [ (r.tag, .nominal (if r.passed then "pass" else "fail")),
+          ("num_datatypes", .ordinal r.block.length),
+          ("num_constrs", .ordinal (r.block.foldl (fun n d => n + d.constrs.length) 0)),
+          ("params_uniform", .nominal (if blockParamsUniform r.block then "yes" else "no")),
+          ("independent", .nominal (if isIndependentBlock r.block then "yes" else "no")),
+          ("addMutualBlock", .nominal (if blockAccepted r.block then "accepted" else "rejected")),
+          ("smt_safe", .nominal (if blockIsSmtSafe r.block then "yes" else "no")) ] }
+
+/-- Sample an ordinary block and score it with `check`. Drawn at `maxSize := 0`,
+    matching the `Arbitrary GenAdtBlock` instance the Plausible harnesses use, so a
+    panel and its LSpec counterpart see the same distribution. -/
+def genAdtBlockProp (tag : String) (check : Lambda.MutualDatatype Unit → Bool) :
+    IO AdtBlockPropResult := do
+  let block ← DatatypeGen.sample (maxSize := 0)
+  return { block, passed := check block, tag }
+
+/-- Sample a block of *independent* datatypes and score it with `check`. Mirrors
+    `Arbitrary GenIndepBlock`. -/
+def genIndepBlockProp (tag : String) (check : Lambda.MutualDatatype Unit → Bool) :
+    IO AdtBlockPropResult := do
+  let extra ← IO.rand 0 2
+  let block ← StrataGenerators.MutualBlockShape.genIndependentBlock (G := IO) (extra + 1)
+  return { block, passed := check block, tag }
+
+
 -- ── Panel runner ────────────────────────────────────────────────────
 
 /-- Write every Tyche panel to `handle` in JSONL format, `numSamples` samples per
@@ -1530,6 +1581,7 @@ private def genDecimalPairProp
     Each panel's title comes from the shared `PropertyNames.*` catalog, and each
     pass/fail verdict comes from the shared `check*` predicates — so a panel here
     and its `checkIO` counterpart in the Plausible suite always agree. -/
+
 def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) : IO Unit := do
   let panel {α} [Tyche.TycheSample α] (title : String) (gen : IO α)
       (count : Nat := numSamples) : IO Unit :=
@@ -1664,4 +1716,23 @@ def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) 
   -- `procInline` ones by the rarer samples that hold a call. So `decl_kinds` and
   -- `program_size` separate a live sample from a vacuous one on each.
   for p in Properties.unprovenTransforms do
+    panel p.name (genProgramProp p.name p.check)
+
+  -- ── ADT-law, alias-resolution and mutual-block panels ──────────────
+  -- The block-based properties (`Properties.adtBlockChecks` over ordinary blocks,
+  -- `Properties.mutualIndepChecks` over independent ones) sample through the block
+  -- panel; the two alias properties quantify over a whole program, so they reuse
+  -- `genProgramProp` unchanged — same renderer, same features, same shrinking as the
+  -- `program:` panels.
+  --
+  -- One panel shows an honest failure: `mutual: derived functions bind every type
+  -- variable they mention` is red on every sample whose `params_uniform` feature is
+  -- `no`, which is exactly what that feature is there to show. The three solver-backed
+  -- `adt:` properties have no panel — they are `--smt`-only `IO` actions with their own
+  -- per-family tallies, like `expr: SMT/concrete eval agreement`.
+  for p in Properties.adtBlockChecks do
+    panel p.name (genAdtBlockProp p.name p.check)
+  for p in Properties.mutualIndepChecks do
+    panel p.name (genIndepBlockProp p.name p.check)
+  for p in Properties.aliasChecks do
     panel p.name (genProgramProp p.name p.check)

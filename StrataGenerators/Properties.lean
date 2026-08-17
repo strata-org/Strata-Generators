@@ -13,6 +13,14 @@ import StrataGenerators.ProgramGen.TestSupport
 import StrataGenerators.ProgramGen.UnprovenTransforms
 -- Supplies the thirteen check predicates for `LiftInternalFuncDecls`.
 import StrataGenerators.ProgramGen.LiftFuncDecls
+-- Supplies the injectivity/disjointness law programs for a generated datatype
+-- block, and the two pure companions to the solver-backed law properties.
+import StrataGenerators.AdtLaws
+-- Supplies the eager-vs-incremental alias-resolution checks.
+import StrataGenerators.AliasResolution
+-- Supplies the checks on a `mutual … end` block of non-mutually-recursive
+-- datatypes.
+import StrataGenerators.MutualBlockShape
 
 /-!
 # Shared property catalog
@@ -355,6 +363,109 @@ def liftSnapshotsInScope   : String := "lift: every snapshot is used in scope"
 def liftFixpointMatchesRef : String := "lift: the fixpoint matches Def 4.6"
 def liftTypeArgsClosed     : String := "lift: no hoisted function has a free type var"
 def liftRejectsOnlyKnown   : String := "lift: only the documented triggers are rejected"
+-- ── The two laws of an algebraic datatype: injectivity and disjointness ───
+-- See `StrataGenerators.AdtLaws` (the assertion programs and the two pure
+-- companions) and `StrataGenerators.AdtLawsSmt` (the solver-backed properties).
+-- Every generated `mutual … end` block denotes an initial algebra, so its
+-- constructors must be injective and pairwise disjoint — the `injection` and
+-- `discriminate` facts of Software Foundations' `Tactics` chapter. The claims are
+-- not about the generator: they are about **Strata's SMT encoding of a datatype**,
+-- and the oracle is a real solver run through the whole Core pipeline.
+-- Uniformness is deliberately not covered (`addMutualBlock` already checks it).
+
+/-- The program asserting the laws of a block typechecks — the screen that keeps
+    the solver properties from being fed an ill-typed program, and a claim in its
+    own right (a derived constructor is usable in an equality at its ground
+    instance). Held on every block Strata accepts. -/
+def adtLawTypeChecks : String := "adt: the law program typechecks"
+/-- **FAILS honestly, but only on a rare draw.** A datatype with a field `f` *and* a
+    field `f!` derives the name `d..f!` twice — once as `f!`'s safe destructor, once
+    as `f`'s unsafe one — and the whole declaration is then rejected. Both field
+    names are legal Core identifiers. Reported upstream.
+
+    The collision needs two field names that differ by exactly a trailing `!`, which
+    a random draw almost never produces (0 in a dedicated sweep of 400 blocks; it
+    fired once across several `--quick` runs). So the *deterministic* pin is the
+    `#guard`ed `AdtLaws.bangFieldWitness`, and this property is the regression net
+    around it — expect it green on a short run, exactly like the `procInline:`
+    properties. See `AdtLaws.checkNoDerivedNameCollisions`. -/
+def adtNoDerivedNameCollision : String :=
+  "adt: no datatype derives the same function name twice"
+/-- **The partial evaluator decides constructor-form disjointness by itself**:
+    `!(C x⃗ == D y⃗)` folds to the literal `true` during `symbolicEval`, while the
+    tester form `!(isC u && isD u)` survives to the solver. Both halves are
+    asserted — the second is the non-vacuity guard for `adtDisjSmt`. -/
+def adtDisjFolds : String :=
+  "adt: constructor-form disjointness folds during symbolic evaluation"
+/-- Opt-in (`--smt`); needs a live solver. Injectivity of every constructor of a
+    generated block, at the block's `int` instance. PASSES (74/74 obligations at
+    cvc5, 75/75 at z3, on the `blockIsSmtSafe` screen). -/
+def adtInjSmt : String := "adt: constructor injectivity is provable by SMT"
+/-- Opt-in (`--smt`). Disjointness in the **tester** form, which is the form that
+    reaches the solver. PASSES (45/45 at cvc5, 53/53 at z3). -/
+def adtDisjSmt : String := "adt: constructor disjointness is provable by SMT"
+/-- **FAILS honestly.** Opt-in (`--smt`). Unscreened counterpart to the two above:
+    every emitted law query must reach a solver *verdict*. Two independent defects
+    make it red, both from legal Core datatypes:
+
+    1. a `bitvec 0` field is emitted as `(_ BitVec 0)`, whose index SMT-LIB 2.6
+       requires to be positive (cvc5 `Illegal bitvector size: 0`, z3
+       `bit-vector size must be greater than zero`);
+    2. a name that is not a bare SMT-LIB symbol — one containing `'`, or one that
+       is an SMT-LIB reserved word such as `_` — is interpolated verbatim into
+       `declare-datatype`, while the *same* name is pipe-quoted where it occurs in
+       a field type (`(par (vx' NK) (… (U |vx'| NK) …))`).
+
+    Both are reported upstream, and pinned by hand-built witnesses as well as by
+    generated blocks. -/
+def adtSolverAcceptsQuery : String :=
+  "adt: every emitted law query reaches a solver verdict"
+
+-- ── Eager versus incremental type-alias resolution ────────────────────
+-- See `StrataGenerators.AliasResolution`. Strata resolves a type alias *during*
+-- type checking, one declaration at a time. These two properties say that this is
+-- equivalent to expanding every alias up front — that an alias is the transparent
+-- abbreviation it is documented to be. Both PASS.
+--
+-- Non-vacuity needed work: `ProgramGen` emits alias declarations that nothing
+-- ever *uses* (`Inv.aliasVocabDisjoint` keeps the type vocabulary disjoint from
+-- the alias names), so resolution on a raw draw is the identity. `introduceAlias`
+-- therefore *adds* a use — it aliases a ground type the program mentions and
+-- rewrites every occurrence — measured introducible on 29/30 draws.
+
+def aliasAcceptanceAgrees : String :=
+  "alias: eager and incremental resolution agree on acceptance"
+/-- The "evaluates the same" half: the two resolution orders give the same proof
+    obligations under Strata's own symbolic evaluator. -/
+def aliasObligationsAgree : String :=
+  "alias: eager and incremental resolution give the same obligations"
+
+-- ── `mutual … end` blocks that are not mutually recursive ─────────────
+-- See `StrataGenerators.MutualBlockShape`. A block of datatypes that do not refer
+-- to one another at all is accepted, is usable, and means the same as declaring
+-- each datatype separately — the first four properties say so, and all four pass.
+-- The fifth is a defect the shape exposes.
+
+def mutualIndepAccepted : String :=
+  "mutual: a block of non-mutually-recursive datatypes is accepted"
+def mutualIndepUsable : String :=
+  "mutual: such a block's constructors are usable in a program"
+/-- Interchangeability with the split form, up to the eliminators — which differ by
+    design, since `d$Elim` takes a case function per constructor of the whole
+    block. -/
+def mutualSplitAgrees : String :=
+  "mutual: splitting such a block preserves the derived vocabulary"
+def mutualIndepPrints : String :=
+  "mutual: such a block prints without a conversion error"
+/-- **FAILS honestly** (18/40 independent blocks, and 28/60 *ordinary* generated
+    blocks). `elimFuncs` builds `d$Elim`'s case-function arguments from the
+    constructors of every datatype in the block but binds only `d`'s own type
+    parameters, so another datatype's parameters occur free:
+    `Aa$Elim : ∀[$__ty0,$__ty1,x]. Aa x → (x → $__ty0) → (y → $__ty1) → …` with `y`
+    unbound. The comment at the site states the assumption ("OK because all must
+    have same typevars"); nothing enforces it. Reported upstream. -/
+def mutualElimWellScoped : String :=
+  "mutual: derived functions bind every type variable they mention"
 
 /-- Every catalog name, for the no-duplicate-names guard below. -/
 def all : List String :=
@@ -405,7 +516,12 @@ def all : List String :=
     liftInjectionFires, liftFuncsClosed, liftStrataClosed, liftNoResidualDecl,
     liftIdempotent, liftIdentityNoDecl, liftParamsLead, liftFreshNames,
     liftOutputTypechecks, liftSnapshotsInScope, liftFixpointMatchesRef,
-    liftTypeArgsClosed, liftRejectsOnlyKnown ]
+    liftTypeArgsClosed, liftRejectsOnlyKnown,
+    adtLawTypeChecks, adtNoDerivedNameCollision, adtDisjFolds,
+    adtInjSmt, adtDisjSmt, adtSolverAcceptsQuery,
+    aliasAcceptanceAgrees, aliasObligationsAgree,
+    mutualIndepAccepted, mutualIndepUsable, mutualSplitAgrees, mutualIndepPrints,
+    mutualElimWellScoped ]
 
 -- No two properties share a name (a copy/paste slip that pointed two properties
 -- at the same label would collapse their panels/results silently).
@@ -681,5 +797,57 @@ def liftFuncDecls : List (Property Core.Program) :=
     ⟨PropertyNames.liftFixpointMatchesRef, checkLiftFixpointMatchesReference⟩,
     -- P12 — rejection completeness
     ⟨PropertyNames.liftRejectsOnlyKnown,   checkLiftRejectsOnlyKnownTriggers⟩ ]
+
+/-- **The two pure companions to the solver-backed ADT-law properties**, each a
+    generated `mutual … end` block scored by a shared predicate.
+
+    They need no solver, so they run in the default suite, and they are what keeps
+    the `--smt` properties honest: the first says the law program they discharge is
+    well-typed, the second says the constructor-form disjointness assertion is
+    resolved by the partial evaluator *and* that the tester form is not — i.e. that
+    the solver is genuinely asked about disjointness rather than handed a `true`.
+
+    Also `mutualElimWellScoped`, which quantifies over the same input and **fails
+    honestly**: it lives here rather than in `mutualIndepChecks` because the defect
+    is not specific to an independent block — 28 of 60 *ordinary* generated blocks
+    trip it, since `visibleRefs` lets a datatype refer to one whose parameters are a
+    subset of its own, and the block's parameter lists then differ. -/
+def adtBlockChecks : List (Property (Lambda.MutualDatatype Unit)) :=
+  [ ⟨PropertyNames.adtLawTypeChecks,
+     StrataGenerators.AdtLaws.checkLawProgramTypeChecks⟩,
+    ⟨PropertyNames.adtNoDerivedNameCollision,
+     StrataGenerators.AdtLaws.checkNoDerivedNameCollisions⟩,
+    ⟨PropertyNames.adtDisjFolds,
+     StrataGenerators.AdtLaws.checkDisjFoldsDuringSymEval⟩,
+    ⟨PropertyNames.mutualElimWellScoped,
+     StrataGenerators.MutualBlockShape.checkDerivedFuncsWellScoped⟩ ]
+
+/-- **The four claims about a `mutual … end` block whose datatypes are not
+    mutually recursive**, each scored on a block drawn by
+    `MutualBlockShape.genIndependentBlock` — datatypes drawn independently over a
+    threaded reserved set, so no constructor field can mention a sibling.
+
+    Each check re-verifies the shape it needs (`isIndependentBlock`) and is
+    vacuously true otherwise, so feeding it an ordinary block cannot turn it into a
+    claim about connected blocks. All four pass. -/
+def mutualIndepChecks : List (Property (Lambda.MutualDatatype Unit)) :=
+  [ ⟨PropertyNames.mutualIndepAccepted,
+     StrataGenerators.MutualBlockShape.checkIndependentBlockAccepted⟩,
+    ⟨PropertyNames.mutualIndepUsable,
+     StrataGenerators.MutualBlockShape.checkIndependentBlockUsable⟩,
+    ⟨PropertyNames.mutualSplitAgrees,
+     StrataGenerators.MutualBlockShape.checkSplitBlockAgrees⟩,
+    ⟨PropertyNames.mutualIndepPrints,
+     StrataGenerators.MutualBlockShape.checkIndependentBlockPrints⟩ ]
+
+/-- **The two alias-resolution properties**, each a generated `Core.Program` scored
+    by a shared predicate — the same input shape as `programChecks`, so both
+    harnesses fold them identically and counterexamples go through the whole-program
+    shrinker. Both pass. -/
+def aliasChecks : List (Property Core.Program) :=
+  [ ⟨PropertyNames.aliasAcceptanceAgrees,
+     StrataGenerators.AliasResolution.checkAliasAcceptanceAgrees⟩,
+    ⟨PropertyNames.aliasObligationsAgree,
+     StrataGenerators.AliasResolution.checkAliasObligationsAgree⟩ ]
 
 end Properties

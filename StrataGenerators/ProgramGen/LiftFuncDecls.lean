@@ -15,8 +15,7 @@ open StrataGenerators.Program.UnprovenTransforms
 /-!
 # Properties for `LiftInternalFuncDecls` — lambda lifting with declaration-site capture
 
-This module holds the check predicates described in
-`LIFT_INTERNAL_FUNCDECLS_PBT_PLAN.md`: property tests for
+This module holds the check predicates for
 `Strata/Transform/LiftInternalFuncDecls.lean`, which hoists every internal
 `Stmt.funcDecl` out of a procedure body into a closed top-level `Decl.func`.
 

@@ -119,27 +119,55 @@ Properties are listed in
 
 To add a new property:
 
-1. Put the property (an `α → Bool` function, where `α` is the type 
-   produced by the generator) in the relevant `*.TestSupport` module (e.g.
-   `ProcedureHasTypeAGen/TestSupport.lean`).
-   
-2. Define a string containing the name of the property in `PropertyNames` namespace
-   in `Properties.lean` (e.g. `expr`, `cmd`, ...), then add this string to
-   `PropertyNames.all` (at the bottom of `Properties.lean`). This string is the name of the
-   property that is displayed in `stdout` / Tyche when the test harness is run.
+1. **Write the check.** Put the decision procedure — a `check* : α → Bool` on
+   whatever the generator produces (`LExpr'`, `Cmd Expression`, `List Statement`,
+   `Function`, `List Procedure`, …) — in the relevant `*.TestSupport` module (e.g.
+   `HasTypeAGen/TestSupport.lean`, `CmdHasTypeAGen/TestSupport.lean`,
+   `StmtHasTypeAGen/TestSupport.lean`, `ProcedureHasTypeAGen/TestSupport.lean`).
+   Keeping the check there means the LSpec suite, the `test-plain` suite and the
+   Tyche panel all evaluate the *same* function.
 
-3. Add the property to the test suite in `TestMain.lean`:
-   - For a pure `α → Bool` property, wrap it as a `Prop` (e.g. `def prop_foo : Prop := check_foo … = true`), 
-     and add a `checkIO PropertyNames.yourName (∀ x, your_prop x)` expression to the relevant 
-     test suite in `TestMain.lean`.
-   - For an `IO`-based check (e.g. a property that requires an external tool to run, like an SMT solver), 
-     add the property using an `.individualIO PropertyNames.yourName none action .done` expression in `TestMain.lean`. 
-     The SMT/concrete-eval agreement property
+2. **Name it.** Add a `String` constant to the matching `PropertyNames.*` group
+   in `Properties.lean` (naming scheme: `"area: description"`, where `area` is
+   one of `expr` / `cmd` / `function` / `stmt` / `proc` / `program` / `phase` /
+   `printer` / `adt` / `alias` / `mutual`), then add the constant to
+   `PropertyNames.all` — the `#guard` there enforces that no two properties share
+   a name. This string is the name displayed in `stdout` / Tyche when the test
+   harness is run.
+
+3. **Pair name ↔ check (when both harnesses run the identical `Bool` check).**
+   If the LSpec assertion and the Tyche panel run a byte-identical predicate, add
+   a `Property` bundle entry to the appropriate list in the `Properties`
+   namespace (`cmdSingleVerdict`, `stmtTransforms`, `procTransforms`,
+   `adtBlockChecks`, `mutualIndepChecks`, or `aliasChecks`). Each
+   harness iterates that list, so the pairing is defined exactly once. Properties
+   whose two views genuinely differ (or that only one harness runs) keep just the
+   shared *name* here and state their logic in `TestMain.lean`.
+
+4. **Add it to the suite in `TestMain.lean`** (and in `PlainTestMain.lean`, if the
+   property should also gate the LSpec-free harness).
+   - For a pure `α → Bool` property, wrap it as a `Prop` (`prop_* te := check* … = true`)
+     and add a `checkIO PropertyNames.yourName (∀ x, prop_your x)` node to the
+     relevant `*Suite`. Properties from a `Property` bundle are folded in
+     automatically via `foldr` over the bundle list.
+   - For an `IO`-based check (one that runs in `IO`, shrinks its own
+     counterexamples, or needs an external tool), give it the
+     `(success, passed, attempted, errorMsg)` shape and add it as a
+     `.individualIO PropertyNames.yourName none action .done` node. The
+     SMT/concrete-eval agreement property
      ([`HasTypeAGen/SmtEval.lean`](./StrataGenerators/HasTypeAGen/SmtEval.lean),
      gated behind `--smt`) is a worked example.
 
-4. (Optional, for visualizing test results in Tyche) See [Adding a panel for a new
-   property](#adding-a-panel-for-a-new-property) for details.
+5. **(Optional) Add a Tyche panel** in
+   [`TycheViz.lean`](./StrataGenerators/TycheViz.lean), referencing the same
+   `PropertyNames.*` constant so the LSpec result and the panel share a label, and
+   scoring the sample with the same `check*` predicate so the two views cannot
+   disagree. See [Adding a panel for a new
+   property](#adding-a-panel-for-a-new-property) for the walkthrough.
+
+The exit code is the LSpec verdict, so any property added to a `*Suite` gates
+`lake test`; always-run *diagnostics* (which report but don't gate) are called
+after `lspecIO` in `main`.
 
 ## Tyche visualization
 
