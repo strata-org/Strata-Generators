@@ -43,6 +43,33 @@ Expression- and function-level side conditions are **bundled**, exactly as in th
 soundness proof, into `GenLExprComplete` / a `genFunction`-reachability hypothesis,
 taken here as environment hypotheses at every depth.
 
+## You cannot remove the three predicates
+
+`StmtHasTypeAGenCompleteGaps.lean` proves that each of the three predicates is
+necessary. For each one it gives a statement that `StatementHasTypeA` accepts and
+that `genStmt`'s support does not hold. It also gives the Strata Core source text
+of each counterexample. The gap theorems are `metadata_gap`, `label_gap` and
+`call_argorder_gap`.
+
+Three upstream predicates come close, but none of them discharges a condition:
+
+* `Imperative.Stmt.stripMetaData` erases the metadata of a `block`, an `ite`, a
+  `loop`, an `exit`, a `funcDecl` and a `typeDecl`. It leaves a `.cmd` node
+  untouched, and the metadata gap is at a `.cmd` node.
+* `Core.WF.WFcallProp.lhsWF` states the `Nodup` fact that `CallOk` needs for the
+  write keys of a call. Its parent `Core.WF.WFStatementProp` is not recursive:
+  its `block`, `ite` and `loop` cases are empty structures. So it says nothing
+  about a call inside a body.
+* `LContext.WellKindedTy` (a premise of the `init` rules) bounds the type
+  constructors of an annotation. `genLMonoTy`'s support also bounds the depth of
+  the type and its free type variables, so `WellKindedTy` is too weak for the
+  `init` clause of `AlphabetOk`.
+
+`InGenShape`'s other clause demands a monomorphic `init` annotation. The Core
+front end builds only `.forAll []` local annotations, so no parsed program can
+violate that clause. It is necessary at the level of the abstract syntax tree
+only.
+
 The procedure-call *correspondence* is a top-level hypothesis `ProcSigComplete procs P`
 (the converse of `ProcSigCorresponds`): the callee a well-typed call resolves in `P`
 is listed in the generator's `procs`. The `immutableVars` parameter is fixed to `[]`
@@ -166,6 +193,9 @@ theorem init_stored_eq_rigid {rigid : List TyIdentifier} {mty mtyS : LMonoTy} {t
 -- `String.arbitrary`, `typeDecl` bounds via sampling, `init` stored type via the
 -- rigid context). Procedure `call` is admissible here (its extra recipe/σ
 -- conditions live in `CallOk`).
+--
+-- `metadata_gap` (`StmtHasTypeAGenCompleteGaps.lean`) shows that the metadata
+-- clause is necessary.
 
 mutual
 /-- The metadata/annotation shape the generator emits, recursively over the tree. -/
@@ -195,7 +225,10 @@ end
 mutual
 /-- The identifier-alphabet + size kernel, recursively over the tree, at size `n`.
     Names lie in their generator's support (dodging keywords where relevant), and
-    each generated list is within the budget available at its nesting depth. -/
+    each generated list is within the budget available at its nesting depth.
+
+    `label_gap` (`StmtHasTypeAGenCompleteGaps.lean`) shows that the alphabet
+    clause is necessary. -/
 def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
   | n, .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)) =>
       x.name ∈ SetGen.support (NonEmptyString.arbitrary (G := SetGen.Set)) ∧
@@ -263,7 +296,10 @@ mutual
     at the callee's *instantiated* input types, and no fresh `init`s required (a
     well-typed call has all names in scope, so the emitted group is the bare call and
     the output scope is `ctx`). `hσvals` places `σvals` in the sampling step's support.
-    `True` on every non-call leaf; nested bodies recurse with the body's own scope. -/
+    `True` on every non-call leaf; nested bodies recurse with the body's own scope.
+
+    `call_argorder_gap` (`StmtHasTypeAGenCompleteGaps.lean`) shows that the recipe
+    clause is necessary. -/
 def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
   | .cmd (CmdExt.call pname args _) =>
       ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr),
