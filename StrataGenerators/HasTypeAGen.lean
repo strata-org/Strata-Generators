@@ -4445,6 +4445,37 @@ theorem mem_freeVars_subst_of_find?_none (Su : Lambda.Subst) (t : LMonoTy)
     obtain ⟨a, ha, hva⟩ := hex
     exact hsub a ha hva
 
+/-- **Matchers of the same pattern agree pointwise on its variables.**
+
+    The converse of `agree_on_freeVars_implies_subst_eq`: substitution is a
+    homomorphism, so if two substitutions send `t` to the *same* type they must send
+    each variable of `t` to the same type. Structural induction on `t`; the `tcons`
+    case is `List.map_inj_left` on the argument lists.
+
+    This is the **matching-uniqueness** ingredient the `SchemeInstAt` reformulation
+    needs. It is worth noting what it is *not*: it says nothing about most-generality
+    (`Subst.absorbs`), and it needs no unifier theory at all. Two matchers of the same
+    matching problem are forced to agree on the pattern's variables, full stop — which
+    is exactly why the generator's unifier output `Su` can be reconciled with a
+    caller's matcher `Sm` on the *determined* variables without any MGU result. -/
+theorem subst_agree_of_subst_eq {S₁ S₂ : Lambda.Subst} (t : LMonoTy)
+    (h : LMonoTy.subst S₁ t = LMonoTy.subst S₂ t) :
+    ∀ v ∈ t.freeVars, LMonoTy.subst S₁ (.ftvar v) = LMonoTy.subst S₂ (.ftvar v) := by
+  induction t with
+  | ftvar w =>
+    intro v hv
+    simp only [LMonoTy.freeVars, List.mem_singleton] at hv
+    subst hv
+    exact h
+  | bitvec n => intro v hv; simp only [LMonoTy.freeVars, List.not_mem_nil] at hv
+  | tcons name args ih =>
+    intro v hv
+    rw [LMonoTy.subst_unfold, LMonoTy.subst_unfold] at h
+    simp only [LMonoTy.tcons.injEq, true_and] at h
+    obtain ⟨a, ha, hva⟩ :=
+      Freshening.exists_of_freeVars_mem (show v ∈ LMonoTys.freeVars args from hv)
+    exact ih a ha (List.map_inj_left.mp h a ha) v hva
+
 /-- **Sampling is harmless for `guard2`.** The generator extends the unifier's
     substitution `Su` (a matcher for the suffix — not known to be *most general*)
     with a scope binding the *undetermined* freshened variables
@@ -4478,6 +4509,81 @@ theorem extended_subst_guard2 (freshBoundVars : List TyIdentifier) (Su : Lambda.
       mem_freeVars_subst_of_find?_none Su leftoverSuffix v hv hnone
     rw [hSu] at hmemτ
     exact hdisjBV v hbv hmemτ
+
+/-- **The `Sm`-to-`Su` bridge on the applied prefix.**
+
+    The generator instantiates the applied prefix `schemeArgTys.take k` with its own
+    *unifier output* extended by samples; a caller reasoning from the typing judgment
+    instantiates it with a matcher `Sm`. This lemma says the two agree — provided the
+    split point is **determined**: every type variable of the applied prefix also
+    occurs in the leftover suffix (`hdet`).
+
+    That proviso is what makes the reconciliation unconditional. Under it, each prefix
+    variable `v`:
+    - is *determined* by `Su` — otherwise `v` would survive into
+      `subst Su suffix = τ` (`mem_freeVars_subst_of_find?_none`), contradicting
+      freshening disjointness — so the sampled scope never fires on the prefix
+      (`subst_substScope_noop`), and
+    - satisfies `Sm v = Su v`, because `Sm` and `Su` are matchers of the *same*
+      matching problem (`subst · suffix = τ`) and so agree on the suffix's variables
+      (`subst_agree_of_subst_eq`).
+
+    No most-generality (`Subst.absorbs`) and no bound on `Su`'s domain is needed. The
+    determinacy proviso is exactly the boundary: for a split point where a scheme
+    variable *vanishes* from the leftover suffix (the sampling fragment, e.g.
+    `Sequence.map`'s element type at full saturation) the generator picks that
+    variable's instance by *random sampling*, and no theorem can force the sample to
+    equal `Sm`'s choice. Reaching that fragment from a spec-level premise needs either
+    a domain bound on `Su` (`keys Su ⊆ FV(suffix) ∪ FV(τ)`, which upstream's
+    `Constraints.unifyCore_matching_complete` proves internally but its public wrapper
+    `Constraints_unify_matching_complete` does not expose) or an existentially bound
+    `sampledTys`; see the note on `SchemeInstAt`. -/
+theorem extended_subst_prefix_of_determined (schemeArgTys : List LMonoTy)
+    (retTy τ : LMonoTy) (k : Nat) (Sm Su : Lambda.Subst)
+    (freshBoundVars : List TyIdentifier) (sampledTys : List LMonoTy)
+    (hdisjSuffix : ∀ v ∈ ((schemeArgTys.drop k).foldr
+      (fun σ acc => LMonoTy.arrow σ acc) retTy).freeVars, v ∉ τ.freeVars)
+    (hmatch : LMonoTy.subst Sm
+      ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ)
+    (hSu : LMonoTy.subst Su
+      ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ)
+    (hdet : ∀ σ ∈ schemeArgTys.take k, ∀ v ∈ σ.freeVars,
+      v ∈ ((schemeArgTys.drop k).foldr
+        (fun σ acc => LMonoTy.arrow σ acc) retTy).freeVars) :
+    (schemeArgTys.take k).map (LMonoTy.subst Sm)
+      = (schemeArgTys.take k).map (LMonoTy.subst
+          (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su)) := by
+  -- Both matchers agree pointwise on the free variables of the leftover suffix.
+  have hagree : ∀ v ∈ ((schemeArgTys.drop k).foldr
+      (fun σ acc => LMonoTy.arrow σ acc) retTy).freeVars,
+      LMonoTy.subst Sm (.ftvar v) = LMonoTy.subst Su (.ftvar v) :=
+    subst_agree_of_subst_eq _ (hmatch.trans hSu.symm)
+  -- Every suffix variable is *determined* by `Su`: an undetermined one would survive
+  -- into `subst Su suffix = τ`, contradicting freshening disjointness.
+  have hdetermined : ∀ v ∈ ((schemeArgTys.drop k).foldr
+      (fun σ acc => LMonoTy.arrow σ acc) retTy).freeVars,
+      Strata.Util.HMaps.find? Su v ≠ none := by
+    intro v hv hnone
+    exact hdisjSuffix v hv (hSu ▸ mem_freeVars_subst_of_find?_none Su _ v hv hnone)
+  apply List.map_congr_left
+  intro σ hσ
+  -- The sampled scope never fires on a prefix type: its keys are the variables `Su`
+  -- leaves undetermined, and every prefix variable is determined.
+  have hnoop : LMonoTy.subst
+      (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su) σ
+      = LMonoTy.subst Su σ := by
+    apply subst_substScope_noop
+    intro v hv
+    rcases hlk : ((findFreeTyVars freshBoundVars Su).zip sampledTys).lookup v with _ | t
+    · rfl
+    exfalso
+    have hvin : v ∈ findFreeTyVars freshBoundVars Su :=
+      (List.of_mem_zip (Freshening.lookup_mem _ _ _ hlk)).1
+    unfold findFreeTyVars at hvin
+    rw [List.mem_filter] at hvin
+    exact hdetermined v (hdet σ hσ v hv) (by simpa using hvin.2)
+  rw [hnoop]
+  exact agree_on_freeVars_implies_subst_eq (fun v hv => hagree v (hdet σ hσ v hv))
 
 /-- **Forward construction of a `findPolymorphicOps` candidate (bridge,
     plumbing only).**
@@ -6546,16 +6652,36 @@ theorem schemeInstAt_freshening_disjoint
     bound and pinned by `rfl`-shaped equalities, so a caller supplies only the *scheme*
     (`boundVars`, `monoTy`), *split point* `k`, and *matcher* `Sm`.
 
-    Crucially, the matcher condition (`hmatch`) is stated purely in terms of the
-    caller's substitution `Sm` — there is **no reference to the generator's `unifyTypes`
-    output `Su`**. The applied-prefix condition `hprefix` is likewise phrased against
-    `Sm`. `isPolyApp_of_hasType_specShaped` internally bridges `Sm` to the unifier's `Su`
-    (via `unifyTypes_matching_complete` + `extended_subst_guard2`), so no `Su` leaks
-    into this predicate.
+    **Every conjunct is now `Su`-free.** Both the matcher condition (`hmatch`) and the
+    applied-prefix condition are stated in terms of the caller's substitution `Sm`;
+    neither `unifyTypes` nor its output `Su` nor the generator's `sampledTys` appears
+    anywhere in this predicate. `isPolyApp_of_hasType_specShaped` bridges `Sm` to the
+    unifier's `Su` internally (`extended_subst_prefix_of_determined` for the applied
+    prefix, `unifyTypes_matching_complete` + `extended_subst_guard2` for the suffix),
+    so nothing generator-internal leaks out. Earlier the applied-prefix conjunct read
+    `∀ Su, unifyTypes suffix τ = some Su → …`, which no caller reasoning from the
+    typing judgment could discharge; that is the whole point of the reformulation.
+
+    **The price is split determinacy.** The `Su`-free form has to rule out the
+    *sampling* fragment: at a split point where a scheme variable vanishes from the
+    leftover suffix, the generator instantiates it by random sampling, and no
+    hypothesis about `Sm` can force the sample to agree. The determinacy conjunct
+    (prefix variables ⊆ suffix variables) is exactly that restriction; it is a
+    decidable property of the scheme and split point, so a caller settles it by
+    `decide`/`simp`. It always holds at `k = 0` (nothing applied), and it holds at *full*
+    saturation whenever the scheme's return type mentions every variable its inputs do —
+    e.g. `Sequence.append : ∀a. Seq a → Seq a → Seq a` at every split point. It fails
+    exactly where a variable of the applied prefix is absent from the leftover suffix
+    (`Sequence.length : ∀a. Seq a → int` at `k = 1`), which is where the generator picks
+    that variable's instance by sampling. For those, use the `hEntry` form
+    (`genLExpr_complete_poly_specShaped`), which covers the sampling fragment at the cost
+    of a generator-internal premise. See
+    `extended_subst_prefix_of_determined` for what would be needed to lift the
+    restriction (a domain bound on `Su`, proved but not exposed upstream).
 
     Discharging `SchemeInstAt` from a caller's `OpsConsistentR F e` (which carries
     exactly this scheme-instance witness in its `.op_in` constructor) is the intended
-    route. For more information, see the module notes and the issue tracker.
+    route: see `schemeInstAt_of_opsConsistentR` in `HasTypeAGenOpsConsistent.lean`.
 
     **Well-formedness for `freshenBoundVars` is no longer a premise.** Before, this
     predicate carried two disjointness conjuncts, and callers supplied them. The first
@@ -6566,8 +6692,7 @@ theorem schemeInstAt_freshening_disjoint
     weaker: the scheme body mentions no type variable outside its own binders. -/
 def SchemeInstAt (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (bctx : BVarCtx) (τ : LMonoTy) (name : String)
-    (concreteArgTys : List LMonoTy) (sampledTys : List LMonoTy)
-    (maxNumArgs : Nat) : Prop :=
+    (concreteArgTys : List LMonoTy) (maxNumArgs : Nat) : Prop :=
   ∃ (boundVars : List TyIdentifier) (monoTy : LMonoTy)
     (freshBoundVars : List TyIdentifier) (freshMonoTy : LMonoTy)
     (schemeArgTys : List LMonoTy) (retTy : LMonoTy) (k : Nat) (Sm : Lambda.Subst),
@@ -6589,12 +6714,17 @@ def SchemeInstAt (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- the matcher (spec-level; no `Su`):
     LMonoTy.subst Sm
       ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ ∧
-    -- applied prefix instantiates to the argument types, under any unifier the
-    -- generator's search returns (bridged to `Sm` internally):
-    (∀ Su, unifyTypes
-        ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) τ = some Su →
-      concreteArgTys = (schemeArgTys.take k).map
-        (LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su)))
+    -- **Split determinacy**: every type variable of the applied prefix also occurs in
+    -- the leftover suffix, so the target `τ` pins down the whole instance and the
+    -- generator's random sampling cannot disagree with `Sm`. See
+    -- `extended_subst_prefix_of_determined` for why this is the exact boundary of what
+    -- a `Su`-free predicate can claim.
+    (∀ σ ∈ schemeArgTys.take k, ∀ v ∈ σ.freeVars,
+      v ∈ ((schemeArgTys.drop k).foldr
+        (fun σ acc => LMonoTy.arrow σ acc) retTy).freeVars) ∧
+    -- the applied prefix instantiates to the argument types under the *same* matcher
+    -- (spec-level; no `unifyTypes`, no `Su`):
+    concreteArgTys = (schemeArgTys.take k).map (LMonoTy.subst Sm)
 
 /-- **Fully spec-shaped backward direction: `hEntry` eliminated.**
 
@@ -6636,11 +6766,11 @@ theorem isPolyApp_of_hasType_specShaped
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
       args concreteArgTys)
     (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
-    (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys sampledTys maxNumArgs) :
+    (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys maxNumArgs) :
     IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs
       (mkApps (.op () ⟨name, ()⟩ (some annot)) args) := by
   obtain ⟨boundVars, monoTy, freshBoundVars, freshMonoTy, schemeArgTys, retTy, k, Sm,
-    hmem, hfresh, hdec, harity, hk, hclosed, hmatch, hcat⟩ := hInst
+    hmem, hfresh, hdec, harity, hk, hclosed, hmatch, hdet, hprefix⟩ := hInst
   -- The proof *derives* the two well-formedness conditions from scheme closedness,
   -- and does not assume them. `freshenBoundVars` cannot add a variable that clashes
   -- with `FV(τ)`, because it gets a `varsInUse` set that contains `FV(τ)`.
@@ -6654,12 +6784,19 @@ theorem isPolyApp_of_hasType_specShaped
   have hg2 : LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su)
       ((schemeArgTys.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) retTy) = τ :=
     extended_subst_guard2 freshBoundVars Su sampledTys _ τ _hSupat hdisjBV
+  -- Bridge the caller's matcher `Sm` to the generator's `Su` on the applied prefix.
+  -- Determinacy (`hdet`) is what makes this unconditional; see
+  -- `extended_subst_prefix_of_determined`.
+  have hcat : concreteArgTys = (schemeArgTys.take k).map
+      (LMonoTy.subst (substScope ((findFreeTyVars freshBoundVars Su).zip sampledTys) ++ Su)) :=
+    hprefix.trans (extended_subst_prefix_of_determined schemeArgTys retTy τ k Sm Su
+      freshBoundVars sampledTys hdisjSuffix hmatch _hSupat hdet)
   -- Construct the `findPolymorphicOps` membership.
   have hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
       (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs :=
     findPolymorphicOps_complete pctx τ _ sampledTys name boundVars monoTy hmem
       freshBoundVars freshMonoTy schemeArgTys retTy Su concreteArgTys k maxNumArgs
-      hfresh hdec harity hk hunify (Or.inr hgen) hg2 (hcat Su hunify)
+      hfresh hdec harity hk hunify (Or.inr hgen) hg2 hcat
   -- Reuse the `hEntry`-form backward direction.
   exact isPolyApp_of_hasType fctx octx pctx tvars bctx depth τ name annot args hwt
     sampledTys concreteArgTys hLen hValid hEntry hAnnot hArgLen hArgsComplete
@@ -6799,6 +6936,7 @@ theorem genLExpr_complete_poly_specShaped
     |---|---|---|
     | unification premise | `hInst : SchemeInstAt …` + `hgen` | `hEntry` (a `findPolymorphicOps` membership) |
     | that premise is | **spec-level** (scheme, split point, matcher) | a **generator internal** |
+    | split points covered | determined ones only (see `SchemeInstAt`) | all, including sampling |
     | axioms | `propext`, `Classical.choice`, `Quot.sound` | the same |
 
     Both are `sorry`-free and share the same axiom footprint. Eliminating `hEntry` means
@@ -6811,10 +6949,15 @@ theorem genLExpr_complete_poly_specShaped
 
     **Prefer `…_specShaped`** if you would rather supply `hEntry` yourself — it is a
     decidable list membership, so `decide` or `simp [findPolymorphicOps]` settles it for
-    concrete arguments.
+    concrete arguments, and it is the route that reaches the *sampling* split points
+    `SchemeInstAt`'s determinacy conjunct excludes.
 
-    `SchemeInstAt` is the intended discharge point for a caller's
-    `OpsConsistentR F e`, whose `.op_in` constructor carries exactly this witness. -/
+    `SchemeInstAt` is the intended discharge point for a caller's `OpsConsistentR F e`,
+    whose `.op_in` constructor carries exactly this witness. That discharge is
+    `schemeInstAt_of_opsConsistentR`, and
+    `genLExpr_complete_poly_opsConsistentR` is this theorem with the premise already
+    discharged — both in `HasTypeAGenOpsConsistent.lean`, which is where the
+    `OpsConsistentR` judgment is available. -/
 theorem genLExpr_complete_poly_fullySpecShaped
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
@@ -6837,7 +6980,7 @@ theorem genLExpr_complete_poly_fullySpecShaped
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
       args concreteArgTys)
     (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
-    (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys sampledTys maxNumArgs) :
+    (hInst : SchemeInstAt fctx octx pctx bctx τ name concreteArgTys maxNumArgs) :
     (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
       ∈ SetGen.support
         (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
