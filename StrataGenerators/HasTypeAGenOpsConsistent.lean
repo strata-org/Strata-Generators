@@ -53,6 +53,43 @@ Every `.op` node a generated term can contain comes from one of two places:
   permits annotations mentioning a free (non-quantified) type variable.
 
 All compound cases (`.app`, `.ite`, `.abs`, `.eq`, `.quant`) are structural.
+
+## `OpsConsistentR` on the *completeness* side
+
+The last section of this file runs the same judgment in the other direction. It
+discharges `HasTypeAGen.lean`'s `SchemeInstAt` — the spec-level scheme-instance witness
+that polymorphic completeness needs — from a caller's `OpsConsistentR F e`
+(`schemeInstAt_of_opsConsistentR`), and packages the result as
+`genLExpr_complete_poly_opsConsistentR`: *reachability from the two judgments alone*,
+with no generator internals in the hypotheses.
+
+`OpsConsistentR` has to be a *premise* there. `HasTypeA'`'s `.op` rule accepts whatever
+annotation the node carries, so a well-typed term may carry an annotation that is not an
+instance of the operator's scheme — the generator would never emit such a term, and
+`OpsConsistentR.op_in` is exactly the judgment that excludes it, handing over the
+instantiating substitution as its payload. The two directions therefore stay symmetric:
+both judgments are theorems about generated terms on the soundness side, and both are
+assumptions about the target term on the completeness side.
+
+### A `freshenBoundVars` defect this exposes
+
+Building the matcher needs the freshening renaming to be injective on the scheme's
+binders (`hfreshNodup`). That is *not* automatic:
+
+```lean
+#eval freshenBoundVars ["a", "b"] (LMonoTy.arrow (.ftvar "a") (.ftvar "b")) ["a"]
+-- (["b", "b"], b → b)
+```
+
+`freshenBoundVars` renames only the binders that clash with `varsAlreadyInUse`, and it
+draws replacement names that avoid `varsAlreadyInUse` **but not the scheme's other
+binders** — so a renamed binder can land on one of them and two distinct type variables
+collapse into one. `∀ a b. a → b` then instantiates only at `b → b`, and no matcher
+exists for a genuine instance such as `int → bool`: a real (if narrow) completeness hole
+rather than a proof artifact. Filtering the fresh-name supply against
+`varsAlreadyInUse ++ boundVars` would fix it; since that changes `freshenBoundVars`'
+output it is left to its own change. Single-binder schemes — most of `corePolyOps` —
+cannot be affected.
 -/
 
 -- ── `factoryOps` characterization ────────────────────────────────────
@@ -1705,3 +1742,526 @@ theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (fun _ _ _ _ _ _ hmem => by
       rw [findPolymorphicOps_nil] at hmem; simp at hmem)
     e he
+
+-- ── Discharging `SchemeInstAt` from `OpsConsistentR` ──────────────────
+--
+-- `SchemeInstAt` (`HasTypeAGen.lean`) is the spec-level scheme-instance witness that
+-- `genLExpr_complete_poly_fullySpecShaped` consumes. This section discharges it from a
+-- caller's `Lambda.OpsConsistentR F e`, whose `.op_in` constructor carries exactly the
+-- missing ingredient: the substitution `tySubst` that instantiates the operator's
+-- generic type to the node's annotation.
+--
+-- `HasTypeA'` alone cannot supply that witness. Its `.op` rule types an op node at
+-- *whatever* annotation the node carries, so a well-typed term may carry an annotation
+-- that is not an instance of the operator's scheme at all — an annotation the
+-- generator would never emit. `OpsConsistentR` is the judgment that rules this out, so
+-- the completeness side takes it as a premise (symmetric to `HasTypeA'`, and a
+-- *theorem* on the soundness side: `genLExpr_opsConsistentR_factory`).
+--
+-- The work is a change of variables. `OpsConsistentR` gives an instance of the
+-- *original* scheme body; `SchemeInstAt` needs a matcher for the body *after*
+-- `freshenBoundVars` has alpha-renamed the binders. So the matcher is `tySubst`
+-- composed with the *inverse* of that renaming, which exists precisely when the
+-- renaming does not identify two distinct binders — hypothesis `hfreshNodup`.
+
+/-- The type-variable renaming `freshenBoundVars` performs, as an association list.
+
+    This mirrors `freshenBoundVars`' local `subst` binding. Keeping it as a separate
+    definition is what lets the renaming be *named* in proofs; the two
+    `freshenBoundVars_fst_eq`/`freshenBoundVars_snd_eq` equations below hold by `rfl`,
+    which is the check that this definition has not drifted from the generator. -/
+def renamingPairs (boundVars varsAlreadyInUse : List TyIdentifier) :
+    List (TyIdentifier × TyIdentifier) :=
+  let conflictingTyVars := boundVars.filter (· ∈ varsAlreadyInUse)
+  let allTypeVarsInUse := varsAlreadyInUse ++ conflictingTyVars
+  let numFreshNames := allTypeVarsInUse.length + conflictingTyVars.length + 1
+  let freshNames := (freshNameSupply numFreshNames).filter (· ∉ allTypeVarsInUse)
+  conflictingTyVars.zip freshNames
+
+/-- The freshening renaming as a function on type variables: binders that do not
+    collide with the context are left alone. -/
+def renameTyVar (boundVars varsAlreadyInUse : List TyIdentifier) (v : TyIdentifier) :
+    TyIdentifier :=
+  ((renamingPairs boundVars varsAlreadyInUse).lookup v).getD v
+
+/-- The freshening renaming as a `Lambda.Subst`. -/
+def freshenRenaming (boundVars varsAlreadyInUse : List TyIdentifier) : Lambda.Subst :=
+  substScope ((renamingPairs boundVars varsAlreadyInUse).map
+    (fun p => (p.1, LMonoTy.ftvar p.2)))
+
+/-- `freshenBoundVars`' first component is the pointwise renaming of the binders. -/
+theorem freshenBoundVars_fst_eq (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (varsAlreadyInUse : List TyIdentifier) :
+    (freshenBoundVars boundVars monoTy varsAlreadyInUse).1
+      = boundVars.map (renameTyVar boundVars varsAlreadyInUse) := rfl
+
+/-- `freshenBoundVars`' second component is the renaming applied to the body. -/
+theorem freshenBoundVars_snd_eq (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (varsAlreadyInUse : List TyIdentifier) :
+    (freshenBoundVars boundVars monoTy varsAlreadyInUse).2
+      = LMonoTy.subst (freshenRenaming boundVars varsAlreadyInUse) monoTy := rfl
+
+/-- The renaming substitution sends variables to variables — never to a compound
+    type. This is what makes it commute with `decomposeArrow`. -/
+theorem subst_freshenRenaming_ftvar (boundVars varsAlreadyInUse : List TyIdentifier)
+    (v : TyIdentifier) :
+    LMonoTy.subst (freshenRenaming boundVars varsAlreadyInUse) (.ftvar v)
+      = .ftvar (renameTyVar boundVars varsAlreadyInUse v) := by
+  rw [LMonoTy.subst_unfold, freshenRenaming]
+  simp only [Freshening.find?_substScope_eq_lookup, Freshening.lookup_map_snd, renameTyVar]
+  rcases h : (renamingPairs boundVars varsAlreadyInUse).lookup v with _ | w <;> simp
+
+-- ── generic substitution/`decomposeArrow` lemmas ─────────────────────
+
+/-- A two-step substitution collapses to a one-step one as soon as the two agree
+    pointwise on the free variables. The composition analogue of
+    `agree_on_freeVars_implies_subst_eq`. -/
+theorem subst_subst_of_pointwise (S₁ S₂ T : Lambda.Subst) (t : LMonoTy)
+    (h : ∀ v ∈ t.freeVars,
+      LMonoTy.subst S₂ (LMonoTy.subst S₁ (.ftvar v)) = LMonoTy.subst T (.ftvar v)) :
+    LMonoTy.subst S₂ (LMonoTy.subst S₁ t) = LMonoTy.subst T t := by
+  induction t with
+  | ftvar v => exact h v (by simp [LMonoTy.freeVars])
+  | bitvec n => simp [LMonoTy.subst_bitvec]
+  | tcons name args ih =>
+    rw [LMonoTy.subst_unfold, LMonoTy.subst_unfold, LMonoTy.subst_unfold]
+    simp only [List.map_map]
+    congr 1
+    apply List.map_congr_left
+    intro a ha
+    exact ih a ha (fun v hv => h v (by
+      show v ∈ LMonoTys.freeVars args
+      exact Freshening.freeVars_mem_of_mem ha hv))
+
+/-- Substituting into a larger type cannot lose the variables that one of its own free
+    variables contributes. -/
+theorem freeVars_subst_mono (S : Lambda.Subst) (t : LMonoTy) (v : TyIdentifier)
+    (hv : v ∈ t.freeVars) :
+    ∀ w ∈ (LMonoTy.subst S (.ftvar v)).freeVars, w ∈ (LMonoTy.subst S t).freeVars := by
+  induction t with
+  | ftvar u =>
+    simp only [LMonoTy.freeVars, List.mem_singleton] at hv
+    subst hv; exact fun w hw => hw
+  | bitvec n => simp only [LMonoTy.freeVars, List.not_mem_nil] at hv
+  | tcons name args ih =>
+    intro w hw
+    obtain ⟨a, ha, hva⟩ :=
+      Freshening.exists_of_freeVars_mem (show v ∈ LMonoTys.freeVars args from hv)
+    rw [LMonoTy.subst_unfold]
+    show w ∈ LMonoTys.freeVars (args.map (LMonoTy.subst S))
+    exact Freshening.freeVars_mem_of_mem (List.mem_map_of_mem ha) (ih a ha hva w hw)
+
+/-- Conversely, every free variable of `subst S t` is contributed by some free
+    variable of `t`. -/
+theorem freeVars_subst_exists (S : Lambda.Subst) (t : LMonoTy) (w : TyIdentifier)
+    (hw : w ∈ (LMonoTy.subst S t).freeVars) :
+    ∃ v ∈ t.freeVars, w ∈ (LMonoTy.subst S (.ftvar v)).freeVars := by
+  induction t with
+  | ftvar u => exact ⟨u, by simp [LMonoTy.freeVars], hw⟩
+  | bitvec n => rw [LMonoTy.subst_bitvec] at hw; simp [LMonoTy.freeVars] at hw
+  | tcons name args ih =>
+    rw [LMonoTy.subst_unfold] at hw
+    obtain ⟨b, hb, hwb⟩ :=
+      Freshening.exists_of_freeVars_mem
+        (show w ∈ LMonoTys.freeVars (args.map (LMonoTy.subst S)) from hw)
+    obtain ⟨a, ha, rfl⟩ := List.mem_map.mp hb
+    obtain ⟨v, hv, hwv⟩ := ih a ha hwb
+    exact ⟨v, Freshening.freeVars_mem_of_mem ha hv, hwv⟩
+
+/-- `decomposeArrow` bottoms out on anything that is not an arrow. -/
+theorem decomposeArrow_of_not_arrow (t : LMonoTy)
+    (h : ∀ σ rest, t ≠ LMonoTy.tcons "arrow" [σ, rest]) : decomposeArrow t = ([], t) := by
+  unfold decomposeArrow
+  split
+  · rename_i σ rest; exact absurd rfl (h σ rest)
+  · rfl
+
+/-- **A variable renaming commutes with `decomposeArrow`.** Mapping variables to
+    variables can neither create an arrow (a variable never becomes one) nor destroy
+    one (the head constructor is preserved), so the arrow spine is untouched. This is
+    what transports a split point across the freshening. -/
+theorem decomposeArrow_subst_of_renaming (S : Lambda.Subst)
+    (hren : ∀ v, ∃ w, LMonoTy.subst S (.ftvar v) = .ftvar w) (t : LMonoTy) :
+    decomposeArrow (LMonoTy.subst S t)
+      = ((decomposeArrow t).1.map (LMonoTy.subst S),
+         LMonoTy.subst S (decomposeArrow t).2) := by
+  fun_induction decomposeArrow t with
+  | case1 σ rest args ret hrec ih =>
+    have harrow : LMonoTy.subst S (LMonoTy.tcons "arrow" [σ, rest])
+        = LMonoTy.tcons "arrow" [LMonoTy.subst S σ, LMonoTy.subst S rest] := by
+      rw [LMonoTy.subst_unfold]; simp
+    rw [harrow]
+    rw [show decomposeArrow (LMonoTy.tcons "arrow" [LMonoTy.subst S σ, LMonoTy.subst S rest])
+        = ((LMonoTy.subst S σ) :: (decomposeArrow (LMonoTy.subst S rest)).1,
+           (decomposeArrow (LMonoTy.subst S rest)).2) from by rw [decomposeArrow]]
+    rw [ih, hrec]
+    simp
+  | case2 ty hne =>
+    have hnotarrow : ∀ σ rest, LMonoTy.subst S ty ≠ LMonoTy.tcons "arrow" [σ, rest] := by
+      intro σ rest heq
+      cases ty with
+      | ftvar v =>
+        obtain ⟨w, hw⟩ := hren v
+        rw [hw] at heq; simp at heq
+      | bitvec n => rw [LMonoTy.subst_bitvec] at heq; simp at heq
+      | tcons nm args =>
+        rw [LMonoTy.subst_unfold] at heq
+        simp only [LMonoTy.tcons.injEq] at heq
+        obtain ⟨rfl, hargs⟩ := heq
+        have hlen : args.length = 2 := by
+          have := congrArg List.length hargs
+          simpa using this
+        match args, hlen with
+        | [a, b], _ => exact absurd rfl (hne a b)
+    rw [decomposeArrow_of_not_arrow (LMonoTy.subst S ty) hnotarrow]
+    simp
+
+/-- `foldr arrow` is injective in *both* components once the argument lists have equal
+    length. Unlike `foldr_arrow_inj_of_length_eq` the two bases need not coincide —
+    which is what lets a scheme's arrow spine be split at `k` and matched against
+    `concreteArgTys.foldr arrow τ`, recovering the argument types *and* the target. -/
+theorem foldr_arrow_inj (as bs : List LMonoTy) (A B : LMonoTy)
+    (hlen : as.length = bs.length)
+    (heq : as.foldr (fun σ acc => LMonoTy.arrow σ acc) A
+         = bs.foldr (fun σ acc => LMonoTy.arrow σ acc) B) :
+    as = bs ∧ A = B := by
+  induction as generalizing bs with
+  | nil => cases bs with
+    | nil => exact ⟨rfl, heq⟩
+    | cons b bs => simp at hlen
+  | cons a as ih => cases bs with
+    | nil => simp at hlen
+    | cons b bs =>
+      simp only [List.foldr_cons, LMonoTy.arrow, LMonoTy.tcons.injEq, List.cons.injEq,
+        and_true, true_and] at heq
+      obtain ⟨rfl, hrest⟩ := heq
+      obtain ⟨rfl, rfl⟩ := ih bs (by simpa using hlen) hrest
+      exact ⟨rfl, rfl⟩
+
+-- ── the matcher: `tySubst` after undoing the freshening ──────────────
+
+/-- `lookup` through an association list keyed by `f`, when `f` is injective on the
+    key list (`(l.map f).Nodup`). Without injectivity the first matching key wins and
+    the value need not be the intended one — which is precisely the collision the
+    `hfreshNodup` hypothesis of `schemeInstAt_of_opsConsistentR` excludes. -/
+theorem lookup_map_of_nodup {β} (f : TyIdentifier → TyIdentifier) (g : TyIdentifier → β)
+    (l : List TyIdentifier) (hnodup : (l.map f).Nodup) (v : TyIdentifier) (hv : v ∈ l) :
+    (l.map (fun u => (f u, g u))).lookup (f v) = some (g v) := by
+  induction l with
+  | nil => simp at hv
+  | cons w ws ih =>
+    simp only [List.map_cons, List.lookup_cons]
+    rw [List.map_cons, List.nodup_cons] at hnodup
+    obtain ⟨hnotmem, hnodup'⟩ := hnodup
+    rcases List.mem_cons.mp hv with rfl | hvws
+    · simp
+    · by_cases hfv : f v = f w
+      · exact absurd (hfv ▸ List.mem_map_of_mem hvws) hnotmem
+      · simp only [show (f v == f w) = false from by simp [hfv]]
+        exact ih hnodup' hvws
+
+/-- **The matcher `SchemeInstAt` needs.** It sends each *freshened* binder back to the
+    type that `tySubst` assigns to the original binder, so applying it after the
+    freshening reproduces `tySubst`. -/
+def schemeMatcher (boundVars varsAlreadyInUse : List TyIdentifier)
+    (tySubst : Lambda.Subst) : Lambda.Subst :=
+  substScope (boundVars.map
+    (fun v => (renameTyVar boundVars varsAlreadyInUse v, LMonoTy.subst tySubst (.ftvar v))))
+
+theorem subst_schemeMatcher_ftvar (boundVars varsAlreadyInUse : List TyIdentifier)
+    (tySubst : Lambda.Subst)
+    (hnodup : (boundVars.map (renameTyVar boundVars varsAlreadyInUse)).Nodup)
+    (v : TyIdentifier) (hv : v ∈ boundVars) :
+    LMonoTy.subst (schemeMatcher boundVars varsAlreadyInUse tySubst)
+        (LMonoTy.subst (freshenRenaming boundVars varsAlreadyInUse) (.ftvar v))
+      = LMonoTy.subst tySubst (.ftvar v) := by
+  have hlk : (boundVars.map (fun u => (renameTyVar boundVars varsAlreadyInUse u,
+      LMonoTy.subst tySubst (LMonoTy.ftvar u)))).lookup
+        (renameTyVar boundVars varsAlreadyInUse v)
+      = some (LMonoTy.subst tySubst (.ftvar v)) :=
+    lookup_map_of_nodup _ _ boundVars hnodup v hv
+  rw [subst_freshenRenaming_ftvar, LMonoTy.subst_unfold]
+  simp only [schemeMatcher, Freshening.find?_substScope_eq_lookup, hlk]
+
+/-- **The matcher works.** On any type whose variables are scheme binders, undoing the
+    freshening and then applying `tySubst` is a single substitution by
+    `schemeMatcher`. -/
+theorem subst_schemeMatcher (boundVars varsAlreadyInUse : List TyIdentifier)
+    (tySubst : Lambda.Subst)
+    (hnodup : (boundVars.map (renameTyVar boundVars varsAlreadyInUse)).Nodup)
+    (t : LMonoTy) (hclosed : ∀ v ∈ t.freeVars, v ∈ boundVars) :
+    LMonoTy.subst (schemeMatcher boundVars varsAlreadyInUse tySubst)
+        (LMonoTy.subst (freshenRenaming boundVars varsAlreadyInUse) t)
+      = LMonoTy.subst tySubst t :=
+  subst_subst_of_pointwise _ _ _ t
+    (fun v hv => subst_schemeMatcher_ftvar boundVars varsAlreadyInUse tySubst hnodup v
+      (hclosed v hv))
+
+/-- Splitting a right-nested arrow fold at `k`: the first `k` argument types, then the
+    leftover suffix. This is the split point `findPolymorphicOps` ranges over. -/
+theorem foldr_arrow_split (l : List LMonoTy) (t : LMonoTy) (k : Nat) :
+    l.foldr (fun σ acc => LMonoTy.arrow σ acc) t
+      = (l.take k).foldr (fun σ acc => LMonoTy.arrow σ acc)
+          ((l.drop k).foldr (fun σ acc => LMonoTy.arrow σ acc) t) := by
+  rw [← List.foldr_append, List.take_append_drop]
+
+/-- Inversion of `OpsConsistentR` at an `.op` node: either the operator is not in the
+    factory at all, or the annotation is an instance of its generic type. Stated so the
+    instantiating substitution is *named* without naming the constructor's implicits. -/
+theorem opsConsistentR_op_inv (F : @Factory LExprParams') (name : String)
+    (annot : LMonoTy)
+    (h : Lambda.OpsConsistentR F (.op () ⟨name, ()⟩ (some annot))) :
+    F[name]? = none ∨
+      ∃ (fn : LFunc LExprParams') (T : Lambda.Subst), F[name]? = some fn ∧
+        annot = LMonoTy.subst T (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd)) := by
+  cases h with
+  | op_notin h => exact Or.inl h
+  | op_in hfn hty => exact Or.inr ⟨_, _, hfn, hty⟩
+
+set_option maxHeartbeats 800000 in
+/-- **`SchemeInstAt` from a caller's `OpsConsistentR`.**
+
+    The intended discharge route for `genLExpr_complete_poly_fullySpecShaped`'s
+    scheme-instance premise: a caller who holds `OpsConsistentR F` for the op node (plus
+    `PCtxWF` and the scheme's `pctx` membership) does not have to construct the matcher
+    themselves.
+
+    All the real content is a change of variables. `OpsConsistentR.op_in` hands over a
+    substitution `T` with `annot = subst T monoTy` — an instance of the *original*
+    scheme body. `SchemeInstAt` asks for a matcher of the body *after*
+    `freshenBoundVars` alpha-renames its binders. `schemeMatcher` is that matcher: it
+    sends each freshened binder back to `T`'s image of the original binder
+    (`subst_schemeMatcher`). The split point is `concreteArgTys.length` — the number of
+    arguments actually applied — and `decomposeArrow_subst_of_renaming` is what moves
+    the scheme's arrow spine across the renaming.
+
+    ### The premises, and why each is needed
+
+    - `hPctx`/`hmem` — say *which* `pctx` scheme the operator is, and tie it to the
+      factory. `hmem` also *is* `SchemeInstAt`'s first conjunct.
+    - `hops` — the `OpsConsistentR` premise; supplies `T`. `HasTypeA'` cannot: its `.op`
+      rule believes whatever annotation the node carries, so a well-typed term may carry
+      an annotation that is no instance of the scheme.
+    - `hAnnot` — the spine shape (`annot = concreteArgTys.foldr arrow τ`), forced by the
+      typing derivation at the call site.
+    - `hclosed`, `harity`, `hsplit`, `hdet` — decidable facts about the scheme and the
+      split point (closedness, arity bound, `k` in range, split determinacy). For a
+      concrete factory these are `decide`/`simp` obligations.
+    - `hfreshNodup` — **the freshening does not collapse two binders.** This is a real
+      side condition, not bookkeeping: `freshenBoundVars` renames only the binders that
+      clash with the context and draws replacements that avoid the context *but not the
+      other binders*, so it can map two distinct binders to one name. For example
+      `freshenBoundVars ["a", "b"] (a → b) ["a"]` evaluates to `(["b", "b"], b → b)`.
+      When that happens no matcher exists (the two binders' images under `T` would have
+      to coincide), so `SchemeInstAt` is genuinely false and the generator genuinely
+      cannot reach the instance. -/
+theorem schemeInstAt_of_opsConsistentR
+    (F : @Factory LExprParams') (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (bctx : BVarCtx) (τ : LMonoTy) (name : String) (annot : LMonoTy)
+    (concreteArgTys : List LMonoTy) (maxNumArgs : Nat)
+    (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (hPctx : PCtxWF F pctx)
+    (hmem : (name, Lambda.LTy.forAll boundVars monoTy) ∈ pctx)
+    (hops : Lambda.OpsConsistentR F (.op () ⟨name, ()⟩ (some annot)))
+    (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (hclosed : ∀ v ∈ monoTy.freeVars, v ∈ boundVars)
+    (harity : (decomposeArrow monoTy).1.length ≤ maxNumArgs)
+    (hsplit : concreteArgTys.length ≤ (decomposeArrow monoTy).1.length)
+    (hfreshNodup : (boundVars.map (renameTyVar boundVars
+      ((LMonoTy.freeVars τ ++ (generableTypesFromCtx bctx fctx octx).flatMap
+        LMonoTy.freeVars).eraseDups))).Nodup)
+    (hdet : ∀ σ ∈ (decomposeArrow monoTy).1.take concreteArgTys.length,
+      ∀ v ∈ σ.freeVars,
+      v ∈ (((decomposeArrow monoTy).1.drop concreteArgTys.length).foldr
+        (fun σ acc => LMonoTy.arrow σ acc) (decomposeArrow monoTy).2).freeVars) :
+    SchemeInstAt fctx octx pctx bctx τ name concreteArgTys maxNumArgs := by
+  -- The scheme is a factory function's generic type.
+  obtain ⟨fn, hget, hlty⟩ := hPctx name (.forAll boundVars monoTy) hmem
+  rw [LTy.forAll.injEq] at hlty
+  obtain ⟨_, hmono⟩ := hlty
+  -- `OpsConsistentR` supplies the instantiating substitution `T`.
+  obtain ⟨T, hTannot⟩ : ∃ T : Lambda.Subst,
+      LMonoTy.subst T monoTy = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ := by
+    rcases opsConsistentR_op_inv F name annot hops with hnone | ⟨fn', T, hfn, hty⟩
+    · rw [hget] at hnone; exact absurd hnone (by simp)
+    · have hfneq : fn' = fn := Option.some.inj (hfn.symm.trans hget)
+      rw [hfneq] at hty
+      exact ⟨T, by rw [hmono, ← hty]; exact hAnnot⟩
+  -- Name the arrow decomposition of the *original* scheme body.
+  obtain ⟨origArgs, origRet, hdecEq⟩ : ∃ a b, decomposeArrow monoTy = (a, b) := ⟨_, _, rfl⟩
+  rw [hdecEq] at harity hsplit hdet
+  simp only at harity hsplit hdet
+  have hmonoFold : monoTy = origArgs.foldr (fun σ acc => LMonoTy.arrow σ acc) origRet := by
+    have h := decomposeArrow_foldr monoTy; rw [hdecEq] at h; simpa using h
+  -- Free variables of every part of the scheme body are scheme binders.
+  obtain ⟨hfvRet, hfvArg⟩ := decomposeArrow_freeVars_subset monoTy
+  rw [hdecEq] at hfvRet hfvArg
+  simp only at hfvRet hfvArg
+  have hfvArgs : ∀ σ ∈ origArgs, ∀ v ∈ σ.freeVars, v ∈ boundVars :=
+    fun σ hσ v hv => hclosed v (hfvArg σ hσ v hv)
+  have hfvSuffix : ∀ v ∈ ((origArgs.drop concreteArgTys.length).foldr
+      (fun σ acc => LMonoTy.arrow σ acc) origRet).freeVars, v ∈ boundVars := by
+    intro v hv
+    rcases mem_freeVars_foldr_arrow _ _ v hv with ⟨σ, hσ, hvσ⟩ | hvret
+    · exact hclosed v (hfvArg σ (List.mem_of_mem_drop hσ) v hvσ)
+    · exact hclosed v (hfvRet v hvret)
+  -- Split the instance equation at `k = concreteArgTys.length`: the applied prefix
+  -- gives the concrete argument types, the leftover suffix gives the target `τ`.
+  obtain ⟨hprefixT, hτT⟩ : concreteArgTys
+      = (origArgs.take concreteArgTys.length).map (LMonoTy.subst T) ∧
+      τ = LMonoTy.subst T ((origArgs.drop concreteArgTys.length).foldr
+        (fun σ acc => LMonoTy.arrow σ acc) origRet) := by
+    refine foldr_arrow_inj _ _ _ _ (by simp; omega) ?_
+    rw [← subst_foldr_arrow, ← foldr_arrow_split, ← hmonoFold]
+    exact hTannot.symm
+  -- Name the `varsInUse` set the generator hands to `freshenBoundVars`.
+  obtain ⟨viu, hviu⟩ : ∃ l, (LMonoTy.freeVars τ ++
+      (generableTypesFromCtx bctx fctx octx).flatMap LMonoTy.freeVars).eraseDups = l := ⟨_, rfl⟩
+  rw [hviu] at hfreshNodup
+  unfold SchemeInstAt
+  rw [hviu]
+  -- The freshening data, and the matcher.
+  refine ⟨boundVars, monoTy,
+    boundVars.map (renameTyVar boundVars viu),
+    LMonoTy.subst (freshenRenaming boundVars viu) monoTy,
+    origArgs.map (LMonoTy.subst (freshenRenaming boundVars viu)),
+    LMonoTy.subst (freshenRenaming boundVars viu) origRet,
+    concreteArgTys.length, schemeMatcher boundVars viu T,
+    hmem, rfl, ?_, by simpa using harity, by simp; omega, hclosed, ?_, ?_, ?_⟩
+  · -- the arrow spine survives the renaming
+    rw [decomposeArrow_subst_of_renaming _
+        (fun v => ⟨_, subst_freshenRenaming_ftvar boundVars viu v⟩) monoTy, hdecEq]
+  · -- the matcher matches the leftover suffix against `τ`
+    rw [← List.map_drop, ← subst_foldr_arrow,
+      subst_schemeMatcher _ _ T hfreshNodup _ hfvSuffix]
+    exact hτT.symm
+  · -- split determinacy transports across the renaming
+    intro σ' hσ' v' hv'
+    rw [← List.map_take] at hσ'
+    obtain ⟨σ, hσ, rfl⟩ := List.mem_map.mp hσ'
+    obtain ⟨v, hv, hv'mem⟩ := freeVars_subst_exists _ σ v' hv'
+    rw [← List.map_drop, ← subst_foldr_arrow]
+    exact freeVars_subst_mono _ _ v (hdet σ hσ v hv) v' hv'mem
+  · -- the applied prefix instantiates to the concrete argument types
+    have hmapeq : (origArgs.take concreteArgTys.length).map
+        (LMonoTy.subst (schemeMatcher boundVars viu T)
+          ∘ LMonoTy.subst (freshenRenaming boundVars viu))
+        = (origArgs.take concreteArgTys.length).map (LMonoTy.subst T) := by
+      apply List.map_congr_left
+      intro σ hσ
+      exact subst_schemeMatcher _ _ T hfreshNodup σ
+        (fun v hv => hfvArgs σ (List.mem_of_mem_take hσ) v hv)
+    rw [← List.map_take, List.map_map, hmapeq]
+    exact hprefixT
+
+-- ── Non-vacuity: the scheme-side premises hold for a real scheme ──────
+--
+-- `schemeInstAt_of_opsConsistentR`'s scheme-side premises (`hclosed`, `harity`,
+-- `hsplit`, `hdet`, `hfreshNodup`) are decidable facts about the scheme and the split
+-- point, so they should be `decide`-able at a call site. These checks confirm that on a
+-- real `corePolyOps` entry — `Sequence.append : ∀a. Seq a → Seq a → Seq a` — rather
+-- than leaving the premises plausible-looking but unsatisfiable.
+--
+-- Note the second `hdet` check: determinacy holds even at *full* saturation here,
+-- because `a` still occurs in the return type. The fragment `hdet` carves out is
+-- therefore not just the partial applications. It excludes exactly the splits where a
+-- scheme variable vanishes from the leftover suffix (`Sequence.length : ∀a. Seq a → int`
+-- at `k = 1`), which is where the generator resorts to random sampling.
+
+private def seqOfA : LMonoTy := .tcons "Sequence" [.ftvar "a"]
+private def appendScheme : LMonoTy := LMonoTy.arrow seqOfA (LMonoTy.arrow seqOfA seqOfA)
+
+example : ∀ v ∈ appendScheme.freeVars, v ∈ ["a"] := by decide
+
+example : (decomposeArrow appendScheme).1.length ≤ 3 := by decide
+
+example : ∀ σ ∈ (decomposeArrow appendScheme).1.take 1, ∀ v ∈ σ.freeVars,
+    v ∈ (((decomposeArrow appendScheme).1.drop 1).foldr
+      (fun σ acc => LMonoTy.arrow σ acc) (decomposeArrow appendScheme).2).freeVars := by decide
+
+example : ∀ σ ∈ (decomposeArrow appendScheme).1.take 2, ∀ v ∈ σ.freeVars,
+    v ∈ (((decomposeArrow appendScheme).1.drop 2).foldr
+      (fun σ acc => LMonoTy.arrow σ acc) (decomposeArrow appendScheme).2).freeVars := by decide
+
+/-- A single-binder scheme can never suffer the freshening collapse, so `hfreshNodup` is
+    free for every scheme in `corePolyOps` with one type argument. -/
+example (viu : List TyIdentifier) : (["a"].map (renameTyVar ["a"] viu)).Nodup := by simp
+
+/-- `OpsConsistentR` of an application spine gives `OpsConsistentR` of its head: the
+    `.app` constructor is the only way to build the spine, so peeling it off is
+    inversion at each step. -/
+theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
+    (args : List LExpr') (h : Lambda.OpsConsistentR F (mkApps base args)) :
+    Lambda.OpsConsistentR F base := by
+  induction args generalizing base with
+  | nil => simpa only [mkApps, List.foldl_nil] using h
+  | cons a rest ih =>
+    have h' := ih (.app () base a) (by simpa only [mkApps, List.foldl_cons] using h)
+    cases h' with
+    | app hbase _ => exact hbase
+
+/-- **Polymorphic completeness from the two judgments, with no generator internals.**
+
+    The fully spec-shaped statement: a spine over a polymorphic operator is reachable
+    given `HasTypeA'` *and* `OpsConsistentR` — the same two judgments the soundness
+    direction establishes (`genLExpr_sound`, `genLExpr_opsConsistentR_factory`) — plus
+    decidable facts about the scheme. No `findPolymorphicOps`, no `unifyTypes`, no
+    `SchemeInstAt` in the hypotheses; `schemeInstAt_of_opsConsistentR` constructs the
+    scheme-instance witness internally.
+
+    **Why `OpsConsistentR` is a premise here.** It is not derivable from `HasTypeA'`:
+    the `.op` typing rule accepts whatever annotation the node carries, so a well-typed
+    term can carry an annotation that is not an instance of the operator's scheme — a
+    term the generator would never produce, and rightly not reachable. Adding
+    `OpsConsistentR` is what closes that gap, and it keeps the two directions
+    symmetric: on the soundness side both judgments are *theorems* about generated
+    terms, on the completeness side both are *assumptions* about the target term.
+
+    The remaining premises are the per-argument recursive-completeness bundle (as in
+    every completeness statement here), the sampling-context facts (`hLen`/`hValid`/
+    `hgen`), and the scheme-side side conditions of
+    `schemeInstAt_of_opsConsistentR` — including `hfreshNodup` (the freshening does not
+    collapse two binders) and `hdet` (split determinacy). -/
+theorem genLExpr_complete_poly_opsConsistentR
+    (F : @Factory LExprParams') (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (hτ : SimpleType τ) (maxNumArgs : Nat)
+    (name : String) (annot : LMonoTy) (args : List LExpr')
+    (concreteArgTys : List LMonoTy)
+    (boundVars : List TyIdentifier) (monoTy : LMonoTy)
+    (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
+    (hops : Lambda.OpsConsistentR F (mkApps (.op () ⟨name, ()⟩ (some annot)) args))
+    (sampledTys : List LMonoTy)
+    (hLen : sampledTys.length = maxNumArgs)
+    (hValid : ∀ σ ∈ sampledTys,
+      ((generableTypesFromCtx bctx fctx octx).length > 0 →
+        σ ∈ generableTypesFromCtx bctx fctx octx) ∧
+      (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
+        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
+    (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
+    (hArgLen : args.length = concreteArgTys.length)
+    (hArgsComplete : List.Forall₂
+      (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
+        AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
+      args concreteArgTys)
+    (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
+    (hPctx : PCtxWF F pctx)
+    (hmem : (name, Lambda.LTy.forAll boundVars monoTy) ∈ pctx)
+    (hclosed : ∀ v ∈ monoTy.freeVars, v ∈ boundVars)
+    (harity : (decomposeArrow monoTy).1.length ≤ maxNumArgs)
+    (hsplit : concreteArgTys.length ≤ (decomposeArrow monoTy).1.length)
+    (hfreshNodup : (boundVars.map (renameTyVar boundVars
+      ((LMonoTy.freeVars τ ++ (generableTypesFromCtx bctx fctx octx).flatMap
+        LMonoTy.freeVars).eraseDups))).Nodup)
+    (hdet : ∀ σ ∈ (decomposeArrow monoTy).1.take concreteArgTys.length,
+      ∀ v ∈ σ.freeVars,
+      v ∈ (((decomposeArrow monoTy).1.drop concreteArgTys.length).foldr
+        (fun σ acc => LMonoTy.arrow σ acc) (decomposeArrow monoTy).2).freeVars) :
+    (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
+      ∈ SetGen.support
+        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
+  genLExpr_complete_poly_fullySpecShaped fctx octx pctx tvars bctx depth τ hτ name annot args
+    hwt sampledTys concreteArgTys hLen hValid hAnnot hArgLen hArgsComplete hgen
+    (schemeInstAt_of_opsConsistentR F fctx octx pctx bctx τ name annot concreteArgTys
+      maxNumArgs boundVars monoTy hPctx hmem
+      (mkApps_opsConsistentR_inv F _ args hops) hAnnot hclosed harity hsplit hfreshNodup hdet)
