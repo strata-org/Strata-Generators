@@ -983,6 +983,49 @@ theorem genCmd_outCtx_functional
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
 
+/-- **`genCmd` keeps every type in scope well-kinded in `C`.** The only commands that
+    change the scope are the two `init`s, and the type they store comes from `genLMonoTy`,
+    hence is a `SimpleType` and so well-kinded wherever the `SimpleType` arities are
+    registered. This is the `cmd` case of the statement generators' well-kindedness
+    invariant (`StrataGenerators.Stmt.WellKindedOk.ctxWK`). -/
+theorem genCmd_outCtx_wellKinded
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) {C : LContext CoreLParams}
+    (hC : SimpleTyArities C) (ctx : VarCtx) (depth : Nat)
+    (hctx : ∀ ty ∈ ctx.values, C.WellKindedTy ty)
+    (r : GenCmdResult)
+    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx)) :
+    ∀ ty ∈ r.outCtx.values, C.WellKindedTy ty := by
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx] at hr
+  rcases hr with hr | (hr | (⟨_, hr⟩ | (⟨_, hr⟩ | (hr | (hr | hr)))))
+  · -- init_det: the scope gains `mty`, drawn from `genLMonoTy`
+    simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨name, _, mty, hmty, _e, _, rfl⟩ := hr
+    intro ty hty
+    rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
+    · exact simpleType_wellKindedTy hC (genLMonoTy_simple tvars _ _ hmty)
+    · exact hctx ty hty'
+  · -- init_nondet: likewise
+    simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨name, _, mty, hmty, rfl⟩ := hr
+    intro ty hty
+    rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
+    · exact simpleType_wellKindedTy hC (genLMonoTy_simple tvars _ _ hmty)
+    · exact hctx ty hty'
+  · -- set_det / set_nondet / assert / assume / cover leave the scope alone
+    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
+      mem_support_elements_iff] at hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
+  · simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
+      mem_support_elements_iff] at hr
+    obtain ⟨_, _, rfl⟩ := hr; exact hctx
+  · simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
+  · simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
+  · simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
+
 /-- Soundness of `genCmds`: every command sequence in the generator's support
     satisfies the chained `CmdsHasTypeA` relation.
 

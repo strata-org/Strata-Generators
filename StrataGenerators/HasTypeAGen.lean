@@ -4690,6 +4690,99 @@ theorem simpleType_wellKindedTy {C : LContext CoreLParams} (hC : SimpleTyArities
     · exact hC.seq
     · exact ih ref n hn
 
+-- ── How the generators may change the ambient context ───────────────
+--
+-- Only two statement generators touch `C`: `genFuncDeclStmt` (`addFactoryFunction`,
+-- which leaves `knownTypes` alone) and `genTypeDeclStmt` (`addKnownTypeWithError`, which
+-- *adds* one name and fails on a clash). Both therefore leave every existing known-type
+-- entry in place, which is all `SimpleTyArities` and `WellKindedTy` read.
+
+/-- A successful `Identifiers.addWithError` only inserts a *new* key, so every entry
+    already present keeps its value. -/
+theorem Identifiers.addWithError_mono {IDMeta} [DecidableEq IDMeta]
+    {m m' : Identifiers IDMeta} {x : Identifier IDMeta} {f : Strata.Message}
+    (h : Identifiers.addWithError m x f = .ok m') :
+    ∀ (n : String) (v : IDMeta), m[n]? = some v → m'[n]? = some v := by
+  intro n v hn
+  unfold Identifiers.addWithError at h
+  rcases hcti : Std.HashMap.containsThenInsertIfNew m x.name x.metadata with ⟨b, m2⟩
+  rw [hcti] at h
+  simp only at h
+  have hm2 : m2 = m.insertIfNew x.name x.metadata := by
+    rw [← Std.HashMap.containsThenInsertIfNew_snd (m := m) (k := x.name) (v := x.metadata), hcti]
+  split at h
+  · exact absurd h (by simp)
+  · simp only [Except.ok.injEq] at h
+    subst h; subst hm2
+    rw [Std.HashMap.getElem?_insertIfNew]
+    have hmem : n ∈ m := Std.HashMap.mem_iff_isSome_getElem?.mpr (by rw [hn]; rfl)
+    split
+    · rename_i hc
+      obtain ⟨hbeq, hnotmem⟩ := hc
+      rw [beq_iff_eq] at hbeq
+      subst hbeq
+      exact absurd hmem hnotmem
+    · exact hn
+
+/-- Declaring a new type constructor leaves every already-registered arity in place. -/
+theorem addKnownTypeWithError_mono {C C' : LContext CoreLParams} {k : KnownType}
+    {f : Strata.Message} (h : C.addKnownTypeWithError k f = .ok C') :
+    ∀ (n : String) (v : Nat), C.knownTypes[n]? = some v → C'.knownTypes[n]? = some v := by
+  intro n v hn
+  dsimp only [LContext.addKnownTypeWithError, bind, Except.instMonad, Except.bind] at h
+  split at h
+  · simp at h
+  · rename_i ks hadd
+    simp only [Except.ok.injEq] at h
+    subst h
+    exact Identifiers.addWithError_mono hadd n v hn
+
+/-- Declaring a function does not touch the known-type table. -/
+@[simp] theorem addFactoryFunction_knownTypes {C : LContext CoreLParams}
+    (fn : LFunc CoreLParams) : (C.addFactoryFunction fn).knownTypes = C.knownTypes := by
+  simp only [LContext.addFactoryFunction]; split <;> rfl
+
+/-- `SimpleTyArities` transports along a known-type extension. -/
+theorem simpleTyArities_mono {C C' : LContext CoreLParams}
+    (h : ∀ (n : String) (v : Nat), C.knownTypes[n]? = some v → C'.knownTypes[n]? = some v)
+    (hC : SimpleTyArities C) : SimpleTyArities C' :=
+  { bool := h _ _ hC.bool, int := h _ _ hC.int, string := h _ _ hC.string
+    real := h _ _ hC.real, regex := h _ _ hC.regex, arrow := h _ _ hC.arrow
+    map := h _ _ hC.map, seq := h _ _ hC.seq }
+
+-- ── `Map.values` under `insert` ──────────────────────────────────────
+
+theorem Map.values_eq_map_snd {α β : Type} (m : Map α β) : m.values = m.map Prod.snd := by
+  induction m with
+  | nil => rfl
+  | cons p m ih => cases p; simp [Map.values, ih]
+
+/-- An `insert` adds at most the inserted value to a map's values. -/
+theorem mem_values_insert {α β : Type} [DecidableEq α] (m : Map α β) (a : α) (b : β) {v : β}
+    (h : v ∈ (Map.insert m a b).values) : v = b ∨ v ∈ m.values := by
+  induction m with
+  | nil =>
+    simp only [Map.insert, Map.values_eq_map_snd, List.map_cons, List.map_nil,
+      List.mem_singleton] at h
+    exact Or.inl h
+  | cons p m ih =>
+    obtain ⟨k, w⟩ := p
+    rw [Map.values_eq_map_snd] at h ⊢
+    simp only [Map.insert] at h
+    split at h
+    · simp only [List.map_cons, List.mem_cons] at h
+      rcases h with rfl | h
+      · exact Or.inl rfl
+      · exact Or.inr (List.mem_cons_of_mem _ h)
+    · simp only [List.map_cons, List.mem_cons] at h
+      rcases h with rfl | h
+      · exact Or.inr (List.mem_cons_self ..)
+      · rw [← Map.values_eq_map_snd] at h
+        rcases ih h with rfl | h'
+        · exact Or.inl rfl
+        · rw [Map.values_eq_map_snd] at h'
+          exact Or.inr (List.mem_cons_of_mem _ h')
+
 -- ── Helper lemmas for SimpleType preservation ───────────────────────
 
 /-- `LMonoTy.subst` preserves `SimpleType` when the substitution maps
@@ -4815,6 +4908,148 @@ theorem generableTypesFromCtx_simple
     · exact hFctx p hp
     · exact hOctx p hp
   exact syntacticSubtypes_simple ty hty_simple τ hty_sub
+
+-- ── The same closure results, directly for `LContext.WellKindedTy` ───
+--
+-- The lemmas above route through `SimpleType`, which is the *generator's* type
+-- vocabulary: it is closed under the operations below, and `simpleType_wellKindedTy`
+-- turns it into the `WellKindedTy` obligation upstream's rules impose. That route
+-- breaks down as soon as a context holds a type the generator did not build — most
+-- importantly a datatype's own `tcons`, which a generated `MutualDatatype` block
+-- contributes to `octx` through its constructor operators. Such a type is perfectly
+-- well-kinded in the context that registers the block, but it is not a `SimpleType`.
+--
+-- `LContext.WellKindedTy` (upstream, `LExprTypeEnv.lean`) is itself closed under every
+-- operation the generators perform on context types, so the results below are the ones
+-- to state the statement generators' discipline against. They subsume the `SimpleType`
+-- versions via `simpleType_wellKindedTy`, and unlike them they stay true at the program
+-- level.
+
+/-- `C.WellKindedTy` reads nothing but `C.knownTypes`, so it transports along any
+    extension of the known-type table that leaves existing entries in place. -/
+theorem wellKindedTy_mono {C C' : LContext CoreLParams}
+    (h : ∀ (n : String) (k : Nat), C.knownTypes[n]? = some k → C'.knownTypes[n]? = some k)
+    {ty : LMonoTy} (hty : C.WellKindedTy ty) : C'.WellKindedTy ty :=
+  fun ref n hn => h ref n (hty ref n hn)
+
+/-- The arity pairs of an `arrow`'s result type are among the arrow's own. -/
+theorem wellKindedTy_arrow_right {C : LContext CoreLParams} {a b : LMonoTy}
+    (h : C.WellKindedTy (.arrow a b)) : C.WellKindedTy b := by
+  intro ref n hn
+  refine h ref n ?_
+  simp only [LMonoTy.arrow, getTypeConsArities, List.flatMap_cons, List.flatMap_nil,
+    List.append_nil, List.mem_cons, List.mem_append]
+  exact Or.inr (Or.inr hn)
+
+/-- Every syntactic subtype of a well-kinded type is well-kinded: `syntacticSubtypes`
+    descends only into an `arrow`'s two components, whose arity pairs are among the
+    arrow's own. -/
+theorem wellKindedTy_syntacticSubtypes {C : LContext CoreLParams} :
+    ∀ (ty : LMonoTy), C.WellKindedTy ty → ∀ σ ∈ syntacticSubtypes ty, C.WellKindedTy σ := by
+  intro ty
+  induction ty using syntacticSubtypes.induct with
+  | case1 a b ih₁ ih₂ =>
+    intro hty σ hσ
+    simp only [syntacticSubtypes, List.mem_cons, List.mem_append] at hσ
+    have harities : ∀ ref n, (ref, n) ∈ getTypeConsArities a ∨ (ref, n) ∈ getTypeConsArities b →
+        (ref, n) ∈ getTypeConsArities (LMonoTy.tcons "arrow" [a, b]) := by
+      intro ref n hn
+      simp only [getTypeConsArities, List.flatMap_cons, List.flatMap_nil, List.append_nil,
+        List.mem_cons, List.mem_append]
+      exact Or.inr hn
+    rcases hσ with rfl | hσ | hσ
+    · exact hty
+    · exact ih₁ (fun ref n hn => hty ref n (harities ref n (Or.inl hn))) σ hσ
+    · exact ih₂ (fun ref n hn => hty ref n (harities ref n (Or.inr hn))) σ hσ
+  | case2 ty _ =>
+    intro hty σ hσ
+    simp only [syntacticSubtypes, List.mem_singleton] at hσ
+    exact hσ ▸ hty
+
+/-- `addNewTypes` preserves well-kindedness: the only types it adds are `arrow` result
+    types of types already in the list. -/
+theorem wellKindedTy_addNewTypes {C : LContext CoreLParams} (fuel : Nat) (tys : List LMonoTy)
+    (hAll : ∀ σ ∈ tys, C.WellKindedTy σ) :
+    ∀ σ ∈ addNewTypes fuel tys, C.WellKindedTy σ := by
+  induction fuel generalizing tys with
+  | zero => simpa [addNewTypes] using hAll
+  | succ n ih =>
+    simp only [addNewTypes]
+    split
+    · exact hAll
+    · apply ih
+      intro σ hσ
+      rcases List.mem_append.mp hσ with hOld | hNew
+      · exact hAll σ hOld
+      · simp only [List.mem_filterMap] at hNew
+        obtain ⟨ty, hty_mem, hty_eq⟩ := hNew
+        split at hty_eq
+        · rename_i argTy retTy
+          split at hty_eq
+          · simp only [Option.some.injEq] at hty_eq; subst hty_eq
+            exact wellKindedTy_arrow_right (hAll _ hty_mem)
+          · simp at hty_eq
+        · simp at hty_eq
+
+/-- **Every type the call generator can sample is well-kinded in `C`**, given that the
+    types recorded in the variable and operator contexts are. `generableTypesFromCtx`
+    only takes syntactic subtypes of context types and `arrow` result types, and
+    `C.WellKindedTy` is closed under both. This is the `WellKindedTy` analogue of
+    `generableTypesFromCtx_simple`, and unlike that lemma it survives a datatype block's
+    constructor operators landing in `octx`. -/
+theorem generableTypesFromCtx_wellKinded {C : LContext CoreLParams}
+    (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx)
+    (hBctx : ∀ τ ∈ bctx, C.WellKindedTy τ)
+    (hFctx : ∀ p ∈ fctx, C.WellKindedTy p.2)
+    (hOctx : ∀ p ∈ octx.ops, C.WellKindedTy p.2) :
+    ∀ σ ∈ generableTypesFromCtx bctx fctx octx, C.WellKindedTy σ := by
+  intro σ hσ
+  unfold generableTypesFromCtx at hσ
+  refine wellKindedTy_addNewTypes _ _ ?_ σ hσ
+  intro τ hτ
+  rw [dedupTys_eq] at hτ
+  have hτ' := List.mem_eraseDups.mp hτ
+  rw [List.mem_flatMap] at hτ'
+  obtain ⟨ty, hty_mem, hty_sub⟩ := hτ'
+  have hty_wk : C.WellKindedTy ty := by
+    have hty_mem' := hty_mem
+    simp only [List.mem_append, List.mem_map] at hty_mem'
+    rcases hty_mem' with (hb | ⟨p, hp, rfl⟩) | ⟨p, hp, rfl⟩
+    · exact hBctx ty hb
+    · exact hFctx p hp
+    · exact hOctx p hp
+  exact wellKindedTy_syntacticSubtypes ty hty_wk τ hty_sub
+
+/-- **`LMonoTy.subst` preserves well-kindedness** when every type in the substitution's
+    range is well-kinded: substitution rewrites `ftvar`s (which contribute no arity pairs
+    at all) and leaves every type-constructor name applied at its original argument
+    count. -/
+theorem subst_wellKinded {C : LContext CoreLParams} (S : Lambda.Subst)
+    (hSubst : ∀ v t, Strata.Util.HMaps.find? S v = some t → C.WellKindedTy t) :
+    ∀ (ty : LMonoTy), C.WellKindedTy ty → C.WellKindedTy (LMonoTy.subst S ty) := by
+  intro ty
+  induction ty with
+  | ftvar f =>
+    intro _
+    simp only [LMonoTy.subst_unfold]
+    split
+    · exact hSubst _ _ ‹_›
+    · intro ref n hn; simp [getTypeConsArities] at hn
+  | bitvec n =>
+    intro _
+    simp only [LMonoTy.subst_unfold]
+    intro ref m hm; simp [getTypeConsArities] at hm
+  | tcons name args ih =>
+    intro hty
+    rw [LMonoTy.subst_tcons, LMonoTys.subst_eq_map]
+    intro ref n hn
+    simp only [getTypeConsArities, List.length_map, List.mem_cons, List.mem_flatMap,
+      List.mem_map] at hn
+    rcases hn with hhead | ⟨_, ⟨a, ha, rfl⟩, hn⟩
+    · exact hty ref n (by simp only [getTypeConsArities, List.mem_cons]; exact Or.inl hhead)
+    · refine ih a ha (fun ref' n' hn' => hty ref' n' ?_) ref n hn
+      simp only [getTypeConsArities, List.mem_cons, List.mem_flatMap]
+      exact Or.inr ⟨a, ha, hn'⟩
 
 /-- **Soundness of the monomorphic Indir rule**, parametric in the argument
     generator. Given that `genArg σ` only produces terms of type `σ` (`hArg`), a

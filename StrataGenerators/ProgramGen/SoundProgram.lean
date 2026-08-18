@@ -221,25 +221,32 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
 
 Upstream's `init` rules and `signatureWellKinded` fields require every stored / declared
 monotype to be well-kinded in the ambient context. For the procedure step that reduces to
-`StmtHasTypeAGen.WellKindedOk` at the contexts the statement generator reaches, whose two
-type-level fields (`generable`, `sigs`) are properties of the threaded operator context and
-procedure-signature context.
+`StmtHasTypeAGen.WellKindedAmbient` at the states the declaration fold reaches: `arities`
+(discharged by `simpleTyArities_of_inv`) plus well-kindedness of the *operator vocabulary*
+`s.octx` and of the callable procedure signatures `s.procs`.
 
-Establishing them needs `SimpleType`-closure results for `generableTypesFromCtx` and for the
-operator vocabulary a datatype block contributes — generator theory this port does not add.
-They are therefore **assumed**, guarded by `Inv` so the assumption ranges only over states
-the fold can actually reach, and threaded unchanged through the fold. Discharging
-`ProgramWellKindedAssumption` is a local change here plus those closure lemmas. -/
+Those last two are what remain **assumed**, guarded by `Inv` so the assumption ranges only
+over states the fold can actually reach, and threaded unchanged through the fold.
+Discharging them needs `ContextOk`-relative results about the operators a generated
+datatype block contributes to `s.octx` and about the signatures `genProcedure` records in
+`s.procs` — generator theory this file does not add.
 
-/-- Assumed: at every state the declaration fold reaches, the statement generator's
-    well-kindedness discipline holds. See the note above. -/
+Two things that used to be assumed here no longer are:
+
+* the *scope-local* half (`WellKindedOk.ctxWK`), which `genProcedure_sound` now proves at
+  the body seed and `wellKindedOk_preserved` carries along the body;
+* `WellKindedPreserved`, which is now the theorem
+  `StrataGenerators.Stmt.wellKindedOk_preserved`.
+
+Both became provable by stating the invariant in upstream's `LContext.WellKindedTy` rather
+than in the generator's `SimpleType` vocabulary — see the note on
+`StmtHasTypeAGen.WellKindedOk`. -/
+
+/-- Assumed: at every state the declaration fold reaches, the *ambient* half of the
+    statement generator's well-kindedness discipline holds. See the note above. -/
 def ProgramWellKindedAssumption : Prop :=
-  ∀ s : GenState, Inv s →
-    (∀ (rv : List TyIdentifier) (ctx : VarCtx),
-      StrataGenerators.Stmt.WellKindedOk s.octx s.procs
-        { s.C with rigidTypeVars := rv } ctx) ∧
-    (∀ (tvars : List TyIdentifier) (iv : List (Identifier Unit)) (pctx' : PolyOpCtx),
-      StrataGenerators.Stmt.WellKindedPreserved s.octx tvars iv s.procs pctx')
+  ∀ s : GenState, Inv s → ∀ rv : List TyIdentifier,
+    StrataGenerators.Stmt.WellKindedAmbient s.octx s.procs { s.C with rigidTypeVars := rv }
 
 /-- `ProcHasTypeA` is invariant under renaming the procedure's header name: no
     `ProcHasType'` field mentions `proc.header.name` (they read
@@ -280,7 +287,7 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
   -- `hProcs` rather than the vacuous `ProcSigCorresponds [] P`.
   have hpt : ProcHasTypeA P s.C s.Γ proc₀ :=
     genProcedure_sound_ambient P s.octx s.procs hProcs b.procSize b.procLen s.C s.Γ
-      hinv.typesNil (simpleTyArities_of_inv hinv) (hWKA s hinv).1 (hWKA s hinv).2
+      hinv.typesNil (simpleTyArities_of_inv hinv) (hWKA s hinv)
       proc₀ s.derivedPctx hproc₀
       (by rw [hinv.rigidNil]; exact List.nil_subset _)
   -- Rename to the fresh name; `ProcHasTypeA` is name-invariant.
