@@ -153,14 +153,14 @@ variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
 -- the ambient context (`C.WellKindedTy`), i.e. every type constructor applied at the arity
 -- `C.knownTypes` records for it. Two of the statement generators store types:
 --
--- * `genCmdStmt`, whose `init` types come from `genLMonoTy` — always `SimpleType`s, so
---   `SimpleTyArities C` suffices (`wellKindedTy_of_genLMonoTy`);
+-- * `genCmdStmt`, whose `init` types come from `genLMonoTy`, and are therefore always
+--   generable, so `SimpleTyArities C` suffices (`wellKindedTy_of_genLMonoTy`);
 -- * `genCallStmt`, whose inline `init` chain stores the *callee's* signature types
 --   instantiated by a sampled `σ`. Those depend on `procs`, `ctx` and `octx` rather than
 --   on the generator alone.
 --
--- `WellKindedOk` bundles what that needs, stated **directly** in upstream's
--- `LContext.WellKindedTy` rather than through the generator's `SimpleType` vocabulary.
+-- `WellKindedOk` bundles what that needs, stated **directly** in
+-- `LContext.WellKindedTy` rather than through the generator's type vocabulary.
 -- The difference matters twice over:
 --
 -- * `WellKindedTy` is closed under everything the generators do to context types —
@@ -168,20 +168,20 @@ variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
 --   `subst_wellKinded`) — so the invariant is *provably preserved* rather than assumed:
 --   see `wellKindedOk_preserved` below, which is what used to be the separate
 --   `WellKindedPreserved` premise.
--- * `SimpleType` would be *false* at the program level: a generated `MutualDatatype`
+-- * Generability would be *false* at the program level: a generated `MutualDatatype`
 --   block contributes constructor operators to `octx` whose types mention the datatype's
---   own `tcons`. Those are well-kinded in the context that registers the block, but they
---   are not `SimpleType`s.
+--   own `tcons`. Those types are well-kinded in the context that registers the block, but
+--   the type generator cannot produce them.
 
 /-- The well-kindedness discipline the statement generators need at an ambient context `C`
-    and variable scope `ctx`: `C` registers the `SimpleType` constructors at their own
-    arities (the `init` types `genCmdStmt` draws from `genLMonoTy` are `SimpleType`s), and
+    and variable scope `ctx`: `C` registers the type constructors at their own
+    arities (`genCmdStmt` draws its `init` types from `genLMonoTy`), and
     every type already recorded in the variable scope, the operator context, and a callable
     procedure's written-to blocks is well-kinded in `C`. -/
 structure WellKindedAmbient (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) : Prop where
   /-- `C` registers `bool`/`int`/`string`/`real`/`regex` at 0, `arrow`/`Map` at 2 and
-      `Sequence` at 1 — enough to make every `SimpleType` well-kinded in `C`. -/
+      `Sequence` at 1. This is enough to make every generable type well-kinded in `C`. -/
   arities : SimpleTyArities C
   /-- Every operator's type is well-kinded in `C`. Together with `ctxWK` this is what
       makes the call generator's sampled instantiations well-kinded (`generable`). -/
@@ -213,7 +213,7 @@ theorem WellKindedOk.generable {octx : OpCtx} {procs : ProcSigCtx}
 theorem WellKindedOk.boolWK {octx : OpCtx} {procs : ProcSigCtx}
     {C : LContext CoreLParams} {ctx : VarCtx} (h : WellKindedOk octx procs C ctx) :
     C.WellKindedTy .bool :=
-  simpleType_wellKindedTy h.arities .bool
+  genLMonoTy_mem_wellKindedTy (tvars := []) h.arities genLMonoTy_mem_bool
 
 /-- `WellKindedAmbient` transports along an extension of the known-type table: nothing it
     asserts is disturbed by *adding* a type constructor name. -/
@@ -875,7 +875,7 @@ theorem genStmt_outCtx_functional
 
 /-- **`genStmt` preserves `WellKindedOk`.** This used to be the separate
     `WellKindedPreserved` premise; stating the invariant in `LContext.WellKindedTy` rather
-    than in `SimpleType` makes it provable, because `WellKindedTy` is closed under every
+    than in the generator's vocabulary makes it provable, because `WellKindedTy` is closed under every
     operation the generators perform on context types and is undisturbed by the two ways a
     generator extends `C`.
 

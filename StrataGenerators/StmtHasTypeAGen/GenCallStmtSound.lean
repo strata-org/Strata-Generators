@@ -418,9 +418,9 @@ theorem mem_values_insertAllCtx (news : List (Identifier Unit × LMonoTy)) :
     point it is declared, and every declared type is well-kinded in `C`) is well-typed
     and yields `insertAll Γ news`.
 
-    `hwk` discharges the `WellKindedTy` premise upstream added to `CmdHasType'.init_nondet`;
-    the caller gets it from `SimpleTyArities` (the declared types are all generated
-    `SimpleType`s). -/
+    `hwk` discharges the `WellKindedTy` premise of `CmdHasType'.init_nondet`. The caller
+    gets it from `SimpleTyArities`, because the generator makes all of the declared
+    types. -/
 theorem initChain_types {P : Program} {C : LContext CoreLParams} {L : List String}
     (news : List (Identifier Unit × LMonoTy))
     (hwk : ∀ p ∈ news, C.WellKindedTy p.2) : ∀ (Γ : TContext Unit),

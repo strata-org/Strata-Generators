@@ -809,7 +809,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     -- Upstream's `init` rules and `ProcHasType'.signatureWellKinded` need every stored /
     -- declared monotype to be well-kinded in the ambient context. `hC` covers the
-    -- procedure's own signature (all generated types are `SimpleType`s); `hWK` is the
+    -- procedure's own signature (the generator makes all of the types); `hWK` is the
     -- statement-level premise — see the note on `StmtHasTypeAGen.WellKindedOk`. Only its
     -- *ambient* half is assumed: the scope-local half holds at the body seed because that
     -- scope holds nothing but generated signature types (`hseedWK` below), and it is
@@ -910,7 +910,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     intro p hp
     rw [List.contains_iff_mem, ListMap_keys_append, List.mem_append]
     exact Or.inl (by rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨p, hp, rfl⟩)
-  -- Every declared input/output type is reachable by `genLMonoTy` (hence a `SimpleType`).
+  -- `genLMonoTy` can reach every declared input and output type.
   have key : ∀ (ty : LMonoTy),
       (ty ∈ (M ++ disjointInputs rawInputOnly M).values ∨
        ty ∈ (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)).values) →
@@ -936,7 +936,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     { hWK typeArgs with
       ctxWK := by
         intro ty hty
-        refine simpleType_wellKindedTy hC (genLMonoTy_simple typeArgs size ty (key ty ?_))
+        refine genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hC ⟨size, key ty ?_⟩
         rw [Map_values_eq_ListMap_values, ListMap_values_append, ListMap_values_append,
           oldVars_values, List.mem_append, List.mem_append] at hty
         rcases hty with (hMI | hMO) | hM
@@ -982,15 +982,14 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       · obtain ⟨ty, hty, hvty⟩ := Freshening.exists_of_freeVars_mem h; exact ⟨ty, Or.inl hty, hvty⟩
       · obtain ⟨ty, hty, hvty⟩ := Freshening.exists_of_freeVars_mem h; exact ⟨ty, Or.inr hty, hvty⟩
     obtain ⟨ty, hty_mem, hv_ty⟩ := hpiece
-    have hftv : allFtvarsIn typeArgs ty :=
-      (genLMonoTy_support typeArgs size ty |>.mp (key ty hty_mem)).2.2
+    have hftv : allFtvarsIn typeArgs ty := genLMonoTy_mem_ftvars (key ty hty_mem)
     exact allFtvarsIn_freeVars hftv v hv_ty
-  · -- signatureWellKinded: `tyCompat` is equality at `HasTypeA`, and every declared type
-    -- is a generated `SimpleType`, hence well-kinded by `hC` (which only reads
-    -- `knownTypes`, untouched by the `rigidTypeVars` refinement).
+  · -- signatureWellKinded: `tyCompat` is equality at `HasTypeA`, and the generator makes
+    -- every declared type. Therefore `hC` gives well-kindedness (`hC` only reads
+    -- `knownTypes`, which the `rigidTypeVars` refinement does not touch).
     intro ty hty
-    refine ⟨ty, rfl, simpleType_wellKindedTy hC ?_⟩
-    refine genLMonoTy_simple typeArgs size ty (key ty ?_)
+    refine ⟨ty, rfl, genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hC ?_⟩
+    refine ⟨size, key ty ?_⟩
     rcases List.mem_append.mp hty with h | h
     · exact Or.inl h
     · exact Or.inr h

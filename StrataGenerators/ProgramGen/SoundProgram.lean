@@ -238,8 +238,8 @@ Two things that used to be assumed here no longer are:
 * `WellKindedPreserved`, which is now the theorem
   `StrataGenerators.Stmt.wellKindedOk_preserved`.
 
-Both became provable by stating the invariant in upstream's `LContext.WellKindedTy` rather
-than in the generator's `SimpleType` vocabulary — see the note on
+Both became provable by stating the invariant in `LContext.WellKindedTy` rather
+than in the generator's type vocabulary. See the note on
 `StmtHasTypeAGen.WellKindedOk`. -/
 
 /-- Assumed: at every state the declaration fold reaches, the *ambient* half of the

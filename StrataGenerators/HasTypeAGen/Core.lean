@@ -493,7 +493,7 @@ two of its properties give different results in different runs.
 A `@[csimp]` lemma connects each fast form to the original function. Therefore the
 compiler uses the fast form, but `simp`, `rw` and `unfold` use the original definition.
 Each proof about `addNewTypes` and `generableTypesFromCtx` stays the same. These proofs
-include `addNewTypes_mem_genLMonoTy` and `generableTypesFromCtx_mem_genLMonoTy` in
+include `wellKindedTy_addNewTypes` and `generableTypesFromCtx_wellKinded` in
 `HasTypeAGen.lean`.
 The fast forms add no `sorry` and no axiom. -/
 

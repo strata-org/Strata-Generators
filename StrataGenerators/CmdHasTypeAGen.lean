@@ -986,7 +986,7 @@ theorem genCmd_outCtx_functional
 
 /-- **`genCmd` keeps every type in scope well-kinded in `C`.** The only commands that
     change the scope are the two `init`s, and the type they store comes from `genLMonoTy`,
-    hence is a `SimpleType` and so well-kinded wherever the `SimpleType` arities are
+    and is therefore well-kinded wherever the `SimpleTyArities` arities are
     registered. This is the `cmd` case of the statement generators' well-kindedness
     invariant (`StrataGenerators.Stmt.WellKindedOk.ctxWK`). -/
 theorem genCmd_outCtx_wellKinded
@@ -1004,14 +1004,14 @@ theorem genCmd_outCtx_wellKinded
     obtain ⟨name, _, mty, hmty, _e, _, rfl⟩ := hr
     intro ty hty
     rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
-    · exact simpleType_wellKindedTy hC (genLMonoTy_simple tvars _ _ hmty)
+    · exact genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
     · exact hctx ty hty'
   · -- init_nondet: likewise
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, _, mty, hmty, rfl⟩ := hr
     intro ty hty
     rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
-    · exact simpleType_wellKindedTy hC (genLMonoTy_simple tvars _ _ hmty)
+    · exact genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
     · exact hctx ty hty'
   · -- set_det / set_nondet / assert / assume / cover leave the scope alone
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,

@@ -2225,7 +2225,7 @@ theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
 theorem genLExpr_complete_poly_opsConsistentR
     (F : @Factory LExprParams') (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hτ : SimpleType τ) (maxNumArgs : Nat)
+    (hτ : ∃ m, τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) (maxNumArgs : Nat)
     (name : String) (annot : LMonoTy) (args : List LExpr')
     (concreteArgTys : List LMonoTy)
     (boundVars : List TyIdentifier) (monoTy : LMonoTy)
@@ -2241,7 +2241,8 @@ theorem genLExpr_complete_poly_opsConsistentR
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hArgLen : args.length = concreteArgTys.length)
     (hArgsComplete : List.Forall₂
-      (fun arg σ => SimpleType σ ∧ emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
+      (fun arg σ => (∃ m, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) ∧
+        emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
       args concreteArgTys)
     (hgen : generableTypesFromCtx bctx fctx octx ≠ [])
