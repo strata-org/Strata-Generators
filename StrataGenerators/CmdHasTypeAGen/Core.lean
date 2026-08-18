@@ -95,18 +95,22 @@ def fallbackFreshName (ctx : VarCtx) : String :=
 def indexedFreshName (base i : Nat) : String :=
   String.ofList (List.replicate (base + 1 + i) 'x')
 
-/-- Generate a fresh variable name not in `ctx`. Uses `NonEmptyString.arbitrary`
-    for randomness (a variable identifier must be non-empty), maps it through
-    `dodgeKeyword` so the result is never a reserved Core keyword, and falls back
-    to a length-based guarantee when the (dodged) random name collides.
+/-- Generate a fresh variable name not in `ctx`. Uses `genIdentName` for
+    randomness, and falls back to a length-based guarantee when the random name
+    collides.
 
-    `dodgeKeyword` is applied *before* the freshness check so that the name we
-    test for freshness is exactly the name we return; the fallback is dodged too
-    (it is all `x`s, hence never a keyword, so `dodgeKeyword` is the identity on
-    it — but this keeps keyword-freedom uniform across both branches). -/
+    `genIdentName`'s support is exactly the legal Core bare identifiers that are
+    not reserved keywords (`mem_support_genIdentName_iff_isId`). So every name
+    this generator emits is a name the Core lexer accepts in identifier position,
+    and every name a parsed program can hold is reachable. `NonEmptyString.arbitrary`
+    was the earlier source. Its support holds the alphanumeric strings only, so a
+    parsed name such as `my_var` was out of reach.
+
+    `dodgeKeyword` is still applied to the fallback. The fallback is all `x`s,
+    hence never a keyword, so `dodgeKeyword` is the identity on it. This keeps
+    keyword-freedom uniform across both branches. -/
 def genFreshName [Gen G] (ctx : VarCtx) : G String := do
-  let s ← NonEmptyString.arbitrary
-  let s := dodgeKeyword s
+  let s ← genIdentName
   if ctx.isFresh ⟨s, ()⟩ then
     pure s
   else
@@ -190,28 +194,33 @@ def genSetNondet [Gen G] (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
   let (name, _) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
-/-- Generate `assert l e` with a boolean expression. The label `l` is sampled via
-    `String.arbitrary` (its typing rule constrains only the expression), so the
-    generator reaches every alphanumeric label rather than only `""`. -/
+/-- Generate `assert l e` with a boolean expression. The label `l` comes from
+    `genIdentName`, so it is a legal non-keyword Core identifier. The typing rule
+    constrains only the expression.
+
+    `String.arbitrary` was the earlier source. Its support holds the alphanumeric
+    strings only, so the auto-label that the parser mints for an unlabelled
+    `assert` (`assert_0`, see `translateLabeledCheck`) was out of reach. It also
+    holds `""`, which the printer renders as the degenerate `[||]`. -/
 def genAssertCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
-  let l ← String.arbitrary
+  let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure ⟨.assert l e default, ctx⟩
 
-/-- Generate `assume l e` with a boolean expression. The label `l` is sampled via
-    `String.arbitrary` (typing-irrelevant, as for `assert`). -/
+/-- Generate `assume l e` with a boolean expression. The label `l` comes from
+    `genIdentName` (typing-irrelevant, as for `assert`). -/
 def genAssumeCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
-  let l ← String.arbitrary
+  let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure ⟨.assume l e default, ctx⟩
 
-/-- Generate `cover l e` with a boolean expression. The label `l` is sampled via
-    `String.arbitrary` (typing-irrelevant, as for `assert`). -/
+/-- Generate `cover l e` with a boolean expression. The label `l` comes from
+    `genIdentName` (typing-irrelevant, as for `assert`). -/
 def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
-  let l ← String.arbitrary
+  let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure ⟨.cover l e default, ctx⟩
 

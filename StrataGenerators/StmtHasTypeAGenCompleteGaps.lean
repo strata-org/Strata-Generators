@@ -1,6 +1,6 @@
 import StrataGenerators.StmtHasTypeAGenComplete
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString ArbChar
+open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
@@ -12,17 +12,33 @@ them. For each of the three, it gives a statement that is well-typed under
 `StatementHasTypeA` but is not in the support of `genStmt`. Therefore no
 completeness theorem holds for `genStmt` without a side condition of this kind.
 
-Each counterexample is a real Strata Core program. The docstring of each gap
-theorem gives the source text. `Core.formatProgram` produced that text from the
-statement in the theorem.
-
 ## The three gaps
 
-| Predicate     | Clause that survives            | Gap theorem            |
-| ------------- | ------------------------------- | ---------------------- |
-| `InGenShape`  | `md = default`                  | `metadata_gap`         |
-| `AlphabetOk`  | label in `String.arbitrary`     | `label_gap`            |
-| `CallOk`      | `args = mkArgs …`               | `call_argorder_gap`    |
+| Predicate     | Clause that survives      | Gap theorem      | In Core source? |
+| ------------- | ------------------------- | ---------------- | --------------- |
+| `InGenShape`  | `md = default`            | `metadata_gap`   | yes             |
+| `AlphabetOk`  | name in `genIdentName`    | `label_gap`      | no              |
+| `CallOk`      | out target is `outTargets`| `outTarget_gap`  | yes             |
+
+The docstring of each gap theorem gives the Strata Core source text of its
+counterexample. `Core.formatProgram` produced that text from the statement in the
+theorem.
+
+## Two gaps that a generator change closed
+
+The generators used to be narrower, and two more counterexamples were plain Core
+programs:
+
+* An `assert`, `assume` or `cover` label came from `String.arbitrary`, and an
+  `init` variable name came from `NonEmptyString.arbitrary`. The support of each
+  holds the alphanumeric strings only, so a name with an underscore was out of
+  reach. That included `assert_0`, which the parser itself mints for an unlabelled
+  `assert`. All four generators now draw from `genIdentName`, whose support is
+  exactly the legal non-keyword Core identifiers. `label_gap` survives only because
+  a `Statement` holds a bare `String`. `emptyLabel_not_reachable` gives a witness.
+* `mkArgs` fixed the argument order as in-out, then by-value input, then out
+  target, so a call such as `call p(out y, 1);` was out of reach. `mkArgs` now
+  takes an interleaving mask. `mkArgs_out_then_in` shows the call is reachable.
 
 ## Upstream predicates that do not fit
 
@@ -41,16 +57,15 @@ discharges one:
   `genLMonoTy`'s support also bounds the depth of the type and the free type
   variables (`genLMonoTy_support`), so `WellKindedTy` is too weak.
 
-## The one clause with no source-level counterexample
+## The clauses with no source-level counterexample
 
 `InGenShape` also demands that an `init` annotation is monomorphic
 (`.forAll [] mty`). The Core front end builds only `.forAll []` local
 annotations (`translateInitStatement` and `translateVarStatement` in
 `Strata/Languages/Core/DDMTransform/Translate.lean`). So this clause is
 necessary at the level of the abstract syntax tree, but no parsed program can
-violate it.
+violate it. The name clauses of `AlphabetOk` are now in the same position.
 -/
-
 namespace StrataGenerators.Stmt.SpecComplete.Gaps
 
 variable {octx : OpCtx} {tvars : List TyIdentifier}
@@ -82,25 +97,35 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [])) ∨
-    (∃ (pn : String) (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr),
-        ce = CmdExt.call pn (StrataGenerators.Stmt.mkArgs M T exprs) default) := by
+    (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
+        s ∈ procs ∧
+        ce = CmdExt.call s.pname
+          (StrataGenerators.Stmt.mkArgs s.M
+            (outTargets immutableVars ctx
+              (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
+            exprs mask) default) := by
   have hcall : ∀ (d : Nat),
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
         SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d []) →
-      (∃ (pn : String) (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr),
-        ce = CmdExt.call pn (StrataGenerators.Stmt.mkArgs M T exprs) default) := by
+      (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
+        s ∈ procs ∧
+        ce = CmdExt.call s.pname
+          (StrataGenerators.Stmt.mkArgs s.M
+            (outTargets immutableVars ctx
+              (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
+            exprs mask) default) := by
     intro d hmem
     cases procs with
     | nil => exact ((SetGen.bot_mem_iff _).mp hmem).elim
     | cons p0 ps =>
       simp only [genCallStmt, mem_support_bind_iff] at hmem
-      obtain ⟨s, _, σvals, _, hmem⟩ := hmem
+      obtain ⟨s, hs, σvals, _, hmem⟩ := hmem
       split at hmem
       · simp only [mem_support_bind_iff, mem_support_pure_iff] at hmem
-        obtain ⟨exprs, _, heq⟩ := hmem
+        obtain ⟨exprs, _, mask, _, heq⟩ := hmem
         simp only [GenStmtResult.mk.injEq] at heq
         have := initChain_append_call_singleton heq.1
-        exact ⟨s.pname, s.M, _, exprs, by
+        exact ⟨s, σvals, exprs, mask, (mem_support_elements_iff (by simp)).mp hs, by
           simpa only [Statement.call, Stmt.cmd.injEq] using this⟩
       · exact ((SetGen.bot_mem_iff _).mp hmem).elim
   have hcmdstmt : ∀ (d : Nat),
@@ -180,12 +205,12 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
 
 /-- **Inversion at an `assert` command.** `genAssertCmd` is the only branch of
     `genCmd` that produces an `assert`. It emits `default` metadata, and it draws
-    the label from `String.arbitrary`. -/
+    the label from `genIdentName`. -/
 theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx' : VarCtx)
     (n : Nat) (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
     (h : (⟨.assert l e md, ctx'⟩ : GenCmdResult) ∈
       SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [])) :
-    md = default ∧ l ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
+    md = default ∧ l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
   rw [genCmd_support_iff] at h
   rcases h with h | h | ⟨_, h⟩ | ⟨_, h⟩ | h | h | h
   · simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff,
@@ -204,19 +229,6 @@ theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx'
       GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
   · simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff,
       GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
-
-/-- A string with one character outside `alphanumChars` is outside the support of
-    `String.arbitrary`. -/
-theorem not_mem_String_arbitrary {s : String} {c : Char} (hc : c ∈ s.toList)
-    (hnc : c ∉ alphanumChars) : s ∉ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
-  intro h
-  simp only [String.arbitrary, mem_support_map_iff] at h
-  obtain ⟨cs, hcs, rfl⟩ := h
-  rw [String.toList_ofList] at hc
-  have hmem := SetGen.mem_support_listOf hcs c hc
-  rw [Char.arbitrary, mem_support_elements_iff
-    (show alphanumChars ≠ [] from by decide +kernel)] at hmem
-  exact hnc hmem
 
 -- ── Well-typedness of an `assert` ────────────────────────────────────────
 
@@ -260,7 +272,7 @@ theorem metadata_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCt
       SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨pn, M, T, exprs, hce⟩
+    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
   · rw [CmdExt.cmd.injEq] at hce; subst hce
     exact hmd (mem_genCmd_assert_inv immutableVars ctx ctx' n l e md hc).1
   · exact absurd hce (by simp)
@@ -271,66 +283,55 @@ example : (#[mdKey] : Imperative.MetaData Expression) ≠ default := by decide
 -- ── Gap 2: the alphabet clause of `AlphabetOk` ───────────────────────────
 
 /-- **Gap 2: the label alphabet.** `genAssertCmd` draws an `assert` label from
-    `String.arbitrary`, whose support holds the alphanumeric strings only. A
-    label with an underscore is a legal Core label, and the `assert` rule accepts
-    every label, so such a statement is well-typed and out of reach.
+    `genIdentName`, whose support is exactly the legal Core bare identifiers that
+    are not reserved keywords. The `assert` rule accepts *every* `String`, and a
+    `Statement` holds a bare `String`, so a statement with any other label is
+    well-typed and out of reach.
 
-    ```
-    program Core;
+    **This gap has no source-level counterexample.** Every label a Core program can
+    hold is a legal identifier, so the Core parser cannot produce a statement that
+    breaks the clause. The earlier source of labels was `String.arbitrary`, whose
+    support holds the alphanumeric strings only. Under it a plain parsed program was
+    a counterexample, because the parser mints `assert_0` for an unlabelled `assert`
+    and an underscore is not alphanumeric.
 
-    procedure caller ()
-    {
-      assert [loop_invariant]: true;
-    };
-    ```
+    `""` is a witness that lives in the abstract syntax tree alone. See
+    `emptyLabel_not_reachable`. `Core.formatProgram` renders it as the degenerate
+    `assert [||]: true;`. `assert_wt` gives the well-typedness of the statement.
 
-    `assert_wt` gives the well-typedness of the body statement. The same gap
-    applies to an `assume` label, to a `cover` label and to an `init` variable
-    name. An `init` name comes from `NonEmptyString.arbitrary`, which has the
-    same alphabet. -/
+    The same gap applies to an `assume` label, to a `cover` label, to an invariant
+    label, to a `block` label, to an `init` variable name and to a
+    type-constructor name. Each of those now comes from `genIdentName` too. -/
 theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
-    (l : String) (e : Expression.Expr) {c₀ : Char} (hc₀ : c₀ ∈ l.toList)
-    (hnc₀ : c₀ ∉ alphanumChars) :
+    (l : String) (e : Expression.Expr)
+    (hl : l ∉ SetGen.support (genIdentName (G := SetGen.Set))) :
     (⟨[Statement.assert l e default], C', ctx'⟩ : GenStmtResult) ∉
       SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨pn, M, T, exprs, hce⟩
+    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
   · rw [CmdExt.cmd.injEq] at hce; subst hce
-    exact not_mem_String_arbitrary hc₀ hnc₀
-      (mem_genCmd_assert_inv immutableVars ctx ctx' n l e default hc).2
+    exact hl (mem_genCmd_assert_inv immutableVars ctx ctx' n l e default hc).2
   · exact absurd hce (by simp)
 
-/-- The label `loop_invariant` holds an underscore, so `label_gap` applies to
-    it. -/
-example : '_' ∈ "loop_invariant".toList ∧ '_' ∉ alphanumChars := by decide +kernel
+/-- The empty label is not a legal identifier, so `label_gap` applies to it. An
+    identifier needs a first character. -/
+theorem emptyLabel_not_reachable :
+    "" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+  rw [StrataGenerators.Function.mem_support_genIdentName_iff]
+  rintro ⟨⟨c, cs, hsplit, _, _⟩, _⟩
+  exact absurd hsplit (by simp)
 
--- ── Gap 3: the recipe clause of `CallOk` ─────────────────────────────────
+-- ── The old Gap 3 is closed: the argument order is now free ───────────────
 
-/-- `mkArgs` puts every `inoutArg` first, then every `inArg`, then every
-    `outArg`. So it never puts an `outArg` before an `inArg`. -/
-theorem mkArgs_ne_out_then_in (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
-    (y : Identifier Unit) (e : Expression.Expr) :
-    StrataGenerators.Stmt.mkArgs M T exprs ≠ [CallArg.outArg y, CallArg.inArg e] := by
-  cases M with
-  | cons hd tl => simp [StrataGenerators.Stmt.mkArgs]
-  | nil =>
-    cases exprs with
-    | cons hd tl => simp [StrataGenerators.Stmt.mkArgs]
-    | nil =>
-      cases T with
-      | nil => simp [StrataGenerators.Stmt.mkArgs]
-      | cons hd tl =>
-        cases tl with
-        | nil => simp [StrataGenerators.Stmt.mkArgs]
-        | cons hd2 tl2 => simp [StrataGenerators.Stmt.mkArgs]
+/-- **The argument-order gap is closed.** `mkArgs` takes an interleaving mask, so
+    an `out` argument before a by-value input is now in the recipe's image. The mask
+    `[false]` puts the single out target first.
 
-/-- **Gap 3: the order of the call arguments.** The `call` rule constrains the
-    input positions and the write positions of a call one by one. It does not
-    constrain the order of the `CallArg` nodes. `mkArgs` fixes that order. So a
-    call that puts an `out` argument before a by-value input is well-typed and
-    out of reach, for every procedure context `procs`.
+    Before the mask, `mkArgs` fixed the order as in-out, then by-value input, then
+    out target. The call `call p(out y, 1);` below was well-typed and out of reach.
+    Now it is the recipe at `mask = [false]`:
 
     ```
     program Core;
@@ -344,21 +345,14 @@ theorem mkArgs_ne_out_then_in (M T : @LMonoTySignature Unit) (exprs : List Expre
       var y : int := 0;
       call p(out y, 1);
     };
-    ```
+    ``` -/
+theorem mkArgs_out_then_in (y : Identifier Unit)
+    (ty : LMonoTy) (e : Expression.Expr) :
+    StrataGenerators.Stmt.mkArgs [] [(y, ty)] [e] [false]
+      = [CallArg.outArg y, CallArg.inArg e] := by
+  simp [StrataGenerators.Stmt.mkArgs, StrataGenerators.Stmt.mergeBy]
 
-    `badOrderCall_wt` gives the well-typedness of the call. -/
-theorem call_argorder_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
-    (pname : String) (y : Identifier Unit) (e : Expression.Expr)
-    (md : Imperative.MetaData Expression) :
-    (⟨[Statement.call pname [CallArg.outArg y, CallArg.inArg e] md], C', ctx'⟩ : GenStmtResult) ∉
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
-  intro h
-  rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨pn, M, T, exprs, hce⟩
-  · exact absurd hce (by simp)
-  · rw [CmdExt.call.injEq] at hce
-    exact mkArgs_ne_out_then_in M T exprs y e hce.2.1.symm
+-- ── Gap 3: the out-target name choice of `CallOk` ─────────────────────────
 
 /-- The callee of the counterexample: `procedure p (x : int, out r : int)`. -/
 def procP : Procedure :=
@@ -370,20 +364,77 @@ def procP : Procedure :=
 /-- The program that declares `procP`. -/
 def progP : Program := { decls := [.proc procP .empty] }
 
-/-- The scope of the caller: `y : int` and `z : int`. -/
-def callerCtx : VarCtx := [(⟨"y", ()⟩, .int), (⟨"z", ()⟩, .int)]
+/-- The generator-side signature of `procP`: no in-out block, one input-only
+    parameter `x`, one output-only parameter `r`. -/
+def sigP : ProcSig :=
+  { pname := "p", typeArgs := [], M := [], I := [(⟨"x", ()⟩, .int)],
+    O := [(⟨"r", ()⟩, .int)] }
 
-/-- The call `call p(out y, 1);`. The `out` argument comes before the by-value
-    input. -/
-def badOrderCall : Statement :=
-  Statement.call "p" [CallArg.outArg ⟨"y", ()⟩, CallArg.inArg (LExpr.const () (.intConst 1))] default
+/-- The scope of the caller: `r : int` and `z : int`. Both have the type of the
+    `out` parameter, so either one can receive the result. -/
+def callerCtx : VarCtx := [(⟨"r", ()⟩, .int), (⟨"z", ()⟩, .int)]
 
-/-- **`badOrderCall` is well-typed.** The type instantiation is empty. The one
-    input position holds the literal `1` at type `int`. The one write position
-    holds `y`, which the scope binds at type `int`. The input parameter `x` is
-    not an output parameter, so the in-out premise is vacuous. -/
-theorem badOrderCall_wt (C : LContext CoreLParams) (L : List String) :
-    StatementHasTypeA progP C (procToTCtx callerCtx) L badOrderCall C (procToTCtx callerCtx) := by
+/-- The call `call p(1, out z);`. It receives the result into `z`, not into the
+    name `r` that the callee declares. -/
+def otherTargetCall : Statement :=
+  Statement.call "p"
+    [CallArg.inArg (LExpr.const () (.intConst 1)), CallArg.outArg ⟨"z", ()⟩] default
+
+/-- With `r : int` in scope, the generator's out target for `procP` is `r`. -/
+theorem outTargets_sigP :
+    outTargets [] callerCtx (StrataGenerators.Stmt.substSig [] sigP.O)
+      = [(⟨"r", ()⟩, (.int : LMonoTy))] := by
+  decide
+
+/-- **Gap 3: the out-target name choice.** The `call` rule constrains an `out`
+    argument's existence, its type and its writability. It says nothing about its
+    *name*. `outTargets` fixes the name: it reuses the name the callee declares
+    when that name is in scope at the declared type, and otherwise it invents a
+    fresh one. So a call that receives the result into another in-scope variable of
+    the same type is well-typed and out of reach.
+
+    ```
+    program Core;
+
+    procedure p (x : int, out r : int)
+    {
+
+    };
+    procedure caller ()
+    {
+      var r : int := 0;
+      var z : int := 0;
+      call p(1, out z);
+    };
+    ```
+
+    `otherTargetCall_wt` gives the well-typedness of the call. -/
+theorem outTarget_gap (labels : List String)
+    (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
+    (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
+      SetGen.support (genStmt (G := SetGen.Set) octx tvars [] [sigP] labels C callerCtx [] n) := by
+  intro h
+  rcases mem_genStmt_cmd_inv [] [sigP] labels C C' callerCtx ctx' n _ h with
+    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, hs, hce⟩
+  · exact absurd hce (by simp)
+  · -- `procs = [sigP]`, so the callee is `sigP` and its instantiation is empty.
+    rw [List.mem_singleton] at hs
+    subst hs
+    rw [show sigP.typeArgs.zip σvals = [] from by simp [sigP]] at hce
+    -- Compare the write positions: the recipe writes to `r`, the call writes to `z`.
+    rw [CmdExt.call.injEq] at hce
+    obtain ⟨-, hargs, -⟩ := hce
+    have hlhs := congrArg CallArg.getLhs hargs
+    rw [StrataGenerators.Stmt.getLhs_mkArgs, outTargets_sigP] at hlhs
+    exact absurd hlhs (by decide)
+
+/-- **`otherTargetCall` is well-typed.** The type instantiation is empty. The one
+    input position holds the literal `1` at type `int`. The one write position holds
+    `z`, which the scope binds at type `int`. The input parameter `x` is not an
+    output parameter, so the in-out premise is vacuous. -/
+theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
+    StatementHasTypeA progP C (procToTCtx callerCtx) L otherTargetCall C
+      (procToTCtx callerCtx) := by
   refine .cmd _ _ _ _ _ _ (.call _ "p" _ procP _ [] _ (by decide) ?_ ?_ ?_ ?_ ?_ ?_
     (TContext.Equiv.refl _)) (TContext.Equiv.refl _)
   · decide
@@ -429,15 +480,14 @@ theorem badOrderCall_wt (C : LContext CoreLParams) (L : List String) :
     simp only [ListMap.keys, procP, List.getElem_cons_zero] at hcontains
     exact absurd hcontains (by decide)
 
-/-- **The full counterexample for `CallOk`.** `badOrderCall` is well-typed, and
-    `genStmt` cannot reach it at any size and at any procedure context. -/
-theorem badOrderCall_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat) :
-    StatementHasTypeA progP C (procToTCtx callerCtx) labels badOrderCall C
+/-- **The full counterexample for `CallOk`.** `otherTargetCall` is well-typed, and
+    `genStmt` cannot reach it at any size. -/
+theorem otherTargetCall_gap (labels : List String)
+    (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
+    StatementHasTypeA progP C (procToTCtx callerCtx) labels otherTargetCall C
         (procToTCtx callerCtx) ∧
-    (⟨[badOrderCall], C', ctx'⟩ : GenStmtResult) ∉
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) :=
-  ⟨badOrderCall_wt C labels,
-    call_argorder_gap immutableVars procs labels C C' ctx ctx' n _ _ _ _⟩
+    (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
+      SetGen.support (genStmt (G := SetGen.Set) octx tvars [] [sigP] labels C callerCtx [] n) :=
+  ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
 end StrataGenerators.Stmt.SpecComplete.Gaps

@@ -427,8 +427,14 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
       -- and assemble the call. The `mkArgs` in-out/out names come from key-position
       -- only, and `substSig` preserves keys, so passing `s.M` is the same as `Mσ`.
       let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx pctx tvars [] depth τ)
+      -- Step 6: sample how the by-value inputs and the out targets interleave. The
+      -- call rule reads the input positions and the write positions through two
+      -- projections that each drop the other kind of node, so their relative order
+      -- is free. `mask` picks one order; see `mkArgs`.
+      let mask ← listOf (elements [true, false] (by simp))
       let theCall :=
-        Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M outTargets exprs) default
+        Statement.call s.pname
+          (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
       -- The `init`s (possibly none) then the call, inline in the ambient scope.
       pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,
         StrataGenerators.Stmt.insertAllCtx ctx toInit⟩
