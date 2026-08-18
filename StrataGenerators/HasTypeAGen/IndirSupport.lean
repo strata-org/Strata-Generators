@@ -69,7 +69,7 @@ theorem mem_mapM_iff' (f : LMonoTy → SetGen.Set LExpr')
 
     Needed because a proof can apply `genLExprBase_termDepth_bound` only at a
     generable type. Therefore the per-argument bound is conditional on the argument
-    type being generable (`IndirArgTysSimple`). -/
+    type being generable. -/
 theorem forall₂_forall_of_cond {P : LExpr' → Prop} {Q : LMonoTy → Prop}
     {genArg : LMonoTy → SetGen.Set LExpr'}
     (hArg : ∀ σ, Q σ → ∀ a, a ∈ SetGen.support (genArg σ) → P a)
@@ -431,41 +431,6 @@ theorem le_depthBudget_self (K : Nat) (hK : 1 ≤ K) (n : Nat) : n ≤ depthBudg
   induction n with
   | zero => simp [depthBudget]
   | succ n ih => simp only [depthBudget]; omega
-
-end StrataGenerators.IndirSupport
-
--- ── Argument types the Indir rules can request ──────────────────────
-
-namespace StrataGenerators.IndirSupport
-
-/-- **Every argument type that the Indir and IndirPoly rules can ask for at target
-    `τ` is generable.**
-
-    This is a side condition, and not a theorem. It must be one: `findOpsInCtx` reads
-    argument types straight off the arrow types of `octx`, and `findPolymorphicOps`
-    makes them when it substitutes *sampled* types into a scheme. Nothing in the
-    generator holds either one to a generable type. Therefore a caller with an
-    unusual `octx` entry (for example, a `tcons "Foo"` that the generator does not
-    handle) can make the rules ask for an argument type that is not generable.
-
-    `genLExprBase_termDepth_bound` needs the condition, because its recursion is
-    indexed by generability. To bound the depth of a spine, you must bound the depth of
-    each argument, and that means you must apply the theorem at the type of the
-    argument.
-
-    In practice the condition is cheap to discharge. For `coreMonoOps` and
-    `corePolyOps`, all argument types are built from
-    `int`/`bool`/`string`/`real`/`regex`/`Sequence`/`Map`/arrows, and are therefore
-    generable. The condition is stated for each target type, so the form that the
-    recursive callers need, quantified over all types, is available. -/
-def IndirArgTysSimple (tvars : List TyIdentifier) (fctx : FVarCtx) (octx : OpCtx)
-    (pctx : PolyOpCtx) (bctx : BVarCtx) (τ : LMonoTy) (maxNumArgs : Nat) : Prop :=
-  (∀ (name : String) (argTys : List LMonoTy),
-    (name, argTys) ∈ findOpsInCtx octx τ → ∀ σ ∈ argTys, ∃ k, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k)) ∧
-  (∀ (sampledTys : List LMonoTy) (name : String) (argTys : List LMonoTy),
-    (name, argTys) ∈ findPolymorphicOps pctx τ
-      (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs →
-    ∀ σ ∈ argTys, ∃ k, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k))
 
 end StrataGenerators.IndirSupport
 

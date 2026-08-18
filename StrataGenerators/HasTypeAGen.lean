@@ -2135,13 +2135,29 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
     (depth : Nat) (K : Nat)
     (hK : 1 ≤ K) (hKops : opCtxArity octx ≤ K) (hKpoly : 3 ≤ K)
     -- The Indir rules' argument types must be generable, at every target type: the
-    -- recursion bounds an argument's depth by invoking this theorem at that
-    -- argument's type, and this theorem is indexed by generability. See
-    -- `IndirArgTysSimple` for why this cannot be derived.
-    -- Quantified over `bctx` as well as the target type: `abs`/`quant` branches
-    -- recurse under an extended binder context, and `bctx` feeds
+    -- recursion bounds an argument's depth by applying this theorem at that argument's
+    -- type, and this theorem is indexed by generability.
+    --
+    -- This is a side condition, and not a theorem. `findOpsInCtx` reads argument types
+    -- straight off the arrow types of `octx`, and `findPolymorphicOps` makes them when
+    -- it substitutes sampled types into a scheme. Nothing in the generator holds either
+    -- one to a generable type. Therefore an unusual `octx` entry (for example, a
+    -- `tcons "Foo"` that the generator does not handle) can make the rules ask for an
+    -- argument type that is not generable. For `coreMonoOps` and `corePolyOps` the
+    -- condition is cheap to discharge, because all of their argument types are built
+    -- from `int`/`bool`/`string`/`real`/`regex`/`Sequence`/`Map`/arrows.
+    --
+    -- Quantified over the binder context `bc` as well as the target type `σ`:
+    -- `abs`/`quant` branches recurse under an extended binder context, and `bc` feeds
     -- `generableTypesFromCtx`, hence the polymorphic rule's sampled types.
-    (hSimpleArgs : ∀ bc σ m, IndirArgTysSimple tvars fctx octx pctx bc σ m)
+    (hSimpleArgs : ∀ bc σ m,
+      (∀ (name : String) (argTys : List LMonoTy),
+        (name, argTys) ∈ findOpsInCtx octx σ →
+        ∀ σ' ∈ argTys, ∃ k, σ' ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k)) ∧
+      (∀ (sampledTys : List LMonoTy) (name : String) (argTys : List LMonoTy),
+        (name, argTys) ∈ findPolymorphicOps pctx σ
+          (generableTypesFromCtx bc fctx octx) sampledTys m →
+        ∀ σ' ∈ argTys, ∃ k, σ' ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k)))
     (τ : LMonoTy) (hτ : ∃ m, τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m))
     (e : LExpr')
     (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx octx pctx tvars bctx depth τ)) :
