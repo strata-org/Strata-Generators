@@ -151,35 +151,17 @@ instance : EmptyCollection OpCtx := ⟨OpCtx.ofList []⟩
 namespace Lambda
 
 /-- The regex monotype (a base type with no parameters). -/
-abbrev LMonoTy.regex : LMonoTy := .tcons "regex" []
+@[match_pattern] abbrev LMonoTy.regex : LMonoTy := .tcons "regex" []
 
 /-- The Map monotype with key type `k` and value type `v`. -/
-abbrev LMonoTy.map (k v : LMonoTy) : LMonoTy := .tcons "Map" [k, v]
+@[match_pattern] abbrev LMonoTy.map (k v : LMonoTy) : LMonoTy := .tcons "Map" [k, v]
 
 /-- The Sequence monotype with element type `a`. -/
-abbrev LMonoTy.seq (a : LMonoTy) : LMonoTy := .tcons "Sequence" [a]
+@[match_pattern] abbrev LMonoTy.seq (a : LMonoTy) : LMonoTy := .tcons "Sequence" [a]
 
 end Lambda
 
--- ── SimpleType and depth ─────────────────────────────────────────────
-
-/-- A monotype is *simple* if it is built from `bool`, `int`, `string`, `real`,
-    `bitvec n` (for *any* width `n`), `arrow`, and `ftvar`.
-    This characterizes exactly the types produced by `genLMonoTy`.
-
-    Bitvector widths are unconstrained: the Strata Core AST does not restrict
-    them, so `genLMonoTy` may produce a `bitvec` of any width. -/
-inductive SimpleType : LMonoTy → Prop where
-  | bool   : SimpleType .bool
-  | int    : SimpleType .int
-  | string : SimpleType .string
-  | real   : SimpleType .real
-  | regex  : SimpleType .regex
-  | bitvec : SimpleType (.bitvec n)
-  | map    : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.map τ₁ τ₂)
-  | seq    : SimpleType τ → SimpleType (.seq τ)
-  | arrow  : SimpleType τ₁ → SimpleType τ₂ → SimpleType (.arrow τ₁ τ₂)
-  | ftvar  : SimpleType (.ftvar name)
+-- ── Monotype depth ───────────────────────────────────────────────────
 
 /-- The nesting depth of a monotype: 0 for base types, `max(depth τ₁, depth τ₂) + 1`
     for arrows. Matches the fuel consumed by `genLMonoTy` to produce the type. -/
@@ -511,7 +493,8 @@ two of its properties give different results in different runs.
 A `@[csimp]` lemma connects each fast form to the original function. Therefore the
 compiler uses the fast form, but `simp`, `rw` and `unfold` use the original definition.
 Each proof about `addNewTypes` and `generableTypesFromCtx` stays the same. These proofs
-include `addNewTypes_simple` and `generableTypesFromCtx_simple` in `HasTypeAGen.lean`.
+include `wellKindedTy_addNewTypes` and `generableTypesFromCtx_wellKinded` in
+`HasTypeAGen.lean`.
 The fast forms add no `sorry` and no axiom. -/
 
 /-- A dedup that keeps the order. It keeps the first occurrence of each element, in the
@@ -657,14 +640,13 @@ def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : Lis
   -- The fuel `initial.length` is an upper limit on the number of rounds.
   addNewTypes initial.length initial
 
-/-- Boolean decision procedure for "`τ` is in the support of `genLMonoTy tvars n`",
-    i.e. for `SimpleType τ ∧ monoTyDepth τ ≤ n ∧ allFtvarsIn tvars τ`
-    (see `genLMonoTy_support`). Used to filter the context-derived generable types
-    down to those `genLMonoTy` could itself have produced, which is what makes
+/-- Boolean decision procedure for "`τ` is in the support of `genLMonoTy tvars n`"
+    (see `genLMonoTy_support`). It filters the context-derived generable types
+    down to those that `genLMonoTy` can itself produce. This makes
     `genGenerableTy`'s support *equal* to `genLMonoTy`'s — see
-    `genGenerableTy_support`. Kept in lockstep with `SimpleType`/`monoTyDepth`:
-    a `bitvec` of any width is generable, `arrow`/`Map`/`Sequence` consume
-    one unit of depth, and every `ftvar` must be declared in `tvars`. -/
+    `genGenerableTy_support`. It is in lockstep with `monoTyDepth`:
+    a `bitvec` of any width is generable, `arrow`/`Map`/`Sequence` each consume
+    one unit of depth, and `tvars` must declare every `ftvar`. -/
 def inGenLMonoTySupport (tvars : List TyIdentifier) : Nat → LMonoTy → Bool
   | _, .bitvec _ => true
   | _, .ftvar name => tvars.contains name
@@ -697,8 +679,8 @@ def inGenLMonoTySupport (tvars : List TyIdentifier) : Nat → LMonoTy → Bool
     1. The context-derived list is filtered by `inGenLMonoTySupport tvars n`, so it only
        ever contains types `genLMonoTy tvars n` could itself have produced. A raw
        context type need not be one (it can be too deep, mention an undeclared
-       `ftvar`, or use a non-simple constructor), and the soundness proofs rely on
-       the drawn argument type being `SimpleType` of depth ≤ `n`.
+       `ftvar`, or use a constructor the type generator does not build), and the
+       soundness proofs rely on the drawn argument type being generable at depth ≤ `n`.
     2. The `genLMonoTy` branch is *retained* with positive weight. Since
        `frequency`'s support is the union of its positive-weight branches'
        supports (`mem_support_frequency_iff`), the filtered branch contributes
@@ -1700,8 +1682,8 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   -- only" (`case h_21` of `genLExprBase_sound`, `_fvars_subset` and
   -- `_opsConsistentR`), and each would need the inductive hypothesis plus, for
   -- IndirPoly, the `hPoly` premise. `genLExprBase_termDepth_bound` is unaffected
-  -- either way: it is indexed by `SimpleType τ`, which has no datatype `tcons` case,
-  -- so no depth bound is stated for a datatype target at all.
+  -- either way: it is indexed by the generability of `τ`, which has no datatype
+  -- `tcons` case, so no depth bound is stated for a datatype target at all.
   | _, τ =>
     let bvars := bvarsOfType bctx τ
     oneOf

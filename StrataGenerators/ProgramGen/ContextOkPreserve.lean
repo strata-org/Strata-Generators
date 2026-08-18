@@ -222,11 +222,11 @@ theorem arrow_mem_initialReserved {baseTypes : List String}
 
 /-! ## `SimpleTyArities` preservation
 
-Upstream's `init` rules and `signatureWellKinded` need the ambient context to register the
-`SimpleType` constructors at their own arities. The fold only ever *grows* `knownTypes`
-(with `insertIfNew`, which never overwrites), so the property is preserved at every step. -/
+The `init` rules and `signatureWellKinded` need the ambient context to register the eight
+type constructors at their own arities. The fold only *grows* `knownTypes` (with
+`insertIfNew`, which never overwrites). Therefore each step keeps the property. -/
 
-/-- `coreContext` registers every `SimpleType` constructor at its own arity. Discharged by
+/-- `coreContext` registers each of the eight type constructors at its own arity. Discharged by
     `native_decide` on `Core.KnownTypes`, like `defaultContextOk`. -/
 theorem coreContextSimpleTyArities : SimpleTyArities DatatypeGen.coreContext := by
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩

@@ -585,10 +585,10 @@ structure Inv (s : GenState) : Prop where
   storedRefsReserved : ∀ d ∈ s.C.datatypes.allDatatypes, ∀ c ∈ d.constrs,
     ∀ arg ∈ c.args, ∀ r ∈ getTypeRefs arg.2, r ∈ s.reserved
 
-/-- **The fold's invariant already pins the `SimpleType` arities.** The default pool
-    is contained in the threaded one (`baseSupset` / `tyConsSupset`), and `ContextOk`'s
-    arity fields register each of its members at its own arity — which is exactly
-    `SimpleTyArities`, the premise upstream's `init` and `signatureWellKinded` rules need. -/
+/-- **The fold's invariant already pins the `SimpleTyArities` arities.** The threaded pool
+    holds the default pool (`baseSupset` and `tyConsSupset`), and the arity fields of
+    `ContextOk` register each of its members at its own arity. This is exactly
+    `SimpleTyArities`, the premise that the `init` and `signatureWellKinded` rules need. -/
 theorem simpleTyArities_of_inv {s : GenState} (hinv : Inv s) : SimpleTyArities s.C := by
   have hb : ∀ b ∈ DatatypeGen.defaultBaseTypes, s.C.knownTypes[b]? = some 0 :=
     fun b hb => hinv.ctxOk.base_arity b (hinv.baseSupset hb)

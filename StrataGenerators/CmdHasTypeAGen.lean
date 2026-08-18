@@ -611,14 +611,15 @@ theorem genFreshName_not_keyword (ctx : VarCtx) :
   · exact StrataGenerators.Function.dodgeKeyword_not_keyword s
   · exact StrataGenerators.Function.dodgeKeyword_not_keyword _
 
-/-- The `WellKindedTy` premise that upstream added to the two `init` rules, discharged for
-    any type the generator can emit: `genLMonoTy` produces only `SimpleType`s, and
-    `SimpleTyArities C` says `C` registers each `SimpleType` constructor at its own arity. -/
+/-- The `WellKindedTy` premise of the two `init` rules, discharged for any type the
+    generator can emit: `genLMonoTy` produces only generable types, and
+    `SimpleTyArities C` says that `C` registers each of their constructors at its own
+    arity. -/
 theorem wellKindedTy_of_genLMonoTy {C : LContext CoreLParams} (hC : SimpleTyArities C)
     (tvars : List TyIdentifier) (depth : Nat) (mty : LMonoTy)
     (hmty : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth)) :
     C.WellKindedTy mty :=
-  simpleType_wellKindedTy hC (genLMonoTy_simple tvars depth mty hmty)
+  genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
 
 -- ── Full soundness of genCmd ─────────────────────────────────────────
 
@@ -985,7 +986,7 @@ theorem genCmd_outCtx_functional
 
 /-- **`genCmd` keeps every type in scope well-kinded in `C`.** The only commands that
     change the scope are the two `init`s, and the type they store comes from `genLMonoTy`,
-    hence is a `SimpleType` and so well-kinded wherever the `SimpleType` arities are
+    and is therefore well-kinded wherever the `SimpleTyArities` arities are
     registered. This is the `cmd` case of the statement generators' well-kindedness
     invariant (`StrataGenerators.Stmt.WellKindedOk.ctxWK`). -/
 theorem genCmd_outCtx_wellKinded
@@ -1003,14 +1004,14 @@ theorem genCmd_outCtx_wellKinded
     obtain ⟨name, _, mty, hmty, _e, _, rfl⟩ := hr
     intro ty hty
     rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
-    · exact simpleType_wellKindedTy hC (genLMonoTy_simple tvars _ _ hmty)
+    · exact genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
     · exact hctx ty hty'
   · -- init_nondet: likewise
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, _, mty, hmty, rfl⟩ := hr
     intro ty hty
     rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
-    · exact simpleType_wellKindedTy hC (genLMonoTy_simple tvars _ _ hmty)
+    · exact genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
     · exact hctx ty hty'
   · -- set_det / set_nondet / assert / assume / cover leave the scope alone
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,

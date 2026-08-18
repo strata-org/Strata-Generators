@@ -67,9 +67,9 @@ theorem mem_mapM_iff' (f : LMonoTy → SetGen.Set LExpr')
     whenever `Q σ` holds, and every type in `argTys` satisfies `Q`, then every
     element of the produced list satisfies `P`.
 
-    Needed because `genLExprBase_termDepth_bound` may only be invoked at a
-    `SimpleType`, so the per-argument bound is conditional on the argument type
-    being simple (`IndirArgTysSimple`). -/
+    Needed because a proof can apply `genLExprBase_termDepth_bound` only at a
+    generable type. Therefore the per-argument bound is conditional on the argument
+    type being generable. -/
 theorem forall₂_forall_of_cond {P : LExpr' → Prop} {Q : LMonoTy → Prop}
     {genArg : LMonoTy → SetGen.Set LExpr'}
     (hArg : ∀ σ, Q σ → ∀ a, a ∈ SetGen.support (genArg σ) → P a)
@@ -434,39 +434,6 @@ theorem le_depthBudget_self (K : Nat) (hK : 1 ≤ K) (n : Nat) : n ≤ depthBudg
 
 end StrataGenerators.IndirSupport
 
--- ── Argument types the Indir rules can request ──────────────────────
-
-namespace StrataGenerators.IndirSupport
-
-/-- **Every argument type the Indir/IndirPoly rules can ask for at target `τ` is
-    simple.**
-
-    A side condition, not a theorem, and it has to be: `findOpsInCtx` reads
-    argument types straight off `octx`'s arrow types, and `findPolymorphicOps`
-    produces them by substituting *sampled* types into a scheme. Neither is
-    constrained to `SimpleType` by anything in the generator, so a caller with an
-    exotic `octx` entry (say a `tcons "Foo"` the generator does not handle) really
-    can make the rules request a non-simple argument type.
-
-    It is needed by `genLExprBase_termDepth_bound`, whose recursion is indexed by
-    `SimpleType`: bounding a spine's depth means bounding each argument's depth,
-    which means invoking that theorem at the argument's type.
-
-    Discharging it is cheap in practice — for `coreMonoOps`/`corePolyOps` all
-    argument types are built from `int`/`bool`/`string`/`real`/`regex`/`Sequence`/
-    `Map`/arrows, hence simple — and it is stated per-target-type so the
-    quantified-over-all-types form the recursive callers need is available. -/
-def IndirArgTysSimple (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
-    (bctx : BVarCtx) (τ : LMonoTy) (maxNumArgs : Nat) : Prop :=
-  (∀ (name : String) (argTys : List LMonoTy),
-    (name, argTys) ∈ findOpsInCtx octx τ → ∀ σ ∈ argTys, SimpleType σ) ∧
-  (∀ (sampledTys : List LMonoTy) (name : String) (argTys : List LMonoTy),
-    (name, argTys) ∈ findPolymorphicOps pctx τ
-      (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs →
-    ∀ σ ∈ argTys, SimpleType σ)
-
-end StrataGenerators.IndirSupport
-
 -- ── Generic spine-measure bound for the two rules ───────────────────
 --
 -- `termDepth` is defined in `HasTypeAGen.lean`, downstream of this module, so
@@ -480,11 +447,12 @@ namespace StrataGenerators.IndirSupport
 
 /-- The monomorphic Indir rule's output is bounded by `d + opCtxArity octx`, where
     `d` bounds everything `genArg` produces. -/
-theorem genIndir_measure_le {m : LExpr' → Nat} (octx : OpCtx) (τ : LMonoTy)
+theorem genIndir_measure_le {m : LExpr' → Nat} {tvars : List TyIdentifier}
+    (octx : OpCtx) (τ : LMonoTy)
     (genArg : LMonoTy → SetGen.Set LExpr') (d : Nat)
     (hSimple : ∀ (name : String) (argTys : List LMonoTy),
-      (name, argTys) ∈ findOpsInCtx octx τ → ∀ σ ∈ argTys, SimpleType σ)
-    (hArg : ∀ σ, SimpleType σ → ∀ a, a ∈ SetGen.support (genArg σ) → m a ≤ d)
+      (name, argTys) ∈ findOpsInCtx octx τ → ∀ σ ∈ argTys, ∃ k, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k))
+    (hArg : ∀ σ, (∃ k, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k)) → ∀ a, a ∈ SetGen.support (genArg σ) → m a ≤ d)
     (hspine : ∀ (nm : String) (annot : LMonoTy) (args : List LExpr'),
       (∀ a ∈ args, m a ≤ d) →
       m (mkApps (.op () ⟨nm, ()⟩ (some annot)) args) ≤ d + args.length)
@@ -502,15 +470,16 @@ theorem genIndir_measure_le {m : LExpr' → Nat} (octx : OpCtx) (τ : LMonoTy)
 
 /-- The polymorphic IndirPoly rule's output is bounded by `d + maxNumArgs`
     (`findPolymorphicOps` skips wider schemes), or by the fallback's own bound. -/
-theorem genIndirPolyCore_measure_le {m : LExpr' → Nat} (fctx : FVarCtx) (octx : OpCtx)
+theorem genIndirPolyCore_measure_le {m : LExpr' → Nat} {tvars : List TyIdentifier}
+    (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (bctx : BVarCtx) (τ : LMonoTy)
     (genArg : LMonoTy → SetGen.Set LExpr') (fallback : SetGen.Set LExpr')
     (maxNumArgs : Nat) (d dfb : Nat)
     (hSimple : ∀ (sampledTys : List LMonoTy) (name : String) (argTys : List LMonoTy),
       (name, argTys) ∈ findPolymorphicOps pctx τ
         (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs →
-      ∀ σ ∈ argTys, SimpleType σ)
-    (hArg : ∀ σ, SimpleType σ → ∀ a, a ∈ SetGen.support (genArg σ) → m a ≤ d)
+      ∀ σ ∈ argTys, ∃ k, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k))
+    (hArg : ∀ σ, (∃ k, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars k)) → ∀ a, a ∈ SetGen.support (genArg σ) → m a ≤ d)
     (hFallback : ∀ a, a ∈ SetGen.support fallback → m a ≤ dfb)
     (hspine : ∀ (nm : String) (annot : LMonoTy) (args : List LExpr'),
       (∀ a ∈ args, m a ≤ d) →
