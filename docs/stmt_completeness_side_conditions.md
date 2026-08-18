@@ -9,16 +9,31 @@ predicate, or remove them from the theorem.
 ## The result
 
 You cannot remove them. The support of `genStmt` is a strict subset of the
-statements that `StatementHasTypeA` accepts. Each of the three predicates keeps
-one clause that closes a real gap. `StrataGenerators/StmtHasTypeAGenCompleteGaps.lean`
-proves this. For each predicate it gives a statement with two properties:
+statements that `StatementHasTypeA` accepts. Each of the three predicates keeps at
+least one clause that closes a real gap.
+`StrataGenerators/StmtHasTypeAGenCompleteGaps.lean` proves this. For each
+predicate it gives a statement with two properties:
 
 1. `StatementHasTypeA` accepts the statement.
 2. The support of `genStmt` does not hold the statement, at every size and at
    every procedure context.
 
-The three gap theorems are `metadata_gap`, `label_gap` and `call_argorder_gap`.
-The proofs need no new axiom and no `sorry`.
+The three gap theorems are `metadata_gap`, `label_gap` and `outTarget_gap`. The
+proofs need no new axiom and no `sorry`.
+
+Two gaps that earlier versions of this report recorded are now **closed**, by a
+change to the generators rather than to the proofs:
+
+| Gap                              | State  | Cause                                    |
+| -------------------------------- | ------ | ---------------------------------------- |
+| metadata at `default`            | open   | the generator emits no metadata          |
+| name outside `genIdentName`      | open in the AST only | a `Statement` holds a bare `String` |
+| label outside the alphanumerics  | closed | labels now come from `genIdentName`      |
+| fixed call-argument order        | closed | `mkArgs` takes an interleaving mask      |
+| out target is the callee's name  | open   | `outTargets` picks the name              |
+
+So exactly two of the surviving clauses have a counterexample you can write in
+Core: the metadata clause and the out-target clause.
 
 ## Gap 1: metadata (`InGenShape`)
 
@@ -45,12 +60,16 @@ is an upstream defect: the function claims to remove all metadata from a
 statement, but it does not recurse into `Imperative.Cmd` or into `Core.CmdExt`.
 Upstream has no `Cmd.stripMetaData`.
 
-## Gap 2: the identifier alphabet (`AlphabetOk`)
+## Gap 2: the identifier alphabet (`AlphabetOk`) — closed at the source level
 
-`genAssertCmd` draws an `assert` label from `String.arbitrary`. The support of
-`String.arbitrary` holds the alphanumeric strings only (`ArbChar.alphanumChars`).
-An underscore is legal in a Core label, and the `assert` rule accepts every
-label:
+`genAssertCmd`, `genAssumeCmd`, `genCoverCmd` and `genFreshName` now draw from
+`genIdentName`. Its support is exactly the legal Core bare identifiers that are not
+reserved keywords (`mem_support_genIdentName_iff_isId`). So every name a parsed
+program can hold is reachable, and **no Core program breaks the clause any more**.
+
+The earlier sources were `String.arbitrary` for a label and
+`NonEmptyString.arbitrary` for an `init` variable name. The support of each holds
+the alphanumeric strings only, so this was a counterexample:
 
 ```
 program Core;
@@ -61,30 +80,39 @@ procedure caller ()
 };
 ```
 
-Theorem: `label_gap`. Well-typedness: `assert_wt`.
+The gap mattered in practice. The parser mints `assert_0` for an unlabelled
+`assert` (`translateLabeledCheck`), and an underscore is not alphanumeric, so the
+generator could not produce the label shape that the front end produces. The old
+generator also emitted `""` often, which `Core.formatProgram` renders as the
+degenerate `assert [||]: true;`.
 
-The same gap applies to an `assume` label, to a `cover` label and to an `init`
-variable name. An `init` name comes from `NonEmptyString.arbitrary`, which uses
-the same alphabet. A `block` label, an invariant label, a type-constructor name
-and a type-parameter name come from `genIdentName`. Its support is exactly the
-legal Core bare identifiers that are not reserved keywords
-(`mem_support_genIdentName_iff_isId`), so those clauses hold for every parsed
-program. They are still necessary at the level of the abstract syntax tree,
-because the tree admits any string.
+`label_gap` survives, because a `Statement` holds a bare `String` that need not be
+a legal identifier. `emptyLabel_not_reachable` gives a witness that lives in the
+abstract syntax tree alone. The `dodgeKeyword` conjunct is gone from `AlphabetOk`:
+`genIdentName`'s support already excludes every keyword.
 
-Upstream has no predicate for the syntax of an identifier.
 `LContext.WellKindedTy` is a premise of the two `init` rules and bounds the type
 constructors of the annotation. The support of `genLMonoTy` also bounds the depth
-of the type and its free type variables (`genLMonoTy_support`), so
-`WellKindedTy` cannot replace the `init` clause of `AlphabetOk`.
+of the type and its free type variables (`genLMonoTy_support`), so `WellKindedTy`
+cannot replace the `init` type clause of `AlphabetOk`.
 
-## Gap 3: the order of the call arguments (`CallOk`)
+## Gap 3: the order of the call arguments (`CallOk`) — closed
 
 The `call` rule of `CmdExtHasType'` constrains the input positions and the write
-positions of a call one at a time. It uses `CallArg.getInputExprs` and
-`CallArg.getLhs`, and both drop the other kind of argument. So the rule does not
-constrain the order of the `CallArg` nodes. `mkArgs` fixes that order: every
-`inoutArg`, then every `inArg`, then every `outArg`.
+positions one at a time. It uses `CallArg.getInputExprs` and `CallArg.getLhs`, and
+each projection drops one kind of node. So order matters *inside* each projection
+only:
+
+| swap                  | `getInputExprs` | `getLhs`  | visible to the rule |
+| --------------------- | --------------- | --------- | ------------------- |
+| `inArg` ↔ `outArg`    | unchanged       | unchanged | no                  |
+| `inArg` ↔ `inoutArg`  | changes         | unchanged | yes                 |
+| `outArg` ↔ `inoutArg` | unchanged       | changes   | yes                 |
+
+Four `#guard`s in `GenCallStmtSound.lean` pin this table down.
+
+`mkArgs` used to fix the order as in-out, then by-value input, then out target, so
+this was a counterexample:
 
 ```
 program Core;
@@ -100,27 +128,53 @@ procedure caller ()
 };
 ```
 
-`mkArgs` would produce `call p(1, out y);` for the same callee. Theorem:
-`call_argorder_gap`. Well-typedness: `badOrderCall_wt`. The two facts together
-are `badOrderCall_gap`.
+`mkArgs` now takes an interleaving mask and `genCallStmt` samples one, so the call
+above is reachable. `mkArgs_out_then_in` witnesses it. The in-out block still
+leads, because it heads both the input signature and the output signature, and the
+in-out premise pins `getInputExprs[i]` to the very name the callee declares.
+
+`getIn_mkArgs` and `getLhs_mkArgs` keep their right-hand sides at every mask, so no
+soundness proof changed. `genStmt_sound` still holds.
+
+## Gap 3': the out-target name choice (`CallOk`) — open
+
+The `call` rule constrains an `out` argument's existence, its type and its
+writability. It says nothing about its *name*. `outTargets` fixes the name: it
+reuses the name the callee declares when that name is in scope at the declared
+type, and otherwise it invents a fresh one. So a call that receives the result into
+another in-scope variable of the same type is well-typed and out of reach:
+
+```
+program Core;
+
+procedure p (x : int, out r : int)
+{
+
+};
+procedure caller ()
+{
+  var r : int := 0;
+  var z : int := 0;
+  call p(1, out z);
+};
+```
+
+Theorem: `outTarget_gap`. Well-typedness: `otherTargetCall_wt`. Both facts
+together: `otherTargetCall_gap`.
 
 `Core.WF.WFcallProp.lhsWF` states the `Nodup` fact that `CallOk` needs for the
 write keys of a call, so that one conjunct has an upstream form. Its parent
-`Core.WF.WFStatementProp` is not recursive: its `block`, `ite` and `loop` cases
-are empty structures. So it says nothing about a call inside a body, and a
-recursive form of it does not exist upstream.
+`Core.WF.WFStatementProp` is not recursive: its `block`, `ite` and `loop` cases are
+empty structures. So it says nothing about a call inside a body, and a recursive
+form of it does not exist upstream.
 
-`CallOk` has two more clauses with no upstream counterpart:
+`CallOk` keeps one more clause with no upstream counterpart: the generator draws
+each type argument from `generableTypesFromCtx`, and the spec accepts every type
+instantiation.
 
-* The generator picks the receiving variable of each `out` parameter itself
-  (`outTargets`). It reuses the name of the callee, or it invents a fresh name.
-  The spec accepts any writable variable of the right type. So a call that
-  receives into another in-scope variable of the right type is well-typed and out
-  of reach.
-* The generator draws each type argument from `generableTypesFromCtx`. The spec
-  accepts every type instantiation.
+## The clauses with no source-level counterexample
 
-## The one clause with no source-level counterexample
+The name clauses of `AlphabetOk` are one case, described above.
 
 `InGenShape` demands that an `init` annotation is monomorphic (`.forAll [] mty`).
 The `init_det` and `init_nondet` rules accept a polymorphic annotation with a
@@ -157,3 +211,19 @@ This claim is not machine-checked. It needs an inversion lemma for the support o
 `genLExprBase` does make a nested application reachable at a higher depth, so the
 argument is about `d = 0` alone. The three gaps above are independent of this
 item: they are statements about the support of `genStmt` alone.
+
+## Test-suite effect
+
+`lake test -- --quick` reports the same set of failing properties before and after
+the change, with one exception: `program: typeCheck output re-typechecks`. That
+property also fails on the baseline at 200 trials, and its counterexample is a
+procedure with an empty body whose signature holds a `bitvec 0`. It has no label,
+no local variable and no call, so neither change can cause it. The change shifts
+the random stream, so a draw-dependent known defect surfaces on a different
+property.
+
+The label change reduces one source of noise. `checkInlineProcLabelsNodup` and
+`checkS2uLabelsNodup` guard on the input having distinct labels, because
+`String.arbitrary` gave `""` often enough that about 4 percent of programs held a
+duplicate label before any pass ran. `genIdentName` collides far less often, so the
+guard now holds off the property far less often.
