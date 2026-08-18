@@ -611,14 +611,15 @@ theorem genFreshName_not_keyword (ctx : VarCtx) :
   · exact StrataGenerators.Function.dodgeKeyword_not_keyword s
   · exact StrataGenerators.Function.dodgeKeyword_not_keyword _
 
-/-- The `WellKindedTy` premise that upstream added to the two `init` rules, discharged for
-    any type the generator can emit: `genLMonoTy` produces only `SimpleType`s, and
-    `SimpleTyArities C` says `C` registers each `SimpleType` constructor at its own arity. -/
+/-- The `WellKindedTy` premise of the two `init` rules, discharged for any type the
+    generator can emit: `genLMonoTy` produces only generable types, and
+    `SimpleTyArities C` says that `C` registers each of their constructors at its own
+    arity. -/
 theorem wellKindedTy_of_genLMonoTy {C : LContext CoreLParams} (hC : SimpleTyArities C)
     (tvars : List TyIdentifier) (depth : Nat) (mty : LMonoTy)
     (hmty : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth)) :
     C.WellKindedTy mty :=
-  simpleType_wellKindedTy hC (genLMonoTy_simple tvars depth mty hmty)
+  genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
 
 -- ── Full soundness of genCmd ─────────────────────────────────────────
 

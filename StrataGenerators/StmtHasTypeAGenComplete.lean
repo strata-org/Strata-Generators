@@ -133,12 +133,12 @@ theorem stmtHasType_rigid_eq {P : Program} {C C' : LContext CoreLParams}
     · injection h_add with h_add_eq; rw [← h_add_eq]
 
 /-- Every free variable of a `genLMonoTy tvars`-reachable type lies in `tvars`:
-    from `genLMonoTy_support` we get `allFtvarsIn tvars mty`, and `allFtvarsIn_freeVars`
+    `genLMonoTy_mem_ftvars` gives `allFtvarsIn tvars mty`, and `allFtvarsIn_freeVars`
     turns that into a `freeVars ⊆ tvars` statement. -/
 theorem freeVars_subset_of_reachable {mty : LMonoTy} {tvars : List TyIdentifier} {n : Nat}
     (h : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n)) :
     ∀ v ∈ mty.freeVars, v ∈ tvars :=
-  allFtvarsIn_freeVars ((genLMonoTy_support tvars n mty).mp h).2.2
+  allFtvarsIn_freeVars (genLMonoTy_mem_ftvars h)
 
 /-- **The rigid pin (init case).** When every free variable of the (monomorphic)
     annotation `mty` is rigid, `RigidAnnotCompat` forces the stored type `mtyS` to

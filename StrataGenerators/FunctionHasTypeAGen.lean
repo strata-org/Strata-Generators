@@ -238,10 +238,10 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     spec ignores it) and *any* operator context — `genLExpr_sound` is now
     unconditional.
 
-    The one condition on `C` is `SimpleTyArities`, for upstream's `signatureWellKinded`
-    field: it asks that each signature type be well-kinded in `C`, and the generator only
-    ever builds `SimpleType`s, so it is enough that `C` register the eight `SimpleType`
-    constructors at their own arities. The Strata Core context does
+    The one condition on `C` is `SimpleTyArities`, for the `signatureWellKinded`
+    field: it asks that each signature type be well-kinded in `C`. The generator builds
+    only generable types. Therefore it is enough that `C` registers the eight type
+    constructors at their own arities. The Strata Core context does this
     (`coreContextSimpleTyArities`). -/
 theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit) (pctx : PolyOpCtx)
@@ -260,7 +260,7 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
   have htyNodup : typeArgs.Nodup := genTypeArgs_nodup depth typeArgs htypeArgs
   obtain ⟨hkeysNodup, hvals⟩ := genInputs_support typeArgs depth inputs hinputs
   have houtputFtv : allFtvarsIn typeArgs output :=
-    (genLMonoTy_support typeArgs depth output |>.mp houtput).2.2
+    genLMonoTy_mem_ftvars houtput
   -- Build the `FuncHasType'` structure.
   refine ⟨hkeysNodup, htyNodup, ?_, ?_, ?_, ?_⟩
   · -- noUndeclaredVars
@@ -270,15 +270,15 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     · -- t is one of the input values, hence in genLMonoTy's support ⇒ allFtvarsIn
       have ht_supp := hvals t ht_mem
       have ht_ftv : allFtvarsIn typeArgs t :=
-        (genLMonoTy_support typeArgs depth t |>.mp ht_supp).2.2
+        genLMonoTy_mem_ftvars ht_supp
       exact allFtvarsIn_freeVars ht_ftv v hvt
-  · -- signatureWellKinded: every generated signature type is a `SimpleType`, and
+  · -- signatureWellKinded: every generated signature type is generable, and
     -- `HasTypeA`'s `tyCompat` is plain equality, so `ty' := ty` works.
     intro ty hty
-    refine ⟨ty, rfl, simpleType_wellKindedTy hC ?_⟩
+    refine ⟨ty, rfl, genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hC ?_⟩
     rcases List.mem_cons.mp hty with rfl | hty
-    · exact genLMonoTy_simple typeArgs depth _ houtput
-    · exact genLMonoTy_simple typeArgs depth _ (hvals ty hty)
+    · exact ⟨_, houtput⟩
+    · exact ⟨_, hvals ty hty⟩
   · -- bodyTyped
     intro b hb
     exact genOptExpr_sound fctx octx typeArgs depth output pctx body hbody b hb

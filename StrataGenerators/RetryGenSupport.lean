@@ -273,7 +273,8 @@ theorem genLExpr_complete_retryCont
     (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hτ : SimpleType τ) (maxNumArgs : Nat) (e : LExpr')
+    (hτ : ∃ m, τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m))
+    (maxNumArgs : Nat) (e : LExpr')
     (he : (HasTypeA' bctx e τ ∧ emptyNames e ∧ allVarsInCtx fctx octx e ∧
             AllTypesSimple tvars depth bctx e ∧ termDepth bctx e ≤ depth)
           ∨ IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs e) :
