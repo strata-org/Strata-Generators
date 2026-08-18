@@ -53,6 +53,13 @@ theorem ListMap_keys_append (a b : ListMap (Identifier Unit) LMonoTy) :
   rw [← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys]
   exact Map.keys_append a b
 
+/-- `Map.values` and `ListMap.values` are the same traversal of the same list. -/
+theorem Map_values_eq_ListMap_values {α β} (m : List (α × β)) :
+    Map.values m = ListMap.values m := by
+  induction m with
+  | nil => rfl
+  | cons p m ih => obtain ⟨a, b⟩ := p; simp only [Map.values, ListMap.values, ih]
+
 /-- `ListMap.values` distributes over the `ListMap` append. -/
 theorem ListMap_values_append (a b : ListMap (Identifier Unit) LMonoTy) :
     (a ++ b).values = a.values ++ b.values := by
@@ -340,6 +347,17 @@ theorem mem_writable_seed_keys (A B C : Map (Identifier Unit) LMonoTy)
   · exact absurd h hkC
 
 -- ── Functionality of the in-out body seed ─────────────────────────────────
+
+/-- `oldVars` only renames keys, so it has exactly `M`'s types. -/
+theorem oldVars_values (M : ListMap (Identifier Unit) LMonoTy) :
+    (oldVars M).values = M.values := by
+  induction M with
+  | nil => rfl
+  | cons p M ih =>
+    obtain ⟨a, b⟩ := p
+    simp only [oldVars, List.map_cons, ListMap.values]
+    rw [show ListMap.values (List.map (fun x => (CoreIdent.mkOld x.fst.name, x.snd)) M)
+          = ListMap.values M from ih]
 
 /-- Every key of `oldVars M` contains a space (`CoreIdent.mkOld` prefixes
     `"old "`). This is the fact that keeps `oldVars M` key-disjoint from the
@@ -791,15 +809,14 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     -- Upstream's `init` rules and `ProcHasType'.signatureWellKinded` need every stored /
     -- declared monotype to be well-kinded in the ambient context. `hC` covers the
-    -- procedure's own signature (all generated types are `SimpleType`s); `hWK` /
-    -- `hWKpres` are the statement-level premises — see the note on
-    -- `StmtHasTypeAGen.WellKindedOk`.
+    -- procedure's own signature (all generated types are `SimpleType`s); `hWK` is the
+    -- statement-level premise — see the note on `StmtHasTypeAGen.WellKindedOk`. Only its
+    -- *ambient* half is assumed: the scope-local half holds at the body seed because that
+    -- scope holds nothing but generated signature types (`hseedWK` below), and it is
+    -- carried along the body by `wellKindedOk_preserved`.
     (hC : SimpleTyArities C)
-    (hWK : ∀ (rv : List TyIdentifier) (ctx : VarCtx),
-      StrataGenerators.Stmt.WellKindedOk octx procs { C with rigidTypeVars := rv } ctx)
-    (hWKpres : ∀ (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit))
-      (pctx' : PolyOpCtx),
-      StrataGenerators.Stmt.WellKindedPreserved octx tvars immutableVars procs pctx')
+    (hWK : ∀ rv : List TyIdentifier,
+      StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (proc : Procedure) (pctx : PolyOpCtx := [])
     (hproc : proc ∈ SetGen.support
       (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
@@ -893,26 +910,6 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     intro p hp
     rw [List.contains_iff_mem, ListMap_keys_append, List.mem_append]
     exact Or.inl (by rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨p, hp, rfl⟩)
-  -- Body soundness (seeded at `inputs ++ outputs ++ oldVars M`, immutable = inputs.keys ++ old.keys).
-  have hbodyTyped : StatementsHasTypeA P { C with rigidTypeVars := typeArgs }
-      ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx
-        (M ++ disjointInputs rawInputOnly M ++
-          (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
-      body C' ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx ctx') :=
-    genStmtChain_sound P (procStmtEnvΓ Γ octx typeArgs pctx)
-      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
-      hProcs []
-      { C with rigidTypeVars := typeArgs }
-      (M ++ disjointInputs rawInputOnly M ++
-        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
-      (hWK typeArgs _) (hWKpres typeArgs _ pctx) size len hseedFun (body, C', ctx') hbody
-  -- modRights from the sequence invariant (write targets are mutable keys).
-  have hmod := genStmtChain_mutableVars octx pctx typeArgs
-      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
-      { C with rigidTypeVars := typeArgs }
-      (M ++ disjointInputs rawInputOnly M ++
-        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
-      size len (body, C', ctx') hbody
   -- Every declared input/output type is reachable by `genLMonoTy` (hence a `SimpleType`).
   have key : ∀ (ty : LMonoTy),
       (ty ∈ (M ++ disjointInputs rawInputOnly M).values ∨
@@ -929,6 +926,43 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       · exact hMVals ty h
       · exact hRawOutVals ty
           (disjointInputs_values_mem rawOutputOnly (M ++ disjointInputs rawInputOnly M) ty h)
+  -- The body seed's scope holds nothing but generated signature types, so every one of
+  -- them is well-kinded in `C`. This is the scope-local half of `WellKindedOk`, which the
+  -- caller therefore does not have to assume.
+  have hseedWK : StrataGenerators.Stmt.WellKindedOk octx procs
+      { C with rigidTypeVars := typeArgs }
+      (M ++ disjointInputs rawInputOnly M ++
+        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M) :=
+    { hWK typeArgs with
+      ctxWK := by
+        intro ty hty
+        refine simpleType_wellKindedTy hC (genLMonoTy_simple typeArgs size ty (key ty ?_))
+        rw [Map_values_eq_ListMap_values, ListMap_values_append, ListMap_values_append,
+          oldVars_values, List.mem_append, List.mem_append] at hty
+        rcases hty with (hMI | hMO) | hM
+        · exact Or.inl hMI
+        · exact Or.inr hMO
+        · exact Or.inl (by rw [ListMap_values_append, List.mem_append]; exact Or.inl hM) }
+  -- Body soundness (seeded at `inputs ++ outputs ++ oldVars M`, immutable = inputs.keys ++ old.keys).
+  have hbodyTyped : StatementsHasTypeA P { C with rigidTypeVars := typeArgs }
+      ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx
+        (M ++ disjointInputs rawInputOnly M ++
+          (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
+      body C' ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx ctx') :=
+    genStmtChain_sound P (procStmtEnvΓ Γ octx typeArgs pctx)
+      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
+      hProcs []
+      { C with rigidTypeVars := typeArgs }
+      (M ++ disjointInputs rawInputOnly M ++
+        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
+      hseedWK size len hseedFun (body, C', ctx') hbody
+  -- modRights from the sequence invariant (write targets are mutable keys).
+  have hmod := genStmtChain_mutableVars octx pctx typeArgs
+      (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
+      { C with rigidTypeVars := typeArgs }
+      (M ++ disjointInputs rawInputOnly M ++
+        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
+      size len (body, C', ctx') hbody
   refine {
     inputsNodup := hInputsNodup,
     outputsNodup := hOutputsNodup,
@@ -1026,18 +1060,15 @@ theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSig
     (hProcs : ProcSigCorresponds procs P) (size len : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     (hC : SimpleTyArities C)
-    (hWK : ∀ (rv : List TyIdentifier) (ctx : VarCtx),
-      StrataGenerators.Stmt.WellKindedOk octx procs { C with rigidTypeVars := rv } ctx)
-    (hWKpres : ∀ (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit))
-      (pctx' : PolyOpCtx),
-      StrataGenerators.Stmt.WellKindedPreserved octx tvars immutableVars procs pctx')
+    (hWK : ∀ rv : List TyIdentifier,
+      StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (proc : Procedure) (pctx : PolyOpCtx := [])
     (hproc : proc ∈ SetGen.support
       (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx))
     (hCrigid : C.rigidTypeVars ⊆ proc.header.typeArgs) :
     ProcHasTypeA P C Γ proc := by
   have hbase :=
-    genProcedure_sound P octx procs hProcs size len C Γ hΓtypes hC hWK hWKpres proc pctx hproc
+    genProcedure_sound P octx procs hProcs size len C Γ hΓtypes hC hWK proc pctx hproc
   -- All fields except `bodyTyped` are ambient-`C`-blind (the contract clauses use
   -- `S.exprTyped C … = HasTypeA [] …`, which drops `C`); only `bodyTyped` threads
   -- `C.rigidTypeVars`, and it weakens down to `C`'s own rigid set.

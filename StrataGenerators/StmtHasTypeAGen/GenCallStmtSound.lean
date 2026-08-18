@@ -236,7 +236,7 @@ theorem forall₂_mem_left {α β} {R : α → β → Prop} :
 
 /-- Every value bound by a single-scope substitution built with `HMaps.ofScopes` comes from
     the association list it was built from. Bridges the `find?` side condition of
-    `subst_simple` to a membership fact about the sampled instantiation. -/
+    `subst_wellKinded` to a membership fact about the sampled instantiation. -/
 theorem mem_values_of_find?_ofScopes (σ : List (TyIdentifier × LMonoTy))
     (v : TyIdentifier) (t : LMonoTy)
     (h : Strata.Util.HMaps.find? (Strata.Util.HMaps.ofScopes [σ]) v = some t) :
@@ -245,20 +245,21 @@ theorem mem_values_of_find?_ofScopes (σ : List (TyIdentifier × LMonoTy))
     Strata.Util.HMaps.find?_single_scope] at h
   exact Strata.Util.HMap.mem_values_ofList σ t (Strata.Util.HMap.find?_mem_values _ h)
 
-/-- **`SimpleType` survives a `substSig`.** If a block's declared types and the sampled
-    instantiation are all `SimpleType`s, so is every instantiated type. This is what turns
-    the call generator's own type discipline into the `WellKindedTy` premise that upstream
-    added to the `init` rules (via `simpleType_wellKindedTy`). -/
-theorem substSig_values_simple (σ : List (TyIdentifier × LMonoTy))
-    (block : @LMonoTySignature Unit)
-    (hσ : ∀ t ∈ σ.map Prod.snd, SimpleType t)
-    (hblock : ∀ ty ∈ block.values, SimpleType ty) :
-    ∀ ty ∈ (substSig σ block).values, SimpleType ty := by
+/-- **Well-kindedness survives a `substSig`.** If a block's declared types and the sampled
+    instantiation are all well-kinded in `C`, so is every instantiated type. This is what
+    discharges the `WellKindedTy` premise upstream's `init` rules impose on the types the
+    call generator's inline `init` chain stores. -/
+theorem substSig_values_wellKinded {C : LContext CoreLParams}
+    (σ : List (TyIdentifier × LMonoTy)) (block : @LMonoTySignature Unit)
+    (hσ : ∀ t ∈ σ.map Prod.snd, C.WellKindedTy t)
+    (hblock : ∀ ty ∈ block.values, C.WellKindedTy ty) :
+    ∀ ty ∈ (substSig σ block).values, C.WellKindedTy ty := by
   intro ty hty
   rw [substSig_values, List.mem_map] at hty
   obtain ⟨ty0, hty0, rfl⟩ := hty
-  exact subst_simple _ ty0 (hblock ty0 hty0)
+  exact subst_wellKinded _
     (fun v t hfind => hσ t (mem_values_of_find?_ofScopes σ v t hfind))
+    ty0 (hblock ty0 hty0)
 
 -- ── The call-argument recipe ──────────────────────────────────────────────
 
@@ -395,6 +396,23 @@ theorem insertAllCtx_keys_subset (news : List (Identifier Unit × LMonoTy)) :
       · exact List.mem_append_right _ (by simp)
       · exact List.mem_append_left _ h'
     · exact List.mem_append_right _ (List.mem_cons_of_mem _ h)
+
+/-- Declaring `news` can only add the declared *types* as values. The value analogue of
+    `insertAllCtx_keys_subset`, used to carry the "every type in scope is well-kinded in
+    the ambient context" invariant across an inline `init` chain. -/
+theorem mem_values_insertAllCtx (news : List (Identifier Unit × LMonoTy)) :
+    ∀ (ctx : VarCtx) {v : LMonoTy},
+      v ∈ (insertAllCtx ctx news).values → v ∈ news.map Prod.snd ∨ v ∈ ctx.values := by
+  induction news with
+  | nil => intro ctx v h; exact Or.inr h
+  | cons hd tl ih =>
+    intro ctx v h
+    rw [insertAllCtx_cons] at h
+    rcases ih _ h with h' | h'
+    · exact Or.inl (List.mem_cons_of_mem _ h')
+    · rcases mem_values_insert ctx hd.1 hd.2 h' with rfl | h''
+      · exact Or.inl (List.mem_cons_self ..)
+      · exact Or.inr h''
 
 /-- Running `initChain news` from `Γ` (where each declared name is fresh at the
     point it is declared, and every declared type is well-kinded in `C`) is well-typed
