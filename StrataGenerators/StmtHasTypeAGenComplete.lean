@@ -87,6 +87,34 @@ The procedure-call *correspondence* is a top-level hypothesis `ProcSigComplete p
 (the converse of `ProcSigCorresponds`): the callee a well-typed call resolves in `P`
 is listed in the generator's `procs`. The `immutableVars` parameter is fixed to `[]`
 (a procedure-level notion, vacuous at the statement level: `ctx.writable [] = ctx`).
+
+## Open item: `spec_complete` may be vacuous at depth 0
+
+**Flagged, not proven.** `spec_complete` takes two environment hypotheses that
+quantify over *every* depth `d`, so both must hold at `d = 0`:
+
+```
+(hExprC     : ∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d)
+(hFuncReach : ∀ d C Γ (func : Function), FuncHasTypeA C Γ func →
+                func ∈ SetGen.support (genFunction (G := SetGen.Set) [] octx d))
+```
+
+At `d = 0` the generator has two branches only. `genLExprBase … 0 τ` gives a leaf (a
+constant, a bound variable, a free variable or an operator), and `genIndir` applies
+one operator to arguments drawn from `genLExprBase … 0`, which are leaves again. So
+the support at `d = 0` holds no term whose argument is itself an application, and
+`1 + (2 + 3)` is such a term — `LExpr.HasTypeA` accepts it, because `HasTypeA.op`
+reads the type off the annotation and ignores the context. If that is right then
+`GenLExprComplete fctx octx tvars 0` is false for every `fctx`/`octx`/`tvars`,
+`hExprC` is unsatisfiable, and `spec_complete` is vacuous. `genFunction` at depth 0
+has the same shape, so `hFuncReach` carries the same risk. Nothing in the package
+applies `spec_complete` today.
+
+Closing this needs a support-inversion lemma for `genLExpr … 0`. Note that `genApp`
+in `genLExprBase` does make a nested application reachable at a *higher* depth, so
+the argument is about `d = 0` alone. The gap theorems above are independent of this
+item: they are statements about the support of `genStmt` alone, and they hold at
+every size.
 -/
 
 namespace StrataGenerators.Stmt.SpecComplete
@@ -325,7 +353,12 @@ mutual
     The `mask` existential is what makes the argument *order* free. `mkArgs` used to
     fix it as in-out, then by-value input, then out target, and a well-typed call in
     any other order was out of reach. The in-out block must still lead, because `M`
-    heads both the input signature and the output signature. -/
+    heads both the input signature and the output signature.
+
+    The existential costs nothing: `mkArgs_surjective` shows that some mask reaches
+    *every* order-preserving interleaving of the by-value inputs with the out
+    targets, and `exists_mask_mkArgs_iff` shows it reaches no more than those. So
+    this clause admits exactly the argument orders the `call` rule leaves free. -/
 def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
   | .cmd (CmdExt.call pname args _) =>
       ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr)
