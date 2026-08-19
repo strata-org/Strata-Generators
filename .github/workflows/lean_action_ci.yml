@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: ["main"]
   schedule:
-    - cron: '0 6 * * *'  # 6 AM UTC daily, for check-upstream-Strata-dependency below
+    - cron: '0 6 * * *'  # 6 AM UTC daily, for check-upstream-strata-dependency below
   workflow_dispatch:
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
   # `needs: build` is what makes the report trustworthy: the pinned build must be
   # green before we get here, so a failure in this job is upstream's doing rather
   # than a defect on the branch, and nobody gets pinged for our own breakage.
-  check-upstream-Strata-dependency:
+  check-upstream-strata-dependency:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
@@ -58,8 +58,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh issue list --state open --json title --jq '.[].title' \
-               | grep -q check-upstream-Strata-dependency; then
-            echo "A check-upstream-Strata-dependency issue is already open; not filing another."
+               | grep -q check-upstream-strata-dependency; then
+            echo "A check-upstream-strata-dependency issue is already open; not filing another."
             exit 0
           fi
           {
@@ -83,5 +83,5 @@ jobs:
             echo "[Full log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
           } > /tmp/issue.md
           gh issue create \
-            --title 'check-upstream-Strata-dependency: upstream Strata update breaks the build' \
+            --title 'check-upstream-strata-dependency: upstream Strata update breaks the build' \
             --body-file /tmp/issue.md
