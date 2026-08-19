@@ -112,14 +112,14 @@ theorem genTypeArgs_nodup (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact nodup_dedup names
+  exact List.nodup_dedup names
 
 /-- Any list in the support of `genIdents` is `Nodup` (it is `List.dedup`ped). -/
 theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact nodup_dedup _
+  exact List.nodup_dedup _
 
 -- ── Keyword-freedom and space-freedom of generated names ─────────────
 -- `FunctionHasTypeAGen/IdentName.lean` holds these results. They are corollaries
@@ -187,7 +187,7 @@ theorem genInputs_key_name_reachable (tvars : List TyIdentifier) (depth : Nat)
   rw [hkeys] at hk
   simp only [genIdents, mem_support_map_iff] at hidents
   obtain ⟨names, hnames, rfl⟩ := hidents
-  rw [StrataGenerators.Dedup.mem_dedup] at hk
+  rw [← List.mem_of_dedup] at hk
   obtain ⟨s, hs, rfl⟩ := List.mem_map.mp hk
   rw [genNameList, mem_support_listOfMaxLength_iff] at hnames
   exact hnames.2 s hs
@@ -588,8 +588,8 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hConstr : func.isConstr = false)
     (hRec : func.isRecursive = false)
     (hAttr : func.attr = #[])
-    -- (Strata's `76933e8b` split moved the function-typed `concreteEval` off the
-    -- base `Func`, so `Function` no longer has that field and the former
+    -- (An upstream split moved the function-typed `concreteEval` off the base
+    -- `Func`, so `Function` no longer has that field and the former
     -- `func.concreteEval = none` hypothesis is gone.)
     (hAxioms : func.axioms = [])
     -- `preconditions` IS generated, but at most one clause (`genPreconditions`
@@ -658,7 +658,7 @@ theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
   intro s hs
-  exact genNameList_not_keyword depth names hnames s ((mem_dedup names s).mp hs)
+  exact genNameList_not_keyword depth names hnames s ((List.mem_of_dedup names s).mpr hs)
 
 /-- Every input-identifier name produced by `genIdents` is a non-keyword: each
     identifier `⟨s, ()⟩` comes from mapping over the `genNameList` names, and
@@ -671,7 +671,7 @@ theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
   intro x hx
   -- `x ∈ (names.map ⟨·,()⟩).dedup` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
   have hx' : x ∈ names.map (fun s => (⟨s, ()⟩ : Identifier Unit)) :=
-    (mem_dedup _ x).mp hx
+    (List.mem_of_dedup _ x).mpr hx
   obtain ⟨s, hs_mem, rfl⟩ := List.mem_map.mp hx'
   exact genNameList_not_keyword depth names hnames s hs_mem
 

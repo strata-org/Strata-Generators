@@ -790,9 +790,9 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
   -- Establish the six `type_syn` premises.
   have hNodup : ts.typeArgs.Nodup := (LMonoTy.freeVars body).nodup_dedup
   have hclosed : ∀ v, v ∈ LMonoTy.freeVars ts.type → v ∈ ts.typeArgs := by
-    intro v hv; exact (StrataGenerators.Dedup.mem_dedup _ _).mpr hv
+    intro v hv; exact (List.mem_of_dedup _ _).mp hv
   have hnophantom : ∀ v, v ∈ ts.typeArgs → v ∈ LMonoTy.freeVars ts.type := by
-    intro v hv; exact (StrataGenerators.Dedup.mem_dedup _ _).mp hv
+    intro v hv; exact (List.mem_of_dedup _ _).mpr hv
   have hname_clash : ¬ s.C.knownTypes.containsName ts.name := by
     intro hc
     have : ts.name ∈ s.C.knownTypes.keywords := by
