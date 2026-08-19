@@ -2,9 +2,11 @@ name: Lean Action CI
 
 on:
   push:
-  merge_group: 
+  merge_group:
   pull_request:
     branches: ["main"]
+  schedule:
+    - cron: '0 6 * * *'  # 6 AM UTC daily, for check-upstream-strata-dependency below
   workflow_dispatch:
 
 jobs:
@@ -16,9 +18,70 @@ jobs:
       - uses: leanprover/lean-action@v1
         with:
           # Run `lake build` but don't run `lake test`: the test suite
-          # reports known/expected counterexamples, which would fail CI. 
+          # reports known/expected counterexamples, which would fail CI.
           # We only want CI to confirm the repo builds.
           test: false
       # Verify the `lake test` driver is properly configured. This does not run the test suite.
       - name: Check test driver is configured
         run: lake check-test
+
+  # Nightly only: re-resolve dependencies and check whether upstream Strata has
+  # broken us. `build` above compiles the *pinned* manifest, so PR results stay
+  # reproducible; this is the only place that runs `lake update`.
+  #
+  # `needs: build` is what makes the report trustworthy: the pinned build must be
+  # green before we get here, so a failure in this job is upstream's doing rather
+  # than a defect on the branch, and nobody gets pinged for our own breakage.
+  check-upstream-strata-dependency:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v5
+      - uses: leanprover/lean-action@v1
+        with:
+          build: false
+          test: false
+
+      - name: Update dependencies and rebuild
+        run: |
+          set -o pipefail
+          { lake update && lake build && lake check-test; } 2>&1 | tee /tmp/build.log
+
+      - name: Report upstream breakage
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh issue list --state open --json title --jq '.[].title' \
+               | grep -q check-upstream-strata-dependency; then
+            echo "A check-upstream-strata-dependency issue is already open; not filing another."
+            exit 0
+          fi
+          {
+            echo 'cc @joscoh @ngernest — an upstream update broke the build.'
+            echo
+            echo 'CI is green at the pinned revisions and fails after `lake update`,'
+            echo 'so this is upstream drift rather than a defect on `main`. Reproduce with'
+            echo '`lake update && lake build`; a dangling import reports `no such file or'
+            echo 'directory` and takes every downstream module with it, so the root cause is'
+            echo 'near the top of the output.'
+            echo
+            echo '```diff'
+            git diff --no-color lake-manifest.json | grep . \
+              || echo '(manifest unchanged: `lake update` failed before rewriting it)'
+            echo '```'
+            echo
+            echo '```'
+            sed '/^✔/d' /tmp/build.log | head -n 60
+            echo '```'
+            echo
+            echo "[Full log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+          } > /tmp/issue.md
+          gh issue create \
+            --title 'check-upstream-strata-dependency: upstream Strata update breaks the build' \
+            --body-file /tmp/issue.md
