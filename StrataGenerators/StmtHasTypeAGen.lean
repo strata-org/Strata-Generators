@@ -492,7 +492,9 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
     obtain ⟨σvals, hσvals, hr⟩ := hr
     split at hr
     · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, rfl⟩ := hr
+      -- The last two components are the argument-order mask and its membership
+      -- proof; the mask does not reach the output scope, so it is discarded.
+      obtain ⟨_, _, _, _, rfl⟩ := hr
       -- The sampled instantiation is well-kinded, hence so is the instantiated signature.
       have hσWK : ∀ t ∈ (s.typeArgs.zip σvals).map Prod.snd, C.WellKindedTy t := by
         intro t ht
