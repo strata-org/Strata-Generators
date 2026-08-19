@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: ["main"]
   schedule:
-    - cron: '0 6 * * *'  # 6 AM UTC daily, for the upstream canary below
+    - cron: '0 6 * * *'  # 6 AM UTC daily, for check-upstream-Strata-dependency below
   workflow_dispatch:
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
   # `needs: build` is what makes the report trustworthy: the pinned build must be
   # green before we get here, so a failure in this job is upstream's doing rather
   # than a defect on the branch, and nobody gets pinged for our own breakage.
-  upstream-canary:
+  check-upstream-Strata-dependency:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
@@ -50,15 +50,16 @@ jobs:
       - name: Update dependencies and rebuild
         run: |
           set -o pipefail
-          { lake update && lake build && lake check-test; } 2>&1 | tee /tmp/canary.log
+          { lake update && lake build && lake check-test; } 2>&1 | tee /tmp/build.log
 
       - name: Report upstream breakage
         if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh issue list --state open --json title --jq '.[].title' | grep -q upstream-canary; then
-            echo "An upstream-canary issue is already open; not filing another."
+          if gh issue list --state open --json title --jq '.[].title' \
+               | grep -q check-upstream-Strata-dependency; then
+            echo "A check-upstream-Strata-dependency issue is already open; not filing another."
             exit 0
           fi
           {
@@ -76,10 +77,11 @@ jobs:
             echo '```'
             echo
             echo '```'
-            sed '/^✔/d' /tmp/canary.log | head -n 60
+            sed '/^✔/d' /tmp/build.log | head -n 60
             echo '```'
             echo
             echo "[Full log]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
           } > /tmp/issue.md
-          gh issue create --title 'upstream-canary: Strata update breaks the build' \
-                          --body-file /tmp/issue.md
+          gh issue create \
+            --title 'check-upstream-Strata-dependency: upstream Strata update breaks the build' \
+            --body-file /tmp/issue.md
