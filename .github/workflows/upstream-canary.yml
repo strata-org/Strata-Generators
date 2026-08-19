@@ -1,0 +1,259 @@
+name: Upstream Strata Canary
+
+# Detects when new commits to upstream Strata (or basalt) break this repo.
+#
+# Deliberately NOT folded into `nightly-release.yml`: that job tags a release
+# from the committed, pinned state, and running `lake update` there would tag
+# nightlies built against drifting dependencies. It also holds `contents: write`
+# and pushes tags, which a build canary has no business being coupled to.
+#
+# Regular push/PR CI (`lean_action_ci.yml`) intentionally keeps building the
+# *pinned* manifest, so PR results stay reproducible and immune to upstream
+# churn. This workflow is the only place that resolves dependencies afresh.
+
+on:
+  schedule:
+    # 06:00 UTC, two hours ahead of the nightly release tag job.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+# Only needs to file an issue. No secrets, no write access to code.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # `build: false` gives us elan/lake plus caching without building yet:
+      # we need to control the build ordering ourselves (see below).
+      - name: Set up Lean toolchain
+        uses: leanprover/lean-action@v1
+        with:
+          build: false
+          test: false
+
+      - name: Record pinned dependency revisions
+        id: pinned
+        run: |
+          {
+            echo "strata=$(jq -r '.packages[] | select(.name == "Strata") | .rev' lake-manifest.json)"
+            echo "basalt=$(jq -r '.packages[] | select(.name == "basalt") | .rev' lake-manifest.json)"
+          } >> "$GITHUB_OUTPUT"
+          cp lake-manifest.json /tmp/manifest-pinned.json
+
+      # Step 1 of 2: build exactly what is committed. If THIS fails, `main` is
+      # broken on its own and upstream is not to blame -- so we must not report
+      # it as an upstream regression. Never exits nonzero; the verdict is an
+      # output, and the job's final status is decided at the end.
+      - name: Build at pinned revisions (baseline)
+        id: baseline
+        run: |
+          if lake build > /tmp/baseline.log 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Baseline build at pinned revisions succeeded."
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Baseline build FAILED at the pinned revisions. \
+            This is a defect on main, not an upstream regression -- not reporting it as one."
+            grep -v '^✔' /tmp/baseline.log | tail -n 40
+          fi
+
+      # `lake update` can fail outright -- upstream deleting a package or an
+      # `inputRev` ceasing to resolve are upstream breakages too, so record the
+      # verdict instead of exiting and let the notify step report it.
+      - name: Update dependencies
+        id: update
+        if: steps.baseline.outputs.ok == 'true'
+        run: |
+          if lake update > /tmp/update.log 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::\`lake update\` itself failed to resolve dependencies."
+            tail -n 40 /tmp/update.log
+            cp /tmp/update.log /tmp/excerpt.txt
+          fi
+          tail -n 20 /tmp/update.log
+          {
+            echo "strata=$(jq -r '.packages[] | select(.name == "Strata") | .rev' lake-manifest.json)"
+            echo "basalt=$(jq -r '.packages[] | select(.name == "basalt") | .rev' lake-manifest.json)"
+          } >> "$GITHUB_OUTPUT"
+          echo "### Manifest diff" >> "$GITHUB_STEP_SUMMARY"
+          echo '```diff' >> "$GITHUB_STEP_SUMMARY"
+          diff -u /tmp/manifest-pinned.json lake-manifest.json >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # Step 2 of 2: build against freshly resolved dependencies. A failure
+      # here, with the baseline green, is a genuine upstream regression.
+      - name: Build at updated revisions
+        id: updated
+        if: steps.update.outputs.ok == 'true'
+        run: |
+          if lake build > /tmp/updated.log 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Build against updated dependencies succeeded."
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::Build FAILED against updated dependencies -- upstream regression."
+          fi
+          # Strip the per-module success lines; what is left is the signal.
+          # Note the root cause is usually near the TOP of the failure output,
+          # while the cascade of dependent modules fills the tail.
+          grep -v '^✔' /tmp/updated.log | head -n 60 > /tmp/excerpt.txt
+          cat /tmp/excerpt.txt
+
+      # Mirrors `lean_action_ci.yml`: confirm the `lake test` driver still
+      # resolves. Does not run the test suite (it reports known counterexamples).
+      - name: Check test driver is configured
+        id: checktest
+        if: steps.updated.outputs.ok == 'true'
+        run: |
+          if lake check-test > /tmp/checktest.log 2>&1; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::error::\`lake check-test\` failed against updated dependencies."
+            cat /tmp/checktest.log
+            cp /tmp/checktest.log /tmp/excerpt.txt
+          fi
+
+      - name: Notify maintainers
+        if: |
+          steps.baseline.outputs.ok == 'true' &&
+          (steps.update.outputs.ok == 'false' ||
+           steps.updated.outputs.ok == 'false' ||
+           steps.checktest.outputs.ok == 'false')
+        uses: actions/github-script@v7
+        env:
+          OLD_STRATA: ${{ steps.pinned.outputs.strata }}
+          NEW_STRATA: ${{ steps.update.outputs.strata }}
+          OLD_BASALT: ${{ steps.pinned.outputs.basalt }}
+          NEW_BASALT: ${{ steps.update.outputs.basalt }}
+        with:
+          script: |
+            const fs = require('fs')
+            const MARKER = '[upstream-canary]'
+            const LABEL = 'upstream-breakage'
+            const { OLD_STRATA, NEW_STRATA, OLD_BASALT, NEW_BASALT } = process.env
+
+            // Read the log off disk rather than interpolating it through a
+            // shell expression, so build output can never inject into script.
+            let excerpt = 'nothing captured'
+            try { excerpt = fs.readFileSync('/tmp/excerpt.txt', 'utf8').slice(0, 8000) } catch {}
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+                           `/actions/runs/${context.runId}`
+            const shortNew = (NEW_STRATA || '').slice(0, 9)
+
+            const body = [
+              'cc @joscoh @ngernest — an upstream update broke `main`.',
+              '',
+              'The build is green at the **pinned** revisions and fails after `lake update`,',
+              'so this is an upstream regression rather than a defect on `main`.',
+              '',
+              '| dependency | pinned | resolved |',
+              '| --- | --- | --- |',
+              `| Strata | \`${OLD_STRATA}\` | \`${NEW_STRATA || '(unresolved)'}\` |`,
+              `| basalt | \`${OLD_BASALT}\` | \`${NEW_BASALT || '(unresolved)'}\` |`,
+              '',
+              OLD_STRATA && NEW_STRATA && OLD_STRATA !== NEW_STRATA
+                ? `[Compare Strata \`${OLD_STRATA.slice(0, 9)}...${shortNew}\`]` +
+                  `(https://github.com/strata-org/Strata/compare/${OLD_STRATA}...${NEW_STRATA})`
+                : '',
+              '',
+              '<details><summary>Build output (success lines stripped)</summary>',
+              '',
+              '```',
+              excerpt.replace(/```/g, "'''"),
+              '```',
+              '',
+              '</details>',
+              '',
+              '### Reproducing locally',
+              '',
+              '```bash',
+              'lake update && lake build',
+              '```',
+              '',
+              'A dangling `import` shows up as `no such file or directory` naming the missing',
+              '`.lean` file, and takes every downstream module with it. The root cause sits near',
+              'the top of the output; `lake build <root-module>` isolates it.',
+              '',
+              `[Full run log](${runUrl})`,
+              '',
+              `<!-- ${MARKER} -->`,
+            ].filter(l => l !== '').join('\n')
+
+            // Ensure the label exists; creating an issue with an unknown label errors.
+            try {
+              await github.rest.issues.getLabel({ ...context.repo, name: LABEL })
+            } catch {
+              try {
+                await github.rest.issues.createLabel({
+                  ...context.repo, name: LABEL, color: 'b60205',
+                  description: 'Upstream dependency update breaks the build',
+                })
+              } catch {}
+            }
+
+            // Dedupe by listing open issues rather than using the search API,
+            // which lags behind on freshly created issues. One breakage window
+            // gets one issue; a new upstream rev adds a comment to it.
+            const open = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+            })
+            const existing = open.find(i => !i.pull_request && (i.body || '').includes(MARKER))
+
+            if (!existing) {
+              const issue = await github.rest.issues.create({
+                ...context.repo,
+                title: `${MARKER} Upstream Strata update breaks the build (${shortNew})`,
+                body,
+                labels: [LABEL],
+              })
+              core.notice(`Opened #${issue.data.number}`)
+              return
+            }
+
+            // Throttle: only speak up again when the failing revision changes,
+            // so a week-long breakage does not post seven identical comments.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              ...context.repo, issue_number: existing.number, per_page: 100,
+            })
+            const seen = [existing.body, ...comments.map(c => c.body)].join('\n')
+            if (NEW_STRATA && seen.includes(NEW_STRATA)) {
+              core.notice(`#${existing.number} already reports ${shortNew}; staying quiet.`)
+              return
+            }
+            await github.rest.issues.createComment({
+              ...context.repo, issue_number: existing.number, body,
+            })
+            core.notice(`Commented on #${existing.number}`)
+
+      # Single place that decides the job's status, so the steps above can
+      # record verdicts without short-circuiting the reporting step.
+      - name: Conclude
+        if: always()
+        run: |
+          if [ "${{ steps.baseline.outputs.ok }}" != "true" ]; then
+            echo "Baseline build at pinned revisions failed: main is broken independently of upstream."
+            exit 1
+          fi
+          if [ "${{ steps.update.outputs.ok }}" != "true" ]; then
+            echo "Upstream regression: \`lake update\` could not resolve dependencies. Maintainers notified."
+            exit 1
+          fi
+          if [ "${{ steps.updated.outputs.ok }}" != "true" ] \
+             || [ "${{ steps.checktest.outputs.ok }}" != "true" ]; then
+            echo "Upstream regression: pinned build is green, updated build is not. Maintainers notified."
+            exit 1
+          fi
+          echo "Up to date with upstream and green."
