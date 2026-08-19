@@ -39,7 +39,7 @@ theorem freshNamesDisjointFromExprs_toFVarCtx (octx : OpCtx) (tvars : List TyIde
   have hmem' : (⟨name, ()⟩ : Identifier Unit)
       ∈ ctx.toFVarCtx.map (fun p => (⟨p.1, ()⟩ : Identifier Unit)) := by
     have : (⟨name, ()⟩ : Identifier Unit) ∈ LExpr.getVars e := by
-      simpa only [HasVarsPure.getVars] using hmem
+      simpa only [HasFvars.getFvars] using hmem
     exact hsub this
   -- Unfold `ctx.toFVarCtx = ctx.map (fun q => (q.1.name, q.2))` and extract the
   -- originating scope entry `q ∈ ctx`, whose key is exactly `⟨name, ()⟩`.
@@ -68,7 +68,7 @@ theorem freshNamesDisjointFromExprs_nil (octx : OpCtx) (tvars : List TyIdentifie
   intro name _ τ e he
   have hnil : LExpr.getVars e = [] :=
     Lambda.LExpr.genLExpr_no_fvars octx [] tvars [] depth τ e he
-  simp only [HasVarsPure.getVars, hnil, List.not_mem_nil, not_false_eq_true]
+  simp only [HasFvars.getFvars, hnil, List.not_mem_nil, not_false_eq_true]
 
 /-- Hypothesis-free soundness of `genCmd`: every result in the generator's support
     produces a well-typed command. The only remaining obligations are the genuine

@@ -47,7 +47,7 @@ def ppCmd (cmd : Cmd Expression) : String :=
     Returns `true` for all non-init commands. -/
 def checkInitFreshNotInRhs (cmd : Cmd Expression) : Bool :=
   match cmd with
-  | .init x _ (.det e) _ => !(x ∈ HasVarsPure.getVars (P := Expression) e)
+  | .init x _ (.det e) _ => !(x ∈ HasFvars.getFvars (P := Expression) e)
   | _ => true
 
 /-- Check that the expression sub-term in a command typechecks.

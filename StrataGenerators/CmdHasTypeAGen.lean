@@ -374,7 +374,7 @@ theorem genInitDet_sound
     (hfresh : Γ.types.find? x = none)
     (e : Expression.Expr)
     (hwt : LExpr.HasTypeA (T := LExprParams') [] e mty)
-    (hnovar : x ∉ HasVarsPure.getVars (P := Expression) e)
+    (hnovar : x ∉ HasFvars.getFvars (P := Expression) e)
     (hwk : C.WellKindedTy mty) :
     CmdHasTypeA C Γ (.init x (.forAll [] mty) (.det e) default)
       { Γ with types := Γ.types.insert x (.forAll [] mty) } :=
@@ -641,7 +641,7 @@ def FreshNamesDisjointFromExprs (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx := []) : Prop :=
   ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
     ∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ) →
-      (⟨name, ()⟩ : Identifier Unit) ∉ HasVarsPure.getVars (P := Expression) e
+      (⟨name, ()⟩ : Identifier Unit) ∉ HasFvars.getFvars (P := Expression) e
 
 /-- Full soundness of `genCmd`: every result in the generator's support produces
     a well-typed command. The output context `Γ'` satisfies `CmdHasTypeA C Γ cmd Γ'`.
