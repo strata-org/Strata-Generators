@@ -16,7 +16,7 @@ open RandomChoice
     `BasaltExamples.ArbNat`. The upstream `non_empty_combinators` reorg dropped the
     lightweight `ArbNat.Def` split, so `BasaltExamples.ArbNat` now imports the
     full `Basalt` umbrella — which transitively pulls in Mathlib's `List.dedup`
-    and collides with Strata's `List.dedup` (from `Strata.DL.Util.List`, imported
+    and collides with Strata's `List.dedup` (from `Strata.Util.ListUtils`, imported
     via `Strata.DL.Lambda.*`). This file is deliberately kept Mathlib-free, so we
     inline the definition. It is definitionally identical to the upstream one
     (`pick 0 / (·+1)`), so the support proofs in `HasTypeAGen.lean` that unfold
