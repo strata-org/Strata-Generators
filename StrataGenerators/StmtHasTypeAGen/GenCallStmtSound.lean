@@ -266,14 +266,95 @@ theorem substSig_values_wellKinded {C : LContext CoreLParams}
 /-- Merge two lists under a Boolean mask, and keep the relative order inside each
     list. `true` takes the next element of `xs`, and `false` takes the next element
     of `ys`. When the mask ends, or when the chosen list is empty, the rest of both
-    lists follows. Every order-preserving interleaving of `xs` and `ys` is
-    `mergeBy bs xs ys` for some `bs`. -/
+    lists follows.
+
+    The mask reaches *exactly* the order-preserving interleavings of `xs` and `ys`:
+    `mergeBy_surjective` gives every one of them, `mergeBy_interleave` gives no more
+    than them, and `exists_mask_iff_interleave` is the two together. -/
 def mergeBy {α : Type} : List Bool → List α → List α → List α
   | [], xs, ys => xs ++ ys
   | true :: bs, x :: xs, ys => x :: mergeBy bs xs ys
   | true :: bs, [], ys => mergeBy bs [] ys
   | false :: bs, xs, y :: ys => y :: mergeBy bs xs ys
   | false :: bs, xs, [] => mergeBy bs xs []
+
+/-- `Interleave xs ys zs` — `zs` is an **order-preserving interleaving** (a shuffle)
+    of `xs` and `ys`: it holds every element of both, and it keeps the relative order
+    inside `xs` and the relative order inside `ys`. Nothing else is constrained, so
+    the two lists may interleave in any way at all.
+
+    This is exactly the freedom the `call` rule leaves between the by-value inputs
+    and the out targets: `CallArg.getInputExprs` keeps the `inArg` order and drops
+    every `outArg`, and `CallArg.getLhs` does the reverse, so neither projection can
+    see how the two kinds interleave. -/
+inductive Interleave {α : Type} : List α → List α → List α → Prop
+  | nil : Interleave [] [] []
+  | left {x : α} {xs ys zs : List α} :
+      Interleave xs ys zs → Interleave (x :: xs) ys (x :: zs)
+  | right {y : α} {xs ys zs : List α} :
+      Interleave xs ys zs → Interleave xs (y :: ys) (y :: zs)
+
+/-- **Surjectivity of the mask.** *Every* order-preserving interleaving of `xs` and
+    `ys` is `mergeBy mask xs ys` for some `mask`. The mask bits are read straight off
+    the derivation: `left` becomes `true`, `right` becomes `false`.
+
+    This is what makes the `mask` existential in `CallOk` cost nothing — see
+    `mkArgs_surjective` for the reading at the call-argument level. -/
+theorem mergeBy_surjective {α : Type} {xs ys zs : List α} (h : Interleave xs ys zs) :
+    ∃ mask : List Bool, mergeBy mask xs ys = zs := by
+  induction h with
+  | nil => exact ⟨[], rfl⟩
+  | left _ ih =>
+    obtain ⟨mask, hm⟩ := ih
+    exact ⟨true :: mask, by rw [mergeBy, hm]⟩
+  | right _ ih =>
+    obtain ⟨mask, hm⟩ := ih
+    exact ⟨false :: mask, by rw [mergeBy, hm]⟩
+
+/-- Taking every element from the right list is an interleaving. -/
+theorem interleave_nil_left {α : Type} (ys : List α) : Interleave [] ys ys := by
+  induction ys with
+  | nil => exact .nil
+  | cons _ _ ih => exact .right ih
+
+/-- Concatenation is an interleaving. This is the case an exhausted mask falls back
+    to, and it is why the `[]` equation of `mergeBy` does not escape the relation. -/
+theorem interleave_append {α : Type} (xs ys : List α) : Interleave xs ys (xs ++ ys) := by
+  induction xs with
+  | nil => exact interleave_nil_left ys
+  | cons _ _ ih => exact .left ih
+
+/-- **The mask produces nothing but interleavings** — the converse of
+    `mergeBy_surjective`. Needed for the characterisation below to say that the mask
+    is neither too weak nor too strong. -/
+theorem mergeBy_interleave {α : Type} (mask : List Bool) :
+    ∀ (xs ys : List α), Interleave xs ys (mergeBy mask xs ys) := by
+  induction mask with
+  | nil => intro xs ys; rw [mergeBy]; exact interleave_append xs ys
+  | cons b mask ih =>
+    intro xs ys
+    cases b with
+    | true =>
+      cases xs with
+      | nil => rw [mergeBy]; exact ih [] ys
+      | cons x xs => rw [mergeBy]; exact .left (ih xs ys)
+    | false =>
+      cases ys with
+      | nil => rw [mergeBy]; exact ih xs []
+      | cons y ys => rw [mergeBy]; exact .right (ih xs ys)
+
+/-- **The mask ranges over exactly the order-preserving interleavings**, no fewer and
+    no more. -/
+theorem exists_mask_iff_interleave {α : Type} {xs ys zs : List α} :
+    (∃ mask : List Bool, mergeBy mask xs ys = zs) ↔ Interleave xs ys zs :=
+  ⟨fun ⟨mask, hm⟩ => hm ▸ mergeBy_interleave mask xs ys, mergeBy_surjective⟩
+
+-- The mask semantics, executably: a leading `false` takes the right list first, and
+-- the merge genuinely interleaves rather than concatenating.
+#guard mergeBy [false] [1, 2] [3] == ([3, 1, 2] : List Nat)
+#guard mergeBy [true, false] [1, 2] [3] == ([1, 3, 2] : List Nat)
+-- An exhausted mask falls back to concatenation (`interleave_append`).
+#guard mergeBy [] [1, 2] [3] == ([1, 2, 3] : List Nat)
 
 /-- A `filterMap` that drops every element of `ys` sees `mergeBy bs xs ys` as `xs`.
     The merge keeps the relative order inside `xs`. -/
@@ -403,6 +484,48 @@ theorem getLhs_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Ex
       (by rintro a ha; simp only [List.mem_map] at ha; obtain ⟨e, _, rfl⟩ := ha; rfl)]
   simp only [List.filterMap_map, Function.comp_def, filterMap_some_comp,
     ListMap.keys_eq_map_fst]
+
+/-- **Every argument order the `call` rule leaves free is reachable.** Fix a callee
+    block `M`/`T` and by-value inputs `exprs`. For *any* order-preserving
+    interleaving `rest` of the `inArg` nodes with the `outArg` nodes, some mask makes
+    `mkArgs` emit exactly the in-out block followed by `rest`.
+
+    So `mkArgs` fixes only what the rule itself forces — that the in-out block leads,
+    because `M` heads both projections (see the `#guard`s above) — and the `mask`
+    existential in `CallOk` restricts nothing beyond that. Before the mask, `mkArgs`
+    fixed the order as in-out, then by-value input, then out target, and a well-typed
+    `call p(out y, 1);` was out of reach; `mkArgs_out_then_in` is that call as a
+    worked instance of this theorem. -/
+-- **`Interleave` is inhabited at the swap that matters**, so `mkArgs_surjective` is
+-- not vacuous: the single out target ahead of the single by-value input is exactly
+-- the `call p(out y, 1);` shape that was unreachable before the mask.
+example : Interleave [CallArg.inArg gcaExpr] [CallArg.outArg gcaY]
+    ([CallArg.outArg gcaY, CallArg.inArg gcaExpr] : GcaArgs) :=
+  .right (.left .nil)
+
+theorem mkArgs_surjective (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (rest : List (CallArg Expression))
+    (h : Interleave (exprs.map CallArg.inArg)
+      (T.map (fun p => CallArg.outArg p.1)) rest) :
+    ∃ mask : List Bool,
+      mkArgs M T exprs mask = M.map (fun p => CallArg.inoutArg p.1) ++ rest := by
+  obtain ⟨mask, hm⟩ := mergeBy_surjective h
+  exact ⟨mask, by rw [mkArgs, hm]⟩
+
+/-- The `mkArgs` counterpart of `exists_mask_iff_interleave`: an argument list is
+    reachable at *some* mask precisely when its tail interleaves the by-value inputs
+    with the out targets. -/
+theorem exists_mask_mkArgs_iff (M T : @LMonoTySignature Unit)
+    (exprs : List Expression.Expr) (rest : List (CallArg Expression)) :
+    (∃ mask : List Bool,
+      mkArgs M T exprs mask = M.map (fun p => CallArg.inoutArg p.1) ++ rest)
+      ↔ Interleave (exprs.map CallArg.inArg) (T.map (fun p => CallArg.outArg p.1)) rest := by
+  rw [← exists_mask_iff_interleave]
+  constructor
+  · rintro ⟨mask, hm⟩
+    exact ⟨mask, by rw [mkArgs] at hm; exact List.append_cancel_left hm⟩
+  · rintro ⟨mask, hm⟩
+    exact ⟨mask, by rw [mkArgs, hm]⟩
 
 -- ── The init-chain that brings the required names into scope ───────────────
 
