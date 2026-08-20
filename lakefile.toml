@@ -47,3 +47,12 @@ root = "TestMain"
 [[lean_exe]]
 name = "test-plain"
 root = "PlainTestMain"
+
+# Distribution report: samples each property family's generator under each tuning
+# profile in `StrataGenerators.TuningProfiles` and prints how often the shapes the
+# suite's properties discriminate on actually appear. This is how the profiles'
+# weights were derived, and how to re-derive them after a generator change.
+# Run: `lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]`
+[[lean_exe]]
+name = "dist-report"
+root = "DistReportMain"

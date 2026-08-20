@@ -109,6 +109,55 @@ property. It has no Tyche pass (the `--tyche-*` flags are accepted but ignored),
 and it is **not** registered as the `lake test` driver — `test` (LSpec) remains
 the driver.
 
+## Tuning the generators' distributions
+
+The generators are proven sound *and* complete, so every sample is well-typed and every well-typed
+program is reachable — but neither says anything about *how often* a shape appears, and the
+properties in the suite are not equally sensitive to all shapes. A property whose interesting
+precondition holds on 2% of samples spends 98% of its budget on a trivial case; one whose
+precondition never holds passes vacuously.
+
+Every generator the suite draws from is therefore tagged `@[tunable]` (Basalt's tuning attribute),
+which makes each `frequency` branch weight a runtime value:
+
+```lean
+-- 24 : 2 in favour of `loop`, so a loop-elimination pass gets loops to eliminate
+def stmtLoopHeavy : Tuning := withWeights stmtDefault [(StmtIdx.loop, 24)]
+```
+
+- [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) — one named `Tuning` per job the
+  suite has to do, with the desirable-distribution rationale per property family, the flat index
+  tables the profiles are written in, and the tuned entry points (`genProgramStmtsT`,
+  `genProcedureT`, `genCmdsT`) the harnesses draw from.
+- [`SetGen/TuningPrototypes.lean`](./StrataGenerators/SetGen/TuningPrototypes.lean) — a theorem per
+  generator that tuning is **behavior-preserving**: at `SetGen.Set` the tuned generator is *equal*
+  to the untuned one for every `θ`, so every soundness and completeness result carries over by one
+  `rw` and no profile can make a program shape unreachable.
+- [`SetGen/Tuning.lean`](./StrataGenerators/SetGen/Tuning.lean) — the reweighting lemmas those
+  proofs run on, and one recipe per recursion form.
+- [`SetGen/TuningWalkthrough.lean`](./StrataGenerators/SetGen/TuningWalkthrough.lean) — start here
+  to *use* tuning on a generator of your own.
+
+### Measuring a distribution (`dist-report`)
+
+The weights above were derived by measurement, not by eye. `dist-report` samples each family's
+generator under each profile and reports how often the shapes the properties discriminate on
+actually appear — plus `1st-try`, the fraction of draws that succeed with no retry, since a profile
+that steers into failure-prone shapes buys coverage with generation time:
+
+```bash
+lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--props]
+```
+
+`--props` is the one to run when changing a profile: it runs the suite's own properties under each
+profile and reports how often each *fails*, so a profile that introduces a new failure — or that
+raises the reproduction rate of a known defect — is visible immediately. Measured over 300 samples
+per profile, `stmt: typechecker accepts generated statements` (#1, the `funcDecl` gap) fails on ~5%
+of default samples and ~23% under `stmtFuncDeclHeavy`, and `proc: PrecondElim factory strips declared
+functions` on ~23% by default and ~51% under `procPrecondHeavy` — with no profile introducing a
+failure that the default weights did not already produce. Nothing here is seed-deterministic, so
+re-run before reading a small difference as a change.
+
 ## Adding a new property
 
 Properties are catalogued in
