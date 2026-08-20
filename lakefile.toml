@@ -37,17 +37,17 @@ globs = ["StrataTests.*"]
 name = "strata-generators"
 root = "Main"
 
-# The `lake test` driver: the registry rendered by the package's own reporter, with no
-# test-framework dependency.
+# The `lake test` driver: the registry rendered by LSpec.
 [[lean_exe]]
 name = "test"
-root = "TestRunner"
-
-# The same registry rendered by LSpec, so a rendering discrepancy between the two is
-# visible rather than assumed away.
-[[lean_exe]]
-name = "lspec-test"
 root = "LSpecTestRunner"
+
+# The same registry rendered by the package's own reporter, with no test-framework
+# dependency. Kept so that the LSpec dependency stays droppable, and so that a
+# discrepancy between the two renderings is visible rather than assumed away.
+[[lean_exe]]
+name = "test-plain"
+root = "PlainTestRunner"
 
 # Rewrites `StrataTests.lean` from the contents of `StrataTests/`. Needed only when a
 # file is added or removed there.

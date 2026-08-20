@@ -5,6 +5,7 @@ import StrataGenerators.Test.Report
 import StrataGenerators.Test.TycheReport
 import StrataGenerators.Test.Cli
 import StrataGenerators.Test.Family
+import StrataGenerators.Test.Driver
 import StrataGenerators.Test.ImportRoot
 import StrataGenerators.Test.Generators
 

@@ -37,8 +37,8 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 - `Strata`
 - `Basalt` (used for proving generators correct)
 - `Plausible` (used to run generators)
-- `LSpec` (Lean testing framework; used only by the `lspec-test` driver — the default
-  driver `lake test` runs needs nothing beyond `Plausible`)
+- `LSpec` (Lean testing framework; used by the `test` driver that `lake test` runs. The
+  alternate `test-plain` driver needs nothing beyond `Plausible`)
 - (Optionally) An SMT solver (cvc5 or z3) to test Strata properties related to SMT encoding, which are not run by default
   - See the [installation instructions in the Strata repository](https://github.com/strata-org/strata#smt-solvers) on how to install cvc5/z3
 
@@ -108,19 +108,22 @@ lake build test
 `lake test -- --list` prints the full list of properties tested; each one is declared
 in a file under [`StrataTests/`](./StrataTests).
 
-### LSpec rendering of the same suite (`lspec-test`)
+### LSpec-free driver (`test-plain`)
 
-`lake test` runs a driver that depends on `Plausible` and nothing else — no test
-framework. A second driver renders the *same* registry through LSpec:
+`lake test` runs the LSpec driver. A second driver renders the *same* registry through
+the package's own reporter, and depends on `Plausible` and nothing else:
 
 ```bash
-lake build lspec-test
-.lake/build/bin/lspec-test [numTrials] [maxSize] [flags]
+lake build test-plain
+.lake/build/bin/test-plain [numTrials] [maxSize] [flags]
 ```
 
-Both fold the same `List TestDecl`, so they cannot disagree about *what* is tested;
-they differ only in how a verdict is printed and aggregated. That is what keeps the
-package honest about its LSpec dependency.
+It exists to keep the LSpec dependency droppable: LSpec reaches this package only
+through a fork pinned to Lean 4.29, because mainline LSpec is on 4.31.
+
+Both drivers fold the same `List TestDecl`, and everything except the rendering is
+`StrataGenerators.Test.Driver`, shared by both. So they cannot disagree about *what* is
+tested, and a discrepancy could only be in the printing.
 
 ## Adding a new property
 

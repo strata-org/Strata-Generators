@@ -325,5 +325,6 @@ one run.
 | `StrataGenerators/Test/TycheReport.lean` | the derived panel |
 | `StrataGenerators/Test/Cli.lean` | the flags |
 | `StrataGenerators/TestScaffold.lean` | the wrapper types and their instances |
-| `TestRunner.lean` | the driver `lake test` runs |
-| `LSpecTestRunner.lean` | the same registry, rendered by LSpec |
+| `LSpecTestRunner.lean` | the driver `lake test` runs, rendering through LSpec |
+| `PlainTestRunner.lean` | the same registry, LSpec-free; kept as a backup |
+| `StrataGenerators/Test/Driver.lean` | everything both drivers do except the rendering |
