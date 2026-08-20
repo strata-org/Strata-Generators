@@ -57,5 +57,5 @@ def printerBvWidthAgreement : TestDecl :=
     `printer conversion-error` diagnostic. -/
 @[strata_property]
 def printerNoConversionError : TestDecl :=
-  (TestDecl.forAll "printer: no conversion error on generated programs"
+  (TestDecl.property "printer: no conversion error on generated programs"
     (fun (gp : GenProgram) => checkProgramPrintsWithoutError gp.prog)).withPanel genPrinterProgramProp

@@ -18,7 +18,7 @@ open StrataGenerators.Stmt.TestSupport
     `some τ`, for exactly the `τ` the variable carries in the context. -/
 @[strata_property]
 def fnFvarsAnnotated : TestDecl :=
-  (TestDecl.forAll "function: fvars annotated by context type map"
+  (TestDecl.property "function: fvars annotated by context type map"
     (fun (gf : GenFunction) => functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func)).withPanel
     genAndCheckFunctionFvarsAnnotated
 
@@ -28,7 +28,7 @@ def fnFvarsAnnotated : TestDecl :=
     `FuncHasTypeA C Γ` for any `Γ`. -/
 @[strata_property]
 def fnTypeCheckSound : TestDecl :=
-  (TestDecl.forAll
+  (TestDecl.property
     "function: typeCheck output satisfies FuncHasTypeA (typeCheck_annotated_sound)"
     (fun (gf : ClosedGenFunction) => checkTypeCheckAnnotatedSound gf.func)).withPanel
     genAndCheckFunctionTypeCheckSound
@@ -37,7 +37,7 @@ def fnTypeCheckSound : TestDecl :=
     `StepStar.type_preserved` / `eval_denote_sound`. -/
 @[strata_property]
 def fnBodyPreservation : TestDecl :=
-  (TestDecl.forAll "function: body type preserved under eval"
+  (TestDecl.property "function: body type preserved under eval"
     (fun (gf : ClosedGenFunction) => checkFunctionBodyPreservation gf.func)).withPanel
     genAndCheckFunctionBodyPreservation
 
@@ -49,7 +49,7 @@ def fnBodyPreservation : TestDecl :=
     analogue of exactly this. -/
 @[strata_property]
 def fnTypeCheckComplete : TestDecl :=
-  (TestDecl.forAll "function: typeCheck accepts generated functions (completeness)"
+  (TestDecl.property "function: typeCheck accepts generated functions (completeness)"
     (fun (gf : ClosedGenFunction) => checkFunctionTypeCheckerComplete gf.func)).withPanel
     genAndCheckFunctionTypeCheckComplete
 
@@ -58,7 +58,7 @@ def fnTypeCheckComplete : TestDecl :=
     red while the property above stays red for the same reason it already was. -/
 @[strata_property]
 def fnRejectionOnlyMeasure : TestDecl :=
-  .forAll "function: typeCheck rejections are only measure-without-body"
+  .property "function: typeCheck rejections are only measure-without-body"
      (fun (gf : ClosedGenFunction) => funcRejectionImpliesMeasureNoBody gf.func)
 
 /-- Pretty-print → parse → re-print is a fixed point.

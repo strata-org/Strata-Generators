@@ -10,12 +10,12 @@ the value it quantifies over.
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  .forAll "mypass: idempotent" "mypass" fun (gp : GenProgram) => checkMyPass gp.prog
+  .property "mypass: idempotent" fun (gp : GenProgram) => checkMyPass gp.prog
 ```
 
 `GenProgram` already carries `Arbitrary`/`Repr`/`Shrinkable` instances — they live in
 `StrataGenerators.TestScaffold`, which stays the single source of truth for *how* each
-shape is drawn, shrunk and printed — so `TestDecl.forAll` needs nothing from this
+shape is drawn, shrunk and printed — so `TestDecl.property` needs nothing from this
 module in order to run that property.
 
 What this module adds is a fourth instance: `TycheFeatures`, the breakdown of a
@@ -25,9 +25,9 @@ facts about a generated program, and every property over `GenProgram` wants the 
 axes. Declaring them once here is what makes a Tyche panel free for a property written
 later, and what lets a reader tell a vacuous draw from a live one.
 
-The `Gens.*` values below are those same instances reified as `GenSpec`s. A property
-needs one only in order to *deviate* from the type's default generator — see
-`GenSpec.withRender`, `GenSpec.withFeatures` and `TestDecl.property`.
+The `Generators.*` values below are those same instances reified as `PropertyRunner`s.
+A property needs one only in order to *deviate* from the type's default — see
+`PropertyRunner.withRender`, `PropertyRunner.withFeatures` and `TestDecl.forAll`.
 -/
 
 open Lambda Core Imperative Plausible
@@ -35,7 +35,7 @@ open StrataGenerators.Stmt.TestSupport
 open StrataGenerators.Program.TestSupport
 open ProgramGen.TestSupport
 
-namespace StrataGenerators.Test.Gens
+namespace StrataGenerators.Test.Generators
 
 -- ── Feature extraction ────────────────────────────────────────────────
 -- Ported from the hand-written panels of `StrataGenerators.TycheViz`, where each
@@ -159,8 +159,8 @@ def blockFeatures (b : Lambda.MutualDatatype Unit) : List (String × Tyche.Featu
 -- ── The catalog ───────────────────────────────────────────────────────
 --
 -- One `TycheFeatures` instance per input type, then the same thing reified as a
--- `GenSpec`. A property that is content with the type's default generator — almost
--- every property — mentions neither: `TestDecl.forAll` finds the instances.
+-- `PropertyRunner`. A property content with the type's default — almost every
+-- property — mentions neither: `TestDecl.property` finds the instances.
 
 section Instances
 open StrataGenerators.Test
@@ -219,32 +219,32 @@ instance : TycheFeatures GenIndepBlock := ⟨fun gb => blockFeatures gb.block⟩
 
 end Instances
 
--- The same generators as first-class values, for a property that needs to deviate from
--- the default: `Gens.program.withRender …` keeps every axis and changes the rendering.
+-- The same runners as first-class values, for a property that needs to deviate from the
+-- default: `Generators.program.withRender …` keeps every axis and changes the printer.
 
 open StrataGenerators.Test in
-def typedExpr      : GenSpec TypedExpr        := .ofInstances _
+def typedExpr      : PropertyRunner TypedExpr        := .ofInstances _
 open StrataGenerators.Test in
-def closedExpr     : GenSpec ClosedTypedExpr  := .ofInstances _
+def closedExpr     : PropertyRunner ClosedTypedExpr  := .ofInstances _
 open StrataGenerators.Test in
-def resolveExpr    : GenSpec ResolveTypedExpr := .ofInstances _
+def resolveExpr    : PropertyRunner ResolveTypedExpr := .ofInstances _
 open StrataGenerators.Test in
-def cmd            : GenSpec GenCmdWithCtx    := .ofInstances _
+def cmd            : PropertyRunner GenCmdWithCtx    := .ofInstances _
 open StrataGenerators.Test in
-def cmds           : GenSpec GenCmdsWithCtx   := .ofInstances _
+def cmds           : PropertyRunner GenCmdsWithCtx   := .ofInstances _
 open StrataGenerators.Test in
-def function       : GenSpec GenFunction      := .ofInstances _
+def function       : PropertyRunner GenFunction      := .ofInstances _
 open StrataGenerators.Test in
-def closedFunction : GenSpec ClosedGenFunction := .ofInstances _
+def closedFunction : PropertyRunner ClosedGenFunction := .ofInstances _
 open StrataGenerators.Test in
-def stmts          : GenSpec GenStmts         := .ofInstances _
+def stmts          : PropertyRunner GenStmts         := .ofInstances _
 open StrataGenerators.Test in
-def procs          : GenSpec GenProcs         := .ofInstances _
+def procs          : PropertyRunner GenProcs         := .ofInstances _
 open StrataGenerators.Test in
-def program        : GenSpec GenProgram       := .ofInstances _
+def program        : PropertyRunner GenProgram       := .ofInstances _
 open StrataGenerators.Test in
-def adtBlock       : GenSpec GenAdtBlock      := .ofInstances _
+def adtBlock       : PropertyRunner GenAdtBlock      := .ofInstances _
 open StrataGenerators.Test in
-def indepBlock     : GenSpec GenIndepBlock    := .ofInstances _
+def indepBlock     : PropertyRunner GenIndepBlock    := .ofInstances _
 
-end StrataGenerators.Test.Gens
+end StrataGenerators.Test.Generators

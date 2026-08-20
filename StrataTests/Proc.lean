@@ -94,11 +94,12 @@ def procTransforms : List TestDecl :=
 /-- `PrecondElim factory entries are stripped` is separated out because its panel
     needs a diagnostic view rather than the plain program: its minimized witness is
     the *empty* program, and the cause — output-factory entries that still carry a
-    precondition — is not in the program text at all. So the generator's renderer is
-    extended with `procFactoryStrippedDiagnostic` for this one property. -/
+    precondition — is not in the program text at all. So this is the one property that
+    names its `PropertyRunner` explicitly, to extend the printer with
+    `procFactoryStrippedDiagnostic`. -/
 @[strata_property]
 def procPrecondFactoryStripped : TestDecl :=
-  .property "proc: PrecondElim factory entries are stripped"
-    (Gens.procs.withRender fun gp =>
+  .forAll "proc: PrecondElim factory entries are stripped"
+    (Generators.procs.withRender fun gp =>
       procsRepr gp.procs ++ "\n\n" ++ procFactoryStrippedDiagnostic gp.procs)
     (fun gp => checkPrecondFactoryStripped gp.procs)

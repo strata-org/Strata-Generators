@@ -49,10 +49,10 @@ diagnostics that sample and print for themselves (`roundtripFunctionAction`,
 `programShrinkDiagnostic`, the two coverage reports).
 
 This is the **single source of truth for how each shape is drawn, shrunk and
-printed**. `StrataGenerators.Test.Gens` lifts each wrapper to a first-class
-`GenSpec` — the same three instances, as data — so a property can name its
-generator in its own file; and both test drivers reach the wrappers only through
-that catalog.
+printed**. Each wrapper's `Arbitrary`/`Repr`/`Shrinkable` instances are what
+`TestDecl.property` resolves, and `StrataGenerators.Test.Generators` adds the
+`TycheFeatures` instance and reifies the four as a `PropertyRunner` for the rare
+property that wants to deviate from them.
 
 Properties themselves are **not** here. Each one is a `@[strata_property]`
 declaration under `StrataTests/`, pairing its name with its check in one place;

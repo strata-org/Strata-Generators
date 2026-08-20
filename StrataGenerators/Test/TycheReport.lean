@@ -3,11 +3,12 @@ import StrataGenerators.Test.Types
 /-!
 # Tyche panels, derived
 
-One panel per registered property, generated from the property's own `GenSpec`.
+One panel per registered property, generated from the property's own `PropertyRunner`
+(which for almost every property is the one its input type's instances induce).
 
 The old front end wrote a panel by hand for each property family: a result
 structure, a `TycheSample` instance, a `gen*Prop` sampler, and a line in
-`runTychePanels`. Because a `GenSpec` already carries the renderer, the shrinker
+`runTychePanels`. Because a `PropertyRunner` already carries the printer, the shrinker
 and the feature breakdown, none of that is property-specific — so a panel comes
 free with a registration, and a property written in a user's own file is visible
 in Tyche without touching this module.
@@ -34,7 +35,7 @@ namespace StrataGenerators.Test
 
     The same shape as the bespoke minimizers the old panels used
     (`minimizeProgramCounterexample`, `shrinkWhile`), lifted to act on any
-    `GenSpec`'s shrinker. `fuel` bounds the walk; a shrinker that offers no
+    `PropertyRunner`'s shrinker. `fuel` bounds the walk; a shrinker that offers no
     reduction (the default) makes this the identity. -/
 def minimizeWith (shrink : α → List α) (fails : α → Bool) : Nat → α → α
   | 0, x => x
@@ -57,7 +58,7 @@ private instance : Tyche.TycheSample Mark where
 
 /-- Draw one sample for a property's panel and score it. `maxSize` bounds the
     generator size drawn per sample. -/
-private def sampleMark (spec : GenSpec α) (check : α → Bool) (name : String)
+private def sampleMark (spec : PropertyRunner α) (check : α → Bool) (name : String)
     (maxSize : Nat) : IO Mark := do
   let size ← IO.rand 0 maxSize
   let x ← Plausible.Gen.run spec.gen size
@@ -89,10 +90,9 @@ def writePanel (handle : IO.FS.Handle) (d : TestDecl) (cfg : RunConfig)
            features := (d.name, .nominal (if passed then "pass" else "fail"))
              :: features c } : Mark))
       d.name runStart
-  -- Nothing to sample: a closed `Bool`, a `Prop` whose input type is not recoverable
-  -- from the value, or an action that reports only a verdict. Such a property can still
-  -- have a panel, through `TestDecl.withPanel` above.
-  | .witness _ | .testable _ _ | .action _ => pure ()
+  -- Nothing to sample: a closed `Bool`, or an action that reports only a verdict. Such
+  -- a property can still have a panel, through `TestDecl.withPanel` above.
+  | .witness _ | .action _ => pure ()
 
 /-- Write one panel per registered property with a sampled or enumerated body, and
     one per diagnostic that supplied its own. Never affects the exit code. -/

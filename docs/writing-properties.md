@@ -20,7 +20,7 @@ def checkMyPassIdempotent (p : Core.Program) : Bool :=
 
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .forAll "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .property "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
 ```
 
 Then:
@@ -33,7 +33,7 @@ lake test                               # run everything
 
 `StrataTests/Example.lean` is a complete, working copy of this shape.
 
-The two arguments to `TestDecl.forAll` are the whole interface:
+The two arguments to `TestDecl.property` are the whole interface:
 
 | argument | meaning |
 |---|---|
@@ -121,7 +121,7 @@ instance : Shrinkable MyType := ⟨myShrinker⟩
 instance : TycheFeatures MyType := ⟨myFeatures⟩
 ```
 
-`forAll` then accepts `fun (x : MyType) => …` with nothing further declared. Two of
+`property` then accepts `fun (x : MyType) => …` with nothing further declared. Two of
 these are worth spending effort on:
 
 * **`Shrinkable`** may be `⟨fun _ => []⟩`, but a property without a shrinker reports
@@ -134,45 +134,31 @@ these are worth spending effort on:
   what makes that visible in Tyche. Put facts about the *type* here; they are shared by
   every property over it.
 
-### Deviating from the default generator
+### Deviating from the default
 
-To sample a type differently for one property, pass a `GenSpec` with
-`TestDecl.property`. `GenSpec.ofInstances MyType` is the default one, and
-`withRender` / `withFeatures` adjust it:
+A `PropertyRunner` bundles the generator, the printer, the shrinker and the Tyche axes
+for one input type. `TestDecl.property` builds it from the instances, so you never name
+one — except for the rare property that wants something else. Then use `TestDecl.forAll`,
+which is the explicit-generator sense of QuickCheck's `forAll`:
 
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  .property "proc: …"
-    (Gens.procs.withRender fun gp => procsRepr gp.procs ++ myDiagnostic gp.procs)
+  .forAll "proc: …"
+    (Generators.procs.withRender fun gp => procsRepr gp.procs ++ myDiagnostic gp.procs)
     (fun gp => checkMine gp.procs)
 ```
 
-`Gens.*` holds the default `GenSpec` for each type above, so you rarely build one from
-scratch.
-
-## Stating the property as a `Prop`
-
-`TestDecl.check` takes a `Prop` and runs it through the `Testable` instance Plausible
-synthesizes for it. This is the same elaboration `#test` and `Plausible.Testable.check`
-use, `mk_decorations` included, so anything you could write in `#test` works here:
-
-```lean
-@[strata_property]
-def myPropShaped : TestDecl :=
-  .check "mypass: idempotent under any fuel"
-    (∀ gp : GenProgram, ∀ n : Nat, myPass n gp.prog = myPass (n + 1) (myPass n gp.prog))
-```
-
-Reach for it when the `Prop` form buys something the `Bool` form cannot express: more
-than one `∀`, a `Decidable` hypothesis used as a guard, or a type whose
-`SampleableExt` instance samples through a proxy. The cost is that no Tyche panel can
-be derived, since a `Prop` does not expose the type it quantifies over. Prefer `forAll`
-otherwise.
+`Generators.*` holds the default runner for each type above, so you rarely build one
+from scratch. `PropertyRunner.ofInstances MyType` is that default; `withRender` and
+`withFeatures` adjust it. Exactly one property in the suite needs this
+(`proc: PrecondElim factory entries are stripped`, whose minimized witness is the empty
+program, so its counterexample needs a diagnostic view instead).
 
 ## The other three shapes of property
 
-Most properties are a `Bool` check over a sampled type. Three cases are not.
+`TestDecl.property` is the only entry point you need for a property that quantifies over
+one generated value, which is nearly all of them. Three cases are not that.
 
 ### A single constructed witness
 
@@ -233,15 +219,15 @@ def stmtTransforms : List TestDecl :=
 ```
 
 The annotation on the first entry fixes the type for the whole list. `familyOf` is the
-variant that takes an explicit `GenSpec`.
+variant that names a `PropertyRunner` explicitly.
 
 Prefer `@[strata_property]` for a standalone property, so its name is greppable from
 its own declaration.
 
 ## Tyche panels
 
-A registered property gets a panel automatically, built from the input type's
-instances: `Repr` draws the sample, `TycheFeatures` gives the axes, the verdict is the
+A registered property gets a panel automatically, built from its `PropertyRunner` —
+which for almost every property is the one its input type's instances induce: `Repr` draws the sample, `TycheFeatures` gives the axes, the verdict is the
 mark's status, and `Shrinkable` minimizes a failing sample before display. There is
 nothing to register.
 
@@ -252,7 +238,7 @@ lives next to the property rather than in a central list:
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  (TestDecl.forAll "mypass: …"
+  (TestDecl.property "mypass: …"
     (fun (gp : GenProgram) => checkMine gp.prog)).withPanel myPanelAction
 ```
 
@@ -305,10 +291,10 @@ one run.
 |---|---|
 | `StrataTests/*.lean` | the properties and diagnostics — the only place you add one |
 | `StrataTests.lean` | generated import root; rewritten by `lake test` |
-| `StrataGenerators/Test/Types.lean` | `TestDecl`, `GenSpec`, `Body`, and the runner |
+| `StrataGenerators/Test/Types.lean` | `TestDecl`, `PropertyRunner`, `Body`, and `runSampled` |
 | `StrataGenerators/Test/Registry.lean` | the three attributes |
 | `StrataGenerators/Test/Collect.lean` | `strata_registry%` / `strata_diagnostics%` |
-| `StrataGenerators/Test/Gens.lean` | the `TycheFeatures` instances and the default `GenSpec`s |
+| `StrataGenerators/Test/Generators.lean` | the `TycheFeatures` instances and the default `PropertyRunner`s |
 | `StrataGenerators/Test/Report.lean` | grouping, printing, exit code |
 | `StrataGenerators/Test/TycheReport.lean` | the derived panel |
 | `StrataGenerators/Test/Cli.lean` | the flags |

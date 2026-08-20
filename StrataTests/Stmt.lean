@@ -37,5 +37,5 @@ def stmtTransforms : List TestDecl :=
     verdict *and* why, so it keeps a bespoke one. -/
 @[strata_property]
 def stmtKleeneDefinedIff : TestDecl :=
-  (TestDecl.forAll "stmt: DetToKleene defined iff supported"
+  (TestDecl.property "stmt: DetToKleene defined iff supported"
     (fun (gs : GenStmts) => checkKleeneDefinedIff gs.stmts)).withPanel genKleeneDefined

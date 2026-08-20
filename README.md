@@ -139,7 +139,7 @@ def checkMyPassIdempotent (p : Core.Program) : Bool :=
 
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .forAll "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .property "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
 ```
 
 A name and a check. That is the whole registration. `lake test` discovers it, reports it under a `mypass`
@@ -148,9 +148,8 @@ group, and gives it a Tyche panel.
 The generator is chosen the way Plausible and QuickCheck choose it: by the **type** of
 the quantified value. `GenProgram` carries the `Arbitrary`/`Repr`/`Shrinkable` instances
 Plausible needs, so annotating the binder selects the whole-program generator, its
-renderer and its shrinker at once. The report group is the name's `mypass:` prefix,
-derived rather than declared. A property that is better stated as a `Prop` uses
-`.check` instead, which goes through the `Testable` instance exactly as `#test` does.
+printer and its shrinker at once. The report group is the name's `mypass:` prefix,
+derived rather than declared.
 
 ```bash
 lake test -- --list                     # confirm it was picked up
@@ -160,7 +159,7 @@ lake test -- --only="mypass:" --quick   # run just this group
 [`StrataTests/Example.lean`](./StrataTests/Example.lean) is a working copy of this
 shape, and **[`docs/writing-properties.md`](./docs/writing-properties.md)** is the
 full guide: how the harness discovers your file, which input types are generable, how
-to make a new type generable with the four instances, the `Prop` form, the three non-sampled property shapes (a single
+to make a new type generable with the four instances, the three non-sampled property shapes (a single
 witness, a finite input space, a self-driving `IO` action), opt-in gates such as
 `--smt`, registering a family at once, custom Tyche panels, and diagnostics.
 
@@ -209,7 +208,7 @@ property's verdict is the mark's status, and `Shrinkable` minimizes a failing sa
 before display.
 
 So the way to improve a panel is to improve the type's `TycheFeatures` instance — see
-[`StrataGenerators/Test/Gens.lean`](./StrataGenerators/Test/Gens.lean), where each
+[`StrataGenerators/Test/Generators.lean`](./StrataGenerators/Test/Generators.lean), where each
 shape's axes are declared once and shared by every property over it. Include at least
 one axis that explains *why* a property failed (`rejection_cause`, `decl_kinds`,
 `func_shape`), since that is what separates a vacuous pass from a real one.
@@ -224,7 +223,7 @@ with `withPanel`, in the `StrataTests/` file that declares it:
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  (TestDecl.forAll "mypass: …"
+  (TestDecl.property "mypass: …"
     (fun (gp : GenProgram) => checkMine gp.prog)).withPanel myPanelAction
 ```
 

@@ -34,7 +34,7 @@ def phaseNoOpWitnesses : List TestDecl :=
 @[strata_property]
 def phaseAllChangedFlag : TestDecl :=
   let name := "phase: every pipeline phase has a faithful changed flag"
-  (TestDecl.forAll name
+  (TestDecl.property name
     (fun (gp : GenProcs) => checkAllPhasesChangedFlag gp.procs)).withPanel
     (genPhaseSweepProp name (checkAllPhasesChangedFlag ·) allCorePhases)
 
@@ -43,6 +43,6 @@ def phaseAllChangedFlag : TestDecl :=
 @[strata_property]
 def phaseHonestChangedFlag : TestDecl :=
   let name := "phase: non-hardcoded pipeline phases have a faithful changed flag"
-  (TestDecl.forAll name
+  (TestDecl.property name
     (fun (gp : GenProcs) => checkHonestPhasesChangedFlag gp.procs)).withPanel
     (genPhaseSweepProp name (checkHonestPhasesChangedFlag ·) honestPhases)

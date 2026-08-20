@@ -10,7 +10,7 @@ A property author writes one declaration in one file:
 ```lean
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .property "mypass: the pass is idempotent" "mypass" Gens.program checkMyPass
+  .property "mypass: the pass is idempotent" "mypass" Generators.program checkMyPass
 ```
 
 and `lake test` runs it. Nothing in this package's internals has to be edited:

@@ -5,14 +5,14 @@ import StrataGenerators.Test.Report
 import StrataGenerators.Test.TycheReport
 import StrataGenerators.Test.Cli
 import StrataGenerators.Test.Root
-import StrataGenerators.Test.Gens
+import StrataGenerators.Test.Generators
 
 /-!
 # `StrataGenerators.Test` — the property-test front end
 
 The single import for writing a property. Everything a property author needs is
 re-exported here: the `TestDecl` type, the `@[strata_property]` attribute, and the
-generator catalog `Gens`.
+generator catalog `Generators`.
 
 ## Writing a property
 
@@ -29,7 +29,7 @@ def checkMyPassIdempotent (p : Core.Program) : Bool :=
 
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .forAll "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .property "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
 ```
 
 A name and a check. That is the whole registration: `lake test` runs it, reports it
@@ -46,27 +46,9 @@ The report group is the `area` of an `area: description` name — derived, never
 so it cannot disagree with the name. A prefix nothing has used before simply creates a
 new group.
 
-## Stating the property as a `Prop`
-
-`TestDecl.check` takes a `Prop` and runs it through the `Testable` instance Plausible
-synthesizes for it — the same elaboration `#test` and `Plausible.Testable.check` use,
-`mk_decorations` included:
-
-```lean
-@[strata_property]
-def myPropShaped : TestDecl :=
-  .check "mypass: idempotent under any fuel"
-    (∀ gp : GenProgram, ∀ n : Nat, myPass n gp.prog = myPass (n + 1) (myPass n gp.prog))
-```
-
-Reach for this when the `Prop` form buys something the `Bool` form cannot express:
-more than one `∀`, a `Decidable` hypothesis used as a guard, or a type whose
-`SampleableExt` instance samples through a proxy. The cost is that no Tyche panel can
-be derived, since a `Prop` does not expose the type it quantifies over.
-
 ## The generator instances
 
-A type is usable with `forAll` as soon as Plausible can sample it:
+A type is usable with `property` as soon as Plausible can sample it:
 
 | instance | supplies |
 |---|---|
@@ -79,17 +61,19 @@ A type is usable with `forAll` as soon as Plausible can sample it:
 classes: `num_decls`, `decl_kinds` and `rejection_cause` are facts about the *type*,
 not about any one claim, so declaring them once gives every later property the axes
 that tell a vacuous draw from a live one. The instances for this package's shapes are
-in `StrataGenerators.Test.Gens`; the generators themselves are in
+in `StrataGenerators.Test.Generators`; the generators themselves are in
 `StrataGenerators.TestScaffold`.
 
-To sample a type in a way its default `Arbitrary` instance does not, pass a `GenSpec`
-explicitly with `TestDecl.property` — `Gens.program.withRender …` keeps every axis and
-changes only the rendering.
+To sample a type in a way its default instances do not, name a `PropertyRunner`
+explicitly with `TestDecl.forAll` — the explicit-generator sense of QuickCheck's
+`forAll`. `Generators.program.withRender …` keeps every axis and changes only the
+printer. That is the only reason a property ever mentions a `PropertyRunner`.
 
 ## The other shapes
 
-Most properties are a `Bool` check over a sampled type, which is what
-`TestDecl.forAll` builds. Three other shapes exist for the cases that are not:
+`TestDecl.property` is the only entry point you need for a property that quantifies
+over one generated value, which is nearly all of them. Three other shapes exist for the
+cases that are not:
 
 * `TestDecl.witness` — a closed `Bool`. For a claim whose sharpest statement is one
   constructed program or one operator, where sampling would only obscure which case is
@@ -102,7 +86,7 @@ Most properties are a `Bool` check over a sampled type, which is what
 
 `@[strata_properties]` registers a `List TestDecl` at once; `family` pairs each name
 with its check in one line, for a family that shares an input type. `familyOf` and
-`TestDecl.property` are the variants that take an explicit `GenSpec`.
+`TestDecl.forAll` are the variants that name a `PropertyRunner` explicitly.
 
 `@[strata_diagnostic]` registers a `Diagnostic`: a report that prints and never gates
 the exit code, for a coverage statistic or a localisation tally.

@@ -29,13 +29,13 @@ open StrataGenerators.Test
     trusts fvar annotations. -/
 @[strata_property]
 def exprTypecheck : TestDecl :=
-  .forAll "expr: generated terms typecheck"
+  .property "expr: generated terms typecheck"
     (fun (te : TypedExpr) => LExpr.typeCheck (T := LExprParams') [] te.expr == some te.ty)
 
 /-- Preservation, on closed terms: if `∅ ⊢ e : τ` and `e →* e'` then `∅ ⊢ e' : τ`. -/
 @[strata_property]
 def exprPreservation : TestDecl :=
-  (TestDecl.forAll "expr: preservation under eval (closed)"
+  (TestDecl.property "expr: preservation under eval (closed)"
     (fun (te : ClosedTypedExpr) => checkPreservation te.expr te.ty)).withPanel genAndEval
 
 /-- Progress, on closed terms: a well-typed closed term is a value or can step.
@@ -44,14 +44,14 @@ def exprPreservation : TestDecl :=
     `if (∀x. e) then …` gets stuck. -/
 @[strata_property]
 def exprProgress : TestDecl :=
-  (TestDecl.forAll "expr: progress (closed)"
+  (TestDecl.property "expr: progress (closed)"
     (fun (te : ClosedTypedExpr) => checkProgress te.expr)).withPanel genAndCheckProgress
 
 /-- Evaluation introduces no *new* free variables. Variables already in the context
     may appear in the input and the output; eval may not invent one. -/
 @[strata_property]
 def exprFvarsPreserved : TestDecl :=
-  (TestDecl.forAll "expr: eval preserves fvars"
+  (TestDecl.property "expr: eval preserves fvars"
     (fun (te : TypedExpr) => checkFvarsPreserved te.expr)).withPanel genAndCheckFvarPreservation
 
 /-- After erasing *all* type annotations, `resolve` infers a principal type of which
@@ -69,7 +69,7 @@ def exprFvarsPreserved : TestDecl :=
     any counterexamples. -/
 @[strata_property]
 def exprResolveAfterErase : TestDecl :=
-  (TestDecl.forAll "expr: resolve after type erasure"
+  (TestDecl.property "expr: resolve after type erasure"
     (fun (te : ResolveTypedExpr) => checkResolveAfterErase te.expr te.ty)).withPanel
     genAndCheckResolveAfterErase
 
