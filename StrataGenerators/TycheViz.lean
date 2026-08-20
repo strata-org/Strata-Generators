@@ -1,5 +1,4 @@
 import StrataGenerators.Tyche
-import StrataGenerators.Properties
 import StrataGenerators.RetryGen
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.CmdHasTypeAGen.TestSupport
@@ -55,15 +54,22 @@ set (the pipeline-phase no-op witnesses, and the printer's bitvector widths and
 `Bv↔Int` operators) rather than a distribution — those are *enumerated* via
 `Tyche.writeInto` rather than sampled.
 
-This module holds every Tyche panel (feature extractors, `TycheSample` instances,
-`IO` generator wrappers, and `runTychePanels`). It is *not* an executable root: the
-merged test driver in `TestMain.lean` calls `runTychePanels` after the LSpec suite,
-gated behind a CLI flag (Tyche visualization is on by default).
+This module holds the panels that cannot be *derived*. Most can: given a property's
+`GenSpec` — which carries the renderer, the shrinker and the per-input feature
+breakdown — `StrataGenerators.Test.TycheReport` builds the panel for it, so a newly
+written property is visible in Tyche without touching this file. What is left here is
+the residue: a panel whose oracle is itself an `IO` action (a solver run, a
+format→parse round-trip), or one whose breakdown reports *why* a sample failed in
+terms the generated input alone does not determine (which pipeline phase lied, which
+printer site refused).
+
+Such a panel is attached to its property with `TestDecl.withPanel`, in the
+`StrataTests/` file that declares the property — so the panel and the claim it
+visualizes are read together, and there is no central list of panels to keep in step.
 
 All property *check* logic (pass/fail verdicts and the helper contexts behind them)
-is shared with the Plausible harness via the `*.TestSupport` modules — this file
-only adds the Tyche-specific visualization scaffolding (feature breakdowns, sample
-representations).
+lives in the `*.TestSupport` modules and is scored by the property itself; this file
+only adds visualization scaffolding (feature breakdowns, sample representations).
 -/
 
 -- ── Feature extraction ────────────────────────────────────────────────
@@ -527,7 +533,7 @@ def genAndCheckFunctionTypeCheckComplete (depth : Nat := 0) : IO FunctionTypeChe
 --
 -- `formatFuncAsProgram`, `parseCoreProgram`, `parseCoreProgramErr`, the
 -- structural shrinker (`shrinkWhile` et al.) and the failure predicates
--- (`failsRoundtrip`, …) are shared with the Plausible harness — see
+-- (`failsRoundtrip`, …) are shared with the gating property — see
 -- `StrataGenerators.FunctionHasTypeAGen.Roundtrip`.
 
 /-- Extract a short, position-independent "kind" from a parser error message,
@@ -701,7 +707,7 @@ def genAndCheckIdentProbe : IO IdentProbeResult := do
 -- Panels visualizing the six statement-transform / typechecker properties on
 -- well-typed statement lists from `genProgramStmts` (proven sound+complete
 -- against `StatementsHasTypeA`). The `check*` predicates and measurements are shared
--- with the Plausible harness via `StrataGenerators.StmtHasTypeAGen.TestSupport`.
+-- with the gating property via `StrataGenerators.StmtHasTypeAGen.TestSupport`.
 
 open StrataGenerators.Stmt.TestSupport
 
@@ -728,23 +734,6 @@ def stmtRepr (ss : List Statement) : String :=
   let suffix := if shapes.isEmpty then "" else s!"\n-- {" ".intercalate shapes}"
   formatStmts ss ++ suffix
 
-/-- A generated statement list paired with a single property's pass/fail verdict
-    and the property name (used as the pass/fail nominal feature). One structure
-    serves every boolean statement property; the panel title distinguishes them. -/
-structure StmtPropResult where
-  stmts : List Statement
-  passed : Bool
-  genSize : Nat
-  /-- Short property tag, surfaced as the primary nominal feature. -/
-  tag : String
-
-instance : Tyche.TycheSample StmtPropResult where
-  toSample r :=
-    { representation := stmtRepr r.stmts
-      status := if r.passed then .passed else .failed
-      features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
-        :: stmtListFeatures r.stmts r.genSize }
-
 /-- Generate one well-typed statement list in `IO` for the Tyche panels. Caps
     `size`/`len` low (mirrors the Plausible wrapper) so whole-list generation
     rarely hits an empty sub-generator. -/
@@ -753,12 +742,6 @@ def genStmtsForTyche : IO (List Statement × Nat) := do
   let len ← IO.rand 1 4
   let ss ← genProgramStmtsIO d len
   return (ss, d)
-
-/-- Build a `StmtPropResult` by generating a statement list and applying a check
-    predicate under the given tag. -/
-def genStmtProp (tag : String) (check : List Statement → Bool) : IO StmtPropResult := do
-  let (ss, d) ← genStmtsForTyche
-  return { stmts := ss, passed := check ss, genSize := d, tag }
 
 -- ── The `StmtToKleeneStmt` definedness panel (extra breakdown) ────────
 -- Unlike the pass/fail panels, this one also records *why* the transform was (un)
@@ -789,11 +772,10 @@ def genKleeneDefined : IO KleeneDefinedResult := do
   return { stmts := ss, defined := (kleeneStmts ss).isSome, genSize := d }
 
 -- ── Procedure ↔ transform-pass panels ────────────────────────────────
--- One panel per procedure/transform property. Each sample is a generated
--- procedure *list* (assembled into a `Program`), scored by the same shared
--- `check* : List Procedure → Bool` predicate the Plausible suite uses (via the
--- `Properties.procTransforms` bundle), so a panel and its `checkIO` counterpart
--- always agree. The two `changed`-flag panels discriminate the samples that bear on
+-- The procedure-list sampler and renderer the phase-sweep panel builds on. The
+-- per-property `proc:` panels are derived from `Gens.procs`, since their renderer and
+-- axes are exactly this file's `procsRepr` and `procListFeatures`; what survives here
+-- is what the derivation cannot express. The two `changed`-flag panels discriminate the samples that bear on
 -- the flag: for `proc: FilterProcedures changed flag is faithful`, those where
 -- nothing is removed; for `proc: PrecondElim changed flag is faithful`, the rarer
 -- ones where a declared function's body calls a partial function and a `$$wf` block
@@ -811,7 +793,7 @@ private def procListFeatures (ps : List Core.Procedure) (genSize : Nat) :
 
 open StrataGenerators.Procedure.TestSupport in
 /-- Render an assembled procedure program via Strata's own formatter. -/
-private def procsRepr (ps : List Core.Procedure) : String :=
+def procsRepr (ps : List Core.Procedure) : String :=
   let prog : Core.Program := { decls := ps.map (Core.Decl.proc · .empty) }
   (Core.formatProgram prog).pretty
 
@@ -843,7 +825,7 @@ instance : Tyche.TycheSample ProcPropResult where
 
 open StrataGenerators.Procedure.TestSupport in
 /-- Generate a well-typed procedure list in `IO` for the Tyche panels, via
-    `Gen.run` on the same `retryGen` wrapper the Plausible harness uses (the
+    `Gen.run` on the same `retryGen` wrapper the gating property uses (the
     direct `G := IO` path is unreliable — nested sub-generators hit empty-support
     fallbacks — so we run the retrying `Plausible.Gen` at a random size).
     Names are relabelled `P0…Pk` for collision-free identities.
@@ -905,7 +887,7 @@ open StrataGenerators.Procedure.TestSupport in
     Entries are grouped by `declared` to keep the two independent causes visually
     distinct, and the seeded-builtin list is truncated (58 entries on the empty
     program) since it is long and uniform; the count is always reported in full. -/
-private def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
+def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
   let offenders := precondFactoryStrippedOffenders ps
   if offenders.isEmpty then
     "-- output factory: no entry retains a precondition (property holds)"
@@ -931,28 +913,11 @@ private def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
       ([s!"-- factoryStripped offenders: {offenders.length} factory entries retain a precondition"]
         ++ declaredBlock ++ builtinBlock)
 
-open StrataGenerators.Procedure.TestSupport in
-/-- The `factoryStripped` panel: as `genProcProp`, but appends the offending
-    factory entries to the representation and records their counts as features, so
-    the panel shows *why* the property fails rather than just an empty program.
-
-    The verdict still comes from the shared `checkPrecondFactoryStripped`, so this
-    panel and its Plausible counterpart continue to agree. -/
-def genProcFactoryStrippedProp (tag : String) (check : List Core.Procedure → Bool) :
-    IO ProcPropResult := do
-  let r ← genProcProp tag check
-  let offenders := precondFactoryStrippedOffenders r.procs
-  return { r with
-    diagnostic := procFactoryStrippedDiagnostic r.procs
-    extraFeatures :=
-      [ ("factory_offenders", .ordinal offenders.length),
-        ("declared_offenders", .ordinal (offenders.filter (·.2.2)).length),
-        ("builtin_offenders", .ordinal (offenders.filter (fun e => !e.2.2)).length) ] }
-
 -- ── Whole-program panels ────────────────────────────────────────────
--- One panel per property in `Properties.programChecks`. Each sample is a whole
--- generated `Program` (every declaration kind, ambient context threaded across the
--- fold) with a pass/fail verdict.
+-- The whole-program sampler and feature breakdown. `programFeatures` is duplicated as
+-- `Gens.program`'s feature function, which is where the derived `program:` panels get
+-- their axes; the copy here backs the printer panel below, whose verdict is an `IO`
+-- computation and so cannot be derived.
 --
 -- For the `typechecker accepts generated programs` panel, ~60% of draws are
 -- rejected on one of three known causes, and the `rejection_cause` feature below is
@@ -983,24 +948,6 @@ private def programFeatures (p : Core.Program) (genSize : Nat) :
     ("rejection_cause", .nominal (if causes.isEmpty then "none" else "+".intercalate causes)),
     ("generator_size", .ordinal genSize) ]
 
-/-- A generated program paired with one property's verdict and the property name. -/
-structure ProgramPropResult where
-  prog : Core.Program
-  passed : Bool
-  genSize : Nat
-  tag : String
-
-open StrataGenerators.Program.TestSupport in
-instance : Tyche.TycheSample ProgramPropResult where
-  toSample r :=
-    -- Render via Strata's own formatter, annotating a typechecker-rejected program
-    -- with the gap it bears via the *shared* `programStatusNote` — the same function
-    -- the Plausible `Repr` uses, so a counterexample reads identically in both views.
-    { representation := (Core.formatProgram r.prog).pretty ++ programStatusNote r.prog
-      status := if r.passed then .passed else .failed
-      features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
-        :: programFeatures r.prog r.genSize }
-
 /-- Generate a whole program in `IO` for the Tyche panels, via `ProgramGen.sample`
     (which runs the generator through the retrying `Plausible.Gen` interpretation —
     the direct `G := IO` path is unreliable, as `ProgramGen.sample`'s docstring
@@ -1011,31 +958,8 @@ def genProgramForTyche : IO (Core.Program × Nat) := do
   let prog ← ProgramGen.sample numDecls {} 30000 genSize
   return (prog, genSize)
 
-open StrataGenerators.Program.TestSupport in
-/-- Build a `ProgramPropResult` by generating a program and applying a check
-    predicate under the given tag.
-
-    A failing sample is first minimized by `minimizeProgramCounterexample`, so the
-    panel shows the smallest well-typed reproducer rather than the raw draw — the
-    same shrink-then-report pattern `genProcProp` uses. The minimized program still
-    fails `check` and is still well-typed, so the verdict is unchanged; features are
-    recomputed from it, so `num_decls`/`program_size` describe what is displayed.
-
-    For `programTypecheck` specifically the minimizer is a no-op by construction
-    (the negative result *is* oracle rejection, so no candidate survives the filter)
-    and the raw draw is shown, which is why the `rejection_cause` feature exists.
-    Other samples are reported as generated. -/
-def genProgramProp (tag : String) (check : Core.Program → Bool) : IO ProgramPropResult := do
-  let (p, d) ← genProgramForTyche
-  if check p then
-    return { prog := p, passed := true, genSize := d, tag }
-  else
-    return { prog := minimizeProgramCounterexample check 400 p, passed := false,
-             genSize := d, tag }
-
 -- ── Pipeline-phase `changed`-flag panels ────────────────────────────
--- One panel per property in `Properties.phaseNoOpWitnesses` / `phaseChangedFlags`
--- (see `StrataGenerators.PhaseChangedFlag`). The properties have two shapes and so
+-- See `StrataGenerators.PhaseChangedFlag`. The properties have two shapes and so
 -- do the panels:
 --
 --   * the two no-op witnesses take no generated input at all — each is one
@@ -1143,17 +1067,8 @@ def genPhaseSweepProp (tag : String) (check : List Core.Procedure → Bool)
            diagnostic := phaseChangedFlagDiagnostic phases prog,
            hasLoop := programHasLoop prog }
 
-open StrataGenerators.PhaseChangedFlag in
-/-- The phase list a sweep property quantifies over, so the panel's diagnostic
-    reports on *exactly* the phases its check scored. Keyed on the property name
-    because the check is a `List Procedure → Bool` that has already closed over its
-    list; the narrower sweep is the one that excludes `knownDefectivePhases`. -/
-def sweptPhasesFor (name : String) : List NamedPhase :=
-  if name == PropertyNames.phaseHonestChangedFlag then honestPhases else allCorePhases
-
 -- ── Printer-expressiveness panels ───────────────────────────────────
--- One panel per property in `Properties.printerWitnesses` / the whole-program
--- printer property (see `StrataGenerators.PrinterCoverage`).
+-- See `StrataGenerators.PrinterCoverage`.
 --
 -- The three witness panels enumerate a *fixed finite* input space — the registered
 -- bitvector widths, the eighteen `Bv↔Int` operators, the widths `0..63` — rather
@@ -1428,7 +1343,7 @@ instance : Tyche.TycheSample EscapingResult where
       ] }
 
 /-- Draw one string and record whether its SMT-LIB literal is printable ASCII. -/
-private def genEscapingSample : IO EscapingResult := do
+def genEscapingSample : IO EscapingResult := do
   let s ← StrataGenerators.PrimitiveGens.genInterestingString (G := IO)
   return { s := s,
            passed := StrataGenerators.SmtStringEscaping.escapedIsPrintableAscii s,
@@ -1514,7 +1429,7 @@ lt in both directions gave {r.lt₁} and {r.lt₂}, for two spellings of {value}
 
 /-- Draw one pair of equal value and record the verdict of the property that
     `check` states. -/
-private def genDecimalPairProp
+def genDecimalPairProp
     (check : StrataDDM.Decimal → StrataDDM.Decimal → Bool) : IO DecimalPairResult := do
   let (d₁, d₂) ← StrataGenerators.DecimalAgreement.genSameValuePair (G := IO)
   return { d₁ := d₁, d₂ := d₂,
@@ -1534,205 +1449,17 @@ private def genDecimalPairProp
 -- cross-referenced at all, whether Strata accepted it, and whether it passed the
 -- SMT-safety screen the `--smt` law properties apply.
 
-/-- A generated datatype block paired with one property's verdict. -/
-structure AdtBlockPropResult where
-  block : Lambda.MutualDatatype Unit
-  passed : Bool
-  tag : String
-
-open StrataGenerators.MutualBlockShape StrataGenerators.AdtLaws in
-instance : Tyche.TycheSample AdtBlockPropResult where
-  toSample r :=
-    { representation := renderBlock r.block
-      status := if r.passed then .passed else .failed
-      features :=
-        [ (r.tag, .nominal (if r.passed then "pass" else "fail")),
-          ("num_datatypes", .ordinal r.block.length),
-          ("num_constrs", .ordinal (r.block.foldl (fun n d => n + d.constrs.length) 0)),
-          ("params_uniform", .nominal (if blockParamsUniform r.block then "yes" else "no")),
-          ("independent", .nominal (if isIndependentBlock r.block then "yes" else "no")),
-          ("addMutualBlock", .nominal (if blockAccepted r.block then "accepted" else "rejected")),
-          ("smt_safe", .nominal (if blockIsSmtSafe r.block then "yes" else "no")) ] }
-
-/-- Sample an ordinary block and score it with `check`. Drawn at `maxSize := 0`,
-    matching the `Arbitrary GenAdtBlock` instance the Plausible harnesses use, so a
-    panel and its LSpec counterpart see the same distribution. -/
-def genAdtBlockProp (tag : String) (check : Lambda.MutualDatatype Unit → Bool) :
-    IO AdtBlockPropResult := do
-  let block ← DatatypeGen.sample (maxSize := 0)
-  return { block, passed := check block, tag }
-
-/-- Sample a block of *independent* datatypes and score it with `check`. Mirrors
-    `Arbitrary GenIndepBlock`. -/
-def genIndepBlockProp (tag : String) (check : Lambda.MutualDatatype Unit → Bool) :
-    IO AdtBlockPropResult := do
-  let extra ← IO.rand 0 2
-  let block ← StrataGenerators.MutualBlockShape.genIndependentBlock (G := IO) (extra + 1)
-  return { block, passed := check block, tag }
-
-
--- ── Panel runner ────────────────────────────────────────────────────
-
-/-- Write every Tyche panel to `handle` in JSONL format, `numSamples` samples per
-    panel. `startTime` is the run-start timestamp shared by all panels (from
-    `IO.monoMsNow`). Called by the merged test driver after the LSpec suite, unless
-    Tyche visualization is disabled via the CLI flag.
-
-    Each panel's title comes from the shared `PropertyNames.*` catalog, and each
-    pass/fail verdict comes from the shared `check*` predicates — so a panel here
-    and its `checkIO` counterpart in the Plausible suite always agree. -/
-
-def runTychePanels (handle : IO.FS.Handle) (numSamples : Nat) (startTime : Nat) : IO Unit := do
-  let panel {α} [Tyche.TycheSample α] (title : String) (gen : IO α)
-      (count : Nat := numSamples) : IO Unit :=
-    Tyche.runInto handle gen title count startTime
-  -- For a property whose input space is a fixed finite set rather than a
-  -- distribution: enumerate it once instead of sampling it `numSamples` times.
-  let enumerate {α} [Tyche.TycheSample α] (title : String) (samples : List α) :
-      IO Unit :=
-    Tyche.writeInto handle samples title startTime
-
-  panel PropertyNames.exprPreservation genAndEval
-  panel PropertyNames.exprProgress genAndCheckProgress
-  panel PropertyNames.exprFvarsPreserved genAndCheckFvarPreservation
-  panel PropertyNames.exprResolveAfterErase genAndCheckResolveAfterErase
-
-  panel PropertyNames.exprSmtStringEscaping genEscapingSample
-
-  panel PropertyNames.realDecimalEqFold
-    (genDecimalPairProp StrataGenerators.DecimalAgreement.checkEqFold)
-  panel PropertyNames.realDecimalTrichotomy
-    (genDecimalPairProp StrataGenerators.DecimalAgreement.checkTrichotomy)
-
-  -- Command-level property tests (one panel each). The first four share the
-  -- `CmdPropResult` shape and a shared name↔check bundle (`Properties.cmdSingleVerdict`,
-  -- also consumed by the Plausible harness); eval/run agreement has its own
-  -- richer panel.
-  for p in Properties.cmdSingleVerdict do
-    panel p.name (genCmdProp (fun c ctx => p.check (c, ctx)))
-  panel PropertyNames.cmdEvalRunAgreement genAndCheckEvalRunAgreement
-
-  -- Function generator property: fvars in generated functions are annotated
-  -- consistently with the context type map.
-  panel PropertyNames.fnFvarsAnnotated genAndCheckFunctionFvarsAnnotated
-  -- Function.typeCheck_annotated_sound: when typeCheck accepts a generated
-  -- (spec-well-typed) function, the output satisfies the declarative spec
-  -- FuncHasTypeA.
-  panel PropertyNames.fnTypeCheckSound
-    genAndCheckFunctionTypeCheckSound
-  -- Typechecker COMPLETENESS (dual to the panel above). Rejected functions render
-  -- as failed marks — the measure-without-body gap shows up as failures, with
-  -- `measure_no_body = yes` identifying the cause.
-  panel PropertyNames.fnTypeCheckComplete
-    genAndCheckFunctionTypeCheckComplete
-  -- Pretty-print / parse round-trip: format → parse → re-format is a fixed point
-  -- (parse failures marked separately).
-  panel PropertyNames.fnRoundtrip genAndCheckFunctionRoundtrip
-  -- Type preservation under eval (Step.type_preserved / StepStar.type_preserved /
-  -- eval_denote_sound). Evaluating a function body preserves the declared output.
-  panel PropertyNames.fnBodyPreservation genAndCheckFunctionBodyPreservation
-  -- Special-character identifier round-trip: a legal identifier containing special
-  -- (non-alphanumeric) characters (`genQuotedName`) in one syntactic position; a
-  -- parse failure or mismatch is a minimal printer/parser bug reproducer.
-  panel PropertyNames.fnIdentProbe genAndCheckIdentProbe
-
-  -- ── Statement generator panels (transforms + typechecker) ───────────
-  -- One panel per property. Each generates a
-  -- well-typed statement list (proven sound+complete against `StatementsHasTypeA`) and
-  -- visualizes the property's pass/fail against structural features.
-  -- Shared name↔check bundles (`Properties.stmtTransforms`), also consumed by the
-  -- Plausible harness, so a name is never paired with the wrong check.
-  for p in Properties.stmtTransforms do
-    panel p.name (genStmtProp p.name p.check)
-
-  -- Kleene definedness gets its own richer panel (definedness + why).
-  panel PropertyNames.stmtKleeneDefinedIff genKleeneDefined
-
-  -- ── Procedure ↔ transform-pass panels ──────────────────────────────
-  -- One panel per property (four FilterProcedures, five PrecondElim, four
-  -- ANFEncoder), from the shared `Properties.procTransforms` bundle (also consumed
-  -- by both Plausible harnesses).
-  -- `factoryStripped` gets a diagnostic representation instead of the plain
-  -- program: its minimized witness is the empty
-  -- program and the cause (factory entries retaining preconditions) would
-  -- otherwise be invisible. Every other property uses the uniform renderer.
-  for p in Properties.procTransforms do
-    if p.name == PropertyNames.procPrecondFactoryStripped then
-      panel p.name (genProcFactoryStrippedProp p.name p.check)
-    else
-      panel p.name (genProcProp p.name p.check)
-
-  -- ── Whole-program panels ───────────────────────────────────────────
-  -- One panel per property in the shared `Properties.programChecks` and
-  -- `Properties.programADTProps` bundles (both also consumed by both Plausible
-  -- harnesses, so the LSpec suite and these panels cover the same ten checks). A
-  -- failing sample is minimized by the whole-program shrinker before display, except
-  -- for `programTypecheck`, whose failures are oracle rejections and so cannot
-  -- shrink — there the `rejection_cause` feature is what makes the three gaps
-  -- legible. The `programADTProps` panels pass on every draw; their value is the
-  -- `decl_kinds` feature, which shows whether a sample even contained a datatype
-  -- block for the ADT-derived-call path to be exercised.
-  for p in Properties.programChecks ++ Properties.programADTProps do
-    panel p.name (genProgramProp p.name p.check)
-
-  -- ── Pipeline-phase `changed`-flag panels ───────────────────────────
-  -- The two no-op witnesses are enumerated (one constructed program each, from the
-  -- shared `Properties.phaseNoOpWitnesses` bundle, so the panel scores the same
-  -- `NoOpWitness.check` both Plausible harnesses assert). The two sweeps sample
-  -- generated procedure lists from the shared `Properties.phaseChangedFlags`
-  -- bundle, each reporting which of the phases *it* sweeps were unfaithful.
-  for (name, witness) in Properties.phaseNoOpWitnesses do
-    enumerate name [({ witness } : PhaseNoOpResult)]
-  for p in Properties.phaseChangedFlags do
-    panel p.name (genPhaseSweepProp p.name p.check (sweptPhasesFor p.name))
-
-  -- ── Printer-expressiveness panels ───────────────────────────────────
-  -- The whole-program property samples (and shrinks, since its oracle is the
-  -- printer rather than the typechecker); the three witness properties enumerate
-  -- their fixed input space — the six registered widths, the eighteen `Bv↔Int`
-  -- operators, the widths `0..63` — scoring each element with the shared per-element
-  -- check whose conjunction is the property the Plausible harnesses assert.
-  panel PropertyNames.printerNoConversionError genPrinterProgramProp
-  enumerate PropertyNames.printerBv128Literal
-    (StrataGenerators.PrinterCoverage.factoryBvWidths.map fun w =>
-      ({ width := w,
-         passed := StrataGenerators.PrinterCoverage.checkBvLitPrints w } : BvLitWidthResult))
-  enumerate PropertyNames.printerBvIntConversions bvIntConversionSamples
-  enumerate PropertyNames.printerBvWidthAgreement bvWidthAgreementSamples
-
-  -- ── Panels for the eight unproven Core transform passes ────────────
-  -- One panel per property in the shared `Properties.unprovenTransforms` bundle
-  -- (also consumed by both Plausible harnesses), for the passes in
-  -- `Strata/Transform/` that carry no correctness proof. Each sample is
-  -- a whole generated program, so the `programFeatures` breakdown
-  -- (`num_decls`, `decl_kinds`, `program_size`, `rejection_cause`) applies
-  -- unchanged, and `decl_kinds` is what makes a vacuous panel legible: a property
-  -- about the axioms is uninformative on a sample that declares none.
-  --
-  -- Several of these panels are discriminated by shape: `s2u: every block is
-  -- reachable from the entry` by whether a body holds a labelled block, `s2u: a
-  -- cfg-bodied procedure prints` by whether a procedure is declared, `loop: LoopElim
-  -- mints distinct block labels` by whether a loop is present, and the two
-  -- `procInline` ones by the rarer samples that hold a call. So `decl_kinds` and
-  -- `program_size` separate a live sample from a vacuous one on each.
-  for p in Properties.unprovenTransforms do
-    panel p.name (genProgramProp p.name p.check)
-
-  -- ── ADT-law, alias-resolution and mutual-block panels ──────────────
-  -- The block-based properties (`Properties.adtBlockChecks` over ordinary blocks,
-  -- `Properties.mutualIndepChecks` over independent ones) sample through the block
-  -- panel; the two alias properties quantify over a whole program, so they reuse
-  -- `genProgramProp` unchanged — same renderer, same features, same shrinking as the
-  -- `program:` panels.
-  --
-  -- One panel shows an honest failure: `mutual: derived functions bind every type
-  -- variable they mention` is red on every sample whose `params_uniform` feature is
-  -- `no`, which is exactly what that feature is there to show. The three solver-backed
-  -- `adt:` properties have no panel — they are `--smt`-only `IO` actions with their own
-  -- per-family tallies, like `expr: SMT/concrete eval agreement`.
-  for p in Properties.adtBlockChecks do
-    panel p.name (genAdtBlockProp p.name p.check)
-  for p in Properties.mutualIndepChecks do
-    panel p.name (genIndepBlockProp p.name p.check)
-  for p in Properties.aliasChecks do
-    panel p.name (genProgramProp p.name p.check)
+-- ── Panels are attached to properties, not registered here ──────────
+--
+-- There is deliberately no `runTychePanels` any more. A panel used to be a line in
+-- a central function, which is one of the places a new property had to be wired
+-- into; now `StrataGenerators.Test.TycheReport` *derives* a panel from a property's
+-- `GenSpec` (the renderer, the shrinker and the feature breakdown all live there),
+-- and the richer panels above are attached to their properties with
+-- `TestDecl.withPanel` in the `StrataTests/` file that declares them.
+--
+-- The generators above are therefore the panels that are *not* derivable: an `IO`
+-- oracle (a solver run, a format→parse round-trip), or a breakdown of why a sample
+-- failed that the generated input alone does not determine. Everything whose panel
+-- was `render + verdict + per-input features` is now derived, since `GenSpec`
+-- already carries exactly those three.
