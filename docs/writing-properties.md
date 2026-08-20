@@ -1,11 +1,12 @@
 # Writing a property
 
-Everything about a property lives in one file that you create. You never edit a
-file in `StrataGenerators/`.
+A property goes in whatever file under `StrataTests/` you think it belongs in — an
+existing one or a new one, one property or forty. You never edit a file in
+`StrataGenerators/`.
 
 ## The short version
 
-Create `StrataTests/MyPass.lean`:
+Add this to any file under `StrataTests/`, or create a new one:
 
 ```lean
 import StrataGenerators.Test
@@ -64,10 +65,20 @@ That is the same mechanism Lake uses for `@[test_driver]`, and the same idea as
 
 Lean links statically, so a declaration is only *visible* to the driver if the driver
 transitively imports the module it lives in — the analogue of `mod tests;` in Rust.
-That last hop is the generated `StrataTests.lean` import root, which the `lake test`
-script rewrites from the contents of `StrataTests/` before it builds. So dropping a
-file into `StrataTests/` is enough; you never edit `StrataTests.lean` (and `lake run
-testRoot` regenerates it on its own if you want to build without running).
+That last hop is the generated `StrataTests.lean` import root.
+
+**Adding a property to an existing file needs nothing**: the import list does not
+change. If you **add or remove a file** under `StrataTests/`, regenerate the root:
+
+```bash
+lake exe gen-test-root
+```
+
+You never edit `StrataTests.lean` by hand. Forgetting is not silent: the driver
+rewrites a stale root and asks to be re-run, and `#verify_test_root` in the root fails
+the build. After *removing* a file you must regenerate before the build succeeds,
+since the root still imports a module that no longer exists — Lake reports that as a
+plain `bad import`, so run `lake exe gen-test-root` when you see it.
 
 Two properties may not share a name — the driver refuses to run and names the
 duplicates, because two properties under one name would collapse their Tyche panels

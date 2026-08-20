@@ -3,17 +3,18 @@ import StrataGenerators.Test
 /-!
 # A worked example
 
-This file exists to be copied. It is one property, complete: the check, the
-generator it draws from, and the name — with nothing registered anywhere else.
+This file exists to be copied. Each property here is complete on its own: the check,
+the type it draws from, and the name — with nothing registered anywhere else.
 
 ```
 lake test -- --list                        # confirm it was picked up
 lake test -- --only="example:" --quick     # run just this group
 ```
 
-To add your own, copy this file under `StrataTests/`, rename the declarations, and
-run `lake test`. The `lake test` script regenerates the `StrataTests.lean` import
-root from the directory, so there is no list to add yourself to.
+To add your own, put it in whatever file under `StrataTests/` it belongs in — this one,
+another, or a new one — and run `lake test`. A new *file* also needs
+`lake exe gen-test-root`, which rewrites the `StrataTests.lean` import root from the
+directory listing, so there is no list you maintain by hand.
 -/
 
 open Lambda Core Imperative

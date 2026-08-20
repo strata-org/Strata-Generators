@@ -68,9 +68,7 @@ lake test -- --quick
 `--quick` runs 100 trials per property at a maximum input size of 40. Omit it and the
 full suite — 145+ properties — takes 10+ minutes.
 
-`lake test` regenerates the `StrataTests.lean` import root from the contents of
-`StrataTests/`, then builds and runs the driver, so a newly added property file needs
-no other step. To configure the run, pass arguments through after `--`:
+To configure the run, pass arguments through after `--`:
 
 ```bash
 lake test -- [numTrials] [maxSize] [flags]
@@ -103,8 +101,8 @@ The exit code is the property verdict. Diagnostics and the Tyche pass never affe
 You can also build and run the driver directly:
 
 ```bash
-lake build strata-test
-.lake/build/bin/strata-test [numTrials] [maxSize] [flags]
+lake build test
+.lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
 `lake test -- --list` prints the full list of properties tested; each one is declared
@@ -126,9 +124,9 @@ package honest about its LSpec dependency.
 
 ## Adding a new property
 
-Everything about a property — its check, its generator, and its name — goes in one
-file that you create under [`StrataTests/`](./StrataTests). You do not edit any file
-in `StrataGenerators/`.
+A property — its check, its generator, and its name — goes in whatever file under
+[`StrataTests/`](./StrataTests) you think it belongs in: an existing one or a new one,
+one property or forty. You do not edit any file in `StrataGenerators/`.
 
 ```lean
 import StrataGenerators.Test
@@ -161,8 +159,8 @@ lake test -- --only="mypass:" --quick   # run just this group
 
 [`StrataTests/Example.lean`](./StrataTests/Example.lean) is a working copy of this
 shape, and **[`docs/writing-properties.md`](./docs/writing-properties.md)** is the
-full guide: which input types are generable, how to make a new type generable with the
-four instances, the `Prop` form, the three non-sampled property shapes (a single
+full guide: how the harness discovers your file, which input types are generable, how
+to make a new type generable with the four instances, the `Prop` form, the three non-sampled property shapes (a single
 witness, a finite input space, a self-driving `IO` action), opt-in gates such as
 `--smt`, registering a family at once, custom Tyche panels, and diagnostics.
 
@@ -178,8 +176,8 @@ The test driver writes Tyche panels by default, so a plain run produces the
 JSONL file alongside the property-test results:
 
 ```bash
-lake build strata-test
-.lake/build/bin/strata-test [numTrials] [maxSize]
+lake build test
+.lake/build/bin/test [numTrials] [maxSize]
 ```
 
 Use these CLI flags to control the output:
@@ -194,7 +192,7 @@ having Tyche visualizations, pass the following CLI args manually
 to the test executable:
 
 ```bash
-.lake/build/bin/strata-test 100 40 --tyche-samples=200
+.lake/build/bin/test 100 40 --tyche-samples=200
 ```
 
 ### Viewing Tyche visualizations
@@ -239,8 +237,8 @@ per element rather than sampling the space with replacement.
 Run the following to produce the Tyche visualizations with a small no. of tests:
 
 ```bash
-lake build strata-test
-.lake/build/bin/strata-test 100 40 --tyche-samples=200
+lake build test
+.lake/build/bin/test 100 40 --tyche-samples=200
 ```
 
 Then, in VS Code, do `Cmd+Shift+P` → `Tyche: Open`, and click on the relevant panel.

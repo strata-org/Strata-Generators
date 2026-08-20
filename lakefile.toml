@@ -1,0 +1,56 @@
+name = "strata-generators"
+version = "0.1.0"
+defaultTargets = ["StrataGenerators", "StrataTests"]
+testDriver = "test"
+
+[[require]]
+name = "Strata"
+git = "https://github.com/strata-org/Strata"
+rev = "main"
+
+[[require]]
+name = "basalt"
+git = "https://github.com/hgoldstein95/basalt"
+rev = "lean-4.29"
+
+# Note: Strata is on Lean 4.29.1, but mainline LSpec is on 4.31,
+# so we currently depend on a custom fork of LSpec that is on 4.29
+[[require]]
+name = "LSpec"
+git = "https://github.com/ngernest/LSpec"
+rev = "aa07f8c"
+
+[[lean_lib]]
+name = "StrataGenerators"
+globs = ["StrataGenerators.*"]
+
+# The property files. Globbed, so a new file under `StrataTests/` is compiled without
+# a configuration change. A default target, so a plain `lake build` — which is all CI
+# runs, since the suite reports known counterexamples and would fail it — still
+# compiles every property. `StrataTests.lean` is the import root the drivers read;
+# regenerate it with `lake exe gen-test-root`.
+[[lean_lib]]
+name = "StrataTests"
+globs = ["StrataTests.*"]
+
+[[lean_exe]]
+name = "strata-generators"
+root = "Main"
+
+# The `lake test` driver: the registry rendered by the package's own reporter, with no
+# test-framework dependency.
+[[lean_exe]]
+name = "test"
+root = "TestRunner"
+
+# The same registry rendered by LSpec, so a rendering discrepancy between the two is
+# visible rather than assumed away.
+[[lean_exe]]
+name = "lspec-test"
+root = "LSpecTestRunner"
+
+# Rewrites `StrataTests.lean` from the contents of `StrataTests/`. Needed only when a
+# file is added or removed there.
+[[lean_exe]]
+name = "gen-test-root"
+root = "GenTestRoot"

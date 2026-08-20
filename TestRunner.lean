@@ -20,7 +20,7 @@ lake test -- [numTrials] [maxSize] [flags]
 or, equivalently:
 
 ```bash
-lake build strata-test && .lake/build/bin/strata-test [numTrials] [maxSize] [flags]
+lake build test && .lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
 See `StrataGenerators.Test.Cli` for the flags. The exit code is the property verdict;
@@ -60,6 +60,13 @@ def checkSolvers : IO (Option UInt32) := do
 
 def main (args : List String) : IO UInt32 := do
   let cli := parseCli args
+
+  -- Refuse to run against a stale import root: this binary was linked from the old
+  -- one, so a property file added since then is not in `registry` at all. Rewriting it
+  -- here and asking for a re-run is the only honest option — reporting a green suite
+  -- that silently omits a file is the failure this guards against.
+  if ← StrataGenerators.Test.Root.ensureFresh then
+    return 1
   let selected := cli.select registry
 
   if cli.listOnly then

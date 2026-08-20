@@ -28,11 +28,14 @@ somewhere else.
 
 Lean links statically, so a declaration is visible to the driver only if the
 driver's module transitively imports the module it lives in — the analogue of
-`mod tests;` in Rust, or of a file being part of a Dune library in OCaml. That
-last hop is handled outside Lean, by the `lake test` script, which regenerates
-the `StrataTests.lean` import root from the contents of the `StrataTests/`
-directory before building. So dropping a file into `StrataTests/` really is
-enough; see `docs/writing-properties.md`.
+`mod tests;` in Rust, or of a file being part of a Dune library in OCaml. That last
+hop is the generated `StrataTests.lean` import root.
+
+Adding a property to an existing file under `StrataTests/` needs nothing further.
+Adding or removing a *file* needs `lake exe gen-test-root`, which rewrites the root
+from the directory listing; see `StrataGenerators.Test.Root`. Forgetting is not
+silent — the driver rewrites a stale root and asks to be re-run, and
+`#verify_test_root` fails the build. See `docs/writing-properties.md`.
 
 ## Ordering
 

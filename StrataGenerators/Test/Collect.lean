@@ -44,12 +44,10 @@ open Elab Command in
 /-- Check that every `.lean` file under `StrataTests/` is imported by the module this
     command appears in, and error naming the ones that are not.
 
-    `lake test` regenerates `StrataTests.lean` before building, so in the normal
-    workflow this never fires. It exists for the workflow that skips the script — a
-    bare `lake build`, or CI — where a property file that was added but whose
-    regenerated root was not committed would otherwise be silently absent from the
-    suite. Silent absence is the failure mode worth spending a command on: the suite
-    still goes green, having tested one thing less than it claims.
+Silent absence is the failure mode worth spending a command on: without this, a
+    property file added but never imported leaves the suite green, having tested one
+    thing less than it claims. Adding a property to an *existing* file changes no
+    import, so this only ever fires when a file is added or removed.
 
     Two honest limitations. Reading the directory is best-effort: if it cannot be read
     (an out-of-tree build, a different working directory) the command passes rather than
@@ -72,8 +70,7 @@ elab "#verify_test_root" : command => do
     let lines := missing.map (s!"import {·}")
     throwError "`StrataTests.lean` is out of date: \
       {missing.length} property file(s) are not imported, so their properties are not \
-      in the suite.\n\nRun `lake run testRoot` (or just `lake test`, which does it \
-      for you), and commit the result. The missing lines are:\n\n\
-      {String.intercalate "\n" lines}"
+      in the suite.\n\nRun `lake exe gen-test-root`, and commit the result. \
+      The missing lines are:\n\n{String.intercalate "\n" lines}"
 
 end StrataGenerators.Test

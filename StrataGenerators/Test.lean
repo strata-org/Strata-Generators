@@ -4,6 +4,7 @@ import StrataGenerators.Test.Collect
 import StrataGenerators.Test.Report
 import StrataGenerators.Test.TycheReport
 import StrataGenerators.Test.Cli
+import StrataGenerators.Test.Root
 import StrataGenerators.Test.Gens
 
 /-!
@@ -15,7 +16,7 @@ generator catalog `Gens`.
 
 ## Writing a property
 
-One file, anywhere under `StrataTests/`:
+Any file under `StrataTests/` — an existing one or a new one, one property or forty:
 
 ```lean
 import StrataGenerators.Test
