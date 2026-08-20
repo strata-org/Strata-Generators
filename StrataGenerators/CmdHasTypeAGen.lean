@@ -735,7 +735,18 @@ def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     The generator fixes labels to `"l"` and metadata to `default`; the
     conclusion states that the generator produces a command with the same
     *expression* and *variable* content (but possibly different label/metadata).
-    Any label in `genIdentName`'s support would do here. -/
+    Any label in `genIdentName`'s support would do here.
+
+    **This theorem is vacuous**, and knowingly left so for now.
+    `hExprComplete : GenLExprComplete …` is unsatisfiable:
+    `SpecComplete.Gaps.not_GenLExprComplete` proves it false at *every* depth, because
+    an annotated free variable is well-typed against the empty context yet is
+    unreachable when the scope is empty. `spec_complete` no longer takes a hypothesis
+    of this shape — it uses the scope- and size-threaded `SpecComplete.ExprOk`, which
+    claims reachability one expression at a time. Repairing this theorem is the same
+    move: replace `hExprComplete` with a per-command condition, as
+    `SpecComplete.CmdExprOk` does. Note `spec_complete` does **not** route through
+    here; it inverts the `CmdHasTypeA` derivation itself. -/
 theorem genCmd_complete
     (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)

@@ -490,4 +490,49 @@ theorem otherTargetCall_gap (labels : List String)
       SetGen.support (genStmt (G := SetGen.Set) octx tvars [] [sigP] labels C callerCtx [] n) :=
   ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
+-- ── `spec_complete`'s old environment hypotheses were unsatisfiable ──────────
+
+/-! ### The old `hExprC` was unsatisfiable, at every depth
+
+`spec_complete` used to take `hExprC : ∀ d (ctx : VarCtx), GenLExprComplete
+ctx.toFVarCtx octx tvars d`, and `GenLExprComplete fctx octx tvars d` demands that
+*every* expression `HasTypeA` accepts at `τ` be in the support of `genLExpr … d τ`.
+That is false, and the reason has nothing to do with the depth: with an empty `fctx`
+nothing in the support has a free variable, while `HasTypeA.fvar` accepts an
+*annotated* free variable against the empty context, since it reads the type off the
+annotation. The two sides already disagree at a leaf.
+
+The depth is a second, independent obstruction — `genLExpr` recurses structurally on
+it, so the support at a fixed depth is depth-bounded while `HasTypeA` accepts terms
+of every depth. Either obstruction alone is fatal, which is why weakening `∀ d` to
+`∃ d` does not help. -/
+
+/-- **`GenLExprComplete` is false at every depth.** An annotated free variable is
+    well-typed against the empty context, and with `fctx = []` nothing in
+    `genLExpr`'s support has a free variable (`genLExpr_no_fvars`). -/
+theorem not_GenLExprComplete (d : Nat) :
+    ¬ GenLExprComplete [] octx tvars d := by
+  intro h
+  have hmem := h .int (LExpr.fvar () ⟨"zzz", ()⟩ (some .int)) HasTypeA.fvar
+  have := Lambda.LExpr.genLExpr_no_fvars octx [] tvars [] d .int _ hmem
+  simp [LExpr.getVars] at this
+
+/-- **An existential depth would not have helped.** The predicate fails at each
+    individual depth, so `∃ d, GenLExprComplete …` is false too. Only moving the
+    quantifier *inside* — reachability per expression, in a scope that holds that
+    expression's free variables — can be satisfiable. That is what `ExprOk` does. -/
+theorem not_exists_depth_GenLExprComplete :
+    ¬ ∃ d, GenLExprComplete [] octx tvars d := by
+  rintro ⟨d, hd⟩; exact not_GenLExprComplete d hd
+
+/-- The empty scope really is the empty `fctx`, so the refutation applies to
+    `hExprC`'s `ctx = []` instance. -/
+theorem toFVarCtx_nil : VarCtx.toFVarCtx [] = [] := rfl
+
+/-- **The old `hExprC` was unsatisfiable**, so the old `spec_complete` was vacuous.
+    Instantiate at `ctx = []`. -/
+theorem hExprC_unsatisfiable :
+    ¬ (∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d) := by
+  intro h; exact not_GenLExprComplete 0 (h 0 [])
+
 end StrataGenerators.Stmt.SpecComplete.Gaps
