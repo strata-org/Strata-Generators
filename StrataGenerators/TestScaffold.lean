@@ -1,4 +1,14 @@
-import StrataGenerators.Properties
+-- The check predicates the registered properties score with. These used to arrive
+-- via `StrataGenerators.Properties`, the module that paired each name with its
+-- check; that pairing now lives with the property itself, in `StrataTests/`.
+import StrataGenerators.PhaseChangedFlag
+import StrataGenerators.PrinterCoverage
+import StrataGenerators.ProcedureHasTypeAGen.TestSupport
+import StrataGenerators.ProgramGen.UnprovenTransforms
+import StrataGenerators.ProgramGen.LiftFuncDecls
+import StrataGenerators.AdtLaws
+import StrataGenerators.AliasResolution
+import StrataGenerators.MutualBlockShape
 import StrataGenerators.RetryGen
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.HasTypeAGen.SmtEval
@@ -10,6 +20,12 @@ import StrataGenerators.StmtHasTypeAGen.TestSupport
 -- Supplies `relabelProcs` and `shrinkProcsList`, backing the `Shrinkable GenProcs`
 -- instance so Plausible reports minimal well-typed procedure counterexamples.
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
+-- The whole-program generator, and the whole-program shrinker backing the
+-- `Shrinkable GenProgram` instance (plus the `checkProgram*` predicates).
+import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.Shrink
+-- The ADT-derived-call test support (`checkProgramADTCalls*` predicates).
+import StrataGenerators.ProgramGen.TestSupport
 import Basalt.PlausibleGen
 import Plausible
 import Strata.DL.Lambda.LExprT
@@ -24,21 +40,24 @@ import StrataDDM.Elab
 import StrataDDM.BuiltinDialects.Init
 
 /-!
-# Shared test scaffold (harness-independent)
+# The generator wrappers
 
-Everything the property-based test suite needs that does **not** depend on the
-test-runner library (LSpec) lives here: the generator wrapper structures and
-their `Repr`/`Shrinkable`/`Arbitrary` instances, the `prop_*` property
-definitions, the IO-based checks/diagnostics (`roundtripFunctionAction`,
-`specialCharProbeDiagnostic`, `printResolveErrors`), and the CLI parser
-(`CliConfig`/`parseArgs`).
+One wrapper structure per shape the suite generates, with its
+`Repr`/`Shrinkable`/`Arbitrary` instances, plus the `IO`-driven checks and
+diagnostics that sample and print for themselves (`roundtripFunctionAction`,
+`specialCharProbeDiagnostic`, `printResolveErrors`, `printerErrorDiagnostic`,
+`programShrinkDiagnostic`, the two coverage reports).
 
-This module is the **single source of truth** imported by *both* test
-executables — the LSpec-based `TestMain` (the reference "nice harness") and the
-Plausible-only `PlainTestMain` (which de-risks dropping the LSpec dependency). By
-sharing the properties, generators, and CLI here, the two drivers cannot drift:
-they exercise the same checks over the same generated inputs and only differ in
-how results are formatted and aggregated into an exit code.
+This is the **single source of truth for how each shape is drawn, shrunk and
+printed**. Each wrapper's `Arbitrary`/`Repr`/`Shrinkable` instances are what
+`TestDecl.property` resolves, and `StrataGenerators.Test.Generators` adds the
+`TycheFeatures` instance and reifies the four as a `PropertyRunner` for the rare
+property that wants to deviate from them.
+
+Properties themselves are **not** here. Each one is a `@[strata_property]`
+declaration under `StrataTests/`, pairing its name with its check in one place;
+see `StrataGenerators.Test` and `docs/writing-properties.md`. What is left in this
+module is generation.
 -/
 
 open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible Core Imperative
@@ -84,7 +103,14 @@ private def genTypedExprWith (fctx : FVarCtx) : Gen TypedExpr := Gen.sized fun s
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExprWithOps (G := Plausible.Gen) fctx coreMonoOps corePolyOps tvars [] depth ty
+  -- `retryGenArg` is the retry continuation: on a failed *subterm* it redraws that
+  -- subterm rather than letting the failure discard the whole term. It applies at
+  -- every nesting level, which is what the outer `retryGen` below cannot reach —
+  -- without it, one unfillable leaf deep in a term costs a full redraw. Measured
+  -- at depth 3 (target `int`): mean root attempts per success drops from ~6.0 to
+  -- ~1.0. The outer `retryGen` is still needed for the root draw itself.
+  let expr ← genLExprWithOps (G := Plausible.Gen) fctx coreMonoOps corePolyOps tvars []
+               depth ty 3 (retryGenArg 20)
   pure ⟨expr, ty⟩
 
 -- `genLExpr` can fail (via `default`) when a depth-0 arrow case has no
@@ -137,7 +163,7 @@ instance : ToFormat Unit where
 --
 --   • `eval_eraseMetadata_invariant` (Semantics.lean): eval is invariant
 --     under metadata changes. Since our metadata type is `Unit`, eraseMetadata
---     is the identity (proved in LExprEvalTests.lean:106), so this property
+--     is the identity (proved in LExprEvalTests.lean), so this property
 --     holds trivially and we omit it.
 
 -- Properties are `@[reducible]` so that Lean's typeclass resolution can
@@ -145,32 +171,10 @@ instance : ToFormat Unit where
 -- (e.g. `DecidableEq` for `=`). Without this, Plausible's `decidableTestable`
 -- instance sees an opaque `Prop` and fails to synthesize `Testable`.
 
--- Soundness of the generator: every generated expression typechecks
--- to the type it was generated for. (Works for both open and closed terms
--- since HasTypeA trusts fvar annotations.)
-@[reducible] def prop_typecheck (te : TypedExpr) : Prop :=
-  LExpr.typeCheck (T := LExprParams') [] te.expr = some te.ty
-
--- Preservation (closed terms only): if ∅ ⊢ e : τ and e →* e', then ∅ ⊢ e' : τ.
-@[reducible] def prop_preservation (te : ClosedTypedExpr) : Prop :=
-  checkPreservation te.expr te.ty = true
-
--- Progress (closed terms only): a well-typed closed term is either a value
--- or can take a step.
--- Falsified by quantifiers (`∀`/`∃`) — `LExpr.eval` has no reduction rule
--- for them, so `if (∀x. e) then ...` gets stuck.
-@[reducible] def prop_progress (te : ClosedTypedExpr) : Prop :=
-  checkProgress te.expr = true
-
--- Fvar preservation: evaluation does not introduce *new* free variables.
--- Free variables from the context (x, f, n) may appear in both the input
--- and output, but eval should not create fvars that weren't already present.
-@[reducible] def prop_closedness_preservation (te : TypedExpr) : Prop :=
-  checkFvarsPreserved te.expr = true
-
 -- ── Resolve after erasure ────────────────────────────────────────────
 
-/-- A closed expression generated using only `intBoolFactory` ops,
+/-- A closed expression generated over `coreOpCtx`, the operators of
+    `coreFactory`,
     suitable for round-tripping through `eraseTypes` + `resolve`. -/
 structure ResolveTypedExpr where
   expr : LExpr'
@@ -187,32 +191,13 @@ private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
-  let expr ← genLExprWithOps (G := Plausible.Gen) [] intBoolOpCtx [] tvars [] depth ty
+  -- See `genTypedExprWith`: `retryGenArg` retries failed subterms in place.
+  let expr ← genLExprWithOps (G := Plausible.Gen) [] coreOpCtx [] tvars [] depth ty 3
+               (retryGenArg 20)
   pure ⟨expr, ty⟩
 
 instance : Arbitrary ResolveTypedExpr where
   arbitrary := retryGen 500 genResolveTypedExpr
-
-/-- After erasing *all* type annotations, `resolve` infers a principal type that
-    may be more general than the type the expression was generated at (e.g. a
-    fully-erased `λx. x` resolves to `?a -> ?a`, of which `int -> int` is an
-    instance). So we check that the original type is a substitution instance of
-    the inferred type rather than syntactically equal to it.
-
-    `resolve` can legitimately *fail* on a fully-erased quantifier whose body
-    type is exactly the bound variable (e.g. `∃x. x`): with the binder
-    annotation gone it assigns the bound variable a fresh type variable `?a`,
-    infers the body's type as `?a`, and then rejects the quantifier because its
-    rule checks the body type is literally `bool` rather than unifying it with
-    `bool`. This is an incompleteness of `resolve` on erased quantifiers, not a
-    soundness violation, so we treat resolve-failure as a (vacuous) pass and
-    only assert the instance relation when `resolve` succeeds.
-
-    The decision procedure (`checkResolveAfterErase`) and its helpers
-    (`eraseAllTypes` / `isInstanceOf` / `resolveLContext`) are shared with the
-    Tyche harness — see `StrataGenerators.HasTypeAGen.TestSupport`. -/
-@[reducible] def prop_resolve_after_erase (te : ResolveTypedExpr) : Prop :=
-  checkResolveAfterErase te.expr te.ty = true
 
 /-- Run `resolve` on the fully-erased term and report the outcome as a string:
     `none` if the property holds (resolve succeeded and inferred a general-enough
@@ -248,14 +233,14 @@ instance : Shrinkable GenCmdWithCtx where
 private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
   let depth := max 1 (s / 20)
   let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreMonoOps tvars [] ctx depth
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) coreMonoOps tvars [] ctx depth
   pure ⟨cmd, ctx, ctx'⟩
 
 private def genCmdFromBuiltCtx (ctxSize : Nat) : Gen GenCmdWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
-  let (_, baseCtx) ← genCmds (G := Plausible.Gen) [] coreMonoOps tvars [] [] depth ctxSize
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) [] coreMonoOps tvars [] baseCtx depth
+  let (_, baseCtx) ← genCmds (G := Plausible.Gen) coreMonoOps tvars [] [] depth ctxSize
+  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) coreMonoOps tvars [] baseCtx depth
   pure ⟨cmd, baseCtx, ctx'⟩
 
 instance : Arbitrary GenCmdWithCtx where
@@ -283,7 +268,7 @@ private def genCmdsWithCtx : Gen GenCmdsWithCtx := do
   let depth := 2
   let n := 4
   let tvars : List TyIdentifier := []
-  let (cmds, ctx') ← genCmds (G := Plausible.Gen) [] coreMonoOps tvars [] [] depth n
+  let (cmds, ctx') ← genCmds (G := Plausible.Gen) coreMonoOps tvars [] [] depth n
   pure ⟨cmds, [], ctx'⟩
 
 instance : Arbitrary GenCmdsWithCtx where
@@ -291,22 +276,10 @@ instance : Arbitrary GenCmdsWithCtx where
 
 -- ── Command-level properties ─────────────────────────────────────────
 
--- The four single-verdict command properties — init-fresh, expr-typechecks,
--- set-preserves-var, store-type-preservation — are defined by the shared
--- `Properties.cmdSingleVerdict` bundle (see `StrataGenerators.Properties`),
--- which pairs each name with its check in one place, so they are folded directly
--- into `cmdSuite` below rather than restated as `prop_*` wrappers here.
-
--- For a generated command sequence, the output context equals the input
--- context prepended with the newly defined variables (in reverse order,
--- since `init` conses onto the front).
-@[reducible] def prop_cmds_context_growth (gc : GenCmdsWithCtx) : Prop :=
-  checkContextGrowth gc.inCtx gc.outCtx gc.cmds = true
-
--- Symbolic/concrete agreement: whenever concrete execution (`Cmd.run`) succeeds,
--- symbolic simulation (`Cmd.eval`) also succeeds with the same store.
-@[reducible] def prop_cmd_eval_run_agreement (gc : GenCmdWithCtx) : Prop :=
-  checkEvalRunAgreement gc.cmd gc.inCtx = true
+-- The command properties — init-fresh, expr-typechecks, set-preserves-var,
+-- store-type-preservation, context growth, symbolic/concrete agreement — are
+-- registered in `StrataTests/Cmd.lean`, each pairing its name with its check in one
+-- place. Their check predicates live in `CmdHasTypeAGen.TestSupport`.
 
 -- ── Function generation via Plausible.Gen ────────────────────────────
 
@@ -342,14 +315,6 @@ instance : Arbitrary GenFunction where
 
 -- ── Function-level properties ────────────────────────────────────────
 
--- `fvars_annotated_by`: every free variable in the generated function's body
--- and measure is annotated consistently with the type map derived from the
--- fvar context it was generated against. This holds because `pickFVar` always
--- emits `fvar` nodes annotated with `some τ`, where `τ` is exactly the type the
--- variable carries in the fvar context.
-@[reducible] def prop_function_fvars_annotated (gf : GenFunction) : Prop :=
-  functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func = true
-
 -- ── Closed function generator (for typeCheck + round-trip + preservation) ──
 
 /-- A `Function` generated with an *empty* fvar context. Bodies are closed (no
@@ -369,7 +334,8 @@ instance : Repr ClosedGenFunction where
 -- Same structural function shrinker as `GenFunction`. `funcWellFormed` admits a
 -- measure-without-body function (body absent ⇒ vacuously body-typed), so the
 -- shrinker *preserves* that shape — the very counterexample the completeness
--- properties (`prop_function_typeCheck_complete` / `prop_function_rejection_only_measure`)
+-- properties (`function: typeCheck accepts generated functions` /
+-- `function: typeCheck rejections are only measure-without-body`)
 -- hunt for — and can even reach it by dropping a body while keeping the measure,
 -- yielding a minimal witness rather than discarding it.
 instance : Shrinkable ClosedGenFunction where
@@ -386,7 +352,7 @@ instance : Arbitrary ClosedGenFunction where
 -- ── Property 1: Function.typeCheck_annotated_sound ─────────────────────
 --
 -- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound` at
--- `Strata/Languages/Core/FunctionTypeSpecSound.lean:31`:
+-- `Strata/Languages/Core/FunctionTypeSpecSound.lean`:
 --
 --   If `Function.typeCheck C Env func = .ok (func', _)` then `func'` satisfies
 --   `FuncHasTypeA C Γ` for any Γ.
@@ -394,9 +360,6 @@ instance : Arbitrary ClosedGenFunction where
 -- The decision procedure (`checkTypeCheckAnnotatedSound`, which reflects
 -- `FuncHasTypeA` via `checkFuncHasTypeA` using `funcCheckContext`) is shared with
 -- the Tyche harness — see `StrataGenerators.FunctionHasTypeAGen.TestSupport`.
-
-@[reducible] def prop_function_typeCheck_annotated_sound (gf : ClosedGenFunction) : Prop :=
-  checkTypeCheckAnnotatedSound gf.func = true
 
 -- ── Property 2: Pretty-print / parse round-trip ───────────────────────
 --
@@ -454,44 +417,13 @@ def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
     if s1 == s2 then pure none
     else pure (some (s1, s2))
 
--- ── Property 3: Type preservation under evaluation ────────────────────
---
--- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
--- `eval_denote_sound` (`Strata/DL/Lambda/Denote/LExprSemanticsConsistent.lean`).
--- The decision procedure (`checkFunctionBodyPreservation`) is shared with the
--- Tyche harness — see `StrataGenerators.FunctionHasTypeAGen.TestSupport`.
-
-@[reducible] def prop_function_body_preservation (gf : ClosedGenFunction) : Prop :=
-  checkFunctionBodyPreservation gf.func = true
-
--- ── Function typechecker completeness ─────────────────────────────────
--- Dual to the soundness property above. `genFunction` is proven sound (output
--- satisfies `FuncHasType'`), so `Function.typeCheck` should accept every generated
--- function. It does NOT — the spec permits a measure without a body, the algorithm
--- rejects it. Checks live in `StrataGenerators.StmtHasTypeAGen.TestSupport`
--- (`checkFunctionTypeCheckerComplete` / `funcRejectionImpliesMeasureNoBody`), run
--- against the full `Core.Factory` context so no operator spuriously fails to
--- resolve. The `funcDecl` gap in the statement test (#1) is the syntactic-statement
--- analogue of exactly this.
-
-open StrataGenerators.Stmt.TestSupport in
--- Completeness: the typechecker accepts every generated function. FAILS on the
--- measure-without-body gap — asserted honestly, so a real failure is reported.
-@[reducible] def prop_function_typeCheck_complete (gf : ClosedGenFunction) : Prop :=
-  checkFunctionTypeCheckerComplete gf.func = true
-
-open StrataGenerators.Stmt.TestSupport in
--- Every rejection is a measure-without-body function (pins the sole known gap).
-@[reducible] def prop_function_rejection_only_measure (gf : ClosedGenFunction) : Prop :=
-  funcRejectionImpliesMeasureNoBody gf.func = true
-
 -- ── Statement generation via Plausible.Gen ────────────────────────────
 --
 -- `genProgramStmts` generates a well-typed Strata Core statement list
--- (`StmtsHasTypeA`), proven sound AND complete against the declarative typing
+-- (`StatementsHasTypeA`), proven sound AND complete against the declarative typing
 -- spec. We use it as a certified-well-typed oracle input for the statement
--- typechecker (property #1) and the Core statement-level transformations
--- (properties #3–#6, #9). All check predicates live in the shared module
+-- typechecker and the Core statement-level transformations. All check predicates
+-- live in the shared module
 -- `StrataGenerators.StmtHasTypeAGen.TestSupport`.
 
 open StrataGenerators.Stmt.TestSupport
@@ -531,7 +463,7 @@ instance : Shrinkable GenStmts where
 private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
   let size := max 1 (min 3 (s / 25))
   let len := max 1 (min 4 (s / 20))
-  let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) [] coreMonoOps [] size len
+  let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) coreMonoOps [] size len
   pure ⟨ss⟩
 
 -- `genStmt` can hit the empty generator (`default`) in sub-cases (e.g. a
@@ -542,18 +474,10 @@ instance : Arbitrary GenStmts where
 
 -- ── Statement-level properties (all currently unproven) ───────────────
 
--- The six statement-transform / typechecker properties (#1, #3, #4, #5a, #5b, #9)
--- are defined by the shared `Properties.stmtTransforms` bundle (see
--- `StrataGenerators.Properties`), which pairs each name with its check in one
--- place, so they are folded directly into `stmtSuite` below rather than restated
--- as `prop_*` wrappers here. Only #6 keeps a wrapper — its Tyche panel records
--- extra breakdown, so it is not part of the shared bundle.
-
--- #6: `StmtToKleeneStmt` is defined exactly when the block has no
--- `exit`/`funcDecl`/`typeDecl` (and, for the invariant-loop caveat, not defined
--- when an invariant-bearing loop is present).
-@[reducible] def prop_stmt_kleene_defined_iff (gs : GenStmts) : Prop :=
-  checkKleeneDefinedIff gs.stmts = true
+-- The statement-transform / typechecker properties are registered in
+-- `StrataTests/Stmt.lean`; their check predicates live in
+-- `StmtHasTypeAGen.TestSupport`. Kleene definedness is the one that keeps a bespoke
+-- Tyche panel, since its panel records definedness *and* why.
 
 -- ── Procedure generation via Plausible.Gen ────────────────────────────
 --
@@ -562,8 +486,8 @@ instance : Arbitrary GenStmts where
 -- *list* of them into a multi-declaration `Program` and use it as a
 -- certified-well-typed oracle input for the three Core transform passes
 -- (FilterProcedures, PrecondElim, ANFEncoder). All check predicates live in the
--- shared module `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, folded into
--- the suites via the `Properties.procTransforms` bundle.
+-- shared module `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, and the
+-- properties that score with them are registered in `StrataTests/Proc.lean`.
 
 open StrataGenerators.Procedure.TestSupport
 
@@ -600,15 +524,15 @@ instance : Shrinkable GenProcs where
 --
 -- The procedures are generated **left to right into an acyclic call DAG**: the
 -- body of procedure `i` is generated against the signatures of the
--- already-generated *monomorphic* siblings `0..i-1` (named `P0…P{i-1}` — exactly
--- what `relabelProcs` assigns each position below, so the `call`s and the renamed
+-- already-generated siblings `0..i-1` (named `P0…P{i-1}` — exactly what
+-- `relabelProcs` assigns each position below, so the `call`s and the renamed
 -- headers line up). This lets a body call its siblings: a body may emit `call P{j}`
 -- for `j < i`, so the assembled program's call graph carries real edges and the
 -- callee-closure / call-graph dimensions of the FilterProcedures/PrecondElim
--- properties are no longer vacuous. Only monomorphic siblings become call targets
--- — the call generator and `ProcSigCorresponds` both require the callee's
--- `typeArgs = []`, and `genProcedure` does not instantiate a polymorphic callee's
--- type arguments at the call site.
+-- properties are no longer vacuous. **Polymorphic** siblings are now callable too
+--: `headerProcSig` records the callee's `typeArgs`, and `genCallStmt`
+-- samples a concrete instantiation `σ` at the call site (`ProcSigCorresponds` no
+-- longer requires `typeArgs = []`).
 private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
   let n := max 2 (min 4 (2 + s / 30))
   let size := max 1 (min 2 (s / 30))
@@ -617,12 +541,11 @@ private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
     (fun (acc : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
       let proc ← (retryGen 8000
         (StrataGenerators.Procedure.genProcedure (G := Plausible.Gen)
-          corePartialOps acc.2 size len) : Gen Core.Procedure)
-      -- Add this procedure to the callable context only if it is monomorphic; its
-      -- post-relabel name is `P{i}` (its generated header name is discarded).
-      let sigs := if proc.header.typeArgs.isEmpty then
-          acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
-        else acc.2
+          corePartialOps acc.2 LContext.default {} size len) : Gen Core.Procedure)
+      -- Add this procedure to the callable context (its post-relabel name is
+      -- `P{i}`; its generated header name is discarded). Both monomorphic and
+      -- polymorphic siblings are callable — the call site instantiates `typeArgs`.
+      let sigs := acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
       pure (acc.1 ++ [proc], sigs))
     (([], []) : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx)
   pure ⟨relabelProcs ps⟩
@@ -630,15 +553,310 @@ private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
 instance : Arbitrary GenProcs where
   arbitrary := retryGen 8000 genProcsWith
 
--- The thirteen procedure/transform properties (four FilterProcedures, five
--- PrecondElim, four ANFEncoder) are defined by the shared
--- `Properties.procTransforms` bundle, so they are folded directly into
--- `procSuite` below rather than restated as `prop_*` wrappers here. Two of them
--- are EXPECTED to fail, each stating a faithful `changed ↔ program changed`
--- contract that the pass genuinely violates: `proc: FilterProcedures changed flag
--- is faithful` (the pass hardcodes `changed := true` even when it removes
--- nothing) and `proc: PrecondElim changed flag is faithful` (the `.funcDecl`
--- branch reports unchanged while inserting a `$$wf` block).
+-- The twenty-eight procedure/transform properties (seven FilterProcedures, thirteen
+-- PrecondElim, eight ANFEncoder) are registered in `StrataTests/Proc.lean`. Two of them
+-- state a faithful `changed ↔ program changed` contract that the pass violates:
+-- `proc: FilterProcedures changed flag is faithful` (the pass hardcodes
+-- `changed := true` even when it removes nothing) and `proc: PrecondElim changed
+-- flag is faithful` (the `.funcDecl` branch reports unchanged while inserting a
+-- `$$wf` block).
+
+-- ── Whole-program generation via Plausible.Gen ─────────────────────────
+--
+-- `genProgram` generates a whole well-typed Strata Core `Program` — every
+-- declaration kind, with the ambient context threaded across the declaration fold
+-- — and is proven sound against the declarative spec `ProgramHasTypeA`
+-- (`ProgramGen.SoundProgram`). Unlike `GenProcs`, which assembles a program out of
+-- procedures only, this exercises abstract types, aliases, axioms, `distinct`,
+-- datatype blocks and functions as well.
+--
+-- Most of the suite quantifies over this type: the whole-program checks and
+-- ADT-derived-call checks of `StrataTests/Program.lean`, the unproven-transform
+-- properties of `StrataTests/Transforms.lean`, the lambda-lifting properties of
+-- `StrataTests/Lift.lean`, the alias properties of `StrataTests/Alias.lean`, and the
+-- printer-expressiveness property of `StrataTests/Printer.lean` — the last needs a
+-- whole `Program` because
+-- the unprintable constructs are spread across type declarations (`bitvec` widths
+-- in a signature), expressions (`Bv↔Int` operators) and statements (bodiless
+-- `funcDecl`), and `genProgram` reaches all three.
+--
+-- This is also the only place the ADT-derived-function work is observable
+-- end-to-end: a datatype block extends the operator vocabulary, and *later*
+-- functions and procedures draw from it, so their bodies can call the block's
+-- constructors, testers, and safe/unsafe field accessors. `derivedCallCoverage`
+-- below reports that as a statistic.
+
+open StrataGenerators.Program.TestSupport
+open ProgramGen.TestSupport
+
+/-- A generated whole program. -/
+structure GenProgram where
+  prog : Core.Program
+
+instance : Repr GenProgram where
+  -- Render via Strata's own formatter (real Core concrete syntax), so a
+  -- counterexample shows exactly the program under test, followed by the shared
+  -- `programStatusNote`. That note matters because a typechecker-rejected program
+  -- (~60% of draws) is one the shrinker cannot minimize — its oracle *is* that
+  -- typechecker — so the note names the gap responsible instead of leaving the
+  -- reader to infer it from an unreduced program, and falls back to the checker's
+  -- verbatim diagnostic when the rejection matches no known gap. Sharing the
+  -- function with the Tyche panel renderer keeps the two views from drifting.
+  reprPrec gp _ :=
+    (Core.formatProgram gp.prog).pretty ++ programStatusNote gp.prog
+
+-- Shrink via the whole-program shrinker `shrinkProgram`: drop a declaration,
+-- truncate to a prefix, cut every gap-bearing declaration at once, or reduce one
+-- declaration in place (delegating to the procedure / function / statement /
+-- expression shrinkers below it). Every candidate is re-checked with Strata's own
+-- `Program.typeCheck`, so a reported counterexample is always a well-typed
+-- program; declaration order is preserved and nothing is renamed.
+instance : Shrinkable GenProgram where
+  shrink gp := (shrinkProgram gp.prog).map (⟨·⟩)
+
+-- `numDecls` is capped at 2–5 and scales with Plausible's size parameter. As with
+-- `genProcsWith`, the retry budget has to absorb the residual `inhabitedWitness`
+-- failure in the expression generator (a compound argument type nothing in scope
+-- inhabits): each declaration is an independent chance to hit it, so whole-program
+-- success decays geometrically in `numDecls`.
+--
+-- The fuel is 30000, matching `ProgramGen.sample`'s default. That default rose from
+-- 4000 once function and procedure bodies could call a datatype's derived functions:
+-- a call to a *polymorphic* datatype's tester or accessor goes through `IndirPoly`,
+-- which samples instantiations, and an unfillable sample is another `inhabitedWitness`
+-- failure for the retry loop to absorb (measured 1/8 versus 8/8 draws surviving at
+-- `numDecls = 12` — see the `sample` docstring). `numDecls ≤ 5` here is far below that, so
+-- 30000 is ample rather than tight.
+private def genProgramWith : Gen GenProgram := Gen.sized fun s => do
+  let numDecls := max 2 (min 5 (2 + s / 25))
+  let prog ← (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) numDecls {})
+    : Gen Core.Program)
+  pure ⟨prog⟩
+
+instance : Arbitrary GenProgram where
+  arbitrary := retryGen 8000 genProgramWith
+
+-- ── Whole-program shrinker diagnostic ─────────────────────────────────
+--
+-- What the whole-program properties cannot show is how well the *shrinker* works. Its one reliable
+-- failure (`programTypecheck`) fails only on gap-bearing programs, which are
+-- precisely the ones no shrinker with this oracle can minimize; the one shrinkable
+-- failure (`programTypeCheckIdem`) fires on roughly 1 draw in 500, so most runs do
+-- not see it. On a run that hits neither, the `Shrinkable GenProgram` instance goes
+-- unexercised and a regression in it would pass unnoticed until the day it matters.
+--
+-- This diagnostic closes that hole: it minimizes each sampled program against a
+-- deliberately-always-failing property, and reports the reduction achieved plus the
+-- two invariants that matter. It is a diagnostic, not a gated property — it
+-- measures shrinker quality rather than asserting a fact about Strata.
+
+/-- Exercise the whole-program shrinker on freshly sampled programs and report how
+    far it reduces them, checking on the way that every candidate it emits is
+    well-typed and that no reduction leaves a `requires` clause stranded.
+
+    The target property is `sizeProgram p ≤ 3`, chosen because it fails on
+    essentially every generated program and keeps failing as the program shrinks, so
+    the minimizer runs to its fixpoint and the reported ratio measures the
+    shrinker's reach rather than an early exit.
+
+    Returns `(candidates, illTyped, stranded)` — the second and third must be 0. -/
+def programShrinkDiagnostic (numTrials : Nat) : IO (Nat × Nat × Nat) := do
+  let samples := max 1 (min 20 numTrials)
+  let mut candidates := 0
+  let mut illTyped := 0
+  let mut stranded := 0
+  let mut sizeBefore := 0
+  let mut sizeAfter := 0
+  let mut declsBefore := 0
+  let mut declsAfter := 0
+  for _ in [0:samples] do
+    let prog ← ProgramGen.sample 6
+    -- Every one-step candidate must be well-typed, and none may strand a
+    -- `requires` clause (the one ill-formedness the typechecker does not catch —
+    -- see `funcPreconditionsScoped`).
+    let cands := shrinkProgram prog
+    candidates := candidates + cands.length
+    illTyped := illTyped + (cands.filter (!progTypeChecks ·)).length
+    stranded := stranded + (cands.filter (fun c => c.decls.any fun
+      | .func f _ => !funcPreconditionsScoped f
+      | .recFuncBlock fs _ => fs.any (!funcPreconditionsScoped ·)
+      | _ => false)).length
+    let minimized := minimizeProgramCounterexample (fun p => sizeProgram p ≤ 3) 400 prog
+    sizeBefore := sizeBefore + sizeProgram prog
+    sizeAfter := sizeAfter + sizeProgram minimized
+    declsBefore := declsBefore + prog.decls.length
+    declsAfter := declsAfter + minimized.decls.length
+  IO.println s!"    {samples} programs: size {sizeBefore} → {sizeAfter}, \
+    decls {declsBefore} → {declsAfter}"
+  IO.println s!"    {candidates} candidates emitted; {illTyped} ill-typed, \
+    {stranded} with a stranded `requires` (both must be 0)"
+  pure (candidates, illTyped, stranded)
+
+-- ── ADT-derived-call coverage ─────────────────────────────────────────
+
+/-- Sample programs and report how often a generated function/procedure/axiom
+    body actually **calls** a derived function of an earlier datatype, broken down
+    by family (constructor / tester / safe accessor / unsafe accessor).
+
+    This is a *coverage statistic*, not a pass/fail property: the generator is free
+    to draw a program whose bodies happen to call nothing. It is reported because
+    the interesting failure mode for the ADT work is silent regression to zero —
+    which no `True`-valued property would catch. Returns
+    `(programs, withDatatype, withCall, ctors, testers, accessors, unsafeAccessors)`. -/
+def derivedCallCoverage (samples maxSize : Nat) (coverageNumDecls : Nat := 10) :
+    IO (Nat × Nat × Nat × Nat × Nat × Nat × Nat) := do
+  let mut drawn := 0
+  let mut withDt := 0
+  let mut withCall := 0
+  let mut ctors := 0
+  let mut testers := 0
+  let mut accs := 0
+  let mut uaccs := 0
+  -- Deliberately *not* the size-scaled `Arbitrary GenProgram`: a derived call needs
+  -- a datatype block AND a later function/procedure in the same program, so the
+  -- property suite's small draws (`numDecls` ~3 at default sizes) essentially never
+  -- exhibit one. Coverage is measured at a fixed, realistic declaration count.
+  for i in [:samples] do
+    let r ← (try
+      let prog ← Plausible.Gen.run
+        (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) coverageNumDecls {})
+         : Gen Core.Program) (4 + i % (maxSize + 1))
+      pure (some prog)
+     catch _ => pure none)
+    match r with
+    | none => pure ()
+    | some prog =>
+      drawn := drawn + 1
+      unless (datatypeBlocks prog).isEmpty do withDt := withDt + 1
+      if mentionsDerivedFunction prog then
+        withCall := withCall + 1
+        let (c, t, a, u) := calledByFamily prog
+        unless c.isEmpty do ctors := ctors + 1
+        unless t.isEmpty do testers := testers + 1
+        unless a.isEmpty do accs := accs + 1
+        unless u.isEmpty do uaccs := uaccs + 1
+  pure (drawn, withDt, withCall, ctors, testers, accs, uaccs)
+
+/-- Print the `derivedCallCoverage` report. Never gates the exit code — it is a
+    distribution, not an assertion. -/
+def printDerivedCallCoverage (samples maxSize : Nat) : IO Unit := do
+  let (drawn, withDt, withCall, ctors, testers, accs, uaccs) ←
+    derivedCallCoverage samples maxSize
+  IO.println s!"  programs drawn: {drawn}/{samples} (declaring >= 1 datatype: {withDt})"
+  IO.println s!"  bodies calling an ADT-derived function: {withCall}"
+  IO.println s!"    constructors {ctors} | testers {testers} \
+| safe accessors {accs} | unsafe accessors {uaccs}"
+  if withDt > 0 && withCall == 0 then
+    IO.println "  NOTE: no derived calls in this run -- if persistent, this is the \
+regression the ADT-derived-function work fixed."
+
+-- ── Datatype-block generation via Plausible.Gen ───────────────────────
+--
+-- Two wrappers over the *same* generator, differing only in how a block is
+-- assembled, because the properties they feed ask different questions:
+--
+--   * `GenAdtBlock` is one draw of `DatatypeGen.genMutuallyRecursiveDatatypes` —
+--     an ordinary, usually connected block. It feeds the `adt:` properties of
+--     `StrataTests/Adt.lean` (the two pure companions to the SMT law properties, plus
+--     the eliminator-scoping property, which is *not* specific to the independent
+--     shape).
+--   * `GenIndepBlock` concatenates independent one-datatype draws
+--     (`MutualBlockShape.genIndependentBlock`), so no field can mention a sibling.
+--     It feeds the `mutual:` properties of `StrataTests/Mutual.lean`.
+--
+-- Both are drawn at `maxSize := 0`. At a larger size `genArgTy` emits arrows, and
+-- `validateDatatypesForSMT` refuses a function-typed field for the whole block, so
+-- the arrow-free fraction falls from 40/40 to about 5/40 — three quarters of the
+-- budget would go to blocks no solver ever sees. The larger sizes are exercised
+-- where they are the point: `AdtLawsSmt.adtSolverAcceptsQueryAction` draws over a
+-- size schedule, since it *wants* the refusals.
+
+/-- A generated `mutual … end` block (ordinary shape). -/
+structure GenAdtBlock where
+  block : Lambda.MutualDatatype Unit
+
+/-- A generated `mutual … end` block whose datatypes are pairwise independent. -/
+structure GenIndepBlock where
+  block : Lambda.MutualDatatype Unit
+
+instance : Repr GenAdtBlock where
+  reprPrec b _ := StrataGenerators.MutualBlockShape.renderBlock b.block
+
+instance : Repr GenIndepBlock where
+  reprPrec b _ := StrataGenerators.MutualBlockShape.renderBlock b.block
+
+/-- Shrink a block by dropping one datatype. `MutualDatatype` is a plain `List`, so
+    no proof obligation travels with the drop (each datatype carries its own
+    `constrs_ne`); the empty list is excluded, since `validateMutualBlock` rejects
+    an empty block. A candidate that drops below two datatypes makes the `mutual:`
+    properties vacuously true, and Plausible discards a candidate that no longer
+    fails — so the shrinker cannot report a one-datatype "counterexample". -/
+private def shrinkBlock (block : Lambda.MutualDatatype Unit) :
+    List (Lambda.MutualDatatype Unit) :=
+  if block.length ≤ 1 then []
+  else (List.range block.length).map (fun i => block.eraseIdx i)
+
+instance : Shrinkable GenAdtBlock where
+  shrink b := (shrinkBlock b.block).map (⟨·⟩)
+
+instance : Shrinkable GenIndepBlock where
+  shrink b := (shrinkBlock b.block).map (⟨·⟩)
+
+instance : Arbitrary GenAdtBlock where
+  arbitrary := do
+    let block ← DatatypeGen.genMutuallyRecursiveDatatypes (G := Plausible.Gen)
+      (maxSize := 0)
+    pure ⟨block⟩
+
+instance : Arbitrary GenIndepBlock where
+  arbitrary := Gen.sized fun s => do
+    -- Two to four datatypes: `mutual` is vacuous for one, and the properties need
+    -- at least a pair to be about the *block* rather than about a datatype.
+    let extra := min 2 (s / 30)
+    let block ← StrataGenerators.MutualBlockShape.genIndependentBlock
+      (G := Plausible.Gen) (extra + 1) (maxSize := 0)
+    pure ⟨block⟩
+
+-- ── Datatype-block coverage diagnostic ────────────────────────────────
+
+/-- Report what the block-based suites actually drew: how many blocks held two or
+    more datatypes, how many had uniform type parameters (the condition `elimFuncs`
+    assumes), how many Strata's `addMutualBlock` accepted, how many passed the
+    `blockIsSmtSafe` screen the `--smt` law properties apply, and how many
+    independent draws really were independent.
+
+    Printed as a diagnostic, never gating the exit code, for the reason the rest of
+    this suite reports coverage: a green block property on blocks that are all
+    single-datatype, or all rejected, is a property that tested nothing. -/
+def datatypeBlockCoverage (samples : Nat) : IO (Nat × Nat × Nat × Nat × Nat) := do
+  let mut multi := 0
+  let mut uniform := 0
+  let mut accepted := 0
+  let mut smtSafe := 0
+  let mut indep := 0
+  for i in List.range samples do
+    let block ← DatatypeGen.sample (maxSize := i % 3)
+    if block.length ≥ 2 then multi := multi + 1
+    if StrataGenerators.MutualBlockShape.blockParamsUniform block then
+      uniform := uniform + 1
+    if StrataGenerators.AdtLaws.blockAccepted block then accepted := accepted + 1
+    if StrataGenerators.AdtLaws.blockIsSmtSafe block then smtSafe := smtSafe + 1
+    let ind ← StrataGenerators.MutualBlockShape.genIndependentBlock (G := IO) 1
+    if StrataGenerators.MutualBlockShape.isIndependentBlock ind then indep := indep + 1
+  pure (multi, uniform, accepted, smtSafe, indep)
+
+/-- Print the block coverage report. -/
+def printDatatypeBlockCoverage (samples : Nat) : IO Unit := do
+  let (multi, uniform, accepted, smtSafe, indep) ← datatypeBlockCoverage samples
+  IO.println s!"  ordinary blocks drawn: {samples} \
+(>= 2 datatypes: {multi} | uniform type params: {uniform})"
+  IO.println s!"    accepted by addMutualBlock: {accepted} | \
+SMT-safe (arrow-free, no bitvec 0, bare SMT symbols): {smtSafe}"
+  IO.println s!"  independent blocks drawn: {samples} (actually independent: {indep})"
+  if accepted < samples then
+    IO.println s!"  NOTE: {samples - accepted} block(s) rejected by addMutualBlock -- \
+DatatypeGen does not thread reserved names across the datatypes of one block, so two \
+of them can declare a constructor of the same name."
 
 -- ── Test runner ──────────────────────────────────────────────────────
 
@@ -771,27 +989,58 @@ def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
             IO.println s!"           reparsed: {outcome.replace "\n" " "}"
   return (probeFail, probeOk)
 
--- ── CLI ────────────────────────────────────────────────────────────────
+/-- Printer-expressiveness diagnostic: sample whole programs, and tally the
+    *distinct* conversion-error messages `Core.formatProgram` logs, most frequent
+    first. Also reports, of the programs that logged an error, how many still
+    re-parse — those are the dangerous ones, where a placeholder produced a
+    syntactically valid but **different** program, which the string round-trip
+    property cannot detect.
 
-/-- Parsed command-line configuration for the merged driver. -/
-structure CliConfig where
-  numTrials : Nat
-  maxSize : Nat
-  tycheEnabled : Bool
-  tycheOut : String
-  tycheSamples : Nat
-  smtEnabled : Bool
+    A **diagnostic**: it does not gate the exit code (the gating statement is
+    `printer: no conversion error on generated programs`). Its job is
+    localisation — naming the offending *constructs* across a whole sample, which
+    the per-counterexample view cannot give. The whole-program shrinker does
+    minimize the gating property's witness, but only when the draw typechecks: its
+    candidate filter is `Program.typeCheck`, so on a gap-bearing draw (~60%) the
+    witness is reported unshrunk and this tally is the only localisation available.
 
-/-- Parse `args` into a `CliConfig`. Positional args are `[numTrials] [maxSize]`;
-    `--`-prefixed flags configure the Tyche visualization (on by default). -/
-def parseArgs (args : List String) : CliConfig :=
-  let flags := args.filter (·.startsWith "--")
-  let positional := args.filter (fun a => !a.startsWith "--")
-  let flagValue (key : String) : Option String :=
-    (flags.find? (·.startsWith key)).map (·.drop key.length |>.toString)
-  { numTrials := (positional[0]? >>= String.toNat?).getD 1000
-    maxSize := (positional[1]? >>= String.toNat?).getD 100
-    tycheEnabled := !flags.contains "--no-tyche"
-    tycheOut := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
-    tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
-    smtEnabled := flags.contains "--smt" }
+    Returns `(programsWithErrors, programsSampled, reparsedDespiteError)`. -/
+def printerErrorDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat × Nat) := do
+  let total := min numTrials 60
+  let mut withErrors := 0
+  let mut reparsed := 0
+  let mut sampled := 0
+  let mut tally : List (String × Nat) := []
+  for i in List.range total do
+    let size := i % (maxSize + 1)
+    let gp ← try Gen.run (Arbitrary.arbitrary (α := GenProgram)) size
+             catch _ => pure ⟨{ decls := [] }⟩
+    -- A retry-exhausted draw yields the empty program; don't score it either way.
+    if gp.prog.decls.isEmpty then continue
+    sampled := sampled + 1
+    let s := (Core.formatProgram gp.prog).pretty
+    let lines := StrataGenerators.PrinterCoverage.strataErrorLines s
+    if !lines.isEmpty then
+      withErrors := withErrors + 1
+      for line in lines.dedup do
+        tally := match tally.find? (·.1 == line) with
+          | some _ => tally.map (fun (m, c) => if m == line then (m, c + 1) else (m, c))
+          | none => (line, 1) :: tally
+      -- Did the text the printer *claims* to have produced still parse?
+      match ← parseCoreProgram (StrataGenerators.PrinterCoverage.printedText s) with
+      | some _ => reparsed := reparsed + 1
+      | none => pure ()
+  IO.println s!"    {withErrors}/{sampled} programs logged a conversion error"
+  IO.println s!"    {reparsed} of those still re-parsed (placeholder ⇒ silently different program)"
+  IO.println s!"    distinct messages ({tally.length}), most frequent first:"
+  for (m, c) in (tally.mergeSort (fun a b => a.2 > b.2)) do
+    IO.println s!"      [{c}×] {m}"
+  -- Bitvector width divergence, reported alongside because several of the
+  -- messages above are instances of it. Deterministic, so it is a scan rather
+  -- than a sample: `Function.typeCheck` accepts every width, the printer supports
+  -- five, and the five are *not* the powers of two.
+  let divergent := StrataGenerators.PrinterCoverage.divergentBvWidths 64
+  IO.println s!"    bitvec widths 0..63: {64 - divergent.length} printable, {divergent.length} typecheck-but-unprintable"
+  IO.println s!"      printable: {StrataGenerators.PrinterCoverage.printableBvWidths}"
+  IO.println s!"      first divergent: {divergent.take 12}{if divergent.length > 12 then " …" else ""}"
+  return (withErrors, sampled, reparsed)

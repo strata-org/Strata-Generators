@@ -92,6 +92,15 @@ def disjointInputs (inputs : ListMap (Identifier Unit) LMonoTy)
 def oldVars (M : ListMap (Identifier Unit) LMonoTy) : ListMap (Identifier Unit) LMonoTy :=
   M.map (fun (id, ty) => (CoreIdent.mkOld id.name, ty))
 
+/-- Project a parameter signature to the expression-layer `FVarCtx` a contract
+    clause reads its free variables from: each entry `(⟨x, ()⟩, τ)` becomes `(x, τ)`.
+    Kept as a named def (rather than inlined at the `genChecks` call sites) so it
+    stays *folded* in `genProcedure`'s support unfolding — the pre/post soundness
+    and completeness proofs match against `sigFctx <block>` syntactically instead of
+    forcing an expensive zeta-expansion of the projection term. -/
+def sigFctx (sig : @LMonoTySignature Unit) : FVarCtx :=
+  sig.map (fun p => (p.1.name, p.2))
+
 /-- Generate a labeled contract clause list (`preconditions` or `postconditions`):
     a `ListMap` from label names to `Procedure.Check`s, each wrapping a `bool`
     expression drawn from `genLExpr … .bool`. Labels come from `genNameList`; the
@@ -100,11 +109,11 @@ def oldVars (M : ListMap (Identifier Unit) LMonoTy) : ListMap (Identifier Unit) 
     Every generated clause is a well-typed `bool` expression in the *empty* bvar
     context, so it satisfies both `preconditionsTyped` and `postconditionsTyped`
     under the annotated typing spec (which ignores the ambient context). -/
-def genChecks [Gen G] (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) :
-    G (ListMap CoreLabel Procedure.Check) := do
+def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (depth : Nat) (pctx : PolyOpCtx := []) : G (ListMap CoreLabel Procedure.Check) := do
   let labels ← genNameList depth
   labels.mapM (fun l => do
-    let e ← genLExpr [] octx [] tvars [] depth .bool
+    let e ← genLExpr fctx octx pctx tvars [] depth .bool
     pure (l, ({ expr := e } : Procedure.Check)))
 
 /-- Generate a well-typed `Procedure`.
@@ -133,9 +142,17 @@ def genChecks [Gen G] (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) :
 
     `noFilter` / statement `MetaData` are at their defaults.
 
+    The body is generated under the *ambient* context `C` (its type parameters
+    marked rigid) rather than a hardcoded `LContext.default`, so a caller can thread
+    in the context under which the surrounding program is being checked; the ambient
+    type-scope `Γ` is likewise threaded to the soundness statement (see
+    `genProcedure_sound`). Passing `LContext.default` and `{}` recovers the old
+    behaviour.
+
     See `genProcedure_sound` for the well-typedness guarantee. -/
-def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
-    G Procedure := do
+def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
+    (pctx : PolyOpCtx := []) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   -- Three mutually-disjoint signature blocks. `M` is the in-out block (parameters
@@ -152,17 +169,38 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
   -- positions in both and the call-site argument positions line up.
   let inputs := inout ++ inputOnly
   let outputs := inout ++ outputOnly
-  let preconditions ← genChecks octx typeArgs size
-  let postconditions ← genChecks octx typeArgs size
+  -- The contract clauses may *read* parameters, so each is generated at the
+  -- free-variable context the declarative spec types it in (`ProcedureTypeSpec`):
+  --   * preconditions see the **inputs** only (`procInputContext`);
+  --   * postconditions see **inputs ++ outputs ++ old(inout)** (`procBodyContext`).
+  -- A signature entry `(⟨x, ()⟩, τ)` becomes the `FVarCtx` entry `(x, τ)`.
+  let preconditions ← genChecks (sigFctx inputs) octx typeArgs size pctx
+  let postconditions ←
+    genChecks (sigFctx (inputs ++ outputs ++ oldVars inout)) octx typeArgs size pctx
   -- Seed the body's variable scope with the inputs, outputs, and the `old`
   -- bindings of the in-out block (`old g` for each `g ∈ M`) — mirroring the
   -- declarative `procBodyContext`. The inputs *and* the `old` bindings are marked
   -- immutable, so the only writable keys are the output-only names (`O`), which
   -- are exactly the outputs the body is entitled to assign. `VarCtx` and
   -- `LMonoTySignature` are both `List ((Identifier Unit) × LMonoTy)`.
-  let (body, _, _) ← genStmtChain [] octx typeArgs
+  --
+  -- Body expressions draw their free variables from the *current* scope: the
+  -- statement generators derive their `FVarCtx` from `ctx` at each step (via
+  -- `VarCtx.toFVarCtx`), so a generated body may genuinely *read* its parameters
+  -- (including polymorphic-typed ones) — and any earlier-declared local — in
+  -- expressions, not just declare fresh locals. Because the emitted free variables
+  -- are always in the current scope, a freshly-`init`ed name never collides with
+  -- them (the `init_det` rule's `x ∉ getVars e` premise), which is what keeps the
+  -- generator sound (see `freshNamesDisjointFromExprs_toFVarCtx`).
+  let (body, _, _) ← genStmtChain octx typeArgs
     (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) procs []
-    (LContext.default) (inputs ++ outputs ++ oldVars inout) size len
+    -- The procedure's type parameters are *rigid* inside its body: unification
+    -- must not refine them (a caller may instantiate them at any type), so the
+    -- body is generated under a context marking `typeArgs` rigid. This matches
+    -- `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters
+    -- before checking the body, and pins a generated `init`'s stored type to its
+    -- annotation (see `genProcedure_complete` / the statement-level `hRigid`).
+    ({ C with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) pctx size len
   pure {
     header := {
       name := ⟨name, ()⟩,
@@ -194,6 +232,7 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
     into later bodies (see `TestScaffold.genProcsWith`). -/
 def headerProcSig (name : String) (h : Procedure.Header) : ProcSig where
   pname := name
+  typeArgs := h.typeArgs
   M := h.getInoutParams
   I := h.inputs.filter (fun p => !(ListMap.keys h.outputs).contains p.1)
   O := h.getOutputOnlyParams
@@ -207,7 +246,7 @@ instance instToFormatUnitProcedureHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of procedures at size 2, up to 4 body statements.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let p ← genProcedure [] [] 2 4
+  let p ← genProcedure [] [] LContext.default {} 2 4
   IO.println <| Std.format p.header |>.pretty : IO Unit)
 
 end StrataGenerators.Procedure

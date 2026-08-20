@@ -1,58 +1,65 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators"]
+defaultTargets = ["StrataGenerators", "StrataTests"]
 testDriver = "test"
 
 [[require]]
 name = "Strata"
-git = "https://github.com/ngernest/Strata"
-rev = "7f94d01f"
+git = "https://github.com/strata-org/Strata"
+rev = "main"
 
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
 rev = "lean-4.29"
 
+# Note: Strata is on Lean 4.29.1, but mainline LSpec is on 4.31,
+# so we currently depend on a custom fork of LSpec that is on 4.29
 [[require]]
 name = "LSpec"
 git = "https://github.com/ngernest/LSpec"
 rev = "aa07f8c"
 
-# A single library covering every module under `StrataGenerators/`. The glob
-# `StrataGenerators.*` selects `StrataGenerators` and all of its submodules, so
-# new files are picked up automatically without adding a stanza per module.
 [[lean_lib]]
 name = "StrataGenerators"
 globs = ["StrataGenerators.*"]
+
+# The property files. Globbed, so a new file under `StrataTests/` is compiled without
+# a configuration change. A default target, so a plain `lake build` — which is all CI
+# runs, since the suite reports known counterexamples and would fail it — still
+# compiles every property. `StrataTests.lean` is the import root the drivers read;
+# regenerate it with `lake exe write-test-imports`.
+[[lean_lib]]
+name = "StrataTests"
+globs = ["StrataTests.*"]
 
 [[lean_exe]]
 name = "strata-generators"
 root = "Main"
 
-# The single merged test driver (registered as the `lake test` driver above). It
-# exercises the expr/command/function/statement generators via Plausible + LSpec
-# and — unless `--no-tyche` is passed — also writes Tyche visualization panels.
-# Run: `lake test -- [numTrials] [maxSize] [--no-tyche] [--tyche-out=PATH] [--tyche-samples=N]`
+# The `lake test` driver: the registry rendered by LSpec.
 [[lean_exe]]
 name = "test"
-root = "TestMain"
+root = "LSpecTestRunner"
 
-# A second test driver that reproduces the same suite *without* the LSpec
-# dependency, to de-risk dropping LSpec in the future (see issue #21). It imports
-# the same shared `StrataGenerators.TestScaffold` as `test`, so the two cannot
-# drift, and runs the properties through the ~small Plausible-only harness in
-# `StrataGenerators.PlainHarness` instead of `LSpec.checkIO`/`lspecIO`. It is
-# deliberately NOT the registered `lake test` driver (that stays `test`).
-# Run: `lake build test-plain && .lake/build/bin/test-plain [numTrials] [maxSize] [--smt]`
+# The same registry rendered by the package's own reporter, with no test-framework
+# dependency. Kept so that the LSpec dependency stays droppable, and so that a
+# discrepancy between the two renderings is visible rather than assumed away.
 [[lean_exe]]
 name = "test-plain"
-root = "PlainTestMain"
+root = "PlainTestRunner"
 
-# Distribution report: samples each property family's generator under each tuning
-# profile in `StrataGenerators.TuningProfiles` and prints how often the shapes the
-# suite's properties discriminate on actually appear. This is how the profiles'
-# weights were derived, and how to re-derive them after a generator change.
-# Run: `lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]`
+# Rewrites `StrataTests.lean` from the contents of `StrataTests/`. Needed only when a
+# file is added or removed there.
+[[lean_exe]]
+name = "write-test-imports"
+root = "WriteTestImports"
+
+# Distribution report: samples each tunable generator under each tuning profile in
+# `StrataGenerators.TuningProfiles` and prints how often the shapes the suite's
+# properties discriminate on actually appear. This is how the profiles' weights were
+# derived, and how to re-derive them after a generator change.
+# Run: `lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--props]`
 [[lean_exe]]
 name = "dist-report"
 root = "DistReportMain"

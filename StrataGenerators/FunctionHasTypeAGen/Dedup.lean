@@ -1,51 +1,28 @@
-import Strata.DL.Util.List
+import Strata.Util.ListUtils
 
 /-!
-# Local facts about `List.dedup`
+# A local fixed-point fact about `List.dedup`
 
-Strata's `List.dedup` (in `Strata.DL.Util.List`) is used by `genFunction` to make
-`typeArgs` and the input identifiers `Nodup`. Strata marks the *definition* of
-`dedup` as `public` (so it is importable), but its accompanying lemmas
-(`nodup_dedup`, `mem_of_dedup`, …) are **not** `public`, so they are not visible
-to importers. Mathlib also defines `List.dedup` with a rich lemma set, but once
-`Strata.DL.Util.List` is in the environment, importing a Mathlib module that
-defines `List.dedup` fails with an "environment already contains `List.dedup`"
-error.
+Strata's `List.dedup` (in `Strata.Util.ListUtils`) is used by `genFunction` to make
+`typeArgs` and the input identifiers `Nodup`. Its lemmas live in
+`Strata.Util.ListUtilsProps`, which this package reaches transitively via
+`Strata.DL.Lambda.LTyUnify`, so `List.nodup_dedup` and `List.mem_of_dedup` are used
+directly at their call sites rather than re-proved here. Note that upstream's
+`mem_of_dedup` is oriented `a ∈ l ↔ a ∈ l.dedup`.
 
-The `FunctionHasTypeAGen` proofs (which transitively import both Strata's
-`Util.List` and Mathlib via `HasTypeAGen`) are therefore stuck with Strata's
-`dedup` definition but no dedup lemmas from either side. We only need three basic
-facts, all provable by a short induction on `List.dedup`'s definition
-(`| a :: as => let as := as.dedup; if a ∈ as then as else a :: as`), so we prove
-them locally here. `List.nodup_cons` and `List.mem_cons` come from core/Batteries
-(no collision), so these compile in the `HasTypeAGen`-importing environment.
+The one fact upstream does not provide is the fixed-point law below, which
+completeness needs: a well-typed function's `Nodup` `typeArgs`/inputs have to be
+reachable by the dedup-based generators. It is a short induction on `List.dedup`'s
+definition (`| a :: as => let as := as.dedup; if a ∈ as then as else a :: as`).
+
+Mathlib also defines `List.dedup`, with a fixed-point lemma among others, but it is
+unavailable here: once `Strata.Util.ListUtils` is in the environment, importing a
+Mathlib module that defines `List.dedup` fails with an "environment already
+contains `List.dedup`" error. `List.nodup_cons` comes from core/Batteries (no
+clash), so this file compiles in the `HasTypeAGen`-importing environment.
 -/
 
 namespace StrataGenerators.Dedup
-
-/-- `List.dedup` always produces a `Nodup` list. -/
-theorem nodup_dedup {α} [DecidableEq α] (l : List α) : l.dedup.Nodup := by
-  induction l with
-  | nil => simp [List.dedup]
-  | cons a as ih =>
-    simp only [List.dedup]; split
-    · exact ih
-    · rename_i h; exact List.nodup_cons.mpr ⟨h, ih⟩
-
-/-- Membership is preserved by `List.dedup` in both directions. -/
-theorem mem_dedup {α} [DecidableEq α] (l : List α) (a : α) :
-    a ∈ l.dedup ↔ a ∈ l := by
-  induction l with
-  | nil => simp [List.dedup]
-  | cons b bs ih =>
-    simp only [List.dedup]; split
-    · rename_i h
-      rw [ih, List.mem_cons]
-      refine ⟨fun hh => Or.inr hh, fun hh => ?_⟩
-      rcases hh with heq | hmem
-      · subst heq; exact ih.mp h
-      · exact hmem
-    · rename_i h; rw [List.mem_cons, List.mem_cons, ih]
 
 /-- A `Nodup` list is a fixed point of `List.dedup`. Needed for completeness:
     a well-typed function's `Nodup` `typeArgs`/inputs are reachable by the

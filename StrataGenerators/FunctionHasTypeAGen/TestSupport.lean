@@ -109,11 +109,11 @@ def funcCheckKnownTypes : Lambda.KnownTypes :=
     t[∀a b. Map %a %b],
     t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
 
-/-- `LContext` with `intBoolFactory` and all generator-relevant known types.
+/-- `LContext` with `coreFactory` and all generator-relevant known types.
     Matches the `resolveLContext` used for expression-level tests. -/
 def funcCheckContext : Lambda.LContext CoreLParams :=
   { Lambda.LContext.default with
-    functions := intBoolFactory,
+    functions := coreFactory,
     knownTypes := funcCheckKnownTypes }
 
 -- ── Function property checks (shared by both harnesses) ───────────────────

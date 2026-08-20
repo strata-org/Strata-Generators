@@ -85,15 +85,16 @@ theorem mem_writable_keys_iff (ctx : VarCtx) (immutableVars : List (Identifier U
     `elements (ctx.writable immutableVars)`), and every mutable output-context key is
     either a mutable input key or the freshly-`init`-defined name. -/
 theorem genCmd_mutableVars
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) fctx octx tvars immutableVars ctx depth)) :
+    (hr : r ∈ SetGen.support
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx)) :
     (∀ v ∈ HasVarsImp.modifiedVars (P := Expression) r.cmd,
       v ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
       k ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) := by
-  rw [genCmd_support_iff] at hr
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
   · -- init_det: modified [], defined [name], outCtx = ctx.insert
     simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
@@ -141,19 +142,19 @@ theorem genCmd_mutableVars
     show name ∈ Map.keys (ctx.writable immutableVars)
     rw [VarCtx.writable, Map.keys_eq_map_fst]
     exact List.mem_map.mpr ⟨(name, mty), hmem, rfl⟩
-  · -- assert
+  · -- assert (label sampled via `genIdentName`)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr
     exact ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv,
            fun k hk => List.mem_append_left _ hk⟩
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr
     exact ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv,
            fun k hk => List.mem_append_left _ hk⟩
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr
+    obtain ⟨_, _, _, _, rfl⟩ := hr
     exact ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv,
            fun k hk => List.mem_append_left _ hk⟩
 
@@ -267,10 +268,10 @@ theorem initChain_definedVars (news : List (Identifier Unit × LMonoTy)) :
     (`getLhs_mkArgs = M.keys ++ T.keys`). -/
 theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
     (missing : List (Identifier Unit × LMonoTy))
-    (exprs : List Expression.Expr) :
+    (exprs : List Expression.Expr) (mask : List Bool) :
     Block.modifiedVars (P := Expression)
       (StrataGenerators.Stmt.initChain missing ++
-        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs) default])
+        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default])
       = M.keys ++ T.keys := by
   rw [block_modifiedVars_append, initChain_modifiedVars]
   simp only [List.nil_append, Block.modifiedVars, Stmt.modifiedVars, HasVarsImp.modifiedVars,
@@ -283,10 +284,10 @@ theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
     the group's output scope is `insertAllCtx ctx missing` rather than `ctx`. -/
 theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
     (missing : List (Identifier Unit × LMonoTy))
-    (exprs : List Expression.Expr) :
+    (exprs : List Expression.Expr) (mask : List Bool) :
     Block.definedVars (P := Expression)
       (StrataGenerators.Stmt.initChain missing ++
-        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs) default]) false
+        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default]) false
       = missing.map Prod.fst := by
   rw [block_definedVars_append, initChain_definedVars]
   simp only [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, Command.definedVars,
@@ -323,12 +324,13 @@ theorem mem_keys_append_exists (M T : @LMonoTySignature Unit) (v : Identifier Un
     the declared names being precisely the group's `definedVars`. Both
     empty-generator branches (empty `procs`, guard false) discharge vacuously. -/
 theorem genCallStmt_mutableVars
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars immutableVars procs C ctx n)) :
+    (hr : r ∈ SetGen.support
+      (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx n pctx)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) r.stmts,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
@@ -338,20 +340,28 @@ theorem genCallStmt_mutableVars
   | cons p₀ ps =>
     simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
+    -- Peel the type-instantiation sampling; name the instantiated blocks.
+    obtain ⟨σvals, _, hr⟩ := hr
+    obtain ⟨σ, hσ⟩ : ∃ σ, s.typeArgs.zip σvals = σ := ⟨_, rfl⟩
+    obtain ⟨Mσ, hMσ⟩ : ∃ Mσ, StrataGenerators.Stmt.substSig σ s.M = Mσ := ⟨_, rfl⟩
+    obtain ⟨Oσ, hOσ⟩ : ∃ Oσ, StrataGenerators.Stmt.substSig σ s.O = Oσ := ⟨_, rfl⟩
+    simp only [hσ, hMσ, hOσ] at hr
     split at hr
     · rename_i hcond
       obtain ⟨hMusable, _hNodup⟩ := hcond
       -- Name the generator's chosen out targets; every one of them is usable
-      -- (`outTargets_all_usableName`), so the guard over `s.M` extends to `s.M ++ T`.
-      obtain ⟨T, hT⟩ : ∃ T, outTargets immutableVars ctx s.O = T := ⟨_, rfl⟩
-      have hallusable : (List.append s.M T).all (usableName immutableVars ctx) = true := by
-        rw [← hT]; exact all_usableName_append immutableVars ctx s.M s.O hMusable
+      -- (`outTargets_all_usableName`), so the guard over `Mσ` extends to `Mσ ++ T`.
+      obtain ⟨T, hT⟩ : ∃ T, outTargets immutableVars ctx Oσ = T := ⟨_, rfl⟩
+      have hallusable : (List.append Mσ T).all (usableName immutableVars ctx) = true := by
+        rw [← hT]; exact all_usableName_append immutableVars ctx Mσ Oσ hMusable
       rw [hT] at hr
       simp only [mem_support_bind_iff] at hr
       obtain ⟨exprs, hexprs, hr⟩ := hr
+      -- Peel the argument-order mask; `getLhs_mkArgs` holds at every mask.
+      obtain ⟨mask, _, hr⟩ := hr
       -- A reused name (bound in `ctx`, hence `reusable` rather than `needsInit`) is
       -- a mutable key of `ctx` — that is exactly `reusable`'s writability bit.
-      have hReuseWritable : ∀ q ∈ List.append s.M T, ∀ τ,
+      have hReuseWritable : ∀ q ∈ List.append Mσ T, ∀ τ,
           ctx.find? q.1 = some τ → q.1 ∈ Map.keys (ctx.writable immutableVars) := by
         intro q hq τ hfind_q
         have hq' := List.all_eq_true.mp hallusable q hq
@@ -367,13 +377,17 @@ theorem genCallStmt_mutableVars
       simp only [mem_support_pure_iff] at hr
       obtain rfl := hr
       -- Fuse the recipe's in-out-then-out-target init lists into the single filter
-      -- over `s.M ++ T`, which is the form both `definedVars` and `insertAllCtx`
+      -- over `Mσ ++ T`, which is the form both `definedVars` and `insertAllCtx`
       -- are stated at below.
       rw [callGroup_modifiedVars, callGroup_definedVars, filter_needsInit_append]
+      -- `substSig` preserves keys, so the call's LHS names (from `mkArgs s.M …`) are
+      -- the same names as the instantiated write-list `Mσ`'s keys.
+      have hMkeys : s.M.keys = Mσ.keys := by rw [← hMσ, StrataGenerators.Stmt.substSig_keys]
       refine ⟨fun v hv => ?_, fun k hk => ?_⟩
       · -- Each LHS name is either `init`-defined (absent from `ctx`) or reused
         -- (bound in `ctx`, hence a mutable key).
-        obtain ⟨q, hq, rfl⟩ := mem_keys_append_exists s.M T v hv
+        rw [hMkeys] at hv
+        obtain ⟨q, hq, rfl⟩ := mem_keys_append_exists Mσ T v hv
         rcases hfind_q : ctx.find? q.1 with _ | τ
         · -- absent ⇒ fresh ⇒ `needsInit`, so `q` is in the init list.
           apply List.mem_append_right
@@ -405,13 +419,14 @@ mutual
     `modifiedVars` and `definedVars _ false` to the recursively-generated body, so
     they follow from `genStmtChain_mutableVars` at the smaller `size`. -/
 theorem genStmt_mutableVars
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx n)) :
+    (hr : r ∈ SetGen.support
+      (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) r.stmts,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
@@ -425,7 +440,7 @@ theorem genStmt_mutableVars
     · -- cmd
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
-      have h := genCmd_mutableVars fctx octx tvars immutableVars ctx 0 rc hrc
+      have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
         Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
@@ -433,10 +448,10 @@ theorem genStmt_mutableVars
       cases labels with
       | nil =>
         replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx 0) := hr
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
-        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx 0 rc hrc
+        have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
@@ -469,17 +484,17 @@ theorem genStmt_mutableVars
       cases procs with
       | nil =>
         replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx 0) := hr
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
-        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx 0 rc hrc
+        have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars
-          immutableVars (hd :: tl) C ctx 0) := hr
-        exact genCallStmt_mutableVars fctx octx tvars immutableVars (hd :: tl) C ctx 0 _ hr
+        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+          immutableVars (hd :: tl) C ctx 0 pctx) := hr
+        exact genCallStmt_mutableVars octx pctx tvars immutableVars (hd :: tl) C ctx 0 _ hr
   | succ size =>
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
@@ -488,7 +503,7 @@ theorem genStmt_mutableVars
     · -- cmd
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
-      have h := genCmd_mutableVars fctx octx tvars immutableVars ctx (size+1) rc hrc
+      have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
         Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
@@ -496,10 +511,10 @@ theorem genStmt_mutableVars
       cases labels with
       | nil =>
         replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx (size+1)) := hr
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size+1) pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
-        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx (size+1) rc hrc
+        have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
@@ -532,44 +547,44 @@ theorem genStmt_mutableVars
       cases procs with
       | nil =>
         replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx (size+1)) := hr
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size+1) pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
-        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx (size+1) rc hrc
+        have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars
-          immutableVars (hd :: tl) C ctx (size+1)) := hr
-        exact genCallStmt_mutableVars fctx octx tvars immutableVars (hd :: tl) C ctx (size+1) _ hr
+        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+          immutableVars (hd :: tl) C ctx (size+1) pctx) := hr
+        exact genCallStmt_mutableVars octx pctx tvars immutableVars (hd :: tl) C ctx (size+1) _ hr
     · -- block: outCtx = ctx, modified/defined delegate to body
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨label, hlabel, ⟨⟨len, _⟩⟩, _, triple, htriple, rfl⟩ := hr
-      have ih := genStmtChain_mutableVars fctx octx tvars immutableVars procs (label :: labels) C ctx size len triple htriple
+      have ih := genStmtChain_mutableVars octx pctx tvars immutableVars procs (label :: labels) C ctx size len triple htriple
       simp only [block_modifiedVars_singleton, block_definedVars_singleton,
         Stmt.modifiedVars, Stmt.definedVars, if_false, Bool.false_eq_true]
       refine ⟨ih.1, fun k hk => List.mem_append_left _ hk⟩
     · -- ite_det
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨cond, hcond, ⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmtChain_mutableVars fctx octx tvars immutableVars procs labels C ctx size tlen tt htt
-      have ihe := genStmtChain_mutableVars fctx octx tvars immutableVars procs labels C ctx size elen et het
+      have iht := genStmtChain_mutableVars octx pctx tvars immutableVars procs labels C ctx size tlen tt htt
+      have ihe := genStmtChain_mutableVars octx pctx tvars immutableVars procs labels C ctx size elen et het
       simp only [block_modifiedVars_singleton, block_definedVars_singleton,
         Stmt.modifiedVars, Stmt.definedVars, if_false, Bool.false_eq_true]
       refine ⟨ite_combine _ _ _ _ _ iht.1 ihe.1, fun k hk => List.mem_append_left _ hk⟩
     · -- ite_nondet
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmtChain_mutableVars fctx octx tvars immutableVars procs labels C ctx size tlen tt htt
-      have ihe := genStmtChain_mutableVars fctx octx tvars immutableVars procs labels C ctx size elen et het
+      have iht := genStmtChain_mutableVars octx pctx tvars immutableVars procs labels C ctx size tlen tt htt
+      have ihe := genStmtChain_mutableVars octx pctx tvars immutableVars procs labels C ctx size elen et het
       simp only [block_modifiedVars_singleton, block_definedVars_singleton,
         Stmt.modifiedVars, Stmt.definedVars, if_false, Bool.false_eq_true]
       refine ⟨ite_combine _ _ _ _ _ iht.1 ihe.1, fun k hk => List.mem_append_left _ hk⟩
     · -- loop
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨guard, hguard, measure, hmeasure, invs, hinvs, ⟨⟨blen, _⟩⟩, _, body, hbody, rfl⟩ := hr
-      have ih := genStmtChain_mutableVars fctx octx tvars immutableVars procs labels C ctx size blen body hbody
+      have ih := genStmtChain_mutableVars octx pctx tvars immutableVars procs labels C ctx size blen body hbody
       simp only [block_modifiedVars_singleton, block_definedVars_singleton,
         Stmt.modifiedVars, Stmt.definedVars, if_false, Bool.false_eq_true]
       refine ⟨ih.1, fun k hk => List.mem_append_left _ hk⟩
@@ -585,13 +600,14 @@ termination_by (n, 0, 0)
     whose every key `genStmt_mutableVars` already justified against
     `ctx.keys ++ definedVars head`. -/
 theorem genStmtChain_mutableVars
-    (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (result : List Statement × LContext CoreLParams × VarCtx)
-    (hr : result ∈ SetGen.support (genStmtChain (G := SetGen.Set) fctx octx tvars immutableVars procs labels C ctx size len)) :
+    (hr : result ∈ SetGen.support
+      (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx size len)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) result.1,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) result.1 false) ∧
     (∀ k ∈ Map.keys (result.2.2.writable immutableVars),
@@ -606,8 +622,8 @@ theorem genStmtChain_mutableVars
   | succ len =>
     simp only [genStmtChain, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨rhead, hhead, rtail, htail, rfl⟩ := hr
-    have hh := genStmt_mutableVars fctx octx tvars immutableVars procs labels C ctx size rhead hhead
-    have ht := genStmtChain_mutableVars fctx octx tvars immutableVars procs labels rhead.outC rhead.outCtx size len rtail htail
+    have hh := genStmt_mutableVars octx pctx tvars immutableVars procs labels C ctx size rhead hhead
+    have ht := genStmtChain_mutableVars octx pctx tvars immutableVars procs labels rhead.outC rhead.outCtx size len rtail htail
     -- The head is a statement *list* now, so the chain **appends** it rather than
     -- consing: both write-sets split by `block_*_append`, not by the cons equations.
     rw [block_modifiedVars_append, block_definedVars_append]

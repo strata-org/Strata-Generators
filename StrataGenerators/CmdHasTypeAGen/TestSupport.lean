@@ -47,7 +47,7 @@ def ppCmd (cmd : Cmd Expression) : String :=
     Returns `true` for all non-init commands. -/
 def checkInitFreshNotInRhs (cmd : Cmd Expression) : Bool :=
   match cmd with
-  | .init x _ (.det e) _ => !(x ∈ HasVarsPure.getVars (P := Expression) e)
+  | .init x _ (.det e) _ => !(x ∈ HasFvars.getFvars (P := Expression) e)
   | _ => true
 
 /-- Check that the expression sub-term in a command typechecks.
@@ -277,12 +277,12 @@ def shrinkCmds (inCtx : VarCtx) (cmds : List (Cmd Expression)) : List (List (Cmd
     input context, and the output context. -/
 def genCmdIO (ctx : VarCtx := []) (depth : Nat := 2) : IO (Cmd Expression × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) [] coreMonoOps tvars [] ctx depth
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] ctx depth
   return (cmd, ctx, ctx')
 
 /-- Generate a sequence of well-typed commands in IO. -/
 def genCmdsIO (n : Nat := 5) (ctx : VarCtx := []) (depth : Nat := 2) :
     IO (List (Cmd Expression) × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []
-  let (cmds, ctx') ← genCmds (G := IO) [] coreMonoOps tvars [] ctx depth n
+  let (cmds, ctx') ← genCmds (G := IO) coreMonoOps tvars [] ctx depth n
   return (cmds, ctx, ctx')

@@ -102,6 +102,17 @@ def runInto [TycheSample α] (handle : IO.FS.Handle) (gen : IO α)
     catch _ =>
       retries := retries + 1
 
+/-- Write one JSONL line per element of `samples`, all under the same property
+    name. The deterministic counterpart of `runInto`: for a property whose input
+    space is a *fixed finite set* rather than a distribution — the registered
+    bitvector widths, the eighteen `Bv↔Int` operators, a constructed no-op witness —
+    sampling with replacement would emit the same few marks repeatedly, so the panel
+    enumerates the space exactly once instead. -/
+def writeInto [TycheSample α] (handle : IO.FS.Handle) (samples : List α)
+    (property : String) (runStart : Nat) : IO Unit := do
+  for val in samples do
+    handle.putStrLn ((TycheSample.toSample val).toJsonLine property runStart)
+
 /-- Run a generator `numSamples` times and write Tyche JSONL output.
     Retries on failure so the output always contains exactly `numSamples` lines. -/
 def run [TycheSample α] (gen : IO α) (config : Config := {}) : IO Unit := do

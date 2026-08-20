@@ -1,6 +1,7 @@
 import StrataGenerators.HasTypeAGen
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Dedup
+import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.Languages.Core.FunctionTypeSpec
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
@@ -42,6 +43,24 @@ namespace StrataGenerators.Function
 
 -- ── Free-variable helpers ────────────────────────────────────────────
 
+/-- If `v ∈ LMonoTys.freeVars tys`, then some element of `tys` contains `v`.
+
+    Strata proves this as `Lambda.LMonoTys.freeVars_exists`, but it lives in
+    `Strata.DL.Lambda.LTyProps`, which has no `public section`, so it is only
+    reachable via `import all` — illegal from this non-`module` file. The proof
+    is three lines from the public `LMonoTys.freeVars_of_cons`, so we reprove it
+    locally rather than widen Strata's visibility. -/
+theorem freeVars_exists' {v : TyIdentifier} {tys : List LMonoTy}
+    (hv : v ∈ LMonoTys.freeVars tys)
+    : ∃ ty, ty ∈ tys ∧ v ∈ LMonoTy.freeVars ty := by
+  induction tys with
+  | nil => simp [LMonoTys.freeVars] at hv
+  | cons ty rest ih =>
+    simp only [LMonoTys.freeVars_of_cons, List.mem_append] at hv
+    cases hv with
+    | inl h => exact ⟨ty, .head _, h⟩
+    | inr h => obtain ⟨t, ht, hvt⟩ := ih h; exact ⟨t, .tail _ ht, hvt⟩
+
 /-- `allFtvarsIn tvars τ` says every ftvar in `τ` is drawn from `tvars`; this is
     exactly the `noUndeclaredVars`-style statement phrased via `LMonoTy.freeVars`. -/
 theorem allFtvarsIn_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
@@ -62,7 +81,7 @@ theorem allFtvarsIn_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
     -- `allFtvarsIn tvars (.tcons name args)` unfolds to a per-argument statement
     have hargs : ∀ a ∈ args, allFtvarsIn tvars a := by unfold allFtvarsIn at h; exact h
     -- reduce membership in `LMonoTys.freeVars` to some element containing `v`
-    obtain ⟨ty, hty_mem, hv_ty⟩ := LMonoTys.freeVars_exists hv
+    obtain ⟨ty, hty_mem, hv_ty⟩ := freeVars_exists' hv
     exact ih ty hty_mem (hargs ty hty_mem) v hv_ty
 
 set_option linter.unusedSimpArgs false in
@@ -93,97 +112,23 @@ theorem genTypeArgs_nodup (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact nodup_dedup names
+  exact List.nodup_dedup names
 
 /-- Any list in the support of `genIdents` is `Nodup` (it is `List.dedup`ped). -/
 theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact nodup_dedup _
+  exact List.nodup_dedup _
 
--- ── Keyword-freedom of generated names ───────────────────────────────
--- `genIdentName` post-processes each candidate with `dodgeKeyword`, so it never
--- produces a reserved Strata Core keyword. These lemmas make that guarantee
--- explicit and provable (a soundness-style property of the name generator): no
--- generated function name, type argument, or parameter name is a reserved word
--- the parser would reject in identifier position.
-
-/-- No reserved keyword's character list ends in `_` (checked over the concrete
-    source list `reservedKeywordsList`). -/
-theorem no_keyword_ends_underscore :
-    ∀ k ∈ reservedKeywordsList, k.toList.getLast? ≠ some '_' := by decide +kernel
-
-/-- `s ++ "_"` is never a reserved keyword: it ends in `_`, and no keyword does.
-    Stated via `isReservedKeyword` (the `HashSet` lookup) and discharged through
-    the `isReservedKeyword_eq_list_contains` bridge to `reservedKeywordsList`. -/
-theorem append_underscore_not_keyword (s : String) :
-    isReservedKeyword (s ++ "_") = false := by
-  rw [isReservedKeyword_eq_list_contains, Bool.eq_false_iff]
-  intro hc
-  rw [List.contains_iff_mem] at hc
-  have hlast : (s ++ "_").toList.getLast? = some '_' := by
-    rw [String.toList_append]; exact List.getLast?_concat
-  exact no_keyword_ends_underscore _ hc hlast
-
-/-- `dodgeKeyword` never returns a reserved keyword: keywords are mapped to
-    `k ++ "_"` (not a keyword), non-keywords are returned unchanged. -/
-theorem dodgeKeyword_not_keyword (s : String) :
-    isReservedKeyword (dodgeKeyword s) = false := by
-  unfold dodgeKeyword
-  split
-  · rename_i h
-    exact append_underscore_not_keyword s
-  · rename_i h
-    simpa using h
-
-/-- **Keyword-freedom of `genIdentName`.** Every name in the support of
-    `genIdentName` is a non-keyword identifier. -/
-theorem genIdentName_not_keyword (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
-    isReservedKeyword s = false := by
-  simp only [genIdentName, mem_support_bind_iff, mem_support_pure_iff] at hs
-  obtain ⟨x, _, xs, _, rfl⟩ := hs
-  exact dodgeKeyword_not_keyword _
-
-/-- `dodgeKeyword` never introduces a space: the keyword branch appends `"_"`
-    (no space), the fallthrough returns the string unchanged. -/
-theorem dodgeKeyword_no_space (s : String) (h : ' ' ∉ s.toList) :
-    ' ' ∉ (dodgeKeyword s).toList := by
-  unfold dodgeKeyword
-  split
-  · rw [String.toList_append]
-    intro hmem
-    rcases List.mem_append.mp hmem with h1 | h2
-    · exact h h1
-    · simp at h2
-  · exact h
-
-/-- **Space-freedom of `genIdentName`.** Every generated identifier's character
-    list contains no space: the leading char is drawn from `startChars` and the
-    rest from `remainingChars` — neither list contains `' '` — and `dodgeKeyword`
-    only ever appends `"_"`. This is the enabling fact for the in-out procedure
-    body seed: `CoreIdent.mkOld` prefixes `"old "` (which *does* contain a space),
-    so no generated parameter name can equal an `old`-binding key. -/
-theorem genIdentName_no_space (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
-    ' ' ∉ s.toList := by
-  simp only [genIdentName, mem_support_bind_iff, mem_support_pure_iff] at hs
-  obtain ⟨x, hx, xs, hxs, rfl⟩ := hs
-  have hstart : x ∈ startChars := by
-    simpa only [genStartChar,
-      mem_support_elements_iff (show startChars ≠ [] from by decide +kernel)] using hx
-  have hxs' : ∀ c ∈ xs, c ∈ remainingChars := by
-    intro c hc
-    have := SetGen.mem_support_listOf hxs c hc
-    simpa only [genRemainingChar,
-      mem_support_elements_iff (show remainingChars ≠ [] from by decide +kernel)] using this
-  apply dodgeKeyword_no_space
-  rw [String.toList_ofList]
-  intro hmem
-  rcases List.mem_cons.mp hmem with rfl | hmem
-  · exact (by decide +kernel : ' ' ∉ startChars) hstart
-  · exact (by decide +kernel : ' ' ∉ remainingChars) (hxs' _ hmem)
+-- ── Keyword-freedom and space-freedom of generated names ─────────────
+-- `FunctionHasTypeAGen/IdentName.lean` holds these results. They are corollaries
+-- of `mem_support_genIdentName_iff`, the support lemma in both directions. That
+-- file also uses the lemma to discharge the side conditions on name reachability
+-- in the completeness proofs of this package. The results are
+-- `genIdentName_not_keyword`, `genIdentName_no_space`, `dodgeKeyword_*`,
+-- `append_underscore_not_keyword` and `no_keyword_ends_underscore`, all in the
+-- namespace `StrataGenerators.Function`.
 
 set_option linter.unusedSimpArgs false in
 /-- The `mapM` inside `genInputs` produces a `ListMap` whose keys are exactly the
@@ -242,7 +187,7 @@ theorem genInputs_key_name_reachable (tvars : List TyIdentifier) (depth : Nat)
   rw [hkeys] at hk
   simp only [genIdents, mem_support_map_iff] at hidents
   obtain ⟨names, hnames, rfl⟩ := hidents
-  rw [StrataGenerators.Dedup.mem_dedup] at hk
+  rw [← List.mem_of_dedup] at hk
   obtain ⟨s, hs, rfl⟩ := List.mem_map.mp hk
   rw [genNameList, mem_support_listOfMaxLength_iff] at hnames
   exact hnames.2 s hs
@@ -270,9 +215,9 @@ theorem polyOpsForResult_nil (τ : LMonoTy) (generableTys sampledTys : List LMon
 /-- Soundness of `genOptExpr`: any `some e` it produces is well-typed at `τ`
     (empty bvar context). The `none` case is vacuous. -/
 theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) (τ : LMonoTy)
+    (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx)
     (o : Option LExpr')
-    (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ))
+    (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ pctx))
     (e : LExpr') (heq : o = some e) :
     HasTypeA' [] e τ := by
   simp only [genOptExpr,
@@ -284,18 +229,25 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     subst heq
     have hee : e' = e := (Option.some.inj ho).symm
     subst hee
-    exact genLExpr_sound fctx octx [] tvars [] depth τ e' he'
+    exact genLExpr_sound fctx octx pctx tvars [] depth τ _ e' he'
 
 -- ── Soundness of genFunction ─────────────────────────────────────────
 
 /-- **Soundness of `genFunction`.** Every function in the generator's support is
     well-typed w.r.t. `FuncHasTypeA` for *any* ambient context `Γ` (the annotated
     spec ignores it) and *any* operator context — `genLExpr_sound` is now
-    unconditional. -/
+    unconditional.
+
+    The one condition on `C` is `SimpleTyArities`, for the `signatureWellKinded`
+    field: it asks that each signature type be well-kinded in `C`. The generator builds
+    only generable types. Therefore it is enough that `C` registers the eight type
+    constructors at their own arities. The Strata Core context does this
+    (`coreContextSimpleTyArities`). -/
 theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (pctx : PolyOpCtx)
+    (hC : SimpleTyArities C)
     (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth)) :
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth pctx)) :
     FuncHasTypeA C Γ func := by
   -- Expose the components generated for each field.
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
@@ -308,9 +260,9 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
   have htyNodup : typeArgs.Nodup := genTypeArgs_nodup depth typeArgs htypeArgs
   obtain ⟨hkeysNodup, hvals⟩ := genInputs_support typeArgs depth inputs hinputs
   have houtputFtv : allFtvarsIn typeArgs output :=
-    (genLMonoTy_support typeArgs depth output |>.mp houtput).2.2
+    genLMonoTy_mem_ftvars houtput
   -- Build the `FuncHasType'` structure.
-  refine ⟨hkeysNodup, htyNodup, ?_, ?_, ?_⟩
+  refine ⟨hkeysNodup, htyNodup, ?_, ?_, ?_, ?_⟩
   · -- noUndeclaredVars
     intro v hv
     rcases freeVars_mkArrow' output inputs.values v hv with hout | ⟨t, ht_mem, hvt⟩
@@ -318,23 +270,30 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     · -- t is one of the input values, hence in genLMonoTy's support ⇒ allFtvarsIn
       have ht_supp := hvals t ht_mem
       have ht_ftv : allFtvarsIn typeArgs t :=
-        (genLMonoTy_support typeArgs depth t |>.mp ht_supp).2.2
+        genLMonoTy_mem_ftvars ht_supp
       exact allFtvarsIn_freeVars ht_ftv v hvt
+  · -- signatureWellKinded: every generated signature type is generable, and
+    -- `HasTypeA`'s `tyCompat` is plain equality, so `ty' := ty` works.
+    intro ty hty
+    refine ⟨ty, rfl, genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hC ?_⟩
+    rcases List.mem_cons.mp hty with rfl | hty
+    · exact ⟨_, houtput⟩
+    · exact ⟨_, hvals ty hty⟩
   · -- bodyTyped
     intro b hb
-    exact genOptExpr_sound fctx octx typeArgs depth output body hbody b hb
+    exact genOptExpr_sound fctx octx typeArgs depth output pctx body hbody b hb
   · -- measureTyped
     intro m hm _
-    exact genOptExpr_sound fctx octx typeArgs depth .int measure hmeasure m hm
+    exact genOptExpr_sound fctx octx typeArgs depth .int pctx measure hmeasure m hm
 
 /-- Hypothesis-free soundness of `genFunction` at an empty operator context.
     (Now a special case of `genFunction_sound`, which is unconditional in `octx`.) -/
 theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (hC : SimpleTyArities C)
     (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx [] depth)) :
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx ∅ depth)) :
     FuncHasTypeA C Γ func :=
-  genFunction_sound fctx [] depth C Γ func hfunc
+  genFunction_sound fctx ∅ depth C Γ [] hC func hfunc
 
 -- ── Completeness helpers ─────────────────────────────────────────────
 
@@ -343,9 +302,8 @@ theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
     `genIdentName`. This concretizes the opaque `∈ support (genNameList …)`
     reachability side-conditions of `genFunction_complete`.
 
-    (The remaining `∈ support genIdentName` per-name obligation is the
-    residual bottleneck noted in `docs/vectorof-listofmaxlength-integration.md`
-    §4/§5 — it awaits a public two-directional `genIdentName` support lemma.) -/
+    (The remaining `∈ support genIdentName` per-name obligation is the residual
+    bottleneck. It awaits a public two-directional `genIdentName` support lemma.) -/
 theorem mem_support_genNameList_iff (depth : Nat) (l : List String) :
     l ∈ SetGen.support (genNameList (G := SetGen.Set) depth) ↔
       l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
@@ -506,7 +464,7 @@ theorem genPreconditions_complete (octx : OpCtx)
     completeness theorem would have to quantify over the "provable" or "valid"
     preconditions and so drag in undecidability. It does not. The support of a
     generator is a set of `LExpr'` *syntax trees*, and `FuncWF.precond_freevars`
-    (`Func.lean:120`) constrains preconditions only syntactically (free variables ⊆
+    (`Func.lean`) constrains preconditions only syntactically (free variables ⊆
     input names). Nothing here mentions satisfiability, validity, or provability, so
     there is no semantic quantifier to be undecidable about.
 
@@ -630,8 +588,8 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hConstr : func.isConstr = false)
     (hRec : func.isRecursive = false)
     (hAttr : func.attr = #[])
-    -- (Strata's `76933e8b` split moved the function-typed `concreteEval` off the
-    -- base `Func`, so `Function` no longer has that field and the former
+    -- (An upstream split moved the function-typed `concreteEval` off the base
+    -- `Func`, so `Function` no longer has that field and the former
     -- `func.concreteEval = none` hypothesis is gone.)
     (hAxioms : func.axioms = [])
     -- `preconditions` IS generated, but at most one clause (`genPreconditions`
@@ -700,7 +658,7 @@ theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
   intro s hs
-  exact genNameList_not_keyword depth names hnames s ((mem_dedup names s).mp hs)
+  exact genNameList_not_keyword depth names hnames s ((List.mem_of_dedup names s).mpr hs)
 
 /-- Every input-identifier name produced by `genIdents` is a non-keyword: each
     identifier `⟨s, ()⟩` comes from mapping over the `genNameList` names, and
@@ -713,7 +671,7 @@ theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
   intro x hx
   -- `x ∈ (names.map ⟨·,()⟩).dedup` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
   have hx' : x ∈ names.map (fun s => (⟨s, ()⟩ : Identifier Unit)) :=
-    (mem_dedup _ x).mp hx
+    (List.mem_of_dedup _ x).mpr hx
   obtain ⟨s, hs_mem, rfl⟩ := List.mem_map.mp hx'
   exact genNameList_not_keyword depth names hnames s hs_mem
 

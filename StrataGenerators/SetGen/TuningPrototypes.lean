@@ -97,9 +97,10 @@ def precondInputHeavy : Tuning := ⟨#[(10, 0), (1, 0)]⟩
     `SetGen.frequency_eq_oneOf` sends each side's `frequency` to the same weight-free `oneOf` normal
     form. The `inputs.toList = []` case has no site at all, so it closes by reflexivity. -/
 theorem genPrecondition_tuned_eq (θ : Tuning) (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth
-      = genPrecondition octx inputs tvars depth := by
+    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat)
+    (pctx : PolyOpCtx) :
+    genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx
+      = genPrecondition octx inputs tvars depth pctx := by
   unfold genPrecondition genPrecondition.tuned
   by_cases hne : inputs.toList ≠ []
   · simp only [dif_pos hne]
@@ -111,18 +112,19 @@ theorem genPrecondition_tuned_eq (θ : Tuning) (octx : OpCtx)
     (`mem_support_genPrecondition_iff`) holds verbatim of every tuning of it — one `rw`, no reproof.
     In particular `genPreconditions_complete`, and thence `genFunction_complete`, carry over. -/
 example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) :
-    SetGen.support (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth)
-      = SetGen.support (genPrecondition (G := SetGen.Set) octx inputs tvars depth) := by
+    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx) :
+    SetGen.support (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx)
+      = SetGen.support (genPrecondition (G := SetGen.Set) octx inputs tvars depth pctx) := by
   rw [genPrecondition_tuned_eq]
 
 /-- And any soundness-and-completeness fact transfers without knowing what the predicate is. -/
 example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) (P : Option (FuncPrecondition LExpr' Unit) → Prop)
+    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx)
+    (P : Option (FuncPrecondition LExpr' Unit) → Prop)
     (h : SetGen.IsSoundAndComplete
-      (genPrecondition (G := SetGen.Set) octx inputs tvars depth) P) :
+      (genPrecondition (G := SetGen.Set) octx inputs tvars depth pctx) P) :
     SetGen.IsSoundAndComplete
-      (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth) P :=
+      (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx) P :=
   SetGen.IsSoundAndComplete.of_support_eq (by rw [genPrecondition_tuned_eq]) h
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -306,38 +308,40 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 
 /-- The single-statement generator, as tagged at its definition site: the same fact, read off the
     block's. -/
-theorem genStmt_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+theorem genStmt_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
-    genStmtT (G := SetGen.Set) θ fctx octx tvars immutableVars procs labels C ctx size
-      = genStmt fctx octx tvars immutableVars procs labels C ctx size := by
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size : Nat) :
+    genStmtT (G := SetGen.Set) θ octx tvars immutableVars procs labels C ctx pctx size
+      = genStmt octx tvars immutableVars procs labels C ctx pctx size := by
   unfold genStmtT
   rw [genStmt_mutual_tuned_eq]
   rfl
 
 /-- …and for the chain, which is what the statement family's harness draws from. -/
-theorem genStmtChain_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
+theorem genStmtChain_tuned_eq (θ : Tuning) (octx : OpCtx)
     (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat) :
-    genStmtChainT (G := SetGen.Set) θ fctx octx tvars immutableVars procs labels C ctx size len
-      = genStmtChain fctx octx tvars immutableVars procs labels C ctx size len := by
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx)
+    (size len : Nat) :
+    genStmtChainT (G := SetGen.Set) θ octx tvars immutableVars procs labels C ctx pctx size len
+      = genStmtChain octx tvars immutableVars procs labels C ctx pctx size len := by
   unfold genStmtChainT
   rw [genStmt_mutual_tuned_eq]
   rfl
 
-theorem genProgramStmtsT_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
-    (tvars : List TyIdentifier) (size len : Nat) :
-    genProgramStmtsT (G := SetGen.Set) θ fctx octx tvars size len
-      = genProgramStmts fctx octx tvars size len :=
+theorem genProgramStmtsT_tuned_eq (θ : Tuning) (octx : OpCtx)
+    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
+    genProgramStmtsT (G := SetGen.Set) θ octx tvars size len pctx
+      = genProgramStmts octx tvars size len pctx :=
   genStmtChain_tuned_eq ..
 
 /-- The procedure generator too: `genProcedureT` differs from the shipping `genProcedure` only in
     which statement-chain generator it calls, so the block's θ-invariance is the whole proof. This is
     what makes the `proc:` family's profiles — the ones aimed at the three transform passes — free of
     consequence for `genProcedure_sound` and `genProcedure_complete`. -/
-theorem genProcedureT_tuned_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
-    genProcedureT (G := SetGen.Set) θ octx procs size len
-      = StrataGenerators.Procedure.genProcedure octx procs size len := by
+theorem genProcedureT_tuned_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx) :
+    genProcedureT (G := SetGen.Set) θ octx procs C Γ size len pctx
+      = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx := by
   unfold genProcedureT StrataGenerators.Procedure.genProcedure
   simp only [genStmtChain_tuned_eq]
 
@@ -348,10 +352,10 @@ theorem genProcedureT_tuned_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
 /-- `genCmd` is not recursive, so the recipe is the first one in `SetGen.Tuning`'s list — except that
     its two sites sit in the two branches of a `dite` whose proof `h` the `set` branches *use*, so
     the condition has to be split first (exactly as for `genPrecondition` in §1). -/
-theorem genCmd_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
-    genCmd.tuned (G := SetGen.Set) θ fctx octx tvars immutableVars ctx depth
-      = genCmd fctx octx tvars immutableVars ctx depth := by
+theorem genCmd_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx) :
+    genCmd.tuned (G := SetGen.Set) θ octx tvars immutableVars ctx depth pctx
+      = genCmd octx tvars immutableVars ctx depth pctx := by
   unfold genCmd genCmd.tuned
   by_cases h : (ctx.writable immutableVars).length > 0
   · simp only [dif_pos h]
@@ -364,11 +368,11 @@ theorem genCmd_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : L
     all_goals simp [Tuning.weight_pos]
 
 /-- So the tuned command *chain* is the shipping one, by induction on its length. -/
-theorem genCmdsT_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+theorem genCmdsT_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (depth : Nat) :
     ∀ (n : Nat) (ctx : VarCtx),
-      genCmdsT (G := SetGen.Set) θ fctx octx tvars immutableVars ctx depth n
-        = genCmds fctx octx tvars immutableVars ctx depth n := by
+      genCmdsT (G := SetGen.Set) θ octx tvars immutableVars ctx depth n
+        = genCmds octx tvars immutableVars ctx depth n := by
   intro n
   induction n with
   | zero => intro ctx; rfl
@@ -407,10 +411,10 @@ set_option maxHeartbeats 1000000 in
     The `refine congrFun (congrFun …)` rather than `apply` is because the equation compiler moved
     `bctx` and the target type into `Nat.brecOn`'s motive, so `delta` leaves them applied outside the
     `brecOn` (see `SetGen.brecOn_congr`). -/
-theorem genLExprBase_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
+theorem genLExprBase_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) :
-    genLExprBase.tuned (G := SetGen.Set) θ fctx octx tvars bctx n τ
-      = genLExprBase fctx octx tvars bctx n τ := by
+    genLExprBase.tuned (G := SetGen.Set) θ fctx octx pctx tvars bctx n τ
+      = genLExprBase fctx octx pctx tvars bctx n τ := by
   delta genLExprBase genLExprBase.tuned
   refine congrFun (congrFun (SetGen.brecOn_congr ?heq n) bctx) τ
   case heq =>
@@ -425,11 +429,12 @@ theorem genLExprBase_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
 
 /-- The payoff, spelled out once: an arbitrary soundness-and-completeness fact about the shipping
     expression generator holds of every tuning of it, with no reference to what the predicate is. -/
-example (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx)
-    (n : Nat) (τ : LMonoTy) (P : LExpr' → Prop)
-    (h : SetGen.IsSoundAndComplete (genLExprBase (G := SetGen.Set) fctx octx tvars bctx n τ) P) :
+example (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) (P : LExpr' → Prop)
+    (h : SetGen.IsSoundAndComplete
+      (genLExprBase (G := SetGen.Set) fctx octx pctx tvars bctx n τ) P) :
     SetGen.IsSoundAndComplete
-      (genLExprBase.tuned (G := SetGen.Set) θ fctx octx tvars bctx n τ) P :=
+      (genLExprBase.tuned (G := SetGen.Set) θ fctx octx pctx tvars bctx n τ) P :=
   SetGen.IsSoundAndComplete.of_support_eq (by rw [genLExprBase_tuned_eq]) h
 
 end TuningPrototypes

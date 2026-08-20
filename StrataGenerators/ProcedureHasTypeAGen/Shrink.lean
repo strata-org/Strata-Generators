@@ -31,12 +31,12 @@ Checking the *whole* procedure rather than tracking per-node types is what makes
 the delegation above sound, and it is what decides several obligations for free:
 
 - **Contract clauses stay Boolean.** `Procedure.typeCheck`'s `typeCheckConditions`
-  rejects any pre/postcondition whose type is not `bool` (ProcedureType.lean:93),
+  rejects any pre/postcondition whose type is not `bool` (ProcedureType.lean),
   so a clause reduced to a non-Boolean subterm is filtered out rather than
   emitted. Clauses may therefore be shrunk freely.
 - **Modification rights stay valid.** Dropping a body statement can leave a `set x`
   whose defining `init x` is gone, which `checkModificationRights` rejects
-  (ProcedureType.lean:55) — again caught by the filter, not by local reasoning.
+  (ProcedureType.lean) — again caught by the filter, not by local reasoning.
 - **`old v` stays in scope.** Postconditions may mention `old v` for in-out
   parameters; since the header is held fixed (below), those bindings survive every
   reduction.
@@ -291,11 +291,14 @@ private def specProc : Procedure :=
 -- THE HEADLINE INVARIANT: every candidate list is well-typed.
 #guard (shrinkProcsList [emptyProc, specProc]).all procsTypeCheck == true
 
-/-- A procedure whose body declares a function with a `decreases` clause but no
-    body — the measure-without-body shape the *algorithmic* typechecker rejects
-    while the declarative spec permits it (the documented completeness gap, which
-    `genProcedure` reaches on roughly 2% of draws). -/
-private def illTypedProc : Procedure :=
+/-- A procedure whose body declares a function with a `decreases` clause but no body.
+
+    This used to be the reproducer for a completeness gap: the declarative spec permitted
+    the shape while the *algorithmic* typechecker rejected it (`genProcedure` hit it on
+    roughly 2% of draws). **`strata-org/Strata` `main` accepts it**, so the gap is closed
+    and this is now simply a well-typed procedure — kept as a regression pin for the shape
+    and for the shrinker's well-typedness invariant. -/
+private def measureNoBodyProc : Procedure :=
   { emptyProc with
     body := .structured [
       .funcDecl { name := ⟨"g", ()⟩, typeArgs := [], inputs := [],
@@ -303,23 +306,21 @@ private def illTypedProc : Procedure :=
                   measure := some (.const () (.intConst 0)),
                   preconditions := [] } .empty ] }
 
--- The oracle really does reject it (so the case below is not vacuous)...
-#guard procTypeChecks illTypedProc == false
-#guard procsTypeCheck [illTypedProc] == false
--- ...and, crucially, shrinking an ill-typed list never *emits* an ill-typed one.
--- Before `procsTypeCheck` filtered the drop family too, the drop of `specProc`
--- here would have been emitted unchecked, still carrying `illTypedProc`.
-#guard (shrinkProcsList [illTypedProc, specProc]).all procsTypeCheck == true
--- Concretely: the only way past the filter is to drop the offending procedure, so
--- no candidate retains it. (Reducing it in place cannot help either — the gap is in
--- the `funcDecl` the algorithm rejects, and every reduct still contains it or is
--- the drop.)
-#guard (shrinkProcsList [illTypedProc, specProc]).all
-  (fun c => !c.any (fun p => p.body == illTypedProc.body)) == true
--- Dropping is a legitimate reduction, so a singleton ill-typed list minimizes to
--- the empty list rather than getting stuck. What the filter rules out is reporting
--- a *smaller, still ill-typed* list: the shrinker's output is well-typed either way.
-#guard minimizeProcsWhile (fun _ => true) 100 [illTypedProc] == []
+-- The oracle now *accepts* the shape (upstream closed the gap), so this input is
+-- well-typed and every shrink candidate stays well-typed trivially.
+#guard procTypeChecks measureNoBodyProc == true
+#guard procsTypeCheck [measureNoBodyProc] == true
+-- The headline invariant still holds on this input, which is what the pin is for: the
+-- `procsTypeCheck` filter covers the drop family as well as the reduce family, so no
+-- candidate list can be ill-typed regardless of which shape the checker accepts.
+#guard (shrinkProcsList [measureNoBodyProc, specProc]).all procsTypeCheck == true
+-- Because the procedure is now well-typed, candidates may legitimately *retain* it —
+-- the old pin (no candidate keeps the offending body) no longer applies.
+#guard (shrinkProcsList [measureNoBodyProc, specProc]).any
+  (fun c => c.any (fun p => p.body == measureNoBodyProc.body)) == true
+-- Dropping is still a legitimate reduction, so a singleton minimizes to the empty list
+-- for a property that fails everywhere.
+#guard minimizeProcsWhile (fun _ => true) 100 [measureNoBodyProc] == []
 
 end Guards
 

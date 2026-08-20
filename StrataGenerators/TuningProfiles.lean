@@ -35,20 +35,29 @@ been measured anywhere from 13% to 19%. Re-run before reading a small difference
 
 | properties | interesting shape | default | tuned | profile |
 | --- | --- | --- | --- | --- |
-| `stmt: LoopElim …` (#3, #4) | ≥ 1 `loop` | 28% | **76%** | `stmtLoopHeavy` |
-| ” | a loop inside a loop | 3% | **24%** | ” |
-| ” | LoopElim changes the program | 28% | **76%** | ” |
-| `stmt: typechecker accepts …` (#1) | ≥ 1 `funcDecl` | 17% | **64%** | `stmtFuncDeclHeavy` |
-| `stmt: DetToKleene …` (#6) | ≥ 1 `exit` | 4% | **13%** | `stmtKleeneBalanced` |
-| `proc: FilterProcedures …` (7) | ≥ 1 `call` (a call-graph edge) | 15% | **52%** | `procCallHeavy` |
-| `proc: PrecondElim …` (13) | the pass rewrites the program | 30% | **54%** | `procPrecondHeavy` |
-| ” | the pass emits a `$wf` procedure | 1% | **4%** | ” |
-| ” | ≥ 1 declared function | 38% | **72%** | ” |
-| `cmd: set …` (2) | ≥ 1 `set` (mean `set`s per sample) | 1.3 | **2.1** | `cmdSetHeavy` |
-| `cmd: context growth …` | variables added by `init` (mean) | 1.0 | **2.0** | `cmdInitHeavy` |
-| `expr: preservation`/`progress` | term is not already a value | 30% | **51%** | `exprEvalHeavy` |
-| `expr: progress` | the failure the gap predicts | 11% | **18%** | `exprStuckOpHeavy` |
-| `expr: eval preserves fvars` | term mentions a free variable | 32% | **52%** | `exprFVarHeavy` |
+| `stmt: LoopElim …` (#3, #4) | ≥ 1 `loop` | 32% | **78%** | `stmtLoopHeavy` |
+| ” | a loop inside a loop | 3% | **32%** | ” |
+| ” | an invariant-bearing loop | 19% | **59%** | ” |
+| `stmt: typechecker accepts …` | ≥ 1 `funcDecl` | 18% | **68%** | `stmtFuncDeclHeavy` |
+| `stmt: DetToKleene …` | ≥ 1 `exit` | 4% | **17%** | `stmtKleeneBalanced` |
+| `cmd: set …` (2) | mean `set`s per sample | 1.3 | **2.1** | `cmdSetHeavy` |
+| `cmd: context growth …` | variables added by `init` (mean) | 0.9 | **2.1** | `cmdInitHeavy` |
+| `cmd: symbolic/concrete eval …` | ≥ 1 `assert`/`assume`/`cover` | 91% | **99%** | `cmdCheckHeavy` |
+| `expr: preservation`/`progress` | term is not already a value | 42% | **54%** | `exprEvalHeavy` |
+| `expr: progress` | the failure the gap predicts | 22% | **38%** | `exprIndirHeavy` |
+| `expr: eval preserves fvars` | term mentions a free variable | 28% | **41%** | `exprFVarHeavy` |
+| `proc: PrecondElim …` (13) | the pass rewrites the program | 67% | **78%** | `procPrecondHeavy` |
+| ” | ≥ 1 declared function | 40% | **81%** | ” |
+| `proc: FilterProcedures …` (7) | ≥ 1 `call` | 57% | **82%** | `procCallHeavy` |
+
+The `proc:` rows are the ones to read sceptically, and they are a good advertisement for measuring
+rather than assuming: when these profiles were first written, calls appeared in 15% of generated
+programs and PrecondElim fired on 26%. Both numbers are now 57% and 67% *without* any tuning, because
+`genProcedure` and `genCallStmt` were improved in the meantime (every sibling is callable, and the
+`call` weight is 3 rather than 1). What was a 4× gain is now a sharpener worth about 1.2–2×, and
+`stmtLoopHeavy` raises `PrecondElim fires` (78%) just as much as `procPrecondHeavy` does. Keep the
+`proc:` profiles for the declared-function rate, which is still 40% → 81%; do not expect them to
+rescue a vacuous property, because that family is no longer vacuous.
 
 Two rows are honestly *not* there: `stmt: ANF …` and `proc: ANFEncoder …` (ten properties) run as
 identity checks — the encoder changed the program on 0–4% of samples under every profile. The reason
@@ -242,52 +251,62 @@ end CmdIdx
 
 /-! Flat indices of `genLExprBase`'s ten sites — one per generated type, all at `n + 1` (the
 `n = 0` arms are uniform `oneOf`s, with no weights to tune). Every site offers the same *roles*, in
-the same order, with two exceptions: `bool` also offers `eq`/`∀`/`∃`, and the four sites whose type
-has no literal (`ftvar`, `regex`, `Map`, `Sequence`) have no constant branch, while `arrow`'s first
-branch is `abs` rather than a constant.
+the same order, with three exceptions: `bool` also offers `eq`/`∀`/`∃`, the four sites whose type has
+no literal (`ftvar`, `regex`, `Map`, `Sequence`) have no constant branch, and `arrow`'s first branch
+is `abs` rather than a constant.
 
 That regularity is what the role lists below capture. A weight is worth setting *per role across
 every site*, not per site: a profile that raises `ite` only at `bool` is diluted by the type
-distribution, since a base type is drawn uniformly from six and only one of them is `bool` — which
-is exactly what the first `dist-report` run of `exprQuantHeavy` showed (a 10× weight moved the
+distribution, since a base type is drawn uniformly and only one draw in six is `bool` — which is
+exactly what the first `dist-report` run of `exprQuantHeavy` showed (a 10× weight moved the
 quantifier rate from 3% to 13%, no further, because 5 draws in 6 never reach the `bool` site at the
 root at all). -/
 namespace ExprIdx
 
 /-- Site offsets, in source order. -/
-def arrowSite : Nat := 0
-def boolSite  : Nat := 6
-def intSite   : Nat := 15
-def ftvarSite : Nat := 21
-def stringSite : Nat := 26
-def realSite  : Nat := 32
-def bitvecSite : Nat := 38
-def regexSite : Nat := 44
-def mapSite   : Nat := 49
-def seqSite   : Nat := 54
+def arrowSite  : Nat := 0
+def boolSite   : Nat := 8
+def intSite    : Nat := 19
+def ftvarSite  : Nat := 27
+def stringSite : Nat := 34
+def realSite   : Nat := 42
+def bitvecSite : Nat := 50
+def regexSite  : Nat := 58
+def mapSite    : Nat := 65
+def seqSite    : Nat := 72
 
 /-- The `app` branch of every site. -/
-def appAll : List Nat := [1, 7, 16, 21, 27, 33, 39, 44, 49, 54]
+def appAll : List Nat := [1, 9, 20, 27, 35, 43, 51, 58, 65, 72]
 /-- The `ite` branch of every site. -/
-def iteAll : List Nat := [2, 8, 17, 22, 28, 34, 40, 45, 50, 55]
+def iteAll : List Nat := [2, 10, 21, 28, 36, 44, 52, 59, 66, 73]
 /-- The bound-variable branch of every site (a `bvar` when one of the right type is in scope, and
 otherwise the site's own fallback). -/
-def bvarAll : List Nat := [3, 12, 18, 23, 29, 35, 41, 46, 51, 56]
+def bvarAll : List Nat := [3, 14, 22, 29, 37, 45, 53, 60, 67, 74]
 /-- The free-variable branch of every site. -/
-def fvarAll : List Nat := [4, 13, 19, 24, 30, 36, 42, 47, 52, 57]
-/-- The operator branch of every site. -/
-def opAll : List Nat := [5, 14, 20, 25, 31, 37, 43, 48, 53, 58]
+def fvarAll : List Nat := [4, 15, 23, 30, 38, 46, 54, 61, 68, 75]
+/-- The bare-operator branch of every site — an operator whose *type is* the target type, hence a
+leaf. Not to be confused with `indirAll`. -/
+def opAll : List Nat := [5, 16, 24, 31, 39, 47, 55, 62, 69, 76]
+/-- The **Indir** branch of every site: a fully-applied monomorphic operator returning the target
+type, with its arguments drawn from this generator. This is where `Int.Add x 2` — and the partial
+`Int.Safe*` builtins PrecondElim exists for — come from, so it is the operator knob that matters. -/
+def indirAll : List Nat := [6, 17, 25, 32, 40, 48, 56, 63, 70, 77]
+/-- The **IndirPoly** branch of every site: the same for a polymorphic library operator. -/
+def indirPolyAll : List Nat := [7, 18, 26, 33, 41, 49, 57, 64, 71, 78]
 /-- The literal-constant branch of the five sites that have one. -/
-def constAll : List Nat := [6, 15, 26, 32, 38]
+def constAll : List Nat := [8, 19, 34, 42, 50]
 /-- `abs`, which only the `arrow` site offers. -/
 def absArrow : Nat := 0
 
 /-- `bool`-only rules. -/
-def boolEq    : Nat := 9
-def boolAll   : Nat := 10
-def boolExist : Nat := 11
+def boolConst : Nat := 8
+def boolApp   : Nat := 9
+def boolIte   : Nat := 10
+def boolEq    : Nat := 11
+def boolAll   : Nat := 12
+def boolExist : Nat := 13
 /-- Both quantifiers. -/
-def quantAll : List Nat := [10, 11]
+def quantAll : List Nat := [12, 13]
 
 end ExprIdx
 
@@ -388,9 +407,10 @@ independent choices makes two of them equal. Two things do move the rate, both w
 * **More expressions per body.** Collisions are roughly quadratic in the number of expressions a
   body holds, so the density lever helps a little — and the best one is `stmtLoopHeavy`, not
   anything `cmd`-shaped, because a `loop` carries a guard *and* a measure *and* an invariant list
-  while a command carries one expression. Measured: `ANF≠id` 0–1% at the defaults, 3–4% under
-  `stmtLoopHeavy`, and 0–2% under the `cmd`-heavy, `block`-heavy variant that this note replaces
-  (which is why that variant is not a profile).
+  while a command carries one expression. Measured: `ANF≠id` 1% at the defaults, 3% under
+  `stmtLoopHeavy`, and 0–1% under the `cmd`-heavy, `block`-heavy variant that this note replaces
+  (which is why that variant is not a profile). The `cse:` witness in the front-end redesign — a
+  body holding `str.le(P(G), P(G))` — is one of those 1%.
 * **A degenerate expression distribution**, which would raise the collision probability directly.
   That is a `genLExprBase` knob, so `genStmt` reaches it by name and untunably (see "Composition") —
   and it would trade away exactly the breadth the `expr:` properties need.
@@ -463,7 +483,7 @@ What this profile therefore buys is quantifier *presence*, not `progress` failur
 the suite's whole size range, and 10% → 53% at max size 60 (where the depth budget is 3 — at depth
 1 the sub-terms of an `ite` are drawn from the `n = 0` arms, which have no quantifier branch at
 all, so the depth schedule, not the weight, is the binding constraint). For reproducing the
-`progress` gap use `exprStuckOpHeavy` instead, and see its docstring for why. -/
+`progress` gap use `exprIndirHeavy` instead, and see its docstring for why. -/
 def exprQuantHeavy : Tuning :=
   let θ := withWeightsAt exprBreadth ExprIdx.quantAll 8
   let θ := withWeightsAt θ ExprIdx.iteAll 14
@@ -480,28 +500,36 @@ non-empty `fctx` — with `fctx = []` the branch falls back to the site's consta
 def exprFVarHeavy : Tuning :=
   withWeightsAt exprBreadth ExprIdx.fvarAll 10
 
-/-- **Stuck-leaf-heavy** (`expr: progress`). This is the profile that actually reproduces the
-`progress` counterexamples, and finding that out is what `dist-report` is for: the property's
-docstring blames quantifiers, but printing the counterexamples shows they are overwhelmingly
-*nullary operator constants* — `Re.All`, `Re.AllChar`, `Re.None`, `Re.Star Re.None` — which
-`checkProgress` counts as neither a value nor able to step. (`regex` is the only generated type
-whose factory operators take no arguments, which is why it is the only type that shows up.) A
-quantifier does appear, in the documented `if ∀real. #false then … else …` shape, but rarely.
+/-- **Indir-heavy** (`expr: progress`). This is the profile that reproduces the `progress`
+counterexamples, and which knob does it changed when the expression generator did: `genLExprBase`
+now offers the **Indir** and **IndirPoly** rules — a fully-applied operator whose result type is the
+target — at every type, so an operator application is a branch here rather than something only the
+`genLExpr` wrapper added at the root.
 
-So the profile raises the `op` branch at every site rather than the quantifiers: measured, that
-takes the `progress` failure rate from 12% to 18% *and raises* the first-try rate from 76% to 92%,
-since a leaf branch is the one thing that cannot fail. Contrast `exprQuantHeavy`, which *lowers*
-the failure rate to 3–5% precisely because it suppresses these leaves. -/
-def exprStuckOpHeavy : Tuning :=
-  withWeightsAt exprBreadth ExprIdx.opAll 30
+Measured (400 draws per row, `dist-report`'s expression sampler):
 
-/-! There is deliberately no operator-heavy profile. `genLExprBase`'s `op` branch draws an operator
-whose *type is* the target type — a leaf, not an application — so raising it makes terms more
-value-like rather than more operator-rich: measured, a 10× weight moved the fraction of terms
-containing an operator from 17% to 19% while raising the already-a-value fraction from 68% to 77%.
-Fully applied operator terms (`Int.Add #1 #2`, and the partial `Int.Safe*` builtins that PrecondElim
-exists for) come from `genLExpr`'s Indir rule instead, whose 1:9 split is tunable but sits above
-`genLExprBase` rather than inside it. -/
+| | default | `op` leaf ×30 | Indir ×12 | Indir ×24 |
+| --- | --- | --- | --- | --- |
+| `progress` fails | 22% | 17% | 30% | **38%** |
+| term contains an operator | 33% | 24% | 48% | **54%** |
+| term is already a value | 64% | 81% | 52% | **47%** |
+| 1st-try | 51% | 77% | 35% | **32%** |
+
+Note the middle column, which is why this profile replaced an earlier `exprStuckOpHeavy` that raised
+the bare-`op` *leaf* branch instead: raising a leaf **crowds out** Indir, so it lowered the failure
+rate and the operator content it was supposed to raise. The `op` branch draws an operator whose
+*type is* the target type — a leaf, not an application — and the two are easy to confuse.
+
+The price is the highest in this module: first-try success 51% → 32%, so every sample costs about
+1.6× as much to draw. An operator application needs a term per argument, and each is another chance
+to fail. -/
+def exprIndirHeavy : Tuning :=
+  withWeightsAt (withWeightsAt exprBreadth ExprIdx.indirAll 24) ExprIdx.indirPolyAll 24
+
+/-! There is deliberately no profile for the bare-`op` *leaf* branch. It draws an operator whose
+*type is* the target type, so raising it makes terms more value-like and, worse, displaces the Indir
+branches that carry real operator applications — see the table in `exprIndirHeavy`, whose middle
+column is that measurement. -/
 
 /-! ### Types
 
@@ -521,64 +549,73 @@ def tyCompoundHeavy : Tuning := withWeights tyDefault [(1, 9), (3, 9)]
 -- Tuned entry points
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-! Each of these is the shipping generator with `θ` threaded through it, and each is pinned to
-the shipping generator at `θ = defaults` by an `example : … = … := rfl` below — so the plumbing
-cannot drift away from what it claims to wrap. -/
+/-! Each of these is the shipping generator with `θ` threaded through it, and each is pinned to the
+shipping generator at `θ = defaults` by an `example : … = … := rfl` below — so the plumbing cannot
+drift away from what it claims to wrap. -/
 
-/-- `genStmt` with every branch weight read from `θ`, threaded through the *whole* mutual
-recursion (so the statements nested inside a `block`/`ite`/`loop` body are tuned too). -/
-def genStmtT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
-    (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
+/-- `genStmt` with every branch weight read from `θ`, threaded through the *whole* mutual recursion
+(so the statements nested inside a `block`/`ite`/`loop` body are tuned too). -/
+def genStmtT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat) :
     G GenStmtResult :=
-  genStmt._mutual.tuned θ fctx octx tvars immutableVars procs (PSum.inl ⟨labels, C, ctx, size⟩)
+  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx (PSum.inl ⟨labels, C, ctx, size⟩)
 
 /-- `genStmtChain` with every branch weight read from `θ`. -/
-def genStmtChainT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
-    (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat) :
+def genStmtChainT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size len : Nat) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmt._mutual.tuned θ fctx octx tvars immutableVars procs
+  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx
     (PSum.inr ⟨labels, C, ctx, size, len⟩)
 
-/-- `genProgramStmts` with every branch weight read from `θ`: the entry point the statement
-family's harness draws from. -/
-def genProgramStmtsT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
-    (tvars : List TyIdentifier) (size len : Nat) :
+/-- `genProgramStmts` with every branch weight read from `θ`: the entry point the statement family's
+harness draws from. -/
+def genProgramStmtsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
+    (size len : Nat) (pctx : PolyOpCtx := []) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmtChainT θ fctx octx tvars [] [] [] (LContext.default) [] size len
+  genStmtChainT θ octx tvars [] [] [] (LContext.default) [] pctx size len
 
-/-- `genCmds` with every branch weight read from `θ`. `genCmds` has no `frequency` site of its
-own — it is a plain fold over `genCmd` — so the tuned chain is spelled out here rather than
-emitted by the attribute. -/
-def genCmdsT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
-    (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
-    (depth : Nat) : Nat → G (List (Cmd Expression) × VarCtx)
+/-- `genCmds` with every branch weight read from `θ`. `genCmds` has no `frequency` site of its own —
+it is a plain fold over `genCmd` — so the tuned chain is spelled out here rather than emitted by the
+attribute. -/
+def genCmdsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
+    Nat → G (List (Cmd Expression) × VarCtx)
   | 0 => pure ([], ctx)
   | n + 1 => do
-    let ⟨cmd, ctx'⟩ ← genCmd.tuned θ fctx octx tvars immutableVars ctx depth
-    let (rest, ctx'') ← genCmdsT θ fctx octx tvars immutableVars ctx' depth n
+    let ⟨cmd, ctx'⟩ ← genCmd.tuned θ octx tvars immutableVars ctx depth []
+    let (rest, ctx'') ← genCmdsT θ octx tvars immutableVars ctx' depth n
     pure (cmd :: rest, ctx'')
 
 /-- `genProcedure` with the statement weights of its *body* read from `θ`. Identical to
 `StrataGenerators.Procedure.genProcedure` except for the `genStmtChainT` call, which is what the
 `rfl` pin below records. -/
 def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
-    (size len : Nat) : G Procedure := do
+    (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
+    (pctx : PolyOpCtx := []) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   let inout ← genInputs typeArgs size
   let rawInputOnly ← genInputs typeArgs size
   let inputOnly := StrataGenerators.Procedure.disjointInputs rawInputOnly inout
   let rawOutputOnly ← genInputs typeArgs size
-  let outputOnly := StrataGenerators.Procedure.disjointInputs rawOutputOnly (inout ++ inputOnly)
+  let outputOnly :=
+    StrataGenerators.Procedure.disjointInputs rawOutputOnly (inout ++ inputOnly)
   let inputs := inout ++ inputOnly
   let outputs := inout ++ outputOnly
-  let preconditions ← StrataGenerators.Procedure.genChecks octx typeArgs size
-  let postconditions ← StrataGenerators.Procedure.genChecks octx typeArgs size
-  let (body, _, _) ← genStmtChainT θ [] octx typeArgs
+  let preconditions ←
+    StrataGenerators.Procedure.genChecks (StrataGenerators.Procedure.sigFctx inputs)
+      octx typeArgs size pctx
+  let postconditions ←
+    StrataGenerators.Procedure.genChecks
+      (StrataGenerators.Procedure.sigFctx
+        (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout))
+      octx typeArgs size pctx
+  let (body, _, _) ← genStmtChainT θ octx typeArgs
     (ListMap.keys inputs ++ ListMap.keys (StrataGenerators.Procedure.oldVars inout)) procs []
-    (LContext.default) (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) size len
+    ({ C with rigidTypeVars := typeArgs })
+    (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) pctx size len
   pure {
     header := {
       name := ⟨name, ()⟩, typeArgs := typeArgs, inputs := inputs, outputs := outputs,
@@ -603,36 +640,37 @@ them unsealed to see that each is a projection of the shared auxiliary the tunin
 through. -/
 unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 
-example [_root_.Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+@[simp] theorem genStmtT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
-    genStmtT (G := G) stmtDefault fctx octx tvars immutableVars procs labels C ctx size
-      = genStmt fctx octx tvars immutableVars procs labels C ctx size := rfl
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size : Nat) :
+    genStmtT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size
+      = genStmt octx tvars immutableVars procs labels C ctx pctx size := rfl
 
-example [_root_.Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+@[simp] theorem genStmtChainT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat) :
-    genStmtChainT (G := G) stmtDefault fctx octx tvars immutableVars procs labels C ctx size len
-      = genStmtChain fctx octx tvars immutableVars procs labels C ctx size len := rfl
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size len : Nat) :
+    genStmtChainT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size len
+      = genStmtChain octx tvars immutableVars procs labels C ctx pctx size len := rfl
 
-example [_root_.Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (size len : Nat) :
-    genProgramStmtsT (G := G) stmtDefault fctx octx tvars size len
-      = genProgramStmts fctx octx tvars size len := rfl
+@[simp] theorem genProgramStmtsT_defaults [_root_.Gen G] (octx : OpCtx)
+    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
+    genProgramStmtsT (G := G) stmtDefault octx tvars size len pctx
+      = genProgramStmts octx tvars size len pctx := rfl
 
-example [_root_.Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+@[simp] theorem genCmdsT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth n : Nat) :
-    genCmdsT (G := G) cmdDefault fctx octx tvars immutableVars ctx depth n
-      = genCmds fctx octx tvars immutableVars ctx depth n := by
+    genCmdsT (G := G) cmdDefault octx tvars immutableVars ctx depth n
+      = genCmds octx tvars immutableVars ctx depth n := by
   induction n generalizing ctx with
   | zero => rfl
   | succ n ih =>
     simp only [cmdDefault] at ih
     simp only [genCmdsT, genCmds, cmdDefault, genCmd.tuned_defaults, ih]
 
-example [_root_.Gen G] (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
-    genProcedureT (G := G) stmtDefault octx procs size len
-      = StrataGenerators.Procedure.genProcedure octx procs size len := rfl
+@[simp] theorem genProcedureT_defaults [_root_.Gen G] (octx : OpCtx) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx) :
+    genProcedureT (G := G) stmtDefault octx procs C Γ size len pctx
+      = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx := rfl
 
 /-! The index tables above name the branch each profile means to move; these pin them. A branch
 reordering in `genStmt`/`genCmd`/`genLExprBase` changes an arity or an offset and breaks one of
@@ -645,14 +683,20 @@ example : genStmt._mutual.defaults = genStmt.defaults := rfl
 example : (genCmd.sites[0]!.offset, genCmd.sites[0]!.arity) = (0, 7) := rfl
 example : (genCmd.sites[1]!.offset, genCmd.sites[1]!.arity) = (7, 5) := rfl
 example : genLExprBase.sites.size = 10 := rfl
-example : (genLExprBase.sites[1]!.offset, genLExprBase.sites[1]!.arity) = (ExprIdx.boolSite, 9) :=
+example : genLExprBase.defaults.schedules.size = 79 := rfl
+example : (genLExprBase.sites[1]!.offset, genLExprBase.sites[1]!.arity) = (ExprIdx.boolSite, 11) :=
   rfl
+example : genLExprBase.sites[9]!.offset = ExprIdx.seqSite := rfl
 example : ExprIdx.appAll.length = 10 ∧ ExprIdx.iteAll.length = 10 := ⟨rfl, rfl⟩
 example : ExprIdx.appAll.map (· + 1) = ExprIdx.iteAll := rfl
-example : genLExprBase.sites[9]!.offset = ExprIdx.seqSite := rfl
+/-- Indir and IndirPoly are the last two branches of every site, so they sit one apart. -/
+example : ExprIdx.indirAll.map (· + 1) = ExprIdx.indirPolyAll := rfl
+/-- And they are the weight-4 branches the source gives them. -/
+example : ExprIdx.indirAll.all (fun i => genLExprBase.defaults.schedules[i]! == (4, 0)) := by
+  decide
 
 /-! And that each profile moves the branch it names, leaving its neighbours alone. (The expression
-profiles fold over 59 schedule entries, hence the raised recursion depth.) -/
+profiles fold over 79 schedule entries, hence the raised recursion depth.) -/
 
 set_option maxRecDepth 8000
 

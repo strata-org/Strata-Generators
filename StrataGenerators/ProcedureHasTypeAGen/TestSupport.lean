@@ -9,7 +9,7 @@ import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.Transform.FilterProcedures
 import Strata.Transform.PrecondElim
-import Strata.Transform.ANFEncoder
+import Strata.Transform.CommonSubexprElim
 import Strata.Languages.Core.Factory
 
 open Lambda Core Imperative
@@ -53,7 +53,7 @@ field name in its docstring. Three shared obligations recur across all three
 passes and are therefore decided once, by predicates reused by all three:
 
 - `ChangedFlagValid pass` — `changed = true ↔ progOut ≠ progIn`, decided with the
-  derived `DecidableEq Program` (see the honest-failure notes below);
+  derived `DecidableEq Program` (see the structural-equality note below);
 - `PreservesCachedAnalysesWF pass` — `CallGraphWF cgIn progIn → CallGraphWF cgOut
   progOut`, decided by `callGraphWF` below, which is a field-by-field executable
   transcription of the spec's `CallGraphWF` structure;
@@ -136,80 +136,33 @@ operators. Three facts about that body shape bound what these properties can tes
    path (`preconditionsStripped`), the factory properties, and
    `functionsPreserved` reachable from generated input.
 
-## The three honest failures
-
-### `ChangedFlagValid` for FilterProcedures
-
-`filterProceduresPipelinePhase` hardcodes its return to `(true, filtered)`
-(FilterProcedures.lean:82). So when the target set already covers every
-procedure — nothing is removed and `progOut = progIn` — the pass *still* reports
-`changed = true`, violating `ChangedFlagValid` (`changed ↔ progOut ≠ progIn`).
-`checkFilterChangedFlagValid` states that property honestly against the
-all-targets scenario and therefore **fails**, surfacing the real bug exactly as
-the repo's other honest-gap properties (`stmt #1`, function completeness) do.
-
-### `ChangedFlagValid` for PrecondElim
-
-`checkPrecondChangedFlagValid` states the same `changed ↔ progOut ≠ progIn`
-contract for PrecondElim, and it too **fails** — but for a different, narrower
-reason, and this one is a *false negative* (the pass rewrites the program while
-reporting `changed = false`). The culprit is the `.funcDecl` branch of
-`PrecondElim.transformStmt` (`PrecondElim.lean:318–338`): when a statement declares
-an inline function, the branch emits a `{name}$$wf` block holding the asserts
-collected from the function's **preconditions and body**, but returns
-`(hasPreconds, …)` — a flag computed *only* from `!decl.preconditions.isEmpty`.
-So a declared function with no preconditions of its own whose *body* calls a
-partial function (e.g. `function f() : int { Int.SafeDiv(0, -2) }`) gets a `$$wf`
-block inserted and is still reported unchanged. Empirically this hits ~0.5% of
-generated programs, against ~6% on which the pass fires correctly.
+## Structural equality for the `changed`-flag properties
 
 Both `changed`-flag properties use full structural equality on `Program`, which
 is available: `Program`, `Decl` and `Procedure.Header` all derive `DecidableEq`,
 and `Strata.DL.Imperative.Stmt` supplies a hand-rolled `DecidableEq (Stmt P C)`
-instance (`Stmt.lean:194`) that the derived `Decl` instance uses. This comparison
+instance (`Stmt.lean`) that the derived `Decl` instance uses. This comparison
 includes metadata, which is what we want and is not a source of spurious
-failures: `transformStmt` re-emits every unchanged statement with its original
+differences: `transformStmt` re-emits every unchanged statement with its original
 `md` untouched, and only the freshly generated asserts carry the
 `propertySummary`-stripped metadata.
 
-### `PrecondElimFactoryCorrect.factoryStripped`
-
-`checkPrecondFactoryStripped` transcribes the field verbatim — *every* entry of
-the output `Lambda.Factory` has `preconditions = []` — and **fails on every
-input, including the empty program**, for two independent reasons:
-
-1. The pass is seeded with `Core.Factory` (as `Core.Verifier` seeds it in
-   production, and as it must be, since PrecondElim early-returns `(false, prog)`
-   on a `none` factory). 58 of its 310 entries are the partial builtins
-   (`Int.SafeDiv`, `Sequence.select`, …) *whose preconditions are the pass's
-   entire reason for existing*. Nothing in the pass strips them, so the field
-   cannot hold for any seeded run.
-2. Independently, the pass pushes each declared function into the factory
-   **before** stripping it: both `precondElim`'s `.func` branch
-   (`PrecondElim.lean:412`, `F.push func.toLFunc` then `func' := {func with
-   preconditions := []}`) and `transformStmt`'s `.funcDecl` branch
-   (`PrecondElim.lean:326`) leave the *declaration* stripped in the program but
-   the *factory copy* carrying its preconditions.
-
-Cause (1) says the field as written is unsatisfiable for a realistically seeded
-run — a specification bug, not a pass bug. Cause (2) is a real pass/spec
-divergence and is pinned separately by `checkPrecondDeclaredFactoryStripped`,
-which restricts the same claim to the functions the *program* declares and so
-fails only when the program declares one. Both are stated rather than quietly
-weakened; the deterministic `#guard`s at the end of the file pin each cause
-independently.
+Each property is stated verbatim from its spec field rather than quietly weakened,
+and the deterministic `#guard`s at the end of the file pin each cause
+independently. The defect analysis these properties produced is recorded in the
+repo's findings write-up.
 
 ## The FilterProcedures `noFilter` / call-graph divergence
 
-`checkFilterAnalysisPreserving` (the `PreservesCachedAnalysesWF` field) passes on
-generated input, but it is **not** vacuous and it does catch a real divergence
-that generated input cannot reach: `FilterProcedures.run` retains a procedure
+`checkFilterAnalysisPreserving` (the `PreservesCachedAnalysesWF` field) is **not**
+vacuous on generated input, and it catches a real divergence that generated input
+cannot reach: `FilterProcedures.run` retains a procedure
 with `noFilter := true` in the declaration list while filtering it *out* of the
 cached call graph (both maps are filtered by `isNeededProc`, which ignores
-`noFilter` — FilterProcedures.lean:47–66). The retained procedure then has no
+`noFilter` — FilterProcedures.lean). The retained procedure then has no
 `callees` entry, breaking `CallGraphWF.complete` for the output pair. Generated
-procedures all carry `noFilter := false` (`ProcedureHasTypeAGen/Core.lean:160`),
-so the property cannot fail on generated input; the hand-built
+procedures all carry `noFilter := false` (`ProcedureHasTypeAGen/Core.lean`),
+so generated input cannot reach the divergence; the hand-built
 `noFilterProgram` guard at the end of the file pins the divergence
 deterministically instead.
 -/
@@ -313,13 +266,16 @@ def mkMixedProgram (ps : List Procedure) : Program :=
   { decls := fixedNonProcDecls ++ fs.map (Decl.func · .empty) ++ procs }
 
 /-- The transform state a pass is run in: the `Factory` is seeded with
-    `Core.Factory` (PrecondElim early-returns `(false, prog)` if it is `none`, so
-    an unseeded factory would make every PrecondElim property vacuous), and the
-    cached call graph is seeded with the program's own `toProcedureCG` (which
-    FilterProcedures consults, falling back to recomputing it only if absent). -/
+    `Core.Factory` (an unseeded factory has no builtin to read WF obligations off,
+    so it would make every PrecondElim property vacuous), and the cached call graph
+    is seeded with the program's own `toProcedureCG` (which FilterProcedures
+    consults, falling back to recomputing it only if absent).
+
+    `CoreTransformState.factory` is a plain `Factory` upstream (it used to be an
+    `Option`), so the seeding — and every read of it below — is unwrapped. -/
 def mkState (prog : Program) : Transform.CoreTransformState :=
   { Transform.CoreTransformState.emp with
-    factory := some Core.Factory,
+    factory := Core.Factory,
     cachedAnalyses := { callGraph := some prog.toProcedureCG } }
 
 /-- Run a pipeline phase on a program from a freshly-seeded state, returning the
@@ -480,7 +436,7 @@ end
 /-- Strip ANF-prefixed `init` statements from a statement list. -/
 def stripANFInits (ss : List Statement) : List Statement :=
   ss.filter fun
-    | .cmd (.cmd (.init name _ _ _)) => !(CoreIdent.toPretty name).startsWith Core.ANFEncoder.anfVarPrefix
+    | .cmd (.cmd (.init name _ _ _)) => !(CoreIdent.toPretty name).startsWith Core.CSE.cseVarPrefix
     | _ => true
 
 -- ══ FilterProcedures check predicates ═════════════════════════════════════
@@ -595,11 +551,10 @@ def checkFilterUnreachableRemoved (ps : List Procedure) : Bool :=
       | _ => true
   | none => true
 
-/-- **`ChangedFlagValid` for FilterProcedures — HONEST FAILURE.** With the target
-    set covering *every* procedure, nothing is removed, so `progOut = progIn` and
-    the pass *should* report `changed = false`. It hardcodes `changed = true`
-    instead (FilterProcedures.lean:82), so this property genuinely FAILS, pinning
-    the real bug. -/
+/-- **`ChangedFlagValid` for FilterProcedures.** With the target set covering
+    *every* procedure, nothing is removed, so `progOut = progIn` and the pass should
+    report `changed = false`. It hardcodes `changed = true` instead
+    (FilterProcedures.lean). -/
 def checkFilterChangedFlagValid (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
   checkChangedFlagValid (filterPhase (programProcNames prog)) prog
@@ -846,12 +801,7 @@ def checkPrecondOrderPreserved (ps : List Procedure) : Bool :=
     decide ((prog.decls.map Decl.name).Sublist (out.decls.map Decl.name))
   | none => true
 
-/-- **`ChangedFlagValid` for PrecondElim — HONEST FAILURE.** `changed ↔ progOut ≠
-    progIn`. This **fails**: the `.funcDecl` branch of `transformStmt`
-    (`PrecondElim.lean:318–338`) inserts a `{name}$$wf` block for obligations found
-    in a declared function's *body* but derives `changed` solely from whether the
-    declaration had preconditions of its own, so a precondition-free function whose
-    body calls `Int.SafeDiv` is rewritten and reported unchanged. -/
+/-- **`ChangedFlagValid` for PrecondElim:** `changed ↔ progOut ≠ progIn`. -/
 def checkPrecondChangedFlagValid (ps : List Procedure) : Bool :=
   checkChangedFlagValid Core.precondElimPipelinePhase (mkProgram ps)
 
@@ -889,10 +839,9 @@ def checkPrecondFactoryGrows (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
   match runPhaseSt Core.precondElimPipelinePhase prog with
   | some (_, st') =>
-    match (mkState prog).factory, st'.factory with
-    | some fIn, some fOut =>
-      (factoryNames fIn).all fun n => decide (n ∈ fOut)
-    | _, _ => true
+    let fIn := (mkState prog).factory
+    let fOut := st'.factory
+    (factoryNames fIn).all fun n => decide (n ∈ fOut)
   | none => true
 
 /-- **`PrecondElimFactoryCorrect.factoryComplete`.** Every function the output
@@ -902,29 +851,23 @@ def checkPrecondFactoryGrows (ps : List Procedure) : Bool :=
 def checkPrecondFactoryComplete (ps : List Procedure) : Bool :=
   match runPhaseSt Core.precondElimPipelinePhase (mkMixedProgram ps) with
   | some ((_, out), st') =>
-    match st'.factory with
-    | some fOut =>
-      out.decls.all fun
-        | .func f _ => decide (f.name.name ∈ fOut)
-        | .recFuncBlock fs _ => fs.all fun f => decide (f.name.name ∈ fOut)
-        | _ => true
-    | none => true
+    let fOut := st'.factory
+    out.decls.all fun
+      | .func f _ => decide (f.name.name ∈ fOut)
+      | .recFuncBlock fs _ => fs.all fun f => decide (f.name.name ∈ fOut)
+      | _ => true
   | none => true
 
-/-- **`PrecondElimFactoryCorrect.factoryStripped` — HONEST FAILURE (spec bug +
-    pass bug).** Verbatim: every entry of the output factory has
-    `preconditions = []`. This fails on *every* input, including the empty
-    program, for two independent reasons — the seeded `Core.Factory` builtins keep
-    the very preconditions the pass exists to discharge, and the pass pushes each
-    declared function into the factory before stripping it. See "The three honest
-    failures" in the module doc; `checkPrecondDeclaredFactoryStripped` isolates
-    the second, pass-side cause. -/
+/-- **`PrecondElimFactoryCorrect.factoryStripped`.** Verbatim: every entry of the
+    output factory has `preconditions = []`. Two independent causes bear on it — the
+    seeded `Core.Factory` builtins keep the very preconditions the pass exists to
+    discharge, and the pass pushes each declared function into the factory before
+    stripping it. `checkPrecondDeclaredFactoryStripped` isolates the second,
+    pass-side cause. -/
 def checkPrecondFactoryStripped (ps : List Procedure) : Bool :=
   match runPhaseSt Core.precondElimPipelinePhase (mkMixedProgram ps) with
   | some (_, st') =>
-    match st'.factory with
-    | some fOut => fOut.toArray.toList.all (·.preconditions.isEmpty)
-    | none => true
+    st'.factory.toArray.toList.all (·.preconditions.isEmpty)
   | none => true
 
 /-- The factory entries that make `checkPrecondFactoryStripped` fail: every entry
@@ -943,45 +886,38 @@ def checkPrecondFactoryStripped (ps : List Procedure) : Bool :=
     `false` entries are the spec-side bug (builtins whose preconditions the pass
     must *keep*, since they are the very WF obligations it reads to emit asserts),
     and `true` entries are the pass-side bug (a declared function pushed into the
-    factory unstripped, `PrecondElim.lean:326`/`:412`) that
+    factory unstripped, in `PrecondElim.lean`) that
     `checkPrecondDeclaredFactoryStripped` isolates. -/
 def precondFactoryStrippedOffenders (ps : List Procedure) :
     List (String × List String × Bool) :=
   let prog := mkMixedProgram ps
   match runPhaseSt Core.precondElimPipelinePhase prog with
   | some (_, st') =>
-    match st'.factory with
-    | some fOut =>
-      let declared := prog.decls.filterMap fun
-        | .func f _ => some f.name.name
-        | _ => none
-      fOut.toArray.toList.filterMap fun lf =>
-        if lf.preconditions.isEmpty then none
-        else some (lf.name.name,
-                   lf.preconditions.map fun p => toString (Std.format p.expr),
-                   declared.contains lf.name.name)
-    | none => []
+    let declared := prog.decls.filterMap fun
+      | .func f _ => some f.name.name
+      | _ => none
+    st'.factory.toArray.toList.filterMap fun lf =>
+      if lf.preconditions.isEmpty then none
+      else some (lf.name.name,
+                 lf.preconditions.map fun p => toString (Std.format p.expr),
+                 declared.contains lf.name.name)
   | none => []
 
 /-- **`PrecondElimFactoryCorrect.factoryStripped`, restricted to the functions the
-    program declares — HONEST FAILURE (pass side only).** Drops the seeded
-    builtins from the claim, so the only way to fail is the pass pushing a
-    declared function's *unstripped* copy into the factory
-    (`PrecondElim.lean:326` and `:412`). Fails exactly on the programs that
-    declare a function with a precondition, which `genFunction` produces (module
-    doc, point 3). -/
+    program declares (pass side only).** Drops the seeded builtins from the claim,
+    so the only cause it can report is the pass pushing a declared function's
+    *unstripped* copy into the factory (`PrecondElim.lean`). Live exactly on the
+    programs that declare a function with a precondition, which `genFunction`
+    produces (module doc, point 3). -/
 def checkPrecondDeclaredFactoryStripped (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
   match runPhaseSt Core.precondElimPipelinePhase prog with
   | some (_, st') =>
-    match st'.factory with
-    | some fOut =>
-      let declared := prog.decls.filterMap fun
-        | .func f _ => some f.name.name
-        | _ => none
-      fOut.toArray.toList.all fun lf =>
-        !declared.contains lf.name.name || lf.preconditions.isEmpty
-    | none => true
+    let declared := prog.decls.filterMap fun
+      | .func f _ => some f.name.name
+      | _ => none
+    st'.factory.toArray.toList.all fun lf =>
+      !declared.contains lf.name.name || lf.preconditions.isEmpty
   | none => true
 
 /-- **`PreservesCachedAnalysesWF` for PrecondElim.** The pass registers each
@@ -999,7 +935,7 @@ def checkPrecondAnalysisPreserving (ps : List Procedure) : Bool :=
     the output is a pointwise modification of the input. -/
 def checkAnfDeclsLength (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) => out.decls.length == prog.decls.length
   | none => true
 
@@ -1008,7 +944,7 @@ def checkAnfDeclsLength (ps : List Procedure) : Bool :=
     `distinct` declarations are present to be left alone. -/
 def checkAnfNonProcsUnchanged (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     prog.decls.all fun d => d.kind == .proc || decide (d ∈ out.decls)
   | none => true
@@ -1017,7 +953,7 @@ def checkAnfNonProcsUnchanged (ps : List Procedure) : Bool :=
     preserved (ANF touches only bodies). -/
 def checkAnfHeadersPreserved (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     (programProcNames prog).all fun n =>
       match findProc prog n, findProc out n with
@@ -1050,12 +986,12 @@ end
     the top-level statements only. -/
 def checkAnfFreshVarsDet (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     out.decls.all fun
       | .proc q _ =>
         (stmtsInits (bodyStmts q.body)).all fun (name, rhs) =>
-          !(CoreIdent.toPretty name).startsWith Core.ANFEncoder.anfVarPrefix ||
+          !(CoreIdent.toPretty name).startsWith Core.CSE.cseVarPrefix ||
             (match rhs with | .det _ => true | .nondet => false)
       | _ => true
   | none => true
@@ -1066,7 +1002,7 @@ def checkAnfFreshVarsDet (ps : List Procedure) : Bool :=
     declaration kinds take part in the positional comparison. -/
 def checkAnfOrderPreserved (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     decide (out.decls.map Decl.name = prog.decls.map Decl.name)
   | none => true
@@ -1077,7 +1013,7 @@ def checkAnfOrderPreserved (ps : List Procedure) : Bool :=
     skeleton (`stmtsCFEquiv`) as the corresponding input body. -/
 def checkAnfControlFlowPreserved (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) =>
     (programProcNames prog).all fun n =>
       match findProc prog n, findProc out n with
@@ -1087,16 +1023,16 @@ def checkAnfControlFlowPreserved (ps : List Procedure) : Bool :=
 
 /-- **`ChangedFlagValid` for ANFEncoder.** `changed ↔ progOut ≠ progIn`. Unlike
     the other two passes, ANFEncoder derives its flag from the fresh-variable
-    counter actually advancing (`idx' > idx`, ANFEncoder.lean:280), which is
+    counter actually advancing (`idx' > idx`, ANFEncoder.lean), which is
     precisely when a body is rewritten — so this one holds. -/
 def checkAnfChangedFlagValid (ps : List Procedure) : Bool :=
-  checkChangedFlagValid Core.anfEncoderPipelinePhase (mkProgram ps)
+  checkChangedFlagValid Core.commonSubexprElimPhase (mkProgram ps)
 
 /-- **`PreservesCachedAnalysesWF` for ANFEncoder.** ANF neither renames procedures
     nor adds or removes `call` statements, so the seeded call graph it passes
     through unchanged stays well-formed. -/
 def checkAnfAnalysisPreserving (ps : List Procedure) : Bool :=
-  checkAnalysisPreserving Core.anfEncoderPipelinePhase (mkProgram ps)
+  checkAnalysisPreserving Core.commonSubexprElimPhase (mkProgram ps)
 
 -- ── Sanity guards ─────────────────────────────────────────────────────────
 -- Small hand-built programs pin the plumbing and, more importantly, pin the
@@ -1210,24 +1146,24 @@ private def liftMeProc : Procedure :=
 -- Scenarios the *generator* cannot currently reach, pinned deterministically so
 -- the behaviour is regression-tested even though no property covers it.
 
--- ① THE `changed`-FLAG BUG (`PrecondElim.lean:318–338`). `function f() : int {
+-- ① THE `changed`-FLAG BUG — **FIXED UPSTREAM.** `function f() : int {
 -- Int.SafeDiv(1, 0) }` has no preconditions of its own, but its *body* calls a
 -- partial function. The pass inserts an `f$$wf` block holding the obligation
--- assert — so the program provably changes — yet reports `changed = false`,
--- because that branch returns `hasPreconds`. `checkPrecondChangedFlagValid`
--- therefore fails on this input, which is exactly the honest failure the property
--- is there to pin.
+-- assert, so the program provably changes; it used to report `changed = false`
+-- anyway (that branch returned `hasPreconds`), which is what this reproducer
+-- pinned. On `strata-org/Strata` `main` the flag is correct, so the
+-- guard now records the *fixed* behaviour.
 private def bodyCallProc : Procedure :=
   procOf "P" [funcDeclOf "f" (some (callOp "Int.SafeDiv" (intLit 1) (intLit 0))) []]
 
-#guard checkPrecondChangedFlagValid [bodyCallProc] == false
--- The obligation is real and the assert *is* emitted (so the flag is the only
--- thing wrong here — the pass does the right rewrite, it just misreports it).
+#guard checkPrecondChangedFlagValid [bodyCallProc] == true
+-- The obligation is real and the assert *is* emitted.
 #guard programObligations (mkProgram [bodyCallProc]) == 1
 #guard checkPrecondCallSiteAsserts [bodyCallProc] == true
--- ...and the rewrite is genuinely visible in the output program.
+-- ...the rewrite is genuinely visible in the output program, and `changed` now
+-- agrees with it.
 #guard (match runPhase Core.precondElimPipelinePhase (mkProgram [bodyCallProc]) with
-        | some (changed, out) => changed == false && out != mkProgram [bodyCallProc]
+        | some (changed, out) => changed == true && out != mkProgram [bodyCallProc]
         | none => false) == true
 
 -- ② `preconditionsStripped` with a declaration that *does* carry a precondition.
@@ -1241,9 +1177,12 @@ private def precondFuncProc : Procedure :=
 #guard checkPrecondPreconditionsStripped [precondFuncProc] == true
 
 -- ③ Cause (2) of the `factoryStripped` failure, isolated from the seeded
--- builtins: the *declaration* is stripped in the output program, but the copy the
--- pass pushed into the factory still carries the precondition.
-#guard checkPrecondDeclaredFactoryStripped [precondFuncProc] == false
+-- builtins: the copy the pass pushed into the factory used to keep the
+-- precondition that the output *declaration* had dropped. **FIXED UPSTREAM** — the
+-- declared function's factory entry is stripped too, so only cause (1) (the seeded
+-- builtins, whose preconditions the pass must keep) is left in
+-- `checkPrecondFactoryStripped`.
+#guard checkPrecondDeclaredFactoryStripped [precondFuncProc] == true
 #guard checkPrecondPreconditionsStripped [precondFuncProc] == true
 -- The `$$wf` procedure generated for that declared precondition is well-formed
 -- (`noFilter`, empty spec) — `generatedWF` bites here.
@@ -1306,10 +1245,11 @@ private def noFilterProgram : List Procedure :=
 -- `unreachableRemoved` still holds — it exempts `noFilter` procedures by design.
 #guard checkFilterUnreachableRemoved noFilterProgram == true
 
--- The hardcoded `changed := true` (FilterProcedures.lean:82) misreports the
--- all-targets scenario, in which nothing is removed.
-#guard checkFilterChangedFlagValid noFilterProgram == false
-#guard checkFilterChangedFlagValid callerCalleeProgram == false
+-- FilterProcedures used to hardcode `changed := true`, misreporting the
+-- all-targets scenario in which nothing is removed. **FIXED UPSTREAM** — the flag
+-- now tracks whether the pass actually dropped a procedure.
+#guard checkFilterChangedFlagValid noFilterProgram == true
+#guard checkFilterChangedFlagValid callerCalleeProgram == true
 
 end Guards
 

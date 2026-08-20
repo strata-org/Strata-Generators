@@ -1,5 +1,4 @@
 import StrataGenerators.TuningProfiles
-import StrataGenerators.Properties
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
 import StrataGenerators.RetryGen
 import Basalt.PlausibleGen
@@ -114,7 +113,7 @@ def isCallStmt : Statement → Bool
 def stmtsGen (θ : Tuning) (s : Nat) : Gen (List Statement) := do
   let size := max 1 (min 3 (s / 25))
   let len := max 1 (min 4 (s / 20))
-  let (ss, _, _) ← genProgramStmtsT (G := Plausible.Gen) θ [] coreMonoOps [] size len
+  let (ss, _, _) ← genProgramStmtsT (G := Plausible.Gen) θ coreMonoOps [] size len
   pure ss
 
 structure StmtStats where
@@ -178,10 +177,8 @@ def procsGen (θ : Tuning) (s : Nat) : Gen (List Procedure) := do
   let (ps, _) ← (List.range n).foldlM
     (fun (acc : List Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
       let proc ← (retryGen 8000 (genProcedureT (G := Plausible.Gen) θ
-        corePartialOps acc.2 size len) : Gen Procedure)
-      let sigs := if proc.header.typeArgs.isEmpty then
-          acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
-        else acc.2
+        corePartialOps acc.2 LContext.default {} size len) : Gen Procedure)
+      let sigs := acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
       pure (acc.1 ++ [proc], sigs))
     (([], []) : List Procedure × StrataGenerators.Stmt.ProcSigCtx)
   pure (relabelProcs ps)
@@ -215,9 +212,13 @@ def filterDrops (ps : List Procedure) : Bool :=
   | some (_, out) => out.decls.length < prog.decls.length
   | none => false
 
+/-- Did `CommonSubexprElim` (the pass formerly called ANFEncoder) rewrite the program?
+    It hoists a *duplicated* non-leaf subexpression into a `var`, so this fires only when
+    two independently drawn subterms happen to coincide — see the note in
+    `StrataGenerators.TuningProfiles` on why no weight buys this reliably. -/
 def anfChanges (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
-  match runPhase Core.anfEncoderPipelinePhase prog with
+  match runPhase Core.commonSubexprElimPhase prog with
   | some (_, out) => decide (out ≠ prog)
   | none => false
 
@@ -278,8 +279,8 @@ def isCheck : Cmd Expression → Bool
     context built by a first chain, then the commands under test), through the
     tuned chain. -/
 def cmdsGen (θ : Tuning) : Gen (List (Cmd Expression) × VarCtx × VarCtx) := do
-  let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ [] coreMonoOps [] [] [] 2 3
-  let (cmds, outCtx) ← genCmdsT (G := Plausible.Gen) θ [] coreMonoOps [] [] baseCtx 2 4
+  let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 3
+  let (cmds, outCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] baseCtx 2 4
   pure (cmds, baseCtx, outCtx)
 
 structure CmdStats where
@@ -366,7 +367,7 @@ def hasRedexKind : LExpr' → Bool
 def exprGen (θty θe : Tuning) (fctx : FVarCtx) (s : Nat) : Gen (LExpr' × LMonoTy) := do
   let depth := max 1 (s / 20)
   let τ ← genLMonoTy.tuned (G := Plausible.Gen) θty [] depth
-  let e ← genLExprBase.tuned (G := Plausible.Gen) θe fctx coreMonoOps [] [] depth τ
+  let e ← genLExprBase.tuned (G := Plausible.Gen) θe fctx coreMonoOps corePolyOps [] [] depth τ
   pure (e, τ)
 
 structure ExprStats where
@@ -407,51 +408,11 @@ def exprRow (θ : Tuning × Tuning × FVarCtx) (samples maxSize : Nat) : IO (Lis
 def exprHeaders : List String :=
   ["quant", "value", "redex", "op", "hasFvar", "prog✓", "presv✓", "fvars✓", "1st-try"]
 
--- ══════════════════════════════════════════════════════════════════════════
--- Property outcomes
--- ══════════════════════════════════════════════════════════════════════════
-
-/-! The coverage tables above measure *shapes*. This one measures the thing a shape is a proxy for:
-how often each property in the suite actually fails, per profile. Two things to read off it.
-
-* A profile should not introduce a *new* failure. If it does, either the profile has steered into a
-  genuine defect the default distribution was too narrow to reach — the good outcome, and the reason
-  to run this — or the property was relying on a shape the profile made rare, which is a bug in the
-  property.
-* For a known-defect property, the failure rate is the reproduction rate, i.e. how many trials the
-  suite needs to see the defect once. That is what the profiles are chosen to raise. -/
-
-/-- Failure counts for a list of `Property`s over one sampler. -/
-def propRow (props : List (Property α)) (gen : Nat → Plausible.Gen α) (fuel samples maxSize : Nat) :
-    IO (Nat × List Nat) := do
-  let mut counts : Array Nat := (props.map (fun _ => 0)).toArray
-  let mut tot := 0
-  for i in List.range samples do
-    let sz := i % (maxSize + 1)
-    let (o, _) ← draw (gen sz) fuel sz
-    match o with
-    | none => pure ()
-    | some a =>
-      tot := tot + 1
-      counts := (props.zipIdx.foldl
-        (fun (acc : Array Nat) (p, j) => if p.check a then acc else acc.set! j (acc[j]! + 1))
-        counts)
-  pure (tot, counts.toList)
-
-/-- Print, for one family, the properties that failed at least once under at least one profile. A
-    property absent from the table passed everywhere. -/
-def propTable (title : String) (props : List (Property α)) (profiles : List (String × Tuning))
-    (gen : Tuning → Nat → Plausible.Gen α) (fuel samples maxSize : Nat) : IO Unit := do
-  let mut cols := #[]
-  for (label, θ) in profiles do
-    IO.print s!"  … {title}/{label}\n"
-    cols := cols.push (label, ← propRow props (gen θ) fuel samples maxSize)
-  let interesting := props.zipIdx.filter (fun (_, j) =>
-    cols.any (fun (_, (_, cs)) => (cs[j]?.getD 0) != 0))
-  let rows := interesting.map (fun (p, j) =>
-    (p.name, cols.toList.map (fun (_, (tot, cs)) => pct (cs[j]?.getD 0) tot)))
-  printTable title 56 (profiles.map (·.1)) rows
-  IO.println "  cells are the % of samples on which the property FAILED (absent rows passed everywhere)"
+/-! There is deliberately no property-outcome table here. Running the suite's own properties under
+each profile is what `TestDecl.underTunings` does — one registered property per (claim, weighting)
+pair, each with its own verdict and Tyche panel — so the comparison belongs in the suite, where a
+distribution-sensitive failure gates CI, rather than in a report nobody runs. See
+`StrataTests/Stmt.lean` for the two properties that use it. -/
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- The report
@@ -486,7 +447,7 @@ def exprProfiles : List (String × (Tuning × Tuning × FVarCtx)) :=
   [ ("(default), closed", (tyDefault, exprBreadth, [])),
     ("exprEvalHeavy", (tyDefault, exprEvalHeavy, [])),
     ("exprQuantHeavy", (tyDefault, exprQuantHeavy, [])),
-    ("exprStuckOpHeavy", (tyDefault, exprStuckOpHeavy, [])),
+    ("exprIndirHeavy", (tyDefault, exprIndirHeavy, [])),
     ("tyCompoundHeavy", (tyCompoundHeavy, exprBreadth, [])),
     ("(default), open", (tyDefault, exprBreadth, defaultFCtx)),
     ("exprFVarHeavy, open", (tyDefault, exprFVarHeavy, defaultFCtx)) ]
@@ -514,11 +475,6 @@ def report (samples maxSize : Nat) (families : List String) : IO Unit := do
        ++ "(retryGen 8000) before assembling the list, as TestScaffold does")
   if families.contains "cmd" then
     runFamily "commands" cmdHeaders cmdProfiles (fun θ => cmdRow θ samples)
-  if families.contains "props" then
-    propTable "property failures: statements" Properties.stmtTransforms stmtProfiles
-      stmtsGen 4000 samples maxSize
-    propTable "property failures: procedures" Properties.procTransforms procProfiles
-      procsGen 8000 (max 1 (samples / 3)) maxSize
   if families.contains "expr" then
     runFamily "expressions" exprHeaders exprProfiles (exprRow · samples maxSize)
       ("closed rows use fctx = [] (the ClosedTypedExpr shape of progress/preservation), open rows "

@@ -348,6 +348,48 @@ theorem mem_support_listOf {g : Set α} {xs : List α}
       · exact hz
       · exact ih (by rw [support]; exact hzs) x hx
 
+/-- Converse of `mem_support_listOf`. If each element of a list is in `support g`,
+    then the list is in `support (listOf g)`.
+
+    `listOf` does a `pick` between two branches: the branch for `[]`, and the branch
+    that draws one element and then calls itself. To show that the generator reaches
+    a given list, follow the recursive branch one time for each element, then follow
+    the branch for `[]`. No branch puts a bound on the length. Therefore the support
+    of `listOf g` is all of the lists over `support g`. `listOfMaxLength` is
+    different, because it has a bound on the length.
+
+    `support_listOf` in `Basalt.SPMF.Support` gives this direction for the `SPMF`
+    interpretation. This lemma gives it for `SetGen.Set`. The support lemma for
+    `genIdentName` needs this direction, because the run of characters after the
+    first character of a name is a `listOf`. -/
+theorem mem_support_listOf_of_forall {g : Set α} {xs : List α}
+    (hxs : ∀ x ∈ xs, x ∈ support g) :
+    xs ∈ support (listOf g) := by
+  induction xs with
+  | nil =>
+    -- The `[]` branch of the `pick` returns `pure []`.
+    rw [support, listOf]
+    simp [pick_mem_iff]
+  | cons y ys ih =>
+    -- Follow the recursive branch: draw `y` from `g`, then `ys` from `listOf g`.
+    rw [support, listOf]
+    simp only [pick_mem_iff, Set.mem_bind, Set.mem_pure]
+    refine Or.inr ⟨y, hxs y List.mem_cons_self, ys, ?_, rfl⟩
+    exact ih (fun x hx => hxs x (List.mem_cons_of_mem y hx))
+
+/-- **Support of `listOf`, in both directions.** `xs ∈ support (listOf g)` holds
+    exactly when each element of `xs` is in `support g`. There is no bound on the
+    length. The proof puts `mem_support_listOf` together with
+    `mem_support_listOf_of_forall`. -/
+theorem mem_support_listOf_iff {g : Set α} {xs : List α} :
+    xs ∈ support (listOf g) ↔ ∀ x ∈ xs, x ∈ support g :=
+  ⟨mem_support_listOf, mem_support_listOf_of_forall⟩
+
+/-- Set form of `mem_support_listOf_iff`. -/
+theorem support_listOf {g : Set α} :
+    support (listOf g) = {xs | ∀ x ∈ xs, x ∈ support g} := by
+  ext xs; exact mem_support_listOf_iff
+
 -- ── coin / biasedOptionGen / optionGen support ───────────────────────────
 -- Ported to `SetGen.Set` from the `SPMF`-based lemmas in `Basalt.SPMF.Support`.
 

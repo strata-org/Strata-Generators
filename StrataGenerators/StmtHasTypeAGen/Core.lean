@@ -16,7 +16,7 @@ open Lambda RandomChoice Core Imperative ArbString
 This file contains the canonical definition of `genStmt` / `genStmtChain`, mutually
 recursive generators of well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
-`StmtHasTypeA` / `StmtsHasTypeA` relations of
+`StatementHasTypeA` / `StatementsHasTypeA` relations of
 `Strata.Languages.Core.StatementTypeSpec`.
 
 ## Reuse of existing generators
@@ -34,8 +34,8 @@ component generators:
 
 ## The three threaded contexts
 
-`StmtHasType'` is a 6-place relation `C Γ L s C' Γ'` (post-#1392: the spec now
-tracks the set `L` of enclosing-block labels). The generator threads a
+`StatementHasType'` is a 6-place relation `C Γ L s C' Γ'` (the spec tracks the set
+`L` of enclosing-block labels). The generator threads a
 representation of all three:
 
 - `Γ` (variable type-scope) is threaded via the flat `VarCtx` from
@@ -121,14 +121,21 @@ def genFreshLabel [Gen G] (labels : List String) : G String := do
 
 -- ── TypeConstructor / declaration sub-generators ─────────────────────────
 
+/-- `Boundedness` is `Inhabited` (default `.Infinite`), needed by `elements` and its
+    support-inversion lemma `mem_support_elements_iff` when sampling `bound`. -/
+instance : Inhabited Boundedness := ⟨.Infinite⟩
+
 /-- Generate a random `TypeConstructor`: a name and a list of (up to `depth`)
     parameter names, all produced by `genIdentName` so each is a non-empty,
     non-keyword identifier (constructor and type-parameter names both appear in
-    identifier position). The `bound` field is left at its default (`.Infinite`). -/
+    identifier position). The `bound` field is sampled over both `Boundedness`
+    values: it is typing-irrelevant (the `typeDecl` rule's `addKnownTypeWithError`
+    keys only off `name`/`numargs`), so either choice is well-typed. -/
 def genTypeConstructor [Gen G] (depth : Nat) : G TypeConstructor := do
   let name ← genIdentName
   let params ← listOfMaxLength depth genIdentName
-  pure { name := name, params := params }
+  let bound ← elements [Boundedness.Infinite, Boundedness.Finite] (by simp)
+  pure { bound := bound, name := name, params := params }
 
 /-- Lift a monomorphic `Function` to a non-recursive `PureFunc Expression` (the
     syntactic declaration node stored in a `funcDecl` statement). Each monotype
@@ -156,55 +163,62 @@ def Function.toPureFuncDecl (f : Function) : Imperative.PureFunc Expression :=
     only requires `¬decl.isRecursive` and `FuncHasType' func`. The generator
     therefore samples them independently (see `genStmt`); this helper just
     supplies non-recursive `decl` nodes. -/
-def genDecl [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) :
+def genDecl [Gen G] (octx : OpCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (Imperative.PureFunc Expression) :=
-  Function.toPureFuncDecl <$> genFunction fctx octx depth
+  Function.toPureFuncDecl <$> genFunction [] octx depth pctx
 
 -- ── Guard / measure / invariant sub-generators ───────────────────────────
 
 /-- Generate an `ExprOrNondet` used as an `ite` condition or a `loop` guard:
-    either `.nondet`, or `.det e` for a boolean expression `e`. -/
-def genCondOrNondet [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) : G (ExprOrNondet Expression) :=
-  pick
-    (fun () => pure .nondet)
-    (fun () => (fun e => ExprOrNondet.det e) <$> genLExpr fctx octx [] tvars [] depth .bool)
+    either `.nondet`, or `.det e` for a boolean expression `e`. Biased 80% toward a
+    *deterministic* guard (weights `1 : 4`) so generated `ite`/`loop`s more often
+    carry a real boolean condition rather than `*`; both branches keep positive
+    weight, so the support — hence the soundness/completeness statements — is
+    unchanged (see `genCondOrNondet_det_sound` / `genCondOrNondet_complete`). -/
+def genCondOrNondet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (ExprOrNondet Expression) :=
+  frequency
+    [ (1, fun () => pure .nondet),
+      (4, fun () => (fun e => ExprOrNondet.det e) <$> genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool) ]
+    (by simp)
 
 /-- Generate an optional loop measure: either `none`, or `some m` for an
     integer expression `m`. Biased to produce a measure 75% of the time (weights
     `1` for `none` versus `3` for `some`), so generated loops usually carry a
     measure. -/
-def genOptMeasure [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) : G (Option Expression.Expr) :=
-  biasedOptionGen (3 / 4) (genLExpr fctx octx [] tvars [] depth .int)
+def genOptMeasure [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (Option Expression.Expr) :=
+  biasedOptionGen (3 / 4) (genLExpr ctx.toFVarCtx octx pctx tvars [] depth .int)
 
 /-- Generate a single loop invariant: a label (a non-empty, non-keyword
     identifier via `genIdentName`, since an invariant label appears in identifier
     position) paired with a boolean expression. -/
-def genInvariant [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) : G (String × Expression.Expr) := do
+def genInvariant [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (String × Expression.Expr) := do
   let l ← genIdentName
-  let e ← genLExpr fctx octx [] tvars [] depth .bool
+  let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure (l, e)
 
 /-- Generate a list of (up to `depth`) loop invariants, each a
     `(label, boolean expression)` pair. -/
-def genInvariants [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) : G (List (String × Expression.Expr)) :=
-  listOfMaxLength depth (genInvariant fctx octx tvars depth)
+def genInvariants [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
+    G (List (String × Expression.Expr)) :=
+  listOfMaxLength depth (genInvariant octx tvars ctx depth pctx)
 
 -- ── Non-nesting (leaf) statement sub-generators ──────────────────────────
 
 /-- Generate a `cmd` statement by delegating to `genCmd`. The imperative command
     is wrapped as `CmdExt.cmd`; `C` is unchanged. -/
-def genCmdStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult := do
-  let r ← genCmd fctx octx tvars immutableVars ctx depth
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G GenStmtResult := do
+  let r ← genCmd octx tvars immutableVars ctx depth pctx
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement targeting an enclosing block. Under the new
-    typing spec `StmtHasType'.exit` requires `label ∈ L`, so the target label is
+    typing spec `StatementHasType'.exit` requires `label ∈ L`, so the target label is
     sampled (via `elements`) from the enclosing-block `labels` — the generated
     `exit` genuinely breaks out of a live enclosing block. When no block encloses
     the current point (`labels = []`, e.g. at top level) *no* well-typed `exit`
@@ -223,10 +237,11 @@ def genExitStmt [Gen G] (labels : List String)
     non-recursive `PureFunc`) and the well-typed witness `func` (added to `C`)
     are sampled independently, mirroring the declarative rule's decoupling of the
     two. `Γ` is unchanged; `C` becomes `C.addFactoryFunction func`. -/
-def genFuncDeclStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx)
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult := do
-  let decl ← genDecl fctx octx depth
-  let func ← genFunction fctx octx depth
+def genFuncDeclStmt [Gen G] (octx : OpCtx)
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G GenStmtResult := do
+  let decl ← genDecl octx depth pctx
+  let func ← genFunction [] octx depth pctx
   pure ⟨[Stmt.funcDecl decl default], C.addFactoryFunction func.toLFunc, ctx⟩
 
 /-- Generate a `typeDecl` statement. A random `TypeConstructor` is generated and
@@ -275,7 +290,7 @@ def usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     it for the `out` parameter the callee declares as `q = (x, τ)` at position `i` of
     its output-only block; `base` is a length past which invented names are fresh.
 
-    The name is genuinely the caller's to choose. The Core spec (§4.6.4) requires an
+    The name is genuinely the caller's to choose. The Core spec requires an
     `out` argument to exist, to have the declared type, and to be writable, but says
     **nothing about its name** — unlike an in-out argument, which the call rule pins
     to the name the callee declares. So:
@@ -364,36 +379,63 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     Note that no `labels` argument is needed: emitting no block means the
     enclosing-label set plays no role, and the emitted sequence is correspondingly
     well-typed at *every* label set (see `genCallStmt_sound`). -/
-def genCallStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) : G GenStmtResult :=
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G GenStmtResult :=
   match procs with
   | [] => default
   | p₀ :: ps => do
     -- Step 1: pick a random procedure to call from the procedure context.
     let s ← elements (p₀ :: ps) (by simp)
-    -- Step 2: read the in-out args off the callee's signature. Front alignment
-    -- (`inputs = M ++ I`, `outputs = M ++ O`) makes `s.M` exactly the in-out
-    -- block; `s.O` are the output-only args. Both blocks are written back through,
-    -- so both need caller variables, but only the in-out names are dictated to us
-    -- (step 3).
-    let inoutNames : List (Identifier Unit × LMonoTy) := s.M
-    let outTargets : @LMonoTySignature Unit := outTargets immutableVars ctx s.O
-    -- Step 3: for each in-out arg, reuse the ambient `x : τ` when we have it,
+    -- Step 2: instantiate the callee's type parameters. A polymorphic callee's
+    -- signature is over `s.typeArgs`; the `CmdExtHasType'.call` rule lets us pick
+    -- any concrete instantiation `σ`. We sample one monotype per type parameter
+    -- from the generable types (mirroring `genIndirPoly`'s type sampling for
+    -- polymorphic factory functions), then instantiate the three signature blocks
+    -- by `σ`. A monomorphic callee (`s.typeArgs = []`) gives `σ = []`, and
+    -- `substSig [] = id`, so this reduces to the previous behaviour verbatim.
+    let generableTys := generableTypesFromCtx ctx.values [] octx
+    let σvals ← s.typeArgs.mapM (fun _ =>
+      if hg : generableTys.length > 0 then
+        elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
+      else pure .bool)
+    let σ : List (TyIdentifier × LMonoTy) := s.typeArgs.zip σvals
+    -- The instantiated blocks: types substituted, names untouched.
+    let Mσ := StrataGenerators.Stmt.substSig σ s.M
+    let Iσ := StrataGenerators.Stmt.substSig σ s.I
+    let Oσ := StrataGenerators.Stmt.substSig σ s.O
+    -- Step 3: read the in-out args off the callee's (instantiated) signature. Front
+    -- alignment (`inputs = M ++ I`, `outputs = M ++ O`) makes `Mσ` exactly the
+    -- in-out block; `Oσ` are the output-only args. Both blocks are written back
+    -- through, so both need caller variables, but only the in-out names are
+    -- dictated to us (step 4). (`substSig` preserves keys, so the in-out names are
+    -- still exactly `s.M`'s — the callee dictates names, `σ` only fixes types.)
+    let inoutNames : List (Identifier Unit × LMonoTy) := Mσ
+    let outTargets : @LMonoTySignature Unit := outTargets immutableVars ctx Oσ
+    -- Step 4: for each in-out arg, reuse the ambient `x : τ` when we have it,
     -- otherwise plan an `init`. A name that is neither reusable nor absent makes
     -- this callee uncallable here. (The out targets are always usable by
     -- construction — see `outTargets_all_usableName`.)
     if inoutNames.all (usableName immutableVars ctx) = true
-        ∧ (s.M ++ outTargets).keys.Nodup then
+        ∧ (Mσ ++ outTargets).keys.Nodup then
       -- The in-out args we must `init` first, then the out targets we must `init`.
       let inoutToInit := inoutNames.filter (needsInit ctx)
       let outToInit := outTargets.filter (needsInit ctx)
       let toInit := inoutToInit ++ outToInit
-      -- Step 4: generate the by-value inputs and assemble the call.
-      let exprs ← s.I.values.mapM (fun σ => genLExpr fctx octx [] tvars [] depth σ)
+      -- Step 5: generate the by-value inputs (at the *instantiated* input types)
+      -- and assemble the call. The `mkArgs` in-out/out names come from key-position
+      -- only, and `substSig` preserves keys, so passing `s.M` is the same as `Mσ`.
+      let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx pctx tvars [] depth τ)
+      -- Step 6: sample how the by-value inputs and the out targets interleave. The
+      -- call rule reads the input positions and the write positions through two
+      -- projections that each drop the other kind of node, so their relative order
+      -- is free. `mask` picks one order; see `mkArgs`.
+      let mask ← listOf (elements [true, false] (by simp))
       let theCall :=
-        Statement.call s.pname (StrataGenerators.Stmt.mkArgs s.M outTargets exprs) default
+        Statement.call s.pname
+          (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
       -- The `init`s (possibly none) then the call, inline in the ambient scope.
       pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,
         StrataGenerators.Stmt.insertAllCtx ctx toInit⟩
@@ -425,71 +467,73 @@ mutual
     output scope (see `genCallStmt`). This is why the result type is a statement
     *list*; every other branch returns a singleton.
 
-    The generated statements satisfy `StmtsHasTypeA P C Γ ss C' Γ'` (for any
+    The generated statements satisfy `StatementsHasTypeA P C Γ ss C' Γ'` (for any
     program `P`) — see `genStmt_sound`.
 
     Tagged `@[tunable]`, so every branch weight is a runtime knob: `genStmt.tuned θ`
-    reads them from `θ` at the current `size`. The two sites are the `size = 0`
-    leaf list (arity 5) and the `size + 1` list (arity 9), the latter having `loop`
-    at flat index 13 — the knob a loop-transformation test wants turned up. See
-    `StrataGenerators.TuningProfiles` for the profiles the test suite uses, and
+    reads them from `θ`. The two sites are the `size = 0` leaf list (arity 5) and the
+    `size + 1` list (arity 9), the latter having `loop` at flat index 13 — the knob a
+    loop-transformation test wants turned up. Weights are *constant* rather than
+    `size`-indexed (no `depth` binder is in scope, so each site reads its schedule at
+    depth 0): unlike an expression generator this recursion cannot run away, since the
+    nesting branches exist only at `size + 1` and generate their bodies at `size`, so a
+    decaying schedule has nothing to protect against. See
+    `StrataGenerators.TuningProfiles` for the profiles the suite uses, and
     `TuningPrototypes.genStmt_mutual_tuned_eq` for the proof that no `θ` changes what is
     reachable.
-    The weights are *constant* rather than `size`-indexed (no `depth` binder is in
-    scope, so every site reads its schedule at depth 0): unlike an expression
-    generator, this recursion cannot run away — the nesting branches exist only at
-    `size + 1` and generate their bodies at `size`, so nesting depth is bounded by
-    the initial budget whatever the weights are, and a decaying schedule has
-    nothing to protect against.
 
-    **Why `exit`/`call` fall back to a command.** `exit` needs an enclosing block
-    label and `call` needs a callee, so with `labels = []` / `procs = []` those
-    generators have *empty support* and can only throw. They used to be pruned by
-    the weight `if labels.isEmpty then 0 else 1`, which `frequency` skips — but a
-    weight computed by an `if` is invisible to `@[tunable]`, and a literal `0` is
-    rejected outright (it would break support-completeness). Pruning the *branch*
-    instead of its weight — deferring to `genCmdStmt`, which branch 0 already
-    offers — keeps every weight a positive literal and is equally throw-free. The
-    branch's support is then either `genExitStmt`'s or a subset of branch 0's, so
-    the union over the list, i.e. `genStmt`'s support, is unchanged; that is why
-    the soundness and completeness proofs go through with only a `cases labels` /
-    `cases procs` added.
+    **Why `exit`/`call` fall back to a command.** `exit` needs an enclosing block label
+    and `call` needs a callee, so with `labels = []` / `procs = []` those generators have
+    *empty support* and can only throw. They used to be pruned by the weight
+    `if labels.isEmpty then 0 else 1`, which `frequency` skips — but a weight computed by
+    an `if` is invisible to `@[tunable]`, and a literal `0` is rejected outright (it
+    would break support-completeness). Pruning the *branch* instead of its weight —
+    deferring to `genCmdStmt`, which branch 0 already offers — keeps every weight a
+    positive literal and is equally throw-free. The branch's support is then either
+    `genExitStmt`'s or a subset of branch 0's, so the union over the list, i.e.
+    `genStmt`'s support, is unchanged; that is why the soundness and completeness proofs
+    go through with only a `cases labels` / `cases procs` added.
 
-    The distributions differ in one respect, which is not a regression but is
-    worth knowing: where the old generator renormalised over the surviving
-    branches (`cmd` took 4/6 of a label-free, callee-free leaf draw), this one
-    hands the pruned branches' share to `cmd` (4/8 directly plus 2/8 through the
-    fallbacks, i.e. 3/4), leaving `funcDecl` and `typeDecl` slightly rarer than
-    before. -/
+    The distributions differ in one respect, which is not a regression but is worth
+    knowing: where the old generator renormalised over the surviving branches, this one
+    hands the pruned branches' share to `cmd`, leaving `funcDecl` and `typeDecl`
+    slightly rarer in a label-free, callee-free scope than before. -/
 @[tunable]
-def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) : Nat → G GenStmtResult
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) :
+    Nat → G GenStmtResult
   | 0 =>
+    -- `exit` needs an enclosing block label and `call` needs a callee: with
+    -- `labels = []` / `procs = []` those generators have *empty support* and can only
+    -- throw, so the branch defers to `genCmdStmt` — branch 0's generator — instead.
+    -- See the docstring for why the pruning moved from the weight into the branch.
     frequency
-      [ (4, fun () => genCmdStmt fctx octx tvars immutableVars C ctx 0),
+      [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx 0 pctx),
         (1, fun () =>
-          if labels.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx 0
+          if labels.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
           else genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt fctx octx C ctx 0),
+        (1, fun () => genFuncDeclStmt octx C ctx 0 pctx),
         (1, fun () => genTypeDeclStmt C ctx 0),
-        (1, fun () =>
-          if procs.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx 0
-          else genCallStmt fctx octx tvars immutableVars procs C ctx 0) ]
-      (by show 0 < 4+1+1+1+1; omega)
+        (3, fun () =>
+          if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
+          else genCallStmt octx tvars immutableVars procs C ctx 0 pctx) ]
+      (by show 0 < 4+1+1+1+3; omega)
   | size + 1 =>
+    -- See the `size = 0` case: `exit`/`call` defer to `genCmdStmt` when their own
+    -- support is provably empty (no enclosing label / no callee).
     frequency
-      [ (4, fun () => genCmdStmt fctx octx tvars immutableVars C ctx (size + 1)),
+      [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
         (1, fun () =>
-          if labels.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx (size + 1)
+          if labels.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
           else genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt fctx octx C ctx (size + 1)),
+        (1, fun () => genFuncDeclStmt octx C ctx (size + 1) pctx),
         (1, fun () => genTypeDeclStmt C ctx (size + 1)),
-        (1, fun () =>
-          if procs.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx (size + 1)
-          else genCallStmt fctx octx tvars immutableVars procs C ctx (size + 1)),
+        (3, fun () =>
+          if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
+          else genCallStmt octx tvars immutableVars procs C ctx (size + 1) pctx),
         (2, fun () => do
           -- The block's `label` must not shadow an enclosing one (`label ∉ L`,
           -- the new-spec `block` premise), so it is drawn fresh from `labels`.
@@ -498,29 +542,29 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
           -- The block's own `label` becomes an enclosing label for its body, so
           -- an `exit` inside the body can break out of this block. The body is
           -- generated at the smaller `size` (guaranteeing termination).
-          let (body, _, _) ← genStmtChain fctx octx tvars immutableVars procs (label :: labels) C ctx size len
+          let (body, _, _) ← genStmtChain octx tvars immutableVars procs (label :: labels) C ctx pctx size len
           pure ⟨[Stmt.block label body default], C, ctx⟩),
         (2, fun () => do
-          let cond ← genLExpr fctx octx [] tvars [] (size + 1) .bool
+          let cond ← genLExpr ctx.toFVarCtx octx pctx tvars [] (size + 1) .bool
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmtChain fctx octx tvars immutableVars procs labels C ctx size tlen
-          let (elseb, _, _) ← genStmtChain fctx octx tvars immutableVars procs labels C ctx size elen
+          let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size tlen
+          let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size elen
           pure ⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩),
         (1, fun () => do
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (thenb, _, _) ← genStmtChain fctx octx tvars immutableVars procs labels C ctx size tlen
-          let (elseb, _, _) ← genStmtChain fctx octx tvars immutableVars procs labels C ctx size elen
+          let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size tlen
+          let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size elen
           pure ⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩),
         (2, fun () => do
-          let guard ← genCondOrNondet fctx octx tvars (size + 1)
-          let measure ← genOptMeasure fctx octx tvars (size + 1)
-          let invariants ← genInvariants fctx octx tvars (size + 1)
+          let guard ← genCondOrNondet octx tvars ctx (size + 1) pctx
+          let measure ← genOptMeasure octx tvars ctx (size + 1) pctx
+          let invariants ← genInvariants octx tvars ctx (size + 1) pctx
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
-          let (body, _, _) ← genStmtChain fctx octx tvars immutableVars procs labels C ctx size blen
+          let (body, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size blen
           pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]
-      (by show 0 < 4+1+1+1+1+2+2+1+2; omega)
+      (by show 0 < 4+1+1+1+3+2+2+1+2; omega)
 termination_by n => (n, 0, 0)
 
 /-- Generate a chain of up to `len` well-typed statement *groups*, threading both
@@ -535,17 +579,18 @@ termination_by n => (n, 0, 0)
     generation steps, not the statement count.
 
     Returns the statement list together with the final `(C, Γ)`. Satisfies the
-    chained `StmtsHasTypeA` relation — see `genStmtChain_sound`. -/
-def genStmtChain [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    chained `StatementsHasTypeA` relation — see `genStmtChain_sound`. -/
+def genStmtChain [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat) :
     Nat → G (List Statement × LContext CoreLParams × VarCtx)
   | 0 => pure ([], C, ctx)
   | len + 1 => do
-    let r ← genStmt fctx octx tvars immutableVars procs labels C ctx size
-    let (rest, C'', ctx'') ← genStmtChain fctx octx tvars immutableVars procs labels r.outC r.outCtx size len
+    let r ← genStmt octx tvars immutableVars procs labels C ctx pctx size
+    let (rest, C'', ctx'') ←
+      genStmtChain octx tvars immutableVars procs labels r.outC r.outCtx pctx size len
     pure (r.stmts ++ rest, C'', ctx'')
 termination_by n => (size, 1, n)
 
@@ -557,9 +602,10 @@ end
     at element `size`, starting from an empty ambient context and empty variable
     scope. The two knobs are orthogonal: `size` bounds each statement's
     nesting/expression size, `len` bounds the top-level sequence length. -/
-def genProgramStmts [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (size len : Nat) : G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmtChain fctx octx tvars [] [] [] (LContext.default) [] size len
+def genProgramStmts [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
+    (size len : Nat) (pctx : PolyOpCtx := []) :
+    G (List Statement × LContext CoreLParams × VarCtx) :=
+  genStmtChain octx tvars [] [] [] (LContext.default) [] pctx size len
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
@@ -570,27 +616,28 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
 -- Smoke test: a handful of individual statements at size 2.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨ss, _, _⟩ ← genStmt [] [] [] [] [] [] (LContext.default) [] 2
+  let ⟨ss, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default) [] [] 2
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 -- Smoke test: a statement started from a non-empty variable scope, so `set`
--- and control-flow guards over existing variables can appear.
+-- and control-flow guards over existing variables can appear. Body expressions
+-- may now *read* those variables (the free-var context is derived from the scope).
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨ss, _, _⟩ ← genStmt [] [] [] [] [] [] (LContext.default)
-    [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] 2
+  let ⟨ss, _, _⟩ ← genStmt [] [] [] [] (LContext.default)
+    [(⟨"x", ()⟩, .int), (⟨"b", ()⟩, .bool)] [] 2
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 -- Smoke test: a whole statement sequence (size 2, up to 4 statements).
 #guard_msgs(drop warning, drop all) in
 #eval (do
-  let (ss, _, _) ← genProgramStmts [] [] [] 2 4
+  let (ss, _, _) ← genProgramStmts [] [] 2 4
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 -- Smoke test: with enclosing labels in scope, `exit` may target one of them.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
-  let ⟨ss, _, _⟩ ← genStmt [] [] [] [] [] ["outer", "inner"] (LContext.default) [] 2
+  let ⟨ss, _, _⟩ ← genStmt [] [] [] ["outer", "inner"] (LContext.default) [] [] 2
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
 end StrataGenerators.Stmt

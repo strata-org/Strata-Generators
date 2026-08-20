@@ -10,7 +10,7 @@ suites as the LSpec-based `TestMain`, using the combinators here instead of
 `LSpec.checkIO`/`LSpec.lspecIO`, and both drivers must report the same
 pass/fail verdicts and the same exit code.
 
-The key observation (see the discussion in issue #21) is that LSpec's runtime
+The key observation is that LSpec's runtime
 harness is a thin wrapper over Plausible: `checkIO` runs `Plausible`'s testable
 runner and packages the result, `TestSeq.individualIO` merely holds an
 `IO (Bool × Nat × Nat × Option String)` action, and `lspecIO` iterates suites,
@@ -67,6 +67,20 @@ def runIOProperty (name : String)
       | some m => s!"\n    {m}"
       | none   => ""
     pure ⟨false, s!"  × FAIL ({numSamples}/{totalTests}) {name}{suffix}"⟩
+
+/-- Assert a closed `Bool` — a property with no generated input, whose verdict is
+    a single constructed witness rather than a sample. The plain-harness analogue
+    of `LSpec.test`.
+
+    Used by the pipeline-phase no-op witnesses and the two targeted printer
+    witnesses: in each case the sharp statement of the defect is one specific
+    program or operator, so sampling would only obscure it. There is no trial
+    count to report, hence the bare `PASS`/`FAIL` line. -/
+def runUnitProperty (name : String) (verdict : Bool) : IO Result :=
+  if verdict then
+    pure ⟨true, s!"  ✓ PASS {name}"⟩
+  else
+    pure ⟨false, s!"  × FAIL {name}"⟩
 
 /-- Run one named suite: print its header, run each property in order (printing
     each result line as it completes), and return whether every property in the

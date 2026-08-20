@@ -127,6 +127,12 @@ def sizeFunc (f : Function) : Nat :=
     + f.typeArgs.length
     + (match f.body with | some _ => 1 | none => 0)
     + (match f.measure with | some _ => 1 | none => 0)
+    -- Each `requires` clause counts its expression's AST size plus one for the
+    -- clause itself, so *dropping* a clause is strictly smaller than reducing its
+    -- expression to a leaf (the same convention as `sizeCheck` for a procedure's
+    -- contract). Without this summand the precondition reductions below would all
+    -- be filtered out by the strict-decrease test in `shrinkWhile`.
+    + (f.preconditions.map (fun pc => 1 + pc.expr.sizeOf)).foldl (· + ·) 0
 
 /-- Immediate smaller candidates for a monotype: collapse a compound toward a
     child or toward `int`, a type variable / bitvector toward `int`, and shrink
@@ -150,7 +156,7 @@ partial def shrinkTy : LMonoTy → List LMonoTy
 /-- Well-formedness of a shrink candidate. `genFunction` maintains all of these
     invariants; the shrinker must preserve them so it never fabricates a failure
     that is really an *ill-formed* function (which the parser would rightly
-    reject) rather than a genuine printer/parser bug. Two conditions:
+    reject) rather than a genuine printer/parser bug. Four conditions:
 
     1. **Scoping** — every free type variable in the signature (inputs + output)
        is declared in `typeArgs`.
@@ -160,7 +166,25 @@ partial def shrinkTy : LMonoTy → List LMonoTy
        touching the body, which would leave e.g. a `real`-returning lambda body
        under an `int` output — an ill-typed function whose parse failure is a
        shrinker artifact, not a Strata bug. Re-checking here rejects such
-       candidates. -/
+       candidates.
+    3. **Precondition typing** — each `requires` clause type-checks at `bool`.
+    4. **Precondition scoping** — each clause's free variables are all formals.
+
+    Conditions 3 and 4 are *not* redundant with any typechecker: `Function.typeCheck`
+    never inspects `preconditions` at all — neither type-checking them nor free-var
+    checking them. So nothing but this predicate stops a shrink from stranding a
+    clause: dropping the input a clause mentions (`dropInput` below) leaves
+    `requires y == 0` with no `y` in sight, and reducing a clause's expression can
+    make it non-Boolean. `genFunction` emits a clause over the formals on roughly
+    half of its draws (measured 101/200), so both are reachable rather than
+    hypothetical.
+
+    Condition 4 is also available on its own as
+    `StrataGenerators.Program.TestSupport.funcPreconditionsScoped`, whose docstring
+    records the full analysis of the gap. Enforcing both here means every
+    function-shrinking family — this module's `shrinkFunc`, the `Shrinkable Function`
+    instance, and the whole-program shrinker's `.func` case — inherits them from one
+    filter. -/
 def funcWellFormed (f : Function) : Bool :=
   let used := f.output.freeVars ++ (f.inputs.toList.flatMap (fun p => p.2.freeVars))
   let scopedOk := used.all (· ∈ f.typeArgs)
@@ -170,23 +194,47 @@ def funcWellFormed (f : Function) : Bool :=
   let measureOk := match f.measure with
     | some m => LExpr.typeCheck (T := CoreLParams) [] m == some .int
     | none => true
-  scopedOk && bodyOk && measureOk
+  let formals := f.inputs.keys.map (·.name)
+  let precondsOk := f.preconditions.all fun pc =>
+    LExpr.typeCheck (T := CoreLParams) [] pc.expr == some .bool
+      && (LExpr.collectFvarNames pc.expr).all (fun x => x.name ∈ formals)
+  scopedOk && bodyOk && measureOk && precondsOk
 
-/-- Candidate smaller functions: drop body/measure, drop an input, drop a
-    type-arg, shrink an input type, shrink the output type, or shorten the name.
-    All candidates are strictly smaller by `sizeFunc`. Ill-formed candidates are
-    filtered out by `shrinkWhile`. -/
+/-- Candidate smaller functions: drop body/measure, drop a `requires` clause, drop
+    an input, drop a type-arg, reduce a `requires` clause's expression, shrink an
+    input type, shrink the output type, or shorten the name. All candidates are
+    strictly smaller by `sizeFunc`. Ill-formed candidates are filtered out by
+    `shrinkWhile` (via `funcWellFormed`).
+
+    The two precondition families delegate to the shared `shrinkLExpr`, exactly as
+    the procedure shrinker does for a contract clause. Dropping a clause is offered
+    before reducing one, so the bigger reduction is tried first. Both are guarded by
+    `funcWellFormed`, which keeps a reduced clause Boolean and scoped to the formals
+    — a guard nothing else provides, since `Function.typeCheck` does not check
+    preconditions at all.
+
+    Note the interaction with `dropInput`: a candidate that drops the formal a clause
+    mentions *is* proposed here, and `funcWellFormed` rejects it, because the clause
+    would be left referring to nothing. Dropping that formal is still reachable in
+    two steps — drop the clause, then the input — which is why the drop-clause family
+    comes first. -/
 def shrinkFunc (f : Function) : List Function :=
   let ins := f.inputs.toList
+  let pres := f.preconditions
   let dropBody    := if f.body.isSome then [{ f with body := none }] else []
   let dropMeasure := if f.measure.isSome then [{ f with measure := none }] else []
+  let dropPrecond := (fun ps => { f with preconditions := ps }) <$> dropEach pres
   let dropInput   := (fun i => { f with inputs := ListMap.ofList i }) <$> dropEach ins
   let dropTyArg   := (fun tas => { f with typeArgs := tas }) <$> dropEach f.typeArgs
+  let shrinkPrecond := pres.zipIdx.flatMap (fun (pc, i) =>
+    (fun e => { f with preconditions := pres.set i { pc with expr := e } })
+      <$> shrinkLExpr pc.expr)
   let shrinkInput := ins.zipIdx.flatMap (fun ((x, ty), i) =>
     (fun ty' => { f with inputs := ListMap.ofList (ins.set i (x, ty')) }) <$> shrinkTy ty)
   let shrinkOut   := (fun o => { f with output := o }) <$> shrinkTy f.output
   let shrinkName  := if f.name.name.length > 1 then [{ f with name := ⟨"f", ()⟩ }] else []
-  dropBody ++ dropMeasure ++ dropInput ++ dropTyArg ++ shrinkInput ++ shrinkOut ++ shrinkName
+  dropBody ++ dropMeasure ++ dropPrecond ++ dropInput ++ dropTyArg
+    ++ shrinkPrecond ++ shrinkInput ++ shrinkOut ++ shrinkName
 
 /-- First candidate (in order) that still satisfies the failure predicate. -/
 partial def firstSatisfying (p : Function → IO Bool) : List Function → IO (Option Function)
