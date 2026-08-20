@@ -15,14 +15,16 @@ only in how a verdict is printed and aggregated.
 
 namespace StrataGenerators.Test
 
-/-- The registry grouped by `TestDecl.suite`, groups in first-appearance order and
-    properties in registration order within a group. Deterministic, so a report
-    diff between two runs shows verdict changes and nothing else. -/
+/-- The registry grouped by `TestDecl.group` — the `area` of an `area: description`
+    name — with groups in first-appearance order and properties in registration order
+    within a group. Deterministic, so a report diff between two runs shows verdict
+    changes and nothing else. -/
 def suiteGroups (ds : List TestDecl) : List (String × List TestDecl) :=
   ds.foldl (init := []) (fun acc d =>
-    if acc.any (·.1 == d.suite) then
-      acc.map (fun (s, xs) => if s == d.suite then (s, xs ++ [d]) else (s, xs))
-    else acc ++ [(d.suite, [d])])
+    let g := d.group
+    if acc.any (·.1 == g) then
+      acc.map (fun (s, xs) => if s == g then (s, xs ++ [d]) else (s, xs))
+    else acc ++ [(g, [d])])
 
 /-- Names carried by more than one property. Two properties sharing a name would
     silently collapse their Tyche panels and make a result line ambiguous, so a

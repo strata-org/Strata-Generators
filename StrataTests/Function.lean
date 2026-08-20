@@ -18,7 +18,7 @@ open StrataGenerators.Stmt.TestSupport
     `some τ`, for exactly the `τ` the variable carries in the context. -/
 @[strata_property]
 def fnFvarsAnnotated : TestDecl :=
-  (TestDecl.forAll "function: fvars annotated by context type map" "function"
+  (TestDecl.forAll "function: fvars annotated by context type map"
     (fun (gf : GenFunction) => functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func)).withPanel
     genAndCheckFunctionFvarsAnnotated
 
@@ -30,7 +30,6 @@ def fnFvarsAnnotated : TestDecl :=
 def fnTypeCheckSound : TestDecl :=
   (TestDecl.forAll
     "function: typeCheck output satisfies FuncHasTypeA (typeCheck_annotated_sound)"
-    "function"
     (fun (gf : ClosedGenFunction) => checkTypeCheckAnnotatedSound gf.func)).withPanel
     genAndCheckFunctionTypeCheckSound
 
@@ -38,7 +37,7 @@ def fnTypeCheckSound : TestDecl :=
     `StepStar.type_preserved` / `eval_denote_sound`. -/
 @[strata_property]
 def fnBodyPreservation : TestDecl :=
-  (TestDecl.forAll "function: body type preserved under eval" "function"
+  (TestDecl.forAll "function: body type preserved under eval"
     (fun (gf : ClosedGenFunction) => checkFunctionBodyPreservation gf.func)).withPanel
     genAndCheckFunctionBodyPreservation
 
@@ -51,7 +50,6 @@ def fnBodyPreservation : TestDecl :=
 @[strata_property]
 def fnTypeCheckComplete : TestDecl :=
   (TestDecl.forAll "function: typeCheck accepts generated functions (completeness)"
-    "function"
     (fun (gf : ClosedGenFunction) => checkFunctionTypeCheckerComplete gf.func)).withPanel
     genAndCheckFunctionTypeCheckComplete
 
@@ -60,7 +58,7 @@ def fnTypeCheckComplete : TestDecl :=
     red while the property above stays red for the same reason it already was. -/
 @[strata_property]
 def fnRejectionOnlyMeasure : TestDecl :=
-  .forAll "function: typeCheck rejections are only measure-without-body" "function"
+  .forAll "function: typeCheck rejections are only measure-without-body"
      (fun (gf : ClosedGenFunction) => funcRejectionImpliesMeasureNoBody gf.func)
 
 /-- Pretty-print → parse → re-print is a fixed point.
@@ -72,7 +70,7 @@ def fnRejectionOnlyMeasure : TestDecl :=
     does not parse back means the printer emitted legal-but-unparseable text. -/
 @[strata_property]
 def fnRoundtrip : TestDecl :=
-  (TestDecl.action "function: pretty-print/parse round-trip" "function"
+  (TestDecl.action "function: pretty-print/parse round-trip"
     (fun cfg => ActionResult.ofTuple <$>
       roundtripFunctionAction cfg.numTrials cfg.maxSize)).withPanel
     genAndCheckFunctionRoundtrip

@@ -28,19 +28,22 @@ def checkMyPassIdempotent (p : Core.Program) : Bool :=
 
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .forAll "mypass: the pass is idempotent" "mypass"
-    fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .forAll "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
 ```
 
-`lake test` then runs it, reports it under a `mypass` group, and gives it a Tyche
-panel — with no other file edited. `lake test -- --list` shows what the harness picked
-up; `lake test -- --only=mypass --quick` iterates on just this one.
+A name and a check. That is the whole registration: `lake test` runs it, reports it
+under a `mypass` group, and gives it a Tyche panel — with no other file edited.
+`lake test -- --list` shows what the harness picked up;
+`lake test -- --only="mypass:" --quick` iterates on just this group.
 
 The generator is chosen the way Plausible and QuickCheck choose it: **by the type of
 the quantified value**. `GenProgram` carries `Arbitrary`/`Repr`/`Shrinkable` instances,
 so annotating the binder selects the whole-program generator, its renderer and its
-shrinker at once. What is left to say is the property's **name** (unique across the
-suite; it is the report label and the Tyche panel title) and its **report group**.
+shrinker at once.
+
+The report group is the `area` of an `area: description` name — derived, never declared,
+so it cannot disagree with the name. A prefix nothing has used before simply creates a
+new group.
 
 ## Stating the property as a `Prop`
 
@@ -51,7 +54,7 @@ synthesizes for it — the same elaboration `#test` and `Plausible.Testable.chec
 ```lean
 @[strata_property]
 def myPropShaped : TestDecl :=
-  .check "mypass: idempotent under any fuel" "mypass"
+  .check "mypass: idempotent under any fuel"
     (∀ gp : GenProgram, ∀ n : Nat, myPass n gp.prog = myPass (n + 1) (myPass n gp.prog))
 ```
 
@@ -97,7 +100,8 @@ Most properties are a `Bool` check over a sampled type, which is what
   `gate := some "smt"` when it needs a live solver.
 
 `@[strata_properties]` registers a `List TestDecl` at once; `family` pairs each name
-with its check in one line, for a family that shares an input type.
+with its check in one line, for a family that shares an input type. `familyOf` and
+`TestDecl.property` are the variants that take an explicit `GenSpec`.
 
 `@[strata_diagnostic]` registers a `Diagnostic`: a report that prints and never gates
 the exit code, for a coverage statistic or a localisation tally.

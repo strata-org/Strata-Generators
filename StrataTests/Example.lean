@@ -7,8 +7,8 @@ This file exists to be copied. It is one property, complete: the check, the
 generator it draws from, and the name — with nothing registered anywhere else.
 
 ```
-lake test -- --list                       # confirm it was picked up
-lake test -- --only=example --quick       # run just this one
+lake test -- --list                        # confirm it was picked up
+lake test -- --only="example:" --quick     # run just this group
 ```
 
 To add your own, copy this file under `StrataTests/`, rename the declarations, and
@@ -28,13 +28,18 @@ open StrataGenerators.Program.TestSupport
 def checkSizeAtLeastDecls (p : Core.Program) : Bool :=
   p.decls.length ≤ sizeProgram p
 
-/-- Registering the property. `forAll` picks the generator the way Plausible and
-    QuickCheck do: from the **type** of the argument. `GenProgram` carries
-    `Arbitrary`/`Repr`/`Shrinkable` instances, so annotating the binder is all it takes
-    to select the whole-program generator, its renderer and its shrinker. -/
+/-- Registering the property. A name and a check, and nothing else.
+
+    `forAll` picks the generator the way Plausible and QuickCheck do: from the **type**
+    of the argument. `GenProgram` carries `Arbitrary`/`Repr`/`Shrinkable` instances, so
+    annotating the binder is all it takes to select the whole-program generator, its
+    renderer and its shrinker.
+
+    The report group is the name's `example:` prefix. It is derived, not declared, so it
+    cannot disagree with the name. -/
 @[strata_property]
 def sizeAtLeastDecls : TestDecl :=
-  .forAll "example: sizeProgram is at least the declaration count" "example"
+  .forAll "example: sizeProgram is at least the declaration count"
     (fun (gp : GenProgram) => checkSizeAtLeastDecls gp.prog)
 
 /-- The same claim as a `Prop`, run by Plausible's `Testable` instance for it, exactly
@@ -44,5 +49,5 @@ def sizeAtLeastDecls : TestDecl :=
     expose the type it quantifies over. -/
 @[strata_property]
 def sizeAtLeastDeclsProp : TestDecl :=
-  .check "example: sizeProgram bound, stated as a Prop" "example"
+  .check "example: sizeProgram bound, stated as a Prop"
     (∀ gp : GenProgram, gp.prog.decls.length ≤ sizeProgram gp.prog)

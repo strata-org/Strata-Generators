@@ -30,7 +30,7 @@ open StrataGenerators.Procedure.TestSupport
     thirteen PrecondElim, eight ANFEncoder. -/
 @[strata_properties]
 def procTransforms : List TestDecl :=
-  family "proc"
+  family
     [ -- FilterProcedures — `FilterProcedurePhaseCorrect`
       ("proc: FilterProcedures output decls are a sublist",
        fun (gp : GenProcs) => checkFilterDeclsSublist gp.procs),
@@ -98,7 +98,7 @@ def procTransforms : List TestDecl :=
     extended with `procFactoryStrippedDiagnostic` for this one property. -/
 @[strata_property]
 def procPrecondFactoryStripped : TestDecl :=
-  .property "proc: PrecondElim factory entries are stripped" "proc"
+  .property "proc: PrecondElim factory entries are stripped"
     (Gens.procs.withRender fun gp =>
       procsRepr gp.procs ++ "\n\n" ++ procFactoryStrippedDiagnostic gp.procs)
     (fun gp => checkPrecondFactoryStripped gp.procs)

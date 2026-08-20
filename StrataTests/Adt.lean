@@ -34,7 +34,7 @@ open StrataGenerators.AdtLawsSmt (runLawTallies tallyToNode adtSolverAcceptsQuer
     about disjointness rather than handed a `true`. -/
 @[strata_properties]
 def adtBlockChecks : List TestDecl :=
-  family "adt"
+  family
     [ -- The screen that keeps the solver properties from being fed an ill-typed
       -- program, and a claim in its own right: a derived constructor is usable in an
       -- equality at its ground instance. Holds on every block Strata accepts.
@@ -88,7 +88,7 @@ private def lawTallies (cfg : RunConfig) :
     screen). Gated on `--smt`. -/
 @[strata_property]
 def adtInjSmt : TestDecl :=
-  TestDecl.action "adt: constructor injectivity is provable by SMT" "adt"
+  TestDecl.action "adt: constructor injectivity is provable by SMT"
     (fun cfg => do
       let (inj, _, _, notes) ← lawTallies cfg
       pure (ActionResult.ofTuple (tallyToNode "injectivity" inj notes)))
@@ -98,7 +98,7 @@ def adtInjSmt : TestDecl :=
     PASSES (45/45 at cvc5, 53/53 at z3). Gated on `--smt`. -/
 @[strata_property]
 def adtDisjSmt : TestDecl :=
-  TestDecl.action "adt: constructor disjointness is provable by SMT" "adt"
+  TestDecl.action "adt: constructor disjointness is provable by SMT"
     (fun cfg => do
       let (_, disjT, _, notes) ← lawTallies cfg
       pure (ActionResult.ofTuple
@@ -121,7 +121,7 @@ def adtDisjSmt : TestDecl :=
     generated blocks. Gated on `--smt`. -/
 @[strata_property]
 def adtSolverAcceptsQuery : TestDecl :=
-  TestDecl.action "adt: every emitted law query reaches a solver verdict" "adt"
+  TestDecl.action "adt: every emitted law query reaches a solver verdict"
     (fun cfg => ActionResult.ofTuple <$>
       adtSolverAcceptsQueryAction cfg.numTrials StrataGenerators.SmtEval.solverName)
     (gate := some "smt")

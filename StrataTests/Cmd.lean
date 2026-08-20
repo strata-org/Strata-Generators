@@ -25,7 +25,7 @@ def cmdSingleVerdict : List TestDecl :=
     ("cmd: store type preservation under eval",
      fun gc => checkStoreTypePreservation gc.cmd gc.inCtx) ].map
   fun (name, check) =>
-    (TestDecl.forAll name "cmd" check).withPanel
+    (TestDecl.forAll name check).withPanel
       (genCmdProp (fun c ctx => check ⟨c, ctx, cmdOutCtx ctx c⟩))
 
 /-- For a generated command sequence, the output context is the input context with
@@ -33,13 +33,13 @@ def cmdSingleVerdict : List TestDecl :=
     onto the front. -/
 @[strata_property]
 def cmdContextGrowth : TestDecl :=
-  .forAll "cmd: context growth matches inits" "cmd"
+  .forAll "cmd: context growth matches inits"
     (fun (gc : GenCmdsWithCtx) => checkContextGrowth gc.inCtx gc.outCtx gc.cmds)
 
 /-- Whenever concrete execution (`Cmd.run`) succeeds, symbolic simulation
     (`Cmd.eval`) also succeeds, with the same store. -/
 @[strata_property]
 def cmdEvalRunAgreement : TestDecl :=
-  (TestDecl.forAll "cmd: symbolic/concrete eval agreement" "cmd"
+  (TestDecl.forAll "cmd: symbolic/concrete eval agreement"
     (fun (gc : GenCmdWithCtx) => checkEvalRunAgreement gc.cmd gc.inCtx)).withPanel
     genAndCheckEvalRunAgreement

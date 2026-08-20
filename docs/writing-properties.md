@@ -19,27 +19,30 @@ def checkMyPassIdempotent (p : Core.Program) : Bool :=
 
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .forAll "mypass: the pass is idempotent" "mypass"
-    fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .forAll "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
 ```
 
 Then:
 
 ```bash
-lake test -- --list                    # confirm it was picked up
-lake test -- --only=mypass --quick     # run just this one
-lake test                              # run everything
+lake test -- --list                     # confirm it was picked up
+lake test -- --only="mypass:" --quick   # run just this group
+lake test                               # run everything
 ```
 
 `StrataTests/Example.lean` is a complete, working copy of this shape.
 
-The three arguments to `TestDecl.forAll` are the whole interface:
+The two arguments to `TestDecl.forAll` are the whole interface:
 
 | argument | meaning |
 |---|---|
-| `"mypass: the pass is idempotent"` | the property's name. Unique across the suite; it is the report label *and* the Tyche panel title. |
-| `"mypass"` | the report group. A string nothing has seen before simply creates a new group. |
+| `"mypass: the pass is idempotent"` | the name. Unique across the suite; it is the report line, the Tyche panel title, and — through its `mypass:` prefix — the report group. |
 | `fun (gp : GenProgram) => …` | the check. **The annotation picks the generator.** |
+
+There is no group argument. A report group is the `area` of an `area: description` name,
+derived rather than declared, so it cannot disagree with the name. A prefix nothing has
+used before simply creates a new group, and `--only="mypass:"` selects that group
+exactly.
 
 The generator is chosen the way Plausible and QuickCheck choose it — by the type of the
 quantified value, not by naming a generator. `GenProgram` carries the
@@ -129,7 +132,7 @@ To sample a type differently for one property, pass a `GenSpec` with
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  .property "proc: …" "proc"
+  .property "proc: …"
     (Gens.procs.withRender fun gp => procsRepr gp.procs ++ myDiagnostic gp.procs)
     (fun gp => checkMine gp.procs)
 ```
@@ -146,7 +149,7 @@ use, `mk_decorations` included, so anything you could write in `#test` works her
 ```lean
 @[strata_property]
 def myPropShaped : TestDecl :=
-  .check "mypass: idempotent under any fuel" "mypass"
+  .check "mypass: idempotent under any fuel"
     (∀ gp : GenProgram, ∀ n : Nat, myPass n gp.prog = myPass (n + 1) (myPass n gp.prog))
 ```
 
@@ -168,7 +171,7 @@ sampling only obscures which case is at stake:
 ```lean
 @[strata_property]
 def bv128Prints : TestDecl :=
-  .witness "printer: bitvec 128 literals are printable" "printer" checkBv128LiteralPrints
+  .witness "printer: bitvec 128 literals are printable" checkBv128LiteralPrints
 ```
 
 ### A fixed finite input space
@@ -180,7 +183,7 @@ exists:
 ```lean
 @[strata_property]
 def allWidths : TestDecl :=
-  .witnesses "printer: every typecheckable bitvec width is printable" "printer"
+  .witnesses "printer: every typecheckable bitvec width is printable"
     (List.range 64) toString checkWidthPrints
 ```
 
@@ -192,7 +195,7 @@ with generation. It reports `(passed, samples, total, message)`:
 ```lean
 @[strata_property]
 def smtAgreement : TestDecl :=
-  .action "expr: SMT/concrete eval agreement (closed)" "expr"
+  .action "expr: SMT/concrete eval agreement (closed)"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.SmtEval.smtEvalAgreementAction cfg.numTrials cfg.maxSize)
     (gate := some "smt")
@@ -211,7 +214,7 @@ list:
 ```lean
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
-  family "stmt"
+  family
     [ ("stmt: LoopElim preserves typeability",
        fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts),
       ("stmt: LoopElim eliminates all loops",
@@ -238,7 +241,7 @@ lives next to the property rather than in a central list:
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  (TestDecl.forAll "mypass: …" "mypass"
+  (TestDecl.forAll "mypass: …"
     (fun (gp : GenProgram) => checkMine gp.prog)).withPanel myPanelAction
 ```
 
@@ -271,16 +274,15 @@ lake test -- [numTrials] [maxSize] [flags]
 | flag | effect |
 |---|---|
 | `--quick` | 100 trials, max size 40, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
-| `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. |
-| `--suite=NAME` | run only the named report groups. Repeatable. |
+| `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
 | `--list` | print the registry and exit. The answer to "did my property get picked up?" |
 | `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
 | `--no-tyche` | skip the Tyche pass. |
 | `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). |
 | `--tyche-samples=N` | samples per panel (default 1000). |
 
-`--only=… --quick` is the loop to iterate in: it runs one property, skips the
-diagnostics, and writes no Tyche file.
+`--only=… --quick` is the loop to iterate in: it runs one property or one group, skips
+the diagnostics, and writes no Tyche file.
 
 Note that the suite is **not** seed-deterministic, and a few properties fail on
 roughly one draw in several hundred. Never conclude anything from comparing one run to

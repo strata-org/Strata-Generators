@@ -24,7 +24,7 @@ open StrataGenerators.Program.LiftFuncDecls
     `normalizeAmbient`. -/
 @[strata_properties]
 def liftFuncDecls : List TestDecl :=
-  family "lift"
+  family
     [ -- coverage first: the rest mean nothing without it
       ("lift: the injected declaration is really lifted",
        fun (gp : GenProgram) => checkLiftInjectionFires gp.prog),

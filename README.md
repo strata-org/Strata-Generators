@@ -86,8 +86,8 @@ Flags (all optional; the Tyche visualization pass is on by default):
   higher precedence, so `--quick 500` gives 500 trials and keeps the rest of the preset.
 - `--only=SUBSTRING` — run only the properties whose name contains `SUBSTRING`.
   Repeatable. This is the loop to iterate in while writing one property: it also skips
-  the diagnostics and writes no Tyche file.
-- `--suite=NAME` — run only the named report groups. Repeatable.
+  the diagnostics and writes no Tyche file. Since a report group is a name prefix,
+  `--only="lift:"` selects the `lift` group exactly.
 - `--list` — print the registry (name, group, gate) and exit without running anything.
   The answer to "did my property get picked up?"
 - `--no-tyche` — omit Tyche visualizations (i.e. only run tests).
@@ -141,22 +141,22 @@ def checkMyPassIdempotent (p : Core.Program) : Bool :=
 
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .forAll "mypass: the pass is idempotent" "mypass"
-    fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .forAll "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
 ```
 
-That is the whole registration. `lake test` discovers it, reports it under a `mypass`
+A name and a check. That is the whole registration. `lake test` discovers it, reports it under a `mypass`
 group, and gives it a Tyche panel.
 
 The generator is chosen the way Plausible and QuickCheck choose it: by the **type** of
 the quantified value. `GenProgram` carries the `Arbitrary`/`Repr`/`Shrinkable` instances
 Plausible needs, so annotating the binder selects the whole-program generator, its
-renderer and its shrinker at once. A property that is better stated as a `Prop` uses
+renderer and its shrinker at once. The report group is the name's `mypass:` prefix,
+derived rather than declared. A property that is better stated as a `Prop` uses
 `.check` instead, which goes through the `Testable` instance exactly as `#test` does.
 
 ```bash
-lake test -- --list                    # confirm it was picked up
-lake test -- --only=mypass --quick     # run just this one
+lake test -- --list                     # confirm it was picked up
+lake test -- --only="mypass:" --quick   # run just this group
 ```
 
 [`StrataTests/Example.lean`](./StrataTests/Example.lean) is a working copy of this
@@ -226,7 +226,7 @@ with `withPanel`, in the `StrataTests/` file that declares it:
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  (TestDecl.forAll "mypass: …" "mypass"
+  (TestDecl.forAll "mypass: …"
     (fun (gp : GenProgram) => checkMine gp.prog)).withPanel myPanelAction
 ```
 

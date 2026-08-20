@@ -66,7 +66,7 @@ def main (args : List String) : IO UInt32 := do
     (suite, [props.foldr (fun d rest => node cli.run d ++ rest) TestSeq.done])
   let exitCode ← lspecIO (.ofList suites) []
 
-  if cli.only.isEmpty && cli.suites.isEmpty then
+  if cli.only.isEmpty then
     runDiagnostics diagnostics cli.run
 
   if cli.tycheEnabled then

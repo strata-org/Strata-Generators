@@ -67,7 +67,7 @@ def main (args : List String) : IO UInt32 := do
     return 0
 
   if selected.isEmpty then
-    IO.eprintln "error: no property matched the --only/--suite filters."
+    IO.eprintln "error: no property matched the --only filter."
     IO.eprintln "Run with --list to see what is registered."
     return 1
 
@@ -82,7 +82,7 @@ def main (args : List String) : IO UInt32 := do
   -- Diagnostics run after the gating suite and never affect the exit code. They are
   -- skipped under a filter: a `--only` run is a run about one property, and six
   -- unrelated distribution reports would bury its result.
-  if cli.only.isEmpty && cli.suites.isEmpty then
+  if cli.only.isEmpty then
     runDiagnostics diagnostics cli.run
 
   -- The Tyche pass writes one panel per property to `cli.tycheOut`, scoring each

@@ -24,9 +24,11 @@ property, default 1000; `maxSize` = maximum generator size, default 100).
 * `--only=SUBSTRING` — run only the properties whose name contains `SUBSTRING`.
   Repeatable; a property matching any of them runs. The rest are not reported at
   all, which is what makes iterating on one new property cheap.
-* `--suite=NAME` — run only the named report groups. Repeatable.
-* `--list` — print the registry (name, suite, gate) and exit without running
-  anything. The answer to "did my property get picked up?".
+* `--list` — print the registry (name, group, gate) and exit without running anything.
+  The answer to "did my property get picked up?".
+
+There is no `--suite=` flag: a report group *is* a name prefix, so `--only="lift:"`
+selects the `lift` group exactly.
 -/
 
 namespace StrataGenerators.Test
@@ -40,8 +42,6 @@ structure Cli where
   tycheSamples : Nat
   /-- Name substrings to filter the registry by; empty means no filter. -/
   only         : List String
-  /-- Suite names to filter by; empty means no filter. -/
-  suites       : List String
   /-- Print the registry and exit. -/
   listOnly     : Bool
   /-- Whether `--quick` was passed, so a driver can name the flag that actually
@@ -74,7 +74,6 @@ def parseCli (args : List String) : Cli :=
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
     tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
     only         := flagValues "--only="
-    suites       := flagValues "--suite="
     listOnly     := flags.contains "--list"
     quick        := quick }
 
@@ -82,22 +81,20 @@ def parseCli (args : List String) : Cli :=
 private def contains (hay needle : String) : Bool :=
   (hay.splitOn needle).length > 1
 
-/-- Apply `--only` / `--suite` to the registry. An empty filter keeps everything. -/
+/-- Apply `--only` to the registry. An empty filter keeps everything. -/
 def Cli.select (cli : Cli) (ds : List TestDecl) : List TestDecl :=
-  ds.filter fun d =>
-    (cli.only.isEmpty || cli.only.any (contains d.name)) &&
-    (cli.suites.isEmpty || cli.suites.contains d.suite)
+  ds.filter fun d => cli.only.isEmpty || cli.only.any (contains d.name)
 
 private def pad (s : String) (n : Nat) : String :=
   s ++ "".pushn ' ' (n - min n s.length)
 
-/-- Print the registry: what is registered, which group it reports under, and
-    whether a gate holds it back. This is how a property author confirms their file
-    was picked up, without waiting for a run. -/
+/-- Print the registry: what is registered, which group it reports under, and whether
+    a gate holds it back. This is how a property author confirms their file was picked
+    up, without waiting for a run. -/
 def listRegistry (ds : List TestDecl) : IO Unit := do
   IO.println s!"{ds.length} propert{if ds.length == 1 then "y" else "ies"} registered"
   for d in ds do
     let gate := match d.gate with | some g => s!"  [--{g}]" | none => ""
-    IO.println s!"  {pad d.suite 12} {d.name}{gate}"
+    IO.println s!"  {pad d.group 12} {d.name}{gate}"
 
 end StrataGenerators.Test

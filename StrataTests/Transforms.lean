@@ -19,9 +19,13 @@ are exercised on real input rather than on a statement list that cannot express 
 
 Two caveats worth reading before trusting a green result:
 
-* `CommonSubexprElim` fires on 0 of 200 generated programs, since no generated body
-  holds a duplicated subexpression, so all four `cse:` properties are vacuous here
-  and the `#guard`s in `ProgramGen/UnprovenTransforms` are what test them.
+* `CommonSubexprElim` fires on very few generated programs, since a generated body
+  rarely holds a duplicated subexpression, so the four `cse:` properties are usually
+  vacuous and the `#guard`s in `ProgramGen/UnprovenTransforms` are what test them
+  reliably. Not *always* vacuous, though: a `--quick` run drew
+  `assume [||]: str.le(P(G), P(G))`, on which the pass fires and
+  `cse: the output typechecks` fails. Expect that property to be green on most runs
+  and red on the occasional one, like the `procInline:` properties.
 * the three `procInline:` properties need a sample that holds a call, which is rare,
   so a short run may not reach them.
 
@@ -41,7 +45,7 @@ open StrataGenerators.Program.UnprovenTransforms
 /-- The forty-five properties for the unproven passes. -/
 @[strata_properties]
 def unprovenTransforms : List TestDecl :=
-  family "transforms"
+  family
     [ -- IrrelevantAxioms — the relevance oracle
       ("axioms: IrrelevantAxioms removes only axioms",
        fun (gp : GenProgram) => checkAxiomsOnlyAxRemoved gp.prog),

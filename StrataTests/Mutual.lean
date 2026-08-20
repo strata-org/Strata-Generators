@@ -25,7 +25,7 @@ open StrataGenerators.MutualBlockShape
     threaded reserved-name set, so no constructor field can mention a sibling. -/
 @[strata_properties]
 def mutualIndepChecks : List TestDecl :=
-  family "mutual"
+  family
     [ ("mutual: a block of non-mutually-recursive datatypes is accepted",
        fun (gb : GenIndepBlock) => checkIndependentBlockAccepted gb.block),
       ("mutual: such a block's constructors are usable in a program",

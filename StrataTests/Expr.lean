@@ -29,13 +29,13 @@ open StrataGenerators.Test
     trusts fvar annotations. -/
 @[strata_property]
 def exprTypecheck : TestDecl :=
-  .forAll "expr: generated terms typecheck" "expr"
+  .forAll "expr: generated terms typecheck"
     (fun (te : TypedExpr) => LExpr.typeCheck (T := LExprParams') [] te.expr == some te.ty)
 
 /-- Preservation, on closed terms: if `∅ ⊢ e : τ` and `e →* e'` then `∅ ⊢ e' : τ`. -/
 @[strata_property]
 def exprPreservation : TestDecl :=
-  (TestDecl.forAll "expr: preservation under eval (closed)" "expr"
+  (TestDecl.forAll "expr: preservation under eval (closed)"
     (fun (te : ClosedTypedExpr) => checkPreservation te.expr te.ty)).withPanel genAndEval
 
 /-- Progress, on closed terms: a well-typed closed term is a value or can step.
@@ -44,14 +44,14 @@ def exprPreservation : TestDecl :=
     `if (∀x. e) then …` gets stuck. -/
 @[strata_property]
 def exprProgress : TestDecl :=
-  (TestDecl.forAll "expr: progress (closed)" "expr"
+  (TestDecl.forAll "expr: progress (closed)"
     (fun (te : ClosedTypedExpr) => checkProgress te.expr)).withPanel genAndCheckProgress
 
 /-- Evaluation introduces no *new* free variables. Variables already in the context
     may appear in the input and the output; eval may not invent one. -/
 @[strata_property]
 def exprFvarsPreserved : TestDecl :=
-  (TestDecl.forAll "expr: eval preserves fvars" "expr"
+  (TestDecl.forAll "expr: eval preserves fvars"
     (fun (te : TypedExpr) => checkFvarsPreserved te.expr)).withPanel genAndCheckFvarPreservation
 
 /-- After erasing *all* type annotations, `resolve` infers a principal type of which
@@ -69,7 +69,7 @@ def exprFvarsPreserved : TestDecl :=
     any counterexamples. -/
 @[strata_property]
 def exprResolveAfterErase : TestDecl :=
-  (TestDecl.forAll "expr: resolve after type erasure" "expr"
+  (TestDecl.forAll "expr: resolve after type erasure"
     (fun (te : ResolveTypedExpr) => checkResolveAfterErase te.expr te.ty)).withPanel
     genAndCheckResolveAfterErase
 
@@ -80,7 +80,7 @@ def exprResolveAfterErase : TestDecl :=
     characters — under Basalt's alphanumeric `String.arbitrary` it would not be. -/
 @[strata_property]
 def exprSmtStringEscaping : TestDecl :=
-  (TestDecl.action "expr: SMT string literals are printable ASCII" "expr"
+  (TestDecl.action "expr: SMT string literals are printable ASCII"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.SmtStringEscaping.escapingAction cfg.numTrials)).withPanel
     genEscapingSample
@@ -91,7 +91,7 @@ def exprSmtStringEscaping : TestDecl :=
     a *second spelling* of one value; two independent draws are almost never equal. -/
 @[strata_property]
 def realDecimalEqFold : TestDecl :=
-  (TestDecl.action "real: Decimal eq fold agrees with value equality" "expr"
+  (TestDecl.action "real: Decimal eq fold agrees with value equality"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.DecimalAgreement.eqFoldAction cfg.numTrials)).withPanel
     (genDecimalPairProp StrataGenerators.DecimalAgreement.checkEqFold)
@@ -99,7 +99,7 @@ def realDecimalEqFold : TestDecl :=
 /-- The `Decimal` comparator is a total order. -/
 @[strata_property]
 def realDecimalTrichotomy : TestDecl :=
-  (TestDecl.action "real: Decimal comparator is a total order" "expr"
+  (TestDecl.action "real: Decimal comparator is a total order"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.DecimalAgreement.trichotomyAction cfg.numTrials)).withPanel
     (genDecimalPairProp StrataGenerators.DecimalAgreement.checkTrichotomy)
@@ -109,7 +109,7 @@ def realDecimalTrichotomy : TestDecl :=
     from `StrataTest/Languages/Core/Tests/ExprEvalTest.lean`. -/
 @[strata_property]
 def exprSmtEvalAgreement : TestDecl :=
-  TestDecl.action "expr: SMT/concrete eval agreement (closed)" "expr"
+  TestDecl.action "expr: SMT/concrete eval agreement (closed)"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.SmtEval.smtEvalAgreementAction cfg.numTrials cfg.maxSize)
     (gate := some "smt")

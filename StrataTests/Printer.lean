@@ -25,7 +25,7 @@ open StrataGenerators.PrinterCoverage
     power of two, and still fails. -/
 @[strata_property]
 def printerBv128Literal : TestDecl :=
-  (TestDecl.witness "printer: bitvec 128 literals are printable" "printer"
+  (TestDecl.witness "printer: bitvec 128 literals are printable"
     checkBv128LiteralPrints).withEnumeratedPanel
     (factoryBvWidths.map fun w =>
       ({ width := w, passed := checkBvLitPrints w } : BvLitWidthResult))
@@ -33,7 +33,7 @@ def printerBv128Literal : TestDecl :=
 /-- The eighteen `Bv↔Int` conversion operators are printable. -/
 @[strata_property]
 def printerBvIntConversions : TestDecl :=
-  (TestDecl.witness "printer: Bv/Int conversion operators are printable" "printer"
+  (TestDecl.witness "printer: Bv/Int conversion operators are printable"
     checkBvIntConversionsPrint).withEnumeratedPanel bvIntConversionSamples
 
 /-- Every bitvector width the typechecker accepts is printable. `Function.typeCheck`
@@ -41,7 +41,7 @@ def printerBvIntConversions : TestDecl :=
     of two — so this is deterministic, and a scan rather than a sample. -/
 @[strata_property]
 def printerBvWidthAgreement : TestDecl :=
-  (TestDecl.witness "printer: every typecheckable bitvec width is printable" "printer"
+  (TestDecl.witness "printer: every typecheckable bitvec width is printable"
     checkAllWidthsAgree).withEnumeratedPanel bvWidthAgreementSamples
 
 /-- No generated program provokes a conversion error. Quantifies over a whole
@@ -57,5 +57,5 @@ def printerBvWidthAgreement : TestDecl :=
     `printer conversion-error` diagnostic. -/
 @[strata_property]
 def printerNoConversionError : TestDecl :=
-  (TestDecl.forAll "printer: no conversion error on generated programs" "printer"
+  (TestDecl.forAll "printer: no conversion error on generated programs"
     (fun (gp : GenProgram) => checkProgramPrintsWithoutError gp.prog)).withPanel genPrinterProgramProp

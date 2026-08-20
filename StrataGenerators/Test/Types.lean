@@ -148,15 +148,15 @@ inductive Body where
 
 /-- One property under test. This is the whole of what a property author writes.
 
-    `name` is the label in every report and the Tyche panel title, and must be
-    unique across the registry — `Report.duplicateNames` checks that at startup,
-    since two properties sharing a name would silently collapse their panels.
+    `name` is the only label there is: it is the line in every report, the Tyche panel
+    title, and — through its `area:` prefix — the report group. It must be unique across
+    the registry; `Report.duplicateNames` checks that at startup, since two properties
+    sharing a name would silently collapse their panels.
 
-    `suite` is the report group; a string nothing has seen before simply creates a
-    new group, so a new family of properties needs no registration anywhere. -/
+    There is deliberately no separate group field. A report group is a *function of the
+    name*, so a property author supplies one string and a check, and nothing else. -/
 structure TestDecl where
   name  : String
-  suite : String
   /-- Opt-in gate: the property runs only when the driver was given this tag
       (`--smt` supplies `"smt"`). `none` runs always. -/
   gate  : Option String := none
@@ -204,15 +204,15 @@ structure Diagnostic where
     is what selects the generator:
 
     ```lean
-    .forAll "mypass: idempotent" "mypass" fun (gp : GenProgram) => checkMine gp.prog
+    .forAll "mypass: idempotent" fun (gp : GenProgram) => checkMine gp.prog
     ```
 
     Use `TestDecl.check` when the claim is better stated as a `Prop`, and
     `TestDecl.property` when the type's default generator is not the one you want. -/
-def TestDecl.forAll (name suite : String)
+def TestDecl.forAll (name : String)
     [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
     (check : α → Bool) (gate : Option String := none) : TestDecl :=
-  { name, suite, gate, body := .sampled (GenSpec.ofInstances α) check }
+  { name, gate, body := .sampled (GenSpec.ofInstances α) check }
 
 open Plausible.Decorations in
 /-- A property written as a `Prop`, elaborated and run exactly as `#test` and
@@ -220,7 +220,7 @@ open Plausible.Decorations in
     `Testable` instance is synthesized:
 
     ```lean
-    .check "expr: eval is idempotent" "expr"
+    .check "expr: eval is idempotent"
       (∀ te : ClosedTypedExpr, ∀ n : Nat, evalN n te.expr = evalN (n + 1) te.expr)
     ```
 
@@ -228,33 +228,33 @@ open Plausible.Decorations in
     more than one `∀`, a `Decidable` hypothesis used as a guard, or a type whose
     `SampleableExt` instance samples through a proxy. The cost is that no Tyche panel
     can be derived, because a `Prop` does not expose the type it quantifies over. -/
-def TestDecl.check (name suite : String) (p : Prop) (gate : Option String := none)
+def TestDecl.check (name : String) (p : Prop) (gate : Option String := none)
     (p' : DecorationsOf p := by mk_decorations) [inst : Testable p'] : TestDecl :=
-  { name, suite, gate, tyche := false, body := .testable p' inst }
+  { name, gate, tyche := false, body := .testable p' inst }
 
 /-- A sampled property over an explicitly given generator, for the case where the
     type's default `Arbitrary` instance is not the generator you want — a narrowed
     draw, a diagnostic renderer, an extra Tyche axis. Prefer `TestDecl.forAll`. -/
-def TestDecl.property (name suite : String) (spec : GenSpec α) (check : α → Bool)
+def TestDecl.property (name : String) (spec : GenSpec α) (check : α → Bool)
     (gate : Option String := none) : TestDecl :=
-  { name, suite, gate, body := .sampled spec check }
+  { name, gate, body := .sampled spec check }
 
 /-- A closed-`Bool` property with no generated input. -/
-def TestDecl.witness (name suite : String) (verdict : Bool)
+def TestDecl.witness (name : String) (verdict : Bool)
     (gate : Option String := none) : TestDecl :=
-  { name, suite, gate, tyche := false, body := .witness verdict }
+  { name, gate, tyche := false, body := .witness verdict }
 
 /-- A property over a fixed finite input space. -/
-def TestDecl.witnesses (name suite : String) (cases : List α) (render : α → String)
+def TestDecl.witnesses (name : String) (cases : List α) (render : α → String)
     (check : α → Bool)
     (features : α → List (String × Tyche.Feature) := fun _ => [])
     (gate : Option String := none) : TestDecl :=
-  { name, suite, gate, body := .witnesses cases render check features }
+  { name, gate, body := .witnesses cases render check features }
 
 /-- A self-driving `IO` property. -/
-def TestDecl.action (name suite : String) (run : RunConfig → IO ActionResult)
+def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
     (gate : Option String := none) : TestDecl :=
-  { name, suite, gate, tyche := false, body := .action run }
+  { name, gate, tyche := false, body := .action run }
 
 /-- A family of properties that share one generator and differ only in the check:
     each name is paired with its check exactly once, in one reviewable line.
@@ -263,14 +263,13 @@ def TestDecl.action (name suite : String) (run : RunConfig → IO ActionResult)
     keeping a separate list of name constants is what makes it structurally
     impossible to attach a name to the wrong check — the failure mode the old
     two-list arrangement guarded against with a `#guard`. -/
-def family (suite : String) [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
+def family [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
     (ps : List (String × (α → Bool))) : List TestDecl :=
-  ps.map fun (name, check) => .forAll name suite check
+  ps.map fun (name, check) => .forAll name check
 
 /-- `family` over an explicitly given generator. -/
-def familyOf (suite : String) (spec : GenSpec α) (ps : List (String × (α → Bool))) :
-    List TestDecl :=
-  ps.map fun (name, check) => .property name suite spec check
+def familyOf (spec : GenSpec α) (ps : List (String × (α → Bool))) : List TestDecl :=
+  ps.map fun (name, check) => .property name spec check
 
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
@@ -297,6 +296,13 @@ def Diagnostic.withPanel [Tyche.TycheSample β] (d : Diagnostic) (gen : IO β) :
     Diagnostic :=
   { d with panel := some (fun handle _ numSamples runStart =>
              Tyche.runInto handle gen d.name numSamples runStart) }
+
+/-- The report group: the `area` of an `area: description` name.
+
+    Grouping is derived rather than declared, so it cannot disagree with the name. A
+    name with no `": "` is its own group. -/
+def TestDecl.group (d : TestDecl) : String :=
+  (d.name.splitOn ": ").headD d.name
 
 /-- Whether this run's gates admit the property. -/
 def TestDecl.enabled (d : TestDecl) (cfg : RunConfig) : Bool :=
