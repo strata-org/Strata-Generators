@@ -56,8 +56,8 @@ the snapshots, the Johnsson fixpoint, and the rejection conditions.
 
 `genFuncDeclStmt` draws its `funcDecl` bodies with `genFunction []` — an **empty**
 free-variable context — so every generated internal function is *closed*. The pass
-would then have nothing to capture, every property below would hold vacuously, and
-a green run would mean nothing.
+would then have nothing to capture and every property below would hold vacuously,
+so a sweep over unmodified draws would establish nothing.
 
 So each predicate **injects** a capturing `funcDecl` into the generated program and
 scores the pass on the result. `Scenario` names the shapes worth injecting and
@@ -71,45 +71,79 @@ Names the injection introduces are freshened against the host procedure
 accident — the one property that is *about* collisions
 (`checkLiftFreshSnapshotNames`) creates its collision deliberately.
 
-## The typechecker guard, and why most properties do not use it
+## The typechecker guard
 
-`Program.typeCheck` rejects about 60% of generated programs for three documented
-reasons (see `ProgramGen/Shrink`'s module doc). Only the two properties whose
-*claim* is about well-typedness — `checkLiftOutputTypechecks` and
-`checkLiftRejectsOnlyKnownTriggers` — guard on `progTypeChecks`. The pass is
-otherwise a syntactic program-to-program transform, so the structural properties
-are stated unconditionally and stay non-vacuous on every draw.
+Every property here opens with `!progTypeChecks p`, so a draw the whole-program
+typechecker rejects is skipped rather than scored. The pass is a phase of
+`transformPipelinePhases` and runs only on programs Core accepted, so a claim about
+its behaviour on an ill-typed input is a claim about a state the pipeline never
+reaches; a counterexample drawn from one would not be actionable.
+
+The guard is a screen, so it can only cost coverage, and how much it costs is a
+property of the generator rather than of anything here. Measured over 500 draws at
+sizes 0–40: it skipped **none** of them. Do not read that as free — it says the
+generator currently produces well-typed programs, not that it always will, and
+`ProgramGen/Shrink`'s module doc still records a rejection rate of about 60% for
+three documented reasons, which is not what this measures. `checkLiftInjectionFires`
+carries the same guard and is what keeps the cost visible whichever way the rate
+moves. The constructed `#guard`s at the end of the file are unaffected either way,
+since they are built on the empty program, which typechecks.
+
+Two properties guard a second time, per scenario rather than per draw:
+`checkLiftOutputTypechecks` and `checkLiftRejectsOnlyKnownTriggers` ask
+`!progTypeChecks q` of the *injected* program, because their claims are conditional
+on the shape they are scoring being well typed and not merely on the host draw
+being so.
 
 ## Findings
 
-Measured over 20 draws at `numDecls := 6`, `size := 8`, and deterministic on 6 of
-the 15 injected shapes. `checkLiftInjectionFires` confirms the pass really ran and
-really hoisted a function on 20/20, so no property is scored vacuously.
+Two defects in the pass, both machine-checked at `numDecls := 6`, `size := 8`. The
+second is reachable from a well-typed program; the first was, until upstream
+narrowed what "well-typed" means.
 
-**Two defects, both machine-checked, both reachable from a well-typed program.**
-
-* `checkLiftOutputTypechecks` — **the snapshot init is left behind in a nested
+* `checkLiftSnapshotsInScope` — **the snapshot init is left behind in a nested
   scope while the function is hoisted out of it.** When a `funcDecl` sits inside a
   `block` / `ite` / `loop` and is called anywhere outside that construct, the pass
   emits `var $__liftfncl_0 : int := c` *inside* the construct and rewrites the outer
   call site to `$__liftfncl_addC_1($__liftfncl_0, …)`. The snapshot is out of scope
-  there, so `Program.typeCheck` **accepts the input and rejects the output**:
+  there, so `Program.typeCheck` rejects the output:
 
   ```
   No free variables are allowed here! Free Variables: [$__liftfncl_0]
   ```
 
-  The four nesting shapes (`Placement.block`, `.ite`, `.elseArm`, `.loop`) reach it
-  and the two same-scope shapes (`.top`, `.blockIn`) do not, which isolates the
-  escape from the declaring scope as the cause. Core's own typechecker puts a `funcDecl`'s
-  name in scope for the whole enclosing procedure — that is *why* the input is
-  well-typed — so a call outside the declaring block is legal input, not a
-  malformed program.
+  The six escaping shapes (`Placement.block`, `.ite`, `.elseArm`, `.loop`, and the
+  `chain`/`measure` variants of the first two) reach it and the nine same-scope
+  shapes (`.top`, `.blockIn`) do not, which isolates the escape from the declaring
+  scope as the cause.
 
-  Severity: `liftInternalFuncDeclsPipelinePhase` is the **first** phase of
+  **Upstream has since fixed the typechecker half of this, and that is what makes
+  the finding harder to read now, not smaller.** Core's typechecker used to put a
+  block-local `funcDecl`'s name in scope for the whole enclosing procedure, so a call
+  outside the declaring block was legal input and `Program.typeCheck` *accepted the
+  input and rejected the output* — a model-preserving pass turning a well-typed
+  program into an ill-typed one. `fix(core): Scope local funcDecls and typeDecls to
+  their block` changed `goBlock` in `StatementType.lean` to return the outer
+  `LContext`, so a block-local `funcDecl` is now scoped to its block exactly as a
+  block-local variable always was. The six escaping shapes are therefore **no longer
+  well-typed input**.
+
+  The pass is unchanged: fed one of those shapes directly it still hoists the
+  function out and leaves the snapshot behind. Which of the two properties can see
+  that now differs, and the difference is entirely about their guards, not about the
+  pass — `checkLiftOutputTypechecks` and `liftTypecheckDiagnostic` skip a scenario
+  whose injection is ill-typed, and `checkLiftSnapshotsInScope` does not. So the
+  scope property is the one to read on the escaping placements, and a clean
+  `liftTypecheckDiagnostic` is not evidence that the escape was repaired. The
+  `#guard`s in "The two defects, minimally" pin the split explicitly.
+
+  Severity, on the pipeline as it stood when this was measured:
+  `liftInternalFuncDeclsPipelinePhase` is the **first** phase of
   `transformPipelinePhases` and the pipeline's own `typeCheck` phase runs after all
-  of them (`Verifier.lean`), so this surfaces to a user as
-  `❌ Type checking error` on a program that was well typed as written.
+  of them (`Verifier.lean`), so this surfaced to a user as
+  `❌ Type checking error` on a program that was well typed as written. Reaching it
+  from legal input now needs a shape the injection does not build, since the only
+  placements the sweep uses are the ones upstream just made illegal.
 
 * `checkLiftFreshSnapshotNames` — **the minted names are not checked against the
   program's own identifiers.** A procedure that already declares
@@ -129,7 +163,7 @@ really hoisted a function on 20/20, so no property is scored vacuously.
   mints `$__cse.0` without reading a program name) — two passes, one missing
   mechanism.
 
-**Everything else passes, including three things the plan expected to be weak:**
+**Three things the plan expected to be weak turned out not to be:**
 
 * Capture through `axioms`, `preconditions` and `measure` — the plan calls a
   body-only generator "the most likely coverage gap". The pass handles all four
@@ -149,15 +183,15 @@ one fails `Program.typeCheck` before the pass sees it. The
 `Scenario.recursiveDecl` case is therefore scored only by a `#guard`, and
 `checkLiftRejectsOnlyKnownTriggers` treats it as a skip.
 
-**A methodological finding worth keeping.** The first run of this suite read 6 of
-20 draws on the three properties that bear on the defects — signal that turned out
-to be noise. `run` folds `processDecl` over the declarations with `foldlM`, so a
-rejection in *any* procedure aborts the whole program, and 5 of 20 draws carried
-their own trigger (a generated internal function name clashing with a top-level one,
-or sitting beside a local `typeDecl`). Those draws took the injected scenario down
-with them, and every property was then scored vacuously. `normalizeAmbient` fixes
-the cause and `checkLiftInjectionFires` scores the symptom, so the same masking
-cannot come back unnoticed.
+**A methodological finding worth keeping.** The first run of this suite read signal
+on the three properties that bear on the defects which turned out to be noise. `run`
+folds `processDecl` over the declarations with `foldlM`, so a rejection in *any*
+procedure aborts the whole program, and a sizeable fraction of draws carry their own
+trigger (a generated internal function name clashing with a top-level one, or sitting
+beside a local `typeDecl`). Those draws take the injected scenario down with them,
+and every property is then scored vacuously. `normalizeAmbient` fixes the cause and
+`checkLiftInjectionFires` scores the symptom, so the same masking cannot come back
+unnoticed.
 
 **Not covered here.** The plan's semantic tier — P13 (bidirectional operational
 correctness), P14 (verification-outcome preservation) and P16 (the
@@ -165,6 +199,11 @@ snapshot-vs-call-site differential that would pin the declaration-time capture
 semantics) — needs the symbolic evaluator and a decision about comparing
 `List Env`. The structural layer had to be trusted first, and it is not: it found
 the two defects above.
+
+Draw counts and per-property outcomes are deliberately not recorded here. They go
+stale on every upstream bump and on every change to the guards, and a stale one reads
+as evidence. `lake test` is the current answer; `properties_bugs_found.md` records
+the findings.
 -/
 
 namespace StrataGenerators.Program.LiftFuncDecls
@@ -330,9 +369,11 @@ free variable a statement mentions has already been declared in an enclosing or
 current scope. A `block` / `ite` arm / `loop` body extends the scope for its own
 statements only, which is exactly the scoping the defect violates.
 
-`checkLiftOutputTypechecks` is the authoritative oracle (it is Strata's own
-checker); this one localises the failure to "a snapshot is used out of scope"
-rather than reporting a generic type error. -/
+`checkLiftOutputTypechecks` is the sharper oracle in principle (it is Strata's own
+checker), but it is guarded on the input typechecking and upstream has since made
+every escaping shape illegal input, so in practice this one is the oracle that
+still reports the escape — and it localises the failure to "a snapshot is used out
+of scope" rather than to a generic type error. -/
 
 /-- Every free variable named in an expression. -/
 def exprFvarNames (e : Expression.Expr) : List String :=
@@ -685,7 +726,7 @@ def injectStmts (extra : List Statement) (p : Program) : Program :=
 *any* procedure aborts the whole program. A draw whose own internal functions
 happen to trip one of the four rejection conditions therefore takes the injected
 scenario down with it: the pass returns a diagnostic, and every property below is
-vacuous without saying so. Measured on 20 draws, 5 were lost this way.
+vacuous without saying so, which measurement confirmed was common rather than rare.
 
 `stripInternalDecls` removes the draw's own `funcDecl` and local `typeDecl`
 statements before injecting, which is what the three reachable triggers need
@@ -756,11 +797,12 @@ def onOutput (f : Program → Program → Bool) :
     returned a diagnostic — which is right (a rejection is scored by
     `checkLiftRejectsOnlyKnownTriggers`, not by the closedness properties) but
     means a draw the pass refuses makes them all vacuous in silence. That is not
-    hypothetical: before `normalizeAmbient` existed, 5 of 20 draws were lost that
-    way, and three properties read 6 of 20 for reasons that had nothing to do with
-    the pass. Scoring coverage as its own property turns that failure mode
-    from invisible into red. -/
+    hypothetical: before `normalizeAmbient` existed, draws were routinely lost that
+    way for reasons that had nothing to do with the pass. Scoring coverage as its own
+    property turns that failure mode from invisible into visible. -/
 def checkLiftInjectionFires (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (fun _ q r =>
     match r with
     | none => false
@@ -776,6 +818,8 @@ def checkLiftInjectionFires (p : Program) : Bool :=
     the closedness section note. `checkLiftStrataClosed` covers Strata's own
     weaker predicate separately. -/
 def checkLiftAllFuncsClosed (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (onOutput fun q out =>
     (liftedFuncs q out).all (fun f => (openVars f).isEmpty))).isEmpty
 
@@ -784,6 +828,8 @@ def checkLiftAllFuncsClosed (p : Program) : Bool :=
     `checkLiftAllFuncsClosed` (it ignores `axioms` and `measure`) but it is the
     predicate the rest of Strata consumes. -/
 def checkLiftStrataClosed (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (onOutput fun _ out => (programFuncs out).all strataClosed)).isEmpty
 
 /-- **P2 — no residual `funcDecl`.** Proved upstream as `run_noFuncDecl`, so this
@@ -792,12 +838,16 @@ def checkLiftStrataClosed (p : Program) : Bool :=
     (`Stmt.lean`), so a `funcDecl` that survived stripping would have its inner
     call sites silently left un-rewritten. -/
 def checkLiftNoResidualFuncDecl (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (onOutput fun _ out => !anyResidualFuncDecl out)).isEmpty
 
 /-- **P3 — idempotence.** A second run changes nothing and returns the same
     program. Follows from P2, so a violation means the traversal missed a nesting
     position. -/
 def checkLiftIdempotent (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (onOutput fun _ out =>
     match runLift out with
     | none => false
@@ -812,6 +862,8 @@ def checkLiftIdempotent (p : Program) : Bool :=
     injection — a generated program's own `funcDecl`s are all closed, but they are
     still lifted, so `p` must be filtered to the draws that have none. -/
 def checkLiftIdentityWithoutFuncDecl (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   if !(programFuncDecls p).isEmpty then true
   else match runLift p with
     | none => false
@@ -827,6 +879,8 @@ def checkLiftIdentityWithoutFuncDecl (p : Program) : Bool :=
     functions are scored — their names are freshened, so the match is unambiguous,
     whereas a generated `funcDecl` name could be a substring of another. -/
 def checkLiftParamsLead (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (fun _ q r =>
     match r with
     | none => true
@@ -856,13 +910,14 @@ def checkLiftParamsLead (p : Program) : Bool :=
     It seeds a *range* of prefixed names rather than just `{liftPrefix}_0`. The
     counter is shared across the whole program, so how many values are already
     consumed by the time the injected function is lifted depends on how many
-    `funcDecl`s the draw itself carries — with a single seeded name the property
-    was red on only 14 of 20 draws, which would make its green runs meaningless.
-    Seeding `_0` … `_5` makes it deterministic on any draw.
+    `funcDecl`s the draw itself carries; a single seeded name would make the outcome
+    depend on the draw. Seeding `_0` … `_5` makes it independent of it.
 
-    **This FAILS.** See the module doc: `StringGenState.gen` is a bare counter that
-    never reads a program name, so the output declares a seeded name twice. -/
+    `StringGenState.gen` is a bare counter that never reads a program name — see the
+    module doc. -/
 def checkLiftFreshSnapshotNames (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   let nm := mkNames p
   let collide := (List.range 6).map (fun i => declInt s!"{liftPrefix}_{i}" 7)
   let q := injectStmts
@@ -877,17 +932,23 @@ def checkLiftFreshSnapshotNames (p : Program) : Bool :=
     let snapshots := declared.filter (fun n => n.startsWith liftPrefix)
     nodup snapshots
 
-/-- **P7 — the output typechecks.** The sharp property, and the authoritative
-    oracle for scope correctness: Strata's own `Program.typeCheck` accepted the
+/-- **P7 — the output typechecks.** Strata's own `Program.typeCheck` accepted the
     input, so it must accept the output of a pass that claims to be
     model-preserving.
 
-    **This FAILS on all four escaping placements** (`.block`, `.ite`, `.elseArm`,
-    `.loop`). The pass hoists the function out of the nested scope but leaves the
-    snapshot `init` inside it, so a call site outside the construct names a
-    variable that is not in scope. See the module doc for the diagnostic and the
-    severity. -/
+    Guarded per scenario as well as per draw: `!progTypeChecks q` skips an *injected*
+    shape that is not itself well typed, which is the only way this property can be
+    stated at all — an ill-typed input carries no obligation on the output. Since
+    upstream scoped a block-local `funcDecl` to its block, a call placed after the
+    declaring block is no longer well typed, so the per-scenario guard is what
+    decides the escaping shapes rather than the typechecker.
+
+    `checkLiftSnapshotsInScope` states the same claim structurally and does not
+    depend on the scenario typechecking, so it is the one to read for the escaping
+    shapes. See the module doc. -/
 def checkLiftOutputTypechecks (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (fun _ q r =>
     !progTypeChecks q || match r with
       | none => true
@@ -898,9 +959,13 @@ def checkLiftOutputTypechecks (p : Program) : Bool :=
     localises the failure to "a snapshot escaped its scope" rather than reporting a
     generic type error, and it holds independently of whether the draw typechecks.
 
-    **This FAILS on the same four placements**, which is what confirms the two
-    properties are seeing one defect and not two. -/
+    Screened only on the draw, not per scenario: unlike `checkLiftOutputTypechecks`
+    this makes no reference to whether the *injected* shape typechecks, so it still
+    speaks about a shape upstream's block scoping made ill-typed. That is what makes
+    it the sharper of the pair on the escaping placements. -/
 def checkLiftSnapshotsInScope (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (onOutput fun _ out =>
     (programProcs out).all (fun nq => procSnapshotsInScope nq.2))).isEmpty
 
@@ -915,6 +980,8 @@ def checkLiftSnapshotsInScope (p : Program) : Bool :=
     it is where the loop bound `for _ in [0 : lfs.length]` would show up if it were
     too small. -/
 def checkLiftFixpointMatchesReference (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (fun _ q r =>
     match r with
     | none => true
@@ -939,6 +1006,8 @@ def checkLiftFixpointMatchesReference (p : Program) : Bool :=
     computed per function from the extended capture set, so an inherited capture
     has to bring its own type variables along. -/
 def checkLiftTypeArgsClosed (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   (scenarioFails p (onOutput fun q out =>
     (liftedFuncs q out).all fun f =>
       let tvs := (f.inputs.flatMap (fun iv => Lambda.LMonoTy.freeVars iv.2))
@@ -985,6 +1054,8 @@ def hasKnownRejectionTrigger (p : Program) : Bool :=
     "does it crash" into a biconditional, and it is the property that would find an
     *unintended* rejection. -/
 def checkLiftRejectsOnlyKnownTriggers (p : Program) : Bool :=
+  -- Every property here is about what the pass does to a *legal* program.
+  !progTypeChecks p ||
   -- Deliberately un-normalized (see the normalization note): the raw draw's own
   -- triggers are exactly what this property is about, and `applyScenario` would
   -- strip them. The injection is still added, so a capturing declaration is
@@ -1001,7 +1072,11 @@ A failing sweep says only *that* some shape broke. These name which one, for the
 Tyche panels and for anyone reading a counterexample. -/
 
 /-- The scenario labels on which the output fails to typecheck, with the
-    typechecker's own message for the first one. -/
+    typechecker's own message for the first one.
+
+    Mirrors `checkLiftOutputTypechecks`, including its `!progTypeChecks q` skip, so a
+    shape whose *injection* is ill-typed is absent from this list rather than named
+    by it. `liftScopeDiagnostic` applies no such skip. -/
 def liftTypecheckDiagnostic (p : Program) : String :=
   let bad := scenarioFails p (fun _ q r =>
     !progTypeChecks q || match r with
@@ -1052,9 +1127,10 @@ private def starBody : Scenario := ⟨"top/body/star", .top, .body, .star, false
 private def binderChain : Scenario := ⟨"top/chain/binder", .top, .body, .chain, false, true⟩
 
 -- The injection really is well typed on its own, so a failing property below is
--- about the pass and not about a malformed witness.
+-- about the pass and not about a malformed witness. `blockBody` is the exception
+-- and is pinned in the defect section below: since upstream scoped a block-local
+-- `funcDecl` to its block, a call after the block is no longer legal *input*.
 #guard progTypeChecks (soleScenario topBody)
-#guard progTypeChecks (soleScenario blockBody)
 #guard progTypeChecks (soleScenario chainBody)
 #guard progTypeChecks (soleScenario starBody)
 #guard progTypeChecks (soleScenario binderChain)
@@ -1101,12 +1177,23 @@ private def binderChain : Scenario := ⟨"top/chain/binder", .top, .body, .chain
 /-! ### The two defects, minimally -/
 
 -- **The snapshot escapes its declaring scope.** A `funcDecl` inside a labelled
--- block, called after the block: the input typechecks, the output does not.
-#guard progTypeChecks (soleScenario blockBody)
+-- block, called after the block: the pass hoists the function out of the block and
+-- leaves the snapshot `init` behind, so the rewritten call site names a variable
+-- that is not in scope there.
+--
+-- Upstream closed the *typechecker* half of this (`goBlock` no longer threads the
+-- block's `LContext` out, so a block-local `funcDecl` is scoped to its block like a
+-- block-local variable). The input shape is therefore no longer well typed, so
+-- `checkLiftOutputTypechecks` skips it on the `!progTypeChecks q` guard.
+#guard !progTypeChecks (soleScenario blockBody)
+#guard checkLiftOutputTypechecks emptyProg
+
+-- The pass itself is unchanged: fed the same shape directly, it still emits a
+-- program the typechecker rejects, and the snapshot is still out of scope. The
+-- structural property has no typechecking guard, so it still finds this.
 #guard match runLift (soleScenario blockBody) with
        | some (_, out) => !progTypeChecks out
        | none => false
-#guard !checkLiftOutputTypechecks emptyProg
 #guard !checkLiftSnapshotsInScope emptyProg
 
 -- The same shape with the call *inside* the block is fine, which isolates the

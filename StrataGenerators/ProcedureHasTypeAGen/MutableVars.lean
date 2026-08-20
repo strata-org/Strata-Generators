@@ -142,7 +142,7 @@ theorem genCmd_mutableVars
     show name ∈ Map.keys (ctx.writable immutableVars)
     rw [VarCtx.writable, Map.keys_eq_map_fst]
     exact List.mem_map.mpr ⟨(name, mty), hmem, rfl⟩
-  · -- assert (label sampled via `String.arbitrary`)
+  · -- assert (label sampled via `genIdentName`)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨_, _, _, _, rfl⟩ := hr
     exact ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv,
@@ -268,10 +268,10 @@ theorem initChain_definedVars (news : List (Identifier Unit × LMonoTy)) :
     (`getLhs_mkArgs = M.keys ++ T.keys`). -/
 theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
     (missing : List (Identifier Unit × LMonoTy))
-    (exprs : List Expression.Expr) :
+    (exprs : List Expression.Expr) (mask : List Bool) :
     Block.modifiedVars (P := Expression)
       (StrataGenerators.Stmt.initChain missing ++
-        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs) default])
+        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default])
       = M.keys ++ T.keys := by
   rw [block_modifiedVars_append, initChain_modifiedVars]
   simp only [List.nil_append, Block.modifiedVars, Stmt.modifiedVars, HasVarsImp.modifiedVars,
@@ -284,10 +284,10 @@ theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
     the group's output scope is `insertAllCtx ctx missing` rather than `ctx`. -/
 theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
     (missing : List (Identifier Unit × LMonoTy))
-    (exprs : List Expression.Expr) :
+    (exprs : List Expression.Expr) (mask : List Bool) :
     Block.definedVars (P := Expression)
       (StrataGenerators.Stmt.initChain missing ++
-        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs) default]) false
+        [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default]) false
       = missing.map Prod.fst := by
   rw [block_definedVars_append, initChain_definedVars]
   simp only [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, Command.definedVars,
@@ -357,6 +357,8 @@ theorem genCallStmt_mutableVars
       rw [hT] at hr
       simp only [mem_support_bind_iff] at hr
       obtain ⟨exprs, hexprs, hr⟩ := hr
+      -- Peel the argument-order mask; `getLhs_mkArgs` holds at every mask.
+      obtain ⟨mask, _, hr⟩ := hr
       -- A reused name (bound in `ctx`, hence `reusable` rather than `needsInit`) is
       -- a mutable key of `ctx` — that is exactly `reusable`'s writability bit.
       have hReuseWritable : ∀ q ∈ List.append Mσ T, ∀ τ,

@@ -452,7 +452,7 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
     · rename_i hcond
       obtain ⟨_, hNodup⟩ := hcond
       simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, rfl⟩ := hr
+      obtain ⟨_, _, _, _, rfl⟩ := hr
       -- Fuse the recipe's two init-lists into one filter over `Mσ ++ T`.
       rw [filter_needsInit_append]
       refine insertAllCtx_functional _ ctx hFun ?_ ?_
@@ -492,7 +492,9 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
     obtain ⟨σvals, hσvals, hr⟩ := hr
     split at hr
     · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, rfl⟩ := hr
+      -- The last two components are the argument-order mask and its membership
+      -- proof; the mask does not reach the output scope, so it is discarded.
+      obtain ⟨_, _, _, _, rfl⟩ := hr
       -- The sampled instantiation is well-kinded, hence so is the instantiated signature.
       have hσWK : ∀ t ∈ (s.typeArgs.zip σvals).map Prod.snd, C.WellKindedTy t := by
         intro t ht
@@ -570,6 +572,9 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       rw [hT] at hNodup hr
       simp only [mem_support_bind_iff] at hr
       obtain ⟨exprs, hexprs, hr⟩ := hr
+      -- Peel the argument-order mask sampling. The mask is typing-irrelevant: the
+      -- two projections `getIn_mkArgs` / `getLhs_mkArgs` hold at every mask.
+      obtain ⟨mask, _, hr⟩ := hr
       -- Callee signature facts from the correspondence.
       obtain ⟨proc, hfind, _htyargs, hInputs, hOutputs, hIdisjOut⟩ := hProcs s hs
       -- The drawn inputs are pointwise reachable, at the *instantiated* input types.
@@ -668,11 +673,20 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       -- instantiated ones the generator used. Rewrite them back to `substSig σ …`.
       rw [← hMσ] at hNodup hReuse ⊢
       rw [← hOσ] at hTVals
-      exact call_mixed_body_sound σ s.M s.I s.O T exprs hfind hInputs hOutputs
+      exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hfind hInputs hOutputs
         hExLen hTVals hExTy hIdisjOut hNodup hReuse hwk
     · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
 -- ── Procedure-call completeness (forward membership) ──────────────────────
+
+/-- **Every argument-order mask is reachable.** `genCallStmt` draws the mask from
+    `listOf` over both Boolean values, whose support holds every finite `List Bool`.
+    So the mask puts no restriction on which interleaving a call site can use. -/
+theorem mem_support_argMask (mask : List Bool) :
+    mask ∈ SetGen.support
+      (listOf (elements [true, false] (by simp)) : SetGen.Set (List Bool)) :=
+  SetGen.mem_support_listOf_of_forall (fun b _ =>
+    (mem_support_elements_iff (by simp)).mpr (by cases b <;> simp))
 
 /-- **Forward membership for `genCallStmt` (Part 2 of call completeness).** Given a
     callee `s` in the procedure context, whose in-out block is usable and whose
@@ -689,7 +703,11 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     the emitted group/output scope are stated over the instantiated blocks
     `substSig σ s.M` / `substSig σ s.O`, with `T := outTargets immutableVars ctx (substSig σ s.O)`.
     A monomorphic callee (`s.typeArgs = []`) forces `σvals = []`, `σ = []`, and
-    `substSig [] = id`, recovering the previous statement. -/
+    `substSig [] = id`, recovering the previous statement.
+
+    `mask` is the argument-order mask the generator samples (see `mkArgs`). Every
+    `List Bool` is reachable, so the caller may pick any interleaving of the
+    by-value inputs and the out targets. -/
 theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat)
     (s : ProcSig) (hs : s ∈ procs)
@@ -700,7 +718,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
           elements (generableTypesFromCtx ctx.values [] octx)
             (by apply List.ne_nil_of_length_pos; assumption)
         else pure (.bool : LMonoTy)) : SetGen.Set (List LMonoTy)))
-    (exprs : List Expression.Expr)
+    (exprs : List Expression.Expr) (mask : List Bool)
     (hMusable : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all
       (usableName immutableVars ctx) = true)
     (hNodup : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
@@ -715,7 +733,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
         ++ [Statement.call s.pname
               (StrataGenerators.Stmt.mkArgs s.M
                 (outTargets immutableVars ctx
-                  (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)) exprs) default],
+                  (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)) exprs mask) default],
       C, StrataGenerators.Stmt.insertAllCtx ctx
         ((StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
           ++ (outTargets immutableVars ctx
@@ -733,7 +751,8 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     -- Take the guard-true branch (`hMusable` and `hNodup` are exactly its condition).
     rw [if_pos ⟨hMusable, hNodup⟩]
     simp only [mem_support_bind_iff, mem_support_pure_iff]
-    exact ⟨exprs, (mem_support_mapM_iff _ _ exprs).mpr hexprs, rfl⟩
+    exact ⟨exprs, (mem_support_mapM_iff _ _ exprs).mpr hexprs, mask,
+      mem_support_argMask mask, rfl⟩
 
 -- ── Guard / measure / invariant soundness helpers ────────────────────────
 

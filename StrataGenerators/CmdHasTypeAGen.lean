@@ -595,20 +595,20 @@ theorem indexedFreshName_not_keyword (base i : Nat) :
   · rw [indexedFreshName_length]; omega
 
 /-- **Keyword-freedom of `genFreshName`.** Every name in the support of
-    `genFreshName ctx` is a non-keyword: both exit paths (the dodged random
-    candidate and the dodged fallback) pass through `dodgeKeyword`, which never
-    returns a reserved Core keyword. So the variable names `genInitDet` /
-    `genInitNondet` bind in `init` commands are never reserved words the Core
-    parser would reject in identifier position. -/
+    `genFreshName ctx` is a non-keyword. The random candidate comes from
+    `genIdentName`, whose support holds no keyword. The fallback passes through
+    `dodgeKeyword`, which never returns a keyword. So the variable names
+    `genInitDet` / `genInitNondet` bind in `init` commands are never reserved
+    words the Core parser would reject in identifier position. -/
 theorem genFreshName_not_keyword (ctx : VarCtx) :
     ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
       isReservedKeyword name = false := by
   intro name hmem
   simp only [genFreshName, mem_support_bind_iff] at hmem
-  obtain ⟨s, _, hname⟩ := hmem
+  obtain ⟨s, hs, hname⟩ := hmem
   simp only [mem_support_ite_iff, mem_support_pure_iff] at hname
   rcases hname with ⟨_, rfl⟩ | ⟨_, rfl⟩
-  · exact StrataGenerators.Function.dodgeKeyword_not_keyword s
+  · exact StrataGenerators.Function.genIdentName_not_keyword _ hs
   · exact StrataGenerators.Function.dodgeKeyword_not_keyword _
 
 /-- The `WellKindedTy` premise of the two `init` rules, discharged for any type the
@@ -694,7 +694,7 @@ theorem genCmd_sound
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     exact ⟨Γ, CmdHasType'.set_nondet Γ name mty default Γ hfind (tctxEquivRefl Γ)⟩
-  · -- assert (label sampled via `String.arbitrary`, typing-irrelevant)
+  · -- assert (label sampled via `genIdentName`, typing-irrelevant)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
     have hwt := hExprSound .bool e he
@@ -732,9 +732,21 @@ def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     - `hTyReach`: the type of any init target is in `genLMonoTy`'s support
     - `hVarInCtx`: the target of any set command exists in `ctx`
 
-    The generator fixes labels to `""` and metadata to `default`; the
+    The generator fixes labels to `"l"` and metadata to `default`; the
     conclusion states that the generator produces a command with the same
-    *expression* and *variable* content (but possibly different label/metadata). -/
+    *expression* and *variable* content (but possibly different label/metadata).
+    Any label in `genIdentName`'s support would do here.
+
+    **This theorem is vacuous**, and knowingly left so for now.
+    `hExprComplete : GenLExprComplete …` is unsatisfiable:
+    `SpecComplete.Gaps.not_GenLExprComplete` proves it false at *every* depth, because
+    an annotated free variable is well-typed against the empty context yet is
+    unreachable when the scope is empty. `spec_complete` no longer takes a hypothesis
+    of this shape — it uses the scope- and size-threaded `SpecComplete.ExprOk`, which
+    claims reachability one expression at a time. Repairing this theorem is the same
+    move: replace `hExprComplete` with a per-command condition, as
+    `SpecComplete.CmdExprOk` does. Note `spec_complete` does **not** route through
+    here; it inverts the `CmdHasTypeA` derivation itself. -/
 theorem genCmd_complete
     (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
@@ -796,38 +808,38 @@ theorem genCmd_complete
     exact ⟨_, hinSupport, CmdHasType'.set_nondet _ x mty default _ hfind hequiv⟩
   | assert l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
-    -- The empty label is alphanumeric-vacuously, so `"" ∈ support String.arbitrary`.
-    have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
-      simp only [String.arbitrary, mem_support_map_iff]
-      exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
-    have hinSupport : (⟨.assert "" e default, ctx⟩ : GenCmdResult) ∈
+    -- `"l"` is a legal non-keyword identifier, so it is in `genIdentName`'s support.
+    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+      StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
+        (by decide +kernel) (by decide +kernel)
+    have hinSupport : (⟨.assert "l" e default, ctx⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
-        exact ⟨"", hemptyL, e, he, rfl⟩))))))
-    exact ⟨_, hinSupport, CmdHasType'.assert _ "" e default _ hexpr hequiv⟩
+        exact ⟨"l", hlblL, e, he, rfl⟩))))))
+    exact ⟨_, hinSupport, CmdHasType'.assert _ "l" e default _ hexpr hequiv⟩
   | assume l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
-    have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
-      simp only [String.arbitrary, mem_support_map_iff]
-      exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
-    have hinSupport : (⟨.assume "" e default, ctx⟩ : GenCmdResult) ∈
+    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+      StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
+        (by decide +kernel) (by decide +kernel)
+    have hinSupport : (⟨.assume "l" e default, ctx⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
-        exact ⟨"", hemptyL, e, he, rfl⟩)))))))
-    exact ⟨_, hinSupport, CmdHasType'.assume _ "" e default _ hexpr hequiv⟩
+        exact ⟨"l", hlblL, e, he, rfl⟩)))))))
+    exact ⟨_, hinSupport, CmdHasType'.assume _ "l" e default _ hexpr hequiv⟩
   | cover l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
-    have hemptyL : "" ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := by
-      simp only [String.arbitrary, mem_support_map_iff]
-      exact ⟨[], by rw [SetGen.support, listOf]; simp [pick_mem_iff], rfl⟩
-    have hinSupport : (⟨.cover "" e default, ctx⟩ : GenCmdResult) ∈
+    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+      StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
+        (by decide +kernel) (by decide +kernel)
+    have hinSupport : (⟨.cover "l" e default, ctx⟩ : GenCmdResult) ∈
         SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
         simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
-        exact ⟨"", hemptyL, e, he, rfl⟩)))))))
-    exact ⟨_, hinSupport, CmdHasType'.cover _ "" e default _ hexpr hequiv⟩
+        exact ⟨"l", hlblL, e, he, rfl⟩)))))))
+    exact ⟨_, hinSupport, CmdHasType'.cover _ "l" e default _ hexpr hequiv⟩
 
 -- ── Chained typing for command sequences ────────────────────────────
 
@@ -926,7 +938,7 @@ theorem genCmd_sound_env
     have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
     have hfind := (env.corr ctx).1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     exact CmdHasType'.set_nondet _ name mty default _ hfind (tctxEquivRefl _)
-  · -- assert (label sampled via `String.arbitrary`, typing-irrelevant)
+  · -- assert (label sampled via `genIdentName`, typing-irrelevant)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _hl, e, he, rfl⟩ := hr
     exact CmdHasType'.assert _ l e default _ (env.exprSound ctx .bool e he) (tctxEquivRefl _)
