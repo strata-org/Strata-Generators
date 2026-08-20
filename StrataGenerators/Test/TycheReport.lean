@@ -85,7 +85,7 @@ def writePanel (handle : IO.FS.Handle) (d : TestDecl) (cfg : RunConfig)
   if let some write := d.panel then
     return ← write handle cfg numSamples runStart
   match d.body with
-  | .sampled runner check dec _ =>
+  | .sampled runner check dec _ _ =>
     Tyche.runInto handle
       (sampleMark runner (fun x => @decide (check x) (dec x)) d.name cfg.maxSize)
       d.name numSamples runStart

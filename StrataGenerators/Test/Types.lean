@@ -115,6 +115,22 @@ class TunableGen (α : Type) where
 def TunableGen.arity (α : Type) [TunableGen α] : Nat :=
   (TunableGen.sites α).foldl (fun n s => n + s.arity) 0
 
+/-- `TunableGen.genWith` as *data*, present for every type: `some` when the type has a
+    `TunableGen` instance and `none` when it does not.
+
+    This is the `TycheFeatures` pattern — a class with a low-priority catch-all — and it is here for
+    the same reason: `TestDecl.property` has to record the retuning *at the site where `α` is still
+    known*, because `Body.sampled` then packs `α` away existentially and nothing downstream can
+    recover it. `@[strata_property (tuning := θ)]` applies whatever was recorded; a type with no
+    `TunableGen` instance records `none`, and asking to tune it fails loudly (see
+    `TestDecl.withTuning`) rather than silently doing nothing. -/
+class MaybeTunable (α : Type) where
+  retune? : Option (Tuning → Gen α)
+
+instance (priority := low) : MaybeTunable α := ⟨none⟩
+
+instance [TunableGen α] : MaybeTunable α := ⟨some TunableGen.genWith⟩
+
 /-- The generator, the printer and the shrinker for one input type, as data — the
     components a run needs for every input other than the check itself.
 
@@ -174,9 +190,15 @@ inductive Body where
         legible. Rebuilding `Testable` from `dec` further down would fall back to the
         catch-all and report `issue: ⋯ does not hold`.
       * `dec` is what the Tyche panel and the shrinker need, since both must *decide*
-        each candidate rather than merely test it. -/
+        each candidate rather than merely test it.
+
+      `retune?` is a third passenger of the same kind: how to rebuild `runner.gen` from a
+      `Tuning`, when the input type has a `TunableGen` instance. It has to be captured here
+      too, because this is the last place `α` is known — `@[strata_property (tuning := θ)]`
+      applies it afterwards, when `α` is gone. See `MaybeTunable`. -/
   | sampled {α : Type} (runner : PropertyRunner α) (check : α → Prop)
       (dec : DecidablePred check) (inst : ∀ x, Testable (check x))
+      (retune? : Option (Tuning → Gen α))
   /-- One constructed witness: the verdict is a closed `Bool`, with no sampling.
       For a claim whose sharpest statement is a single program or operator —
       a pipeline phase's no-op, a specific bitvector width — where sampling would
@@ -262,10 +284,11 @@ structure Diagnostic where
     `TestDecl.forAll` is the same thing with the runner named explicitly, for the rare
     property that wants something other than its type's default. -/
 def TestDecl.property (name : String)
-    [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
+    [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α] [MaybeTunable α]
     (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
     (gate : Option String := none) : TestDecl :=
-  { name, gate, body := .sampled (PropertyRunner.ofInstances α) check dec inst }
+  { name, gate,
+    body := .sampled (PropertyRunner.ofInstances α) check dec inst MaybeTunable.retune? }
 
 /-- A property over an explicitly named `PropertyRunner`, for the case where the type's
     default instances are not what you want — a narrowed draw, a diagnostic renderer,
@@ -274,62 +297,78 @@ def TestDecl.property (name : String)
 def TestDecl.forAll (name : String) (runner : PropertyRunner α) (check : α → Prop)
     [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
     (gate : Option String := none) : TestDecl :=
-  { name, gate, body := .sampled runner check dec inst }
+  -- No retuning: this property's generator was given explicitly, so there is nothing for a
+  -- `Tuning` to act on. `@[strata_property (tuning := …)]` on one of these says so.
+  { name, gate, body := .sampled runner check dec inst none }
 
-/-- **A property over a tuned generator.** `TestDecl.property`, except that the input's generator
-    reads its branch weights from `θ` instead of taking the source's — so the *distribution* a
-    property is checked over is stated where the property is, next to its name and its check:
+/-- **Retune a property's generator.** Replaces the generator of a sampled property with the same
+    generator reading its branch weights from `θ`, and records `label` on the property's Tyche
+    breakdown so panels of the same claim under different weightings stay distinguishable.
 
-    ```lean
-    .tuned "stmt: LoopElim eliminates all loops" stmtLoopHeavy
-      fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
-    ```
+    This is what `@[strata_property (tuning := θ)]` applies. Two shapes of property have nothing to
+    retune, and both fail loudly rather than quietly ignoring `θ`: one whose input type has no
+    `TunableGen` instance, and one stated with `TestDecl.forAll`, whose generator was given
+    explicitly. The failure is a property that reports the reason, so it shows up as a red line
+    naming the mistake instead of a silently untuned run. -/
+def TestDecl.withTuning (θ : Tuning) (label : String) (d : TestDecl) : TestDecl :=
+  match d.body with
+  | .sampled runner check dec inst (some retune) =>
+    let runner' : PropertyRunner _ :=
+      { runner with
+        gen := retune θ
+        features := fun x => runner.features x ++ [("tuning", .nominal label)] }
+    { d with body := .sampled runner' check dec inst (some retune) }
+  | .sampled _ _ _ _ none =>
+    tuningUnavailable d
+      "its input type has no `TunableGen` instance, or the property was stated with \
+       `TestDecl.forAll`, whose generator is given explicitly — either way a tuning has nothing \
+       to act on"
+  | _ => tuningUnavailable d "it does not sample a generated input"
+where
+  /-- A property that fails with an explanation, so a tuning that cannot be applied is a red line
+      naming the mistake rather than a silently untuned run. -/
+  tuningUnavailable (d : TestDecl) (why : String) : TestDecl :=
+    let res : ActionResult :=
+      { passed := false, samples := 0, total := 0,
+        message := some s!"a tuning was requested for this property, but {why}" }
+    { d with tyche := false, panel := none, body := .action fun _ => pure res }
 
-    Use it when a property is vacuous or near-vacuous under the default weights: `LoopElim`'s two
-    properties are the identity on a loop-free program, and `dist-report` measures a loop in 28% of
-    default statement lists against 76% under `stmtLoopHeavy`. Prefer `TestDecl.underTunings` when the
-    default distribution is worth keeping *as well* — which it usually is.
+/-- Rename a property. Used to suffix a weighting's label, so each row of a matrix has its own
+    (unique) name. -/
+def TestDecl.rename (name : String) (d : TestDecl) : TestDecl := { d with name }
 
-    `θ` must address the input type's generator; `label` names it in the property's Tyche breakdown.
-    `TestDecl.property` remains the way to state a property that is happy with the source's
-    weights. -/
-def TestDecl.tuned (name : String) (θ : Tuning)
-    [TunableGen α] [Repr α] [Shrinkable α] [TycheFeatures α]
-    (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
-    (label : String := "tuned") (gate : Option String := none) : TestDecl :=
-  { name, gate
-    body := .sampled
-      { gen := TunableGen.genWith θ
-        render := fun x => toString (repr x)
-        shrink := Shrinkable.shrink
-        features := fun x => TycheFeatures.features x ++ [("tuning", .nominal label)] }
-      check dec inst }
+/-- **One claim, several distributions.** The same property once per labelled weighting, each named
+    `"⟨name⟩ [⟨label⟩]"` so each gets its own verdict, its own reported line and its own Tyche panel.
 
-/-- **One claim, several distributions.** Registers the same check once per labelled tuning, each as
-    its own property named `"⟨name⟩ [⟨label⟩]"`, so each gets its own verdict, its own reported line
-    and its own Tyche panel.
-
-    This is the form to reach for, because the interesting question about a tuning is rarely "does the
-    property hold under it" on its own but "does it hold under this one *and* the default". A row that
-    passes at the defaults and fails loop-heavy is a distribution-sensitive defect, and it is visible
-    here rather than only to someone who runs `dist-report` by hand.
-
-    ```lean
-    @[strata_properties]
-    def loopElim : List TestDecl :=
-      TestDecl.underTunings "stmt: LoopElim preserves typeability"
-        [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)]
-        fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
-    ```
+    This is what `@[strata_property (tunings := …)]` applies, and it is usually what you want over a
+    single tuning: the interesting question is rarely "does the property hold under this weighting"
+    but "does it hold under this one *and* the default". A row that passes at the defaults and fails
+    loop-heavy is a distribution-sensitive defect, and it gates CI here rather than living in a report.
 
     Pass a generator's own `.defaults` for the untuned row: `genWith defaults` is the type's
-    `Arbitrary` instance, so that row is exactly the property `TestDecl.property` would register. -/
+    `Arbitrary` instance, so that row is exactly the property as written. -/
+def TestDecl.underTuningsOf (tunings : List (String × Tuning)) (d : TestDecl) : List TestDecl :=
+  tunings.map fun (label, θ) => (d.withTuning θ label).rename s!"{d.name} [{label}]"
+
+/-- **A property over a tuned generator**, stated as a term rather than through the attribute:
+    `TestDecl.property` with the input's branch weights read from `θ`.
+
+    Prefer `@[strata_property (tuning := θ)]`, which says the same thing without repeating the
+    property's shape. This exists for a property built programmatically, where an attribute has no
+    declaration to attach to. -/
+def TestDecl.tuned (name : String) (θ : Tuning)
+    [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α] [MaybeTunable α]
+    (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
+    (label : String := "tuned") (gate : Option String := none) : TestDecl :=
+  (TestDecl.property name check gate).withTuning θ label
+
+/-- `TestDecl.underTuningsOf` over a property stated here rather than tagged. Prefer
+    `@[strata_property (tunings := …)]`. -/
 def TestDecl.underTunings (name : String) (tunings : List (String × Tuning))
-    [TunableGen α] [Repr α] [Shrinkable α] [TycheFeatures α]
+    [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α] [MaybeTunable α]
     (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
     (gate : Option String := none) : List TestDecl :=
-  tunings.map fun (label, θ) =>
-    TestDecl.tuned s!"{name} [{label}]" θ check label gate
+  TestDecl.underTuningsOf tunings (TestDecl.property name check gate)
 
 /-- A closed-`Bool` property with no generated input. -/
 def TestDecl.witness (name : String) (verdict : Bool)
@@ -437,7 +476,7 @@ def TestDecl.run (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
   match d.body with
-  | .sampled runner check _ inst =>
+  | .sampled runner check _ inst _ =>
     @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
       check inst cfg.toConfiguration
   | .witness verdict => pure { passed := verdict }

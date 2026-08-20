@@ -165,22 +165,25 @@ that steers into failure-prone shapes buys coverage with generation time:
 lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]
 ```
 
-To compare a *property's* verdict across weightings, register it under both with
-`TestDecl.underTunings` — one property per weighting, each with its own verdict, its own line in the
-report and its own Tyche panel — rather than running a report nobody reads. `StrataTests/Stmt.lean`
-does this for the two `LoopElim` properties, and
-[`docs/writing-properties.md`](./docs/writing-properties.md#choosing-the-distribution) is the guide.
+A property names the distribution it is checked over in its registration attribute, so choosing a
+weighting is a one-line change where the property is declared — and checking a claim under *two*
+weightings registers two properties, each with its own verdict, line in the report and Tyche panel:
 
 ```lean
-@[strata_properties]
-def loopElimPreservesTyping : List TestDecl :=
-  TestDecl.underTunings "stmt: LoopElim preserves typeability"
-    [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)]
+@[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
+def loopElimPreservesTyping : TestDecl :=
+  .property "stmt: LoopElim preserves typeability"
     fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
 ```
 
-Only some input types can be tuned (`GenStmts`, `GenProcs`, `GenCmdsWithCtx`, `TypedExpr`); a type
-without a `TunableGen` instance rejects `.tuned` at compile time rather than ignoring it.
+`(tuning := θ)` is the single-weighting form, and `θ` is an ordinary term, so
+`(tuning := withWeights stmtDefault [(StmtIdx.loop, 30)])` works for a one-off.
+`StrataTests/Stmt.lean` uses this for both `LoopElim` properties, and
+[`docs/writing-properties.md`](./docs/writing-properties.md#choosing-the-distribution) is the guide.
+
+Only some input types can be tuned (`GenStmts`, `GenProcs`, `GenCmdsWithCtx`, `TypedExpr`); tuning a
+type without a `TunableGen` instance is an error at the declaration, naming the type, rather than a
+tuning that is silently ignored.
 
 ## Adding a new property
 

@@ -16,10 +16,11 @@ the identity on a loop-free program — where they degenerate into
 `stmt: typechecker accepts generated statements`, which is already tested. `dist-report`
 measures a loop in 28% of statement lists at the source weights and 76% under
 `stmtLoopHeavy`, with a loop inside a loop — where a loop-elimination pass is likeliest
-to be wrong — going 3% to 24%. So those two are registered under both weightings, via
-`TestDecl.underTunings`; each row is its own verdict and its own Tyche panel, and the
-`[default]` row is exactly what `TestDecl.property` would have registered (pinned by
-`rfl` in `StrataGenerators.Test.Generators`).
+to be wrong — going 3% to 24%. So those two are registered under both weightings, by naming them
+in the registration attribute: `@[strata_property (tunings := …)]`. Each row is its own
+verdict and its own Tyche panel, and the `[default]` row is exactly the property as
+written, since `genWith defaults` is the type's `Arbitrary` instance (pinned by `rfl` in
+`StrataGenerators.Test.Generators`).
 -/
 
 open Lambda Core Imperative
@@ -43,10 +44,9 @@ def stmtTransforms : List TestDecl :=
 
 /-- `LoopElim` preserves typeability — checked at the source weights *and* at weights
     that make a loop the modal statement, since the claim has no content without one. -/
-@[strata_properties]
-def loopElimPreservesTyping : List TestDecl :=
-  TestDecl.underTunings "stmt: LoopElim preserves typeability"
-    [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)]
+@[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
+def loopElimPreservesTyping : TestDecl :=
+  .property "stmt: LoopElim preserves typeability"
     fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
 
 /-- `LoopElim` eliminates every loop. Vacuously true on a loop-free program, so the
@@ -62,10 +62,9 @@ def loopElimPreservesTyping : List TestDecl :=
     `stmtLoopHeavy`, which is why the loop-heavy row fails faster rather than differently.
     The claim as stated is really "…unless the pass throws"; the fix is upstream (or in the
     property), and this pins it either way. -/
-@[strata_properties]
-def loopElimZeroLoops : List TestDecl :=
-  TestDecl.underTunings "stmt: LoopElim eliminates all loops"
-    [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)]
+@[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
+def loopElimZeroLoops : TestDecl :=
+  .property "stmt: LoopElim eliminates all loops"
     fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
 
 /-- `StmtToKleeneStmt` is defined exactly when the block has no
