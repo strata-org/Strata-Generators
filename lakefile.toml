@@ -1,6 +1,6 @@
 name = "strata-generators"
 version = "0.1.0"
-defaultTargets = ["StrataGenerators"]
+defaultTargets = ["StrataGenerators", "StrataTests"]
 testDriver = "test"
 
 [[require]]
@@ -24,15 +24,33 @@ rev = "aa07f8c"
 name = "StrataGenerators"
 globs = ["StrataGenerators.*"]
 
+# The property files. Globbed, so a new file under `StrataTests/` is compiled without
+# a configuration change. A default target, so a plain `lake build` — which is all CI
+# runs, since the suite reports known counterexamples and would fail it — still
+# compiles every property. `StrataTests.lean` is the import root the drivers read;
+# regenerate it with `lake exe write-test-imports`.
+[[lean_lib]]
+name = "StrataTests"
+globs = ["StrataTests.*"]
+
 [[lean_exe]]
 name = "strata-generators"
 root = "Main"
 
+# The `lake test` driver: the registry rendered by LSpec.
 [[lean_exe]]
 name = "test"
-root = "TestMain"
+root = "LSpecTestRunner"
 
-# Alternate test driver without LSpec dependency
+# The same registry rendered by the package's own reporter, with no test-framework
+# dependency. Kept so that the LSpec dependency stays droppable, and so that a
+# discrepancy between the two renderings is visible rather than assumed away.
 [[lean_exe]]
 name = "test-plain"
-root = "PlainTestMain"
+root = "PlainTestRunner"
+
+# Rewrites `StrataTests.lean` from the contents of `StrataTests/`. Needed only when a
+# file is added or removed there.
+[[lean_exe]]
+name = "write-test-imports"
+root = "WriteTestImports"

@@ -1,4 +1,14 @@
-import StrataGenerators.Properties
+-- The check predicates the registered properties score with. These used to arrive
+-- via `StrataGenerators.Properties`, the module that paired each name with its
+-- check; that pairing now lives with the property itself, in `StrataTests/`.
+import StrataGenerators.PhaseChangedFlag
+import StrataGenerators.PrinterCoverage
+import StrataGenerators.ProcedureHasTypeAGen.TestSupport
+import StrataGenerators.ProgramGen.UnprovenTransforms
+import StrataGenerators.ProgramGen.LiftFuncDecls
+import StrataGenerators.AdtLaws
+import StrataGenerators.AliasResolution
+import StrataGenerators.MutualBlockShape
 import StrataGenerators.RetryGen
 import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.HasTypeAGen.SmtEval
@@ -30,21 +40,24 @@ import StrataDDM.Elab
 import StrataDDM.BuiltinDialects.Init
 
 /-!
-# Shared test scaffold (harness-independent)
+# The generator wrappers
 
-Everything the property-based test suite needs that does **not** depend on the
-test-runner library (LSpec) lives here: the generator wrapper structures and
-their `Repr`/`Shrinkable`/`Arbitrary` instances, the `prop_*` property
-definitions, the IO-based checks/diagnostics (`roundtripFunctionAction`,
-`specialCharProbeDiagnostic`, `printResolveErrors`), and the CLI parser
-(`CliConfig`/`parseArgs`).
+One wrapper structure per shape the suite generates, with its
+`Repr`/`Shrinkable`/`Arbitrary` instances, plus the `IO`-driven checks and
+diagnostics that sample and print for themselves (`roundtripFunctionAction`,
+`specialCharProbeDiagnostic`, `printResolveErrors`, `printerErrorDiagnostic`,
+`programShrinkDiagnostic`, the two coverage reports).
 
-This module is the **single source of truth** imported by *both* test
-executables — the LSpec-based `TestMain` (the reference "nice harness") and the
-Plausible-only `PlainTestMain` (which de-risks dropping the LSpec dependency). By
-sharing the properties, generators, and CLI here, the two drivers cannot drift:
-they exercise the same checks over the same generated inputs and only differ in
-how results are formatted and aggregated into an exit code.
+This is the **single source of truth for how each shape is drawn, shrunk and
+printed**. Each wrapper's `Arbitrary`/`Repr`/`Shrinkable` instances are what
+`TestDecl.property` resolves, and `StrataGenerators.Test.Generators` adds the
+`TycheFeatures` instance and reifies the four as a `PropertyRunner` for the rare
+property that wants to deviate from them.
+
+Properties themselves are **not** here. Each one is a `@[strata_property]`
+declaration under `StrataTests/`, pairing its name with its check in one place;
+see `StrataGenerators.Test` and `docs/writing-properties.md`. What is left in this
+module is generation.
 -/
 
 open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible Core Imperative
@@ -158,29 +171,6 @@ instance : ToFormat Unit where
 -- (e.g. `DecidableEq` for `=`). Without this, Plausible's `decidableTestable`
 -- instance sees an opaque `Prop` and fails to synthesize `Testable`.
 
--- Soundness of the generator: every generated expression typechecks
--- to the type it was generated for. (Works for both open and closed terms
--- since HasTypeA trusts fvar annotations.)
-@[reducible] def prop_typecheck (te : TypedExpr) : Prop :=
-  LExpr.typeCheck (T := LExprParams') [] te.expr = some te.ty
-
--- Preservation (closed terms only): if ∅ ⊢ e : τ and e →* e', then ∅ ⊢ e' : τ.
-@[reducible] def prop_preservation (te : ClosedTypedExpr) : Prop :=
-  checkPreservation te.expr te.ty = true
-
--- Progress (closed terms only): a well-typed closed term is either a value
--- or can take a step.
--- Falsified by quantifiers (`∀`/`∃`) — `LExpr.eval` has no reduction rule
--- for them, so `if (∀x. e) then ...` gets stuck.
-@[reducible] def prop_progress (te : ClosedTypedExpr) : Prop :=
-  checkProgress te.expr = true
-
--- Fvar preservation: evaluation does not introduce *new* free variables.
--- Free variables from the context (x, f, n) may appear in both the input
--- and output, but eval should not create fvars that weren't already present.
-@[reducible] def prop_closedness_preservation (te : TypedExpr) : Prop :=
-  checkFvarsPreserved te.expr = true
-
 -- ── Resolve after erasure ────────────────────────────────────────────
 
 /-- A closed expression generated over `coreOpCtx`, the operators of
@@ -208,27 +198,6 @@ private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
 
 instance : Arbitrary ResolveTypedExpr where
   arbitrary := retryGen 500 genResolveTypedExpr
-
-/-- After erasing *all* type annotations, `resolve` infers a principal type that
-    may be more general than the type the expression was generated at (e.g. a
-    fully-erased `λx. x` resolves to `?a -> ?a`, of which `int -> int` is an
-    instance). So we check that the original type is a substitution instance of
-    the inferred type rather than syntactically equal to it.
-
-    `resolve` can legitimately *fail* on a fully-erased quantifier whose body
-    type is exactly the bound variable (e.g. `∃x. x`): with the binder
-    annotation gone it assigns the bound variable a fresh type variable `?a`,
-    infers the body's type as `?a`, and then rejects the quantifier because its
-    rule checks the body type is literally `bool` rather than unifying it with
-    `bool`. This is an incompleteness of `resolve` on erased quantifiers, not a
-    soundness violation, so we treat resolve-failure as a (vacuous) pass and
-    only assert the instance relation when `resolve` succeeds.
-
-    The decision procedure (`checkResolveAfterErase`) and its helpers
-    (`eraseAllTypes` / `isInstanceOf` / `resolveLContext`) are shared with the
-    Tyche harness — see `StrataGenerators.HasTypeAGen.TestSupport`. -/
-@[reducible] def prop_resolve_after_erase (te : ResolveTypedExpr) : Prop :=
-  checkResolveAfterErase te.expr te.ty = true
 
 /-- Run `resolve` on the fully-erased term and report the outcome as a string:
     `none` if the property holds (resolve succeeded and inferred a general-enough
@@ -307,22 +276,10 @@ instance : Arbitrary GenCmdsWithCtx where
 
 -- ── Command-level properties ─────────────────────────────────────────
 
--- The four single-verdict command properties — init-fresh, expr-typechecks,
--- set-preserves-var, store-type-preservation — are defined by the shared
--- `Properties.cmdSingleVerdict` bundle (see `StrataGenerators.Properties`),
--- which pairs each name with its check in one place, so they are folded directly
--- into `cmdSuite` below rather than restated as `prop_*` wrappers here.
-
--- For a generated command sequence, the output context equals the input
--- context prepended with the newly defined variables (in reverse order,
--- since `init` conses onto the front).
-@[reducible] def prop_cmds_context_growth (gc : GenCmdsWithCtx) : Prop :=
-  checkContextGrowth gc.inCtx gc.outCtx gc.cmds = true
-
--- Symbolic/concrete agreement: whenever concrete execution (`Cmd.run`) succeeds,
--- symbolic simulation (`Cmd.eval`) also succeeds with the same store.
-@[reducible] def prop_cmd_eval_run_agreement (gc : GenCmdWithCtx) : Prop :=
-  checkEvalRunAgreement gc.cmd gc.inCtx = true
+-- The command properties — init-fresh, expr-typechecks, set-preserves-var,
+-- store-type-preservation, context growth, symbolic/concrete agreement — are
+-- registered in `StrataTests/Cmd.lean`, each pairing its name with its check in one
+-- place. Their check predicates live in `CmdHasTypeAGen.TestSupport`.
 
 -- ── Function generation via Plausible.Gen ────────────────────────────
 
@@ -358,14 +315,6 @@ instance : Arbitrary GenFunction where
 
 -- ── Function-level properties ────────────────────────────────────────
 
--- `fvars_annotated_by`: every free variable in the generated function's body
--- and measure is annotated consistently with the type map derived from the
--- fvar context it was generated against. This holds because `pickFVar` always
--- emits `fvar` nodes annotated with `some τ`, where `τ` is exactly the type the
--- variable carries in the fvar context.
-@[reducible] def prop_function_fvars_annotated (gf : GenFunction) : Prop :=
-  functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func = true
-
 -- ── Closed function generator (for typeCheck + round-trip + preservation) ──
 
 /-- A `Function` generated with an *empty* fvar context. Bodies are closed (no
@@ -385,7 +334,8 @@ instance : Repr ClosedGenFunction where
 -- Same structural function shrinker as `GenFunction`. `funcWellFormed` admits a
 -- measure-without-body function (body absent ⇒ vacuously body-typed), so the
 -- shrinker *preserves* that shape — the very counterexample the completeness
--- properties (`prop_function_typeCheck_complete` / `prop_function_rejection_only_measure`)
+-- properties (`function: typeCheck accepts generated functions` /
+-- `function: typeCheck rejections are only measure-without-body`)
 -- hunt for — and can even reach it by dropping a body while keeping the measure,
 -- yielding a minimal witness rather than discarding it.
 instance : Shrinkable ClosedGenFunction where
@@ -410,9 +360,6 @@ instance : Arbitrary ClosedGenFunction where
 -- The decision procedure (`checkTypeCheckAnnotatedSound`, which reflects
 -- `FuncHasTypeA` via `checkFuncHasTypeA` using `funcCheckContext`) is shared with
 -- the Tyche harness — see `StrataGenerators.FunctionHasTypeAGen.TestSupport`.
-
-@[reducible] def prop_function_typeCheck_annotated_sound (gf : ClosedGenFunction) : Prop :=
-  checkTypeCheckAnnotatedSound gf.func = true
 
 -- ── Property 2: Pretty-print / parse round-trip ───────────────────────
 --
@@ -469,37 +416,6 @@ def probeIdentRoundtrip (pos : IdentPosition) (name : String) :
     let s2 := (Core.formatProgram ast2).pretty
     if s1 == s2 then pure none
     else pure (some (s1, s2))
-
--- ── Property 3: Type preservation under evaluation ────────────────────
---
--- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
--- `eval_denote_sound` (`Strata/DL/Lambda/Denote/LExprSemanticsConsistent.lean`).
--- The decision procedure (`checkFunctionBodyPreservation`) is shared with the
--- Tyche harness — see `StrataGenerators.FunctionHasTypeAGen.TestSupport`.
-
-@[reducible] def prop_function_body_preservation (gf : ClosedGenFunction) : Prop :=
-  checkFunctionBodyPreservation gf.func = true
-
--- ── Function typechecker completeness ─────────────────────────────────
--- Dual to the soundness property above. `genFunction` is proven sound (output
--- satisfies `FuncHasType'`), so `Function.typeCheck` should accept every generated
--- function. It does NOT — the spec permits a measure without a body, the algorithm
--- rejects it. Checks live in `StrataGenerators.StmtHasTypeAGen.TestSupport`
--- (`checkFunctionTypeCheckerComplete` / `funcRejectionImpliesMeasureNoBody`), run
--- against the full `Core.Factory` context so no operator spuriously fails to
--- resolve. The `funcDecl` gap in the statement test is the syntactic-statement
--- analogue of exactly this.
-
-open StrataGenerators.Stmt.TestSupport in
--- Completeness: the typechecker accepts every generated function. Asserted
--- unweakened, so the measure-without-body gap is reported rather than masked.
-@[reducible] def prop_function_typeCheck_complete (gf : ClosedGenFunction) : Prop :=
-  checkFunctionTypeCheckerComplete gf.func = true
-
-open StrataGenerators.Stmt.TestSupport in
--- Every rejection is a measure-without-body function (pins the sole known gap).
-@[reducible] def prop_function_rejection_only_measure (gf : ClosedGenFunction) : Prop :=
-  funcRejectionImpliesMeasureNoBody gf.func = true
 
 -- ── Statement generation via Plausible.Gen ────────────────────────────
 --
@@ -558,18 +474,10 @@ instance : Arbitrary GenStmts where
 
 -- ── Statement-level properties (all currently unproven) ───────────────
 
--- The six statement-transform / typechecker properties
--- are defined by the shared `Properties.stmtTransforms` bundle (see
--- `StrataGenerators.Properties`), which pairs each name with its check in one
--- place, so they are folded directly into `stmtSuite` below rather than restated
--- as `prop_*` wrappers here. Only Kleene definedness keeps a wrapper — its Tyche
--- panel records extra breakdown, so it is not part of the shared bundle.
-
--- Kleene definedness: `StmtToKleeneStmt` is defined exactly when the block has no
--- `exit`/`funcDecl`/`typeDecl` (and, for the invariant-loop caveat, not defined
--- when an invariant-bearing loop is present).
-@[reducible] def prop_stmt_kleene_defined_iff (gs : GenStmts) : Prop :=
-  checkKleeneDefinedIff gs.stmts = true
+-- The statement-transform / typechecker properties are registered in
+-- `StrataTests/Stmt.lean`; their check predicates live in
+-- `StmtHasTypeAGen.TestSupport`. Kleene definedness is the one that keeps a bespoke
+-- Tyche panel, since its panel records definedness *and* why.
 
 -- ── Procedure generation via Plausible.Gen ────────────────────────────
 --
@@ -578,8 +486,8 @@ instance : Arbitrary GenStmts where
 -- *list* of them into a multi-declaration `Program` and use it as a
 -- certified-well-typed oracle input for the three Core transform passes
 -- (FilterProcedures, PrecondElim, ANFEncoder). All check predicates live in the
--- shared module `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, folded into
--- the suites via the `Properties.procTransforms` bundle.
+-- shared module `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, and the
+-- properties that score with them are registered in `StrataTests/Proc.lean`.
 
 open StrataGenerators.Procedure.TestSupport
 
@@ -645,10 +553,8 @@ private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
 instance : Arbitrary GenProcs where
   arbitrary := retryGen 8000 genProcsWith
 
--- The thirteen procedure/transform properties (four FilterProcedures, five
--- PrecondElim, four ANFEncoder) are defined by the shared
--- `Properties.procTransforms` bundle, so they are folded directly into
--- `procSuite` below rather than restated as `prop_*` wrappers here. Two of them
+-- The twenty-eight procedure/transform properties (seven FilterProcedures, thirteen
+-- PrecondElim, eight ANFEncoder) are registered in `StrataTests/Proc.lean`. Two of them
 -- state a faithful `changed ↔ program changed` contract that the pass violates:
 -- `proc: FilterProcedures changed flag is faithful` (the pass hardcodes
 -- `changed := true` even when it removes nothing) and `proc: PrecondElim changed
@@ -664,10 +570,12 @@ instance : Arbitrary GenProcs where
 -- procedures only, this exercises abstract types, aliases, axioms, `distinct`,
 -- datatype blocks and functions as well.
 --
--- Three suites quantify over this type: the whole-program checks of
--- `Properties.programChecks`, the ADT-derived-call checks of
--- `Properties.programADTProps`, and the printer-expressiveness property of
--- `StrataGenerators.PrinterCoverage` — the last needs a whole `Program` because
+-- Most of the suite quantifies over this type: the whole-program checks and
+-- ADT-derived-call checks of `StrataTests/Program.lean`, the unproven-transform
+-- properties of `StrataTests/Transforms.lean`, the lambda-lifting properties of
+-- `StrataTests/Lift.lean`, the alias properties of `StrataTests/Alias.lean`, and the
+-- printer-expressiveness property of `StrataTests/Printer.lean` — the last needs a
+-- whole `Program` because
 -- the unprintable constructs are spread across type declarations (`bitvec` widths
 -- in a signature), expressions (`Bv↔Int` operators) and statements (bodiless
 -- `funcDecl`), and `genProgram` reaches all three.
@@ -730,11 +638,7 @@ instance : Arbitrary GenProgram where
 
 -- ── Whole-program shrinker diagnostic ─────────────────────────────────
 --
--- The six whole-program properties come from the shared `Properties.programChecks`
--- bundle, so they are folded directly into each driver's `programSuite` rather than
--- restated as `prop_*` wrappers here.
---
--- What the bundle cannot show is how well the *shrinker* works. Its one reliable
+-- What the whole-program properties cannot show is how well the *shrinker* works. Its one reliable
 -- failure (`programTypecheck`) fails only on gap-bearing programs, which are
 -- precisely the ones no shrinker with this oracle can minimize; the one shrinkable
 -- failure (`programTypeCheckIdem`) fires on roughly 1 draw in 500, so most runs do
@@ -852,13 +756,13 @@ regression the ADT-derived-function work fixed."
 -- assembled, because the properties they feed ask different questions:
 --
 --   * `GenAdtBlock` is one draw of `DatatypeGen.genMutuallyRecursiveDatatypes` —
---     an ordinary, usually connected block. It feeds `Properties.adtBlockChecks`
---     (the two pure companions to the SMT law properties, plus the
---     eliminator-scoping property, which is *not* specific to the independent
+--     an ordinary, usually connected block. It feeds the `adt:` properties of
+--     `StrataTests/Adt.lean` (the two pure companions to the SMT law properties, plus
+--     the eliminator-scoping property, which is *not* specific to the independent
 --     shape).
 --   * `GenIndepBlock` concatenates independent one-datatype draws
 --     (`MutualBlockShape.genIndependentBlock`), so no field can mention a sibling.
---     It feeds `Properties.mutualIndepChecks`.
+--     It feeds the `mutual:` properties of `StrataTests/Mutual.lean`.
 --
 -- Both are drawn at `maxSize := 0`. At a larger size `genArgTy` emits arrows, and
 -- `validateDatatypesForSMT` refuses a function-typed field for the whole block, so
@@ -1140,51 +1044,3 @@ def printerErrorDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat × Nat) :=
   IO.println s!"      printable: {StrataGenerators.PrinterCoverage.printableBvWidths}"
   IO.println s!"      first divergent: {divergent.take 12}{if divergent.length > 12 then " …" else ""}"
   return (withErrors, sampled, reparsed)
-
--- ── CLI ────────────────────────────────────────────────────────────────
-
-/-- Parsed command-line configuration for the merged driver. -/
-structure CliConfig where
-  numTrials : Nat
-  maxSize : Nat
-  tycheEnabled : Bool
-  tycheOut : String
-  tycheSamples : Nat
-  smtEnabled : Bool
-
-/-- The number of trials that `--quick` selects. -/
-def quickNumTrials : Nat := 100
-
-/-- The maximum generator size that `--quick` selects. -/
-def quickMaxSize : Nat := 40
-
-/-- Parse `args` into a `CliConfig`. The positional arguments are
-    `[numTrials] [maxSize]`. Each flag with the prefix `--` selects an option, and
-    the pass for the Tyche visualization is on by default.
-
-    `--quick` selects a fast preset for a short cycle of work: 100 trials, a
-    maximum size of 40, and no Tyche pass. Use it to find a defect, and use the
-    default settings to gate a merge. A measurement gives about 16 seconds for the
-    preset, against about 7 minutes for the default settings.
-
-    A positional argument has a higher precedence than `--quick`, so
-    `--quick 500` gives 500 trials and keeps the other two parts of the preset.
-    Therefore a user can make one part of the preset wider without the loss of the
-    others. `--tyche-samples=N` also keeps its value, but it has no effect while
-    `--quick` holds the Tyche pass off. To get the Tyche pass together with the
-    other parts of the preset, give the trials and the size as positional
-    arguments and do not use `--quick`. -/
-def parseArgs (args : List String) : CliConfig :=
-  let flags := args.filter (·.startsWith "--")
-  let positional := args.filter (fun a => !a.startsWith "--")
-  let flagValue (key : String) : Option String :=
-    (flags.find? (·.startsWith key)).map (·.drop key.length |>.toString)
-  let quick := flags.contains "--quick"
-  { numTrials := (positional[0]? >>= String.toNat?).getD
-                   (if quick then quickNumTrials else 1000)
-    maxSize := (positional[1]? >>= String.toNat?).getD
-                 (if quick then quickMaxSize else 100)
-    tycheEnabled := !flags.contains "--no-tyche" && !quick
-    tycheOut := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
-    tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
-    smtEnabled := flags.contains "--smt" }

@@ -98,8 +98,10 @@ the extent of the coverage is not overstated:
 
 * `checkKleeneMeasureAccepted` is a characterization and not a bug oracle, for the
   reason its docstring gives.
-* the four `CommonSubexprElim` properties are vacuous on generated input (the pass
-  fires on 0 of 200 draws), for the reason the `CommonSubexprElim` note gives.
+* the four `CommonSubexprElim` properties are usually silent on generated input,
+  because the pass fires only on a duplicated subexpression and a generated body
+  rarely holds one. The `#guard`s exercise them on every build; one of them pins a
+  real defect. See the `CommonSubexprElim` note.
 * the four `FunctionInlining` properties now fire on **231 of 400** draws, after the
   generator work the `FunctionInlining` note describes — a real negative result for that pass
   rather than an absence of testing.
@@ -958,16 +960,22 @@ symbolic evaluation agrees. What remains is the fresh-name discipline. CSE mints
 (`CommonSubexprElim.lean`), and it prepends each new `var` declaration to the
 body, so both a collision and a wrong order are possible in principle.
 
-**These four properties are vacuous on generated input, and the number is 0 of
-200.** CSE fires only when a procedure body holds a *duplicated* subexpression,
-and no generated body does: each expression is drawn independently, so two
-identical subterms of a non-trivial size essentially never coincide. The four
-properties are therefore regression gates that the `#guard`s at the end of this
-file make real, on a hand-built body that does hold a duplicate. The same
-condition is recorded for the `ANFEncoder` properties (599 of 600 measured
-vacuous), so this is a known limit of the generator and not of the properties.
+**CSE fires on very few generated programs.** It fires only when a procedure body
+holds a *duplicated* subexpression, and a generated body rarely does: each
+expression is drawn independently, so two identical subterms of a non-trivial size
+seldom coincide. So these four properties are usually silent on generated input,
+and the `#guard`s at the end of this file are what exercise them on every build.
 
-Making them non-vacuous needs a generator that plants a repeated subterm on
+They are not silent *always*, and the difference matters: a `--quick` run drew
+`assume [||]: str.le(P(G), P(G))` and `the output typechecks` went red on it. That
+is the defect `cseCapturingBody` now pins — the pass hoists an extracted
+subexpression above the declaration of a variable the subexpression mentions. A
+count of "0 of 200" was recorded here before that draw; read it as "rare", not as
+"never", and do not treat a green tick on these four as a claim that the pass was
+exercised. The `decl_kinds` and `program_size` axes of the Tyche panel are what
+say whether a given run reached it.
+
+Reaching it *reliably* needs a generator that plants a repeated subterm on
 purpose. This is the one item of the four whose likely route (a sharing construct
 in `genLExpr`) adds a case to `genLExpr_sound`; a post-processing alternative
 avoids that proof work at the cost of a less principled distribution. -/
@@ -1048,10 +1056,15 @@ def checkCseFreshDeclOrder (p : Program) : Bool :=
       decide (cseInits = cseInits.mergeSort (fun a b => idxOf a ≤ idxOf b))
   | none => true
 
-/-- **The CSE output typechecks.**
+/-- **The CSE output typechecks. FAILS.**
 
-    Not reachable from generated input: CSE fires on 0 of 200 generated programs at
-    all, so a hand-built body is needed either way.
+    The pass prepends every extracted `var $__cse.{idx}` to the *front* of the
+    procedure body, without regard for where the variables of the extracted
+    subexpression are declared. So a duplicated subexpression mentioning a local is
+    hoisted above that local's declaration, and the output is rejected with
+    `No free variables are allowed here!`. Pinned deterministically by
+    `cseCapturingBody` below, and reached on a generated draw only when the body
+    happens to hold a duplicate, which is rare.
 
     Conditional on the input typechecking, so the pass is not blamed for input the
     checker rejects on its own. -/
@@ -2107,15 +2120,42 @@ private def cseCollisionBody : List Statement :=
   Statement.init ⟨s!"{Core.CSE.cseVarPrefix}0", ()⟩ (.forAll [] .int) (.det (intLit 9)) .empty
     :: cseFiringBody
 
--- CSE really fires on `cseFiringBody`, and the fresh name it mints is unique
--- there, so each property is non-vacuous on a well-behaved input. This matters more
--- than usual: CSE fires on 0 of 200 generated programs, so without these guards all
--- four CSE properties would be vacuous forever.
+-- CSE really fires on `cseFiringBody`, and the fresh name it mints is unique there,
+-- so each property is live on a well-behaved input. This matters more than usual,
+-- since the pass fires on few generated programs: these guards are what exercise the
+-- four properties on every build.
 #guard (runPhase Core.commonSubexprElimPhase (guardProg cseFiringBody)).any (·.1)
 #guard checkCseFreshNamesFresh (guardProg cseFiringBody)
 #guard checkCseAssertLabelsPreserved (guardProg cseFiringBody)
 #guard checkCseFreshDeclOrder (guardProg cseFiringBody)
 #guard checkCseOutputTypechecks (guardProg cseFiringBody)
+
+/-- `Int.Add(G, 4)`: the same shape as `cseDup`, except that it mentions a variable
+    the body **declares**, rather than being closed. -/
+private def cseDupLocal : Expression.Expr :=
+  .app () (.app () (.op () ⟨"Int.Add", ()⟩ (some intBinOpTy))
+    (.fvar () ⟨"G", ()⟩ (some .int))) (intLit 4)
+
+/-- A body whose duplicated subexpression mentions the local `G`. CSE hoists the
+    extracted `var $__cse.0 := int.add(G, 4)` to the front of the body, *above*
+    `var G : int := 0`, so `G` is out of scope where the hoisted declaration reads it.
+
+    `cseFiringBody` cannot show this, because its duplicate `Int.Add(3, 4)` is closed
+    and hoisting a closed expression to the front is always sound. -/
+private def cseCapturingBody : List Statement :=
+  [ Statement.init ⟨"G", ()⟩ (.forAll [] .int) (.det (intLit 0)) .empty,
+    Statement.init ⟨"a", ()⟩ (.forAll [] .int) (.det cseDupLocal) .empty,
+    Statement.init ⟨"b", ()⟩ (.forAll [] .int) (.det cseDupLocal) .empty ]
+
+-- The input typechecks and the pass fires, so the claim is live …
+#guard progTypeChecks (guardProg cseCapturingBody)
+#guard (runPhase Core.commonSubexprElimPhase (guardProg cseCapturingBody)).any (·.1)
+-- … and the output does **not** typecheck:
+--   `[init ($__cse.0 : int) := ((~Int.Add …) (G : int) #4)]`
+--   `No free variables are allowed here! Free Variables: [G]`
+-- Reported upstream. This guard is stated negatively, so it turns red when the pass
+-- is fixed, which is when it should be deleted.
+#guard !checkCseOutputTypechecks (guardProg cseCapturingBody)
 
 /-- The same firing body, with the duplicated subexpression left unannotated. -/
 private def cseBareBody : List Statement :=

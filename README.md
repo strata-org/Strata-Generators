@@ -37,7 +37,8 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 - `Strata`
 - `Basalt` (used for proving generators correct)
 - `Plausible` (used to run generators)
-- `LSpec` (Lean testing framework, we use LSpec's test harnesses to run tests)
+- `LSpec` (Lean testing framework; used by the `test` driver that `lake test` runs. The
+  alternate `test-plain` driver needs nothing beyond `Plausible`)
 - (Optionally) An SMT solver (cvc5 or z3) to test Strata properties related to SMT encoding, which are not run by default
   - See the [installation instructions in the Strata repository](https://github.com/strata-org/strata#smt-solvers) on how to install cvc5/z3
 
@@ -58,85 +59,113 @@ in the same file, as `List.Forall₂` is defined by both libraries.
    ```
 
 
-## Running tests using these generators 
+## Running tests using these generators
 
-To run a test executable, which tests a variety of properties using these Strata Core generators,
-run `lake test -- --quick`. (The `--quick` flag minimizes the no. of tests run, if we omit this flag,
-the entire test suite, consisting of 80+ properites, takes 10+ minutes to run.)
+```bash
+lake test -- --quick
+```
 
-This executable runs a Plausible test suite via LSpec, and visualizes test results using [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
-inspecting property-based testing generators.
+`--quick` runs 100 trials per property at a maximum input size of 40. Omit it and the
+full suite — 145+ properties — takes 10+ minutes.
 
-If you want to manually configure the no. of trials / size of inputs, you can pass
-them through to the test driver after `--`:
+To configure the run, pass arguments through after `--`:
 
 ```bash
 lake test -- [numTrials] [maxSize] [flags]
 ```
 
-Alternatively, you can also build & run the test executable directly as follows:
+- `numTrials` (default 1000) — random test cases per property
+- `maxSize` (default 100) — maximum size parameter for generation (controls the depth
+  of the generated AST)
+
+Flags (all optional; the Tyche visualization pass is on by default):
+
+- `--quick` — 100 trials, maximum size 40, no Tyche pass. A positional argument has
+  higher precedence, so `--quick 500` gives 500 trials and keeps the rest of the preset.
+- `--only=SUBSTRING` — run only the properties whose name contains `SUBSTRING`.
+  Repeatable. This is the loop to iterate in while writing one property: it also skips
+  the diagnostics and writes no Tyche file. Since a report group is a name prefix,
+  `--only="lift:"` selects the `lift` group exactly.
+- `--list` — print the registry (name, group, gate) and exit without running anything.
+  The answer to "did my property get picked up?"
+- `--no-tyche` — omit Tyche visualizations (i.e. only run tests).
+- `--tyche-out=PATH` — output path for the JSONL file Tyche ingests (default
+  `tyche_output.jsonl`).
+- `--tyche-samples=N` — samples visualized per Tyche panel (default 1000).
+- `--smt` — also run the properties whose oracle is a real SMT solver. Requires a local
+  `cvc5` or `z3`; if none can be launched the harness errors out with a non-zero exit
+  code. Without the flag those properties are reported as `SKIP`, never as passes.
+
+The exit code is the property verdict. Diagnostics and the Tyche pass never affect it.
+
+You can also build and run the driver directly:
 
 ```bash
 lake build test
 .lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
-- `numTrials` (default: 1000) — number of random test cases per property
-- `maxSize` (default: 100) — maximum size parameter for generation (controls
-  the depth of the generated AST)
+`lake test -- --list` prints the full list of properties tested; each one is declared
+in a file under [`StrataTests/`](./StrataTests).
 
-Flags (all optional; the Tyche visualization pass is on by default):
+### LSpec-free driver (`test-plain`)
 
-- `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
-  Currently, this flag runs 100 trials for each property, where each input has a maximum size of 40.
-  This flag omits Tyche visualizations:
-- `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
-- `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
-- `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
-- `--smt` — Tests properties related to Strata SMT encodings. This CLI flag requires a local installation of an SMT solver (cvc5/z3). 
-  If `--smt` is passed but the SMT solver cannot be run, the test harness emits an error and exits with a non-zero exit code.
+`lake test` runs the LSpec driver. A second driver renders the *same* registry through
+the package's own reporter, and depends on `Plausible` and nothing else:
 
-See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of properties tested.
-
-### LSpec-free harness (`test-plain`)
-
-There is a second test executable, `test-plain`, that does not depend on LSpec. 
-All properties, generators and CLI flags are shared with the default test runner (the one inovked by doing `lake test`).
-
-To run the alternate `test-plain` harness, do:
 ```bash
 lake build test-plain
-.lake/build/bin/test-plain [numTrials] [maxSize] [--smt]
+.lake/build/bin/test-plain [numTrials] [maxSize] [flags]
 ```
+
+It exists to keep the LSpec dependency droppable: LSpec reaches this package only
+through a fork pinned to Lean 4.29, because mainline LSpec is on 4.31.
+
+Both drivers fold the same `List TestDecl`, and everything except the rendering is
+`StrataGenerators.Test.Driver`, shared by both. So they cannot disagree about *what* is
+tested, and a discrepancy could only be in the printing.
 
 ## Adding a new property
 
-Properties are listed in
-[`Properties.lean`](./StrataGenerators/Properties.lean) and invoked from [`TestMain.lean`](./TestMain.lean). 
+A property — its check, its generator, and its name — goes in whatever file under
+[`StrataTests/`](./StrataTests) you think it belongs in: an existing one or a new one,
+one property or forty. You do not edit any file in `StrataGenerators/`.
 
-To add a new property:
+```lean
+import StrataGenerators.Test
 
-1. Put the property (an `α → Bool` function, where `α` is the type 
-   produced by the generator) in the relevant `*.TestSupport` module (e.g.
-   `ProcedureHasTypeAGen/TestSupport.lean`).
-   
-2. Define a string containing the name of the property in `PropertyNames` namespace
-   in `Properties.lean` (e.g. `expr`, `cmd`, ...), then add this string to
-   `PropertyNames.all` (at the bottom of `Properties.lean`). This string is the name of the
-   property that is displayed in `stdout` / Tyche when the test harness is run.
+open StrataGenerators.Test
 
-3. Add the property to the test suite in `TestMain.lean`:
-   - For a pure `α → Bool` property, wrap it as a `Prop` (e.g. `def prop_foo : Prop := check_foo … = true`), 
-     and add a `checkIO PropertyNames.yourName (∀ x, your_prop x)` expression to the relevant 
-     test suite in `TestMain.lean`.
-   - For an `IO`-based check (e.g. a property that requires an external tool to run, like an SMT solver), 
-     add the property using an `.individualIO PropertyNames.yourName none action .done` expression in `TestMain.lean`. 
-     The SMT/concrete-eval agreement property
-     ([`HasTypeAGen/SmtEval.lean`](./StrataGenerators/HasTypeAGen/SmtEval.lean),
-     gated behind `--smt`) is a worked example.
+@[strata_property]
+def myPassIdempotent : TestDecl :=
+  .property "mypass: the pass is idempotent"
+    fun (gp : GenProgram) => myPass (myPass gp.prog) = myPass gp.prog
+```
 
-4. (Optional, for visualizing test results in Tyche) See [Adding a panel for a new
-   property](#adding-a-panel-for-a-new-property) for details.
+A name and a check. That is the whole registration. `lake test` discovers it, reports it under a `mypass`
+group, and gives it a Tyche panel.
+
+The check is a decidable `Prop`, so a failing draw reports the comparison itself
+(`issue: 3 ≤ 2 does not hold`) rather than the word `false`. A `Bool`-valued `check*`
+helper is accepted unchanged, since `Bool` coerces to `Prop`.
+
+The generator is chosen the way Plausible and QuickCheck choose it: by the **type** of
+the quantified value. `GenProgram` carries the `Arbitrary`/`Repr`/`Shrinkable` instances
+Plausible needs, so annotating the binder selects the whole-program generator, its
+printer and its shrinker at once. The report group is the name's `mypass:` prefix,
+derived rather than declared.
+
+```bash
+lake test -- --list                     # confirm it was picked up
+lake test -- --only="mypass:" --quick   # run just this group
+```
+
+[`StrataTests/Example.lean`](./StrataTests/Example.lean) is a working copy of this
+shape, and **[`docs/writing-properties.md`](./docs/writing-properties.md)** is the
+full guide: how the harness discovers your file, which input types are generable, how
+to make a new type generable with the four instances, the three non-sampled property shapes (a single
+witness, a finite input space, a self-driving `IO` action), opt-in gates such as
+`--smt`, registering a family at once, custom Tyche panels, and diagnostics.
 
 ## Tyche visualization
 
@@ -177,101 +206,35 @@ interactive histograms and distribution charts for each property.
 
 ### Adding a Tyche visualization for a new property
 
-Note: the following steps assume the property is already defined in the test harness
-(see [Adding a new property](#adding-a-new-property) on how to add a new property).
+There is nothing to add. A registered property gets a panel derived from its input
+type's instances: `Repr` draws the sample, `TycheFeatures` gives the axes, the
+property's verdict is the mark's status, and `Shrinkable` minimizes a failing sample
+before display.
 
-#### 1. Define the type containing the data to be visualized
+So the way to improve a panel is to improve the type's `TycheFeatures` instance — see
+[`StrataGenerators/Test/Generators.lean`](./StrataGenerators/Test/Generators.lean), where each
+shape's axes are declared once and shared by every property over it. Include at least
+one axis that explains *why* a property failed (`rejection_cause`, `decl_kinds`,
+`func_shape`), since that is what separates a vacuous pass from a real one.
 
-This type is typically a `structure` that contains the generated value,
-along with auxiliary featuers that cannot be recomputed, e.g.:
-
-```lean
-structure PropResult where
-  value   : MyThing       -- Value produced by generator
-  passed  : Bool          -- No. of trials passed
-  genSize : Nat           -- The generator size `value` was sampled at
-```
-
-If several properties share the same `PropResult` type, define an extra `tag` field 
-in the `structure` and distinguish them using the name of the visualization distinguish 
-(see `StmtPropResult` and `ProcPropResult` for an example of how this is done).
-
-#### 2. Implement an instance of `Tyche.TycheSample` typeclass for the type defined in step (1)
+A handful of panels cannot be derived: one whose oracle is itself an `IO` action (a
+solver run, a format→parse round-trip), or one whose breakdown reports something the
+generated input alone does not determine (which pipeline phase lied, which printer
+site refused). Those live in
+[`TycheViz.lean`](./StrataGenerators/TycheViz.lean) and are attached to their property
+with `withPanel`, in the `StrataTests/` file that declares it:
 
 ```lean
-instance : Tyche.TycheSample PropResult where
-  toSample r :=
-    { representation := formatMyThing r.value              -- Function for serializing `r.value`
-      status         := if r.passed then .passed else .failed
-      statusReason   := if r.passed then "" else explainFailure r.value
-      features := [
-        ("verdict", .nominal (if r.passed then "pass" else "fail")),
-        ("cause",   .nominal (classifyCause r.value)),     -- Why a property failed
-        ("size",    .ordinal (sizeOf r.value)) ] }
+@[strata_property]
+def myProp : TestDecl :=
+  (TestDecl.property "mypass: …"
+    (fun (gp : GenProgram) => checkMine gp.prog)).withPanel myPanelAction
 ```
 
-- **`representation`**: If generating random Strata Core programs, use 
-  Strata Core's own pretty-printer (`Core.formatProgram`, `formatStmts`, `formatFunc`) .
-- **`status`**: this must be the same property function that is invoked by the test harnes
-  (i.e. a function in the relevant `*.TestSupport` module).
-- **`features`**: `.nominal` for grouping, `.ordinal` / `.continuous` for
-  distributions. Include at least one field that explains why a property failed
-  (e.g. `rejection_cause`, `measure_no_body`, `violating_phases`, `error_sites`).
-  For samples that pass a property vacuously, use an explicit `"—"` indicator
-  rather than treating them as trials that passed.
-
-#### 3. Write the generator wrapper
-
-An `IO MyPropResult`. Reuse an existing draw (`genStmtsForTyche`,
-`genProcsForTyche`, `genProgramForTyche`) rather than a fresh generator call, so
-the panel samples the same distribution as its neighbours, and vary the generator
-size per sample. If the property's counterexamples are shrinkable, minimize on
-failure and recompute the features from the minimized value, so they describe what
-is actually displayed:
-
-```lean
-def generatorWrapper (prop : MyThing → Bool) : IO PropResult := do
-  let (x, genSize) ← genMyThingForTyche -- Invoke the actual generator`
-  if prop x then
-    return { value := x, passed := true, genSize }
-  else
-    -- `minimizeProcsCounterexample` / `minimizeProgramCounterexample` keep every
-    -- candidate well-typed *and* still-failing, so the verdict is unchanged.
-    return { value := minimizeMyCounterexample prop 200 x, passed := false, genSize }
-```
-
-#### 4. Register it in `runTychePanels`
-
-Add the following expression in the `runTychePanels` function in `TycheViz.lean`:
-```lean
-panel PropertyNames.myProperty (generatorWrapper myProperty)
-```
-
-Alternatively, if the property belongs to an existing list of `Property`s in
-[`Properties.lean`](./StrataGenerators/Properties.lean) 
-(e.g. `StmtTransforms`), you can iterate over them like so:
-
-
-```lean
-for p in Properties.stmtTransforms do
-  panel p.name (genStmtProp p.name p.check)
-```
-
-Note that `panel` defaults to `--tyche-samples` samples. 
-To override this option, pass `(count := n)` .
-
-**For properties with a finite and small no. of inputs**:
-For properties whose input space is finite and small (e.g., all bitvectors of width 4),
-use the `enumerate` function instead of `panel`. 
-The `enumerate` function performs one trial per element in the input space, 
-as opposed to running `--tyche-samples` times:
-
-```lean
-enumerate PropertyNames.printerBvIntConversions bvIntConversionSamples
-```
-
-The test oracle for these properties is a conjunction over all elements
-in the input space (e.g. `checkBvIntConversionsPrint`). 
+`myPanelAction : IO β` for any `β` with a `Tyche.TycheSample` instance; the panel takes
+its title from the property's `name`, so the two cannot drift apart. For a property
+whose input space is *finite*, use `withEnumeratedPanel` instead, which emits one mark
+per element rather than sampling the space with replacement.
 
 #### Checking that the Tyche visualizations appear
 Run the following to produce the Tyche visualizations with a small no. of tests:
