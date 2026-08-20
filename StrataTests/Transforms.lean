@@ -19,13 +19,14 @@ are exercised on real input rather than on a statement list that cannot express 
 
 Two caveats worth reading before trusting a green result:
 
-* `CommonSubexprElim` fires on very few generated programs, since a generated body
-  rarely holds a duplicated subexpression, so the four `cse:` properties are usually
-  vacuous and the `#guard`s in `ProgramGen/UnprovenTransforms` are what test them
-  reliably. Not *always* vacuous, though: a `--quick` run drew
-  `assume [||]: str.le(P(G), P(G))`, on which the pass fires and
-  `cse: the output typechecks` fails. Expect that property to be green on most runs
-  and red on the occasional one, like the `procInline:` properties.
+* `CommonSubexprElim` fires only on a duplicated subexpression, which a generated
+  body rarely holds, so the four `cse:` properties are silent on most runs and the
+  `#guard`s in `ProgramGen/UnprovenTransforms` are what exercise them on every build.
+  When a run does reach the pass, `cse: the output typechecks` goes red: the pass
+  hoists an extracted subexpression above the declaration of a local it mentions
+  (issue #126, "CommonSubexprElim hoists above a local's declaration"), which a
+  `--quick` run found on `assume [||]: str.le(P(G), P(G))`. Read a green tick on
+  these four as "not reached this run", not as "the pass is right".
 * the three `procInline:` properties need a sample that holds a call, which is rare,
   so a short run may not reach them.
 
@@ -101,7 +102,7 @@ def unprovenTransforms : List TestDecl :=
        fun gp => checkLoopBlockLabelsNodup gp.prog),
       ("loop: erasedLoops is faithful",
        fun gp => checkLoopElimStatFaithful gp.prog),
-      -- CommonSubexprElim — fresh names and ordering (vacuous on generated input)
+      -- CommonSubexprElim — fresh names and ordering
       ("cse: no fresh name is declared twice",
        fun gp => checkCseFreshNamesFresh gp.prog),
       ("cse: the assert labels are preserved",
