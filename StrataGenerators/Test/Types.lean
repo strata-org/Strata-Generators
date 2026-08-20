@@ -1,4 +1,5 @@
 import Plausible
+import Basalt.Tuning
 import StrataGenerators.Tyche
 
 /-!
@@ -80,6 +81,39 @@ class TycheFeatures (α : Type) where
   features : α → List (String × Tyche.Feature)
 
 instance (priority := low) : TycheFeatures α := ⟨fun _ => []⟩
+
+/-- An input type whose generator's branch weights can be read from a `Tuning` — the fourth thing a
+    property might want to say about its input, after the generator, the printer and the shrinker.
+
+    A `Tuning` is a *runtime* value (an array of weight schedules addressing the `frequency` sites of
+    the underlying Strata generator — see `StrataGenerators.TuningProfiles`), so it cannot arrive
+    through `Arbitrary`, whose `arbitrary : Gen α` has nowhere to put one. Hence a second class, and
+    hence `TestDecl.tuned` rather than an optional argument on `TestDecl.property`: a type with no
+    instance here simply cannot be tuned, and asking to tune it is a missing-instance error at the
+    property rather than a tuning that is silently ignored.
+
+    An instance whose type draws through a tunable generator end to end satisfies
+    `genWith defaults = Arbitrary.arbitrary` — pinned by `rfl` for `GenStmts`, `GenProcs` and
+    `GenCmdsWithCtx` in `StrataGenerators.Test.Generators` — so a tuned property differs from its
+    untuned form only in the weights, and `underTunings`'s "default" row is exactly the property
+    `TestDecl.property` would register. `TypedExpr` is the documented exception: its `Arbitrary`
+    instance draws through `genLExprWithOps`, which reaches the tunable `genLExprBase` by name, so its
+    tuned sampler draws through `genLExprBase` directly instead.
+
+    Either way, because tuning is proven θ-invariant at `SetGen.Set`
+    (`StrataGenerators.SetGen.TuningPrototypes`), a tuning changes only the *distribution*: no `θ` can
+    make a well-typed shape unreachable, so a tuned property still tests the same claim over the same
+    language. -/
+class TunableGen (α : Type) where
+  /-- The type's generator with the weights of the underlying Strata generator read from `θ`. -/
+  genWith : Tuning → Gen α
+  /-- The sites `θ` addresses, so a mis-sized hand-built tuning can be caught rather than silently
+      reindexed, and so a report can say what a property's knobs are. -/
+  sites : Array Site
+
+/-- How many branch weights a type's tuning is expected to carry. -/
+def TunableGen.arity (α : Type) [TunableGen α] : Nat :=
+  (TunableGen.sites α).foldl (fun n s => n + s.arity) 0
 
 /-- The generator, the printer and the shrinker for one input type, as data — the
     components a run needs for every input other than the check itself.
@@ -241,6 +275,61 @@ def TestDecl.forAll (name : String) (runner : PropertyRunner α) (check : α →
     [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
     (gate : Option String := none) : TestDecl :=
   { name, gate, body := .sampled runner check dec inst }
+
+/-- **A property over a tuned generator.** `TestDecl.property`, except that the input's generator
+    reads its branch weights from `θ` instead of taking the source's — so the *distribution* a
+    property is checked over is stated where the property is, next to its name and its check:
+
+    ```lean
+    .tuned "stmt: LoopElim eliminates all loops" stmtLoopHeavy
+      fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
+    ```
+
+    Use it when a property is vacuous or near-vacuous under the default weights: `LoopElim`'s two
+    properties are the identity on a loop-free program, and `dist-report` measures a loop in 28% of
+    default statement lists against 76% under `stmtLoopHeavy`. Prefer `TestDecl.underTunings` when the
+    default distribution is worth keeping *as well* — which it usually is.
+
+    `θ` must address the input type's generator; `label` names it in the property's Tyche breakdown.
+    `TestDecl.property` remains the way to state a property that is happy with the source's
+    weights. -/
+def TestDecl.tuned (name : String) (θ : Tuning)
+    [TunableGen α] [Repr α] [Shrinkable α] [TycheFeatures α]
+    (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
+    (label : String := "tuned") (gate : Option String := none) : TestDecl :=
+  { name, gate
+    body := .sampled
+      { gen := TunableGen.genWith θ
+        render := fun x => toString (repr x)
+        shrink := Shrinkable.shrink
+        features := fun x => TycheFeatures.features x ++ [("tuning", .nominal label)] }
+      check dec inst }
+
+/-- **One claim, several distributions.** Registers the same check once per labelled tuning, each as
+    its own property named `"⟨name⟩ [⟨label⟩]"`, so each gets its own verdict, its own reported line
+    and its own Tyche panel.
+
+    This is the form to reach for, because the interesting question about a tuning is rarely "does the
+    property hold under it" on its own but "does it hold under this one *and* the default". A row that
+    passes at the defaults and fails loop-heavy is a distribution-sensitive defect, and it is visible
+    here rather than only to someone who runs `dist-report` by hand.
+
+    ```lean
+    @[strata_properties]
+    def loopElim : List TestDecl :=
+      TestDecl.underTunings "stmt: LoopElim preserves typeability"
+        [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)]
+        fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
+    ```
+
+    Pass a generator's own `.defaults` for the untuned row: `genWith defaults` is the type's
+    `Arbitrary` instance, so that row is exactly the property `TestDecl.property` would register. -/
+def TestDecl.underTunings (name : String) (tunings : List (String × Tuning))
+    [TunableGen α] [Repr α] [Shrinkable α] [TycheFeatures α]
+    (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
+    (gate : Option String := none) : List TestDecl :=
+  tunings.map fun (label, θ) =>
+    TestDecl.tuned s!"{name} [{label}]" θ check label gate
 
 /-- A closed-`Bool` property with no generated input. -/
 def TestDecl.witness (name : String) (verdict : Bool)

@@ -1,5 +1,6 @@
 import StrataGenerators.TestScaffold
 import StrataGenerators.Test.Types
+import StrataGenerators.TuningProfiles
 
 /-!
 # The generator catalog
@@ -246,5 +247,97 @@ open StrataGenerators.Test in
 def adtBlock       : PropertyRunner GenAdtBlock      := .ofInstances _
 open StrataGenerators.Test in
 def indepBlock     : PropertyRunner GenIndepBlock    := .ofInstances _
+
+-- ── Tunable generators ────────────────────────────────────────────────
+--
+-- One instance per input type whose generator's branch weights can be set at run time,
+-- which is what `TestDecl.tuned` / `TestDecl.underTunings` need. Each is the sampler
+-- above with the tuned entry point substituted for the shipping one — same `size`/`len`
+-- schedule, same operator contexts, same `retryGen` budget — so `genWith defaults` is the
+-- type's `Arbitrary` instance and a tuned property differs only in the distribution. The
+-- wrappers, and the proof that no `θ` changes what is reachable, are in
+-- `StrataGenerators.TuningProfiles` and `StrataGenerators.SetGen.TuningPrototypes`.
+--
+-- A type absent from this list cannot be tuned: `GenProgram`, `GenAdtBlock` and
+-- `GenIndepBlock` draw through generators whose weights are not yet exposed, so
+-- `TestDecl.tuned` on one of them is a missing-instance error rather than a silent no-op.
+
+section Tunable
+open StrataGenerators.Test StrataGenerators.TuningProfiles
+open StrataGenerators.Procedure.TestSupport (relabelProcs)
+
+/-- Statement lists, with `genStmt`'s branch weights read from `θ` — threaded through the
+    whole mutual recursion, so statements nested in a `block`/`ite`/`loop` body are tuned
+    too. `stmtLoopHeavy` and friends address this. -/
+instance : TunableGen GenStmts where
+  genWith θ := retryGen 4000 <| Gen.sized fun s => do
+    let size := max 1 (min 3 (s / 25))
+    let len := max 1 (min 4 (s / 20))
+    let (ss, _, _) ← genProgramStmtsT (G := Plausible.Gen) θ coreMonoOps [] size len
+    pure ⟨ss⟩
+  sites := StrataGenerators.Stmt.genStmt._mutual.sites
+
+/-- Procedure lists, with the statement weights of each *body* read from `θ`. The three
+    transform passes key on what those bodies contain, so this is the instance the
+    `proc:` properties tune through. -/
+instance : TunableGen GenProcs where
+  genWith θ := retryGen 8000 <| Gen.sized fun s => do
+    let n := max 2 (min 4 (2 + s / 30))
+    let size := max 1 (min 2 (s / 30))
+    let len := max 1 (min 3 (s / 25))
+    let (ps, _) ← (List.range n).foldlM
+      (fun (acc : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
+        let proc ← (retryGen 8000 (genProcedureT (G := Plausible.Gen) θ
+          corePartialOps acc.2 LContext.default {} size len) : Gen Core.Procedure)
+        let sigs := acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
+        pure (acc.1 ++ [proc], sigs))
+      (([], []) : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx)
+    pure ⟨relabelProcs ps⟩
+  sites := StrataGenerators.Stmt.genStmt._mutual.sites
+
+/-- Command sequences, with `genCmd`'s branch weights read from `θ` (`cmdSetHeavy`,
+    `cmdInitHeavy`, `cmdCheckHeavy`). -/
+instance : TunableGen GenCmdsWithCtx where
+  genWith θ := retryGen 1000 <| do
+    let (cmds, ctx') ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 4
+    pure ⟨cmds, [], ctx'⟩
+  sites := genCmd.sites
+
+/-- Typed expressions, with `genLExprBase`'s 79 branch weights read from `θ`
+    (`exprEvalHeavy`, `exprQuantHeavy`, `exprIndirHeavy`, `exprFVarHeavy`).
+
+    Note this draws through `genLExprBase` directly rather than `genLExprWithOps`: the
+    weights live in the former, and the latter reaches it by name and so untuned. The
+    Indir/IndirPoly rules that `genLExprWithOps` adds at the root are *also* branches of
+    `genLExprBase` at every type, so they are tunable here — see `ExprIdx.indirAll`. -/
+instance : TunableGen TypedExpr where
+  genWith θ := retryGen 500 <| Gen.sized fun s => do
+    let depth := max 1 (s / 20)
+    let τ ← genLMonoTy (G := Plausible.Gen) [] depth
+    let e ← genLExprBase.tuned (G := Plausible.Gen) θ defaultFCtx coreMonoOps corePolyOps
+      [] [] depth τ
+    pure ⟨e, τ⟩
+  sites := genLExprBase.sites
+
+/-! **Tuning is opt-in.** At a generator's own `.defaults` the tuned sampler is the type's
+`Arbitrary` instance *definitionally*, so `underTunings`'s "default" row is the property
+`TestDecl.property` would have registered, and adding a tuned row cannot perturb the untuned one.
+`Eq.refl`, checked by the kernel. -/
+
+example : TunableGen.genWith (α := GenStmts) stmtDefault = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, genProgramStmtsT_defaults]; rfl
+example : TunableGen.genWith (α := GenProcs) stmtDefault = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, genProcedureT_defaults]; rfl
+example : TunableGen.genWith (α := GenCmdsWithCtx) cmdDefault = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, genCmdsT_defaults]; rfl
+
+/-! The arity a hand-built tuning must match, so a mis-sized one is a wrong number rather than a
+silent reindexing. -/
+example : TunableGen.arity GenStmts = 14 := rfl
+example : TunableGen.arity GenProcs = 14 := rfl
+example : TunableGen.arity GenCmdsWithCtx = 12 := rfl
+example : TunableGen.arity TypedExpr = 79 := rfl
+
+end Tunable
 
 end StrataGenerators.Test.Generators

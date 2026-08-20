@@ -171,6 +171,65 @@ from scratch. `PropertyRunner.ofInstances MyType` is that default; `withRender` 
 (`proc: PrecondElim factory entries are stripped`, whose minimized witness is the empty
 program, so its counterexample needs a diagnostic view instead).
 
+### Choosing the distribution
+
+Soundness and completeness say every sample is well-typed and every well-typed program is
+reachable. Neither says how *often* a shape appears, and a property whose interesting
+shape is rare spends most of its trials on a case it does not discriminate on. `LoopElim`'s
+two properties are the identity on a loop-free program; `dist-report` measures a loop in
+32% of statement lists at the source weights, and a loop *inside* a loop — where a
+loop-elimination pass is likeliest to be wrong — in 3%.
+
+So a property can name its weights along with its check. `TestDecl.tuned` takes a
+`Tuning` from [`StrataGenerators.TuningProfiles`](../StrataGenerators/TuningProfiles.lean):
+
+```lean
+@[strata_property]
+def loopElimZeroLoops : TestDecl :=
+  .tuned "stmt: LoopElim eliminates all loops" stmtLoopHeavy
+    fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
+```
+
+Usually you want the default distribution *as well*, since a property that holds under one
+weighting and fails under another is exactly what you want to see. `TestDecl.underTunings`
+registers one property per weighting, each with its own verdict, its own reported line and
+its own Tyche panel (which carries a `tuning` axis):
+
+```lean
+@[strata_properties]
+def loopElimPreservesTyping : List TestDecl :=
+  TestDecl.underTunings "stmt: LoopElim preserves typeability"
+    [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)]
+    fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
+```
+
+Names come out as `stmt: LoopElim preserves typeability [loop-heavy]`, so `--only=` and the
+group still work. Passing a generator's own `.defaults` gives back the untuned property
+exactly: `genWith defaults` *is* the type's `Arbitrary` instance, pinned by `rfl`.
+
+Three things worth knowing:
+
+* **Only some input types can be tuned.** `GenStmts`, `GenProcs`, `GenCmdsWithCtx` and
+  `TypedExpr` have a `TunableGen` instance; `GenProgram`, `GenAdtBlock` and `GenIndepBlock`
+  do not, because the weights of the generators they draw through are not exposed yet.
+  `.tuned` on one of those is a missing-instance error, not a tuning that is silently
+  ignored — which is why it is a separate constructor rather than an optional argument on
+  `.property`.
+* **A tuning cannot weaken a property.** Reweighting is proven to leave the generator's
+  *support* unchanged at every `θ` (`StrataGenerators.SetGen.TuningPrototypes`), so no
+  weighting makes a well-typed shape unreachable. A tuned property tests the same claim
+  over the same language; only the order in which cases turn up changes.
+* **Weights are not free.** The generators are partial: a sub-generator with empty support
+  throws and `retryGen` redraws the whole sample. `dist-report`'s `1st-try` column is that
+  cost — `exprIndirHeavy` buys a 22% → 38% failure-reproduction rate for a 51% → 32% drop
+  in first-try success. Read the two columns together before adopting a profile.
+
+To pick a weighting, or to check one you invented, run:
+
+```bash
+lake exe dist-report 200 100 --stmt      # coverage and cost, per profile, per family
+```
+
 ## The other three shapes of property
 
 `TestDecl.property` is the only entry point you need for a property that quantifies over

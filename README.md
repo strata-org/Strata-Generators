@@ -162,17 +162,25 @@ actually appear — plus `1st-try`, the fraction of draws that succeed with no r
 that steers into failure-prone shapes buys coverage with generation time:
 
 ```bash
-lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--props]
+lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]
 ```
 
-`--props` is the one to run when changing a profile: it runs the suite's own properties under each
-profile and reports how often each *fails*, so a profile that introduces a new failure — or that
-raises the reproduction rate of a known defect — is visible immediately. Measured over 300 samples
-per profile, `stmt: typechecker accepts generated statements` (#1, the `funcDecl` gap) fails on ~5%
-of default samples and ~23% under `stmtFuncDeclHeavy`, and `proc: PrecondElim factory strips declared
-functions` on ~23% by default and ~51% under `procPrecondHeavy` — with no profile introducing a
-failure that the default weights did not already produce. Nothing here is seed-deterministic, so
-re-run before reading a small difference as a change.
+To compare a *property's* verdict across weightings, register it under both with
+`TestDecl.underTunings` — one property per weighting, each with its own verdict, its own line in the
+report and its own Tyche panel — rather than running a report nobody reads. `StrataTests/Stmt.lean`
+does this for the two `LoopElim` properties, and
+[`docs/writing-properties.md`](./docs/writing-properties.md#choosing-the-distribution) is the guide.
+
+```lean
+@[strata_properties]
+def loopElimPreservesTyping : List TestDecl :=
+  TestDecl.underTunings "stmt: LoopElim preserves typeability"
+    [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)]
+    fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
+```
+
+Only some input types can be tuned (`GenStmts`, `GenProcs`, `GenCmdsWithCtx`, `TypedExpr`); a type
+without a `TunableGen` instance rejects `.tuned` at compile time rather than ignoring it.
 
 ## Adding a new property
 
