@@ -202,7 +202,7 @@ structure TestDecl where
       (`--smt` supplies `"smt"`). `none` runs always. -/
   gate  : Option String := none
   /-- What this property claims about its own verdict. Defaulted, so stating a property
-      says nothing about known defects until it says so with `TestDecl.knownFailure`. -/
+      says nothing about known defects until it says so with `knownFailure`. -/
   expect : Expectation := .mustHold
   /-- Whether to emit a Tyche panel. Sampled and witness-set properties get one by
       default; `witness` and `action` bodies have nothing to sample, so they
@@ -295,26 +295,32 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
     counterexample is suppressed and it stops gating the exit code; if it ever passes,
     the run fails and names this call as the thing to delete.
 
-    Written next to the property, like `withPanel`, because the reason belongs with the
-    claim it explains rather than in a central list that has to be edited in step — and
-    because the registry is then the single answer to "what is known to fail?", which
-    `--list` prints:
+    A prefix rather than a method, so the mark is the first thing read and the property
+    needs no parentheses around it:
 
     ```lean
-    (TestDecl.property "lift: the output typechecks"
-       fun (gp : GenProgram) => checkLiftOutputTypechecks gp.prog).knownFailure
-      "strata-org/Strata#123: a snapshot name escapes its scope"
+    @[strata_property]
+    def liftOutputTypechecks : TestDecl :=
+      knownFailure "strata-org/Strata#123: a snapshot name escapes its scope" <|
+        TestDecl.property "lift: the output typechecks"
+          fun (gp : GenProgram) => checkLiftOutputTypechecks gp.prog
     ```
+
+    The reason travels with the mark rather than sitting in a central list that has to be
+    edited in step, so the registry is the single answer to "what is known to fail?" —
+    which `--list` prints. For one member of a `family`, give the `Expectation` as the
+    entry's third component instead; an attribute or a prefix cannot address one entry of
+    a list.
 
     Prefer this to deleting or commenting out a property: a deleted property stops
     watching the defect, and nothing then reports the fix. -/
-def TestDecl.knownFailure (d : TestDecl) (reason : String) : TestDecl :=
+def knownFailure (reason : String) (d : TestDecl) : TestDecl :=
   { d with expect := .knownFailure reason }
 
 /-- **Mark a property as failing only on a rare draw**, so it gates in neither
     direction. See `Expectation.rareFailure`; use `knownFailure` for a defect a run of
     the default size reliably finds. -/
-def TestDecl.rareFailure (d : TestDecl) (reason : String) : TestDecl :=
+def rareFailure (reason : String) (d : TestDecl) : TestDecl :=
   { d with expect := .rareFailure reason }
 
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
@@ -422,7 +428,7 @@ def Outcome.reconcile (o : Outcome) : Expectation → Outcome
       -- The defect is fixed, or the mark was wrong. Either way this must be seen.
       { o with passed := false,
                message := some s!"expected to fail, but passed — the defect appears to \
-                 be fixed, so drop the `.knownFailure` on this property ({reason})" }
+                 be fixed, so drop its known-failure mark ({reason})" }
     else
       -- Drop `o.message`: that is where `Testable.formatFailure` put the counterexample,
       -- and it is noise for a defect that is already understood and reported.

@@ -92,7 +92,7 @@ Flags (all optional; the Tyche visualization pass is on by default):
 - `--known-failure=NAME` — treat the property called `NAME` as known to fail for this
   run: suppress its counterexample and stop it gating the exit code. Repeatable, and it
   takes a whole property name rather than a substring. The committed form is
-  `.knownFailure` on the declaration, which also carries the reason — see
+  `knownFailure` on the declaration, which also carries the reason — see
   [`docs/writing-properties.md`](./docs/writing-properties.md).
 - `--no-tyche` — omit Tyche visualizations (i.e. only run tests).
 - `--tyche-out=PATH` — output path for the JSONL file Tyche ingests (default
@@ -181,14 +181,14 @@ Mark it, rather than deleting it or letting it hold up a merge:
 ```lean
 @[strata_property]
 def myPassOutputTypechecks : TestDecl :=
-  (TestDecl.property "mypass: the output typechecks"
-     fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog).knownFailure
-    "strata-org/Strata#123: the pass drops a type annotation on a nested call"
+  knownFailure "strata-org/Strata#123: the pass drops a type annotation on a nested call" <|
+    TestDecl.property "mypass: the output typechecks"
+      fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog
 ```
 
 It then reports `? XFAIL`, prints no counterexample, and does not gate the exit code —
 but **if it ever passes, the run fails** and asks you to drop the mark, so the fix cannot
-go unnoticed. Use `.rareFailure` instead for a property that fails only on an occasional
+go unnoticed. Use `rareFailure` instead for a property that fails only on an occasional
 draw; it gates in neither direction. `lake test -- --list` prints every mark and its
 reason.
 

@@ -258,18 +258,22 @@ hostage to a bug that is already reported:
 ```lean
 @[strata_property]
 def myPassOutputTypechecks : TestDecl :=
-  (TestDecl.property "mypass: the output typechecks"
-     fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog).knownFailure
-    "strata-org/Strata#123: the pass drops a type annotation on a nested call"
+  knownFailure "strata-org/Strata#123: the pass drops a type annotation on a nested call" <|
+    TestDecl.property "mypass: the output typechecks"
+      fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog
 ```
+
+`knownFailure` is a prefix rather than a method, so the mark is the first thing you read
+and the property needs no parentheses around it.
 
 A marked property prints `? XFAIL`, its counterexample is suppressed, and it does not
 gate the exit code. **If it ever passes, the run fails** and tells you to drop the mark —
 so a fixed defect cannot go unnoticed, which is the whole reason to mark a property
 rather than delete or comment it out.
 
-Inside a `family`, add the expectation as a third component of the entry, so the member
-stays in the list where its neighbours can be read in order:
+Inside a `family`, give the `Expectation` as a third component of the entry instead. A
+prefix cannot address one entry of a list, and lifting the member out would cost the
+family its shape — so the member stays where its neighbours can be read in order:
 
 ```lean
       ("lift: the minted snapshot names are fresh",
@@ -285,11 +289,11 @@ so it is the only explanation a reader gets for why a red property reads as gree
 
 | | |
 |---|---|
-| `.knownFailure reason` | fails at the default trial count, every run. Fails the suite if it starts passing. |
-| `.rareFailure reason` | fails only on an occasional draw, so a short run passes and a long one fails. Gates in **neither** direction. |
+| `knownFailure reason` | fails at the default trial count, every run. Fails the suite if it starts passing. |
+| `rareFailure reason` | fails only on an occasional draw, so a short run passes and a long one fails. Gates in **neither** direction. |
 
-Choose by *frequency*, not by severity. `.knownFailure` on a property that holds on most
-runs turns the suite red on those runs; `.rareFailure` is the escape hatch for exactly
+Choose by *frequency*, not by severity. `knownFailure` on a property that holds on most
+runs turns the suite red on those runs; `rareFailure` is the escape hatch for exactly
 that case, and it asserts nothing at all — which is why it is the weaker choice wherever
 either would do.
 
@@ -302,7 +306,7 @@ lake test -- --known-failure="mypass: the output typechecks" --quick
 Repeatable, and it takes a **whole property name** rather than a substring — unlike
 `--only=`, since a substring would claim that every property in a group must fail, and
 the ones that hold would then be reported as failures. A name matching nothing is an
-error rather than a silent no-op. Use this while triaging; use `.knownFailure` for what
+error rather than a silent no-op. Use this while triaging; use `knownFailure` for what
 gets committed, since only the declaration can carry a reason.
 
 `--list` prints every mark and its reason, so the registry is the answer to "what is

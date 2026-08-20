@@ -130,10 +130,10 @@ def adtDisjSmt : TestDecl :=
     generated blocks. Gated on `--smt`. -/
 @[strata_property]
 def adtSolverAcceptsQuery : TestDecl :=
-  (TestDecl.action "adt: every emitted law query reaches a solver verdict"
-    (fun cfg => ActionResult.ofTuple <$>
-      adtSolverAcceptsQueryAction cfg.numTrials StrataGenerators.SmtEval.solverName)
-    (gate := some "smt")).knownFailure
-      "reported upstream: (1) a `bitvec 0` field is emitted as `(_ BitVec 0)`, whose \
-index SMT-LIB 2.6 requires to be positive; (2) a name that is not a bare SMT-LIB symbol \
-is interpolated verbatim into `declare-datatype`"
+  knownFailure "reported upstream: (1) a `bitvec 0` field is emitted as `(_ BitVec 0)`, \
+whose index SMT-LIB 2.6 requires to be positive; (2) a name that is not a bare SMT-LIB \
+symbol is interpolated verbatim into `declare-datatype`" <|
+    TestDecl.action "adt: every emitted law query reaches a solver verdict"
+      (fun cfg => ActionResult.ofTuple <$>
+        adtSolverAcceptsQueryAction cfg.numTrials StrataGenerators.SmtEval.solverName)
+      (gate := some "smt")

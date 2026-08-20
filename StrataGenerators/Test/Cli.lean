@@ -28,7 +28,7 @@ property, default 1000; `maxSize` = maximum generator size, default 100).
   anything. The answer to "did my property get picked up?".
 * `--known-failure=NAME` — treat `NAME` as known to fail for this run: suppress its
   counterexample and stop it gating the exit code. Repeatable. The permanent form is
-  `TestDecl.knownFailure` at the property, which carries a reason; this flag is for the
+  `knownFailure` at the property, which carries a reason; this flag is for the
   short cycle of work where you want the rest of the suite's colour while a defect is
   being triaged. Unlike `--only=`, it takes a **whole property name**, not a substring:
   a substring would silently claim that every property in a group must fail, and the
@@ -100,7 +100,7 @@ def Cli.select (cli : Cli) (ds : List TestDecl) : List TestDecl :=
 def Cli.markKnownFailures (cli : Cli) (ds : List TestDecl) : List TestDecl :=
   ds.map fun d =>
     if cli.knownFailures.contains d.name then
-      d.knownFailure "marked as a known failure on the command line"
+      knownFailure "marked as a known failure on the command line" d
     else d
 
 /-- `--known-failure=` arguments that name no registered property. A driver refuses to
