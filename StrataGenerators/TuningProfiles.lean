@@ -51,9 +51,9 @@ been measured anywhere from 13% to 19%. Re-run before reading a small difference
 | `expr: eval preserves fvars` | term mentions a free variable | 32% | **52%** | `exprFVarHeavy` |
 
 Two rows are honestly *not* there: `stmt: ANF …` and `proc: ANFEncoder …` (ten properties) run as
-identity checks — the encoder changed the program on 0–4% of samples under every profile — and no
-weight in reach fixes that. See "Composition" below for why, and `procAnfHeavy`'s absence for the
-measurement that says a plausible-looking profile bought nothing.
+identity checks — the encoder changed the program on 0–4% of samples under every profile. The reason
+is not a weight that is set wrong but the shape the pass keys on; see the ANF note below the
+procedure profiles.
 
 ## What the profiles do to the suite's own properties
 
@@ -127,10 +127,11 @@ itself on:
 * `typechecker accepts generated statements` (#1) fails only on a `funcDecl` — the honest
   spec/algorithm gap — so `stmtFuncDeclHeavy` is the profile that turns it into a fast, reliable
   reproducer.
-* `ANF is idempotent` / `ANF preserves typeability` need **nested expressions**: ANF hoists
-  sub-expressions, so on a program whose commands are all `init x int := 3` the encoder is the
-  identity. That knob is an *expression* knob, not a statement one, and it is the one place the
-  per-definition tuning model cannot reach — see "Composition" below.
+* `ANF is idempotent` / `ANF preserves typeability` need a **repeated** subexpression, which is a
+  harder thing to ask a generator for than it sounds — the encoder is common-subexpression
+  elimination, so it fires only when the *same* non-leaf, bvar-free expression occurs twice in one
+  body. No weight makes two independently drawn subterms equal; see the ANF note below the procedure
+  profiles for what does move the rate and by how little.
 
 **Procedures** (`proc: …`, 28 properties over three transform passes). Everything the passes
 need is in the procedure *bodies*, i.e. in the statement weights:
@@ -141,7 +142,8 @@ need is in the procedure *bodies*, i.e. in the statement weights:
   the `changed`-flag defect, a *declared function whose body* calls one (~0.5%).
   `procPrecondHeavy` raises `call` and `funcDecl` together, since a `funcDecl` is what carries a
   declared function into the program.
-* ANFEncoder needs nested expressions, with the same caveat as `stmt: ANF …`.
+* ANFEncoder needs a repeated subexpression in one procedure body, which no weight reliably buys —
+  see the note below.
 
 ## Composition: what a knob reaches, and what it does not
 
@@ -159,8 +161,8 @@ thread it into a *different* definition the body calls by name. Two consequences
   So `exprEvalHeavy` shapes the `expr:` family (which draws from `genLExprBase` directly) but
   not the expressions inside a `cmd` or a loop guard. Reaching those needs the sub-generator
   calls to take the tuning — tuning-passing style — which is a Basalt-level change, not a
-  weighting. Until then, the `stmt: ANF …` and PrecondElim-partial-call rates are not tunable
-  from here.
+  weighting. Until then the PrecondElim-partial-call rate is not tunable from here, and neither is
+  the one expression-level lever that would move the ANF rate (see the ANF note above).
 -/
 
 namespace StrataGenerators.TuningProfiles
@@ -372,15 +374,31 @@ def procPrecondHeavy : Tuning :=
   withWeights stmtDefault
     [(StmtIdx.funcDecl, 10), (StmtIdx.call, 6), (StmtIdx.funcDecl0, 10), (StmtIdx.call0, 6)]
 
-/-! **There is deliberately no ANFEncoder profile.** `proc: ANFEncoder …` (eight properties) and
-`stmt: ANF …` (two) need the encoder to *do* something, i.e. a command holding a non-atomic
-expression. Measured, the encoder changed the program on **0%** of samples under the default
-weights and on 0% under a `cmd`-heavy, `block`-heavy variant too — raising the number of commands
-does not make any *one* command's expression nested. The knob that would is `genLExpr`'s Indir
-split, which `genStmt` reaches by name and therefore untunably (see "Composition"). Until that is
-closed, the honest statement is that these ten properties run as identity checks, and the nearest
-available lever is `stmtLoopHeavy`: a loop guard is an extra expression per loop, which took
-`ANF≠id` from 0% to 3–4%. -/
+/-! **There is deliberately no ANFEncoder profile**, and the reason is about the pass rather than
+about the weights. `Core.ANFEncoder` is *common-subexpression elimination*, not expression
+flattening: `findANFEncoderTargets` collects the subexpressions of a whole procedure body, keeps the
+non-leaf bvar-free ones, and hoists only the **duplicates** (`findDuplicates`) into
+`var $__anf.n := …`. So `proc: ANFEncoder …` (eight properties) and `stmt: ANF …` (two) need the same
+expression to occur *twice in one body* — a nested expression on its own is not enough, and neither
+is any number of distinct ones.
+
+That is not a weight. Every subterm the generator draws is drawn independently, and no weighting of
+independent choices makes two of them equal. Two things do move the rate, both weakly:
+
+* **More expressions per body.** Collisions are roughly quadratic in the number of expressions a
+  body holds, so the density lever helps a little — and the best one is `stmtLoopHeavy`, not
+  anything `cmd`-shaped, because a `loop` carries a guard *and* a measure *and* an invariant list
+  while a command carries one expression. Measured: `ANF≠id` 0–1% at the defaults, 3–4% under
+  `stmtLoopHeavy`, and 0–2% under the `cmd`-heavy, `block`-heavy variant that this note replaces
+  (which is why that variant is not a profile).
+* **A degenerate expression distribution**, which would raise the collision probability directly.
+  That is a `genLExprBase` knob, so `genStmt` reaches it by name and untunably (see "Composition") —
+  and it would trade away exactly the breadth the `expr:` properties need.
+
+The observed firings are collisions of small terms: e.g. `if false then 0 else -1` drawn into two
+different loop invariants of one procedure, hoisted into a single `var`. Getting this family off the
+floor wants a generator that *shares* subterms — draw a subexpression once and use it in two places —
+which is a generator-structure change, and a well-motivated one given what the pass does. -/
 
 /-! ### Commands -/
 
