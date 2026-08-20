@@ -535,4 +535,102 @@ theorem hExprC_unsatisfiable :
     ¬ (∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d) := by
   intro h; exact not_GenLExprComplete 0 (h 0 [])
 
+-- ── The `funcDecl` rule is broken upstream ──────────────────────────────────
+
+/-! ### `StatementHasType'.funcDecl` never checks the function it declares
+
+```
+| funcDecl : ∀ C Γ L decl func md Δ,
+    ¬ decl.isRecursive →
+    FuncHasType' τ C Γ func →
+    TContext.Equiv Δ Γ →
+    StatementHasType' τ P C Γ L (.funcDecl decl md) (C.addFactoryFunction func.toLFunc) Δ
+```
+
+`decl` occurs in exactly one premise, `¬ decl.isRecursive`. The function that is
+*type-checked*, and that lands in the output context, is an unrelated `func`. The
+rule's own docstring says "the resulting `func` is added to `C`" — resulting from
+`decl` — but nothing connects them, and the algorithmic checker
+(`Core.StatementType`) does connect them:
+
+```
+let (decl', func, Env) ← PureFunc.typeCheck C Env decl   -- func := ofPureFunc decl, checked
+let C := C.addFactoryFunction func.toLFunc
+```
+
+Two consequences, both witnessed below by `funcDecl_illTyped_accepted`:
+
+1. **The spec accepts an ill-typed local declaration.** `decl` is never checked, so
+   `function f (x : int) : bool { x };` — whose body has type `int` against a declared
+   return type of `bool` — is well-formed under the rule. The real checker rejects it.
+2. **The output context is unconstrained.** The rule adds *any* well-typed function,
+   here one that is not even called `f`. Since `FuncHasType'` is a six-field structure
+   constraining no name, `attr`, `axioms`, `isRecursive` or precondition count — all
+   of which `genFunction_complete` requires — the added function can also be one
+   `genFunction` never produces. That is what blocks a side-condition-free
+   completeness theorem at a `funcDecl` node, and why `SpecComplete.ExprOk`'s
+   `.funcDecl` clause is `False`.
+
+The fix is to add the premise the algorithm already computes,
+`Function.ofPureFunc decl = .ok func` (or the `tyCompat`-style agreement, if
+`Function.typeCheck` annotates a signature field). Then `func` is determined by
+`decl`, its reachability follows from the declaration's, and the clause can go. -/
+
+/-- `function f (x : int) : bool { x };` — the body has type `int`, the declared
+    return type is `bool`. Nothing about this declaration is well-typed. -/
+def illTypedDecl : Imperative.PureFunc Expression :=
+  { name := ⟨"f", ()⟩, typeArgs := [], isConstr := false, isRecursive := false,
+    inputs := [(⟨"x", ()⟩, (.forAll [] .int : LTy))], output := (.forAll [] .bool : LTy),
+    body := some (LExpr.fvar () ⟨"x", ()⟩ (some .int)),
+    attr := #[], axioms := [], preconditions := [], measure := none }
+
+/-- A trivial well-typed function, whose name is not even the declared one. -/
+def unrelatedFunc : Function :=
+  { name := ⟨"g", ()⟩, typeArgs := [], inputs := [], output := .bool }
+
+/-- `unrelatedFunc` is well-typed in any context that knows `bool`: `FuncHasType'`
+    asks only for distinct inputs and type arguments, no undeclared type variables,
+    a well-kinded signature, and — vacuously, both being `none` — a typed body and
+    measure. -/
+theorem unrelatedFunc_wt (C : LContext CoreLParams) (Γ : TContext Unit)
+    (hbool : C.WellKindedTy .bool) :
+    FuncHasTypeA C Γ unrelatedFunc := by
+  refine { inputsNodup := ?_, typeArgsNodup := ?_, noUndeclaredVars := ?_,
+           signatureWellKinded := ?_, bodyTyped := ?_, measureTyped := ?_ }
+  · show (ListMap.keys ([] : @LMonoTySignature Unit)).Nodup
+    simp [ListMap.keys]
+  · show ([] : List TyIdentifier).Nodup
+    simp
+  · intro v hv
+    revert hv
+    simp [unrelatedFunc, ListMap.values, LMonoTys.freeVars, LMonoTy.bool, LMonoTy.freeVars]
+  · intro ty hty
+    simp only [unrelatedFunc, ListMap.values, List.mem_cons, List.not_mem_nil, or_false] at hty
+    subst hty
+    exact ⟨.bool, (congrArg (LMonoTy.tcons "bool") ∘ fun a => a) rfl, hbool⟩
+  · simp [unrelatedFunc]
+  · simp [unrelatedFunc]
+
+/-- **The counterexample.** The spec accepts a `funcDecl` of an *ill-typed*
+    declaration, and puts an *unrelated* function into the output context:
+
+    ```
+    program Core;
+
+    procedure caller ()
+    {
+      function f (x : int) : bool { x };
+    };
+    ```
+
+    Under this rule that statement is well-formed, and after it the context holds a
+    function called `g`. Both halves are wrong, and each on its own is enough to
+    force the spec change described above. -/
+theorem funcDecl_illTyped_accepted (P : Program) (C : LContext CoreLParams)
+    (Γ : TContext Unit) (L : List String) (hbool : C.WellKindedTy .bool) :
+    StatementHasTypeA P C Γ L (.funcDecl illTypedDecl default)
+      (C.addFactoryFunction unrelatedFunc.toLFunc) Γ :=
+  StatementHasType'.funcDecl C Γ L illTypedDecl unrelatedFunc default Γ
+    (by simp [illTypedDecl]) (unrelatedFunc_wt C Γ hbool) (tctxEquivRefl _)
+
 end StrataGenerators.Stmt.SpecComplete.Gaps
