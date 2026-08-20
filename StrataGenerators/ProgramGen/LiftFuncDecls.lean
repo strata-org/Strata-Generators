@@ -86,30 +86,52 @@ Measured over 20 draws at `numDecls := 6`, `size := 8`, and deterministic on 6 o
 the 15 injected shapes. `checkLiftInjectionFires` confirms the pass really ran and
 really hoisted a function on 20/20, so no property is scored vacuously.
 
-**Two defects, both machine-checked, both reachable from a well-typed program.**
+**Two defects, both machine-checked. The second is reachable from a well-typed
+program; the first was, until upstream narrowed what "well-typed" means.**
 
-* `checkLiftOutputTypechecks` — **the snapshot init is left behind in a nested
+* `checkLiftSnapshotsInScope` — **the snapshot init is left behind in a nested
   scope while the function is hoisted out of it.** When a `funcDecl` sits inside a
   `block` / `ite` / `loop` and is called anywhere outside that construct, the pass
   emits `var $__liftfncl_0 : int := c` *inside* the construct and rewrites the outer
   call site to `$__liftfncl_addC_1($__liftfncl_0, …)`. The snapshot is out of scope
-  there, so `Program.typeCheck` **accepts the input and rejects the output**:
+  there, so `Program.typeCheck` rejects the output:
 
   ```
   No free variables are allowed here! Free Variables: [$__liftfncl_0]
   ```
 
-  The four nesting shapes (`Placement.block`, `.ite`, `.elseArm`, `.loop`) reach it
-  and the two same-scope shapes (`.top`, `.blockIn`) do not, which isolates the
-  escape from the declaring scope as the cause. Core's own typechecker puts a `funcDecl`'s
-  name in scope for the whole enclosing procedure — that is *why* the input is
-  well-typed — so a call outside the declaring block is legal input, not a
-  malformed program.
+  The six escaping shapes (`Placement.block`, `.ite`, `.elseArm`, `.loop`, and the
+  `chain`/`measure` variants of the first two) reach it and the nine same-scope
+  shapes (`.top`, `.blockIn`) do not, which isolates the escape from the declaring
+  scope as the cause.
 
-  Severity: `liftInternalFuncDeclsPipelinePhase` is the **first** phase of
+  **Upstream has since fixed the typechecker half of this, and that is what makes
+  the finding harder to read now, not smaller.** When this was first measured,
+  Core's typechecker put a block-local `funcDecl`'s name in scope for the whole
+  enclosing procedure, so a call outside the declaring block was legal input, and
+  `Program.typeCheck` *accepted the input and rejected the output* — a
+  model-preserving pass turning a well-typed program into an ill-typed one.
+  `fix(core): Scope local funcDecls and typeDecls to their block` changed `goBlock`
+  in `StatementType.lean` to return the outer `LContext`, so a block-local
+  `funcDecl` is now scoped to its block exactly as a block-local variable always
+  was. The six escaping shapes are therefore **no longer well-typed input**.
+
+  The pass is unchanged: fed one of those shapes directly it still hoists the
+  function out and leaves the snapshot behind, which `checkLiftSnapshotsInScope`
+  (deliberately unguarded) still reports on 6 of 15 shapes. But
+  `checkLiftOutputTypechecks` is guarded on `progTypeChecks q`, so it now **passes
+  because it skips them**, and `liftTypecheckDiagnostic` now reads "the output
+  typechecks on all 15 injected shapes". Neither is evidence that the escape was
+  repaired — read the scope property, not the typecheck property. The `#guard`s in
+  "The two defects, minimally" pin this split explicitly.
+
+  Severity, as measured before the upstream fix:
+  `liftInternalFuncDeclsPipelinePhase` is the **first** phase of
   `transformPipelinePhases` and the pipeline's own `typeCheck` phase runs after all
-  of them (`Verifier.lean`), so this surfaces to a user as
-  `❌ Type checking error` on a program that was well typed as written.
+  of them (`Verifier.lean`), so this surfaced to a user as
+  `❌ Type checking error` on a program that was well typed as written. Reaching it
+  from legal input now needs a shape the injection does not build, since the only
+  placements the sweep uses are the ones upstream just made illegal.
 
 * `checkLiftFreshSnapshotNames` — **the minted names are not checked against the
   program's own identifiers.** A procedure that already declares
@@ -330,9 +352,11 @@ free variable a statement mentions has already been declared in an enclosing or
 current scope. A `block` / `ite` arm / `loop` body extends the scope for its own
 statements only, which is exactly the scoping the defect violates.
 
-`checkLiftOutputTypechecks` is the authoritative oracle (it is Strata's own
-checker); this one localises the failure to "a snapshot is used out of scope"
-rather than reporting a generic type error. -/
+`checkLiftOutputTypechecks` is the sharper oracle in principle (it is Strata's own
+checker), but it is guarded on the input typechecking and upstream has since made
+every escaping shape illegal input, so in practice this one is the oracle that
+still reports the escape — and it localises the failure to "a snapshot is used out
+of scope" rather than to a generic type error. -/
 
 /-- Every free variable named in an expression. -/
 def exprFvarNames (e : Expression.Expr) : List String :=
@@ -877,16 +901,21 @@ def checkLiftFreshSnapshotNames (p : Program) : Bool :=
     let snapshots := declared.filter (fun n => n.startsWith liftPrefix)
     nodup snapshots
 
-/-- **P7 — the output typechecks.** The sharp property, and the authoritative
-    oracle for scope correctness: Strata's own `Program.typeCheck` accepted the
+/-- **P7 — the output typechecks.** Strata's own `Program.typeCheck` accepted the
     input, so it must accept the output of a pass that claims to be
     model-preserving.
 
-    **This FAILS on all four escaping placements** (`.block`, `.ite`, `.elseArm`,
-    `.loop`). The pass hoists the function out of the nested scope but leaves the
-    snapshot `init` inside it, so a call site outside the construct names a
-    variable that is not in scope. See the module doc for the diagnostic and the
-    severity. -/
+    **This used to FAIL on all six escaping shapes** (`.block`, `.ite`, `.elseArm`,
+    `.loop`, and the `chain`/`measure` variants). The pass hoists the function out
+    of the nested scope but leaves the snapshot `init` inside it, so a call site
+    outside the construct names a variable that is not in scope.
+
+    **It now PASSES, and only because its guard skips those six shapes**: upstream
+    scoped a block-local `funcDecl` to its block, so a call after the block is no
+    longer legal *input* and `!progTypeChecks q` short-circuits every shape that
+    used to carry the failure. The pass is unchanged. Read
+    `checkLiftSnapshotsInScope`, which has no such guard, for the live claim; see
+    the module doc for the full account. -/
 def checkLiftOutputTypechecks (p : Program) : Bool :=
   (scenarioFails p (fun _ q r =>
     !progTypeChecks q || match r with
@@ -898,8 +927,12 @@ def checkLiftOutputTypechecks (p : Program) : Bool :=
     localises the failure to "a snapshot escaped its scope" rather than reporting a
     generic type error, and it holds independently of whether the draw typechecks.
 
-    **This FAILS on the same four placements**, which is what confirms the two
-    properties are seeing one defect and not two. -/
+    **This FAILS on 6 of the 15 shapes**, and is now the *only* one of the pair that
+    does. Being unguarded is what earns it that: `checkLiftOutputTypechecks` skips
+    the same six shapes since upstream made them illegal input, so this property
+    carries the finding on its own rather than corroborating it. That the two agreed
+    exactly, while both were live, is what confirmed they were seeing one defect and
+    not two. -/
 def checkLiftSnapshotsInScope (p : Program) : Bool :=
   (scenarioFails p (onOutput fun _ out =>
     (programProcs out).all (fun nq => procSnapshotsInScope nq.2))).isEmpty
@@ -1001,7 +1034,12 @@ A failing sweep says only *that* some shape broke. These name which one, for the
 Tyche panels and for anyone reading a counterexample. -/
 
 /-- The scenario labels on which the output fails to typecheck, with the
-    typechecker's own message for the first one. -/
+    typechecker's own message for the first one.
+
+    Reports clean on every draw since upstream scoped block-local `funcDecl`s: it
+    mirrors `checkLiftOutputTypechecks`, including its `!progTypeChecks q` skip, and
+    the six shapes that used to fail are no longer well-typed input.
+    `liftScopeDiagnostic` is the one that still names them. -/
 def liftTypecheckDiagnostic (p : Program) : String :=
   let bad := scenarioFails p (fun _ q r =>
     !progTypeChecks q || match r with
@@ -1052,9 +1090,10 @@ private def starBody : Scenario := ⟨"top/body/star", .top, .body, .star, false
 private def binderChain : Scenario := ⟨"top/chain/binder", .top, .body, .chain, false, true⟩
 
 -- The injection really is well typed on its own, so a failing property below is
--- about the pass and not about a malformed witness.
+-- about the pass and not about a malformed witness. `blockBody` is the exception
+-- and is pinned in the defect section below: since upstream scoped a block-local
+-- `funcDecl` to its block, a call after the block is no longer legal *input*.
 #guard progTypeChecks (soleScenario topBody)
-#guard progTypeChecks (soleScenario blockBody)
 #guard progTypeChecks (soleScenario chainBody)
 #guard progTypeChecks (soleScenario starBody)
 #guard progTypeChecks (soleScenario binderChain)
@@ -1101,12 +1140,23 @@ private def binderChain : Scenario := ⟨"top/chain/binder", .top, .body, .chain
 /-! ### The two defects, minimally -/
 
 -- **The snapshot escapes its declaring scope.** A `funcDecl` inside a labelled
--- block, called after the block: the input typechecks, the output does not.
-#guard progTypeChecks (soleScenario blockBody)
+-- block, called after the block: the pass hoists the function out of the block and
+-- leaves the snapshot `init` behind, so the rewritten call site names a variable
+-- that is not in scope there.
+--
+-- Upstream closed the *typechecker* half of this (`goBlock` no longer threads the
+-- block's `LContext` out, so a block-local `funcDecl` is scoped to its block like a
+-- block-local variable). The input shape is therefore no longer well typed, which
+-- is what takes `checkLiftOutputTypechecks` — guarded on `progTypeChecks` — green.
+#guard !progTypeChecks (soleScenario blockBody)
+#guard checkLiftOutputTypechecks emptyProg
+
+-- The pass itself is unchanged: fed the same shape directly, it still emits a
+-- program the typechecker rejects, and the snapshot is still out of scope. The
+-- structural property has no typechecking guard, so it still finds this.
 #guard match runLift (soleScenario blockBody) with
        | some (_, out) => !progTypeChecks out
        | none => false
-#guard !checkLiftOutputTypechecks emptyProg
 #guard !checkLiftSnapshotsInScope emptyProg
 
 -- The same shape with the call *inside* the block is fine, which isolates the
