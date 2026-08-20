@@ -15,7 +15,7 @@ Everything except the rendering lives here. That is deliberate: the reason for h
 second driver is to keep the LSpec dependency droppable, and that argument is only worth
 anything if the two drivers agree on *everything else*. So the import-root check, the
 `--list` and `--only` handling, the `--smt` solver check, the diagnostics and the Tyche
-pass are written once, and a driver is a `preflight`, a render, and a `postlude`.
+pass are written once, and a driver is a `setup`, a render, and a `cleanup`.
 -/
 
 namespace StrataGenerators.Test
@@ -42,11 +42,14 @@ def checkSolvers : IO (Option UInt32) := do
     serve `--list`, reject an empty selection or a duplicate name, check the solvers, and
     print the header.
 
+    "Setup" in the xUnit sense of the work that precedes a test run, not in the sense of
+    building anything: it allocates nothing and it has no counterpart to release.
+
     Returns `some code` when the driver should stop with that code, and `none` when it
     should go on and render `cli.select registry`. It does not return the selection,
     because `TestDecl` lives in `Type 1` and so cannot cross an `IO` boundary;
     `Cli.select` is pure, so a driver simply calls it. -/
-def preflight (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
+def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   -- Refuse to run against a stale import root. This binary was linked from the old
   -- root, so a property file added since then is not in `registry` at all. Rewriting
   -- the root and asking for a re-run is the only honest option; a green suite that
@@ -81,8 +84,13 @@ def preflight (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   IO.println ""
   return none
 
-/-- Everything a driver does after the suite. Neither part affects the exit code. -/
-def postlude (cli : Cli) (selected : List TestDecl) (diags : List Diagnostic) : IO Unit := do
+/-- Everything a driver does after the suite: run the registered diagnostics, then write
+    the Tyche panels. Neither part affects the exit code.
+
+    Note that this releases no resource, despite the name. It *reports*: the diagnostics
+    print coverage statistics and localisation tallies, and the Tyche pass writes the
+    panel file. Nothing here is safe to skip if you want those outputs. -/
+def cleanup (cli : Cli) (selected : List TestDecl) (diags : List Diagnostic) : IO Unit := do
   -- Diagnostics are skipped under a filter: a `--only` run is a run about one property,
   -- and six unrelated distribution reports would bury its result.
   if cli.only.isEmpty then

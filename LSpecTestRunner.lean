@@ -52,7 +52,7 @@ def node (cfg : RunConfig) (d : TestDecl) : TestSeq :=
 
 def main (args : List String) : IO UInt32 := do
   let cli := parseCli args
-  if let some code ← preflight cli registry then
+  if let some code ← setup cli registry then
     return code
   let selected := cli.select registry
 
@@ -61,5 +61,5 @@ def main (args : List String) : IO UInt32 := do
     (group, [props.foldr (fun d rest => node cli.run d ++ rest) TestSeq.done])
   let exitCode ← lspecIO (.ofList suites) []
 
-  postlude cli selected diagnostics
+  cleanup cli selected diagnostics
   return exitCode

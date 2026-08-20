@@ -87,7 +87,7 @@ def regenerate : IO (Bool × Nat) := do
   IO.FS.writeFile rootPath contents
   return (true, mods.size)
 
-/-- A driver's pre-flight check. When the root is stale this rewrites it and returns
+/-- A driver's setup check. When the root is stale this rewrites it and returns
     `true`, meaning "do not run: the binary was linked from the old root, so re-run".
 
     Best-effort: if `StrataTests/` cannot be read — an out-of-tree build, a different

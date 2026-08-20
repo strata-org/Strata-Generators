@@ -30,10 +30,10 @@ def diagnostics : List Diagnostic := strata_diagnostics%
 
 def main (args : List String) : IO UInt32 := do
   let cli := parseCli args
-  if let some code ← preflight cli registry then
+  if let some code ← setup cli registry then
     return code
   let selected := cli.select registry
 
   let exitCode ← runRegistry selected cli.run
-  postlude cli selected diagnostics
+  cleanup cli selected diagnostics
   return exitCode
