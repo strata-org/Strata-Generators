@@ -128,9 +128,21 @@ def PropertyRunner.withRender (spec : PropertyRunner α) (render : α → String
 /-- How a property gets its verdict. The `α` of the sampled shapes is existential,
     so properties over different input types share one registry. -/
 inductive Body where
-  /-- Draw `numTrials` inputs from `spec`, score each with `check`, and minimize
-      the first counterexample. The shape of essentially every property. -/
-  | sampled {α : Type} (spec : PropertyRunner α) (check : α → Bool)
+  /-- Draw `numTrials` inputs from `runner`, score each with `check`, and minimize the
+      first counterexample. The shape of essentially every property.
+
+      `check` returns a `Prop`, and two instances travel with it because each is needed
+      by a different consumer and neither can be recovered later:
+
+      * `inst` is what Plausible runs. It has to be captured *here*, at the registration
+        site, because that is the only place the shape of `check x` is known — and the
+        shape is what selects the `PrintableProp` instance that makes a counterexample
+        legible. Rebuilding `Testable` from `dec` further down would fall back to the
+        catch-all and report `issue: ⋯ does not hold`.
+      * `dec` is what the Tyche panel and the shrinker need, since both must *decide*
+        each candidate rather than merely test it. -/
+  | sampled {α : Type} (runner : PropertyRunner α) (check : α → Prop)
+      (dec : DecidablePred check) (inst : ∀ x, Testable (check x))
   /-- One constructed witness: the verdict is a closed `Bool`, with no sampling.
       For a claim whose sharpest statement is a single program or operator —
       a pipeline phase's no-op, a specific bitvector width — where sampling would
@@ -194,8 +206,8 @@ structure Diagnostic where
 
 -- ── Smart constructors ────────────────────────────────────────────────
 
-/-- **The way to state a property.** A `Bool`-valued check over a type Plausible can
-    sample: the generator, the renderer and the shrinker come from that type's
+/-- **The way to state a property.** A decidable `Prop` over a type Plausible can
+    sample: the generator, the printer and the shrinker come from that type's
     `Arbitrary`/`Repr`/`Shrinkable` instances, and the Tyche axes from its
     `TycheFeatures` instance.
 
@@ -204,23 +216,31 @@ structure Diagnostic where
     annotation is what selects the generator:
 
     ```lean
-    .property "mypass: idempotent" fun (gp : GenProgram) => checkMine gp.prog
+    .property "mypass: idempotent"
+      fun (gp : GenProgram) => myPass (myPass gp.prog) = myPass gp.prog
     ```
+
+    A `Bool`-valued check works unchanged, since `Bool` coerces to `Prop`, so a named
+    `check*` predicate can be handed over as-is. Stating the claim as a `Prop` is worth
+    it wherever the shape is an equality or an order: Plausible's `PrintableProp` then
+    prints *both sides* of the failing comparison instead of the single word `false`.
 
     `TestDecl.forAll` is the same thing with the runner named explicitly, for the rare
     property that wants something other than its type's default. -/
 def TestDecl.property (name : String)
     [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
-    (check : α → Bool) (gate : Option String := none) : TestDecl :=
-  { name, gate, body := .sampled (PropertyRunner.ofInstances α) check }
+    (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
+    (gate : Option String := none) : TestDecl :=
+  { name, gate, body := .sampled (PropertyRunner.ofInstances α) check dec inst }
 
 /-- A property over an explicitly named `PropertyRunner`, for the case where the type's
     default instances are not what you want — a narrowed draw, a diagnostic renderer,
     an extra Tyche axis. The explicit-generator sense of QuickCheck's `forAll`. Prefer
     `TestDecl.property`. -/
-def TestDecl.forAll (name : String) (runner : PropertyRunner α) (check : α → Bool)
+def TestDecl.forAll (name : String) (runner : PropertyRunner α) (check : α → Prop)
+    [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
     (gate : Option String := none) : TestDecl :=
-  { name, gate, body := .sampled runner check }
+  { name, gate, body := .sampled runner check dec inst }
 
 /-- A closed-`Bool` property with no generated input. -/
 def TestDecl.witness (name : String) (verdict : Bool)
@@ -245,15 +265,20 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
     This is what `@[strata_properties]` is for. Pairing them here rather than
     keeping a separate list of name constants is what makes it structurally
     impossible to attach a name to the wrong check — the failure mode the old
-    two-list arrangement guarded against with a `#guard`. -/
+    two-list arrangement guarded against with a `#guard`.
+
+    The elements are `Bool`-valued rather than `Prop`-valued, because the instances a
+    `Prop` check needs are resolved per-check at the registration site, and a list
+    literal offers no such site. Every family here scores with a named `check*`
+    predicate, which returns a `Bool` anyway. -/
 def family [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
     (ps : List (String × (α → Bool))) : List TestDecl :=
-  ps.map fun (name, check) => .property name check
+  ps.map fun (name, check) => .property name (fun x => check x = true)
 
 /-- `family` over an explicitly named `PropertyRunner`. -/
 def familyOf (runner : PropertyRunner α) (ps : List (String × (α → Bool))) :
     List TestDecl :=
-  ps.map fun (name, check) => .forAll name runner check
+  ps.map fun (name, check) => .forAll name runner (fun x => check x = true)
 
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
@@ -316,7 +341,7 @@ def Outcome.ofTestResult (cfg : Configuration) {p : Prop} : TestResult p → Out
   | .failure _ xs n =>
     { passed := false, message := some (Testable.formatFailure "Found problems!" xs n) }
 
-/-- Run a `Bool`-valued check over a generator through Plausible's own runner.
+/-- Run a decidable `Prop` over a generator through Plausible's own runner.
 
     The runner's fields are supplied as explicit instances rather than synthesized,
     which is the trick that lets the input type be existential:
@@ -327,10 +352,15 @@ def Outcome.ofTestResult (cfg : Configuration) {p : Prop} : TestResult p → Out
 
     `NamedBinder` is applied by hand because `varTestable` matches only on a
     decorated `∀`; `mk_decorations` cannot help here, since the proposition is built
-    from a term rather than written as syntax. -/
+    from a term rather than written as syntax.
+
+    The `Prop` reaches Plausible *undecided*, which is what buys the readable
+    counterexample — `issue: 1 = 2 does not hold` rather than
+    `issue: false does not hold`. Deciding it first erases the shape `PrintableProp`
+    reads. -/
 def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
-    (check : α → Bool) (cfg : Configuration) : IO Outcome := do
-  let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x = true)) cfg
+    (check : α → Prop) [∀ x, Testable (check x)] (cfg : Configuration) : IO Outcome := do
+  let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x)) cfg
   pure (Outcome.ofTestResult cfg r)
 
 /-- Run one property. Returns a `skipped` outcome when the run's gates do not
@@ -339,9 +369,9 @@ def TestDecl.run (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
   match d.body with
-  | .sampled runner check =>
+  | .sampled runner check _ inst =>
     @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
-      check cfg.toConfiguration
+      check inst cfg.toConfiguration
   | .witness verdict => pure { passed := verdict }
   | .witnesses cases render check _ =>
     let failures := cases.filter (fun c => !check c)

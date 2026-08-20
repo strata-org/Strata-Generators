@@ -133,17 +133,18 @@ import StrataGenerators.Test
 
 open StrataGenerators.Test
 
-/-- My pass does not change a program it has already changed. -/
-def checkMyPassIdempotent (p : Core.Program) : Bool :=
-  myPass (myPass p) == myPass p
-
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .property "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .property "mypass: the pass is idempotent"
+    fun (gp : GenProgram) => myPass (myPass gp.prog) = myPass gp.prog
 ```
 
 A name and a check. That is the whole registration. `lake test` discovers it, reports it under a `mypass`
 group, and gives it a Tyche panel.
+
+The check is a decidable `Prop`, so a failing draw reports the comparison itself
+(`issue: 3 ≤ 2 does not hold`) rather than the word `false`. A `Bool`-valued `check*`
+helper is accepted unchanged, since `Bool` coerces to `Prop`.
 
 The generator is chosen the way Plausible and QuickCheck choose it: by the **type** of
 the quantified value. `GenProgram` carries the `Arbitrary`/`Repr`/`Shrinkable` instances

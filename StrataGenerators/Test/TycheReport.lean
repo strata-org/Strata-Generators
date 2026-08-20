@@ -57,18 +57,24 @@ private instance : Tyche.TycheSample Mark where
       features := m.features }
 
 /-- Draw one sample for a property's panel and score it. `maxSize` bounds the
-    generator size drawn per sample. -/
-private def sampleMark (spec : PropertyRunner α) (check : α → Bool) (name : String)
+    generator size drawn per sample.
+
+    `check` is the *decided* form of the property. A panel has to classify every sample
+    and a shrinker has to reject every candidate, so both need a decision procedure
+    rather than a `Prop`; `Body.sampled` carries the `DecidablePred` instance that
+    supplies it. Plausible gets the undecided `Prop` instead, which is what keeps a
+    counterexample's failure message legible. -/
+private def sampleMark (runner : PropertyRunner α) (check : α → Bool) (name : String)
     (maxSize : Nat) : IO Mark := do
   let size ← IO.rand 0 maxSize
-  let x ← Plausible.Gen.run spec.gen size
+  let x ← Plausible.Gen.run runner.gen size
   let passed := check x
-  let shown := if passed then x else minimizeWith spec.shrink (fun y => !check y) 400 x
-  pure { representation := spec.render shown
+  let shown := if passed then x else minimizeWith runner.shrink (fun y => !check y) 400 x
+  pure { representation := runner.render shown
          passed
          features := (name, .nominal (if passed then "pass" else "fail"))
            :: ("generator_size", .ordinal size)
-           :: spec.features shown }
+           :: runner.features shown }
 
 /-- Write the panel for one property. A property that supplied its own `panel`
     writer gets that; otherwise the panel is derived from the body, and a
@@ -79,8 +85,10 @@ def writePanel (handle : IO.FS.Handle) (d : TestDecl) (cfg : RunConfig)
   if let some write := d.panel then
     return ← write handle cfg numSamples runStart
   match d.body with
-  | .sampled spec check =>
-    Tyche.runInto handle (sampleMark spec check d.name cfg.maxSize) d.name numSamples runStart
+  | .sampled runner check dec _ =>
+    Tyche.runInto handle
+      (sampleMark runner (fun x => @decide (check x) (dec x)) d.name cfg.maxSize)
+      d.name numSamples runStart
   | .witnesses cases render check features =>
     Tyche.writeInto handle
       (cases.map fun c =>

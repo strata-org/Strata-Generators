@@ -14,13 +14,10 @@ import StrataGenerators.Test
 open Core
 open StrataGenerators.Test
 
-/-- My pass does not change a program it has already changed. -/
-def checkMyPassIdempotent (p : Core.Program) : Bool :=
-  myPass (myPass p) == myPass p
-
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .property "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .property "mypass: the pass is idempotent"
+    fun (gp : GenProgram) => myPass (myPass gp.prog) = myPass gp.prog
 ```
 
 Then:
@@ -38,7 +35,7 @@ The two arguments to `TestDecl.property` are the whole interface:
 | argument | meaning |
 |---|---|
 | `"mypass: the pass is idempotent"` | the name. Unique across the suite; it is the report line, the Tyche panel title, and — through its `mypass:` prefix — the report group. |
-| `fun (gp : GenProgram) => …` | the check. **The annotation picks the generator.** |
+| `fun (gp : GenProgram) => …` | the check, a decidable `Prop`. **The annotation picks the generator.** |
 
 There is no group argument. A report group is the `area` of an `area: description` name,
 derived rather than declared, so it cannot disagree with the name. A prefix nothing has
@@ -54,6 +51,26 @@ fails.
 
 Naming convention: `area: description`, lower case, where `area` matches the report
 group. A failing line then reads as a sentence.
+
+## `Prop` or `Bool`
+
+The check is a decidable `Prop`, and a `Bool`-valued predicate is accepted unchanged,
+since `Bool` coerces to `Prop`. The difference is the failure message, because Plausible
+reads the *shape* of the proposition:
+
+| you write | a failing draw reports |
+|---|---|
+| `fun gp => sizeProgram gp.prog ≤ 2` | `issue: 3 ≤ 2 does not hold` |
+| `fun gp => gp.prog.decls.length = 99` | `issue: 0 = 99 does not hold` |
+| `fun gp => checkMine gp.prog` (a `Bool`) | `issue: false does not hold` |
+
+So state the claim inline as a `Prop` where its shape is an equality or an order. Reach
+for a named `check*` predicate in a `*/TestSupport` module when the check is long, is
+reused, is worth pinning with a `#guard`, or is shared with a bespoke Tyche panel — most
+of this suite is in that position, which is why most of it returns `Bool`.
+
+`family` takes `Bool`-valued checks only. The instances a `Prop` check needs are
+resolved per-check at the registration site, and a list literal offers no such site.
 
 ## How it gets picked up
 
@@ -227,7 +244,8 @@ its own declaration.
 ## Tyche panels
 
 A registered property gets a panel automatically, built from its `PropertyRunner` —
-which for almost every property is the one its input type's instances induce: `Repr` draws the sample, `TycheFeatures` gives the axes, the verdict is the
+which for almost every property is the one its input type's instances induce — and from
+the check's `Decidable` instance, since a panel must classify every sample: `Repr` draws the sample, `TycheFeatures` gives the axes, the verdict is the
 mark's status, and `Shrinkable` minimizes a failing sample before display. There is
 nothing to register.
 

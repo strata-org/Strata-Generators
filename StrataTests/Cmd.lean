@@ -25,7 +25,7 @@ def cmdSingleVerdict : List TestDecl :=
     ("cmd: store type preservation under eval",
      fun gc => checkStoreTypePreservation gc.cmd gc.inCtx) ].map
   fun (name, check) =>
-    (TestDecl.property name check).withPanel
+    (TestDecl.property name (fun gc => check gc = true)).withPanel
       (genCmdProp (fun c ctx => check ⟨c, ctx, cmdOutCtx ctx c⟩))
 
 /-- For a generated command sequence, the output context is the input context with

@@ -23,13 +23,10 @@ import StrataGenerators.Test
 
 open StrataGenerators.Test
 
-/-- My pass does not change a program it has already changed. -/
-def checkMyPassIdempotent (p : Core.Program) : Bool :=
-  myPass (myPass p) == myPass p
-
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .property "mypass: the pass is idempotent" fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
+  .property "mypass: the pass is idempotent"
+    fun (gp : GenProgram) => myPass (myPass gp.prog) = myPass gp.prog
 ```
 
 A name and a check. That is the whole registration: `lake test` runs it, reports it
@@ -37,9 +34,15 @@ under a `mypass` group, and gives it a Tyche panel — with no other file edited
 `lake test -- --list` shows what the harness picked up;
 `lake test -- --only="mypass:" --quick` iterates on just this group.
 
+The check is a decidable `Prop`, so a claim reads as the statement it is, and a failing
+draw reports the comparison rather than the word `false`: `issue: 3 ≤ 2 does not hold`
+rather than `issue: false does not hold`. A `Bool`-valued predicate is accepted
+unchanged — `Bool` coerces to `Prop` — so a named `check*` helper can be handed over
+as-is, and most of this suite does exactly that.
+
 The generator is chosen the way Plausible and QuickCheck choose it: **by the type of
 the quantified value**. `GenProgram` carries `Arbitrary`/`Repr`/`Shrinkable` instances,
-so annotating the binder selects the whole-program generator, its renderer and its
+so annotating the binder selects the whole-program generator, its printer and its
 shrinker at once.
 
 The report group is the `area` of an `area: description` name — derived, never declared,
@@ -56,6 +59,12 @@ A type is usable with `property` as soon as Plausible can sample it:
 | `Repr α` | how a counterexample is printed |
 | `Shrinkable α` | how a counterexample is reduced |
 | `TycheFeatures α` | the Tyche axes (optional; a catch-all instance gives none) |
+
+The check's own `Decidable` instance is resolved at the registration site too. That is
+where it has to happen: Plausible receives the `Prop` undecided, so the shape is still
+visible to `PrintableProp` and the failure message can name both sides, while the Tyche
+panel and the shrinker receive the decided form, since they must classify every sample
+rather than merely test it. Both travel with the property in `Body.sampled`.
 
 `TycheFeatures` is this package's addition, for the same reason the other three are
 classes: `num_decls`, `decl_kinds` and `rejection_cause` are facts about the *type*,

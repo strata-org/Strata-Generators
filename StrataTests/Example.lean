@@ -23,22 +23,20 @@ open StrataGenerators.Program.TestSupport
 
 /-- The reducible size of a program is at least its declaration count.
 
-    A modest claim, but a load-bearing one: `sizeProgram` is the measure the
-    whole-program shrinker reports progress against, so a size that could ignore
-    declarations would make the shrinker's reduction figures meaningless. -/
-def checkSizeAtLeastDecls (p : Core.Program) : Bool :=
-  p.decls.length ≤ sizeProgram p
+    A modest claim, but a load-bearing one: `sizeProgram` is the measure the whole-program
+    shrinker reports progress against, so a size that could ignore declarations would make
+    the shrinker's reduction figures meaningless.
 
-/-- Registering the property. A name and a check, and nothing else.
+    Stated inline as a `Prop`. A failing draw then reports the comparison itself —
+    `issue: 3 ≤ 2 does not hold` — because Plausible reads the shape of the proposition.
+    A `Bool`-valued check reports only `issue: false does not hold`.
 
-    `property` picks the generator the way Plausible and QuickCheck do: from the **type**
-    of the argument. `GenProgram` carries `Arbitrary`/`Repr`/`Shrinkable` instances, so
-    annotating the binder is all it takes to select the whole-program generator, its
-    printer and its shrinker.
-
-    The report group is the name's `example:` prefix. It is derived, not declared, so it
-    cannot disagree with the name. -/
+    So prefer an inline `Prop` for a claim whose shape is an equality or an order. Prefer
+    a named `check*` predicate in a `*/TestSupport` module when the check is long, is
+    reused, is worth pinning with a `#guard`, or is shared with a bespoke Tyche panel;
+    such a predicate returns a `Bool` and is accepted here unchanged, since `Bool`
+    coerces to `Prop`. -/
 @[strata_property]
 def sizeAtLeastDecls : TestDecl :=
   .property "example: sizeProgram is at least the declaration count"
-    (fun (gp : GenProgram) => checkSizeAtLeastDecls gp.prog)
+    (fun (gp : GenProgram) => gp.prog.decls.length ≤ sizeProgram gp.prog)
