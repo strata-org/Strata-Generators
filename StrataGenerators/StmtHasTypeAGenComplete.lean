@@ -22,31 +22,112 @@ returning `Prop`, not inductive relations:
 
 * **`InGenShape`** — the two shape facts the generator fixes and the spec leaves
   free: metadata at `default`, and an `init`'s annotation monomorphic (`.forAll []`).
-  (The empty-`assert`/`assume`/`cover`-label condition is *gone*: the generator now
-  samples labels via `String.arbitrary`. The `typeDecl` `.bound` condition is *gone*:
-  the generator now samples both `Boundedness` values. The `init` groundness
-  condition is *gone*: procedure bodies are generated under a context that marks the
-  type parameters rigid, so `RigidAnnotCompat` pins the stored type to the
-  annotation — see `hRigid`.)
-* **`AlphabetOk`** — the identifier-alphabet kernel: every generated *name*
-  (block/invariant labels, `init` variable, type-constructor name and params) lies
-  in the appropriate generator's support and, where relevant, dodges reserved
-  keywords; `assert`/`assume`/`cover` labels lie in `String.arbitrary`'s support;
-  and each generated *list* is within the size budget available at its depth.
+  (The `typeDecl` `.bound` condition is *gone*: the generator now samples both
+  `Boundedness` values. The `init` groundness condition is *gone*: procedure bodies
+  are generated under a context that marks the type parameters rigid, so
+  `RigidAnnotCompat` pins the stored type to the annotation — see `hRigid`.)
+* **`AlphabetOk`** — the identifier-alphabet + size kernel. Every generated *name*
+  lies in `genIdentName`'s support, which is exactly the legal Core bare identifiers
+  that are not reserved keywords. That covers `assert`/`assume`/`cover` labels,
+  block and invariant labels, the `init` variable, and a type-constructor name and
+  its parameters. Each generated *list* is within the size budget available at its
+  depth. The `init` type lies in `genLMonoTy`'s support, and a `funcDecl`'s
+  declaration lies in `genDecl`'s support.
 * **`CallOk`** — the call recipe shape: a `.cmd (.call …)` statement is reachable
-  only when its argument list is exactly the generator's `mkArgs`/`outTargets`
-  recipe over some callee `s`, at the identity type-instantiation `σ = []`
-  (the generator instantiates no type arguments). `True` on every non-call node,
-  recursing into nested bodies.
+  only when its argument list is the generator's `mkArgs`/`outTargets` recipe over
+  some callee `s`, at some sampled type-instantiation and some argument-order mask.
+  `True` on every non-call node, recursing into nested bodies.
 
-Expression- and function-level side conditions are **bundled**, exactly as in the
-soundness proof, into `GenLExprComplete` / a `genFunction`-reachability hypothesis,
-taken here as environment hypotheses at every depth.
+* **`ExprOk`** — expression reachability, threaded through the evolving scope and
+  size: every expression the statement holds is in `genLExpr`'s support at the size
+  of *its own* nesting level, in the scope available *there*. This replaced two
+  environment hypotheses that were **unsatisfiable**; see the section below.
+
+## You cannot remove the three predicates
+
+`StmtHasTypeAGenCompleteGaps.lean` proves that each of the three predicates is
+necessary. For each one it gives a statement that `StatementHasTypeA` accepts and
+that `genStmt`'s support does not hold. The gap theorems are `metadata_gap`,
+`label_gap` and `outTarget_gap`.
+
+Two of the gaps were closed by a change to the generators, so only one of the
+three now has a counterexample you can write in Core:
+
+* **Closed.** `genAssertCmd`, `genAssumeCmd`, `genCoverCmd` and `genFreshName` now
+  draw from `genIdentName` rather than from `String.arbitrary` or from
+  `NonEmptyString.arbitrary`, whose supports hold the alphanumeric strings only. So
+  every name in a parsed program is now reachable, and `label_gap` needs a witness
+  that lives in the abstract syntax tree alone.
+* **Closed.** `mkArgs` now takes an interleaving mask, so the order of an `inArg`
+  and an `outArg` is free. A call such as `call p(out y, 1);` is now reachable.
+* **Open.** `outTargets` still picks the receiving variable of each `out` parameter
+  itself, and the spec accepts any writable variable of the right type. See
+  `outTarget_gap`. `genStmt` also still emits `default` metadata, and the grammar
+  has an annotation prefix on every statement. See `metadata_gap`.
+
+Three upstream predicates come close, but none of them discharges a condition:
+
+* `Imperative.Stmt.stripMetaData` erases the metadata of a `block`, an `ite`, a
+  `loop`, an `exit`, a `funcDecl` and a `typeDecl`. It leaves a `.cmd` node
+  untouched, and the metadata gap is at a `.cmd` node.
+* `Core.WF.WFcallProp.lhsWF` states the `Nodup` fact that `CallOk` needs for the
+  write keys of a call. Its parent `Core.WF.WFStatementProp` is not recursive:
+  its `block`, `ite` and `loop` cases are empty structures. So it says nothing
+  about a call inside a body.
+* `LContext.WellKindedTy` (a premise of the `init` rules) bounds the type
+  constructors of an annotation. `genLMonoTy`'s support also bounds the depth of
+  the type and its free type variables, so `WellKindedTy` is too weak for the
+  `init` clause of `AlphabetOk`.
+
+`InGenShape`'s other clause demands a monomorphic `init` annotation. The Core
+front end builds only `.forAll []` local annotations, so no parsed program can
+violate that clause. It is necessary at the level of the abstract syntax tree
+only.
 
 The procedure-call *correspondence* is a top-level hypothesis `ProcSigComplete procs P`
 (the converse of `ProcSigCorresponds`): the callee a well-typed call resolves in `P`
 is listed in the generator's `procs`. The `immutableVars` parameter is fixed to `[]`
 (a procedure-level notion, vacuous at the statement level: `ctx.writable [] = ctx`).
+
+## `spec_complete` used to be vacuous. It is not any more.
+
+It used to take two environment hypotheses:
+
+```
+(hExprC     : ∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d)
+(hFuncReach : ∀ d C Γ (func : Function), FuncHasTypeA C Γ func →
+                func ∈ SetGen.support (genFunction (G := SetGen.Set) [] octx d))
+```
+
+**Both were unsatisfiable, so the theorem said nothing.**
+`Gaps.hExprC_unsatisfiable` machine-checks the first. `GenLExprComplete` asked that
+*every* expression the spec accepts at `τ` be in the support of `genLExpr … d τ`, and
+that fails twice over, at a leaf:
+
+* **Scope.** `HasTypeA.fvar` accepts an *annotated* free variable against the empty
+  context, since it reads the type off the annotation. With `fctx = []` nothing in
+  the support has a free variable (`genLExpr_no_fvars`). This is depth-independent.
+* **Depth.** `genLExpr` recurses structurally on the depth, so the support at a fixed
+  depth is depth-bounded, while the spec accepts terms of every depth.
+
+Making the depth existential does **not** help — the predicate is false at each
+individual depth, so `∃ d, GenLExprComplete …` is false too
+(`Gaps.not_exists_depth_GenLExprComplete`). The quantifier had to move *inside*, to
+one expression at a time, in a scope that holds that expression's free variables and
+at a depth that bounds it. That is `ExprOk`, and `exprOk_assert_of_syntactic`
+discharges a clause of it from exactly the syntactic side conditions of the proven
+`genLExpr_complete`. `exprOk_assert_true` exhibits a statement satisfying it.
+
+`hFuncReach` failed for the same kind of reason, and no side condition on the
+*statement* can repair it: upstream's `StatementHasType'.funcDecl` adds an
+**arbitrary** well-typed `func` to the context, unrelated to the `decl` the statement
+declares, so the statement does not determine the function whose reachability is
+needed. The two sides also disagree outright — `genFunction_complete` requires the
+name to be in `genIdentName`'s support, `preconditions.length ≤ 1`,
+`isRecursive = false`, `attr = #[]` and `axioms = []`, while `FuncHasType'` (a
+six-field structure) constrains none of them. So `ExprOk`'s `.funcDecl` clause is
+`False`: **the theorem now covers every statement except a local `funcDecl`.** That
+is a real restriction, and closing it needs the spec to tie `func` to `decl`.
 -/
 
 namespace StrataGenerators.Stmt.SpecComplete
@@ -67,13 +148,16 @@ theorem procToTCtx_fresh_rev (ctx : VarCtx) (x : Identifier Unit)
   | none => rfl
   | some m => rw [hc] at h; simp at h
 
+/-- A fresh `genIdentName` name is in `genFreshName`'s support. `genFreshName`
+    draws from `genIdentName`, whose support holds no keyword, so this needs no
+    separate `dodgeKeyword` premise. -/
 theorem freshName_reach (ctx : VarCtx) (x : Identifier Unit)
-    (hname : x.name ∈ SetGen.support (NonEmptyString.arbitrary (G := SetGen.Set)))
-    (hdodge : dodgeKeyword x.name = x.name) (hfresh : Map.find? ctx x = none) :
+    (hname : x.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hfresh : Map.find? ctx x = none) :
     x.name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) := by
   simp only [genFreshName, mem_support_bind_iff]
   refine ⟨x.name, hname, ?_⟩
-  rw [hdodge]; simp only [mem_support_ite_iff, mem_support_pure_iff]
+  simp only [mem_support_ite_iff, mem_support_pure_iff]
   refine Or.inl ⟨?_, trivial⟩
   unfold VarCtx.isFresh VarCtx.find?; obtain ⟨nm, u⟩ := x; cases u; rw [hfresh]; rfl
 
@@ -163,9 +247,12 @@ theorem init_stored_eq_rigid {rigid : List TyIdentifier} {mty mtyS : LMonoTy} {t
 -- Recursive `Prop`-valued functions (NOT inductive relations). Two facts the
 -- generator fixes and the spec leaves free: metadata `default`, and monomorphic
 -- `init` annotations. Everything else the generator now reaches (labels via
--- `String.arbitrary`, `typeDecl` bounds via sampling, `init` stored type via the
+-- `genIdentName`, `typeDecl` bounds via sampling, `init` stored type via the
 -- rigid context). Procedure `call` is admissible here (its extra recipe/σ
 -- conditions live in `CallOk`).
+--
+-- `metadata_gap` (`StmtHasTypeAGenCompleteGaps.lean`) shows that the metadata
+-- clause is necessary.
 
 mutual
 /-- The metadata/annotation shape the generator emits, recursively over the tree. -/
@@ -194,21 +281,31 @@ end
 
 mutual
 /-- The identifier-alphabet + size kernel, recursively over the tree, at size `n`.
-    Names lie in their generator's support (dodging keywords where relevant), and
-    each generated list is within the budget available at its nesting depth. -/
+    Names lie in their generator's support, and each generated list is within the
+    budget available at its nesting depth.
+
+    Every *name* clause is now one and the same condition: membership in
+    `genIdentName`'s support, which is exactly the legal Core bare identifiers
+    that are not reserved keywords (`mem_support_genIdentName_iff_isId`). So no
+    program that the Core parser accepts can break a name clause. The clauses
+    remain because a `Statement` holds a bare `String`, which need not be a legal
+    identifier. `label_gap` (`StmtHasTypeAGenCompleteGaps.lean`) is the
+    counterexample, and it is no longer a program you can write in Core.
+
+    A separate `dodgeKeyword` conjunct is gone from the `init` clause:
+    `genIdentName`'s support already excludes every keyword. -/
 def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
   | n, .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)) =>
-      x.name ∈ SetGen.support (NonEmptyString.arbitrary (G := SetGen.Set)) ∧
-      dodgeKeyword x.name = x.name ∧
+      x.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧
       mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n)
   | _, .cmd (CmdExt.cmd (.init _ _ _ _)) => True
   | _, .cmd (CmdExt.cmd (.set _ _ _)) => True
   | _, .cmd (CmdExt.cmd (.assert l _ _)) =>
-      l ∈ SetGen.support (String.arbitrary (G := SetGen.Set))
+      l ∈ SetGen.support (genIdentName (G := SetGen.Set))
   | _, .cmd (CmdExt.cmd (.assume l _ _)) =>
-      l ∈ SetGen.support (String.arbitrary (G := SetGen.Set))
+      l ∈ SetGen.support (genIdentName (G := SetGen.Set))
   | _, .cmd (CmdExt.cmd (.cover l _ _)) =>
-      l ∈ SetGen.support (String.arbitrary (G := SetGen.Set))
+      l ∈ SetGen.support (genIdentName (G := SetGen.Set))
   | _, .cmd (CmdExt.call _ _ _) => True
   | 0, .block .. => False
   | (n+1), .block label body _ =>
@@ -257,16 +354,28 @@ mutual
 /-- The call-recipe side condition, threaded through the evolving scope `ctx` and at
     size `n`. A `.cmd (.call …)` is admissible only when its argument list is exactly
     the generator's recipe for *some* sampled type-instantiation `σvals` (with
-    `σ := s.typeArgs.zip σvals`): `mkArgs s.M (outTargets [] ctx (substSig σ s.O)) exprs`
-    for some callee `s` and by-value inputs `exprs` — with the generator's guard (usable
-    instantiated in-out block, distinct write keys), the inputs reachable by `genLExpr`
+    `σ := s.typeArgs.zip σvals`) and *some* argument-order mask `mask`:
+    `mkArgs s.M (outTargets [] ctx (substSig σ s.O)) exprs mask` for some callee `s`
+    and by-value inputs `exprs` — with the generator's guard (usable instantiated
+    in-out block, distinct write keys), the inputs reachable by `genLExpr`
     at the callee's *instantiated* input types, and no fresh `init`s required (a
     well-typed call has all names in scope, so the emitted group is the bare call and
     the output scope is `ctx`). `hσvals` places `σvals` in the sampling step's support.
-    `True` on every non-call leaf; nested bodies recurse with the body's own scope. -/
+    `True` on every non-call leaf; nested bodies recurse with the body's own scope.
+
+    The `mask` existential is what makes the argument *order* free. `mkArgs` used to
+    fix it as in-out, then by-value input, then out target, and a well-typed call in
+    any other order was out of reach. The in-out block must still lead, because `M`
+    heads both the input signature and the output signature.
+
+    The existential costs nothing: `mkArgs_surjective` shows that some mask reaches
+    *every* order-preserving interleaving of the by-value inputs with the out
+    targets, and `exists_mask_mkArgs_iff` shows it reaches no more than those. So
+    this clause admits exactly the argument orders the `call` rule leaves free. -/
 def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
   | .cmd (CmdExt.call pname args _) =>
-      ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr),
+      ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr)
+        (mask : List Bool),
         s ∈ procs ∧
         s.pname = pname ∧
         σvals ∈ SetGen.support
@@ -276,7 +385,8 @@ def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
                 (by apply List.ne_nil_of_length_pos; assumption)
             else pure (.bool : LMonoTy)) : SetGen.Set (List LMonoTy)) ∧
         args = StrataGenerators.Stmt.mkArgs s.M
-          (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)) exprs ∧
+          (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
+          exprs mask ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName [] ctx) = true ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
           ++ outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
@@ -301,6 +411,116 @@ def CallOkList (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : List Statement �
   | [] => True
   | s :: ss => CallOk procs ctx n s ∧ CallOkList procs (stepCtx ctx s) n ss
 end
+
+-- ── Residual expression-reachability side condition (`ExprOk`) ──────────────
+
+/-- The expressions of one command, reachable by `genLExpr` at size `n` in the scope
+    `ctx`. This is the per-command half of `ExprOk`.
+
+    `set`'s clause is stated against the type the scope gives its target, because
+    that is the type the generator draws the right-hand side at. -/
+def CmdExprOk (ctx : VarCtx) (n : Nat) : Cmd Expression → Prop
+  | .init _ (.forAll [] mty) (.det e) _ =>
+      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n mty)
+  | .init _ _ _ _ => True
+  | .set x (.det e) _ =>
+      ∀ mty, Map.find? ctx x = some mty →
+        e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n mty)
+  | .set _ _ _ => True
+  | .assert _ e _ =>
+      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)
+  | .assume _ e _ =>
+      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)
+  | .cover _ e _ =>
+      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)
+
+mutual
+/-- **Expression reachability, threaded through the evolving scope and size.** Every
+    expression the statement holds is in `genLExpr`'s support at the size of *its own*
+    nesting level and in the scope available *there*.
+
+    This replaces the old `hExprC : ∀ d ctx, GenLExprComplete ctx.toFVarCtx octx tvars d`
+    environment hypothesis, which was **unsatisfiable** — see
+    `Gaps.hExprC_unsatisfiable`. `GenLExprComplete` asked for *every* well-typed
+    expression at a *fixed* depth, and that fails twice over: an annotated free
+    variable is well-typed in the empty context but unreachable when the scope is
+    empty, and `genLExpr`'s support at a fixed depth is depth-bounded while the spec
+    accepts terms of every depth. Neither obstruction is repaired by making the depth
+    existential (`Gaps.not_exists_depth_GenLExprComplete`) — the quantifier has to
+    move *inside*, to one expression at a time, which is what this predicate does.
+
+    It is satisfiable, and `exprOk_assert_of_syntactic` discharges a clause of it from
+    the syntactic side conditions of `genLExpr_complete`. Nested bodies drop to `n - 1`
+    and re-thread the scope, exactly as `AlphabetOk` and `CallOk` do. -/
+def ExprOk (ctx : VarCtx) (n : Nat) : Statement → Prop
+  | .cmd (CmdExt.cmd c) => CmdExprOk (octx := octx) (tvars := tvars) ctx n c
+  -- A call's by-value inputs are `CallOk`'s business, not this predicate's.
+  | .cmd (CmdExt.call _ _ _) => True
+  | .block _ body _ => ExprOkList ctx (n - 1) body
+  | .ite cond t e _ =>
+      (∀ g, cond = .det g →
+        g ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+      ExprOkList ctx (n - 1) t ∧ ExprOkList ctx (n - 1) e
+  | .loop guard measure invs body _ =>
+      (∀ g, guard = .det g →
+        g ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+      (∀ m, measure = some m →
+        m ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .int)) ∧
+      (∀ p ∈ invs, p.2 ∈
+        SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+      ExprOkList ctx (n - 1) body
+  | .exit _ _ => True
+  -- **A local `funcDecl` is out of scope, and that is forced.** The old
+  -- `hFuncReach : ∀ d C Γ func, FuncHasTypeA C Γ func → func ∈ support (genFunction … d)`
+  -- was unsatisfiable, for a reason no side condition on the *statement* can repair:
+  -- upstream's `StatementHasType'.funcDecl` adds an **arbitrary** well-typed `func` to
+  -- the context, unrelated to the `decl` the statement declares, so the statement does
+  -- not even determine the function whose reachability is needed. The two sides also
+  -- disagree outright: `genFunction_complete` requires the name to be in
+  -- `genIdentName`'s support, `preconditions.length ≤ 1`, `isRecursive = false`,
+  -- `attr = #[]` and `axioms = []`, while `FuncHasType'` — a six-field structure —
+  -- constrains none of them. Closing this needs the *spec* to tie `func` to `decl`.
+  | .funcDecl _ _ => False
+  | .typeDecl _ _ => True
+
+/-- `ExprOk` lifted to a statement chain, threading the scope with `stepCtx`. -/
+def ExprOkList (ctx : VarCtx) (n : Nat) : List Statement → Prop
+  | [] => True
+  | s :: ss => ExprOk ctx n s ∧ ExprOkList (stepCtx ctx s) n ss
+end
+
+/-- **`ExprOk` is satisfiable.** Its `assert` clause follows from exactly the
+    syntactic side conditions of `genLExpr_complete`: the expression is well-typed,
+    holds no bound-variable names, has its free variables and operators in the
+    ambient contexts, has simple types, and fits the depth budget. The same
+    derivation discharges the `assume`/`cover`/`ite`/`loop` clauses, which are the
+    same membership at `.bool`, and the `init`/`set` clauses at their own type.
+
+    This is what the old `hExprC` could never have: reachability is claimed for *one*
+    expression, in a scope that holds its free variables, at a depth that bounds it. -/
+theorem exprOk_assert_of_syntactic (ctx : VarCtx) (n : Nat) (l : String)
+    (e : Expression.Expr) (md : Imperative.MetaData Expression)
+    (hwt : HasTypeA' [] e .bool)
+    (hnames : emptyNames e)
+    (hvars : allVarsInCtx ctx.toFVarCtx octx e)
+    (hats : AllTypesSimple tvars n [] e)
+    (hdepth : termDepth [] e ≤ n) :
+    CmdExprOk (octx := octx) (tvars := tvars) ctx n (.assert l e md) :=
+  genLExpr_complete ctx.toFVarCtx octx [] tvars [] n .bool
+    genLMonoTy_mem_bool 3 e (Or.inl ⟨hwt, hnames, hvars, hats, hdepth⟩)
+
+/-- **`ExprOk` holds of a concrete statement**, at every size and in the empty scope:
+    `assert [l]: true;`. This is the witness the old `hExprC` provably could not have
+    (`Gaps.hExprC_unsatisfiable`), so `spec_complete` is no longer vacuous. -/
+theorem exprOk_assert_true (n : Nat) :
+    ExprOk (octx := octx) (tvars := tvars) []  n
+      (.cmd (CmdExt.cmd (.assert "l" (LExpr.const () (LConst.boolConst true)) default))) := by
+  simp only [ExprOk]
+  exact exprOk_assert_of_syntactic [] n "l" _ default
+    ((HasTypeA_iff_typeCheck (T := LExprParams') []
+      (LExpr.const () (LConst.boolConst true)) LMonoTy.bool).mpr rfl)
+    (by simp [emptyNames]) (by simp [allVarsInCtx]) AllTypesSimple.boolConst
+    (by simp [termDepth])
 
 -- ── Structural size witness ─────────────────────────────────────────────────
 
@@ -339,7 +559,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     (hwt : CmdHasTypeA C (procToTCtx ctx) c Γ')
     (hshape : InGenShape (.cmd (CmdExt.cmd c)))
     (hok : AlphabetOk (octx := octx) tvars n (.cmd (CmdExt.cmd c)))
-    (hExprC : GenLExprComplete ctx.toFVarCtx octx tvars n) :
+    (hExprC : CmdExprOk (octx := octx) (tvars := tvars) ctx n c) :
     ∃ ctx', TContext.Equiv (T := CoreLParams) (procToTCtx ctx') Γ' ∧
       ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
       (⟨[Stmt.cmd (CmdExt.cmd c)], C, ctx'⟩ : GenStmtResult) ∈
@@ -363,7 +583,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
         cases bs with
         | nil => exact ⟨body, rfl, hshape⟩
         | cons _ _ => exact absurd hshape (by simp [InGenShape])
-    obtain ⟨hname, hdodge, hmtyReach⟩ := hok
+    obtain ⟨hname, hmtyReach⟩ := hok
     -- `hRigid` + reachability pin the stored type to the annotation.
     have hrigidfv : ∀ v ∈ mtyA.freeVars, v ∈ C.rigidTypeVars := by
       rw [hRigid]; exact freeVars_subset_of_reachable hmtyReach
@@ -375,8 +595,8 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     exact hlift ⟨.init ⟨nm,()⟩ (.forAll [] mty) (.det e) default, ctx.insert ⟨nm,()⟩ mty⟩ (by
       rw [genCmd_support_iff]; refine Or.inl ?_
       simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
-      exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname hdodge (procToTCtx_fresh_rev ctx ⟨nm,()⟩ hfresh),
-        mty, hmtyReach, e, hExprC mty e hexpr, rfl⟩)
+      exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname (procToTCtx_fresh_rev ctx ⟨nm,()⟩ hfresh),
+        mty, hmtyReach, e, (by simpa [CmdExprOk] using hExprC), rfl⟩)
   | init_nondet x xty mty tys md Δ hfresh hlen hcompat hwk hequiv =>
     obtain ⟨mtyA, rfl, hmdc⟩ : ∃ m, xty = .forAll [] m ∧ md = default := by
       cases xty with
@@ -384,7 +604,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
         cases bs with
         | nil => exact ⟨body, rfl, hshape⟩
         | cons _ _ => exact absurd hshape (by simp [InGenShape])
-    obtain ⟨hname, hdodge, hmtyReach⟩ := hok
+    obtain ⟨hname, hmtyReach⟩ := hok
     have hrigidfv : ∀ v ∈ mtyA.freeVars, v ∈ C.rigidTypeVars := by
       rw [hRigid]; exact freeVars_subset_of_reachable hmtyReach
     have hstored : mty = mtyA := init_stored_eq_rigid hrigidfv hcompat
@@ -395,7 +615,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     exact hlift ⟨.init ⟨nm,()⟩ (.forAll [] mty) .nondet default, ctx.insert ⟨nm,()⟩ mty⟩ (by
       rw [genCmd_support_iff]; refine Or.inr (Or.inl ?_)
       simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
-      exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname hdodge (procToTCtx_fresh_rev ctx ⟨nm,()⟩ hfresh),
+      exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname (procToTCtx_fresh_rev ctx ⟨nm,()⟩ hfresh),
         mty, hmtyReach, rfl⟩)
   | set_det x mty e md Δ hfind hexpr hequiv =>
     have hmdc : md = default := hshape
@@ -406,7 +626,8 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩))
       simp only [genSetDet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff]
-      refine ⟨(x, mty), ?_, e, hExprC mty e hexpr, rfl⟩
+      refine ⟨(x, mty), ?_, e,
+        (by simpa [CmdExprOk] using hExprC mty (procToTCtx_find_rev ctx x mty hfind)), rfl⟩
       rw [show List.filter (fun p => !([].contains p.1)) ctx = ctx from List.filter_eq_self.mpr (fun _ _ => rfl)]
       exact Map.find?_mem ctx x mty (procToTCtx_find_rev ctx x mty hfind)
   | set_nondet x mty md Δ hfind hequiv =>
@@ -423,31 +644,31 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
       exact Map.find?_mem ctx x mty (procToTCtx_find_rev ctx x mty hfind)
   | assert l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
-    have hlreach : l ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := hok
+    have hlreach : l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := hok
     refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.assert l e default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ?_))))
       simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
-      exact ⟨l, hlreach, e, hExprC .bool e hexpr, rfl⟩
+      exact ⟨l, hlreach, e, (by simpa [CmdExprOk] using hExprC), rfl⟩
   | assume l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
-    have hlreach : l ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := hok
+    have hlreach : l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := hok
     refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.assume l e default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ?_)))))
       simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
-      exact ⟨l, hlreach, e, hExprC .bool e hexpr, rfl⟩
+      exact ⟨l, hlreach, e, (by simpa [CmdExprOk] using hExprC), rfl⟩
   | cover l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
-    have hlreach : l ∈ SetGen.support (String.arbitrary (G := SetGen.Set)) := hok
+    have hlreach : l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := hok
     refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.cover l e default, ctx⟩ ?_
     · subst hmdc; exact this
     · rw [genCmd_support_iff]; refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ?_)))))
       simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
-      exact ⟨l, hlreach, e, hExprC .bool e hexpr, rfl⟩
+      exact ⟨l, hlreach, e, (by simpa [CmdExprOk] using hExprC), rfl⟩
 
 /-- A reachable, non-enclosing label is in `genFreshLabel`'s support (discharges the
     `block` rule's `label ∉ L` premise against the generator's freshness filter). -/
@@ -484,12 +705,11 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (Γ : TContext Unit) (labels : List String)
     (s : Statement) (C' : LContext CoreLParams) (Γ' : TContext Unit)
     (h : StatementHasTypeA P C Γ labels s C' Γ')
-    (hExprC : ∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d)
-    (hFuncReach : ∀ d C Γ (func : Function), FuncHasTypeA C Γ func →
-      func ∈ SetGen.support (genFunction (G := SetGen.Set) [] octx d)) :
+    :
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars →
       TContext.Equiv (T := CoreLParams) Γ (procToTCtx ctx) →
       InGenShape s → AlphabetOk (octx := octx) tvars n s → CallOk (octx := octx) (tvars := tvars) procs ctx n s →
+      ExprOk (octx := octx) (tvars := tvars) ctx n s →
       ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
         ctx' = stepCtx ctx s ∧
         (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
@@ -498,32 +718,36 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars →
       TContext.Equiv (T := CoreLParams) Γ (procToTCtx ctx) →
       InGenShapeList ss → AlphabetOkList (octx := octx) tvars n ss → CallOkList (octx := octx) (tvars := tvars) procs ctx n ss →
+      ExprOkList (octx := octx) (tvars := tvars) ctx n ss →
       ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
         ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
           SetGen.support (genStmtChain (G := SetGen.Set) octx tvars [] procs L C ctx [] n ss.length)) with
   | cmd C Γ Γ2 L c Δ hc hequiv =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     cases cmdExtHasTypeA_equiv_congr hc hΓ.symm with
     | cmd Γ3 c2 hcmd =>
       obtain ⟨ctx', hctx', hstep, hmem⟩ :=
-        genCmdStmt_complete_spec procs L C ctx n _ c2 hRig hcmd hnf hok (hExprC n ctx)
+        genCmdStmt_complete_spec procs L C ctx n _ c2 hRig hcmd hnf hok
+          (by simpa [ExprOk] using hexpr)
       exact ⟨ctx', hequiv.trans hctx'.symm, hstep, hmem⟩
     | call pname callArgs proc md σ Δ2 hfind hInLen hOutLen hLhs hIn hOut hInout hequiv2 =>
       -- Shape gives `md = default`; `CallOk` gives membership + recipe + guard + empty chain.
       have hmdc : md = default := hnf
       subst hmdc
-      obtain ⟨s, σvals, exprs, hsmem, hpname, hσvals, hargs, hMusable, hNodup, hForall, hEmpty⟩ := hcall
+      obtain ⟨s, σvals, exprs, mask, hsmem, hpname, hσvals, hargs, hMusable, hNodup,
+        hForall, hEmpty⟩ := hcall
       refine ⟨ctx, hequiv.trans hequiv2, rfl, ?_⟩
       -- The emitted group is `initChain (…) ++ [call]`; the chain is empty (`hEmpty`),
       -- and the output scope `insertAllCtx ctx [] = ctx`.
       refine genCallStmt_mem procs C ctx n _ ?_
       have hmem := genCallStmt_mem_complete (octx := octx) (tvars := tvars)
-        (immutableVars := []) procs C ctx n s hsmem σvals hσvals exprs hMusable hNodup hForall
+        (immutableVars := []) procs C ctx n s hsmem σvals hσvals exprs mask hMusable hNodup
+        hForall
       rw [hEmpty] at hmem
       simpa [hargs, StrataGenerators.Stmt.initChain, StrataGenerators.Stmt.insertAllCtx, hpname] using hmem
   | exit C Γ L label md Δ hmem hequiv =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     have hmdc : md = default := hnf
     subst hmdc
     refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
@@ -535,16 +759,14 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff]
       exact ⟨label, hmem, rfl⟩
   | funcDecl C Γ L decl func md Δ hrec hfunc hequiv =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     have hmdc : md = default := hnf
     subst hmdc
-    have hdecl : decl ∈ SetGen.support (genDecl (G := SetGen.Set) octx n) := hok
-    refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
-    refine genFuncDeclStmt_mem procs C ctx n _ ?_
-    simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff]
-    exact ⟨decl, hdecl, func, hFuncReach n C (procToTCtx ctx) func (funcHasTypeA_ctx_irrel hfunc), rfl⟩
+    -- Out of scope: see the `.funcDecl` clause of `ExprOk` for why no side condition
+    -- on the statement can make this case work.
+    exact absurd hexpr (by simp [ExprOk])
   | typeDecl C C' Γ L tc md Δ hoktc hequiv =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     have hmdc : md = default := hnf
     subst hmdc
     obtain ⟨hname_tc, hlen, hparams⟩ := hok
@@ -554,19 +776,19 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     refine ⟨tc, genTypeConstructor_complete n tc hname_tc hlen hparams, ?_⟩
     rw [hoktc]; simp only [mem_support_pure_iff]
   | block C Γ Cb Γb L label body md Δ hlabel hbody hequiv ihbody =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ m =>
       obtain ⟨hlabelname, hlen, hokbody⟩ := hok
       obtain ⟨hmdc, hnfbody⟩ := hnf
       subst hmdc
-      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx m hRig hΓ hnfbody hokbody hcall
+      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx m hRig hΓ hnfbody hokbody hcall hexpr
       refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       exact block_mem procs C ctx m label body Cb ctxb body.length hlen hbodymem
         (genFreshLabel_complete L label hlabelname hlabel)
   | ite_det C Γ Ct Γt Ce Γe L cond thenb elseb md Δ hcond hthen helse hequiv iht ihe =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ m =>
@@ -574,13 +796,13 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       obtain ⟨hmdc, hnft, hnfe⟩ := hnf
       subst hmdc
       obtain ⟨hcallt, hcalle⟩ := hcall
-      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig hΓ hnft hokt hcallt
-      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig hΓ hnfe hoke hcalle
+      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig hΓ hnft hokt hcallt hexpr.2.1
+      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig hΓ hnfe hoke hcalle hexpr.2.2
       refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       exact ite_det_mem procs C ctx m cond thenb elseb Ct ctxt Ce ctxe thenb.length elseb.length
-        htlen helen (hExprC (m+1) ctx .bool cond hcond) htmem hemem
+        htlen helen (hexpr.1 cond rfl) htmem hemem
   | ite_nondet C Γ Ct Γt Ce Γe L thenb elseb md Δ hthen helse hequiv iht ihe =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ m =>
@@ -588,42 +810,42 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       obtain ⟨hmdc, hnft, hnfe⟩ := hnf
       subst hmdc
       obtain ⟨hcallt, hcalle⟩ := hcall
-      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig hΓ hnft hokt hcallt
-      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig hΓ hnfe hoke hcalle
+      obtain ⟨ctxt, hctxt, _, htmem⟩ := iht ctx m hRig hΓ hnft hokt hcallt hexpr.2.1
+      obtain ⟨ctxe, hctxe, _, hemem⟩ := ihe ctx m hRig hΓ hnfe hoke hcalle hexpr.2.2
       refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       exact ite_nondet_mem procs C ctx m thenb elseb Ct ctxt Ce ctxe thenb.length elseb.length
         htlen helen htmem hemem
   | loop C Γ Cb Γb L guard measure invs body md Δ hg hm hi hbody hequiv ihbody =>
-    intro ctx n hRig hΓ hnf hok hcall
+    intro ctx n hRig hΓ hnf hok hcall hexpr
     cases n with
     | zero => exact absurd hok (by simp [AlphabetOk])
     | succ mm =>
       obtain ⟨hinvlen, hinvname, hblen, hokbody⟩ := hok
       obtain ⟨hmdc, hnfbody⟩ := hnf
       subst hmdc
-      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx mm hRig hΓ hnfbody hokbody hcall
+      obtain ⟨ctxb, hctxb, _, hbodymem⟩ := ihbody ctx mm hRig hΓ hnfbody hokbody hcall hexpr.2.2.2
       refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
       refine loop_mem procs C ctx mm guard measure invs body Cb ctxb body.length hblen ?_ ?_ ?_ hbodymem
-      · exact genCondOrNondet_complete (mm+1) ctx guard (fun g hgd => hExprC (mm+1) ctx .bool g (hg g hgd))
-      · exact genOptMeasure_complete (mm+1) ctx measure (fun mmm hmm => hExprC (mm+1) ctx .int mmm (hm mmm hmm))
+      · exact genCondOrNondet_complete (mm+1) ctx guard hexpr.1
+      · exact genOptMeasure_complete (mm+1) ctx measure hexpr.2.1
       · exact genInvariants_complete (mm+1) ctx invs hinvlen
-          (fun p hp => ⟨hinvname p hp, hExprC (mm+1) ctx .bool p.2 (hi p hp)⟩)
+          (fun p hp => ⟨hinvname p hp, hexpr.2.2.1 p hp⟩)
   | nil C Γ L Δ hequiv =>
-    rename_i ctx n hRig hΓ _ _ _
+    rename_i ctx n hRig hΓ _ _ _ _
     exact ⟨ctx, hequiv.trans hΓ, rfl, genStmtChain_nil_mem procs C ctx n⟩
   | cons C C1 C2 Γ Γ1 Γ2 L s ss hs hss ihs ihss =>
-    rename_i ctx n hRig hΓ hnf hok hcall
+    rename_i ctx n hRig hΓ hnf hok hcall hexpr
     obtain ⟨hnfs, hnfss⟩ := hnf
     obtain ⟨hoks, hokss⟩ := hok
     obtain ⟨hcalls, hcallss⟩ := hcall
     -- The head produces `[s]` at scope `ctx1 = stepCtx ctx s` (pinned by `ihs`); the
     -- tail continues from there, so its threaded `CallOkList`/scope line up exactly.
-    obtain ⟨ctx1, hctx1, hstep1, hsmem⟩ := ihs ctx n hRig hΓ hnfs hoks hcalls
+    obtain ⟨ctx1, hctx1, hstep1, hsmem⟩ := ihs ctx n hRig hΓ hnfs hoks hcalls hexpr.1
     subst hstep1
     -- `hRig` transfers to `C1`: statement typing preserves `rigidTypeVars`
     -- (`funcDecl`/`typeDecl` extend only the factory/known-types).
     have hRig1 : C1.rigidTypeVars = tvars := (stmtHasType_rigid_eq hs).trans hRig
-    obtain ⟨ctx2, hctx2, hstep2, hssmem⟩ := ihss (stepCtx ctx s) n hRig1 hctx1 hnfss hokss hcallss
+    obtain ⟨ctx2, hctx2, hstep2, hssmem⟩ := ihss (stepCtx ctx s) n hRig1 hctx1 hnfss hokss hcallss hexpr.2
     refine ⟨ctx2, hctx2, ?_, ?_⟩
     · show ctx2 = stepCtxList ctx (s :: ss); rw [hstep2]; rfl
     · have := genStmtChain_cons_mem procs C ctx n ss.length ⟨[s], C1, stepCtx ctx s⟩ ss C2 ctx2 hsmem hssmem

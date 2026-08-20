@@ -263,15 +263,164 @@ theorem substSig_values_wellKinded {C : LContext CoreLParams}
 
 -- ── The call-argument recipe ──────────────────────────────────────────────
 
+/-- Merge two lists under a Boolean mask, and keep the relative order inside each
+    list. `true` takes the next element of `xs`, and `false` takes the next element
+    of `ys`. When the mask ends, or when the chosen list is empty, the rest of both
+    lists follows.
+
+    The mask reaches *exactly* the order-preserving interleavings of `xs` and `ys`:
+    `mergeBy_surjective` gives every one of them, `mergeBy_interleave` gives no more
+    than them, and `exists_mask_iff_interleave` is the two together. -/
+def mergeBy {α : Type} : List Bool → List α → List α → List α
+  | [], xs, ys => xs ++ ys
+  | true :: bs, x :: xs, ys => x :: mergeBy bs xs ys
+  | true :: bs, [], ys => mergeBy bs [] ys
+  | false :: bs, xs, y :: ys => y :: mergeBy bs xs ys
+  | false :: bs, xs, [] => mergeBy bs xs []
+
+/-- `Interleave xs ys zs` — `zs` is an **order-preserving interleaving** (a shuffle)
+    of `xs` and `ys`: it holds every element of both, and it keeps the relative order
+    inside `xs` and the relative order inside `ys`. Nothing else is constrained, so
+    the two lists may interleave in any way at all.
+
+    This is exactly the freedom the `call` rule leaves between the by-value inputs
+    and the out targets: `CallArg.getInputExprs` keeps the `inArg` order and drops
+    every `outArg`, and `CallArg.getLhs` does the reverse, so neither projection can
+    see how the two kinds interleave. -/
+inductive Interleave {α : Type} : List α → List α → List α → Prop
+  | nil : Interleave [] [] []
+  | left {x : α} {xs ys zs : List α} :
+      Interleave xs ys zs → Interleave (x :: xs) ys (x :: zs)
+  | right {y : α} {xs ys zs : List α} :
+      Interleave xs ys zs → Interleave xs (y :: ys) (y :: zs)
+
+/-- **Surjectivity of the mask.** *Every* order-preserving interleaving of `xs` and
+    `ys` is `mergeBy mask xs ys` for some `mask`. The mask bits are read straight off
+    the derivation: `left` becomes `true`, `right` becomes `false`.
+
+    This is what makes the `mask` existential in `CallOk` cost nothing — see
+    `mkArgs_surjective` for the reading at the call-argument level. -/
+theorem mergeBy_surjective {α : Type} {xs ys zs : List α} (h : Interleave xs ys zs) :
+    ∃ mask : List Bool, mergeBy mask xs ys = zs := by
+  induction h with
+  | nil => exact ⟨[], rfl⟩
+  | left _ ih =>
+    obtain ⟨mask, hm⟩ := ih
+    exact ⟨true :: mask, by rw [mergeBy, hm]⟩
+  | right _ ih =>
+    obtain ⟨mask, hm⟩ := ih
+    exact ⟨false :: mask, by rw [mergeBy, hm]⟩
+
+/-- Taking every element from the right list is an interleaving. -/
+theorem interleave_nil_left {α : Type} (ys : List α) : Interleave [] ys ys := by
+  induction ys with
+  | nil => exact .nil
+  | cons _ _ ih => exact .right ih
+
+/-- Concatenation is an interleaving. This is the case an exhausted mask falls back
+    to, and it is why the `[]` equation of `mergeBy` does not escape the relation. -/
+theorem interleave_append {α : Type} (xs ys : List α) : Interleave xs ys (xs ++ ys) := by
+  induction xs with
+  | nil => exact interleave_nil_left ys
+  | cons _ _ ih => exact .left ih
+
+/-- **The mask produces nothing but interleavings** — the converse of
+    `mergeBy_surjective`. Needed for the characterisation below to say that the mask
+    is neither too weak nor too strong. -/
+theorem mergeBy_interleave {α : Type} (mask : List Bool) :
+    ∀ (xs ys : List α), Interleave xs ys (mergeBy mask xs ys) := by
+  induction mask with
+  | nil => intro xs ys; rw [mergeBy]; exact interleave_append xs ys
+  | cons b mask ih =>
+    intro xs ys
+    cases b with
+    | true =>
+      cases xs with
+      | nil => rw [mergeBy]; exact ih [] ys
+      | cons x xs => rw [mergeBy]; exact .left (ih xs ys)
+    | false =>
+      cases ys with
+      | nil => rw [mergeBy]; exact ih xs []
+      | cons y ys => rw [mergeBy]; exact .right (ih xs ys)
+
+/-- **The mask ranges over exactly the order-preserving interleavings**, no fewer and
+    no more. -/
+theorem exists_mask_iff_interleave {α : Type} {xs ys zs : List α} :
+    (∃ mask : List Bool, mergeBy mask xs ys = zs) ↔ Interleave xs ys zs :=
+  ⟨fun ⟨mask, hm⟩ => hm ▸ mergeBy_interleave mask xs ys, mergeBy_surjective⟩
+
+-- The mask semantics, executably: a leading `false` takes the right list first, and
+-- the merge genuinely interleaves rather than concatenating.
+#guard mergeBy [false] [1, 2] [3] == ([3, 1, 2] : List Nat)
+#guard mergeBy [true, false] [1, 2] [3] == ([1, 3, 2] : List Nat)
+-- An exhausted mask falls back to concatenation (`interleave_append`).
+#guard mergeBy [] [1, 2] [3] == ([1, 2, 3] : List Nat)
+
+/-- A `filterMap` that drops every element of `ys` sees `mergeBy bs xs ys` as `xs`.
+    The merge keeps the relative order inside `xs`. -/
+theorem filterMap_mergeBy_left {α β : Type} (f : α → Option β) (bs : List Bool) :
+    ∀ (xs ys : List α), (∀ a ∈ ys, f a = none) →
+      (mergeBy bs xs ys).filterMap f = xs.filterMap f := by
+  induction bs with
+  | nil =>
+    intro xs ys hy
+    rw [mergeBy, List.filterMap_append,
+      List.filterMap_eq_nil_iff.mpr (fun a ha => hy a ha), List.append_nil]
+  | cons b bs ih =>
+    intro xs ys hy
+    cases b with
+    | true =>
+      cases xs with
+      | nil => rw [mergeBy, ih [] ys hy]
+      | cons x xs => rw [mergeBy, List.filterMap_cons, List.filterMap_cons, ih xs ys hy]
+    | false =>
+      cases ys with
+      | nil => rw [mergeBy, ih xs [] (by simp)]
+      | cons y ys =>
+        rw [mergeBy, List.filterMap_cons, hy y List.mem_cons_self,
+          ih xs ys (fun a ha => hy a (List.mem_cons_of_mem y ha))]
+
+/-- A `filterMap` that drops every element of `xs` sees `mergeBy bs xs ys` as `ys`. -/
+theorem filterMap_mergeBy_right {α β : Type} (f : α → Option β) (bs : List Bool) :
+    ∀ (xs ys : List α), (∀ a ∈ xs, f a = none) →
+      (mergeBy bs xs ys).filterMap f = ys.filterMap f := by
+  induction bs with
+  | nil =>
+    intro xs ys hx
+    rw [mergeBy, List.filterMap_append,
+      List.filterMap_eq_nil_iff.mpr (fun a ha => hx a ha), List.nil_append]
+  | cons b bs ih =>
+    intro xs ys hx
+    cases b with
+    | true =>
+      cases xs with
+      | nil => rw [mergeBy, ih [] ys (by simp)]
+      | cons x xs =>
+        rw [mergeBy, List.filterMap_cons, hx x List.mem_cons_self,
+          ih xs ys (fun a ha => hx a (List.mem_cons_of_mem x ha))]
+    | false =>
+      cases ys with
+      | nil => rw [mergeBy, ih xs [] hx]
+      | cons y ys => rw [mergeBy, List.filterMap_cons, List.filterMap_cons, ih xs ys hx]
+
 /-- Build the call arguments for a callee whose signature decomposes as
     `inputs = M ++ I`, `outputs = M ++ O` (`M` = in-out, `I` = input-only,
     `O` = output-only, the shared block `M` leading both). The in-out block leads
     (as `inoutArg` nodes, so each is a
     pass-by-reference variable named exactly `M.keys[i]`, as the call rule's in-out
-    premise requires), followed by the by-value inputs `exprs` (as `inArg` nodes),
-    followed by the output-only *targets* `T` (as `outArg` nodes). This layout makes
-    the argument positions line up with the parameter positions the callee declares —
-    see `getIn_mkArgs` / `getLhs_mkArgs`.
+    premise requires). Then come the by-value inputs `exprs` (as `inArg` nodes) and
+    the output-only *targets* `T` (as `outArg` nodes), merged under the mask `mask`.
+    This layout makes the argument positions line up with the parameter positions
+    the callee declares — see `getIn_mkArgs` / `getLhs_mkArgs`.
+
+    **Why `mask` exists.** The `call` rule constrains the input positions and the
+    write positions one at a time, through `CallArg.getInputExprs` and
+    `CallArg.getLhs`. Each of those drops the other kind of node, so the rule leaves
+    the relative order of an `inArg` and an `outArg` free. `mask` gives the
+    generator that same freedom, so a call such as `call p(out y, 1);` is now
+    reachable. The in-out block still has to lead: `M` heads both projections, so
+    an `inoutArg` after an `inArg` or after an `outArg` would break the positional
+    match.
 
     `T` is a **separate** argument rather than the callee's own `O`, because the
     Core spec does not constrain an out argument's *name*: any writable
@@ -280,29 +429,103 @@ theorem substSig_values_wellKinded {C : LContext CoreLParams}
     *positionally in type* — see `outTargets` (the generator's choice) and the
     `hTinΓ` premise of the soundness theorems below, which pairs `T.keys[i]` with
     `O.values[i]`. -/
-def mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr) : List (CallArg Expression) :=
+def mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (mask : List Bool) : List (CallArg Expression) :=
   M.map (fun p => CallArg.inoutArg p.1) ++
-    exprs.map CallArg.inArg ++
-    T.map (fun p => CallArg.outArg p.1)
+    mergeBy mask (exprs.map CallArg.inArg) (T.map (fun p => CallArg.outArg p.1))
 
-/-- `getInputExprs (mkArgs M T exprs)` is the in-out block turned into bare
-    unannotated `fvar`s, followed by the by-value inputs (the out-argument targets
-    contribute nothing to the input positions). -/
-theorem getIn_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr) :
-    CallArg.getInputExprs (mkArgs M T exprs)
+-- **Which swaps the `call` rule can see.** `CmdExtHasType'.call` constrains the
+-- *projections* `getInputExprs` and `getLhs`, position by position. An `inArg`
+-- appears in the first projection only, and an `outArg` in the second only, so a
+-- swap of the two changes neither. An `inoutArg` appears in *both*, so a swap of an
+-- `inoutArg` with either other kind is visible. That is why `mask` merges the
+-- by-value inputs with the out targets, and why the in-out block still has to lead.
+section
+private def gcaExpr : Expression.Expr := LExpr.const () (.intConst 1)
+private def gcaY : Identifier Unit := ⟨"y", ()⟩
+private def gcaZ : Identifier Unit := ⟨"z", ()⟩
+private abbrev GcaArgs := List (CallArg Expression)
+
+-- An `inArg`/`outArg` swap is invisible to the input positions.
+#guard CallArg.getInputExprs [CallArg.inArg gcaExpr, CallArg.outArg gcaY]
+     == CallArg.getInputExprs [CallArg.outArg gcaY, CallArg.inArg gcaExpr]
+-- An `inArg`/`outArg` swap is invisible to the write positions.
+#guard CallArg.getLhs [CallArg.inArg gcaExpr, CallArg.outArg gcaY]
+     == CallArg.getLhs [CallArg.outArg gcaY, CallArg.inArg gcaExpr]
+-- An `inArg`/`inoutArg` swap *does* change the input positions.
+#guard ! (CallArg.getInputExprs [CallArg.inArg gcaExpr, CallArg.inoutArg gcaY]
+       == CallArg.getInputExprs [CallArg.inoutArg gcaY, CallArg.inArg gcaExpr])
+-- An `outArg`/`inoutArg` swap *does* change the write positions.
+#guard ! (CallArg.getLhs ([CallArg.outArg gcaZ, CallArg.inoutArg gcaY] : GcaArgs)
+       == CallArg.getLhs ([CallArg.inoutArg gcaY, CallArg.outArg gcaZ] : GcaArgs))
+end
+
+/-- `getInputExprs (mkArgs M T exprs mask)` is the in-out block turned into bare
+    unannotated `fvar`s, followed by the by-value inputs. The out-argument targets
+    contribute nothing to the input positions, at every mask. -/
+theorem getIn_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (mask : List Bool) :
+    CallArg.getInputExprs (mkArgs M T exprs mask)
       = M.map (fun p => LExpr.fvar () p.1 none) ++ exprs := by
-  simp only [mkArgs, CallArg.getInputExprs, List.filterMap_append, List.filterMap_map,
-    Function.comp_def, filterMap_some_comp, filterMap_const_none, List.filterMap_some,
-    List.append_nil]
+  rw [mkArgs, CallArg.getInputExprs, List.filterMap_append,
+    filterMap_mergeBy_left _ mask _ _
+      (by rintro a ha; simp only [List.mem_map] at ha; obtain ⟨p, _, rfl⟩ := ha; rfl)]
+  simp only [List.filterMap_map, Function.comp_def, filterMap_some_comp,
+    List.filterMap_some]
 
-/-- `getLhs (mkArgs M T exprs)` is the LHS (assignable) positions: the in-out keys
-    followed by the out-argument target names (the by-value inputs contribute
-    nothing). -/
-theorem getLhs_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr) :
-    CallArg.getLhs (mkArgs M T exprs) = M.keys ++ T.keys := by
-  simp only [mkArgs, CallArg.getLhs, List.filterMap_append, List.filterMap_map,
-    Function.comp_def, filterMap_some_comp, filterMap_const_none, List.append_nil,
+/-- `getLhs (mkArgs M T exprs mask)` is the LHS (assignable) positions: the in-out
+    keys followed by the out-argument target names. The by-value inputs contribute
+    nothing, at every mask. -/
+theorem getLhs_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (mask : List Bool) :
+    CallArg.getLhs (mkArgs M T exprs mask) = M.keys ++ T.keys := by
+  rw [mkArgs, CallArg.getLhs, List.filterMap_append,
+    filterMap_mergeBy_right _ mask _ _
+      (by rintro a ha; simp only [List.mem_map] at ha; obtain ⟨e, _, rfl⟩ := ha; rfl)]
+  simp only [List.filterMap_map, Function.comp_def, filterMap_some_comp,
     ListMap.keys_eq_map_fst]
+
+/-- **Every argument order the `call` rule leaves free is reachable.** Fix a callee
+    block `M`/`T` and by-value inputs `exprs`. For *any* order-preserving
+    interleaving `rest` of the `inArg` nodes with the `outArg` nodes, some mask makes
+    `mkArgs` emit exactly the in-out block followed by `rest`.
+
+    So `mkArgs` fixes only what the rule itself forces — that the in-out block leads,
+    because `M` heads both projections (see the `#guard`s above) — and the `mask`
+    existential in `CallOk` restricts nothing beyond that. Before the mask, `mkArgs`
+    fixed the order as in-out, then by-value input, then out target, and a well-typed
+    `call p(out y, 1);` was out of reach; `mkArgs_out_then_in` is that call as a
+    worked instance of this theorem. -/
+-- **`Interleave` is inhabited at the swap that matters**, so `mkArgs_surjective` is
+-- not vacuous: the single out target ahead of the single by-value input is exactly
+-- the `call p(out y, 1);` shape that was unreachable before the mask.
+example : Interleave [CallArg.inArg gcaExpr] [CallArg.outArg gcaY]
+    ([CallArg.outArg gcaY, CallArg.inArg gcaExpr] : GcaArgs) :=
+  .right (.left .nil)
+
+theorem mkArgs_surjective (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (rest : List (CallArg Expression))
+    (h : Interleave (exprs.map CallArg.inArg)
+      (T.map (fun p => CallArg.outArg p.1)) rest) :
+    ∃ mask : List Bool,
+      mkArgs M T exprs mask = M.map (fun p => CallArg.inoutArg p.1) ++ rest := by
+  obtain ⟨mask, hm⟩ := mergeBy_surjective h
+  exact ⟨mask, by rw [mkArgs, hm]⟩
+
+/-- The `mkArgs` counterpart of `exists_mask_iff_interleave`: an argument list is
+    reachable at *some* mask precisely when its tail interleaves the by-value inputs
+    with the out targets. -/
+theorem exists_mask_mkArgs_iff (M T : @LMonoTySignature Unit)
+    (exprs : List Expression.Expr) (rest : List (CallArg Expression)) :
+    (∃ mask : List Bool,
+      mkArgs M T exprs mask = M.map (fun p => CallArg.inoutArg p.1) ++ rest)
+      ↔ Interleave (exprs.map CallArg.inArg) (T.map (fun p => CallArg.outArg p.1)) rest := by
+  rw [← exists_mask_iff_interleave]
+  constructor
+  · rintro ⟨mask, hm⟩
+    exact ⟨mask, by rw [mkArgs] at hm; exact List.append_cancel_left hm⟩
+  · rintro ⟨mask, hm⟩
+    exact ⟨mask, by rw [mkArgs, hm]⟩
 
 -- ── The init-chain that brings the required names into scope ───────────────
 
@@ -549,7 +772,7 @@ theorem keyval_mem {α β} (m : ListMap α β) (i : Nat)
     out-argument targets `T` positionally as long as `O`, every `M` name and every
     `T` name in scope at its declared type (`M.values[i]` resp. `O.values[i]`), and
     by-value inputs `exprs` that are well-typed and not bare unannotated `fvar`s,
-    the call `CmdExt.call pname (mkArgs M T exprs) md` type-checks (leaving `Γ`
+    the call `CmdExt.call pname (mkArgs M T exprs mask) md` type-checks (leaving `Γ`
     unchanged).
 
     Note the asymmetry between the two written-to blocks, which mirrors the spec:
@@ -561,6 +784,7 @@ theorem call_recipe_inout_sound
     {pname : String} {proc : Procedure} {md : MetaData Expression}
     (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (mask : List Bool)
     (hfind : Program.Procedure.find? P pname = some proc)
     (hInputs : proc.header.inputs = M ++ I)
     (hOutputs : proc.header.outputs = M ++ O)
@@ -578,7 +802,7 @@ theorem call_recipe_inout_sound
     (hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none)
     (hIdisjOut : ∀ i (hi : i < I.keys.length),
       (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false) :
-    CmdExtHasTypeA C P Γ (CmdExt.call pname (mkArgs M T exprs) md) Γ := by
+    CmdExtHasTypeA C P Γ (CmdExt.call pname (mkArgs M T exprs mask) md) Γ := by
   -- length facts
   have hkeysM : M.keys.length = M.length := ListMap.keys.length
   have hvalsM : M.values.length = M.length := lm_values_length M
@@ -587,9 +811,9 @@ theorem call_recipe_inout_sound
   have hkeysO : O.keys.length = O.length := ListMap.keys.length
   have hvalsO : O.values.length = O.length := lm_values_length O
   have hkeysT : T.keys.length = O.length := by rw [ListMap.keys.length, hTLen]
-  have hgetIn := getIn_mkArgs M T exprs
-  have hgetLhs := getLhs_mkArgs M T exprs
-  apply CmdExtHasType'.call Γ pname (mkArgs M T exprs) proc md σ Γ
+  have hgetIn := getIn_mkArgs M T exprs mask
+  have hgetLhs := getLhs_mkArgs M T exprs mask
+  apply CmdExtHasType'.call Γ pname (mkArgs M T exprs mask) proc md σ Γ
   case _ => -- (1) find?
     exact hfind
   case _ => -- (2) input arity
@@ -1001,6 +1225,7 @@ theorem call_mixed_body_sound
     {pname : String} {proc : Procedure}
     (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (mask : List Bool)
     (hfind : Program.Procedure.find? P pname = some proc)
     (hInputs : proc.header.inputs = M ++ I)
     (hOutputs : proc.header.outputs = M ++ O)
@@ -1022,7 +1247,7 @@ theorem call_mixed_body_sound
     (hwk : ∀ p ∈ (substSig σ M ++ T).toList, C.WellKindedTy p.2) :
     StatementsHasTypeA P C Γ L
       (initChain (missingIn Γ (substSig σ M ++ T)) ++
-        [Statement.call pname (mkArgs M T exprs) default]) C
+        [Statement.call pname (mkArgs M T exprs mask) default]) C
       (insertAll Γ (missingIn Γ (substSig σ M ++ T))) := by
   -- The instantiated write-list; kept spelled out (no `set` — Mathlib absent).
   have hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none := by
@@ -1084,10 +1309,10 @@ theorem call_mixed_body_sound
       (fun p hp => hInScope _ (List.mem_append_right (substSig σ M).toList hp)) i hi hjOσ
     rwa [substSig_values_getElem σ O i hjOσ hj] at h
   have hcall : StatementHasTypeA P C (insertAll Γ (missingIn Γ (substSig σ M ++ T))) L
-      (Statement.call pname (mkArgs M T exprs) default) C
+      (Statement.call pname (mkArgs M T exprs mask) default) C
       (insertAll Γ (missingIn Γ (substSig σ M ++ T))) :=
     StatementHasType'.cmd C _ _ L _ _
-      (call_recipe_inout_sound σ M I O T exprs hfind hInputs hOutputs hExLen
+      (call_recipe_inout_sound σ M I O T exprs mask hfind hInputs hOutputs hExLen
         (by rw [← lm_values_length T, ← lm_values_length O, hTVals, substSig_values,
               List.length_map])
         hMinΓ hTinΓ hExTy hExNoFvar hIdisjOut)

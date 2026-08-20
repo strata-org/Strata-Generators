@@ -641,8 +641,8 @@ def checkS2uNoDanglingLabel (p : Program) : Bool :=
     `j: { } j: { }` is therefore generatable, and it makes the emitted CFG hold two
     blocks named `j` — through no fault of this pass, which copies the source label.
     Blaming the pass for that would report a generator artefact as a Strata defect,
-    the same way the `procInline` label property has to guard against `String.arbitrary`
-    drawing `""` twice.
+    the same way the `procInline` label property has to guard against `genIdentName`
+    drawing one name twice.
 
     Under the guard the property is a real claim: the pass mints labels of its own
     (`l$`, `blk$`, `ite$`, `loop_entry$`, and so on) from a `StringGenState` counter,
@@ -1398,11 +1398,13 @@ def programLabelsNodup (p : Program) : Bool :=
     indistinguishable in the report.
 
     The claim is conditional on the input having distinct labels, and it must be:
-    the generator draws an `assert`, `assume` and `cover` label from
+    the generator draws an `assert`, `assume` and `cover` label from `genIdentName`,
+    and two draws can coincide, so a program can hold two statements under one label
+    before any pass runs. Blaming the pass for those would report a generator
+    artefact as a Strata defect. Under the guard the property is a real claim about
+    the pass. The collision used to be far more common: the earlier source was
     `String.arbitrary`, which gives `""` often enough that about 4 percent of
-    programs already hold two statements under one label before any pass runs.
-    Blaming the pass for those would report a generator artefact as a Strata
-    defect. Under the guard the property is a real claim about the pass.
+    programs held a duplicate label.
 
     The generator reaches the shape rarely: about 1 percent of draws hold two or
     more calls. The deterministic guards at the end of this file pin each of the two

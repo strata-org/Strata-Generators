@@ -57,8 +57,9 @@ One `assert` per field rather than one conjunction, so a solver verdict names th
 field that failed rather than only the constructor.
 
 **The obligation labels carry indices, never generated names.** A generated
-datatype name is an arbitrary Core identifier (`String.arbitrary` draws
-non-alphanumeric characters), and an obligation label reaches SMT-LIB as a
+datatype name is an arbitrary Core identifier (`genIdentName` draws
+non-alphanumeric characters such as `.`, `?` and `@`), and an obligation label
+reaches SMT-LIB as a
 symbol; a label built from a generated name would therefore risk turning a *law*
 failure into an encoder failure, and the two must stay distinguishable. The
 indices are positions in the block: `inj_{d}_{c}_f{i}` is field `i` of
