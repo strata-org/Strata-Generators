@@ -158,6 +158,35 @@ inductive Body where
       diagnostics have to be interleaved with generation. -/
   | action (run : RunConfig → IO ActionResult)
 
+/-- What a property claims about its own verdict.
+
+    Almost every property claims to hold, which is `mustHold` and the default. The other
+    two are for a property that states a *real defect in the code under test*: the claim
+    is right and the implementation is wrong, so the property must stay in the suite as
+    the regression net around the eventual fix, while not holding a merge hostage to a
+    bug that is already reported.
+
+    `reason` is prose, and the place to put the upstream issue. It replaces the
+    counterexample on the report line, so it is the only explanation a reader gets for
+    why a red property reads as green — make it name the defect.
+
+    This is *not* a way to quiet a property that is merely noisy: `rareFailure` gates in
+    neither direction and so asserts nothing at all, and `knownFailure` fails the run the
+    moment the defect is fixed. Neither can hide a regression in a property that holds
+    today. -/
+inductive Expectation where
+  /-- The property must hold. Every property is this unless it says otherwise. -/
+  | mustHold
+  /-- The property must fail, because the code under test has a defect. Its
+      counterexample is suppressed and it does not fail the run — but if it ever
+      *passes*, the run fails, since a fixed defect must not go unnoticed. -/
+  | knownFailure (reason : String)
+  /-- The property fails only on a rare draw, so a short run passes and a long one
+      fails. Gated in neither direction: `knownFailure` would turn the usual pass into a
+      failure, and `mustHold` would make the suite's colour depend on the trial count. -/
+  | rareFailure (reason : String)
+  deriving Inhabited
+
 /-- One property under test. This is the whole of what a property author writes.
 
     `name` is the only label there is: it is the line in every report, the Tyche panel
@@ -172,6 +201,9 @@ structure TestDecl where
   /-- Opt-in gate: the property runs only when the driver was given this tag
       (`--smt` supplies `"smt"`). `none` runs always. -/
   gate  : Option String := none
+  /-- What this property claims about its own verdict. Defaulted, so stating a property
+      says nothing about known defects until it says so with `TestDecl.knownFailure`. -/
+  expect : Expectation := .mustHold
   /-- Whether to emit a Tyche panel. Sampled and witness-set properties get one by
       default; `witness` and `action` bodies have nothing to sample, so they
       default to off via the smart constructors below. -/
@@ -259,6 +291,32 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
     (gate : Option String := none) : TestDecl :=
   { name, gate, tyche := false, body := .action run }
 
+/-- **Mark a property as failing against a defect in the code under test.** Its
+    counterexample is suppressed and it stops gating the exit code; if it ever passes,
+    the run fails and names this call as the thing to delete.
+
+    Written next to the property, like `withPanel`, because the reason belongs with the
+    claim it explains rather than in a central list that has to be edited in step — and
+    because the registry is then the single answer to "what is known to fail?", which
+    `--list` prints:
+
+    ```lean
+    (TestDecl.property "lift: the output typechecks"
+       fun (gp : GenProgram) => checkLiftOutputTypechecks gp.prog).knownFailure
+      "strata-org/Strata#123: a snapshot name escapes its scope"
+    ```
+
+    Prefer this to deleting or commenting out a property: a deleted property stops
+    watching the defect, and nothing then reports the fix. -/
+def TestDecl.knownFailure (d : TestDecl) (reason : String) : TestDecl :=
+  { d with expect := .knownFailure reason }
+
+/-- **Mark a property as failing only on a rare draw**, so it gates in neither
+    direction. See `Expectation.rareFailure`; use `knownFailure` for a defect a run of
+    the default size reliably finds. -/
+def TestDecl.rareFailure (d : TestDecl) (reason : String) : TestDecl :=
+  { d with expect := .rareFailure reason }
+
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
 
@@ -311,6 +369,11 @@ structure Outcome where
   /-- Set when the property's gate was not enabled: the driver reports it as
       skipped rather than as a pass, so an absent solver cannot read as green. -/
   skipped : Bool := false
+  /-- Set when `Outcome.reconcile` turned a raw verdict into its expected one: the
+      property is not asserting anything about this run, so a driver reports it as
+      `XFAIL` rather than as a pass. The same reasoning as `skipped` — a suppressed
+      defect must not read as green either. -/
+  xfail   : Bool := false
 
 /-- Read Plausible's own `TestResult` as an `Outcome`. Both Plausible-backed bodies go
     through this, so a `Bool` property and a `Prop` property report identically. -/
@@ -342,9 +405,42 @@ def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
   let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x)) cfg
   pure (Outcome.ofTestResult cfg r)
 
-/-- Run one property. Returns a `skipped` outcome when the run's gates do not
-    admit it. -/
-def TestDecl.run (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
+/-- Reconcile a raw verdict with what the declaration claims about it.
+
+    Every verdict in the package passes through here, and every driver reads the result,
+    so the two drivers cannot disagree about a known failure any more than they can
+    disagree about a pass: the reconciliation happens once, below the rendering.
+
+    A skipped property is returned untouched. Its gate was not enabled, so there is no
+    verdict to reconcile — and reporting `XFAIL` for a property that never ran would
+    claim the defect was observed. -/
+def Outcome.reconcile (o : Outcome) : Expectation → Outcome
+  | .mustHold => o
+  | .knownFailure reason =>
+    if o.skipped then o
+    else if o.passed then
+      -- The defect is fixed, or the mark was wrong. Either way this must be seen.
+      { o with passed := false,
+               message := some s!"expected to fail, but passed — the defect appears to \
+                 be fixed, so drop the `.knownFailure` on this property ({reason})" }
+    else
+      -- Drop `o.message`: that is where `Testable.formatFailure` put the counterexample,
+      -- and it is noise for a defect that is already understood and reported.
+      { o with passed := true, xfail := true, message := some reason }
+  | .rareFailure reason =>
+    if o.skipped then o
+    else { o with passed := true, xfail := true,
+                  message := some (if o.passed then reason
+                                   else s!"{reason} (failed on this run)") }
+
+/-- Run one property and report the *raw* verdict, before reconciliation against
+    `TestDecl.expect`. Split out from `run` so that suppression is visibly one step
+    rather than woven through the four bodies, and so a consumer that wants the
+    unreconciled verdict has one. Nothing needs that today: the Tyche pass scores each
+    sample through the body's own `dec`, so a panel is already unaffected by a mark —
+    which is the behaviour to keep, since the distribution of a known failure is exactly
+    what a panel is for. -/
+def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
   match d.body with
@@ -366,5 +462,14 @@ def TestDecl.run (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   | .action run =>
     let r ← run cfg
     pure { passed := r.passed, counts := some (r.samples, r.total), message := r.message }
+
+/-- Run one property and reconcile the verdict against what it claims. **This is what a
+    driver calls**; `runRaw` is for a consumer that wants the unreconciled verdict.
+
+    Returns a `skipped` outcome when the run's gates do not admit it, and an `xfail` one
+    when `TestDecl.expect` says the property is known to fail. -/
+def TestDecl.run (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
+  let raw ← d.runRaw cfg
+  return raw.reconcile d.expect
 
 end StrataGenerators.Test

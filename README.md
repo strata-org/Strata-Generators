@@ -86,8 +86,14 @@ Flags (all optional; the Tyche visualization pass is on by default):
   Repeatable. This is the loop to iterate in while writing one property: it also skips
   the diagnostics and writes no Tyche file. Since a report group is a name prefix,
   `--only="lift:"` selects the `lift` group exactly.
-- `--list` — print the registry (name, group, gate) and exit without running anything.
-  The answer to "did my property get picked up?"
+- `--list` — print the registry (name, group, gate, expectation) and exit without running
+  anything. The answer to "did my property get picked up?", and to "what is known to
+  fail?"
+- `--known-failure=NAME` — treat the property called `NAME` as known to fail for this
+  run: suppress its counterexample and stop it gating the exit code. Repeatable, and it
+  takes a whole property name rather than a substring. The committed form is
+  `.knownFailure` on the declaration, which also carries the reason — see
+  [`docs/writing-properties.md`](./docs/writing-properties.md).
 - `--no-tyche` — omit Tyche visualizations (i.e. only run tests).
 - `--tyche-out=PATH` — output path for the JSONL file Tyche ingests (default
   `tyche_output.jsonl`).
@@ -165,7 +171,26 @@ shape, and **[`docs/writing-properties.md`](./docs/writing-properties.md)** is t
 full guide: how the harness discovers your file, which input types are generable, how
 to make a new type generable with the four instances, the three non-sampled property shapes (a single
 witness, a finite input space, a self-driving `IO` action), opt-in gates such as
-`--smt`, registering a family at once, custom Tyche panels, and diagnostics.
+`--smt`, registering a family at once, marking a property that is known to fail against a
+Strata defect, custom Tyche panels, and diagnostics.
+
+### When the property is right and Strata is wrong
+
+Mark it, rather than deleting it or letting it hold up a merge:
+
+```lean
+@[strata_property]
+def myPassOutputTypechecks : TestDecl :=
+  (TestDecl.property "mypass: the output typechecks"
+     fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog).knownFailure
+    "strata-org/Strata#123: the pass drops a type annotation on a nested call"
+```
+
+It then reports `? XFAIL`, prints no counterexample, and does not gate the exit code —
+but **if it ever passes, the run fails** and asks you to drop the mark, so the fix cannot
+go unnoticed. Use `.rareFailure` instead for a property that fails only on an occasional
+draw; it gates in neither direction. `lake test -- --list` prints every mark and its
+reason.
 
 ## Tyche visualization
 

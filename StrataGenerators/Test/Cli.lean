@@ -24,8 +24,15 @@ property, default 1000; `maxSize` = maximum generator size, default 100).
 * `--only=SUBSTRING` — run only the properties whose name contains `SUBSTRING`.
   Repeatable; a property matching any of them runs. The rest are not reported at
   all, which is what makes iterating on one new property cheap.
-* `--list` — print the registry (name, group, gate) and exit without running anything.
-  The answer to "did my property get picked up?".
+* `--list` — print the registry (name, group, gate, expectation) and exit without running
+  anything. The answer to "did my property get picked up?".
+* `--known-failure=NAME` — treat `NAME` as known to fail for this run: suppress its
+  counterexample and stop it gating the exit code. Repeatable. The permanent form is
+  `TestDecl.knownFailure` at the property, which carries a reason; this flag is for the
+  short cycle of work where you want the rest of the suite's colour while a defect is
+  being triaged. Unlike `--only=`, it takes a **whole property name**, not a substring:
+  a substring would silently claim that every property in a group must fail, and the
+  ones that hold would then be reported as failures.
 
 There is no `--suite=` flag: a report group *is* a name prefix, so `--only="lift:"`
 selects the `lift` group exactly.
@@ -42,6 +49,8 @@ structure Cli where
   tycheSamples : Nat
   /-- Name substrings to filter the registry by; empty means no filter. -/
   only         : List String
+  /-- Whole property names to mark as known failures for this run only. -/
+  knownFailures : List String
   /-- Print the registry and exit. -/
   listOnly     : Bool
   /-- Whether `--quick` was passed, so a driver can name the flag that actually
@@ -73,9 +82,10 @@ def parseCli (args : List String) : Cli :=
     tycheEnabled := !flags.contains "--no-tyche" && !quick
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
     tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
-    only         := flagValues "--only="
-    listOnly     := flags.contains "--list"
-    quick        := quick }
+    only          := flagValues "--only="
+    knownFailures := flagValues "--known-failure="
+    listOnly      := flags.contains "--list"
+    quick         := quick }
 
 /-- Whether `needle` occurs in `hay`. -/
 private def contains (hay needle : String) : Bool :=
@@ -85,16 +95,46 @@ private def contains (hay needle : String) : Bool :=
 def Cli.select (cli : Cli) (ds : List TestDecl) : List TestDecl :=
   ds.filter fun d => cli.only.isEmpty || cli.only.any (contains d.name)
 
+/-- Apply `--known-failure=` to the registry, overriding each named property's
+    `expect`. Matching is by whole name; see the module doc for why. -/
+def Cli.markKnownFailures (cli : Cli) (ds : List TestDecl) : List TestDecl :=
+  ds.map fun d =>
+    if cli.knownFailures.contains d.name then
+      d.knownFailure "marked as a known failure on the command line"
+    else d
+
+/-- `--known-failure=` arguments that name no registered property. A driver refuses to
+    run when this is non-empty: a mistyped name would otherwise silently do nothing, and
+    the run would look like the suppression worked. -/
+def Cli.unknownKnownFailures (cli : Cli) (ds : List TestDecl) : List String :=
+  cli.knownFailures.filter fun n => !ds.any (fun d => d.name == n)
+
+/-- The registry a driver actually runs: filtered by `--only`, then marked by
+    `--known-failure=`. Both drivers and `Driver.setup` go through this, so `--list`
+    shows the same expectations the run will use. -/
+def Cli.resolve (cli : Cli) (ds : List TestDecl) : List TestDecl :=
+  cli.markKnownFailures (cli.select ds)
+
 private def pad (s : String) (n : Nat) : String :=
   s ++ "".pushn ' ' (n - min n s.length)
 
-/-- Print the registry: what is registered, which group it reports under, and whether
-    a gate holds it back. This is how a property author confirms their file was picked
-    up, without waiting for a run. -/
+/-- Print the registry: what is registered, which group it reports under, whether a gate
+    holds it back, and whether it is expected to fail. This is how a property author
+    confirms their file was picked up, without waiting for a run — and the answer to
+    "what is known to fail?", since the registry is where that is now recorded. -/
 def listRegistry (ds : List TestDecl) : IO Unit := do
   IO.println s!"{ds.length} propert{if ds.length == 1 then "y" else "ies"} registered"
   for d in ds do
     let gate := match d.gate with | some g => s!"  [--{g}]" | none => ""
-    IO.println s!"  {pad d.group 12} {d.name}{gate}"
+    let expect := match d.expect with
+      | .mustHold => ""
+      | .knownFailure r => s!"\n{pad "" 15}known failure: {r}"
+      | .rareFailure r => s!"\n{pad "" 15}rare failure (not gated): {r}"
+    IO.println s!"  {pad d.group 12} {d.name}{gate}{expect}"
+  let marked := ds.filter fun d => match d.expect with | .mustHold => false | _ => true
+  unless marked.isEmpty do
+    IO.println ""
+    IO.println s!"{marked.length} of {ds.length} are expected to fail and do not gate the \
+      exit code."
 
 end StrataGenerators.Test
