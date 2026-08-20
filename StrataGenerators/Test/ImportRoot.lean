@@ -1,7 +1,10 @@
 /-!
 # The `StrataTests.lean` import root
 
-Generating the import root, and checking that it is fresh.
+Writing the import root, and the check that it is fresh. This is plain file IO: a
+directory listing, and a text file of `import` lines. None of it is metaprogramming.
+The metaprogramming lives in `StrataGenerators.Test.Registry` (the attribute) and
+`StrataGenerators.Test.Collect` (the collector).
 
 Lean links statically, so a `@[strata_property]` declaration is visible to a driver
 only if the driver transitively imports the module it lives in — the analogue of
@@ -11,7 +14,7 @@ not a file a property author edits.
 
 Three consumers share it, which is why it lives here rather than in one of them:
 
-* `lake exe gen-test-root`, to rewrite the root on demand;
+* `lake exe write-test-imports`, to rewrite the root on demand;
 * both drivers, which refuse to run against a stale root — they rewrite it and ask to
   be re-run, since the binary they are executing was already linked from the old one;
 * `#verify_test_root` in the generated root itself (see
@@ -28,13 +31,13 @@ Regeneration is needed only when a file is **added or removed** under `StrataTes
 Adding a property to an existing file changes no import.
 -/
 
-namespace StrataGenerators.Test.Root
+namespace StrataGenerators.Test.ImportRoot
 
 /-- The banner on the generated root. -/
 def header : String :=
 "-- GENERATED FILE — do not edit by hand.
 --
--- Regenerate with `lake exe gen-test-root` after you add or remove a file under
+-- Regenerate with `lake exe write-test-imports` after you add or remove a file under
 -- `StrataTests/`. Adding a property to an existing file needs no regeneration.
 --
 -- Why this file exists: Lean links statically, so a `@[strata_property]` declaration
@@ -99,4 +102,4 @@ def ensureFresh : IO Bool := do
     IO.println "Re-run to pick up the change."
   return rewritten
 
-end StrataGenerators.Test.Root
+end StrataGenerators.Test.ImportRoot

@@ -70,7 +70,7 @@ elab "#verify_test_root" : command => do
     let lines := missing.map (s!"import {·}")
     throwError "`StrataTests.lean` is out of date: \
       {missing.length} property file(s) are not imported, so their properties are not \
-      in the suite.\n\nRun `lake exe gen-test-root`, and commit the result. \
+      in the suite.\n\nRun `lake exe write-test-imports`, and commit the result. \
       The missing lines are:\n\n{String.intercalate "\n" lines}"
 
 end StrataGenerators.Test

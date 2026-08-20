@@ -28,7 +28,7 @@ globs = ["StrataGenerators.*"]
 # a configuration change. A default target, so a plain `lake build` — which is all CI
 # runs, since the suite reports known counterexamples and would fail it — still
 # compiles every property. `StrataTests.lean` is the import root the drivers read;
-# regenerate it with `lake exe gen-test-root`.
+# regenerate it with `lake exe write-test-imports`.
 [[lean_lib]]
 name = "StrataTests"
 globs = ["StrataTests.*"]
@@ -52,5 +52,5 @@ root = "LSpecTestRunner"
 # Rewrites `StrataTests.lean` from the contents of `StrataTests/`. Needed only when a
 # file is added or removed there.
 [[lean_exe]]
-name = "gen-test-root"
-root = "GenTestRoot"
+name = "write-test-imports"
+root = "WriteTestImports"

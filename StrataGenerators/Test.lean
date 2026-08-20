@@ -5,7 +5,7 @@ import StrataGenerators.Test.Report
 import StrataGenerators.Test.TycheReport
 import StrataGenerators.Test.Cli
 import StrataGenerators.Test.Family
-import StrataGenerators.Test.Root
+import StrataGenerators.Test.ImportRoot
 import StrataGenerators.Test.Generators
 
 /-!

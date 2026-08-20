@@ -1,6 +1,6 @@
 -- GENERATED FILE — do not edit by hand.
 --
--- Regenerate with `lake exe gen-test-root` after you add or remove a file under
+-- Regenerate with `lake exe write-test-imports` after you add or remove a file under
 -- `StrataTests/`. Adding a property to an existing file needs no regeneration.
 --
 -- Why this file exists: Lean links statically, so a `@[strata_property]` declaration

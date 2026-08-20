@@ -32,8 +32,8 @@ driver's module transitively imports the module it lives in — the analogue of
 hop is the generated `StrataTests.lean` import root.
 
 Adding a property to an existing file under `StrataTests/` needs nothing further.
-Adding or removing a *file* needs `lake exe gen-test-root`, which rewrites the root
-from the directory listing; see `StrataGenerators.Test.Root`. Forgetting is not
+Adding or removing a *file* needs `lake exe write-test-imports`, which rewrites the root
+from the directory listing; see `StrataGenerators.Test.ImportRoot`. Forgetting is not
 silent — the driver rewrites a stale root and asks to be re-run, and
 `#verify_test_root` fails the build. See `docs/writing-properties.md`.
 

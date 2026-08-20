@@ -13,7 +13,7 @@ lake test -- --only="example:" --quick     # run just this group
 
 To add your own, put it in whatever file under `StrataTests/` it belongs in — this one,
 another, or a new one — and run `lake test`. A new *file* also needs
-`lake exe gen-test-root`, which rewrites the `StrataTests.lean` import root from the
+`lake exe write-test-imports`, which rewrites the `StrataTests.lean` import root from the
 directory listing, so there is no list you maintain by hand.
 -/
 

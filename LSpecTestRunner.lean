@@ -51,7 +51,7 @@ def main (args : List String) : IO UInt32 := do
   -- one, so a property file added since then is not in `registry` at all. Rewriting it
   -- here and asking for a re-run is the only honest option — reporting a green suite
   -- that silently omits a file is the failure this guards against.
-  if ← StrataGenerators.Test.Root.ensureFresh then
+  if ← StrataGenerators.Test.ImportRoot.ensureFresh then
     return 1
   let selected := cli.select registry
 
