@@ -69,8 +69,7 @@ for a named `check*` predicate in a `*/TestSupport` module when the check is lon
 reused, is worth pinning with a `#guard`, or is shared with a bespoke Tyche panel — most
 of this suite is in that position, which is why most of it returns `Bool`.
 
-`family` takes `Bool`-valued checks only. The instances a `Prop` check needs are
-resolved per-check at the registration site, and a list literal offers no such site.
+A `family` entry is scored exactly the same way, so this table applies there too.
 
 ## How it gets picked up
 
@@ -221,22 +220,31 @@ green.
 
 ## Registering several at once
 
-When a family shares one generator and differs only in the check, `family` pairs each
-name with its check in one reviewable line, and `@[strata_properties]` registers the
-list:
+When a family shares an input type and differs only in the check, `family` names the type
+once and pairs each name with its check in one reviewable line; `@[strata_properties]`
+registers the list:
 
 ```lean
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
-  family
-    [ ("stmt: LoopElim preserves typeability",
-       fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts),
-      ("stmt: LoopElim eliminates all loops",
-       fun gs => checkLoopElimZeroLoops gs.stmts) ]
+  family GenStmts
+    [ ("stmt: LoopElim preserves typeability", fun gs => checkLoopElimPreservesTyping gs.stmts),
+      ("stmt: LoopElim eliminates all loops",  fun gs => checkLoopElimZeroLoops gs.stmts) ]
 ```
 
-The annotation on the first entry fixes the type for the whole list. `familyOf` is the
-variant that names a `PropertyRunner` explicitly.
+Naming the type in the `family GenStmts` position is what lets the entries drop their
+binder annotations.
+
+`family` is a macro, and that is deliberate. A function would receive the entries as one
+list, and the `Decidable`/`Testable` instances a check needs are resolved *per check*, at
+the site where the check is written — which a list handed to a function does not provide.
+The macro expands each entry to its own `TestDecl.property`, so an entry is a decidable
+`Prop` and reports a failure as precisely as a standalone property does. A function
+`family` could only take the decided form, and every entry would report
+`issue: false does not hold`.
+
+For a family whose entries want an explicit `PropertyRunner`, write the list out with
+`TestDecl.forAll` instead; there is no `familyOf`.
 
 Prefer `@[strata_property]` for a standalone property, so its name is greppable from
 its own declaration.

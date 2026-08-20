@@ -259,27 +259,6 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
     (gate : Option String := none) : TestDecl :=
   { name, gate, tyche := false, body := .action run }
 
-/-- A family of properties that share one generator and differ only in the check:
-    each name is paired with its check exactly once, in one reviewable line.
-
-    This is what `@[strata_properties]` is for. Pairing them here rather than
-    keeping a separate list of name constants is what makes it structurally
-    impossible to attach a name to the wrong check — the failure mode the old
-    two-list arrangement guarded against with a `#guard`.
-
-    The elements are `Bool`-valued rather than `Prop`-valued, because the instances a
-    `Prop` check needs are resolved per-check at the registration site, and a list
-    literal offers no such site. Every family here scores with a named `check*`
-    predicate, which returns a `Bool` anyway. -/
-def family [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
-    (ps : List (String × (α → Bool))) : List TestDecl :=
-  ps.map fun (name, check) => .property name (fun x => check x = true)
-
-/-- `family` over an explicitly named `PropertyRunner`. -/
-def familyOf (runner : PropertyRunner α) (ps : List (String × (α → Bool))) :
-    List TestDecl :=
-  ps.map fun (name, check) => .forAll name runner (fun x => check x = true)
-
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
 

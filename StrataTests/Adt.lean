@@ -34,12 +34,12 @@ open StrataGenerators.AdtLawsSmt (runLawTallies tallyToNode adtSolverAcceptsQuer
     about disjointness rather than handed a `true`. -/
 @[strata_properties]
 def adtBlockChecks : List TestDecl :=
-  family
+  family GenAdtBlock
     [ -- The screen that keeps the solver properties from being fed an ill-typed
       -- program, and a claim in its own right: a derived constructor is usable in an
       -- equality at its ground instance. Holds on every block Strata accepts.
       ("adt: the law program typechecks",
-       fun (gb : GenAdtBlock) => checkLawProgramTypeChecks gb.block),
+       fun gb => checkLawProgramTypeChecks gb.block),
       -- FAILS honestly, but only on a rare draw. A datatype with a field `f` *and* a
       -- field `f!` derives the name `d..f!` twice — once as `f!`'s safe destructor,
       -- once as `f`'s unsafe one — and the whole declaration is then rejected. Both

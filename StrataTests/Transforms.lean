@@ -46,10 +46,10 @@ open StrataGenerators.Program.UnprovenTransforms
 /-- The forty-five properties for the unproven passes. -/
 @[strata_properties]
 def unprovenTransforms : List TestDecl :=
-  family
+  family GenProgram
     [ -- IrrelevantAxioms — the relevance oracle
       ("axioms: IrrelevantAxioms removes only axioms",
-       fun (gp : GenProgram) => checkAxiomsOnlyAxRemoved gp.prog),
+       fun gp => checkAxiomsOnlyAxRemoved gp.prog),
       ("axioms: IrrelevantAxioms preserves declaration order",
        fun gp => checkAxiomsOrderPreserved gp.prog),
       ("axioms: every retained axiom is relevant",

@@ -17,9 +17,9 @@ open StrataGenerators.Stmt.TestSupport
 /-- The six statement transform / typechecker properties. -/
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
-  family
+  family GenStmts
     [ ("stmt: typechecker accepts generated statements",
-       fun (gs : GenStmts) => checkTypeCheckerComplete gs.stmts),
+       fun gs => checkTypeCheckerComplete gs.stmts),
       ("stmt: LoopElim preserves typeability",
        fun gs => checkLoopElimPreservesTyping gs.stmts),
       ("stmt: LoopElim eliminates all loops",

@@ -30,10 +30,10 @@ open StrataGenerators.Procedure.TestSupport
     thirteen PrecondElim, eight ANFEncoder. -/
 @[strata_properties]
 def procTransforms : List TestDecl :=
-  family
+  family GenProcs
     [ -- FilterProcedures — `FilterProcedurePhaseCorrect`
       ("proc: FilterProcedures output decls are a sublist",
-       fun (gp : GenProcs) => checkFilterDeclsSublist gp.procs),
+       fun gp => checkFilterDeclsSublist gp.procs),
       ("proc: FilterProcedures retains targets",
        fun gp => checkFilterTargetsRetained gp.procs),
       ("proc: FilterProcedures retains callee closures",

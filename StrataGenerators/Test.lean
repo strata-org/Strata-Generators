@@ -4,6 +4,7 @@ import StrataGenerators.Test.Collect
 import StrataGenerators.Test.Report
 import StrataGenerators.Test.TycheReport
 import StrataGenerators.Test.Cli
+import StrataGenerators.Test.Family
 import StrataGenerators.Test.Root
 import StrataGenerators.Test.Generators
 
@@ -93,9 +94,13 @@ cases that are not:
   that must interleave its own diagnostics with generation. Pair it with
   `gate := some "smt"` when it needs a live solver.
 
-`@[strata_properties]` registers a `List TestDecl` at once; `family` pairs each name
-with its check in one line, for a family that shares an input type. `familyOf` and
-`TestDecl.forAll` are the variants that name a `PropertyRunner` explicitly.
+`@[strata_properties]` registers a `List TestDecl` at once, and `family T [ … ]` is
+sugar for building that list when the entries share an input type: it names `T` once and
+expands each entry to its own `TestDecl.property`, so an entry is a decidable `Prop`
+scored exactly as a standalone property is. There is one way to state a check across the
+whole API, with no exception for a family.
+
+`TestDecl.forAll` is the variant that names a `PropertyRunner` explicitly.
 
 `@[strata_diagnostic]` registers a `Diagnostic`: a report that prints and never gates
 the exit code, for a coverage statistic or a localisation tally.
