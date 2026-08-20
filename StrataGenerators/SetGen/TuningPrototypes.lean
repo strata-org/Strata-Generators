@@ -5,39 +5,63 @@ Authors: Harrison Goldstein
 -/
 import StrataGenerators.FunctionHasTypeAGen
 import StrataGenerators.StmtHasTypeAGen
+import StrataGenerators.ProcedureHasTypeAGen
+import StrataGenerators.TuningProfiles
 import StrataGenerators.SetGen
 import Basalt.Tuning.Attr
 
 open Lambda RandomChoice Core Imperative
-open StrataGenerators.Stmt (genCondOrNondet)
+open StrataGenerators.Stmt
+open StrataGenerators.TuningProfiles
 open scoped SetGen.Set
 
 /-!
-# Prototypes: transformation-targeted tunings
+# The shipping generators, tuned
 
-Three worked conversions showing how to make a generator's distribution tunable so a Strata Core
-transformation gets non-vacuous input. Each one ends in a machine-checked theorem that the tuning is
-*behavior-preserving*: at `SetGen.Set` the tuned generator is **equal** to the untuned one for every
-`θ`, so every soundness/completeness result about the original applies to every tuning of it.
+Every generator this repo's test suite draws from, made distribution-tunable, with a machine-checked
+theorem per generator that the conversion is *behavior-preserving*: at `SetGen.Set` the tuned
+generator is **equal** to the untuned one for every `θ`, so every soundness and completeness result
+about the original applies to every tuning of it. The weights themselves — which `θ` to use for which
+family of properties, and the measurements behind them — are in
+`StrataGenerators.TuningProfiles`; this file is the guarantee that no choice made there can cost
+coverage.
 
-* **`PrecondElim`, knob 1 — the shape of a precondition, with no source edit.**
-  `attribute [tunable] genPrecondition` tags the *shipping* generator from another module.  This is
-  what the `@[tunable]` attribute bought over the older `tunable def` macro: because it rewrites the
-  elaborated body, it does not have to be written at the definition site.  The site it finds is
-  `genPrecondition`'s existing 3:1 split between an input-mentioning clause and a plain `.bool` draw,
-  so `genPrecondition.tuned θ` moves that ratio at runtime.
+* **§1 `PrecondElim`, knob 1 — the shape of a precondition, with no source edit.**
+  `genPrecondition` is tagged from another module (`StrataGenerators.TuningProfiles`), not at its
+  definition site. That is what the `@[tunable]` attribute bought over the older `tunable def`
+  macro: because it rewrites the elaborated body, it does not have to be written at the definition
+  site. The site it finds is `genPrecondition`'s existing 3:1 split between an input-mentioning
+  clause and a plain `.bool` draw, so `genPrecondition.tuned θ` moves that ratio at runtime.
 
-* **`PrecondElim`, knob 2 — whether a precondition is present at all.**
+* **§2 `PrecondElim`, knob 2 — whether a precondition is present at all.**
   That split is `optionGen`'s rational `coin`, which is not a `frequency` and so is invisible to
   `@[tunable]`. `genPreconditionW` reworks it into the two-branch `frequency` of
   `SetGen.weightedOptionGen` (written inline, so the attribute sees it) and proves the rework has the
   same support as the shipping `genPrecondition` — so the conversion changes only the distribution.
-  This is the knob `PrecondElim` needs turned up.
+  The same rework would make `genFunction`'s body/measure coins tunable, which is what the
+  `function:` family needs; it is not done here.
 
-* **`LoopElim` — a loop-prioritizing statement generator.** `genStmtLoopy` mirrors
-  `StmtHasTypeAGen.Core.genStmt`'s branch structure as a recursive `@[tunable]` generator, so `loop`
-  is flat index 8 of its single site and `loopHeavy` boosts it. §3 also records, as a
-  `#guard_msgs`-checked error, exactly why the *shipping* `genStmt` cannot be tagged as written.
+* **§3 `LoopElim` — the real statement generator.** `StrataGenerators.Stmt.genStmt` is now tagged at
+  its definition site, and `genStmt_mutual_tuned_eq` proves θ-invariance for the *whole mutual
+  block* — so `loop` is flat index 13 of a real knob rather than of a mirror. An earlier revision of
+  this file argued the shipping generator could not be tagged, and recorded the attribute's error as
+  a `#guard_msgs`. Two source changes removed the obstacle, both in
+  `StmtHasTypeAGen/Core.lean`:
+
+  1. the `frequency`'s branch list was a `let`-bound variable; it is now written inline, so the
+     weights are visible to be collected (the same one-line change unblocked `genCmd` and
+     `genLExprBase`);
+  2. `exit` and `call` carried the weight `if labels.isEmpty then 0 else 1`, and `@[tunable]`
+     rejects both a computed weight and a literal `0`. Instead of the weight, the *branch* now
+     tests the condition and falls back to `genCmdStmt` — the generator branch 0 already offers —
+     so the list has only positive literal weights and `genStmt`'s support is unchanged, because
+     the fallback's support was already in the union. Both forms are throw-free (`frequency` skips
+     a zero-weight branch); they differ only in that `cmd` now absorbs the pruned branches' share
+     instead of the list being renormalised.
+
+* **§4 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` (59 branch weights across ten
+  per-type sites), each with the same θ-invariance guarantee, one recursion form each — no
+  recursion, `Nat.brecOn`, and `Nat.brecOn` under a wide match.
 -/
 
 namespace TuningPrototypes
@@ -50,10 +74,8 @@ open Strata.DL.Util (FuncPrecondition)
 
 /-! `genPrecondition` (`StrataGenerators/FunctionHasTypeAGen/Core.lean`) already contains a
 `frequency`: inside the `some` clause it prefers an input-mentioning precondition over a plain
-`.bool` draw, 3:1. Tagging it here — from a different module, with no edit to its source — makes that
-ratio a runtime knob. -/
-
-attribute [tunable] genPrecondition
+`.bool` draw, 3:1. `StrataGenerators.TuningProfiles` tags it — from a different module, with no edit
+to its source — which makes that ratio a runtime knob. -/
 
 /-- One site, arity 2, no recursive calls: the input-mentioning branch and the `.bool` branch. -/
 example : genPrecondition.sites = #[⟨`genPrecondition.site0, 0, 2, #[0, 0]⟩] := rfl
@@ -225,134 +247,189 @@ example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy
   rw [genPreconditionW_tuned_eq, genPreconditionW_support_eq]
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 3. LoopElim: a loop-prioritizing statement generator
+-- 3. LoopElim: the real statement generator
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-! ### Why the shipping `genStmt` cannot be tagged as written
+/-! `StrataGenerators.Stmt.genStmt` is tagged at its definition site, and
+`StrataGenerators.TuningProfiles` additionally tags the mutual block's shared auxiliary
+`genStmt._mutual`. Both are needed, and the difference between them is the whole story of how tuning
+composes:
 
-`@[tunable]` no longer cares how a generator recurses, so `StmtHasTypeAGen.Core.genStmt`'s mutual
-well-founded recursion is not the obstacle. Its `frequency` call is: the branch list is a `let`-bound
-variable, not a literal, so the weights are not visible to be collected. -/
+* `genStmt.tuned θ` reads the weights of the statement it produces itself. Its recursion, though,
+  runs through `genStmtChain` — the *other* member of the block, which `@[tunable]` does not rewrite
+  — so the statements nested inside a `block`/`ite`/`loop` body are drawn from the untuned generator.
+  Measured (`dist-report`), with the `loop` weight at 40: top-level loops 15% → 72%, but
+  loop-inside-a-loop only 2% → 7.5%.
+* `genStmt._mutual.tuned θ` is the whole block. Its recursion is internal — one `WellFounded.fix`
+  over a `PSum` of the two members' argument tuples — so `θ` threads through all of it. Same
+  weighting: loop-inside-a-loop 3.5% → 66%.
 
-/--
-error: tunable: `StrataGenerators.Stmt.genStmt` has a `frequency` whose branch list is not a literal list of `(weight, generator)` pairs — the weights have to be visible to be collected
--/
-#guard_msgs in
-attribute [tunable] StrataGenerators.Stmt.genStmt
+`TuningProfiles.genStmtT`/`genStmtChainT` are therefore built on the auxiliary, and are pinned to the
+shipping generators at `θ = defaults` by `rfl` there. -/
 
-/-! Two source changes would be needed to tune the real generator, and the second is a genuine design
-question rather than a mechanical edit:
+/-- **The conversion is behavior-preserving, for the whole mutual block.** For every `θ`, the tuned
+    statement generator is *the same* `Set`-valued generator as the shipping one — so
+    `genStmt_sound`, `genStmtChain_sound` and the completeness results transfer to every tuning by
+    one `rw`, and no profile in `StrataGenerators.TuningProfiles` can make a statement shape
+    unreachable.
 
-1. Inline `gs` into the `frequency` call, so the branch list is a literal.
-2. Do something about `wExit`/`wCall`. They are `if labels.isEmpty then 0 else 1` — a deliberate
-   weight of `0`, used to prune the `exit` and `call` branches when their support is provably empty.
-   `@[tunable]` rejects a literal `0` (it would break support-completeness) and rejects a non-literal
-   weight, so those two branches would have to move out of the weight and into the *list*: build one
-   literal branch list per case of `labels.isEmpty`/`procs.isEmpty`. That is four lists per `size`
-   arm, and `genStmt` has two arms (5 branches at `0`, 9 at `size + 1`), so eight sites of arity
-   3–9 — 48 schedule entries where there are now 14. The cost is not the count but the addressing:
-   "the weight of the `loop` branch" stops being one index and becomes one per case, and a `Tuning`
-   that sets them inconsistently makes the distribution depend on `labels`/`procs` in a way nobody
-   wrote down. That is why the mirror below is a standalone prototype rather than an edit to
-   `genStmt`.
+    The proof is the `WellFounded.fix` recipe from `SetGen.Tuning`: `delta` exposes both sides as
+    `WellFounded.fix` applied to functionals that differ only in their `frequency` weights (the
+    recursive-call bundle `ih` is literally the same bound variable in both), `SetGen`'s
+    `wellFounded_fix_congr` reduces the goal to those functionals being equal, and then there is one
+    `frequency_congr_weights` per site: the `size = 0` list, the `size + 1` list, and `rfl` for the
+    `PSum.inr` case, which is `genStmtChain` and has no site of its own. -/
+theorem genStmt_mutual_tuned_eq (θ : Tuning) :
+    (genStmt._mutual.tuned (G := SetGen.Set) θ) = genStmt._mutual := by
+  funext fctx octx tvars immutableVars procs
+  delta StrataGenerators.Stmt.genStmt._mutual StrataGenerators.Stmt.genStmt._mutual.tuned
+  apply SetGen.wellFounded_fix_congr
+  funext x ih
+  cases x with
+  | inl a =>
+    obtain ⟨labels, C, ctx, n⟩ := a
+    cases n with
+    | zero =>
+      apply SetGen.frequency_congr_weights
+      · rfl
+      all_goals simp [Tuning.weight_pos]
+    | succ size =>
+      apply SetGen.frequency_congr_weights
+      · rfl
+      all_goals simp [Tuning.weight_pos]
+  | inr a => rfl
 
-`genStmtLoopy` therefore reproduces `genStmt`'s branch structure — the part tuning addresses — in a
-form the attribute accepts. -/
+/-! `genStmt` and `genStmtChain` are irreducible (well-founded recursion), so recognising each as a
+projection of the shared auxiliary — which is what the two corollaries below need — takes an
+`unseal`. -/
+unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 
-/-- A recursive mirror of `StmtHasTypeAGen.Core.genStmt`'s `size + 1` arm: the same nine branches in
-    the same order, so the flat-index layout matches. Tagged `@[tunable]`, so each branch weight is a
-    runtime knob.
+/-- The single-statement generator, as tagged at its definition site: the same fact, read off the
+    block's. -/
+theorem genStmt_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
+    (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
+    genStmtT (G := SetGen.Set) θ fctx octx tvars immutableVars procs labels C ctx size
+      = genStmt fctx octx tvars immutableVars procs labels C ctx size := by
+  unfold genStmtT
+  rw [genStmt_mutual_tuned_eq]
+  rfl
 
-    Branch layout (`genStmtLoopy.sites[0]`, flat indices):
-    `0` cmd  `1` exit  `2` funcDecl  `3` typeDecl  `4` call  `5` block  `6` ite-det  `7` ite-nondet
-    `8` **loop**.
+/-- …and for the chain, which is what the statement family's harness draws from. -/
+theorem genStmtChain_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat) :
+    genStmtChainT (G := SetGen.Set) θ fctx octx tvars immutableVars procs labels C ctx size len
+      = genStmtChain fctx octx tvars immutableVars procs labels C ctx size len := by
+  unfold genStmtChainT
+  rw [genStmt_mutual_tuned_eq]
+  rfl
 
-    Simplified vs the real `genStmt` in the *leaves*: the five non-recursive branches are stubbed with
-    `pure []`, the block label is fixed rather than drawn fresh, and loop measures/invariants are
-    omitted. The four recursive branches do recurse, at `depth + 1`, via `partial_fixpoint` — which the
-    older `tunable def` macro could not have accepted, and which is what makes the θ-invariance proof
-    below a statement about the whole recursive generator rather than one site. -/
-@[tunable]
-def genStmtLoopy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (labels : List String) (depth : Nat) : G (List Statement) :=
-  frequency [
-    (4, fun _ => pure []),                                    -- cmd      (stub)
-    (1, fun _ => pure []),                                    -- exit     (stub)
-    (1, fun _ => pure []),                                    -- funcDecl (stub)
-    (1, fun _ => pure []),                                    -- typeDecl (stub)
-    (1, fun _ => pure []),                                    -- call     (stub)
-    (2, fun _ => do                                           -- block
-      let body ← genStmtLoopy fctx octx tvars ("blk" :: labels) (depth + 1)
-      pure [Stmt.block "blk" body default]),
-    (2, fun _ => do                                           -- ite-det
-      let cond ← genLExpr fctx octx [] tvars [] depth .bool
-      let thenb ← genStmtLoopy fctx octx tvars labels (depth + 1)
-      let elseb ← genStmtLoopy fctx octx tvars labels (depth + 1)
-      pure [Stmt.ite (.det cond) thenb elseb default]),
-    (1, fun _ => do                                           -- ite-nondet
-      let thenb ← genStmtLoopy fctx octx tvars labels (depth + 1)
-      let elseb ← genStmtLoopy fctx octx tvars labels (depth + 1)
-      pure [Stmt.ite .nondet thenb elseb default]),
-    (2, fun _ => do                                           -- loop  ← index 8
-      let guard ← genCondOrNondet fctx octx tvars depth
-      let body ← genStmtLoopy fctx octx tvars labels (depth + 1)
-      pure [Stmt.loop guard none [] body default])
-  ] (by simp)
-partial_fixpoint
+theorem genProgramStmtsT_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier) (size len : Nat) :
+    genProgramStmtsT (G := SetGen.Set) θ fctx octx tvars size len
+      = genProgramStmts fctx octx tvars size len :=
+  genStmtChain_tuned_eq ..
 
-/-- One tunable site, arity 9. `holes` counts the recursive calls per branch: the five stubs make
-    none, `block` and `loop` one each, and the two `ite`s two each. The `loop` branch is index 8. -/
-example : genStmtLoopy.sites =
-    #[⟨`TuningPrototypes.genStmtLoopy.site0, 0, 9, #[0, 0, 0, 0, 0, 1, 2, 2, 1]⟩] := rfl
+/-- The procedure generator too: `genProcedureT` differs from the shipping `genProcedure` only in
+    which statement-chain generator it calls, so the block's θ-invariance is the whole proof. This is
+    what makes the `proc:` family's profiles — the ones aimed at the three transform passes — free of
+    consequence for `genProcedure_sound` and `genProcedure_complete`. -/
+theorem genProcedureT_tuned_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx) (size len : Nat) :
+    genProcedureT (G := SetGen.Set) θ octx procs size len
+      = StrataGenerators.Procedure.genProcedure octx procs size len := by
+  unfold genProcedureT StrataGenerators.Procedure.genProcedure
+  simp only [genStmtChain_tuned_eq]
 
-/-- The default weights are the source weights (mirroring `genStmt`'s `size + 1` arm). -/
-example : genStmtLoopy.defaults =
-    ⟨#[(4,0),(1,0),(1,0),(1,0),(1,0),(2,0),(2,0),(1,0),(2,0)]⟩ := rfl
+-- ══════════════════════════════════════════════════════════════════════════
+-- 4. The command, type and expression generators
+-- ══════════════════════════════════════════════════════════════════════════
 
-/-- **`LoopElim` weighting.** Crank the `loop` branch (index 8) so loops dominate control flow, while
-    every other branch keeps its default weight. A weight of 12 against the summed rest makes a loop
-    the modal statement — plenty to make `LoopElim`'s loop-elimination path non-vacuous. -/
-def loopHeavy : Tuning :=
-  { schedules := genStmtLoopy.defaults.schedules.set! 8 (12, 0) }
+/-- `genCmd` is not recursive, so the recipe is the first one in `SetGen.Tuning`'s list — except that
+    its two sites sit in the two branches of a `dite` whose proof `h` the `set` branches *use*, so
+    the condition has to be split first (exactly as for `genPrecondition` in §1). -/
+theorem genCmd_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
+    genCmd.tuned (G := SetGen.Set) θ fctx octx tvars immutableVars ctx depth
+      = genCmd fctx octx tvars immutableVars ctx depth := by
+  unfold genCmd genCmd.tuned
+  by_cases h : (ctx.writable immutableVars).length > 0
+  · simp only [dif_pos h]
+    apply SetGen.frequency_congr_weights
+    · rfl
+    all_goals simp [Tuning.weight_pos]
+  · simp only [dif_neg h]
+    apply SetGen.frequency_congr_weights
+    · rfl
+    all_goals simp [Tuning.weight_pos]
 
-/-- Sanity: `loopHeavy` only touches the loop entry; the other eight are the defaults. -/
-example : loopHeavy.schedules = #[(4,0),(1,0),(1,0),(1,0),(1,0),(2,0),(2,0),(1,0),(12,0)] := rfl
+/-- So the tuned command *chain* is the shipping one, by induction on its length. -/
+theorem genCmdsT_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (depth : Nat) :
+    ∀ (n : Nat) (ctx : VarCtx),
+      genCmdsT (G := SetGen.Set) θ fctx octx tvars immutableVars ctx depth n
+        = genCmds fctx octx tvars immutableVars ctx depth n := by
+  intro n
+  induction n with
+  | zero => intro ctx; rfl
+  | succ n ih => intro ctx; simp only [genCmdsT, genCmds, genCmd_tuned_eq, ih]
 
-/-- The same weighting, made subcritical by depth: the `cmd` stub's weight grows as `4 + 8·d`, so
-    loops dominate near the root and the recursion is forced closed a few levels down. This is the
-    `Tuning` shape to reach for when a root-heavy weighting would otherwise exhaust the sampler's
-    fuel budget. (At `SetGen.Set` the growth coefficient is invisible — see
-    `genStmtLoopy_tuned_eq`: no schedule can change what is reachable.) -/
-def loopHeavyDecaying : Tuning :=
-  { schedules := loopHeavy.schedules.set! 0 (4, 8) }
+/-- `genLMonoTy` recurses structurally on its depth, so this is the `Nat.brecOn` recipe: `delta`,
+    `SetGen.brecOn_congr`, then one `frequency_congr_weights` per branch of the `n + 1` arm (the
+    `0` arm is a `pick`/`oneOf`, with no weights, so it closes by `rfl`). Both sites are the same
+    9:1 base-versus-compound split, once with type variables in scope and once without. -/
+theorem genLMonoTy_tuned_eq (θ : Tuning) (tvars : List TyIdentifier) (n : Nat) :
+    genLMonoTy.tuned (G := SetGen.Set) θ tvars n = genLMonoTy tvars n := by
+  delta genLMonoTy genLMonoTy.tuned
+  apply SetGen.brecOn_congr
+  funext m below
+  cases m with
+  | zero => rfl
+  | succ k =>
+    by_cases h : tvars.length > 0
+    · simp only [dif_pos h]
+      apply SetGen.frequency_congr_weights
+      · rfl
+      all_goals simp [Tuning.weight_pos]
+    · simp only [dif_neg h]
+      apply SetGen.frequency_congr_weights
+      · rfl
+      all_goals simp [Tuning.weight_pos]
 
-/-! Boosting loops is behavior-preserving for *any* `θ` — so in particular for `loopHeavy` and
-`loopHeavyDecaying`. Every branch weight stays ≥ 1 under `Tuning.weight`, so no statement form is
-lost: the generator still reaches every shape it did before, just with loops far more often. This is
-the fact that would let the real `genStmt`'s soundness/completeness proofs carry over unchanged.
+set_option maxHeartbeats 1000000 in
+/-- `genLExprBase` is the widest of them: ten sites, 59 branch weights, and a match on the target
+    type as well as the depth. It needs no more work than the others, because none of the ten arms
+    has to be *named*: `split` produces one goal per arm of the match — the same matcher constant
+    appears on both sides, since `@[tunable]` reuses matchers rather than rebuilding them — and each
+    goal is then either an `n = 0` arm (a `oneOf`, closed by `rfl`) or one `frequency` whose weights
+    are the only thing that differs.
 
-The `unseal` is needed because `partial_fixpoint` definitions are irreducible and `@[tunable]` copies
-that status onto `.tuned`. -/
+    The `refine congrFun (congrFun …)` rather than `apply` is because the equation compiler moved
+    `bctx` and the target type into `Nat.brecOn`'s motive, so `delta` leaves them applied outside the
+    `brecOn` (see `SetGen.brecOn_congr`). -/
+theorem genLExprBase_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) :
+    genLExprBase.tuned (G := SetGen.Set) θ fctx octx tvars bctx n τ
+      = genLExprBase fctx octx tvars bctx n τ := by
+  delta genLExprBase genLExprBase.tuned
+  refine congrFun (congrFun (SetGen.brecOn_congr ?heq n) bctx) τ
+  case heq =>
+    funext m below bctx' τ'
+    dsimp only
+    split
+    all_goals first
+      | rfl
+      | (apply SetGen.frequency_congr_weights
+         · rfl
+         all_goals simp [Tuning.weight_pos])
 
-unseal genStmtLoopy genStmtLoopy.tuned
-
-theorem genStmtLoopy_tuned_eq (θ : Tuning) :
-    (genStmtLoopy.tuned (G := SetGen.Set) θ) = genStmtLoopy := by
-  -- `partial_fixpoint` hoists the arguments that never change in a recursive call out of the fix, so
-  -- `fctx`, `octx` and `tvars` have to be introduced before `Lean.Order.fix` is exposed; `labels` and
-  -- `depth`, which do change, are the fix's own binders.
-  funext fctx octx tvars
-  apply SetGen.fix_congr
-  funext f labels depth
-  apply SetGen.frequency_congr_weights
-  · rfl
-  all_goals simp [Tuning.weight_pos]
-
-/-- The support consequence, spelled out at `loopHeavy`. -/
-example (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (labels : List String)
-    (depth : Nat) :
-    SetGen.support (genStmtLoopy.tuned (G := SetGen.Set) loopHeavy fctx octx tvars labels depth) =
-      SetGen.support (genStmtLoopy (G := SetGen.Set) fctx octx tvars labels depth) := by
-  rw [genStmtLoopy_tuned_eq]
+/-- The payoff, spelled out once: an arbitrary soundness-and-completeness fact about the shipping
+    expression generator holds of every tuning of it, with no reference to what the predicate is. -/
+example (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx)
+    (n : Nat) (τ : LMonoTy) (P : LExpr' → Prop)
+    (h : SetGen.IsSoundAndComplete (genLExprBase (G := SetGen.Set) fctx octx tvars bctx n τ) P) :
+    SetGen.IsSoundAndComplete
+      (genLExprBase.tuned (G := SetGen.Set) θ fctx octx tvars bctx n τ) P :=
+  SetGen.IsSoundAndComplete.of_support_eq (by rw [genLExprBase_tuned_eq]) h
 
 end TuningPrototypes

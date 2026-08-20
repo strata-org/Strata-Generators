@@ -429,10 +429,19 @@ theorem genStmt_mutableVars
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
         Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
-    · -- exit
+    · -- exit — or a `cmd`, since with `labels = []` the branch falls back to one
       cases labels with
-      | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx 0) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx 0 rc hrc
+        simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
+          HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
+          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr
         exact ⟨fun v hv => by
@@ -456,8 +465,21 @@ theorem genStmt_mutableVars
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call
-      exact genCallStmt_mutableVars fctx octx tvars immutableVars procs C ctx 0 _ hr
+    · -- call — or a `cmd`, since with `procs = []` the branch falls back to one
+      cases procs with
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx 0) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx 0 rc hrc
+        simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
+          HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
+          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+      | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars
+          immutableVars (hd :: tl) C ctx 0) := hr
+        exact genCallStmt_mutableVars fctx octx tvars immutableVars (hd :: tl) C ctx 0 _ hr
   | succ size =>
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
@@ -470,10 +492,19 @@ theorem genStmt_mutableVars
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
         Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
-    · -- exit
+    · -- exit — or a `cmd`, since with `labels = []` the branch falls back to one
       cases labels with
-      | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx (size+1)) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx (size+1) rc hrc
+        simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
+          HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
+          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr
         exact ⟨fun v hv => by
@@ -497,8 +528,21 @@ theorem genStmt_mutableVars
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call
-      exact genCallStmt_mutableVars fctx octx tvars immutableVars procs C ctx (size+1) _ hr
+    · -- call — or a `cmd`, since with `procs = []` the branch falls back to one
+      cases procs with
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) fctx octx tvars immutableVars C ctx (size+1)) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        have h := genCmd_mutableVars fctx octx tvars immutableVars ctx (size+1) rc hrc
+        simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
+          HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
+          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+      | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) fctx octx tvars
+          immutableVars (hd :: tl) C ctx (size+1)) := hr
+        exact genCallStmt_mutableVars fctx octx tvars immutableVars (hd :: tl) C ctx (size+1) _ hr
     · -- block: outCtx = ctx, modified/defined delegate to body
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨label, hlabel, ⟨⟨len, _⟩⟩, _, triple, htriple, rfl⟩ := hr

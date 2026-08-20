@@ -1,6 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
@@ -425,41 +426,70 @@ mutual
     *list*; every other branch returns a singleton.
 
     The generated statements satisfy `StmtsHasTypeA P C Γ ss C' Γ'` (for any
-    program `P`) — see `genStmt_sound`. -/
+    program `P`) — see `genStmt_sound`.
+
+    Tagged `@[tunable]`, so every branch weight is a runtime knob: `genStmt.tuned θ`
+    reads them from `θ` at the current `size`. The two sites are the `size = 0`
+    leaf list (arity 5) and the `size + 1` list (arity 9), the latter having `loop`
+    at flat index 13 — the knob a loop-transformation test wants turned up. See
+    `StrataGenerators.TuningProfiles` for the profiles the test suite uses, and
+    `TuningPrototypes.genStmt_mutual_tuned_eq` for the proof that no `θ` changes what is
+    reachable.
+    The weights are *constant* rather than `size`-indexed (no `depth` binder is in
+    scope, so every site reads its schedule at depth 0): unlike an expression
+    generator, this recursion cannot run away — the nesting branches exist only at
+    `size + 1` and generate their bodies at `size`, so nesting depth is bounded by
+    the initial budget whatever the weights are, and a decaying schedule has
+    nothing to protect against.
+
+    **Why `exit`/`call` fall back to a command.** `exit` needs an enclosing block
+    label and `call` needs a callee, so with `labels = []` / `procs = []` those
+    generators have *empty support* and can only throw. They used to be pruned by
+    the weight `if labels.isEmpty then 0 else 1`, which `frequency` skips — but a
+    weight computed by an `if` is invisible to `@[tunable]`, and a literal `0` is
+    rejected outright (it would break support-completeness). Pruning the *branch*
+    instead of its weight — deferring to `genCmdStmt`, which branch 0 already
+    offers — keeps every weight a positive literal and is equally throw-free. The
+    branch's support is then either `genExitStmt`'s or a subset of branch 0's, so
+    the union over the list, i.e. `genStmt`'s support, is unchanged; that is why
+    the soundness and completeness proofs go through with only a `cases labels` /
+    `cases procs` added.
+
+    The distributions differ in one respect, which is not a regression but is
+    worth knowing: where the old generator renormalised over the surviving
+    branches (`cmd` took 4/6 of a label-free, callee-free leaf draw), this one
+    hands the pruned branches' share to `cmd` (4/8 directly plus 2/8 through the
+    fallbacks, i.e. 3/4), leaving `funcDecl` and `typeDecl` slightly rarer than
+    before. -/
+@[tunable]
 def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) : Nat → G GenStmtResult
   | 0 =>
-    -- `exit` needs an enclosing block label and `call` needs a callee: with
-    -- `labels = []` / `procs = []` those branches have *empty support* and can
-    -- only throw, so they are weighted 0 rather than offered. (`frequency` skips
-    -- zero-weight branches, and support is weight-insensitive — see
-    -- `mem_support_frequency_iff` — so this changes only the distribution, and
-    -- the `rcases` arity in the soundness/completeness proofs is unchanged.)
-    let wExit := if labels.isEmpty then 0 else 1
-    let wCall := if procs.isEmpty then 0 else 1
-    let gs : List (Nat × (Unit → G GenStmtResult)) :=
+    frequency
       [ (4, fun () => genCmdStmt fctx octx tvars immutableVars C ctx 0),
-        (wExit, fun () => genExitStmt labels C ctx),
+        (1, fun () =>
+          if labels.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx 0
+          else genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx 0),
         (1, fun () => genTypeDeclStmt C ctx 0),
-        (wCall, fun () => genCallStmt fctx octx tvars immutableVars procs C ctx 0) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by
-      simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega
-    frequency gs hw
+        (1, fun () =>
+          if procs.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx 0
+          else genCallStmt fctx octx tvars immutableVars procs C ctx 0) ]
+      (by show 0 < 4+1+1+1+1; omega)
   | size + 1 =>
-    -- See the `size = 0` case: `exit`/`call` are weighted 0 when their support is
-    -- provably empty (no enclosing label / no callee).
-    let wExit := if labels.isEmpty then 0 else 1
-    let wCall := if procs.isEmpty then 0 else 1
-    let gs : List (Nat × (Unit → G GenStmtResult)) :=
+    frequency
       [ (4, fun () => genCmdStmt fctx octx tvars immutableVars C ctx (size + 1)),
-        (wExit, fun () => genExitStmt labels C ctx),
+        (1, fun () =>
+          if labels.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx (size + 1)
+          else genExitStmt labels C ctx),
         (1, fun () => genFuncDeclStmt fctx octx C ctx (size + 1)),
         (1, fun () => genTypeDeclStmt C ctx (size + 1)),
-        (wCall, fun () => genCallStmt fctx octx tvars immutableVars procs C ctx (size + 1)),
+        (1, fun () =>
+          if procs.isEmpty then genCmdStmt fctx octx tvars immutableVars C ctx (size + 1)
+          else genCallStmt fctx octx tvars immutableVars procs C ctx (size + 1)),
         (2, fun () => do
           -- The block's `label` must not shadow an enclosing one (`label ∉ L`,
           -- the new-spec `block` premise), so it is drawn fresh from `labels`.
@@ -490,9 +520,7 @@ def genStmt [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let (body, _, _) ← genStmtChain fctx octx tvars immutableVars procs labels C ctx size blen
           pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by
-      simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega
-    frequency gs hw
+      (by show 0 < 4+1+1+1+1+2+2+1+2; omega)
 termination_by n => (n, 0, 0)
 
 /-- Generate a chain of up to `len` well-typed statement *groups*, threading both

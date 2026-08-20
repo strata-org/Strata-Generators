@@ -1,6 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import Basalt.Tuning.Attr
 import BasaltExamples.ArbChar.Def
 import BasaltExamples.ArbString.Def
 import Strata.DL.Lambda.Denote.LExprAnnotated
@@ -445,6 +446,7 @@ def genAppArgTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
     produced with sub-expressions at depth `n`.
 
     The generated term satisfies `HasTypeA' bctx e τ` (see `genLExpr_sound`). -/
+@[tunable (depth := n)]
 def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
   -- ── Arrow type ────────────────────────────────────────────────────
   | 0, .arrow τ₁ τ₂ =>
@@ -464,7 +466,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (4, fun () => genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.arrow τ₁ τ₂)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
@@ -481,8 +483,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
           then pickOp octx _ ho
           else genAbs (genLExprBase fctx octx tvars (τ₁ :: bctx) n τ₂) τ₁) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 4+1+2+2+2+2; omega)
   -- ── Bool type ─────────────────────────────────────────────────────
   | 0, .bool =>
     let bvars := bvarsOfType bctx .bool
@@ -502,7 +503,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .bool =>
     let bvars := bvarsOfType bctx .bool
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genBoolConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .bool) (genLExprBase fctx octx tvars bctx n) .bool),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
@@ -526,8 +527,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .bool).length > 0
           then pickOp octx .bool ho
           else genBoolConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2+2+2+2; omega)
   -- ── Int type ──────────────────────────────────────────────────────
   | 0, .int =>
     let bvars := bvarsOfType bctx .int
@@ -547,7 +547,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .int =>
     let bvars := bvarsOfType bctx .int
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genIntConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .int) (genLExprBase fctx octx tvars bctx n) .int),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
@@ -564,8 +564,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .int).length > 0
           then pickOp octx .int ho
           else genIntConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2; omega)
   -- ── FtVar type (rigid type variable) ────────────────────────────────
   | 0, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
@@ -594,7 +593,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.ftvar name)) (genLExprBase fctx octx tvars bctx n) (.ftvar name)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n (.ftvar name))
@@ -616,8 +615,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2; omega)
   -- ── String type ────────────────────────────────────────────────────
   | 0, .string =>
     let bvars := bvarsOfType bctx .string
@@ -637,7 +635,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .string =>
     let bvars := bvarsOfType bctx .string
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genStrConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .string) (genLExprBase fctx octx tvars bctx n) .string),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
@@ -654,8 +652,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .string).length > 0
           then pickOp octx .string ho
           else genStrConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2; omega)
   -- ── Real type ─────────────────────────────────────────────────────
   | 0, .real =>
     let bvars := bvarsOfType bctx .real
@@ -675,7 +672,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .real =>
     let bvars := bvarsOfType bctx .real
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genRealConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .real) (genLExprBase fctx octx tvars bctx n) .real),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
@@ -692,8 +689,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx .real).length > 0
           then pickOp octx .real ho
           else genRealConst) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2; omega)
   -- ── Bitvec type ───────────────────────────────────────────────────
   | 0, .bitvec n =>
     let bvars := bvarsOfType bctx (.bitvec n)
@@ -713,7 +709,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | m + 1, .bitvec n =>
     let bvars := bvarsOfType bctx (.bitvec n)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genBitvecConst n),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx m (.bitvec n)) (genLExprBase fctx octx tvars bctx m) (.bitvec n)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx m .bool)
@@ -730,8 +726,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           if ho : (opsOfType octx (.bitvec n)).length > 0
           then pickOp octx (.bitvec n) ho
           else genBitvecConst n) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2; omega)
   -- ── Regex type (base type, no constants) ───────────────────────────
   | 0, .regex =>
     let bvars := bvarsOfType bctx .regex
@@ -760,7 +755,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .regex =>
     let bvars := bvarsOfType bctx .regex
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .regex) (genLExprBase fctx octx tvars bctx n) .regex),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n .regex)
@@ -782,8 +777,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2; omega)
   -- ── Map type ──────────────────────────────────────────────────────
   | 0, .map τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.map τ₁ τ₂)
@@ -812,7 +806,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .map τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.map τ₁ τ₂)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx octx tvars bctx n) (.map τ₁ τ₂)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n (.map τ₁ τ₂))
@@ -834,8 +828,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2; omega)
   -- ── Sequence type ─────────────────────────────────────────────────
   | 0, .seq τ =>
     let bvars := bvarsOfType bctx (.seq τ)
@@ -864,7 +857,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
       (by simp)
   | n + 1, .seq τ =>
     let bvars := bvarsOfType bctx (.seq τ)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.seq τ)) (genLExprBase fctx octx tvars bctx n) (.seq τ)),
         (2, fun () => genIte (genLExprBase fctx octx tvars bctx n .bool)
                               (genLExprBase fctx octx tvars bctx n (.seq τ))
@@ -886,8 +879,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2; omega)
   -- ── Fallback (other tcons — not generated) ────────────────────────
   | _, _ => default
 

@@ -27,8 +27,9 @@ Basalt's tuning infrastructure has two halves:
   Because it rewrites the *elaborated* body rather than the surface syntax, it no longer constrains
   the recursion form — structural, well-founded and `partial_fixpoint` generators are all tunable —
   and it can be applied from another module, with `attribute [tunable] genFoo`, to a generator whose
-  source you do not want to touch. `StrataGenerators.SetGen.TuningPrototypes` does exactly that to
-  the shipping `genPrecondition`.)
+  source you do not want to touch. `StrataGenerators.TuningProfiles` does exactly that to the
+  shipping `genPrecondition` and `genLMonoTy`, and to `genStmt._mutual` — the auxiliary a `mutual`
+  block's members share, tagging which is what threads one `θ` through the whole recursion.)
 
 * the proof-side reweight lemmas, which in Basalt live in `Basalt.SPMF.Support` and `Basalt.Laws`
   and are stated for `SPMF`. This file ports those to `SetGen.Set` and then strengthens them, since
@@ -62,8 +63,10 @@ them. In practice `simp [Tuning.weight_pos]` closes them: the obligation
   here if you want to *use* tuning.
 * `StrataGenerators.SetGen.TuningExamples` — what the attribute emits, exhaustively: site tables,
   both error cases, and every recursion form.
-* `StrataGenerators.SetGen.TuningPrototypes` — the same steps applied to this repo's shipping
-  generators, and why one of them cannot be tagged as written.
+* `StrataGenerators.SetGen.TuningPrototypes` — the same steps applied to *every* generator this
+  repo's test suite draws from, with the θ-invariance theorem for each.
+* `StrataGenerators.TuningProfiles` — which weights to use for which family of properties, and the
+  measurements (`lake exe dist-report`) behind them.
 
 ## Proving a tuned generator θ-invariant
 
@@ -76,6 +79,14 @@ set* as the untuned one. Three recipes, all exercised in
 * **`partial_fixpoint`** — `apply SetGen.fix_congr` (after `unseal genFoo genFoo.tuned`, since
   `partial_fixpoint` definitions are irreducible and `@[tunable]` copies that status onto `.tuned`),
   then `funext` and reweight the functional's site.
+* **`termination_by`, including a `mutual` block** — the same, with `SetGen.wellFounded_fix_congr`
+  after `delta`-unfolding the definition (a `mutual` block's members share one `WellFounded.fix`, so
+  unfold the `genFoo._mutual` auxiliary and `cases` the `PSum`; the member with no site closes by
+  `rfl`). This is what `genStmt` needs.
+* **Structural recursion on a `Nat`** — the same, with `SetGen.brecOn_congr`. `delta` leaves the
+  arguments the compiler moved into the motive applied *outside* the `Nat.brecOn`, so reach the
+  functional with `refine congrFun (congrFun (SetGen.brecOn_congr ?_ n) x) y` rather than `apply`;
+  then `split` handles a wide per-constructor match one arm at a time (`genLExprBase` has ten).
 * **A `frequency` buried in a `do` block** — `rw [SetGen.frequency_eq_oneOf, …]` once per site,
   which canonicalizes every positively-weighted `frequency` to the uniform `oneOf` over its
   branches; both sides then close by `rfl`.
@@ -179,6 +190,30 @@ upstream in Basalt alongside the reweight lemmas. -/
 theorem fix_congr {α : Sort u} [Lean.Order.CCPO α] {f g : α → α}
     (hf : Lean.Order.monotone f) (hg : Lean.Order.monotone g) (h : f = g) :
     Lean.Order.fix f hf = Lean.Order.fix g hg := by
+  subst h; rfl
+
+/-- The same fact for `WellFounded.fix`, which is what the equation compiler uses for a generator
+with `termination_by` — including a `mutual` block, whose members share one `WellFounded.fix` over a
+`PSum` of their argument tuples. As with `fix_congr`, the accessibility/monotonicity argument is a
+`Prop`, so only the functional matters.
+
+This is the lemma that lifts a per-site reweighting to `StrataGenerators.Stmt.genStmt`: after
+`delta`-unfolding the block's shared auxiliary, both sides are `WellFounded.fix` applied to
+functionals that differ only in their `frequency` weights, and the *same* `ih` is bound in both — so
+`funext`, a `cases` on the `PSum`, and `frequency_congr_weights` per site finish it. See
+`StrataGenerators.SetGen.TuningPrototypes`. -/
+theorem wellFounded_fix_congr {α : Sort u} {r : α → α → Prop} {C : α → Sort v}
+    (hwf : WellFounded r) {F F' : ∀ x, (∀ y, r y x → C y) → C x} (h : F = F') :
+    WellFounded.fix hwf F = WellFounded.fix hwf F' := by
+  subst h; rfl
+
+/-- And for `Nat.brecOn`, which the equation compiler uses for a generator that recurses
+structurally on a `Nat` — `genLMonoTy` and `genLExprBase` both do. Same shape as the two `fix`
+congruences: the recursive results arrive in a `Nat.below` bundle that is one bound variable on both
+sides, so equality of the step functions is all that is needed. -/
+theorem brecOn_congr {motive : Nat → Sort u}
+    {F F' : (n : Nat) → @Nat.below motive n → motive n} (h : F = F') (n : Nat) :
+    @Nat.brecOn motive n F = @Nat.brecOn motive n F' := by
   subst h; rfl
 
 /-- Soundness-and-completeness transfers along a support equation. Given a proof that the tuned
