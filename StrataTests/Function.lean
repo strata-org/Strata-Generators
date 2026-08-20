@@ -18,8 +18,8 @@ open StrataGenerators.Stmt.TestSupport
     `some τ`, for exactly the `τ` the variable carries in the context. -/
 @[strata_property]
 def fnFvarsAnnotated : TestDecl :=
-  (TestDecl.property "function: fvars annotated by context type map" "function" Gens.function
-    (fun gf => functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func)).withPanel
+  (TestDecl.forAll "function: fvars annotated by context type map" "function"
+    (fun (gf : GenFunction) => functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func)).withPanel
     genAndCheckFunctionFvarsAnnotated
 
 /-- `Function.typeCheck_annotated_sound`, the `sorry`'d theorem at
@@ -28,18 +28,18 @@ def fnFvarsAnnotated : TestDecl :=
     `FuncHasTypeA C Γ` for any `Γ`. -/
 @[strata_property]
 def fnTypeCheckSound : TestDecl :=
-  (TestDecl.property
+  (TestDecl.forAll
     "function: typeCheck output satisfies FuncHasTypeA (typeCheck_annotated_sound)"
-    "function" Gens.closedFunction
-    (fun gf => checkTypeCheckAnnotatedSound gf.func)).withPanel
+    "function"
+    (fun (gf : ClosedGenFunction) => checkTypeCheckAnnotatedSound gf.func)).withPanel
     genAndCheckFunctionTypeCheckSound
 
 /-- Type preservation of a function body under evaluation — `Step.type_preserved` /
     `StepStar.type_preserved` / `eval_denote_sound`. -/
 @[strata_property]
 def fnBodyPreservation : TestDecl :=
-  (TestDecl.property "function: body type preserved under eval" "function" Gens.closedFunction
-    (fun gf => checkFunctionBodyPreservation gf.func)).withPanel
+  (TestDecl.forAll "function: body type preserved under eval" "function"
+    (fun (gf : ClosedGenFunction) => checkFunctionBodyPreservation gf.func)).withPanel
     genAndCheckFunctionBodyPreservation
 
 /-- Completeness, dual to soundness above: `genFunction` is proven sound (its output
@@ -50,9 +50,9 @@ def fnBodyPreservation : TestDecl :=
     analogue of exactly this. -/
 @[strata_property]
 def fnTypeCheckComplete : TestDecl :=
-  (TestDecl.property "function: typeCheck accepts generated functions (completeness)"
-    "function" Gens.closedFunction
-    (fun gf => checkFunctionTypeCheckerComplete gf.func)).withPanel
+  (TestDecl.forAll "function: typeCheck accepts generated functions (completeness)"
+    "function"
+    (fun (gf : ClosedGenFunction) => checkFunctionTypeCheckerComplete gf.func)).withPanel
     genAndCheckFunctionTypeCheckComplete
 
 /-- Every `typeCheck` rejection is a measure-without-body function. This is what
@@ -60,8 +60,8 @@ def fnTypeCheckComplete : TestDecl :=
     red while the property above stays red for the same reason it already was. -/
 @[strata_property]
 def fnRejectionOnlyMeasure : TestDecl :=
-  .property "function: typeCheck rejections are only measure-without-body" "function"
-    Gens.closedFunction (fun gf => funcRejectionImpliesMeasureNoBody gf.func)
+  .forAll "function: typeCheck rejections are only measure-without-body" "function"
+     (fun (gf : ClosedGenFunction) => funcRejectionImpliesMeasureNoBody gf.func)
 
 /-- Pretty-print → parse → re-print is a fixed point.
 

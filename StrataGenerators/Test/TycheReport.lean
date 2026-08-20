@@ -89,7 +89,10 @@ def writePanel (handle : IO.FS.Handle) (d : TestDecl) (cfg : RunConfig)
            features := (d.name, .nominal (if passed then "pass" else "fail"))
              :: features c } : Mark))
       d.name runStart
-  | .witness _ | .action _ => pure ()
+  -- Nothing to sample: a closed `Bool`, a `Prop` whose input type is not recoverable
+  -- from the value, or an action that reports only a verdict. Such a property can still
+  -- have a panel, through `TestDecl.withPanel` above.
+  | .witness _ | .testable _ _ | .action _ => pure ()
 
 /-- Write one panel per registered property with a sampled or enumerated body, and
     one per diagnostic that supplied its own. Never affects the exit code. -/

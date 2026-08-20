@@ -34,8 +34,8 @@ def phaseNoOpWitnesses : List TestDecl :=
 @[strata_property]
 def phaseAllChangedFlag : TestDecl :=
   let name := "phase: every pipeline phase has a faithful changed flag"
-  (TestDecl.property name "phase" Gens.procs
-    (fun gp => checkAllPhasesChangedFlag gp.procs)).withPanel
+  (TestDecl.forAll name "phase"
+    (fun (gp : GenProcs) => checkAllPhasesChangedFlag gp.procs)).withPanel
     (genPhaseSweepProp name (checkAllPhasesChangedFlag ·) allCorePhases)
 
 /-- Every phase *except* the four known hardcoded-`true` sites: this is what guards
@@ -43,6 +43,6 @@ def phaseAllChangedFlag : TestDecl :=
 @[strata_property]
 def phaseHonestChangedFlag : TestDecl :=
   let name := "phase: non-hardcoded pipeline phases have a faithful changed flag"
-  (TestDecl.property name "phase" Gens.procs
-    (fun gp => checkHonestPhasesChangedFlag gp.procs)).withPanel
+  (TestDecl.forAll name "phase"
+    (fun (gp : GenProcs) => checkHonestPhasesChangedFlag gp.procs)).withPanel
     (genPhaseSweepProp name (checkHonestPhasesChangedFlag ·) honestPhases)

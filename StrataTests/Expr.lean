@@ -29,14 +29,14 @@ open StrataGenerators.Test
     trusts fvar annotations. -/
 @[strata_property]
 def exprTypecheck : TestDecl :=
-  .property "expr: generated terms typecheck" "expr" Gens.typedExpr
-    (fun te => LExpr.typeCheck (T := LExprParams') [] te.expr == some te.ty)
+  .forAll "expr: generated terms typecheck" "expr"
+    (fun (te : TypedExpr) => LExpr.typeCheck (T := LExprParams') [] te.expr == some te.ty)
 
 /-- Preservation, on closed terms: if `∅ ⊢ e : τ` and `e →* e'` then `∅ ⊢ e' : τ`. -/
 @[strata_property]
 def exprPreservation : TestDecl :=
-  (TestDecl.property "expr: preservation under eval (closed)" "expr" Gens.closedExpr
-    (fun te => checkPreservation te.expr te.ty)).withPanel genAndEval
+  (TestDecl.forAll "expr: preservation under eval (closed)" "expr"
+    (fun (te : ClosedTypedExpr) => checkPreservation te.expr te.ty)).withPanel genAndEval
 
 /-- Progress, on closed terms: a well-typed closed term is a value or can step.
 
@@ -44,15 +44,15 @@ def exprPreservation : TestDecl :=
     `if (∀x. e) then …` gets stuck. -/
 @[strata_property]
 def exprProgress : TestDecl :=
-  (TestDecl.property "expr: progress (closed)" "expr" Gens.closedExpr
-    (fun te => checkProgress te.expr)).withPanel genAndCheckProgress
+  (TestDecl.forAll "expr: progress (closed)" "expr"
+    (fun (te : ClosedTypedExpr) => checkProgress te.expr)).withPanel genAndCheckProgress
 
 /-- Evaluation introduces no *new* free variables. Variables already in the context
     may appear in the input and the output; eval may not invent one. -/
 @[strata_property]
 def exprFvarsPreserved : TestDecl :=
-  (TestDecl.property "expr: eval preserves fvars" "expr" Gens.typedExpr
-    (fun te => checkFvarsPreserved te.expr)).withPanel genAndCheckFvarPreservation
+  (TestDecl.forAll "expr: eval preserves fvars" "expr"
+    (fun (te : TypedExpr) => checkFvarsPreserved te.expr)).withPanel genAndCheckFvarPreservation
 
 /-- After erasing *all* type annotations, `resolve` infers a principal type of which
     the original is a substitution instance (a fully-erased `λx. x` resolves to
@@ -69,8 +69,8 @@ def exprFvarsPreserved : TestDecl :=
     any counterexamples. -/
 @[strata_property]
 def exprResolveAfterErase : TestDecl :=
-  (TestDecl.property "expr: resolve after type erasure" "expr" Gens.resolveExpr
-    (fun te => checkResolveAfterErase te.expr te.ty)).withPanel
+  (TestDecl.forAll "expr: resolve after type erasure" "expr"
+    (fun (te : ResolveTypedExpr) => checkResolveAfterErase te.expr te.ty)).withPanel
     genAndCheckResolveAfterErase
 
 /-- Every SMT string literal Strata emits is printable ASCII.

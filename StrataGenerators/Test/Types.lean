@@ -65,40 +65,48 @@ structure ActionResult where
 def ActionResult.ofTuple : Bool × Nat × Nat × Option String → ActionResult
   | (passed, samples, total, message) => { passed, samples, total, message }
 
+/-- The Tyche axes of an input type: a breakdown of a generated value into named
+    facets, so a panel can separate a *vacuous* draw from a live one.
+
+    A fourth class alongside Plausible's `Arbitrary`/`Repr`/`Shrinkable`, and for the
+    same reason: `num_decls` / `decl_kinds` / `program_size` are facts about the
+    *type*, not about any one claim, so every property over that type wants the same
+    axes. Declaring the instance once is what makes a Tyche panel free for a property
+    written later.
+
+    The catch-all instance below gives no axes, so a type needs an instance only if
+    it has something worth plotting. -/
+class TycheFeatures (α : Type) where
+  features : α → List (String × Tyche.Feature)
+
+instance (priority := low) : TycheFeatures α := ⟨fun _ => []⟩
+
 /-- A generator packaged with everything a harness needs in order to *use* it:
     draw a value, print one, reduce one, and break one down for Tyche.
 
-    This is the first-class form of the `Arbitrary`/`Repr`/`Shrinkable` triple
-    Plausible normally resolves by instance synthesis. Making it data is what lets
-    a property name its generator in its own file.
-
-    `features` belongs here rather than on the property because a breakdown like
-    `num_decls` / `decl_kinds` / `program_size` is a fact about the *input*, not
-    about the claim: every property drawn from the same generator wants the same
-    axes, which is what makes a Tyche panel free for a newly written property. -/
+    This is the first-class form of the `Arbitrary`/`Repr`/`Shrinkable`/`TycheFeatures`
+    instances. Properties do not normally mention it — `TestDecl.forAll` builds it from
+    the instances, exactly as Plausible would. It exists as data because the runner
+    needs the input type to be *existential* (see `Body`), and because a property may
+    occasionally want a generator that is not the type's default one.-/
 structure GenSpec (α : Type) where
-  /-- Shown in reports, and used as the Tyche panel's input label. -/
-  label    : String
   gen      : Gen α
-  render    : α → String
+  render   : α → String
   /-- One-step reductions, smaller first. Defaults to no shrinking, which costs
       only counterexample quality. -/
   shrink   : α → List α := fun _ => []
   /-- Tyche axes computed from the input. -/
   features : α → List (String × Tyche.Feature) := fun _ => []
 
-/-- Build a `GenSpec` from the instances Plausible would have synthesized. Every
-    generator in the catalog (`StrataGenerators.Test.Gens`) is one of these, so a
-    wrapper type that already has the three instances needs no new code to become
-    a first-class generator. -/
-def GenSpec.ofInstances (label : String) (α : Type)
-    [Arbitrary α] [Repr α] [Shrinkable α]
-    (features : α → List (String × Tyche.Feature) := fun _ => []) : GenSpec α :=
-  { label
-    gen      := Arbitrary.arbitrary
+/-- The `GenSpec` that Plausible's own instances induce. This is what
+    `TestDecl.forAll` uses, so "the generator for `α`" means the same thing here as it
+    does to `#test` or to `Plausible.Testable.check`. -/
+def GenSpec.ofInstances (α : Type)
+    [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α] : GenSpec α :=
+  { gen      := Arbitrary.arbitrary
     render   := fun x => toString (repr x)
     shrink   := Shrinkable.shrink
-    features }
+    features := TycheFeatures.features }
 
 /-- Replace a generator's Tyche breakdown. Used by the few properties whose panel
     needs an axis the input type alone does not suggest. -/
@@ -127,6 +135,12 @@ inductive Body where
       sampling it with replacement. -/
   | witnesses {α : Type} (cases : List α) (render : α → String) (check : α → Bool)
       (features : α → List (String × Tyche.Feature) := fun _ => [])
+  /-- A property stated as a `Prop` and run by Plausible's `Testable` instance for
+      it, which is what `#test` and `Plausible.Testable.check` take. This is the
+      general case: several `∀`s, a `Decidable` guard, a `SampleableExt` proxy type.
+      It carries no `GenSpec`, so no Tyche panel can be derived from it — the input
+      type is not recoverable from a `Prop` at the value level. -/
+  | testable (p : Prop) (inst : Testable p)
   /-- A self-driving `IO` action: it samples, shrinks and prints on its own and
       reports only a verdict. For a property whose oracle is a subprocess or whose
       diagnostics have to be interleaved with generation. -/
@@ -180,7 +194,47 @@ structure Diagnostic where
 
 -- ── Smart constructors ────────────────────────────────────────────────
 
-/-- The common case: a sampled property. -/
+/-- **The primary form.** A `Bool`-valued property over a type Plausible can sample:
+    the generator, the renderer and the shrinker come from that type's
+    `Arbitrary`/`Repr`/`Shrinkable` instances, and the Tyche axes from its
+    `TycheFeatures` instance.
+
+    This is QuickCheck's `quickCheck prop_foo`, where `prop_foo :: T -> Bool` picks its
+    generator by the type of its argument. Annotate the argument, since that annotation
+    is what selects the generator:
+
+    ```lean
+    .forAll "mypass: idempotent" "mypass" fun (gp : GenProgram) => checkMine gp.prog
+    ```
+
+    Use `TestDecl.check` when the claim is better stated as a `Prop`, and
+    `TestDecl.property` when the type's default generator is not the one you want. -/
+def TestDecl.forAll (name suite : String)
+    [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
+    (check : α → Bool) (gate : Option String := none) : TestDecl :=
+  { name, suite, gate, body := .sampled (GenSpec.ofInstances α) check }
+
+open Plausible.Decorations in
+/-- A property written as a `Prop`, elaborated and run exactly as `#test` and
+    `Plausible.Testable.check` do — `mk_decorations` annotates the binders and the
+    `Testable` instance is synthesized:
+
+    ```lean
+    .check "expr: eval is idempotent" "expr"
+      (∀ te : ClosedTypedExpr, ∀ n : Nat, evalN n te.expr = evalN (n + 1) te.expr)
+    ```
+
+    Reach for this when the `Prop` form buys something the `Bool` form cannot express:
+    more than one `∀`, a `Decidable` hypothesis used as a guard, or a type whose
+    `SampleableExt` instance samples through a proxy. The cost is that no Tyche panel
+    can be derived, because a `Prop` does not expose the type it quantifies over. -/
+def TestDecl.check (name suite : String) (p : Prop) (gate : Option String := none)
+    (p' : DecorationsOf p := by mk_decorations) [inst : Testable p'] : TestDecl :=
+  { name, suite, gate, tyche := false, body := .testable p' inst }
+
+/-- A sampled property over an explicitly given generator, for the case where the
+    type's default `Arbitrary` instance is not the generator you want — a narrowed
+    draw, a diagnostic renderer, an extra Tyche axis. Prefer `TestDecl.forAll`. -/
 def TestDecl.property (name suite : String) (spec : GenSpec α) (check : α → Bool)
     (gate : Option String := none) : TestDecl :=
   { name, suite, gate, body := .sampled spec check }
@@ -209,7 +263,12 @@ def TestDecl.action (name suite : String) (run : RunConfig → IO ActionResult)
     keeping a separate list of name constants is what makes it structurally
     impossible to attach a name to the wrong check — the failure mode the old
     two-list arrangement guarded against with a `#guard`. -/
-def family (suite : String) (spec : GenSpec α) (ps : List (String × (α → Bool))) :
+def family (suite : String) [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
+    (ps : List (String × (α → Bool))) : List TestDecl :=
+  ps.map fun (name, check) => .forAll name suite check
+
+/-- `family` over an explicitly given generator. -/
+def familyOf (suite : String) (spec : GenSpec α) (ps : List (String × (α → Bool))) :
     List TestDecl :=
   ps.map fun (name, check) => .property name suite spec check
 
@@ -259,25 +318,31 @@ structure Outcome where
       skipped rather than as a pass, so an absent solver cannot read as green. -/
   skipped : Bool := false
 
+/-- Read Plausible's own `TestResult` as an `Outcome`. Both Plausible-backed bodies go
+    through this, so a `Bool` property and a `Prop` property report identically. -/
+def Outcome.ofTestResult (cfg : Configuration) {p : Prop} : TestResult p → Outcome
+  | .success _ => { passed := true, counts := some (cfg.numInst, cfg.numInst) }
+  | .gaveUp n => { passed := false, message := some s!"Gave up {n} times" }
+  | .failure _ xs n =>
+    { passed := false, message := some (Testable.formatFailure "Found problems!" xs n) }
+
 /-- Run a `Bool`-valued check over a generator through Plausible's own runner.
 
-    The three instances are supplied explicitly from the `GenSpec` rather than
-    synthesized, which is the whole trick that lets the input type be existential:
-    `Plausible.Testable`'s `varTestable` needs `SampleableExt α`, and
-    `SampleableExt` holds precisely `Arbitrary`/`Repr`/`Shrinkable`.
+    The four fields of the `GenSpec` are supplied as explicit instances rather than
+    synthesized, which is the trick that lets the input type be existential:
+    `Plausible.Testable`'s `varTestable` needs `SampleableExt α`, and Plausible's
+    default `SampleableExt` instance holds precisely `Arbitrary`/`Repr`/`Shrinkable`.
+    So a property built by `TestDecl.forAll` is run against the very instances
+    Plausible would have found for itself.
 
     `NamedBinder` is applied by hand because `varTestable` matches only on a
-    decorated `∀`; `Testable.check`'s `mk_decorations` tactic cannot help here,
-    since the proposition is built from a term rather than written as syntax. -/
+    decorated `∀`; `mk_decorations` cannot help here, since the proposition is built
+    from a term rather than written as syntax. `TestDecl.check`, whose proposition *is*
+    syntax, does use `mk_decorations`. -/
 def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
     (check : α → Bool) (cfg : Configuration) : IO Outcome := do
-  match ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x = true)) cfg with
-  | .success _ => pure { passed := true, counts := some (cfg.numInst, cfg.numInst) }
-  | .gaveUp n =>
-    pure { passed := false, message := some s!"Gave up {n} times" }
-  | .failure _ xs n =>
-    pure { passed := false
-           message := some (Testable.formatFailure "Found problems!" xs n) }
+  let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x = true)) cfg
+  pure (Outcome.ofTestResult cfg r)
 
 /-- Run one property. Returns a `skipped` outcome when the run's gates do not
     admit it. -/
@@ -300,6 +365,9 @@ def TestDecl.run (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
              counts := some (total - failures.length, total)
              message := some s!"{failures.length}/{total} cases fail, e.g. \
                {String.intercalate "; " shown}" }
+  | .testable p inst =>
+    let c := cfg.toConfiguration
+    pure (Outcome.ofTestResult c (← @Testable.checkIO p inst c))
   | .action run =>
     let r ← run cfg
     pure { passed := r.passed, counts := some (r.samples, r.total), message := r.message }

@@ -19,7 +19,8 @@ def checkMyPassIdempotent (p : Core.Program) : Bool :=
 
 @[strata_property]
 def myPassIdempotent : TestDecl :=
-  .property "mypass: the pass is idempotent" "mypass" Gens.program checkMyPassIdempotent
+  .forAll "mypass: the pass is idempotent" "mypass"
+    fun (gp : GenProgram) => checkMyPassIdempotent gp.prog
 ```
 
 Then:
@@ -32,14 +33,20 @@ lake test                              # run everything
 
 `StrataTests/Example.lean` is a complete, working copy of this shape.
 
-The four arguments to `TestDecl.property` are the whole interface:
+The three arguments to `TestDecl.forAll` are the whole interface:
 
 | argument | meaning |
 |---|---|
 | `"mypass: the pass is idempotent"` | the property's name. Unique across the suite; it is the report label *and* the Tyche panel title. |
 | `"mypass"` | the report group. A string nothing has seen before simply creates a new group. |
-| `Gens.program` | the generator the input is drawn from. |
-| `checkMyPassIdempotent` | the check: `α → Bool`, where `α` is what the generator produces. |
+| `fun (gp : GenProgram) => …` | the check. **The annotation picks the generator.** |
+
+The generator is chosen the way Plausible and QuickCheck choose it — by the type of the
+quantified value, not by naming a generator. `GenProgram` carries the
+`Arbitrary`/`Repr`/`Shrinkable` instances Plausible needs, so annotating the binder
+selects the whole-program generator, its renderer and its shrinker at once. Annotate
+it: without the annotation Lean has no way to fix the type, and instance resolution
+fails.
 
 Naming convention: `area: description`, lower case, where `area` matches the report
 group. A failing line then reads as a sentence.
@@ -63,60 +70,95 @@ Two properties may not share a name — the driver refuses to run and names the
 duplicates, because two properties under one name would collapse their Tyche panels
 and make a result line ambiguous.
 
-## Choosing a generator
+## Choosing the input type
 
-`StrataGenerators.Test.Gens` holds one entry per shape the package generates:
+These are the types the package can generate. Annotate your binder with one of them:
 
-| generator | produces |
+| type | produces |
 |---|---|
-| `Gens.typedExpr` | a well-typed expression with its type, over `defaultFCtx` |
-| `Gens.closedExpr` | the same, closed (no free variables) |
-| `Gens.resolveExpr` | a closed expression over `coreOpCtx`, for erase/resolve round-trips |
-| `Gens.cmd` / `Gens.cmds` | one command, or a command sequence, with its contexts |
-| `Gens.function` / `Gens.closedFunction` | a function, against `defaultFCtx` or closed |
-| `Gens.stmts` | a well-typed statement list |
-| `Gens.procs` | a list of well-typed procedures forming an acyclic call DAG |
-| `Gens.program` | a whole well-typed program: every declaration kind |
-| `Gens.adtBlock` / `Gens.indepBlock` | a `mutual … end` datatype block, ordinary or pairwise independent |
+| `TypedExpr` | a well-typed expression with its type, over `defaultFCtx` |
+| `ClosedTypedExpr` | the same, closed (no free variables) |
+| `ResolveTypedExpr` | a closed expression over `coreOpCtx`, for erase/resolve round-trips |
+| `GenCmdWithCtx` / `GenCmdsWithCtx` | one command, or a command sequence, with its contexts |
+| `GenFunction` / `ClosedGenFunction` | a function, against `defaultFCtx` or closed |
+| `GenStmts` | a well-typed statement list |
+| `GenProcs` | a list of well-typed procedures forming an acyclic call DAG |
+| `GenProgram` | a whole well-typed program: every declaration kind |
+| `GenAdtBlock` / `GenIndepBlock` | a `mutual … end` datatype block, ordinary or pairwise independent |
 
 Prefer the smallest shape that can state the claim: a smaller shape gives smaller
-counterexamples and faster runs. Reach for `Gens.program` when the claim spans more
-than one declaration — a pass that reads the axioms, or a body that calls a datatype's
+counterexamples and faster runs. Reach for `GenProgram` when the claim spans more than
+one declaration — a pass that reads the axioms, or a body that calls a datatype's
 derived functions, cannot be expressed on a statement list at all.
 
-### Defining your own
+Note that the *distinctions* between these types are load-bearing, not cosmetic.
+Progress and preservation are only true on `ClosedTypedExpr`; `GenIndepBlock` draws
+blocks whose datatypes cannot mention one another. Picking the wrong one gives you a
+property that fails for a reason unrelated to your claim.
 
-A generator is a `GenSpec α`, and nothing in `Gens` is privileged — define one in
-your own file if you need a shape the catalog does not have:
+### Making a new type generable
+
+Give it the three instances Plausible asks for, plus the optional fourth:
 
 ```lean
-def myShape : GenSpec MyType :=
-  { label := "my shape"
-    gen := myGenerator          -- a `Plausible.Gen MyType`
-    render := myPrinter         -- how a counterexample is displayed
-    shrink := myShrinker        -- one-step reductions, smaller first
-    features := myFeatures }    -- Tyche axes, computed from the input
+instance : Arbitrary MyType := ⟨myGenerator⟩
+instance : Repr MyType := ⟨fun x _ => myPrinter x⟩
+instance : Shrinkable MyType := ⟨myShrinker⟩
+instance : TycheFeatures MyType := ⟨myFeatures⟩
 ```
 
-If your type already has `Arbitrary`/`Repr`/`Shrinkable` instances, use
-`GenSpec.ofInstances "my shape" MyType myFeatures` instead — that is what every entry
-in `Gens` is.
+`forAll` then accepts `fun (x : MyType) => …` with nothing further declared. Two of
+these are worth spending effort on:
 
-Two fields are worth spending effort on:
-
-* **`shrink`** costs you nothing if omitted, but a property without a shrinker reports
+* **`Shrinkable`** may be `⟨fun _ => []⟩`, but a property without a shrinker reports
   whatever raw draw first failed. If your candidates must satisfy an invariant to be
   meaningful (well-typedness, say), filter them inside `shrink` — the existing
-  shrinkers all re-run Strata's own typechecker, so a reported counterexample is
-  always a well-typed program.
-* **`features`** is what tells a *vacuous* pass from a real one. A property about
+  shrinkers all re-run Strata's own typechecker, so a reported counterexample is always
+  a well-typed program.
+* **`TycheFeatures`** is what tells a *vacuous* pass from a real one. A property about
   axioms is uninformative on a program that declares none, and the `decl_kinds` axis is
-  what makes that visible in Tyche. Put facts about the *input* here (it is shared by
-  every property drawn from the generator), not facts about your claim.
+  what makes that visible in Tyche. Put facts about the *type* here; they are shared by
+  every property over it.
+
+### Deviating from the default generator
+
+To sample a type differently for one property, pass a `GenSpec` with
+`TestDecl.property`. `GenSpec.ofInstances MyType` is the default one, and
+`withRender` / `withFeatures` adjust it:
+
+```lean
+@[strata_property]
+def myProp : TestDecl :=
+  .property "proc: …" "proc"
+    (Gens.procs.withRender fun gp => procsRepr gp.procs ++ myDiagnostic gp.procs)
+    (fun gp => checkMine gp.procs)
+```
+
+`Gens.*` holds the default `GenSpec` for each type above, so you rarely build one from
+scratch.
+
+## Stating the property as a `Prop`
+
+`TestDecl.check` takes a `Prop` and runs it through the `Testable` instance Plausible
+synthesizes for it. This is the same elaboration `#test` and `Plausible.Testable.check`
+use, `mk_decorations` included, so anything you could write in `#test` works here:
+
+```lean
+@[strata_property]
+def myPropShaped : TestDecl :=
+  .check "mypass: idempotent under any fuel" "mypass"
+    (∀ gp : GenProgram, ∀ n : Nat, myPass n gp.prog = myPass (n + 1) (myPass n gp.prog))
+```
+
+Reach for it when the `Prop` form buys something the `Bool` form cannot express: more
+than one `∀`, a `Decidable` hypothesis used as a guard, or a type whose
+`SampleableExt` instance samples through a proxy. The cost is that no Tyche panel can
+be derived, since a `Prop` does not expose the type it quantifies over. Prefer `forAll`
+otherwise.
 
 ## The other three shapes of property
 
-Most properties are a `Bool` check over a generator. Three cases are not.
+Most properties are a `Bool` check over a sampled type. Three cases are not.
 
 ### A single constructed witness
 
@@ -169,19 +211,24 @@ list:
 ```lean
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
-  family "stmt" Gens.stmts
-    [ ("stmt: LoopElim preserves typeability", fun gs => checkLoopElimPreservesTyping gs.stmts),
-      ("stmt: LoopElim eliminates all loops",  fun gs => checkLoopElimZeroLoops gs.stmts) ]
+  family "stmt"
+    [ ("stmt: LoopElim preserves typeability",
+       fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts),
+      ("stmt: LoopElim eliminates all loops",
+       fun gs => checkLoopElimZeroLoops gs.stmts) ]
 ```
+
+The annotation on the first entry fixes the type for the whole list. `familyOf` is the
+variant that takes an explicit `GenSpec`.
 
 Prefer `@[strata_property]` for a standalone property, so its name is greppable from
 its own declaration.
 
 ## Tyche panels
 
-A registered property gets a panel automatically, built from its `GenSpec`: the
-renderer draws the sample, the features are the axes, the verdict is the mark's
-status, and a failing sample is minimized with the shrinker before display. There is
+A registered property gets a panel automatically, built from the input type's
+instances: `Repr` draws the sample, `TycheFeatures` gives the axes, the verdict is the
+mark's status, and `Shrinkable` minimizes a failing sample before display. There is
 nothing to register.
 
 If your panel needs more than that — an `IO` oracle, or a breakdown of *why* a sample
@@ -191,7 +238,8 @@ lives next to the property rather than in a central list:
 ```lean
 @[strata_property]
 def myProp : TestDecl :=
-  (TestDecl.property "mypass: …" "mypass" Gens.program checkMine).withPanel myPanelAction
+  (TestDecl.forAll "mypass: …" "mypass"
+    (fun (gp : GenProgram) => checkMine gp.prog)).withPanel myPanelAction
 ```
 
 `myPanelAction : IO β` for any `β` with a `Tyche.TycheSample` instance. The panel's
@@ -247,7 +295,7 @@ one run.
 | `StrataGenerators/Test/Types.lean` | `TestDecl`, `GenSpec`, `Body`, and the runner |
 | `StrataGenerators/Test/Registry.lean` | the three attributes |
 | `StrataGenerators/Test/Collect.lean` | `strata_registry%` / `strata_diagnostics%` |
-| `StrataGenerators/Test/Gens.lean` | the generator catalog and its Tyche axes |
+| `StrataGenerators/Test/Gens.lean` | the `TycheFeatures` instances and the default `GenSpec`s |
 | `StrataGenerators/Test/Report.lean` | grouping, printing, exit code |
 | `StrataGenerators/Test/TycheReport.lean` | the derived panel |
 | `StrataGenerators/Test/Cli.lean` | the flags |

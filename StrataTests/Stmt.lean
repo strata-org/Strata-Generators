@@ -17,9 +17,9 @@ open StrataGenerators.Stmt.TestSupport
 /-- The six statement transform / typechecker properties. -/
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
-  family "stmt" Gens.stmts
+  family "stmt"
     [ ("stmt: typechecker accepts generated statements",
-       fun gs => checkTypeCheckerComplete gs.stmts),
+       fun (gs : GenStmts) => checkTypeCheckerComplete gs.stmts),
       ("stmt: LoopElim preserves typeability",
        fun gs => checkLoopElimPreservesTyping gs.stmts),
       ("stmt: LoopElim eliminates all loops",
@@ -37,5 +37,5 @@ def stmtTransforms : List TestDecl :=
     verdict *and* why, so it keeps a bespoke one. -/
 @[strata_property]
 def stmtKleeneDefinedIff : TestDecl :=
-  (TestDecl.property "stmt: DetToKleene defined iff supported" "stmt" Gens.stmts
-    (fun gs => checkKleeneDefinedIff gs.stmts)).withPanel genKleeneDefined
+  (TestDecl.forAll "stmt: DetToKleene defined iff supported" "stmt"
+    (fun (gs : GenStmts) => checkKleeneDefinedIff gs.stmts)).withPanel genKleeneDefined

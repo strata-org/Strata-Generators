@@ -22,9 +22,9 @@ open StrataGenerators.AliasResolution
     counterexamples go through the whole-program shrinker. -/
 @[strata_properties]
 def aliasChecks : List TestDecl :=
-  family "alias" Gens.program
+  family "alias"
     [ ("alias: eager and incremental resolution agree on acceptance",
-       fun gp => checkAliasAcceptanceAgrees gp.prog),
+       fun (gp : GenProgram) => checkAliasAcceptanceAgrees gp.prog),
       -- The "evaluates the same" half: the two resolution orders give the same proof
       -- obligations under Strata's own symbolic evaluator.
       ("alias: eager and incremental resolution give the same obligations",

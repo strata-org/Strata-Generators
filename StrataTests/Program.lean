@@ -34,9 +34,9 @@ open ProgramGen.TestSupport
     counterexample to any of them *is* shrinkable. -/
 @[strata_properties]
 def programChecks : List TestDecl :=
-  family "program" Gens.program
+  family "program"
     [ ("program: typechecker accepts generated programs",
-       fun gp => checkProgramTypeCheckerComplete gp.prog),
+       fun (gp : GenProgram) => checkProgramTypeCheckerComplete gp.prog),
       ("program: typechecker rejections are only the known gaps",
        fun gp => checkProgramRejectionIsKnownGap gp.prog),
       ("program: getNames of a well-typed program are distinct",
@@ -58,9 +58,9 @@ def programChecks : List TestDecl :=
     ADT-derived-call path. -/
 @[strata_properties]
 def programADTProps : List TestDecl :=
-  family "program" Gens.program
+  family "program"
     [ ("program: declared names are globally distinct",
-       fun gp => checkNamesNodup gp.prog),
+       fun (gp : GenProgram) => checkNamesNodup gp.prog),
       ("program: datatype blocks pass addMutualBlock",
        fun gp => checkDatatypeBlocksAccepted gp.prog),
       ("program: called ADT functions are declared",
