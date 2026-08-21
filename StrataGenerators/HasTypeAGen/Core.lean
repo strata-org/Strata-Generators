@@ -1559,9 +1559,10 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
             (genLExprBase fctx octx pctx tvars bctx n (.seq τ))) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
     frequency gs hw
-  -- ── Other type constructors (datatypes, abstract types, aliases) ──
-  -- No constants (literals) have these types, so when the relevant context is empty,
-  -- we return `default`.
+  -- ── The other type constructors ──────────────────────────────────
+  --
+  -- Such a type is a datatype, an abstract type or the body of an alias. There is no constant at such a type,
+  -- so this arm gives `default` when each context that it reads is empty.
   | 0, τ =>
     let bvars := bvarsOfType bctx τ
     oneOf
@@ -1592,8 +1593,8 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   -- operator whose result type is `τ`, and a constructor of the datatype is such an
   -- operator. IndirPoly applies a polymorphic operator at an instance that it
   -- samples, and a derived function of a polymorphic datatype is such an operator.
-  -- The two branches put a compound term such as `Cons(1, Nil)` in an argument
-  -- position, which only a variable or a nullary constructor could fill before.
+  -- The two branches put a compound term, such as `Cons(1, Nil)`, at the position of an argument. A variable
+  -- and a constructor of arity 0 are the two other terms that can fill that position.
   | n + 1, τ =>
     let bvars := bvarsOfType bctx τ
     let gs : List (Nat × (Unit → G LExpr')) :=
@@ -1618,14 +1619,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           else if hf : (fvarsOfType fctx τ).length > 0
           then pickFVar fctx _ hf
           else default),
-        -- Monomorphic Indir rule: a fully-applied operator whose result type is
-        -- `τ`, with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx τ).length > 0
           then genIndir octx τ (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n τ),
-        -- Polymorphic IndirPoly rule: a call to a derived function of a polymorphic
-        -- datatype, at an instance that the rule samples.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx τ
             (genLExprBase fctx octx pctx tvars bctx n)
