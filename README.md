@@ -127,11 +127,20 @@ each `frequency` branch weight a runtime value:
 def stmtLoopHeavy : Tuning := withWeights stmtDefault [(StmtIdx.loop, 24)]
 ```
 
-- [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) holds one named `Tuning` per job the
-  suite has to do. It gives the desirable distribution per property family, the flat index tables that
-  a profile is written in, and the tuned entry points that the harnesses draw from.
-- [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) holds the same for whole programs. It
-  is a separate module because the program generator's proof files import Mathlib.
+Every concrete weight in the suite lives in one of two modules. Look there first for the weights of a
+given testing scenario:
+
+| module | profiles it holds | index table |
+|---|---|---|
+| [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) | `stmtLoopHeavy`, `stmtFuncDeclHeavy`, `stmtKleeneBalanced`, `stmtLoopWide`, `stmtMixed`, `procCallHeavy`, `procPrecondHeavy`, `cmdSetHeavy`, `cmdInitHeavy`, `cmdCheckHeavy`, `exprEvalHeavy`, `exprQuantHeavy`, `exprIndirHeavy`, `exprFVarHeavy`, `tyCompoundHeavy` | `StmtIdx`, `CmdIdx`, `ExprIdx` |
+| [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) | `progPolyHeavy`, `progDatatypeHeavy` | `ProgIdx` |
+
+Each profile is a difference against the shipping distribution, so it reads as one. Its docstring says
+which properties it serves and gives the measured rate it buys. Each module also holds the tuned entry
+points that the harnesses draw from. `ProgramTuning.lean` is separate because the program generator's
+proof files import Mathlib, and `TuningProfiles.lean` must stay Mathlib-free.
+
+Three further files carry the machinery rather than the weights:
 - [`SetGen/TuningPrototypes.lean`](./StrataGenerators/SetGen/TuningPrototypes.lean) proves one theorem
   per generator that tuning **preserves behaviour**. At `SetGen.Set` the tuned generator is *equal* to
   the untuned one for every `θ`. Every soundness and completeness result therefore carries over by one
@@ -170,10 +179,11 @@ uses this for both `LoopElim` properties, and `StrataTests/Monomorphization.lean
 `mono:` properties. [`docs/writing-properties.md`](./docs/writing-properties.md#choosing-the-distribution)
 is the guide.
 
-Only some input types can be tuned. `StrataGenerators.Test.Generators` lists them: the statement,
-procedure, command, expression and whole-program shapes. A tuning on a type with no `TunableGen`
-instance is an error at the declaration, and the message names the type, rather than a tuning that is
-silently ignored.
+Only some input types can be tuned. Eight have a `TunableGen` instance in
+`StrataGenerators.Test.Generators`, and they cover the statement and procedure shapes, both command
+shapes, all three expression shapes, and whole programs. A tuning on a type without one is an error at
+the declaration, and the message names the type, rather than a tuning that is silently ignored. So is
+a `θ` of the wrong length for the generator it reaches.
 
 ## Adding a new property
 

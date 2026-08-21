@@ -273,8 +273,18 @@ The weighting is an ordinary term, so a one-off needs no named profile:
 ```
 
 `@[strata_properties (tuning := θ)]` applies one weighting to every member of a family.
-[`StrataGenerators.TuningProfiles`](../StrataGenerators/TuningProfiles.lean) holds the named
-profiles and the index tables (`StmtIdx`, `CmdIdx`, `ExprIdx`) the inline form addresses.
+
+Two modules hold every concrete weight in the suite, and each pairs a named profile with the flat
+index table that the inline form addresses:
+
+| module | profiles | index table |
+|---|---|---|
+| [`TuningProfiles.lean`](../StrataGenerators/TuningProfiles.lean) | `stmt*`, `proc*`, `cmd*`, `expr*`, `ty*` | `StmtIdx`, `CmdIdx`, `ExprIdx` |
+| [`ProgramTuning.lean`](../StrataGenerators/ProgramTuning.lean) | `prog*` | `ProgIdx` |
+
+Each profile is a difference against the shipping distribution, and its docstring gives the measured
+rate it buys. `ProgramTuning.lean` is a separate module because the program generator's proof files
+import Mathlib, and `TuningProfiles.lean` must stay Mathlib-free.
 
 Three things worth knowing:
 
@@ -299,7 +309,8 @@ Three things worth knowing:
 To pick a weighting, or to check one you invented:
 
 ```bash
-lake exe dist-report 200 100 --stmt      # coverage and cost, per profile, per family
+lake exe dist-report 200 100 --stmt      # one family: coverage and cost, per profile
+lake exe dist-report 250 100             # all five: stmt, proc, cmd, expr, prog
 ```
 
 `TestDecl.tuned` and `TestDecl.underTunings` say the same thing as terms, for a property that a
