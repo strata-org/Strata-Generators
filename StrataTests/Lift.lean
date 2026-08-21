@@ -45,13 +45,21 @@ def liftFuncDecls : List TestDecl :=
        fun gp => checkLiftParamsLead gp.prog),
       ("lift: no hoisted function has a free type var",
        fun gp => checkLiftTypeArgsClosed gp.prog),
-      -- P6/P7 — name hygiene and scope correctness (the two defects)
+      -- P6/P7 — name hygiene and scope correctness (the two defects). Both are marked
+      -- known failures: each fails reliably at the default trial count, so neither
+      -- gates the exit code and neither prints a counterexample. `lift: the output
+      -- typechecks` is deliberately *not* marked — it holds on the current pass, and
+      -- marking it would fail the run.
       ("lift: the minted snapshot names are fresh",
-       fun gp => checkLiftFreshSnapshotNames gp.prog),
+       fun gp => checkLiftFreshSnapshotNames gp.prog,
+       .knownFailure "reported upstream: `StringGenState.gen` is a bare counter, so a \
+minted snapshot name can collide with a name already in the program"),
       ("lift: the output typechecks",
        fun gp => checkLiftOutputTypechecks gp.prog),
       ("lift: every snapshot is used in scope",
-       fun gp => checkLiftSnapshotsInScope gp.prog),
+       fun gp => checkLiftSnapshotsInScope gp.prog,
+       .knownFailure "reported upstream: a snapshot can be emitted outside the scope \
+that uses it"),
       -- P8 — the Johnsson fixpoint against an independent Def 4.6 implementation
       ("lift: the fixpoint matches Def 4.6",
        fun gp => checkLiftFixpointMatchesReference gp.prog),

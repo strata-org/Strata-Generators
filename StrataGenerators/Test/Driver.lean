@@ -57,7 +57,7 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   if ← ImportRoot.ensureFresh then
     return some 1
 
-  let selected := cli.select registry
+  let selected := cli.resolve registry
 
   if cli.listOnly then
     listRegistry selected
@@ -66,6 +66,19 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   if selected.isEmpty then
     IO.eprintln "error: no property matched the --only filter."
     IO.eprintln "Run with --list to see what is registered."
+    return some 1
+
+  -- A mistyped `--known-failure=` must not pass silently: the run would look as though
+  -- the suppression took effect, and the property it was meant to name would still be
+  -- red. Checked against the *selected* registry, so combining it with a `--only` that
+  -- filters the property out is an error too rather than a no-op.
+  let unknown := cli.unknownKnownFailures selected
+  unless unknown.isEmpty do
+    IO.eprintln s!"error: --known-failure= names no property that this run selected:"
+    for n in unknown do
+      IO.eprintln s!"  {n}"
+    IO.eprintln "It takes a whole property name, not a substring. Run with --list to see \
+      the names."
     return some 1
 
   let dups := duplicateNames selected
@@ -81,6 +94,15 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
 
   IO.println s!"Running {selected.length} of {registry.length} properties \
     ({cli.run.numTrials} trials, max size {cli.run.maxSize})..."
+
+  -- Printed here rather than in either renderer, so both drivers report it: the LSpec
+  -- one aggregates through `lspecIO` and never sees an `Outcome`, so it cannot count
+  -- known failures itself. Naming the count up front also keeps a suite that is green
+  -- *because* of suppression from reading as a clean run.
+  let marked := selected.filter fun d => match d.expect with | .mustHold => false | _ => true
+  unless marked.isEmpty do
+    IO.println s!"{marked.length} of them are expected to fail and do not gate the exit \
+      code (--list shows which, and why)."
   IO.println ""
   return none
 

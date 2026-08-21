@@ -41,6 +41,20 @@ namespace StrataGenerators.Test
 /-- `family T [ (name, check), … ]` — one registered property per entry, each check a
     decidable `Prop` over `T`.
 
+    An entry may carry a third component, an `Expectation`, for a member that is known
+    to fail against a defect in the code under test:
+
+    ```lean
+    ("lift: the output typechecks", fun gp => checkLiftOutputTypechecks gp.prog,
+     .knownFailure "strata-org/Strata#123: a snapshot name escapes its scope")
+    ```
+
+    The alternative would be to lift such a member out of the family into a standalone
+    declaration, which costs the family its shape: these lists are ordered and commented
+    by what the pass is supposed to do (`P1 — closedness`, `P6/P7 — name hygiene`), and
+    the members that fail are exactly the ones a reader most needs to find in that
+    order.
+
     `T` parses at maximum precedence, so a compound type needs parentheses:
     `family (List Nat) [ … ]`.
 
@@ -52,10 +66,15 @@ scoped macro "family " α:term:max " [" entries:term,* "]" : term => do
     | `(($n:term, $check:term)) =>
         out := out.push
           (← `(StrataGenerators.Test.TestDecl.property $n (($check : $α → Prop))))
+    | `(($n:term, $check:term, $expect:term)) =>
+        out := out.push
+          (← `({ StrataGenerators.Test.TestDecl.property $n (($check : $α → Prop)) with
+                 expect := ($expect : StrataGenerators.Test.Expectation) }))
     | _ =>
         Macro.throwErrorAt e
-          "`family` expects each entry to be a `(name, check)` pair, where `check` is a \
-           function from the family's input type to a decidable `Prop`"
+          "`family` expects each entry to be a `(name, check)` pair — or a \
+           `(name, check, expectation)` triple for a member that is known to fail — \
+           where `check` is a function from the family's input type to a decidable `Prop`"
   `([$out,*])
 
 end StrataGenerators.Test

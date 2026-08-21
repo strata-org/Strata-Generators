@@ -249,6 +249,70 @@ For a family whose entries want an explicit `PropertyRunner`, write the list out
 Prefer `@[strata_property]` for a standalone property, so its name is greppable from
 its own declaration.
 
+## A property that is known to fail
+
+Sometimes the property is right and Strata is wrong. Marking it as a known failure keeps
+it in the suite — watching the defect, ready to report the fix — without holding a merge
+hostage to a bug that is already reported:
+
+```lean
+@[strata_property]
+def myPassOutputTypechecks : TestDecl :=
+  knownFailure "strata-org/Strata#123: the pass drops a type annotation on a nested call" <|
+    TestDecl.property "mypass: the output typechecks"
+      fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog
+```
+
+`knownFailure` is a prefix rather than a method, so the mark is the first thing you read
+and the property needs no parentheses around it.
+
+A marked property prints `? XFAIL`, its counterexample is suppressed, and it does not
+gate the exit code. **If it ever passes, the run fails** and tells you to drop the mark —
+so a fixed defect cannot go unnoticed, which is the whole reason to mark a property
+rather than delete or comment it out.
+
+Inside a `family`, give the `Expectation` as a third component of the entry instead. A
+prefix cannot address one entry of a list, and lifting the member out would cost the
+family its shape — so the member stays where its neighbours can be read in order:
+
+```lean
+      ("lift: the minted snapshot names are fresh",
+       fun gp => checkLiftFreshSnapshotNames gp.prog,
+       .knownFailure "reported upstream: `StringGenState.gen` is a bare counter, so a \
+minted snapshot name can collide with a name already in the program"),
+```
+
+Put the upstream issue in the reason. It replaces the counterexample on the report line,
+so it is the only explanation a reader gets for why a red property reads as green.
+
+### When not to mark
+
+`knownFailure` says the property fails on *every* run at the default trial count. Do not
+use it for a property that fails only on an occasional draw: such a property passes on
+most runs, so the mark reports "expected to fail, but passed" and turns the suite red on
+exactly the runs that went well.
+
+Leave that property unmarked, and pin the defect with a `#guard` on a hand-built witness
+instead. `adt: no datatype derives the same function name twice` is the example in the
+tree — it needs two field names differing by a trailing `!`, which a draw almost never
+produces, so `AdtLaws.bangFieldWitness` is the real pin and the property is a net around
+it.
+
+### Marking one for a single run
+
+```bash
+lake test -- --known-failure="mypass: the output typechecks" --quick
+```
+
+Repeatable, and it takes a **whole property name** rather than a substring — unlike
+`--only=`, since a substring would claim that every property in a group must fail, and
+the ones that hold would then be reported as failures. A name matching nothing is an
+error rather than a silent no-op. Use this while triaging; use `knownFailure` for what
+gets committed, since only the declaration can carry a reason.
+
+`--list` prints every mark and its reason, so the registry is the answer to "what is
+known to fail?".
+
 ## Tyche panels
 
 A registered property gets a panel automatically, built from its `PropertyRunner` —
@@ -298,7 +362,8 @@ lake test -- [numTrials] [maxSize] [flags]
 |---|---|
 | `--quick` | 100 trials, max size 40, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
-| `--list` | print the registry and exit. The answer to "did my property get picked up?" |
+| `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
+| `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
 | `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
 | `--no-tyche` | skip the Tyche pass. |
 | `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). |

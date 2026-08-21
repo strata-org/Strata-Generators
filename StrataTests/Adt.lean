@@ -48,6 +48,11 @@ def adtBlockChecks : List TestDecl :=
       -- (0 in a sweep of 400 blocks; it fired once across several `--quick` runs), so
       -- the deterministic pin is the `#guard`ed `AdtLaws.bangFieldWitness` and this
       -- property is the regression net around it. Reported upstream.
+      -- Deliberately NOT marked `knownFailure`, because of the frequency above: it holds
+      -- on nearly every run, so the mark would report "expected to fail, but passed" and
+      -- fail the suite almost always. A run that draws the collision is therefore red,
+      -- and that is the correct trade: `bangFieldWitness` is the deterministic pin, and a
+      -- red run here is rare enough to read as news rather than as noise.
       ("adt: no datatype derives the same function name twice",
        fun gb => checkNoDerivedNameCollisions gb.block),
       -- The partial evaluator decides constructor-form disjointness by itself:
@@ -62,7 +67,10 @@ def adtBlockChecks : List TestDecl :=
       -- block: `visibleRefs` lets a datatype refer to one whose parameters are a
       -- subset of its own, and the block's parameter lists then differ.
       ("mutual: derived functions bind every type variable they mention",
-       fun gb => StrataGenerators.MutualBlockShape.checkDerivedFuncsWellScoped gb.block) ]
+       fun gb => StrataGenerators.MutualBlockShape.checkDerivedFuncsWellScoped gb.block,
+       .knownFailure "reported upstream: `elimFuncs` builds `d$Elim`'s case-function \
+arguments from every datatype in the block but binds only `d`'s own type parameters, so \
+a sibling's parameters occur free") ]
 
 /-- One run of the pipeline per block yields the obligations of *every* law family at
     once, so the three solver-backed properties share a single computation. Computing
@@ -121,7 +129,10 @@ def adtDisjSmt : TestDecl :=
     generated blocks. Gated on `--smt`. -/
 @[strata_property]
 def adtSolverAcceptsQuery : TestDecl :=
-  TestDecl.action "adt: every emitted law query reaches a solver verdict"
-    (fun cfg => ActionResult.ofTuple <$>
-      adtSolverAcceptsQueryAction cfg.numTrials StrataGenerators.SmtEval.solverName)
-    (gate := some "smt")
+  knownFailure "reported upstream: (1) a `bitvec 0` field is emitted as `(_ BitVec 0)`, \
+whose index SMT-LIB 2.6 requires to be positive; (2) a name that is not a bare SMT-LIB \
+symbol is interpolated verbatim into `declare-datatype`" <|
+    TestDecl.action "adt: every emitted law query reaches a solver verdict"
+      (fun cfg => ActionResult.ofTuple <$>
+        adtSolverAcceptsQueryAction cfg.numTrials StrataGenerators.SmtEval.solverName)
+      (gate := some "smt")
