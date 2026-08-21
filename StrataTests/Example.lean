@@ -10,6 +10,7 @@ of it.
 ```
 lake test -- --list                        # make sure that the suite found it
 lake test -- --only="example:" --quick     # run only this group
+lake test -- --only="example:" --seed=7    # …reproducibly, reporting the seed on a failure
 ```
 
 To add your own property, put it in the file under `StrataTests/` that fits it best. This
