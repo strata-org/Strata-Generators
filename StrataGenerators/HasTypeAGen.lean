@@ -1736,11 +1736,10 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_sound fctx octx pctx tvars bctx n _ a ha) e he
   case h_21 =>
-    -- The other type constructors. This branch gives one of the three leaves from the context, which
-    -- are a bound variable, a free variable and an operator of arity 0 at the type `τ`. It is the same
-    -- as the `.regex` case at the depth 0, so the same `pick*_sound` lemmas discharge it. Each leaf
-    -- holds the annotation `τ`, so it is well-typed at `τ`. This case gives a leaf only at each depth,
-    -- and that is what keeps the proof of this arm free of induction.
+    -- Other type constructors (datatypes, abstract types, aliases) at depth 0. The
+    -- arm is the three context leaves: a bound variable, a free variable, or a
+    -- nullary operator of type `τ`. Each leaf carries the annotation `τ`, so it
+    -- types at `τ`, and the `pick*_sound` lemmas give that.
     simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
@@ -1752,6 +1751,69 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | exact pickFVar_sound fctx _ _ _ h
       | exact pickOp_sound octx _ _ _ h
       | exact absurd h (by simp)
+  -- The matcher for this arm has 13 binders: the two discriminants, then `n`, then
+  -- the ten hypotheses that say `τ` is not one of the named types. Name all 13, or
+  -- `n` binds one of those hypotheses instead of the depth.
+  case h_22 _ _ n _ _ _ _ _ _ _ _ _ _ =>
+    -- The same three leaves at depth `n + 1`, and the Indir and IndirPoly branches.
+    -- Both of those emit an application spine. The head types at its annotation,
+    -- and each argument comes from `genLExprBase … n`, which this theorem's own
+    -- recursive call types.
+    have hfreq : e ∈ SetGen.support (frequency (G := SetGen.Set)
+      ([ (2, fun () =>
+           if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho
+           else default),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho
+           else default),
+         (2, fun () =>
+           if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho
+           else if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else default),
+         (4, fun () =>
+           if hi : (findOpsInCtx octx τ).length > 0
+           then genIndir octx τ (genLExprBase fctx octx pctx tvars bctx n) hi
+           else genLExprBase fctx octx pctx tvars bctx n τ),
+         (4, fun () =>
+           genIndirPolyCore fctx octx pctx bctx τ
+             (genLExprBase fctx octx pctx tvars bctx n)
+             (genLExprBase fctx octx pctx tvars bctx n τ)) ]
+      ) (by show 0 < 2+2+2+4+4; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | exact pickBVar_sound bctx _ _ _ h
+        | exact pickFVar_sound fctx _ _ _ h
+        | exact pickOp_sound octx _ _ _ h
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | exact pickBVar_sound bctx _ _ _ h
+        | exact pickFVar_sound fctx _ _ _ h
+        | exact pickOp_sound octx _ _ _ h
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | exact pickBVar_sound bctx _ _ _ h
+        | exact pickFVar_sound fctx _ _ _ h
+        | exact pickOp_sound octx _ _ _ h
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, he⟩ | ⟨_, he⟩
+      · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
+          (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha) _ e he
+      · exact genLExprBase_sound fctx octx pctx tvars bctx n _ e he
+    · exact StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
+        (fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx n σ a ha)
+        (fun a ha => genLExprBase_sound fctx octx pctx tvars bctx n _ a ha) e he
   termination_by (depth, sizeOf τ)
   decreasing_by all_goals simp_wf; omega
 
@@ -6330,9 +6392,9 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
   case h_21 =>
-    -- The other type constructors give one of the three leaves from the context, as the `.regex` case
-    -- at the depth 0 does. A bound-variable leaf and an operator leaf hold no free variable, and the
-    -- name of a free-variable leaf comes from `fctx`.
+    -- Other type constructors at depth 0: the three context leaves. A bound-variable
+    -- leaf and an operator leaf have no free variables, and the name of a
+    -- free-variable leaf comes from `fctx`.
     simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
@@ -6345,6 +6407,72 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
       | (rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
          exact getVars_fvar_subset fctx _ name' hmem)
       | exact absurd h (by simp)
+  -- Name all 13 binders of the matcher, with `n` third. See the same case of
+  -- `genLExprBase_sound`.
+  case h_22 _ _ n _ _ _ _ _ _ _ _ _ _ =>
+    -- The same three leaves at depth `n + 1`, and the Indir and IndirPoly branches.
+    -- The head of each spine is an `.op` node, which has no free variables. Each
+    -- argument comes from `genLExprBase … n`, so this theorem's own recursive call
+    -- bounds the free variables of the spine.
+    have hfreq : e ∈ SetGen.support (frequency (G := SetGen.Set)
+      ([ (2, fun () =>
+           if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho
+           else default),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho
+           else default),
+         (2, fun () =>
+           if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho
+           else if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else default),
+         (4, fun () =>
+           if hi : (findOpsInCtx octx τ).length > 0
+           then genIndir octx τ (genLExprBase fctx octx pctx tvars bctx n) hi
+           else genLExprBase fctx octx pctx tvars bctx n τ),
+         (4, fun () =>
+           genIndirPolyCore fctx octx pctx bctx τ
+             (genLExprBase fctx octx pctx tvars bctx n)
+             (genLExprBase fctx octx pctx tvars bctx n τ)) ]
+      ) (by show 0 < 2+2+2+4+4; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | (rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars])
+        | (rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars])
+        | (rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+           exact getVars_fvar_subset fctx _ name' hmem)
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | (rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars])
+        | (rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars])
+        | (rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+           exact getVars_fvar_subset fctx _ name' hmem)
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | (rw [mem_support_pickBVar_iff] at h; obtain ⟨i, _, rfl⟩ := h; simp [LExpr.getVars])
+        | (rw [mem_support_pickOp_iff] at h; obtain ⟨nm, _, rfl⟩ := h; simp [LExpr.getVars])
+        | (rw [mem_support_pickFVar_iff] at h; obtain ⟨name', hmem, rfl⟩ := h
+           exact getVars_fvar_subset fctx _ name' hmem)
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, he⟩ | ⟨_, he⟩
+      · exact StrataGenerators.IndirSupport.genIndir_getVars_subset octx _ _ _
+          (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha) _ e he
+      · exact genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ e he
+    · exact StrataGenerators.IndirSupport.genIndirPolyCore_getVars_subset fctx octx pctx bctx
+        _ _ _ _ _
+        (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
+        (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
   termination_by depth
   decreasing_by all_goals simp_wf; omega
 

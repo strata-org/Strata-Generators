@@ -1559,28 +1559,10 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
             (genLExprBase fctx octx pctx tvars bctx n (.seq τ))) ]
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
     frequency gs hw
-  -- ── The other type constructors ──────────────────────────────────
-  --
-  -- This case takes each `tcons` that no case above names. In practice such a type is a datatype that
-  -- a declaration earlier in the program gives, or an abstract type, or the body of an alias.
-  --
-  -- There is no *constant* at such a type. Therefore the only available leaves come from the context:
-  -- a bound variable, a free variable, or an operator of arity 0 at that exact type. An operator of
-  -- arity 0 is a constructor with no argument, such as `Nil : List<a>`. The branch is `default` when
-  -- nothing in scope has the type, so the support is empty exactly when the type is unreachable.
-  --
-  -- **This case gives a leaf only, and it therefore takes no depth**, unlike each named case above.
-  -- Each named case has a `genApp` branch, a `genIte` branch, and the two Indir branches, at `n + 1`.
-  -- The consequence is precise. An argument of a datatype type comes from the context, and the
-  -- generator never builds one. Therefore `isCons(xs)` is reachable when `xs` is a variable or `Nil`,
-  -- and `isCons(Cons(1, Nil))` is not. An extension of this case with the two Indir branches, which
-  -- would let an application of a constructor fill a position of a datatype type, is a true gain in
-  -- coverage. This case does not do it. Three proofs discharge this arm with the fact that it gives a
-  -- leaf only, and each of them would then need the inductive hypothesis. The IndirPoly branch would
-  -- also need the premise about the polymorphic context. The bound on the depth of a term does not
-  -- change either way, because it is indexed by the generability of `τ`, and no datatype `tcons` is
-  -- generable.
-  | _, τ =>
+  -- ── Other type constructors (datatypes, abstract types, aliases) ──
+  -- No constants (literals) have these types, so when the relevant context is empty,
+  -- we return `default`.
+  | 0, τ =>
     let bvars := bvarsOfType bctx τ
     oneOf
       [ (fun () =>
@@ -1605,6 +1587,51 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickFVar fctx _ hf
           else default) ]
       (by simp)
+  -- The same three leaves at depth `n + 1`, and also the monomorphic Indir branch
+  -- and the polymorphic IndirPoly branch that each named arm has. Indir applies an
+  -- operator whose result type is `τ`, and a constructor of the datatype is such an
+  -- operator. IndirPoly applies a polymorphic operator at an instance that it
+  -- samples, and a derived function of a polymorphic datatype is such an operator.
+  -- The two branches put a compound term such as `Cons(1, Nil)` in an argument
+  -- position, which only a variable or a nullary constructor could fill before.
+  | n + 1, τ =>
+    let bvars := bvarsOfType bctx τ
+    let gs : List (Nat × (Unit → G LExpr')) :=
+      [ (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else default),
+        -- Monomorphic Indir rule: a fully-applied operator whose result type is
+        -- `τ`, with arguments drawn from this generator at `n`.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx τ).length > 0
+          then genIndir octx τ (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n τ),
+        -- Polymorphic IndirPoly rule: a call to a derived function of a polymorphic
+        -- datatype, at an instance that the rule samples.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx τ
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n τ)) ]
+    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 2+2+2+4+4; omega
+    frequency gs hw
 
 
 /-- The depth-indexed IndirPoly rule, which is `genIndirPolyCore` with a default value for each of its
