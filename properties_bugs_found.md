@@ -31,8 +31,7 @@
 
 - Completeness of typechecker with respect to the declarative typing spec
 - Result of loop elimination is well-typed
-- Loop elimination removes all loops
-- The `detToKleene` transformation (converts deterministic control-flow to Kleene Algebra with Tests) produces a result when there are no `exit` or function + type declarations in the original list
+- Loop elimination removes all loopsf
 
 **`FilterProcedures` transformation**
 (Removes procedures that are unreachable from an input list of procedure declarations, where unreachable = "not in the transitive closure")
@@ -121,28 +120,61 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 - `stripMetaData` preserves typeability
 - `eraseTypes` preserves typeability 
 
-**The eight Core transform passes with no correctness proof** (issue #69)
+**`IrrelevantAxioms` transformation**
+(Removes axioms that do not mention any of the functions named in the `--functions` flag, thereby reducing the size of the analysis problem.)
+- The transformation only removes axioms and nothing else 
+- The transformation preserves declaration order
+- All axioms retained by the transformation are relevant
+- All axioms removed are irrelevant 
+- An axiom that is removed doesn't mention any function that is in the call-graph closure of the functions passed as input
+- The output program typechecks
+- The transformation does not change proof obligations
 
-`Strata/Transform/` has 23 files, and only four passes have a correctness companion. Every property below is stated over a whole generated program (needed because three of these passes read declarations other than procedures: `IrrelevantAxioms` reads the axioms and the function call graph, `ProcedureInlining` reads the callee's declaration, and `FunctionInlining` reads a function body out of the factory). `TerminationCheck` is not covered: its properties need recursive functions to be non-vacuous (#15/#29).
+**`StructuredToUnstructured` transformation**
+(Takes a sequence of statements with structured control flow, and compiles it into a control-flow graph consisting of basic blocks and `goto`s)
+- All block labels in the output program are distinct 
+- There exists a label to an entry block in the output program
+- There is exactly one block labelled `.finish` in the output program
+- In the output program, all blocks are reachable from the entry block 
+- The no. of commands in the output program is at least the no. of commands in the input program 
+- All targets of `goto`s in the output program are block labels 
 
-- `IrrelevantAxioms` — the *relevance* oracle (the `changed` flag is #91): only `.ax` declarations are removed; declaration order is preserved; every retained axiom is relevant; every removed axiom is irrelevant; a removed axiom mentions no function in the call-graph closure of the seed set; the pruned program still typechecks; and — the semantic property — **pruning leaves the proof obligations exactly unchanged**.
+**`DetToKleene` transformation**
+(Converts deterministic structured control-flow into Kleene Algebra with Tests: `if` and `while` are replaced with non-deterministic choice and Kleene star)
+- Loops with measures are translated to KAT and not dropped
+- The `detToKleene` transformation produces a result when there are no `exit` or function + type declarations in the original list 
 
-  The last one uses Strata's executable symbolic evaluator (`toCoreProofObligationProgram`, the `symbolicEval` phase) as a differential oracle. *Equality* is the right claim here, unlike for `ProcedureInlining` where obligations legitimately duplicate per call site: an axiom is an assumption and never an obligation, so deleting one cannot add, remove or relabel a single one. Measured non-vacuous at 152 of 300 draws, all equal.
 
-  It is necessary but **not sufficient** for the pass's `modelPreserving` annotation, and the docstring says so: pruning an axiom that some obligation *needed* leaves the obligation present but no longer provable, which is invisible without a solver since only its provability changed. Confirming that needs the `--smt` oracle and is the natural follow-up.
 
-  One trap worth recording: the symbolic evaluator **panics** on a loop ("Cannot evaluate `loop` statement") rather than returning an error, so a `none` branch cannot absorb it — the property must screen the input with `programHasLoop` first or an unlucky draw aborts the whole run. Both symbolic-eval properties now do, and a `#guard` pins the screen
-- `StructuredToUnstructured` — every `goto` target is a block label; block labels are distinct; the entry label exists; exactly one `.finish` block; every block is reachable from the entry; the command count does not shrink; a `.cfg`-bodied procedure prints
-- `DetToKleene` — a measure-carrying loop translates, i.e. the measure is silently dropped rather than rejected the way an invariant is (a characterization, not a bug oracle: which of the pass and the predicate is wrong depends on whether the deterministic semantics signals `hasFailure` on a measure violation)
-- `InsertLoopInvariantAsserts` + `LoopElim` — the inserted `assert` count is exactly `2n + 2m` for `n` invariants and `m` measure-carrying loops; every loop is bare after the pass; the pass is idempotent; the `insertedAssertAssumes` and `erasedLoops` statistics are faithful; no verification condition is lost through `LoopElim`; a nondeterministic loop carrying a `decreases` is rejected; `LoopElim` mints distinct block labels
-- `CommonSubexprElim` — no fresh `$__cse.N` name is declared twice; the `assert` labels are preserved; the fresh declarations appear in the order the counter minted them (the weaker, checkable form of "bound before first use", which needs a scope-aware traversal to state exactly; the output-typechecks property covers the rest, since the checker rejects a reference preceding its declaration); the output typechecks
-- `FunctionInlining` — fuel 0 is the identity; more fuel never un-inlines (stated as "no inlinable call remains that a smaller budget removed", not as a size comparison — a body smaller than the call it replaces makes correct inlining shrink the term); the type is preserved; no free variable is introduced (capture-freedom); and **evaluation agrees before and after inlining**, which is the sharpest of the five since it constrains the result's *meaning* rather than its shape. The factory is seeded with the program's own functions, since `Core.Factory` has no function bodies at all (0 of 310 entries).
 
-  The eval-agreement property needs one setup step to be meaningful: `LExprEval.eval` unfolds a body only for an `.inline`-attributed function (`LExprEval.lean:274`), whereas `inlineFuncDefs` unfolds *any* bodied function — a deliberate asymmetry its module note documents. Comparing over the plain factory therefore disagrees on every sample (230 of 230, with the original stuck on the uninterpreted call), which is an oracle defect, not a pass defect. Marking the program's functions `.inline` lets the evaluator unfold exactly the set the transform does; then **266 of 266 agree**, 152 of them reducing to a canonical value. Full value-level equality over the plain factory is not testable this way — the original never reduces — and needs the SMT oracle, which remains follow-up work.
+- **`InsertLoopInvariantAsserts` transformation**
+(Converts loop invariants into relevant `assert`/`assume` statements)
+- For a program containing `n` loop invariants and `m` measure-carrying loops, the transformation inserts exactly `2n + 2m` assertions
+- Loops in the output program don't contain loop variants or measures
+- Transformation is idempotent
+- Non-deterministic loops with `decreases` clauses are rejected
 
-  These five fire on **231 of 400 draws**, up from 0. Four changes got there, and three addressed a bottleneck that was not the obvious one: (1) `GenState.octx` was fixed across the declaration fold, so a program declared functions its own bodies could not name — growing it left the rate at 0; (2) the property read only *procedure* bodies, whereas the pass fires in a *function* body or `requires` clause — 1 of 400; (3) polymorphic functions could not be registered at all (114 of 158 declared functions are polymorphic, and `OpCtx` holds one monotype per operator), so `funcPolyOpEntry` now sends them to `pctx`, plus order-aware declaration weights — 4 of 400; (4) the real bottleneck was **operator-selection dilution** — `genIndir`/`genIndirPoly` pick with `elements`, uniform over candidates for the target type, and `Core.Factory` supplies 105 operators returning `bool`, so one entry gave a declared function ~1% odds and it was simply never drawn. Repeating the entry (`declaredFuncWeight`) plus synthesizing one saturated call per declared bodied function (`synthesizedCalls`) took it to 231 of 400. All of it was soundness-neutral: `lake build` re-checks `genProgram_sound` unchanged.
+**`LoopElim` transformation**
+(Removes loops to simplify verification problems, keeping only the relevant assertions related to loop invariants, facilitating verification)
+- There are no loops in the output program
+- `LoopElim` does not drop any verification conditions
+- All block labels in the output program are distinct
 
-  **Result: `FunctionInlining` is clean.** Over 600 programs and 439 inlining events — 336 at a *polymorphic* function, so `LFunc.computeTypeSubst` and `applySubst` are genuinely exercised — every property holds, as do two ad-hoc checks run while hunting (the output is a fixed point at high fuel; no type variable appears in the result that the input lacked). A real negative result rather than an absence of testing.
+
+**Common sub-expression elimination (`CommonSubexprElim`)**
+- No fresh variables are declared twice in the output program
+- All assertions are preserved
+- Output program typechecks (this catches bugs where variables are used before they're defined)
+
+**Function inlining**
+(Note: the function that implements this transformation takes a `fuel` parameter)
+- If we supply `fuel = 0` to the transformation, the program is unchnaged
+- Function inlining preserves the type of programs
+- No free variables are introduced by function inlining
+- Function inlining preserves the result of evaluation
+- Function inlining preserves the types of expressions
+- The number of still-inlinable calls if we supply `fuel = 4` ≤ no. of inlinable calls if we supply `fuel = 1`
+
 
 - `ProcedureInlining` — inlining introduces no duplicate label; no `assert` is lost; `visitedCalls`/`inlinedCalls` are consistent; the output typechecks; the cached call graph stays well-formed; and **symbolic evaluation loses no proof obligation**. The last one uses Strata's executable symbolic evaluator (`toCoreProofObligationProgram`, the `symbolicEval` phase of `corePipelinePhases`, preceded by the `nondetElim` phase it now requires) as a differential oracle, and it found the worst defect in the set (see below).
 
@@ -461,3 +493,38 @@ After the type alias `B` is resolved, we get:
 datatype T3 { Base(), MkT3 (f : int -> T3) }
 ```
 which is a legal datatype definition. However, `ProgramHasType` erroneously rejects the source program as violating the non-nested requirement for ADTs as it doesn't resolve type aliases.
+- Typing spec for local function declarations allows for arbitrary well-typed functions in output context. Consider the following (declarative) typing rule for local function declarations (in `StatementHasType`):
+
+```
+  /-- Local function declaration. The function is non-recursive and well-typed
+      (per `FuncHasType'`, evaluated in the ambient `C, Γ`); the resulting `func`
+      is added to `C` for subsequent statements. -/
+  | funcDecl : ∀ C Γ L decl func md Δ,
+      ¬ decl.isRecursive →
+      FuncHasType' τ C Γ func →
+      TContext.Equiv (T := CoreLParams) Δ Γ →
+      StatementHasType' τ P C Γ L (.funcDecl decl md) (C.addFactoryFunction func.toLFunc) Δ
+```
+
+This rule does not connect the function declaration `decl` with the actual function `func`. Specifically, `func` is allowed to be any arbitrary well-typed function in this rule. 
+
+The executable typechecker in `StatementType.lean` implements this rule
+as follows:
+
+```lean
+  | .funcDecl decl md => do
+    if decl.isRecursive then .error …
+    let (decl', func, Env) ← PureFunc.typeCheck C Env decl
+    let C := C.addFactoryFunction func.toLFunc
+    .ok (.funcDecl decl' md, Env, C)
+```
+Note that the typechecker calls `let func ← Function.ofPureFunc decl` to convert the function declaration into a function, so it derives `func` from `decl`, which is currently not done in the typing spec. 
+
+The typing spec currently allows us to declare the local function `f` (as a statement inside a procedure):
+
+```
+procedure caller () {
+    function f (x : int) : bool { x };  
+}
+```
+but the output context is allowed to any other arbitrary function that is well-typed (e.g. `function g() : bool { ... }`).
