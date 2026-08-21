@@ -41,11 +41,25 @@ structure RunConfig where
   numTrials : Nat := 1000
   maxSize   : Nat := 100
   gates     : List String := []
+  /-- The seed for each property (`--seed=N`), or `none` for a seed from the operating
+      system. A property with a seed of its own ignores this field.
+
+      1 seed serves all properties, as `hspec` and `tasty-quickcheck` also do. Two
+      properties of 1 input type then get the same inputs, so a run with a seed covers
+      less than a run without one. Use a seed to get a failure again, not to gate a merge.
+
+      A `Body.action` reads this field as its own seed, because the action must give the
+      seed to its own generators. -/
+  seed      : Option Nat := none
   deriving Inhabited
 
-/-- The Plausible configuration a `RunConfig` induces. -/
-def RunConfig.toConfiguration (cfg : RunConfig) : Configuration :=
-  { numInst := cfg.numTrials, maxSize := cfg.maxSize }
+/-- The Plausible configuration for a `RunConfig`, at `seed` if the run has one.
+
+    With `randomSeed`, `Testable.checkIO` runs the trials from `mkStdGen seed` and not from
+    the process-wide `IO.stdGenRef`. A property with a seed thus takes nothing from the
+    global generator, and it cannot change the inputs of another property. -/
+def RunConfig.toConfiguration (cfg : RunConfig) (seed : Option Nat := none) : Configuration :=
+  { numInst := cfg.numTrials, maxSize := cfg.maxSize, randomSeed := seed }
 
 /-- What a self-driving `IO` property reports: its verdict, how many of its own
     samples passed, how many it drew, and an optional message.
@@ -202,6 +216,10 @@ structure TestDecl where
   /-- What this property claims about its own verdict. Defaulted, so stating a property
       says nothing about known defects until it says so with `knownFailure`. -/
   expect : Expectation := .mustHold
+  /-- A seed for this property alone. The property then gets the same inputs on each run,
+      whatever `--seed=` the run has. `none` is the default and lets the run decide. Write
+      `@[strata_property (seed := 42)]`, or `withSeed 42` in a term. -/
+  seed : Option Nat := none
   /-- Whether to emit a Tyche panel. Sampled and witness-set properties get one by
       default; `witness` and `action` bodies have nothing to sample, so they
       default to off via the smart constructors below. -/
@@ -324,6 +342,35 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
 def knownFailure (reason : String) (d : TestDecl) : TestDecl :=
   { d with expect := .knownFailure reason }
 
+/-- **Give this property its own seed**, so it gets the same inputs on each run, whatever
+    `--seed=` the run has.
+
+    A prefix, as `knownFailure` is, so the seed reads before the property. The attribute
+    `@[strata_property (seed := 42)]` expands to this. Use the attribute at a declaration.
+    Use this function for a `family` member, or for a property built in a term.
+
+    Use a seed for a defect that only some inputs show. A seed that gives such an input
+    makes the property fail on each run, and `knownFailure` can then watch it. Before,
+    such a property could not have a mark at all.
+
+    The cost: the property gets the same inputs forever, so it stops the search for new
+    defects. Give a seed to 1 property, not to a group, and remove it together with the
+    `knownFailure` mark that it helps. -/
+def withSeed (seed : Nat) (d : TestDecl) : TestDecl :=
+  { d with seed := some seed }
+
+/-- The seed for this property: its own seed, or the seed of the run, or none. With none,
+    the property draws from the process-wide generator and no one can replay the run.
+
+    A seed at the declaration wins over `--seed=`. This is the opposite of the usual
+    precedence, and it is deliberate: the seed at the declaration is what makes a rare
+    failure reliable. If the flag replaced it, the property becomes unreliable again. Its
+    `knownFailure` mark then fails the run on each input that does not show the defect. -/
+def TestDecl.effectiveSeed (d : TestDecl) (cfg : RunConfig) : Option Nat :=
+  match d.seed with
+  | some s => some s
+  | none   => cfg.seed
+
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
 
@@ -412,6 +459,48 @@ def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
   let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x)) cfg
   pure (Outcome.ofTestResult cfg r)
 
+/-- Put the seed on a *failing* verdict, so a reader can get the counterexample again.
+
+    Only on a failure. A property that passes has nothing to replay, and 1 line for each
+    property that passes hides the 1 line that counts. A run without a seed gets no note,
+    because no number can give its inputs again. -/
+def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
+  match d.effectiveSeed cfg with
+  | none => o
+  | some s =>
+    if o.passed then o
+    else
+      -- Show the number next to the counterexample, so the reader does not have to find
+      -- it in the header. A seed at the declaration needs no advice: the property gets
+      -- this input until someone removes the seed.
+      let note :=
+        if d.seed.isSome then s!"seed: {s} (set at the declaration)"
+        else s!"seed: {s}. Replay with `--seed={s}`, or keep this input with \
+          `@[strata_property (seed := {s})]`"
+      { o with message := some (match o.message with
+                                | some m => s!"{m}\n    {note}"
+                                | none => note) }
+
+/-- Run `act` with the process-wide generator at `seed`, then put back the old state.
+
+    A `Body.action` samples for itself, and this module cannot give it a seed. The action
+    calls `Gen.run` or `IO.rand`, and both read `IO.stdGenRef`, so that ref is the only
+    way in from here.
+
+    The old state goes back to keep the seed local to the action. Without this step, each
+    property after the action also gets fixed inputs. The suite then stops the search for
+    new defects in properties that asked for no seed. -/
+private def withSeededRng (seed : Option Nat) (act : IO α) : IO α := do
+  match seed with
+  | none => act
+  | some s =>
+    let saved ← IO.stdGenRef.get
+    try
+      IO.setRandSeed s
+      act
+    finally
+      IO.stdGenRef.set saved
+
 /-- Reconcile a raw verdict with what the declaration claims about it.
 
     Every verdict in the package passes through here, and every driver reads the result,
@@ -445,10 +534,12 @@ def Outcome.reconcile (o : Outcome) : Expectation → Outcome
 def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
+  let seed := d.effectiveSeed cfg
   match d.body with
   | .sampled runner check _ inst =>
-    @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
-      check inst cfg.toConfiguration
+    let o ← @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
+      check inst (cfg.toConfiguration seed)
+    pure (o.noteSeed d cfg)
   | .witness verdict => pure { passed := verdict }
   | .witnesses cases render check _ =>
     let failures := cases.filter (fun c => !check c)
@@ -462,8 +553,12 @@ def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
              message := some s!"{failures.length}/{total} cases fail, e.g. \
                {String.intercalate "; " shown}" }
   | .action run =>
-    let r ← run cfg
-    pure { passed := r.passed, counts := some (r.samples, r.total), message := r.message }
+    -- The action samples for itself, so the seed goes to it 2 ways: `cfg.seed` if the
+    -- action gives a seed to its own generators, and the process-wide generator if the
+    -- action calls `Gen.run`, which is the usual case.
+    let r ← withSeededRng seed (run { cfg with seed })
+    pure (Outcome.noteSeed { passed := r.passed, counts := some (r.samples, r.total),
+                             message := r.message } d cfg)
 
 /-- Run one property and reconcile the verdict against what it claims. **This is what a
     driver calls**; `runRaw` is for a consumer that wants the unreconciled verdict.

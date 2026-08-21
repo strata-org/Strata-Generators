@@ -13,7 +13,15 @@ def myPassIdempotent : TestDecl :=
   .property "mypass: the pass is idempotent" "mypass" Generators.program checkMyPass
 ```
 
-and `lake test` runs it. Nothing in this package's internals has to be edited:
+and `lake test` runs it. An optional argument gives the property its own seed, so it gets
+the same inputs on each run:
+
+```lean
+@[strata_property (seed := 8021)]
+def myRareDefect : TestDecl := …
+```
+
+Nothing in this package's internals has to be edited:
 the attribute records the declaration's *name* in an environment extension, and
 `strata_registry%` (in `StrataGenerators.Test.Collect`) expands to the list of
 every name recorded in the current module and in everything it imports.
@@ -58,9 +66,9 @@ namespace StrataGenerators.Test
     report. -/
 inductive Entry where
   /-- A `def _ : TestDecl`. -/
-  | single (decl : Name)
-  /-- A `def _ : List TestDecl`, spliced in place. -/
-  | many (decl : Name)
+  | single (decl : Name) (seed : Option Nat)
+  /-- A `def _ : List TestDecl`, spliced in place. `seed` applies to each member. -/
+  | many (decl : Name) (seed : Option Nat)
   deriving Inhabited, Repr
 
 /-- The registry: entries in declaration order within a module, and modules in import
@@ -80,21 +88,48 @@ def registryEntries (env : Environment) : Array Entry :=
   let s := registryExt.toEnvExtension.getState env
   s.importedEntries.flatMap id ++ s.state
 
-/-- An attribute that records `mk decl` in `registryExt`. `validate` is where it
+/-- The optional argument of the 2 registration attributes: `(seed := 42)` gives the
+    property its own seed. It expands to `StrataGenerators.Test.withSeed`.
+
+    1 attribute with an argument, and not a second attribute as in
+    `@[strata_property, seed = 42]`. Lean reads that form as 2 independent attributes, so
+    `seed` must be a global attribute name. Other packages then cannot use the name, and the
+    name means nothing on its own. Worse, it does nothing at all on a declaration that has
+    no `strata_property`. An argument cannot appear without its attribute. Lean core uses
+    the same form for `@[deprecated (since := "2024-01-01")]`. -/
+syntax seedArg := " (" &"seed" " := " num ")"
+
+@[inherit_doc seedArg]
+syntax (name := strata_property) "strata_property" (seedArg)? : attr
+
+@[inherit_doc seedArg]
+syntax (name := strata_properties) "strata_properties" (seedArg)? : attr
+
+/-- Read the `(seed := N)` argument of an attribute, if the attribute has one. An argument
+    that parses but has no numeral is an error. A seed that does not take effect leaves the
+    property with new inputs on each run, and the author expects 1 input. -/
+private def seedOf? (stx : Syntax) : AttrM (Option Nat) := do
+  let some arg := stx[1].getOptional? | return none
+  let some n := (arg.find? (·.isOfKind numLitKind)).bind Syntax.isNatLit?
+    | throwErrorAt arg "expected `(seed := N)` for a numeral `N`"
+  return some n
+
+/-- An attribute that records `mk decl seed?` in `registryExt`. `validate` is where it
     checks that the declaration has the type the collector will later ascribe to it,
     so a mistyped registration fails at the declaration rather than as a confusing
     elaboration failure inside `strata_registry%`. -/
-private def registerRegistryAttr (name : Name) (descr : String) (mk : Name → Entry)
+private def registerRegistryAttr (name : Name) (descr : String)
+    (mk : Name → Option Nat → Entry)
     (validate : Name → AttrM Unit) (ref : Name := by exact decl_name%) : IO Unit :=
   registerBuiltinAttribute {
     ref, name, descr
     add := fun decl stx kind => do
-      Attribute.Builtin.ensureNoArgs stx
       unless kind == AttributeKind.global do throwAttrMustBeGlobal name kind
       unless ((← getEnv).getModuleIdxFor? decl).isNone do
         throwAttrDeclInImportedModule name decl
       validate decl
-      modifyEnv fun env => registryExt.addEntry env (mk decl)
+      let seed? ← seedOf? stx
+      modifyEnv fun env => registryExt.addEntry env (mk decl seed?)
   }
 
 /-- Check that `decl` has the type `expected` names, so a registration the
@@ -110,10 +145,13 @@ private def expectHead (attrName : Name) (expected : Name) (decl : Name) :
     throwError "`{attrName}` expects a declaration whose type is headed by \
       `{expected}`, but `{decl}` has type{indentExpr info.type}"
 
-/-- One property, registering itself. Attach to a `def _ : TestDecl`. -/
+/-- One property, registering itself. Attach to a `def _ : TestDecl`.
+
+    `@[strata_property (seed := 42)]` also gives the property its own seed. -/
 initialize
   registerRegistryAttr `strata_property
-    "Register a `TestDecl` with the Strata property-test harness."
+    "Register a `TestDecl` with the Strata property-test harness. \
+     `(seed := N)` sets the seed for its inputs."
     Entry.single (expectHead `strata_property ``TestDecl)
 
 /-- A family of properties registered together. Attach to a `def _ : List TestDecl`.
@@ -122,7 +160,8 @@ initialize
     greppable from its own declaration. -/
 initialize
   registerRegistryAttr `strata_properties
-    "Register a `List TestDecl` with the Strata property-test harness."
+    "Register a `List TestDecl` with the Strata property-test harness. \
+     `(seed := N)` sets that seed on each member of the list."
     Entry.many (expectHead `strata_properties ``List)
 
 /-- The diagnostics registry, kept separate because a driver runs it at a different
