@@ -13,8 +13,8 @@ def myPassIdempotent : TestDecl :=
   .property "mypass: the pass is idempotent" "mypass" Generators.program checkMyPass
 ```
 
-`lake test` then runs it. An optional argument pins the property's seed, so it draws the
-same inputs on every run:
+`lake test` then runs it. An optional argument gives the property its own seed, so it gets
+the same inputs on each run:
 
 ```lean
 @[strata_property (seed := 8021)]
@@ -66,8 +66,8 @@ namespace StrataGenerators.Test
 inductive Entry where
   /-- A `def _ : TestDecl`. -/
   | single (decl : Name) (seed : Option Nat)
-  /-- A `def _ : List TestDecl`. The collector splices the list in place. `seed` pins every
-      member. -/
+  /-- A `def _ : List TestDecl`. The collector splices the list in place. `seed` applies to
+      each member. -/
   | many (decl : Name) (seed : Option Nat)
   deriving Inhabited, Repr
 
@@ -126,25 +126,22 @@ hand-written panel closes over its own untuned sampler. `TestDecl.withTuning` sa
 /-- The optional weighting on a registration attribute: `(tuning := θ)` for one, or
     `(tunings := [(label, θ), …])` for a labelled matrix.
 
-    The opening `(` and the keyword are `atomic`, because a `seedArg` also opens with `(`. Without
-    it, `@[strata_property (seed := 7)]` would commit to this spec at the `(` and then fail at
-    `seed`. -/
+    The opening `(` and the keyword are `atomic`, because a `seedArg` also starts with `(`.
+    Without `atomic`, the parser reads `@[strata_property (seed := 7)]` as this spec after the
+    `(`, and then it fails at `seed`. -/
 syntax tuningSpec :=
   atomic(" (" (&"tuning" <|> &"tunings")) " := " term ")"
 
-/-- The optional argument both registration attributes take: `(seed := 42)` pins the
-    property's seed, so it draws the same inputs on every run. See
-    `StrataGenerators.Test.withSeed`, which is what this expands to. It comes after a
-    `tuningSpec`, if both are given: `@[strata_property (tuning := θ) (seed := 42)]`.
+/-- The optional argument of the 2 registration attributes: `(seed := 42)` gives the
+    property its own seed. It expands to `StrataGenerators.Test.withSeed`. If the attribute
+    also has a `tuningSpec`, the seed comes second: `@[strata_property (tuning := θ) (seed := 42)]`.
 
-    One attribute with an argument, rather than a second attribute alongside it — the
-    `@[strata_property, seed = 42]` that `ppx_quick_test`'s `[@config … seed = …]` would
-    suggest. In Lean `@[a, b]` is a list of two *independent* attributes, so `seed = 42`
-    would have to be a globally registered attribute called `seed`: a name any other
-    package may also want, meaningless on its own, and — worst — a silent no-op on a
-    declaration that forgot `strata_property`, since nothing would then be reading it.
-    An argument cannot be written without the attribute it belongs to. This is the form
-    core uses for the same reason: `@[deprecated (since := "2024-01-01")]`. -/
+    1 attribute with an argument, and not a second attribute as in
+    `@[strata_property, seed = 42]`. Lean reads that form as 2 independent attributes, so
+    `seed` must be a global attribute name. Other packages then cannot use the name, and the
+    name means nothing on its own. Worse, it does nothing at all on a declaration that has
+    no `strata_property`. An argument cannot appear without its attribute. Lean core uses
+    the same form for `@[deprecated (since := "2024-01-01")]`. -/
 syntax seedArg := " (" &"seed" " := " num ")"
 
 syntax (name := strataPropertyAttr) "strata_property" (tuningSpec)? (seedArg)? : attr
@@ -157,22 +154,21 @@ private inductive TuningArg where
   /-- `(tunings := [(label, θ), …])`: a labelled matrix. -/
   | many (stx : Term)
 
-/-- Read the optional `tuningSpec` off an attribute's syntax. The spec is read by position, and
-    not with a quotation pattern, because a pattern would also have to spell out every form of the
-    `seedArg` that can follow it. -/
+/-- Read the optional `tuningSpec` of an attribute. This function reads the spec by its
+    position, and not with a quotation pattern. A pattern must also show each form of the
+    `seedArg` that can come after the spec. -/
 private def parseTuningArg? (stx : Syntax) : Option TuningArg := do
   let spec ← stx[1].getOptional?
   let t : Term := ⟨spec[3]⟩
-  -- Under `<|>`, the keyword is wrapped in a `token.tuning` node, so read the atom inside it.
+  -- Under `<|>`, the keyword is in a `token.tuning` node, so read the atom in that node.
   match (spec[1].find? (·.isAtom)).map (·.getAtomVal) with
   | some "tuning"  => some (.one t)
   | some "tunings" => some (.many t)
   | _              => none
 
-/-- Read the `(seed := N)` argument off an attribute, if it carries one. An argument that
-    parsed but holds no numeral is an error rather than a silently absent pin: a pin that
-    quietly failed to take would leave the property drawing fresh inputs while its author
-    believed it was fixed to one draw. -/
+/-- Read the `(seed := N)` argument of an attribute, if the attribute has one. An argument
+    that parses but has no numeral is an error. A seed that does not take effect leaves the
+    property with new inputs on each run, and the author expects 1 input. -/
 private def seedOf? (stx : Syntax) : AttrM (Option Nat) := do
   let some arg := stx[2].getOptional? | return none
   let some n := (arg.find? (·.isOfKind numLitKind)).bind Syntax.isNatLit?
@@ -306,12 +302,12 @@ private def expectHead (attrName : Name) (expected : Name) (decl : Name) :
 /-- The attribute for one property. Attach it to a `def _ : TestDecl`. It also takes an optional
     `(tuning := θ)` or `(tunings := [(label, θ), …])`, which the syntax section above covers.
 
-    `@[strata_property (seed := 42)]` also pins the property's seed. -/
+    `@[strata_property (seed := 42)]` also gives the property its own seed. -/
 initialize
   registerRegistryAttr `strataPropertyAttr `strata_property
     "Register a `TestDecl` with the Strata property-test harness. Optionally \
-     `(tuning := θ)` or `(tunings := [(label, θ), …])`, and `(seed := N)` to pin the seed \
-     it draws its inputs from."
+     `(tuning := θ)` or `(tunings := [(label, θ), …])`, and `(seed := N)` to set the seed \
+     for its inputs."
     (single := true) (expectHead `strata_property ``TestDecl)
 
 /-- The attribute for a family of properties. Attach it to a `def _ : List TestDecl`. Use it
@@ -321,7 +317,7 @@ initialize
 initialize
   registerRegistryAttr `strataPropertiesAttr `strata_properties
     "Register a `List TestDecl` with the Strata property-test harness. Optionally \
-     `(tuning := θ)`, applied to every member, and `(seed := N)`, pinned on every member."
+     `(tuning := θ)`, applied to every member, and `(seed := N)`, set on each member."
     (single := false) (expectHead `strata_properties ``List)
 
 /-- The registry of the diagnostics. It is separate from the property registry, because a

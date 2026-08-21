@@ -27,24 +27,23 @@ inputs, and the cost of one draw grows faster than the bound does.
 * `--tyche-samples=N` gives the number of the samples for each panel of Tyche. The default value is 1000.
 * `--smt` enables the `smt` gate. That gate admits each property whose oracle is a live `cvc5` or `z3`. It is
   off by default, so the suite needs no solver.
-* `--seed=N` — run every property from seed `N`, and report the seed of any property that
-  fails. Two runs of the same command line then draw the same inputs, which is what makes
-  a counterexample reproducible: without it every run starts from OS randomness
-  (`IO.stdGenRef` is seeded from `IO.getRandomBytes` at startup), and a failing draw is
-  gone the moment the run ends. `N` also seeds the process-wide RNG, which is what the
-  self-driving `IO` properties and the Tyche pass draw from.
+* `--seed=N` gives each property the seed `N`, and reports the seed of each property that fails. The same
+  command line then gets the same inputs, so a counterexample comes back. Without the flag, each run starts
+  from the operating system. `IO.stdGenRef` gets its seed from `IO.getRandomBytes` at startup, so a failing
+  input is gone at the end of the run. `N` also goes to the process-wide generator, which the self-driving
+  `IO` properties and the Tyche pass use.
 
-  One seed for every property, as in `hspec` and `tasty-quickcheck`. Two properties over
-  one input type therefore draw the same inputs as each other, so a seeded run covers
-  less than an unseeded one: reach for this to reproduce a failure, not to gate a merge.
+  1 seed serves each property, as `hspec` and `tasty-quickcheck` also do. Two properties of
+  1 input type then get the same inputs, so a run with a seed covers less than a run
+  without one. Use the flag to get a failure again, not to gate a merge.
 
-  A property that pinned its own seed with `@[strata_property (seed := …)]` keeps it and
-  ignores this flag; see `StrataGenerators.Test.TestDecl.effectiveSeed` for why the
-  declaration wins here.
+  A property with its own seed from `@[strata_property (seed := …)]` keeps that seed and
+  ignores the flag. `StrataGenerators.Test.TestDecl.effectiveSeed` tells you why the
+  declaration wins.
 * `--only=SUBSTRING` runs only the properties whose name holds `SUBSTRING`. You can give the flag more than
   one time, and a property that matches one of them runs. The report holds no other property, and that is
   what makes work on one new property cheap.
-* `--list` prints the registry, with the name, the group, the gate, the pinned seed and the expectation of each
+* `--list` prints the registry, with the name, the group, the gate, the seed and the expectation of each
   property. The driver then stops, and it runs nothing. Use it to make sure that the harness found your property.
 * `--known-failure=NAME` marks `NAME` as known to fail for this run. The report hides its counterexample, and
   the property stops gating the exit code. You can give the flag more than one time. The permanent form is
@@ -76,10 +75,9 @@ structure Cli where
       the Tyche pass. A report of `--no-tyche` for a `--quick` run makes a reader look for a
       flag that they did not give. -/
   quick        : Bool
-  /-- Arguments that were given but could not be read. A driver refuses to run rather
-      than proceeding on a value it silently dropped: a `--seed=` that failed to parse
-      would produce an unseeded run reported as a seeded one, and the counterexample it
-      was passed to reproduce would not appear. -/
+  /-- Arguments that the driver could not read. A driver stops instead of a run on a value
+      that it dropped. A bad `--seed=` gives a run without a seed, and the header still shows
+      a seed. The counterexample that the flag must find does not come back. -/
   errors       : List String := []
 
 /-- The number of trials that `--quick` selects. -/
