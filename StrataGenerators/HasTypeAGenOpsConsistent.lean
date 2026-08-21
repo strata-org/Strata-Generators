@@ -630,7 +630,7 @@ theorem genIndirPolyCore_opsConsistentR (F : @Factory LExprParams') (fctx : FVar
         ((mem_mapM_iff' genArg concreteArgTys args).mpr hargs))
   · exact hFallback e hfb
 
-set_option maxHeartbeats 1600000 in
+set_option maxHeartbeats 3200000 in
 theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     -- The IndirPoly rule lives inside `genLExprBase`, so the
     -- polymorphic-annotation assumption this theorem needs is the same one
@@ -1478,15 +1478,10 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_21 =>
-    -- Other type constructors (datatypes, abstract types, aliases). The branch is
-    -- the three context leaves. A `pickOp` leaf's annotation is the operator's
-    -- *generic* factory type, so it is the identity instance `OpsConsistentR.op_in`
-    -- accepts; bvar/fvar leaves carry no `.op` node at all.
-    --
-    -- Every *named* case also carries Indir/IndirPoly branches, whose
-    -- sub-cases need `hPoly` and the recursive hypothesis. This case needs neither:
-    -- it is leaf-only by construction (see `genLExprBase`'s docstring there), which
-    -- is why the discharge is three `pick*` lemmas and no induction.
+    -- Other type constructors (datatypes, abstract types, aliases) at depth 0. The
+    -- arm is the three context leaves. The annotation on a `pickOp` leaf is the
+    -- generic factory type of the operator, so it is the identity instance that
+    -- `OpsConsistentR.op_in` accepts. The other two leaves carry no `.op` node.
     simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
       or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
                bot_mem_iff] at he
@@ -1498,6 +1493,69 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       | exact pickFVar_mem_opsConsistentR F fctx _ h
       | exact pickOp_mem_opsConsistentR F _ h
       | exact absurd h (by simp)
+  -- Name all 13 binders of the matcher, with `n` third. See the same case of
+  -- `genLExprBase_sound`.
+  case h_22 _ _ n _ _ _ _ _ _ _ _ _ _ =>
+    -- The same three leaves at depth `n + 1`, and the Indir and IndirPoly branches.
+    -- The annotation on the head of each spine is a genuine instance of the scheme of
+    -- the operator. `indir_op_opsConsistentR` gives that monomorphically and `hPoly`
+    -- gives it polymorphically. The arguments come from `genLExprBase … n`, and this
+    -- theorem's own recursive call gives their consistency.
+    have hfreq : e ∈ SetGen.support (frequency (G := SetGen.Set)
+      ([ (2, fun () =>
+           if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else if ho : (opsOfType (factoryOps F) τ).length > 0 then pickOp (factoryOps F) τ ho
+           else default),
+         (2, fun () =>
+           if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if ho : (opsOfType (factoryOps F) τ).length > 0 then pickOp (factoryOps F) τ ho
+           else default),
+         (2, fun () =>
+           if ho : (opsOfType (factoryOps F) τ).length > 0 then pickOp (factoryOps F) τ ho
+           else if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
+           else if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
+           else default),
+         (4, fun () =>
+           if hi : (findOpsInCtx (factoryOps F) τ).length > 0
+           then genIndir (factoryOps F) τ (genLExprBase fctx (factoryOps F) pctx tvars bctx n) hi
+           else genLExprBase fctx (factoryOps F) pctx tvars bctx n τ),
+         (4, fun () =>
+           genIndirPolyCore fctx (factoryOps F) pctx bctx τ
+             (genLExprBase fctx (factoryOps F) pctx tvars bctx n)
+             (genLExprBase fctx (factoryOps F) pctx tvars bctx n τ)) ]
+      ) (by show 0 < 2+2+2+4+4; omega)) := he
+    rw [mem_support_frequency_iff] at hfreq
+    obtain ⟨_, g, hg, _, he⟩ := hfreq
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
+    simp only [pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | exact pickBVar_mem_opsConsistentR F bctx _ h
+        | exact pickFVar_mem_opsConsistentR F fctx _ h
+        | exact pickOp_mem_opsConsistentR F _ h
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | exact pickBVar_mem_opsConsistentR F bctx _ h
+        | exact pickFVar_mem_opsConsistentR F fctx _ h
+        | exact pickOp_mem_opsConsistentR F _ h
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
+      all_goals first
+        | exact pickBVar_mem_opsConsistentR F bctx _ h
+        | exact pickFVar_mem_opsConsistentR F fctx _ h
+        | exact pickOp_mem_opsConsistentR F _ h
+        | exact absurd h (by simp)
+    · rcases he with ⟨_, he⟩ | ⟨_, he⟩
+      · exact genIndir_opsConsistentR F _ _
+          (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
+      · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
+    · exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
+        (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
+        (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   termination_by depth
   decreasing_by all_goals simp_wf; omega
 
