@@ -48,14 +48,13 @@ def adtBlockChecks : List TestDecl :=
       -- (0 in a sweep of 400 blocks; it fired once across several `--quick` runs), so
       -- the deterministic pin is the `#guard`ed `AdtLaws.bangFieldWitness` and this
       -- property is the regression net around it. Reported upstream.
-      -- Marked `rareFailure` and not `knownFailure` precisely because of the frequency
-      -- above: it holds on nearly every run, so `knownFailure` would fail the suite
-      -- almost always. This gates in neither direction.
+      -- Deliberately NOT marked `knownFailure`, because of the frequency above: it holds
+      -- on nearly every run, so the mark would report "expected to fail, but passed" and
+      -- fail the suite almost always. A run that draws the collision is therefore red,
+      -- and that is the correct trade: `bangFieldWitness` is the deterministic pin, and a
+      -- red run here is rare enough to read as news rather than as noise.
       ("adt: no datatype derives the same function name twice",
-       fun gb => checkNoDerivedNameCollisions gb.block,
-       .rareFailure "reported upstream: a field `f` alongside a field `f!` derives \
-`d..f!` twice; needs two field names differing by exactly a trailing `!`, so a draw \
-almost never produces it"),
+       fun gb => checkNoDerivedNameCollisions gb.block),
       -- The partial evaluator decides constructor-form disjointness by itself:
       -- `!(C x⃗ == D y⃗)` folds to the literal `true` during `symbolicEval`, while the
       -- tester form `!(isC u && isD u)` survives to the solver. Both halves are

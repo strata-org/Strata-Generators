@@ -160,20 +160,22 @@ inductive Body where
 
 /-- What a property claims about its own verdict.
 
-    Almost every property claims to hold, which is `mustHold` and the default. The other
-    two are for a property that states a *real defect in the code under test*: the claim
-    is right and the implementation is wrong, so the property must stay in the suite as
-    the regression net around the eventual fix, while not holding a merge hostage to a
-    bug that is already reported.
+    Almost every property claims to hold, which is `mustHold` and the default.
+    `knownFailure` is for a property that states a *real defect in the code under test*:
+    the claim is right and the implementation is wrong, so the property must stay in the
+    suite as the regression net around the eventual fix, while not holding a merge
+    hostage to a bug that is already reported.
 
     `reason` is prose, and the place to put the upstream issue. It replaces the
     counterexample on the report line, so it is the only explanation a reader gets for
     why a red property reads as green — make it name the defect.
 
-    This is *not* a way to quiet a property that is merely noisy: `rareFailure` gates in
-    neither direction and so asserts nothing at all, and `knownFailure` fails the run the
-    moment the defect is fixed. Neither can hide a regression in a property that holds
-    today. -/
+    This is *not* a way to quiet a property that is merely noisy. `knownFailure` fails the
+    run the moment the defect is fixed, so it cannot hide a regression in a property that
+    holds today, and it is the wrong tool for a property that fails only on an occasional
+    draw: such a property passes on most runs, and the mark would then turn the suite red
+    on those runs. Leave that one unmarked, and pin the defect with a `#guard` on a
+    hand-built witness instead. -/
 inductive Expectation where
   /-- The property must hold. Every property is this unless it says otherwise. -/
   | mustHold
@@ -181,10 +183,6 @@ inductive Expectation where
       counterexample is suppressed and it does not fail the run — but if it ever
       *passes*, the run fails, since a fixed defect must not go unnoticed. -/
   | knownFailure (reason : String)
-  /-- The property fails only on a rare draw, so a short run passes and a long one
-      fails. Gated in neither direction: `knownFailure` would turn the usual pass into a
-      failure, and `mustHold` would make the suite's colour depend on the trial count. -/
-  | rareFailure (reason : String)
   deriving Inhabited
 
 /-- One property under test. This is the whole of what a property author writes.
@@ -317,12 +315,6 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
 def knownFailure (reason : String) (d : TestDecl) : TestDecl :=
   { d with expect := .knownFailure reason }
 
-/-- **Mark a property as failing only on a rare draw**, so it gates in neither
-    direction. See `Expectation.rareFailure`; use `knownFailure` for a defect a run of
-    the default size reliably finds. -/
-def rareFailure (reason : String) (d : TestDecl) : TestDecl :=
-  { d with expect := .rareFailure reason }
-
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
 
@@ -433,11 +425,6 @@ def Outcome.reconcile (o : Outcome) : Expectation → Outcome
       -- Drop `o.message`: that is where `Testable.formatFailure` put the counterexample,
       -- and it is noise for a defect that is already understood and reported.
       { o with passed := true, xfail := true, message := some reason }
-  | .rareFailure reason =>
-    if o.skipped then o
-    else { o with passed := true, xfail := true,
-                  message := some (if o.passed then reason
-                                   else s!"{reason} (failed on this run)") }
 
 /-- Run one property and report the *raw* verdict, before reconciliation against
     `TestDecl.expect`. Split out from `run` so that suppression is visibly one step

@@ -188,9 +188,9 @@ def myPassOutputTypechecks : TestDecl :=
 
 It then reports `? XFAIL`, prints no counterexample, and does not gate the exit code —
 but **if it ever passes, the run fails** and asks you to drop the mark, so the fix cannot
-go unnoticed. Use `rareFailure` instead for a property that fails only on an occasional
-draw; it gates in neither direction. `lake test -- --list` prints every mark and its
-reason.
+go unnoticed. That last part is why the mark suits a defect that shows up on every run,
+and not one that shows up on an occasional draw: the latter would turn the suite red on
+every run that went well. `lake test -- --list` prints every mark and its reason.
 
 ## Tyche visualization
 

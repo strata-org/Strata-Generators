@@ -285,17 +285,18 @@ minted snapshot name can collide with a name already in the program"),
 Put the upstream issue in the reason. It replaces the counterexample on the report line,
 so it is the only explanation a reader gets for why a red property reads as green.
 
-### Which mark
+### When not to mark
 
-| | |
-|---|---|
-| `knownFailure reason` | fails at the default trial count, every run. Fails the suite if it starts passing. |
-| `rareFailure reason` | fails only on an occasional draw, so a short run passes and a long one fails. Gates in **neither** direction. |
+`knownFailure` says the property fails on *every* run at the default trial count. Do not
+use it for a property that fails only on an occasional draw: such a property passes on
+most runs, so the mark reports "expected to fail, but passed" and turns the suite red on
+exactly the runs that went well.
 
-Choose by *frequency*, not by severity. `knownFailure` on a property that holds on most
-runs turns the suite red on those runs; `rareFailure` is the escape hatch for exactly
-that case, and it asserts nothing at all — which is why it is the weaker choice wherever
-either would do.
+Leave that property unmarked, and pin the defect with a `#guard` on a hand-built witness
+instead. `adt: no datatype derives the same function name twice` is the example in the
+tree — it needs two field names differing by a trailing `!`, which a draw almost never
+produces, so `AdtLaws.bangFieldWitness` is the real pin and the property is a net around
+it.
 
 ### Marking one for a single run
 

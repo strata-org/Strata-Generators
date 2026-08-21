@@ -45,7 +45,6 @@ def label (d : TestDecl) : String :=
   match d.expect with
   | .mustHold => d.name
   | .knownFailure _ => s!"{d.name} [known failure]"
-  | .rareFailure _ => s!"{d.name} [rare failure, not gated]"
 
 /-- One property as an LSpec node. `TestDecl.run` has already reduced the verdict to
     `(passed, counts, message)`, which is exactly `individualIO`'s tuple — so LSpec never

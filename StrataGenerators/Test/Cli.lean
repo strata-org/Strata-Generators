@@ -129,7 +129,6 @@ def listRegistry (ds : List TestDecl) : IO Unit := do
     let expect := match d.expect with
       | .mustHold => ""
       | .knownFailure r => s!"\n{pad "" 15}known failure: {r}"
-      | .rareFailure r => s!"\n{pad "" 15}rare failure (not gated): {r}"
     IO.println s!"  {pad d.group 12} {d.name}{gate}{expect}"
   let marked := ds.filter fun d => match d.expect with | .mustHold => false | _ => true
   unless marked.isEmpty do
