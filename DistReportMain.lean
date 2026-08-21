@@ -9,11 +9,11 @@ suite's properties discriminate on actually appear — see
 `StrataGenerators.TuningProfiles` for what each profile is trying to buy.
 
 ```bash
-lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]
+lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--prog]
 ```
 
 `samples` (default 200) is per profile per family, `maxSize` (default 100) is the
-Plausible size the draws cycle through. With no family flag, all four run.
+Plausible size the draws cycle through. With no family flag, all five run.
 
 To compare a *property's* verdict across profiles, register it with
 `TestDecl.underTunings` instead — see `StrataTests/Stmt.lean`.
@@ -24,7 +24,7 @@ def main (args : List String) : IO UInt32 := do
   let positional := args.filter (fun a => !a.startsWith "--")
   let samples := (positional[0]? >>= String.toNat?).getD 200
   let maxSize := (positional[1]? >>= String.toNat?).getD 100
-  let all := ["stmt", "proc", "cmd", "expr"]
+  let all := ["stmt", "proc", "cmd", "expr", "prog"]
   -- An unrecognised flag is an error, not a no-op: silently ignoring one reads as "that family
   -- was measured" when nothing was, which is how a `--props` flag stayed documented but unbuilt.
   let unknown := flags.filter (fun f => !all.any (fun n => f == s!"--{n}"))

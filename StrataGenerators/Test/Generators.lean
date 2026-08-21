@@ -1,6 +1,7 @@
 import StrataGenerators.TestScaffold
 import StrataGenerators.Test.Types
 import StrataGenerators.TuningProfiles
+import StrataGenerators.ProgramTuning
 
 /-!
 # The generator catalog
@@ -262,12 +263,13 @@ def indepBlock     : PropertyRunner GenIndepBlock    := .ofInstances _
 -- tracks the input types the tuned families quantify over rather than the generators alone: both
 -- command shapes, and all three expression shapes.
 --
--- A type absent from this list cannot be tuned: `GenProgram`, `GenFunction`, `GenAdtBlock` and
--- `GenIndepBlock` draw through generators whose weights are not yet exposed, so
--- `TestDecl.tuned` on one of them is a missing-instance error rather than a silent no-op.
+-- A type absent from this list cannot be tuned: `GenFunction`, `GenAdtBlock` and `GenIndepBlock`
+-- draw through generators whose weights are not yet exposed, so `TestDecl.tuned` on one of them is
+-- a missing-instance error rather than a silent no-op.
 
 section Tunable
 open StrataGenerators.Test StrataGenerators.TuningProfiles
+open StrataGenerators.ProgramTuning
 open StrataGenerators.Procedure.TestSupport (relabelProcs)
 
 /-- Statement lists, with `genStmt`'s branch weights read from `θ` — threaded through the
@@ -346,6 +348,18 @@ instance : TunableGen ClosedTypedExpr where
       pure (⟨e, τ⟩ : TypedExpr))
   sites := genLExprBase.sites
 
+/-- Whole programs, with `genDeclStep`'s declaration-kind weights read from `θ`
+    (`progPolyHeavy`, `progDatatypeHeavy`). This is the instance the `mono:` family tunes
+    through: how many polymorphic functions and polymorphic datatype blocks a program declares is
+    what decides whether `MonomorphizeFunctions` has anything to specialize. -/
+instance : TunableGen GenProgram where
+  genWith θ := retryGen 8000 <| Gen.sized fun s => do
+    let numDecls := max 2 (min 5 (2 + s / 25))
+    let prog ← (retryGen 30000 (genProgramT (G := Plausible.Gen) θ numDecls {})
+      : Gen Core.Program)
+    pure ⟨prog⟩
+  sites := progSites
+
 /-- The same over `coreOpCtx` and no polymorphic operators: the shape
     `expr: resolve after type erasure` quantifies over, which is the second property
     `exprQuantHeavy` is for. -/
@@ -376,6 +390,8 @@ example : TunableGen.genWith (α := ClosedTypedExpr) exprBreadth = Arbitrary.arb
   simp only [TunableGen.genWith, genLExprT_defaults]; rfl
 example : TunableGen.genWith (α := ResolveTypedExpr) exprBreadth = Arbitrary.arbitrary := by
   simp only [TunableGen.genWith, genLExprT_defaults]; rfl
+example : TunableGen.genWith (α := GenProgram) progDefault = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, genProgramT_defaults]; rfl
 
 /-! The arity a hand-built tuning must match. `TestDecl.withTuning` checks a `θ` against it, so a
 tuning meant for another generator is a red line naming both numbers rather than a silent
@@ -387,6 +403,7 @@ example : TunableGen.arity GenCmdWithCtx = 12 := rfl
 example : TunableGen.arity TypedExpr = 79 := rfl
 example : TunableGen.arity ClosedTypedExpr = 79 := rfl
 example : TunableGen.arity ResolveTypedExpr = 79 := rfl
+example : TunableGen.arity GenProgram = 9 := rfl
 
 end Tunable
 

@@ -1,4 +1,6 @@
 import StrataGenerators.TuningProfiles
+import StrataGenerators.ProgramTuning
+import StrataGenerators.MonomorphizeFns
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
 import StrataGenerators.RetryGen
 import Basalt.PlausibleGen
@@ -436,11 +438,60 @@ def exprRow (θ : Tuning × Tuning × FVarCtx) (samples maxSize : Nat) : IO (Lis
 def exprHeaders : List String :=
   ["quant", "value", "redex", "op", "hasFvar", "prog✓", "presv✓", "fvars✓", "1st-try", "dropped"]
 
+-- ══════════════════════════════════════════════════════════════════════════
+-- Program family
+-- ══════════════════════════════════════════════════════════════════════════
+
+open StrataGenerators.ProgramTuning StrataGenerators.Mono in
+/-- The program family's sample: `TestScaffold.genProgramWith` verbatim, through the tuned
+    declaration fold. -/
+def programsGen (θ : Tuning) (s : Nat) : Gen Program := do
+  let numDecls := max 2 (min 5 (2 + s / 25))
+  retryGen 30000 (genProgramT (G := Plausible.Gen) θ numDecls {})
+
+structure ProgStats where
+  n : Nat := 0
+  dropped : Nat := 0
+  firstTry : Nat := 0
+  polyFn : Nat := 0
+  polyData : Nat := 0
+  monoFires : Nat := 0
+  /-- Declarations in the pass output. Reported next to `decls` rather than as a difference,
+      because the pass can also *shrink* a program and a `Nat` difference truncates at 0. -/
+  outDecls : Nat := 0
+  decls : Nat := 0
+
+open StrataGenerators.Mono in
+def programRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
+  let mut t : ProgStats := {}
+  for i in List.range samples do
+    let sz := i % (maxSize + 1)
+    let (o, ok) ← draw (programsGen θ sz) 8000 sz
+    match o with
+    | none => t := { t with n := t.n + 1, dropped := t.dropped + 1 }
+    | some prog =>
+      let (changed, out) := monoChangedOut prog
+      t := { t with
+        n := t.n + 1
+        firstTry := t.firstTry + (if ok then 1 else 0)
+        polyFn := t.polyFn + (if polyProgramFuncNames prog != [] then 1 else 0)
+        polyData := t.polyData +
+          (if (datatypeParams prog).any (fun d => d.2 != []) then 1 else 0)
+        monoFires := t.monoFires + (if changed then 1 else 0)
+        outDecls := t.outDecls + out.decls.length
+        decls := t.decls + prog.decls.length }
+  let k := t.n - t.dropped
+  pure [pct t.polyFn k, pct t.polyData k, pct t.monoFires k,
+        mean1 t.decls k, mean1 t.outDecls k, pct t.firstTry t.n, pct t.dropped t.n]
+
+def programHeaders : List String :=
+  ["polyFn", "polyData", "mono≠id", "#decls", "#out", "1st-try", "dropped"]
+
 /-! There is deliberately no property-outcome table here. Running the suite's own properties under
 each profile is what `TestDecl.underTunings` does — one registered property per (claim, weighting)
 pair, each with its own verdict and Tyche panel — so the comparison belongs in the suite, where a
 distribution-sensitive failure gates CI, rather than in a report nobody runs. See
-`StrataTests/Stmt.lean` for the two properties that use it. -/
+`StrataTests/Stmt.lean` and `StrataTests/Monomorphization.lean` for the properties that use it. -/
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- The report
@@ -480,6 +531,12 @@ def exprProfiles : List (String × (Tuning × Tuning × FVarCtx)) :=
     ("(default), open", (tyDefault, exprBreadth, defaultFCtx)),
     ("exprFVarHeavy, open", (tyDefault, exprFVarHeavy, defaultFCtx)) ]
 
+open StrataGenerators.ProgramTuning in
+def programProfiles : List (String × Tuning) :=
+  [ ("(default)", progDefault),
+    ("progPolyHeavy", progPolyHeavy),
+    ("progDatatypeHeavy", progDatatypeHeavy) ]
+
 def runFamily {θ : Type} (name : String) (headers : List String) (profiles : List (String × θ))
     (row : θ → IO (List String)) (note : String := "") : IO Unit := do
   let mut rows := #[]
@@ -512,5 +569,11 @@ def report (samples maxSize : Nat) (families : List String) : IO Unit := do
       ("closed rows use fctx = [] (the ClosedTypedExpr shape of progress/preservation), open rows "
        ++ "defaultFCtx; drawn through genLExprT, the entry point the expr: properties use. "
        ++ "tyCompoundHeavy tunes the *type* generator, which no property does")
+  if families.contains "prog" then
+    runFamily "programs" programHeaders programProfiles (programRow · samples maxSize)
+      ("polyFn and polyData = the program declares a polymorphic function, and a polymorphic "
+       ++ "datatype. Those are the two shapes the mono: family needs. mono≠id = "
+       ++ "MonomorphizeFunctions rewrote the program. #out is the output declaration count "
+       ++ "against the input count #decls, so a pass that replaces rather than appends shows here")
 
 end StrataGenerators.DistReport
