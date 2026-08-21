@@ -15,20 +15,19 @@ Core procedures. This file proves it **sound** and **complete** with respect to
 the `ProcHasTypeA` typing relation of `Strata.Languages.Core.ProcedureTypeSpec`.
 
 The proof is *compositional*: it reuses `genInputs_support`/`genInputs_complete`
-(for the output signature, exactly as the function generator uses them for
-inputs), `genStmtChain_sound` and the body's `genStmtChain` support membership
-(for the body — completeness takes that membership as a hypothesis, dischargeable
-via `spec_complete`), and `genStmtChain_mutableVars` (for the modification-rights
-obligation).
+for the output signature, exactly as the generator of a function uses them for its inputs. It also uses
+`genStmtChain_sound` and the membership of the body in the support of `genStmtChain`, for the body. The
+completeness proof takes that membership as a hypothesis, and `spec_complete` can discharge it. It also uses
+`genStmtChain_mutableVars`, for the obligation about the rights to modify a variable.
 
 ## The context-alignment lemma
 
 The one genuinely procedure-specific fact is `procBodyContext_default`: with
 empty inputs, empty type-arguments, and no in-out parameters, the declarative
 body context `procBodyContext Γ proc` (a single new scope binding inputs ++
-outputs ++ old-bindings) collapses to `procToTCtx proc.header.outputs` — the very
-context `genStmtChain_sound` produces when seeded with the output parameters. This is
-what lets the generated body's `StatementsHasTypeA` line up *definitionally* with the
+outputs and the old bindings, becomes `procToTCtx proc.header.outputs`. That is exactly the context that
+`genStmtChain_sound` gives when it starts from the output parameters. That fact is what makes the
+`StatementsHasTypeA` of the generated body agree *definitionally* with the
 `ProcBodyHasType'.structured` obligation.
 -/
 
@@ -45,9 +44,9 @@ theorem Map_keys_eq_ListMap_keys {α β} (m : List (α × β)) :
   | nil => rfl
   | cons p m ih => obtain ⟨a, b⟩ := p; simp only [Map.keys, ListMap.keys, ih]
 
-/-- `ListMap.keys` distributes over the `ListMap` append (which is `List.append`).
-    The `ListMap` `++` is not *syntactically* `List.append`, so `List.map_append`
-    won't fire directly; we route through the `Map.keys` bridge. -/
+/-- `ListMap.keys` distributes over the append of two `ListMap` values, and that append is `List.append`. The
+    `++` of a `ListMap` is not *syntactically* `List.append`, so `List.map_append` does not apply directly. The
+    proof therefore goes through the bridge lemma about `Map.keys`. -/
 theorem ListMap_keys_append (a b : ListMap (Identifier Unit) LMonoTy) :
     ListMap.keys (a ++ b) = ListMap.keys a ++ ListMap.keys b := by
   rw [← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys]
@@ -94,11 +93,11 @@ theorem perm_append_rotate {α} (a b c : List α) : (a ++ b ++ c).Perm (c ++ b +
 
 /-- Lookups in an `HMap.ofList` depend only on the *set* of bindings, provided the list is
     *functional* (any two bindings for a key agree). Both the declarative body scope
-    (`old ++ outputs ++ inputs`) and the generator-side one
-    (`(inputs ++ outputs ++ old).reverse`) are functional permutations of one another —
-    they are the same bindings in a different order — so they look up identically, which is
-    all `TContext.Equiv` asks for. Structural equality is unavailable: a scope is an opaque
-    hash map, and hash maps built by different insertion orders are different values. -/
+    of the specification, which is `old ++ outputs ++ inputs`, and the one of the generator, which is
+    `(inputs ++ outputs ++ old).reverse`, are functional permutations of each other. They hold the same bindings
+    in a different order, so a lookup in one gives the same value as a lookup in the other, and that is all that
+    `TContext.Equiv` asks for. A structural equality is not available, because a scope is a hash map, and two
+    hash maps that different orders of insertion build are different values. -/
 theorem find?_ofList_perm_of_functional {α β} [BEq α] [LawfulBEq α] [Hashable α]
     [LawfulHashable α] {L1 L2 : List (α × β)} (hperm : L1.Perm L2)
     (hfun : ∀ (k : α) (v1 v2 : β), (k, v1) ∈ L1 → (k, v2) ∈ L1 → v1 = v2) (k : α) :
@@ -148,11 +147,11 @@ theorem find?_ofList_perm_of_functional {α β} [BEq α] [LawfulBEq α] [Hashabl
     `procToTCtxΓ Γ (inputs ++ outputs ++ oldVars M)`.
 
     Agreement is `TContext.Equiv`, not equality: `procBodyContext` builds its scope as
-    `HMap.ofList (old ++ outputs ++ inputs)` while `procToTCtxΓ` builds
-    `HMap.ofList ((inputs ++ outputs ++ old).reverse)`. Those are the same bindings in a
-    different order — hence the same *lookups*, given that the seed is functional — but not
-    the same hash-map value. `hfun` is the functionality of the seed, which
-    `seed_functional` supplies at the call site. -/
+    `HMap.ofList (old ++ outputs ++ inputs)`, and `procToTCtxΓ` builds
+    `HMap.ofList ((inputs ++ outputs ++ old).reverse)`. Those hold the same bindings in a different order.
+    Therefore a *lookup* in one gives the same value as a lookup in the other, because the seed is functional,
+    and the two hash-map values differ. The hypothesis `hfun` gives that functionality, and `seed_functional`
+    gives it at a call site. -/
 theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     (name : String) (tyArgs : List TyIdentifier)
     (M I O : List ((Identifier Unit) × LMonoTy))
@@ -168,9 +167,8 @@ theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
           spec := { preconditions := pre, postconditions := post },
           body := body })
       (procToTCtxΓ Γ (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))) := by
-  -- Spell the two scopes out: the spec builds `old ++ outputs ++ inputs`, we build the
-  -- reverse of `inputs ++ outputs ++ old`. (`set` is unavailable — this file is
-  -- Mathlib-free — so the blocks are written out.)
+  -- Write the two scopes out. The specification builds `old ++ outputs ++ inputs`, and the generator builds the
+  -- reverse of `inputs ++ outputs ++ old`. This file uses no set type, so each block appears in full.
   have hperm :
       (((M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
           (fun p => (p.1, LTy.forAll [] p.2))).reverse).Perm
@@ -272,9 +270,9 @@ theorem disjointInputs_eq_self (X Y : ListMap (Identifier Unit) LMonoTy)
   intro hmem
   exact h p.1 (by rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨p, hp, rfl⟩) hmem
 
-/-- `disjointInputs ins outs` is a *sublist* of `ins` (it only removes entries),
-    so any property closed under sublists — e.g. `Nodup` of the keys or
-    reachability of the values — transfers from `ins`. -/
+/-- `disjointInputs ins outs` is a *sublist* of `ins`, because it removes an entry only. Therefore each property
+    that is closed under a sublist holds for it if it holds for `ins`. Two such properties are that the keys are
+    distinct, and that each value is reachable. -/
 theorem disjointInputs_sublist (ins outs : ListMap (Identifier Unit) LMonoTy) :
     List.Sublist (disjointInputs ins outs) ins :=
   List.filter_sublist
@@ -305,9 +303,9 @@ theorem Map_keys_append (m₁ m₂ : Map (Identifier Unit) LMonoTy) :
     the immutable set `inputs.keys` is always an *output* key. (A mutable key is a
     key of `inputs ++ outputs` that is not among `inputs.keys`; since the keys of
     the append split as `inputs.keys ++ outputs.keys`, dropping the input keys
-    leaves exactly the output keys.) This is what turns the `writable`-based
-    `genStmtChain_mutableVars` invariant into the `ProcHasType'.modRights` obligation —
-    with **no** disjointness hypothesis needed. -/
+    leaves exactly the output keys. That fact is what turns the invariant of `genStmtChain_mutableVars`, which
+    is about the writable part of a context, into the obligation `ProcHasType'.modRights`, and it needs **no**
+    hypothesis about disjointness. -/
 theorem mem_writable_append_keys (ins outs : Map (Identifier Unit) LMonoTy)
     (immutableVars : List (Identifier Unit)) (hro : immutableVars = Map.keys ins)
     (k : Identifier Unit)
@@ -323,10 +321,10 @@ theorem mem_writable_append_keys (ins outs : Map (Identifier Unit) LMonoTy)
 
 /-- **The in-out write-target containment.** For the body seed
     `A ++ B ++ C` under the immutable set `A.keys ++ C.keys`, every mutable key is
-    a key of the *middle* block `B`. (A mutable key is a key of `A ++ B ++ C` that
-    is neither an `A`-key nor a `C`-key — both immutable — so it must live in `B`.)
-    Instantiated at `A := inputs`, `B := outputs`, `C := oldVars M`, this says
-    every body-modified variable is an *output* key, discharging `modRights`. No
+    a key of the *middle* block `B`. A mutable key is a key of `A ++ B ++ C` that is neither a key of `A` nor a
+    key of `C`, because both of those blocks are immutable, so it must be a key of `B`. At the instance where
+    `A` is the inputs, `B` is the outputs and `C` is the old variables, this lemma says that each variable that
+    the body modifies is an *output* key, and it therefore discharges `modRights`. No
     disjointness hypothesis is needed. -/
 theorem mem_writable_seed_keys (A B C : Map (Identifier Unit) LMonoTy)
     (immutableVars : List (Identifier Unit))
@@ -394,10 +392,10 @@ theorem oldVars_keys_nodup (M : ListMap (Identifier Unit) LMonoTy)
   simp only at heq
   simp [heq]
 
-/-- Two maps whose *keys* are drawn from disjoint character classes — one all
-    space-free, the other all space-containing — share no key, so their append is
-    functional whenever each half is. This is how `oldVars M` (space-containing
-    keys) composes with the space-free generated signature. -/
+/-- Two maps whose *keys* come from disjoint classes of characters share no key. One class holds no space, and
+    the other holds a space in each name. Therefore the append of the two maps is functional whenever each half
+    is functional. That is how the map of the old variables, whose keys hold a space, composes with the
+    generated signature, whose keys hold no space. -/
 theorem functional_append_of_space_disjoint
     (m₁ m₂ : Map (Identifier Unit) LMonoTy)
     (h₁ : Map.Functional m₁) (h₂ : Map.Functional m₂)
@@ -411,9 +409,9 @@ theorem functional_append_of_space_disjoint
 
 /-- **Functionality of the in-out body seed.** The seed `(M ++ I) ++ (M ++ O) ++
     oldVars M` is functional: the two signature halves `M ++ I` and `M ++ O` each
-    have `Nodup` keys (hence are functional), and they agree on shared keys — a
-    key common to both is neither an `I`-key (disjoint from `M ++ O`) nor an
-    `O`-key (disjoint from `M ++ I`), so both entries come from the shared block
+    have distinct keys, and each of them is therefore functional. They also agree at a shared key. A key of both
+    halves is not a key of the input-only block, which is disjoint from the outputs, and it is not a key of the
+    output-only block, which is disjoint from the inputs. Therefore both entries come from the shared block
     `M`, where `Nodup` forces equality; and `oldVars M`'s space-containing keys
     are disjoint from the space-free generated names of `M`/`I`/`O`. -/
 theorem seed_functional
@@ -616,8 +614,8 @@ theorem CmdExtHasTypeA_weaken_rigid {P : Program} {C : LContext CoreLParams}
     predicate transports across any change of ambient context. -/
 theorem FuncHasTypeA_C_irrel {C C' : LContext CoreLParams} {Γ : TContext Unit}
     {func : Function} (h : FuncHasTypeA C Γ func)
-    -- `signatureWellKinded` reads the ambient context — but only its `knownTypes`, so any
-    -- change that keeps those (e.g. swapping `rigidTypeVars`) carries it across.
+    -- `signatureWellKinded` reads the context, and it reads its `knownTypes` field only. Therefore each change
+    -- that keeps that field, such as a change to `rigidTypeVars`, carries the property across.
     (hkt : C'.knownTypes = C.knownTypes) : FuncHasTypeA C' Γ func :=
   { inputsNodup := h.inputsNodup
     typeArgsNodup := h.typeArgsNodup
@@ -635,8 +633,8 @@ theorem FuncHasTypeA_C_irrel {C C' : LContext CoreLParams} {Γ : TContext Unit}
     The ambient `C.rigidTypeVars` flows *unchanged* through every statement
     constructor (`funcDecl` extends only `C.functions`, `typeDecl` only
     `C.knownTypes`; neither touches `rigidTypeVars`), and it is consumed only
-    inside `cmd`'s `init` `RigidAnnotCompat`. So replacing `C.rigidTypeVars` by any
-    subset `rv` — and, in the output context, the same `rv` — preserves typing.
+    inside the `RigidAnnotCompat` condition of an `init` command. Therefore a subset of `C.rigidTypeVars`, in the
+    input context and in the output context, keeps the typing.
     Proved by mutual induction on the derivation. -/
 theorem StatementHasTypeA_rigid_eq {P : Program} {C C' : LContext CoreLParams}
     {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
@@ -781,38 +779,37 @@ set_option maxHeartbeats 800000 in
 /-- **Soundness of `genProcedure`.** Every procedure in the generator's support
     is well-typed w.r.t. `ProcHasTypeA` for any program `P` (and any ambient
     context `C`) whose callable procedures the threaded call-target context `procs`
-    faithfully describes, i.e. `ProcSigCorresponds procs P`. That is the only
-    side-condition (it is *vacuous* — `∀ s ∈ [], …` — when `procs = []`, recovering
-    the old side-condition-free statement for a call-free body); it feeds straight
-    into `genStmtChain_sound`, which the `.call` case of the body soundness needs to
-    certify each emitted `call` against `P`.
+    faithfully describes, which is `ProcSigCorresponds procs P`. That is the one side condition, and it has no
+    content when the context of the callable procedures is empty. It goes straight into
+    `genStmtChain_sound`, which the `.call` case of the soundness of the body needs, so that each emitted `call`
+    is certified against the program.
 
-    - `typeArgsNodup` — from `genTypeArgs_nodup`.
-    - `inputsNodup` — from `genInputs_support` (input keys `Nodup`) carried across
-      the `disjointInputs` filter (a sublist, so still `Nodup`).
-    - `outputsNodup` — from `genInputs_support` (the output keys are `Nodup`).
-    - `noUndeclaredVars` — every input/output type's ftvars lie in `typeArgs`
-      (from `genLMonoTy typeArgs`); the filtered inputs' values are a subset of
-      the raw inputs' values.
-    - `preconditionsTyped` / `postconditionsTyped` — under `instHasTypeA` both
-      reduce to `HasTypeA [] c.expr bool`, exactly what `genLExpr … .bool`
-      produces.
-    - `bodyTyped` — from `genStmtChain_sound`, using `procBodyContext_default` (valid
-      because the filtered inputs are disjoint from the outputs) to identify the
-      body context with `procToTCtx (inputs ++ outputs) = procStmtEnv.toTCtx
-      (inputs ++ outputs)`.
-    - `modRights` — from `genStmtChain_mutableVars`: every modified variable is a
-      *mutable* key of `inputs ++ outputs` (hence an output key, via
-      `mem_writable_append_keys`) or a body-defined variable. -/
+    The proof discharges each field of the specification as follows:
+
+    - The field about distinct type arguments comes from `genTypeArgs_nodup`.
+    - The field about distinct input keys comes from `genInputs_support`, and it survives the filter
+      `disjointInputs`, which gives a sublist.
+    - The field about distinct output keys comes from `genInputs_support`.
+    - The field about an undeclared variable holds because each free type variable of an input type and of an
+      output type is a type argument, which `genLMonoTy typeArgs` gives. The values of the filtered inputs are
+      also a subset of the values of the raw inputs.
+    - The two fields about a contract clause each reduce, under the annotated specification, to
+      `HasTypeA [] c.expr bool`, and that is exactly what `genLExpr … .bool` gives.
+    - The field about the body comes from `genStmtChain_sound`, through `procBodyContext_default`, which holds
+      because the filtered inputs are disjoint from the outputs. That lemma identifies the context of the body
+      with the context that the generator seeds from the inputs and the outputs.
+    - The field about the rights to modify a variable comes from `genStmtChain_mutableVars`. Each modified
+      variable is a *mutable* key of the inputs and the outputs, and it is therefore an output key, through
+      `mem_writable_append_keys`, or the body defines it. -/
 theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (hProcs : ProcSigCorresponds procs P) (size len : Nat)
     (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     -- Upstream's `init` rules and `ProcHasType'.signatureWellKinded` need every stored /
     -- declared monotype to be well-kinded in the ambient context. `hC` covers the
     -- procedure's own signature (the generator makes all of the types); `hWK` is the
-    -- statement-level premise — see the note on `StmtHasTypeAGen.WellKindedOk`. Only its
-    -- *ambient* half is assumed: the scope-local half holds at the body seed because that
-    -- scope holds nothing but generated signature types (`hseedWK` below), and it is
+    -- premise at the level of a statement. Read the note about `StmtHasTypeAGen.WellKindedOk`. The proof assumes
+    -- the half about the context only. The half about the local scope holds at the seed of the body, because that
+    -- scope holds a generated signature type only, which `hseedWK` below gives, and it is
     -- carried along the body by `wellKindedOk_preserved`.
     (hC : SimpleTyArities C)
     (hWK : ∀ rv : List TyIdentifier,
@@ -993,9 +990,9 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     rcases List.mem_append.mp hty with h | h
     · exact Or.inl h
     · exact Or.inr h
-  · -- modRights: a modified var is a mutable key of the seed `A ++ B ++ C` (with
-    -- `A := inputs`, `B := outputs`, `C := oldVars M`), hence — by
-    -- `mem_writable_seed_keys` — an *output* key, or a body-defined variable.
+  · -- The field about the rights to modify a variable. A modified variable is a mutable key of the seed, which
+    -- is the inputs, then the outputs, then the old variables. Therefore `mem_writable_seed_keys` makes it an
+    -- *output* key, or the body defines it.
     intro v hv
     show v ∈ ListMap.keys (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))
         ++ HasVarsImp.definedVars (P := Expression) body false
@@ -1007,8 +1004,9 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
         (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) ?_ v h
       rw [Map_keys_eq_ListMap_keys, Map_keys_eq_ListMap_keys]
     · exact List.mem_append_right _ h
-  · -- preconditionsTyped: under `instHasTypeA` this is `HasTypeA [] c.expr bool`
-    -- (the context — hence the clause's free-var context — is ignored by the spec).
+  · -- The field about a precondition. Under the annotated specification, it is `HasTypeA [] c.expr bool`,
+    -- because the specification reads no context, and it therefore reads no context for the free variables of
+    -- the clause.
     intro c hc
     exact genLExpr_sound _ octx pctx typeArgs [] size .bool _ c.expr
       (genChecks_support _ octx typeArgs size pre pctx hpre c hc)
@@ -1047,8 +1045,8 @@ theorem ProcBodyHasTypeA_weaken_rigid {P : Program} {C : LContext CoreLParams}
     ambient `C` *unchanged*. This lemma bridges the two: since the body's
     `StatementsHasTypeA` consumes `C.rigidTypeVars` only through the reflexive-friendly,
     antitone `RigidAnnotCompat` in `init` (and the contract clauses ignore `C`
-    entirely under `instHasTypeA`), the conclusion transports down to any rigid set
-    `C.rigidTypeVars ⊆ proc.header.typeArgs` — in particular `C`'s own, via
+    at all under the annotated specification. Therefore the conclusion holds at each set of the rigid variables
+    that is a subset of the type arguments of the procedure, and in particular at the set of `C` itself, through
     `StatementsHasTypeA_weaken_rigid`.
 
     The side-condition `C.rigidTypeVars ⊆ proc.header.typeArgs` holds vacuously when
@@ -1089,12 +1087,13 @@ theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSig
 -- ── Completeness ─────────────────────────────────────────────────────────
 
 set_option maxHeartbeats 800000 in
-/-- **Completeness of `genProcedure`.** Every procedure whose signature admits the
-    generator's three-block decomposition — `inputs = M ++ I`,
-    `outputs = M ++ O` with `M` (in-out) shared and leading both, `I` (input-only)
-    key-disjoint from `M`, and `O` (output-only) key-disjoint from `M ++ I` — and
-    (a) has the default
-    values for the fields the generator does not vary (`noFilter := false`, a
+/-- **The completeness of `genProcedure`.** Take a procedure whose signature admits the decomposition of the
+    generator into three blocks. The inputs are the shared in-out block and then the input-only block, and the
+    outputs are the shared block and then the output-only block. The shared block comes first in both. The keys
+    of the input-only block are disjoint from the keys of the shared block, and the keys of the output-only
+    block are disjoint from the keys of the other two. The procedure must also
+    (a) have the default
+    values for each field that the generator does not vary (`noFilter := false`, a
     *structured* body) and (b) whose name, type arguments, each of the three
     signature blocks, contract, and body are individually reachable by the
     corresponding sub-generators, is in `genProcedure`'s support.
@@ -1107,20 +1106,22 @@ set_option maxHeartbeats 800000 in
     and `genProcedure_sound`'s only side-condition is the matching
     `ProcSigCorresponds procs P` that certifies those targets against `P`.
 
-    - `hInputsEq` / `hOutputsEq` — the three-block decomposition of the signature
-      (shared block `M` leading both);
-    - `hName` — the procedure name is a reachable identifier string;
-    - `hTyArgsLen` / `hTyArgsReach` — the (already `Nodup`) type arguments are no
-      longer than `size` and each is reachable by `genIdentName`;
-    - `hM*` / `hI*` / `hO*` — for each block: `Nodup` keys, a length bound and
-      per-name `genIdentName` reachability of the key names, and per-value
-      `genLMonoTy` reachability;
-    - `hPre*` / `hPost*` — each contract clause is default-`attr`/empty-`md`, its
-      label list is reachable by `genNameList`, and its `expr` is reachable by
-      `genLExpr … .bool`;
-    - `hBodyReach` — the body statement list is in `genStmtChain`'s support, seeded
-      exactly as the generator seeds it (`M ++ I ++ (M ++ O) ++ oldVars M`, immutable
-      names `keys (M ++ I) ++ keys (oldVars M)`), at empty label/fvar contexts,
+    The premises are these:
+
+    - `hInputsEq` and `hOutputsEq` give the decomposition of the signature into three blocks, with the shared
+      block first in both the inputs and the outputs.
+    - `hName` says that the name of the procedure is a reachable identifier.
+    - `hTyArgsLen` and `hTyArgsReach` say that the type arguments, whose names are already distinct, are not more
+      than `size` in number, and that `genIdentName` reaches each of them.
+    - The premises for each of the three blocks say that its keys are distinct, that its length is inside the
+      bound, that `genIdentName` reaches each of its key names, and that `genLMonoTy` reaches each of its values.
+    - The premises for each contract clause say that its attribute field and its metadata field hold their
+      default values, that `genNameList` reaches its list of labels, and that `genLExpr … .bool` reaches its
+      expression.
+    - `hBodyReach` says that the statement list of the body is in the support of `genStmtChain`, at exactly the
+      seed that the generator uses, which is the three blocks and then the old variables, with the keys of the
+      inputs and of the old variables as the immutable names, at an empty context of the labels and of the free
+      variables,
       type-variable list `typeArgs`, and the rigidified ambient `C`. (A caller can
       obtain this membership from `spec_complete` applied to each body statement.)
 

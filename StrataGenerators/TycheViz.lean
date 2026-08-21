@@ -5,35 +5,35 @@ import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 import StrataGenerators.StmtHasTypeAGen.TestSupport
--- Supplies `minimizeProcsCounterexample`, so the procedure panels can report the
--- minimal well-typed counterexample rather than the raw generated one.
--- Supplies the two properties about the `Rat`/`Decimal` boundary, and the property
--- about the SMT escape function.
+-- `minimizeProcsCounterexample` lets a panel for a procedure report the smallest well-typed
+-- counterexample, and not the raw draw.
+-- The two properties about the boundary between a `Rat` and a `Decimal`, and the property about the
+-- escape function for SMT.
 import StrataGenerators.HasTypeAGen.DecimalAgreement
 import StrataGenerators.HasTypeAGen.SmtStringEscaping
 import StrataGenerators.AdtLaws
 import StrataGenerators.MutualBlockShape
 import StrataGenerators.AliasResolution
 import StrataGenerators.ProcedureHasTypeAGen.Shrink
--- The whole-program generator, and `minimizeProgramCounterexample` so the program
--- panels report the minimal well-typed counterexample rather than the raw draw.
+-- The whole-program generator, and `minimizeProgramCounterexample`, so that a panel for a program
+-- reports the smallest well-typed counterexample and not the raw draw.
 import StrataGenerators.ProgramGen
 import StrataGenerators.ProgramGen.Shrink
--- Supplies the phase-sweep checks and their reporting helpers, and the printer
--- oracle with its per-width / per-operator checks. (Both arrive via `Properties`
--- too; named here because the panels below use them directly.)
+-- The checks for the sweep over the phases and their helpers for a report, and the oracle for the
+-- printer with its checks for each width and for each operator. `Properties` also imports both of
+-- them. They are named here because the panels below use them directly.
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
 import Basalt.IO
--- `Basalt.PlausibleGen` supplies the `[Gen Plausible.Gen]` instance used by the
--- procedure-list panels, which run the backtracking `genProcedure` generator via
--- `Plausible.Gen.run` (the direct `G := IO` path is unreliable for procedures).
+-- `Basalt.PlausibleGen` gives the `[Gen Plausible.Gen]` instance that the panels for a list of
+-- procedures use. Those panels run the `genProcedure` generator, which backtracks, through
+-- `Plausible.Gen.run`. The direct path at `G := IO` is not reliable for a procedure.
 import Basalt.PlausibleGen
 import Strata.DL.Lambda.LExprT
--- Imports for Function.typeCheck property (typeCheck_annotated_sound)
+-- The imports for the property about `Function.typeCheck`.
 import Strata.Languages.Core.FunctionType
 import Strata.DL.Lambda.Denote.LExprAnnotated
--- Imports for pretty-print/parse round-trip property
+-- The imports for the property about the round trip from the printer to the parser.
 import Strata.Languages.Core.DDMTransform.ASTtoCST
 import Strata.Languages.Core.DDMTransform.Translate
 import Strata.Languages.Core.DDMTransform.Grammar
@@ -45,36 +45,37 @@ open Strata Strata.CoreDDM
 open StrataDDM (initDialect)
 
 /-!
-# Tyche Visualization Panels
+# The panels for Tyche
 
-Generates samples from the `HasTypeA` / command / function / statement / procedure
-/ whole-program generators and writes them in Tyche JSONL format for
-visualization, plus panels for the properties whose input space is a fixed finite
-set (the pipeline-phase no-op witnesses, and the printer's bitvector widths and
-`Bv↔Int` operators) rather than a distribution — those are *enumerated* via
-`Tyche.writeInto` rather than sampled.
+This module draws samples from the generators of this package, and it writes them in the JSONL format of
+Tyche, for a visualization. The generators are the ones for an expression, a command, a function, a
+statement, a procedure and a whole program.
 
-This module holds the panels that cannot be *derived*. Most can: given a property's
-`GenSpec` — which carries the renderer, the shrinker and the per-input feature
-breakdown — `StrataGenerators.Test.TycheReport` builds the panel for it, so a newly
-written property is visible in Tyche without touching this file. What is left here is
-the residue: a panel whose oracle is itself an `IO` action (a solver run, a
-format→parse round-trip), or one whose breakdown reports *why* a sample failed in
-terms the generated input alone does not determine (which pipeline phase lied, which
-printer site refused).
+The module also holds a panel for each property whose set of inputs is a fixed finite set, and not a
+distribution. Those inputs are the witnesses that a pipeline phase changes nothing, the bitvector widths
+of the printer, and the operators between a bitvector and an integer. `Tyche.writeInto` *enumerates* such
+a set, and it draws no sample.
 
-Such a panel is attached to its property with `TestDecl.withPanel`, in the
-`StrataTests/` file that declares the property — so the panel and the claim it
-visualizes are read together, and there is no central list of panels to keep in step.
+This module holds the panels that no code can *derive*. `StrataGenerators.Test.TycheReport` derives most
+panels from the `GenSpec` of a property, which carries the renderer, the shrinker and the breakdown of
+the features of each input. Therefore a new property appears in Tyche with no change to this file. Two
+kinds of panel remain here. The oracle of the first kind is itself an `IO` action, such as a run of a
+solver or a round trip from a format to a parse. The breakdown of the second kind reports *why* a sample
+failed, in terms that the generated input alone does not fix, such as which pipeline phase gave the wrong
+answer, or which site in the printer refused.
 
-All property *check* logic (pass/fail verdicts and the helper contexts behind them)
-lives in the `*.TestSupport` modules and is scored by the property itself; this file
-only adds visualization scaffolding (feature breakdowns, sample representations).
+`TestDecl.withPanel` attaches such a panel to its property, in the file under `StrataTests/` that
+declares the property. Therefore a reader reads the panel together with the claim that it visualizes, and
+no central list of the panels needs a change.
+
+The `*.TestSupport` modules hold the *check* logic of each property, which is the verdict and the helper
+contexts behind it, and the property itself scores it. This file adds the scaffolding for the
+visualization only, which is the breakdown of the features and the representation of a sample.
 -/
 
--- ── Feature extraction ────────────────────────────────────────────────
+-- ── The features of a sample ─────────────────────────────────────────
 
-/-- Compute the depth (nesting level) of an LExpr. -/
+/-- The depth of an `LExpr`, which is its level of nesting. -/
 def exprDepth : LExpr' → Nat
   | .abs _ _ _ body => exprDepth body + 1
   | .app _ fn arg => max (exprDepth fn) (exprDepth arg) + 1
@@ -83,10 +84,10 @@ def exprDepth : LExpr' → Nat
   | .quant _ _ _ _ tr body => max (exprDepth tr) (exprDepth body) + 1
   | _ => 0
 
-/-- Compute the size (number of nodes) of an LExpr (delegates to `LExpr.size` from Strata). -/
+/-- The size of an `LExpr`, which is its number of nodes. The function calls `LExpr.size` of Strata. -/
 def exprSize (e : LExpr') : Nat := LExpr.size LExprParamsT' e
 
-/-- Classify the top-level expression constructor. -/
+/-- The name of the constructor at the top of an expression. -/
 def exprKind : LExpr' → String
   | .bvar _ _ => "bvar"
   | .fvar _ _ _ => "fvar"
@@ -102,7 +103,7 @@ def exprKind : LExpr' → String
   | .const _ (.bitvecConst _ _) => "bitvecConst"
   | .quant _ _ _ _ _ _ => "quant"
 
-/-- Classify the top-level type constructor. -/
+/-- The name of the constructor at the top of a type. -/
 def typeKind : LMonoTy → String
   | .bool => "bool"
   | .int => "int"
@@ -111,9 +112,9 @@ def typeKind : LMonoTy → String
   | .bitvec _ => "bitvec"
   | .tcons _ _ => "tcons"
 
--- ── Type preservation property ────────────────────────────────────────
+-- ── The property about the preservation of a type ────────────────────
 
-/-- Result of generating, evaluating, and re-typechecking. -/
+/-- The result of one draw: the generation, the evaluation and the second type check. -/
 structure EvalResult where
   expr : LExpr'
   expectedTy : LMonoTy
@@ -125,8 +126,8 @@ structure EvalResult where
 
 instance : Tyche.TycheSample EvalResult where
   toSample r :=
-    -- The pass/fail verdict is the shared `checkPreservation`; `evaledTy` is kept
-    -- only to display the re-inferred type in the sample representation.
+    -- The shared `checkPreservation` gives the verdict. The field `evaledTy` holds the type that the
+    -- second check infers, for the representation of the sample only.
     let preserved := checkPreservation r.expr r.expectedTy
     { representation := s!"{ppExpr r.expr}  ⟶  {ppExpr r.evaled}"
       status := if preserved then .passed else .failed
@@ -140,32 +141,32 @@ instance : Tyche.TycheSample EvalResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
--- ── Generator wrappers ────────────────────────────────────────────────
--- Each wrapper varies the depth parameter uniformly over [1, 5] so that
--- Tyche visualizations cover the full range of generator behavior, not
--- just a single fixed depth.
+-- ── The wrappers around a generator ──────────────────────────────────
 --
--- Note the expression panels below instantiate at `G := IO` and so leave
--- `genLExpr`'s `retryCont` at its `id` default (no retrying). `retryGenArg` — the
--- retry continuation `TestScaffold` passes — is `Plausible.Gen`-specific, since
--- retrying needs `tryCatch`. The panels that *do* go through `Plausible.Gen`
--- (`genProcsForTyche`, below) get the outer `retryGen` treatment instead.
+-- Each wrapper draws the depth parameter uniformly from 1 up to 5, so that a visualization in Tyche
+-- covers the whole range of the behaviour of the generator, and not one fixed depth.
+--
+-- Each panel for an expression below instantiates the generator at `G := IO`, so it leaves the
+-- `retryCont` of `genLExpr` at its default value `id`, which retries nothing. The retry continuation
+-- that `TestScaffold` gives works at `Plausible.Gen` only, because a retry needs `tryCatch`. The panels
+-- that *do* go through `Plausible.Gen`, such as the one for a list of procedures below, get the outer
+-- `retryGen` wrapper instead.
 
-/-- The largest size a panel samples at.
+/-- The largest size that a panel draws at.
 
-    A panel runs outside the property loop and so receives no `RunConfig`. This mirrors
-    `StrataGenerators.Test.defaultMaxSize`, which is the bound the properties themselves
-    run at, so a panel shows the distribution the suite actually tested. Keep the two in
-    step; a panel drawn at a size the suite never uses describes nothing the suite did. -/
+    A panel runs outside the loop over the properties, so it receives no configuration of the run. This value
+    follows `StrataGenerators.Test.defaultMaxSize`, which is the bound that each property runs at. Therefore a
+    panel shows the distribution that the suite tested. Keep the two values equal, because a panel at a size
+    that the suite never uses describes nothing that the suite did. -/
 def panelMaxSize : Nat := 5
 
-/-- Randomly choose a depth between 1 and `maxDepth` (inclusive). -/
+/-- Draw a depth at random, from 1 up to `maxDepth`. Both limits are included. -/
 def randomDepth (maxDepth : Nat := 5) : IO Nat := do
   let r ← IO.rand 1 maxDepth
   return r
 
-/-- Generate a closed expression, evaluate it, and check type preservation.
-    Uses empty fctx since preservation is stated for the empty context. -/
+/-- Generate a closed expression, evaluate it, and check the preservation of its type. The context of the
+    free variables is empty, because the property holds for that context. -/
 def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
@@ -174,9 +175,9 @@ def genAndEval (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : 
   let evaledTy := LExpr.typeCheck (T := LExprParams') [] evaled
   return ⟨expr, ty, evaled, evaledTy, isValue expr, !(expr == evaled), d⟩
 
--- ── Eval progress property ───────────────────────────────────────────
+-- ── The property about progress under evaluation ─────────────────────
 
-/-- Result of checking whether `LExpr.eval` makes progress on a generated term. -/
+/-- The result of the check whether `LExpr.eval` makes progress on a generated term. -/
 structure EvalProgressResult where
   expr : LExpr'
   expectedTy : LMonoTy
@@ -185,8 +186,8 @@ structure EvalProgressResult where
 
 instance : Tyche.TycheSample EvalProgressResult where
   toSample r :=
-    -- Shared `checkProgress` decides the verdict; the `made_progress` /
-    -- `input_is_value` features break down *why* it passed.
+    -- The shared `checkProgress` gives the verdict. The features `made_progress` and `input_is_value`
+    -- say *why* the sample satisfies the property.
     let madeProgress := !(r.expr == r.evaled)
     let inputIsValue := isValue r.expr
     let status := if checkProgress r.expr then Tyche.Status.passed else .failed
@@ -203,9 +204,9 @@ instance : Tyche.TycheSample EvalProgressResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate a closed expression and check whether eval makes progress (or
-    the input is already a value). Uses empty fctx since progress is stated
-    for the empty context. -/
+/-- Generate a closed expression, and check whether the evaluator makes progress, or whether the input is
+    already a value. The context of the free variables is empty, because the property holds for that
+    context. -/
 def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", "β"]) : IO EvalProgressResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let ty ← genLMonoTy (G := IO) tvars d
@@ -213,7 +214,7 @@ def genAndCheckProgress (depth : Nat := 0) (tvars : List TyIdentifier := ["α", 
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, d⟩
 
--- ── Fvar preservation property ───────────────────────────────────────
+-- ── The property about the preservation of a free variable ───────────
 
 structure FvarPreservationResult where
   expr : LExpr'
@@ -242,17 +243,18 @@ def genAndCheckFvarPreservation (depth : Nat := 0) (tvars : List TyIdentifier :=
   let evaled := eval 100 expr
   return ⟨expr, ty, evaled, d⟩
 
--- ── Resolve after erasure property ──────────────────────────────────
--- `resolveLContext`, `coreOpCtx`, `eraseAllTypes`, and `isInstanceOf` are the
--- shared definitions from `HasTypeAGen.TestSupport` — the same ones the Plausible
--- `checkResolveAfterErase` uses, so the two harnesses score this property
--- identically.
+-- ── The property about a resolve after an erasure ────────────────────
+--
+-- `resolveLContext`, `coreOpCtx`, `eraseAllTypes` and `isInstanceOf` come from
+-- `HasTypeAGen.TestSupport`. The check in the other harness uses the same definitions, so both harnesses
+-- score this property in the same way.
 
-/-- Whether the expression contains a quantifier (`∀`/`∃`) anywhere. Every known
-    counterexample to the resolve-after-erase property contains one: after the
-    binder annotation is erased, `LExpr.resolve` gives the bound variable a fresh
-    type variable and then rejects the quantifier with a *syntactic* `≠ bool`
-    check on the body instead of unifying it with `bool`. -/
+/-- Whether the expression holds a quantifier at any position.
+
+    Each known counterexample to the property about a resolve after an erasure holds one. After the
+    erasure of the annotation on the binder, `LExpr.resolve` gives the bound variable a fresh type
+    variable. It then rejects the quantifier by a *syntactic* check that the body is not `bool`, and it
+    does not unify the type of the body with `bool`. -/
 private def containsQuant : LExpr' → Bool
   | .quant _ _ _ _ _ _ => true
   | .abs _ _ _ b => containsQuant b
@@ -269,11 +271,10 @@ structure ResolveAfterEraseResult where
 
 instance : Tyche.TycheSample ResolveAfterEraseResult where
   toSample r :=
-    -- Counterexample-focused scoring: a sample PASSES only when `resolve`
-    -- succeeds *and* infers a type the generation type is an instance of.
-    -- A `resolve` *failure* is scored as a FAIL (a counterexample) rather than
-    -- a vacuous pass, so these cases surface in the Tyche panel. The
-    -- `failure_mode` feature distinguishes the two kinds of counterexample.
+    -- The scoring looks for a counterexample. A sample satisfies the property only when `resolve`
+    -- succeeds *and* infers a type that the type of the generation is an instance of. A *failure* of
+    -- `resolve` counts as a counterexample, and not as a sample that says nothing, so the Tyche panel
+    -- shows such a case. The feature `failure_mode` separates the two kinds of counterexample.
     let failureMode := match r.resolvedTy with
       | some inferred => if isInstanceOf r.expectedTy inferred then "none" else "wrong_type"
       | none => "resolve_failed"
@@ -287,11 +288,11 @@ instance : Tyche.TycheSample ResolveAfterEraseResult where
       status := if passed then .passed else .failed
       features := [
         ("resolve_result", .nominal (if passed then "pass" else "fail")),
-        -- Which kind of counterexample: `resolve_failed` (resolve errored) vs
-        -- `wrong_type` (resolve succeeded but inferred a non-instance type) vs
-        -- `none` (passing sample).
+        -- The kind of the counterexample. `resolve_failed` means that `resolve` gave an error.
+        -- `wrong_type` means that `resolve` succeeded and inferred a type that is not an instance.
+        -- `none` means that the sample satisfies the property.
         ("failure_mode", .nominal failureMode),
-        -- Does the counterexample contain a quantifier? (Expected: every failure.)
+        -- Whether the counterexample holds a quantifier.
         ("has_quantifier", .nominal (if containsQuant r.expr then "yes" else "no")),
         ("inferred_more_general", .nominal (if general then "yes" else "no")),
         ("resolve_succeeded", .nominal (if r.resolvedTy.isSome then "yes" else "no")),
@@ -302,8 +303,8 @@ instance : Tyche.TycheSample ResolveAfterEraseResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate one expression, erase its type annotations, and re-infer with
-    `LExpr.resolve`. The `resolvedTy` is `none` when `resolve` errors. -/
+/-- Generate one expression, erase each of its type annotations, and infer the type again with
+    `LExpr.resolve`. The field `resolvedTy` is `none` when `resolve` gives an error. -/
 def genAndCheckResolveAfterErase (depth : Nat := 0) : IO ResolveAfterEraseResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
@@ -315,9 +316,9 @@ def genAndCheckResolveAfterErase (depth : Nat := 0) : IO ResolveAfterEraseResult
     | .error _ => none
   return ⟨expr, ty, resolvedTy, d⟩
 
--- ── Command-level Tyche support ──────────────────────────────────────
+-- ── The panels for a command ─────────────────────────────────────────
 
-/-- Classify the top-level command constructor. -/
+/-- The name of the constructor at the top of a command. -/
 def cmdKind (cmd : Cmd Expression) : String :=
   match cmd with
   | .init _ _ (.det _) _ => "init_det"
@@ -328,10 +329,9 @@ def cmdKind (cmd : Cmd Expression) : String :=
   | .assume _ _ _ => "assume"
   | .cover _ _ _ => "cover"
 
-/-- Shared helper: generate a command from a random-size context.
-    Uses a large `numCmds` (3× desired context size) to compensate for the
-    fact that only `init` commands grow the context, while `assert`/`assume`/
-    `cover`/`set` leave it unchanged. -/
+/-- Generate a command from a context of a random size. The value of `numCmds` is three times the size of
+    the wanted context, because only an `init` command grows the context. An `assert`, an `assume`, a
+    `cover` and a `set` command leave the context unchanged. -/
 private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCtx × VarCtx × Nat) := do
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
@@ -340,12 +340,12 @@ private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCt
   let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] baseCtx d
   return (cmd, baseCtx, ctx', d)
 
--- ── Panels 1–4: single-verdict command properties ───────────────────
--- These four properties share an identical sample shape (a command, its context
--- size, and a pass/fail verdict), so one `CmdPropResult` serves them all; the
--- panel title distinguishes them. The check predicate receives both the command
--- and its generating context (`checkInitFreshNotInRhs`/`checkExprTypechecks`
--- ignore the context; the other two use it).
+-- ── The four command properties that give one verdict ────────────────
+--
+-- These four properties share one shape of a sample, which is a command, the size of its context, and a
+-- verdict. Therefore one `CmdPropResult` serves each of them, and the title of the panel names the
+-- property. Each check predicate takes the command and the context that generated it.
+-- `checkInitFreshNotInRhs` and `checkExprTypechecks` read no context, and the other two read it.
 
 structure CmdPropResult where
   cmd : Cmd Expression
@@ -363,13 +363,13 @@ instance : Tyche.TycheSample CmdPropResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate a command from a random context and apply a check predicate. -/
+/-- Generate a command from a random context, and apply a check predicate to it. -/
 def genCmdProp (check : Cmd Expression → VarCtx → Bool) : IO CmdPropResult := do
   let (cmd, baseCtx, _, d) ← genCmdFromRandomCtx
   return { cmd, ctxSize := baseCtx.length, generatorSize := d,
            passed := check cmd baseCtx }
 
--- ── Panel 5: symbolic/concrete eval agreement ────────────────────────
+-- ── The panel for the agreement between the two evaluators ───────────
 
 structure CmdEvalRunAgreementResult where
   cmd : Cmd Expression
@@ -384,8 +384,8 @@ instance : Tyche.TycheSample CmdEvalRunAgreementResult where
       status := if r.passed then .passed else .failed
       features := [
         ("cmd_kind", .nominal (cmdKind r.cmd)),
-        -- How the command's condition reduced, which determines whether the
-        -- symbolic and concrete evaluators take the same branch.
+        -- The value that the condition of the command reduces to. That value decides whether the
+        -- symbolic evaluator and the concrete evaluator take the same branch.
         ("condition_kind", .nominal (cmdConditionKind r.cmd r.ctx)),
         ("ctx_size", .ordinal r.ctxSize),
         ("generator_size", .ordinal r.generatorSize)
@@ -396,11 +396,11 @@ def genAndCheckEvalRunAgreement : IO CmdEvalRunAgreementResult := do
   return { cmd, ctx := baseCtx, ctxSize := baseCtx.length, generatorSize := d,
            passed := checkEvalRunAgreement cmd baseCtx }
 
--- ── Function-level Tyche support ─────────────────────────────────────
+-- ── The panels for a function ────────────────────────────────────────
 
-/-- Whether a generated function has a body / a measure, for the panel's
-    breakdown (the property is vacuously true when both are absent, so this
-    lets us see how often the property is exercised non-trivially). -/
+/-- Whether a generated function has a body, and whether it has a measure. The panel breaks the samples
+    down by these two features. The property says nothing when both are absent, so the breakdown shows how
+    often a sample gives the property real content. -/
 private def funcShape (func : Function) : String :=
   match func.body.isSome, func.measure.isSome with
   | true,  true  => "body+measure"
@@ -410,8 +410,8 @@ private def funcShape (func : Function) : String :=
 
 structure FunctionFvarsAnnotatedResult where
   func : Function
-  /-- The property under test: all fvars in body/measure annotated per the
-      context type map. -/
+  /-- The property: each free variable of the body and of the measure holds the annotation that the type
+      map of the context gives. -/
   passed : Bool
   generatorSize : Nat
 
@@ -421,8 +421,8 @@ instance : Tyche.TycheSample FunctionFvarsAnnotatedResult where
       status := if r.passed then .passed else .failed
       features := [
         ("fvars_annotated", .nominal (if r.passed then "yes" else "no")),
-        -- Which optional sub-expressions are present (so we can see how often
-        -- the property is checked non-vacuously).
+        -- Which optional subexpressions are present. These features show how often a sample gives the
+        -- property real content.
         ("func_shape", .nominal (funcShape r.func)),
         ("has_body", .nominal (if r.func.body.isSome then "yes" else "no")),
         ("has_measure", .nominal (if r.func.measure.isSome then "yes" else "no")),
@@ -432,37 +432,36 @@ instance : Tyche.TycheSample FunctionFvarsAnnotatedResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate a `Function` via `genFunction` (against `defaultFCtx`) and check the
-    `fvars_annotated_by` property against the matching type map. -/
+/-- Generate a `Function` with `genFunction`, against `defaultFCtx`, and check the property about the
+    annotations of the free variables against the matching type map. -/
 def genAndCheckFunctionFvarsAnnotated (depth : Nat := 0) : IO FunctionFvarsAnnotatedResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO defaultFCtx coreMonoOps d
   let passed := functionFvarsAnnotatedBy (fctxToTyMap defaultFCtx) func
   return { func, passed, generatorSize := d }
 
--- ── Function property 1: typeCheck_annotated_sound ─────────────────────
--- Tests the *sorry*'d theorem `Function.typeCheck_annotated_sound`
--- (`Strata/Languages/Core/FunctionTypeSpecSound.lean`): when
--- `Function.typeCheck` accepts a generated (spec-well-typed) function, the
--- output satisfies the declarative spec `FuncHasTypeA`. Generated with an
--- *empty* fvar context so bodies are closed (no ambient-context dependency).
--- `funcCheckContext` / `checkFuncHasTypeA` are the shared definitions from
--- `FunctionHasTypeAGen.TestSupport`, so this scores identically to the Plausible
--- `checkTypeCheckAnnotatedSound`.
+-- ── The soundness of `Function.typeCheck` ────────────────────────────
+--
+-- This panel covers a theorem of Strata that has no proof: when `Function.typeCheck` accepts a generated
+-- function that satisfies the specification, its output satisfies the declarative specification
+-- `FuncHasTypeA`. The context of the free variables is *empty*, so each body is closed and depends on no
+-- context. `funcCheckContext` and `checkFuncHasTypeA` come from `FunctionHasTypeAGen.TestSupport`, so this
+-- panel scores the property in the same way as the other harness.
 
 structure FunctionTypeCheckSoundResult where
   func : Function
   /-- Whether `Function.typeCheck` accepted the function. -/
   accepted : Bool
-  /-- When accepted, whether the output satisfies `FuncHasTypeA`. -/
+  /-- Whether the output satisfies `FuncHasTypeA`, when the typechecker accepted the function. -/
   specHolds : Bool
   generatorSize : Nat
 
 instance : Tyche.TycheSample FunctionTypeCheckSoundResult where
   toSample r :=
-    -- A sample "passes" iff soundness is not violated: either typeCheck
-    -- rejected (vacuous — soundness untriggered) or it accepted and the spec
-    -- holds. A failure is: accepted but spec violated.
+    -- A sample satisfies the property when soundness holds. Either the typechecker rejected the
+    -- function, and the property then says nothing, or it accepted the function and the specification
+    -- holds. A sample fails when the typechecker accepted the function and the specification does not
+    -- hold.
     let passed := !r.accepted || r.specHolds
     { representation := formatFunc r.func
       status := if passed then .passed else .failed
@@ -478,8 +477,8 @@ instance : Tyche.TycheSample FunctionTypeCheckSoundResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate a closed function (empty fctx), run `Function.typeCheck`, and record
-    whether it was accepted and whether the output satisfies `FuncHasTypeA`. -/
+/-- Generate a closed function, with an empty context of free variables, run `Function.typeCheck`, and
+    record whether the typechecker accepted it and whether the output satisfies `FuncHasTypeA`. -/
 def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckSoundResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreMonoOps d
@@ -489,15 +488,15 @@ def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckS
   | .error _ =>
     return { func, accepted := false, specHolds := true, generatorSize := d }
 
--- ── Function property: typechecker COMPLETENESS ────────────────────────
--- Dual to the soundness panel above. `genFunction` is proven sound, so
--- `Function.typeCheck` should accept every generated function — but it does NOT:
--- the spec permits a measure without a body, the algorithm rejects it. Here a
--- REJECTED function renders as a FAILED mark (the real gap is visible), and the
--- `measure_no_body` feature shows it is the cause. Uses the full-Core-factory
--- predicates from the shared statement module so no operator spuriously fails to
--- resolve. The `[body=…, measure=…]` shape is surfaced explicitly since the
--- pretty-printer omits an absent body/measure.
+-- ── The completeness of the typechecker ──────────────────────────────
+--
+-- This panel is the dual of the panel for soundness above. `genFunction` has a proof of soundness, so
+-- `Function.typeCheck` must accept each generated function. It does not accept each one: the
+-- specification permits a measure with no body, and the algorithm rejects such a function. Therefore a
+-- function that the typechecker rejects counts as a counterexample here, and the feature
+-- `measure_no_body` shows the cause. The panel uses the predicates over the full Core factory from the
+-- shared module for a statement, so no operator fails to resolve for a false reason. The representation
+-- names the body and the measure, because the printer omits an absent body and an absent measure.
 open StrataGenerators.Stmt.TestSupport in
 structure FunctionTypeCheckCompleteResult where
   func : Function
@@ -507,14 +506,15 @@ structure FunctionTypeCheckCompleteResult where
 open StrataGenerators.Stmt.TestSupport in
 instance : Tyche.TycheSample FunctionTypeCheckCompleteResult where
   toSample r :=
-    -- Passes iff the typechecker accepted the (spec-well-typed) function. A
-    -- rejection is a FAILURE — the genuine completeness gap.
+    -- A sample satisfies the property when the typechecker accepts the function, which the
+    -- specification already accepts. A rejection is a counterexample, and it is a true gap in
+    -- completeness.
     let measNoBody := funcMeasureWithoutBody r.func
     { representation := s!"[body={r.func.body.isSome}, measure={r.func.measure.isSome}]\n{formatFunc r.func}"
       status := if r.accepted then .passed else .failed
       features := [
         ("typecheck_accepted", .nominal (if r.accepted then "yes" else "no")),
-        -- The known gap: rejected because it has a measure but no body.
+        -- The known gap: the typechecker rejects a function that has a measure and no body.
         ("measure_no_body", .nominal (if measNoBody then "yes" else "no")),
         ("func_shape", .nominal (funcShape r.func)),
         ("has_body", .nominal (if r.func.body.isSome then "yes" else "no")),
@@ -526,53 +526,52 @@ instance : Tyche.TycheSample FunctionTypeCheckCompleteResult where
       ] }
 
 open StrataGenerators.Stmt.TestSupport in
-/-- Generate a closed function and record whether `Function.typeCheck` accepts it
-    (in the full Core ambient context). -/
+/-- Generate a closed function, and record whether `Function.typeCheck` accepts it in the full context of
+    Strata Core. -/
 def genAndCheckFunctionTypeCheckComplete (depth : Nat := 0) : IO FunctionTypeCheckCompleteResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreMonoOps d
   return { func, accepted := checkFunctionTypeCheckerComplete func, generatorSize := d }
 
--- ── Function property 2: pretty-print / parse round-trip ───────────────
--- Embeds a generated function in a `Program`, formats it via
--- `Core.formatProgram`, re-parses via DDM, re-formats, and compares. A parse
--- failure is scored as a FAILURE: names are legal Core identifiers by
--- construction (`genIdentName`), so unparseable output is a printer/parser bug.
+-- ── The round trip from the printer to the parser ────────────────────
 --
--- `formatFuncAsProgram`, `parseCoreProgram`, `parseCoreProgramErr`, the
--- structural shrinker (`shrinkWhile` et al.) and the failure predicates
--- (`failsRoundtrip`, …) are shared with the gating property — see
--- `StrataGenerators.FunctionHasTypeAGen.Roundtrip`.
+-- This panel puts a generated function into a `Program`, formats it with `Core.formatProgram`, parses the
+-- output again with DDM, formats the result again, and compares the two strings. A failure of the parse
+-- counts as a counterexample, because `genIdentName` gives a legal Core identifier by construction.
+-- Therefore output that a parser cannot read is a defect of the printer or of the parser.
+--
+-- `formatFuncAsProgram`, `parseCoreProgram`, `parseCoreProgramErr`, the structural shrinker and the
+-- predicates for a failure come from `StrataGenerators.FunctionHasTypeAGen.Roundtrip`. The property that
+-- scores this claim uses the same definitions.
 
-/-- Extract a short, position-independent "kind" from a parser error message,
-    for grouping in the Tyche panel. Strips the `Parse errors:` prefix and the
-    `line:col` location so that e.g. every "Map expects 2 arguments" collapses
-    into one bucket regardless of where in the input it occurred. -/
+/-- A short kind for an error message of the parser, which does not depend on a position. The Tyche panel
+    groups the samples by this value. The function removes the prefix `Parse errors:` and the location, so
+    that each message of one kind falls into one group, at each position in the input. -/
 private def parseErrorKind (msg : String) : String :=
-  -- Drop everything up to and including the last "N:M:" location marker.
+  -- Remove each character up to the last location marker of the form `N:M:`, and that marker too.
   let afterLoc := (msg.splitOn ": ").reverse.headD msg
   let core := afterLoc.trimAscii
   (core.take 45).toString
 
 structure FunctionRoundtripResult where
   func : Function
-  /-- Whether the printed function parsed back successfully. -/
+  /-- Whether the parser read the printed function again. -/
   parsed : Bool
-  /-- When parsed, whether format→parse→re-format is a fixed point. -/
+  /-- Whether the format, the parse and the second format give the first output again. -/
   roundtripped : Bool
-  /-- On parse failure, the parser's diagnostic message (else ""). -/
+  /-- The message of the parser after a failure. The value is the empty string after a success. -/
   parseError : String
   generatorSize : Nat
 
 instance : Tyche.TycheSample FunctionRoundtripResult where
   toSample r :=
-    -- Passes iff the printed function parsed back AND round-tripped. A parse
-    -- failure is a FAILURE, not vacuous: `genIdentName` produces only legal Core
-    -- identifiers by construction, so legal-but-unparseable output is a genuine
-    -- printer/parser bug to report.
+    -- A sample satisfies the property when the parser reads the printed function again *and* the round
+    -- trip gives the same output. A failure of the parse is a counterexample, and not a sample that says
+    -- nothing. `genIdentName` gives a legal Core identifier by construction, so output that is legal and
+    -- that a parser cannot read is a true defect of the printer or of the parser.
     let passed := r.parsed && r.roundtripped
-    -- Show the exact string the round-trip tested (Strata's `Core.formatProgram`
-    -- output), so the panel is a faithful reproducer of any failure.
+    -- Show the exact string that the round trip used, which is the output of `Core.formatProgram`. The
+    -- panel is therefore an exact reproducer of a failure.
     { representation := formatFuncAsProgram r.func
       status := if passed then .passed else .failed
       statusReason := r.parseError
@@ -587,7 +586,7 @@ instance : Tyche.TycheSample FunctionRoundtripResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Build a `FunctionRoundtripResult` for a specific function. -/
+/-- Build a `FunctionRoundtripResult` for one function. -/
 def mkRoundtripResult (func : Function) (d : Nat) : IO FunctionRoundtripResult := do
   let s1 := formatFuncAsProgram func
   match ← parseCoreProgramErr s1 with
@@ -600,32 +599,33 @@ def mkRoundtripResult (func : Function) (d : Nat) : IO FunctionRoundtripResult :
 def genAndCheckFunctionRoundtrip (depth : Nat := 0) : IO FunctionRoundtripResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreMonoOps d
-  -- If the function fails to round-trip, shrink it to a minimal witness and
-  -- report that instead, so the Tyche `representation` shows the smallest
-  -- reproducer (features / status_reason are recomputed on the shrunk func).
+  -- After a failure of the round trip, shrink the function to a smallest witness and report that witness.
+  -- The `representation` of the Tyche panel then shows the smallest reproducer. The code computes the
+  -- features and the reason for the status again, on the shrunk function.
   if ← failsRoundtrip func then
     let minF ← shrinkWhile failsRoundtrip 1000 func
     mkRoundtripResult minF d
   else
     mkRoundtripResult func d
 
--- ── Function property 3: type preservation under eval ──────────────────
--- Corresponds to `Step.type_preserved` / `StepStar.type_preserved` /
--- `eval_denote_sound`. Evaluates a generated function body and checks the
--- result still type-checks at the declared output type. The verdict is the
--- shared `checkFunctionBodyPreservation`.
+-- ── The preservation of a type under the evaluator ───────────────────
+--
+-- This panel covers the theorems of Strata about the preservation of a type under one step and under many
+-- steps. It evaluates the body of a generated function, and it checks that the result still type checks at
+-- the declared output type. The shared `checkFunctionBodyPreservation` gives the verdict.
 
 structure FunctionBodyPreservationResult where
   func : Function
-  /-- Whether the function has a body (the property is exercised non-vacuously). -/
+  /-- Whether the function has a body. The property has real content only then. -/
   hasBody : Bool
   generatorSize : Nat
 
 instance : Tyche.TycheSample FunctionBodyPreservationResult where
   toSample r :=
-    -- Passes iff no body (vacuous) or the body's type is preserved under eval.
+    -- A sample satisfies the property when the function has no body, and the property then says nothing,
+    -- or when the evaluator keeps the type of the body.
     let passed := checkFunctionBodyPreservation r.func
-    -- When a body is present, whether eval preserved the output type.
+    -- Whether the evaluator kept the output type, when the function has a body.
     let preserved := passed
     { representation := formatFunc r.func
       status := if passed then .passed else .failed
@@ -638,25 +638,26 @@ instance : Tyche.TycheSample FunctionBodyPreservationResult where
         ("generator_size", .ordinal r.generatorSize)
       ] }
 
-/-- Generate a closed function, evaluate its body (if any), and check the result
-    still type-checks at the declared output type. -/
+/-- Generate a closed function, evaluate its body if it has one, and check that the result still type
+    checks at the declared output type. -/
 def genAndCheckFunctionBodyPreservation (depth : Nat := 0) : IO FunctionBodyPreservationResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreMonoOps d
   return { func, hasBody := func.body.isSome, generatorSize := d }
 
--- ── Function property: special-character identifier round-trip ─────────
--- Isolates one *legal* identifier that contains special (non-alphanumeric)
--- characters (`genQuotedName`: letter/`_`/`$`-initial, then `. ' | \ ? ! @` in
--- the interior) in one syntactic position (function name / type-arg / binder)
--- inside an otherwise-trivial function, so a failure is a minimal reproducer.
--- Every generated name is a legal Core identifier by construction, so a failure
--- is a genuine printer/parser bug, not a generator artifact. `IdentPosition` and
--- `minimalFuncWithName` are the shared definitions from
+-- ── The round trip of an identifier with a special character ─────────
+--
+-- This panel isolates one *legal* identifier that holds a character which is not alphanumeric.
+-- `genQuotedName` draws such a name: it starts with a letter, an underscore or a `$`, and its interior
+-- can hold one of `. ' | \ ? ! @`. The panel puts that identifier at one syntactic position inside a
+-- function that is trivial in each other part. That position is the name of the function, a type
+-- argument or a binder. Therefore a failure is a smallest reproducer. Each generated name is a legal
+-- Core identifier by construction, so a failure is a true defect of the printer or of the parser, and
+-- not an artefact of the generator. `IdentPosition` and `minimalFuncWithName` come from
 -- `FunctionHasTypeAGen.TestSupport`.
 
-/-- Character class of the identifier that likely triggered a failure — used as
-    the panel's grouping feature so distinct mechanisms surface separately. -/
+/-- The class of the character of the identifier that most probably caused a failure. The panel groups the
+    samples by this feature, so that two different causes stay separate. -/
 def identCharClass (name : String) : String :=
   if name.any (· == '.') then "dot"
   else if name.any (· == '|') then "pipe"
@@ -669,7 +670,7 @@ def identCharClass (name : String) : String :=
 structure IdentProbeResult where
   pos : IdentPosition
   name : String
-  /-- Whether the printed single-identifier function parsed back. -/
+  /-- Whether the parser read the printed function again. That function holds one identifier. -/
   parsed : Bool
   /-- When parsed, whether format→parse→re-format is a fixed point. -/
   roundtripped : Bool
@@ -679,9 +680,9 @@ structure IdentProbeResult where
 
 instance : Tyche.TycheSample IdentProbeResult where
   toSample r :=
-    -- Passes iff the identifier parsed back AND round-tripped. A parse failure
-    -- is a FAILURE: the name is a legal Core identifier, so unparseable output
-    -- is a printer/parser bug.
+    -- A sample satisfies the property when the parser reads the identifier again *and* the round trip
+    -- gives the same output. A failure of the parse is a counterexample, because the name is a legal Core
+    -- identifier, and output that a parser cannot read is a defect of the printer or of the parser.
     let passed := r.parsed && r.roundtripped
     { representation := r.rendered.replace "\n" " "
       status := if passed then .passed else .failed
@@ -694,8 +695,8 @@ instance : Tyche.TycheSample IdentProbeResult where
         ("error_kind", .nominal (if r.parsed then "—" else parseErrorKind r.parseError))
       ] }
 
-/-- Draw an adversarial identifier, place it in a random position, and record
-    whether that single identifier round-trips. -/
+/-- Draw an adversarial identifier, put it at a random position, and record whether that one identifier
+    survives the round trip. -/
 def genAndCheckIdentProbe : IO IdentProbeResult := do
   let name ← genQuotedName (G := IO)
   let posIdx ← IO.rand 0 2
@@ -711,16 +712,18 @@ def genAndCheckIdentProbe : IO IdentProbeResult := do
   | .error e =>
     return { pos, name, parsed := false, roundtripped := false, parseError := e, rendered := s1 }
 
--- ── Statement-level Tyche support ────────────────────────────────────
--- Panels visualizing the six statement-transform / typechecker properties on
--- well-typed statement lists from `genProgramStmts` (proven sound+complete
--- against `StatementsHasTypeA`). The `check*` predicates and measurements are shared
--- with the gating property via `StrataGenerators.StmtHasTypeAGen.TestSupport`.
+-- ── The panels for a statement ───────────────────────────────────────
+--
+-- These panels visualize the six properties about a statement transform and about the typechecker. Each
+-- one runs on a well-typed statement list from `genProgramStmts`, which has a proof of soundness and of
+-- completeness against `StatementsHasTypeA`. The `check*` predicates and the measurements come from
+-- `StrataGenerators.StmtHasTypeAGen.TestSupport`, and the property that scores each claim uses the same
+-- definitions.
 
 open StrataGenerators.Stmt.TestSupport
 
-/-- Shared statement-list features for every statement panel: structural
-    breakdown (size, kind counts) plus the generator size. -/
+/-- The features of a statement list that each panel for a statement uses. They are the structural
+    breakdown, which is the size and the count of each kind, together with the size of the generator. -/
 private def stmtListFeatures (ss : List Statement) (genSize : Nat) :
     List (String × Tyche.Feature) :=
   [ ("num_stmts", .ordinal ss.length),
@@ -733,27 +736,28 @@ private def stmtListFeatures (ss : List Statement) (genSize : Nat) :
     ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")),
     ("generator_size", .ordinal genSize) ]
 
-/-- Render a statement list for a Tyche panel using Strata's own formatter (real
-    Core concrete syntax), appending a `funcDecl[body=…, measure=…]` summary since
-    the CST formatter cannot represent a bodiless `funcDecl` statement (it
-    substitutes a dummy body) — exactly the completeness counterexample shape. -/
+/-- Render a statement list for a Tyche panel with the formatter of Strata, which gives real Core concrete
+    syntax. The function appends a summary of the form `funcDecl[body=…, measure=…]`, because the formatter
+    cannot write a `funcDecl` statement with no body, and it puts a dummy body there instead. That shape is
+    exactly the counterexample to completeness. -/
 def stmtRepr (ss : List Statement) : String :=
   let shapes := funcDeclShapesList ss
   let suffix := if shapes.isEmpty then "" else s!"\n-- {" ".intercalate shapes}"
   formatStmts ss ++ suffix
 
-/-- Generate one well-typed statement list in `IO` for the Tyche panels. Draws the nesting
-    and the length from one size, as `TestScaffold.genStmtsWith` does, so the panel shows
-    the shapes the gating property saw. -/
+/-- Generate one well-typed statement list at `IO`, for the Tyche panels. The function draws the nesting and the
+    length from one size, as `TestScaffold.genStmtsWith` does, so the panel shows the shapes that the property
+    behind the gate saw. -/
 def genStmtsForTyche : IO (List Statement × Nat) := do
   let d ← max 1 <$> IO.rand 0 panelMaxSize
   let len := d
   let ss ← genProgramStmtsIO d len
   return (ss, d)
 
--- ── The `StmtToKleeneStmt` definedness panel (extra breakdown) ────────
--- Unlike the pass/fail panels, this one also records *why* the transform was (un)
--- defined, so the definedness contract is eyeballable.
+-- ── The panel for the definedness of `StmtToKleeneStmt` ──────────────
+--
+-- This panel also records *why* the transform is defined or is not defined. A reader can therefore read
+-- the contract for definedness from the panel.
 
 structure KleeneDefinedResult where
   stmts : List Statement
@@ -764,7 +768,7 @@ instance : Tyche.TycheSample KleeneDefinedResult where
   toSample r :=
     let unsupported := hasKleeneUnsupported r.stmts
     let invLoop := hasInvLoopStmts r.stmts
-    -- Passes iff the definedness matches the documented contract.
+    -- A sample satisfies the property when the definedness agrees with the contract in the docstring.
     let passed := checkKleeneDefinedIff r.stmts
     { representation := stmtRepr r.stmts
       status := if passed then .passed else .failed
@@ -779,19 +783,19 @@ def genKleeneDefined : IO KleeneDefinedResult := do
   let (ss, d) ← genStmtsForTyche
   return { stmts := ss, defined := (kleeneStmts ss).isSome, genSize := d }
 
--- ── Procedure ↔ transform-pass panels ────────────────────────────────
--- The procedure-list sampler and renderer the phase-sweep panel builds on. The
--- per-property `proc:` panels are derived from `Gens.procs`, since their renderer and
--- axes are exactly this file's `procsRepr` and `procListFeatures`; what survives here
--- is what the derivation cannot express. The two `changed`-flag panels discriminate the samples that bear on
--- the flag: for `proc: FilterProcedures changed flag is faithful`, those where
--- nothing is removed; for `proc: PrecondElim changed flag is faithful`, the rarer
--- ones where a declared function's body calls a partial function and a `$$wf` block
--- is inserted.
+-- ── The panels for a procedure and a transform pass ──────────────────
+--
+-- This section holds the sampler and the renderer for a list of procedures, which the panel for the sweep
+-- over the phases uses. `Gens.procs` derives the panel of each `proc:` property, because the renderer and
+-- the axes of such a panel are exactly `procsRepr` and `procListFeatures` here. What remains in this
+-- section is what a derivation cannot express. The two panels about a `changed` flag separate the samples
+-- that concern that flag. For the property about the flag of `FilterProcedures`, those samples are the ones
+-- where the pass removes nothing. For the property about the flag of `PrecondElim`, they are the rarer ones
+-- where the body of a declared function calls a partial function, and the pass inserts a `$$wf` block.
 
 open StrataGenerators.Procedure.TestSupport in
-/-- Structural features of an assembled procedure program: the procedure count and
-    a total statement-body size across all procedures. -/
+/-- The structural features of an assembled program of procedures. They are the number of the procedures,
+    and the total size of the bodies of each procedure. -/
 private def procListFeatures (ps : List Core.Procedure) (genSize : Nat) :
     List (String × Tyche.Feature) :=
   let bodyLen (p : Core.Procedure) := (bodyStmts p.body).length
@@ -800,20 +804,19 @@ private def procListFeatures (ps : List Core.Procedure) (genSize : Nat) :
     ("generator_size", .ordinal genSize) ]
 
 open StrataGenerators.Procedure.TestSupport in
-/-- Render an assembled procedure program via Strata's own formatter. -/
+/-- Render an assembled program of procedures with the formatter of Strata. -/
 def procsRepr (ps : List Core.Procedure) : String :=
   let prog : Core.Program := { decls := ps.map (Core.Decl.proc · .empty) }
   (Core.formatProgram prog).pretty
 
-/-- A generated procedure list paired with a single property's pass/fail verdict
-    and the property name. One structure serves every boolean procedure property;
-    the panel title distinguishes them.
+/-- A generated list of procedures, with the verdict of one property and the name of that property. One
+    structure serves each procedure property that gives a `Bool`, and the title of the panel names the
+    property.
 
-    `diagnostic` and `extraFeatures` let an individual panel append property-specific
-    detail to the otherwise uniform program rendering. They exist for properties
-    whose failure cause is not *in* the program — see
-    `procFactoryStrippedDiagnostic`. Both default to empty, so every other panel is
-    unaffected. -/
+    The fields `diagnostic` and `extraFeatures` let one panel append detail of its own to the uniform
+    rendering of the program. They exist for a property whose cause of a failure is not *in* the program.
+    Read `procFactoryStrippedDiagnostic`. Both fields are empty by default, so each other panel needs no
+    change. -/
 structure ProcPropResult where
   procs : List Core.Procedure
   passed : Bool
@@ -834,14 +837,13 @@ instance : Tyche.TycheSample ProcPropResult where
 open StrataGenerators.Procedure.TestSupport in
 /-- Generate a well-typed procedure list in `IO` for the Tyche panels, via
     `Gen.run` on the same `retryGen` wrapper the gating property uses (the
-    direct `G := IO` path is unreliable — nested sub-generators hit empty-support
-    fallbacks — so we run the retrying `Plausible.Gen` at a random size).
-    Names are relabelled `P0…Pk` for collision-free identities.
+    The direct path at `G := IO` is not reliable, because a nested sub-generator reaches a fallback for an
+    empty support. Therefore this function runs the `Plausible.Gen` interpretation, which retries, at a
+    random size. It also renames each procedure to `P0` up to `Pk`, so that no two names collide.
 
-    Mirrors `TestScaffold.genProcsWith`: the procedures form an acyclic call DAG,
-    body `i` generated against the monomorphic siblings `0..i-1` (named `P0…P{i-1}`,
-    matching `relabelProcs`), so the panels see programs with real call-graph
-    edges. -/
+    The function follows `TestScaffold.genProcsWith`. The procedures form an acyclic graph of calls, and
+    the generator makes the body of each procedure against the monomorphic procedures before it. Therefore
+    each panel sees a program with real edges in its call graph. -/
 def genProcsForTyche : IO (List Core.Procedure × Nat) := do
   let genSize ← IO.rand 0 panelMaxSize
   let n := max 2 genSize
@@ -860,21 +862,19 @@ def genProcsForTyche : IO (List Core.Procedure × Nat) := do
   return (relabelProcs ps, genSize)
 
 open StrataGenerators.Procedure.TestSupport in
-/-- Build a `ProcPropResult` by generating a procedure list and applying a check
-    predicate under the given tag.
+/-- Build a `ProcPropResult`. The function generates a list of procedures, and it applies a check predicate
+    under the given tag.
 
-    When the property *fails*, the list is first minimized by
-    `minimizeProcsCounterexample`, so the panel's `representation` shows the
-    smallest well-typed reproducer instead of the raw generated program — the same
-    shrink-then-report pattern `genAndCheckFunctionRoundtrip` uses. Features are
-    recomputed from the minimized list, so `num_procs` / `total_body_stmts`
-    describe what is actually displayed.
+    After a *failure* of the property, `minimizeProcsCounterexample` first minimizes the list. Therefore
+    the `representation` of the panel shows the smallest well-typed reproducer, and not the raw program.
+    `genAndCheckFunctionRoundtrip` uses the same pattern of a shrink and then a report. The function
+    computes the features again from the minimized list, so each feature describes the program on the
+    screen.
 
-    The minimized list still fails `check` (the minimizer only keeps candidates
-    that do) and is still well-typed (every candidate passes `procsTypeCheck`), so
-    the verdict is unchanged — only the witness gets smaller. Passing samples are
-    reported as generated: there is nothing to minimize, and skipping the work
-    keeps the common case cheap. -/
+    The minimized list still fails the check, because the minimizer keeps only a candidate that fails it.
+    It is also still well typed, because each candidate passes `procsTypeCheck`. Therefore the verdict does
+    not change, and only the witness becomes smaller. For a sample that satisfies the property, the
+    function reports the list as generated, because there is nothing to minimize. -/
 def genProcProp (tag : String) (check : List Core.Procedure → Bool) : IO ProcPropResult := do
   let (ps, d) ← genProcsForTyche
   if check ps then
@@ -883,18 +883,18 @@ def genProcProp (tag : String) (check : List Core.Procedure → Bool) : IO ProcP
     return { procs := minimizeProcsCounterexample check 200 ps, passed := false, genSize := d, tag }
 
 open StrataGenerators.Procedure.TestSupport in
-/-- Render the offending factory entries for the `factoryStripped` panel: each
-    output-factory entry that still carries a precondition, with its formatted
-    preconditions and whether the program declared it.
+/-- Render each factory entry that causes a failure of the `factoryStripped` panel. Such an entry is an
+    entry of the output factory that still holds a precondition. The rendering gives its formatted
+    preconditions, and whether the program declared it.
 
-    Why this panel needs its own representation: the relevant cause is not in the
-    program at all, so the shrinker minimizes the program all the way to the empty
-    one and the formatted program reads as `program Core;` with no indication of what
-    bore on the result. The offenders are the actual evidence, so we print them.
+    This panel needs a representation of its own, because the cause is not in the program at all. The
+    shrinker therefore minimizes the program to the empty one, and the formatted program reads as
+    `program Core;`, with nothing about the cause. The entries are the evidence, so this function prints
+    them.
 
-    Entries are grouped by `declared` to keep the two independent causes visually
-    distinct, and the seeded-builtin list is truncated (58 entries on the empty
-    program) since it is long and uniform; the count is always reported in full. -/
+    The rendering groups the entries by the field `declared`, to keep the two independent causes visually
+    apart. It also truncates the list of the entries that come from the builtin factory, because that list
+    is long and uniform. The rendering always gives the full count. -/
 def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
   let offenders := precondFactoryStrippedOffenders ps
   if offenders.isEmpty then
@@ -921,23 +921,23 @@ def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
       ([s!"-- factoryStripped offenders: {offenders.length} factory entries retain a precondition"]
         ++ declaredBlock ++ builtinBlock)
 
--- ── Whole-program panels ────────────────────────────────────────────
--- The whole-program sampler and feature breakdown. `programFeatures` is duplicated as
--- `Gens.program`'s feature function, which is where the derived `program:` panels get
--- their axes; the copy here backs the printer panel below, whose verdict is an `IO`
--- computation and so cannot be derived.
+-- ── The panels for a whole program ───────────────────────────────────
 --
--- For the `typechecker accepts generated programs` panel, ~60% of draws are
--- rejected on one of three known causes, and the `rejection_cause` feature below is
--- what makes the breakdown legible — the panel separates the three causes rather
--- than showing one undifferentiated block. Those rejections are also the ones the
--- shrinker cannot minimize (its oracle is the checker under test), so `num_decls`
--- on a rejected sample is the generated size, not a reduced one.
+-- This section holds the sampler for a whole program and the breakdown of its features.
+-- `programFeatures` also appears as the feature function of `Gens.program`, which gives the axes of each
+-- derived `program:` panel. The copy here supports the panel for the printer below, whose verdict is an
+-- `IO` computation and which no code can therefore derive.
+--
+-- For the panel about the acceptance of a program by the typechecker, the typechecker rejects a large part
+-- of the draws, for one of three known causes. The feature `rejection_cause` below separates those three
+-- causes, so the panel does not show one undifferentiated block. The shrinker cannot minimize such a
+-- rejection, because its oracle is the checker under test. Therefore the feature `num_decls` of a rejected
+-- sample gives the size of the draw, and not a smaller size.
 
 open StrataGenerators.Program.TestSupport in
-/-- Structural features of a generated program: declaration count, reducible size,
-    which declaration kinds it contains, and — the discriminating feature for the
-    completeness panel — which known gap (if any) it bears. -/
+/-- The structural features of a generated program. They are the number of the declarations, the reducible
+    size, the kinds of the declarations that the program holds, and the known gap that the program holds,
+    if it holds one. That last feature separates the samples of the panel for completeness. -/
 private def programFeatures (p : Core.Program) (genSize : Nat) :
     List (String × Tyche.Feature) :=
   let kind : Core.Decl → String
@@ -956,36 +956,36 @@ private def programFeatures (p : Core.Program) (genSize : Nat) :
     ("rejection_cause", .nominal (if causes.isEmpty then "none" else "+".intercalate causes)),
     ("generator_size", .ordinal genSize) ]
 
-/-- Generate a whole program in `IO` for the Tyche panels, via `ProgramGen.sample`
-    (which runs the generator through the retrying `Plausible.Gen` interpretation —
-    the direct `G := IO` path is unreliable, as `ProgramGen.sample`'s docstring
-    records). Mirrors `TestScaffold.genProgramWith`'s bounds. -/
+/-- Generate a whole program at `IO`, for the Tyche panels, through `ProgramGen.sample`. That function
+    runs the generator through the `Plausible.Gen` interpretation, which retries, because the direct path
+    at `G := IO` is not reliable. The docstring of `ProgramGen.sample` records that fact. This function
+    uses the same limits as `TestScaffold.genProgramWith`. -/
 def genProgramForTyche : IO (Core.Program × Nat) := do
   let genSize ← IO.rand 0 panelMaxSize
   let numDecls := max 2 genSize
   let prog ← ProgramGen.sample numDecls {} 30000 genSize
   return (prog, genSize)
 
--- ── Pipeline-phase `changed`-flag panels ────────────────────────────
--- See `StrataGenerators.PhaseChangedFlag`. The properties have two shapes and so
--- do the panels:
+-- ── The panels for the `changed` flag of a pipeline phase ────────────
 --
---   * the two no-op witnesses take no generated input at all — each is one
---     constructed program on which one phase provably cannot change anything — so
---     their panels *enumerate* their single witness rather than sample it. Drawing
---     it a thousand times would give a thousand identical marks;
---   * the two sweeps quantify over generated procedure lists, so they sample like
---     the `proc:` panels, with the offending phases as the discriminating feature.
+-- Read `StrataGenerators.PhaseChangedFlag`. The properties have two shapes, and so do the panels:
 --
--- The first three discriminate the four hardcoded `changed := true` sites.
--- `phase: non-hardcoded pipeline phases have a faithful changed flag` is the
--- regression guard, so a single discriminating mark in its panel is the interesting
--- event.
+--   * The two witnesses that a phase changes nothing take no generated input. Each of them is one
+--     program that a person wrote, and one phase provably changes nothing on it. Therefore the panel of
+--     each witness *enumerates* that one witness, and it draws no sample. A thousand draws would give a
+--     thousand identical marks.
+--   * The two sweeps quantify over a generated list of procedures. Therefore they draw samples, as a
+--     `proc:` panel does, and the phases that break the contract are the feature that separates the
+--     samples.
+--
+-- The first three properties separate the four sites that set `changed := true` as a literal. The property
+-- about each other phase is the guard against a change, so one mark in its panel is the interesting event.
 
 open StrataGenerators.PhaseChangedFlag in
-/-- One constructed no-op witness. The verdict is the shared `NoOpWitness.check`,
-    and the reported/actual flags come from the same `phaseOutcome` that check
-    reads, so the panel cannot display a flag other than the one it scored. -/
+/-- One witness that a phase changes nothing. The shared `NoOpWitness.check` gives the verdict. The flag
+    that the phase reports and the flag that describes its true effect both come from the same
+    `phaseOutcome` that the check reads. Therefore the panel cannot show a flag other than the one that it
+    scored. -/
 structure PhaseNoOpResult where
   witness : NoOpWitness
 
@@ -1006,34 +1006,34 @@ instance : Tyche.TycheSample PhaseNoOpResult where
       features := [
         ("verdict", .nominal (if passed then "pass" else "fail")),
         ("phase", .nominal r.witness.label),
-        -- The flag the phase reported against what it actually did: the whole
-        -- content of the finding is that these two disagree.
+        -- The flag that the phase reports, beside its true effect. The whole content of the finding is
+        -- that the two disagree.
         ("reported_changed", .nominal (flag (outcome.map (·.1)))),
         ("program_changed", .nominal (flag (outcome.map (·.2)))),
         ("num_decls", .ordinal r.witness.prog.decls.length) ] }
 
 open StrataGenerators.PhaseChangedFlag in
-/-- A generated procedure list swept by a phase list, with the sweep's verdict and
-    the labels of the phases that violated it.
+/-- A generated list of procedures, together with a list of phases that a sweep runs over it, the verdict of
+    that sweep, and the labels of the phases that break the contract.
 
-    `violatingPhases` and `diagnostic` are what make a failed mark legible. Like the
-    `factoryStripped` panel, the failure cause is not *in* the program — every phase
-    of `allCorePhases` sees the same program, and the two `Verifier.lean` phases
-    report `changed = true` on all of them — so the minimized witness is nearly
-    empty and the program alone would say nothing about which phase lied. -/
+    The fields `violatingPhases` and `diagnostic` make a failed mark readable. As in the `factoryStripped`
+    panel, the cause of a failure is not *in* the program. Each phase of `allCorePhases` sees the same
+    program, and two of those phases report `changed = true` on each program. Therefore the minimized
+    witness is nearly empty, and the program alone says nothing about which phase reported the wrong
+    flag. -/
 structure PhaseSweepResult where
   procs : List Core.Procedure
   passed : Bool
   genSize : Nat
   tag : String
-  /-- Labels of the swept phases whose flag was unfaithful, deduplicated. -/
+  /-- The label of each phase of the sweep whose flag disagrees with its effect, with no duplicate. -/
   violatingPhases : List String
-  /-- How many phases this property sweeps, for context on the count above. -/
+  /-- The number of the phases that this property sweeps, as context for the count above. -/
   numSwept : Nat
-  /-- Per-violator detail, from the shared `phaseChangedFlagDiagnostic`. -/
+  /-- The detail for each such phase, from the shared `phaseChangedFlagDiagnostic`. -/
   diagnostic : String
-  /-- Whether the program contains a loop — i.e. whether `symbolicEval` was skipped
-      on this sample rather than scored. -/
+  /-- Whether the program holds a loop, which is to say whether the sweep skipped `symbolicEval` on this
+      sample and did not score it. -/
   hasLoop : Bool
 
 instance : Tyche.TycheSample PhaseSweepResult where
@@ -1046,25 +1046,24 @@ instance : Tyche.TycheSample PhaseSweepResult where
       features := (r.tag, .nominal (if r.passed then "pass" else "fail"))
         :: procListFeatures r.procs r.genSize ++ [
         ("num_violators", .ordinal r.violatingPhases.length),
-        -- Which phases lied on this sample. On the full sweep this should be
-        -- constantly the known set; a *new* label appearing here is the regression
-        -- the property exists to catch, and this feature is where it shows up.
+        -- Which phases reported the wrong flag on this sample. Over the full sweep, this feature should
+        -- always give the known set. A *new* label here is the change that the property exists to catch.
         ("violating_phases", .nominal
           (if r.violatingPhases.isEmpty then "none"
            else " ".intercalate r.violatingPhases)),
         ("num_phases_swept", .ordinal r.numSwept),
-        -- `symbolicEval` is skipped (not scored) on a program with a loop, so a
-        -- `yes` here marks a sample that is vacuous for that one phase.
+        -- The sweep skips `symbolicEval` on a program with a loop, and it scores nothing there. A `yes`
+        -- here therefore marks a sample that says nothing about that one phase.
         ("symbolic_eval_skipped", .nominal (if r.hasLoop then "yes" else "no")) ] }
 
 open StrataGenerators.Procedure.TestSupport StrataGenerators.PhaseChangedFlag in
-/-- Build a `PhaseSweepResult` by generating a procedure list, scoring it with the
-    shared sweep check, and recording which of `phases` violated the contract.
+/-- Build a `PhaseSweepResult`. The function generates a list of procedures, scores it with the shared
+    check for a sweep, and records which of the phases break the contract.
 
-    Generation and minimization are `genProcProp`'s, so this panel draws from the
-    same distribution as the `proc:` ones. The violators are recomputed from the
-    (possibly minimized) list the panel actually displays, so the diagnostic always
-    describes the program on screen. -/
+    The generation and the minimization are the ones of `genProcProp`, so this panel draws from the same
+    distribution as a `proc:` panel. The function computes the list of the phases again, from the list of
+    procedures that the panel displays, which can be a minimized one. Therefore the diagnostic always
+    describes the program on the screen. -/
 def genPhaseSweepProp (tag : String) (check : List Core.Procedure → Bool)
     (phases : List NamedPhase) : IO PhaseSweepResult := do
   let r ← genProcProp tag check
@@ -1075,56 +1074,54 @@ def genPhaseSweepProp (tag : String) (check : List Core.Procedure → Bool)
            diagnostic := phaseChangedFlagDiagnostic phases prog,
            hasLoop := programHasLoop prog }
 
--- ── Printer-expressiveness panels ───────────────────────────────────
--- See `StrataGenerators.PrinterCoverage`.
+-- ── The panels for the coverage of the printer ────────────────────────
 --
--- The three witness panels enumerate a *fixed finite* input space — the registered
--- bitvector widths, the eighteen `Bv↔Int` operators, the widths `0..63` — rather
--- than sampling it, and score each element with the shared per-element check whose
--- conjunction *is* the property. So the panel shows the shape of the gap (which
--- widths, which directions) where the property's single `Bool` can only report that
--- a gap exists.
+-- Read `StrataGenerators.PrinterCoverage`.
+--
+-- The three panels for a witness *enumerate* a fixed finite set of inputs, and they draw no sample. Those
+-- sets are the registered bitvector widths, the eighteen operators between a bitvector and an integer, and
+-- the widths from 0 up to 63. Each panel scores each element with the shared check for one element, and the
+-- conjunction of those checks *is* the property. Therefore a panel shows the shape of the gap, which is
+-- which widths and which directions, and the one `Bool` of the property can report only that a gap exists.
 
-/-- Is `n` a power of two? The panels record this because the usual framing
-    predicts the printable widths are the powers of two, and they are not: `2`, `4`
-    and `128` are powers of two that do not print. Seeing that in the panel is the
-    point. -/
+/-- Whether `n` is a power of two. The panels record this feature, because a reader expects the printable
+    widths to be exactly the powers of two, and they are not. The widths 2, 4 and 128 are powers of two that
+    the printer does not write. The panel shows that fact. -/
 private def isPowerOfTwo (n : Nat) : Bool := n != 0 && (n &&& (n - 1)) == 0
 
-/-- A generated whole program, scored by the printer-expressiveness oracle ("the
-    printer logged no conversion error"). -/
+/-- A generated whole program, with the verdict of the oracle for the coverage of the printer. That oracle
+    says that the printer wrote no error about a conversion. -/
 structure PrinterProgramResult where
   prog : Core.Program
   passed : Bool
   genSize : Nat
-  /-- The distinct Strata-attributable conversion-error lines. -/
+  /-- The different lines of an error about a conversion that belong to Strata, with no duplicate. -/
   errorLines : List String
-  /-- Whether the text the printer *claims* to have produced still re-parses.
-      `none` when nothing went wrong, so there was nothing to ask. -/
+  /-- Whether the parser reads the text that the printer gave. The value is `none` when the printer wrote
+      no error, because there was then no question to ask. -/
   reparsedDespiteError : Option Bool
 
 open StrataGenerators.PrinterCoverage in
 instance : Tyche.TycheSample PrinterProgramResult where
   toSample r :=
-    -- Show the printer's *whole* output, error block included: that block is the
-    -- evidence, and the placeholders it explains (`$__unknown_type`,
-    -- `mkGenericCall`) are visible in the program text right above it.
+    -- Show the *whole* output of the printer, together with the block of the errors. That block is the
+    -- evidence, and the text of the program above it holds the placeholders that the block explains.
     { representation := (Core.formatProgram r.prog).pretty
       status := if r.passed then .passed else .failed
       statusReason := " ".intercalate r.errorLines
       features := [
         ("verdict", .nominal (if r.passed then "pass" else "fail")),
         ("num_error_sites", .ordinal r.errorLines.length),
-        -- Which printer functions failed, e.g. `lconstToExpr` or `handleUnaryOps`.
-        -- Grouped by site rather than by message so that one gap hit at two widths
-        -- reads as one gap.
+        -- Which functions of the printer failed, such as `lconstToExpr` or `handleUnaryOps`. The panel
+        -- groups the samples by the site, and not by the message, so that one gap at two widths reads as
+        -- one gap.
         ("error_sites", .nominal
           (if r.errorLines.isEmpty then "none"
            else " ".intercalate (r.errorLines.map errorSite).eraseDups)),
-        -- **The dangerous case.** A program that logged an error and still
-        -- re-parses is one where a placeholder silently produced a *different*
-        -- program — precisely what a string round-trip cannot detect, and the reason
-        -- this property is worth having alongside the round-trip one.
+        -- **The dangerous case.** A program for which the printer wrote an error, and whose output the
+        -- parser still reads, is a program where a placeholder gave a *different* program in silence. A
+        -- round trip over a string cannot find that case, and that is why this property exists beside the
+        -- property about a round trip.
         ("silently_different", .nominal (match r.reparsedDespiteError with
           | some true => "yes" | some false => "no" | none => "—")),
         ("reparsed", .nominal (match r.reparsedDespiteError with
@@ -1132,19 +1129,18 @@ instance : Tyche.TycheSample PrinterProgramResult where
       ] ++ programFeatures r.prog r.genSize }
 
 open StrataGenerators.Program.TestSupport StrataGenerators.PrinterCoverage in
-/-- Generate a whole program and score it with the shared printer oracle.
+/-- Generate a whole program, and score it with the shared oracle for the printer.
 
-    A failing draw is minimized first, as in `genProgramProp` — and unlike
-    `programTypecheck`, these failures *do* shrink: the oracle is the printer, not
-    the typechecker the shrinker uses to keep candidates well-typed, so a smaller
-    unprintable program survives the filter. What the panel shows is therefore a
-    minimal unprintable program, and the error lines and re-parse verdict are
-    recomputed from it.
+    The function first minimizes a draw that fails, as `genProgramProp` does. Such a failure *does* shrink,
+    unlike a rejection by the typechecker. The oracle here is the printer, and not the typechecker that the
+    shrinker uses to keep each candidate well typed. Therefore a smaller program that the printer cannot
+    write passes the filter of the shrinker. The panel therefore shows a smallest such program, and the
+    function computes the lines of the errors and the verdict of the parse again from it.
 
-    Read `error_sites` accordingly: it is which site the *minimal* witness blames,
-    not which site fires most often across raw draws — shrinking keeps one of
-    several independent gaps and discards the rest. The unbiased cross-sample tally
-    is the ungated `printerErrorDiagnostic`. -/
+    Read the feature `error_sites` with that in mind. It gives the site that the *smallest* witness blames,
+    and not the site that fails most often over the raw draws. A shrink keeps one of several independent
+    gaps, and it drops the others. `printerErrorDiagnostic`, which has no guard, gives the count over each
+    sample. -/
 def genPrinterProgramProp : IO PrinterProgramResult := do
   let (raw, d) ← genProgramForTyche
   let passed := checkProgramPrintsWithoutError raw
@@ -1152,18 +1148,17 @@ def genPrinterProgramProp : IO PrinterProgramResult := do
     if passed then raw
     else minimizeProgramCounterexample checkProgramPrintsWithoutError 400 raw
   let errorLines := programErrorLines prog
-  -- Only ask the parser when the printer already logged something: a `no` here is
-  -- the ordinary case (the round-trip property is red too) and a `yes` is the
-  -- silently-different one. With no error there is no question to ask.
+  -- Ask the parser only when the printer wrote an error. A `no` here is the ordinary case, and a `yes` is
+  -- the case where the output is a different program. With no error there is no question to ask.
   let reparsedDespiteError ←
     if errorLines.isEmpty then pure none
     else pure (some (← parseCoreProgram (printedText (Core.formatProgram prog).pretty)).isSome)
-  -- `passed` describes `prog`: minimization only ever returns a candidate that
-  -- still fails the check, so the verdict survives it unchanged.
+  -- The field `passed` describes `prog`. A minimization gives back only a candidate that still fails the
+  -- check, so the verdict does not change.
   return { prog, passed, genSize := d, errorLines, reparsedDespiteError }
 
-/-- One bitvector literal width, scored by the shared per-width check whose
-    instance at `128` *is* `checkBv128LiteralPrints`. -/
+/-- One width of a bitvector literal, with the verdict of the shared check for one width. That check at the
+    width 128 *is* `checkBv128LiteralPrints`. -/
 structure BvLitWidthResult where
   width : Nat
   passed : Bool
@@ -1179,18 +1174,19 @@ instance : Tyche.TycheSample BvLitWidthResult where
         ("verdict", .nominal (if r.passed then "pass" else "fail")),
         ("width", .ordinal r.width),
         ("power_of_two", .nominal (if isPowerOfTwo r.width then "yes" else "no")),
-        -- The width this panel's property is about. It is the *only* registered
-        -- width that fails, which is what makes it an omission rather than a
-        -- design boundary — and that is legible only next to its siblings.
+        -- The width that the property of this panel is about. It is the *only* registered width that
+        -- fails, so the gap is an omission and not a boundary of the design. A reader sees that only beside
+        -- the other widths.
         ("pinned_by_property", .nominal (if r.width == 128 then "yes" else "no"))
       ] }
 
-/-- One `Bv↔Int` conversion operator, scored by the shared per-operator check whose
-    conjunction over all eighteen *is* `checkBvIntConversionsPrint`. -/
+/-- One conversion operator between a bitvector and an integer, with the verdict of the shared check for one
+    operator. The conjunction of that check over each of the eighteen operators *is*
+    `checkBvIntConversionsPrint`. -/
 structure BvIntConversionResult where
   op : String
   width : Nat
-  /-- Which of the three registered directions this operator is. -/
+  /-- Which of the three registered directions this operator has. -/
   direction : String
   passed : Bool
 
@@ -1206,31 +1202,30 @@ instance : Tyche.TycheSample BvIntConversionResult where
         ("verdict", .nominal (if r.passed then "pass" else "fail")),
         ("operator", .nominal r.op),
         ("width", .ordinal r.width),
-        -- The gap is the whole family: every direction at every width. Splitting
-        -- the panel by these two features is what shows that, rather than an
-        -- undifferentiated block of eighteen failures.
+        -- The gap covers the whole family, which is each direction at each width. A split of the panel by
+        -- these two features shows that fact, and not one block of eighteen failures.
         ("direction", .nominal r.direction)
       ] }
 
-/-- Labels for the three conversion directions, in the order
-    `PrinterCoverage.bvIntConversionOps` returns them. -/
+/-- The label of each of the three conversion directions, in the order that
+    `PrinterCoverage.bvIntConversionOps` gives. -/
 private def conversionDirections : List String := ["bv_to_int", "bv_to_uint", "int_to_bv"]
 
--- The zip below silently drops operators if these two lists ever disagree in
--- length, which would understate the finding.
+-- The `zip` below drops an operator in silence if the two lists have different lengths, and the panel
+-- would then understate the gap.
 #guard (StrataGenerators.PrinterCoverage.bvIntConversionOps 8).length
          == conversionDirections.length
 
 open StrataGenerators.PrinterCoverage in
-/-- Every registered `Bv↔Int` conversion operator, scored individually. -/
+/-- Each registered conversion operator between a bitvector and an integer, with its own verdict. -/
 def bvIntConversionSamples : List BvIntConversionResult :=
   factoryBvWidths.flatMap fun w =>
     ((bvIntConversionOps w).zip conversionDirections).map fun (op, direction) =>
       { op, width := w, direction, passed := checkBvIntConversionPrints op }
 
-/-- One bitvector width in *type* position, scored by the shared per-width
-    implication (`typechecks → prints`) whose conjunction over `0..63` *is*
-    `checkAllWidthsAgree`. -/
+/-- One bitvector width at a *type* position, with the verdict of the shared implication for one width. That
+    implication says that the printer writes each width that the typechecker accepts. Its conjunction over
+    the widths from 0 up to 63 *is* `checkAllWidthsAgree`. -/
 structure BvWidthAgreementResult where
   width : Nat
   typechecks : Bool
@@ -1248,30 +1243,31 @@ instance : Tyche.TycheSample BvWidthAgreementResult where
       features := [
         ("verdict", .nominal (if r.passed then "pass" else "fail")),
         ("width", .ordinal r.width),
-        -- Read these two together: `typechecks = yes, prints = no` is the
-        -- divergence, and it is 60 of the first 64 widths.
+        -- Read these two features together. The pair `typechecks = yes, prints = no` is the disagreement,
+        -- and it holds for most of the first 64 widths.
         ("typechecks", .nominal (if r.typechecks then "yes" else "no")),
         ("prints", .nominal (if r.prints then "yes" else "no")),
-        -- The usual framing predicts the printable set is the powers of two.
-        -- Grouping by this feature is what refutes that: `2`, `4` and `128` are red.
+        -- A reader expects the printable set to be exactly the powers of two. A group by this feature
+        -- shows that it is not, because the widths 2, 4 and 128 fail.
         ("power_of_two", .nominal (if isPowerOfTwo r.width then "yes" else "no")),
         ("factory_registered", .nominal
           (if factoryBvWidths.contains r.width then "yes" else "no"))
       ] }
 
 open StrataGenerators.PrinterCoverage in
-/-- The widths `0..63`, each scored individually — the same range
-    `checkAllWidthsAgree` conjoins over. -/
+/-- The widths from 0 up to 63, each with its own verdict. `checkAllWidthsAgree` takes the conjunction over
+    the same range. -/
 def bvWidthAgreementSamples : List BvWidthAgreementResult :=
   (List.range 64).map fun w =>
     { width := w, typechecks := widthTypeChecks w, prints := widthPrintsCleanly w,
       passed := checkWidthTypeCheckPrinterAgreement w }
 
--- ── Panel for the SMT escape function ───────────────────────────────
--- Each sample is one string from `genInterestingString`, serialized through
--- `Strata.SMTDDM.termToString`, which is the real path to the solver. A sample
--- passes when each character of the emitted literal is printable ASCII, which is
--- the requirement of SMT-LIB 2.6+ itself.
+-- ── The panel for the escape function of SMT ─────────────────────────
+--
+-- Each sample is one string from `genInterestingString`, which the panel serializes through
+-- `Strata.SMTDDM.termToString`. That function is the real path to the solver. A sample satisfies the
+-- property when each character of the emitted literal is printable ASCII, which is what SMT-LIB 2.6 and
+-- later require.
 
 /-- One sample for the property about the SMT escape function. -/
 structure EscapingResult where
@@ -1282,15 +1278,13 @@ structure EscapingResult where
   /-- The codepoints that reach the literal without an escape. -/
   offenders : List Nat
 
-/-- The highest codepoint in `s`, or `0` for the empty string. This is the feature
-    that separates a pass from a failure, because the escape function stops at
-    U+00A1. -/
+/-- The highest codepoint of `s`, and `0` for the empty string. This feature separates a sample that
+    satisfies the property from a counterexample, because the escape function stops at U+00A1. -/
 private def maxCodepoint (s : String) : Nat :=
   s.toList.foldl (fun acc c => max acc c.toNat) 0
 
-/-- The number of UTF-8 bytes that `c` needs. The defect emits a raw UTF-8 byte, so
-    the count of bytes is what a solver measures where Lean counts one
-    codepoint. -/
+/-- The number of UTF-8 bytes that `c` needs. A raw UTF-8 byte in the literal makes a solver measure the
+    number of the bytes, where Lean counts one codepoint. -/
 private def utf8Width (c : Char) : Nat :=
   let n := c.toNat
   if n < 0x80 then 1 else if n < 0x800 then 2 else if n < 0x10000 then 3 else 4
@@ -1343,9 +1337,8 @@ instance : Tyche.TycheSample EscapingResult where
         ("byte_length_differs", .nominal
           (if r.s.length == r.s.utf8ByteSize then "no" else "yes")),
         ("is_empty", .nominal (if r.s.isEmpty then "yes" else "no")),
-        -- Whether the string holds any non-ASCII character at all. A sample with
-        -- `no` here passes for a trivial reason, so this feature separates a true
-        -- pass from a vacuous one.
+        -- Whether the string holds a character outside ASCII. A sample with `no` here satisfies the
+        -- property for a trivial reason, so this feature separates a real sample from such a one.
         ("has_non_ascii", .nominal
           (if r.s.toList.any (fun c => c.toNat ≥ 0x80) then "yes" else "no"))
       ] }
@@ -1357,11 +1350,12 @@ def genEscapingSample : IO EscapingResult := do
            passed := StrataGenerators.SmtStringEscaping.escapedIsPrintableAscii s,
            offenders := StrataGenerators.SmtStringEscaping.offendingCodepoints s }
 
--- ── Panels for the `Rat`/`Decimal` boundary ─────────────────────────
--- Two properties about the representation of a real in the SMT dialect. Each pair
--- of samples is two `Decimal` spellings of **one** rational value, from
--- `genSameValuePair`. Therefore each sample is a case that must pass, and each
--- failure is a true defect and not an artifact of the draw.
+-- ── The panels for the boundary between a `Rat` and a `Decimal` ──────
+--
+-- These are two properties about the representation of a real number in the dialect of SMT. Each sample is
+-- a pair of two `Decimal` spellings of **one** rational value, from `genSameValuePair`. Therefore each
+-- sample is a case that must satisfy the property, and each counterexample is a true defect and not an
+-- artefact of the draw.
 
 /-- One sample for a property about the `Rat`/`Decimal` boundary. -/
 structure DecimalPairResult where
@@ -1446,28 +1440,25 @@ def genDecimalPairProp
            lt₁ := Strata.SMT.TermPrim.lt (.real d₁) (.real d₂),
            lt₂ := Strata.SMT.TermPrim.lt (.real d₂) (.real d₁) }
 
--- ── ADT-law / mutual-block panels ──────────────────────────────────
+-- ── The panels for the laws of an ADT and for a mutual block ─────────
 --
--- The `adt:` and `mutual:` properties quantify over a generated `mutual … end`
--- block rather than over a program, so they need their own sample type. The
--- features are the ones that separate a real pass from a vacuous one: how many
--- datatypes the block held (a `mutual:` property is vacuous below two), whether the
--- datatypes' type parameters agree (the condition `elimFuncs` assumes, and the
--- discriminator for the eliminator-scoping failure), whether the block is
--- cross-referenced at all, whether Strata accepted it, and whether it passed the
--- SMT-safety screen the `--smt` law properties apply.
+-- Each `adt:` property and each `mutual:` property quantifies over a generated `mutual … end` block, and
+-- not over a program. Therefore they need a sample type of their own. The features are the ones that
+-- separate a sample with real content from a sample with none. They are the number of the datatypes in the
+-- block, because a `mutual:` property says nothing below two, whether the type parameters of the datatypes
+-- agree, which is the condition that `elimFuncs` assumes and the feature that separates the failure about
+-- the scope of an eliminator, whether one datatype of the block references another, whether Strata accepted
+-- the block, and whether the block passed the screen for safety under SMT that the law properties behind the
+-- `--smt` gate apply.
 
--- ── Panels are attached to properties, not registered here ──────────
+-- ── A panel belongs to its property, and not to a list here ──────────
 --
--- There is deliberately no `runTychePanels` any more. A panel used to be a line in
--- a central function, which is one of the places a new property had to be wired
--- into; now `StrataGenerators.Test.TycheReport` *derives* a panel from a property's
--- `GenSpec` (the renderer, the shrinker and the feature breakdown all live there),
--- and the richer panels above are attached to their properties with
--- `TestDecl.withPanel` in the `StrataTests/` file that declares them.
+-- This module holds no central function that registers each panel. `StrataGenerators.Test.TycheReport`
+-- *derives* a panel from the `GenSpec` of a property, because that structure holds the renderer, the
+-- shrinker and the breakdown of the features. `TestDecl.withPanel` attaches each richer panel above to its
+-- property, in the file under `StrataTests/` that declares it.
 --
--- The generators above are therefore the panels that are *not* derivable: an `IO`
--- oracle (a solver run, a format→parse round-trip), or a breakdown of why a sample
--- failed that the generated input alone does not determine. Everything whose panel
--- was `render + verdict + per-input features` is now derived, since `GenSpec`
--- already carries exactly those three.
+-- The generators above are therefore the panels that no code can derive. Each of them has an oracle at `IO`,
+-- such as a run of a solver or a round trip from a format to a parse, or a breakdown of the cause of a
+-- failure that the generated input alone does not fix. A panel that is a renderer, a verdict and the
+-- features of each input is derived, because a `GenSpec` already holds those three.

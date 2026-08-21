@@ -28,29 +28,28 @@ which the auxiliary fact ties back to `ctx.keys ++ definedVars`.
 
 ## Why the invariant holds structurally
 
-- The only command that *modifies* a variable is `set`, whose target is drawn
-  from the *mutable* sub-context `ctx.writable immutableVars` via `elements` — so it
-  always lands in `(ctx.writable immutableVars).keys`. Immutable names (a procedure's
-  inputs) are therefore never modified.
+- The one command that *modifies* a variable is `set`. `elements` draws its target from the *mutable* part of
+  the scope, which is `ctx.writable immutableVars`, so that target is always a key of that part. Therefore no
+  command modifies an immutable name, which is an input of the procedure.
 - The only command that *grows* the context is `init`, which both defines the
   new name (`definedVars = [name]`) and adds it as a mutable key.
 - The nesting statements (`block`, `ite`, `loop`) are lexically scoped: their
   output `VarCtx` is the *input* `ctx` (the body's threaded scope is discarded),
   and both `modifiedVars` and `definedVars _ false` descend into the body
-  identically. So a `set` can never target a variable living only inside a
-  sibling's nested block — the invariant is preserved by the recursive body.
-- `genCmd` never emits `.call`; the only `.call`s come from `genCallStmt`, whose
-  group writes to the callee's in-out names and out targets. Each of those is
-  either reused from `ctx` (and writable, by the `usable` guard) or declared by
-  the group's own inline `init` chain — so it lands in `ctx.keys ++ definedVars`
-  either way. This is also the one branch whose output scope is *larger* than its
-  input (`insertAllCtx ctx toInit`, the `init`s being inline rather than blocked),
+  in the same way. Therefore a `set` can never target a variable that lives inside a nested block of a sibling
+  statement, and the body of the recursion keeps the invariant.
+- `genCmd` emits no `.call`. Each `.call` comes from `genCallStmt`, and its group writes to the in-out names of
+  the callee and to the out targets. Each of those names comes from the scope, and the `usable` guard makes it
+  writable, or the inline chain of the `init` statements of the group declares it. Therefore each of them is a
+  key of the scope or a name that the group defines. This branch is also the one branch whose output scope is
+  *larger* than its input scope, which is `insertAllCtx ctx toInit`, because the `init` statements are inline and
+  no block holds them,
   and the names it adds are exactly its `definedVars`.
 
-Because the modified/tracked keys are those of the *mutable* sub-context, the
-top-level instantiation (`ctx := inputs ++ outputs`, `immutableVars := inputs.keys`)
-collapses to `outputs.keys` — exactly the `ProcHasType'.modRights` obligation —
-without the inputs leaking in (they are filtered out by `writable`).
+The modified keys and the tracked keys are the keys of the *mutable* part of the scope. Therefore, at the top
+level, where the scope is the inputs and the outputs and the immutable names are the keys of the inputs, the
+set becomes the keys of the outputs. That set is exactly the obligation `ProcHasType'.modRights`, and no input
+key enters it, because `writable` removes each of them.
 
 ## Statement lists
 
@@ -196,9 +195,9 @@ theorem ite_combine (keys : List Expression.Ident)
 
 /-! `Block.modifiedVars` and `Block.definedVars` are defined by the recursion
 `s :: rest ↦ f s ++ go rest`, which is exactly `List.flatMap`. Rather than
-re-deriving each structural fact (append-distribution, behaviour on a `map`ped
-list, …) by its own induction, we prove the `flatMap` characterisation **once**
-below and then obtain every such fact from the standard library
+a separate induction for each structural fact, such as the distribution over an append and the behaviour on a
+list from a `map`, this file proves the description as a `flatMap` **one time** below, and it then takes each
+such fact from the standard library
 (`List.flatMap_append`, `List.flatMap_map`, `List.flatMap_eq_nil_iff`,
 `List.map_eq_flatMap`, `List.mem_flatMap`, …). The two bridge lemmas are the only
 inductions needed. -/
@@ -245,8 +244,8 @@ exactly as they were before `genStmt` returned a list. -/
     Block.definedVars (P := Expression) [s] b = Stmt.definedVars (P := Expression) s b := by
   simp only [Block.definedVars, List.append_nil]
 
-/-- The `init … nondet` chain modifies nothing (every statement is an `init`, and
-    an `init` modifies nothing — so the `flatMap` is constantly empty). -/
+/-- The chain of the `init … nondet` statements modifies nothing. Each statement of it is an `init`, and an
+    `init` modifies nothing, so the `flatMap` gives the empty list at each element. -/
 theorem initChain_modifiedVars (news : List (Identifier Unit × LMonoTy)) :
     Block.modifiedVars (P := Expression) (StrataGenerators.Stmt.initChain news) = [] := by
   simp only [block_modifiedVars_eq_flatMap, StrataGenerators.Stmt.initChain, List.flatMap_map]
@@ -261,10 +260,10 @@ theorem initChain_definedVars (news : List (Identifier Unit × LMonoTy)) :
     Stmt.definedVars, HasVarsImp.definedVars, Command.definedVars, Cmd.definedVars]
   exact (List.map_eq_flatMap ..).symm
 
-/-- The generated procedure-call *group* — the inline `init` chain followed by the
-    `call`, as a statement **list** — modifies exactly the in-out names plus the
-    chosen out targets, regardless of which of them were `init`ed: the `initChain`
-    prefix modifies nothing, and the `call` modifies its LHS
+/-- The *group* of a generated procedure call, which is the inline chain of the `init` statements followed by the
+    `call`, as a statement **list**, modifies exactly the in-out names and the chosen out targets. That set does
+    not depend on which of those names the group declares. The chain at the front modifies nothing, and the
+    `call` modifies its written-to names, which are
     (`getLhs_mkArgs = M.keys ++ T.keys`). -/
 theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
     (missing : List (Identifier Unit × LMonoTy))
@@ -278,10 +277,9 @@ theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
     Command.modifiedVars, StrataGenerators.Stmt.getLhs_mkArgs, List.append_nil]
 
 /-- The generated procedure-call group defines exactly the `init`ed names
-    (`missing.map Prod.fst`): the `initChain` prefix `init`s each of them; the
-    `call` defines nothing. Unlike the old blocked shape there is no `block` to
-    hide them — these names escape into the ambient scope, which is precisely why
-    the group's output scope is `insertAllCtx ctx missing` rather than `ctx`. -/
+    the names of the missing entries. The chain at the front declares each of them, and the `call` defines
+    nothing. No `block` holds those names, so they enter the scope around the group. That is why the output scope
+    of the group is `insertAllCtx ctx missing`, and not the input scope. -/
 theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
     (missing : List (Identifier Unit × LMonoTy))
     (exprs : List Expression.Expr) (mask : List Bool) :
@@ -300,29 +298,27 @@ theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
 theorem mem_keys_append_exists (M T : @LMonoTySignature Unit) (v : Identifier Unit)
     (hv : v ∈ M.keys ++ T.keys) :
     ∃ q : Identifier Unit × LMonoTy, q ∈ List.append M T ∧ q.1 = v := by
-  -- `keys` is `map Prod.fst`, so the two appended key-lists are one `map` of the
-  -- appended signature — then this is just `List.mem_map`.
+  -- `keys` is a `map` of the first projection, so the append of the two lists of the keys is one `map` over the
+  -- append of the two signatures. `List.mem_map` then closes the goal.
   rw [ListMap.keys_eq_map_fst, ListMap.keys_eq_map_fst, ← List.map_append] at hv
   exact List.mem_map.mp hv
 
-/-- **Per-call-statement modification-rights invariant.** The emitted group is the
-    inline `init` chain followed by the `call` (a statement *list*, spliced into the
-    ambient scope — there is no enclosing `block`). Every modified variable — the
-    call's LHS `M.keys ++ T.keys` — is accounted for by the *mutable* input keys
-    plus the group's defined names:
+/-- **The invariant about the rights to modify a variable, for one call statement.** The emitted group is the
+    inline chain of the `init` statements followed by the `call`, as a statement *list*, and the generator splices
+    it into the scope around it, with no `block`. Each modified variable of that group is a written-to name of the
+    call. Each of them is a *mutable* key of the input scope, or a name that the group defines:
 
-    * a *reused* name is bound in `ctx` **and** not immutable (the `usable` guard —
-      which, for an out target, is `outTargets_all_usableName`), hence a key of
-      `ctx.writable immutableVars`;
-    * an *absent* name — a fresh in-out name, or an *invented* out target — is
-      `init`-defined by the inline chain (`definedVars = toInit.map Prod.fst`).
-      When nothing needs `init`ing the chain is empty and every name is reused.
+    * A name that the group *reuses* is bound in the scope **and** is not immutable, which the `usable` guard
+      gives, and `outTargets_all_usableName` gives for an out target. Therefore it is a key of
+      `ctx.writable immutableVars`.
+    * A name that the scope does not hold is a fresh in-out name or a new out target, and the inline chain
+      declares it. When the group needs no declaration, the chain is empty and it reuses each name.
 
-    Because the `init`s are inline, the output scope is `insertAllCtx ctx toInit`,
-    genuinely *larger* than `ctx`: an output key is either an input key or one of
-    the freshly-declared names, and `insertAllCtx_keys_subset` says exactly that —
-    the declared names being precisely the group's `definedVars`. Both
-    empty-generator branches (empty `procs`, guard false) discharge vacuously. -/
+    The `init` statements are inline, so the output scope is `insertAllCtx ctx toInit`, which is *larger* than the
+    input scope. A key of the output scope is a key of the input scope or one of the new names, which
+    `insertAllCtx_keys_subset` says, and those new names are exactly the names that the group defines. Both
+    branches that give the empty generator, which are an empty context of the callable procedures and a guard
+    that fails, hold with no content. -/
 theorem genCallStmt_mutableVars
     (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
@@ -359,8 +355,8 @@ theorem genCallStmt_mutableVars
       obtain ⟨exprs, hexprs, hr⟩ := hr
       -- Peel the argument-order mask; `getLhs_mkArgs` holds at every mask.
       obtain ⟨mask, _, hr⟩ := hr
-      -- A reused name (bound in `ctx`, hence `reusable` rather than `needsInit`) is
-      -- a mutable key of `ctx` — that is exactly `reusable`'s writability bit.
+      -- A name that the group reuses is bound in the scope, so `reusable` holds for it and `needsInit` does not.
+      -- Therefore it is a mutable key of the scope, which is exactly the part of `reusable` about writability.
       have hReuseWritable : ∀ q ∈ List.append Mσ T, ∀ τ,
           ctx.find? q.1 = some τ → q.1 ∈ Map.keys (ctx.writable immutableVars) := by
         intro q hq τ hfind_q

@@ -9,28 +9,31 @@ import Strata.Languages.Core.CmdType
 open Lambda RandomChoice Core Core.CmdEval Imperative
 
 /-!
-# Test support for the `CmdHasTypeAGen` generator
+# The test support for the `CmdHasTypeAGen` generator
 
-Provides shared utilities for property-based testing of `genCmd` and `genCmds`:
-- Pretty-printing for commands and contexts
-- Generator wrappers for IO and Plausible.Gen
-- Decidable properties about generated commands
+This module holds the shared functions for the property-based tests of `genCmd` and
+`genCmds`:
+- the functions that print a command and a context;
+- the wrappers that run a generator in `IO` and in `Plausible.Gen`;
+- the decidable properties of a generated command.
 -/
 
--- ── Pretty-printing ────────────────────────────────────────────────────
+-- ── The functions that print ───────────────────────────────────────────
 
-/-- Pretty-print a `VarCtx` as a comma-separated list of `name : type`. -/
+/-- Prints a `VarCtx` as a list of entries of the form `name : type`, with a comma between two
+    entries. -/
 def ppVarCtx (ctx : VarCtx) : String :=
   ctx.map (fun (n, ty) => s!"{n.name} : {ppType ty}") |> ", ".intercalate |> (s!"[{·}]")
 
-/-- Pretty-print an `LTy` (polytype). Monomorphic types `forAll [] mty` print
-    as just the monotype; polymorphic types show the quantifier. -/
+/-- Prints an `LTy`, which is a polytype. A monomorphic type `forAll [] mty` prints as the monotype
+    alone, and a polymorphic type prints with its quantifier. -/
 private def ppLTy : Lambda.LTy → String
   | .forAll [] mty => ppType mty
   | .forAll tvs mty => s!"∀{tvs}. {ppType mty}"
 
-/-- Pretty-print a command using Strata's layout (init/set/havoc/assert/assume/cover)
-    with the human-readable type/expression pretty-printers from `TestSupport`. -/
+/-- Prints a command in the layout of Strata, which covers `init`, `set`, `havoc`, `assert`,
+    `assume` and `cover`. The function uses the printers for a type and for an expression from
+    `TestSupport`, which a person can read. -/
 def ppCmd (cmd : Cmd Expression) : String :=
   match cmd with
   | .init x xty (.det e) _ => s!"init ({x.name} : {ppLTy xty}) := {ppExpr e}"
@@ -41,19 +44,19 @@ def ppCmd (cmd : Cmd Expression) : String :=
   | .assume l e _ => s!"assume [{l}] {ppExpr e}"
   | .cover l e _ => s!"cover [{l}] {ppExpr e}"
 
--- ── Decidable properties ──────────────────────────────────────────────
+-- ── The decidable properties ──────────────────────────────────────────
 
-/-- For `init x τ (det e)`, check that `x ∉ vars(e)`.
-    Returns `true` for all non-init commands. -/
+/-- For an `init x τ (det e)`, whether `x` is not a variable of `e`. The result is `true` for each
+    command that is not an `init`. -/
 def checkInitFreshNotInRhs (cmd : Cmd Expression) : Bool :=
   match cmd with
   | .init x _ (.det e) _ => !(x ∈ HasFvars.getFvars (P := Expression) e)
   | _ => true
 
-/-- Check that the expression sub-term in a command typechecks.
-    For `init` with a declared type, checks expression matches that type.
-    For `assert`/`assume`/`cover`, checks expression is boolean.
-    For `set`, checks the expression is well-typed (has some type). -/
+/-- Whether the expression inside a command typechecks. For an `init` that declares a type, the
+    check tests that the expression has that type. For an `assert`, an `assume` and a `cover`, it
+    tests that the expression is Boolean. For a `set`, it tests that the expression is well-typed
+    and therefore has some type. -/
 def checkExprTypechecks (cmd : Cmd Expression) : Bool :=
   match cmd with
   | .init _ (.forAll [] mty) (.det e) _ =>
@@ -66,9 +69,9 @@ def checkExprTypechecks (cmd : Cmd Expression) : Bool :=
   | _ => true
 
 
-/-- Check that the output context matches input + newly init'd variables.
-    `Map.insert` appends a fresh binding to the end of the flat map, so the
-    newly-defined variables appear after `inCtx` in definition order. -/
+/-- Whether the output context equals the input context and the variables that an `init` added.
+    `Map.insert` adds a fresh binding to the end of a flat map, so a new variable comes after the
+    entries of `inCtx`, in the order of the declarations. -/
 def checkContextGrowth (inCtx outCtx : VarCtx) (cmds : List (Cmd Expression)) : Bool :=
   let definedNames : List (Identifier Unit × LMonoTy) := cmds.filterMap fun
     | .init x (.forAll [] mty) _ _ => some (x, mty)
@@ -76,30 +79,31 @@ def checkContextGrowth (inCtx outCtx : VarCtx) (cmds : List (Cmd Expression)) : 
   (outCtx : List (Identifier Unit × LMonoTy)) ==
     List.append (inCtx : List (Identifier Unit × LMonoTy)) definedNames
 
--- ── Command runner (using Strata's Cmd.run) ──────────────────────────
+-- ── How the module runs a command, with `Cmd.run` of Strata ───────────
 
-/-- Build an `Env` from a `VarCtx` by initializing each variable with a
-    default value (integer 0). -/
+/-- Builds an `Env` from a `VarCtx`. Each variable gets the default value, which is the integer
+    0. -/
 def envFromVarCtx (ctx : VarCtx) : Core.Env :=
   ctx.foldl (fun env (name, mty) =>
     CmdEval.update env name (.forAll [] mty) (.intConst () 0))
     Core.Env.init
 
-/-- Build an `Env` from a `VarCtx`, seeding each variable with a *well-typed*
-    placeholder value: an annotated free variable `(x : τ)`, which typechecks to
-    exactly its declared type `τ`. This contrasts with `envFromVarCtx`, which
-    seeds every variable with `intConst 0` regardless of its declared type and
-    would therefore start from an ill-typed store for non-`int` variables.
-    Used by the store-type-preservation property so that the *starting* store is
-    well-typed and any failure is attributable to command evaluation. -/
+/-- Builds an `Env` from a `VarCtx`. Each variable gets a *well-typed* placeholder value, which is a
+    free variable with an annotation, `(x : τ)`, and that value typechecks at the declared type `τ`.
+
+    `envFromVarCtx` is different. It gives each variable the value `intConst 0` whatever its
+    declared type is, and the store is therefore ill-typed for a variable whose type is not `int`.
+
+    The property for the preservation of the types in the store uses this function, so the store at
+    the *start* is well-typed and a failure therefore comes from the evaluation of the command. -/
 def envFromVarCtxWellTyped (ctx : VarCtx) : Core.Env :=
   ctx.foldl (fun env (name, mty) =>
     CmdEval.update env name (.forAll [] mty) (.fvar () name (some mty)))
     Core.Env.init
 
--- ── Evaluation-based properties ───────────────────────────────────────
+-- ── The properties that use evaluation ────────────────────────────────
 
-/-- After running `set x (det e)`, the variable `x` is still in the store. -/
+/-- After a run of `set x (det e)`, the store still holds the variable `x`. -/
 def checkSetPreservesVar (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
   match cmd with
   | .set x _ _ =>
@@ -107,43 +111,45 @@ def checkSetPreservesVar (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
     env'.error.isNone && (CmdEval.lookup env' x).isSome
   | _ => true
 
-/-- Every variable binding currently in the store typechecks to its declared
-    type. Bindings with no declared type are a vacuous pass. -/
+/-- Each variable binding in the store typechecks at its declared type. A binding with no declared
+    type is a vacuous pass. -/
 def storeWellTyped (E : Core.Env) : Bool :=
   E.exprEnv.state.toSingleMap.all fun (_, (optTy, e)) =>
     match optTy with
     | some τ => LExpr.typeCheck (T := LExprParams') [] e == some τ
     | none => true
 
-/-- **Store type preservation.** Running a command on a well-typed store leaves
-    every variable bound to a value that still typechecks at its declared type.
-    This is the command-level analogue of expression-level type preservation
-    under `eval`.
+/-- **A command keeps the types in the store.** A run of a command on a well-typed store leaves each
+    variable bound to a value that still typechecks at its declared type. This claim is the form of
+    type preservation under `eval` for a command, and not for an expression.
 
-    We seed the input context with well-typed placeholders (`envFromVarCtxWellTyped`)
-    so the starting store is well-typed, then run the command. If the run errors
-    (e.g. `cover`, which `Cmd.run` does not support, or a failed `assert`) the
-    command never produced a new store, so we treat it as a vacuous pass — this
-    deliberately avoids the invalid "commands never error" framing. -/
+    The check gives the input context well-typed placeholder values with
+    `envFromVarCtxWellTyped`, so the store at the start is well-typed. It then runs the command. If
+    the run gives an error, then the command made no new store and the check is a vacuous pass. A
+    `cover` gives an error, because `Cmd.run` does not support it, and an `assert` that does not
+    hold also gives an error. This form avoids the wrong claim that a command never gives an
+    error. -/
 def checkStoreTypePreservation (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
   let env' := Cmd.run (envFromVarCtxWellTyped ctx) cmd
   if env'.error.isNone then storeWellTyped env' else true
 
-/-- **Symbolic/concrete agreement (refinement).** Concrete execution `Cmd.run`
-    refines symbolic simulation `Cmd.eval`: whenever the concrete run succeeds
-    without error, the symbolic evaluation also succeeds and produces the *same*
-    variable store.
+/-- **Symbolic and concrete evaluation agree, as a refinement.** Concrete execution with `Cmd.run`
+    refines symbolic simulation with `Cmd.eval`: when the concrete run succeeds with no error, the
+    symbolic evaluation also succeeds and it gives the *same* variable store.
 
-    We state the *refinement* direction rather than full equivalence because the
-    two evaluators legitimately diverge when concrete execution gets stuck while
-    symbolic execution continues:
-      • `assert e` with `e` not reducing to a concrete bool: `Cmd.run` errors,
-        `Cmd.eval` defers a proof obligation.
-      • `assume false`: `Cmd.run` errors, `Cmd.eval` adds a path condition.
-      • `cover`: `Cmd.run` errors (unsupported), `Cmd.eval` defers an obligation.
-    In every such case concrete *fails*, so the implication is vacuously true and
-    we make no false claim. On the agreeing cases (`init`/`set`, `assert`/`assume`
-    with a concretely-true condition) both produce identical stores. -/
+    The claim is the *refinement* direction and not full equivalence, because the two evaluators
+    correctly differ when concrete execution stops and symbolic execution continues:
+
+    * `assert e`, where `e` does not reduce to a concrete Boolean value. `Cmd.run` gives an error,
+      and `Cmd.eval` keeps a proof obligation for later.
+    * `assume false`. `Cmd.run` gives an error, and `Cmd.eval` adds a path condition.
+    * `cover`. `Cmd.run` gives an error, because it does not support a `cover`, and `Cmd.eval` keeps
+      an obligation for later.
+
+    In each of those cases the concrete run *fails*, so the implication is vacuously true and the
+    property makes no wrong claim. In each case where the two agree, which is an `init`, a `set`, and
+    an `assert` or an `assume` whose condition is concretely true, both evaluators give the same
+    store. -/
 def checkEvalRunAgreement (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
   let σ := envFromVarCtxWellTyped ctx
   let runEnv := Cmd.run σ cmd
@@ -154,9 +160,10 @@ def checkEvalRunAgreement (cmd : Cmd Expression) (ctx : VarCtx) : Bool :=
   else
     true
 
-/-- Classify how a command's condition reduces, for visualization. For
-    `assert`/`assume`/`cover` we evaluate the condition in the seeded store and
-    report `"true"`, `"false"`, or `"non-concrete"`; other commands are `"n/a"`. -/
+/-- How the condition of a command reduces, for a Tyche panel. For an `assert`, an `assume` and a
+    `cover`, the function evaluates the condition in the store that the placeholder values built,
+    and it reports `"true"`, `"false"` or `"non-concrete"`. For each other command, it reports
+    `"n/a"`. -/
 def cmdConditionKind (cmd : Cmd Expression) (ctx : VarCtx) : String :=
   match cmd with
   | .assert _ e _ | .assume _ e _ | .cover _ e _ =>
@@ -166,26 +173,26 @@ def cmdConditionKind (cmd : Cmd Expression) (ctx : VarCtx) : String :=
     | none => "non-concrete"
   | _ => "n/a"
 
--- ── Structural command shrinker ───────────────────────────────────────
+-- ── The structural shrinker for a command ─────────────────────────────
 --
--- Mirrors the expression shrinker's structural-shrink + rejection-sample
--- strategy (`shrinkLExpr` from `HasTypeAGen.TestSupport`) at the command level.
--- Every candidate is required to remain well-typed via `checkExprTypechecks`,
--- but — as the expression shrinker already allows — a candidate's *type* may
--- change: shrinking `init (x : bool) := (b && c)` toward `init (x : int) := n`
--- keeps a well-typed command, and the declared type is re-derived so it still
--- matches the shrunk RHS.
+-- This shrinker follows the strategy of the shrinker for an expression, `shrinkLExpr`: it makes a
+-- structural reduction and then rejects a candidate that does not hold. `checkExprTypechecks`
+-- requires each candidate to stay well-typed. The *type* of a candidate can change, and the
+-- shrinker for an expression already allows this. A reduction from `init (x : bool) := (b && c)`
+-- toward `init (x : int) := n` keeps a well-typed command, because the code computes the declared
+-- type again and it therefore still matches the smaller right side.
 
-/-- Structurally smaller candidates for a command, before well-typedness
-    filtering. Two families of reduction:
+/-- The structurally smaller candidates for a command, before the filter for good typing. There are
+    two families of reduction:
 
-    * **RHS-expression shrinks** — reduce the expression carried by
-      `init`/`set` (deterministic RHS only) or the boolean condition of
-      `assert`/`assume`/`cover`, using the shared `shrinkLExpr`. For a
-      deterministic `init` we re-derive the declared type from the shrunk RHS so
-      the result stays well-typed even when the RHS type changes.
-    * **Determinism collapse** — replace a deterministic `init`/`set` RHS by
-      `.nondet` (havoc), a strictly simpler, always-well-typed command. -/
+    * **A reduction of the expression on the right.** The shrinker reduces the expression of an
+      `init` or of a `set`, for a deterministic right side only, or the Boolean condition of an
+      `assert`, an `assume` or a `cover`. It uses the shared `shrinkLExpr`. For a deterministic
+      `init`, the code computes the declared type again from the smaller right side, so the result
+      stays well-typed even when the type of that side changes.
+    * **A collapse of the determinism.** The shrinker replaces the deterministic right side of an
+      `init` or of a `set` by `.nondet`, which is a `havoc`. Such a command is simpler and it is
+      always well-typed. -/
 def shrinkCmdCandidates (c : Cmd Expression) : List (Cmd Expression) :=
   match c with
   | .init x ty (.det ex) md =>
@@ -203,84 +210,86 @@ def shrinkCmdCandidates (c : Cmd Expression) : List (Cmd Expression) :=
   | .assume l b md => (Cmd.assume l · md) <$> shrinkLExpr b
   | .cover l b md => (Cmd.cover l · md) <$> shrinkLExpr b
 
-/-- Well-typed structural shrinks of a command: candidate commands whose
-    expression sub-terms still typecheck (bool for `assert`/`assume`/`cover`, the
-    re-derived declared type for `init`, any type for `set`). -/
+/-- The structural reductions of a command that stay well-typed. Each candidate is a command whose
+    expressions still typecheck: at `bool` for an `assert`, an `assume` and a `cover`, at the
+    declared type that the code computed again for an `init`, and at any type for a `set`. -/
 def shrinkCmd (c : Cmd Expression) : List (Cmd Expression) :=
   (shrinkCmdCandidates c).filter checkExprTypechecks
 
-/-- The variables a command adds to the ambient context (only `init` defines a
-    new variable). Mirrors the `definedNames` computation in `checkContextGrowth`
-    so a shrunk command's recomputed output context stays consistent. -/
+/-- The variables that a command adds to the ambient context. Only an `init` declares a new
+    variable. The function follows the computation of `definedNames` in `checkContextGrowth`, so the
+    output context that the code computes again for a smaller command stays correct. -/
 def cmdDefinedVars (c : Cmd Expression) : List (Identifier Unit × LMonoTy) :=
   match c with
   | .init x (.forAll [] mty) _ _ => [(x, mty)]
   | _ => []
 
-/-- Recompute the output context of a (shrunk) command from its input context:
-    the input context extended with any variable the command defines. -/
+/-- The output context of a command, from its input context. The result is the input context and
+    each variable that the command declares. A caller uses this function after a reduction. -/
 def cmdOutCtx (inCtx : VarCtx) (c : Cmd Expression) : VarCtx :=
   Map.ofList (List.append (inCtx : List (Identifier Unit × LMonoTy)) (cmdDefinedVars c))
 
-/-- Recompute the output context of a (shrunk) command *sequence*: the input
-    context extended with every variable defined along the sequence, in order.
-    Mirrors the `definedNames` fold in `checkContextGrowth`, so a shrunk sequence
-    satisfies the context-growth property by construction. -/
+/-- The output context of a *sequence* of commands, from its input context. The result is the input
+    context and each variable that the sequence declares, in order. The function follows the fold
+    over `definedNames` in `checkContextGrowth`, so a smaller sequence satisfies the property about
+    the growth of the context by construction. -/
 def cmdsOutCtx (inCtx : VarCtx) (cmds : List (Cmd Expression)) : VarCtx :=
   Map.ofList (List.append (inCtx : List (Identifier Unit × LMonoTy)) (cmds.flatMap cmdDefinedVars))
 
-/-- The standard Core ambient typing context (built-in `Core.Factory` operators +
-    `Core.KnownTypes`), used to type-check a whole command *sequence*. Mirrors the
-    statement module's `stmtCheckContext`; duplicated here (rather than imported)
-    because that module imports *this* one. -/
+/-- The standard ambient typing context of Core. It holds the operators of `Core.Factory` and the
+    types of `Core.KnownTypes`. The type check of a whole *sequence* of commands uses it. The
+    statement module has the same context as `stmtCheckContext`. This module holds its own copy,
+    because that module imports *this* module. -/
 def cmdSeqCheckContext : LContext CoreLParams :=
   { LContext.default with
     functions := Core.Factory,
     knownTypes := Core.KnownTypes }
 
-/-- Seed a typing environment from a `VarCtx`: every variable in the input context
-    is declared (with its monotype) so a command sequence generated under `inCtx`
-    is type-checked with those variables already in scope. -/
+/-- Builds a typing environment from a `VarCtx`. The environment declares each variable of the input
+    context with its monotype. A type check of a sequence of commands that the generator drew under
+    `inCtx` therefore has those variables in scope. -/
 def seedTyEnv (inCtx : VarCtx) : TEnv Unit :=
   (inCtx : List (Identifier Unit × LMonoTy)).foldl
     (fun e (x, mty) => Core.CmdType.update e x (LTy.forAll [] mty)) TEnv.default
 
-/-- **Scope-threading well-formedness check** for a command *sequence*. Unlike the
-    per-command `checkExprTypechecks` (which type-checks each expression in the
-    *empty* context and trusts annotated free variables), this runs Strata's own
-    `Imperative.Cmds.typeCheck`, which threads a variable context along the
-    sequence: an `init` extends scope, a `set`/reference to an *undeclared*
-    variable is rejected. Seeded from `inCtx` so pre-declared variables are in
-    scope. This is what makes dropping an `init` whose variable is used later a
-    rejected shrink, rather than a dangling reference. -/
+/-- **The check for good form of a *sequence* of commands, which threads the scope.**
+    `checkExprTypechecks` acts on one command. It typechecks each expression in the *empty* context,
+    and it trusts the annotation on a free variable. This function is different: it runs
+    `Imperative.Cmds.typeCheck` of Strata, which threads a variable context along the sequence. An
+    `init` adds to the scope, and the check rejects a `set` or a reference to a variable that no
+    declaration introduced. The environment starts from `inCtx`, so each variable that a declaration
+    introduced before is in scope.
+
+    This check is what makes the removal of an `init` a rejected reduction when a later command uses
+    the variable of that `init`, and the result is therefore never a reference with no
+    declaration. -/
 def cmdsScopeWellFormed (inCtx : VarCtx) (cmds : List (Cmd Expression)) : Bool :=
   match Imperative.Cmds.typeCheck cmdSeqCheckContext (seedTyEnv inCtx) cmds with
   | .ok _ => true
   | .error _ => false
 
-/-- Structural shrinks of a command sequence: drop one command, or replace one
-    command by a smaller one (`shrinkCmd`). Every candidate is filtered by the
-    whole-sequence scope-threading check `cmdsScopeWellFormed` (seeded from
-    `inCtx`), so a candidate stays not just well-typed but well-*formed*: dropping
-    an `init` whose variable a later command references is rejected, never
-    yielding a dangling variable. (The per-command `shrinkCmd` already keeps each
-    replacement's own expression well-typed; the sequence check adds cross-command
-    scoping.) -/
+/-- The structural reductions of a sequence of commands. The shrinker removes one command, or it
+    replaces one command by a smaller command from `shrinkCmd`. `cmdsScopeWellFormed` filters each
+    candidate, and that check reads the whole sequence and threads the scope from `inCtx`. A
+    candidate therefore stays well-typed *and* well-formed. The check rejects the removal of an
+    `init` whose variable a later command uses, so the result never holds a variable with no
+    declaration. `shrinkCmd` already keeps the expression of each replacement well-typed, and the
+    check on the sequence adds the scope across the commands. -/
 def shrinkCmds (inCtx : VarCtx) (cmds : List (Cmd Expression)) : List (List (Cmd Expression)) :=
   (dropEach cmds
    ++ cmds.zipIdx.flatMap (fun (c, i) => (cmds.set i ·) <$> shrinkCmd c)).filter
     (cmdsScopeWellFormed inCtx)
 
--- ── Generator wrappers ────────────────────────────────────────────────
+-- ── The wrappers around the generators ────────────────────────────────
 
-/-- Generate a single well-typed command in IO, returning the command, the
-    input context, and the output context. -/
+/-- Makes one well-typed command in `IO`. The result holds the command, the input context and the
+    output context. -/
 def genCmdIO (ctx : VarCtx := []) (depth : Nat := 2) : IO (Cmd Expression × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []
   let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] ctx depth
   return (cmd, ctx, ctx')
 
-/-- Generate a sequence of well-typed commands in IO. -/
+/-- Makes a sequence of well-typed commands in `IO`. -/
 def genCmdsIO (n : Nat := 5) (ctx : VarCtx := []) (depth : Nat := 2) :
     IO (List (Cmd Expression) × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []

@@ -2,22 +2,22 @@ import StrataGenerators.Test
 import StrataGenerators.TycheViz
 
 /-!
-# Pipeline-phase `changed`-flag properties
+# Properties of the `changed` flag of a pipeline phase
 
-Four phases hardcode `changed := true` (`FilterProcedures`,
-`RemoveIrrelevantAxioms`, `typeCheck`, `symbolicEval`). The `proc:` suite pins
-`FilterProcedures` and `PrecondElim` individually; these state the contract
-*uniformly over a phase list*, so a phase added later is covered without a new
-property being written.
+Four phases set `changed := true` without a test: `FilterProcedures`,
+`RemoveIrrelevantAxioms`, `typeCheck` and `symbolicEval`. The `proc:` suite pins
+`FilterProcedures` and `PrecondElim` one at a time. The properties here state the contract
+*uniformly over a list of phases*, so they also cover a phase that someone adds later.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.PhaseChangedFlag
 
-/-- The two no-op witnesses: a phase paired with a program it provably cannot
-    change, so the verdict is a closed `Bool` and sampling would only obscure which
-    case is at stake. Between them they pin two of the four hardcoded sites. -/
+/-- The two witnesses for a phase that changes nothing. Each witness gives a phase and a
+    program that the phase cannot change. The verdict is therefore a closed `Bool`, and a
+    random sample would hide which case the witness covers. Together the two witnesses pin
+    two of the four sites that set the flag without a test. -/
 @[strata_properties]
 def phaseNoOpWitnesses : List TestDecl :=
   [ ("phase: RemoveIrrelevantAxioms changed flag is faithful on a no-op",
@@ -27,10 +27,10 @@ def phaseNoOpWitnesses : List TestDecl :=
       (TestDecl.witness name witness.check).withEnumeratedPanel
         [({ witness } : PhaseNoOpResult)]
 
-/-- The uniform sweep over every phase of `corePipelinePhases` plus
-    `RemoveIrrelevantAxioms`. This is the regression gate that catches a *newly
-    added* hardcoding phase; its panel names which phases lied on each sample, so a
-    new label appearing there is the signal. -/
+/-- The uniform sweep over each phase of `corePipelinePhases` and over
+    `RemoveIrrelevantAxioms`. The property finds a *new* phase that sets the flag without a
+    test. Its panel names the phases whose flag was wrong on each sample, so a new label in
+    the panel is the signal. -/
 @[strata_property]
 def phaseAllChangedFlag : TestDecl :=
   let name := "phase: every pipeline phase has a faithful changed flag"
@@ -38,8 +38,8 @@ def phaseAllChangedFlag : TestDecl :=
     (fun (gp : GenProcs) => checkAllPhasesChangedFlag gp.procs)).withPanel
     (genPhaseSweepProp name (checkAllPhasesChangedFlag ·) allCorePhases)
 
-/-- Every phase *except* the four known hardcoded-`true` sites: this is what guards
-    the honestly-computing phases against regression. -/
+/-- Each phase *except* the four known sites that set `changed := true` without a test. The
+    property guards the phases that really compute the flag. -/
 @[strata_property]
 def phaseHonestChangedFlag : TestDecl :=
   let name := "phase: non-hardcoded pipeline phases have a faithful changed flag"

@@ -3,7 +3,7 @@ Copyright (c) 2026 Harrison Goldstein. All rights reserved.
 Released under MIT license as described in the file LICENSE.
 Authors: Harrison Goldstein
 
-Vendored from https://github.com/hgoldstein95/basalt (SetGen branch, not yet on `main`).
+Vendored from https://github.com/hgoldstein95/basalt, from the `SetGen` branch.
 -/
 import StrataGenerators.SetGen.Defs
 import Basalt.Gen
@@ -12,15 +12,15 @@ open Lean.Order RandomChoice
 open scoped SetGen.Set
 
 /-!
-# Set-Based Generator Interpretation
+# The reading of a generator as a set
 
-This file establishes a `Gen` instance for `Set`, providing a simple interpretation of generators
-in terms of their support (the set of values they can produce). This is a simplified version of the
-`SPMF` interpretation that tracks only reachability, not probabilities.
+This file gives a `Gen` instance for `Set`. It reads a generator as its support, which is the set
+of the values that the generator can produce. This is a simple form of the `SPMF` reading: it holds
+which values a generator can reach, and it holds no probability.
 
-## Main Definitions
+## The main definitions
 
-- `Gen Set` — The `Gen` instance for `Set`.
+- `Gen Set`: the `Gen` instance for `Set`.
 -/
 
 namespace SetGen

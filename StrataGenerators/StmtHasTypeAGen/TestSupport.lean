@@ -19,17 +19,17 @@ the merged `TestMain` driver) for property-based testing of `genStmt` / `genStmt
 generate random well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
 `StatementHasTypeA` / `StatementsHasTypeA` typing relations. The generator is proven both
-**sound** and **complete** w.r.t. those relations (see `StmtHasTypeAGen.lean`), so
-every generated statement is a certified well-typed input — an ideal oracle input
-for the statement typechecker and the Core statement-level transformations.
+**soundness** and a proof of **completeness** against those relations, in `StmtHasTypeAGen.lean`. Therefore
+each generated statement is a certified well-typed input, and it is a good input for the typechecker of a
+statement and for each transform of Strata Core at the level of a statement.
 
 This module holds everything both harnesses need so the harness files only add
 thin glue:
 
-- **Total measurement functions** (`countLoops`, `countExit`, `countFuncDecl`,
-  `countTypeDecl`, `sizeStmts`, `stmtKind`) — each `#guard`-checked below.
-- **Generator wrappers** (`genProgramStmtsIO`) plus the ambient contexts.
-- **Six `Bool` check predicates**, one per property under test, each applied to a
+- **The total functions that measure a statement list**, which are `countLoops`, `countExit`,
+  `countFuncDecl`, `countTypeDecl`, `sizeStmts` and `stmtKind`. A `#guard` below checks each of them.
+- **The wrapper `genProgramStmtsIO` around the generator**, together with the contexts.
+- **Six check predicates that give a `Bool`**, one for each property under test, and each of them applies to a
   generated statement list.
 
 ## The statement typechecker context
@@ -37,14 +37,14 @@ thin glue:
 `Statement.typeCheck` takes an ambient `LContext CoreLParams` (`= Expression.TyContext`)
 and a `TEnv Unit`. The generator threads its own `LContext CoreLParams` starting
 from `LContext.default`, and the annotated typing spec `instHasTypeA` ignores `C`
-when typing *expressions* — so a generated statement is well-typed under *any* `C`
-whose factory/known-types resolve the operators and type aliases it uses. We
-therefore run the algorithm against the standard Core ambient context
+when it types an *expression*. Therefore a generated statement is well typed under *each* context whose
+factory and whose known types resolve each operator and each type alias that the statement uses. This module
+therefore runs the algorithm against the standard context of Strata Core,
 (`Core.Factory` + `Core.KnownTypes`), exactly the context real Core programs are
-checked in. Generated statements never contain procedure calls (`CmdExt.call` is
-provably unreachable from the generator — see `StmtHasTypeAGen.lean`), so the
-empty program `Program.init` with `op := none` is sufficient: the only place the
-typechecker consults the `Program`/`Procedure` is the `.call` branch.
+checks a real Core program in. A generated statement holds no procedure call, because a `CmdExt.call` is
+provably unreachable from the generator, which `StmtHasTypeAGen.lean` proves. Therefore the empty program with
+no procedure is enough, because the `.call` branch is the one place where the typechecker reads the program or
+a procedure.
 -/
 
 namespace StrataGenerators.Stmt.TestSupport
@@ -70,8 +70,8 @@ mutual
 
 /-- Count the statement nodes (anywhere in `s`, including nested bodies) that
     satisfy `pred`. The generic traversal underlying every structural count/has
-    query below: recurse into `block`/`ite`/`loop` bodies, adding one for each
-    node — leaf or compound — for which `pred` holds. -/
+    query below. It goes into the body of a `block`, of an `ite` and of a `loop`, and it adds one for each node
+    where `pred` holds, whether that node is a leaf or a compound statement. -/
 def countStmtsBy (pred : Statement → Bool) : Statement → Nat
   | s@(.block _ body _) => (if pred s then 1 else 0) + countStmtsByList pred body
   | s@(.ite _ thenb elseb _) =>
@@ -116,10 +116,9 @@ def stmtKind : Statement → String
   | .funcDecl _ _ => "funcDecl"
   | .typeDecl _ _ => "typeDecl"
 
-/-- Whether a statement list contains any `exit`/`funcDecl`/`typeDecl` node, or a
-    procedure `call` — exactly the constructors that make `kleeneStmts` return
-    `none` other than an invariant-bearing loop (`hasInvLoopStmts`). Used to state
-    the "defined ⟺ supported" property.
+/-- Whether a statement list holds an `exit`, a `funcDecl`, a `typeDecl` or a procedure `call`. Those are
+    exactly the constructors that make `kleeneStmts` give `none`, apart from a loop that carries an invariant,
+    which `hasInvLoopStmts` finds. The property about the definedness of the transform uses this function.
 
     The `call` case is unreachable from the *statement* generator, which is why
     `toCmdStmt`'s note calls it vacuous. It is **not** vacuous for a whole generated
@@ -134,25 +133,23 @@ def hasKleeneUnsupported (ss : List Statement) : Bool :=
 
 /-- Whether a statement list contains any `loop` node carrying a non-empty
     invariant list. `StmtToKleeneStmt` returns `none` for such loops (Kleene has
-    no invariants), an extra rejection beyond `exit`/`funcDecl`/`typeDecl` —
-    accounted for in the Kleene-definedness property. -/
+    no invariant. That is one more cause of a rejection, beyond an `exit`, a `funcDecl` and a `typeDecl`, and
+    the property about definedness accounts for it. -/
 def hasInvLoopStmts (ss : List Statement) : Bool :=
   countStmtsByList (fun | .loop _ _ inv _ _ => !inv.isEmpty | _ => false) ss != 0
 
-/-- Structural equality on statement lists, via Strata's `DecidableEq (Stmt …)`
-    instance (added in `strata-org/Strata` commit `496bba7`). This compares the
-    ASTs directly rather than their pretty-printed forms, which is exact where
-    the old `Std.format`-based comparison was brittle (distinct ASTs can share a
-    rendering, and `funcDecl` bodies in particular do not round-trip). -/
+/-- The structural equality of two statement lists, through the `DecidableEq (Stmt …)` instance of Strata. This
+    definition compares the two abstract syntax trees directly, and not the printed form of each of them. A
+    comparison of two printed forms is not exact, because two different trees can print to one text, and the body
+    of a `funcDecl` in particular does not survive a round trip. -/
 def stmtsEq (ss ss' : List Statement) : Bool :=
   decide (ss = ss')
 
 mutual
 /-- Collect a `[body=…, measure=…]` tag for every `funcDecl` node anywhere in a
-    statement (nested bodies included). Strata's CST formatter cannot represent a
-    bodiless `funcDecl` statement — it substitutes a dummy body — and a bodiless
-    funcDecl *with a measure* is exactly the typechecker-completeness
-    counterexample, so this records the true shape the rendered form can't show. -/
+    statement, and it reads each nested body. The formatter of Strata cannot write a `funcDecl` statement with
+    no body, and it puts a dummy body there instead. A `funcDecl` with a measure and no body is exactly the
+    counterexample to the completeness of the typechecker, so this function records the true shape. -/
 def funcDeclShapes : Statement → List String
   | .funcDecl d _ => [s!"funcDecl[body={d.body.isSome}, measure={d.measure.isSome}]"]
   | .block _ body _ => funcDeclShapesList body
@@ -217,14 +214,13 @@ end Guards
 -- `List Statement` with no procedure/program wrapper.
 
 /-- Apply loop elimination to a statement list, run from a fresh
-    `CoreTransformState`. Operates directly on statements — no
-    `Procedure`/`Program` needed.
+    `CoreTransformState`. The function works on a statement list directly, and it needs no procedure and no
+    program.
 
-    Strata used to expose a statement-level `Block.removeLoopsM`; the pass is now
-    structured as a single-statement `Core.removeLoop` driven over a
-    statement list by `Transform.runStmtsRec` in `CoreTransformM`. We drive it
-    the same way here and return the input unchanged if the pass throws (it does
-    so only on loops that still carry invariants/measures, or on label
+    Strata gives the pass as `Core.removeLoop`, which acts on one statement, and `Transform.runStmtsRec` in
+    `CoreTransformM` drives it over a statement list. This function drives it in the same way, and it gives
+    the input back unchanged when the pass throws. The pass throws on a loop that still carries an invariant
+    or a measure, and on a label
     conflicts), since these properties are all of the shape
     "if the input type-checks, so does the output". -/
 def loopElimStmts (ss : List Statement) : List Statement :=
@@ -234,18 +230,17 @@ def loopElimStmts (ss : List Statement) : List Statement :=
   | .ok (_, ss') => ss'
   | .error _ => ss
 
-/-- Apply the common-subexpression eliminator (formerly the ANF encoder) to a
-    statement list, starting from fresh-var index 0 and discarding the returned
-    next-index. -/
+/-- Apply the eliminator of a common subexpression to a statement list. The function starts the index of the
+    fresh variables at 0, and it discards the next index that the pass gives. -/
 def anfStmts (ss : List Statement) : List Statement :=
   (Core.CSE.stmtRunCSE ss 0).fst
 
 -- `StmtToKleeneStmt` operates on `Stmt Expression (Cmd Expression)`, whereas the
 -- generator produces `Statement = Stmt Expression Command` with
 -- `Command = CmdExt Expression`. The two differ only by the `CmdExt` wrapper: a
--- generated statement's atomic commands are always `CmdExt.cmd` (never
--- `CmdExt.call` — procedure calls are provably unreachable from the generator).
--- So we first unwrap `CmdExt.cmd`, returning `none` if a `.call` ever appears.
+-- each atomic command of a generated statement is a `CmdExt.cmd`, and never a `CmdExt.call`, because a
+-- procedure call is provably unreachable from the generator. Therefore the function below first removes the
+-- `CmdExt.cmd` wrapper, and it gives `none` when a `.call` occurs.
 
 mutual
 /-- Unwrap `CmdExt.cmd` throughout a statement, yielding a
@@ -302,10 +297,10 @@ end
 #guard (toCmdStmts [Statement.assert "a" (.const () (.boolConst true)) .empty]).map
   ofCmdStmts == some [Statement.assert "a" (.const () (.boolConst true)) .empty]
 
-/-- The deterministic-to-Kleene transform on a statement list. `none` iff the
-    block contains a construct with no Kleene counterpart (`exit`/`funcDecl`/
-    `typeDecl`, or a loop carrying an invariant), or — vacuously for generated
-    input — a procedure call. -/
+/-- The transform from a deterministic statement list to a Kleene statement. The result is `none` if and only
+    if the list holds a construct that has no counterpart in the Kleene form. Such a construct is an `exit`, a
+    `funcDecl`, a `typeDecl`, a loop that carries an invariant, or a procedure call. Generated input holds no
+    procedure call. -/
 def kleeneStmts (ss : List Statement) : Option (KleeneStmt Expression (Cmd Expression)) := do
   let ss' ← toCmdStmts ss
   BlockToKleeneStmt (P := Expression) ss'
@@ -315,9 +310,9 @@ def kleeneStmts (ss : List Statement) : Option (KleeneStmt Expression (Cmd Expre
 /-- A dummy enclosing procedure. The typechecker consults its `op : Option
     Procedure` argument *only* in the `exit` case, where `exit` is rejected
     outright when `op = none` ("occurs outside a procedure"). Generated statement
-    lists are procedure *bodies* — they legitimately contain `exit`s targeting
-    enclosing blocks — so we typecheck them as if inside a procedure by passing
-    `some dummyProc`. No field of the procedure is otherwise inspected. -/
+    list is the *body* of a procedure, and it can hold an `exit` that targets a block around it. Therefore this
+    module type checks such a list inside a procedure, and it gives `some dummyProc`. The typechecker reads no
+    other field of that procedure. -/
 def dummyProc : Procedure := Inhabited.default
 
 /-- Whether `Statement.typeCheck` accepts a statement list in the standard Core
@@ -331,31 +326,28 @@ def checkTypeChecks (ss : List Statement) : Bool :=
 /-- Whether a statement list contains any `funcDecl` node. -/
 def stmtsHaveFuncDecl (ss : List Statement) : Bool := countFuncDeclStmts ss != 0
 
-/-- **Typechecker completeness.** The generator is proven *sound*:
-    every statement list it produces satisfies `StatementsHasTypeA`. So the algorithmic
-    typechecker — whose *soundness* (`typeCheck_annotated_sound`) is proven but
-    whose *completeness* is not — should accept every one of them. A rejection is a
-    genuine incompleteness of the algorithm relative to the declarative spec. This
-    predicate makes that claim unweakened, and does not mask the known `funcDecl`
-    discrepancy — see `rejectionImpliesFuncDecl`. -/
+/-- **The completeness of the typechecker.** The generator has a proof of *soundness*: each statement list that
+    it gives satisfies `StatementsHasTypeA`. Therefore the algorithmic typechecker must accept each of them.
+    That algorithm has a proof of *soundness*, and it has no proof of *completeness*. A rejection is therefore a
+    true gap in the completeness of the algorithm against the declarative specification. This predicate states
+    that claim and does not weaken it, and it does not hide the known difference at a `funcDecl`. Read
+    `rejectionImpliesFuncDecl`. -/
 abbrev checkTypeCheckerComplete (ss : List Statement) : Bool := checkTypeChecks ss
 
-/-- **Characterization of the completeness gap.** `true` when the typechecker
-    accepts `ss`, *or* `ss` contains a `funcDecl`. Equivalently: "every rejection of
-    a generated statement is attributable to a `funcDecl`." This SHOULD hold — it
-    pins the sole known source of incompleteness. If it ever *fails*, the generator
-    has produced a spec-well-typed statement the algorithm rejects for some reason
-    *other* than `funcDecl` — a new, unclassified completeness bug.
+/-- **The description of the gap in completeness.** The result is `true` when the typechecker accepts the list,
+    *or* the list holds a `funcDecl`. That is to say that a `funcDecl` causes each rejection of a generated
+    statement. This predicate pins the one known source of a gap in completeness. A counterexample means that
+    the generator gave a statement that the specification accepts and that the algorithm rejects for some
+    *other* reason, which is a gap in completeness of a new kind.
 
-    The `funcDecl` discrepancy itself: the declarative `StatementHasType'.funcDecl` rule
-    requires only that the *witness* `func` added to `C` is well-typed and the
-    syntactic `decl` node is non-recursive — the two are **independent** (no premise
-    ties `decl` to `func`). The generator faithfully samples them independently. The
-    *algorithm*, by contrast, derives the witness *from* the decl node
-    (`PureFunc.typeCheck C Env decl`, FunctionType.lean), so it rejects a
-    `funcDecl` whose decl node does not itself typecheck. The spec is thus strictly
-    more permissive on `funcDecl` — arguably the spec rule is too loose (it should
-    relate `decl` to `func`). Either way it is a real spec/algorithm divergence. -/
+    The difference at a `funcDecl` is this. The declarative rule `StatementHasType'.funcDecl` asks only that the
+    *witness* function that it adds to the context is well typed, and that the syntactic declaration node is
+    not recursive. The two are **independent**, because no premise ties the declaration to the function. The
+    generator therefore draws them independently. The *algorithm* instead derives the witness *from* the
+    declaration node, through `PureFunc.typeCheck`. Therefore it rejects a `funcDecl` whose declaration node
+    does not type check itself. The specification is therefore strictly more permissive at a `funcDecl`, and its
+    rule is arguably too loose, because it should relate the declaration to the function. Either way, that is a
+    true disagreement between the specification and the algorithm. -/
 def rejectionImpliesFuncDecl (ss : List Statement) : Bool :=
   checkTypeChecks ss || stmtsHaveFuncDecl ss
 
@@ -387,11 +379,11 @@ def checkAnfPreservesTyping (ss : List Statement) : Bool :=
   !checkTypeChecks ss || checkTypeChecks (anfStmts ss)
 
 /-- **Kleene definedness**: `StmtToKleeneStmt` is defined *exactly* when the block has no
-    `exit`/`funcDecl`/`typeDecl`. One caveat: the transform *also* rejects loops
-    carrying invariants (`inv.isEmpty` guard). So the clean bi-implication only
-    holds when no such loop is present; we score the sample as a pass when either
-    the bi-implication holds, or the block contains an invariant-bearing loop
-    (the one documented extra `none` case). This keeps the property a faithful test of the
+    an `exit`, a `funcDecl` or a `typeDecl`. There is one further condition: the transform *also* rejects a loop
+    that carries an invariant, through its guard on the list of the invariants. Therefore the plain
+    biconditional holds only when the list holds no such loop. This predicate accepts a sample when the
+    biconditional holds, or when the list holds a loop with an invariant, which is the one further cause of a
+    `none`. That form keeps the property a faithful test of the
     doc-comment's stated contract without spurious failures. -/
 def checkKleeneDefinedIff (ss : List Statement) : Bool :=
   let defined := (kleeneStmts ss).isSome
@@ -404,24 +396,25 @@ def checkKleeneDefinedIff (ss : List Statement) : Bool :=
     -- The doc-comment contract: defined ⟺ ¬(exit/funcDecl/typeDecl present).
     defined == !unsupported
 
-/-- **`mapExprs` identity**: `Statements.mapExprs id = id` — mapping the identity over all
-    expressions in a statement list is the identity. -/
+/-- **The identity of `mapExprs`.** The statement `Statements.mapExprs id = id` says that a map of the identity
+    function over each expression of a statement list gives that list again. -/
 def checkMapExprsId (ss : List Statement) : Bool :=
   stmtsEq (Statements.mapExprs id ss) ss
 
--- ── Function typechecker completeness ─────────────────────────────────────
--- `genFunction` is proven sound: every function it produces satisfies the
--- declarative spec `FuncHasType'`. So `Function.typeCheck` — whose *soundness* is
--- tested elsewhere but whose *completeness* is not — should accept every one. The
--- probe (see git history) shows it does NOT: the spec's `FuncHasType'` has no
--- field requiring a body (both `bodyTyped` and `measureTyped` are conditional on
+-- ── The completeness of the typechecker for a function ───────────────
+--
+-- `genFunction` has a proof of soundness: each function that it gives satisfies the declarative specification
+-- `FuncHasType'`. Therefore `Function.typeCheck` must accept each of them. Another property tests the
+-- *soundness* of that algorithm, and no proof gives its *completeness*. The algorithm does not accept each
+-- generated function. `FuncHasType'` has no field that asks for a body, because the field about the body and
+-- the field about the measure are each conditional on
 -- the component being present), so a function with a **measure but no body**
 -- satisfies the spec; but `Function.typeCheck` rejects it ("a decreases clause was
 -- supplied but the function has no body", FunctionType.lean). This is the
--- function-level analogue of the statement-level `funcDecl` gap. Running against
--- the full `Core.Factory`/`Core.KnownTypes` (below), measure-without-body is the
--- *sole* cause — with a smaller factory, generated regex/real ops would spuriously
--- fail to resolve, masking the real gap.
+-- form at the level of a function of the gap at a `funcDecl` at the level of a statement. Against the full
+-- `Core.Factory` and `Core.KnownTypes` below, a measure with no body is the *one* cause. With a smaller
+-- factory, a generated operator on a regular expression or on a real number would fail to resolve for a false
+-- reason, and that failure would hide the real gap.
 
 /-- Whether `Function.typeCheck` accepts `func` in the full Core ambient context
     (`Core.Factory` + `Core.KnownTypes`, so every operator/type the generator can
@@ -431,22 +424,22 @@ def checkFunctionTypeChecks (func : Function) : Bool :=
   | .ok _ => true
   | .error _ => false
 
-/-- Whether `func` has a measure but no body — the spec-permitted, algorithm-
-    rejected shape that witnesses the function typechecker's incompleteness. -/
+/-- Whether `func` has a measure and no body. The specification permits that shape, the algorithm rejects it,
+    and it is therefore the witness for the gap in the completeness of the typechecker for a function. -/
 def funcMeasureWithoutBody (func : Function) : Bool :=
   func.measure.isSome && func.body.isNone
 
-/-- **Function typechecker completeness.** `genFunction` is sound (output satisfies
-    `FuncHasType'`), so the algorithm should accept every generated function. This
-    asserts it unweakened, so the measure-without-body gap — a genuine
-    spec/algorithm divergence — is reported with a minimal witness. -/
+/-- **The completeness of the typechecker for a function.** `genFunction` is sound, because its output
+    satisfies `FuncHasType'`. Therefore the algorithm must accept each generated function. This predicate states
+    that claim and does not weaken it, so it reports the gap about a measure with no body, which is a true
+    disagreement between the specification and the algorithm, with a smallest witness. -/
 abbrev checkFunctionTypeCheckerComplete (func : Function) : Bool := checkFunctionTypeChecks func
 
 /-- **Characterization of the function-completeness gap.** "Every rejection is a
     measure-without-body function." Accepts, OR is measure-without-body. This PINS
-    measure-without-body as the sole known cause: it should pass, and a failure
-    means `genFunction` produced a spec-well-typed function the algorithm rejects
-    for some *other* reason — a new, unclassified completeness bug. -/
+    a measure with no body as the one known cause. A counterexample means that `genFunction` gave a function
+    that the specification accepts and that the algorithm rejects for some *other* reason, which is a gap in
+    completeness of a new kind. -/
 def funcRejectionImpliesMeasureNoBody (func : Function) : Bool :=
   checkFunctionTypeChecks func || funcMeasureWithoutBody func
 
@@ -458,25 +451,24 @@ def funcRejectionImpliesMeasureNoBody (func : Function) : Bool :=
 -- `checkTypeChecks` (the algorithmic `Statement.typeCheck` in the standard Core
 -- ambient context). This is the direct analogue of how the expression shrinker
 -- filters on `LExpr.typeCheck`. Consequently *every* statement list the shrinker
--- yields is well-typed by the algorithm — but, exactly as the requirement
--- permits, it need not have the same "shape"/scope as the original (a shrink may
--- drop a variable's `init` and everything referencing it, change a guard's type,
--- etc.), because we re-check the whole list rather than tracking per-node types.
+-- gives is well typed by the algorithm. It need not have the same shape or the same scope as the original,
+-- which the requirement permits. A shrink can drop the `init` of a variable and each statement that names that
+-- variable, and it can change the type of a guard. The shrinker checks the whole list again, and it tracks no
+-- type for one node.
 --
 -- Interaction with the completeness-gap properties: typechecker completeness
 -- (`checkTypeCheckerComplete`) and the function-completeness properties hunt for
 -- statement lists the *algorithm rejects* (e.g. a `funcDecl` with a measure but
--- no body). Since the oracle here is the algorithm, the shrinker will not
--- minimize *those* counterexamples (any candidate that still fails is filtered
--- out), so Plausible reports them unshrunk — never a *wrong* result. For the
+-- with no body. The oracle here is the algorithm, so the shrinker minimizes no such counterexample, because
+-- the filter removes each candidate that still fails. The harness therefore reports such a counterexample at
+-- its full size, and it never reports a *wrong* result. For each
 -- transform properties, whose inputs must be genuinely well-typed,
 -- the algorithmic filter is exactly the right invariant.
 
-/-- Structurally smaller replacements for a deterministic-or-nondet guard: shrink
-    the carried expression (via `shrinkLExpr`), or collapse a deterministic guard
-    to a nondeterministic one (`.nondet`) — a strictly simpler choice. Candidates
-    whose type is wrong for a guard position are pruned by the whole-list
-    typecheck in `shrinkStmts`. -/
+/-- The structurally smaller replacements for a guard, which is deterministic or nondeterministic. The function
+    shrinks the expression of the guard with `shrinkLExpr`, and it also replaces a deterministic guard by a
+    nondeterministic one, which is a strictly simpler choice. The type check of the whole list in `shrinkStmts`
+    removes each candidate whose type is wrong at the position of a guard. -/
 def shrinkGuard (g : ExprOrNondet Expression) : List (ExprOrNondet Expression) :=
   match g with
   | .det e => (ExprOrNondet.det <$> shrinkLExpr e) ++ [ExprOrNondet.nondet]
@@ -491,11 +483,11 @@ def shrinkPureFunc (d : PureFunc Expression) : List (PureFunc Expression) :=
   ++ (if d.measure.isSome then [{ d with measure := none }] else [])
 
 mutual
-/-- Structurally smaller replacements for a single statement (each strictly
-    smaller by `Stmt.sizeOf`): recurse into bodies/branches, shrink the atomic
-    command (via `shrinkCmd`), shrink guards, and — for loops — drop the measure
-    or the invariants. Blocks/ites/loops are also *flattened* at the list level
-    by `shrinkStmtsList` (their body spliced in place), so this need not itself
+/-- The structurally smaller replacements for one statement. Each of them is strictly smaller by `Stmt.sizeOf`.
+    The function goes into each body and each branch, it shrinks the atomic command with `shrinkCmd`, it shrinks
+    each guard, and for a loop it drops the measure or the invariants. `shrinkStmtsList` also *flattens* a
+    `block`, an `ite` and a `loop` at the level of the list, and it puts the body in place of the statement.
+    Therefore this function needs no
     unwrap them. -/
 partial def shrinkStmt : Statement → List Statement
   | .cmd (.cmd c) => (fun c' => .cmd (.cmd c')) <$> shrinkCmd c
@@ -547,8 +539,8 @@ def shrinkStmts (ss : List Statement) : List (List Statement) :=
 /-- Generate a well-typed statement list in `IO` via `genProgramStmts`, from an
     empty ambient context and empty variable scope. `size` bounds each
     statement's nesting/expression size; `len` bounds the top-level sequence
-    length. Returns just the statement list (the threaded output contexts are
-    discarded — the tests only need the statements). -/
+    length. The function gives the statement list only, and it discards each output context that the generator
+    threads, because each property needs the statements only. -/
 def genProgramStmtsIO (size len : Nat) (octx : OpCtx := coreMonoOps)
     (tvars : List TyIdentifier := []) : IO (List Statement) := do
   let (ss, _, _) ← genProgramStmts (G := IO) octx tvars size len

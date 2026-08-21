@@ -1,25 +1,24 @@
 -- The whole-program generator and its shrinker, the program typechecker oracle
 -- (`progTypeChecks`) and `sizeProgram`.
 import StrataGenerators.ProgramGen.Shrink
--- `programFuncs` / `programBodies` / `declNames` / `nodup` / `evalOver`, and the
--- phase-running plumbing the properties here reuse verbatim rather than re-derive.
+-- `programFuncs`, `programBodies`, `declNames`, `nodup` and `evalOver`, together with the definitions that
+-- run a phase. Each property here uses them, and it writes none of them again.
 import StrataGenerators.ProgramGen.UnprovenTransforms
 -- `opNames`, `datatypeBlocks`, and the derived-operator projections.
 import StrataGenerators.ProgramGen.TestSupport
 -- The pass under test, and the naming convention it renames through.
 import Strata.Transform.MonomorphizeFunctions
 import Strata.Languages.Core.NameMangling
--- `Core.typeCheck`, which is the only typechecker entry point that accepts a
--- *factory* argument — and the output of this pass can only be checked against
--- the factory the pass itself produced.
+-- `Core.typeCheck`, which is the one entry point of the typechecker that takes a *factory* argument. A check
+-- of the output of this pass needs the factory that the pass itself built.
 import Strata.Languages.Core.Verifier
 
 open Lambda Core Imperative
 -- `progTypeChecks`, the whole-program typechecker oracle, and the program shrinker.
 open StrataGenerators.Program.TestSupport
--- `runPhaseSt` and `mkState`: a pipeline phase run from a freshly-seeded transform
--- state, returning the `(changed, output)` pair *and* the final state. The final
--- state is what carries the rebuilt factory, which half the properties here read.
+-- `runPhaseSt` and `mkState`. They run a pipeline phase from a fresh transform state, and they give the pair
+-- of the flag and the output *and* the final state. That final state holds the factory that the pass built,
+-- and many properties here read it.
 open StrataGenerators.Procedure.TestSupport
 -- `opNames` (every `.op` name of an expression) and `datatypeBlocks`.
 open ProgramGen.TestSupport
@@ -29,127 +28,104 @@ open StrataGenerators.Program.UnprovenTransforms
 open Core.NameMangling
 
 /-!
-# Check predicates for `MonomorphizeFunctions`
+# The check predicates for `MonomorphizeFunctions`
 
-`Strata/Transform/MonomorphizeFunctions.lean` specializes every polymorphic
-top-level function (`Decl.func`, `Decl.recFuncBlock`) and every polymorphic
-`Factory` function once per distinct ground type instantiation reached from a
-non-function context, renames every reference to the specialized copy, and
-**drops the polymorphic originals that nothing reached**. It runs immediately
-after `typeCheckPhase` in `Core.corePipelinePhases`, so that the SMT encoder, the
-symbolic evaluator and the downstream backends can assume monomorphic input.
+`Strata/Transform/MonomorphizeFunctions.lean` specializes each polymorphic top-level function, which is a
+`Decl.func` or a `Decl.recFuncBlock`, and each polymorphic function of the `Factory`. It makes one copy for
+each different ground instantiation that a context outside a function reaches. It then renames each
+reference to the specialized copy, and it **drops each polymorphic original that nothing reaches**. The
+pass runs immediately after the phase for the typechecker in `Core.corePipelinePhases`, so that the encoder
+for SMT, the symbolic evaluator and each backend can assume a monomorphic input.
 
-Upstream tests the pass with fourteen hand-written `#guard_msgs` goldens, each
-asserting the same three predicates on one fixed program: no top-level function
-keeps its type parameters, no factory entry keeps its type parameters, and the
-output typechecks. This module states those claims *over the generator*, and adds
-the ones a fixed example set cannot reach.
+Strata tests the pass with fourteen examples that a person wrote, and each of them asserts the same three
+claims about one fixed program: no top-level function keeps its type parameters, no entry of the factory
+keeps its type parameters, and the output type checks. This module states those claims *over the
+generator*, and it adds the claims that a fixed set of examples cannot reach.
 
-## Why a generated program is a live input, and why it needs no typechecking first
+## Why a generated program is a real input, and why it needs no type check first
 
-The pass reads a call's instantiation off the type annotation the typechecker
-attaches to the `.op` node, which is why it is ordered after `typeCheckPhase`.
-A generated program already carries that annotation: `genIndirPolyCore` builds
-`.op () name (some fullArrowTy)` with the instantiation baked in
-(`HasTypeAGen/Core.lean`), and `ProgramGen` registers each *declared*
-polymorphic function into the `pctx` that feeds body generation, so a generated
-body really does call a generated polymorphic function at a ground
-instantiation.
+The pass reads the instantiation of a call from the type annotation that the typechecker puts on the `.op`
+node, and that is why the pipeline runs it after the phase for the typechecker. A generated program already
+carries that annotation. `genIndirPolyCore` builds an `.op` node with the instantiation inside its
+annotation, and `ProgramGen` registers each *declared* polymorphic function into the polymorphic context
+that the generation of a body uses. Therefore the body of a generated program does call a generated
+polymorphic function at a ground instantiation.
 
-The pass can therefore be run on a draw directly. That matters, because
-`Program.typeCheck` rejects about 60 percent of generated programs for three
-documented pre-existing reasons (see `ProgramGen/Shrink`), and gating every
-property on it would throw away most of the signal. Only the properties whose
-*claim* presupposes a well-typed input carry the `!progTypeChecks p ||` guard —
+The pass therefore runs on a draw directly. That fact matters, because `Program.typeCheck` rejects a large
+part of the generated programs, for three reasons that the module docstring of `ProgramGen/Shrink` gives. A
+guard on that check for each property would therefore throw most of the signal away. Only a property whose
+*claim* needs a well-typed input carries the guard `!progTypeChecks p ||`, and those two properties are
 `checkMonoOutputTypechecks` and `checkMonoEvalAgreement`.
 
-## Seeding: `Core.Factory`, exactly as upstream does
+## The seed factory is `Core.Factory`, as in the tests of Strata
 
-`runPhaseSt` seeds the transform state with `Core.Factory` (via `mkState`), which
-is precisely upstream's own `monoFns` seeding
-(`{ CoreTransformState.emp with factory := Core.Factory }`). `runPhaseWithFuncs`,
-which additionally pushes the program's own functions into the factory, is
-deliberately *not* used: it would put each declared polymorphic function into the
-factory as well as into `p.decls`, so `checkMonoFactoryMonomorphic` would then
-demand that the pass specialize the same function twice over, under two different
-`FuncSource`s, and a red result would say more about the seeding than the pass.
+`runPhaseSt` seeds the transform state with `Core.Factory`, through `mkState`, and that is exactly the seed
+of the tests of Strata for this pass. This module does *not* use `runPhaseWithFuncs`, which also pushes
+each function of the program into the factory. That seed would put a declared polymorphic function into the
+factory *and* into the declarations of the program. `checkMonoFactoryMonomorphic` would then ask the pass
+to specialize one function two times, under two different sources, and a counterexample would report the
+seed and not the pass.
 
-One consequence is worth stating plainly, because it bounds what
-`checkMonoDerivedOpsRewritten` can see: `Core.Factory` does **not** hold the
-operators a generated datatype block derives (its constructors, testers and field
-accessors). Those reach the factory only when a program is run through
-`Core.Verifier`. `monoSeedFactoryWithDerived` pushes them in for the one property
-that is about them, and that property is self-calibrating — its premise is
-"reference to a function that is polymorphic *in the seed factory*", so it goes
-vacuous rather than red when the premise is empty.
+One consequence bounds what `checkMonoDerivedOpsRewritten` can see. `Core.Factory` holds **none** of the
+operators that a generated datatype block derives, which are its constructors, its testers and its
+accessors of a field. Those operators reach a factory only when `Core.Verifier` runs a program.
+`monoSeedFactoryWithDerived` pushes them in for the one property that is about them, and that property
+calibrates itself. Its premise is a reference to a function that is polymorphic *in the seed factory*, so
+it says nothing when the premise is empty, and it reports no counterexample there.
 
-## Measured: the default draw does not reach the pass
+## A default draw rarely reaches the pass
 
-**Read this before trusting a green tick.** Over 40 draws from the default
-`Arbitrary GenProgram`, the pass produced **zero** specializations — under
-`Core.Factory` seeding *and* under `monoSeedFactoryWithDerived`. Every predicate
-below except the two `funcDecl` ones was therefore green vacuously. The cause is
-a chain of three facts about the generator, none of them a defect in it:
+A property below says nothing about the pass when the draw reaches no specialization. Three facts about the
+generator, and none of them is a defect in it, keep a default draw away from the pass:
 
-* A declared polymorphic function is registered into `GenState.pctx`
-  (`ProgramGen.funcPolyOpEntry`), and `pctx` is consumed by `genAxiom` **only**.
-  Function and procedure bodies see `derivedPctx`, the datatype-derived schemes
-  alone. So a generated polymorphic *function* is callable from an axiom and
-  nowhere else.
-* The default runner draws at most five declarations
-  (`numDecls := max 2 (min 5 (2 + s / 25))` in `TestScaffold`), and the axiom
-  weight is 1 of six kinds. Across 25 draws, **0** axiom declarations appeared.
-* `processTopDecls` seeds the worklist from procedures, axioms, `distinct` and
-  *monomorphic* functions. A reference sitting in a polymorphic function's body
-  is reached only transitively, so it cannot start a specialization on its own.
+* `ProgramGen.funcPolyOpEntry` registers a declared polymorphic function into the polymorphic context of
+  the state, and `genAxiom` is the **one** generator that reads that context. The body of a function and of
+  a procedure reads the context of the schemes that a datatype derives. Therefore an axiom is the one place
+  that can call a generated polymorphic *function*.
+* The default runner draws few declarations, and an axiom is one of six kinds of declaration at the weight
+  1. Therefore a draw often holds no axiom at all.
+* `processTopDecls` seeds its list of the work from each procedure, each axiom, each `distinct` declaration
+  and each *monomorphic* function. A reference inside the body of a polymorphic function is reachable only
+  through another declaration, so it cannot start a specialization on its own.
 
-Two things follow for whoever wires these up. First, state the coverage: register
-`monoSpecializationCount` as a Tyche axis or a `Diagnostic`, so a run says how
-often it reached the pass instead of leaving it to be assumed — `monoReachedPass`
-is the boolean form. Second, a live draw needs a generator that is *tuned*, not
-the default: a larger `numDecls` through `TestDecl.forAll` with an explicit
-`PropertyRunner` raises the chance of an axiom-plus-polymorphic-function pair, and
-the durable fix is upstream of this module — letting procedure bodies draw from
-`pctx` rather than only `derivedPctx` would make a call to a declared polymorphic
-function an ordinary event rather than a coincidence.
+Two things follow for a caller that registers these properties. First, report the coverage: register
+`monoSpecializationCount` as an axis of a Tyche panel or as a `Diagnostic`, so that a run says how often it
+reached the pass. `monoReachedPass` is the same measurement as a `Bool`. Second, a draw that reaches the
+pass needs a *tuned* generator, and not the default one. A larger number of declarations, through
+`TestDecl.forAll` with an explicit `PropertyRunner`, raises the chance of a draw that holds an axiom and a
+polymorphic function together. The durable correction is outside this module: a body of a procedure that
+draws from the full polymorphic context, and not from the derived schemes only, would make a call to a
+declared polymorphic function an ordinary event.
 
-The two `funcDecl` predicates are the exception, and are reachable today: one of
-40 draws carried a polymorphic `funcDecl` statement, and it failed
-`checkMonoStmtFuncDeclsMonomorphic` as predicted. Budget trials accordingly —
-that is roughly a 2.5 percent hit rate.
+The two properties about a `funcDecl` statement are the exception, and a draw reaches them. `genFuncDeclStmt`
+draws a polymorphic `funcDecl` statement, which `checkMonoStmtFuncDeclsMonomorphic` scores.
 
 ## What each group of predicates claims
 
-* `checkMonoAllFuncsMonomorphic`, `checkMonoFactoryMonomorphic`,
-  `checkMonoOutputTypechecks`, `checkMonoIdempotent` — upstream's three goldens
-  quantified, plus idempotence, which upstream does not state at all.
-* `checkMonoStmtFuncDeclsMonomorphic`, `checkMonoStmtFuncDeclRefsRewritten` — the
-  statement-level `funcDecl`. `allFuncsMonomorphic` inspects `p.decls` only, and
-  the pass's two traversals both ignore a `funcDecl` statement:
-  `Command.mapExprM` falls through it on its catch-all, and
-  `Statement.collectExprs` returns `[]` for it. So a block-local polymorphic
-  function is invisible to the pass, and a block-local body that calls a
-  polymorphic top-level function is neither collected (no specialization is
-  seeded) nor rewritten (the name is left alone) while the original is dropped as
-  unreached. `genFuncDeclStmt` draws exactly this shape, so these two are
-  expected to be red; whether that is a defect or a documented scope boundary is
-  the upstream conversation, and `Expectation.knownFailure` is where the answer
-  belongs.
-* `checkMonoTypeDeclsUnchanged`, `checkMonoPolyDatatypesRemain`,
-  `checkMonoDerivedOpsRewritten` — the pass monomorphizes a polymorphic
-  datatype's *derived functions* but not the datatype *declaration*:
-  `processTopDecls` passes a `.type` declaration through on its catch-all. These
-  three state that asymmetry as a fact rather than assuming it, so that a future
-  upstream change in either direction shows up.
-* `checkMonoMangledBaseWasPolymorphic`, `checkMangleRoundtripAt`,
-  `checkMangleDistinctAt`, `checkMonoOutputNamesNodup`,
-  `checkMonoNoPolyProgramUnchanged`, `checkMonoDeclOrderPreserved` — the naming
-  convention. Injectivity of `$__mono#<base>#<tyargs>` is load-bearing for the
-  whole scheme (two specializations that mangle alike collapse into one
-  declaration), and `mangleTy`'s own docstring concedes that the arity prefix is
-  "documentary rather than disambiguating".
-* `checkMonoEvalAgreement` — the semantic one. See its docstring for what is and
-  is not claimed.
+* `checkMonoAllFuncsMonomorphic`, `checkMonoFactoryMonomorphic`, `checkMonoOutputTypechecks` and
+  `checkMonoIdempotent` state the three claims of the tests of Strata over the generator, and they add
+  idempotence, which those tests do not state.
+* `checkMonoStmtFuncDeclsMonomorphic` and `checkMonoStmtFuncDeclRefsRewritten` are about a `funcDecl`
+  *statement*. The field `allFuncsMonomorphic` reads the declarations of the program only, and both
+  traversals of the pass skip a `funcDecl` statement. `Command.mapExprM` gives such a statement back
+  through its final case, and `Statement.collectExprs` gives the empty list for it. Therefore the pass does
+  not see a polymorphic function that a block declares, and it neither seeds a specialization for a
+  block-local body that calls a polymorphic top-level function, nor renames that call, and it drops the
+  original as unreached. `genFuncDeclStmt` draws exactly that shape. Whether that behaviour is a defect or
+  a documented limit of the scope is a question for Strata, and `Expectation.knownFailure` is where the
+  answer belongs.
+* `checkMonoTypeDeclsUnchanged`, `checkMonoPolyDatatypesRemain` and `checkMonoDerivedOpsRewritten` state one
+  asymmetry: the pass specializes the *derived functions* of a polymorphic datatype, and it does not
+  specialize the *declaration* of that datatype. `processTopDecls` gives a `.type` declaration back through
+  its final case. These three properties state that asymmetry as a fact, so that a later change of Strata
+  in either direction becomes visible.
+* `checkMonoMangledBaseWasPolymorphic`, `checkMangleRoundtripAt`, `checkMangleDistinctAt`,
+  `checkMonoOutputNamesNodup`, `checkMonoNoPolyProgramUnchanged` and `checkMonoDeclOrderPreserved` are
+  about the convention for a name. The whole scheme needs the injectivity of that convention, because two
+  specializations of one name become one declaration. The docstring of `mangleTy` also records that the
+  prefix for an arity is documentary, and that it separates no two names.
+* `checkMonoEvalAgreement` is the semantic property. Read its docstring for what it claims and for what it
+  does not claim.
 -/
 
 namespace StrataGenerators.Mono
@@ -159,73 +135,69 @@ namespace StrataGenerators.Mono
 /-- The pipeline phase under test. -/
 def monoPhase : Core.PipelinePhase := Core.monomorphizeFunctionsPipelinePhase
 
-/-- The SMT-trigger meta-operators, which the CST converter matches by name and
-    which are therefore left polymorphic on purpose. Kept in step with
-    `MonomorphizeFunctions.collectPolymorphicFuncDeclsFromFactory`, which excludes
-    exactly these from the set of functions to specialize — so a predicate here
-    that failed to exclude them would report the pass's own deliberate exemption
-    as a violation. -/
+/-- The meta-operators for a trigger of SMT. The converter to concrete syntax matches each of them by name,
+    so the pass leaves each of them polymorphic on purpose. This list agrees with
+    `MonomorphizeFunctions.collectPolymorphicFuncDeclsFromFactory`, which excludes exactly these operators
+    from the set to specialize. A predicate here that did not exclude them would report that deliberate
+    exemption as a counterexample. -/
 def isTriggerMetaOp (name : String) : Bool :=
   name == "TriggerGroup.addTrigger" || name == "TriggerGroup.empty" ||
   name == "Triggers.addGroup"       || name == "Triggers.empty"
 
-/-- The pass run on `p` from a freshly-seeded state: the `changed` flag, the
-    output program, and the final transform state (whose `factory` is the rebuilt
-    one — the polymorphic originals dropped and the specialized copies added).
+/-- The pass, run on the program from a fresh state. The result holds the `changed` flag, the output program,
+    and the final transform state. The `factory` field of that state is the factory that the pass built, which
+    holds the specialized copies and holds no polymorphic original.
 
-    `none` when the pass raised a diagnostic, which it does on a growing cycle
-    (it calls that "non-uniform polymorphic recursion"). Every predicate below
-    reads `none` as "no claim to make", so a diagnostic never reads as a
-    violation; `checkMonoSucceeds` is the property that scores the diagnostic
-    itself. -/
+    The result is `none` when the pass raises a diagnostic, which it does on a cycle that grows, and which it
+    names a non-uniform polymorphic recursion. Each predicate below reads a `none` as an absence of a claim,
+    so a diagnostic is never a counterexample. `checkMonoSucceeds` is the property that scores a
+    diagnostic. -/
 def runMono (p : Program) :
     Option ((Bool × Program) × Transform.CoreTransformState) :=
   runPhaseSt monoPhase p
 
-/-- `runMono` with the seed factory named explicitly, for a property that needs
-    the pass to see something `Core.Factory` does not hold — a datatype's derived
-    operators, say. `runMono` is this at `Core.Factory`, which is upstream's
-    seeding; anything else is a deliberate deviation and should say why. -/
+/-- `runMono` with an explicit seed factory, for a property that needs the pass to see something that
+    `Core.Factory` does not hold, such as an operator that a datatype derives. `runMono` is this function at
+    `Core.Factory`, which is the seed of the tests of Strata. Each other seed is a deliberate difference, and
+    its call site says why. -/
 def runMonoWith (F : Lambda.Factory CoreLParams) (p : Program) :
     Option ((Bool × Program) × Transform.CoreTransformState) :=
   match Transform.runWith p monoPhase.transform { mkState p with factory := F } with
   | (.ok r, st) => some (r, st)
   | (.error _, _) => none
 
-/-- The pass run a second time, threaded from the first run's transform state.
-    `none` when the second run raised a diagnostic — which, unlike a diagnostic on
-    the *first* run, is a violation rather than an absence of claim, so
-    `checkMonoIdempotent` asserts this is `some`. -/
+/-- The pass, run a second time, from the transform state of the first run. The result is `none` when the
+    second run raises a diagnostic. A diagnostic on the *first* run is an absence of a claim, and a diagnostic
+    on the second run is a counterexample. Therefore `checkMonoIdempotent` asks that this result is not
+    `none`. -/
 def runMonoAgain (r : (Bool × Program) × Transform.CoreTransformState) :
     Option (Bool × Program) :=
   match Transform.runWith r.1.2 monoPhase.transform r.2 with
   | (.ok x, _) => some x
   | (.error _, _) => none
 
-/-- Whether the pass returned at all. Separated from every other predicate so
-    that a diagnostic is scored once, by a property that is about the diagnostic,
-    instead of silently making the others vacuous. -/
+/-- Whether the pass gave a result. This predicate is separate from each other one, so that one property
+    scores a diagnostic, and a diagnostic does not silently empty each other property. -/
 abbrev checkMonoSucceeds (p : Program) : Prop := (runMono p).isSome = true
 
 /-- The output program alone. -/
 def monoOut (p : Program) : Option Program := (runMono p).map (·.1.2)
 
-/-! ### Total projections of the output
+/-! ### The total projections of the output
 
-Every claim below is stated as an *equality at the top level*, and these exist to
-make that possible. The obvious phrasing, `∀ p' ∈ monoOut p, f p' = []`, is
-decidable but prints `issue: ⋯ does not hold` — Plausible's `PrintableProp` reads
-the top-level shape, and a bounded `∀` is not a shape it can render, so such a
-property is no more informative than a `Bool`. Projecting through `Option.elim`
-with the *vacuous* value as the default keeps the same meaning (a diagnostic is
-still no claim) while putting an `=` on top, which prints both sides. -/
+Each claim below is an *equality at its top level*, and the definitions here make that form possible. The
+direct form, which is `∀ p' ∈ monoOut p, f p' = []`, is decidable, and it prints only a placeholder for the
+counterexample. The `PrintableProp` instance of the harness reads the shape at the top level, and it cannot
+render a bounded `∀`. Such a property therefore says no more than a `Bool` does. A projection through
+`Option.elim`, with the *empty* value as the default, keeps the same meaning, because a diagnostic is still
+an absence of a claim, and it puts an equality at the top, which prints both sides. -/
 
 /-- `f` applied to the output, or `dflt` when the pass raised a diagnostic. -/
 def onOutput (p : Program) (dflt : α) (f : Program → α) : α :=
   ((monoOut p).map f).getD dflt
 
-/-- The `(changed, output)` pair the pass reported, or `(false, p)` on a
-    diagnostic — which reads as "unchanged", the vacuous value here. -/
+/-- The pair of the flag and the output that the pass gives. After a diagnostic, the result is the input
+    program together with `false`, which reads as an unchanged program, and which is the empty value here. -/
 def monoChangedOut (p : Program) : Bool × Program :=
   (((runMono p).map (·.1)).getD (false, p))
 
@@ -235,9 +207,9 @@ def monoFactory (p : Program) : Option (Lambda.Factory CoreLParams) :=
 
 /-! ## Naming the polymorphic functions the pass can see -/
 
-/-- The polymorphic functions a program declares, by name. These are the
-    `Decl.func` and `Decl.recFuncBlock` entries `collectPolymorphicFuncDecls`
-    indexes, so this is the set whose originals the pass is entitled to drop. -/
+/-- The polymorphic functions that a program declares, by name. Those are the `Decl.func` and the
+    `Decl.recFuncBlock` entries that `collectPolymorphicFuncDecls` indexes, so this set holds each original
+    that the pass can drop. -/
 def polyProgramFuncNames (p : Program) : List String :=
   (programFuncs p).filterMap fun f =>
     if f.typeArgs.isEmpty then none else some f.name.name
@@ -248,54 +220,49 @@ def polyFactoryNames (F : Lambda.Factory CoreLParams) : List String :=
     if !lf.typeArgs.isEmpty && !isTriggerMetaOp lf.name.name then some lf.name.name
     else none
 
-/-- Every name the pass will specialize and then drop, for the seed factory `F`.
-    A reference to one of these surviving in the output is a dangling reference:
-    the declaration it names is gone. -/
+/-- Each name that the pass specializes and then drops, at the seed factory `F`. A reference to one of those
+    names in the output names a declaration that the pass removed. -/
 def polyNames (p : Program) (F : Lambda.Factory CoreLParams := Core.Factory) : List String :=
   polyProgramFuncNames p ++ polyFactoryNames F
 
-/-- The references in `ops` that still name one of the `dropped` originals.
+/-- Each reference of `ops` that still names one of the dropped originals.
 
-    Every "no dangling reference" claim below is `survivingPolyRefs … = []`, and
-    that shape is the point: a `Prop`-valued equality against `[]` lets Plausible
-    print the *offending names* (`issue: ["f"] = [] does not hold`), where a
-    `Bool`-valued `List.all` could only report `false`. -/
+    Each claim below about such a reference is an equality of this list against the empty list, and that shape
+    is the point. An equality that gives a `Prop` lets the harness print the *names* that cause the failure,
+    and a `List.all` that gives a `Bool` could report only `false`. -/
 def survivingPolyRefs (dropped ops : List String) : List String :=
   (ops.filter dropped.contains).eraseDups
 
-/-- `Core.Factory` with each operator that the program's datatype blocks derive
-    pushed in — the constructors, testers and field accessors of a generated
-    `mutual … end` block.
+/-- `Core.Factory` together with each operator that a datatype block of the program derives. Those operators
+    are the constructors, the testers and the accessors of a field of a generated `mutual … end` block.
 
-    `Core.Factory` holds none of these: they reach a factory only through
-    `Core.Verifier`. So without this, a reference to `List..head` is a reference
-    to a function the pass has never heard of, and every claim about a *derived*
-    operator would be vacuous under the default seeding. `pushIfNew` keeps the
-    first entry under a name, so a derived name cannot displace a builtin. -/
+    `Core.Factory` holds none of them, because such an operator reaches a factory only through
+    `Core.Verifier`. Without this definition, a reference to an accessor names a function that the pass does
+    not hold, and each claim about a *derived* operator would then say nothing under the default seed.
+    `pushIfNew` keeps the first entry under a name, so a derived name cannot replace a builtin. -/
 def monoSeedFactoryWithDerived (p : Program) : Lambda.Factory CoreLParams :=
   (datatypeBlocks p).foldl (init := Core.Factory) fun F block =>
     match ProgramGen.blockDerivedFactory block with
     | none => F
     | some DF => DF.toArray.foldl (fun F lf => F.pushIfNew lf) F
 
-/-! ## Collecting operator references
+/-! ## The references to an operator
 
-`ProgramGen.TestSupport.stmtOpNames` deliberately stops at a `funcDecl` statement
-and at a `call`'s arguments. Both matter here: the `funcDecl` statement is the
-subject of `checkMonoStmtFuncDeclRefsRewritten`, and a `call`'s `inArg` is an
-expression the pass *does* rewrite (`Command.mapExprM` descends into it), so a
-predicate that could not see it would miss a whole class of reference. Hence the
-deeper traversal below rather than a reuse. -/
+`ProgramGen.TestSupport.stmtOpNames` stops at a `funcDecl` statement and at the arguments of a `call`, on
+purpose. Both of those positions matter here. A `funcDecl` statement is the subject of
+`checkMonoStmtFuncDeclRefsRewritten`, and an `inArg` of a `call` is an expression that the pass *does*
+rewrite, because `Command.mapExprM` goes into it. A predicate that could not read those two positions would
+miss a whole class of reference. Therefore this section holds a deeper traversal, and it does not use that
+function. -/
 
-/-- The user-facing expressions of a syntactic function declaration — the node a
-    `funcDecl` statement carries. Mirrors `MonomorphizeFunctions`'
-    `expressionsFromFunction`, which is what the pass reads out of a *top-level*
-    function, so the two views of "a function's expressions" cannot drift. -/
+/-- Each expression of a syntactic function declaration, which is the node that a `funcDecl` statement holds.
+    This definition follows `expressionsFromFunction` of the pass, which is what the pass reads from a
+    *top-level* function. Therefore the two views of the expressions of a function cannot differ. -/
 def pureFuncExprs (d : Imperative.PureFunc Expression) : List Expression.Expr :=
   d.body.toList ++ d.axioms ++ d.preconditions.map (·.expr) ++ d.measure.toList
 
-/-- Every function a statement list declares through a `funcDecl` statement, at
-    any depth. Invisible to `allFuncsMonomorphic`, which reads `p.decls`. -/
+/-- Each function that a statement list declares through a `funcDecl` statement, at any depth. The field
+    `allFuncsMonomorphic` reads the declarations of the program, so it reads none of these functions. -/
 partial def funcDeclsOfStmts (ss : List Statement) :
     List (Imperative.PureFunc Expression) :=
   ss.flatMap fun s =>
@@ -335,29 +302,27 @@ partial def stmtOpNamesDeep (ss : List Statement) : List String :=
 
 /-- The statements of a procedure body, or `[]` for a `.cfg` body.
 
-    A generated procedure is always `.structured` — `StructuredToUnstructured` is
-    a pass, not a shape the generator draws — so nothing here is lost. The `.cfg`
-    case is spelled out rather than left to a catch-all so that a future generator
-    that *does* draw one shows up as an obviously empty result instead of a
-    silently wrong one. -/
+    A generated procedure always has a `.structured` body, because a control-flow graph is the output of a
+    pass and not a shape that the generator draws. Therefore this function loses nothing. The case for a
+    control-flow graph is explicit, and it is not part of a final case, so that a later generator which draws
+    one gives an empty result here, and not a wrong one. -/
 def structuredBody (q : Procedure) : List Statement :=
   match q.body with
   | .structured ss => ss
   | .cfg _ => []
 
-/-- The expressions of the declarations the pass treats as **always live** —
-    procedures (contract clauses and body), axioms and `distinct`.
+/-- The expressions of each declaration that the pass treats as **always live**. Those declarations are a
+    procedure, with its contract clauses and its body, an axiom, and a `distinct` declaration.
 
-    This is the list the pass rewrites *in place*: `processTopDecls` visits these
-    three declaration kinds, rewrites each, and pushes it back in the same
-    position, adding and removing nothing. So the list has the same length and
-    the same order before and after the pass, which is what lets
-    `checkMonoEvalAgreement` compare positionally.
+    The pass rewrites that list *in place*. `processTopDecls` visits those three kinds of declaration, it
+    rewrites each of them, and it puts each of them back at the same position. It adds and removes nothing.
+    Therefore the list has the same length and the same order before and after the pass, and
+    `checkMonoEvalAgreement` can compare the two lists by position.
 
-    Function bodies are deliberately excluded, and that exclusion is what makes
-    the alignment true: the pass *adds* one declaration per specialization and
-    drops the polymorphic originals, so any list that included function
-    expressions would be a different length on the two sides. -/
+    This definition excludes the body of a function on purpose, and that choice is what makes the two lists
+    agree. The pass *adds* one declaration for each specialization, and it drops each polymorphic original.
+    Therefore a list that held the expressions of a function would have a different length on the two
+    sides. -/
 def aliveExprs (p : Program) : List Expression.Expr :=
   p.decls.flatMap fun
     | .proc q _ =>
@@ -368,10 +333,9 @@ def aliveExprs (p : Program) : List Expression.Expr :=
     | .distinct _ es _ => es
     | _ => []
 
-/-- Every `.op` name reachable in a program: the always-live declarations, plus
-    every function's own expressions, plus the bodies of every function declared
-    by a `funcDecl` statement. This is the view a dangling-reference claim needs,
-    since a reference the pass failed to rewrite is a reference *somewhere*. -/
+/-- Each `.op` name of a program. The result covers each always-live declaration, the expressions of each
+    function, and the body of each function that a `funcDecl` statement declares. A claim about a reference
+    that the pass did not rewrite needs that whole view, because such a reference can sit at any position. -/
 def allOpNames (p : Program) : List String :=
   (aliveExprs p).flatMap opNames
     ++ (programFuncs p).flatMap (fun f =>
@@ -380,79 +344,72 @@ def allOpNames (p : Program) : List String :=
          (f.measure.map opNames).getD [])
     ++ (p.decls.flatMap fun | .proc q _ => stmtOpNamesDeep (structuredBody q) | _ => [])
 
-/-! ## Group A — upstream's goldens, quantified
+/-! ## The three claims of the tests of Strata, over the generator
 
-The three predicates upstream asserts on each of its fourteen examples, plus
-idempotence. Each is stated unconditionally except `checkMonoOutputTypechecks`,
-whose claim presupposes a well-typed input. -/
+The three predicates that the tests of Strata assert on each of their fourteen examples, together with
+idempotence. Each of them holds with no guard, except `checkMonoOutputTypechecks`, whose claim needs a
+well-typed input. -/
 
-/-- **No top-level function declaration keeps its type parameters.** The pass's
-    headline postcondition, and the reason the SMT encoder is allowed to assume
-    monomorphic input.
+/-- **No top-level function declaration keeps its type parameters.** This is the main postcondition of the
+    pass, and it is the reason that the encoder for SMT can assume a monomorphic input.
 
-    Note the scope: `p.decls` only. A function declared by a `funcDecl`
-    *statement* is not covered here — that is `checkMonoStmtFuncDeclsMonomorphic`,
-    and the two are separate properties precisely because the pass treats them
-    differently.
+    The scope is the declarations of the program only. This property does not cover a function that a
+    `funcDecl` *statement* declares, and `checkMonoStmtFuncDeclsMonomorphic` covers that case. The two are
+    separate properties, because the pass treats the two kinds of declaration differently.
 
-    Stated as `polyProgramFuncNames p' = []` rather than as a bounded `∀` over the
-    declarations, because the two say the same thing and only the equality prints
-    the counterexample: a failure reads `issue: ["f"] = [] does not hold`, naming
-    the function that kept its type parameters. -/
+    The claim is an equality of `polyProgramFuncNames p'` against the empty list, and it is not a bounded `∀`
+    over the declarations. The two forms say the same thing, and only the equality prints the counterexample,
+    which names each function that kept its type parameters. -/
 abbrev checkMonoAllFuncsMonomorphic (p : Program) : Prop :=
   onOutput p [] polyProgramFuncNames = []
 
-/-- **No entry of the rebuilt factory keeps its type parameters**, save the
-    trigger meta-operators the pass exempts by name — which is exactly the
-    exemption `polyFactoryNames` already applies. -/
+/-- **No entry of the factory that the pass built keeps its type parameters**, except a meta-operator for a
+    trigger, which the pass exempts by name. `polyFactoryNames` applies exactly that exemption. -/
 abbrev checkMonoFactoryMonomorphic (p : Program) : Prop :=
   ((monoFactory p).map polyFactoryNames).getD [] = []
 
-/-- **The output typechecks**, against the factory the pass itself produced.
+/-- **The output type checks**, against the factory that the pass built.
 
-    `Core.typeCheck` is the only entry point that takes a factory, and it has to
-    be the *rebuilt* one: the output names `$__mono#f#int`, which exists nowhere
-    else. Checking the output against `Core.Factory` would therefore fail for a
-    reason that has nothing to do with the property.
+    `Core.typeCheck` is the one entry point that takes a factory, and that factory must be the one that the
+    pass built. The output names a specialized function, which exists in no other factory. A check of the
+    output against `Core.Factory` would therefore fail for a reason outside this property.
 
-    Guarded on the input typechecking, since a pass can only be blamed for what
-    it does to well-typed input. The guard is an implication rather than a
-    disjunction, which is what lets a failure print with the guard discharged. -/
+    The property carries a guard on the type check of the input, because a pass is responsible only for what
+    it does to a well-typed input. That guard is an implication, and not a disjunction, and that form is what
+    lets a counterexample print with the guard already discharged. -/
 abbrev checkMonoOutputTypechecks (p : Program) : Prop :=
   progTypeChecks p = true →
     ∀ r ∈ runMono p,
       (Core.typeCheck Core.VerifyOptions.quiet r.1.2
         (factory := r.2.factory)).toOption.isSome = true
 
-/-- **The pass is idempotent**, and reports so: after one run every function is
-    monomorphic, hence the second run has nothing to specialize, must return the
-    same program, and must report `changed = false`.
+/-- **The pass is idempotent, and it reports so.** After one run, each function is monomorphic. Therefore the
+    second run has nothing to specialize, it must give the same program, and it must report `changed = false`.
 
-    The second run is threaded from the *first run's* state, not from a fresh
-    one. Re-seeding with `Core.Factory` would hand the second run back the
-    polymorphic factory originals the first run dropped, so it would specialize
-    them again and the property would be measuring the harness.
+    The second run starts from the state of the *first* run, and not from a fresh state. A second seed of
+    `Core.Factory` would give the second run the polymorphic originals of the factory that the first run
+    dropped. The second run would then specialize them again, and the property would measure this module and
+    not the pass.
 
-    The `isSome` conjunct is load-bearing: a `∀ s ∈ runMonoAgain r` alone would
-    read a diagnostic on the *second* run as vacuous, and a second run that fails
-    where the first succeeded is precisely a violation of idempotence. -/
+    The part of the claim that says the second run gives a result is necessary. A bounded `∀` over that result
+    alone would read a diagnostic on the *second* run as an absence of a claim, and a second run that fails
+    where the first run succeeded breaks idempotence. -/
 abbrev checkMonoIdempotent (p : Program) : Prop :=
   (runMono p).bind runMonoAgain = (monoOut p).map (fun p' => (false, p'))
 
-/-! ## Group B2 — the statement-level `funcDecl`
+/-! ## The `funcDecl` statement
 
-`allFuncsMonomorphic` reads `p.decls`. But a `funcDecl` *statement* carries an
-`Imperative.PureFunc` with its own `typeArgs`, and both of the pass's traversals
-skip it: `Command.mapExprM`'s catch-all (`| c => pure c`) returns a `.funcDecl`
-unchanged, and `Statement.collectExprs` returns `[]` for it. So a block-local
-polymorphic function keeps its type parameters, and a block-local body's call to
-a polymorphic top-level function is neither seeded nor renamed — while the
-original is dropped as unreached.
+The field `allFuncsMonomorphic` reads the declarations of the program. A `funcDecl` *statement* holds an
+`Imperative.PureFunc` with its own type parameters, and both traversals of the pass skip it. The final case
+of `Command.mapExprM` gives a `.funcDecl` back unchanged, and `Statement.collectExprs` gives the empty list
+for it. Therefore a polymorphic function that a block declares keeps its type parameters, and a call from a
+block-local body to a polymorphic top-level function gets neither a specialization nor a new name, while the
+pass drops the original as unreached.
 
-`genFuncDeclStmt` draws the declaration from `genFunction`, whose `typeArgs` come
-from `genTypeArgs`, and threads `pctx` into the body, so both shapes are
-reachable. Read a green tick on either of these as "not reached this draw" until
-the Tyche `has_funcDecl` axis says otherwise. -/
+`genFuncDeclStmt` draws the declaration from `genFunction`, whose type parameters come from `genTypeArgs`,
+and it threads the polymorphic context into the body. Therefore a draw can reach both shapes. Read a result
+with no counterexample from either property together with the axis of the Tyche panel for a `funcDecl`,
+which says whether the draw reached the shape at all. -/
 
 /-- Every function a program declares through a `funcDecl` statement, from any
     procedure body. -/
@@ -461,18 +418,17 @@ def programStmtFuncDecls (p : Program) : List (Imperative.PureFunc Expression) :
     | .proc q _ => funcDeclsOfStmts (structuredBody q)
     | _ => []
 
-/-- The names of the *polymorphic* functions a program declares through a
-    `funcDecl` statement. The statement-level analogue of
-    `polyProgramFuncNames`, and for the same reason: naming them is what lets the
-    property below print which one kept its type parameters. -/
+/-- The names of the *polymorphic* functions that a program declares through a `funcDecl` statement. This
+    definition is the form of `polyProgramFuncNames` for a statement, and it exists for the same reason: a
+    list of the names is what lets the property below print which function kept its type parameters. -/
 def polyStmtFuncDeclNames (p : Program) : List String :=
   (programStmtFuncDecls p).filterMap fun d =>
     if d.typeArgs.isEmpty then none else some d.name.name
 
-/-- **No function declared by a statement keeps its type parameters** — the
-    statement-level counterpart of `checkMonoAllFuncsMonomorphic`.
+/-- **No function that a statement declares keeps its type parameters.** This property is the form of
+    `checkMonoAllFuncsMonomorphic` for a statement.
 
-    Vacuous unless the draw holds a `funcDecl` statement whose declaration is
+    The property says nothing unless the draw holds a `funcDecl` statement whose declaration is
     polymorphic. -/
 abbrev checkMonoStmtFuncDeclsMonomorphic (p : Program) : Prop :=
   onOutput p [] polyStmtFuncDeclNames = []
@@ -481,9 +437,9 @@ abbrev checkMonoStmtFuncDeclsMonomorphic (p : Program) : Prop :=
     `funcDecl` statement in the output may still name a function whose
     polymorphic original the pass dropped.
 
-    Vacuous unless the draw holds a `funcDecl` whose body calls a polymorphic
-    function; when it is not vacuous, a failure is a dangling reference and not a
-    cosmetic one. -/
+    The property says nothing unless the draw holds a `funcDecl` whose body calls a polymorphic function. When
+    it does say something, a counterexample is a reference to a declaration that the pass removed, and it is
+    not a difference of appearance. -/
 abbrev checkMonoStmtFuncDeclRefsRewritten
     (p : Program) (F : Lambda.Factory CoreLParams := Core.Factory) : Prop :=
   onOutput p [] (fun p' =>
@@ -493,58 +449,55 @@ abbrev checkMonoStmtFuncDeclRefsRewritten
 /-- **No reference to a dropped polymorphic original survives anywhere.** The
     unrestricted form of the claim above, over every expression of the output.
 
-    Sharper than "the output typechecks" in one direction and weaker in another:
-    it needs no well-typed input, but it checks only the *name*, not the
-    instantiation. A reference renamed to a specialization that exists at the
-    wrong instantiation passes this and fails the typechecker. -/
+    This property is sharper than the one about the type check of the output in one direction, and weaker in
+    another. It needs no well-typed input, and it reads the *name* only, and not the instantiation. A
+    reference that the pass renames to a specialization at the wrong instantiation satisfies this property and
+    fails the typechecker. -/
 abbrev checkMonoNoPolyRefsSurvive
     (p : Program) (F : Lambda.Factory CoreLParams := Core.Factory) : Prop :=
   onOutput p [] (fun p' => survivingPolyRefs (polyNames p F) (allOpNames p')) = []
 
-/-! ## Type declarations: monomorphized only through their derived functions
+/-! ## A type declaration changes only through the functions that it derives
 
-The pass handles `Decl.func`, `Decl.recFuncBlock` and the factory.
-`processTopDecls` passes a `.type` declaration through untouched on its `| _ =>`
-catch-all, so a polymorphic datatype declaration survives with its type
-parameters intact — while the operators it *derives* are ordinary polymorphic
-factory functions and so are specialized like any other.
+The pass handles a `Decl.func`, a `Decl.recFuncBlock` and the factory. `processTopDecls` gives a `.type`
+declaration back unchanged, through its final case. Therefore a polymorphic datatype declaration keeps its
+type parameters. The operators that such a datatype *derives* are ordinary polymorphic functions of the
+factory, and the pass specializes each of them as it specializes each other one.
 
-That asymmetry is stated here as a fact rather than assumed. It is also the one
-place where Lutze, Schuster and Brachthäuser's *The Simple Essence of
-Monomorphization* (OOPSLA 2025) says Strata is incomplete rather than merely
-different: their §2.2 treats type-parametric data types as a kind of polymorphism
-in its own right, with constraints raised by the well-formedness judgment, and
-specializes `Lazy[Int]` to a declaration `Lazy_Int`. Strata leaves `List a`
-declared as `List a` and emits `$__mono#List.cons#int` against it. -/
+This section states that asymmetry as a fact, and no property assumes it. It is also the one point where
+Lutze, Schuster and Brachthäuser, in *The Simple Essence of Monomorphization* (OOPSLA 2025), call Strata
+incomplete, and not merely different. Their section 2.2 treats a datatype with a type parameter as a kind of
+polymorphism of its own, with the constraints that the judgement for well-formedness raises, and it
+specializes a datatype at a ground instance into a declaration of its own. Strata keeps such a datatype
+declared with its type parameters, and it emits a specialized name for each derived operator against it. -/
 
 /-- The type declarations of a program, in declaration order. -/
 def typeDecls (p : Program) : List Decl :=
   p.decls.filter fun | .type _ _ => true | _ => false
 
-/-- Each datatype the program declares, paired with its type parameters. The
-    projection `checkMonoPolyDatatypesRemain` compares, so that a failure prints
-    the datatype whose parameters moved rather than the whole block. -/
+/-- Each datatype that the program declares, together with its type parameters.
+    `checkMonoPolyDatatypesRemain` compares this projection, so that a counterexample prints the datatype
+    whose parameters changed, and not the whole block. -/
 def datatypeParams (p : Program) : List (String × List TyIdentifier) :=
   (datatypeBlocks p).flatMap fun b => b.map fun d => (d.name, d.typeArgs)
 
-/-- **Type declarations pass through the pass unchanged** — same declarations, in
-    the same order.
+/-- **The pass gives each type declaration back unchanged**, in the same order.
 
-    `Decl` derives `DecidableEq`, so this is a genuine equality rather than a
-    `BEq` comparison, and a failure prints both declaration lists. They can be
-    large; that is the price of the counterexample naming what changed. -/
+    `Decl` derives `DecidableEq`, so this claim is a true equality, and not a comparison through `BEq`. A
+    counterexample therefore prints both lists of the declarations. Such a list can be large, and that size
+    is the price of a counterexample that names what changed. -/
 abbrev checkMonoTypeDeclsUnchanged (p : Program) : Prop :=
   onOutput p (typeDecls p) typeDecls = typeDecls p
 
 /-- **A polymorphic datatype is still polymorphic after the pass**: its type
     parameters are neither dropped nor specialized.
 
-    Stated positively, and expected to hold, because it pins the pass's scope. If
-    it ever fails, kind (2) monomorphization has arrived and the properties around
-    it need rereading — which is the signal wanted, rather than a silent change of
-    meaning under `checkMonoTypeDeclsUnchanged`.
+    The property states the claim positively, because it pins the scope of the pass. A counterexample means
+    that the pass also specializes a datatype declaration, and each property around this one then needs a
+    second reading. That signal is the point, and it is better than a silent change of the meaning of
+    `checkMonoTypeDeclsUnchanged`.
 
-    Vacuous unless the draw declares a datatype with type parameters. -/
+    The property says nothing unless the draw declares a datatype with a type parameter. -/
 abbrev checkMonoPolyDatatypesRemain (p : Program) : Prop :=
   onOutput p (datatypeParams p) datatypeParams = datatypeParams p
 
@@ -553,27 +506,23 @@ def derivedPolyNames (p : Program) : List String :=
   (datatypeBlocks p).flatMap fun block =>
     (ProgramGen.adtDerivedPolyOps block).map Prod.fst
 
-/-- **The derived functions of a polymorphic datatype *are* rewritten**, which is
-    the other half of the asymmetry: the declaration stays polymorphic, the
-    operators it derives do not.
+/-- **The pass rewrites each derived function of a polymorphic datatype.** That is the other half of the
+    asymmetry: the declaration keeps its type parameters, and the operators that it derives do not.
 
-    Seeded with `monoSeedFactoryWithDerived`, because `Core.Factory` holds no
-    derived operator and the claim would otherwise be vacuous by construction
-    rather than by draw. Self-calibrating: the premise is "a reference to a name
-    that is polymorphic in the seed factory", so an empty premise reads as
-    vacuous, never as red. -/
+    The property uses `monoSeedFactoryWithDerived` as its seed, because `Core.Factory` holds no derived
+    operator, and the claim would otherwise say nothing by construction, and not by the draw. The property
+    calibrates itself: its premise is a reference to a name that is polymorphic in the seed factory, so an
+    empty premise gives no claim, and it gives no counterexample. -/
 abbrev checkMonoDerivedOpsRewritten (p : Program) : Prop :=
   (((runMonoWith (monoSeedFactoryWithDerived p) p).map
     (fun r => survivingPolyRefs (derivedPolyNames p) (allOpNames r.1.2))).getD []) = []
 
-/-! ## Group C — the naming convention
+/-! ## The convention for a name
 
-Every specialization is identified by its mangled name
-`$__mono#<base>#<mangleTyArgs tys>`, so the convention carries the whole weight of
-keeping specializations apart. Two instantiations that mangle alike collapse into
-one declaration, silently and at the wrong type — and `mangleTy`'s docstring
-concedes that the arity prefix a `.tcons` carries is "documentary rather than
-disambiguating". -/
+The mangled name of a specialization identifies it, and that convention is therefore what keeps two
+specializations apart. Two instantiations that give one mangled name become one declaration, in silence and
+at the wrong type. The docstring of `mangleTy` also records that the prefix for the arity of a `.tcons` is
+documentary, and that it separates no two names. -/
 
 /-- The mangled specialization names the output declares. -/
 def monoMangledNames (p : Program) : List String :=
@@ -583,87 +532,80 @@ def monoMangledNames (p : Program) : List String :=
     (programFuncs p').filterMap fun f =>
       if (demangleFuncName f.name.name).isSome then some f.name.name else none
 
-/-! ### Coverage
+/-! ### The coverage
 
-Not properties: a property asserts, and these two measure. They exist because
-every predicate in this module reads `none`-or-nothing as "no claim to make", and
-the measurement in the module header says that is the *usual* case for a default
-draw. Wire at least one of them as a Tyche axis or a `Diagnostic`, so a run
-reports how often it reached the pass rather than leaving a reader to assume it
-did. -/
+The two definitions below are not properties. A property asserts a claim, and each of these measures a draw.
+They exist because each predicate of this module reads an absent result as an absence of a claim, and a
+default draw rarely reaches the pass, as the module docstring records. Register at least one of them as an
+axis of a Tyche panel or as a `Diagnostic`, so that a run reports how often it reached the pass. -/
 
-/-- How many specializations the pass created — `0` when the draw never reached
-    it, which the module header measures as the common case. -/
+/-- The number of the specializations that the pass built. The value is 0 when the draw never reached the
+    pass, and the module docstring records that a default draw rarely reaches it. -/
 def monoSpecializationCount (p : Program) : Nat := (monoMangledNames p).length
 
-/-- Whether this draw reached the pass at all. The boolean form of
-    `monoSpecializationCount`, for a Tyche nominal axis. -/
+/-- Whether this draw reached the pass. This definition is the `Bool` form of
+    `monoSpecializationCount`, for a nominal axis of a Tyche panel. -/
 def monoReachedPass (p : Program) : Bool := monoSpecializationCount p != 0
 
-/-- **Every specialization's base name was a polymorphic function of the input.**
-    A mangled name whose base is not one of the functions the pass set out to
-    specialize is a name minted from nowhere. -/
+/-- **The base name of each specialization is a polymorphic function of the input.** A mangled name whose base
+    is not one of the functions that the pass set out to specialize comes from nowhere. -/
 abbrev checkMonoMangledBaseWasPolymorphic
     (p : Program) (F : Lambda.Factory CoreLParams := Core.Factory) : Prop :=
   (monoMangledNames p).filter
     (fun n => !(polyNames p F).contains (demangledBaseName n)) = []
 
-/-- **The output declares no name twice.** The pass adds one declaration per
-    specialization, keyed on the instantiation *vector* by
-    `FuncSpecialization`'s hand-written `BEq` and `Hashable`. Should those two
-    ever disagree, or should two distinct instantiations mangle alike, the output
-    holds two declarations under one name — which this catches and the
-    typechecker may not.
+/-- **The output declares no name two times.** The pass adds one declaration for each specialization, and it
+    keys each of them on the *list* of the instantiations, through the `BEq` instance and the `Hashable`
+    instance of `FuncSpecialization`, which a person wrote. If those two instances disagree, or if two
+    different instantiations give one mangled name, then the output holds two declarations under one name.
+    This property catches that case, and the typechecker can miss it.
 
-    Stated as an equality of *lengths* rather than through `nodup`, so a failure
-    prints the two counts (`issue: 5 = 6 does not hold`) and thereby how many
-    names collapsed. -/
+    The claim is an equality of two *lengths*, and it does not use a predicate about duplicates. Therefore a
+    counterexample prints the two counts, and it says how many names became one. -/
 abbrev checkMonoOutputNamesNodup (p : Program) : Prop :=
   (onOutput p [] declNames).eraseDups.length = (onOutput p [] declNames).length
 
-/-- **`demangleFuncName` inverts `mangleFuncName`** at a non-empty instantiation:
-    the base name and the type mangling both come back.
+/-- **`demangleFuncName` inverts `mangleFuncName`** at an instantiation that is not empty. Both the base name
+    and the mangled types come back.
 
-    This is where the assumption stated in `demangleFuncName`'s own docstring —
-    "`funcname` never contains `#` (not a legal Strata ident char)" — gets tested
-    against the names the generator actually mints, rather than trusted. A
-    nullary instantiation returns the base name unchanged and so has nothing to
-    invert; that case is excluded here and stated by
-    `checkMangleNullaryIsIdentity`. -/
+    The docstring of `demangleFuncName` states one assumption: the name of a function never holds the
+    separator character, because that character is not legal in an identifier of Strata. This property tests
+    that assumption against the names that the generator builds, and it does not trust it. An empty
+    instantiation gives the base name unchanged, so there is nothing to invert there. This property excludes
+    that case, and `checkMangleNullaryIsIdentity` states it. -/
 abbrev checkMangleRoundtripAt (name : String) (tys : List LMonoTy) : Prop :=
   tys ≠ [] →
     demangleFuncName (mangleFuncName Strata.PtrCache.PtrCache.empty name tys).1.name
       = some (name, mangleTyArgs tys)
 
-/-- **A nullary instantiation is not mangled at all**, per `mangleFuncName`. Worth
-    pinning separately: it is the one input on which the round-trip above cannot
-    hold, and the reason is a deliberate special case rather than a gap. -/
+/-- **`mangleFuncName` does not change a name at an empty instantiation.** This case needs a property of its
+    own, because it is the one input where the round trip above cannot hold, and the reason is a deliberate
+    special case and not a gap. -/
 abbrev checkMangleNullaryIsIdentity (name : String) : Prop :=
   (mangleFuncName Strata.PtrCache.PtrCache.empty name []).1.name = name
 
-/-- **Distinct instantiations of one function get distinct names.** Injectivity of
-    the convention, stated pointwise over a pair of instantiation vectors so that
-    a failure names the colliding pair. -/
+/-- **Two different instantiations of one function get two different names.** This property is the injectivity
+    of the convention, over a pair of lists of the instantiations, so that a counterexample names the pair
+    that collides. -/
 abbrev checkMangleDistinctAt (name : String) (tys₁ tys₂ : List LMonoTy) : Prop :=
   tys₁ ≠ tys₂ →
     (mangleFuncName Strata.PtrCache.PtrCache.empty name tys₁).1.name ≠
       (mangleFuncName Strata.PtrCache.PtrCache.empty name tys₂).1.name
 
-/-- Whether the program refers to any function the pass would specialize. The
-    guard for `checkMonoNoPolyProgramUnchanged`: a program that mentions no
-    polymorphic function is one the pass has nothing to do to. -/
+/-- Whether the program names a function that the pass would specialize. This predicate is the guard of
+    `checkMonoNoPolyProgramUnchanged`, because the pass has nothing to do to a program that names no
+    polymorphic function. -/
 def refersToPolyFunc (p : Program) (F : Lambda.Factory CoreLParams := Core.Factory) : Bool :=
   let poly := polyNames p F
   (allOpNames p).any poly.contains || !(polyProgramFuncNames p).isEmpty
 
-/-- **A program with no polymorphic function is returned unchanged**, and reported
-    as unchanged.
+/-- **The pass gives a program with no polymorphic function back unchanged**, and it reports that program as
+    unchanged.
 
-    The anchor against spurious rewriting: whatever else the pass does, it must
-    not touch a program that has nothing to monomorphize. Note what the `changed`
-    flag is computed from — `p'.decls != p.decls`, which ignores the rebuilt
-    factory entirely, so this property says nothing about a draw whose only
-    polymorphic functions are factory entries. -/
+    This property is the guard against a rewrite that the pass should not make: whatever else the pass does,
+    it must change no program that has nothing to specialize. Read what the `changed` flag comes from: a
+    comparison of the two lists of the declarations, which reads no factory. Therefore this property says
+    nothing about a draw whose polymorphic functions are entries of the factory only. -/
 abbrev checkMonoNoPolyProgramUnchanged (p : Program) : Prop :=
   refersToPolyFunc p = false → monoChangedOut p = (false, p)
 
@@ -672,41 +614,37 @@ def nonFuncDeclNames (p : Program) : List String :=
   (p.decls.filter fun | .func _ _ | .recFuncBlock _ _ => false | _ => true).map
     fun d => CoreIdent.toPretty d.name
 
-/-- **The declarations the pass does not add keep their relative order.** A
-    specialization is a new declaration, so the output is longer; but every
-    declaration that was already there must still be there, in the same order.
-    Stated over the non-function declarations, which are the ones the pass neither
-    adds nor drops. -/
+/-- **Each declaration that the pass does not add keeps its relative order.** A specialization is a new
+    declaration, so the output is longer. Each declaration of the input must still be present, and in the same
+    order. The property covers each declaration that is not a function, because those are the ones that the
+    pass neither adds nor drops. -/
 abbrev checkMonoDeclOrderPreserved (p : Program) : Prop :=
   onOutput p (nonFuncDeclNames p) nonFuncDeclNames = nonFuncDeclNames p
 
-/-! ## Semantics preservation
+/-! ## The preservation of the semantics
 
-`monomorphizeFunctionsPipelinePhase` is declared `modelPreserving`: a specialized
-copy is a type-instantiated duplicate, so it denotes the same values at that
-instantiation. Lutze et al. prove the corresponding result step-for-step
-(Theorem 3.10, Corollary 3.11); what is checkable here is the weaker, executable
-consequence — that running Strata's own concrete evaluator over an expression
-before and after the pass gives the same answer.
+The pipeline phase of this pass carries the annotation `modelPreserving`. A specialized copy is a duplicate
+at one instantiation of the types, so it denotes the same values at that instantiation. Lutze and others
+prove the matching result for each step, in their Theorem 3.10 and their Corollary 3.11. The executable
+consequence is weaker, and this module can check it: the concrete evaluator of Strata gives the same answer
+for an expression before the pass and after it.
 
-**The comparison is modulo the naming convention, and has to be.** Renaming is
-the pass's entire purpose, so `f(3)` becomes `$__mono#f#int(3)` and the two terms
-are trivially unequal as terms. Both sides are therefore normalized through
-`demangledBaseName` before comparison, which is exactly the normalization the CST
-printer performs for display. What survives that normalization is a difference in
-evaluation *behaviour*, which is the thing worth catching.
+**The comparison ignores the convention for a name, and it must do so.** A rename is the whole purpose of
+the pass, so a call becomes a call to a specialized name, and the two terms are then different terms. This
+module therefore normalizes both sides through `demangledBaseName` before the comparison, and the printer for
+concrete syntax performs exactly that normalization for its display. What survives that normalization is a
+difference in the *behaviour* of the evaluator, and that difference is the one worth a report.
 
-**Where the risk actually is.** `LExpr.eval` unfolds only an `.inline`-attributed
-function, so neither side unfolds a user function and the property says little
-about those. What it does bear on is the *builtins*: the evaluator dispatches on
-an operator's literal name, and the pass renames polymorphic builtins
-(`select`, `update`, `Sequence.length`, …) to `$__mono#select#…`. If a renamed
-builtin stops matching the evaluator's dispatch, folding silently stops — the
-program still typechecks, still encodes, and quietly computes less. That is the
-failure this property exists to find. -/
+**Where the risk is.** `LExpr.eval` unfolds a function with the `.inline` attribute only, so neither side
+unfolds a function of the program, and this property says little about such a function. It does bear on a
+builtin operator. The evaluator dispatches on the literal name of an operator, and the pass renames a
+polymorphic builtin, such as the one that selects from a map or the one that gives the length of a sequence.
+If a renamed builtin no longer matches the dispatch of the evaluator, then the folding stops in silence. The
+program still type checks, it still goes to the encoder, and it computes less. This property exists to find
+that failure. -/
 
-/-- Rewrite every `.op` name of an expression through `demangledBaseName`, so a
-    specialized reference and its polymorphic original compare equal. -/
+/-- Rewrite each `.op` name of an expression through `demangledBaseName`, so that a reference to a
+    specialization and a reference to its polymorphic original are equal. -/
 partial def demangleOps : Expression.Expr → Expression.Expr
   | .op m o ty => .op m ⟨demangledBaseName o.name, o.metadata⟩ ty
   | .app m f a => .app m (demangleOps f) (demangleOps a)
@@ -716,15 +654,15 @@ partial def demangleOps : Expression.Expr → Expression.Expr
   | .eq m a b => .eq m (demangleOps a) (demangleOps b)
   | e => e
 
-/-- The `(before, after)` pairs of always-live expressions whose evaluations
-    disagree once names are normalized, plus a self-pairing sentinel when the two
-    lists are not the same length.
+/-- Each pair of an always-live expression before the pass and after it whose two evaluations differ, after the
+    normalization of the names. The result also holds one pair of the first input expression with itself when
+    the two lists have different lengths.
 
-    The sentinel is what keeps the alignment claim inside the same predicate:
-    `List.zip` truncates, so a pass that dropped an always-live declaration would
-    otherwise shorten both sides and compare only the surviving prefix. Pairing
-    the first input expression with itself is never a real disagreement — the two
-    sides are identical — so it cannot fire except through the length check. -/
+    That extra pair keeps the claim about the alignment inside this one predicate. `List.zip` drops the longer
+    tail, so a pass that removed an always-live declaration would otherwise shorten both sides, and the
+    comparison would read the common prefix only. A pair of one expression with itself is never a true
+    difference, because the two sides are identical, so it can appear only through the check of the two
+    lengths. -/
 def evalDisagreements (p : Program) : List (Expression.Expr × Expression.Expr) :=
   match runMono p with
   | none => []
@@ -738,16 +676,15 @@ def evalDisagreements (p : Program) : List (Expression.Expr × Expression.Expr) 
 /-- **Concrete evaluation agrees before and after the pass**, up to the naming
     convention.
 
-    Compares positionally over `aliveExprs`, which the pass rewrites in place and
-    neither reorders nor resizes — the length check states that alignment rather
-    than assuming it, so a future pass that did add a procedure would fail here
-    loudly instead of comparing mismatched pairs.
+    The property compares the two lists by position, over `aliveExprs`. The pass rewrites that list in place,
+    and it changes neither its order nor its length. The check of the two lengths states that alignment, and
+    the property does not assume it. Therefore a later pass that added a procedure gives a counterexample
+    here, and it does not compare two pairs that do not match.
 
-    Each side is evaluated against the factory that side belongs to: the input
-    against `Core.Factory` (what `mkState` seeds, hence what the pass saw), the
-    output against the rebuilt factory that holds the specialized copies. Guarded
-    on the input typechecking, since evaluation of an ill-typed expression is not
-    something either side owes an answer for. -/
+    Each side runs against its own factory. The input runs against `Core.Factory`, which `mkState` seeds and
+    which the pass saw. The output runs against the factory that the pass built, which holds each specialized
+    copy. The property carries a guard on the type check of the input, because neither side owes an answer for
+    an expression that is not well typed. -/
 abbrev checkMonoEvalAgreement (p : Program) : Prop :=
   progTypeChecks p = true → evalDisagreements p = []
 

@@ -2,26 +2,26 @@ import Basalt.IO
 import Lean.Data.Json
 
 /-!
-# Tyche Visualization Support
+# Support for the Tyche visualization
 
-This module provides infrastructure for outputting generator samples in the
-[Tyche](https://github.com/tyche-pbt/tyche-extension) JSONL format.
-Tyche is a VS Code extension for visualizing PBT generator distributions.
+This module writes the samples of a generator in the JSONL format of
+[Tyche](https://github.com/tyche-pbt/tyche-extension). Tyche is an extension for VS Code that
+shows the distribution of a generator for a property-based test.
 
-## JSONL Format
+## The JSONL format
 
-Each line in the output file is a JSON object with `type: "test_case"`:
+Each line of the output file is a JSON object whose `type` field is `"test_case"`:
 ```json
 {"type":"test_case","run_start":<timestamp>,"property":"<name>",
  "status":"passed","status_reason":"","representation":"<value>",
  "features":{...},"coverage":null}
 ```
 
-## Usage
+## How to use this module
 
-1. Implement a `TycheSample` instance for your generated type.
-2. Call `Tyche.run` with a generator action and output path.
-3. Open the resulting `.jsonl` file with Tyche (`Tyche: Open` in VS Code).
+1. Write a `TycheSample` instance for your generated type.
+2. Call `Tyche.run` with a generator action and an output path.
+3. Open the `.jsonl` file with Tyche. In VS Code, use `Tyche: Open`.
 -/
 
 open Lean (Json JsonNumber)
@@ -35,38 +35,40 @@ inductive Status where
   | gaveUp
   deriving Inhabited
 
-/-- A feature value for Tyche visualization. -/
+/-- The value of one feature, for the Tyche visualization. -/
 inductive Feature where
   | ordinal (v : Int)
   | nominal (v : String)
   | continuous (v : Float)
   deriving Inhabited
 
-/-- A single sample produced by a generator, ready for Tyche serialization. -/
+/-- One sample from a generator, in the form that the Tyche output needs. -/
 structure Sample where
   representation : String
   features : List (String × Feature)
   status : Status := .passed
-  /-- Optional human-readable reason for the status (e.g. a parser error on a
-      failure). Serialized to Tyche's `status_reason` field. -/
+  /-- A reason for the status, in words. An error from the parser is one example. The output holds
+      it in the `status_reason` field of Tyche. -/
   statusReason : String := ""
   deriving Inhabited
 
-/-- Typeclass for types that can be converted to Tyche samples. -/
+/-- The class for a type that this module can convert to a Tyche sample. -/
 class TycheSample (α : Type) where
   toSample : α → Sample
 
+/-- The JSON form of a status. -/
 def Status.toJson : Status → Json
   | .passed => "passed"
   | .failed => "failed"
   | .gaveUp => "gave_up"
 
+/-- The JSON form of a feature value. -/
 def Feature.toJson : Feature → Json
   | .ordinal v => Json.num (JsonNumber.fromInt v)
   | .nominal v => Json.str v
   | .continuous v => Lean.toJson v
 
-/-- Serialize a sample as one line of Tyche JSONL. -/
+/-- Writes a sample as one line of Tyche JSONL. -/
 def Sample.toJsonLine (s : Sample) (property : String) (runStart : Nat) : String :=
   Json.compress <| Json.mkObj [
     ("type", "test_case"),
@@ -79,16 +81,16 @@ def Sample.toJsonLine (s : Sample) (property : String) (runStart : Nat) : String
     ("coverage", Json.null)
   ]
 
-/-- Configuration for a Tyche run. -/
+/-- The configuration of a Tyche run. -/
 structure Config where
   numSamples : Nat := 1000
   propertyName : String := "generator"
   outputPath : String := "tyche_output.jsonl"
   deriving Inhabited
 
-/-- Append `numSamples` generated samples to an already-open handle as Tyche
-    JSONL lines. Retries on failure so exactly `numSamples` lines are written.
-    Lets many generators share one output file without per-panel temp files. -/
+/-- Adds `numSamples` generated samples to an open handle, as lines of Tyche JSONL. The function
+    tries again after a failure, so it writes exactly `numSamples` lines. Many generators can
+    therefore share one output file, and no panel needs a temporary file. -/
 def runInto [TycheSample α] (handle : IO.FS.Handle) (gen : IO α)
     (property : String) (numSamples : Nat) (runStart : Nat) : IO Unit := do
   let mut written := 0
@@ -102,25 +104,26 @@ def runInto [TycheSample α] (handle : IO.FS.Handle) (gen : IO α)
     catch _ =>
       retries := retries + 1
 
-/-- Write one JSONL line per element of `samples`, all under the same property
-    name. The deterministic counterpart of `runInto`: for a property whose input
-    space is a *fixed finite set* rather than a distribution — the registered
-    bitvector widths, the eighteen `Bv↔Int` operators, a constructed no-op witness —
-    sampling with replacement would emit the same few marks repeatedly, so the panel
-    enumerates the space exactly once instead. -/
+/-- Writes one JSONL line for each element of `samples`, under one property name.
+
+    This function is the deterministic partner of `runInto`. Use it for a property whose input
+    space is a *fixed and finite set* and not a distribution. The registered bitvector widths, the
+    eighteen `Bv↔Int` operators, and a witness that the author builds are three examples. A sample
+    with replacement would give the same few marks many times, so the panel lists the space one
+    time. -/
 def writeInto [TycheSample α] (handle : IO.FS.Handle) (samples : List α)
     (property : String) (runStart : Nat) : IO Unit := do
   for val in samples do
     handle.putStrLn ((TycheSample.toSample val).toJsonLine property runStart)
 
-/-- Run a generator `numSamples` times and write Tyche JSONL output.
-    Retries on failure so the output always contains exactly `numSamples` lines. -/
+/-- Runs a generator `numSamples` times and writes the Tyche JSONL output. The function tries again
+    after a failure, so the output always holds exactly `numSamples` lines. -/
 def run [TycheSample α] (gen : IO α) (config : Config := {}) : IO Unit := do
   let startTime ← IO.monoMsNow
   let handle ← IO.FS.Handle.mk config.outputPath .write
   runInto handle gen config.propertyName config.numSamples startTime
 
-/-- Run multiple named generators and write all samples to one JSONL file. -/
+/-- Runs many generators that have names, and writes each sample to one JSONL file. -/
 def runMultiple (generators : List (String × IO Sample)) (config : Config := {}) : IO Unit := do
   let startTime ← IO.monoMsNow
   let handle ← IO.FS.Handle.mk config.outputPath .write

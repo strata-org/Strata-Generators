@@ -171,8 +171,7 @@ def actualEqFold (d₁ d₂ : Decimal) : Option Bool :=
   | .prim (.bool b) => some b
   | _ => none
 
-/-- **Property P1.2: a fold of `eq` on two real literals agrees with a comparison
-    of their values.**
+/-- **A fold of `eq` on two real literals agrees with a comparison of their values.**
 
     The property holds when `Factory.eq` either folds to
     `expectedEqFold`, or leaves the comparison for the solver, which is `none`. A
@@ -186,7 +185,7 @@ def checkEqFold (d₁ d₂ : Decimal) : Bool :=
   | none => true
   | some b => b == expectedEqFold d₁ d₂
 
-/-- **Property P1.3: the comparator on two real literals is a total order.**
+/-- **The comparator on two real literals is a total order.**
 
     Exactly one of `lt d₁ d₂`, `lt d₂ d₁` and `eq d₁ d₂` must hold. This is
     trichotomy, and each order needs it.
@@ -203,10 +202,9 @@ def checkTrichotomy (d₁ d₂ : Decimal) : Bool :=
 
 -- ── Machine-checked reproducers ───────────────────────────────────────
 --
--- These pin the specific pair from the report, independently of what the generator
--- draws. Each states the behaviour of the code as it is now, which is the
--- incorrect behaviour, so each breaks after a correction and shows that this file
--- needs an update.
+-- Each example below pins one pair, and it does not depend on what the generator draws. Each of them states the
+-- behaviour of the code, which is the incorrect behaviour. Therefore each of them breaks after a correction, and
+-- it then shows that this file needs a change too.
 
 /-- `3e0` and `30e-1` denote one value. -/
 example : Decimal.toRat ⟨3, 0⟩ = Decimal.toRat ⟨30, -1⟩ := by native_decide
@@ -270,13 +268,12 @@ have the defect. `Decimal` has no normal form, so one value has many spellings. 
 {detail}. This property must turn green after `Factory.eq` compares a real by \
 value.")
 
-/-- Property P1.2 as a suite node: a fold of `eq` agrees with a comparison of the
-    values. -/
+/-- The property as a node of the suite: a fold of `eq` agrees with a comparison of the two values. -/
 def eqFoldAction (numTrials : Nat) : IO (Bool × Nat × Nat × Option String) :=
   runDecimalProperty numTrials
     "`Factory.eq` folds two reals of equal value to `false`:" checkEqFold
 
-/-- Property P1.3 as a suite node: the comparator is a total order. -/
+/-- The property as a node of the suite: the comparator is a total order. -/
 def trichotomyAction (numTrials : Nat) : IO (Bool × Nat × Nat × Option String) :=
   runDecimalProperty numTrials
     "`eq` is structural and `lt` is by value, so neither `<` nor `=` holds:"

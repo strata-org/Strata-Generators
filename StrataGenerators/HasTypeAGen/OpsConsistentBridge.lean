@@ -6,25 +6,25 @@ import all Strata.DL.Lambda.FactoryProps
 import Std.Data.HashMap.Lemmas
 
 /-!
-# `Factory`-internal bridge lemma for the `OpsConsistent(R)` generator proofs
+# The two lemmas about the inside of a `Factory`, for the op-consistency proofs
 
-Both of Strata's op-consistency predicates are nameable directly from downstream
-(non-`module`) proof files: `Lambda.OpsConsistent` is `@[expose] public`,
-`Lambda.OpsConsistentR` is `public`, and the soundness bridge
-`Lambda.OpsConsistent_OpsConsistentR` is `public`. So the generator proofs need
-**no local copy** of either predicate, and — since the traversal is proven
-directly against the declarative `OpsConsistentR` via its constructors — no
-operational-unfolding or self-unification helpers either.
+A proof file that is not a module can name both op-consistency predicates of Strata directly.
+`Lambda.OpsConsistent` is `@[expose] public`, `Lambda.OpsConsistentR` is `public`, and the
+bridge for soundness, `Lambda.OpsConsistent_OpsConsistentR`, is also `public`. The proofs for
+the generator therefore need **no copy** of either predicate. The proof about the traversal
+also goes through the constructors of the declarative `OpsConsistentR`, so it needs no lemma
+that unfolds the operational form and no lemma that unifies a type with itself.
 
-This module survives for two lemmas that reach into `Factory`'s module-private surface and
-therefore must live in a `module` file that does `import all Factory`. The non-`module`
-op-consistency proof file cannot `import all` itself (it transitively depends on the
-non-`module` Basalt library), so it reuses both from here:
+This module holds two lemmas that reach the parts of `Factory` that its own module keeps
+private. Such a lemma must be in a `module` file that does `import all Factory`. The proof
+file for op-consistency is not a module and cannot use `import all`, because it depends on
+the Basalt library, which is also not a module. That file therefore uses both lemmas from
+here:
 
-* `mem_get?_eq`, which reaches the *private* `Factory.nameMap` internals;
-* `Factory.memNameGetElem`, a re-export of Strata's `Factory.mem_name_eq_getElem`. That
-  theorem lives in `Strata.DL.Lambda.FactoryProps`, whose declarations are not `public`
-  under Strata's module system, so it cannot be named from a plain import.
+* `mem_get?_eq`, which reaches the *private* internals of `Factory.nameMap`;
+* `Factory.memNameGetElem`, which exports `Factory.mem_name_eq_getElem` of Strata again. That
+  theorem is in a module whose declarations are not `public` under the module system of
+  Strata, so a plain import cannot name it.
 -/
 
 namespace Lambda
@@ -34,17 +34,17 @@ set_option linter.unusedSectionVars false
 
 variable {T : LExprParams} [DecidableEq T.IDMeta]
 
--- ── Factory lookup bridge ────────────────────────────────────────────
+-- ── The lemmas for a lookup in a `Factory` ──────────────────────────
 
-/-- Public re-export of `Factory.mem_name_eq_getElem`: if `fn ∈ F.toArray` and
-    `fn.name.name = s`, then `s ∈ F` and `F[s] = fn`. -/
+/-- A public export of `Factory.mem_name_eq_getElem`. If `F.toArray` holds `fn` and the name of `fn`
+    is `s`, then `F` holds `s` and `F[s]` is `fn`. -/
 public theorem Factory.memNameGetElem {F : @Factory T} {fn : LFunc T} {s : String}
     (hmem : fn ∈ F.toArray) (hname : fn.name.name = s) :
     ∃ (hs : s ∈ F), F[s]'hs = fn :=
   Factory.mem_name_eq_getElem hmem hname
 
-/-- Membership plus a total lookup determines the partial lookup: if `s ∈ F`
-    and `F[s] = fn`, then `F[s]? = some fn`. -/
+/-- Membership and a total lookup give the partial lookup. If `F` holds `s` and `F[s]` is `fn`, then
+    `F[s]?` is `some fn`. -/
 public theorem mem_get?_eq {F : @Factory T} {s : String} {fn : LFunc T}
     (hs : s ∈ F) (hget : F[s]'hs = fn) : F[s]? = some fn := by
   cases h : F[s]? with

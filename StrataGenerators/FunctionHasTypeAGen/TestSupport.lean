@@ -6,18 +6,16 @@ import Strata.Languages.Core.FunctionType
 open Lambda RandomChoice Core Imperative
 
 /-!
-# Test support for the `FunctionHasTypeAGen` generator
+# The test support for the `FunctionHasTypeAGen` generator
 
-Provides shared utilities for property-based testing of `genFunction` (defined
-in `FunctionHasTypeAGen/Core.lean`):
-- Pretty-printing for generated `Function`s,
-- A `Bool` reflection of Strata's `fvars_annotated_by` predicate,
-- Generator wrappers for `IO` and `Plausible.Gen`.
+This module holds the shared functions for the property-based tests of `genFunction`:
+- the functions that print a generated `Function`;
+- a `Bool` copy of the `fvars_annotated_by` predicate of Strata;
+- the wrappers that run a generator in `IO` and in `Plausible.Gen`.
 
-## Why we reflect `fvars_annotated_by` locally
+## Why this module has its own copy of `fvars_annotated_by`
 
-The predicate under test is `Lambda.fvars_annotated_by`, defined in
-`Strata.DL.Lambda.Denote.Assumptions`:
+The predicate under test is `Lambda.fvars_annotated_by` of Strata:
 
 ```
 def fvars_annotated_by [DecidableEq T.IDMeta]
@@ -32,28 +30,29 @@ def fvars_annotated_by [DecidableEq T.IDMeta]
   | .quant _ _ _ _ tr body => fvars_annotated_by tyMap tr ∧ fvars_annotated_by tyMap body
 ```
 
-We cannot import it here. It lives in a Lean *module*-system file
-(`import all`-only, no `public section`), whereas this repo's generator files
-are non-`module`; Lean rejects importing the symbol into a non-`module` file.
-So — exactly as the `Cmd` harness re-implements `storeWellTyped` / typechecking
-rather than importing the corresponding Strata `Prop`s — we mirror the
-definition as a decidable `Bool` function `fvarsAnnotatedBy`, matching the
-`Prop` clause-for-clause. The only clause needing care is the annotated-`fvar`
-case: `∀ ty', find? tyMap name = some ty' → ty = ty'` holds iff either
-`find? tyMap name = none`, or it is `some ty'` with `ty = ty'`; both are decided
-by a single `Map.find?` lookup.
+This file cannot import that predicate. It is in a file that uses the module system of Lean,
+with no `public section`, so only an `import all` reaches it. The generator files of this
+repository are not modules, and Lean rejects an import of such a symbol into a file that is
+not a module. This module therefore has its own copy, `fvarsAnnotatedBy`, which is a
+decidable `Bool` function that follows the `Prop` clause by clause. The harness for a command
+does the same for `storeWellTyped` and for the type check, and it imports no `Prop` of Strata
+for them.
+
+One clause needs care, and that is the case of an `fvar` with an annotation. The claim
+`∀ ty', find? tyMap name = some ty' → ty = ty'` holds exactly when `find? tyMap name` is
+`none`, or when it is `some ty'` and `ty` equals `ty'`. One lookup with `Map.find?` decides
+both cases.
 -/
 
--- ── Bool reflection of `fvars_annotated_by` ──────────────────────────────
+-- ── The `Bool` copy of `fvars_annotated_by` ──────────────────────────────
 
-/-- A `Bool` reflection of `Lambda.fvars_annotated_by tyMap e` (see the module
-    docstring for why this is re-implemented rather than imported).
+/-- A `Bool` copy of `Lambda.fvars_annotated_by tyMap e`. The documentation of this module says why
+    the module has its own copy and does not import the predicate.
 
-    Every annotated free variable `(name : ty)` must be consistent with `tyMap`:
-    if `name` is bound in `tyMap`, its recorded type must equal `ty`. An
-    *unannotated* free variable (`.fvar _ _ none`) is unconditionally rejected
-    (mirrors the `Prop`'s `False` clause). All other leaves pass; compound nodes
-    recurse into every subexpression. -/
+    Each free variable with an annotation, `(name : ty)`, must agree with `tyMap`. If `tyMap` binds
+    `name`, then the type in `tyMap` must equal `ty`. A free variable with *no* annotation, which is
+    `.fvar _ _ none`, always fails, and this follows the `False` clause of the `Prop`. Each other
+    leaf passes, and a compound node recurses into each of its subexpressions. -/
 def fvarsAnnotatedBy (tyMap : Map (Identifier Unit) LMonoTy) : LExpr' → Bool
   | .fvar _ name (some ty) =>
     match Map.find? tyMap name with
@@ -69,38 +68,37 @@ def fvarsAnnotatedBy (tyMap : Map (Identifier Unit) LMonoTy) : LExpr' → Bool
   | .eq _ e1 e2 => fvarsAnnotatedBy tyMap e1 && fvarsAnnotatedBy tyMap e2
   | .quant _ _ _ _ tr body => fvarsAnnotatedBy tyMap tr && fvarsAnnotatedBy tyMap body
 
-/-- The `FVarCtx` used to *generate* a function, viewed as the type map that its
-    fvar annotations should be consistent with. `FVarCtx` is a
-    `List (String × LMonoTy)`; the identifiers created by the generator are
-    `⟨name, ()⟩`, so we rekey accordingly. -/
+/-- The `FVarCtx` that the generator used for a function, as the type map that the annotations on its
+    free variables must agree with. An `FVarCtx` is a `List (String × LMonoTy)`, and the identifiers
+    that the generator makes are of the form `⟨name, ()⟩`, so this function changes each key to that
+    form. -/
 def fctxToTyMap (fctx : FVarCtx) : Map (Identifier Unit) LMonoTy :=
   fctx.map (fun (name, ty) => (⟨name, ()⟩, ty))
 
-/-- **The property under test**, applied to a whole function: every fvar in the
-    (optional) body and in the (optional) measure is annotated consistently with
-    `tyMap`. Absent body/measure are a vacuous pass. -/
+/-- **The property under test**, for a whole function. Each free variable in the body and in the
+    measure has an annotation that agrees with `tyMap`. The body and the measure are optional, and a
+    function that has neither is a vacuous pass. -/
 def functionFvarsAnnotatedBy (tyMap : Map (Identifier Unit) LMonoTy) (func : Function) : Bool :=
   (match func.body with | some b => fvarsAnnotatedBy tyMap b | none => true) &&
   (match func.measure with | some m => fvarsAnnotatedBy tyMap m | none => true)
 
--- Function pretty-printing now goes through Strata's own `Core.formatProgram`
--- (see `formatFunc` / `formatFuncAsProgram` in
--- `StrataGenerators.FunctionHasTypeAGen.Roundtrip`), so displays match the real
--- formatter exactly. The former hand-rolled `ppFunction` has been removed.
+-- The output for a function goes through the `Core.formatProgram` of Strata. `formatFunc` and
+-- `formatFuncAsProgram` in `StrataGenerators.FunctionHasTypeAGen.Roundtrip` call it, so a report
+-- shows the output of the real formatter.
 
--- ── Generator wrappers ────────────────────────────────────────────────────
+-- ── The wrappers around the generator ─────────────────────────────────────
 
-/-- Generate a single well-typed `Function` in `IO`, exercising `genFunction`
-    directly. Defaults mirror the other harness wrappers (`defaultFCtx`,
-    `coreMonoOps`, depth 3). -/
+/-- Makes one well-typed `Function` in `IO`, with a direct call of `genFunction`. The default values
+    follow the other wrappers of the harness: `defaultFCtx`, `coreMonoOps` and the depth 3. -/
 def genFunctionIO (fctx : FVarCtx := defaultFCtx) (octx : OpCtx := coreMonoOps)
     (depth : Nat := 3) : IO Function :=
   genFunction (G := IO) fctx octx depth
 
--- ── Known types and context for `Function.typeCheck` ──────────────────────
+-- ── The known types and the context for `Function.typeCheck` ──────────────
 
-/-- Known types covering all base types + type constructors the generator can
-    produce. Required for `Function.typeCheck` to resolve arrow/Map/Seq aliases. -/
+/-- The known types. The list covers each base type and each type constructor that the generator can
+    make. `Function.typeCheck` needs it to resolve the alias of an arrow, of a `Map` and of a
+    `Sequence`. -/
 def funcCheckKnownTypes : Lambda.KnownTypes :=
   open Lambda.LTy.Syntax in
   Lambda.makeKnownTypes ([t[∀a b. %a → %b],
@@ -109,18 +107,18 @@ def funcCheckKnownTypes : Lambda.KnownTypes :=
     t[∀a b. Map %a %b],
     t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
 
-/-- `LContext` with `coreFactory` and all generator-relevant known types.
-    Matches the `resolveLContext` used for expression-level tests. -/
+/-- An `LContext` that holds `coreFactory` and each known type that the generator needs. It is the
+    same context as the `resolveLContext` that the tests for an expression use. -/
 def funcCheckContext : Lambda.LContext CoreLParams :=
   { Lambda.LContext.default with
     functions := coreFactory,
     knownTypes := funcCheckKnownTypes }
 
--- ── Function property checks (shared by both harnesses) ───────────────────
+-- ── The checks for a function, which both drivers share ───────────────────
 
-/-- Reflect `FuncHasTypeA` on a function via `LExpr.typeCheck`: the body (if any)
-    types at the declared output, the measure (if any) at `int`, and the input /
-    type-argument lists are duplicate-free. -/
+/-- A `Bool` copy of `FuncHasTypeA` for a function, through `LExpr.typeCheck`. The body, when it
+    exists, has the declared output type. The measure, when it exists, has the type `int`. The list
+    of inputs and the list of type arguments each hold no duplicate. -/
 def checkFuncHasTypeA (func : Function) : Bool :=
   let bodyOk := match func.body with
     | some b => LExpr.typeCheck (T := CoreLParams) [] b == some func.output
@@ -130,53 +128,53 @@ def checkFuncHasTypeA (func : Function) : Bool :=
     | none => true
   bodyOk && measureOk && decide (func.inputs.keys.Nodup) && decide (func.typeArgs.Nodup)
 
-/-- `Function.typeCheck` soundness (`typeCheck_annotated_sound`): when `typeCheck`
-    accepts, its output satisfies the declarative spec `FuncHasTypeA`. When
-    `typeCheck` rejects (e.g. measure-without-body, which the spec allows but the
-    algorithm forbids), this is a vacuous pass — the property asserts soundness,
-    not completeness. -/
+/-- Soundness of `Function.typeCheck`, which upstream states as `typeCheck_annotated_sound`. When
+    `typeCheck` accepts a function, its output satisfies the declarative specification
+    `FuncHasTypeA`. When `typeCheck` rejects a function, the check is a vacuous pass. A function
+    with a measure and no body is one such case, because the specification allows it and the
+    algorithm rejects it. The property states soundness and not completeness. -/
 def checkTypeCheckAnnotatedSound (func : Function) : Bool :=
   match Function.typeCheck funcCheckContext TEnv.default func with
   | .ok (func', _) => checkFuncHasTypeA func'
   | .error _ => true
 
-/-- Type preservation under evaluation (`Step.type_preserved` /
-    `StepStar.type_preserved` / `eval_denote_sound`): if a function has a body,
-    evaluating it preserves the declared output type. A bodiless function passes
-    vacuously. -/
+/-- Evaluation keeps the type. Upstream states this claim as `Step.type_preserved`,
+    `StepStar.type_preserved` and `eval_denote_sound`. If a function has a body, then the evaluation
+    of that body keeps the declared output type. A function with no body is a vacuous pass. -/
 def checkFunctionBodyPreservation (func : Function) : Bool :=
   match func.body with
   | some body => LExpr.typeCheck (T := CoreLParams) [] (eval 100 body) == some func.output
   | none => true
 
--- ── Special-character identifier probe (shared by both harnesses) ─────────
--- The full-function round-trip bundles a name, typeargs, types, a body, etc., so
--- a failure can't be attributed to one cause. This probe isolates a single
--- generated identifier in one syntactic position at a time inside an otherwise-
--- trivial function, so a failure yields a minimal reproducer.
+-- ── The probe for an identifier with a special character ──────────────────
+-- Both drivers share this probe. The round trip of a whole function holds a name, the type
+-- arguments, the types, a body and more, so a reader cannot give one cause for a failure. This probe
+-- puts one generated identifier in one syntactic position at a time, inside a function that is
+-- otherwise trivial. A failure therefore gives a small reproducer.
 
-/-- The three syntactic positions an identifier can occupy in a `Function`. -/
+/-- The three syntactic positions where an identifier can occur in a `Function`. -/
 inductive IdentPosition where
   | funcName
   | typeArg
   | binder
   deriving Repr, DecidableEq
 
+/-- The label of a position, for a report. -/
 def IdentPosition.label : IdentPosition → String
   | .funcName => "function-name"
   | .typeArg  => "type-arg"
   | .binder   => "binder"
 
-/-- Build a minimal `Function` that places `name` in the given position and is
-    otherwise trivial (no body, no measure, `int` output). For `typeArg`, the name
-    is also referenced as the output type (`ftvar name`) so it appears in a use
-    position, not just its binding. For `binder`, the single input uses the name
-    as its parameter identifier at type `int`. -/
+/-- Builds the smallest `Function` that holds `name` in the given position. The function is otherwise
+    trivial: it has no body, it has no measure, and its output type is `int`. For a `typeArg`, the
+    output type is also `ftvar name`, so the name occurs in a use position and not only in its
+    declaration. For a `binder`, the one input uses the name as the identifier of its parameter, at
+    the type `int`. -/
 def minimalFuncWithName (pos : IdentPosition) (name : String) : Function :=
   let ident : Identifier Unit := ⟨name, ()⟩
-  -- `Function` aliases the decidable base `LFuncDefined` (no `concreteEval`) after
-  -- Strata's `76933e8b` split, so build the bare record directly rather than via
-  -- `LFunc.mk` (which constructs the fuller `LFunc`).
+  -- `Function` is an alias for the decidable base type `LFuncDefined`, which has no `concreteEval`
+  -- field. The code therefore builds the record directly, and it does not call `LFunc.mk`, which
+  -- builds the larger `LFunc`.
   match pos with
   | .funcName => { name := ident, inputs := [], output := .int }
   | .typeArg  => { name := ⟨"f", ()⟩, typeArgs := [name], inputs := [],

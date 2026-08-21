@@ -42,11 +42,8 @@ more than a single self-reference. It emits any member of the supplied
 `blockRefs : List BlockRef`. That list holds the block datatypes that the new
 datatype can refer to. Read the section "Type parameters" for the exact rule.
 
-The recursive occurrence is the one part of the generator that shows the change from a
-single datatype to a mutual block. The old code compared a head symbol against one
-`selfName`, but the conditions are now weaker. The head symbol must be a member of
-the set of block names. A recursive occurrence is `n (n's typeArgs)` for each block
-datatype `n`.
+The head symbol of a recursive occurrence must be a member of the set of block names. A
+recursive occurrence is `n (n's typeArgs)` for each block datatype `n`.
 
 `genConstrArgs` and `genConstrs` make argument lists and constructors.
 `genConstructors` makes the constructors of one datatype, and
@@ -122,7 +119,7 @@ reserved set, but it does not add the parameter back to that set. Therefore two
 different datatypes can use the same parameter names, and one parameterized datatype
 can refer to another.
 
-`genFreshName` in `CmdHasTypeAGen/Core.lean` uses the same method for variable names.
+The `genFreshName` function for a command uses the same method for a variable name.
 It draws a random legal identifier. If that identifier is already in the reserved
 list, it falls back to a name that is longer than each reserved name. Such a name is
 certainly absent from the list. The generator puts no other limit on a name. In
@@ -181,58 +178,59 @@ abbrev KnownTyCon := String × Nat
 
 /-! ### The vocabulary, read off `Core.KnownTypes`
 
-Both lists below are **derived** from `Core.KnownTypes` — the register Strata Core itself
-consults — rather than written by hand. Two reasons:
+Both lists below come **from `Core.KnownTypes`**, which is the register that Strata Core
+reads. No one writes them by hand, for two reasons.
 
-* a hand-written list drifts (the same lesson as `coreMonoOps`/`corePolyOps`); and
-* the derivation is what makes the *arity* side condition provable rather than assumed.
-  `MutualADTWF.argsWellKinded` says every type-constructor occurrence is applied at the
-  arity `C.knownTypes` records. If the vocabulary *is* that register split by arity, the
-  converse holds too, so `genArgTy_complete_of_MutualADTWF` no longer needs a hand-written
-  `ArityOk` restating the whole arity discipline.
+* A list that a person writes by hand can differ from the register.
+* The derivation is what makes the side condition on the *arity* provable, and not an
+  assumption. `MutualADTWF.argsWellKinded` says that each occurrence of a type constructor
+  has the arity that `C.knownTypes` records. If the vocabulary *is* that register in two
+  parts by arity, then the converse also holds, and
+  `genArgTy_complete_of_MutualADTWF` needs no hand-written `ArityOk` that states the whole
+  discipline of the arities again.
 
-`Core.KnownTypes` is a `HashMap`, whose `toList` order is unspecified, so both lists are
-sorted: the generator's distribution must not depend on hash iteration order. -/
+`Core.KnownTypes` is a `HashMap`, and the order of its `toList` is not specified. Both lists
+are therefore in sorted order, because the distribution of the generator must not depend on
+the order of the iteration over a hash map. -/
 
-/-- The nullary type constructors Strata Core knows, i.e. the base types the generator may
-    refer to. Currently `TriggerGroup`, `Triggers`, `bool`, `int`, `real`, `regex`,
-    `string` — the five scalars this list used to be written as by hand, plus the two
-    quantifier-trigger types it had omitted.
+/-- The nullary type constructors that Strata Core knows. These are the base types that the
+    generator can refer to: `TriggerGroup`, `Triggers`, `bool`, `int`, `real`, `regex` and
+    `string`.
 
-    Every entry is included: `coreNullary_arity` needs the list to be *exactly* the arity-0
-    register, since that is the direction that turns `argsWellKinded` back into
-    "this name is one of ours".
+    The list holds each entry of the register at arity 0. `coreNullary_arity` needs the list to
+    be *exactly* that register, because that is the direction which turns `argsWellKinded` back
+    into the claim that a name belongs to the vocabulary of the generator.
 
-    `pickBitvecWidth` draws bitvectors separately (see `genBaseTy`), because a bitvector
-    type is `LMonoTy.bitvec n` for a *width* `n` and not a type application. -/
+    `pickBitvecWidth` draws a bitvector separately, as `genBaseTy` shows. A bitvector type is
+    `LMonoTy.bitvec n` for a *width* `n`, and it is not an application of a type. -/
 def defaultBaseTypes : List String :=
   -- `KnownTypes = Std.HashMap String Nat`, key = name, value = arity.
   ((Std.HashMap.toList Core.KnownTypes).filterMap
     (fun k => if k.2 == 0 then some k.1 else none)).mergeSort (· ≤ ·)
 
-/-- The applied (arity ≥ 1) type constructors Strata Core knows, minus `arrow`. This is the
-    register `MutualADTWF.argsWellKinded` speaks about, restricted to the applications
-    `genArgTy` does not give a dedicated branch. `defaultTyCons` is this list minus
-    `bitvec`. -/
+/-- The type constructors of arity 1 or more that Strata Core knows, without `arrow`. This is the
+    register that `MutualADTWF.argsWellKinded` speaks about, for the applications that have no
+    branch of their own in `genArgTy`. `defaultTyCons` is this list without `bitvec`. -/
 def coreAppliedTyCons : List KnownTyCon :=
   -- `KnownTypes = Std.HashMap String Nat`, key = name, value = arity.
   ((Std.HashMap.toList Core.KnownTypes).filter
     (fun k => k.2 != 0 && k.1 != "arrow")).mergeSort (fun a b => a.1 ≤ b.1)
 
-/-- The applied (arity ≥ 1) type constructors Strata Core knows, as `(name, arity)` pairs.
-    `arrow` is excluded because `genArgTy` has a dedicated branch for it, and `bitvec`
-    because its argument is a *width* and not a type — `genBaseTy` emits `LMonoTy.bitvec n`
-    for it. `coreAppliedTyCons` keeps `bitvec`, and the `BitvecWidthOnly` side condition is
-    what bridges the two (see `genArgTy_complete_of_MutualADTWF`).
+/-- The type constructors of arity 1 or more that Strata Core knows, as pairs of a name and an
+    arity. The list holds `[("Map", 2), ("Sequence", 1)]`.
 
-    Currently `[("Map", 2), ("Sequence", 1)]`, the same pair this list used to name by
-    hand. -/
+    The list does not hold `arrow`, because `genArgTy` has a branch of its own for an arrow. It
+    also does not hold `bitvec`, because the argument of a `bitvec` is a *width* and not a type,
+    and `genBaseTy` emits `LMonoTy.bitvec n` for it. `coreAppliedTyCons` keeps `bitvec`, and the
+    side condition `BitvecWidthOnly` is the bridge between the two lists, as
+    `genArgTy_complete_of_MutualADTWF` shows. -/
 def defaultTyCons : List KnownTyCon :=
   coreAppliedTyCons.filter (fun kc => kc.1 != "bitvec")
 
--- Drift pins. These are `#guard`s (evaluation) and not `decide` (kernel reduction), because
--- `Core.KnownTypes` is a `HashMap`. If upstream registers a new primitive, the guard that
--- fires tells you which list grew; nothing else in the build depends on these values.
+-- These guards pin the two lists to the register. They are `#guard` statements, which evaluate,
+-- and not `decide`, which reduces in the kernel, because `Core.KnownTypes` is a `HashMap`. If
+-- upstream registers a new primitive, then the guard that fails says which list grew. No other
+-- part of the build depends on these two values.
 #guard defaultBaseTypes ==
   ["TriggerGroup", "Triggers", "bool", "int", "real", "regex", "string"]
 #guard coreAppliedTyCons == [("Map", 2), ("Sequence", 1), ("bitvec", 1)]
@@ -267,8 +265,8 @@ def initialReserved (baseTypes : List String) (tyCons : List KnownTyCon)
 
 /-- The length of the longest name in a list. The result is `0` for an empty list. A
     name that is longer than this length cannot be a member of the list. This is the
-    argument from length that `fallbackName` uses. `maxNameLen` in
-    `CmdHasTypeAGen/Core.lean` does the same for a `VarCtx`. -/
+    argument from length that `fallbackName` uses. `maxNameLen` does the same for a
+    `VarCtx`. -/
 def maxNameLength (names : List String) : Nat :=
   names.foldl (fun acc nm => max acc nm.length) 0
 
@@ -278,8 +276,8 @@ def maxNameLength (names : List String) : Nat :=
     holds only letters. It holds only the character `x`, therefore it is never a
     reserved keyword.
 
-    This definition uses `indexedFreshName` from `CmdHasTypeAGen/Core.lean`. The member
-    of that family at index `0` is this string. -/
+    This definition uses `indexedFreshName`. The member of that family at index `0` is this
+    string. -/
 def fallbackName (reserved : List String) : String :=
   indexedFreshName (maxNameLength reserved) 0
 
@@ -292,7 +290,7 @@ def fallbackName (reserved : List String) : String :=
     result is always a legal identifier that is absent from `reserved`. The generator
     adds no prefix and no suffix to it.
 
-    `genFreshName` in `CmdHasTypeAGen/Core.lean` does the same against a `VarCtx`. This
+    The `genFreshName` function for a command does the same work against a `VarCtx`. This
     function does it against a `List String`. -/
 def genFreshName [Gen G] (reserved : List String) : G String := do
   let s ← genIdentName
@@ -331,8 +329,7 @@ abbrev BlockRef := String × LMonoTys
 * `blockRefs : List BlockRef`. These are the block datatypes that the new datatype can
   refer to. Each member is its name with its own type arguments as types. A uniform
   occurrence of a member is `name args`, with no change. For `List α`, the occurrence
-  must be `List α`. It cannot be `List β` or `List (α, α)`. This list makes the old
-  single pair `selfName` and `selfArgs` more general. The conditions now test for
+  must be `List α`. It cannot be `List β` or `List (α, α)`. The conditions test for
   membership in this set of names, and not for equality with one name.
 * `tyParams : List TyIdentifier`. These are the type parameter names of the datatype.
   The generator uses them to make the rigid type variables, which are the `.ftvar`
@@ -347,17 +344,15 @@ abbrev BlockRef := String × LMonoTys
     member `b` of `baseTypes` with no arguments, which is `.tcons b []`. A base type
     holds no type variable.
 
-    This function uses `pickBitvecWidth` from `HasTypeAGen/Core.lean`. The `LMonoTy`
-    generator uses the same width generator, and it now draws a width with no limit.
-    `pickBitvecWidth` is at the head of the list, therefore the list is
-    clearly a `::`. Therefore `simp` can prove that `oneOf` gets a list that is not
-    empty, and an empty `baseTypes` does no damage.
+    This function uses `pickBitvecWidth`. The generator for an `LMonoTy` uses the same generator
+    for a width, and that generator draws a width with no limit. `pickBitvecWidth` is at the head
+    of the list, therefore the list is clearly a `::`. Therefore `simp` can prove that `oneOf`
+    gets a list that is not empty, and an empty `baseTypes` does no damage.
 
-    `pickBaseType` in that module has no parameter for the pool of base types. But
-    `genBaseTy` takes the pool `baseTypes` from the caller, because the soundness proof
-    quantifies over it. Therefore `genBaseTy` cannot call `pickBaseType`. The two
-    functions agree on the default pool, and `defaultBaseTypes` is
-    `nullaryBaseTypeNames`. -/
+    `pickBaseType` has no parameter for the pool of base types. `genBaseTy` takes the pool
+    `baseTypes` from the caller, because the proof of soundness quantifies over that pool.
+    Therefore `genBaseTy` cannot call `pickBaseType`. The two functions agree on the default
+    pool, because `defaultBaseTypes` equals `nullaryBaseTypeNames`. -/
 def genBaseTy [Gen G] (baseTypes : List String) : G LMonoTy :=
   oneOf ((fun () => pickBitvecWidth) ::
          baseTypes.map (fun b => (fun () => pure (.tcons b [])))) (by simp)
@@ -592,12 +587,9 @@ Each edge of that graph makes the rank smaller, therefore the graph has no cycle
 datatype is inhabited. The inhabited constructor of a datatype at the smallest rank refers to no
 block datatype. The reason is that the set of names that it may use is empty.
 
-The old design gave the same guarantee of inhabitance. In that design the generator made
-the datatypes in a fixed order, and the inhabited constructor referred only to the
-datatypes before it. The new design makes the rank an explicit label, and the position in
-the list gives nothing. Therefore the completeness proof does not build a topological
-order. It uses the rank that the inhabitance derivation gives it. Read `rankExists` in the
-proofs. -/
+The rank is an explicit label, and the position of a datatype in the list gives nothing.
+Therefore the proof of completeness builds no topological order. It uses the rank that the
+derivation of the inhabitance gives it. Read `rankExists` in the proofs. -/
 
 /-- Draw `n` lists of type parameters, one for each datatype. The generator draws the
     length of each list independently in the range `[0, maxTyParams]`. It draws each list
@@ -710,9 +702,8 @@ def lowerRankHeaders (rankedHeaders : List (TypeConstructor × Nat)) (r : Nat) :
     is inhabited. The inhabited constructor of a datatype at the smallest rank refers to no
     block datatype.
 
-    The old function threaded an accumulator `done` for a fixed order, but this function
-    threads no such accumulator. The drawn ranks alone give that set of names, therefore
-    the order of the declarations has no effect.
+    This function threads no accumulator for a fixed order. The ranks that the generator drew
+    give that set of names, therefore the order of the declarations has no effect.
 
     This function gives the same first value of `reserved` to each datatype. The
     constructor names and the field names of two different datatypes are independent. That

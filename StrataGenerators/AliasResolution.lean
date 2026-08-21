@@ -2,57 +2,56 @@ import StrataGenerators.DatatypeGen
 import StrataGenerators.ProgramGen.UnprovenTransforms
 
 /-!
-# Eager versus incremental type-alias resolution
+# Eager and incremental resolution of a type alias
 
-Strata Core resolves a type alias (`type A x := …;`, a `TypeSynonym`) **during**
-type checking, one declaration at a time: `Program.typeCheck`'s fold adds each
-`.syn` declaration to the type environment (`TEnv.addTypeAlias`) as it reaches it,
-and later declarations are de-aliased where the checker happens to need it — a
-datatype block through `MutualDatatype.resolveAliases`, an annotation through
-`AnnotCompat`/`AliasEquiv`, a signature through `LTy.resolveAliases`.
+Strata Core resolves a type alias **during** type checking, one declaration at a
+time. An alias is a `TypeSynonym`, and it has the form `type A x := …;`. The fold of
+`Program.typeCheck` adds each `.syn` declaration to the type environment with
+`TEnv.addTypeAlias` when it reaches that declaration. It then removes an alias from a
+later declaration at the places where the checker needs the expansion: from a
+datatype block through `MutualDatatype.resolveAliases`, from an annotation through
+`AnnotCompat` and `AliasEquiv`, and from a signature through `LTy.resolveAliases`.
 
-The property here is that this is *equivalent to* resolving every alias up front:
-expanding all aliases before the checker runs must produce a program that type
-checks exactly when the original does and that **evaluates the same**. If the two
-paths disagree, then an alias is not the transparent abbreviation it is documented
-to be — a program's meaning would depend on whether it spells a type by its name or
-by its expansion.
+The property here says that this order gives the same result as the expansion of every
+alias before the checker runs. The expanded program must type check exactly when the
+original does, and it must **evaluate the same**. If the two paths disagree, then an
+alias is not the transparent abbreviation that the documents describe, and the meaning
+of a program depends on whether it writes a type by its name or by its expansion.
 
-Both directions matter and the module states both:
+Both directions matter, and this module states both:
 
-* `checkAliasAcceptanceAgrees` — the two paths agree on acceptance.
-* `checkAliasObligationsAgree` — the two paths give the same proof obligations,
-  under Strata's own symbolic evaluator (`toCoreProofObligationProgram`, the
-  `symbolicEval` phase). This is the "evaluates the same" half.
+* `checkAliasAcceptanceAgrees`: the two paths agree on acceptance.
+* `checkAliasObligationsAgree`: the two paths give the same proof obligations under the
+  symbolic evaluator of Strata, which is `toCoreProofObligationProgram` in the
+  `symbolicEval` phase. This is the half about evaluation.
 
-This is the *semantic* counterpart to a typing-spec gap the repo already records
-elsewhere: there is a machine-checked counterexample to `MutualADTWF` being
-preserved by alias resolution. That is about which programs the spec calls
-well-formed; this is about whether the two resolution orders *mean* the same
-thing.
+This is the *semantic* companion to a gap in the typing specification that the
+repository records elsewhere: there is a machine-checked counterexample to the claim
+that alias resolution keeps `MutualADTWF`. That gap is about which programs the
+specification calls well-formed. This module is about whether the two orders of
+resolution *mean* the same thing.
 
-## Making the property non-vacuous
+## How the property stays away from vacuity
 
-`ProgramGen.genDeclAlias` emits an alias declaration but nothing ever *uses* it:
-the generator's type vocabulary (`baseTypes`/`tyCons`/`dtCons`) is deliberately
-kept disjoint from the alias names (invariant `Inv.aliasVocabDisjoint`), precisely
-because drawing a block over alias names could not be proved sound. So a generated
-program has aliases, and resolving them is the identity — the property would pass
-on every draw while testing nothing.
+`ProgramGen.genDeclAlias` emits an alias declaration, but nothing *uses* it. The type
+vocabulary of the generator, which is `baseTypes`, `tyCons` and `dtCons`, stays
+disjoint from the alias names. The invariant `Inv.aliasVocabDisjoint` states this, and
+the reason is that no proof of soundness exists for a block that draws over alias
+names. A generated program therefore has aliases, and resolution of them is the
+identity function. The property then holds on each draw and it tests nothing.
 
-The fix is to *introduce* alias usage rather than to hope for it:
-`introduceAlias` picks a ground type `τ` that the program actually mentions, adds
-`type A := τ;` as the program's first declaration, and rewrites **every**
-occurrence of `τ` to `A`. The result is a program in which the alias is used in
-every position a type can appear — signatures, `var` annotations, datatype
-constructor fields, expression annotations — and whose eager resolution is the
-program we started from. A draw where no ground type occurs at all yields `none`
-and is counted as a skip, not a pass.
+The fix is to *add* a use of an alias. `introduceAlias` picks a ground type `τ` that
+the program mentions, adds `type A := τ;` as the first declaration of the program, and
+rewrites **each** occurrence of `τ` to `A`. The result is a program that uses the alias
+in each position where a type can occur: a signature, a `var` annotation, a field of a
+datatype constructor, and an annotation on an expression. The eager resolution of that
+program is the program at the start. A draw that mentions no ground type gives `none`,
+and the suite counts it as a skip and not as a pass.
 
-The rewrite direction is what makes the test sharp. Rewriting `τ` to `A`
-*everywhere* means the checker never sees `τ` again and has to do the de-aliasing
-itself at each of those positions; and because `A` is nullary and `τ` ground, the
-rewrite cannot capture a type variable or change arity.
+The direction of the rewrite is what makes the test sharp. The rewrite of `τ` to `A`
+happens *everywhere*, so the checker never sees `τ` again and must remove the alias
+itself at each of those positions. `A` is nullary and `τ` is ground, so the rewrite
+cannot capture a type variable and it cannot change an arity.
 -/
 
 open Lambda Core Imperative
@@ -61,34 +60,37 @@ namespace StrataGenerators.AliasResolution
 
 open StrataGenerators.Program.UnprovenTransforms (symbolicObligations programHasLoop)
 
-/-! ## A type rewrite over a whole program
+/-! ## A rewrite of the types of a whole program
 
-Core has no generic "map over every type" traversal (`Program.eraseTypes` drops
-*expression* annotations but keeps every signature), so this is it. Both
-directions of the property need it: `introduceAlias` rewrites `τ ↦ A`, and the
-comparison normalises both programs by rewriting `A ↦ τ` so that a difference in
-the two obligation programs cannot be a mere difference of spelling. -/
+Core has no traversal that maps a function over each type. `Program.eraseTypes` drops
+the annotation of an *expression*, but it keeps each signature. The functions below are
+therefore that traversal. Both directions of the property need it. `introduceAlias`
+rewrites `τ` to `A`. The comparison then normalizes both programs, and it rewrites `A`
+to `τ`, so a difference between the two obligation programs cannot be a difference of
+spelling only. -/
 
 mutual
-/-- Apply `f` to `τ` and, recursively, to its arguments (bottom-up: the arguments
-    are rewritten first, then `f` sees the rebuilt constructor). -/
+/-- Applies `f` to `τ` and to the arguments of `τ`. The traversal goes from the bottom
+    up: it rewrites the arguments first, and `f` then sees the constructor that the
+    traversal rebuilt. -/
 def mapTy (f : LMonoTy → LMonoTy) : LMonoTy → LMonoTy
   | .ftvar v => f (.ftvar v)
   | .bitvec n => f (.bitvec n)
   | .tcons n args => f (.tcons n (mapTys f args))
 
-/-- `mapTy` over a list. -/
+/-- `mapTy` over a list of types. -/
 def mapTys (f : LMonoTy → LMonoTy) : LMonoTys → LMonoTys
   | [] => []
   | t :: ts => mapTy f t :: mapTys f ts
 end
 
-/-- `mapTy` under a type scheme. The bound variables are untouched: `f` is only
-    ever the ground rewrite `τ ↦ A` or its inverse, so no capture is possible. -/
+/-- `mapTy` under a type scheme. The function does not change a bound variable. `f` is
+    always the ground rewrite from `τ` to `A`, or its inverse, so no capture can
+    happen. -/
 def mapLTy (f : LMonoTy → LMonoTy) : LTy → LTy
   | .forAll vs mty => .forAll vs (mapTy f mty)
 
-/-- `mapTy` over every type annotation of an expression. -/
+/-- `mapTy` over each type annotation of an expression. -/
 def mapExprTys (f : LMonoTy → LMonoTy) : Expression.Expr → Expression.Expr
   | .const m c => .const m c
   | .op m o ty => .op m o (ty.map (mapTy f))
@@ -101,13 +103,13 @@ def mapExprTys (f : LMonoTy → LMonoTy) : Expression.Expr → Expression.Expr
   | .ite m c t e => .ite m (mapExprTys f c) (mapExprTys f t) (mapExprTys f e)
   | .eq m e1 e2 => .eq m (mapExprTys f e1) (mapExprTys f e2)
 
-/-- `mapTy` over a signature (a `ListMap` from identifier to monotype). -/
+/-- `mapTy` over a signature, which is a `ListMap` from an identifier to a monotype. -/
 def mapSig (f : LMonoTy → LMonoTy) (s : @LMonoTySignature Unit) : @LMonoTySignature Unit :=
   s.map (fun (n, τ) => (n, mapTy f τ))
 
-/-- `mapTy` over a function declaration: its signature, its body, its axioms, its
-    preconditions and its measure. A `Core.Function` is `LFuncDefined CoreLParams`,
-    whose signature types are `LMonoTy`. -/
+/-- `mapTy` over a function declaration: the signature, the body, the axioms, the
+    preconditions and the measure. A `Core.Function` is an `LFuncDefined CoreLParams`, and
+    the types in its signature are `LMonoTy` values. -/
 def mapFuncTys (f : LMonoTy → LMonoTy) (fn : Core.Function) : Core.Function :=
   { fn with
     inputs := mapSig f fn.inputs
@@ -117,9 +119,9 @@ def mapFuncTys (f : LMonoTy → LMonoTy) (fn : Core.Function) : Core.Function :=
     preconditions := fn.preconditions.map (fun p => { p with expr := mapExprTys f p.expr })
     measure := fn.measure.map (mapExprTys f) }
 
-/-- `mapTy` over a statement-level function declaration. Distinct from
-    `mapFuncTys` because a `Stmt.funcDecl` carries a `PureFunc Expression`, whose
-    signature types are `Expression.Ty = LTy` rather than `LMonoTy`. -/
+/-- `mapTy` over a function declaration inside a statement. This function is separate from
+    `mapFuncTys`, because a `Stmt.funcDecl` holds a `PureFunc Expression`, and the types in
+    its signature are `Expression.Ty`, which is `LTy` and not `LMonoTy`. -/
 def mapPureFuncTys (f : LMonoTy → LMonoTy) (fn : PureFunc Expression) :
     PureFunc Expression :=
   { fn with
@@ -130,7 +132,8 @@ def mapPureFuncTys (f : LMonoTy → LMonoTy) (fn : PureFunc Expression) :
     preconditions := fn.preconditions.map (fun p => { p with expr := mapExprTys f p.expr })
     measure := fn.measure.map (mapExprTys f) }
 
-/-- `mapTy` over a datatype block: every constructor field's type. -/
+/-- `mapTy` over a datatype block. It rewrites the type of each field of each
+    constructor. -/
 def mapBlockTys (f : LMonoTy → LMonoTy) (block : MutualDatatype Unit) :
     MutualDatatype Unit :=
   block.map fun d =>
@@ -146,7 +149,8 @@ def mapOptExprTys (f : LMonoTy → LMonoTy) : ExprOrNondet Expression → ExprOr
   | .det e => .det (mapExprTys f e)
   | .nondet => .nondet
 
-/-- `mapTy` over a Core command: the `var` type annotation and every expression. -/
+/-- `mapTy` over a Core command. It rewrites the type annotation of a `var` and each
+    expression. -/
 def mapCmdTys (f : LMonoTy → LMonoTy) : Command → Command
   | .cmd (.init n ty e md) => .cmd (.init n (mapLTy f ty) (mapOptExprTys f e) md)
   | .cmd (.set n e md) => .cmd (.set n (mapOptExprTys f e) md)
@@ -160,9 +164,9 @@ def mapCmdTys (f : LMonoTy → LMonoTy) : Command → Command
       | a => a)) md
 
 mutual
-/-- `mapTy` over a statement: its command, and recursively every nested body. A
-    `.typeDecl` carries a bare `TypeConstructor` (a name and its parameter count),
-    which holds no type to rewrite. -/
+/-- `mapTy` over a statement: its command, and each nested body. A `.typeDecl` holds a
+    `TypeConstructor`, which is a name and a number of parameters, and it therefore holds
+    no type to rewrite. -/
 def mapStmtTys (f : LMonoTy → LMonoTy) : Statement → Statement
   | .cmd c => .cmd (mapCmdTys f c)
   | .block l b md => .block l (mapStmtsTys f b) md
@@ -176,15 +180,15 @@ def mapStmtTys (f : LMonoTy → LMonoTy) : Statement → Statement
   | .funcDecl d md => .funcDecl (mapPureFuncTys f d) md
   | .typeDecl tc md => .typeDecl tc md
 
-/-- `mapStmtTys` over a statement list. -/
+/-- `mapStmtTys` over a list of statements. -/
 def mapStmtsTys (f : LMonoTy → LMonoTy) : List Statement → List Statement
   | [] => []
   | s :: rest => mapStmtTys f s :: mapStmtsTys f rest
 end
 
-/-- `mapTy` over a procedure: header signatures, spec checks, structured body. A
-    `.cfg` body is left alone (the generator produces none; only
-    `StructuredToUnstructured` does). -/
+/-- `mapTy` over a procedure: the signatures in the header, the checks in the
+    specification, and a structured body. The function does not change a `.cfg` body,
+    because the generator makes none and only `StructuredToUnstructured` does. -/
 def mapProcTys (f : LMonoTy → LMonoTy) (p : Core.Procedure) : Core.Procedure :=
   { p with
     header := { p.header with
@@ -200,9 +204,10 @@ def mapProcTys (f : LMonoTy → LMonoTy) (p : Core.Procedure) : Core.Procedure :
 
 /-- `mapTy` over one declaration.
 
-    An alias declaration's *body* is rewritten too. That matters for the
-    normalising direction (`A ↦ τ`): after it, the program holds `type A := τ;`
-    rather than the vacuous `type A := A;` the naive rewrite would give. -/
+    The function also rewrites the *body* of an alias declaration. This matters for the
+    direction that normalizes, which rewrites `A` to `τ`. After that rewrite the program
+    holds `type A := τ;`, and not the vacuous `type A := A;` that a rewrite of the head
+    alone gives. -/
 def mapDeclTys (f : LMonoTy → LMonoTy) : Decl → Decl
   | .type (.con tc) md => .type (.con tc) md
   | .type (.syn ts) md => .type (.syn { ts with type := mapTy f ts.type }) md
@@ -213,77 +218,78 @@ def mapDeclTys (f : LMonoTy → LMonoTy) : Decl → Decl
   | .func fn md => .func (mapFuncTys f fn) md
   | .recFuncBlock fns md => .recFuncBlock (fns.map (mapFuncTys f)) md
 
-/-- `mapTy` over every type in a program. -/
+/-- `mapTy` over each type in a program. -/
 def mapProgramTys (f : LMonoTy → LMonoTy) (p : Program) : Program :=
   { p with decls := p.decls.map (mapDeclTys f) }
 
-/-! ## Introducing an alias -/
+/-! ## How the module adds an alias -/
 
-/-- The ground types an alias may be introduced for, in the order tried.
+/-- The ground types that can receive an alias, in the order that the code tries them.
 
-    Only *ground* (type-variable-free) types are candidates: an alias for a
-    variable-bearing type would need type parameters, `TEnv.addTypeAlias` requires
-    `freeVars = typeArgs` exactly, and rewriting a variable-bearing type could
-    capture. Base types come first because they occur in the most positions, so
-    aliasing one exercises the most of the checker.
+    Only a *ground* type is a candidate, which is a type with no type variable. An alias
+    for a type that holds a variable needs type parameters, `TEnv.addTypeAlias` needs
+    `freeVars` to equal `typeArgs`, and a rewrite of such a type can capture a variable. A
+    base type comes first, because it occurs in the most positions and an alias for it
+    therefore exercises the most of the checker.
 
-    The list is fixed rather than harvested from the program: what matters is that
-    the chosen type *occurs* (which `occursIn` decides exactly), and a fixed list
-    keeps the choice deterministic per program, which is what lets the shrinker
+    The list is fixed, and the code does not collect it from the program. What matters is
+    that the chosen type *occurs*, and `occursIn` decides that exactly. A fixed list also
+    keeps the choice deterministic for one program, and that is what lets the shrinker
     reproduce a counterexample. -/
 def candidateAliasTys : List LMonoTy :=
   [.bool, .int, .string, .real,
    .bitvec 1, .bitvec 8, .bitvec 16, .bitvec 32, .bitvec 64,
    .tcons "Sequence" [.int], .tcons "Map" [.int, .int]]
 
-/-- A type name no generated program can declare: every generated name is a legal
-    bare Core identifier, and this one starts with `$__`, which `genIdentName`'s
-    `startChars` can produce only as `$` followed by identifier characters — but
-    never the two-character run `__` after a `$`… and in any case
-    `mapProgramTys` only ever inserts it transiently, inside `occursIn`. -/
+/-- A type name that no generated program can declare. Each generated name is a legal bare
+    Core identifier. This name starts with `$__`, and the `startChars` set of
+    `genIdentName` can give a `$` and then identifier characters, but it cannot give the
+    two characters `__` after a `$`. `mapProgramTys` also inserts this name only inside
+    `occursIn`, and it removes the name again. -/
 private def probeTy : LMonoTy := .tcons "$__aliasProbe" []
 
-/-- Whether `τ` occurs anywhere in `p`, decided by *rewriting* it: replace every
-    occurrence with a sentinel and see whether the program changed. This reuses the
-    same traversal the rewrite itself uses, so "occurs" and "is rewritten" cannot
-    disagree — the alternative, a separate collector, is a second traversal that
-    could drift from the first and silently pick a type that is then rewritten
-    nowhere.
+/-- Whether `τ` occurs in `p`. The function decides this by a *rewrite*: it replaces each
+    occurrence with a probe type, and it then tests whether the program changed. It
+    therefore uses the same traversal as the rewrite itself, and the two notions of an
+    occurrence and of a rewrite cannot disagree. A separate function that collects the
+    types is a second traversal, which can differ from the first and can then pick a type
+    that the rewrite touches nowhere.
 
-    The comparison is on the rendered program, since `Core.Program` carries
-    `MetaData` arrays with no `BEq`. -/
+    The comparison uses the printed program, because a `Core.Program` holds arrays of
+    `MetaData` and those arrays have no `BEq` instance. -/
 def occursIn (τ : LMonoTy) (p : Program) : Bool :=
   (Std.format (mapProgramTys (fun t => if t == τ then probeTy else t) p)).pretty
     != (Std.format p).pretty
 
 /-! ### Why the candidates are *primitive* types only
 
-A program's own declared type names (a monomorphic datatype, a nullary abstract
-type) would be attractive candidates — aliasing one puts the alias in front of the
-derived-function vocabulary rather than only in front of `int`. They are excluded,
-because the alias declaration has to be *positioned*: Core's fold processes
-declarations in order, so `type A := T;` for a program-declared `T` may only appear
-after `T`'s own declaration, and the rewrite may then only touch the declarations
-that follow it. Introducing an alias for a *primitive* type needs no such
-reasoning: the alias goes first and the rewrite is total, which is the strongest
-form of the test. The narrower coverage is a deliberate trade, and a program
-whose types are all program-declared is counted as a skip rather than a pass. -/
+A type name that the program declares itself, such as a monomorphic datatype or a nullary
+abstract type, is an attractive candidate. An alias for such a name puts the alias in
+front of the vocabulary of derived functions, and not only in front of `int`. These
+candidates are absent, because the alias declaration then needs a *position*. The fold of
+Core reads the declarations in order, so `type A := T;` for a `T` that the program
+declares can come only after the declaration of `T`, and the rewrite can then touch only
+the declarations after it. An alias for a *primitive* type needs no such argument: the
+alias comes first and the rewrite is total, which is the strongest form of the test. The
+smaller coverage is a deliberate trade, and the suite counts a program whose types are all
+its own declarations as a skip and not as a pass. -/
 
-/-- A name for the introduced alias, fresh for the program: longer than every
-    name the program declares, by the same length argument
-    `DatatypeGen.fallbackName` uses. -/
+/-- A name for the new alias that is fresh for the program. The name is longer than each
+    name that the program declares, and `DatatypeGen.fallbackName` uses the same argument
+    about the length. -/
 def freshAliasName (p : Program) : String :=
   let names := p.getNames.map (·.name)
   indexedFreshName (DatatypeGen.maxNameLength names) 0
 
-/-- Introduce an alias into `p`: pick the first ground type `τ` it mentions, add
-    `type A := τ;` as the first declaration, and rewrite every occurrence of `τ`
-    to `A`. Returns `(A, τ, p')`, or `none` when `p` mentions no ground type (a
-    fully polymorphic program — counted as a skip).
+/-- Adds an alias to `p`. It picks the first ground type `τ` that `p` mentions, it adds
+    `type A := τ;` as the first declaration, and it rewrites each occurrence of `τ` to
+    `A`. The result is `(A, τ, p')`. The result is `none` when `p` mentions no ground type,
+    which means that `p` is fully polymorphic, and the suite counts such a draw as a skip.
 
-    The alias declaration comes **first** so that it is in scope at every use:
-    Core's fold processes declarations in order, so an alias used before its
-    declaration would be an unresolvable name rather than a test of resolution. -/
+    The alias declaration comes **first**, so that it is in scope at each use. The fold of
+    Core reads the declarations in order, so an alias that a declaration uses before the
+    alias declaration is a name that the checker cannot resolve, and that is not a test of
+    resolution. -/
 def introduceAlias (p : Program) : Option (String × LMonoTy × Program) :=
   match candidateAliasTys.find? (occursIn · p) with
   | none => none
@@ -294,72 +300,70 @@ def introduceAlias (p : Program) : Option (String × LMonoTy × Program) :=
     let decl : Decl := .type (.syn { name := a, typeArgs := [], type := τ }) .empty
     some (a, τ, { rewritten with decls := decl :: rewritten.decls })
 
-/-- Rewrite `A` back to `τ` everywhere: the *eager* resolution of the alias
-    `introduceAlias` added, and also the normaliser the obligation comparison
-    applies to both sides so that a difference cannot be one of spelling.
+/-- Rewrites `A` back to `τ` everywhere. This is the *eager* resolution of the alias that
+    `introduceAlias` added. It is also the function that normalizes both sides of the
+    comparison of the obligations, so that a difference cannot be a difference of spelling.
 
-    Expanding by substitution rather than through `LMonoTy.resolveAliases` keeps
-    this a claim about *Strata's* behaviour: were the eager path to use the
-    checker's own resolver, a defect in that resolver would appear on both sides
-    and cancel. `A` is nullary and `τ` ground, so the substitution is exactly what
-    the resolver's `tconsAliasSimple` would compute. -/
+    The expansion is a substitution, and it does not call `LMonoTy.resolveAliases`. This
+    keeps the claim a claim about the behaviour of *Strata*. If the eager path used the
+    resolver of the checker, a defect in that resolver would appear on both sides and the
+    two would cancel. `A` is nullary and `τ` is ground, so the substitution gives exactly
+    the result that `tconsAliasSimple` in the resolver computes. -/
 def expandAlias (a : String) (τ : LMonoTy) (p : Program) : Program :=
   mapProgramTys (fun t => if t == .tcons a [] then τ else t) p
 
 /-! ## The two properties -/
 
-/-- Whether Strata's checker accepts `p`. -/
+/-- Whether the type checker of Strata accepts `p`. -/
 private def accepts (p : Program) : Bool :=
   match Core.typeCheck Core.VerifyOptions.quiet p with
   | .ok _ => true
   | .error _ => false
 
-/-- The checker's diagnostic on `p`, or `none` when it accepts. Used only for
-    reporting a counterexample. -/
+/-- The message that the type checker gives for `p`, or `none` when the checker accepts `p`.
+    Only the report of a counterexample uses it. -/
 def rejectionMessage (p : Program) : Option String :=
   match Core.typeCheck Core.VerifyOptions.quiet p with
   | .ok _ => none
   | .error m => some (toString (m.format none))
 
-/-- **Eager and incremental alias resolution agree on acceptance.**
+/-- **Eager and incremental resolution of an alias agree on acceptance.**
 
-    Given a generated program `p`, let `p'` be `p` with one of its ground types
-    replaced by a fresh alias (`introduceAlias`). Then
+    Take a generated program `p`, and let `p'` be `p` with one of its ground types replaced
+    by a fresh alias, which is the work of `introduceAlias`. Then:
 
-    * the *incremental* path is `typeCheck p'` — the checker meets the alias
-      declaration in its fold and resolves later uses itself;
-    * the *eager* path is `typeCheck (expandAlias … p')` — every alias use is
-      expanded first, so the checker never sees the alias in a use position.
+    * the *incremental* path is `typeCheck p'`. The checker meets the alias declaration in
+      its fold, and it resolves each later use itself.
+    * the *eager* path is `typeCheck (expandAlias … p')`. Each use of the alias is expanded
+      first, so the checker never sees the alias in a use position.
 
-    The two must agree. Vacuously `true` when `p` mentions no ground type, and —
-    deliberately — **not** conditioned on `p` itself typechecking: about 40% of
-    generated programs trip a documented completeness gap, and an alias is
-    supposed to be transparent for *those* too. What the property forbids is one
-    path accepting where the other rejects. -/
+    The two paths must agree. The property is vacuously `true` when `p` mentions no ground
+    type. It also does **not** have the type check of `p` itself as a condition, and this is
+    deliberate. Many generated programs reach a documented gap in completeness, and an alias
+    must be transparent for those programs too. What the property forbids is one path that
+    accepts where the other path rejects. -/
 def checkAliasAcceptanceAgrees (p : Program) : Bool :=
   match introduceAlias p with
   | none => true
   | some (a, τ, p') => accepts p' == accepts (expandAlias a τ p')
 
-/-- **Eager and incremental alias resolution give the same proof obligations.**
-    The "evaluates the same" half: the oracle is Strata's own symbolic evaluator
-    (`toCoreProofObligationProgram`, the `symbolicEval` phase of
-    `corePipelinePhases`), so what is compared is the verification conditions a
-    real run would receive.
+/-- **Eager and incremental resolution of an alias give the same proof obligations.** This is
+    the half about evaluation. The oracle is the symbolic evaluator of Strata, which is
+    `toCoreProofObligationProgram` in the `symbolicEval` phase of `corePipelinePhases`. The
+    comparison therefore covers the verification conditions that a real run receives.
 
-    Both sides are normalised with `expandAlias` before comparison — the
-    incremental path's output still spells the alias in its annotations, and a
-    difference of spelling is not a difference of meaning.
+    `expandAlias` normalizes both sides before the comparison. The output of the incremental
+    path still writes the alias in its annotations, and a difference of spelling is not a
+    difference of meaning.
 
-    Screened three ways, each of which would otherwise make the comparison a
-    non-claim rather than a failure:
+    Three screens apply. Without them, the comparison gives a failure where it makes no
+    claim:
 
-    * no ground type to alias — nothing to test;
-    * `programHasLoop` — the symbolic evaluator **panics** (not `.error`) on a
-      loop, so the screen has to precede the call;
-    * one of the two paths not typechecking — then it has no obligations to
-      compare, and the disagreement is `checkAliasAcceptanceAgrees`' business, not
-      this property's. -/
+    * `p` mentions no ground type, so there is nothing to test.
+    * `programHasLoop` holds. The symbolic evaluator **panics** on a loop and it returns no
+      `.error`, so this screen must come before the call.
+    * One of the two paths does not type check. It then has no obligations to compare, and
+      `checkAliasAcceptanceAgrees` covers that disagreement. -/
 def checkAliasObligationsAgree (p : Program) : Bool :=
   match introduceAlias p with
   | none => true
@@ -375,14 +379,15 @@ def checkAliasObligationsAgree (p : Program) : Bool :=
       | none, none => true
       | _, _ => false
 
-/-- Whether this program contributes anything to the two properties above: it
-    mentions a ground type, so an alias can be introduced. Reported as a coverage
-    statistic — a suite where this is rarely true is a suite whose alias
-    properties are mostly vacuous. -/
+/-- Whether this program gives anything to the two properties for alias resolution. It does
+    so when it mentions a ground type, because an alias for that type can then exist. The
+    suite reports this value as a statistic for coverage. If the value is rarely `true`, then
+    the properties for an alias are mostly vacuous. -/
 def aliasIntroducible (p : Program) : Bool := (introduceAlias p).isSome
 
-/-- Whether the alias-introduced program is one the *obligation* property actually
-    compares (both paths accepted, no loop). The second coverage statistic. -/
+/-- Whether the property for the *obligations* compares the program that holds the new alias.
+    It does so when both paths accept the program and the program holds no loop. This is the
+    second statistic for coverage. -/
 def aliasObligationsCompared (p : Program) : Bool :=
   match introduceAlias p with
   | none => false

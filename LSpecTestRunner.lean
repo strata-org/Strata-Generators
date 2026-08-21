@@ -4,52 +4,53 @@ import LSpec
 /-!
 # The test driver (`lake test`)
 
-The reference driver. It renders the registry through `LSpec.lspecIO`, and it is what
-`testDriver = "test"` names.
+This driver prints the property registry through `LSpec.lspecIO`. The setting
+`testDriver = "test"` names it.
 
 ```bash
 lake test -- [numTrials] [maxSize] [flags]
 ```
 
-or, equivalently:
+The same command in two steps:
 
 ```bash
 lake build test && .lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
-See `StrataGenerators.Test.Cli` for the flags. The exit code is the property verdict;
-the diagnostics and the Tyche pass never affect it.
+For the flags, see `StrataGenerators.Test.Cli`. The exit code gives the verdict of the
+properties. The diagnostics and the Tyche pass do not change it.
 
-The suite it runs is whatever `@[strata_property]` declarations are reachable from
-`StrataTests` — it knows no individual property, and there is nowhere to add one.
+The suite holds each `@[strata_property]` declaration that `StrataTests` reaches. This
+file names no single property, and you cannot add a property here.
 
-Everything except the rendering is `StrataGenerators.Test.Driver`, shared with the
-LSpec-free `PlainTestRunner`. Both fold the same `List TestDecl`, so the two cannot
-disagree about what is tested, only about how a verdict is printed.
+`StrataGenerators.Test.Driver` does all of the work except the output. The
+`PlainTestRunner` driver, which does not use LSpec, uses the same module. Both drivers
+fold the same `List TestDecl`. Therefore the two drivers always agree on what the suite
+tests, and they can differ only in how they print a verdict.
 -/
 
 open StrataGenerators.Test
 open LSpec (TestSeq lspecIO)
 
-/-- Every property registered anywhere under `StrataTests/`. -/
+/-- Every property that a file under `StrataTests/` registers. -/
 def registry : List TestDecl := strata_registry%
 
-/-- Every diagnostic registered anywhere under `StrataTests/`. -/
+/-- Every diagnostic that a file under `StrataTests/` registers. -/
 def diagnostics : List Diagnostic := strata_diagnostics%
 
-/-- The label LSpec prints. A property that is expected to fail is tagged in its *name*,
-    because `TestSeq.individualIO` reports a `Bool` and so has no third state: the plain
-    driver prints `? XFAIL`, but here a reconciled verdict is indistinguishable from a
-    pass and would otherwise read as one. -/
+/-- The label that LSpec prints. The *name* of a property shows if the property is
+    expected to fail. `TestSeq.individualIO` reports a `Bool`, so it has no third state
+    for such a property. Without the tag in the name, a reconciled verdict looks the
+    same as a pass. -/
 def label (d : TestDecl) : String :=
   match d.expect with
   | .mustHold => d.name
   | .knownFailure _ => s!"{d.name} [known failure]"
 
-/-- One property as an LSpec node. `TestDecl.run` has already reduced the verdict to
-    `(passed, counts, message)`, which is exactly `individualIO`'s tuple — so LSpec never
-    sees a `Prop` and no `Testable` instance is synthesized here. LSpec supplies the
-    grouping, the printing and the exit code, and nothing else. -/
+/-- One property as an LSpec node. `TestDecl.run` reduces the verdict to the tuple
+    `(passed, counts, message)`, which is the tuple that `individualIO` needs. LSpec
+    therefore never sees a `Prop`, and Lean synthesizes no `Testable` instance here.
+    LSpec supplies only the groups, the output and the exit code. -/
 def node (cfg : RunConfig) (d : TestDecl) : TestSeq :=
   .individualIO (label d) none
     (do

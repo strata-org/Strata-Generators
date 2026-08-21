@@ -9,106 +9,104 @@ import StrataGenerators.FunctionHasTypeAGen.Core
 open Lambda RandomChoice Core Imperative ArbString
 
 /-!
-# Core generator definitions for well-typed `Cmd`s
+# The core definitions of the generator for a well-typed `Cmd`
 
-This file contains the canonical definition of `genCmd`, a generator of
-well-typed imperative commands satisfying the `CmdHasTypeA` relation.
+This file holds the definition of `genCmd`, which is a generator for a well-typed imperative
+command that satisfies the relation `CmdHasTypeA`.
 
-The generator produces `Cmd Expression` values along with the output typing
-context, using `genLExpr` from `HasTypeAGen/Core.lean` to generate well-typed
-expressions for the right-hand sides of commands.
+The generator gives a `Cmd Expression` value and the output typing context. It uses
+`genLExpr` to make a well-typed expression for the right side of a command.
 -/
 
--- ── Typing context representation ──────────────────────────────────────
+-- ── How the module represents a typing context ─────────────────────────
 
-/-- A representation of the typing context suitable for the generator, using
-    Strata's `Map` keyed by identifier. Each entry maps a variable identifier
-    `⟨name, ()⟩` to its monotype (we only deal with monomorphic contexts, i.e.
-    `forAll [] mty`), mirroring the `Map` field of the semantic `TContext`. -/
+/-- The form of a typing context that the generator uses. It is a `Map` of Strata whose keys are
+    identifiers. Each entry maps a variable identifier `⟨name, ()⟩` to its monotype, because each
+    context here is monomorphic and therefore holds only a `forAll [] mty`. The type follows the
+    `Map` field of the semantic `TContext`. -/
 abbrev VarCtx := Map (Identifier Unit) LMonoTy
 
-/-- Extract all variable names from a `VarCtx`. -/
+/-- The name of each variable in a `VarCtx`. -/
 def VarCtx.names (ctx : VarCtx) : List String :=
   ctx.map (fun p => p.1.name)
 
-/-- Project a statement-level variable scope `VarCtx` (keyed by `Identifier Unit`)
-    down to the expression-level free-variable context `FVarCtx` (keyed by `String`)
-    that `genLExpr` consumes: each entry `(⟨x, ()⟩, τ)` becomes `(x, τ)`.
+/-- Maps a `VarCtx`, which is the variable scope of a statement and whose keys are
+    `Identifier Unit` values, to the free-variable context `FVarCtx` that `genLExpr` takes and
+    whose keys are strings. Each entry `(⟨x, ()⟩, τ)` becomes `(x, τ)`.
 
-    The command/statement generators feed `ctx.toFVarCtx` — *not* a separately
-    threaded `fctx` — into every `genLExpr` call, so a generated expression may
-    reference exactly the variables currently in scope (procedure parameters,
-    earlier-declared locals). Deriving the free-var context from `ctx` at each step
-    makes the soundness invariant `fctx.names ⊆ ctx.names` hold *by construction*
-    (`toFVarCtx_names`: `ctx.toFVarCtx.names = ctx.names`), which is what discharges
-    the `init` rule's freshness premise (`freshNamesDisjointFromExprs_toFVarCtx`)
-    once expressions may contain free variables. -/
+    The generators for a command and for a statement give `ctx.toFVarCtx` to each call of
+    `genLExpr`, and they do *not* thread a separate `fctx`. A generated expression can therefore
+    refer to exactly the variables that are in scope, such as a parameter of the procedure or a
+    local variable from an earlier declaration.
+
+    The free-variable context comes from `ctx` at each step, so the invariant for soundness that
+    the names of `fctx` are a subset of the names of `ctx` holds *by construction*.
+    `toFVarCtx_names` states the equality of the two sets of names. That equality is what
+    discharges the freshness premise of the `init` rule, which is
+    `freshNamesDisjointFromExprs_toFVarCtx`, when an expression can hold a free variable. -/
 def VarCtx.toFVarCtx (ctx : VarCtx) : FVarCtx :=
   ctx.map (fun p => (p.1.name, p.2))
 
-/-- The names of `ctx.toFVarCtx` are exactly the names of `ctx`. -/
+/-- The names of `ctx.toFVarCtx` are the names of `ctx`. -/
 @[simp] theorem VarCtx.toFVarCtx_names (ctx : VarCtx) :
     ctx.toFVarCtx.map Prod.fst = ctx.names := by
   simp only [VarCtx.toFVarCtx, VarCtx.names, List.map_map, Function.comp_def]
 
-/-- Look up a variable identifier in the context. -/
+/-- Looks up a variable identifier in the context. -/
 def VarCtx.find? (ctx : VarCtx) (x : Identifier Unit) : Option LMonoTy :=
   Map.find? ctx x
 
-/-- Check if a variable identifier is fresh (not in the context). -/
+/-- Whether a variable identifier is fresh, which means that the context does not hold it. -/
 def VarCtx.isFresh (ctx : VarCtx) (x : Identifier Unit) : Bool :=
   ctx.find? x |>.isNone
 
-/-- The *mutable* sub-context: the entries of `ctx` whose key is **not** among the
-    immutable names `immutableVars`. Assignment (`set`) targets are drawn from here, so a
-    generated body may freely *read* the immutable names (e.g. a procedure's input
-    parameters, which live in the threaded `ctx` for freshness and expression
-    typing) but can never *assign* to them — exactly the `modRights` obligation.
-    When `immutableVars = []` the mutable context is the whole `ctx`. -/
+/-- The *mutable* part of the context: the entries of `ctx` whose key is **not** in the list of
+    immutable names `immutableVars`. The generator draws the target of a `set` from this part. A
+    generated body can therefore *read* an immutable name, such as an input parameter of a
+    procedure, but it can never *assign* to one. This is the `modRights` obligation. An input
+    parameter is in the threaded `ctx` for freshness and for the typing of an expression. When
+    `immutableVars` is empty, the mutable part is the whole of `ctx`. -/
 def VarCtx.writable (immutableVars : List (Identifier Unit)) (ctx : VarCtx) : VarCtx :=
   List.filter (fun p => !immutableVars.contains p.1) ctx
 
--- ── Fresh name generation ──────────────────────────────────────────────
+-- ── How the generator makes a fresh name ───────────────────────────────
 
-/-- The length of the longest name occurring in a list of `(identifier, type)`
-    pairs (`0` for the empty list). A name strictly longer than this is guaranteed
-    not to occur in the list — the length-based freshness argument used by
-    `fallbackFreshName` and `indexedFreshName`. -/
+/-- The length of the longest name in a list of pairs of an identifier and a type. The result is
+    `0` for an empty list. A name that is longer than this length cannot occur in the list, and
+    this is the argument from length that `fallbackFreshName` and `indexedFreshName` use. -/
 def maxNameLen (l : List (Identifier Unit × LMonoTy)) : Nat :=
   (l.map (fun p => p.1.name)).foldl (fun acc nm => max acc nm.length) 0
 
-/-- A fallback name guaranteed to be fresh: a string of `x` characters longer
-    than any name in the context. -/
+/-- A fallback name that is always fresh. It is a string of `x` characters that is longer than each
+    name in the context. -/
 def fallbackFreshName (ctx : VarCtx) : String :=
   String.ofList (List.replicate (ctx.names.foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
 
-/-- A *family* of names, one per index `i`, all strictly longer than `base`: the
-    string of `base + 1 + i` `x` characters. Two properties make this family useful
-    where several fresh names are needed at once with no randomness involved:
+/-- A *family* of names, one name for each index `i`. Each name is longer than `base`, and it is
+    the string of `base + 1 + i` characters `x`. Two properties make this family useful where the
+    code needs several fresh names at one time and no randomness:
 
-    * taking `base := maxNameLen l` makes every member fresh for `l` (each is
-      strictly longer than every name in `l`);
-    * distinct indices give names of distinct lengths, hence distinct names.
+    * With `base := maxNameLen l`, each member is fresh for `l`, because each member is longer than
+      each name in `l`.
+    * Two different indices give names of two different lengths, and therefore two different names.
 
-    See `outTargets`, which names the caller variables receiving a call's `out`
-    results — names the Core spec leaves entirely to the caller. -/
+    `outTargets` uses the family. It names the variables of the caller that receive the `out`
+    results of a call, and the Core specification leaves those names to the caller. -/
 def indexedFreshName (base i : Nat) : String :=
   String.ofList (List.replicate (base + 1 + i) 'x')
 
-/-- Generate a fresh variable name not in `ctx`. Uses `genIdentName` for
-    randomness, and falls back to a length-based guarantee when the random name
-    collides.
+/-- Makes a fresh variable name that `ctx` does not hold. The generator draws a random name with
+    `genIdentName`, and it falls back to the argument from length when that name is already in the
+    context.
 
-    `genIdentName`'s support is exactly the legal Core bare identifiers that are
-    not reserved keywords (`mem_support_genIdentName_iff_isId`). So every name
-    this generator emits is a name the Core lexer accepts in identifier position,
-    and every name a parsed program can hold is reachable. `NonEmptyString.arbitrary`
-    was the earlier source. Its support holds the alphanumeric strings only, so a
-    parsed name such as `my_var` was out of reach.
+    The support of `genIdentName` is exactly the set of legal bare Core identifiers that are not
+    reserved keywords, as `mem_support_genIdentName_iff_isId` states. Each name that this generator
+    emits is therefore a name that the Core lexer accepts in the position of an identifier, and the
+    generator can reach each name that a parsed program can hold.
 
-    `dodgeKeyword` is still applied to the fallback. The fallback is all `x`s,
-    hence never a keyword, so `dodgeKeyword` is the identity on it. This keeps
-    keyword-freedom uniform across both branches. -/
+    The code also applies `dodgeKeyword` to the fallback name. That name holds only the character
+    `x`, so it is never a keyword and `dodgeKeyword` is the identity on it. The two branches
+    therefore give a name that is not a keyword in the same way. -/
 def genFreshName [Gen G] (ctx : VarCtx) : G String := do
   let s ← genIdentName
   if ctx.isFresh ⟨s, ()⟩ then
@@ -116,22 +114,21 @@ def genFreshName [Gen G] (ctx : VarCtx) : G String := do
   else
     pure (dodgeKeyword (fallbackFreshName ctx))
 
--- ── Length-based freshness, shared across generators ────────────────────
+-- ── The argument from length, which each generator shares ───────────────
 
-/-- The foldl-max accumulator over an arbitrary measure `f` is monotonically
-    non-decreasing. The generic core of the length-based freshness argument that
-    `fallbackFreshName` / `fallbackName` / `fallbackFreshLabel` all rest on
-    (with `f := String.length`): a name strictly longer than every name in a
-    list cannot occur in it. -/
+/-- The accumulator of a fold that takes a maximum over a measure `f` never gets smaller. This is
+    the general form of the argument from length that `fallbackFreshName`, `fallbackName` and
+    `fallbackFreshLabel` all use with `f := String.length`: a name that is longer than each name
+    in a list cannot occur in that list. -/
 theorem foldl_max_ge_init {α : Type _} (f : α → Nat) (xs : List α) (init : Nat) :
     init ≤ xs.foldl (fun acc x => max acc (f x)) init := by
   induction xs generalizing init with
   | nil => exact Nat.le_refl _
   | cons hd tl ih => exact Nat.le_trans (Nat.le_max_left _ _) (ih _)
 
-/-- The foldl-max result is at least `f x` for any member `x`. Specialized to
-    `f := String.length` this bounds the length of every member; `maxNameLen`
-    lifts it to `(identifier, type)` lists via `length_le_maxNameLen`. -/
+/-- The result of a fold that takes a maximum is not less than `f x` for each member `x`. At
+    `f := String.length`, this bounds the length of each member. `maxNameLen` carries the bound to
+    a list of pairs of an identifier and a type, through `length_le_maxNameLen`. -/
 theorem foldl_max_ge_of_mem {α : Type _} (f : α → Nat) (xs : List α) (x : α)
     (h : x ∈ xs) (init : Nat) :
     f x ≤ xs.foldl (fun acc y => max acc (f y)) init := by
@@ -142,25 +139,25 @@ theorem foldl_max_ge_of_mem {α : Type _} (f : α → Nat) (xs : List α) (x : �
     | head => exact Nat.le_trans (Nat.le_max_right _ _) (foldl_max_ge_init f tl _)
     | tail _ hmem => exact ih hmem _
 
-/-- `indexedFreshName base i` has length `base + 1 + i` — the single fact the
-    freshness, injectivity, and keyword-freedom lemmas built on the family all
-    rest on. -/
+/-- The length of `indexedFreshName base i` is `base + 1 + i`. This is the one fact that each lemma
+    about the family uses: the lemma for freshness, the lemma for injectivity, and the lemma that
+    says that no member is a keyword. -/
 theorem indexedFreshName_length (base i : Nat) :
     (indexedFreshName base i).length = base + 1 + i := by
   simp [indexedFreshName, String.length_ofList]
 
--- ── Command sub-generators ─────────────────────────────────────────────
+-- ── The smaller generators for one command ─────────────────────────────
 
-/-- The result of generating a command: the command itself and the output context. -/
+/-- The result of a draw of one command: the command, and the output context. -/
 structure GenCmdResult where
   /-- The generated command. -/
   cmd : Cmd Expression
-  /-- The output typing context after executing the command. -/
+  /-- The typing context after the command runs. -/
   outCtx : VarCtx
 
-/-- Generate `init x τ (det e)` with a fresh name and well-typed expression. The
-    initializer `e` draws its free variables from the current scope
-    (`ctx.toFVarCtx`), so it may reference any in-scope variable. -/
+/-- Makes `init x τ (det e)` with a fresh name and a well-typed expression. The initial value `e`
+    draws its free variables from the current scope, which is `ctx.toFVarCtx`, so it can refer to
+    each variable that is in scope. -/
 def genInitDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (tyDepth depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let name ← genFreshName ctx
@@ -169,7 +166,7 @@ def genInitDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   let xty : Lambda.LTy := .forAll [] mty
   pure ⟨.init ⟨name, ()⟩ xty (.det e) default, ctx.insert ⟨name, ()⟩ mty⟩
 
-/-- Generate `init x τ nondet` with a fresh name. -/
+/-- Makes `init x τ nondet` with a fresh name. -/
 def genInitNondet [Gen G] (tvars : List TyIdentifier)
     (ctx : VarCtx) (tyDepth : Nat) : G GenCmdResult := do
   let name ← genFreshName ctx
@@ -177,10 +174,10 @@ def genInitNondet [Gen G] (tvars : List TyIdentifier)
   let xty : Lambda.LTy := .forAll [] mty
   pure ⟨.init ⟨name, ()⟩ xty .nondet default, ctx.insert ⟨name, ()⟩ mty⟩
 
-/-- Generate `set x (det e)` where `x` is an existing *mutable* variable (its key
-    is not among the immutable names `immutableVars`). The target is drawn from
-    `ctx.writable immutableVars`, so immutable names are never assigned; the output
-    context is the full `ctx`. -/
+/-- Makes `set x (det e)`, where `x` is a *mutable* variable that the context holds. The key of
+    such a variable is not in the list of immutable names `immutableVars`. The generator draws the
+    target from `ctx.writable immutableVars`, so a `set` never assigns to an immutable name. The
+    output context is the whole of `ctx`. -/
 def genSetDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (h : (ctx.writable immutableVars).length > 0) (pctx : PolyOpCtx := []) : G GenCmdResult := do
@@ -188,60 +185,58 @@ def genSetDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth mty
   pure ⟨.set name (.det e) default, ctx⟩
 
-/-- Generate `set x nondet` where `x` is an existing *mutable* variable. -/
+/-- Makes `set x nondet`, where `x` is a *mutable* variable that the context holds. -/
 def genSetNondet [Gen G] (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (h : (ctx.writable immutableVars).length > 0) : G GenCmdResult := do
   let (name, _) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
-/-- Generate `assert l e` with a boolean expression. The label `l` comes from
-    `genIdentName`, so it is a legal non-keyword Core identifier. The typing rule
-    constrains only the expression.
+/-- Makes `assert l e` with a Boolean expression. The label `l` comes from `genIdentName`, so it is
+    a legal Core identifier and not a keyword. The typing rule constrains only the expression.
 
-    `String.arbitrary` was the earlier source. Its support holds the alphanumeric
-    strings only, so the auto-label that the parser mints for an unlabelled
-    `assert` (`assert_0`, see `translateLabeledCheck`) was out of reach. It also
-    holds `""`, which the printer renders as the degenerate `[||]`. -/
+    `genIdentName` gives the label, and not `String.arbitrary`. The support of `String.arbitrary`
+    holds only an alphanumeric string, so it cannot reach the label that the parser makes for an
+    `assert` with no label, such as `assert_0`, which `translateLabeledCheck` builds. It also holds
+    `""`, and the printer writes an empty label as the degenerate form `[||]`. -/
 def genAssertCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure ⟨.assert l e default, ctx⟩
 
-/-- Generate `assume l e` with a boolean expression. The label `l` comes from
-    `genIdentName` (typing-irrelevant, as for `assert`). -/
+/-- Makes `assume l e` with a Boolean expression. The label `l` comes from `genIdentName`, and the
+    typing rule ignores it, as for an `assert`. -/
 def genAssumeCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure ⟨.assume l e default, ctx⟩
 
-/-- Generate `cover l e` with a boolean expression. The label `l` comes from
-    `genIdentName` (typing-irrelevant, as for `assert`). -/
+/-- Makes `cover l e` with a Boolean expression. The label `l` comes from `genIdentName`, and the
+    typing rule ignores it, as for an `assert`. -/
 def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure ⟨.cover l e default, ctx⟩
 
--- ── Main command generator ─────────────────────────────────────────────
+-- ── The main generator for a command ───────────────────────────────────
 
-/-- Generate a well-typed `Cmd Expression` given an input variable context.
-    The generated command satisfies `CmdHasTypeA` when interpreted against
-    the appropriate `TContext`.
+/-- Makes a well-typed `Cmd Expression` from an input variable context. The command satisfies
+    `CmdHasTypeA` against the matching `TContext`.
 
-    Commands generated:
-    - `init x τ (det e)` — deterministic variable initialization
-    - `init x τ nondet`  — non-deterministic variable initialization
-    - `set x (det e)`    — deterministic assignment (if ctx has variables)
-    - `set x nondet`     — non-deterministic assignment (if ctx has variables)
-    - `assert l e`       — assertion with a boolean expression
-    - `assume l e`       — assumption with a boolean expression
-    - `cover l e`        — coverage check with a boolean expression
+    The generator can make these commands:
+    - `init x τ (det e)`, which is a deterministic first value for a variable.
+    - `init x τ nondet`, which is a nondeterministic first value for a variable.
+    - `set x (det e)`, which is a deterministic assignment. It needs a variable in the context.
+    - `set x nondet`, which is a nondeterministic assignment. It needs a variable in the context.
+    - `assert l e`, which is an assertion with a Boolean expression.
+    - `assume l e`, which is an assumption with a Boolean expression.
+    - `cover l e`, which is a check for coverage with a Boolean expression.
 
-    Uses `frequency` for more uniform distribution across command kinds.
-    When the context is non-empty, `set` commands get higher weight to
-    compensate for the structural bias toward `init` in sequences. -/
+    The generator uses `frequency`, so the distribution over the kinds of command is more uniform.
+    When the context is not empty, a `set` command gets a higher weight, because the structure of a
+    sequence otherwise favours an `init`. -/
 def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenCmdResult :=
@@ -267,10 +262,10 @@ def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 3+1+2+2+2; omega
     frequency gs hw
 
--- ── Sequence generator ──────────────────────────────────────────────────
+-- ── The generator for a sequence of commands ────────────────────────────
 
-/-- `genCmds n` generates a length-n sequence of well-typed commands,
-    threading the context through. -/
+/-- `genCmds n` makes a sequence of `n` well-typed commands. It threads the context through the
+    sequence. -/
 def genCmds [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
     Nat → G (List (Cmd Expression) × VarCtx)

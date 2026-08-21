@@ -33,129 +33,101 @@ open StrataGenerators.Procedure.TestSupport
 open StrataGenerators.Stmt.TestSupport
 
 /-!
-# Properties for the eight Core transform passes that have no correctness proof
+# The properties for the Core transform passes that have no correctness proof
 
-This module holds the check predicates for the parts of `Strata/Transform/` that
-carry no machine-checked correctness argument. Each predicate takes a **whole
-generated program** (`Core.Program` from `ProgramGen.genProgram`, proven sound against
-`ProgramHasTypeA`) and returns a `Bool`. Both harnesses evaluate the same
-predicate, and the whole-program shrinker minimizes a counterexample.
+This module holds the check predicates for the passes of `Strata/Transform/` that carry no
+machine-checked correctness argument. Each predicate takes a **whole generated program**, which is a
+`Core.Program` from `ProgramGen.genProgram` with a proof of soundness against `ProgramHasTypeA`, and it
+gives a `Bool`. Both harnesses evaluate the same predicate, and the whole-program shrinker minimizes a
+counterexample.
 
-## The eight passes and why they are here
+## The passes that this module covers
 
-`Strata/Transform/` holds 23 files. Only four passes have a correctness
-companion. These eight passes have no correctness file, and no theorem in the
-file itself:
+Only four passes of `Strata/Transform/` have a companion file with a correctness proof. These eight
+passes have no such file, and no theorem in the file of the pass itself:
 
-`StructuredToUnstructured`, `LoopElim`, `InsertLoopInvariantAsserts`,
-`CommonSubexprElim`, `FunctionInlining`, `ProcedureInlining`, `TerminationCheck`
-and `IrrelevantAxioms`. Two more passes (`NondetElim` and `LoopInitHoist`) prove
-syntactic preservation lemmas, but neither one proves its own headline
-postcondition, so both are here too.
+`StructuredToUnstructured`, `LoopElim`, `InsertLoopInvariantAsserts`, `CommonSubexprElim`,
+`FunctionInlining`, `ProcedureInlining`, `TerminationCheck` and `IrrelevantAxioms`.
 
-`TerminationCheck` is **not** covered. Its properties need a recursive function
-to be non-vacuous, and the generator cannot make one yet, so
-each property would pass on empty input and give a false signal of coverage.
+Two more passes, which are `NondetElim` and `LoopInitHoist`, prove lemmas about syntactic preservation.
+Neither of them proves its own main postcondition, so this module also covers both of them.
+
+This module does **not** cover `TerminationCheck`. A property about that pass needs a recursive
+function, and the generator cannot make one. Each such property would therefore say nothing about the
+pass, and it would give a false signal of coverage.
 
 ## Why the input is a whole program, and not a statement list
 
-Three of the eight passes are program-to-program `PipelinePhase`s that read
-declarations other than procedures: `IrrelevantAxioms` reads the axioms and the
-function call graph, `ProcedureInlining` reads the callee's declaration at each
-call site, and `FunctionInlining` reads a function body out of the factory. A
-statement list cannot express any of those, so the input here is the whole
-program that `ProgramGen.genProgram` draws, which holds every declaration kind.
-The two purely structural passes (`StructuredToUnstructured` and `NondetElim`)
-take a statement list, so each property applies the pass to each procedure body
-of the program.
+Three of the passes are `PipelinePhase` values from a program to a program, and each of them reads a
+declaration that is not a procedure. `IrrelevantAxioms` reads the axioms and the call graph of the
+functions. `ProcedureInlining` reads the declaration of the callee at each call site.
+`FunctionInlining` reads the body of a function out of the factory. A statement list holds none of
+those. Therefore the input here is the whole program that `ProgramGen.genProgram` draws, which holds
+each kind of declaration. The two purely structural passes, which are `StructuredToUnstructured` and
+`NondetElim`, take a statement list, so each property applies such a pass to each procedure body of the
+program.
 
-## The typechecker guard
+## The guard for the typechecker
 
-`Program.typeCheck` rejects about 60 percent of generated programs, for three
-documented reasons (see the module doc of `ProgramGen/Shrink`). A pass can be
-blamed only for what it does to input that is already well typed. Therefore each
-predicate that could be affected starts with `!progTypeChecks p ||`, which makes
-it vacuous on a rejected draw and a real claim on the rest. The property
-`program: typechecker rejections are only the known gaps` pins the three known
-causes, so a new cause appears as a failure of that property, and not as silent
-filtering here.
+`Program.typeCheck` rejects a large part of the generated programs, for three reasons that the module
+docstring of `ProgramGen/Shrink` gives. A pass is responsible only for what it does to input that is
+already well typed. Therefore each predicate that the guard concerns starts with `!progTypeChecks p ||`.
+That guard makes the predicate empty on a rejected draw, and a real claim on each other draw. A separate
+property pins the three known causes of a rejection, so a new cause becomes visible there, and this
+module filters nothing in silence.
 
-## Seeding the factory
+## The functions of the program in the factory
 
-`FunctionInlining` reads function bodies from a `Lambda.Factory`, and
-`Core.Factory` holds **no** function body: 0 of its 310 entries have one. So a
-property that runs the pass against `Core.Factory` alone can never inline, and
-would pass vacuously. `programFactory` therefore pushes each function that the
-*program* declares into `Core.Factory`, which is what `Core.Verifier` does in
-production. A generated function has a body about half of the time, so the
-inlining properties bite.
+`FunctionInlining` reads the body of a function from a `Lambda.Factory`, and `Core.Factory` holds **no**
+function body. Therefore a property that runs the pass against `Core.Factory` alone can inline nothing,
+and it says nothing about the pass. `programFactory` therefore pushes each function that the *program*
+declares into `Core.Factory`. `Core.Verifier` does the same in production. A generated function has a
+body about half of the time, so each property about inlining has real input.
 
 ## Coverage
 
-Each property is stated as the true claim, and not weakened, so it reports a
-defect instead of hiding it. Three caveats, each recorded where it belongs so that
-the extent of the coverage is not overstated:
+Each property states the true claim, and it is not weakened, so it reports a defect and does not hide
+one. Two limits of the coverage are recorded where they belong:
 
-* `checkKleeneMeasureAccepted` is a characterization and not a bug oracle, for the
-  reason its docstring gives.
-* the four `CommonSubexprElim` properties are usually silent on generated input,
-  because the pass fires only on a duplicated subexpression and a generated body
-  rarely holds one. The `#guard`s exercise them on every build; one of them pins a
-  real defect. See the `CommonSubexprElim` note.
-* the four `FunctionInlining` properties now fire on **231 of 400** draws, after the
-  generator work the `FunctionInlining` note describes — a real negative result for that pass
-  rather than an absence of testing.
+* `checkKleeneMeasureAccepted` describes the behaviour of the pass, and it is not an oracle for a
+  defect. Its own docstring gives the reason.
+* The four properties about `CommonSubexprElim` are usually silent on generated input, because the pass
+  acts only on a duplicate subexpression, and a generated body rarely holds one. A `#guard` exercises
+  each of them at each build. Read the note about `CommonSubexprElim`.
 
-The defect analysis these properties produced is recorded in the repo's findings
-write-up.
+A `#guard` covers each of the four properties about `CommonSubexprElim` on input that a person wrote. A
+`#guard` also covers each of the four properties about `FunctionInlining`. One of those guards uses a
+chain of two functions, where the results at the fuel 1 and at the fuel 4 differ.
 
-`#guard`s cover the four `CommonSubexprElim` properties on hand-built input, and
-also back the `FunctionInlining` four (including a two-function chain on which the
-fuel-1 and fuel-4 results genuinely differ).
+## What each family of properties checks
 
-The rates that make the other families non-vacuous, over 200 draws: 12 programs
-declare an axiom and all 12 have one pruned; 33 carry a loop invariant or a
-measure; 28 hold a nondeterministic guard; 7 hold an `init` in a loop body.
-
-## What each property family checks
-
-The families follow the sections of the test plan:
-
-* **IrrelevantAxioms** — the *relevance* oracle, and not the `changed`
-  flag (covered separately). Five properties: only an `.ax` declaration
-  is ever removed, declaration order holds, each retained axiom is relevant, each
-  removed axiom is irrelevant, and the pruned program still typechecks.
-* **StructuredToUnstructured** — seven structural properties over the
-  emitted CFG: no dangling target, distinct labels, the entry label exists,
-  exactly one `.finish` block, each block is reachable from the entry, the
-  command count holds modulo the commands the pass synthesizes, and the `.cfg`
-  body prints.
-* **LoopElim and InsertLoopInvariantAsserts** — the accounting of the
-  verification conditions: the exact count of each inserted `assert` and
-  `assume` as a function of the invariant count, a bare loop after the pass,
-  idempotence, the statistics counter, and the survival of each verification
-  condition through `LoopElim`.
-* **CommonSubexprElim** — a fresh name that does not collide, the
-  `assert` labels, the order of the fresh declarations, and a typecheckable
-  output.
-* **FunctionInlining** — identity at fuel 0, monotonicity in the fuel,
-  type preservation, and freedom from capture.
-* **ProcedureInlining** — distinct labels after two call sites, the
-  count of the `assert` labels, the statistics counters, and a well-formed call
-  graph.
-* **NondetElim and LoopInitHoist** — the headline postcondition of each
-  pass, which neither file proves: no `.nondet` guard is left, and each loop body
-  holds no `init`.
-* **The three loop passes under the symbolic evaluator** — whether
-  `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` change the proof
-  obligations that reach SMT. The loop-accounting and postcondition families state
-  their claims syntactically; these
-  three go through Strata's executable evaluator instead, which is the only oracle
-  that can see an obligation surviving as *syntax* but never being emitted. Since
-  the evaluator refuses a loop, each side runs `LoopElim` first. All three are
-  stated as "no obligation is lost", and their section note gives the reason equality
-  would be wrong for each. **These found the eighth defect, and it is in the
-  evaluator rather than in any of the three passes.**
+* **IrrelevantAxioms.** The oracle for *relevance*, and not the `changed` flag, which a separate
+  property covers. There are five properties: the pass removes an `.ax` declaration only, the order of
+  the declarations holds, each axiom that stays is relevant, each axiom that the pass removes is
+  irrelevant, and the pruned program still type checks.
+* **StructuredToUnstructured.** Seven structural properties about the control-flow graph that the pass
+  emits: no target dangles, the labels are different in pairs, the entry label exists, there is exactly
+  one `.finish` block, each block is reachable from the entry, the count of the commands holds after the
+  commands that the pass builds, and the `.cfg` body prints.
+* **LoopElim and InsertLoopInvariantAsserts.** The accounting of the verification conditions: the exact
+  count of each `assert` and each `assume` that the pass inserts, as a function of the number of the
+  invariants, a bare loop after the pass, idempotence, the counter for the statistics, and the survival
+  of each verification condition through `LoopElim`.
+* **CommonSubexprElim.** A fresh name that collides with no other name, the `assert` labels, the order
+  of the fresh declarations, and an output that type checks.
+* **FunctionInlining.** The identity at the fuel 0, growth with the fuel, preservation of a type, and
+  freedom from capture.
+* **ProcedureInlining.** Labels that are different in pairs after two call sites, the count of the
+  `assert` labels, the counters for the statistics, and a well-formed call graph.
+* **NondetElim and LoopInitHoist.** The main postcondition of each pass, which neither file proves. No
+  `.nondet` guard stays, and each loop body holds no `init`.
+* **The three loop passes under the symbolic evaluator.** Whether `InsertLoopInvariantAsserts`,
+  `NondetElim` and `LoopInitHoist` change the proof obligations that reach SMT. The two families above
+  state their claims about the syntax. These three properties go through the executable evaluator of
+  Strata instead. That evaluator is the only oracle that can see an obligation that survives as *syntax*
+  and that the pipeline never emits. The evaluator refuses a loop, so each side runs `LoopElim` first.
+  Each of the three properties states that no obligation is lost, and the note of that section gives the
+  reason why an equality would be the wrong claim.
 -/
 
 namespace StrataGenerators.Program.UnprovenTransforms
@@ -224,43 +196,34 @@ def runPhaseWithFuncs (ph : Core.PipelinePhase) (prog : Program) :
 
 /-! ## The symbolic evaluator as a differential oracle
 
-Two families below compare a pass's *proof obligations* before and after it runs:
-`IrrelevantAxioms`, where the obligation set must be **unchanged**, and
-`ProcedureInlining`, where it must not **shrink**. Both use Strata's own
-executable symbolic evaluator, which is the `symbolicEval` phase of
-`corePipelinePhases`, together with the `nondetElim` phase that now precedes it
-there.
+Two families of properties below compare the *proof obligations* of a pass before and after the pass
+runs. For `IrrelevantAxioms`, the set of the obligations must be **the same**. For
+`ProcedureInlining`, it must not become **smaller**. Both families use the executable symbolic
+evaluator of Strata, which is the `symbolicEval` phase of `corePipelinePhases`, together with the
+`nondetElim` phase that comes before it there.
 
-**It panics on a loop.** `Core.Statement.evalOneStmt` aborts with "Cannot evaluate
-`loop` statement. Please transform your program to eliminate loops before calling
-`Core.Statement.evalAux`" — which is why `loopElimPipelinePhase` sits immediately
-before `symbolicEval` in `transformPipelinePhases`. A `PANIC` is not catchable, so a
-property using this oracle must screen the input with `programHasLoop` *first*, not
-rely on the `none` branch.
+**The evaluator panics on a loop.** `Core.Statement.evalOneStmt` stops with a message that asks the
+caller to eliminate each loop first. That message is why `loopElimPipelinePhase` comes immediately
+before `symbolicEval` in `transformPipelinePhases`. A panic is not catchable. Therefore a property
+that uses this oracle must first screen the input with `programHasLoop`, and it must not rely on the
+`none` branch.
 
-**It rejects a nondeterministic guard**, and this oracle therefore runs
-`nondetElimPipelinePhase` in front of it, exactly as `corePipelinePhases` does.
-Upstream used to evaluate an `if *` by havocking a boolean it named
-`$__nondet_cond_{path-condition depth}`, which collided between siblings and
-silently dropped every obligation from the second `if *` onward;
-`fix(core): eliminate nondeterministic control before symbolic evaluation` replaced
-that with a hard `.error` plus a mandatory `nondetElim` phase. Calling
-`symbolicEval` alone would leave this oracle refusing every draw that holds an
-`if *` / `while *` — a `none` that reads as "no claim to make" in every property
-here, so a whole shape class would go quietly unscored. -/
+**The evaluator rejects a nondeterministic guard.** Therefore this oracle runs
+`nondetElimPipelinePhase` in front of it, as `corePipelinePhases` does. A call to `symbolicEval`
+alone would refuse each draw that holds an `if *` or a `while *`. Each property here reads the
+resulting `none` as "there is no claim to make", so a whole class of shapes would go unscored in
+silence. -/
 
-/-- The obligation program that Strata's symbolic evaluator produces, or `none` when
-    it raises a diagnostic. This is the `nondetElim` and `symbolicEval` phases of
-    `corePipelinePhases`, in that order, called directly — the evaluator rejects a
-    surviving nondeterministic guard, so the two are one step (see the section
-    note).
+/-- The program of the obligations that the symbolic evaluator of Strata gives, or `none` when it
+    raises a diagnostic. The function calls the `nondetElim` phase and the `symbolicEval` phase of
+    `corePipelinePhases` directly, in that order. The evaluator rejects a nondeterministic guard
+    that stays, so the two phases are one step here. Read the note of this section.
 
-    Run at `VerifyOptions.quiet`, not `.default`: the evaluator `dbg_trace`s the whole
-    obligation list at `.normal` verbosity or above (`Verifier.lean`), which would
-    dump a VC listing into the build output on every `#guard` and every property
-    sample. `.quiet` differs from `.default` only in that field.
+    The call uses `VerifyOptions.quiet`, and not `.default`. At the verbosity `.normal` or above, the
+    evaluator traces the whole list of the obligations, which would write that list into the output
+    of each build and of each draw. `.quiet` differs from `.default` in that field only.
 
-    **Never call this on a program holding a loop** — see the section note. -/
+    **Never call this function on a program that holds a loop.** Read the note of this section. -/
 def symbolicObligations (p : Program) : Option Program :=
   match runPhase Core.nondetElimPipelinePhase p with
   | none => none
@@ -369,12 +332,11 @@ def stmtsBlockLabels (ss : List Statement) : List String :=
   | s :: rest => stmtBlockLabels s ++ stmtsBlockLabels rest
 end
 
-/-! ## `IrrelevantAxioms` — the relevance oracle
+/-! ## `IrrelevantAxioms`: the oracle for relevance
 
-`irrelevantAxiomsPipelinePhase` prunes each axiom that its fixed-point relevance
-computation finds irrelevant to a seed set of function names. The `changed` flag,
-which the pass hardcodes to `true`, is pinned separately. What no property covers yet is
-whether the pass prunes the **right** axioms, which is what this family checks.
+`irrelevantAxiomsPipelinePhase` removes each axiom that its computation of a fixed point finds
+irrelevant to a seed set of function names. A separate property pins the `changed` flag, which the pass
+sets to `true` always. This family checks whether the pass removes the **correct** axioms.
 
 The seed set is each function the program declares (`axiomSeedFunctions`). That is
 the production shape: `Verifier` seeds the pass with the functions of the goal
@@ -487,39 +449,35 @@ def checkAxiomsPrunedTypechecks (p : Program) : Bool :=
      | some (_, out) => progTypeChecks out
      | none => true)
 
-/-- **Pruning axioms leaves the proof obligations unchanged.** The semantic
-    counterpart to the five syntactic properties above, and the sharpest claim this
-    pass admits without a solver.
+/-- **The removal of an axiom leaves the proof obligations unchanged.** This property is the semantic
+    companion of the five syntactic properties above, and it is the sharpest claim about this pass that
+    needs no solver.
 
-    An axiom is an *assumption*, never an obligation, so deleting one cannot add,
-    remove or rename a single obligation. The obligation sets before and after must
-    therefore be **equal** — not merely contained, as for `ProcedureInlining`, whose
-    obligations legitimately duplicate per call site. Equality is the right claim here
-    precisely because this pass is supposed to change nothing that reaches the solver.
+    An axiom is an *assumption*, and it is never an obligation. Therefore the removal of an axiom cannot
+    add, remove or rename an obligation. The set of the obligations before the pass and the set after it
+    must therefore be **equal**. For `ProcedureInlining`, containment is the correct claim, because the
+    obligations of that pass duplicate at each call site. Equality is the correct claim here, because this
+    pass must change nothing that reaches the solver.
 
-    The oracle is Strata's own `symbolicEval` phase, so what the property compares is
-    the obligations a verification run would actually receive.
+    The oracle is the `symbolicEval` phase of Strata. Therefore this property compares the obligations
+    that a verification run receives.
 
-    ### What it does and does not catch
+    ### What the property catches, and what it does not catch
 
-    It catches the pass perturbing the obligation *structure*: adding, dropping or
-    relabelling one. It does **not** catch the failure mode that matters most —
-    pruning an axiom some obligation needed, which leaves the obligation present but
-    no longer provable. That is invisible without a solver, since the obligation
-    expression is unchanged and only its *provability* differs. Confirming that needs
-    the `--smt` oracle, and is the natural follow-up.
+    It catches a change to the *structure* of an obligation, which is an addition, a removal or a new
+    label. It does **not** catch the most important failure: the pass removes an axiom that an obligation
+    needs, and the obligation then stays but is not provable. That failure is invisible with no solver,
+    because the expression of the obligation does not change, and only its *provability* differs. A check
+    of that kind needs the oracle behind the `--smt` gate.
 
-    So this is a necessary-but-not-sufficient condition for the pass's
-    `modelPreserving` annotation. Stating it as such rather than overselling it: a
-    it establishes that the pass did not disturb the obligations, not that it
-    preserved their provability.
+    This property is therefore a necessary condition for the `modelPreserving` annotation of the pass, and
+    it is not a sufficient one. It says that the pass did not change the obligations. It does not say that
+    the pass kept them provable.
 
     ### Coverage
 
-    Conditional on the input typechecking **and being loop-free**, because the
-    symbolic evaluator panics on a loop (see the oracle note). Measured non-vacuous:
-    152 of 300 generated draws satisfy both guards, and all 152 give exactly equal
-    obligation sets. -/
+    The claim holds under two guards: the input type checks, and it holds **no loop**. The symbolic
+    evaluator panics on a loop. Read the note about the oracle. -/
 def checkAxiomsObligationsUnchanged (p : Program) : Bool :=
   !progTypeChecks p || programHasLoop p ||
     (match runPhase (irrelevantAxiomsPhase p) p with
@@ -536,7 +494,7 @@ def checkAxiomsObligationsUnchanged (p : Program) : Bool :=
         | none, none => true   -- the oracle read neither side; no claim to make
         | _, _ => false))      -- it read one side only: the pass changed its verdict
 
-/-! ## `StructuredToUnstructured` — the structural properties
+/-! ## `StructuredToUnstructured`: the structural properties
 
 `stmtsToBlocks` (`StructuredToUnstructured.lean`) threads a continuation label
 `k` and an `exitConts` association list by hand across eight statement cases, and
@@ -641,7 +599,7 @@ def checkS2uNoDanglingLabel (p : Program) : Bool :=
     against the *enclosing* labels only, which is what the `block` premise of the
     typing spec requires, so two **sibling** blocks may share a label. A body such as
     `j: { } j: { }` is therefore generatable, and it makes the emitted CFG hold two
-    blocks named `j` — through no fault of this pass, which copies the source label.
+    blocks named `j`. That result is not a fault of this pass, which copies the label of the source.
     Blaming the pass for that would report a generator artefact as a Strata defect,
     the same way the `procInline` label property has to guard against `genIdentName`
     drawing one name twice.
@@ -713,7 +671,7 @@ def checkS2uCfgPrintable (p : Program) : Bool :=
         | other => other }
   (toString (Core.formatProgram cfgProg)).splitOn "Errors encountered" |>.length == 1
 
-/-! ## `LoopElim` and `InsertLoopInvariantAsserts` — accounting of the
+/-! ## `LoopElim` and `InsertLoopInvariantAsserts`: the accounting of the
 verification conditions
 
 The repository already checks that `LoopElim` preserves typeability and removes
@@ -898,7 +856,7 @@ def checkLoopElimStatFaithful (p : Program) : Bool :=
         | none => true)
      | none => true)
 
-/-! ## `DetToKleene` — the measure the transform drops
+/-! ## `DetToKleene`: the measure that the transform drops
 
 `StmtToKleeneStmt` (`DetToKleene.lean`) rejects a loop that carries an
 invariant (`if !inv.isEmpty then none`) and explains why: the deterministic
@@ -952,7 +910,7 @@ def checkKleeneMeasureAccepted (p : Program) : Bool :=
     !(hasMeasureOnlyLoop ss && !hasKleeneUnsupported ss && !hasInvLoopStmts ss) ||
       (kleeneStmts ss).isSome
 
-/-! ## `CommonSubexprElim` — fresh names and ordering
+/-! ## `CommonSubexprElim`: the fresh names and the order
 
 The repository already checks that CSE leaves no dangling bound variable and that
 symbolic evaluation agrees. What remains is the fresh-name discipline. CSE mints
@@ -960,25 +918,21 @@ symbolic evaluation agrees. What remains is the fresh-name discipline. CSE mints
 (`CommonSubexprElim.lean`), and it prepends each new `var` declaration to the
 body, so both a collision and a wrong order are possible in principle.
 
-**CSE fires on very few generated programs.** It fires only when a procedure body
-holds a *duplicated* subexpression, and a generated body rarely does: each
-expression is drawn independently, so two identical subterms of a non-trivial size
-seldom coincide. So these four properties are usually silent on generated input,
-and the `#guard`s at the end of this file are what exercise them on every build.
+**The pass acts on very few generated programs.** It acts only when a procedure body holds a
+*duplicate* subexpression, and a generated body rarely holds one. The generator draws each expression
+on its own, so two identical subterms of a real size rarely occur together. Therefore these four
+properties are usually silent on generated input, and the `#guard`s at the end of this file are what
+exercise them at each build.
 
-They are not silent *always*, and the difference matters: a `--quick` run drew
-`assume [||]: str.le(P(G), P(G))` and `the output typechecks` went red on it. That
-is the defect `cseCapturingBody` now pins — the pass hoists an extracted
-subexpression above the declaration of a variable the subexpression mentions. A
-count of "0 of 200" was recorded here before that draw; read it as "rare", not as
-"never", and do not treat a green tick on these four as a claim that the pass was
-exercised. The `decl_kinds` and `program_size` axes of the Tyche panel are what
-say whether a given run reached it.
+They are not silent *always*. `cseCapturingBody` pins one defect that a draw can reach: the pass lifts
+an extracted subexpression above the declaration of a variable that the subexpression names. Read a
+green result for these four properties as "the pass rarely ran", and not as a claim about the pass. The
+`decl_kinds` axis and the `program_size` axis of the Tyche panel say whether a run reached the pass.
 
-Reaching it *reliably* needs a generator that plants a repeated subterm on
-purpose. This is the one item of the four whose likely route (a sharing construct
-in `genLExpr`) adds a case to `genLExpr_sound`; a post-processing alternative
-avoids that proof work at the cost of a less principled distribution. -/
+To reach the pass *often*, a generator must put a repeated subterm into a body on purpose. Of these
+four items, this is the one whose likely route, which is a construct for sharing in `genLExpr`, adds a
+case to the soundness proof of `genLExpr`. A step after generation avoids that proof, at the price of a
+less principled distribution. -/
 
 /-- Each `init` name of a statement list, at any depth, in order of appearance.
     Reuses the procedure test support's `stmtsInits`, whose traversal the ANF
@@ -1074,74 +1028,54 @@ def checkCseOutputTypechecks (p : Program) : Bool :=
      | some (_, out) => progTypeChecks out
      | none => true)
 
-/-! ## `FunctionInlining` — a pure expression transform
+/-! ## `FunctionInlining`: a transform of an expression only
 
 `inlineFuncDefs` (`FunctionInlining.lean`) is a pure `LExpr → LExpr` transform,
 which makes it the pass that is easiest to test well. It relies on
 `substFvarsLifting` for capture safety under a binder, and on
 `LFunc.computeTypeSubst` for polymorphic instantiation.
 
-The factory matters. `Core.Factory` holds **no** function body: 0 of its 310
-entries have one. So the pass over `Core.Factory` alone is the identity.
-`programFactory` therefore pushes each function the program declares, which is what
-`Core.Verifier` does in production, and 80 of 200 generated programs do declare a
-function with a body.
+The factory matters. `Core.Factory` holds **no** function body, so the pass over `Core.Factory` alone is
+the identity. `programFactory` therefore pushes each function that the program declares, and
+`Core.Verifier` does the same in production.
 
-**The rate is 231 of 400 programs, up from 0 at the start of this work.** Four
-changes were needed, and the measurements that motivated each are worth keeping,
-because three of the four addressed a bottleneck that was *not* the obvious one:
+Four parts of the generator must work together, or a property about this pass reaches the pass on almost
+no draw:
 
-1. **`GenState.octx` was fixed across the declaration fold.** Declaring a function
-   grew `C`, so the typechecker knew about it, but not `octx`, so a generated program
-   declared functions none of its own bodies could name. `genDeclFunction` now
-   registers each declared function. Rate after: still 0.
-2. **`programExprs` read only procedure bodies.** The pass fires in a *function* body
-   or `requires` clause, since a function declared later in the fold sees the grown
-   vocabulary. It now reads function bodies, preconditions and axiom bodies too.
-   Rate after: 1 of 400.
-3. **Polymorphic functions could not be registered at all.** 114
-   of 158 declared functions are polymorphic, and `OpCtx` holds one monotype per
-   operator, so `funcOpEntry` skipped them; `funcPolyOpEntry` now sends them to
-   `pctx`. Combined with order-aware declaration weights, the rate
-   reached 4 of 400 — an improvement, but nowhere near enough.
-4. **The real bottleneck was operator-selection dilution, which none of the
-   above identified.** `genIndir` and `genIndirPoly` pick with `elements`, which is
-   *uniform* over the candidates for the target type — and `Core.Factory` supplies
-   105 operators returning `bool` and 27 returning `int`. So one entry for a declared
-   function gave it ~1% odds at a `bool` leaf: it was registered correctly and simply
-   never drawn. Two things fixed that: `declaredFuncWeight` repeats the entry to
-   raise its share (see its docstring), and `synthesizedCalls` builds one saturated
-   call per declared bodied function directly, which removes the dependence on a
-   lucky draw altogether.
+1. **`GenState.octx` must grow across the fold over the declarations.** A declaration of a function
+   grows `C`, so the typechecker knows the function. A body can name the function only when `octx` also
+   holds it, so `genDeclFunction` registers each declared function there.
+2. **`programExprs` must read more than a procedure body.** The pass acts inside a *function* body or a
+   `requires` clause, because a function that the fold declares later sees the larger vocabulary.
+   Therefore `programExprs` also reads each function body, each precondition and each axiom body.
+3. **A polymorphic function needs its own context.** Most declared functions are polymorphic, and an
+   `OpCtx` holds one monotype for each operator. Therefore `funcOpEntry` cannot take such a function, and
+   `funcPolyOpEntry` sends it to `pctx`.
+4. **The selection of an operator dilutes a single entry.** `genIndir` and `genIndirPoly` draw with
+   `elements`, which is *uniform* over the candidates for the target type, and `Core.Factory` gives more
+   than a hundred operators that give a `bool`. Therefore one entry for a declared function has a very
+   small share at a `bool` leaf, and a draw almost never selects it. Two definitions handle this.
+   `declaredFuncWeight` repeats the entry to raise its share, and its docstring gives the details.
+   `synthesizedCalls` builds one full call for each declared function that has a body, so a property
+   does not depend on a lucky draw at all.
 
-Point 4 is why the properties are now genuinely live rather than nearly vacuous:
-growing the vocabularies was necessary but on its own bought a factor of 4 against a
-needed factor of 200.
-
-Coverage: over 600 programs and 439 inlining events — 336 of them at a
-*polymorphic* function, so `LFunc.computeTypeSubst` and `applySubst` are genuinely
-exercised. Two further ad-hoc checks were run while hunting (the result is a fixed
-point at high fuel; no type variable appears in the result that the input lacked).
-That makes this a real negative result for the pass, not an absence of testing. -/
+Item 4 is the largest of the four. A larger vocabulary is necessary, and it alone is far from enough. -/
 
 /-- A saturated call to each function the program declares, with each argument taken
     from the function's own body if the body is a suitable closed term, and otherwise
     from a default value of the parameter's type.
 
-    **Why synthesize call sites.** `inlineFuncDefs` is a pure `LExpr → LExpr`
-    transform, so its properties are properly about *expressions*, not about programs
-    — the program only supplies the factory. Waiting for the generator to draw a body
-    that happens to call a declared function makes the properties hostage to the
-    declaration cap and the operator-selection odds: even with both vocabularies grown
-    and the entry weighted, only 4 of 400 draws produce a call
-    (`ProgramGen.lean`, `declaredFuncWeight`).
+    **Why this function builds a call site.** `inlineFuncDefs` is a transform from an `LExpr` to an
+    `LExpr`, so a property about it is a property about an *expression*, and not about a program. The
+    program gives the factory only. A property that waits for the generator to draw a body that calls a
+    declared function depends on the limit for the declarations and on the odds of the selection of an
+    operator. Under those odds, very few draws hold such a call.
 
-    Building the call directly removes that dependence. The call is exactly the shape
-    `Factory.callOfLFunc` recognises — the operator annotated with its curried type,
-    applied to one argument per formal — so it exercises the same path a generated
-    call would, including `LFunc.computeTypeSubst` for a polymorphic function. What is
-    *not* synthesized is the function itself: its name, signature, body and type
-    parameters are all what `genFunction` drew.
+    A call that this function builds removes that dependence. The call has exactly the shape that
+    `Factory.callOfLFunc` accepts, which is the operator with an annotation of its curried type, applied
+    to one argument for each formal parameter. Therefore it reaches the same path as a generated call,
+    including `LFunc.computeTypeSubst` for a polymorphic function. This function does *not* build the
+    function itself. `genFunction` draws its name, its signature, its body and its type parameters.
 
     A function with no body is skipped: `tryInlineCall` returns `none` for one, so a
     call to it would add a vacuous sample. -/
@@ -1164,12 +1098,12 @@ def synthesizedCalls (p : Program) : List Expression.Expr :=
     expression of each procedure body, plus each function body, each function
     precondition, and each axiom body.
 
-    The non-procedure sites matter, and they are where the pass actually fires on
-    generated input. `genDeclFunction` grows `octx` with each monomorphic function it
-    declares, so a *later* function's body or `requires` clause can call an earlier
-    one — whereas a procedure body would have to be generated after that growth and
-    also draw the right operator, which is rarer still. Restricting this to procedure
-    bodies made every `FunctionInlining` property vacuous.
+    The sites that are not a procedure body are the important ones, because the pass acts there on
+    generated input. `genDeclFunction` adds each monomorphic function that it declares to `octx`.
+    Therefore the body or the `requires` clause of a *later* function can call an earlier one. A
+    procedure body must be generated after that growth, and it must also draw the correct operator,
+    which happens less often. A list of the procedure bodies alone therefore leaves each property about
+    `FunctionInlining` with no input.
 
     Reuses Strata's own `Statements.collectExprs` for the statement side, which is
     the traversal CSE uses. -/
@@ -1263,22 +1197,18 @@ def checkInlineCaptureFree (p : Program) : Bool :=
     let permitted := LExpr.collectFvarNames e ++ bodyFvars
     (LExpr.collectFvarNames (inlineIn p e)).all permitted.contains
 
-/-! ### Value preservation under the concrete evaluator
+/-! ### Preservation of a value under the concrete evaluator
 
-The sharpest oracle available for `FunctionInlining`, and the one the issue asks
-for: inlining a call must not change what the expression *evaluates to*.
+This is the sharpest oracle for `FunctionInlining`. The inlining of a call must not change the value
+that the expression *evaluates to*.
 
-**Making the comparison meaningful takes one step.** `LExprEval.eval` unfolds a
-function body only when the function carries the `.inline` attribute, or an
-`inlineIf*` variant whose side condition holds (`LExprEval.lean`).
-`inlineFuncDefs` unfolds **any** fully applied call whose function has a body — that
-asymmetry is deliberate and documented in `FunctionInlining`'s module note ("Unlike
-the attribute-gated inlining inside `LExprEval.eval` … these transforms are explicit,
-caller-driven passes"). So comparing `eval e` against `eval (inline e)` over the
-*plain* factory compares two different notions of unfolding and disagrees on every
-sample: measured at 230 of 230, with `eval e` stuck on the uninterpreted call while
-`eval (inline e)` reduces to a value. That is a defect in the oracle, not in the
-pass.
+**The comparison needs one step to be meaningful.** `LExprEval.eval` unfolds the body of a function only
+when the function holds the `.inline` attribute, or an `inlineIf*` variant whose side condition holds.
+`inlineFuncDefs` unfolds **each** full call whose function has a body. That difference is deliberate,
+and the module docstring of `FunctionInlining` records it. Therefore a comparison of `eval e` against
+`eval (inline e)` over the *plain* factory compares two different notions of an unfolding, and the two
+sides disagree on each sample. `eval e` stops at the call, which it cannot interpret, and
+`eval (inline e)` reduces to a value. That is a defect in the oracle, and not in the pass.
 
 `inlineEvalFactory` fixes it by marking the program's own functions `.inline`, so the
 evaluator is permitted to unfold exactly the set the transform unfolds. Then the
@@ -1336,9 +1266,8 @@ where
     captured a variable, instantiated a type parameter wrongly, or dropped an
     argument would pass all four and fail this one.
 
-    Measured non-vacuous: over 400 programs the transform fires on 266 expressions
-    and **all 266 agree**, with 152 of them reducing to a canonical value on the
-    inlined side. So this is a real negative result for the pass.
+    The property has real content, because the transform acts on many expressions of a generated program, and
+    the inlined side of many of them reduces to a canonical value.
 
     ### Two boundaries the claim has to respect
 
@@ -1374,7 +1303,7 @@ def checkInlineEvalAgreement (p : Program) : Bool :=
     decide (out = e) || exprHasBinder e ||
       decide (evalOver Finl e = evalOver Finl out)
 
-/-! ## `ProcedureInlining` — freshening of the labels
+/-! ## `ProcedureInlining`: the renaming of the labels
 
 `replaceLabelsOfBlocksAndAssertAssumes` (`ProcedureInlining.lean`) renames each
 block, `assert`, `assume` and `cover` label when it inlines a body. The classic
@@ -1414,14 +1343,11 @@ def programLabelsNodup (p : Program) : Bool :=
     the generator draws an `assert`, `assume` and `cover` label from `genIdentName`,
     and two draws can coincide, so a program can hold two statements under one label
     before any pass runs. Blaming the pass for those would report a generator
-    artefact as a Strata defect. Under the guard the property is a real claim about
-    the pass. The collision used to be far more common: the earlier source was
-    `String.arbitrary`, which gives `""` often enough that about 4 percent of
-    programs held a duplicate label.
+    artefact as a defect of Strata. Under the guard, the property is a real claim about the pass.
 
-    The generator reaches the shape rarely: about 1 percent of draws hold two or
-    more calls. The deterministic guards at the end of this file pin each of the two
-    causes separately, so neither depends on a lucky draw. -/
+    The generator rarely reaches the shape, because few draws hold two calls or more. The `#guard`s at
+    the end of this file pin each of the two causes separately, so neither one depends on a lucky
+    draw. -/
 def checkInlineProcLabelsNodup (p : Program) : Bool :=
   !programLabelsNodup p ||
     (match runPhase inlinePhase p with
@@ -1501,24 +1427,23 @@ def checkInlineProcAnalysisPreserved (p : Program) : Bool :=
 
 The `ProcedureInlining` analogue of `checkInlineEvalAgreement`, and the second half of
 what the request asks for. Strata has no executable *concrete* interpreter for a
-statement list — `StatementSemantics.lean` gives only relations — but it does have an
+statement list, because `StatementSemantics.lean` gives a relation only. It does have an
 executable **symbolic** evaluator, `toCoreProofObligationProgram`, which is the phase
 `corePipelinePhases` runs under the name `symbolicEval`. It turns a program into a
 program of proof obligations, so it is exactly the differential oracle available here.
 
-**What can and cannot be claimed.** Comparing the two obligation programs for equality
-is wrong, and measurably so:
+**What the property can claim, and what it cannot claim.** A comparison of the two programs of
+obligations for equality is the wrong claim:
 
 ```
 obligations BEFORE: [inner]
 obligations AFTER:  [inner, Callee_inner_1, Callee_inner_3]
 ```
 
-That difference is the *point* of inlining, not a defect. Before inlining a callee is
-verified once, modularly, and each call site assumes its contract; after inlining the
-callee's body is verified again at every call site. So the obligation multiset grows,
-and an equality claim would report correct behaviour as a bug — the same trap the
-`useArrayTheory` property fell into before being restated.
+That difference is the *purpose* of the inlining, and not a defect. Before the pass, one proof covers a
+callee, and each call site assumes its contract. After the pass, a proof covers the body of the callee
+again at each call site. Therefore the multiset of the obligations grows, and a claim of equality would
+report correct behaviour as a defect.
 
 What holds, and is worth pinning:
 
@@ -1574,7 +1499,7 @@ def checkInlineProcSymbolicAgreement (p : Program) : Bool :=
              let lb := (programBodies after).flatMap stmtsAssertLabels
              la.all lb.contains)))
 
-/-! ## `NondetElim` and `LoopInitHoist` — the unproven postconditions
+/-! ## `NondetElim` and `LoopInitHoist`: the postconditions with no proof
 
 Both files prove syntactic *preservation* lemmas (`noFuncDecl`,
 `noMeasureLoops`), but neither proves its own headline postcondition. Each
@@ -1693,11 +1618,11 @@ def checkHoistPreservesUniqueInits (p : Program) : Bool :=
 
 /-! ## The three loop passes under the symbolic evaluator
 
-The two sections above state each loop pass's claim **syntactically**: a count of inserted
-statements, a `Bool` postcondition, a survival check on assert *labels*. None of
-them asks the question the pipeline actually cares about — whether the pass
-changes the **proof obligations that reach SMT**. That is what this section adds,
-for `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist`.
+The two sections above state the claim of each loop pass **about its syntax**. Those claims are a count
+of the inserted statements, a postcondition as a `Bool`, and a check on the survival of an `assert`
+*label*. None of them asks whether the pass changes the **proof obligations that reach SMT**, which is
+the question that the pipeline cares about. This section asks it, for `InsertLoopInvariantAsserts`,
+`NondetElim` and `LoopInitHoist`.
 
 ### Running the evaluator on a program that holds a loop
 
@@ -1726,13 +1651,13 @@ For all three the claim is that **no obligation is lost**, plus that the
 evaluator does not start failing. Equality is wrong for the first, and stated as
 containment for the other two so that they report the direction that matters:
 
-* `InsertLoopInvariantAsserts` *adds* obligations by design — that is the pass.
-  So the obligation set must grow, and an equality claim would report the pass
-  working as a bug (the trap the `ProcedureInlining` note records).
+* `InsertLoopInvariantAsserts` *adds* an obligation by design, because that is the purpose of the pass.
+  Therefore the set of the obligations must grow, and a claim of equality would report correct
+  behaviour as a defect.
 
-* `NondetElim` and `LoopInitHoist` both preserve the obligation set exactly, by
-  measurement. They are still stated as containment, so that a *lost* obligation
-  (which is a lost proof) is reported and a benign addition is not.
+* `NondetElim` and `LoopInitHoist` must keep each obligation. Each of the two properties states
+  containment, so that it reports a *lost* obligation, which is a lost proof, and it does not report a
+  harmless addition.
 
 ### `NondetElim` is early-against-late, not with-against-without
 
@@ -1743,56 +1668,24 @@ baseline left for `checkNondetElimSymbolicNoLoss` to use: a program that reaches
 the evaluator at all has had `nondetElim` applied to it.
 
 What the property compares instead is *where* the elimination happens.
-`nondetElimProgram` rewrites the procedure bodies at the source, before
-`InsertLoopInvariantAsserts` and `LoopElim`; the oracle's phase rewrites what
-those two produce. Both sides then evaluate. The claim is that moving the
-elimination earlier — past a pass that reads loop guards, and past one that
-rewrites `while *` into `if *` — loses no obligation, which is exactly the
-question a caller who wants to normalize nondeterminism up front has to ask.
+`nondetElimProgram` rewrites each procedure body at the source, before
+`InsertLoopInvariantAsserts` and before `LoopElim`. The phase of the oracle rewrites the output of those
+two passes. Both sides then evaluate. The claim is that an earlier elimination loses no obligation. That
+earlier position is before a pass that reads a loop guard, and before a pass that rewrites a `while *`
+into an `if *`. A caller who wants to normalize each nondeterministic guard first must ask that
+question.
 
-### The evaluator defect this section was written for
+### Why the oracle runs `nondetElim` itself
 
-Before `fix(core): eliminate nondeterministic control before symbolic
-evaluation`, `StatementEval.lean` minted the variable standing for a
-nondeterministic guard as
+`Core.Statement.eval` and `toCoreProofObligationProgram` **reject** a nondeterministic guard that
+survives, and `nondetElimPipelinePhase` sits immediately before `symbolicEval`, so that no such guard
+reaches the evaluator. `nondetElim` replaces each `if *` with a havoc of a fresh variable of the form
+`$__ndelim_ite$`, drawn from a monotone counter in a `StringGenState`.
 
-    $__nondet_cond_{Ewn.env.pathConditions.scopes.length}
-
-— a name derived from the current path-condition **depth**, not from a monotone
-counter. Entering a `.block` pushes a *variable* scope and no path-condition
-scope (`Env.pushEmptyScope` touches `exprEnv.state` only), and
-`Env.performMerge` pops the branch scope again after an `.ite`, so two `if *`
-statements sitting at the same path-condition depth were handed the **same** name.
-The second one's synthesized `init` then re-declared a name already in scope, the
-path took an error, and `evalAuxGo` — whose first act is
-`if good.isEmpty then return` — stopped. Every obligation from that point to the
-end of the procedure was dropped, and `toCoreProofObligationProgram` still
-returned `.ok`, so nothing reported it.
-
-Measured then, on a one-procedure program:
-
-| body | obligations |
-| --- | --- |
-| `if * { assert a }; assert after` | `[a, after]` |
-| `if * { assert a }; if * { assert b }` | `[a]` |
-| `if * { assert a }; if * { assert b }; assert after` | `[a]` |
-| `if (true) { assert a }; if (true) { assert b }` | `[a, b]` |
-
-and the mechanism was confirmed against a source program that declared the name
-itself: prefixing `init $__nondet_cond_2 : bool := true` to
-`if * { assert a }; assert after` dropped the obligation list to `[]` — a program
-whose every assertion silently went unchecked.
-
-The fix makes `Core.Statement.eval` and `toCoreProofObligationProgram` **reject** a
-surviving nondeterministic guard, and puts `nondetElimPipelinePhase` immediately
-before `symbolicEval` so that nothing arrives with one. `nondetElim` replaces each
-`if *` with a havoc of its own freshly generated `$__ndelim_ite$` variable, drawn
-from a `StringGenState` counter that *is* monotone, so no `$__nondet_cond_` is
-minted at all. Every row of the table above now reads `[a, …]` in full, and the
-`#guard`s at the end of this file keep it that way: they are the regression
-witnesses for the repair, and they are the reason the oracle runs the phase rather
-than leaving the rejection to fire, which would have turned every `if *` draw into
-a silent skip. -/
+The oracle here runs that phase itself, and it does not let the rejection happen. A rejection would turn
+each draw that holds an `if *` into a silent skip, because every property here reads the resulting
+`none` as "there is no claim to make". The `#guard`s at the end of this file hold the obligation lists
+for a set of small bodies with an `if *`, so a change to this behaviour becomes visible there. -/
 
 /-- A program's procedure bodies rewritten by `f`, every other declaration left
     alone. A `.cfg` body is left alone too: `bodyStmts` reads nothing out of one,
@@ -1806,9 +1699,9 @@ def mapProgramBodies (f : List Statement → List Statement) (p : Program) : Pro
       | other => other }
 
 /-- Lift a pass on `Stmt Expression (Cmd Expression)` to one on `Statement`s.
-    A body holding a procedure call does not convert (`toCmdStmts` gives `none`),
-    and is then returned unchanged rather than dropped — the pass simply does not
-    apply there, which is what `cmdShapedBodies` measures. -/
+    A body that holds a procedure call does not convert, because `toCmdStmts` gives `none` for it. The
+    function then gives that body back unchanged, and it does not drop the body. The pass does not apply
+    there, and `cmdShapedBodies` measures how often that happens. -/
 def onCmdShaped
     (f : List (Stmt Expression (Cmd Expression)) → List (Stmt Expression (Cmd Expression)))
     (ss : List Statement) : List Statement :=
@@ -1858,12 +1751,11 @@ def bareLoopsProgram (p : Program) : Program := mapProgramBodies bareLoopsStmts 
     `LoopElim` threw, or it left a loop behind, or `symbolicObligations` raised a
     diagnostic.
 
-    `LoopElim` runs *before* the `nondetElim` that `symbolicObligations` performs,
-    which is the production order: `loopElimPipelinePhase` sits in
-    `transformPipelinePhases` and `nondetElimPipelinePhase` immediately before
-    `symbolicEval`. The order is load-bearing in one direction at least — `LoopElim`
-    rewrites a `while *` into an `if *`, so a `nondetElim` placed ahead of it would
-    have to be repeated afterwards anyway.
+    `LoopElim` runs *before* the `nondetElim` that `symbolicObligations` performs, and that is the
+    production order. `loopElimPipelinePhase` is a part of `transformPipelinePhases`, and
+    `nondetElimPipelinePhase` comes immediately before `symbolicEval`. The order matters in at least one
+    direction, because `LoopElim` rewrites a `while *` into an `if *`. A `nondetElim` before `LoopElim`
+    would therefore have to run again after it.
 
     The loop-freedom of the `LoopElim` output is *checked*, not assumed. The
     evaluator answers a loop with an uncatchable `PANIC`, so a `LoopElim` that
@@ -1879,9 +1771,9 @@ def elimObligationLabels (p : Program) : Option (List String) :=
       | none => none
       | some ob => some ((programBodies ob).flatMap stmtsAssertLabels)
 
-/-- The obligation labels of `p` after `InsertLoopInvariantAsserts` and then
-    `LoopElim` — the production order, and the chain the two structural passes of
-    this section are measured through on both sides. -/
+/-- The labels of the obligations of `p`, after `InsertLoopInvariantAsserts` and then `LoopElim`. That
+    is the production order, and it is the chain that both sides of a comparison use for the two
+    structural passes of this section. -/
 def vcElimObligationLabels (p : Program) : Option (List String) :=
   match runPhase loopInvPhase p with
   | none => none
@@ -1913,13 +1805,12 @@ def labelsRetained (before after : List String) : Bool :=
 
     Vacuous when the input does not typecheck, when a nondeterministic loop
     carries a measure (the pass throws, which `checkLoopNondetMeasureThrows`
-    states), or when the baseline itself never reaches the evaluator — there is
-    then nothing to compare against. A pass output that *stops* reaching the
-    evaluator is a failure, not a skip.
+    states), or when the baseline itself does not reach the evaluator, because there is then nothing to
+    compare against. An output of the pass that *stops* reaching the evaluator is a failure, and not a
+    skip.
 
-    Coverage, measured over two runs of 400 draws: the claim is live on 397 and
-    396, and the pass has an invariant or a measure to insert on 12 and 10 of
-    those. So the guards are cheap but the interesting subset is small, which is
+    The two guards cost little coverage, and few generated programs hold an invariant or a measure for
+    the pass to insert. That small subset is
     what the `#guard`s at the end of this file are for. Passes on every draw. -/
 def checkLoopVcSymbolicNoLoss (p : Program) : Bool :=
   !progTypeChecks p || hasNondetMeasureLoop p ||
@@ -1939,28 +1830,17 @@ def checkLoopVcSymbolicNoLoss (p : Program) : Bool :=
     the source, ahead of the two structural passes, while the before-side leaves it
     to the phase inside `symbolicObligations`.
 
-    This is not the claim the property was originally written for. Upstream used to
-    evaluate an `if *` directly, so "with the pass against without it" was
-    statable and the pass made the obligation set *grow* — it repaired the
-    `$__nondet_cond_` collision. The evaluator now rejects a surviving
-    nondeterministic guard outright, so a program only ever reaches it
-    post-elimination and there is no "without" side left; see the section note.
+    There is no baseline without an elimination. The evaluator rejects a nondeterministic guard that
+    survives, so a program reaches the evaluator only after an elimination. Read the note of this
+    section.
 
-    Stated as containment for uniformity with the other two, though measurement
-    finds the two orders agree exactly.
+    The property states containment, for uniformity with the other two properties of this section.
 
-    Vacuous when the input does not typecheck or holds a nondeterministic loop
-    carrying a measure. That second guard is doing real work here and is not
-    symmetric: `insertInvariantAsserts` throws on such a loop, and `NondetElim`
-    makes every guard deterministic, so the early rewrite would *remove* the
-    rejection — the after-side would run where the before-side threw, and there
-    would be no baseline to compare with.
-
-    Coverage over two runs of 400 draws: live on 397 and 396, and the pass has a
-    nondeterministic guard to rewrite on 12 and 11 of those. Passes on every draw.
-    Before the oracle was retargeted to mirror `corePipelinePhases` this read
-    `fires = 0` on both runs — every draw carrying an `if *` failed to produce a
-    baseline, so the property was live only where the pass did nothing. -/
+    The property says nothing when the input does not type check, and when it holds a nondeterministic
+    loop that carries a measure. That second guard does real work here, and it is not symmetric.
+    `insertInvariantAsserts` throws on such a loop, and `NondetElim` makes each guard deterministic.
+    Therefore the early rewrite would *remove* the rejection. The side after the pass would then run
+    where the side before it threw, and there would be no baseline for the comparison. -/
 def checkNondetElimSymbolicNoLoss (p : Program) : Bool :=
   !progTypeChecks p || hasNondetMeasureLoop p ||
     (match vcElimObligationLabels p with
@@ -1981,18 +1861,12 @@ def checkNondetElimSymbolicNoLoss (p : Program) : Bool :=
     body that violates it the pass makes no promise, so neither does this
     property.
 
-    Of the three passes in this section this is the one whose obligation set is
-    preserved *exactly*, by measurement. It is still stated as containment, so a
-    benign addition does not disturb it while a lost obligation — a lost proof —
-    still shows up.
+    The property states containment, so a harmless addition does not break it, and a lost obligation,
+    which is a lost proof, does break it.
 
-    Coverage over two runs of 400 draws: live on 397 and 396, and a loop body holds
-    an `init` for the pass to hoist on 0 and 2 of those — the thinnest of the three
-    by a wide margin, since it needs a loop *and* a declaration inside it, so on a
-    given run it may well be scored vacuously throughout. The `#guard`s below are
-    where this pass's obligation preservation is actually pinned. `uniqueInitsB`
-    rejected 1 draw across the two runs, so that guard costs almost no coverage.
-    Passes on every draw. -/
+    Generated input reaches this pass least often of the three, because the pass needs a loop *and* a
+    declaration inside that loop. A run can therefore score this property with no real input throughout.
+    The `#guard`s below are where the preservation of the obligations of this pass is pinned. -/
 def checkHoistSymbolicNoLoss (p : Program) : Bool :=
   !progTypeChecks p || hasNondetMeasureLoop p ||
     !((cmdShapedBodies p).all uniqueInitsB) ||
@@ -2003,16 +1877,16 @@ def checkHoistSymbolicNoLoss (p : Program) : Bool :=
        | none => false   -- the pass broke the chain to the evaluator
        | some after => labelsRetained before after)
 
-/-! ## Deterministic guards
+/-! ## The deterministic guards
 
-Small hand-built programs that pin each dimension generated input cannot reach,
-and each of the three known defects, so a regression shows up as a broken build.
+Each guard below is a small program that a person wrote. Together they pin each dimension that generated
+input cannot reach, and each of the three known defects. Therefore a change to any of them breaks the
+build.
 
-Generated input cannot reach three things: a name that collides with a pass's own
-generated prefix (`genIdentName` draws no `$`-prefixed name), a procedure inlined
-at two call sites (a generated program holds two or more procedures in about
-3 percent of draws, and a call in under 2 percent), and a `.cfg` body in the input
-(no generator makes one). -/
+Generated input cannot reach three things. The first is a name that collides with the prefix that a pass
+generates, because `genIdentName` draws no name that starts with `$`. The second is a procedure that the
+pass inlines at two call sites, because few generated programs hold two procedures and a call. The third
+is a `.cfg` body in the input, because no generator makes one. -/
 
 section Guards
 
@@ -2162,11 +2036,9 @@ private def cseBareBody : List Statement :=
   [ Statement.init ⟨"a", ()⟩ (.forAll [] .int) (.det cseDupBare) .empty,
     Statement.init ⟨"b", ()⟩ (.forAll [] .int) (.det cseDupBare) .empty ]
 
--- **A polymorphic annotation the typechecker used to forbid — FIXED UPSTREAM.** With the
--- operator unannotated, `dup.typeOf` gives `none` and CSE emits `var $__cse.0 : α := 3 + 4;`.
--- That output used to be rejected ("Variable annotation must be monomorphic, but got
--- polymorphic type ∀[α]. α"), isolating the `none` fallback as the cause; on
--- `strata-org/Strata` `main` both the input and the CSE output typecheck.
+-- **A polymorphic annotation on the output of the pass.** With no annotation on the operator,
+-- `dup.typeOf` gives `none`, and the pass emits `var $__cse.0 : α := 3 + 4;`. The typechecker accepts
+-- both the input and that output.
 #guard progTypeChecks (guardProg cseBareBody)
 #guard checkCseOutputTypechecks (guardProg cseBareBody)
 
@@ -2287,19 +2159,18 @@ private def callerPassing (arg : Expression.Expr) : Decl :=
     `requires x >= 0` and an **empty body**, called with `-1`.
 
     The empty body is what makes this the sharpest possible statement of the defect:
-    the precondition check is the program's *only* proof obligation, so the obligation
-    list goes from exactly one entry to **zero**. There is no surviving obligation for
-    a reader to compare against, and — more to the point — no candidate the lost
-    obligation could have been silently *renamed* into, which forecloses the objection
-    that it was absorbed rather than dropped.
+    the check of the precondition is the *only* proof obligation of the program. Therefore the list of
+    the obligations goes from one entry to **zero**. No obligation survives for a reader to compare
+    against, and no obligation remains that could hold a new name for the lost one. Therefore nobody can
+    reply that the pass absorbed the obligation and did not drop it.
 
     Before inlining, symbolic evaluation of this program is one line:
 
         assert [|(Origin_Callee_Requires)pre|]: false;
 
-    `false` because `-1 >= 0` folds to it, so the obligation is unsatisfiable —
-    correctly reporting that the call is illegal. After inlining the whole inlined
-    block is a single variable binding and the obligation list is `[]`. -/
+    The obligation is `false`, because `-1 >= 0` folds to `false`. That obligation is therefore not
+    provable, and it correctly reports that the call is illegal. After the pass, the whole inlined block
+    is one binding of a variable, and the list of the obligations is empty. -/
 private def preconditionEmptyBodyProgram : Program :=
   { decls :=
       [ .proc { header := { name := ⟨"Callee", ()⟩, typeArgs := [],
@@ -2337,10 +2208,10 @@ private def preconditionSatisfiedProgram : Program :=
                 body := .structured [] } .empty,
         callerPassing (intLit 5) ] }
 
--- **The precondition obligation is dropped, on the minimal witness.** The input
--- typechecks, symbolic evaluation succeeds on both sides, and the pass fires — so the
--- failure is neither an ill-typed input, nor an oracle error, nor a no-op. It is a
--- lost proof obligation.
+-- **The pass drops the obligation of the precondition, on the smallest witness.** The input type
+-- checks, the symbolic evaluation succeeds on both sides, and the pass acts. Therefore the failure is
+-- not an ill-typed input, and not an error of the oracle, and not a no-op. It is a lost proof
+-- obligation.
 #guard progTypeChecks preconditionEmptyBodyProgram
 #guard (symbolicObligations preconditionEmptyBodyProgram).isSome
 #guard (runPhase inlinePhase preconditionEmptyBodyProgram).any (·.1)
@@ -2357,10 +2228,9 @@ private def preconditionSatisfiedProgram : Program :=
            | none => false)
         | none => false)
 
--- The contrast case. With an argument that satisfies the precondition, the obligation
--- folds to `true` rather than `false` — so the pre-inlining obligation really is a
--- check on the caller's argument. The defect is still present (the check is still
--- dropped), which is the point: the pass does not inspect the argument either.
+-- The contrast case. With an argument that satisfies the precondition, the obligation folds to `true`
+-- and not to `false`. Therefore the obligation before the pass is a check on the argument of the caller.
+-- The pass still drops that check, which is the point: the pass reads the argument no more than before.
 #guard progTypeChecks preconditionSatisfiedProgram
 #guard !checkInlineProcSymbolicAgreement preconditionSatisfiedProgram
 
@@ -2370,20 +2240,19 @@ private def preconditionSatisfiedProgram : Program :=
 #guard (symbolicObligations preconditionCallProgram).isSome
 #guard !checkInlineProcSymbolicAgreement preconditionCallProgram
 
-/-- The shrunk counterexample the property reported on a generated draw at 400 trials,
-    transcribed so the finding does not depend on a lucky reseed.
+/-- A counterexample that the generator produced, in its shrunk form, written out here so that it does
+    not depend on a seed.
 
-    Two things make it a *better* witness than `preconditionCallProgram` above, and it
-    is kept alongside rather than instead of it:
+    Two properties make it a *better* witness than `preconditionCallProgram` above, and this file keeps
+    both witnesses:
 
-    * the callee has an **empty body**, so the obligation program before inlining holds
-      *only* the precondition check. After inlining the obligation list is `[]` — the
-      program's sole proof obligation is gone, rather than one of several;
-    * nothing about it is contrived. The generator drew a beta redex for the
-      precondition (`(fun __q0 : bv64 => true)(bv{64}(5065526758814335903))`), five
-      parameters of assorted types, two type parameters, and a procedure named `$`.
-      A hand-written witness invites the reply "no real program looks like that"; this
-      one is what the generator actually produced. -/
+    * The callee has an **empty body**, so the program of the obligations before the pass holds the check
+      of the precondition only. After the pass, the list of the obligations is empty, so the one proof
+      obligation of the program is gone, and not one of several.
+    * Nothing in it is contrived. The generator drew a beta redex for the precondition, five parameters
+      of assorted types, two type parameters, and a procedure whose name is `$`. A reader can reply to a
+      witness that a person wrote that no real program has that shape. This witness is what the generator
+      gave. -/
 private def generatedRequiresWitness : Program :=
   let preExpr : Expression.Expr :=
     .app ()
@@ -2449,10 +2318,9 @@ private def generatedRequiresWitness : Program :=
            | none => false)
         | none => false)
 
--- Non-vacuity: the pass really fires, symbolic evaluation really succeeds on both
--- sides, and the obligation count really *grows* — which is why the property claims
--- containment rather than equality. Pinning the growth keeps a future reader from
--- "tightening" the property into something false.
+-- The input is real: the pass acts, the symbolic evaluation succeeds on both sides, and the count of the
+-- obligations *grows*. That growth is why the property claims containment and not equality. These guards
+-- record the growth, so that a later reader does not make the property stronger and false.
 #guard (runPhase inlinePhase twoCallSitesProgram).any (·.1)
 #guard (symbolicObligations twoCallSitesProgram).isSome
 #guard (match runPhase inlinePhase twoCallSitesProgram with
@@ -2566,9 +2434,9 @@ private def nestedInlinableProgram : Program :=
 
 -- Non-vacuity, and it matters here more than usual: the property is an implication
 -- whose premise is "the transform changed the expression", and the whole comparison
--- rests on the evaluator being *willing* to unfold. So pin that the inlined side
--- really reduces to a canonical value under `inlineEvalFactory` — the chain
--- `guardOuter(7) → guardInner(7) → 7` collapses to the literal.
+-- depends on the evaluator being *able* to unfold. Therefore this guard pins that the inlined side
+-- reduces to a canonical value under `inlineEvalFactory`. The chain `guardOuter(7) → guardInner(7) → 7`
+-- collapses to the literal.
 #guard (programExprs nestedInlinableProgram).any fun e =>
   let out := Strata.inlineFuncDefs (programFactory nestedInlinableProgram) (e := e)
   decide (out = e) == false &&
@@ -2583,8 +2451,8 @@ private def nestedInlinableProgram : Program :=
   let out := Strata.inlineFuncDefs F (e := e)
   decide (out = e) == false && decide (evalOver F e = e)
 
-/-- A nullary bodied function, so a "call" to it is a bare `.op` node — the smallest
-    shape that exercises the binder boundary below. -/
+/-- A function with no parameter and with a body, so a call to it is a bare `.op` node. That is the
+    smallest shape that reaches the boundary of a binder below. -/
 private def nullaryFuncProgram (body : Expression.Expr) : Program :=
   { decls :=
       [ .func { name := ⟨"NF", ()⟩, typeArgs := [], inputs := [], output := .bool,
@@ -2604,8 +2472,8 @@ private def nfCall : Expression.Expr := .op () ⟨"NF", ()⟩ (some .bool)
 -- Under a binder they legitimately diverge: `eval` substitutes and stops
 -- (`LExprEval.lean`) while `inlineFuncDefs` recurses, so `fun q => NF` evaluates
 -- to itself on the left and to `fun q => false` on the right. `exprHasBinder`
--- excludes it, which is why the property still passes on such a program — the guard
--- records that this exclusion is doing real work and is not dead weight.
+-- excludes such an expression, and the property therefore holds on such a program. This guard records
+-- that the exclusion does real work.
 #guard exprHasBinder (.abs () "q" (some .bool) nfCall)
 #guard checkInlineEvalAgreement (nullaryFuncProgram (.abs () "q" (some .bool) nfCall))
 #guard (let p := nullaryFuncProgram (.abs () "q" (some .bool) nfCall)
@@ -2617,9 +2485,9 @@ private def nfCall : Expression.Expr := .op () ⟨"NF", ()⟩ (some .bool)
 
 -- ── The measure that `DetToKleene` drops ──────────────────────────────────
 
--- A loop with a measure and no invariant: the transform is defined, and the
--- measure is gone from the result. This is the `DetToKleene` characterization, pinned on
--- the exact shape rather than left to the generator's 8 percent hit rate.
+-- A loop with a measure and no invariant. The transform is defined there, and the measure is absent
+-- from the result. This guard pins the behaviour of `DetToKleene` on the exact shape, and it does not
+-- wait for the generator to draw one.
 #guard checkKleeneMeasureAccepted (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])
 
 -- The contrast: a loop with an invariant makes the transform undefined, which is
@@ -2685,9 +2553,9 @@ private def axiomRelevanceProgram : Program :=
 #guard (symbolicObligations axiomRelevanceProgram).isSome
 #guard checkAxiomsObligationsUnchanged axiomRelevanceProgram
 
--- A program with a loop is skipped rather than crashing the evaluator. Worth pinning
--- because the failure mode is a `PANIC`, not a `false` — an unscreened property would
--- abort the whole test run rather than report a counterexample.
+-- The property skips a program that holds a loop, and it does not send that program to the evaluator.
+-- This guard matters, because the failure is a panic and not a `false`. A property with no screen would
+-- stop the whole run instead of reporting a counterexample.
 #guard programHasLoop (guardProg [.loop .nondet none [] [guardAssert "a"] .empty])
 #guard checkAxiomsObligationsUnchanged
   (guardProg [.loop .nondet none [] [guardAssert "a"] .empty])
@@ -2727,58 +2595,39 @@ private def ndIte (l : String) : Statement :=
 private def detIte (l : String) : Statement :=
   .ite (.det trueLit) [guardAssert l] [] .empty
 
-/-- The obligation labels the evaluator emits for a body, with no *structural* pass
-    in between. The bodies below are loop-free, so `LoopElim` is a no-op on them and
-    `elimObligationLabels` is `nondetElim` and then "evaluate this" — the two phases
-    `symbolicObligations` runs, in production order. -/
+/-- The labels of the obligations that the evaluator emits for a body, with no *structural* pass between
+    them. Each body below holds no loop, so `LoopElim` changes nothing there. `elimObligationLabels` is
+    then `nondetElim` followed by the evaluation, which are the two phases that `symbolicObligations`
+    runs, in the production order. -/
 private def obligationsOf (ss : List Statement) : Option (List String) :=
   elimObligationLabels (guardProg ss)
 
--- **The evaluator used to drop proof obligations after a second `if *` — FIXED
--- UPSTREAM** (`fix(core): eliminate nondeterministic control before symbolic
--- evaluation`). The guard variable was named `$__nondet_cond_{path-condition
--- depth}`, so two `if *` at the same depth got the same name, the second `init`
--- re-declared it, and every obligation from there to the end of the procedure was
--- dropped while `toCoreProofObligationProgram` still returned `.ok`:
---
---     obligationsOf [ndIte "a", guardAssert "after"]            == some ["a", "after"]
---     obligationsOf [ndIte "a", ndIte "b"]                      == some ["a"]
---     obligationsOf [ndIte "a", ndIte "b", guardAssert "after"] == some ["a"]
---     obligationsOf [ndIte "a", guardAssert "mid", ndIte "b"]   == some ["a", "mid"]
---
--- The fix has two halves: `Core.Statement.eval` and `toCoreProofObligationProgram`
--- now *reject* a surviving nondeterministic guard outright, and
--- `nondetElimPipelinePhase` runs immediately before `symbolicEval` in
--- `corePipelinePhases` so that nothing reaches them with one. `symbolicObligations`
--- mirrors that pair, so these witnesses are repaired rather than refused — every
--- obligation now arrives, in source order, however many `if *` precede it:
+-- **Each obligation arrives, in source order, after any number of `if *` statements.** This is the
+-- property that a reader should check first, because a defect in the evaluator can drop an obligation
+-- after a second `if *` in silence. `Core.Statement.eval` and `toCoreProofObligationProgram` *reject* a
+-- nondeterministic guard that survives, and `nondetElimPipelinePhase` runs immediately before
+-- `symbolicEval` in `corePipelinePhases`, so no such guard reaches them. `symbolicObligations` runs the
+-- same pair of phases.
 #guard obligationsOf [ndIte "a", guardAssert "after"] == some ["a", "after"]
 #guard obligationsOf [ndIte "a", ndIte "b"] == some ["a", "b"]
 #guard obligationsOf [ndIte "a", ndIte "b", guardAssert "after"] == some ["a", "b", "after"]
 #guard obligationsOf [ndIte "a", guardAssert "mid", ndIte "b"] == some ["a", "mid", "b"]
--- The two contrasts the defect used to show up against, kept as controls. A
--- deterministic pair was never affected; and nesting one `if *` inside another gave
--- the two of them different path-condition depths, so they escaped the collision.
--- Both now agree with the sibling nondet pair above, which is the shape of a repair
--- rather than of a workaround — the answer no longer depends on the guard kind or
--- on the nesting.
+-- Two controls. The first is a pair of deterministic guards. The second nests one `if *` inside another.
+-- Both agree with the pair of sibling nondeterministic guards above, so the answer depends neither on the
+-- kind of the guard nor on the nesting.
 #guard obligationsOf [detIte "a", detIte "b"] == some ["a", "b"]
 #guard obligationsOf [.ite .nondet [guardAssert "a", ndIte "b"] [] .empty] == some ["a", "b"]
 
--- The mechanism the fix removed, pinned directly, because a repair is only worth
--- as much as the witness that used to break: the evaluator minted the guard name as
--- `$__nondet_cond_{path-condition depth}` (`StatementEval.lean`), so a source
--- program declaring that very name collided with the *first* `if *` and the whole
--- procedure's obligation list went empty (`== some []`) with no diagnostic
--- anywhere. `nondetElim` mints from a monotone `StringGenState` under a different
--- prefix, so the name is no longer predictable from the program and the colliding
--- and innocent declarations now agree.
+-- **A name in the source cannot collide with the name of a generated guard.** `nondetElim` builds each
+-- name from a monotone `StringGenState`, under a prefix of its own. Therefore a program cannot predict
+-- that name, and the two declarations below give the same obligations. A name that an evaluator derives
+-- from the depth of the path condition is predictable, and a program that declares that name empties the
+-- whole list of the obligations with no diagnostic.
 private def collidingNondetName : Statement :=
   Statement.init ⟨"$__nondet_cond_2", ()⟩ (.forAll [] .bool) (.det trueLit) .empty
 
-/-- The same declaration under a name the evaluator never minted even before the
-    fix — the control, so an effect would be attributable to the collision and not
-    to the extra `init`. -/
+/-- The same declaration under a name that no phase generates. This is the control, so that an effect
+    belongs to the collision and not to the extra `init`. -/
 private def innocentNondetName : Statement :=
   Statement.init ⟨"$__nondet_cond_99", ()⟩ (.forAll [] .bool) (.det trueLit) .empty
 
@@ -2788,11 +2637,10 @@ private def innocentNondetName : Statement :=
 #guard obligationsOf [innocentNondetName, ndIte "a", guardAssert "after"]
         == some ["a", "after"]
 
--- What is left for `checkNondetElimSymbolicNoLoss` to say, now that the oracle runs
--- `nondetElim` on both sides: not "with the pass against without it" — there is no
--- "without" any more — but **early against late**. Our `nondetElimProgram` rewrites
--- the source before `InsertLoopInvariantAsserts` and `LoopElim`; the phase inside
--- the oracle rewrites after both. The claim is that moving it earlier loses nothing.
+-- The oracle runs `nondetElim` on both sides, so `checkNondetElimSymbolicNoLoss` compares an **early**
+-- elimination against a **late** one, and not the pass against its absence. `nondetElimProgram` rewrites
+-- the source before `InsertLoopInvariantAsserts` and before `LoopElim`, and the phase inside the oracle
+-- rewrites after both. The claim is that the earlier position loses nothing.
 #guard (nondetElimProgram (guardProg [ndIte "a", ndIte "b"]) |> fun p =>
   (cmdShapedBodies p).all fun ss => !stmtsHaveNondetGuard ss)
 #guard vcElimObligationLabels (guardProg [ndIte "a", ndIte "b"]) == some ["a", "b"]
@@ -2834,13 +2682,11 @@ private def hoistObligationBody : List Statement :=
 #guard (cmdShapedBodies (loopInitHoistProgram (guardProg hoistObligationBody))).all
   Imperative.Block.loopBodyNoInits
 
--- The sharpest form the evaluator defect took, and the one the random generator
--- actually produced (a draw of size 129, shrunk to 16 and then tidied): a
--- procedure whose postcondition is `false` — unverifiable by construction —
--- together with two *empty* `if *`. The blocks assert nothing and assign nothing;
--- they only consumed the minted name. The obligation list came back **empty**, so
--- a verifier had nothing to prove and reported success. Kept as a regression
--- witness: it is the shape that would tell us fastest if the repair came undone.
+-- The sharpest shape for this class of defect, and one that the random generator produced. The procedure
+-- has the postcondition `false`, so it is unverifiable by construction, and its body holds two *empty*
+-- `if *` statements. Those blocks assert nothing and assign nothing, and they only consume a generated
+-- name. A predictable name empties the list of the obligations, so a verifier then has nothing to prove
+-- and it reports success. This witness therefore shows such a defect fastest.
 
 /-- `procedure P (out r : int) ensures [post]: false { ss }`. The postcondition
     makes the procedure unverifiable, so its obligation must reach the evaluator. -/
@@ -2855,11 +2701,9 @@ private def ensuresFalseProg (ss : List Statement) : Program :=
 /-- An empty nondeterministic `if *`, which contributes nothing but the name. -/
 private def emptyNdIte : Statement := .ite .nondet [] [] .empty
 
--- Varying only the number of empty `if *` used to isolate the defect: zero and one
--- were correct, two lost the postcondition entirely (`== some []` — an
--- `ensures false` procedure that verified), and a deterministic guard never lost
--- it. All four cases now agree on `["post"]`, which is the whole content of the
--- repair: the count of `if *` no longer changes what the procedure owes.
+-- The four cases below differ only in the number of the empty `if *` statements, and in the kind of the
+-- guard. All four give `["post"]`, so the number of the `if *` statements does not change what the
+-- procedure owes.
 #guard vcElimObligationLabels (ensuresFalseProg []) == some ["post"]
 #guard vcElimObligationLabels (ensuresFalseProg [emptyNdIte]) == some ["post"]
 #guard vcElimObligationLabels (ensuresFalseProg [emptyNdIte, emptyNdIte]) == some ["post"]

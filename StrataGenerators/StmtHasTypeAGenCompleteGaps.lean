@@ -24,21 +24,19 @@ The docstring of each gap theorem gives the Strata Core source text of its
 counterexample. `Core.formatProgram` produced that text from the statement in the
 theorem.
 
-## Two gaps that a generator change closed
+## Two conditions that the generators satisfy
 
-The generators used to be narrower, and two more counterexamples were plain Core
-programs:
+Two further shapes could be a counterexample in the source of Core, and the generators reach both of them:
 
-* An `assert`, `assume` or `cover` label came from `String.arbitrary`, and an
-  `init` variable name came from `NonEmptyString.arbitrary`. The support of each
-  holds the alphanumeric strings only, so a name with an underscore was out of
-  reach. That included `assert_0`, which the parser itself mints for an unlabelled
-  `assert`. All four generators now draw from `genIdentName`, whose support is
-  exactly the legal non-keyword Core identifiers. `label_gap` survives only because
-  a `Statement` holds a bare `String`. `emptyLabel_not_reachable` gives a witness.
-* `mkArgs` fixed the argument order as in-out, then by-value input, then out
-  target, so a call such as `call p(out y, 1);` was out of reach. `mkArgs` now
-  takes an interleaving mask. `mkArgs_out_then_in` shows the call is reachable.
+* Each label of an `assert`, of an `assume` and of a `cover`, and each variable name of an `init`, comes from
+  `genIdentName`, whose support holds exactly the legal identifiers of Core that are not a keyword. A generator
+  that draws a name from `String.arbitrary` or from `NonEmptyString.arbitrary` reaches an alphanumeric name
+  only, so a name with an underscore is then out of reach. One such name is `assert_0`, which the parser itself
+  builds for an `assert` with no label. `label_gap` therefore survives for one reason only: a `Statement` holds
+  a bare `String`. `emptyLabel_not_reachable` gives a witness.
+* `mkArgs` takes a mask for an interleaving, so a call such as `call p(out y, 1);` is in the image of the
+  recipe. `mkArgs_out_then_in` shows that. A recipe that fixes the order as the in-out block, then each
+  by-value input, then each out target, cannot reach such a call.
 
 ## Upstream predicates that do not fit
 
@@ -64,7 +62,7 @@ discharges one:
 annotations (`translateInitStatement` and `translateVarStatement` in
 `Strata/Languages/Core/DDMTransform/Translate.lean`). So this clause is
 necessary at the level of the abstract syntax tree, but no parsed program can
-violate it. The name clauses of `AlphabetOk` are now in the same position.
+break it. Each clause of `AlphabetOk` about a name is in the same position.
 -/
 namespace StrataGenerators.Stmt.SpecComplete.Gaps
 
@@ -299,9 +297,9 @@ example : (#[mdKey] : Imperative.MetaData Expression) ≠ default := by decide
     `emptyLabel_not_reachable`. `Core.formatProgram` renders it as the degenerate
     `assert [||]: true;`. `assert_wt` gives the well-typedness of the statement.
 
-    The same gap applies to an `assume` label, to a `cover` label, to an invariant
-    label, to a `block` label, to an `init` variable name and to a
-    type-constructor name. Each of those now comes from `genIdentName` too. -/
+    The same gap applies to the label of an `assume`, of a `cover`, of an invariant and of a `block`, to the
+    variable name of an `init`, and to the name of a type constructor. Each of those also comes from
+    `genIdentName`. -/
 theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
     (l : String) (e : Expression.Expr)
@@ -323,11 +321,11 @@ theorem emptyLabel_not_reachable :
   rintro ⟨⟨c, cs, hsplit, _, _⟩, _⟩
   exact absurd hsplit (by simp)
 
--- ── The old Gap 3 is closed: the argument order is now free ───────────────
+-- ── The order of the arguments is free ───────────────────────────────
 
-/-- **The argument-order gap is closed.** `mkArgs` takes an interleaving mask, so
-    an `out` argument before a by-value input is now in the recipe's image. The mask
-    `[false]` puts the single out target first.
+/-- **The order of the arguments needs no side condition.** `mkArgs` takes a mask for an interleaving, so an
+    `out` argument before a by-value input is in the image of the recipe. The mask `[false]` puts the one out
+    target first.
 
     Before the mask, `mkArgs` fixed the order as in-out, then by-value input, then
     out target. The call `call p(out y, 1);` below was well-typed and out of reach.
@@ -492,19 +490,19 @@ theorem otherTargetCall_gap (labels : List String)
 
 -- ── `spec_complete`'s old environment hypotheses were unsatisfiable ──────────
 
-/-! ### The old `hExprC` was unsatisfiable, at every depth
+/-! ### A hypothesis over each environment is unsatisfiable, at each depth
 
-`spec_complete` used to take `hExprC : ∀ d (ctx : VarCtx), GenLExprComplete
-ctx.toFVarCtx octx tvars d`, and `GenLExprComplete fctx octx tvars d` demands that
-*every* expression `HasTypeA` accepts at `τ` be in the support of `genLExpr … d τ`.
+A hypothesis of the form `∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d` is unsatisfiable.
+`GenLExprComplete fctx octx tvars d` asks that *each* expression that `HasTypeA` accepts at a type is in the
+support of `genLExpr` at the depth `d` and at that type.
 That is false, and the reason has nothing to do with the depth: with an empty `fctx`
 nothing in the support has a free variable, while `HasTypeA.fvar` accepts an
 *annotated* free variable against the empty context, since it reads the type off the
 annotation. The two sides already disagree at a leaf.
 
-The depth is a second, independent obstruction — `genLExpr` recurses structurally on
-it, so the support at a fixed depth is depth-bounded while `HasTypeA` accepts terms
-of every depth. Either obstruction alone is fatal, which is why weakening `∀ d` to
+The depth is a second obstruction, and it is independent of the first. `genLExpr` recurses structurally on the
+depth, so its support at a fixed depth has a bounded depth, and `HasTypeA` accepts a term of each depth. Each
+obstruction alone is enough, and that is why an existential in place of the `∀ d`
 `∃ d` does not help. -/
 
 /-- **`GenLExprComplete` is false at every depth.** An annotated free variable is
@@ -517,10 +515,10 @@ theorem not_GenLExprComplete (d : Nat) :
   have := Lambda.LExpr.genLExpr_no_fvars octx [] tvars [] d .int _ hmem
   simp [LExpr.getVars] at this
 
-/-- **An existential depth would not have helped.** The predicate fails at each
-    individual depth, so `∃ d, GenLExprComplete …` is false too. Only moving the
-    quantifier *inside* — reachability per expression, in a scope that holds that
-    expression's free variables — can be satisfiable. That is what `ExprOk` does. -/
+/-- **An existential over the depth does not help.** The predicate fails at each depth, so
+    `∃ d, GenLExprComplete …` is false too. Only a form with the quantifier *inside* can be satisfiable, which
+    means the reachability of one expression at a time, in a scope that holds the free variables of that
+    expression. `ExprOk` has that form. -/
 theorem not_exists_depth_GenLExprComplete :
     ¬ ∃ d, GenLExprComplete [] octx tvars d := by
   rintro ⟨d, hd⟩; exact not_GenLExprComplete d hd
@@ -547,11 +545,10 @@ theorem hExprC_unsatisfiable :
     StatementHasType' τ P C Γ L (.funcDecl decl md) (C.addFactoryFunction func.toLFunc) Δ
 ```
 
-`decl` occurs in exactly one premise, `¬ decl.isRecursive`. The function that is
-*type-checked*, and that lands in the output context, is an unrelated `func`. The
-rule's own docstring says "the resulting `func` is added to `C`" — resulting from
-`decl` — but nothing connects them, and the algorithmic checker
-(`Core.StatementType`) does connect them:
+The declaration occurs in one premise only, which says that it is not recursive. The function that the rule
+*type checks*, and that goes into the output context, is a separate function. The docstring of the rule says
+that the resulting function goes into the context, and it means the function that the declaration gives. No
+premise connects the two. The algorithmic checker in `Core.StatementType` does connect them:
 
 ```
 let (decl', func, Env) ← PureFunc.typeCheck C Env decl   -- func := ofPureFunc decl, checked
@@ -560,24 +557,23 @@ let C := C.addFactoryFunction func.toLFunc
 
 Two consequences, both witnessed below by `funcDecl_illTyped_accepted`:
 
-1. **The spec accepts an ill-typed local declaration.** `decl` is never checked, so
-   `function f (x : int) : bool { x };` — whose body has type `int` against a declared
-   return type of `bool` — is well-formed under the rule. The real checker rejects it.
-2. **The output context is unconstrained.** The rule adds *any* well-typed function,
-   here one that is not even called `f`. Since `FuncHasType'` is a six-field structure
-   constraining no name, `attr`, `axioms`, `isRecursive` or precondition count — all
-   of which `genFunction_complete` requires — the added function can also be one
-   `genFunction` never produces. That is what blocks a side-condition-free
-   completeness theorem at a `funcDecl` node, and why `SpecComplete.ExprOk`'s
-   `.funcDecl` clause is `False`.
+1. **The specification accepts a local declaration that is ill typed.** No premise checks the declaration.
+   Therefore `function f (x : int) : bool { x };` is well formed under the rule, and the type of its body is
+   `int` against a declared result type of `bool`. The real checker rejects it.
+2. **The rule puts no condition on the output context.** It adds *each* well-typed function, and the one here
+   does not even carry the declared name. `FuncHasType'` is a structure of six fields, and it constrains no
+   name, no attribute, no axiom, the recursion of the function and the number of its preconditions.
+   `genFunction_complete` needs each of those conditions. Therefore the function that the rule adds can also be
+   a function that `genFunction` never gives. That fact is what blocks a completeness theorem with no side
+   condition at a `funcDecl` node, and it is why the `.funcDecl` clause of `SpecComplete.ExprOk` is `False`.
 
 The fix is to add the premise the algorithm already computes,
 `Function.ofPureFunc decl = .ok func` (or the `tyCompat`-style agreement, if
 `Function.typeCheck` annotates a signature field). Then `func` is determined by
 `decl`, its reachability follows from the declaration's, and the clause can go. -/
 
-/-- `function f (x : int) : bool { x };` — the body has type `int`, the declared
-    return type is `bool`. Nothing about this declaration is well-typed. -/
+/-- The declaration `function f (x : int) : bool { x };`. The type of its body is `int`, and its declared result
+    type is `bool`. Therefore this declaration is not well typed. -/
 def illTypedDecl : Imperative.PureFunc Expression :=
   { name := ⟨"f", ()⟩, typeArgs := [], isConstr := false, isRecursive := false,
     inputs := [(⟨"x", ()⟩, (.forAll [] .int : LTy))], output := (.forAll [] .bool : LTy),
@@ -588,10 +584,9 @@ def illTypedDecl : Imperative.PureFunc Expression :=
 def unrelatedFunc : Function :=
   { name := ⟨"g", ()⟩, typeArgs := [], inputs := [], output := .bool }
 
-/-- `unrelatedFunc` is well-typed in any context that knows `bool`: `FuncHasType'`
-    asks only for distinct inputs and type arguments, no undeclared type variables,
-    a well-kinded signature, and — vacuously, both being `none` — a typed body and
-    measure. -/
+/-- `unrelatedFunc` is well typed in each context that holds the type `bool`. `FuncHasType'` asks for distinct
+    inputs, distinct type arguments, no undeclared type variable, and a well-kinded signature. Its two fields
+    about a typed body and a typed measure hold with no content here, because this function has neither. -/
 theorem unrelatedFunc_wt (C : LContext CoreLParams) (Γ : TContext Unit)
     (hbool : C.WellKindedTy .bool) :
     FuncHasTypeA C Γ unrelatedFunc := by

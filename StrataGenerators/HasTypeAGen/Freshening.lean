@@ -1,43 +1,44 @@
 import StrataGenerators.HasTypeAGen.Core
 
 /-!
-# Freshening coverage lemmas
+# The lemmas about the supply of fresh names
 
-Supporting lemmas for `freshenBoundVars` (`StrataGenerators/HasTypeAGen/Core.lean`),
-culminating in `freshenBoundVars_disjoint`: the freshened bound variables and the
-free variables of the freshened body are disjoint from the caller's in-use set.
+These lemmas support `freshenBoundVars`, and they lead to `freshenBoundVars_disjoint`. That
+theorem says that the new bound variables, and the free variables of the new body, are
+disjoint from the set of variables that the caller uses.
 
-The chain of reasoning is:
+The chain of the argument has four steps:
 
-1. `freshNameSupply_length` — the supply has `26 * (n / 26 + 2)` names, hence `≥ n`.
-2. `freshNameSupply_nodup` — the supply is duplicate-free. This is the string/char
-   combinatorial core: names are `⟨letter⟩ ++ suffix`, and both components are
-   recoverable from the name (`mkName_inj`), so distinct `(letter, suffix)` pairs
-   give distinct names.
-3. `freshNames_covers` — filtering the (`Nodup`) supply by `· ∉ allTypeVarsInUse`
-   leaves at least `conflictingTyVars.length` names, so the `zip` building the
-   renaming substitution truncates nothing.
-4. `freshenBoundVars_disjoint` — the payoff.
+1. `freshNameSupply_length`: the supply holds `26 * (n / 26 + 2)` names, and therefore it
+   holds `n` names or more.
+2. `freshNameSupply_nodup`: the supply holds no duplicate. This step is the combinatorial
+   core over strings and characters. A name is a letter and then a suffix, and `mkName_inj`
+   recovers both parts from the name. Two different pairs of a letter and a suffix therefore
+   give two different names.
+3. `freshNames_covers`: a filter of the supply by `· ∉ allTypeVarsInUse` leaves at least
+   `conflictingTyVars.length` names. The `zip` that builds the substitution for the renaming
+   therefore drops no name.
+4. `freshenBoundVars_disjoint`: the main result.
 
-This file is deliberately kept in its own module (rather than appended to
-`Core.lean`) and imports nothing beyond `HasTypeAGen.Core`; in particular no
-Mathlib and no `Batteries.Data.List.Basic` — see the import note atop
-`StrataGenerators/HasTypeAGen.lean` about the `List.Forall₂` clash.
+This file is a separate module, and it is not a part of the core module. It imports only
+`HasTypeAGen.Core`. It imports no part of Mathlib, and it imports no part of Batteries. The
+note about the imports at the start of the main `HasTypeAGen` module gives the reason, which
+is a collision on the name `List.Forall₂`.
 -/
 
 open Lambda
 
 namespace Freshening
 
--- ── Generic list helpers ──────────────────────────────────────────────
--- `List.Nodup` is *definitionally* `List.Pairwise (· ≠ ·)` here
--- (`List.nodup_iff_pairwise_ne` is `Iff.rfl`), which the first lemma exploits.
+-- ── The general lemmas about a list ───────────────────────────────────
+-- `List.Nodup` is `List.Pairwise (· ≠ ·)` by definition here, because
+-- `List.nodup_iff_pairwise_ne` is `Iff.rfl`. The first lemma below uses that fact.
 
-/-- `filter` preserves `Nodup`. (Lean core has no `List.Nodup.filter`.) -/
+/-- A `filter` keeps a list free of a duplicate. The core library of Lean has no such lemma. -/
 theorem nodup_filter {α} (p : α → Bool) {l : List α} (h : l.Nodup) :
     (l.filter p).Nodup := List.Pairwise.filter (R := (· ≠ ·)) p h
 
-/-- `map` preserves `Nodup` when the function is injective on the list. -/
+/-- A `map` keeps a list free of a duplicate when the function is injective on that list. -/
 theorem nodup_map_of_injOn {α β} {f : α → β} {l : List α}
     (hinj : ∀ a ∈ l, ∀ b ∈ l, f a = f b → a = b) (h : l.Nodup) : (l.map f).Nodup := by
   induction l with
@@ -52,9 +53,9 @@ theorem nodup_map_of_injOn {α β} {f : α → β} {l : List α}
     obtain ⟨b, hb, hfb⟩ := List.mem_map.mp hmem
     exact hnotin (hinj a List.mem_cons_self b (List.mem_cons_of_mem _ hb) hfb.symm ▸ hb)
 
-/-- Hand-rolled `Nodup` for `flatMap` (Lean core has no `List.nodup_flatMap`):
-    the index list is `Nodup`, each block is `Nodup`, and distinct indices give
-    disjoint blocks. -/
+/-- A `flatMap` gives a list with no duplicate under three conditions: the list of indices holds
+    no duplicate; each block holds no duplicate; and two different indices give two disjoint
+    blocks. The core library of Lean has no such lemma. -/
 theorem nodup_flatMap {α β} {f : α → List β} {l : List α}
     (hl : l.Nodup)
     (hb : ∀ a ∈ l, (f a).Nodup)
@@ -75,9 +76,9 @@ theorem nodup_flatMap {α β} {f : α → List β} {l : List α}
       intro heq
       exact hd a List.mem_cons_self a' (List.mem_cons_of_mem _ ha'mem) hne b hbmem (heq ▸ hb')
 
--- ── String / Char / Nat.repr injectivity ──────────────────────────────
+-- ── The injectivity of a string, a character and `Nat.repr` ───────────
 
-/-- A single-character string prepended to a suffix determines both components. -/
+/-- A string of one character, and then a suffix, determines both parts. -/
 theorem mkName_inj {c c' : Char} {s s' : String}
     (h : String.append (Char.toString c) s = String.append (Char.toString c') s') :
     c = c' ∧ s = s' := by
@@ -89,24 +90,27 @@ theorem mkName_inj {c c' : Char} {s s' : String}
   simp only [List.cons_append, List.cons.injEq] at h'
   exact ⟨h'.1, String.toList_inj.mp h'.2⟩
 
+/-- A string of one character determines that character. -/
 theorem singleton_inj {a b : Char} (h : String.singleton a = String.singleton b) : a = b := by
   have := String.toList_inj.mpr h
   rw [String.toList_singleton, String.toList_singleton] at this
   exact (List.cons.inj this).1
 
-/-- `Char.ofNat (97 + ·)` is injective on `[0, 26)` — the lowercase alphabet. -/
+/-- `Char.ofNat (97 + ·)` is injective on the range from `0` to `25`, which gives the lower-case
+    letters. -/
 theorem char_ofNat_inj {a b : Nat} (ha : a < 26) (hb : b < 26)
     (h : Char.ofNat (97 + a) = Char.ofNat (97 + b)) : a = b := by
   have key : ∀ a < 26, ∀ b < 26, Char.ofNat (97 + a) = Char.ofNat (97 + b) → a = b := by decide
   exact key a ha b hb h
 
+/-- `Nat.digitChar` is injective on the range from `0` to `9`. -/
 theorem digitChar_inj {a b : Nat} (ha : a < 10) (hb : b < 10)
     (h : Nat.digitChar a = Nat.digitChar b) : a = b := by
   have key : ∀ a < 10, ∀ b < 10, Nat.digitChar a = Nat.digitChar b → a = b := by decide
   exact key a ha b hb h
 
-/-- Decimal representation is injective. Needed so that distinct numeric suffixes
-    give distinct suffix strings. -/
+/-- The decimal form of a natural number determines that number. The proof needs this fact, so that
+    two different numeric suffixes give two different strings. -/
 theorem repr_inj : ∀ (n m : Nat), n.repr = m.repr → n = m := by
   intro n
   induction n using Nat.strongRecOn with
@@ -115,7 +119,7 @@ theorem repr_inj : ∀ (n m : Nat), n.repr = m.repr → n = m := by
     rcases Nat.lt_or_ge n 10 with hn | hn <;> rcases Nat.lt_or_ge m 10 with hm | hm
     · rw [Nat.repr_of_lt hn, Nat.repr_of_lt hm] at h
       exact digitChar_inj hn hm (singleton_inj h)
-    · -- `n < 10 ≤ m`: the representations have different lengths.
+    · -- Here `n` is less than 10 and `m` is not, so the two forms have different lengths.
       have h1 : n.repr.length ≤ 1 := (Nat.length_repr_le_iff (by omega)).mpr (by omega)
       have h2 : ¬ (m.repr.length ≤ 1) := fun hc =>
         absurd ((Nat.length_repr_le_iff (k := 1) (by omega)).mp hc) (by omega)
@@ -138,22 +142,24 @@ theorem repr_inj : ∀ (n m : Nat), n.repr = m.repr → n = m := by
           (singleton_inj ((String.append_right_inj _).mp h))
       omega
 
+/-- The string of `i + 1` determines `i`. -/
 theorem toString_succ_inj {i j : Nat} (h : toString (i + 1) = toString (j + 1)) : i = j := by
   have := repr_inj (i + 1) (j + 1) (by simpa using h)
   omega
 
--- ── `freshNameSupply` structure ───────────────────────────────────────
+-- ── The structure of `freshNameSupply` ────────────────────────────────
 
-/-- The block of 26 names contributed by one suffix: `a<suffix>, …, z<suffix>`. -/
+/-- The block of 26 names that one suffix gives: `a<suffix>` through `z<suffix>`. -/
 def block (suffix : String) : List TyIdentifier :=
   (List.range 26).map (fun c => String.append (Char.toString (Char.ofNat (97 + c))) suffix)
 
-/-- The list of suffixes used by `freshNameSupply n`: `"" , "1", …, "n/26+1"`. -/
+/-- The list of suffixes that `freshNameSupply n` uses: `""`, `"1"` and each string up to
+    `n / 26 + 1`. -/
 def suffixes (n : Nat) : List String :=
   "" :: (List.range (n / 26 + 1)).map (fun i => toString (i + 1))
 
-/-- `freshNameSupply` as a `flatMap` of 26-name blocks over the suffix list.
-    The inner `flatMap` of `Core.lean` emits singletons, so it is really a `map`. -/
+/-- `freshNameSupply` equals a `flatMap` of blocks of 26 names over the list of suffixes. The inner
+    `flatMap` in the core module emits a list of one element, so it acts as a `map`. -/
 theorem freshNameSupply_eq (n : Nat) :
     freshNameSupply n = (suffixes n).flatMap block := by
   unfold freshNameSupply block suffixes
@@ -162,9 +168,11 @@ theorem freshNameSupply_eq (n : Nat) :
       ("" :: List.map (fun i => toString (i + 1)) (List.range (n / 26 + 1))) = _
   congr 1
 
+/-- A block holds 26 names. -/
 theorem block_length (suffix : String) : (block suffix).length = 26 := by
   simp [block]
 
+/-- A block holds no duplicate. -/
 theorem block_nodup (suffix : String) : (block suffix).Nodup := by
   unfold block
   apply nodup_map_of_injOn _ List.nodup_range
@@ -172,7 +180,7 @@ theorem block_nodup (suffix : String) : (block suffix).Nodup := by
   rw [List.mem_range] at ha hb
   exact char_ofNat_inj ha hb (mkName_inj heq).1
 
-/-- Blocks for distinct suffixes are disjoint: the suffix is recoverable from a name. -/
+/-- The blocks of two different suffixes are disjoint, because a name determines its suffix. -/
 theorem block_disjoint {s s' : String} (hne : s ≠ s') :
     ∀ x ∈ block s, x ∉ block s' := by
   intro x hx hx'
@@ -181,16 +189,17 @@ theorem block_disjoint {s s' : String} (hne : s ≠ s') :
   obtain ⟨c', _, hc'⟩ := List.mem_map.mp hx'
   exact hne (mkName_inj (hc.trans hc'.symm)).2
 
--- ── Counting: filtering a `Nodup` list by "not in `s`" ────────────────
+-- ── The count after a filter of a list by "not a member of `s`" ───────
 
-/-- Filtering a **duplicate-free** list `l` by `· ∉ s` removes at most `s.length`
-    elements. `Nodup` is essential: each element of `s` can knock out at most one
+/-- A filter of a list `l` by `· ∉ s` removes at most `s.length` elements, when `l` holds **no
+    duplicate**. That condition is necessary: each element of `s` can then remove at most one
     element of `l`. -/
 theorem length_filter_notMem_ge {α} [DecidableEq α] (l s : List α) (h : l.Nodup) :
     l.length - s.length ≤ (l.filter (fun x => decide (x ∉ s))).length := by
   have hsplit := List.length_eq_countP_add_countP (fun x => decide (x ∉ s)) (l := l)
   rw [List.countP_eq_length_filter, List.countP_eq_length_filter] at hsplit
-  -- The discarded elements all lie in `s`, and are distinct, so there are `≤ s.length` of them.
+  -- Each element that the filter removes is in `s`, and those elements differ in pairs, so their
+  -- number is not more than `s.length`.
   have hsub : (l.filter (fun a => decide ¬(decide (a ∉ s) = true))) ⊆ s := by
     intro x hx
     rw [List.mem_filter] at hx
@@ -198,9 +207,9 @@ theorem length_filter_notMem_ge {α} [DecidableEq α] (l s : List α) (h : l.Nod
   have := List.subset_nodup_length (nodup_filter _ h) hsub
   omega
 
--- ── `zip`-based lookup coverage ───────────────────────────────────────
+-- ── The lookups in a list that a `zip` builds ─────────────────────────
 
-/-- A successful `lookup` witnesses membership of the whole pair. -/
+/-- A `lookup` that succeeds shows that the list holds the whole pair. -/
 theorem lookup_mem {α β} [BEq α] [LawfulBEq α] (l : List (α × β)) (a : α) (b : β)
     (h : l.lookup a = some b) : (a, b) ∈ l := by
   induction l with
@@ -215,7 +224,7 @@ theorem lookup_mem {α β} [BEq α] [LawfulBEq α] (l : List (α × β)) (a : α
     · simp only [hk] at h
       exact List.mem_cons_of_mem _ (ih h)
 
-/-- `lookup` commutes with mapping over the values of an association list. -/
+/-- A `lookup` and a `map` over the values of an association list commute. -/
 theorem lookup_map_snd {α β γ} [BEq α] (f : β → γ) (l : List (α × β)) (a : α) :
     (l.map (fun p => (p.1, f p.2))).lookup a = (l.lookup a).map f := by
   induction l with
@@ -227,8 +236,8 @@ theorem lookup_map_snd {α β γ} [BEq α] (f : β → γ) (l : List (α × β))
     · simp [hk]
     · simp [hk, ih]
 
-/-- If the key list is no longer than the value list, `zip` truncates no key:
-    every key has a `lookup`, and the result comes from the value list. -/
+/-- If the list of keys is not longer than the list of values, then `zip` drops no key. Each key
+    therefore has a `lookup`, and the result of that lookup is an element of the list of values. -/
 theorem lookup_zip_of_length_le {α β} [BEq α] [LawfulBEq α]
     (l1 : List α) (l2 : List β) (hlen : l1.length ≤ l2.length) (v : α) (hv : v ∈ l1) :
     ∃ w ∈ l2, (l1.zip l2).lookup v = some w := by
@@ -249,12 +258,12 @@ theorem lookup_zip_of_length_le {α β} [BEq α] [LawfulBEq α]
         obtain ⟨w, hw, hlk⟩ := ih l2rest (by simp at hlen; omega) hv'
         exact ⟨w, List.mem_cons_of_mem _ hw, hlk⟩
 
--- ── Substitution plumbing ─────────────────────────────────────────────
+-- ── The lemmas about a substitution ───────────────────────────────────
 
-/-- `HMap.find?` on a *reversed* association list is the first-match lookup on the original:
-    `HMap.ofList` keeps the *last* binding for a key, which is the *first* binding in the
-    reversed list — exactly what `List.lookup` returns. This is the bridge every
-    construction that has to hand an assoc list to an opaque `HMap` scope goes through. -/
+/-- `HMap.find?` on a *reversed* association list gives the first match in the original list.
+    `HMap.ofList` keeps the *last* binding for a key, and that binding is the *first* binding in the
+    reversed list, which is what `List.lookup` returns. Each construction that gives an association
+    list to an opaque `HMap` scope goes through this lemma. -/
 theorem find?_ofList_reverse {α β} [BEq α] [LawfulBEq α] [Hashable α] [LawfulHashable α]
     (l : List (α × β)) (x : α) :
     Strata.Util.HMap.find? (Strata.Util.HMap.ofList l.reverse) x = l.lookup x := by
@@ -273,20 +282,20 @@ theorem find?_ofList_reverse {α β} [BEq α] [LawfulBEq α] [Hashable α] [Lawf
       have h2 : (x == k) = false := by simp [Ne.symm hk]
       simp only [h1, Bool.false_eq_true, if_false, h2, ih]
 
-/-- `HMaps.find?` on a `substScope` is just `List.lookup` on the association list
-    it was built from. `substScope` reverses before `HMap.ofList` precisely so
-    that the binding the hash map keeps (the *last* one for a key) is the binding
-    `List.lookup` finds (the *first* one). -/
+/-- `HMaps.find?` on a `substScope` gives the same result as `List.lookup` on the association list
+    that built the scope. `substScope` reverses the list before it calls `HMap.ofList`, so that the
+    binding which the hash map keeps, the *last* one for a key, is the binding that `List.lookup`
+    finds, the *first* one. -/
 theorem find?_substScope_eq_lookup (m : List (TyIdentifier × LMonoTy)) (x : TyIdentifier) :
     Strata.Util.HMaps.find? (substScope m) x = m.lookup x := by
   rw [substScope, Strata.Util.HMaps.find?_single_scope]
   exact find?_ofList_reverse m x
 
-/-- Each element's free type variables are among the whole list's.
+/-- Each free type variable of an element of a list is a free type variable of the whole list.
 
-    Upstream proves this as `LMonoTys.freeVars_mem_subset`, but that lives in
-    `Strata.DL.Lambda.LTyProps`, whose theorems are not `public` under Strata's
-    module system and hence invisible here, so we reprove it. -/
+    Upstream proves this claim as `LMonoTys.freeVars_mem_subset`. That theorem is in a module whose
+    theorems are not `public` under the module system of Strata, so this file cannot name it and it
+    has its own proof. -/
 theorem freeVars_mem_of_mem {ty : LMonoTy} {tys : List LMonoTy} (ht : ty ∈ tys)
     {v : TyIdentifier} (hv : v ∈ LMonoTy.freeVars ty) : v ∈ LMonoTys.freeVars tys := by
   induction tys with
@@ -297,10 +306,12 @@ theorem freeVars_mem_of_mem {ty : LMonoTy} {tys : List LMonoTy} (ht : ty ∈ tys
     · exact Or.inl (heq ▸ hv)
     · exact Or.inr (ih hmem)
 
-/-- If `v` is free in a list of monotypes, some element of the list has it free.
+/-- If `v` is a free variable of a list of monotypes, then it is a free variable of an element of
+    that list.
 
-    Upstream proves this as `LMonoTys.freeVars_exists`, in the non-`public`
-    `Strata.DL.Lambda.LTyProps`, so it is reproved here (like `freeVars_mem_of_mem`). -/
+    Upstream proves this claim as `LMonoTys.freeVars_exists`, in a module whose theorems are not
+    `public`. This file therefore has its own proof, in the same way as for
+    `freeVars_mem_of_mem`. -/
 theorem exists_of_freeVars_mem {v : TyIdentifier} {tys : List LMonoTy}
     (hv : v ∈ LMonoTys.freeVars tys) : ∃ ty ∈ tys, v ∈ LMonoTy.freeVars ty := by
   induction tys with
@@ -312,8 +323,8 @@ theorem exists_of_freeVars_mem {v : TyIdentifier} {tys : List LMonoTy}
     · obtain ⟨ty, hty, hv'⟩ := ih h
       exact ⟨ty, List.mem_cons_of_mem _ hty, hv'⟩
 
-/-- Every free variable of `LMonoTy.subst S mty` either comes from a value that `S`
-    maps something to, or is a free variable of `mty` that `S` leaves alone. -/
+/-- Each free variable of `LMonoTy.subst S mty` comes from a value that `S` gives to some variable,
+    or it is a free variable of `mty` that `S` does not change. -/
 theorem freeVars_subst_cases (S : Subst) (mty : LMonoTy) (tv : TyIdentifier)
     (h : tv ∈ LMonoTy.freeVars (LMonoTy.subst S mty)) :
     (∃ x t, Strata.Util.HMaps.find? S x = some t ∧ tv ∈ LMonoTy.freeVars t)
@@ -338,9 +349,8 @@ theorem freeVars_subst_cases (S : Subst) (mty : LMonoTy) (tv : TyIdentifier)
     simp only [LMonoTy.freeVars] at h
     have hex : ∃ a ∈ args, tv ∈ LMonoTy.freeVars (LMonoTy.subst S a) := by
       clear ih
-      -- Restate `h` in the `map`-shaped form that `subst_unfold` now produces (and
-      -- drop the original), so the inner induction hypothesis is a one-argument
-      -- statement about `arest`.
+      -- State `h` again in the form with a `map` that `subst_unfold` gives, and drop the original
+      -- form. The inner induction hypothesis is then a claim about `arest` with one argument.
       have hfv : tv ∈ LMonoTys.freeVars (args.map (LMonoTy.subst S)) := h
       clear h
       induction args with
@@ -358,13 +368,14 @@ theorem freeVars_subst_cases (S : Subst) (mty : LMonoTy) (tv : TyIdentifier)
       simp only [LMonoTy.freeVars]
       exact freeVars_mem_of_mem ham hb
 
+/-- The list of suffixes holds no duplicate. -/
 theorem suffixes_nodup (n : Nat) : (suffixes n).Nodup := by
   unfold suffixes
   rw [List.nodup_cons]
   refine ⟨?_, nodup_map_of_injOn ?_ List.nodup_range⟩
   · intro hmem
     obtain ⟨i, _, hi⟩ := List.mem_map.mp hmem
-    -- `toString (i+1)` is nonempty, so it cannot be `""`.
+    -- The string of `i + 1` is not empty, so it cannot be `""`.
     have : (toString (i + 1)).length = 0 := by rw [hi]; rfl
     have hpos : 0 < (Nat.repr (i + 1)).length := Nat.length_repr_pos
     simp only [Nat.toString_eq_repr] at this
@@ -374,10 +385,10 @@ theorem suffixes_nodup (n : Nat) : (suffixes n).Nodup := by
 
 end Freshening
 
--- ── The four target lemmas ────────────────────────────────────────────
+-- ── The four main lemmas ──────────────────────────────────────────────
 
 open Freshening in
-/-- The supply contains `26 * (n / 26 + 2)` names — in particular at least `n`. -/
+/-- The supply holds `26 * (n / 26 + 2)` names, and that number is not less than `n`. -/
 theorem freshNameSupply_length (n : Nat) :
     (freshNameSupply n).length = 26 * (n / 26 + 2) := by
   rw [freshNameSupply_eq, List.length_flatMap]
@@ -393,12 +404,12 @@ theorem freshNameSupply_length (n : Nat) :
     obtain ⟨i, _, hi⟩ := List.mem_map.mp hb
     exact hi ▸ block_length _
 
-/-- Corollary of `freshNameSupply_length`: the supply has at least `n` names. -/
+/-- The supply holds `n` names or more. This follows from `freshNameSupply_length`. -/
 theorem freshNameSupply_length_ge (n : Nat) : n ≤ (freshNameSupply n).length := by
   rw [freshNameSupply_length]; omega
 
 open Freshening in
-/-- The supply is duplicate-free. -/
+/-- The supply holds no duplicate. -/
 theorem freshNameSupply_nodup (n : Nat) : (freshNameSupply n).Nodup := by
   rw [freshNameSupply_eq]
   refine nodup_flatMap (suffixes_nodup n) (fun s _ => block_nodup s) ?_
@@ -406,11 +417,11 @@ theorem freshNameSupply_nodup (n : Nat) : (freshNameSupply n).Nodup := by
   exact block_disjoint hne
 
 open Freshening in
-/-- **Coverage.** Filtering the (duplicate-free) supply by "not already in use"
-    still leaves at least one fresh name per conflicting bound variable, so the
-    `zip` in `freshenBoundVars` truncates nothing.
+/-- **The supply covers the need.** The supply holds no duplicate. A filter of it by the condition
+    that a name is not already in use still leaves one fresh name for each bound variable that
+    conflicts. The `zip` inside `freshenBoundVars` therefore drops no name.
 
-    The quantities here mirror `freshenBoundVars` exactly (`Core.lean`). -/
+    The quantities here are the same as the quantities in `freshenBoundVars`. -/
 theorem freshNames_covers (boundVars varsAlreadyInUse : List TyIdentifier) :
     let conflictingTyVars := boundVars.filter (· ∈ varsAlreadyInUse)
     let allTypeVarsInUse := varsAlreadyInUse ++ conflictingTyVars
@@ -426,12 +437,12 @@ theorem freshNames_covers (boundVars varsAlreadyInUse : List TyIdentifier) :
   omega
 
 open Freshening in
-/-- The disjointness argument for `freshenBoundVars`, abstracted over the actual
-    fresh-name list. Only two properties of `freshNames` matter: its members avoid
-    `varsInUse`, and it is long enough to cover every conflicting bound variable.
+/-- The argument about disjointness for `freshenBoundVars`, over any list of fresh names. Only two
+    properties of `freshNames` matter: no member of it is in `varsInUse`, and it is long enough for
+    each bound variable that conflicts.
 
-    `hclosed` is needed for the second conjunct: a free variable of `monoTy` outside
-    `boundVars` would survive the renaming unchanged and could collide. -/
+    The second part of the conclusion needs `hclosed`. A free variable of `monoTy` that is not in
+    `boundVars` would pass through the renaming without a change, and it could then collide. -/
 private theorem disjoint_core (boundVars varsInUse freshNames : List TyIdentifier) (monoTy : LMonoTy)
     (hclosed : ∀ v ∈ monoTy.freeVars, v ∈ boundVars)
     (hfnotin : ∀ w ∈ freshNames, w ∉ varsInUse)
@@ -481,8 +492,8 @@ private theorem disjoint_core (boundVars varsInUse freshNames : List TyIdentifie
       simpa using this
 
 open Freshening in
-/-- **Main result.** The bound variables and body produced by `freshenBoundVars`
-    are both disjoint from the caller's in-use variable set. -/
+/-- **The main result.** The bound variables and the body that `freshenBoundVars` gives are both
+    disjoint from the set of variables that the caller uses. -/
 theorem freshenBoundVars_disjoint
     (boundVars : List TyIdentifier) (monoTy : LMonoTy) (varsAlreadyInUse : List TyIdentifier)
     (hclosed : ∀ v ∈ monoTy.freeVars, v ∈ boundVars)
@@ -503,12 +514,12 @@ theorem freshenBoundVars_disjoint
   intro hc
   exact this (List.mem_append_left _ hc)
 
--- Axiom audit — all four results use only the standard axioms (verified output):
+-- The audit of the axioms. Each of the four results uses only the standard axioms:
 --   'freshNameSupply_length'       depends on axioms: [propext, Quot.sound]
 --   'freshNameSupply_nodup'        depends on axioms: [propext, Classical.choice, Quot.sound]
 --   'freshNames_covers'            depends on axioms: [propext, Classical.choice, Quot.sound]
 --   'freshenBoundVars_disjoint'    depends on axioms: [propext, Classical.choice, Quot.sound]
--- Uncomment to re-check:
+-- Remove the comment marks below to run the audit again:
 -- #print axioms freshNameSupply_length
 -- #print axioms freshNameSupply_nodup
 -- #print axioms freshNames_covers

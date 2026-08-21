@@ -1,31 +1,30 @@
 import StrataTests
 
 /-!
-# The LSpec-free driver (`test-plain`)
+# The driver that does not use LSpec (`test-plain`)
 
-The same registry as `lake test`, rendered by the package's own reporter instead of by
-LSpec. It depends on `Plausible` and nothing else.
+This driver runs the same registry as `lake test`, but the reporter of this package
+prints the results in place of LSpec. It depends only on `Plausible`.
 
 ```bash
 lake build test-plain && .lake/build/bin/test-plain [numTrials] [maxSize] [flags]
 ```
 
-It exists to keep the LSpec dependency droppable. LSpec reaches this package only
-through a fork pinned to Lean 4.29, because mainline LSpec is on 4.31, so it is worth
-knowing at all times that the suite runs without it.
+The driver keeps the dependency on LSpec removable. A fork supplies LSpec to this
+package, so it is useful to know that the suite runs without LSpec.
 
-That argument only holds if the two drivers agree on everything except the rendering,
-which is why everything except the rendering is `StrataGenerators.Test.Driver` and the
-suite itself is one `List TestDecl` that neither driver constructs. A disagreement
-between them could only be in the printing.
+This argument holds only if the two drivers agree on all things except the output.
+Therefore `StrataGenerators.Test.Driver` holds all of the work except the output, and
+the suite is one `List TestDecl` that neither driver builds. The two drivers can differ
+only in how they print the results.
 -/
 
 open StrataGenerators.Test
 
-/-- Every property registered anywhere under `StrataTests/`. -/
+/-- Every property that a file under `StrataTests/` registers. -/
 def registry : List TestDecl := strata_registry%
 
-/-- Every diagnostic registered anywhere under `StrataTests/`. -/
+/-- Every diagnostic that a file under `StrataTests/` registers. -/
 def diagnostics : List Diagnostic := strata_diagnostics%
 
 def main (args : List String) : IO UInt32 := do

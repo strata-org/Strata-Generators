@@ -1,10 +1,9 @@
--- Only the *code* modules are imported here — never a proof/`TestSupport` sibling
--- that pulls in Mathlib. `ProcedureHasTypeAGen.Core` gives the generator and the
--- Core AST; `HasTypeAGen.TestSupport` gives the operator contexts `coreMonoOps` /
--- `corePartialOps` (Mathlib-free); the three `Strata.Transform.*` modules are the
--- passes under test. Importing `StmtHasTypeAGen.TestSupport` here would make this
--- file unimportable alongside the transform passes (both Strata and Batteries
--- define `List.Forall₂`).
+-- This file imports the *code* modules only, and no sibling with a proof that brings in Mathlib.
+-- `ProcedureHasTypeAGen.Core` gives the generator and the syntax of Strata Core.
+-- `HasTypeAGen.TestSupport` gives the operator contexts `coreMonoOps` and `corePartialOps`, and it needs
+-- no Mathlib. The three `Strata.Transform.*` modules are the passes under test. An import of
+-- `StmtHasTypeAGen.TestSupport` here would make this file impossible to import beside a transform pass,
+-- because Strata and Batteries each define `List.Forall₂`.
 import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.Transform.FilterProcedures
@@ -15,156 +14,131 @@ import Strata.Languages.Core.Factory
 open Lambda Core Imperative
 
 /-!
-# Shared test support for the `genProcedure` generator vs. Core transform passes
+# The shared support for the properties about `genProcedure` and the Core transform passes
 
-Utilities shared between the LSpec property suite and the Tyche panels (both in
-the merged `TestMain` driver) for property-based testing of `genProcedure`
-(defined in `ProcedureHasTypeAGen/Core.lean`), which generates well-typed Strata
-Core procedures (`Procedure`) satisfying the `ProcHasTypeA` typing relation. The
-generator is proven both **sound** and **complete** w.r.t. that relation (see
-`ProcedureHasTypeAGen.lean`), so every generated procedure is a certified
-well-typed input — an ideal oracle input for the three Core *transformation*
-passes exercised here:
+This module holds the definitions that both harnesses use for the property-based tests of
+`genProcedure`. That generator is in `ProcedureHasTypeAGen/Core.lean`, and it gives a well-typed Strata
+Core procedure that satisfies the `ProcHasTypeA` typing relation. The generator has a proof of
+**soundness** and a proof of **completeness** against that relation, in `ProcedureHasTypeAGen.lean`.
+Therefore each generated procedure is a certified well-typed input, and it is a good input for the three
+Core *transform* passes that this module tests:
 
-- **FilterProcedures** (`filterProceduresPipelinePhase`) — removes procedures
-  unreachable from a target entry set.
-- **PrecondElim** (`precondElimPipelinePhase`) — strips partial-function
-  preconditions and emits well-formedness (`$$wf`) checks.
-- **ANFEncoder** (`anfEncoderPipelinePhase`) — hoists sub-expressions into fresh
-  A-normal-form `init`s.
+- **FilterProcedures** removes each procedure that no target of the entry set reaches.
+- **PrecondElim** removes the precondition of a partial function, and it emits a check of
+  well-formedness, which is a `$$wf` block.
+- **ANFEncoder** lifts a subexpression into a fresh `init` statement, in A-normal form.
 
-## Relationship to the declarative specification
+## The relation to the declarative specification
 
-Every check predicate below is the executable image of **one named field** of the
-three `*PhaseCorrect` structures in the specification file
-`Strata/Transform/CustomSpecifications.lean` (branch `jlee/transform-specs`), and
-the coverage is now *complete*: each field of
+Each check predicate below is the executable form of **one named field** of the three `*PhaseCorrect`
+structures in the specification file of Strata. The coverage is *complete*: each field of these three
+structures has a `check*` counterpart here, and the docstring of that counterpart names the field.
 
-- `Core.FilterProcedures.FilterProcedurePhaseCorrect` (`filterCorrect`'s five
-  `FilterCorrect` fields, `changedFlagValid`, `analysisPreserving`),
-- `Core.PrecondElim.PrecondElimPhaseCorrect` (`precondElimCorrect`'s seven
-  `PrecondElimCorrect` fields, `factoryCorrect`'s three
-  `PrecondElimFactoryCorrect` fields, `changedFlagValid`, `analysisPreserving`),
-- `Core.ANFEncoder.ANFEncoderPhaseCorrect` (`anfCorrect`'s six
-  `ANFEncoderCorrect` fields, `changedFlagValid`, `analysisPreserving`)
+- `Core.FilterProcedures.FilterProcedurePhaseCorrect`, which holds five `FilterCorrect` fields,
+  `changedFlagValid` and `analysisPreserving`.
+- `Core.PrecondElim.PrecondElimPhaseCorrect`, which holds seven `PrecondElimCorrect` fields, three
+  `PrecondElimFactoryCorrect` fields, `changedFlagValid` and `analysisPreserving`.
+- `Core.ANFEncoder.ANFEncoderPhaseCorrect`, which holds six `ANFEncoderCorrect` fields,
+  `changedFlagValid` and `analysisPreserving`.
 
-has a `check*` counterpart here, named after the spec field and carrying the
-field name in its docstring. Three shared obligations recur across all three
-passes and are therefore decided once, by predicates reused by all three:
+Three obligations occur in each of the three passes, so one predicate decides each of them for all three:
 
-- `ChangedFlagValid pass` — `changed = true ↔ progOut ≠ progIn`, decided with the
-  derived `DecidableEq Program` (see the structural-equality note below);
-- `PreservesCachedAnalysesWF pass` — `CallGraphWF cgIn progIn → CallGraphWF cgOut
-  progOut`, decided by `callGraphWF` below, which is a field-by-field executable
-  transcription of the spec's `CallGraphWF` structure;
-- `Sublist`-shaped order properties, decided by Lean's `Decidable (List.Sublist
-  ..)` instance directly on `Decl` / on the declaration-name list — the spec's own
-  formulation, not a hand-rolled proxy.
+- `ChangedFlagValid pass` says that `changed` is `true` if and only if the output program differs from
+  the input program. The derived `DecidableEq Program` instance decides it. Read the note about
+  structural equality below.
+- `PreservesCachedAnalysesWF pass` says that a well-formed input call graph gives a well-formed output
+  call graph. `callGraphWF` below decides it, and that definition transcribes each field of the
+  `CallGraphWF` structure of the specification.
+- The properties about an order have the shape of a `Sublist`. The `Decidable (List.Sublist ..)`
+  instance of Lean decides each of them, on a `Decl` directly or on the list of the declaration names.
+  That is the form of the specification itself, and not a substitute.
 
-## Two program shapes
+## The two shapes of a program
 
-The spec fields quantify over *all* declaration kinds, but `genProcedure`
-produces procedures only, so a program assembled purely from generated
-procedures leaves the function- and non-procedure-declaration fields
-(`onlyProcsRemoved`, `nonProcDeclsPreserved`, `functionsPreserved`,
-`noDeclsRemoved`, `factoryComplete`, `nonProcsUnchanged`) vacuous. Two
-assemblies are therefore provided:
+Each field of the specification quantifies over *each* kind of declaration, and `genProcedure` gives a
+procedure only. Therefore a program that holds generated procedures only leaves each field about a
+function and about a declaration that is not a procedure with no content. Those fields are
+`onlyProcsRemoved`, `nonProcDeclsPreserved`, `functionsPreserved`, `noDeclsRemoved`, `factoryComplete`
+and `nonProcsUnchanged`. This module therefore gives two assemblies:
 
-- `mkProgram ps` — one `.proc` declaration per generated procedure. Used by every
-  property whose spec field concerns procedures, ordering, or the `changed` flag.
-- `mkMixedProgram ps` — the same procedures, but with each body's inline
-  `funcDecl` statements **lifted** to top-level `.func` declarations (dropping the
-  now-redundant inline declaration, deduplicated by name so PrecondElim's
-  "already in factory" guard cannot fire), preceded by a fixed `.type`, `.ax` and
-  `.distinct` declaration. Used by exactly the six fields above, so they bite on
-  real generated function declarations instead of passing vacuously. Nothing is
-  invented: the lifted functions are the ones `genFunction` drew (see point 3
-  below), merely relocated from statement position to declaration position.
+- `mkProgram ps` gives one `.proc` declaration for each generated procedure. Each property whose field
+  is about a procedure, about an order or about the `changed` flag uses this shape.
+- `mkMixedProgram ps` gives the same procedures, and it **lifts** each inline `funcDecl` statement of a
+  body to a top-level `.func` declaration. It drops the inline declaration, and it keeps one
+  declaration for each name, so that the guard of PrecondElim for a name that is already in the factory
+  cannot fire. It also puts one fixed `.type` declaration, one `.ax` declaration and one `.distinct`
+  declaration in front. Exactly the six fields above use this shape, so each of them has real content.
+  This assembly invents nothing: each lifted function is a function that `genFunction` drew, and the
+  assembly only moves it from a statement position to a declaration position.
 
-## What the current generator can and cannot exercise
+## What the generator can reach, and what it cannot reach
 
-`genProcedure` builds a *single* procedure with a structured body drawn from
-`genStmtChain`, at the operator context `TestScaffold` hands it: `corePartialOps`,
-i.e. `coreMonoOps` plus the four precondition-bearing `Int.Safe{Div,Mod,DivT,ModT}`
-operators. Three facts about that body shape bound what these properties can test:
+`genProcedure` builds *one* procedure with a structured body from `genStmtChain`, at the operator
+context that `TestScaffold` gives it. That context is `corePartialOps`, which is `coreMonoOps` together
+with the four `Int.Safe*` operators that carry a precondition. Three facts about the shape of that body
+limit what these properties can test:
 
-1. **Procedure calls, wired into an acyclic call DAG.** `genCallStmt`
-   (`StmtHasTypeAGen/Core.lean`, proven sound in `GenCallStmtSound.lean`) emits
-   `call` statements against a non-empty `procs : ProcSigCtx`, and `genProcedure`
-   now threads such a context into `genStmtChain`
-   (`ProcedureHasTypeAGen/Core.lean`). The two harnesses (`TestScaffold.genProcsWith`
-   and `TycheViz.genProcsForTyche`) exploit this by generating the procedures
-   *left to right*: body `i` is generated against the signatures of the
-   already-generated monomorphic siblings `0..i-1` (named `P0…P{i-1}`, matching
-   the `relabelProcs` renaming), so no cycles or self-recursion arise. Only
-   monomorphic siblings (`typeArgs = []`) become call targets — both `genCallStmt`
-   and `ProcSigCorresponds` require the callee to be monomorphic.
+1. **A procedure call, in an acyclic graph of calls.** `genCallStmt`, in `StmtHasTypeAGen/Core.lean`
+   with a proof of soundness in `GenCallStmtSound.lean`, emits a `call` statement against a
+   `procs : ProcSigCtx` that is not empty. `genProcedure` threads such a context into `genStmtChain`.
+   Both harnesses use that context, and they generate the procedures from left to right. The generator
+   makes the body of the procedure `i` against the signatures of the monomorphic procedures before it,
+   which the renaming step names `P0` up to `P{i-1}`. Therefore no cycle and no self-recursion occurs.
+   Only a monomorphic procedure becomes a target of a call, because `genCallStmt` and
+   `ProcSigCorresponds` each need a monomorphic callee.
 
-   So a generated program's call graph now carries real edges: `call P{j}` for
-   `j < i` appears in body `i`, procedure `0` is still a leaf, and the callee-closure
-   / call-graph dimensions of `FilterCorrect.calleeClosureRetained`,
-   `FilterProcedures`/`PrecondElim` `PreservesCachedAnalysesWF` are no longer
-   vacuous on generated input. The hand-built `callerCalleeProgram` guard is kept as
-   a deterministic pin of a fixed multi-edge shape.
+   The call graph of a generated program therefore holds real edges. A `call P{j}` for `j` below `i`
+   occurs in the body `i`, and the procedure 0 is a leaf. Therefore the fields about the closure of the
+   callees and about the call graph have real content on generated input. The `callerCalleeProgram`
+   guard stays as a deterministic pin of one fixed shape with several edges.
 
-   Because a body may reach a non-target through the call graph, `callerTargets`
-   below (a *strict subset* of the procedures) no longer implies every non-target
-   is unreachable. That is handled where it matters: `checkFilterUnreachableRemoved`
-   already compares against the transitive *closure* `targets ++
-   cgIn.getAllCalleesClosure targets`, so a non-target reachable from a target is
-   correctly *not* obliged to disappear (see `callerTargets`).
+   A body can reach a procedure that is not a target, through the call graph. Therefore `callerTargets`
+   below, which is a *strict subset* of the procedures, does not make each procedure outside it
+   unreachable. `checkFilterUnreachableRemoved` handles that fact: it compares against the transitive
+   *closure* of the targets, so a procedure that a target reaches is correctly *not* obliged to
+   disappear. Read `callerTargets`.
 
-2. **Partial-function calls, but only in bodies.** Because `corePartialOps`
-   carries the `Int.Safe*` operators — each of which has a `y ≠ 0` precondition in
-   `Core.Factory` — generated expressions *do* invoke partial functions, so
-   PrecondElim genuinely fires (empirically on ~6% of generated programs) rather
-   than running as a no-op. But on the `mkProgram` shape the obligations land
-   exclusively **inside procedure bodies**: a generated procedure's contract
-   clauses are also drawn from the same context, yet `mkContractWFProc` only emits
-   a `$$wf` *procedure* when a contract clause calls a partial function, which is
-   rarer still and was not observed over 2000 samples. On the `mkMixedProgram`
-   shape, by contrast, a lifted function whose body or precondition calls a
-   partial function *does* produce a top-level `$$wf` procedure via
-   `mkFuncWFProc` — which is what makes `checkPrecondGeneratedWF` non-vacuous.
+2. **A call to a partial function, in a body only.** `corePartialOps` holds each `Int.Safe*` operator,
+   and each of them has the precondition `y ≠ 0` in `Core.Factory`. Therefore a generated expression
+   *does* call a partial function, and PrecondElim acts and is not a no-op. On the `mkProgram` shape,
+   each obligation lands **inside a procedure body**. The generator draws the contract clauses of a
+   procedure from the same context, and `mkContractWFProc` emits a `$$wf` *procedure* only when a
+   contract clause calls a partial function, which happens rarely. On the `mkMixedProgram` shape, a
+   lifted function whose body or whose precondition calls a partial function *does* give a top-level
+   `$$wf` procedure, through `mkFuncWFProc`. That is what gives `checkPrecondGeneratedWF` real content.
 
-3. **Declared preconditions, over formals only.** `genFunction` emits an optional
-   `requires` clause drawn over the function's own formal parameters (mandatory:
-   `FuncWF.precond_freevars` requires a precondition's free variables to be a
-   subset of the input names), biased 3:1 toward clauses that actually mention a
-   formal. So an inline `funcDecl` can be *declared* partial, not merely call a
-   partial operator — which is what makes PrecondElim's precondition-*stripping*
-   path (`preconditionsStripped`), the factory properties, and
-   `functionsPreserved` reachable from generated input.
+3. **A declared precondition, over the formal parameters only.** `genFunction` emits an optional
+   `requires` clause over the formal parameters of the function itself. That limit is necessary,
+   because `FuncWF.precond_freevars` needs the free variables of a precondition to be among the names
+   of the inputs. The generator has a bias of 3 to 1 toward a clause that names a formal parameter.
+   Therefore an inline `funcDecl` can be *declared* partial, and not only call a partial operator. That
+   is what makes the path of PrecondElim that *removes* a precondition, the properties about the
+   factory, and `functionsPreserved` reachable from generated input.
 
-## Structural equality for the `changed`-flag properties
+## Structural equality for the properties about the `changed` flag
 
-Both `changed`-flag properties use full structural equality on `Program`, which
-is available: `Program`, `Decl` and `Procedure.Header` all derive `DecidableEq`,
-and `Strata.DL.Imperative.Stmt` supplies a hand-rolled `DecidableEq (Stmt P C)`
-instance (`Stmt.lean`) that the derived `Decl` instance uses. This comparison
-includes metadata, which is what we want and is not a source of spurious
-differences: `transformStmt` re-emits every unchanged statement with its original
-`md` untouched, and only the freshly generated asserts carry the
-`propertySummary`-stripped metadata.
+Both properties about the `changed` flag use full structural equality on a `Program`. That equality is
+available, because `Program`, `Decl` and `Procedure.Header` each derive `DecidableEq`, and
+`Strata.DL.Imperative.Stmt` gives a `DecidableEq (Stmt P C)` instance that the derived `Decl` instance
+uses.
 
-Each property is stated verbatim from its spec field rather than quietly weakened,
-and the deterministic `#guard`s at the end of the file pin each cause
-independently. The defect analysis these properties produced is recorded in the
-repo's findings write-up.
+The comparison includes the metadata, which is the correct behaviour and is not a source of a false
+difference. `transformStmt` emits each unchanged statement again with its original metadata, and only a
+fresh assert carries the metadata without the summary of the property.
 
-## The FilterProcedures `noFilter` / call-graph divergence
+Each property states its field of the specification exactly, and no property is weakened. The `#guard`s
+at the end of the file pin each cause separately.
 
-`checkFilterAnalysisPreserving` (the `PreservesCachedAnalysesWF` field) is **not**
-vacuous on generated input, and it catches a real divergence that generated input
-cannot reach: `FilterProcedures.run` retains a procedure
-with `noFilter := true` in the declaration list while filtering it *out* of the
-cached call graph (both maps are filtered by `isNeededProc`, which ignores
-`noFilter` — FilterProcedures.lean). The retained procedure then has no
-`callees` entry, breaking `CallGraphWF.complete` for the output pair. Generated
-procedures all carry `noFilter := false` (`ProcedureHasTypeAGen/Core.lean`),
-so generated input cannot reach the divergence; the hand-built
-`noFilterProgram` guard at the end of the file pins the divergence
-deterministically instead.
+## The disagreement between `noFilter` and the call graph in FilterProcedures
+
+`checkFilterAnalysisPreserving`, which is the field `PreservesCachedAnalysesWF`, has real content on
+generated input, and it catches a real disagreement that generated input cannot reach.
+`FilterProcedures.run` keeps a procedure that has `noFilter := true` in the list of the declarations,
+and it filters that procedure *out* of the cached call graph. `isNeededProc` filters both maps, and it
+reads no `noFilter` field. The procedure that stays then has no entry among the callees, which breaks
+the field `complete` of `CallGraphWF` for the pair of the output. Each generated procedure has
+`noFilter := false`, so generated input cannot reach the disagreement. The `noFilterProgram` guard at
+the end of the file pins it deterministically instead.
 -/
 
 namespace StrataGenerators.Procedure.TestSupport
@@ -175,9 +149,9 @@ namespace StrataGenerators.Procedure.TestSupport
 def mkProgram (ps : List Procedure) : Program :=
   { decls := ps.map (Decl.proc · .empty) }
 
-/-- The structured statement list of a procedure body (`[]` for a CFG body —
-    `genProcedure` only ever produces structured bodies, so this is total on
-    generated input). -/
+/-- The structured statement list of the body of a procedure. The result is the empty list for a body that
+    is a control-flow graph. `genProcedure` gives a structured body only, so this function is total on
+    generated input. -/
 def bodyStmts : Procedure.Body → List Statement
   | .structured ss => ss
   | .cfg _ => []
@@ -220,8 +194,8 @@ end
 
 /-- The generated inline functions that can be lifted to top-level `.func`
     declarations, deduplicated by name (first occurrence wins). An inline
-    declaration is liftable when `Function.ofPureFunc` accepts it — i.e. its
-    formals and result are monotypes, which `genFunction` always produces.
+    A declaration is liftable when `Function.ofPureFunc` accepts it, which asks that its formal parameters
+    and its result each have a monotype. `genFunction` always gives such a function.
 
     Deduplication matters: PrecondElim `throw`s "already in factory" if the same
     function name is pushed twice, and a thrown pass makes every property vacuous
@@ -271,8 +245,8 @@ def mkMixedProgram (ps : List Procedure) : Program :=
     is seeded with the program's own `toProcedureCG` (which FilterProcedures
     consults, falling back to recomputing it only if absent).
 
-    `CoreTransformState.factory` is a plain `Factory` upstream (it used to be an
-    `Option`), so the seeding — and every read of it below — is unwrapped. -/
+    The field `CoreTransformState.factory` is a plain `Factory`, so this function and each read of that
+    field below need no unwrapping. -/
 def mkState (prog : Program) : Transform.CoreTransformState :=
   { Transform.CoreTransformState.emp with
     factory := Core.Factory,
@@ -325,10 +299,10 @@ def specEq (s t : Procedure.Spec) : Bool :=
 def headerEq (h k : Procedure.Header) : Bool := decide (h = k)
 
 -- ══ CallGraph well-formedness (`Core.CallGraphWF`) ════════════════════════
--- `PreservesCachedAnalysesWF` — a field of all three `*PhaseCorrect` structures —
--- is an implication between two `CallGraphWF` claims, so it needs `CallGraphWF`
--- as a *decision procedure*. The three definitions below transcribe the spec's
--- `CalleesCountEqual` and the four `CallGraphWF` fields field by field.
+-- `PreservesCachedAnalysesWF` is a field of each of the three `*PhaseCorrect` structures, and it is an
+-- implication between two claims about `CallGraphWF`. Therefore it needs `CallGraphWF` as a *decision
+-- procedure*. The three definitions below transcribe `CalleesCountEqual` and each of the four
+-- `CallGraphWF` fields of the specification.
 
 /-- **`Core.CalleesCountEqual`.** Every callee's recorded multiplicity equals its
     occurrence count in the procedure's body. The spec quantifies over *all*
@@ -341,15 +315,14 @@ def calleesCountEqual (k : Std.HashMap String Nat) (p : Procedure) : Bool :=
 
 /-- **`Core.CallGraphWF`**, decided field by field:
 
-    * `sound` — every `callees` key is a procedure of the program, with matching
-      per-callee counts;
-    * `complete` — every procedure of the program has a `callees` entry, with
-      matching per-callee counts;
-    * `noZeroCount` — no recorded multiplicity is `0`;
-    * `callersTranspose` — `callers` is the transpose of `callees`. The spec's
-      biconditional is decided by checking both inclusions over the entries that
-      actually exist (each `(a, b, n)` edge of one map must appear in the other),
-      which is exactly the two directions of the `↔`. -/
+    * `sound`: each key of `callees` is a procedure of the program, and the count for each callee agrees.
+    * `complete`: each procedure of the program has an entry in `callees`, and the count for each callee
+      agrees.
+    * `noZeroCount`: no recorded count is 0.
+    * `callersTranspose`: `callers` is the transpose of `callees`. The specification states a
+      biconditional. This definition checks both inclusions over the entries that exist, so each edge of
+      one map must occur in the other map. Those two checks are the two directions of the
+      biconditional. -/
 def callGraphWF (cg : CallGraph) (prog : Program) : Bool :=
   let sound := cg.callees.toList.all fun (caller, k) =>
     prog.decls.any fun
@@ -372,9 +345,9 @@ def callGraphWF (cg : CallGraph) (prog : Program) : Bool :=
 /-- **`Core.PreservesCachedAnalysesWF`** for one phase and one input program: if
     the seeded input call graph is well-formed for the input program, the phase's
     output call graph is well-formed for the output program. A pass that drops the
-    cached graph (`callGraph := none`) discharges the obligation vacuously — the
-    spec's conclusion is guarded by `st'.cachedAnalyses.callGraph = .some cgOut` —
-    so `none` counts as a pass here too. -/
+    cached graph, by `callGraph := none`, satisfies the obligation with no content, because the conclusion
+    of the specification holds only for a cached graph of the form `.some cgOut`. Therefore a `none` also
+    satisfies this predicate. -/
 def checkAnalysisPreserving (ph : Core.PipelinePhase) (prog : Program) : Bool :=
   match runPhaseSt ph prog with
   | some ((_, out), st') =>
@@ -393,10 +366,9 @@ def checkChangedFlagValid (ph : Core.PipelinePhase) (prog : Program) : Bool :=
   | none => true
 
 -- ── Control-flow-skeleton equivalence (ported from the spec file) ─────────
--- `ANFEncoderCorrect.controlFlowPreserved` is stated via `stmtsCFEquiv`; we port
--- `cmdKindEquiv` / `stmtCFEquiv` / `stmtsCFEquiv` / `stripANFInits` verbatim from
--- `Strata/Transform/CustomSpecifications.lean` so the executable check matches the
--- declarative property exactly.
+-- The field `ANFEncoderCorrect.controlFlowPreserved` uses `stmtsCFEquiv`. This section copies
+-- `cmdKindEquiv`, `stmtCFEquiv`, `stmtsCFEquiv` and `stripANFInits` from the specification file of
+-- Strata, without a change, so that the executable check agrees with the declarative property exactly.
 
 /-- Same command kind (init↔init, set↔set, assert↔assert, assume↔assume,
     cover↔cover, call↔call with same proc name). Expressions may differ. -/
@@ -440,34 +412,35 @@ def stripANFInits (ss : List Statement) : List Statement :=
     | _ => true
 
 -- ══ FilterProcedures check predicates ═════════════════════════════════════
--- All FilterProcedures properties below target the *last* procedure only
--- (`callerTargets`), a strict subset. Under the acyclic call DAG the harnesses now
--- generate (module doc, point 1), body `i` may call only siblings `0..i-1`, so the
--- last procedure `P{n-1}` is the one *source* of the DAG — the richest caller — and
--- targeting it is what makes the call-graph *closure* dimension non-vacuous
--- (`checkFilterCalleeClosureRetained`): its callee-closure is exactly the siblings
--- it transitively calls, all of which must then be retained. The removal dimension
--- still bites: any procedure the target does not transitively reach must be removed
--- (and procedure `P0`, a guaranteed leaf, is never reached from anyone, so it is
--- removed whenever it is not the target's own callee). The `ChangedFlagValid`
--- property is the exception: it targets *all* procedures, the scenario in which the
--- hardcoded `changed := true` is provably wrong.
+-- Each property about FilterProcedures below targets the *last* procedure only, through
+-- `callerTargets`, which is a strict subset. In the acyclic graph of calls that both harnesses
+-- generate, the body `i` can call only a procedure before it. Therefore the last procedure is the source
+-- of that graph, and it is the caller with the most edges. A target of that kind gives the dimension of
+-- the *closure* of the call graph real content, which `checkFilterCalleeClosureRetained` needs. The
+-- closure of its callees is exactly the set of the procedures that it calls, and the pass must keep each
+-- of them.
+--
+-- The dimension of the removal also has real content: the pass must remove each procedure that the
+-- target does not reach. The procedure `P0` is a leaf, and no other procedure reaches it, so the pass
+-- removes it whenever it is not a callee of the target.
+--
+-- The property about `ChangedFlagValid` is the exception. It targets *each* procedure, and that is the
+-- case where a `changed := true` as a literal is provably wrong.
 
-/-- The target set used by the removal-oriented FilterProcedures properties: the
-    *last* procedure name, if any.
+/-- The set of the targets that each property about a removal in FilterProcedures uses. That set holds the
+    name of the *last* procedure, if the list holds one.
 
-    The last procedure is chosen deliberately: under the acyclic call DAG (body `i`
-    calls only siblings `0..i-1`) it is the DAG's source — the procedure with the
-    largest potential callee-closure — so targeting it exercises the closure
-    dimension (`checkFilterCalleeClosureRetained`) rather than leaving it vacuous,
-    which is what a leaf target (e.g. `P0`) would do.
+    The choice of the last procedure is deliberate. In the acyclic graph of calls, the body `i` calls only
+    a procedure before it. Therefore the last procedure is the source of that graph, and it has the largest
+    possible closure of its callees. Such a target gives the dimension of the closure real content, which
+    `checkFilterCalleeClosureRetained` needs. A leaf target, such as `P0`, would leave that dimension with
+    no content.
 
-    Taking a *strict subset* keeps the "removed" dimension non-vacuous too: every
-    procedure the target does not transitively reach is obliged to disappear. All
-    removal-oriented properties stay faithful — `checkFilterUnreachableRemoved`
-    compares against the *closure* `targets ++ cg.getAllCalleesClosure targets`, not
-    against `targets`, so a non-target reachable from the target is correctly *not*
-    obliged to disappear. -/
+    A *strict subset* also gives the dimension of the removal real content, because the pass must remove
+    each procedure that the target does not reach. Each property about a removal stays faithful, because
+    `checkFilterUnreachableRemoved` compares against the *closure*
+    `targets ++ cg.getAllCalleesClosure targets`, and not against the targets alone. Therefore a procedure
+    outside the target set that the target reaches is correctly *not* obliged to disappear. -/
 private def callerTargets (ps : List Procedure) : List String :=
   (mkProgram ps |> programProcNames).reverse.take 1
 
@@ -480,8 +453,8 @@ private def filterPhase (targets : List String) : Core.PipelinePhase :=
     input declarations: same elements in the same relative order, with only some
     procedures removed. Decided with Lean's `Decidable (List.Sublist ..)` instance
     on `Decl` directly (`Decl` derives `DecidableEq`), so this is the spec's own
-    statement rather than a name-sequence proxy — it therefore also subsumes
-    "bodies are preserved" and "non-procedures are preserved". -/
+    statement, and not a substitute over a sequence of names. Therefore it also gives the two claims that
+    each body stays and that each declaration which is not a procedure stays. -/
 def checkFilterDeclsSublist (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
   match runPhase (filterPhase (callerTargets ps)) prog with
@@ -531,11 +504,12 @@ def checkFilterOnlyProcsRemoved (ps : List Procedure) : Bool :=
 
 /-- **`FilterCorrect.unreachableRemoved`.** A procedure unreachable from the
     target closure is removed, unless it is protected by `noFilter` (generated
-    procedures all have `noFilter = false`). "Unreachable" is the spec's own
-    condition — absence from `targets ++ cgIn.getAllCalleesClosure targets` — and
-    removal is checked by name, which given the collision-free `P0…Pk` relabelling
-    `TestScaffold` applies is equivalent to the spec's `∀ md', .proc proc md' ∉
-    progOut.decls` (every declaration here carries `.empty` metadata). -/
+    procedure has `noFilter = false`. The word "unreachable" is the condition of the specification itself,
+    which is the absence from `targets ++ cgIn.getAllCalleesClosure targets`.
+
+    The predicate checks the removal by name. `TestScaffold` renames each procedure to `P0` up to `Pk`, so
+    no two names collide, and each declaration here carries empty metadata. Therefore the check by name is
+    equal to the claim of the specification, which quantifies over the metadata. -/
 def checkFilterUnreachableRemoved (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
   let targets := callerTargets ps
@@ -687,9 +661,9 @@ def stmtsHaveFuncPrecond (ss : List Statement) : Bool :=
   | s :: rest => stmtHasFuncPrecond s || stmtsHaveFuncPrecond rest
 end
 
-/-- Does any function reachable in the program — a top-level `.func` /
-    `.recFuncBlock` declaration, or an inline `funcDecl` inside a procedure body —
-    still carry a precondition? -/
+/-- Whether any function of the program still holds a precondition. Such a function is a top-level `.func`
+    declaration, a member of a `.recFuncBlock` declaration, or an inline `funcDecl` inside the body of a
+    procedure. -/
 def programHasFuncPrecond (prog : Program) : Bool :=
   prog.decls.any fun
     | .func f _ => !f.preconditions.isEmpty
@@ -718,16 +692,14 @@ def checkPrecondGeneratedWF (ps : List Procedure) : Bool :=
 
 /-- **`PrecondElimCorrect.preconditionsStripped`.** "The returned program consists
     only of total functions (no preconditions)" (PrecondElim's module doc, point 4):
-    no function reachable in the output — top-level or inline in a procedure body —
+    no function of the output, whether top-level or inline in the body of a procedure,
     still carries a precondition. (Stronger than the spec field, which quantifies
     over top-level `.func` / `.recFuncBlock` declarations only; the inline
     `funcDecl` case is where generated input puts its preconditions.)
 
     Non-vacuous: `genFunction` draws an optional `requires` clause over the
     function's own formals (see `FunctionHasTypeAGen.Core.genPrecondition`), so
-    generated declarations really do carry preconditions for the pass to strip —
-    184 of 1500 sampled programs did, up from 0 of 3000 before the generator
-    gained the clause. -/
+    a generated declaration does carry a precondition for the pass to remove. -/
 def checkPrecondPreconditionsStripped (ps : List Procedure) : Bool :=
   match runPhase Core.precondElimPipelinePhase (mkProgram ps) with
   | some (_, out) => !programHasFuncPrecond out
@@ -745,8 +717,8 @@ def checkPrecondNonProcDeclsPreserved (ps : List Procedure) : Bool :=
   | none => true
 
 /-- **`PrecondElimCorrect.proceduresPreserved`.** Every input procedure survives
-    with the same name and the same spec (its body may — and on partial-call input
-    routinely does — *grow* with inserted asserts, which this tolerates). The
+    with the same name and the same spec. Its body can *grow* with an inserted assert, which this
+    predicate permits, and on input with a call to a partial function it usually does grow. The
     header is compared too, which is stronger than the spec's name-only claim and
     still holds: the pass rewrites bodies, never signatures. -/
 def checkPrecondProceduresPreserved (ps : List Procedure) : Bool :=
@@ -760,7 +732,7 @@ def checkPrecondProceduresPreserved (ps : List Procedure) : Bool :=
   | none => true
 
 /-- **`PrecondElimCorrect.functionsPreserved`.** Every input function survives
-    with the same name, body, inputs and output — and with its preconditions
+    with the same name, the same body, the same inputs and the same output, and with its preconditions
     stripped. Run on `mkMixedProgram`, whose top-level `.func` declarations are
     the generated inline functions lifted out of the bodies. -/
 def checkPrecondFunctionsPreserved (ps : List Procedure) : Bool :=
@@ -789,7 +761,7 @@ def checkPrecondNoDeclsRemoved (ps : List Procedure) : Bool :=
   | none => true
 
 /-- **`PrecondElimCorrect.orderPreserved`.** The input declaration-name sequence
-    is a sublist of the output's — the relative order of input declarations
+    is a sublist of the sequence of the output. The relative order of the input declarations
     survives, with newly generated `$$wf` names interleaved. Decided with the
     spec's own `List.Sublist`, on `mkMixedProgram` so that the interleaving
     actually happens (`mkFuncWFProc` pushes each `$$wf` procedure immediately
@@ -805,7 +777,7 @@ def checkPrecondOrderPreserved (ps : List Procedure) : Bool :=
 def checkPrecondChangedFlagValid (ps : List Procedure) : Bool :=
   checkChangedFlagValid Core.precondElimPipelinePhase (mkProgram ps)
 
-/-- **`PrecondElim` call-site asserts** — the operational content behind
+/-- **The asserts of `PrecondElim` at a call site.** This is the operational content behind
     `generatedWF`'s asserts. Every partial-function call obligation in the input
     gets exactly one `assert` in the output, and no input assert is dropped: the
     output body-assert count is the input count plus the obligation count computed
@@ -828,7 +800,7 @@ def checkPrecondCallSiteAsserts (ps : List Procedure) : Bool :=
 /-- The names in a `Lambda.Factory`. `toArray` is the public field of the
     structure (only `nameMap` is private) and `Factory.name_nodup` says its
     entries have distinct names, so enumerating it is exactly enumerating the
-    factory's membership — and by `nameMapConsistent`, `f[name]` for `name ∈ f` is
+    membership in the factory. By `nameMapConsistent`, the lookup of a name in the factory gives
     the array element of that name. -/
 def factoryNames (f : @Lambda.Factory CoreLParams) : List String :=
   f.toArray.toList.map (·.name.name)
@@ -859,7 +831,7 @@ def checkPrecondFactoryComplete (ps : List Procedure) : Bool :=
   | none => true
 
 /-- **`PrecondElimFactoryCorrect.factoryStripped`.** Verbatim: every entry of the
-    output factory has `preconditions = []`. Two independent causes bear on it — the
+    output factory has `preconditions = []`. Two independent causes concern this field. The
     seeded `Core.Factory` builtins keep the very preconditions the pass exists to
     discharge, and the pass pushes each declared function into the factory before
     stripping it. `checkPrecondDeclaredFactoryStripped` isolates the second,
@@ -875,7 +847,7 @@ def checkPrecondFactoryStripped (ps : List Procedure) : Bool :=
     formatted preconditions and with whether the input program declared it.
 
     This is the diagnostic counterpart to the check above. That property fails on
-    every input — including the empty program — so a minimized *program* witness
+    each input, and also on the empty program. Therefore a minimized *program* witness
     says nothing about the cause; the offenders are in the factory, not the program.
     Reporting them directly is what makes the failure legible: on the empty program
     this returns 58 entries, all seeded `Core.Factory` builtins
@@ -924,7 +896,7 @@ def checkPrecondDeclaredFactoryStripped (ps : List Procedure) : Bool :=
     generated `$$wf` procedure as a leaf in the cached call graph
     (`addWFProcToCallGraph`); this checks that the graph it hands on is still
     well-formed for the program it hands on. Run on `mkMixedProgram` so the
-    `$$wf`-procedure path — the only path that touches the cached graph — is
+    path for a `$$wf` procedure, which is the only path that changes the cached graph, is
     actually taken. -/
 def checkPrecondAnalysisPreserving (ps : List Procedure) : Bool :=
   checkAnalysisPreserving Core.precondElimPipelinePhase (mkMixedProgram ps)
@@ -997,8 +969,8 @@ def checkAnfFreshVarsDet (ps : List Procedure) : Bool :=
   | none => true
 
 /-- **`ANFEncoderCorrect.orderPreserved`.** Declaration names match positionally:
-    the output name list is *equal* to the input's (not merely a sublist — ANF
-    neither adds nor removes declarations). Run on `mkMixedProgram` so all
+    the list of the output names is *equal* to the list of the input names, and not only a sublist,
+    because ANF adds and removes no declaration. The property runs on `mkMixedProgram`, so each
     declaration kinds take part in the positional comparison. -/
 def checkAnfOrderPreserved (ps : List Procedure) : Bool :=
   let prog := mkMixedProgram ps
@@ -1007,7 +979,7 @@ def checkAnfOrderPreserved (ps : List Procedure) : Bool :=
     decide (out.decls.map Decl.name = prog.decls.map Decl.name)
   | none => true
 
-/-- **`ANFEncoderCorrect.controlFlowPreserved`** — the spec's headline claim,
+/-- **`ANFEncoderCorrect.controlFlowPreserved`.** This is the main claim of the specification,
     "ANFEncoder does not change control flow". Stripping the fresh ANF `init`s
     from each output body yields a statement list with the same control-flow
     skeleton (`stmtsCFEquiv`) as the corresponding input body. -/
@@ -1024,7 +996,7 @@ def checkAnfControlFlowPreserved (ps : List Procedure) : Bool :=
 /-- **`ChangedFlagValid` for ANFEncoder.** `changed ↔ progOut ≠ progIn`. Unlike
     the other two passes, ANFEncoder derives its flag from the fresh-variable
     counter actually advancing (`idx' > idx`, ANFEncoder.lean), which is
-    precisely when a body is rewritten — so this one holds. -/
+    which happens exactly when the pass rewrites a body. -/
 def checkAnfChangedFlagValid (ps : List Procedure) : Bool :=
   checkChangedFlagValid Core.commonSubexprElimPhase (mkProgram ps)
 
@@ -1107,7 +1079,7 @@ private def funcDeclOf (name : String) (body : Option Expression.Expr)
 #guard stmtsCFEquiv [.exit "L" .empty] [.exit "M" .empty] == false
 
 -- The obligation-counting oracle behind `checkPrecondCallSiteAsserts` must
--- actually see the `Int.Safe*` preconditions in `Core.Factory` — if it silently
+-- see each `Int.Safe*` precondition in `Core.Factory`. If it
 -- counted zero everywhere the property would be vacuous. `Int.SafeDiv(1, 0)`
 -- carries one (`y ≠ 0`); its total counterpart `Int.Div(1, 0)` carries none.
 #guard obligationCount (callOp "Int.SafeDiv" (intLit 1) (intLit 0)) == 1
@@ -1142,17 +1114,15 @@ private def liftMeProc : Procedure :=
   ["TestSupportT", "testSupportAx", "testSupportDistinct", "g", "P", "P"]
 #guard (runPhase Core.precondElimPipelinePhase (mkMixedProgram [liftMeProc, liftMeProc])).isSome == true
 
--- ── Hand-built PrecondElim reproducers ───────────────────────────────────
--- Scenarios the *generator* cannot currently reach, pinned deterministically so
--- the behaviour is regression-tested even though no property covers it.
+-- ── The reproducers for PrecondElim that a person wrote ──────────────────
+--
+-- Each program below is a case that the *generator* cannot reach. The guards pin the behaviour, although
+-- no property covers it.
 
--- ① THE `changed`-FLAG BUG — **FIXED UPSTREAM.** `function f() : int {
--- Int.SafeDiv(1, 0) }` has no preconditions of its own, but its *body* calls a
--- partial function. The pass inserts an `f$$wf` block holding the obligation
--- assert, so the program provably changes; it used to report `changed = false`
--- anyway (that branch returned `hasPreconds`), which is what this reproducer
--- pinned. On `strata-org/Strata` `main` the flag is correct, so the
--- guard now records the *fixed* behaviour.
+-- ① **The `changed` flag for a function whose body calls a partial function.** The function
+-- `function f() : int { Int.SafeDiv(1, 0) }` has no precondition of its own, and its *body* calls a
+-- partial function. The pass inserts an `f$$wf` block that holds the assert for the obligation, so the
+-- program provably changes, and the flag must be `true`.
 private def bodyCallProc : Procedure :=
   procOf "P" [funcDeclOf "f" (some (callOp "Int.SafeDiv" (intLit 1) (intLit 0))) []]
 
@@ -1160,41 +1130,37 @@ private def bodyCallProc : Procedure :=
 -- The obligation is real and the assert *is* emitted.
 #guard programObligations (mkProgram [bodyCallProc]) == 1
 #guard checkPrecondCallSiteAsserts [bodyCallProc] == true
--- ...the rewrite is genuinely visible in the output program, and `changed` now
--- agrees with it.
+-- The output program shows the rewrite, and the flag agrees with it.
 #guard (match runPhase Core.precondElimPipelinePhase (mkProgram [bodyCallProc]) with
         | some (changed, out) => changed == true && out != mkProgram [bodyCallProc]
         | none => false) == true
 
--- ② `preconditionsStripped` with a declaration that *does* carry a precondition.
--- `genFunction` reaches this shape too, but pin it by hand as well so the property
--- has a deterministic witness independent of the generator's coin flips: the input
--- has a precondition, the output has none.
+-- ② **`preconditionsStripped` with a declaration that *does* carry a precondition.** `genFunction` also
+-- reaches this shape, and the guard below pins it, so the property has a deterministic witness that does
+-- not depend on a draw. The input holds a precondition, and the output holds none.
 private def precondFuncProc : Procedure :=
   procOf "P" [funcDeclOf "g" none [callOp "Int.Ge" (intLit 1) (intLit 0)]]
 
 #guard programHasFuncPrecond (mkProgram [precondFuncProc]) == true
 #guard checkPrecondPreconditionsStripped [precondFuncProc] == true
 
--- ③ Cause (2) of the `factoryStripped` failure, isolated from the seeded
--- builtins: the copy the pass pushed into the factory used to keep the
--- precondition that the output *declaration* had dropped. **FIXED UPSTREAM** — the
--- declared function's factory entry is stripped too, so only cause (1) (the seeded
--- builtins, whose preconditions the pass must keep) is left in
--- `checkPrecondFactoryStripped`.
+-- ③ **The second cause of the failure of `factoryStripped`, apart from the builtin entries.** The pass
+-- pushes a copy of each declared function into the factory, and it must remove the precondition from that
+-- copy too. The entry of a declared function therefore holds no precondition, so only the first cause
+-- remains in `checkPrecondFactoryStripped`. That cause is the builtin entries, whose preconditions the
+-- pass must keep.
 #guard checkPrecondDeclaredFactoryStripped [precondFuncProc] == true
 #guard checkPrecondPreconditionsStripped [precondFuncProc] == true
--- The `$$wf` procedure generated for that declared precondition is well-formed
--- (`noFilter`, empty spec) — `generatedWF` bites here.
+-- The `$$wf` procedure for that declared precondition is well-formed, which is `noFilter := true` and an
+-- empty spec. `generatedWF` has real content here.
 #guard checkPrecondGeneratedWF [precondFuncProc] == true
 
 -- ── Hand-built FilterProcedures reproducers ──────────────────────────────
 
-/-- `A` calls `B`, `B` calls `C`, and `D` is unrelated. Gives the call-graph
-    closure dimension of `calleeClosureRetained` / `unreachableRemoved` something
-    to say. The caller `A` is listed **last** so that `callerTargets` (which picks
-    the last procedure) targets it, driving the `checkFilter*` guards below through
-    the non-empty closure `{B, C}`. -/
+/-- A program where `A` calls `B`, `B` calls `C`, and `D` calls nothing. It gives real content to the
+    dimension of the closure of the call graph, which `calleeClosureRetained` and `unreachableRemoved` use.
+    The caller `A` is **last** in the list, so `callerTargets`, which takes the last procedure, targets it.
+    Therefore each `checkFilter*` guard below runs against the closure `{B, C}`, which is not empty. -/
 private def callerCalleeProgram : List Procedure :=
   [ procOf "D" [],
     procOf "C" [],
@@ -1217,17 +1183,16 @@ private def callerCalleeProgram : List Procedure :=
         (mkProgram callerCalleeProgram) == true
 #guard checkFilterAnalysisPreserving callerCalleeProgram == true
 
-/-- A `noFilter := true` procedure that no target reaches. FilterProcedures keeps
-    the *declaration* (it respects `noFilter`) but filters the procedure out of
-    the cached *call graph* (`isNeededProc` ignores `noFilter`), so the graph it
-    caches is no longer complete for the program it returns — a real divergence
-    from `PreservesCachedAnalysesWF` that generated input cannot reach, since
-    `genProcedure` always sets `noFilter := false`.
+/-- A program with a procedure that has `noFilter := true` and that no target reaches. FilterProcedures
+    keeps the *declaration*, because it reads `noFilter`, and it filters that procedure out of the cached
+    *call graph*, because `isNeededProc` reads no `noFilter` field. Therefore the graph that the pass
+    caches is not complete for the program that it gives, which is a real disagreement with
+    `PreservesCachedAnalysesWF`. Generated input cannot reach that disagreement, because `genProcedure`
+    always sets `noFilter := false`.
 
-    The `noFilter` procedure `P` is listed **first**, so `callerTargets` (which
-    picks the *last* procedure — see its docstring) targets the plain procedure `Q`
-    and `P` is left as the unreached, `noFilter`-protected non-target that triggers
-    the divergence. -/
+    The procedure `P`, which has `noFilter := true`, is **first** in the list. Therefore `callerTargets`,
+    which takes the *last* procedure, targets the plain procedure `Q`. `P` stays as the procedure that no
+    target reaches and that `noFilter` protects, and it causes the disagreement. -/
 private def noFilterProgram : List Procedure :=
   [ { procOf "P" [] with header := { (procOf "P" []).header with noFilter := true } },
     procOf "Q" [] ]
@@ -1242,12 +1207,12 @@ private def noFilterProgram : List Procedure :=
 #guard checkFilterAnalysisPreserving noFilterProgram == false
 -- The antecedent is not the problem: the seeded input graph is well-formed.
 #guard callGraphWF (mkProgram noFilterProgram).toProcedureCG (mkProgram noFilterProgram) == true
--- `unreachableRemoved` still holds — it exempts `noFilter` procedures by design.
+-- `unreachableRemoved` still holds, because it permits a procedure with `noFilter := true` by design.
 #guard checkFilterUnreachableRemoved noFilterProgram == true
 
--- FilterProcedures used to hardcode `changed := true`, misreporting the
--- all-targets scenario in which nothing is removed. **FIXED UPSTREAM** — the flag
--- now tracks whether the pass actually dropped a procedure.
+-- The `changed` flag of FilterProcedures tracks whether the pass removed a procedure. A `changed := true`
+-- as a literal would report the wrong value for a target set that covers each procedure, where the pass
+-- removes nothing.
 #guard checkFilterChangedFlagValid noFilterProgram == true
 #guard checkFilterChangedFlagValid callerCalleeProgram == true
 

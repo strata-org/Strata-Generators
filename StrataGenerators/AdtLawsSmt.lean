@@ -2,51 +2,50 @@ import StrataGenerators.AdtLaws
 import StrataGenerators.HasTypeAGen.SmtEval
 
 /-!
-# Running the ADT laws against a live solver (opt-in)
+# The ADT laws against a live solver, under a gate
 
-`StrataGenerators.AdtLaws` builds, for a generated `mutual … end` block, a Core
-program whose proof obligations are exactly the injectivity and disjointness laws
-of the block's constructors. This module discharges them with a real solver, so —
-like `StrataGenerators.SmtEval`, whose conventions it follows — it is **opt-in**:
-the properties are added to the suite only under `--smt`.
+For a generated `mutual … end` block, `StrataGenerators.AdtLaws` builds a Core program
+whose proof obligations are the laws of injectivity and disjointness of the constructors
+of the block. This module discharges those obligations with a real solver. A **gate**
+therefore controls it, in the same way as `StrataGenerators.SmtEval`, whose conventions it
+follows: the suite holds these properties only under `--smt`.
 
 ## What counts as a failure
 
-Three outcomes per obligation, and only the middle one fails a law property:
+Each obligation has one of three outcomes, and only the second one makes a law property
+fail:
 
-* **proved** — `VCResult.isSuccess`, i.e. the solver established validity.
-* **refuted** — the solver returned a verdict, and it was not "valid". This is a
-  counterexample to the law, and the block is printed.
-* **refused** — the query never got a verdict: an encoder error, a solver parse
-  error, or a crash. Reported with its cause, never scored, exactly as
-  `SmtEval.checkValidExpr` treats `.error`. An unencodable query is a limit of the
-  encoder, not a datatype whose constructors fail to be injective.
+* **proved.** `VCResult.isSuccess` holds, so the solver established validity.
+* **refuted.** The solver returned a verdict, and the verdict was not "valid". This is a
+  counterexample to the law, and the report prints the block.
+* **refused.** The query got no verdict. The cause is an error from the encoder, a parse
+  error from the solver, or a crash. The report gives the cause and it scores nothing,
+  which is how `SmtEval.checkValidExpr` treats an `.error`. A query that the encoder cannot
+  write is a limit of the encoder, and not a datatype whose constructors are not injective.
 
-Because "refused" is unscored, a law property could in principle pass while
-checking nothing. Two things prevent that: the `blockIsSmtSafe` screen (which
-excludes the two *known* encoder defects, so a refusal is a new cause worth
-reading), and the vacuity guard — a law family with zero checked obligations
-**fails** and says so.
+A refusal has no score, so a law property can in principle pass and check nothing. Two
+things prevent that. The `blockIsSmtSafe` screen removes the two *known* defects of the
+encoder, so a refusal is a new cause and worth a read. The guard against vacuity also
+makes a law family with zero checked obligations **fail**, and it says so.
 
-## The third property: is the query even accepted?
+## The third property: does the solver accept the query at all?
 
-`adtSolverAcceptsQuery` is the deliberately unscreened counterpart: it draws
-blocks with no safety screen at all and asks only whether every emitted query
-reached a verdict. It **fails honestly**, on two independent defects that a legal
-Core datatype triggers:
+`adtSolverAcceptsQuery` is the property with no screen. It draws blocks with no safety
+screen, and it asks only whether each emitted query reached a verdict. Two separate defects
+break it, and a legal Core datatype causes each one:
 
-1. **`bitvec 0`.** `pickBitvecWidth` draws an unbounded width, so a field of
-   type `bitvec 0` occurs. Core typechecks it; the encoder emits `(_ BitVec 0)`,
-   whose index SMT-LIB 2.6 requires to be positive. cvc5: `Illegal bitvector size:
-   0`; z3: `bit-vector size must be greater than zero`.
-2. **`'` in an identifier.** Core's identifier alphabet includes `'`, which is not
-   an SMT-LIB simple-symbol character, and the encoder emits a datatype /
-   constructor / field name verbatim rather than pipe-quoting it (`|c'x|`), which
-   it already does elsewhere for type variables. cvc5: `Error finding token`.
+1. **`bitvec 0`.** `pickBitvecWidth` draws a width with no bound, so a field of the type
+   `bitvec 0` occurs. Core typechecks it. The encoder then emits `(_ BitVec 0)`, and
+   SMT-LIB 2.6 needs a positive index. cvc5 reports `Illegal bitvector size: 0`, and z3
+   reports `bit-vector size must be greater than zero`.
+2. **A `'` in an identifier.** The identifier alphabet of Core holds `'`, which is not a
+   simple-symbol character of SMT-LIB. The encoder writes the name of a datatype, of a
+   constructor and of a field without a change, and it does not quote the name as `|c'x|`.
+   It already quotes a type variable elsewhere. cvc5 reports `Error finding token`.
 
-Both are pinned by hand-built witnesses (`bv0Witness`, `quoteWitness`) as well as
-by the generated draws, so the causes stay identified even on a run whose random
-blocks happen to miss them, and so a fix can be checked against a fixed input.
+Hand-built witnesses, `bv0Witness` and `quoteWitness`, pin both defects, and the generated
+draws also reach them. The causes therefore stay clear on a run whose random blocks miss
+them, and a fix has a fixed input to run against.
 -/
 
 open Lambda Core Imperative
@@ -59,37 +58,40 @@ open StrataGenerators.AdtLaws
 inductive Verdict where
   | proved
   | refuted
-  /-- The query got no verdict; the message names the cause. -/
+  /-- The query got no verdict, and the message names the cause. -/
   | refused (cause : String)
   deriving Inhabited
 
-/-- A `VCResult`'s outcome as one line, truncated.
+/-- The outcome of a `VCResult` as one short line.
 
-    Not the *first* line: a solver crash prints `🚨 SMT Solver Crash! stderr:` and
-    puts the informative part — `Illegal bitvector size: 0`, `Error finding token` —
-    on a later line, so taking the head would report every distinct defect under one
-    indistinguishable cause. Flattening and truncating keeps the causes apart, which
-    is the whole point of `adtSolverAcceptsQuery`'s report. -/
+    The line is not the *first* line of the output. A crash of the solver prints
+    `🚨 SMT Solver Crash! stderr:` first, and it puts the useful part on a later line, such as
+    `Illegal bitvector size: 0` or `Error finding token`. The first line alone therefore
+    reports each different defect under one cause that a reader cannot tell apart. This
+    function joins the lines and then cuts the result, so the causes stay separate, and that
+    is the purpose of the report of `adtSolverAcceptsQuery`. -/
 private def outcomeHead (r : Core.VCResult) : String :=
   let words := (r.formatOutcome.splitOn "\n").flatMap (·.splitOn " ")
-  -- Drop the temporary `.smt2` path and the line:column it carries: both differ per
-  -- obligation and per run, so keeping them would report one cause as many.
+  -- Drop the path of the temporary `.smt2` file, and the line and column that follow it. Both
+  -- differ for each obligation and for each run, so a report that keeps them shows one cause
+  -- as many causes.
   let words := words.filter (fun w => !w.isEmpty && !(w.splitOn "/").length.pred > 0
                                       && !(w.splitOn ".smt2").length.pred > 0)
   ((String.intercalate " " words).take 140).trimAscii.toString
 
-/-- Classify one `VCResult`. A `.error` outcome is a refusal (encoder error,
-    solver crash, timeout); a successful `.ok` is `proved`; any other `.ok` is a
-    verdict that the obligation is not valid, i.e. `refuted`. -/
+/-- The verdict for one `VCResult`. An `.error` outcome is a refusal, and its cause is an error
+    from the encoder, a crash of the solver, or a timeout. An `.ok` outcome that succeeded is
+    `proved`. Each other `.ok` outcome is a verdict that the obligation is not valid, which is
+    `refuted`. -/
 def classify (r : Core.VCResult) : Verdict :=
   match r.outcome with
   | .error _ => .refused (outcomeHead r)
   | .ok _ => if r.isSuccess then .proved else .refuted
 
-/-- Run the whole Core verification pipeline on `p` with `solver`, returning the
-    per-obligation results, or a single refusal cause when the pipeline itself
-    threw (`emitDatatypes` raises `IO.userError` for an arrow-typed field, and a
-    type error surfaces the same way). -/
+/-- Runs the whole Core verification pipeline on `p` with `solver`. The result holds one entry
+    for each obligation. The result is one cause of a refusal when the pipeline itself threw.
+    `emitDatatypes` raises an `IO.userError` for a field with an arrow type, and a type error
+    arrives in the same way. -/
 def verifyLawProgram (solver : String) (p : Program) :
     IO (Except String (Array Core.VCResult)) := do
   try
@@ -101,31 +103,33 @@ def verifyLawProgram (solver : String) (p : Program) :
   catch e =>
     return .error (e.toString.splitOn "\n").head!
 
-/-- Per-law tallies: proved, refuted, refused. -/
+/-- The counts for one law: proved, refuted and refused. -/
 structure Tally where
   proved  : Nat := 0
   refuted : Nat := 0
   refused : Nat := 0
   deriving Inhabited
 
+/-- Adds one verdict to the counts. -/
 def Tally.add (t : Tally) : Verdict → Tally
   | .proved => { t with proved := t.proved + 1 }
   | .refuted => { t with refuted := t.refuted + 1 }
   | .refused _ => { t with refused := t.refused + 1 }
 
+/-- The number of obligations that got a verdict, which is the sum of the proved obligations and
+    the refuted ones. -/
 def Tally.checked (t : Tally) : Nat := t.proved + t.refuted
 
+/-- The counts as one line, for a report. -/
 def Tally.format (t : Tally) : String :=
   s!"{t.proved} proved, {t.refuted} REFUTED, {t.refused} refused"
 
-/-- Draw a block that passes both screens, or `none` after `tries` attempts.
+/-- Draws a block that passes both screens, or gives `none` after `tries` attempts.
 
-    The size schedule is `maxSize := 0`: at any larger size `genArgTy` can emit an
-    arrow, which `validateDatatypesForSMT` refuses for the whole block, and the
-    measured eligible fraction drops from 40/40 to about 5/40 — three quarters of
-    the budget would go to draws that never reach a solver. Larger sizes are
-    exercised by `adtSolverAcceptsQueryAction`, which wants exactly those
-    refusals. -/
+    The draw uses `maxSize := 0`. At a larger size, `genArgTy` can emit an arrow, and
+    `validateDatatypesForSMT` then refuses the whole block. Most of the budget would go to
+    draws that no solver sees. `adtSolverAcceptsQueryAction` uses the larger sizes, because it
+    wants those refusals. -/
 partial def drawSafeBlock (tries : Nat := 25) : IO (Option (MutualDatatype Unit)) := do
   if tries == 0 then return none
   let block ← DatatypeGen.sample (maxSize := 0)
@@ -133,18 +137,18 @@ partial def drawSafeBlock (tries : Nat := 25) : IO (Option (MutualDatatype Unit)
     return some block
   else drawSafeBlock (tries - 1)
 
-/-- The two law properties, run together on one draw sequence.
+/-- Runs the two law properties together, over one sequence of draws.
 
-    They share a run because they share every expensive step: one block, one
-    program, one pipeline run through `Core.verify` yields the obligations of all
-    three law families at once, and splitting them into two properties would double
-    the solver work for identical coverage. The verdicts are then *tallied per
-    family*, and each property reads its own tally.
+    The two properties share a run, because they share each expensive step. One block, one
+    program and one run of `Core.verify` give the obligations of all three law families. A
+    separate run for each property would double the solver work and give the same coverage.
+    The function then counts the verdicts *for each family*, and each property reads its own
+    counts.
 
-    Returns `(injTally, disjTesterTally, disjAppTally, notes)`. The third is
-    reported but not asserted on: those obligations are folded to `true` before the
-    solver sees them (see `AdtLaws.checkDisjFoldsDuringSymEval`), so their `proved`
-    count says something about the evaluator, not about SMT. -/
+    The result is `(injTally, disjTesterTally, disjAppTally, notes)`. The report gives the third
+    count, and no property asserts on it. The evaluator folds those obligations to `true`
+    before the solver sees them, as `AdtLaws.checkDisjFoldsDuringSymEval` states, so their
+    `proved` count says something about the evaluator and not about SMT. -/
 def runLawTallies (numTrials : Nat) (solver : String) :
     IO (Tally × Tally × Tally × List String) := do
   let blocks := min numTrials 12
@@ -181,9 +185,9 @@ def runLawTallies (numTrials : Nat) (solver : String) :
   notes := notes ++ [s!"{drawn}/{blocks} blocks drawn; solver {solver}"]
   return (inj, disjT, disjA, notes)
 
-/-- The suite node shape the harnesses expect: `(success, passed, attempted,
-    note)`. A family with zero checked obligations fails: a law property that
-    checked nothing is a coverage loss, not a pass. -/
+/-- The tuple that a driver needs for a suite node: `(success, passed, attempted, note)`. A
+    family with zero checked obligations fails, because a law property that checked nothing is
+    a loss of coverage and not a pass. -/
 def tallyToNode (kind : String) (t : Tally) (notes : List String) :
     Bool × Nat × Nat × Option String :=
   let note := s!"{kind}: {t.format}"
@@ -193,19 +197,23 @@ def tallyToNode (kind : String) (t : Tally) (notes : List String) :
   else
     (t.refuted == 0, t.proved, t.checked, some note)
 
-/-! ## The unscreened property: does every emitted query reach a verdict? -/
+/-! ## The property with no screen: does each emitted query reach a verdict? -/
 
-/-- The two witness blocks, from `AdtLaws`: a `bitvec 0` field, and names holding
-    `'`. They live there because the *pure* half of each defect — that the block is
-    Core-legal, and that the SMT-safety screen sees it — is pinned by `#guard`s that
-    need no solver. Here they are run against a live one. -/
+/-- The witness block from `AdtLaws` that has a `bitvec 0` field. `AdtLaws` holds it, because
+    `#guard` statements there pin the *pure* half of the defect: Core accepts the block, and
+    the screen for SMT safety sees it. Those statements need no solver, and this module runs
+    the block against a live solver. -/
 def bv0Witness : MutualDatatype Unit := AdtLawsWitnesses.bv0Block
+
+/-- The witness block from `AdtLaws` whose names hold `'`. `AdtLaws` holds it for the same
+    reason as `bv0Witness`. -/
 def quoteWitness : MutualDatatype Unit := AdtLawsWitnesses.quoteBlock
 
-/-- Draw a block whose law program is at least *attemptable* — accepted by
-    `addMutualBlock`, arrow-free (else the pipeline throws before any obligation
-    exists) and contributing at least one obligation — but with no screen on
-    widths or names, which is what this property is about. -/
+/-- Draws a block whose law program the pipeline can at least *attempt*. Three conditions must
+    hold: `addMutualBlock` accepts the block; the block holds no arrow type, because the
+    pipeline otherwise throws before an obligation exists; and the block gives at least one
+    obligation. There is no screen on a width or on a name, and those are what this property is
+    about. -/
 partial def drawAttemptableBlock (sz : Nat) (tries : Nat := 25) :
     IO (Option (MutualDatatype Unit)) := do
   if tries == 0 then return none
@@ -214,14 +222,15 @@ partial def drawAttemptableBlock (sz : Nat) (tries : Nat := 25) :
     return some block
   else drawAttemptableBlock sz (tries - 1)
 
-/-- **Every emitted law query reaches a solver verdict.** FAILS honestly: see the
-    module doc for the two causes. Runs the two hand-built witnesses first (so the
-    causes are named on every run, not only on a lucky draw), then generated
-    blocks.
+/-- **Each law query that the encoder emits reaches a verdict from the solver.** The
+    documentation of this module gives the two defects that break this property.
 
-    `attempted` counts obligations, `passed` counts obligations that got a verdict
-    of either kind. The note lists each distinct refusal cause, which is what makes
-    the property a *report* on encoder coverage rather than only a red tick. -/
+    The action runs the two hand-built witnesses first, so the report names the two causes on
+    each run and not only on a lucky draw. It then runs generated blocks.
+
+    `attempted` counts the obligations, and `passed` counts the obligations that got a verdict
+    of either kind. The note lists each different cause of a refusal, and this is what makes
+    the property a *report* on the coverage of the encoder, and not only a verdict. -/
 def adtSolverAcceptsQueryAction (numTrials : Nat) (solver : String) :
     IO (Bool × Nat × Nat × Option String) := do
   let mut total := 0
@@ -248,8 +257,8 @@ def adtSolverAcceptsQueryAction (numTrials : Nat) (solver : String) :
     verdicts := verdicts + v
     causes := causes ++ cs
     witnessNotes := witnessNotes ++ [s!"{label}: {v}/{n} got a verdict"]
-  -- Generated blocks, over a size schedule: size 0 is the shape the law
-  -- properties use, the larger sizes bring `Map`/`Sequence` field types.
+  -- Generated blocks, over a schedule of sizes. Size 0 gives the shape that the law properties
+  -- use, and the larger sizes give a `Map` field type and a `Sequence` field type.
   for i in List.range (min numTrials 8) do
     match ← drawAttemptableBlock (i % 3) with
     | none => pure ()

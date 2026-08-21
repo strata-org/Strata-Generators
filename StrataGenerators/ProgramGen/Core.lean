@@ -16,11 +16,10 @@ namespace Lambda
 
 /-- The erroring form of `LContext.addFactoryFunction`.
 
-    Upstream `strata-org/Strata` keeps only the *total* `LContext.addFactoryFunction`
-    (a no-op on a name clash); the generator needs the erroring form, because that is the
-    gate the program checker applies — and `ProgramTypeSpec`'s `FactoryExtendedBy` describes
-    exactly its successful outcome. It is a thin wrapper over `Factory.tryPush`, which
-    upstream does provide. -/
+    Strata gives the *total* `LContext.addFactoryFunction`, which changes nothing after a clash of two names.
+    The generator needs the form that gives an error, because that form is the gate that the program checker
+    applies, and `FactoryExtendedBy` of `ProgramTypeSpec` describes exactly its successful outcome. This
+    definition is a wrapper over `Factory.tryPush`, which Strata does give. -/
 def LContext.addFactoryFunctionWithError (C : LContext CoreLParams) (fn : LFunc CoreLParams) :
     Except Strata.Message (LContext CoreLParams) := do
   .ok { C with functions := (← C.functions.tryPush fn) }
@@ -30,17 +29,14 @@ end Lambda
 /-!
 # Generator definitions for random well-typed Strata Core *programs*
 
-This module holds the **generator code** (no proofs — those live in
-`StrataGenerators.ProgramGen`) for random Strata Core `Program`s that are
-well-typed with respect to `Core.TypeSpec.ProgramHasType'` (instantiated at the
-annotated `HasTypeA` spec → `ProgramHasTypeA`).
+This module holds the **code of the generator** for a random Strata Core `Program` that is well typed against
+`Core.TypeSpec.ProgramHasType'`, at the annotated specification, which gives `ProgramHasTypeA`. The proofs are
+in `StrataGenerators.ProgramGen`.
 
-A `Program` is a list of `Decl`s. We reuse the existing generators for the
-"interesting" declaration bodies — `DatatypeGen.genMutuallyRecursiveDatatypes`
-for algebraic datatype blocks and `genFunction` for functions — and add
-generators for the four declaration kinds those don't already cover: **abstract
-types** (`type Foo _ _;`), **type aliases** (`type Bar x = …;`), **axioms**, and
-**`distinct`** assertions.
+A `Program` is a list of declarations. This module uses the existing generator for each declaration body that
+has one. `DatatypeGen.genMutuallyRecursiveDatatypes` gives a block of algebraic datatypes, and `genFunction`
+gives a function. This module adds a generator for the four other kinds of declaration: an **abstract type**,
+a **type alias**, an **axiom** and a **`distinct`** assertion.
 
 ## Threading the real context
 
@@ -55,25 +51,23 @@ that only makes sense relative to the real input `C`.
 
 ## Generate-and-check gating
 
-For datatype blocks and functions we do not attempt to *prove* "the block/func is
-well-formed ⟹ the checker's add succeeds" (that bridge does not exist in Strata,
-and for `addMutualBlock` it would require an unproven executable↔inductive
-inhabitance equivalence). Instead we *run* the add operation and only emit the
-declaration on the `.ok` branch. Support-membership of a produced value then
-carries the `= .ok C'` fact for free, which is exactly what the corresponding
-`DeclHasType'` constructor asks for.
+For a block of datatypes and for a function, this module does not *prove* that a well-formed value makes the
+add of the checker succeed. Strata gives no such bridge, and for `addMutualBlock` such a proof would need an
+equivalence between an executable check and an inductive relation about inhabitance, which no proof gives.
+This module instead *runs* the add operation, and it emits the declaration on the `.ok` branch only.
+Membership in the support of the result then carries the fact that the add succeeded, and that is exactly what
+the matching constructor of `DeclHasType'` asks for.
 
-For abstract types, aliases, axioms and `distinct` we generate names fresh
-against a threaded reserved-name set (so `addKnownTypeWithError` / the alias
-guards provably succeed) and rely on the derive-typeArgs-from-body trick for
+For an abstract type, an alias, an axiom and a `distinct` assertion, the generator draws each name fresh
+against a threaded set of the reserved names, so that `addKnownTypeWithError` and each guard of an alias
+provably succeed. It also computes the type arguments from the body for
 alias well-formedness, so no gating is needed there.
 
 ## Global name freshness
 
-`ProgramHasType'` additionally requires `P.getNames.Nodup` — a single flat
-namespace across every declaration kind. We thread one global reserved-name set
-across the whole fold, adding each declared name as we go, so distinctness of the
-generated program's names holds by construction.
+`ProgramHasType'` also needs each name of the program to be different from each other name, in one flat
+namespace over each kind of declaration. The fold threads one set of the reserved names, and it adds each
+declared name as it goes. Therefore the names of a generated program are distinct by construction.
 -/
 
 namespace ProgramGen
@@ -88,19 +82,19 @@ Small helpers that package generated data into a `Decl`. Kept separate from the
 generators so the soundness proofs can talk about the built `Decl` shape
 directly. -/
 
-/-- An abstract type declaration `type name _ … _;` of the given arity. The
-    parameter names are irrelevant for a type constructor (only the count, i.e.
-    `numargs`, matters — see `TypeConstructor.numargs`), so we use placeholder
-    underscores. -/
+/-- An abstract type declaration of the given arity. The name of a parameter of a type constructor does not
+    matter, and only the number of the parameters matters, which `TypeConstructor.numargs` gives. Therefore this
+    definition uses an underscore for each parameter name. -/
 def mkAbstractTypeDecl (name : String) (arity : Nat) : Decl :=
   .type (.con { name := name, params := List.replicate arity "_" }) .empty
 
 /-- A type-alias declaration whose type arguments are exactly the (deduplicated)
     free type variables of the body `body`.
 
-    Deriving `typeArgs` from `body` this way makes all of `TEnv.addTypeAlias`'s
-    guards hold by construction: `typeArgs.Nodup` (dedup), `freeVars ⊆ typeArgs`
-    and `typeArgs ⊆ freeVars` (no phantom args) — see `DeclHasType'.type_syn`. -/
+    The type arguments come from the body, and that choice makes each guard of `TEnv.addTypeAlias` hold by
+    construction. Those guards ask that the type arguments are distinct, which the dedup gives, and that the
+    free variables of the body and the type arguments are the same set, so the alias has no parameter that its
+    body does not name. Read `DeclHasType'.type_syn`. -/
 def mkAliasDecl (name : String) (body : LMonoTy) : Decl :=
   .type (.syn { name := name, typeArgs := (LMonoTy.freeVars body).dedup, type := body }) .empty
 
@@ -113,9 +107,9 @@ def mkDistinctDecl (name : String) (es : List PExpr) : Decl :=
   .distinct ⟨name, ()⟩ es .empty
 
 /-- A Strata Core **constant**: a 0-ary, body-less function at type `τ`
-    ("constants are 0-ary functions", `Core/Program.lean`). Core has no
-    global-variable declaration form, so this is the only way to name a top-level
-    value — which is what a `distinct` group ranges over (see `genDistinctAssertion`).
+    because a constant is a function of arity 0 in Core. Core has no form for a declaration of a global variable,
+    so this is the one way to name a value at the top level, and a `distinct` group ranges over such names. Read
+    `genDistinctAssertion`.
 
     Body-less and measure-less by construction, so `FuncHasType'`'s `bodyTyped` /
     `measureTyped` obligations are vacuous and `isRecursive` stays at its `false`
@@ -129,10 +123,10 @@ def mkConstantDecl (name : String) (τ : LMonoTy) : Decl :=
 
 /-! ## The pool of referenceable type constructors
 
-As the program grows, later ADT blocks and alias bodies may reference the type
-constructors declared earlier. We track the referenceable *applied* constructors
-(arity ≥ 1) as a `List KnownTyCon = List (String × Nat)`, seeded with Strata
-Core's parameterized primitives (`Sequence`, `Map`) and extended by each abstract
+As the program grows, a later block of datatypes and a later alias body can reference a type constructor that
+an earlier declaration gives. The fold therefore tracks the *applied* constructors that a type can reference,
+which are the ones of an arity of 1 or more, as a list of a name and an arity. That list starts with the
+parameterized primitives of Strata Core, which are `Sequence` and `Map`, and each abstract
 type of arity ≥ 1. Nullary abstract types extend the base-type pool. -/
 
 /-- The base (arity-0) referenceable type names: the datatype generator's
@@ -144,10 +138,9 @@ abbrev TyCons := List KnownTyCon
 
 /-! ## Types over the declared type constructors
 
-An alias body is a type over the base types and the applied type constructors that
-are in scope. A constructor argument is such a type also. `DatatypeGen.genArgTy`
-generates these types. We call it with an empty `blockRefs`, because an alias body
-has no recursive self-reference. -/
+An alias body is a type over the base types and over the applied type constructors that are in scope. An
+argument of a constructor is such a type too. `DatatypeGen.genArgTy` generates such a type. This module calls
+it with an empty list of the block references, because an alias body holds no reference to itself. -/
 
 /-- Generate a type that mentions only `baseTypes`, `tyCons`, and the type
     variables `tyParams`. The type has no block references and no self-references.
@@ -198,20 +191,19 @@ def genAxiom [Gen G] (octx : OpCtx) (pctx : PolyOpCtx)
 
 /-! ## Distinct generation
 
-A `distinct` group ranges over *named top-level values*, and in Strata Core those
-are 0-ary functions — Core has no global-variable declaration form. So the step
-emits one constant declaration per element and lets the `distinct` reference them
-as `.op` nodes:
+A `distinct` group ranges over a *named value at the top level*, and in Strata Core such a value is a function
+of arity 0, because Core has no form for a declaration of a global variable. Therefore this step emits one
+declaration of a constant for each element, and the `distinct` assertion then names each of them through an
+`.op` node:
 
 ```
 function c₀ () : τ;   function c₁ () : τ;   distinct [d]: [c₀, c₁];
 ```
 
-Annotated *free* variables (`.fvar () ⟨v, ()⟩ (some τ)`) would also be well-typed
-under the annotated spec — `HasTypeA.fvar` types an fvar from its annotation alone,
-with no reference to scope — but no legal Core program can bind such a variable at
-top level, so `LExpr.resolve` rejects one ("Cannot find this fvar in the context").
-`HasTypeA.op` has the same annotation-only shape as `HasTypeA.fvar`, so soundness is
+An annotated *free* variable is also well typed under the annotated specification, because `HasTypeA.fvar`
+takes the type of a free variable from its annotation alone and reads no scope. No legal Core program can bind
+such a variable at the top level, so `LExpr.resolve` rejects one. `HasTypeA.op` reads only an annotation, as
+`HasTypeA.fvar` does, so soundness is
 discharged just as cheaply, by a term the checker can also resolve.
 
 The element type `τ` is drawn over `tyParams := []`, hence *ground*, which is also
@@ -228,10 +220,9 @@ def distinctElems (τ : LMonoTy) (names : List String) : List PExpr :=
 /-- Draw the ingredients of a `distinct` declaration: a fresh declaration name, a
     ground element type `τ`, and `numVars` fresh constant names.
 
-    The constant names are drawn against `name :: reserved`, so they are distinct
-    from each other *and* from the declaration's own name — all `numVars + 1` names
-    become program-level declaration names, so they must all be globally distinct
-    (`getNames.Nodup`).
+    The generator draws each name of a constant against the name of the declaration and the reserved set.
+    Therefore those names differ from each other *and* from the name of the declaration. Each of them becomes a
+    declaration name of the program, so each of them must differ from each other name of the program.
 
     Turning these parts into declarations needs the ambient `LContext` (each
     constant is added with the checker's own `addFactoryFunctionWithError`), so it
@@ -250,16 +241,13 @@ When a datatype block is declared, `LContext.addMutualBlock` runs Strata's
 `genBlockFactory` and pushes the derived functions into `C.functions`:
 **eliminators** (`D$Elim`), **constructors** (`c`), **testers** (`c.testerName`,
 e.g. `isCons` for a generated block or `List..isCons` for a parsed one),
-and **field accessors** in both a *safe* variant (`D..head`, carrying the
-precondition `D..isCons(x)`) and an *unsafe* variant (`D..head!`, no
-precondition — the result is an arbitrary value of the field type when applied to
-the wrong constructor).
+and an **accessor of a field** in two forms. The *safe* form carries the precondition that the value has the
+matching constructor. The *unsafe* form carries no precondition, and its result is an arbitrary value of the
+type of the field when a caller applies it to the wrong constructor.
 
-The fold *did* thread the grown context, but the operator vocabularies feeding
-expression generation (`GenState.octx`/`pctx`) were pinned to Core's primitives
-for the whole fold — so no generated function or procedure body ever mentioned an
-earlier datatype. The definitions below build the vocabulary a block contributes,
-which `ProgramGen.genDeclDatatype` then merges into `octx`/`pctx`.
+The definitions below build the vocabulary that one block gives, and `ProgramGen.genDeclDatatype` then merges
+that vocabulary into the two operator contexts of the fold. Without that merge, no body of a generated function
+and of a generated procedure could name a datatype of an earlier declaration.
 
 The vocabulary is read out of `genBlockFactory` rather than re-derived here. That
 is deliberate on two counts: it is the *same* function `addMutualBlock` runs, so
@@ -304,11 +292,11 @@ def classifyDerivedOp (block : MutualDatatype Unit) (name : String) : DerivedOpF
 /-- Which derived families to admit into the operator vocabulary.
 
     The eliminator is excluded by default. Its type quantifies over a
-    `freshTypeArgs`-generated result variable (`$__ty0`) that is unconstrained by
-    the target type, so `IndirPoly` must *sample* it, and its case arguments are
-    higher-order (one lambda per constructor of the whole block) — which the
-    expression generator can rarely fill. It is also not one of the three families
-    the language docs describe. The remaining four are exactly those. -/
+    result variable from `freshTypeArgs`, and the target type puts no condition on that variable, so `IndirPoly`
+    must *sample* it. Its arguments for the cases are also higher order, because it takes one lambda for each
+    constructor of the whole block, and the expression generator can rarely fill such an argument. It is also not
+    one of the three families that the documentation of the language describes, and the four families here are
+    exactly those. -/
 structure DerivedOpFamilies where
   elim : Bool := false
   constr : Bool := true
@@ -325,10 +313,9 @@ def DerivedOpFamilies.admits (sel : DerivedOpFamilies) : DerivedOpFamily → Boo
   | .accessor => sel.accessor
   | .unsafeAccessor => sel.unsafeAccessor
 
-/-- The factory of derived functions a datatype block contributes, as Strata's own
-    `addMutualBlock` computes it. `none` when `genBlockFactory` rejects the block
-    (a name clash among the derived functions) — the caller then contributes no
-    operators, exactly as it emits no declaration.
+/-- The factory of the derived functions that a block of datatypes gives, as `addMutualBlock` of Strata computes
+    it. The result is `none` when `genBlockFactory` rejects the block, which happens after a clash of two names
+    among the derived functions. The caller then gives no operator, as it also emits no declaration.
 
     The instances are pinned explicitly (rather than left to synthesis) to the
     `CoreLParams`-native ones, matching `genDeclDatatype`'s `addMutualBlock` call,
@@ -347,11 +334,11 @@ def polySchemeVars : Lambda.LTy → List TyIdentifier
     admitted derived function under its curried generic type.
 
     For a datatype with no type parameters these types are ground, so the `Indir`
-    rule can fully apply them (`findOpsInCtx` compares result types with `==`). For
-    a *polymorphic* datatype the types mention the datatype's type variables and so
-    match no concrete target — such a block's useful entries are the `pctx` ones
-    below. Entries are emitted either way: an unusable `octx` entry is inert, and
-    keeping the two projections uniform avoids a special case.
+    rule can apply each of them in full, because `findOpsInCtx` compares two result types for equality. For a
+    *polymorphic* datatype, each type names a type variable of the datatype, and it therefore matches no concrete
+    target. The useful entries of such a block are the ones for the polymorphic context below. This function
+    emits an entry in each case. An entry that the monomorphic rule cannot use is inert, and one form for both
+    projections needs no special case.
 
     The result is an `OpList` (the plain (name, curried type) list), not an `OpCtx`:
     the caller *appends* it to the state's existing operators and rebuilds the
@@ -378,11 +365,10 @@ def adtDerivedOps (block : MutualDatatype Unit)
     **Ground schemes are deliberately excluded** (the `typeArgs`-nonempty filter).
     A datatype with no type parameters yields derived functions whose types are
     already concrete, and those are fully served by the `octx` projection above via
-    the much cheaper monomorphic `Indir` rule. Admitting them here as degenerate
-    `∀[]. τ` schemes would add nothing reachable while pushing every draw through
-    `findPolymorphicOps` — which alpha-renames, unifies at every split point, and
-    samples instantiations. That cost is real and measurable: routing a
-    *monomorphic* block's derived ops through `pctx` as well as `octx` made a
+    the monomorphic `Indir` rule, which is much cheaper. An entry here as a scheme with no binder would add no
+    reachable term, and it would send each draw through `findPolymorphicOps`, which renames each bound type
+    variable, unifies at each split point, and samples an instantiation. That cost is real: the derived operators
+    of a *monomorphic* block in the polymorphic context, as well as in the monomorphic one, made a
     procedure draw roughly 30× slower for no gain in coverage. -/
 def adtDerivedPolyOps (block : MutualDatatype Unit)
     (sel : DerivedOpFamilies := {}) : PolyOpCtx :=
@@ -408,10 +394,10 @@ theorem mem_adtDerivedPolyOps {block : MutualDatatype Unit}
 
 /-! ## Recovering a procedure's `M`/`I`/`O` split
 
-`genProcedure` builds `inputs = M ++ I` and `outputs = M ++ O` with the shared
-in-out block `M` leading both. To *register* a generated procedure as a callable
-signature the fold must recover `M`, but `GenState` holds no proof data — so it
-recomputes `M` as the longest common prefix of the two signatures.
+`genProcedure` builds the inputs as the shared in-out block and then the input-only block, and the outputs as
+the shared block and then the output-only block. The shared block comes first in both. To *register* a generated
+procedure as a callable signature, the fold must recover that shared block. The state of the fold holds no data
+from a proof, so the fold computes that block again, as the longest common prefix of the two signatures.
 
 That is exact: `lcp (M ++ I) (M ++ O) = M ++ lcp I O`, and `I`/`O` have disjoint
 keys (the generator filters `O` against `M ++ I`), so `lcp I O = []`. The lemma

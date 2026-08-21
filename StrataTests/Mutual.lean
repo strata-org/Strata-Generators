@@ -1,28 +1,29 @@
 import StrataGenerators.Test
 
 /-!
-# `mutual … end` blocks that are not mutually recursive
+# A `mutual … end` block that is not mutually recursive
 
-A block of datatypes that do not refer to one another at all is accepted, is usable,
-and means the same as declaring each datatype separately. All four properties pass —
-which is the answer to the question the suite was written to ask.
+Strata accepts a block of datatypes that do not refer to one another. Such a block is
+usable, and it means the same as a separate declaration for each datatype. These four
+properties state that claim.
 
-Each check re-verifies the shape it needs (`isIndependentBlock`) and is vacuously true
-otherwise, so feeding it an ordinary block cannot silently turn it into a claim about
-connected blocks.
+Each check tests the shape that it needs with `isIndependentBlock`, and it is vacuously true
+for another shape. Therefore an ordinary block cannot turn a check into a claim about a
+connected block.
 
-The defect this shape exposes — `d$Elim` leaving another datatype's type parameters
-free — is *not* specific to the independent shape, so it is registered with the `adt:`
-suite over ordinary blocks instead.
+The defect that this shape shows is *not* specific to the independent shape: `d$Elim` leaves
+the type parameters of another datatype free. Therefore the `adt:` suite holds that
+property, over ordinary blocks.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.MutualBlockShape
 
-/-- The four claims about a block whose datatypes are pairwise independent, scored on
-    blocks drawn by `genIndependentBlock`: datatypes drawn independently over a
-    threaded reserved-name set, so no constructor field can mention a sibling. -/
+/-- The four claims about a block whose datatypes are pairwise independent.
+    `genIndependentBlock` draws the blocks. It draws each datatype on its own, and it
+    threads one set of reserved names through the draws, so no constructor field can mention
+    a sibling datatype. -/
 @[strata_properties]
 def mutualIndepChecks : List TestDecl :=
   family GenIndepBlock
@@ -30,9 +31,9 @@ def mutualIndepChecks : List TestDecl :=
        fun gb => checkIndependentBlockAccepted gb.block),
       ("mutual: such a block's constructors are usable in a program",
        fun gb => checkIndependentBlockUsable gb.block),
-      -- Interchangeability with the split form, up to the eliminators — which differ
-      -- by design, since `d$Elim` takes a case function per constructor of the *whole*
-      -- block.
+      -- The block and the split form are interchangeable, except for the eliminators. The
+      -- eliminators differ by design, because `d$Elim` takes one case function for each
+      -- constructor of the *whole* block.
       ("mutual: splitting such a block preserves the derived vocabulary",
        fun gb => checkSplitBlockAgrees gb.block),
       ("mutual: such a block prints without a conversion error",

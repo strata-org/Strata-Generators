@@ -4,130 +4,107 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
-# Completeness of `genStmt` / `genStmtChain`, indexed directly by `StatementHasTypeA`
+# The completeness of `genStmt` and `genStmtChain`, indexed by `StatementHasTypeA`
 
-`spec_complete` proves that every well-typed statement (per the declarative
-`StatementHasTypeA` relation of `Strata.Languages.Core.StatementTypeSpec`) is in
-`genStmt`'s support — **without** an auxiliary, generator-mirroring `StmtReachable`
-relation. The proof runs by induction on the *typing derivation* itself, via the
-two mutually recursive theorems `genStmt_spec_complete` / `genStmtChain_spec_complete`
-(emulating `LMonoTy.resolveAliases_context` / `LMonoTys.resolveAliases_context`).
+`spec_complete` proves that each well-typed statement is in the support of `genStmt`. The declarative
+relation `StatementHasTypeA`, in `Strata.Languages.Core.StatementTypeSpec`, decides which statements are
+well typed. The proof needs **no** helper relation that follows the shape of the generator. It runs by
+induction on the *typing derivation* itself, through the two mutually recursive theorems
+`genStmt_spec_complete` and `genStmtChain_spec_complete`.
 
-## The side conditions (recursive `Prop`-valued `def`s, not inductive relations)
+## The side conditions
 
-A bounded random generator cannot reach *every* well-typed statement; its support
-is strictly narrower than the spec's acceptance. The residual gaps are captured by
-three recursive predicates over the statement tree — deliberately **functions**
-returning `Prop`, not inductive relations:
+A random generator with a bound cannot reach *each* well-typed statement, so its support is strictly
+narrower than the set that the specification accepts. Four recursive predicates over the tree of a
+statement hold the remaining gaps. Each of them is a **function** that gives a `Prop`, and none of them is
+an inductive relation:
 
-* **`InGenShape`** — the two shape facts the generator fixes and the spec leaves
-  free: metadata at `default`, and an `init`'s annotation monomorphic (`.forAll []`).
-  (The `typeDecl` `.bound` condition is *gone*: the generator now samples both
-  `Boundedness` values. The `init` groundness condition is *gone*: procedure bodies
-  are generated under a context that marks the type parameters rigid, so
-  `RigidAnnotCompat` pins the stored type to the annotation — see `hRigid`.)
-* **`AlphabetOk`** — the identifier-alphabet + size kernel. Every generated *name*
-  lies in `genIdentName`'s support, which is exactly the legal Core bare identifiers
-  that are not reserved keywords. That covers `assert`/`assume`/`cover` labels,
-  block and invariant labels, the `init` variable, and a type-constructor name and
-  its parameters. Each generated *list* is within the size budget available at its
-  depth. The `init` type lies in `genLMonoTy`'s support, and a `funcDecl`'s
-  declaration lies in `genDecl`'s support.
-* **`CallOk`** — the call recipe shape: a `.cmd (.call …)` statement is reachable
-  only when its argument list is the generator's `mkArgs`/`outTargets` recipe over
-  some callee `s`, at some sampled type-instantiation and some argument-order mask.
-  `True` on every non-call node, recursing into nested bodies.
+* **`InGenShape`** holds the two facts about a shape that the generator fixes and that the specification
+  leaves free. Those facts are that the metadata is the default value, and that the annotation of an `init`
+  is monomorphic.
+* **`AlphabetOk`** holds the conditions about the alphabet of an identifier and about a size. Each
+  generated *name* is in the support of `genIdentName`, which holds exactly the legal bare identifiers of
+  Core that are not a reserved keyword. That condition covers the label of an `assert`, of an `assume` and
+  of a `cover`, the label of a block and of an invariant, the variable of an `init`, and the name of a type
+  constructor with its parameters. Each generated *list* is inside the budget for a size at its depth. The
+  type of an `init` is in the support of `genLMonoTy`, and the declaration of a `funcDecl` is in the support
+  of `genDecl`.
+* **`CallOk`** holds the shape of a call. A `.cmd (.call …)` statement is reachable only when its argument
+  list is the recipe of the generator, which is `mkArgs` over `outTargets`, for some callee, at some
+  sampled instantiation of the type parameters and some mask for the order of the arguments. The predicate
+  is `True` at each node that is not a call, and it recurses into each nested body.
+* **`ExprOk`** holds the reachability of each expression, through the scope and the size at each node. Each
+  expression of the statement is in the support of `genLExpr`, at the size of *its own* level of the
+  nesting, and in the scope that is available *there*.
 
-* **`ExprOk`** — expression reachability, threaded through the evolving scope and
-  size: every expression the statement holds is in `genLExpr`'s support at the size
-  of *its own* nesting level, in the scope available *there*. This replaced two
-  environment hypotheses that were **unsatisfiable**; see the section below.
+## No proof can remove the predicates
 
-## You cannot remove the three predicates
+`StmtHasTypeAGenCompleteGaps.lean` proves that each predicate is necessary. For each of them, it gives a
+statement that `StatementHasTypeA` accepts and that the support of `genStmt` does not hold. Those theorems
+are `metadata_gap`, `label_gap` and `outTarget_gap`.
 
-`StmtHasTypeAGenCompleteGaps.lean` proves that each of the three predicates is
-necessary. For each one it gives a statement that `StatementHasTypeA` accepts and
-that `genStmt`'s support does not hold. The gap theorems are `metadata_gap`,
-`label_gap` and `outTarget_gap`.
+One of the gaps has a counterexample that a person can write in Core:
 
-Two of the gaps were closed by a change to the generators, so only one of the
-three now has a counterexample you can write in Core:
+* `outTargets` picks the receiving variable of each `out` parameter itself, and the specification accepts
+  each writable variable of the correct type. Read `outTarget_gap`. `genStmt` also emits the default
+  metadata, and the grammar of Core has a prefix for an annotation on each statement. Read `metadata_gap`.
 
-* **Closed.** `genAssertCmd`, `genAssumeCmd`, `genCoverCmd` and `genFreshName` now
-  draw from `genIdentName` rather than from `String.arbitrary` or from
-  `NonEmptyString.arbitrary`, whose supports hold the alphanumeric strings only. So
-  every name in a parsed program is now reachable, and `label_gap` needs a witness
-  that lives in the abstract syntax tree alone.
-* **Closed.** `mkArgs` now takes an interleaving mask, so the order of an `inArg`
-  and an `outArg` is free. A call such as `call p(out y, 1);` is now reachable.
-* **Open.** `outTargets` still picks the receiving variable of each `out` parameter
-  itself, and the spec accepts any writable variable of the right type. See
-  `outTarget_gap`. `genStmt` also still emits `default` metadata, and the grammar
-  has an annotation prefix on every statement. See `metadata_gap`.
+Each other gap needs a witness that lives in the abstract syntax tree alone. `genAssertCmd`,
+`genAssumeCmd`, `genCoverCmd` and `genFreshName` each draw from `genIdentName`, so each name of a parsed
+program is reachable. `mkArgs` takes a mask for an interleaving, so the order of an `inArg` and an `outArg`
+is free, and a call such as `call p(out y, 1);` is reachable.
 
-Three upstream predicates come close, but none of them discharges a condition:
+Three predicates of Strata come close to a condition here, and none of them discharges one:
 
-* `Imperative.Stmt.stripMetaData` erases the metadata of a `block`, an `ite`, a
-  `loop`, an `exit`, a `funcDecl` and a `typeDecl`. It leaves a `.cmd` node
-  untouched, and the metadata gap is at a `.cmd` node.
-* `Core.WF.WFcallProp.lhsWF` states the `Nodup` fact that `CallOk` needs for the
-  write keys of a call. Its parent `Core.WF.WFStatementProp` is not recursive:
-  its `block`, `ite` and `loop` cases are empty structures. So it says nothing
-  about a call inside a body.
-* `LContext.WellKindedTy` (a premise of the `init` rules) bounds the type
-  constructors of an annotation. `genLMonoTy`'s support also bounds the depth of
-  the type and its free type variables, so `WellKindedTy` is too weak for the
-  `init` clause of `AlphabetOk`.
+* `Imperative.Stmt.stripMetaData` erases the metadata of a `block`, an `ite`, a `loop`, an `exit`, a
+  `funcDecl` and a `typeDecl`. It leaves a `.cmd` node unchanged, and the gap about the metadata is at a
+  `.cmd` node.
+* `Core.WF.WFcallProp.lhsWF` states the fact about distinct names that `CallOk` needs for the written-to
+  keys of a call. Its parent `Core.WF.WFStatementProp` is not recursive, because its cases for a `block`,
+  an `ite` and a `loop` are empty structures. Therefore it says nothing about a call inside a body.
+* `LContext.WellKindedTy`, which is a premise of each `init` rule, bounds the type constructors of an
+  annotation. The support of `genLMonoTy` also bounds the depth of the type and its free type variables, so
+  `WellKindedTy` is too weak for the clause of `AlphabetOk` about an `init`.
 
-`InGenShape`'s other clause demands a monomorphic `init` annotation. The Core
-front end builds only `.forAll []` local annotations, so no parsed program can
-violate that clause. It is necessary at the level of the abstract syntax tree
-only.
+The other clause of `InGenShape` asks that the annotation of an `init` is monomorphic. The front end of
+Core builds a local annotation of that form only, so no parsed program can break that clause. It is
+necessary at the level of the abstract syntax tree only.
 
-The procedure-call *correspondence* is a top-level hypothesis `ProcSigComplete procs P`
-(the converse of `ProcSigCorresponds`): the callee a well-typed call resolves in `P`
-is listed in the generator's `procs`. The `immutableVars` parameter is fixed to `[]`
-(a procedure-level notion, vacuous at the statement level: `ctx.writable [] = ctx`).
+The *correspondence* for a procedure call is a top-level hypothesis, `ProcSigComplete procs P`, which is
+the converse of `ProcSigCorresponds`. It says that the context `procs` of the generator holds the callee
+that a well-typed call resolves in the program. The parameter `immutableVars` is the empty list. That
+parameter is a notion at the level of a procedure, and it has no content at the level of a statement,
+because the writable part of a context at the empty list is that context itself.
 
-## `spec_complete` used to be vacuous. It is not any more.
+## Why the side conditions are per expression, and not per environment
 
-It used to take two environment hypotheses:
+A hypothesis of the form "each expression that the specification accepts at a type is in the support of
+`genLExpr` at a fixed depth" is **unsatisfiable**, and `Gaps.hExprC_unsatisfiable` machine-checks that
+fact. It fails twice over, at a leaf:
 
-```
-(hExprC     : ∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d)
-(hFuncReach : ∀ d C Γ (func : Function), FuncHasTypeA C Γ func →
-                func ∈ SetGen.support (genFunction (G := SetGen.Set) [] octx d))
-```
+* **The scope.** The rule `HasTypeA.fvar` accepts an *annotated* free variable against the empty context,
+  because it reads the type from the annotation. With an empty context of free variables, nothing in the
+  support holds a free variable, which `genLExpr_no_fvars` proves. That obstruction does not depend on the
+  depth.
+* **The depth.** `genLExpr` recurses structurally on the depth, so its support at a fixed depth has a
+  bounded depth, and the specification accepts a term of each depth.
 
-**Both were unsatisfiable, so the theorem said nothing.**
-`Gaps.hExprC_unsatisfiable` machine-checks the first. `GenLExprComplete` asked that
-*every* expression the spec accepts at `τ` be in the support of `genLExpr … d τ`, and
-that fails twice over, at a leaf:
+An existential over the depth does **not** help, because the predicate is false at each depth, so the
+existential is false too. `Gaps.not_exists_depth_GenLExprComplete` proves that. The quantifier must move
+*inside*, to one expression at a time, in a scope that holds the free variables of that expression, and at
+a depth that bounds it. `ExprOk` is that predicate. `exprOk_assert_of_syntactic` discharges one clause of
+it from exactly the syntactic side conditions of `genLExpr_complete`, and `exprOk_assert_true` gives a
+statement that satisfies it.
 
-* **Scope.** `HasTypeA.fvar` accepts an *annotated* free variable against the empty
-  context, since it reads the type off the annotation. With `fctx = []` nothing in
-  the support has a free variable (`genLExpr_no_fvars`). This is depth-independent.
-* **Depth.** `genLExpr` recurses structurally on the depth, so the support at a fixed
-  depth is depth-bounded, while the spec accepts terms of every depth.
-
-Making the depth existential does **not** help — the predicate is false at each
-individual depth, so `∃ d, GenLExprComplete …` is false too
-(`Gaps.not_exists_depth_GenLExprComplete`). The quantifier had to move *inside*, to
-one expression at a time, in a scope that holds that expression's free variables and
-at a depth that bounds it. That is `ExprOk`, and `exprOk_assert_of_syntactic`
-discharges a clause of it from exactly the syntactic side conditions of the proven
-`genLExpr_complete`. `exprOk_assert_true` exhibits a statement satisfying it.
-
-`hFuncReach` failed for the same kind of reason, and no side condition on the
-*statement* can repair it: upstream's `StatementHasType'.funcDecl` adds an
-**arbitrary** well-typed `func` to the context, unrelated to the `decl` the statement
-declares, so the statement does not determine the function whose reachability is
-needed. The two sides also disagree outright — `genFunction_complete` requires the
-name to be in `genIdentName`'s support, `preconditions.length ≤ 1`,
-`isRecursive = false`, `attr = #[]` and `axioms = []`, while `FuncHasType'` (a
-six-field structure) constrains none of them. So `ExprOk`'s `.funcDecl` clause is
-`False`: **the theorem now covers every statement except a local `funcDecl`.** That
-is a real restriction, and closing it needs the spec to tie `func` to `decl`.
+A hypothesis about the reachability of a function fails for the same kind of reason, and no side condition
+on the *statement* can repair it. The rule `StatementHasType'.funcDecl` of Strata adds an **arbitrary**
+well-typed function to the context, and that function has no relation to the declaration of the statement.
+Therefore the statement does not determine the function whose reachability a proof needs. The two sides
+also disagree: `genFunction_complete` needs the name to be in the support of `genIdentName`, at most one
+precondition, no recursion, no attribute and no axiom, and `FuncHasType'`, which is a structure of six
+fields, constrains none of them. Therefore the `.funcDecl` clause of `ExprOk` is `False`, and **this
+theorem covers each statement except a local `funcDecl`**. That is a real restriction, and the
+specification must tie the function of the rule to the declaration of the statement to remove it.
 -/
 
 namespace StrataGenerators.Stmt.SpecComplete
@@ -224,11 +201,11 @@ theorem freeVars_subset_of_reachable {mty : LMonoTy} {tvars : List TyIdentifier}
     ∀ v ∈ mty.freeVars, v ∈ tvars :=
   allFtvarsIn_freeVars (genLMonoTy_mem_ftvars h)
 
-/-- **The rigid pin (init case).** When every free variable of the (monomorphic)
-    annotation `mty` is rigid, `RigidAnnotCompat` forces the stored type `mtyS` to
-    equal `mty` — no groundness needed. The witnessing `σ` is the identity on rigid
-    variables, so it fixes `mty` (all of whose free vars are rigid), and the residual
-    `AliasEquiv [] (subst σ mty) mtyS` collapses to `mtyS = mty`. -/
+/-- **The pin from a rigid variable, for the `init` case.** When each free variable of the monomorphic
+    annotation is rigid, `RigidAnnotCompat` forces the stored type to equal the annotation, and it needs no
+    ground type. The witnessing substitution is the identity on a rigid variable, so it fixes the annotation,
+    because each free variable of the annotation is rigid. The remaining condition about the equivalence of the
+    two types then becomes the equality of the two types. -/
 theorem init_stored_eq_rigid {rigid : List TyIdentifier} {mty mtyS : LMonoTy} {tys : List LMonoTy}
     (hrigid : ∀ v ∈ mty.freeVars, v ∈ rigid)
     (h : RigidAnnotCompat [] rigid ((LTy.forAll [] mty).openFull tys) mtyS) : mtyS = mty := by
@@ -244,11 +221,11 @@ theorem init_stored_eq_rigid {rigid : List TyIdentifier} {mty mtyS : LMonoTy} {t
   exact (aliasEquiv_nil_eq hae).symm
 
 -- ── Residual shape side condition (`InGenShape`) ────────────────────────────
--- Recursive `Prop`-valued functions (NOT inductive relations). Two facts the
--- generator fixes and the spec leaves free: metadata `default`, and monomorphic
--- `init` annotations. Everything else the generator now reaches (labels via
--- `genIdentName`, `typeDecl` bounds via sampling, `init` stored type via the
--- rigid context). Procedure `call` is admissible here (its extra recipe/σ
+-- Each predicate below is a recursive function that gives a `Prop`, and none of them is an inductive
+-- relation. Two facts about a shape belong here: the metadata is the default value, and the annotation of an
+-- `init` is monomorphic. The generator reaches each other shape. It draws a label from `genIdentName`, it
+-- draws both boundedness values for a `typeDecl`, and a rigid context pins the stored type of an `init`. A
+-- procedure `call` is admissible here (its further conditions about the recipe and the instantiation
 -- conditions live in `CallOk`).
 --
 -- `metadata_gap` (`StmtHasTypeAGenCompleteGaps.lean`) shows that the metadata
@@ -284,15 +261,15 @@ mutual
     Names lie in their generator's support, and each generated list is within the
     budget available at its nesting depth.
 
-    Every *name* clause is now one and the same condition: membership in
-    `genIdentName`'s support, which is exactly the legal Core bare identifiers
-    that are not reserved keywords (`mem_support_genIdentName_iff_isId`). So no
+    Each clause about a *name* is one condition: membership in the support of `genIdentName`, which holds
+    exactly the legal bare identifiers of Core that are not a reserved keyword, and which
+    `mem_support_genIdentName_iff_isId` describes. Therefore no
     program that the Core parser accepts can break a name clause. The clauses
-    remain because a `Statement` holds a bare `String`, which need not be a legal
-    identifier. `label_gap` (`StmtHasTypeAGenCompleteGaps.lean`) is the
-    counterexample, and it is no longer a program you can write in Core.
+    stay, because a `Statement` holds a bare `String`, which need not be a legal identifier. `label_gap`, in
+    `StmtHasTypeAGenCompleteGaps.lean`, is the counterexample, and no program that a person writes in Core has
+    that shape.
 
-    A separate `dodgeKeyword` conjunct is gone from the `init` clause:
+    The clause for an `init` needs no separate condition about a keyword, because
     `genIdentName`'s support already excludes every keyword. -/
 def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
   | n, .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)) =>
@@ -333,12 +310,11 @@ end
 
 -- ── Scope threading for the call recipe ─────────────────────────────────────
 
-/-- The output variable scope of a statement, as the generator threads it. Only
-    `init` extends the scope (with its fresh variable); every other constructor —
-    including a *well-typed* `call`, whose arguments are all already in scope, so its
-    `init` chain is empty — leaves the scope unchanged. This mirrors the `ctx'` the
-    completeness proof produces at each node, and is what `CallOkList` threads so a
-    nested `call`'s `outTargets` are evaluated at the scope reached there. -/
+/-- The output scope of the variables of a statement, as the generator threads it. Only an `init` extends the
+    scope, with its own fresh variable. Each other constructor leaves the scope unchanged, and that includes a
+    *well-typed* `call`, because each argument of such a call is already in scope and its chain of `init`
+    statements is therefore empty. This definition gives the same scope as the completeness proof gives at each
+    node, and `CallOkList` threads it, so that `outTargets` of a nested `call` reads the scope at that node. -/
 def stepCtx (ctx : VarCtx) : Statement → VarCtx
   | .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)) => ctx.insert ⟨x.name, ()⟩ mty
   | _ => ctx
@@ -356,9 +332,9 @@ mutual
     the generator's recipe for *some* sampled type-instantiation `σvals` (with
     `σ := s.typeArgs.zip σvals`) and *some* argument-order mask `mask`:
     `mkArgs s.M (outTargets [] ctx (substSig σ s.O)) exprs mask` for some callee `s`
-    and by-value inputs `exprs` — with the generator's guard (usable instantiated
-    in-out block, distinct write keys), the inputs reachable by `genLExpr`
-    at the callee's *instantiated* input types, and no fresh `init`s required (a
+    and for some by-value inputs. The predicate also holds the guard of the generator, which asks for a usable
+    instantiated in-out block and for distinct written-to keys, the reachability of each input by `genLExpr` at
+    the *instantiated* input type of the callee, and the absence of a necessary fresh `init` statement (a
     well-typed call has all names in scope, so the emitted group is the bare call and
     the output scope is `ctx`). `hσvals` places `σvals` in the sampling step's support.
     `True` on every non-call leaf; nested bodies recurse with the body's own scope.
@@ -439,15 +415,14 @@ mutual
     expression the statement holds is in `genLExpr`'s support at the size of *its own*
     nesting level and in the scope available *there*.
 
-    This replaces the old `hExprC : ∀ d ctx, GenLExprComplete ctx.toFVarCtx octx tvars d`
-    environment hypothesis, which was **unsatisfiable** — see
-    `Gaps.hExprC_unsatisfiable`. `GenLExprComplete` asked for *every* well-typed
-    expression at a *fixed* depth, and that fails twice over: an annotated free
+    A hypothesis of the form `∀ d ctx, GenLExprComplete ctx.toFVarCtx octx tvars d` is **unsatisfiable**, which
+    `Gaps.hExprC_unsatisfiable` proves. `GenLExprComplete` asks for *each* well-typed expression at a *fixed*
+    depth, and that fails twice over. An annotated free
     variable is well-typed in the empty context but unreachable when the scope is
-    empty, and `genLExpr`'s support at a fixed depth is depth-bounded while the spec
-    accepts terms of every depth. Neither obstruction is repaired by making the depth
-    existential (`Gaps.not_exists_depth_GenLExprComplete`) — the quantifier has to
-    move *inside*, to one expression at a time, which is what this predicate does.
+    empty, and the support of `genLExpr` at a fixed depth has a bounded depth, and the specification accepts a
+    term of each depth. An existential over the depth repairs neither obstruction, which
+    `Gaps.not_exists_depth_GenLExprComplete` proves. The quantifier must move *inside*, to one expression at a
+    time, and this predicate does that.
 
     It is satisfiable, and `exprOk_assert_of_syntactic` discharges a clause of it from
     the syntactic side conditions of `genLExpr_complete`. Nested bodies drop to `n - 1`
@@ -478,8 +453,9 @@ def ExprOk (ctx : VarCtx) (n : Nat) : Statement → Prop
   -- not even determine the function whose reachability is needed. The two sides also
   -- disagree outright: `genFunction_complete` requires the name to be in
   -- `genIdentName`'s support, `preconditions.length ≤ 1`, `isRecursive = false`,
-  -- `attr = #[]` and `axioms = []`, while `FuncHasType'` — a six-field structure —
-  -- constrains none of them. Closing this needs the *spec* to tie `func` to `decl`.
+  -- no attribute and no axiom, and `FuncHasType'`, which is a structure of six fields, constrains none of
+  -- them. To remove this restriction, the *specification* must tie the function of the rule to the declaration
+  -- of the statement.
   | .funcDecl _ _ => False
   | .typeDecl _ _ => True
 
@@ -509,9 +485,9 @@ theorem exprOk_assert_of_syntactic (ctx : VarCtx) (n : Nat) (l : String)
   genLExpr_complete ctx.toFVarCtx octx [] tvars [] n .bool
     genLMonoTy_mem_bool 3 e (Or.inl ⟨hwt, hnames, hvars, hats, hdepth⟩)
 
-/-- **`ExprOk` holds of a concrete statement**, at every size and in the empty scope:
-    `assert [l]: true;`. This is the witness the old `hExprC` provably could not have
-    (`Gaps.hExprC_unsatisfiable`), so `spec_complete` is no longer vacuous. -/
+/-- **`ExprOk` holds of one concrete statement**, at each size and in the empty scope. That statement is
+    `assert [l]: true;`. This witness is what gives `spec_complete` real content, and
+    `Gaps.hExprC_unsatisfiable` proves that a hypothesis over each environment has no such witness. -/
 theorem exprOk_assert_true (n : Nat) :
     ExprOk (octx := octx) (tvars := tvars) []  n
       (.cmd (CmdExt.cmd (.assert "l" (LExpr.const () (LConst.boolConst true)) default))) := by
