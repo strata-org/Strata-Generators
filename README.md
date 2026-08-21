@@ -97,7 +97,9 @@ Flags (all optional; the Tyche visualization pass is on by default):
 - `--smt` — Tests properties related to Strata SMT encodings. This CLI flag requires a local installation of an SMT solver (cvc5/z3). 
   If `--smt` is passed but the SMT solver cannot be run, the test harness emits an error and exits with a non-zero exit code.
 
-See [`Properties.lean`](./StrataGenerators/Properties.lean) for the full list of properties tested.
+See [`properties_bugs_found.md`](properties_bugs_found.md) for the full list of properties tested & bugs found.
+For the actual code for the properties, refer to the `StrataTests/` directory (see the `Adding a new property` section below for more details
+on how this directory is organized).
 
 ### LSpec-free harness (`test-plain`)
 
