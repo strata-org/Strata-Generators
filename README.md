@@ -81,17 +81,14 @@ lake build test
 .lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
-- `numTrials` (default: 1000) — number of random test cases per property
-- `maxSize` (default: 5) — the structural bound each generator draws up to: a term
-  depth, a statement nesting level, a declaration count. Plausible ramps the size from 0
-  to this number over a property's trials, so the small shapes are tested first. It is
-  small because the cost of a draw grows steeply with it, and because a generator now
-  receives it unchanged instead of dividing it down by a constant of its own
+- `numTrials` (default: 1000) —: umber of random test cases per property
+- `maxSize` (default: 5): maximum size parameter for generation (controls
+  the depth of the generated AST)
 
 Flags (all optional; the Tyche visualization pass is on by default):
 
 - `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
-  Currently, this flag runs 100 trials for each property, where each input has a maximum size of 2.
+  Currently, this flag runs 100 trials for each property, with `size = 2` passed to the generators.
   This flag omits Tyche visualizations:
 - `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
 - `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)

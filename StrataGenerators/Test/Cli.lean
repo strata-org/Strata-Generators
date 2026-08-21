@@ -19,12 +19,6 @@ largest ones last. The number is small because these are *structural* bounds —
 depth-6 term or a 6-declaration program is already a large input, and the cost of
 generating one grows with the bound rather than in proportion to it.
 
-It was 100 until the generators stopped scaling it down themselves. Each one used
-to divide by a constant of its own (`s / 20`, `s / 25`, `s / 30`) to get back to
-the range it wanted, which hid the real bound from the flag and made
-`--quick`'s smaller size mean something different in each generator. See
-`StrataGenerators.TestScaffold`.
-
 * `--quick` — a fast preset for a short cycle of work: 100 trials, maximum size
   2, and no Tyche pass. Use it to find a defect and the defaults to gate a merge.
   A positional argument has higher precedence, so `--quick 500` gives 500 trials
@@ -74,7 +68,7 @@ structure Cli where
 /-- The number of trials `--quick` selects. -/
 def quickNumTrials : Nat := 100
 
-/-- The maximum generator size a run uses when the command line gives none.
+/-- The maximum generator size a run uses by default.
 
     A generator reads this number as its own bound — a term depth, a nesting level, a
     declaration count — so it is small. `TestScaffold`'s generators receive it unchanged. -/
