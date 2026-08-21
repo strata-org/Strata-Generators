@@ -178,11 +178,10 @@ for nested function declarations that don't have preconditions, but whose bodies
 - Non-ASCII strings are not escaped when passed to SMT-Lib, so the Core partial evaluator and SMT solvers disagree on the length of non-ASCII strings (The Core evaluator reports `Str.Length "é" = 1`, but Z3 says `Str.Length "é" = 2` and CVC5 reports `Parse Error: Non-printable character in string literal`)
 - The SMT dialect's comparison operator on real numbers (represented as decimal orders) isn't a total order, i.e. it is possible for `r1 <= r2`, `r2 <= r1` and `r1 == r2` to all be false, violating trichotomy
 - The SMT dialect's equality check returns false on two decimals that are mathematically equal but have different mantissa-exponent representations (e.g. `3.0` can be represented as `3 * 10^0` or `30 * 10^-1` , which are mathematically the same but considered to be not equal)
-- Two more pipeline phases hardcode their `changed` flag to `true`, beyond the already-reported `FilterProcedures`: `RemoveIrrelevantAxioms` (`IrrelevantAxioms.lean:81`) reports `changed = true` even on a program containing *no axioms at all*, and the `typeCheck` / `symbolicEval` phases of `corePipelinePhases` (`Verifier.lean:1510`, `:1517`) do the same. Every other phase computes the flag honestly, which is what makes these read as oversights rather than a convention. No consumer reads the flag today (both call sites discard it), so nothing misbehaves at runtime — the defect is that the field is *specified* to mean something it does not mean.
-- `bitvec 128` literals cannot be pretty-printed, even though the width is registered in the factory (`Factory.lean:872`) and has a grammar production (`bv128Lit`, `Grammar.lean:113`): `lconstToExpr` logs `unsupported bitvec width: 128`. Every other registered width prints.
-- **None** of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean:850–872`) but have no grammar production and no arm in `handleUnaryOps`, so each falls through to `mkGenericCall` and is rendered as a call to a fresh free variable. A systematic hole rather than a missing case.
-- The pretty-printer does not fail when it cannot express a construct: it substitutes a *syntactically valid* placeholder (`$__unknown_type` for a type, a generic call for an operator) and appends its errors to the output. So an unprintable program can round-trip "successfully" while denoting a **different** program — observed on 5 of 198 affected programs, which is exactly the case a string round-trip check structurally cannot detect. Conversion errors fire on ~50% of generated programs at the 2–5 declarations the shared whole-program wrapper samples (rising to ~86% at 6 declarations), spanning seven distinct printer sites.
-- `Function.typeCheck` accepts `bitvec w` for **every** width `w` (checked 0–199, since `LMonoTy.bitvec` is unconstrained in the AST and the known type is the polymorphic `∀n. bitvec n`), but the pretty-printer supports exactly `[1, 8, 16, 32, 64]` — so 60 of the first 64 widths typecheck yet cannot be printed. This resolves issue #48, and **corrects its framing**: the supported set is not "the powers of two" (`bitvec 2`, `4` and `128` are all powers of two and all fail to print), it is the five arms hardcoded in `lmonoTyToCoreType` / `lconstToExpr` / `bvTypeOfWidth`. Note the three sites differ in how they fail: the first two substitute a placeholder, whereas `bvTypeOfWidth` silently returns `.bv64`, so an operator at an unsupported width is printed as a *64-bit* operator.
+- `bitvec 128` literals cannot be pretty-printed, even though the width is registered in the factory (`Factory.lean`) and has a grammar production (`bv128Lit`, `Grammar.lean:113`): `lconstToExpr` logs `unsupported bitvec width: 128`. Every other registered width prints.
+- **None** of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean`) but have no grammar production, so each of these is 
+rendered as a fresh type variable instead. 
+- `Function.typeCheck` accepts `bitvec w` for all natural numbers `w`, but the pretty-printer only support widths in the set `{1, 8, 16, 32, 64}`
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
 
 ```
@@ -233,40 +232,161 @@ function f5 () : bool {
 
 The five findings below come from testing the eight Core transform passes that have no correctness proof (issue #69). The first four have a self-contained reproducer in [`docs/strata-unproven-transform-bugs.md`](docs/strata-unproven-transform-bugs.md); the fifth — which is in the symbolic evaluator rather than in a pass — is in [`docs/strata-symbolic-eval-nondet-collision.md`](docs/strata-symbolic-eval-nondet-collision.md). Each is pinned by a `#guard` in `StrataGenerators/ProgramGen/UnprovenTransforms.lean` so a fix turns the guard red.
 
-- `LoopElim` mints the same block label twice for a single loop. `removeLoop` builds one `havocd` block statement labelled `loopElim_havoc_{loop_num}` (`LoopElim.lean:126`) and places it in the output *twice* (`:139`): once inside the `arbitrary_iter_facts` block, and once after it to model the exit state. So the output contains two blocks under one label, per erased loop. The pass carries a collision *detector* for exactly these labels (`hasLabelConflict`, which rejects a body that already contains `loopElim_havoc_{n}`), which shows a duplicate is a defect and not a design choice — but the detector only compares the minted labels against the labels of the *body*, so it cannot see the collision the pass makes itself. Minimal reproducer: a procedure whose body is `while * { }`
-- `ProcedureInlining` gives two call sites of the same procedure identical labels, for two independent reasons:
-  + the wrapper block label is `procName ++ "$inlined"` (`ProcedureInlining.lean:288`), a plain string concatenation that reaches no counter, so two calls to `Callee` both produce a block labelled `Callee$inlined` in one caller body
-  + `renameAllLocalNames` folds the *label* renaming inside the fold over `var_map` (`:110`), so when the callee declares no local variable `var_map` is empty, the fold body never runs, `replaceLabelsOfBlocksAndAssertAssumes` is never applied, and the callee's labels are copied verbatim at every call site. A callee that *does* declare a variable gets its labels freshened correctly (`Callee_inner_1`, `Callee_inner_3`), which shows the renaming itself works and the fold nesting is the defect
 
-  A duplicate label makes two proof obligations share a name, and a verifier reports obligations by name, so the two become indistinguishable in the report
-- **`ProcedureInlining` drops the callee's `requires` obligation, which is unsound.** Tracked as repo issue #107, with a self-contained runnable reproducer. A procedure's precondition is an obligation on its *callers*, emitted by `Program.eval` at the call site as `assert [(Origin_Callee_Requires)pre]`. `inlineCallCmd` (`ProcedureInlining.lean:207-289`) builds its replacement block from the callee's body plus argument/output plumbing and never reads `proc.spec.preconditions`; nothing downstream re-derives it, since after inlining there is no `call` left to attach one to.
+- For a given loop, the `LoopElim` transformation creates two blocks that share the same label. Minimal counterexample: a procedure whose body is a non-determinsitic loop (`while * { }`).
+- `ProcedureInlining` gives two call sites of the same procedure identical labels
+- `ProcedureInlining` drops the callee's `requires` obligation. Consider this sourc ep
 
-  The minimal witness is a callee `requires x >= 0` with an **empty body**, called with `-1`. The empty body makes the precondition the program's *only* obligation, so the labels go from `[(Origin_Callee_Requires)pre]` to `[]` — the list does not shrink, it **empties**, and verifying the inlined program checks nothing at all. That also rules out the objection available against a non-empty-body witness (where the labels go `[inner, (Origin_Callee_Requires)pre] → [inner, Callee_inner_1]`), namely that the obligation was renamed rather than dropped: with an empty body there is no candidate for it to have become.
+Consider this source Core program:
+```
+procedure Foo(x : int)
+spec { 
+  requires [pre]: x >= 0; 
+} { };
 
-  The pass does not inspect the argument either — passing `5`, which *satisfies* the precondition, drops the check just the same; that case merely loses a check that would have succeeded, so only the `-1` case is unsound. `procedureInliningPipelinePhase` is declared `modelPreservingPipelinePhase`, so the pass asserts exactly the property it breaks. Mitigating: it is not in `corePipelinePhases`, so the default pipeline is unaffected; it is reached via `EntryPoint.lean:72`. The `ensures` mirror case (dropping an assumption — incomplete rather than unsound) is untested and worth a follow-up
-- `ProcedureInlining` copies `old x` expressions verbatim while renaming `x`, turning a well-typed program into an ill-typed one. Inside a procedure body, `old x` is a free variable whose name is literally `"old x"`, which the typechecker admits because the enclosing procedure declares `x` as an `inout` parameter. The pass substitutes with `Statement.substFvar` over `var_map`, whose keys are the plain parameter names, so `"old x"` is not a key and no rule maps it. Given
+procedure Main () {
+  var y : int := -1;
+  call Foo(y);
+};
+```
+
+and this resultant program (obtained via ProcedureInlining):
 
 ```
-procedure Callee (inout T : bool) { assert [inner]: old T; };
-procedure Caller () { var T : bool := true; call Callee(inout T); };
+-- Foo is same as before
+
+-- Note that `Foo`'s precondition is missing after it is inlined into `Main`
+procedure Main () {
+  var y : int := -1;
+  Foo$inlined: {
+    var Foo_x_0 : int := y;
+  }
+}
+```
+The symbolic evaluator returns 1 obligation on the source program, but 0 obligations in the transformed program (a missing proof obligation).
+
+
+- `ProcedureInlining` copies `old x` expressions verbatim while renaming `x`, turning a well-typed program into an ill-typed one. Consider this source Core program:
+```
+procedure Foo (inout T : bool) {
+  assert [inner]: old T;
+};
+
+procedure Main () {
+  var T : bool := true;
+  call Foo(inout T);
+};
+Transformed program:
+procedure Foo (inout T : bool) {
+  assert [inner]: old T;
+};
 ```
 
-the pass produces a caller body containing `assert [Callee_inner_2]: old T;` alongside `var Callee_T_1 : bool := T;`, and `Program.typeCheck` rejects it with `No free variables are allowed here! Free Variables: [old T]` — having accepted the input. A correct rewrite would bind the pre-state value at the call site (which is what `old` means) and rename `old x` to that binding
+Transformed program after procedure inlining:
 
-- **The symbolic evaluator silently drops every proof obligation after a second `if *`, which is unsound.** **Fixed upstream** by `fix(core): eliminate nondeterministic control before symbolic evaluation`, which makes `Core.Statement.eval` and `toCoreProofObligationProgram` reject a surviving nondeterministic guard and puts `nondetElimPipelinePhase` immediately before `symbolicEval` in `corePipelinePhases`. Every witness below now yields its obligations in full, and the `#guard`s at the end of `ProgramGen/UnprovenTransforms` are the regression witnesses. The analysis is kept because it is the one finding here that came out of the *evaluator* rather than a pass. Tracked as repo issue #113, with a self-contained runnable reproducer. Reproducer and analysis in [`docs/strata-symbolic-eval-nondet-collision.md`](docs/strata-symbolic-eval-nondet-collision.md). This one is in the *evaluator*, not in any of the eight passes, and it was found by the obligation-preservation properties for the three loop passes: `NondetElim` removes every `if *`, so running it made obligations **reappear**, and chasing the growth led back to `Core.Statement.evalOneStmt`.
+```
+procedure Main () {
+  var T : bool := true;
+  Foo$inlined: {
+    var Foo_T_1 : bool := T;               -- <-- Note that `T` is renamed to `Foo_T_1`, but the `old T` inside the `assert` is copied as-is
+    assert [Foo_inner_2]: old T;
+    T := Foo_T_1;
+  }
+};
+```
 
-  The evaluator has no `.nondet` case for `.ite`; it desugars one into a havoc of a synthesized boolean plus a deterministic `.ite`, and names that boolean `$__nondet_cond_{Ewn.env.pathConditions.scopes.length}` (`StatementEval.lean:586`) — from the current path-condition **depth**, not from a counter. A depth is not a supply of fresh names: it does not advance from one statement to the next, entering a `.block` does not advance it either (`Env.pushEmptyScope` touches `exprEnv.state` only), and an enclosing `.ite` advances it only until `Env.performMerge` pops the branch scope back off. So two `if *` that are siblings in one block get the *same* name; the second one's `init` re-declares a name already in scope, that path takes an error, and `evalAuxGo` stops at once (`if good.isEmpty then return`). Every obligation from there to the end of the procedure is never deferred.
+On the transformed program, the typechecker emits an error:
 
-  `if * { assert a }; if * { assert b }` yields the obligations `[a]`; adding `assert after` afterwards still yields `[a]`. `if (true) { … }; if (true) { … }` yields both, so it is about `.nondet` and not about `.ite`, and nesting the two guards (giving them different depths) also yields both. The name is predictable enough for a *source* program to collide with it: prefixing `init $__nondet_cond_2 : bool := true` to a body with a single `if *` empties the obligation list entirely — a program whose every assertion goes unchecked.
+```
+No free variables are allowed here! Free Variables: [old T]]
+```
 
-  It is silent in every channel: `toCoreProofObligationProgram` returns `.ok`, no `Message` is raised, the obligation program is well formed, and no statistic records it (it is not fuel exhaustion — `simulatingStmtHitOutOfFuel` stays at 0; `simulatedStmts` simply stops rising). And after `LoopElim` every `while *` **becomes** an `if *` (`LoopElim.lean:139`), so two sibling nondeterministic loops reach this on the standard pipeline. The fix is a monotone counter — the evaluator already threads `nextSplitId` for this purpose, and `NondetElim` does the same desugaring correctly with a `StringGenState`
-Coverage note, recorded because a green tick on the `CommonSubexprElim` properties should not be read as coverage: **CSE fires on few generated programs**, because a generated procedure body seldom contains a duplicated subexpression (each expression is drawn independently, so two identical non-trivial subterms rarely coincide). A count of 0 of 200 was measured here, and it is a measurement of rarity rather than of impossibility: a later `--quick` run drew `assume [||]: str.le(P(G), P(G))` and `the output typechecks` went red on it, which is the finding recorded above as (#126). So the four properties are silent on most runs, the `#guard`s on hand-built bodies are what exercise them on every build, and one of those guards is now negative. Reaching the pass *reliably* still needs a generator that plants a repeated subterm deliberately, which would change the expression generator and its soundness proof. The same rarity is recorded for the `ANFEncoder` properties, at 599 of 600
+- Symbolic evaluator drops proof obligations in programs with two consecutive non-deterministic conditionals. Consider this Core source program:
 
-- (#118) **`bitvec 0` is legal in Core and illegal in SMT-LIB.** `datatype AdtBv0 { Bv0Zero(w : bitvec 0), Bv0One() }` typechecks and is accepted by `addMutualBlock`; the encoder emits `(_ BitVec 0)`, whose index SMT-LIB 2.6 requires to be positive. cvc5 answers `Parse Error: Illegal bitvector size: 0` and z3 `bit-vector size must be greater than zero`, so every obligation mentioning the datatype is lost — never answered rather than answered wrongly
-- (#119) **A legal Core identifier need not be a bare SMT-LIB symbol, and the datatype emitters do not quote.** Core's identifier alphabet includes `'`, and `_` alone is a legal Core name; neither is usable bare in SMT-LIB (§3.1). `datatype Qu { c'x(g'y : int), d() }` emits `(declare-datatype Qu ( (c'x (Qu..g'y Int)) (d)))` and cvc5 stops at `Error finding token`. The inconsistency is visible within a single line for a type parameter — pipe-quoted where it occurs in a field type, bare in the `par` binder that introduces it: `(par (vx' NK) (… (U |vx'| NK) …))`. Field types go through the DDM SMT dialect formatter, which quotes; the datatype name, the `par` list and the constructor/selector names are raw `s!"…"` interpolations (`DL/SMT/Solver.lean:244`, `DL/SMT/IncrementalSolver.lean:254`). Of the special characters the generator draws, `'` is the only offending character — `. ? @ ! $ _` all pass inside a name
-- (#120) **A field named `f!` collides with the unsafe destructor of a field named `f`.** Strata derives `d..f` (safe) and `d..f!` (unsafe) per field, appending `!` (`TypeFactory.lean:539`), and `!` is a legal Core identifier character. So `datatype AdtBang { mkBang(f : int, f! : int) }` derives `AdtBang..f!` twice and `Factory.tryAddAll` rejects the whole declaration with `A function of name AdtBang..f! already exists!` — a legal datatype that cannot be declared, reported by the name of the derived function rather than by the two fields responsible
-- (#121) **`d$Elim` leaves the other datatypes' type parameters free** whenever a `mutual` block's datatypes do not all declare the same type parameters — which `addMutualBlock` permits (`validateMutualBlock` checks only duplicate datatype *names*). `elimFuncs` builds `d$Elim`'s case-function arguments from every constructor of every datatype in the block but binds only `d`'s own parameters, so for `datatype Aa x { mkA(fa : x) }` and `datatype Bb y z { mkB(fb : y), nilB() }` in one block, `Aa$Elim` mentions an unbound `y` and `Bb$Elim` an unbound `x`. The site states the assumption in a comment (`let typeArgs := block[0].typeArgs`, "OK because all must have same typevars") and nothing enforces it. **Latent**: a program calling such an eliminator still typechecks, so what is lost is the constraint that a case function has the right argument type. Fires on 28 of 60 ordinary generated blocks
-- (#126) **`CommonSubexprElim` hoists an extracted subexpression above the declaration of a local variable it mentions.** The pass prepends each `var $__cse.{idx}` to the front of the procedure body without regard for where the variables of the extracted subexpression are declared (`CommonSubexprElim.lean`). So for `var G : int := 0; var a : int := int.add(G, 4); var b : int := int.add(G, 4);` it emits `var $__cse.0 : int := int.add(G, 4);` *before* `var G : int := 0;`, and `Program.typeCheck` refuses the output with `No free variables are allowed here! Free Variables: [G]` — the pass turns a well-typed program into an ill-typed one. The existing `#guard`s could not see it, because their duplicated subexpression `Int.Add(3, 4)` is closed and hoisting a closed expression is always sound. Pinned by `cseCapturingBody`, whose guard is stated negatively so it turns red when the pass is fixed. Found on a generated draw (`assume [||]: str.le(P(G), P(G))`), which is what falsified the "0 of 200, therefore vacuous" note below
+```
+procedure P ()
+{
+  if * {
+    assert [a]: true;
+  }
+  if * {
+    assert [b]: true;
+  }
+};
+```
+
+The symbolic evaluator emits the following:
+
+```
+
+};
+procedure P ()                        // ← the obligation program
+{
+  assume [|<label_ite_cond_true: $__nondet_cond_2>|]: $__nondet_cond_2;
+  assert [a]: true;
+};
+```
+Note that we only have `assert [a]`, and `assert [b]` is missing.
+
+- The datatype `bitvec 0` is legal in Core and illegal in SMT-LIB: cvc5 emits the error `Parse Error: Illegal bitvector size: 0` and z3 emits the error `bit-vector size must be greater than zero`
+
+- Naming collisions for auto-derived ADT functions in Core: An ADT field named `f!` (which is legal, since `!` is a valid identifier character) collides with the name of the automatically derived unsafe field accessor for another field `f`
+
+- Type of auto-derived eliminators for Core ADTs contain free type variables. Consider these two Core datatype definitions which are put in the same mutual block (even though they are not actually mutually recursive):
+
+```
+mutual 
+  datatype Aa (x : Type) { 
+    mkA(fa: x) 
+  }
+  datatype Bb (y : Type, z : Type) { 
+    mkB(fb: y), 
+    nilB() 
+  }
+end
+```
+
+These two type definitions are accepted by the typechecker.
+
+For these two ADTs, genBlockFactory produces eliminators with the following types:
+
+```
+Aa$Elim : ∀[$__ty0, $__ty1, x].    Aa x   → (x → $__ty0) → (y → $__ty1) → $__ty1 → $__ty0
+                                                            ^ y is free
+Bb$Elim : ∀[$__ty0, $__ty1, y, z]. Bb y z → (x → $__ty0) → (y → $__ty1) → $__ty1 → $__ty1
+                                             ^ x is free
+```                                             
+Note that the types for both `Aa$Elim` and `Bb$Elim` contain free type variables which are not bound (`y` for the former, `x` for the latter).
+
+- `CommonSubexprElim` produces variable definitions that read other variables before they're defined. Consider this source Core program, which contains a common subterm `int.add(G, 4)`, where `G` is a local variable:
+
+```
+procedure P () {
+  var G : int := 0;
+  var a : int := int.add(G, 4);
+  var b : int := int.add(G, 4);
+};
+```
+
+CommonSubexprElim (CSE) rewrites it to the following:
+
+```
+procedure P () {
+  -- Hoisted variable refers to `G` before it is defined
+  var $__cse.0 : int := int.add(G, 4);
+  var G : int := 0;
+  var a : int := $__cse.0;
+  var b : int := $__cse.0;
+};
+```
+
+Note that the hoisted variable `$__cse.0` comes before the declaration of `G`, so the transformed program doesn't typecheck. The typechecker emits the following error:
+
+```
+[init ($__cse.0 : int) := ((~Int.Add : (arrow int (arrow int int))) (G : int) #4)]
+No free variables are allowed here! Free Variables: [G]
+```
+
 
 ## Specification bugs caught during testing
 - The function typing spec `FuncHasType'` permits a measure (a `decreases` clause) to exist without requiring the function body to also exist, even though the executable typechecker rejects a function if it has a measure but no body
