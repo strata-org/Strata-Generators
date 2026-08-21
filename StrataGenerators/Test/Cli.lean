@@ -1,70 +1,83 @@
 import StrataGenerators.Test.Types
 
 /-!
-# The driver command line
+# The command line of a driver
 
-Shared by every driver, so the flags mean the same thing whichever one is run.
+Each driver shares this module, so a flag means the same thing in each driver.
 
 ```
 lake test -- [numTrials] [maxSize] [flags]
 ```
 
-Positional arguments configure the Plausible run (`numTrials` = trials per
-property, default 1000; `maxSize` = maximum generator size, default 100).
+The positional arguments configure the run. `numTrials` is the number of the trials for each property, and
+its default value is 1000. `maxSize` is the maximum size of a generator, and its default value is 5.
 
-* `--quick` — a fast preset for a short cycle of work: 100 trials, maximum size
-  40, and no Tyche pass. Use it to find a defect and the defaults to gate a merge.
-  A positional argument has higher precedence, so `--quick 500` gives 500 trials
-  and keeps the rest of the preset.
-* `--no-tyche` — skip the Tyche visualization pass (on by default).
-* `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`).
-* `--tyche-samples=N` — samples per Tyche panel (default 1000).
-* `--smt` — enable the `smt` gate, admitting the properties whose oracle is a live
-  `cvc5`/`z3`. Off by default, so the suite needs no solver.
-* `--only=SUBSTRING` — run only the properties whose name contains `SUBSTRING`.
-  Repeatable; a property matching any of them runs. The rest are not reported at
-  all, which is what makes iterating on one new property cheap.
-* `--list` — print the registry (name, group, gate, expectation) and exit without running
-  anything. The answer to "did my property get picked up?".
-* `--known-failure=NAME` — treat `NAME` as known to fail for this run: suppress its
-  counterexample and stop it gating the exit code. Repeatable. The permanent form is
-  `knownFailure` at the property, which carries a reason; this flag is for the
-  short cycle of work where you want the rest of the suite's colour while a defect is
-  being triaged. Unlike `--only=`, it takes a **whole property name**, not a substring:
-  a substring would silently claim that every property in a group must fail, and the
-  ones that hold would then be reported as failures.
+A generator receives `maxSize` directly, as the depth of a term, the level of the nesting of a statement, or
+the number of the declarations. The harness raises the size from 0 up to that number over the trials of one
+property, so a run tests a small shape first and the largest shape last. The number is small, because each of
+those bounds is *structural*. A term of the depth 6 and a program of six declarations are already large
+inputs, and the cost of one draw grows faster than the bound does.
 
-There is no `--suite=` flag: a report group *is* a name prefix, so `--only="lift:"`
-selects the `lift` group exactly.
+* `--quick` gives a fast preset for a short cycle of work: 100 trials, the maximum size 2, and no pass for
+  Tyche. Use it to find a defect, and use the default values to gate a merge. A positional argument has a
+  higher precedence, so `--quick 500` gives 500 trials and keeps each other part of the preset.
+* `--no-tyche` skips the pass that writes the visualizations for Tyche, which runs by default.
+* `--tyche-out=PATH` gives the path of the JSONL output for Tyche. The default value is
+  `tyche_output.jsonl`.
+* `--tyche-samples=N` gives the number of the samples for each panel of Tyche. The default value is 1000.
+* `--smt` enables the `smt` gate. That gate admits each property whose oracle is a live `cvc5` or `z3`. It is
+  off by default, so the suite needs no solver.
+* `--only=SUBSTRING` runs only the properties whose name holds `SUBSTRING`. You can give the flag more than
+  one time, and a property that matches one of them runs. The report holds no other property, and that is
+  what makes work on one new property cheap.
+* `--list` prints the registry, with the name, the group, the gate and the expectation of each property. The
+  driver then stops, and it runs nothing. Use it to make sure that the harness found your property.
+* `--known-failure=NAME` marks `NAME` as known to fail for this run. The report hides its counterexample, and
+  the property stops gating the exit code. You can give the flag more than one time. The permanent form is
+  `knownFailure` at the property, which also carries a reason. Use this flag for a short cycle of work, when
+  you want the results of the other properties while someone triages a defect. Unlike `--only=`, this flag
+  takes a **whole property name**, and not a substring. A substring would claim that each property of a group
+  must fail, and the report would then give a failure for each property of the group that holds.
+
+There is no `--suite=` flag. A report group *is* a prefix of a name, so `--only="lift:"` selects
+the `lift` group exactly.
 -/
 
 namespace StrataGenerators.Test
 
-/-- Everything a driver reads off the command line: the `RunConfig` every property
-    sees, plus the driver-level options that no property needs to know about. -/
+/-- Everything that a driver reads from the command line. It holds the `RunConfig` that each
+    property sees, and the options of the driver that no property needs. -/
 structure Cli where
   run          : RunConfig
   tycheEnabled : Bool
   tycheOut     : String
   tycheSamples : Nat
-  /-- Name substrings to filter the registry by; empty means no filter. -/
+  /-- The substrings of a name that filter the registry. An empty list gives no filter. -/
   only         : List String
-  /-- Whole property names to mark as known failures for this run only. -/
+  /-- The whole names of the properties to mark as known failures, for this run only. -/
   knownFailures : List String
-  /-- Print the registry and exit. -/
+  /-- Print the registry and stop. -/
   listOnly     : Bool
-  /-- Whether `--quick` was passed, so a driver can name the flag that actually
-      held the Tyche pass off (reporting `--no-tyche` for a `--quick` run sends the
-      reader looking for a flag they did not pass). -/
+  /-- Whether the command line held `--quick`. A driver can then name the flag that stopped
+      the Tyche pass. A report of `--no-tyche` for a `--quick` run makes a reader look for a
+      flag that they did not give. -/
   quick        : Bool
 
-/-- The number of trials `--quick` selects. -/
+/-- The number of trials that `--quick` selects. -/
 def quickNumTrials : Nat := 100
 
-/-- The maximum generator size `--quick` selects. -/
-def quickMaxSize : Nat := 40
+/-- The maximum size of a generator that a run uses by default.
 
-/-- Parse `args`. See the module doc for the flags. -/
+    A generator reads this number as its own bound, which is the depth of a term, a level of the nesting or a
+    number of the declarations. Therefore the number is small. Each generator of `TestScaffold` receives it
+    unchanged. -/
+def defaultMaxSize : Nat := 5
+
+/-- The maximum size of a generator that `--quick` selects. Two levels of the structure are enough for a shape
+    with real content, and a full pass at that size costs seconds. -/
+def quickMaxSize : Nat := 2
+
+/-- Parses `args`. For the flags, see the documentation of this module. -/
 def parseCli (args : List String) : Cli :=
   let flags := args.filter (·.startsWith "--")
   let positional := args.filter (fun a => !a.startsWith "--")
@@ -77,7 +90,7 @@ def parseCli (args : List String) : Cli :=
       { numTrials := (positional[0]? >>= String.toNat?).getD
                        (if quick then quickNumTrials else 1000)
         maxSize   := (positional[1]? >>= String.toNat?).getD
-                       (if quick then quickMaxSize else 100)
+                       (if quick then quickMaxSize else defaultMaxSize)
         gates     := if flags.contains "--smt" then ["smt"] else [] }
     tycheEnabled := !flags.contains "--no-tyche" && !quick
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
@@ -91,37 +104,39 @@ def parseCli (args : List String) : Cli :=
 private def contains (hay needle : String) : Bool :=
   (hay.splitOn needle).length > 1
 
-/-- Apply `--only` to the registry. An empty filter keeps everything. -/
+/-- Applies `--only` to the registry. An empty filter keeps each property. -/
 def Cli.select (cli : Cli) (ds : List TestDecl) : List TestDecl :=
   ds.filter fun d => cli.only.isEmpty || cli.only.any (contains d.name)
 
-/-- Apply `--known-failure=` to the registry, overriding each named property's
-    `expect`. Matching is by whole name; see the module doc for why. -/
+/-- Applies `--known-failure=` to the registry. It replaces the `expect` field of each property
+    that the flag names. The match is on the whole name, and the documentation of this module
+    gives the reason. -/
 def Cli.markKnownFailures (cli : Cli) (ds : List TestDecl) : List TestDecl :=
   ds.map fun d =>
     if cli.knownFailures.contains d.name then
       knownFailure "marked as a known failure on the command line" d
     else d
 
-/-- `--known-failure=` arguments that name no registered property. A driver refuses to
-    run when this is non-empty: a mistyped name would otherwise silently do nothing, and
-    the run would look like the suppression worked. -/
+/-- The `--known-failure=` arguments that name no registered property. A driver refuses to run
+    when this list is not empty. Without the check, a name with a spelling mistake does nothing,
+    and the run looks as if the mark worked. -/
 def Cli.unknownKnownFailures (cli : Cli) (ds : List TestDecl) : List String :=
   cli.knownFailures.filter fun n => !ds.any (fun d => d.name == n)
 
-/-- The registry a driver actually runs: filtered by `--only`, then marked by
-    `--known-failure=`. Both drivers and `Driver.setup` go through this, so `--list`
-    shows the same expectations the run will use. -/
+/-- The registry that a driver runs. It applies `--only` first, and then it applies
+    `--known-failure=`. Both drivers and `Driver.setup` call this function, so `--list` shows
+    the same expectations that the run uses. -/
 def Cli.resolve (cli : Cli) (ds : List TestDecl) : List TestDecl :=
   cli.markKnownFailures (cli.select ds)
 
+/-- Adds spaces to the end of `s` until the length of `s` is `n`. -/
 private def pad (s : String) (n : Nat) : String :=
   s ++ "".pushn ' ' (n - min n s.length)
 
-/-- Print the registry: what is registered, which group it reports under, whether a gate
-    holds it back, and whether it is expected to fail. This is how a property author
-    confirms their file was picked up, without waiting for a run — and the answer to
-    "what is known to fail?", since the registry is where that is now recorded. -/
+/-- Prints the registry: each registered property, its report group, the gate that holds it
+    back, and whether it is expected to fail. The author of a property reads this output to make
+    sure that the harness found the file, and no run is necessary. The output also says which
+    properties are known to fail, because the registry records that. -/
 def listRegistry (ds : List TestDecl) : IO Unit := do
   IO.println s!"{ds.length} propert{if ds.length == 1 then "y" else "ies"} registered"
   for d in ds do

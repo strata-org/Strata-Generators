@@ -120,8 +120,8 @@ def isCallStmt : Statement → Bool
 /-- The statement family's sample. It uses the `size` and `len` schedule of
     `TestScaffold.genStmtsWith`, and draws through the tuned entry point. -/
 def stmtsGen (θ : Tuning) (s : Nat) : Gen (List Statement) := do
-  let size := max 1 (min 3 (s / 25))
-  let len := max 1 (min 4 (s / 20))
+  let size := max 1 (min 3 s)
+  let len := max 1 s
   let (ss, _, _) ← genProgramStmtsT (G := Plausible.Gen) θ coreMonoOps [] size len
   pure ss
 
@@ -185,9 +185,9 @@ def stmtHeaders : List String :=
 /-- The procedure family's sample. It is `TestScaffold.genProcsWith`, and it draws each body through
     `genProcedureT θ`. -/
 def procsGen (θ : Tuning) (s : Nat) : Gen (List Procedure) := do
-  let n := max 2 (min 4 (2 + s / 30))
-  let size := max 1 (min 2 (s / 30))
-  let len := max 1 (min 3 (s / 25))
+  let n := max 2 s
+  let size := max 1 (min 2 s)
+  let len := max 1 (min 3 s)
   let (ps, _) ← (List.range n).foldlM
     (fun (acc : List Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
       let proc ← (retryGen 8000 (genProcedureT (G := Plausible.Gen) θ
@@ -392,7 +392,7 @@ def hasRedexKind : LExpr' → Bool
     reach no `TunableGen` instance, so the `tyCompoundHeavy` row is exploratory. Every other row passes
     `tyDefault`, and at `tyDefault` the tuned type generator is `genLMonoTy`. -/
 def exprGen (θty θe : Tuning) (fctx : FVarCtx) (s : Nat) : Gen (LExpr' × LMonoTy) := do
-  let depth := max 1 (s / 20)
+  let depth := max 1 s
   let τ ← genLMonoTy.tuned (G := Plausible.Gen) θty [] depth
   let e ← genLExprT (G := Plausible.Gen) θe fctx coreMonoOps corePolyOps [] [] depth τ 3
     (retryGenArg 20)
@@ -447,7 +447,7 @@ open StrataGenerators.ProgramTuning StrataGenerators.Mono in
 /-- The program family's sample. It is `TestScaffold.genProgramWith`, drawn through the tuned
     declaration fold. -/
 def programsGen (θ : Tuning) (s : Nat) : Gen Program := do
-  let numDecls := max 2 (min 5 (2 + s / 25))
+  let numDecls := max 2 s
   retryGen 30000 (genProgramT (G := Plausible.Gen) θ numDecls {})
 
 structure ProgStats where
@@ -505,7 +505,6 @@ def stmtProfiles : List (String × Tuning) :=
     ("stmtLoopHeavy", stmtLoopHeavy),
     ("stmtLoopWide", stmtLoopWide),
     ("stmtFuncDeclHeavy", stmtFuncDeclHeavy),
-    ("stmtKleeneBalanced", stmtKleeneBalanced),
     ("stmtMixed", stmtMixed) ]
 
 def procProfiles : List (String × Tuning) :=

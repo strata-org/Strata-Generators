@@ -6,42 +6,29 @@ open Lambda Core Imperative
 /-!
 # Shared check predicates for the whole-program generator
 
-`ProgramGen.genProgram` (in `StrataGenerators.ProgramGen`) generates a random
-well-typed Strata Core `Program`, proven sound against
-`Core.TypeSpec.ProgramHasTypeA` in `ProgramGen/Sound.lean`. Until now it was the
-one generator with **no** presence in either test driver: the suites covered the
-expression / command / function / statement / procedure generators directly, so
-nothing exercised the whole-program fold or the properties that only make sense
-across declarations.
+`ProgramGen.genProgram`, in `StrataGenerators.ProgramGen`, gives a random well-typed Strata Core `Program`, and
+`ProgramGen/Sound.lean` proves it sound against `Core.TypeSpec.ProgramHasTypeA`.
 
-This module holds the harness-independent `check*` predicates, following the
-convention of the other `*.TestSupport` modules: each returns a `Bool` so the
-LSpec driver, the Plausible-only driver, and (if wired later) a Tyche panel all
-share one verdict.
+This module holds the `check*` predicates that no harness owns, by the convention of each other `*.TestSupport`
+module. Each of them gives a `Bool`, so each driver and each Tyche panel share one verdict.
 
-## Why `Core.Program.typeCheck` is *not* used as the oracle here
+## Why the oracle here is not `Core.Program.typeCheck`
 
-The obvious property — "every generated program passes Strata's own program
-typechecker" — is **false today**, for reasons that predate this generator's
-ADT work and are not defects in it:
+The claim that each generated program passes the program typechecker of Strata is **false**, for three reasons
+that no part of this generator causes:
 
-* `Function 'f': a decreases clause was supplied but the function has no body` —
-  `genFunction` draws `body` and `measure` independently, so a bodiless function
-  can carry a measure. This is the known function-typechecker-completeness gap
-  the function suite already pins (`prop_function_rejection_only_measure`).
-* `Cannot find this fvar in the context! v` — `genDistinct` emits fresh
-  *variables*, which the declarative spec accepts (it asks only for
-  `∃ mty, HasTypeA [] e mty`, and an annotated `fvar` supplies it) but the
-  algorithmic checker resolves against a context that never binds them.
-* `Cannot infer the type of this operation: churchFalse` — `corePolyOps` lists
-  schemes (`churchTrue`/`churchFalse`/`id`) that are *not* in `Core.Factory`, so
-  the checker cannot resolve them even though the annotated spec types them from
-  their own annotation.
+* A function with a `decreases` clause and no body. `genFunction` draws the body and the measure independently,
+  so a function with no body can carry a measure. That is the known gap in the completeness of the typechecker
+  for a function, and a property of the suite for a function pins it.
+* A free variable that no context binds. `genDistinct` emits a fresh *variable*, which the declarative
+  specification accepts, because it asks only that some type exists for the expression, and an annotated free
+  variable gives one. The algorithmic checker resolves that variable against a context that binds no such name.
+* An operator that the checker cannot resolve. A vocabulary of the polymorphic operators that a person writes
+  can name a scheme that `Core.Factory` does not hold, and the checker cannot resolve such a name, although the
+  annotated specification takes the type from the annotation of the node.
 
-Measured over 25 draws: 1 passed, 24 failed, every failure in one of those three
-pre-existing classes. Asserting it would therefore add a red check that says
-nothing about this change, so the properties below are the ones that are actually
-true of the generator, plus the coverage statistic this PR is about.
+A property that asserts the claim would therefore report a failure that says nothing about this generator. The
+properties below are the ones that hold of the generator, together with the statistic about the coverage.
 -/
 
 namespace ProgramGen.TestSupport
@@ -81,9 +68,9 @@ partial def stmtOpNames (ss : List Statement) : List String :=
         ++ stmtOpNames b
     | _ => []
 
-/-- Every `.op` name occurring in a declaration's *expressions* — a function's
-    body / measure / preconditions, a procedure's contract clauses and body, or an
-    axiom's proposition. Type-level declarations contribute none. -/
+/-- Each `.op` name that occurs in an *expression* of a declaration. Such an expression is the body, the measure
+    or a precondition of a function, a contract clause or the body of a procedure, or the proposition of an
+    axiom. A declaration of a type gives no such name. -/
 def declOpNames (d : Decl) : List String :=
   match d with
   | .func f _ =>
@@ -103,9 +90,9 @@ def datatypeBlocks (P : Program) : List (MutualDatatype Unit) :=
     | .type (.data block) _ => some block
     | _ => none
 
-/-- The derived-function names the program's datatype blocks contribute — the
-    constructors, testers, and safe/unsafe field accessors Strata generates. Read
-    through the same `adtDerivedOps`/`adtDerivedPolyOps` the generator feeds into
+/-- The names of the derived functions that each datatype block of the program gives. Those are the constructors,
+    the testers, and the safe and unsafe accessors of a field that Strata generates. This definition reads them
+    through the same two functions that the generator gives to
     its operator vocabulary, so this cannot drift from what is actually callable. -/
 def derivedNames (P : Program) : List String :=
   (datatypeBlocks P).flatMap fun block =>
@@ -119,10 +106,9 @@ def calledDerivedNames (P : Program) : List String :=
 
 /-! ## Checks -/
 
-/-- **Every declared name is globally distinct.** `ProgramHasType'` requires
-    `P.getNames.Nodup` — a single flat namespace across every declaration kind —
-    and the generator establishes it by construction, threading one reserved-name
-    set across the whole fold. This is the executable counterpart. -/
+/-- **Each declared name of the program is distinct.** `ProgramHasType'` needs that fact, in one flat namespace
+    over each kind of declaration. The generator establishes it by construction, because it threads one set of
+    the reserved names across the whole fold. This predicate is the executable form of that fact. -/
 def checkNamesNodup (P : Program) : Bool :=
   (P.getNames.map (·.name)).eraseDups.length == P.getNames.length
 
@@ -130,16 +116,14 @@ def checkNamesNodup (P : Program) : Bool :=
     generator gates each block on exactly this call and only emits it on the `.ok`
     branch (that is what makes the emitted declaration match `DeclHasType'
     .type_data`), so replaying the adds in declaration order must succeed. A
-    failure would mean the generator emitted a block the checker rejects — i.e.
-    the gate leaked.
+    counterexample would mean that the generator emitted a block that the checker rejects, and therefore that the
+    gate let a block through.
 
     The replay starts from `coreContext` (the fold's own starting point, see
     `initState`) and must also thread the program's **abstract type**
     declarations, because a later block may reference one: `genDeclDatatype` draws
-    its block over the *threaded* vocabulary, which abstract types extend
-    (interleaving direction (2)). Replaying
-    the blocks alone spuriously fails on exactly those programs — measured 28/40
-    without the abstract-type adds versus 40/40 with them. -/
+    its block over the *threaded* vocabulary, which a declaration of an abstract type extends. A replay of the
+    blocks alone therefore fails for a false reason on exactly such a program. -/
 def checkDatatypeBlocksAccepted (P : Program) : Bool :=
   go DatatypeGen.coreContext P.decls
 where
@@ -160,8 +144,8 @@ where
     declare.** Vacuously true when no derived function is called; the point is
     that a body can only name a derived function whose datatype is *already*
     declared, since the vocabulary grows at the datatype step and only later
-    declarations draw from it. A failure would mean a body called into a datatype
-    that does not exist in the program — an unresolvable name. -/
+    declaration draws from it. A counterexample would mean that a body called a datatype that the program does not
+    declare, and that name would not resolve. -/
 def checkCalledDerivedAreDeclared (P : Program) : Bool :=
   (calledDerivedNames P).all (derivedNames P).contains
 
@@ -170,9 +154,8 @@ def checkCalledDerivedAreDeclared (P : Program) : Bool :=
     establishes. For each declaration, every derived name it calls must come from
     a datatype block appearing strictly earlier in the program.
 
-    This is the property that actually characterizes this feature — "procedures
-    and functions refer to algebraic data types that are defined *earlier* in the
-    program". If the vocabulary were ever seeded before the corresponding block
+    This property describes the behaviour exactly: a procedure and a function reference an algebraic datatype
+    that a declaration *earlier* in the program gives. If the vocabulary held a name before the matching block
     was emitted, this would fail. -/
 def checkDerivedCallsFollowDeclaration (P : Program) : Bool :=
   go [] P.decls

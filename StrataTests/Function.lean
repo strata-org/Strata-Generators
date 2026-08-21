@@ -2,30 +2,31 @@ import StrataGenerators.Test
 import StrataGenerators.TycheViz
 
 /-!
-# Function-generator properties
+# Properties of the function generator
 
-Soundness and completeness of `Function.typeCheck`, type preservation of a function
-body under evaluation, and the format→parse round-trip.
+These properties cover the soundness and the completeness of `Function.typeCheck`, the
+preservation of the type of a function body under evaluation, and the round trip from
+`format` to `parse`.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.Stmt.TestSupport
 
-/-- Every free variable in a generated function's body and measure is annotated
-    consistently with the type map derived from the fvar context it was generated
-    against. Holds because `pickFVar` always emits `fvar` nodes annotated with
-    `some τ`, for exactly the `τ` the variable carries in the context. -/
+/-- Each free variable in the body and in the measure of a generated function has an
+    annotation that agrees with the type map of the context that the generator used. This
+    holds because `pickFVar` always emits an `fvar` node with the annotation `some τ`, where
+    `τ` is the type that the variable has in the context. -/
 @[strata_property]
 def fnFvarsAnnotated : TestDecl :=
   (TestDecl.property "function: fvars annotated by context type map"
     (fun (gf : GenFunction) => functionFvarsAnnotatedBy (fctxToTyMap gf.fctx) gf.func)).withPanel
     genAndCheckFunctionFvarsAnnotated
 
-/-- `Function.typeCheck_annotated_sound`, the `sorry`'d theorem at
-    `Strata/Languages/Core/FunctionTypeSpecSound.lean`: if
-    `Function.typeCheck C Env func = .ok (func', _)` then `func'` satisfies
-    `FuncHasTypeA C Γ` for any `Γ`. -/
+/-- Soundness of the type checker for a function: if `Function.typeCheck C Env func`
+    returns `.ok (func', _)`, then `func'` satisfies the type relation `FuncHasTypeA C Γ`
+    for every `Γ`. Upstream states this claim as `Function.typeCheck_annotated_sound`, and
+    its proof there is a `sorry`. -/
 @[strata_property]
 def fnTypeCheckSound : TestDecl :=
   (TestDecl.property
@@ -33,41 +34,42 @@ def fnTypeCheckSound : TestDecl :=
     (fun (gf : ClosedGenFunction) => checkTypeCheckAnnotatedSound gf.func)).withPanel
     genAndCheckFunctionTypeCheckSound
 
-/-- Type preservation of a function body under evaluation — `Step.type_preserved` /
-    `StepStar.type_preserved` / `eval_denote_sound`. -/
+/-- Evaluation of a function body keeps the type of the body. Upstream states this claim as
+    `Step.type_preserved`, `StepStar.type_preserved` and `eval_denote_sound`. -/
 @[strata_property]
 def fnBodyPreservation : TestDecl :=
   (TestDecl.property "function: body type preserved under eval"
     (fun (gf : ClosedGenFunction) => checkFunctionBodyPreservation gf.func)).withPanel
     genAndCheckFunctionBodyPreservation
 
-/-- Completeness, dual to soundness above: `genFunction` is proven sound (its output
-    satisfies `FuncHasType'`), so `Function.typeCheck` should accept every generated
-    function. It does not — the spec permits a measure without a body, and the
-    algorithm rejects it. Asserted unweakened, so the gap is reported rather than
-    masked. The `funcDecl` gap in the statement suite is the syntactic-statement
-    analogue of exactly this. -/
+/-- Completeness of the type checker for a function, which is the dual of its soundness.
+    `genFunction` is sound, because its output satisfies `FuncHasType'`. Therefore
+    `Function.typeCheck` must accept each generated function.
+
+    It does not accept all of them. The specification lets a function have a measure and no
+    body, and the algorithm rejects such a function. This property states the full claim, so
+    it reports the gap and does not hide it. -/
 @[strata_property]
 def fnTypeCheckComplete : TestDecl :=
   (TestDecl.property "function: typeCheck accepts generated functions (completeness)"
     (fun (gf : ClosedGenFunction) => checkFunctionTypeCheckerComplete gf.func)).withPanel
     genAndCheckFunctionTypeCheckComplete
 
-/-- Every `typeCheck` rejection is a measure-without-body function. This is what
-    pins the sole known completeness gap: were a *second* cause to appear, this goes
-    red while the property above stays red for the same reason it already was. -/
+/-- Each function that `Function.typeCheck` rejects has a measure and no body. This property
+    pins the one known gap in completeness, and it finds a *second* cause if one appears. -/
 @[strata_property]
 def fnRejectionOnlyMeasure : TestDecl :=
   .property "function: typeCheck rejections are only measure-without-body"
      (fun (gf : ClosedGenFunction) => funcRejectionImpliesMeasureNoBody gf.func)
 
-/-- Pretty-print → parse → re-print is a fixed point.
+/-- The sequence of pretty-print, parse and pretty-print again is a fixed point.
 
-    A self-driving action rather than a sampled property: it shrinks its own
-    counterexamples and prints minimal reproducers as it goes, distinguishing a parse
-    failure from a re-print mismatch. A parse failure is scored as a *failure*, not a
-    vacuous pass — `genIdentName` produces only legal Core identifiers, so output that
-    does not parse back means the printer emitted legal-but-unparseable text. -/
+    This is an action and not a sampled property. It shrinks its own counterexamples, and it
+    prints a small reproducer for each one. It also separates a failure of the parser from a
+    difference between the two printed forms. A failure of the parser counts as a *failure*
+    and not as a vacuous pass, because `genIdentName` makes only legal Core identifiers.
+    Output that the parser rejects therefore means that the printer wrote legal text that no
+    parser accepts. -/
 @[strata_property]
 def fnRoundtrip : TestDecl :=
   (TestDecl.action "function: pretty-print/parse round-trip"

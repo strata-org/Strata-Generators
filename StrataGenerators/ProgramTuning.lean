@@ -69,29 +69,7 @@ identity, and the properties about specialization hold for a reason that has not
 pass. This profile raises the function weight in both phases, and raises the datatype block a little.
 
 The procedure weight stays at its default. A procedure body is where a `funcDecl` statement declares
-a function, and two properties are about that statement.
-
-Measured, `dist-report 250 100 --prog`:
-
-| | default | `progPolyHeavy` | `progDatatypeHeavy` |
-| --- | --- | --- | --- |
-| declares a polymorphic function | 63% | **82%** | 28% |
-| declares a polymorphic datatype | 44% | 32% | **82%** |
-| the pass rewrote the program | 63% | **83%** | 28% |
-| declarations in, and out | 3.8 → 3.0 | 3.5 → **2.1** | 3.5 → 3.2 |
-
-The last row is the pass at work. It replaces a polymorphic original by its specializations, so the
-output is *shorter* than the input, and the gap widens as polymorphic functions get more common.
-
-The two profiles pull apart, because a declaration is one kind or the other. A function crowds out a
-datatype block and a datatype block crowds out a function, so there is a profile for each rather than
-one compromise.
-
-The knob is the *number* of functions and datatype blocks. It is not the number of type parameters
-each one takes. Type parameters come from `genTypeArgs`, and from the datatype generator's
-`maxTyParams` bound. Both draw a count with `RandomChoice.choose` rather than with a `frequency`, so
-no `Tuning` reaches them. The number of declarations is enough, because most declared functions are
-already polymorphic. -/
+a function, and two properties are about that statement. -/
 def progPolyHeavy : Tuning :=
   StrataGenerators.TuningProfiles.withWeights progDefault
     [(ProgIdx.datatype, 6), (ProgIdx.funcCallable, 20), (ProgIdx.funcFrontLoad, 20)]

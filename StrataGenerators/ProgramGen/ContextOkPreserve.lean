@@ -18,15 +18,15 @@ which adds a mutual block via `LContext.addMutualBlock`.
 
 `contextOk_addMutualBlock` discharges that. Adding a block grows `knownTypes` (by
 the block's names), `datatypes` (by the block) and `functions` (which no
-`ContextOk` field mentions). The reserved set `R` grows to
-`block.map (·.name) ++ R` — matching the fold, which prepends the freshly drawn
-block names to its reserved list.
+`ContextOk` field mentions). The reserved set grows by the names of the block, at the front, and that is what
+the fold does with each freshly drawn name of the block.
 
 Two field-effect helpers are exported for the fold's own reserved/`getNames`
 bookkeeping:
 
-* `addMutualBlock_datatypes` — `C'.datatypes = C.datatypes.push block`;
-* `addMutualBlock_knownTypes` — a `keywords`-membership characterization.
+* `addMutualBlock_datatypes` says that the factory of the output context is the factory of the input context
+  after a push of the block.
+* `addMutualBlock_knownTypes` describes the membership in the keywords of the known types.
 -/
 
 /-! ## `knownTypes` insertion facts
@@ -62,7 +62,8 @@ theorem getElem?_insertIfNew_of_getElem? {m : Identifiers Nat} {nm : String} {ar
     {k : String} {v : Nat} (h : m[k]? = some v) : (m.insertIfNew nm ar)[k]? = some v := by
   rw [Std.HashMap.getElem?_insertIfNew]
   split
-  · -- `nm == k` and `nm ∉ m`, but `h` puts `k` — hence `nm` — in `m`.
+  · -- The two names are equal, and the first one is not a key of the map. The hypothesis puts the second name, and
+    -- therefore also the first one, in the map.
     rename_i hc
     refine absurd ?_ hc.2
     rw [(by simpa using hc.1 : nm = k)]
@@ -192,9 +193,9 @@ theorem addMutualBlock_knownTypes_getElem? {C C' : LContext CoreLParams}
 
 Every default type name (`defaultBaseTypes`, `defaultTyCons` names, `"arrow"`)
 lies in `initialReserved defaultBaseTypes defaultTyCons R`. Combined with the
-freshness hypothesis (block names avoid `initialReserved`), this shows a default
-type name is never a block name — the fact `getType_push_other` needs to keep the
-"external" fields true. -/
+hypothesis about freshness, which says that no name of the block is in `initialReserved`, this fact says that a
+default type name is never a name of the block. `getType_push_other` needs that fact, to keep each field about
+an external type true. -/
 
 theorem base_mem_initialReserved {b : String} {baseTypes : List String}
     {tyCons : List KnownTyCon} {R : List String} (hb : b ∈ baseTypes) :

@@ -16,189 +16,6 @@ and a Strata transform pass can import it. `StrataGenerators.SetGen.TuningProtot
 θ-invariance theorems, one per generator. Each says that every `θ` denotes the same `SetGen.Set`, so
 no profile can invalidate a soundness or a completeness result.
 
-## What a profile is for
-
-The generators are sound *and* complete, so every sample is a well-typed program, and every
-well-typed program is reachable. Neither law says how *often* a shape appears, and the properties in
-the suite are not equally sensitive to all shapes. A property whose interesting precondition holds on
-2% of samples spends 98% of its budget on a trivial case. A property whose precondition never holds
-passes vacuously, and that is the failure a property-based test reports worst.
-
-A profile fixes this. It moves probability onto the shapes that one family of properties
-discriminates on. It cannot cost coverage, because tuning is θ-invariant at `Set`: every shape stays
-reachable, so a shape that a profile makes rare is still drawn eventually.
-
-The table below gives the measured baseline against what a profile buys. It comes from two runs of
-`lake exe dist-report 250 100`, and each cell is the range across the two runs. Nothing here is
-seed-deterministic, so re-run the report before you read a small difference as a change. If the range
-of a row already spans the gap between the two columns, the profile does nothing.
-
-| properties | interesting shape | default | tuned | profile |
-| --- | --- | --- | --- | --- |
-| `stmt: LoopElim …` (#3, #4) | ≥ 1 `loop` | 23–26% | **80–82%** | `stmtLoopHeavy` |
-| ” | a loop inside a loop | 0–2% | **27–28%** | ” |
-| ” | an invariant-bearing loop | 16% | **56–58%** | ” |
-| `stmt: typechecker accepts …` | ≥ 1 `funcDecl` | 17–19% | **64–65%** | `stmtFuncDeclHeavy` |
-| `stmt: DetToKleene …` | ≥ 1 `exit` | 2% | **13–14%** | `stmtKleeneBalanced` |
-| `cmd: set …` (2) | mean `set`s per sample | 0.7 | **1.0–1.2** | `cmdSetHeavy` |
-| `cmd: context growth …` | variables added by `init` (mean) | 1.3 | **2.3** | `cmdInitHeavy` |
-| `cmd: symbolic and concrete eval …` | ≥ 1 `assert`, `assume` or `cover` | 91–95% | **99%** | `cmdCheckHeavy` |
-| `expr: preservation` and `progress` | term is not already a value | 92–93% | 96% | `exprEvalHeavy` |
-| `expr: progress` | the failure the gap predicts | 40–45% | 45–49% | `exprIndirHeavy` |
-| `expr: eval preserves fvars` | term mentions a free variable | 52–55% | 53–57% | `exprFVarHeavy` |
-| `proc: PrecondElim …` (13) | the pass rewrites the program | 60–65% | **75–77%** | `procPrecondHeavy` |
-| ” | ≥ 1 declared function | 32–34% | **81–82%** | ” |
-| `proc: FilterProcedures …` (7) | ≥ 1 `call` | 58% | **79–81%** | `procCallHeavy` |
-
-**The three `expr:` rows are not bold, and that is the honest result.** Each range covers the gap
-between the two columns. Through the generator those properties draw from, these profiles do almost
-nothing.
-
-One weight explains it, and `θ` does not reach that weight. `genLExpr` has its own root `frequency`,
-a 1 to 9 split in favour of a fully-applied operator. So about 90% of terms are an operator
-application at the root, before any of `genLExprBase`'s 79 weights applies. The base rules are
-reached only in argument position, and a 24-fold weight on a base-rule branch then moves the
-top-level shape by a few points. The *default* distribution is already redex-heavy: 92% of terms are
-not a value. An earlier measurement of the bare `genLExprBase` reported 42%, which is why
-`exprEvalHeavy` looked like it had more to buy.
-
-The missing knob is that root split. It needs a wider index space than `genLExprBase.defaults`, 81
-weights rather than 79, so it changes the arity that every expression profile is checked against. It
-is a change to the index space and not a new profile. Until somebody makes it, read the `expr:`
-profiles as a statement of intent. They apply, they cannot cost coverage, and they are measurably
-weak.
-
-Read the `proc:` rows with the same care, because they show why measurement beats assumption. When
-these profiles were first written, a call appeared in 15% of generated programs and PrecondElim fired
-on 26%. Those numbers are now 58% and 60–65% *without* any tuning, because `genProcedure` and
-`genCallStmt` improved in the meantime. Every sibling is now callable, and the `call` weight is 3
-rather than 1. A four-fold gain is now a sharpener worth about 1.2 to 1.4 times, and `stmtLoopHeavy`
-raises the PrecondElim rate to 67–69%, about as far as `procPrecondHeavy` does. Keep the `proc:`
-profiles for the declared-function rate, which still goes from 32–34% to 81–82%. Do not expect them
-to rescue a vacuous property, because that family is no longer vacuous.
-
-Two rows are honestly *absent*. The ten `stmt: ANF …` and `proc: ANFEncoder …` properties run as
-identity checks, because the encoder changed the program on 0–2% of samples under every profile. No
-weight is set wrong. The cause is the shape the pass keys on, and the ANF note below the procedure
-profiles explains it.
-
-## What the profiles do to the suite's own properties
-
-Coverage of a *shape* is a proxy. Measuring the thing itself means running the suite's own
-properties under each profile. A registration attribute already does that: tag the statement and
-procedure families with `@[strata_properties (tuning := θ)]`, one profile at a time, and read the
-per-property verdicts out of `lake test`. `StrataGenerators.DistReport` has no property-outcome table,
-and says there why that comparison belongs in the suite. Over 300 trials per profile:
-
-* **No profile introduces a new failure.** Every property that passes under the default weights
-  passes under all of them. The θ-invariance theorems predict this outcome but do not imply it: they
-  say that no shape becomes unreachable, not that no property breaks.
-* **The known defects reproduce several times faster.** `stmt: typechecker accepts generated
-  statements` is the `funcDecl` gap between the spec and the algorithm. It fails on 5% of default
-  samples and on **23%** under `stmtFuncDeclHeavy`. `proc: PrecondElim factory strips declared
-  functions` fails on 23% by default and on **51%** under `procPrecondHeavy`. For a defect you want
-  to *keep* pinned, that is the difference between a property that needs hundreds of trials and one
-  that bites on every run.
-* **One known defect stays out of reach.** `proc: PrecondElim changed flag is faithful` fails on
-  about 1% of samples under every profile. It needs a declared function whose *body* calls a partial
-  operator, which is an expression-level shape. The composition section below says why no weight
-  here reaches one.
-
-## Desirable distributions, family by family
-
-**Expressions**: five properties, drawn through `genLExprT`. Three jobs pull in different
-directions. All three currently pull against a root split that they cannot move, so what follows is
-the intent of each profile rather than a measured gain.
-
-* *Generator soundness*, `expr: generated terms typecheck`, wants **breadth**: every rule of every
-  type, because the property is only as strong as the set of shapes it visits. The default
-  near-uniform weighting already gives that, which is why `exprBreadth` is the defaults.
-* The *evaluator properties* want terms that **reduce**. A leaf is already a value, so the property
-  then holds for a reason that has nothing to do with the evaluator. A constant, an `fvar` and an
-  `op` are the leaves. `exprEvalHeavy` raises the redex-forming rules `app`, `ite` and `eq`, and
-  drops the three leaf branches to 1. Measured, the *default* distribution already does this job:
-  only 7–8% of draws are a value.
-* The *known gaps* want the opposite of avoidance. `expr: progress` fails on `∀` and `∃`, because
-  `LExpr.eval` has no rule for a quantifier and `if (∀x. e) then …` is therefore stuck.
-  `expr: resolve after type erasure` fails on an erased quantifier whose body type is the bound
-  variable. `exprQuantHeavy` aims to make a quantifier the modal `bool` shape. It measures 2% of
-  terms with a quantifier, against 0% at the defaults. The quantifier branch exists only at the
-  `bool` site, and the root is an operator application nine times in ten. So the profile does not make
-  either gap a reliable reproducer.
-
-**Commands**: six properties. `cmd: set preserves variable` and `cmd: store type preservation` bite
-only on a `set`. `cmd: context growth matches inits` bites only on an `init`. Those pull apart, so
-there are two profiles, `cmdSetHeavy` and `cmdInitHeavy`, rather than one compromise.
-`cmd: symbolic and concrete eval agreement` bites hardest on `assert`, `assume` and `cover`, whose
-guard can be false at run time. `cmdCheckHeavy` raises those three.
-
-**Functions**: seven properties. The decisive shape is the *presence* of a clause, not the choice of
-rule. `function: typeCheck accepts generated functions` fails exactly on a function that has a
-`measure` and no `body`, and the other six are trivial or vacuous when the body is absent. An
-`optionGen` coin decides body and measure presence, and a coin is not a `frequency` site, so neither
-is **tunable as written**. `SetGen.TuningPrototypes` shows the rework that would expose them: its
-`genPreconditionW` applies `weightedOptionGen` to the precondition coin. The precondition's *shape*
-is already tunable through `genPrecondition`. `precondInputHeavy` makes a `requires` clause mention a
-formal about ten times out of eleven, which gives the stripping path of PrecondElim something to
-strip.
-
-**Statements**: seven properties. This is the family that pays for the tuning machinery.
-
-* `LoopElim preserves typeability` and `LoopElim eliminates all loops` are *entirely* vacuous on a
-  loop-free program. The transform is then the identity, and each property degenerates into "the
-  typechecker accepts what the generator produced". `stmt: typechecker accepts generated statements`
-  already tests that. `stmtLoopHeavy` makes a loop the modal statement, and it also makes *nested*
-  loops common, because the tuning threads through the whole mutual recursion. A nested loop is where
-  a loop-elimination pass is most likely to be wrong.
-* `DetToKleene defined iff supported` is a biconditional, so it needs both sides. It needs programs
-  with an `exit`, a `funcDecl` or a `typeDecl`, where the transform is undefined, and programs
-  without one, where it is defined. It also needs an invariant-bearing loop for the documented
-  caveat. A profile that maximises any one constructor makes one side of the biconditional vacuous.
-  `stmtKleeneBalanced` therefore equalises the leaves rather than maximises them.
-* `typechecker accepts generated statements` fails only on a `funcDecl`, which is the honest gap
-  between the spec and the algorithm. `stmtFuncDeclHeavy` turns it into a fast, reliable reproducer.
-* `ANF is idempotent` and `ANF preserves typeability` need a **repeated** subexpression, which is
-  harder to ask a generator for than it sounds. The encoder eliminates common subexpressions, so it
-  fires only when the *same* non-leaf, bvar-free expression occurs twice in one body. No weight makes
-  two independent draws equal. The ANF note below the procedure profiles says what does move the
-  rate, and by how little.
-
-**Procedures**: 28 properties over three transform passes. Everything the passes need is in the
-procedure *bodies*, which means in the statement weights.
-
-* The five `FilterCorrect` fields of FilterProcedures, and both call-graph fields, need real
-  call-graph edges. That means `call` statements, so `procCallHeavy`.
-* PrecondElim needs a call to a partial function, measured at about 6% of programs by default. For
-  the `changed`-flag defect it needs a *declared function whose body* calls one, at about 0.5%.
-  `procPrecondHeavy` raises `call` and `funcDecl` together, because a `funcDecl` is what carries a
-  declared function into the program.
-* ANFEncoder needs a repeated subexpression in one procedure body, and no weight buys that
-  reliably. See the note below.
-
-## Composition: what a knob reaches, and what it does not
-
-`@[tunable]` threads `θ` through the tagged definition and its own recursion. It does **not** thread
-`θ` into a *different* definition that the body calls by name. There are two measured consequences.
-
-First, `genStmt` and `genStmtChain` are one mutual block, so a tag on `genStmt` alone tunes only the
-outermost statement. With the loop weight at 40, top-level loops went from 15% to 72%, but a loop
-inside a loop went only from 2% to 7.5%. The block's members share the auxiliary
-`genStmt._mutual`, whose recursion is internal, so a tag there threads `θ` through all of it. That
-gives 3.5% to 66% for a loop inside a loop, and it is what `genStmtT` and `genStmtChainT` below are
-built on.
-
-Second, an **expression** weight set here does not reach the expressions inside a generated
-statement. `genStmt` calls `genLExpr` by name, and `genLExpr` and `genIndirPoly` call `genLExprBase`
-by name. Where the by-name call is one hop, a restatement of the caller is cheap, and this module
-writes one: `genLExprT` below is `genLExpr`'s body over the tuned callee. That is what lets
-`exprEvalHeavy` and the other expression profiles reach the `expr:` family through the entry point
-those properties draw from.
-
-The same treatment for `genStmt`'s expressions would mean a restatement of the whole statement
-generator, so no profile here shapes the expression inside a `cmd` or a loop guard. That needs the
-sub-generator calls to take the tuning, which is a change to Basalt rather than a weighting. Until
-somebody makes it, this module cannot tune the rate of a partial call for PrecondElim, and it cannot
-reach the one expression-level lever that would move the ANF rate.
 -/
 
 namespace StrataGenerators.TuningProfiles
@@ -277,12 +94,13 @@ def assume'     : Nat := 10
 def cover'      : Nat := 11
 end CmdIdx
 
-/-! Flat indices of `genLExprBase`'s ten sites, one per generated type. All ten sit at `n + 1`,
+/-! Flat indices of `genLExprBase`'s eleven sites, one per generated type. All eleven sit at `n + 1`,
 because the `n = 0` arms are uniform `oneOf`s and have no weight to tune.
 
-Every site offers the same *roles*, in the same order, with three exceptions. `bool` also offers
-`eq`, `∀` and `∃`. The four sites whose type has no literal have no constant branch, and those are
-`ftvar`, `regex`, `Map` and `Sequence`. The first branch at `arrow` is `abs` rather than a constant.
+Every site offers the same *roles*, in the same order, with four exceptions. `bool` also offers
+`eq`, `∀` and `∃`. The sites whose type has no literal have no constant branch, and those are
+`ftvar`, `regex`, `Map`, `Sequence` and the arm for every other type constructor. The first branch at
+`arrow` is `abs` rather than a constant. That last arm also offers no `app` and no `ite`.
 
 The role lists below capture that regularity. Set a weight *per role across every site*, not per
 site. A profile that raises `ite` at `bool` alone is diluted by the type distribution, because a base
@@ -302,6 +120,9 @@ def bitvecSite : Nat := 50
 def regexSite  : Nat := 58
 def mapSite    : Nat := 65
 def seqSite    : Nat := 72
+/-- The arm for every other type constructor: a datatype, an abstract type, or the body of an alias.
+It offers no `app`, no `ite` and no constant, so it holds 5 branches rather than 7. -/
+def tconsSite  : Nat := 79
 
 /-- The `app` branch of every site. -/
 def appAll : List Nat := [1, 9, 20, 27, 35, 43, 51, 58, 65, 72]
@@ -309,19 +130,19 @@ def appAll : List Nat := [1, 9, 20, 27, 35, 43, 51, 58, 65, 72]
 def iteAll : List Nat := [2, 10, 21, 28, 36, 44, 52, 59, 66, 73]
 /-- The bound-variable branch of every site. It draws a `bvar` when one of the target type is in
 scope, and the site's own fallback when none is. -/
-def bvarAll : List Nat := [3, 14, 22, 29, 37, 45, 53, 60, 67, 74]
+def bvarAll : List Nat := [3, 14, 22, 29, 37, 45, 53, 60, 67, 74, 79]
 /-- The free-variable branch of every site. -/
-def fvarAll : List Nat := [4, 15, 23, 30, 38, 46, 54, 61, 68, 75]
+def fvarAll : List Nat := [4, 15, 23, 30, 38, 46, 54, 61, 68, 75, 80]
 /-- The bare-operator branch of every site. It draws an operator whose *type is* the target type, so
 the result is a leaf. Do not confuse it with `indirAll`. -/
-def opAll : List Nat := [5, 16, 24, 31, 39, 47, 55, 62, 69, 76]
+def opAll : List Nat := [5, 16, 24, 31, 39, 47, 55, 62, 69, 76, 81]
 /-- The **Indir** branch of every site. It draws a fully-applied monomorphic operator that returns
 the target type, and takes its arguments from this generator. This branch is where `Int.Add x 2`
 comes from, and where the partial `Int.Safe*` builtins come from. Those builtins are why PrecondElim
 exists, so this is the operator knob that matters. -/
-def indirAll : List Nat := [6, 17, 25, 32, 40, 48, 56, 63, 70, 77]
+def indirAll : List Nat := [6, 17, 25, 32, 40, 48, 56, 63, 70, 77, 82]
 /-- The **IndirPoly** branch of every site. It does the same for a polymorphic library operator. -/
-def indirPolyAll : List Nat := [7, 18, 26, 33, 41, 49, 57, 64, 71, 78]
+def indirPolyAll : List Nat := [7, 18, 26, 33, 41, 49, 57, 64, 71, 78, 83]
 /-- The literal-constant branch of the five sites that have one. -/
 def constAll : List Nat := [8, 19, 34, 42, 50]
 /-- `abs`, which only the `arrow` site offers. -/
@@ -354,14 +175,6 @@ statement at every nesting level. A loop inside a loop then becomes common rathe
 and that is where a loop-elimination pass is most likely to be wrong. `cmd` keeps its default weight,
 so a loop *body* still holds commands to eliminate around.
 
-The weight 24 comes from a sweep with `dist-report`, at 250 samples per point and max size 100:
-
-| loop weight | 2 (default) | 8 | 16 | 24 | 40 |
-| --- | --- | --- | --- | --- | --- |
-| has a loop | 29% | 61% | 78% | 76% | 87% |
-| has a loop inside a loop | 2% | 10% | 20% | 26% | 28% |
-| first-try success | 67% | 65% | 63% | 60% | 58% |
-
 Nesting is what the weight really buys, and it saturates. Above 24, another 16 points of weight buy
 two points of nesting and cost two points of generation cost. -/
 def stmtLoopHeavy : Tuning :=
@@ -384,22 +197,6 @@ so this profile bites only when the generator has a non-empty `ProcSigCtx`. The 
 harness is the one that supplies one. -/
 def stmtCallHeavy : Tuning :=
   withWeights stmtDefault [(StmtIdx.call, 12), (StmtIdx.call0, 12)]
-
-/-- **Kleene-balanced** (`stmt: DetToKleene defined iff supported`). The property is a biconditional,
-so it needs samples on *both* sides. One side is "the transform is defined". The other is "the block
-holds no `exit`, no `funcDecl` and no `typeDecl`, and no invariant loop". A profile that maximises any
-one constructor makes one side vacuous. This profile raises the three unsupported leaves to the weight
-of `cmd`, which puts the undefined side at about 60% of samples.
-
-It raises `block` as well, and that is not cosmetic. An `exit` needs an enclosing label, so at the top
-level, where `labels = []`, no weight makes an `exit` reachable. A `block` is what creates the scope
-that an `exit` can target. Measured, a raise of `exit` alone left it at the default rate of 3–4% of
-samples. A raise of `block` to 8 alongside it takes `exit` to 13–15%. -/
-def stmtKleeneBalanced : Tuning :=
-  withWeights stmtDefault
-    [(StmtIdx.exit, 8), (StmtIdx.funcDecl, 4), (StmtIdx.typeDecl, 4), (StmtIdx.loop, 4),
-     (StmtIdx.block, 8),
-     (StmtIdx.exit0, 8), (StmtIdx.funcDecl0, 4), (StmtIdx.typeDecl0, 4)]
 
 /-- **Everything at once** for the statement suite. Loops are common, and the three leaves that
 Kleene does not support and `call` are all well represented. One run then exercises the `LoopElim`,
@@ -545,29 +342,7 @@ def exprFVarHeavy : Tuning :=
 /-- **Indir-heavy** (`expr: progress`). This is the profile that reproduces the `progress`
 counterexamples. `genLExprBase` offers the **Indir** and **IndirPoly** rules at every type, and each
 draws a fully-applied operator whose result type is the target. An operator application is therefore a
-branch of `genLExprBase`, and not only something that the `genLExpr` wrapper adds at the root.
-
-Measured on `genLExprBase` alone, at 400 draws per row:
-
-| | default | `op` leaf ×30 | Indir ×12 | Indir ×24 |
-| --- | --- | --- | --- | --- |
-| `progress` fails | 22% | 17% | 30% | **38%** |
-| term contains an operator | 33% | 24% | 48% | **54%** |
-| term is already a value | 64% | 81% | 52% | **47%** |
-| first-try success | 51% | 77% | 35% | **32%** |
-
-Read the middle column carefully. It is why this profile replaced an earlier one that raised the
-bare-`op` *leaf* branch: a raise of a leaf **crowds out** Indir, so it lowered both the failure rate
-and the operator content that it was supposed to raise. The `op` branch draws an operator whose *type
-is* the target type, which is a leaf and not an application. The two are easy to confuse. That lesson
-stands, and the numbers do not carry over.
-
-Through `genLExprT`, which is the entry point the property uses, those columns are nearly flat.
-`progress` fails on 40–45% of default draws and on 45–49% here. An operator occurs in 90–91% of terms
-either way, and first-try success is 78–80% against 80–84%. `genLExpr`'s root split already puts a
-fully-applied operator at the root in nine draws out of ten. A raise of Indir *inside* `genLExprBase`
-therefore has little left to raise, and costs little. Both the gain and the price were real of a
-sampler that no property used. -/
+branch of `genLExprBase`, and not only something that the `genLExpr` wrapper adds at the root. -/
 def exprIndirHeavy : Tuning :=
   withWeightsAt (withWeightsAt exprBreadth ExprIdx.indirAll 24) ExprIdx.indirPolyAll 24
 
@@ -689,7 +464,7 @@ This is what makes an expression weight reach the generator that the `expr:` pro
 drifting.
 
 `genLExpr`'s own root `frequency` keeps its literal weights. That is the 1 to 9 split between the base
-rules and an operator application. `θ` addresses `genLExprBase`'s 79 branches, and a second
+rules and an operator application. `θ` addresses `genLExprBase`'s 84 branches, and a second
 generator's sites in the same flat index space would move every `ExprIdx` name to the wrong
 branch. -/
 def genLExprT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
@@ -803,11 +578,13 @@ example : (genStmt._mutual.sites[1]!.offset, genStmt._mutual.sites[1]!.arity) = 
 example : genStmt._mutual.defaults = genStmt.defaults := rfl
 example : (genCmd.sites[0]!.offset, genCmd.sites[0]!.arity) = (0, 7) := rfl
 example : (genCmd.sites[1]!.offset, genCmd.sites[1]!.arity) = (7, 5) := rfl
-example : genLExprBase.sites.size = 10 := rfl
-example : genLExprBase.defaults.schedules.size = 79 := rfl
+example : genLExprBase.sites.size = 11 := rfl
+example : genLExprBase.defaults.schedules.size = 84 := rfl
 example : (genLExprBase.sites[1]!.offset, genLExprBase.sites[1]!.arity) = (ExprIdx.boolSite, 11) :=
   rfl
 example : genLExprBase.sites[9]!.offset = ExprIdx.seqSite := rfl
+example : (genLExprBase.sites[10]!.offset, genLExprBase.sites[10]!.arity) = (ExprIdx.tconsSite, 5) :=
+  rfl
 example : ExprIdx.appAll.length = 10 ∧ ExprIdx.iteAll.length = 10 := ⟨rfl, rfl⟩
 example : ExprIdx.appAll.map (· + 1) = ExprIdx.iteAll := rfl
 /-- Indir and IndirPoly are the last two branches of every site, so their indices are one apart. -/
@@ -817,7 +594,7 @@ example : ExprIdx.indirAll.all (fun i => genLExprBase.defaults.schedules[i]! == 
   decide
 
 /-! Each profile moves the branch it names and leaves its neighbours alone. The expression profiles
-fold over 79 schedule entries, which is why the recursion depth goes up here. -/
+fold over 84 schedule entries, which is why the recursion depth goes up here. -/
 
 set_option maxRecDepth 8000
 

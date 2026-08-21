@@ -13,15 +13,12 @@ import Strata.DL.Lambda.LTyUnify
 namespace ArbNat
 open RandomChoice
 
-/-- A `Nat` generator, defined locally rather than imported from
-    `BasaltExamples.ArbNat`. The upstream `non_empty_combinators` reorg dropped the
-    lightweight `ArbNat.Def` split, so `BasaltExamples.ArbNat` now imports the
-    full `Basalt` umbrella — which transitively pulls in Mathlib's `List.dedup`
-    and collides with Strata's `List.dedup` (from `Strata.Util.ListUtils`, imported
-    via `Strata.DL.Lambda.*`). This file is deliberately kept Mathlib-free, so we
-    inline the definition. It is definitionally identical to the upstream one
-    (`pick 0 / (·+1)`), so the support proofs in `HasTypeAGen.lean` that unfold
-    `Nat.arbitrary` are unaffected. -/
+/-- A generator for a `Nat`.
+
+    This file keeps the definition local and does not import `BasaltExamples.ArbNat`, because that
+    module imports the full `Basalt` library. `Basalt` gives `List.dedup` of Mathlib, which collides
+    with `List.dedup` of Strata. This file must stay free of Mathlib. The definition here is
+    definitionally equal to the one in Basalt, so a proof can unfold either one. -/
 def Nat.arbitrary [Gen G] : G Nat := do
   pick
     (fun () => pure 0)
@@ -36,23 +33,23 @@ open Lambda RandomChoice ArbNat ArbChar ArbString
 
 -- ── Parameter types ──────────────────────────────────────────────────
 
-/-- The base `LExprParams` we use: unit metadata and unit identifier-metadata. -/
+/-- The base `LExprParams` of this package: unit metadata and unit identifier metadata. -/
 abbrev LExprParams' : LExprParams := ⟨Unit, Unit⟩
-/-- The full `LExprParamsT` (with `LMonoTy` as the type annotation type). -/
+/-- The full `LExprParamsT`, which uses `LMonoTy` as the type of an annotation. -/
 abbrev LExprParamsT' : LExprParamsT := LExprParams.mono LExprParams'
 
 instance : DecidableEq Unit := instDecidableEqPUnit
 
-/-- Our working expression type: `LExpr` with unit metadata and monotype annotations. -/
+/-- The expression type of this package: an `LExpr` with unit metadata and monotype annotations. -/
 abbrev LExpr' := LExpr LExprParamsT'
 
 instance : BEq LMonoTy := instBEqOfDecidableEq
 
 -- ── Contexts ─────────────────────────────────────────────────────────
 
-/-- Bound-variable context: `bctx[i]?` is the type of de Bruijn index `i`. -/
+/-- A context for the bound variables. `bctx[i]?` is the type of the de Bruijn index `i`. -/
 abbrev BVarCtx := List LMonoTy
-/-- Free-variable context: maps variable names to their types (locally nameless). -/
+/-- A context for the free variables. It maps the name of a variable to its type. -/
 abbrev FVarCtx := List (String × LMonoTy)
 
 /-- The operators of a factory, as a list of (name, curried type) pairs.
@@ -104,27 +101,20 @@ private theorem getD_foldl_opIndexStep (l : OpList)
 /-- An operator context. It holds the operators of a factory as (name, curried type)
     pairs, together with an index from a type to the operators of that type.
 
-    A generator looks for an operator by type one time at each candidate leaf. The
-    context holds each function of `Core.Factory`, which is 310 entries. The index
-    makes each lookup one hash instead of a linear scan. The index is also small,
-    because the 310 entries have only 81 different curried types. In compiled code,
-    one lookup takes 0.005 ms with the index and 0.103 ms with a scan.
+    A generator looks for an operator by type one time at each candidate leaf. The context holds each
+    function of `Core.Factory`, which is more than 300 entries. The index makes each lookup one hash and
+    not a linear scan. The index is also small, because those entries have far fewer different curried
+    types. The index does not make the whole generator faster, because a lookup is not the largest cost.
 
-    The index does not make the whole generator faster, because a lookup is not the
-    largest cost. `generableTypesFromCtx` costs about 0.092 ms for each call, and a
-    generator calls it at each node.
+    The `agrees` field connects the index to the scan that specifies it. Therefore the index cannot
+    disagree with `ops`. `Lambda.Factory` uses the same pattern, with an array and a hash map from a name
+    to an index, and invariants between them. The key here is the curried type, because a generator looks
+    for an operator by type. Strata looks for an operator by name, and it therefore needs no index by
+    type.
 
-    The `agrees` field connects the index to the scan that specifies it. Therefore the
-    index cannot disagree with `ops`. `Lambda.Factory`
-    (`Strata/DL/Lambda/Factory.lean`) uses the same pattern: it holds `toArray` with
-    `nameMap : Std.HashMap String Nat` and three invariants between them. The key here
-    is the curried type, because a generator looks for an operator by type. Strata
-    looks for an operator by name, and therefore Strata needs no index by type.
-
-    `OpCtx` holds the index. A separate `OpIndex` structure beside `OpCtx` is also
-    possible, but then `opsOfType`, `pickOp` and each lemma about them need a new
-    signature. With the index inside `OpCtx`, these signatures do not change, and the
-    proofs that use an operator context stay the same. -/
+    `OpCtx` holds the index. A separate structure beside `OpCtx` is also possible, but then `opsOfType`,
+    `pickOp` and each lemma about them need a new signature. With the index inside `OpCtx`, those
+    signatures do not change. -/
 structure OpCtx where
   /-- The operators, in the order of the factory. The proofs use this list. -/
   ops : OpList
@@ -164,8 +154,8 @@ end Lambda
 
 -- ── Monotype depth ───────────────────────────────────────────────────
 
-/-- The nesting depth of a monotype: 0 for base types, `max(depth τ₁, depth τ₂) + 1`
-    for arrows. Matches the fuel consumed by `genLMonoTy` to produce the type. -/
+/-- The depth of a monotype. A base type has the depth 0. A compound type has the depth of its
+    largest component plus 1. The value is the fuel that `genLMonoTy` needs for the type. -/
 def monoTyDepth : LMonoTy → Nat
   | .arrow τ₁ τ₂ => max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1
   | .map τ₁ τ₂   => max (monoTyDepth τ₁) (monoTyDepth τ₂) + 1
@@ -174,12 +164,12 @@ def monoTyDepth : LMonoTy → Nat
 
 -- ── Well-typing relation ─────────────────────────────────────────────
 
-/-- Strata's `HasTypeA` typing judgement instantiated at our parameter types. -/
+/-- The `HasTypeA` typing judgement of Strata, at the parameter types of this package. -/
 abbrev HasTypeA' := LExpr.HasTypeA (T := LExprParams')
 
 -- ── Helpers ──────────────────────────────────────────────────────────
 
-/-- All de Bruijn indices in `bctx` whose type equals `τ`. -/
+/-- Each de Bruijn index in `bctx` that has the type `τ`. -/
 def bvarsOfType (bctx : BVarCtx) (τ : LMonoTy) : List Nat :=
   go bctx 0
 where
@@ -187,7 +177,7 @@ where
     | [],         _  => []
     | τ' :: rest, i  => if τ' == τ then i :: go rest (i + 1) else go rest (i + 1)
 
-/-- Pick a uniformly random bound variable of type `τ` from `bctx`. -/
+/-- Draw a uniformly random bound variable of the type `τ` from `bctx`. -/
 def pickBVar [Gen G] (bctx : BVarCtx) (τ : LMonoTy)
     (h : (bvarsOfType bctx τ).length > 0) : G LExpr' :=
   have hne : (bvarsOfType bctx τ).map (LExpr.bvar () ·) ≠ [] := by
@@ -195,13 +185,12 @@ def pickBVar [Gen G] (bctx : BVarCtx) (τ : LMonoTy)
     exact List.length_pos_iff.mp h
   elements _ hne
 
-/-- All variable names in `fctx` whose type equals `τ`. -/
+/-- Each variable name in `fctx` that has the type `τ`. -/
 def fvarsOfType (fctx : FVarCtx) (τ : LMonoTy) : List String :=
   fctx.filterMap (fun (x, ty) => if ty == τ then some x else none)
 
-/-- Pick a uniformly random free variable of type `τ` from `fctx`. The generated
-    `fvar` node carries a type annotation `(some τ)` so that `HasTypeA` can
-    typecheck it without an external environment. -/
+/-- Draw a uniformly random free variable of the type `τ` from `fctx`. The `fvar` node holds the type
+    annotation `(some τ)`, so `HasTypeA` can type check it with no external environment. -/
 def pickFVar [Gen G] (fctx : FVarCtx) (τ : LMonoTy)
     (h : (fvarsOfType fctx τ).length > 0) : G LExpr' :=
   have hne : (fvarsOfType fctx τ).map (fun name => LExpr.fvar () ⟨name, ()⟩ (some τ)) ≠ [] := by
@@ -235,7 +224,7 @@ theorem opsOfType_eq_scan (octx : OpCtx) (τ : LMonoTy) :
 theorem opsOfType_empty (τ : LMonoTy) : opsOfType ∅ τ = [] := by
   rw [opsOfType_eq_scan]; simp [opsOfTypeList]
 
-/-- Pick a uniformly random operator of type `τ` from `octx`. -/
+/-- Draw a uniformly random operator of the type `τ` from `octx`. -/
 def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
     (h : (opsOfType octx τ).length > 0) : G LExpr' :=
   have hne : (opsOfType octx τ).map (fun name => LExpr.op () ⟨name, ()⟩ (some τ)) ≠ [] := by
@@ -245,29 +234,29 @@ def pickOp [Gen G] (octx : OpCtx) (τ : LMonoTy)
 
 -- ── Type generator ───────────────────────────────────────────────────
 
-/-- Pick a uniformly random type variable name from `tvars` and return it
-    as an `LMonoTy.ftvar`. -/
+/-- Draw a uniformly random type-variable name from `tvars`, and give it as an `LMonoTy.ftvar`. -/
 def pickTyVar [Gen G] (tvars : List TyIdentifier)
     (h : tvars.length > 0) : G LMonoTy :=
   have hne : tvars ≠ [] := List.length_pos_iff.mp h
   LMonoTy.ftvar <$> elements tvars hne
 
-/-- Pick a random bitvector width and return it as an `LMonoTy.bitvec`. The
-    width is drawn from `Nat.arbitrary` (any natural), since the Strata Core AST
-    does not constrain bitvector widths. -/
+/-- Draw a random bitvector width, and give it as an `LMonoTy.bitvec`. The width comes from
+    `Nat.arbitrary`, and it can be any natural number, because the Strata Core syntax puts no limit on
+    the width of a bitvector. -/
 def pickBitvecWidth [Gen G] : G LMonoTy :=
   LMonoTy.bitvec <$> Nat.arbitrary
 
-/-- The names of the nullary (arity-0) base type constructors Strata Core knows:
-    `bool`, `int`, `string`, `real`, `regex`. These are the ground type names
-    `pickBaseType` produces (as `.tcons name []`), the ones `inGenLMonoTySupport`
-    recognizes, and the shared base-type pool the datatype generator draws from
-    (`DatatypeGen.defaultBaseTypes`). Bitvectors are handled separately by
-    `pickBitvecWidth`, since their width is a parameter rather than a name. -/
+/-- The names of the base type constructors of arity 0 in Strata Core, which are `bool`, `int`,
+    `string`, `real` and `regex`.
+
+    These are the ground type names that `pickBaseType` gives, as `.tcons name []`. They are also the
+    names that `inGenLMonoTySupport` accepts, and the pool of base types for the datatype generator.
+    A bitvector is separate, because its width is a parameter and not a name. `pickBitvecWidth`
+    handles it. -/
 def nullaryBaseTypeNames : List String :=
   ["bool", "int", "string", "real", "regex"]
 
-/-- Pick a uniformly random base type (bool, int, string, real, regex, or bitvec). -/
+/-- Draw a uniformly random base type: `bool`, `int`, `string`, `real`, `regex` or a bitvector. -/
 def pickBaseType [Gen G] : G LMonoTy :=
   oneOf
     [ (fun () => pure .bool),
@@ -278,10 +267,11 @@ def pickBaseType [Gen G] : G LMonoTy :=
       (fun () => pickBitvecWidth) ]
     (by simp)
 
-/-- Generate a simple monotype of depth ≤ `n`. When `tvars` is non-empty,
-    type variables (`ftvar`) may appear at leaves alongside base types.
-    Compound types (arrow, map, sequence) are generated at depth `n + 1`
-    with sub-types at depth `n`. -/
+/-- Generate a simple monotype of a depth that is not more than `n`.
+
+    When `tvars` holds a name, a type variable can also appear at a leaf, beside a base type. At the
+    depth `n + 1`, the generator can give a compound type, which is an arrow, a map or a sequence,
+    with each component at the depth `n`. -/
 def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   | 0 =>
     if h : tvars.length > 0 then
@@ -328,23 +318,22 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
               (by simp)) ]
         (by simp)
 
--- ── Expression sub-generator combinators ─────────────────────────────────
--- These combinators take in the generators that they invoke as explicit arguments,
--- in order to avoid mutual recursion (which makes the proofs much more challegning).
+-- ── The combinators for a sub-generator of an expression ─────────────
+--
+-- Each combinator takes the generators that it calls as explicit arguments. Therefore no combinator
+-- is mutually recursive with another one, and each proof about a combinator stays simple.
 
-/-- Generate a random boolean constant (`true` or `false`). -/
+/-- Generate a random boolean constant, which is `true` or `false`. -/
 @[reducible] def genBoolConst [Gen G] : G LExpr' :=
   pick (fun () => pure (.boolConst () true))
        (fun () => pure (.boolConst () false))
 
-/-- Generate a random integer constant (non-negative or negative). -/
+/-- Generate a random integer constant. The value can be negative or not negative. -/
 @[reducible] def genIntConst [Gen G] : G LExpr' :=
   pick (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
        (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int))))
 
-/-- The character-list backing of `String.arbitrary`. Upstream Basalt dropped
-    `genCharList` and now defines `String.arbitrary := String.ofList <$> listOf
-    Char.arbitrary`, so this is `listOf Char.arbitrary`. -/
+/-- The list of characters that `String.arbitrary` of Basalt draws from. -/
 abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
 
 /-- Generate a random string constant.
@@ -357,11 +346,10 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
     at type `string`. An ASCII-only pool cannot reach the defect in the SMT-LIB
     escape function.
 
-    The code depends on the `do let s ← _; pure (.strConst () s)` shape. The support
-    proofs in `HasTypeAGen.lean` and `HasTypeAGenOpsConsistent.lean` destructure
-    it as one `bind` and then one `pure`, and they discard the inner membership
-    hypothesis. Thus they do not depend on *which* string generator supplies the
-    value, but they do depend on the shape. -/
+    The support proofs depend on the shape `do let s ← _; pure (.strConst () s)`. Each such proof
+    takes the shape apart as one `bind` and then one `pure`, and it discards the inner membership
+    hypothesis. Therefore a proof does not depend on *which* generator gives the string, but it does
+    depend on the shape. -/
 @[reducible] def genStrConst [Gen G] : G LExpr' := do
   let s ← StrataGenerators.PrimitiveGens.genInterestingString
   pure (.strConst () s)
@@ -400,8 +388,8 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let k ← StrataGenerators.PrimitiveGens.genBiasedBitVec n
   pure (.bitvecConst () n k)
 
-/-- Generate an application: pick a random argument type, generate the argument
-    and a function from that type to `τ`, then apply. -/
+/-- Generate an application. The generator draws a random argument type. It then generates the
+    argument, and a function from that type to `τ`, and it applies the function to the argument. -/
 @[reducible] def genApp [Gen G] (genTy : G LMonoTy) (genExpr : LMonoTy → G LExpr')
     (τ : LMonoTy) : G LExpr' := do
   let τ' ← genTy
@@ -409,19 +397,19 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let fn ← genExpr (.arrow τ' τ)
   pure (.app () fn arg)
 
-/-- Generate a lambda abstraction with binder type `τ₁`. -/
+/-- Generate a lambda abstraction whose binder has the type `τ₁`. -/
 @[reducible] def genAbs [Gen G] (genBody : G LExpr') (τ₁ : LMonoTy) : G LExpr' := do
   let body ← genBody
   pure (.abs () "" (some τ₁) body)
 
-/-- Generate an if-then-else expression. -/
+/-- Generate an `if-then-else` expression. -/
 @[reducible] def genIte [Gen G] (genCond genThen genElse : G LExpr') : G LExpr' := do
   let c ← genCond
   let t ← genThen
   let e ← genElse
   pure (.ite () c t e)
 
-/-- Generate an equality test: pick a random type, then generate two
+/-- Generate an equality test. The generator draws a random type, and it then generates two
     expressions of that type. -/
 @[reducible] def genEq [Gen G] (genTy : G LMonoTy) (genExpr : LMonoTy → G LExpr') : G LExpr' := do
   let τ' ← genTy
@@ -429,9 +417,11 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let e₂ ← genExpr τ'
   pure (.eq () e₁ e₂)
 
-/-- Generate a quantifier (∀ or ∃) expression. Picks a binder type and a
-    trigger type (the trigger is used for SMT in the LExpr grammar but is otherwise unused by the generator),
-    then generates the terms for the trigger and body in the extended context. -/
+/-- Generate a quantifier expression, which is a `∀` or a `∃`.
+
+    The generator draws a type for the binder and a type for the trigger. It then generates the term
+    of the trigger and the term of the body, in the extended context. The trigger is a part of the
+    `LExpr` syntax for SMT, and the generator itself makes no other use of it. -/
 @[reducible] def genQuant [Gen G] (k : QuantifierKind) (genTy : G LMonoTy)
     (genTrigger : LMonoTy → LMonoTy → G LExpr') (genBody : LMonoTy → G LExpr') : G LExpr' := do
   let τ' ← genTy
@@ -440,14 +430,14 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
   let body ← genBody τ'
   pure (.quant () k "" (some τ') trigger body)
 
-/-- Collects all syntactic sub-types (i.e. sub-terms of a type expression) that appear in a type -/
+/-- Each syntactic subtype of a type, which is each subterm of the type expression. -/
 def syntacticSubtypes : LMonoTy → List LMonoTy
   | ty@(.tcons "arrow" [a, b]) => ty :: (syntacticSubtypes a ++ syntacticSubtypes b)
   | ty => [ty]
 
-/-- Helper function used when building the set of generable types.
-    Implements this rule: if `σ → τ` and `σ` are both in the set, then `τ` is added.
-    Uses a fuel parameter to ensure termination. -/
+/-- One part of the computation of the generable types. The function applies this rule: if the set
+    holds `σ → τ` and it also holds `σ`, then add `τ`. The fuel parameter makes the function
+    terminate. -/
 def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
   match fuel with
   | 0 => tys
@@ -460,43 +450,30 @@ def addNewTypes (fuel : Nat) (tys : List LMonoTy) : List LMonoTy :=
     if newTys.isEmpty then tys
     else addNewTypes fuel (tys ++ newTys)
 
-/-! ### Fast forms of the two helpers with a quadratic cost
+/-! ### The fast forms of the two helpers that have a quadratic cost
 
-A generator calls `generableTypesFromCtx` at each node of each draw. With the 310
-operators of `Core.Factory`, this function is the largest cost in generation. Two
-linear scans, one inside the other, are the reason:
+A generator calls `generableTypesFromCtx` at each node of each draw. With the 310 operators of
+`Core.Factory`, this function is the largest cost in generation. Two linear scans, one inside the
+other, are the reason:
 
-- `List.eraseDups` over the subtype list, which has 1404 elements.
+- `List.eraseDups` over the list of subtypes, which has more than a thousand elements.
 - The membership tests `argTy ∈ tys` and `retTy ∉ tys` in the loop of `addNewTypes`.
 
-The fast forms below give 0.092 ms for each call to `generableTypesFromCtx`. They give
-44 ms for 300 draws at depth 2. They give 4.9 s for the LSpec suite at `100 5`. A context of 40
-operators needs 12 ms for the same 300 draws. The difference is proportional to the
-number of operators, because the subtype list gets larger with the context.
+Each fast form below holds a `Std.HashSet` as an index for membership. `OpCtx` holds a hash map for a
+lookup by type in the same way. Both functions keep their lists, and the dedup keeps the order of the
+input.
 
-Each fast form holds a `Std.HashSet` as a membership index. `OpCtx` holds a hash map
-for a lookup by type in the same way. The two functions keep their lists, and the
-dedup keeps the order of the input.
+The order is not necessary for the distribution. `elements` takes the result, draws a uniform index,
+and gives that element. The list holds no duplicate element, because a dedup makes it. Therefore a
+uniform index is a uniform element for each possible order, and the support is the same set.
 
-The order is not necessary for the distribution. `elements` gets the result, draws a
-uniform index, and returns that element. The list has no duplicate elements, because a
-dedup makes it. Therefore a uniform index is a uniform element for each possible order,
-and the support is the same set. A list from `Std.HashSet.toList` gives the same
-distribution and the same speed. The measurements are 2.43 ms and 2.47 ms for each
-call.
+The order gives one other property: the draws are a function of the seed only. `Std.HashSet` does not
+specify its order, and that order can change with a new version of the toolchain, a new hash
+function, or a different sequence of insertions.
 
-The order gives one other property: the draws are a function of the seed only.
-`Std.HashSet` does not specify its order. The order can change with a new version of
-the toolchain, a new hash function, or a different sequence of insertions. This
-property is useful if the suite has a seed. The suite has no seed now. This is also why
-two of its properties give different results in different runs.
-
-A `@[csimp]` lemma connects each fast form to the original function. Therefore the
-compiler uses the fast form, but `simp`, `rw` and `unfold` use the original definition.
-Each proof about `addNewTypes` and `generableTypesFromCtx` stays the same. These proofs
-include `wellKindedTy_addNewTypes` and `generableTypesFromCtx_wellKinded` in
-`HasTypeAGen.lean`.
-The fast forms add no `sorry` and no axiom. -/
+A `@[csimp]` lemma connects each fast form to the original function. Therefore the compiler uses the
+fast form, but `simp`, `rw` and `unfold` use the original definition. Each proof about `addNewTypes`
+and `generableTypesFromCtx` therefore needs no change. -/
 
 /-- A dedup that keeps the order. It keeps the first occurrence of each element, in the
     same way as `List.eraseDups`. The cost is linear and not quadratic. -/
@@ -625,29 +602,28 @@ private theorem fastAddNewTypes_go_eq (fuel : Nat) (tys : List LMonoTy)
   rw [fastAddNewTypes]
   exact (fastAddNewTypes_go_eq fuel tys _ (by intro x; simp)).symm
 
-/-- Compute the set of "generable types" (i.e. types that can be generated from the
-  current context), following Palka et al. 2011.
+/-- The generable types, which are the types that the current context can generate. The definition
+    follows Pałka et al. 2011.
 
-  We begin by computing the syntactic sub-types for each types in the context,
-  then add new types to the set according to the following rule:
-  if (σ → τ) and σ are both in the set, then τ is too.
+    The function first computes the syntactic subtypes of each type in the context. It then adds a new
+    type to the set by this rule: if the set holds `σ → τ` and it also holds `σ`, then add `τ`.
 
-  The `@[csimp]` lemmas above apply to the dedup and to `addNewTypes`. Therefore the
-  cost is linear in the size of the context at run time, and this definition stays the
-  one that each proof uses. -/
+    The `@[csimp]` lemmas above apply to the dedup and to `addNewTypes`. Therefore the cost at run
+    time is linear in the size of the context, and this definition stays the one that each proof
+    uses. -/
 def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
   let allTys := bctx ++ fctx.map Prod.snd ++ octx.ops.map Prod.snd
   let initial := dedupTys (allTys.flatMap syntacticSubtypes)
   -- The fuel `initial.length` is an upper limit on the number of rounds.
   addNewTypes initial.length initial
 
-/-- Boolean decision procedure for "`τ` is in the support of `genLMonoTy tvars n`"
-    (see `genLMonoTy_support`). It filters the context-derived generable types
-    down to those that `genLMonoTy` can itself produce. This makes
-    `genGenerableTy`'s support *equal* to `genLMonoTy`'s — see
-    `genGenerableTy_support`. It is in lockstep with `monoTyDepth`:
-    a `bitvec` of any width is generable, `arrow`/`Map`/`Sequence` each consume
-    one unit of depth, and `tvars` must declare every `ftvar`. -/
+/-- A decision procedure for the statement "`τ` is in the support of `genLMonoTy tvars n`".
+
+    `genGenerableTy` uses this predicate to keep only the generable types that `genLMonoTy` can also
+    give. Therefore the support of `genGenerableTy` is equal to the support of `genLMonoTy`.
+
+    The predicate agrees with `monoTyDepth`: a bitvector of any width is generable, an arrow, a `Map`
+    and a `Sequence` each take one unit of depth, and `tvars` must declare each `ftvar`. -/
 def inGenLMonoTySupport (tvars : List TyIdentifier) : Nat → LMonoTy → Bool
   | _, .bitvec _ => true
   | _, .ftvar name => tvars.contains name
@@ -659,40 +635,32 @@ def inGenLMonoTySupport (tvars : List TyIdentifier) : Nat → LMonoTy → Bool
   | _, .tcons name [] => nullaryBaseTypeNames.contains name
   | _, _ => false
 
-/-- Context-aware type generator: the type source used for the *argument* type of
-    `genApp`, `genEq`, and `genQuant`.
+/-- A type generator that reads the context. It is the source of the *argument* type for `genApp`,
+    `genEq` and `genQuant`.
 
-    Those three combinators pick a type `τ'` and then demand a term of type `τ'`
-    (and, for `genApp`, of type `τ' → τ`). Drawing `τ'` from the context-blind
-    `genLMonoTy` is the dominant cause of generation failure: `genLExprBase` can
-    only inhabit a compound type when *something in `bctx`/`fctx`/`octx` has that
-    exact type*, so a blindly-chosen `τ'` is usually uninhabitable and the leaf
-    falls through to `default` (i.e. throws `inhabitedWitness`). Because each
-    recursive step re-draws a fresh `τ'`, the failure probability compounds with
-    depth — the superlinear blowup.
+    Those three combinators draw a type `τ'` and then ask for a term of the type `τ'`. `genApp` also
+    asks for a term of the type `τ' → τ`. A `τ'` that comes from `genLMonoTy`, which reads no context,
+    is the largest cause of generation failure. `genLExprBase` can inhabit a compound type only when
+    `bctx`, `fctx` or `octx` holds that exact type. A blind `τ'` is therefore usually not inhabitable,
+    and the leaf goes to `default`. Each recursive step draws a new `τ'`, so the probability of failure
+    grows quickly with the depth.
 
-    So we draw mostly from `generableTypesFromCtx` (Pałka et al. 2011: the types
-    reachable from the context by closing `σ → τ` and `σ` ⊢ `τ`), which are
-    exactly the types the leaf generator can actually inhabit.
+    This generator therefore draws mostly from `generableTypesFromCtx`, which gives the types that the
+    leaf generator can truly inhabit.
 
-    Two details make this a drop-in replacement for `genLMonoTy` in the proofs:
+    Two details keep the support equal to the support of `genLMonoTy`:
 
-    1. The context-derived list is filtered by `inGenLMonoTySupport tvars n`, so it only
-       ever contains types `genLMonoTy tvars n` could itself have produced. A raw
-       context type need not be one (it can be too deep, mention an undeclared
-       `ftvar`, or use a constructor the type generator does not build), and the
-       soundness proofs rely on the drawn argument type being generable at depth ≤ `n`.
-    2. The `genLMonoTy` branch is *retained* with positive weight. Since
-       `frequency`'s support is the union of its positive-weight branches'
-       supports (`mem_support_frequency_iff`), the filtered branch contributes
-       nothing new and the support is exactly `genLMonoTy`'s — see
-       `genGenerableTy_support`.
+    1. `inGenLMonoTySupport tvars n` filters the list from the context. Therefore the list holds only
+       a type that `genLMonoTy tvars n` can also give. A raw type from the context does not always
+       satisfy that condition, because it can be too deep, or it can name an `ftvar` that `tvars` does
+       not declare, or it can use a constructor that the type generator does not build. The soundness
+       proofs need the drawn argument type to be generable at a depth that is not more than `n`.
+    2. The `genLMonoTy` branch stays, with a positive weight. The support of `frequency` is the union
+       of the supports of its branches that have a positive weight. Therefore the filtered branch adds
+       nothing, and the support is exactly the support of `genLMonoTy`.
 
-    So support is unchanged (every existing soundness/completeness proof still
-    applies verbatim, via that one rewrite) while the *distribution* shifts
-    decisively onto types the leaf generator can actually inhabit. This is the
-    reweighting-free part of the fix: it changes which types are likely, not
-    which are possible. -/
+    The support is therefore the same, and each soundness proof and completeness proof still applies.
+    Only the *distribution* moves onto the types that the leaf generator can inhabit. -/
 def genGenerableTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (n : Nat) : G LMonoTy :=
   let generable :=
@@ -705,30 +673,26 @@ def genGenerableTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdent
   else
     genLMonoTy tvars n
 
-/-- The argument-type source for `genApp` specifically.
+/-- The source of the argument type for `genApp`.
 
-    `genApp` is harder than `genEq`/`genQuant`: having drawn an argument type `τ'`
-    it needs terms of type `τ'` *and* of type `τ' → τ`. Drawing `τ'` from the
-    generable set (as `genGenerableTy` does) only ensures the former — measured
-    against `coreMonoOps`, the function type `τ' → bool` was absent from the
-    generable set for 11 of the 16 generable `τ'`, so the *function* position was
-    then the one that failed.
+    `genApp` is more difficult than `genEq` and `genQuant`. After it draws an argument type `τ'`, it
+    needs a term of the type `τ'` *and* a term of the type `τ' → τ`. A `τ'` from the generable set,
+    which is what `genGenerableTy` gives, satisfies the first need only. The function position can then
+    be the one that fails, because the generable set often holds `τ'` but not `τ' → τ`.
 
-    So instead of choosing `τ'` and hoping `τ' → τ` is inhabited, we work
-    backwards: look for generable types of the form `σ → τ` (i.e. functions that
-    actually *return* the target type `τ`) and take `σ` as the argument type. This
-    is the Pałka et al. rule that both positions be satisfiable.
+    This generator therefore works backwards. It looks for a generable type of the form `σ → τ`, which
+    is a function that gives the target type `τ`, and it takes `σ` as the argument type. This is the
+    rule of Pałka et al. that both positions must be satisfiable.
 
-    As with `genGenerableTy`, the fallback branch is retained with positive weight,
-    so the support is still exactly `genLMonoTy`'s (see `genAppArgTy_support`) and
-    the existing proofs continue to apply. -/
+    As in `genGenerableTy`, the fallback branch stays with a positive weight. Therefore the support is
+    still exactly the support of `genLMonoTy`, and each existing proof still applies. -/
 def genAppArgTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) : G LMonoTy :=
   let generable := generableTypesFromCtx bctx fctx octx
-  -- Argument types `σ` of generable function types `σ → τ` returning the target.
-  -- The `inGenLMonoTySupport` guard is a separate outer `filter` (rather than folded
-  -- into the `filterMap`) so that membership immediately yields the predicate,
-  -- which is what `genAppArgTy_support` needs.
+  -- The argument type `σ` of each generable function type `σ → τ` that gives the target type.
+  -- The `inGenLMonoTySupport` guard is a separate outer `filter`, and it is not a part of the
+  -- `filterMap`. Therefore membership in the list gives the predicate at once, which is what the
+  -- support proof needs.
   let argTys := (generable.filterMap (fun ty =>
     match ty with
     | .tcons "arrow" [σ, ret] => if ret == τ then some σ else none
@@ -744,61 +708,57 @@ def genAppArgTy [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifi
 
 -- ── Shared helpers ──────────────────────────────────────────────────
 
-/-- Build a left-nested application: `foldl app base [a₁, a₂, ...] = app (app base a₁) a₂ ...` -/
+/-- Build an application that nests to the left, such as `app (app base a₁) a₂`. -/
 def mkApps (base : LExpr') (args : List LExpr') : LExpr' :=
   args.foldl (fun acc arg => .app () acc arg) base
 
--- ── IndirPoly rule helpers ──────────────────────────────────────────
+-- ── The helpers for the IndirPoly rule ──────────────────────────────
 
-/-- A polymorphic operator context entry: a name paired with a polymorphic type
-    scheme (`LTy`). -/
+/-- A context of polymorphic operators. Each entry is a name and a polymorphic type scheme. -/
 abbrev PolyOpCtx := List (String × Lambda.LTy)
 
 open Lambda in
-/-- Unify two monotypes using Strata's constraint unification.
-    Returns `none` on failure, or `some subst` on success. -/
+/-- Unify two monotypes with the constraint unification of Strata. The result is `some subst` on
+    success, and `none` on failure. -/
 def unifyTypes (t1 t2 : LMonoTy) : Option Lambda.Subst :=
   match Constraints.unify [(t1, t2)] .empty with
   | .ok si => some si.subst
   | .error _ => none
 
-/-- Decomposes an arrow type into a pair consisting of (list of argument types, return type)-/
+/-- Take an arrow type apart into the list of its argument types and its result type. -/
 def decomposeArrow : LMonoTy → List LMonoTy × LMonoTy
   | .tcons "arrow" [σ, rest] =>
     let (args, ret) := decomposeArrow rest
     (σ :: args, ret)
   | ty => ([], ty)
 
-/-- Build a single-scope `Lambda.Subst` from an association list of type-variable
-    bindings.
+/-- Build a `Lambda.Subst` of one scope from an association list of type-variable bindings.
 
-    `Lambda.Subst` is a stack of scopes; upstream made each scope an opaque
-    hash map (`Strata.Util.HMap`) rather than an association list, so a scope can
-    no longer be written as a list literal. Reversing before `HMap.ofList`
-    preserves the association-list convention that the *first* binding for a key
-    wins (`HMap.ofList` would otherwise let the last one win). -/
+    A `Lambda.Subst` is a stack of scopes, and each scope is a hash map. The function reverses the list
+    before `HMap.ofList`, so that the *first* binding for a key wins. That is the convention of an
+    association list. `HMap.ofList` alone lets the last binding win. -/
 def substScope (bindings : List (TyIdentifier × LMonoTy)) : Lambda.Subst :=
   [Strata.Util.HMap.ofList bindings.reverse]
 
-/-- Find free type variables that haven't been instantiated in a substituion,
-    i.e. `findFreeTyVars boundVars subst` elements of `boundVars` that don't appear as keys in `subst`. -/
+/-- The free type variables that a substitution does not instantiate. The result holds each element of
+    `boundVars` that is not a key of `subst`. -/
 def findFreeTyVars (boundVars : List TyIdentifier) (subst : Lambda.Subst) : List TyIdentifier :=
   boundVars.filter (fun v => Strata.Util.HMaps.find? subst v == none)
 
--- ── Alpha-renaming for polymorphic operators (OpsConsistent fix) ──────
--- Without freshening type variables, a polymorphic factory
--- function whose type variables shares a name with a free type variable of
--- the target type (e.g. `id : ∀α. α → α` at target `.ftvar "α"`) would result in an `.op`
--- annotation that is *not* a valid type instantiation of the factory function's polymorphic
--- type, violating `OpsConsistent`. Freshening bound type variables before unification prevents this problem.
+-- ── Alpha renaming for a polymorphic operator ───────────────────────
+--
+-- A bound type variable of a polymorphic factory function can have the same name as a free type
+-- variable of the target type. An example is `id : ∀α. α → α` at the target `.ftvar "α"`. Without a
+-- rename, the annotation on the `.op` node is then not a valid instance of the polymorphic type of
+-- the function, and the term does not satisfy `OpsConsistent`. A rename of each bound type variable
+-- before unification stops this problem.
 
-/-- A supply of candidate fresh type-variable names: `a, b, …, z, a1, b1, c1, …` —
-    `freshNameSupply n` returns a list containing at least `n` distinct names. -/
+/-- A supply of candidate names for a fresh type variable, which is `a`, `b` up to `z`, and then `a1`,
+    `b1` and more names. `freshNameSupply n` gives a list of `n` or more different names. -/
 def freshNameSupply (n : Nat) : List TyIdentifier :=
-  -- Names are grouped by numeric suffix: suffix `i` contributes the whole
-  -- alphabet `a…z` tagged with `i` (suffix 0 is untagged), giving 26 names per
-  -- suffix — `a b … z, a1 b1 … z1, a2 …`. Using `minCount / 26 + 1` suffixes
-  -- yields at least `minCount` names (the caller filters/truncates from there).
+  -- A numeric suffix groups the names. The suffix `i` gives the whole alphabet with that suffix,
+  -- which is 26 names. The suffix 0 is empty. Therefore `n / 26 + 1` suffixes give `n` or more
+  -- names, and the caller then filters the list.
   let numSuffixes := n / 26 + 1
   -- suffixes are "", "1", "2", ...
   let suffixes := "" :: (fun i => toString (i + 1)) <$> (List.range numSuffixes)
@@ -806,10 +766,8 @@ def freshNameSupply (n : Nat) : List TyIdentifier :=
     (List.range 26).flatMap (fun c =>
       [String.append (Char.toString $ Char.ofNat (97 + c)) suffix]))
 
-/-- Alpha-rename bound variables that collide with `varsAlreadyInUse`.
-    Returns `(freshened bound var names, freshened monotype body)`. Bound
-
-    See comments in function body for more details. -/
+/-- Rename each bound variable whose name is also in `varsAlreadyInUse`. The result is the new list of
+    names for the bound variables, together with the body of the monotype after the rename. -/
 def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
     (varsAlreadyInUse : List TyIdentifier) : List TyIdentifier × LMonoTy :=
   -- The conflicting type variables are the ones that appear in `varsAlreadyInUse`
@@ -818,7 +776,7 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
   -- Aggregate all the type variables that are in use
   let allTypeVarsInUse := varsAlreadyInUse ++ conflictingTyVars
 
-  -- Obtain fresh names (names that aren't in the set of all used names)
+  -- The fresh names, which are the names outside the set of each name in use.
   let numFreshNames := allTypeVarsInUse.length + conflictingTyVars.length + 1
   let freshNames := (freshNameSupply numFreshNames).filter (· ∉ allTypeVarsInUse)
 
@@ -826,7 +784,7 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
   let subst := conflictingTyVars.zip freshNames
 
   -- Apply the substitution to the bound variables
-  -- (any variables which aren't mapped by `subst` are left unchanged)
+  -- A variable that the substitution does not map stays unchanged.
   let renamedBoundVars := (fun v => (subst.lookup v).getD v) <$> boundVars
 
   -- Apply the `subst` to `monoTy` (the body of the universally quantified type)
@@ -838,35 +796,35 @@ def freshenBoundVars (boundVars : List TyIdentifier) (monoTy : LMonoTy)
   (renamedBoundVars, renamedTy)
 
 
-/-- Collect the concrete (name, appliedArgTys) pairs that result from instantiating
-    polymorphic operators against the target type `τ`. This function
-    determines which polymorphic factory functions can be invoked
-    if we want to generate a term of type `τ`.
+/-- The concrete candidates that come from an instantiation of a polymorphic operator against the
+    target type `τ`. Each candidate is a name together with the concrete types of the arguments that
+    the term applies. The result therefore says which polymorphic factory functions can build a term of
+    the type `τ`.
 
-    Unlike the monomorphic `findOpsInCtx`, a polymorphic operator is considered at
-    **every split point** `k ∈ [0, arity]`: we apply only the first `k` arguments
-    and leave the suffix `σ_{k+1} → … → σₙ → retTy` to unify with the target `τ`.
-    This means a single scheme may yield several candidates — one per split point at
-    which its instantiated suffix can equal `τ`. In particular:
-    - `k = 0` (the nullary/partial case) is included, so a scheme like
-      `Sequence.empty : ∀a. seq a` is reachable at `seq int` and a partially-applied
+    The monomorphic `findOpsInCtx` looks at a full application only. This function looks at **each
+    split point** `k` from 0 up to the arity. It applies the first `k` arguments, and it unifies the
+    remaining arrow type with the target `τ`. Therefore one scheme can give more than one candidate,
+    which is one candidate for each split point whose remaining type can equal `τ`. Two consequences
+    follow:
+
+    - The split point `k = 0` is included. A scheme such as `Sequence.empty : ∀a. seq a` is therefore
+      reachable at the target `seq int`, and a partial application such as
       `Sequence.append s : seq int → seq int` is reachable at an arrow target.
-    - the returned `appliedArgTys` are the concrete types of exactly those `k`
-      arguments, so `genIndirPoly`'s annotation `appliedArgTys.foldr arrow τ` is the
-      operator's fully-instantiated arrow type (a genuine instance of its scheme).
+    - The result gives the concrete types of exactly those `k` arguments. Therefore the annotation that
+      `genIndirPoly` builds is the fully instantiated arrow type of the operator, and it is a true
+      instance of its scheme.
 
-    The argument `generableTys` is a collection of types that are generable given the
-    context, while `sampledTys` contains a list of random types with which to
-    instantiate type variables.
+    `generableTys` holds the types that the context can generate. `sampledTys` holds random types to
+    instantiate a type variable with.
 
-    The argument `maxNumArgs` is an upper bound on the **arity** of a polymorphic
-    factory function's scheme (by default, this is 3); it bounds the number of
-    arguments the scheme takes, not the number applied at a candidate split point. -/
+    `maxNumArgs` is an upper limit on the **arity** of the scheme of a polymorphic factory function.
+    Its default value is 3. It limits the number of arguments that the scheme takes, and not the number
+    that a candidate applies. -/
 def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
     (generableTys : List LMonoTy) (sampledTys : List LMonoTy) (maxNumArgs : Nat := 3)
     : List (String × List LMonoTy) :=
 
-  -- Collect all type variables in the set of generable types
+   -- Collect all type variables in the set of generable types
   let tyVarsInGenerableSet := generableTys.flatMap LMonoTy.freeVars
 
   -- Determine the set of type variables which are already "in use",
@@ -987,26 +945,23 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
   -- Then, apply the operator to all the args
   pure (mkApps opExpr args)
 
-/-- Generate a well-typed `LExpr` of type `τ` using the IndirPoly rule from
-    Pałka et al. (2011, Section 4). Calls polymorphic library functions by:
-    1. Unifying the function's return type with the target type `τ`
-    2. Sampling undetermined type variables from the set of generable types
-    3. Generating arguments at the resulting concrete types
+/-- Generate a well-typed `LExpr` of the type `τ` with the IndirPoly rule of Pałka et al. 2011,
+    Section 4. The rule applies a polymorphic library function in three steps:
+    1. It unifies the result type of the function with the target type `τ`.
+    2. It samples a type from the set of generable types for each type variable that step 1 leaves
+       open.
+    3. It generates each argument at the concrete type that steps 1 and 2 give.
 
-    The structure mirrors the monomorphic Indir rule (`genIndir`):
-    given a list of `(name, concreteArgTys)` candidates, choose one,
-    generate args via `mapM genArg`, and assemble via `mkApps`.
+    The structure follows the monomorphic Indir rule: from a list of candidates, draw one, generate
+    each argument with `genArg`, and assemble the term with `mkApps`.
 
-    **Both the argument generator and the no-candidate fallback are parameters**
-    (`genArg`, `fallback`), following the same open-recursion style as
-    `genApp`/`genIte`/`genEq`. That is what removes every mention of
-    `genLExprBase` from this definition, which in turn is what lets
-    `genLExprBase` call *it*. `genIndirPoly` below restores the
-    historical defaults for both.
+    **The argument generator `genArg` and the fallback are both parameters.** This is the same open
+    style of recursion as in `genApp`, `genIte` and `genEq`. It removes each mention of `genLExprBase`
+    from this definition, and that is what lets `genLExprBase` call this function. `genIndirPoly` below
+    gives a default value to each of the two parameters.
 
-    There is deliberately **no `depth` parameter**: `depth` was only ever
-    consumed by the default argument generator and the fallback, and both are now
-    supplied by the caller. -/
+    This function takes **no `depth` parameter**, because only the argument generator and the fallback
+    need a depth, and the caller supplies both of them. -/
 def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (bctx : BVarCtx) (τ : LMonoTy)
     (genArg : LMonoTy → G LExpr') (fallback : G LExpr')
@@ -1050,44 +1005,38 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
 
 -- ── Expression generator ─────────────────────────────────────────────
 
-/-- Generate a well-typed `LExpr` of type `τ` with term depth bounded by the
-    first `Nat` argument. At depth 0, only leaf expressions (bvar, fvar, op,
-    constants) are produced; at depth `n+1`, compound expressions may be
-    produced with sub-expressions at depth `n`.
+/-- Generate a well-typed `LExpr` of the type `τ`. The first `Nat` argument is an upper limit on the
+    depth of the term. At the depth 0, the generator gives a leaf only, which is a bound variable, a
+    free variable, an operator or a constant. At the depth `n + 1`, it can give a compound expression
+    whose subexpressions have the depth `n`.
 
-    The generated term satisfies `HasTypeA' bctx e τ` (see `genLExpr_sound`).
+    Each generated term satisfies `HasTypeA' bctx e τ`.
 
-    ## The Indir/IndirPoly branches
+    ## The Indir and IndirPoly branches
 
-    Each `n + 1` case carries, at the end of its `frequency` list, a
-    **monomorphic Indir** branch and a **polymorphic IndirPoly** branch. Because
-    they live *here* rather than only in `genLExpr`, a factory application — and
-    in particular a *polymorphic* one — can appear in any position this generator
-    produces: under `ite` arms, under `abs`/`quant` bodies, and in `genApp`'s
-    function and argument. Formerly the polymorphic rule existed only at
-    `genLExpr`'s root and in Indir argument position, so
-    `if c then Sequence.length s else #0` was outside the support.
+    Each `n + 1` case holds a **monomorphic Indir** branch and a **polymorphic IndirPoly** branch, at
+    the end of its `frequency` list. The branches are *here* and not only in `genLExpr`. Therefore a
+    factory application, and in particular a polymorphic one, can appear at each position that this
+    generator gives. Those positions include an `ite` arm, an `abs` body, a `quant` body, and the
+    function and the argument of an application.
 
-    Both branches draw their arguments from `genLExprBase … n`, the *smaller*
-    depth index. That keeps this definition **structurally recursive** (`#print`
-    shows `Nat.brecOn`, not `WellFounded.fix`), so it stays reducible and the
-    ~150 `simp only [genLExprBase]` / `rw [genLExprBase]` proof sites keep
-    working. Making this and `genLExpr` *mutually* recursive would instead call
-    `genLExprBase (n + 1)` from `genLExpr (n + 1)` at an equal index, forcing a
-    lexicographic measure, turning `genLExprBase` `@[irreducible]`, and breaking
-    definitional unfolding at every one of those sites.
+    Both branches draw each argument from `genLExprBase` at the *smaller* depth index `n`. Therefore
+    this definition is **structurally recursive**, and it stays reducible. Many proofs unfold it with
+    `simp only [genLExprBase]` or with `rw [genLExprBase]`, and they need that reducibility. A
+    *mutual* recursion between this function and `genLExpr` would instead call `genLExprBase (n + 1)`
+    from `genLExpr (n + 1)`, at an equal index. That form of recursion needs a lexicographic measure,
+    it makes `genLExprBase` irreducible, and it then breaks each of those proofs.
 
-    The depth-`0` cases deliberately have no Indir branches: a fully-applied
-    operator at the depth floor would leave no budget for its arguments.
+    The cases at the depth 0 hold no Indir branch, because a full application at the depth floor
+    leaves no budget for its arguments.
 
     Tagged `@[tunable (depth := n)]`, so every branch weight is a runtime knob.
-    `genLExprBase.tuned θ` reads each weight from `θ` at the remaining depth `n`, and it
-    threads `θ` through its own recursion. There is one site per generated type at
-    `n + 1`, so there are ten sites. The `n = 0` arms are uniform `oneOf`s and have no
-    weight to tune.
+    `genLExprBase.tuned θ` reads each weight from `θ` at the remaining depth `n`, and it threads `θ`
+    through its own recursion. There is one site per generated type at `n + 1`. The `n = 0` arms are
+    uniform `oneOf`s and have no weight to tune.
 
-    Set a weight *per rule across all ten sites* rather than per site. The `ExprIdx` role
-    lists in `StrataGenerators.TuningProfiles` do exactly that. -/
+    Set a weight *per rule across every site* rather than per site. The `ExprIdx` role lists in
+    `StrataGenerators.TuningProfiles` do exactly that. -/
 @[tunable (depth := n)]
 def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
@@ -1126,15 +1075,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx (.arrow τ₁ τ₂)).length > 0
           then pickOp octx _ ho
           else genAbs (genLExprBase fctx octx pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is (.arrow τ₁ τ₂), with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.arrow τ₁ τ₂)).length > 0
           then genIndir octx (.arrow τ₁ τ₂) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.arrow τ₁ τ₂)),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx (.arrow τ₁ τ₂)
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1183,15 +1129,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .bool).length > 0
           then pickOp octx .bool ho
           else genBoolConst),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is .bool, with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx .bool).length > 0
           then genIndir octx .bool (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .bool),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx .bool
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1233,15 +1176,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .int).length > 0
           then pickOp octx .int ho
           else genIntConst),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is .int, with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx .int).length > 0
           then genIndir octx .int (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .int),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx .int
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1297,15 +1237,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is (.ftvar name), with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.ftvar name)).length > 0
           then genIndir octx (.ftvar name) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.ftvar name)),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx (.ftvar name)
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1347,15 +1284,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .string).length > 0
           then pickOp octx .string ho
           else genStrConst),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is .string, with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx .string).length > 0
           then genIndir octx .string (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .string),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx .string
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1397,15 +1331,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx .real).length > 0
           then pickOp octx .real ho
           else genRealConst),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is .real, with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx .real).length > 0
           then genIndir octx .real (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .real),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx .real
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1450,15 +1381,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           if ho : (opsOfType octx (.bitvec w)).length > 0
           then pickOp octx (.bitvec w) ho
           else genBitvecConst w),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is (.bitvec w), with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.bitvec w)).length > 0
           then genIndir octx (.bitvec w) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.bitvec w)),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx (.bitvec w)
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1514,15 +1442,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is .regex, with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx .regex).length > 0
           then genIndir octx .regex (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n .regex),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx .regex
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1578,15 +1503,12 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is (.map τ₁ τ₂), with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.map τ₁ τ₂)).length > 0
           then genIndir octx (.map τ₁ τ₂) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂)),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx (.map τ₁ τ₂)
             (genLExprBase fctx octx pctx tvars bctx n)
@@ -1642,53 +1564,22 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickOp octx _ ho
           else if hv : bvars.length > 0 then pickBVar bctx _ hv
           else default),
-        -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is (.seq τ), with arguments drawn from this generator at `n`.
+        -- The monomorphic Indir rule.
         (4, fun () =>
           if hi : (findOpsInCtx octx (.seq τ)).length > 0
           then genIndir octx (.seq τ) (genLExprBase fctx octx pctx tvars bctx n) hi
           else genLExprBase fctx octx pctx tvars bctx n (.seq τ)),
-        -- Polymorphic IndirPoly rule. Having it *here* rather than
-        -- only at `genLExpr`'s root is what makes a polymorphic factory call
-        -- reachable under `ite` arms and `abs`/`quant` bodies.
+        -- The polymorphic IndirPoly rule.
         (4, fun () =>
           genIndirPolyCore fctx octx pctx bctx (.seq τ)
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n (.seq τ))) ]
       (by show 0 < 1+2+2+2+2+4+4; omega)
-  -- ── Other type constructors (datatypes, abstract types, aliases) ──
-  -- Reached for any `tcons` the cases above do not name — in practice a
-  -- *datatype* declared earlier in the program (`List<int>`, `Opt<a>`, …), an
-  -- abstract type, or an alias body.
+  -- ── The other type constructors ──────────────────────────────────
   --
-  -- This used to be `default` (empty support / a thrown `inhabitedWitness`), which
-  -- made every such type **uninhabitable by the base generator**. That is what
-  -- stopped a generated function or procedure body from ever calling a datatype's
-  -- derived functions: a tester `D..isC : D → bool` or accessor `D..hd : D → int`
-  -- is only useful if the argument position — of type `D` — can be filled, and at
-  -- the depth floor arguments come from *this* generator. So the Indir rule kept
-  -- picking those candidates and kept dead-ending.
-  --
-  -- There are no *constants* at such a type, so the only leaves available are the
-  -- context ones: a bound variable, a free variable, or a nullary operator of that
-  -- exact type — the last being precisely a nullary constructor (`Nil : List<a>`,
-  -- `None : Opt<a>`). The branch is still `default` when nothing in scope has the
-  -- type, so support is empty exactly when it was unreachable anyway.
-  --
-  -- **This case is deliberately leaf-only, and so is depth-agnostic** (`| _, τ`),
-  -- unlike every named case above, each of which has `genApp`/`genIte`/Indir/IndirPoly
-  -- branches at `n + 1`. The consequence is precise and worth stating: a
-  -- datatype-typed *argument* is drawn from the context, never built up, so
-  -- `isCons(xs)` is reachable with `xs` a variable or `Nil`, while `isCons(Cons(1,
-  -- Nil))` is not. Extending this case with Indir/IndirPoly branches — letting a
-  -- non-nullary constructor application fill a datatype position — is a real
-  -- coverage gain and is *not* done here. Three proofs discharge this arm by "leaves
-  -- only" (`case h_21` of `genLExprBase_sound`, `_fvars_subset` and
-  -- `_opsConsistentR`), and each would need the inductive hypothesis plus, for
-  -- IndirPoly, the `hPoly` premise. `genLExprBase_termDepth_bound` is unaffected
-  -- either way: it is indexed by the generability of `τ`, which has no datatype
-  -- `tcons` case, so no depth bound is stated for a datatype target at all.
-  | _, τ =>
+  -- Such a type is a datatype, an abstract type or the body of an alias. There is no constant at such a type,
+  -- so this arm gives `default` when each context that it reads is empty.
+  | 0, τ =>
     let bvars := bvarsOfType bctx τ
     oneOf
       [ (fun () =>
@@ -1713,21 +1604,60 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           then pickFVar fctx _ hf
           else default) ]
       (by simp)
+  -- The same three leaves at depth `n + 1`, and also the monomorphic Indir branch
+  -- and the polymorphic IndirPoly branch that each named arm has. Indir applies an
+  -- operator whose result type is `τ`, and a constructor of the datatype is such an
+  -- operator. IndirPoly applies a polymorphic operator at an instance that it
+  -- samples, and a derived function of a polymorphic datatype is such an operator.
+  -- The two branches put a compound term, such as `Cons(1, Nil)`, at the position of an argument. A variable
+  -- and a constructor of arity 0 are the two other terms that can fill that position.
+  | n + 1, τ =>
+    let bvars := bvarsOfType bctx τ
+    frequency
+      [ (2, fun () =>
+          if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else default),
+        (2, fun () =>
+          if ho : (opsOfType octx τ).length > 0
+          then pickOp octx _ ho
+          else if hv : bvars.length > 0 then pickBVar bctx _ hv
+          else if hf : (fvarsOfType fctx τ).length > 0
+          then pickFVar fctx _ hf
+          else default),
+        -- The monomorphic Indir rule.
+        (4, fun () =>
+          if hi : (findOpsInCtx octx τ).length > 0
+          then genIndir octx τ (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n τ),
+        -- The polymorphic IndirPoly rule.
+        (4, fun () =>
+          genIndirPolyCore fctx octx pctx bctx τ
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n τ)) ]
+      (by show 0 < 2+2+2+4+4; omega)
 
 
-/-- The depth-indexed IndirPoly rule: `genIndirPolyCore` with its two generator
-    parameters defaulted the historical way.
+/-- The depth-indexed IndirPoly rule, which is `genIndirPolyCore` with a default value for each of its
+    two generator parameters.
 
-    `genArg` defaults to `genLExprBase … depth` and the no-candidate fallback is
-    `genLExprBase … depth τ`, exactly as before — so every existing call site
-    and every existing proof about `genIndirPoly` continues to mean what it did.
-    `genLExpr` overrides `genArg` with itself at the smaller depth index, which is
-    what makes factory applications nest in *argument* position.
+    The default value of `genArg` is `genLExprBase … depth`, and the default fallback is
+    `genLExprBase … depth τ`. `genLExpr` replaces `genArg` with itself at the smaller depth index, and
+    that is what makes a factory application nest in *argument* position.
 
-    The rule proper lives in `genIndirPolyCore`, defined before `genLExprBase`
-    because `genLExprBase` calls it. This wrapper exists only to hold the
-    `genLExprBase`-valued defaults, which is why it has to be defined here,
-    afterwards. -/
+    The rule itself is in `genIndirPolyCore`, which comes before `genLExprBase`, because
+    `genLExprBase` calls it. This wrapper holds only the defaults that name `genLExprBase`, and it must
+    therefore come after it. -/
 def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
@@ -1736,103 +1666,82 @@ def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
   genIndirPolyCore fctx octx pctx bctx τ genArg
     (genLExprBase fctx octx pctx tvars bctx depth τ) maxNumArgs
 
-/-- Generate a well-typed `LExpr` of type `τ` using the Indir rule from
-    Pałka et al. (2011) in addition to the standard generation rules.
+/-- Generate a well-typed `LExpr` of the type `τ` with the Indir rule of Pałka et al. 2011, together
+    with the standard generation rules.
 
-    When operators in `octx` have result type `τ` (after full application),
-    the generator non-deterministically picks between:
-    - The **Indir rule**: pick such an operator and recursively generate all
-      its arguments at the determined types (no type guessing needed).
-    - The **standard rules** (`genLExprBase`): variables, constants, App with
-      random type, lambda, if-then-else, etc.
+    When an operator of `octx` gives the type `τ` after a full application, the generator draws between
+    two groups of rules:
+    - The **Indir rule**: draw such an operator, and generate each of its arguments at the type that
+      the operator gives. The rule guesses no type.
+    - The **standard rules** of `genLExprBase`: a variable, a constant, an application at a random
+      type, a lambda, an `if-then-else`, and more.
 
-    This produces significantly more fully-applied operator expressions
-    (e.g. `Int.Add #1 #2`) compared to relying solely on the App rule's
-    random type guessing.
+    The result holds many more fully applied operators, such as `Int.Add #1 #2`, than the application
+    rule alone gives with its random type.
 
-    **Factory applications nest.** At depth `n + 1` the arguments of
-    an Indir/IndirPoly application are drawn from `genLExpr` *itself* at the
-    smaller index `n`, so a factory call can appear inside the argument of
-    another factory call — e.g. `Int.Add (Int.SafeDiv #0 #-2) (Int.SafeDiv #0 #0)`,
-    a shape that was unreachable while both branches bottomed out in
-    `genLExprBase`. At the depth floor (`0`) arguments come from
-    `genLExprBase … 0`, i.e. leaves.
+    **A factory application nests.** At the depth `n + 1`, each argument of an Indir application or an
+    IndirPoly application comes from `genLExpr` *itself*, at the smaller index `n`. Therefore a factory
+    call can be the argument of another factory call, as in
+    `Int.Add (Int.SafeDiv #0 #-2) (Int.SafeDiv #0 #0)`. At the depth floor, each argument comes from
+    `genLExprBase` at the depth 0, and it is therefore a leaf.
 
-    Termination is **structural**: every recursive occurrence is at `n` under the
-    `n + 1` pattern, and `genIndir`/`genIndirPoly` are separate non-recursive
-    functions that receive the recursive call as their `genArg` parameter. Passing
-    a recursive call to a higher-order helper this way does not disturb structural
-    recursion (`#print genLExpr` shows `Nat.brecOn`, not `WellFounded.fix`), so no
-    `termination_by`/`decreasing_by` is required. Crucially this also leaves
-    `genLExprBase` alone — it keeps its own structural recursion, so the ~150
-    existing `simp only [genLExprBase]` / `rw [genLExprBase]` proof sites are
-    untouched. Making the two *mutually* recursive would instead force a
-    lexicographic measure, turn `genLExprBase` well-founded and `@[irreducible]`,
-    and break definitional unfolding (`rfl`) at all of those sites.
+    The recursion is **structural**. Each recursive occurrence is at `n` under the pattern `n + 1`.
+    `genIndir` and `genIndirPoly` are separate functions that are not recursive, and each of them takes
+    the recursive call as its `genArg` parameter. A recursive call that goes to a higher-order helper in
+    this way keeps the recursion structural, so this definition needs no `termination_by` and no
+    `decreasing_by`. It also leaves `genLExprBase` alone, and `genLExprBase` keeps its own structural
+    recursion. A *mutual* recursion between the two would instead need a lexicographic measure, it
+    would make `genLExprBase` irreducible, and it would break each proof that unfolds `genLExprBase`
+    by `rfl`.
 
-    ## What this function still adds
+    ## What this function adds
 
-    `genLExprBase` now carries the Indir/IndirPoly rules in its own
-    per-type `frequency` lists, so factory applications — polymorphic ones
-    included — are reachable at *every* subterm position, `ite` arms and
-    `abs`/`quant` bodies among them. The positional gap this docstring used to
-    describe as a "known remaining gap" is closed, and it is closed *inside*
-    `genLExprBase`, not here.
+    `genLExprBase` holds the two Indir rules in each of its own `frequency` lists. Therefore a factory
+    application, and a polymorphic one too, is reachable at each position of a subterm.
 
-    What remains this function's own contribution is the **root-level
-    distribution**: a 1:9 weighting of the base rules against the Indir/IndirPoly
-    rules, against roughly 8:8 in the merged branch lists. It also owns
-    `retryCont`. So `genLExpr` is now a thin distribution-shaping wrapper rather
-    than the only place the polymorphic rule lives.
+    The contribution of this function is the **distribution at the root**. It weights the base rules
+    against the two Indir rules by 1 to 9, and the merged lists in `genLExprBase` weight them about
+    equally. This function also owns `retryCont`.
 
     ## The `retryCont` parameter
 
-    `retryCont` is a **continuation that is invoked to retry generation when it
-    fails**. It receives the argument generator this function would otherwise have
-    used in Indir/IndirPoly argument position, and returns the generator to use
-    instead — so a caller can interpose "if this sub-draw fails, draw it again with
-    fresh randomness" without this module needing to know what failure *is*.
+    `retryCont` is a **continuation that retries generation after a failure**. It takes the argument
+    generator that this function uses in the argument position of the two Indir rules, and it gives the
+    generator to use in place of it. A caller can therefore say "draw this subterm again with new
+    randomness after a failure", and this module needs no definition of a failure.
 
-    Why it has to be a parameter, and why it has to be a *transformer* rather than
-    a plain generator: at depth `n + 1` the argument generator must be *this
-    generator itself at `n`*, so a fixed `LMonoTy → G LExpr'` value would pin the
-    caller to one particular depth. `retryCont` instead threads through the
-    recursion and is therefore applied at **every** level — which is the point,
-    since generation failure compounds multiplicatively with nesting depth and the
-    nested levels are exactly what a caller cannot otherwise reach.
+    The parameter must be a transformer of a generator, and not a plain generator. At the depth
+    `n + 1` the argument generator must be *this generator at `n`*. A fixed value of the type
+    `LMonoTy → G LExpr'` would therefore pin the caller to one depth. `retryCont` instead goes through
+    the recursion, so it applies at **each** level. That is the point, because the probability of a
+    failure grows quickly with the depth of the nesting, and a caller cannot otherwise reach a nested
+    level.
 
-    Note also that `retryCont` at depth `n + 1` wraps the *whole* level-`n`
-    generator, `genIndirPoly`'s type-variable instantiation (`sampledTys`) very much
-    included. So a retrying continuation resamples unfillable instantiations at
-    every nested level, and neither `genIndir` nor `genIndirPoly` needs to change.
+    At the depth `n + 1`, `retryCont` wraps the *whole* generator of the level `n`. That includes the
+    instantiation of a type variable inside `genIndirPoly`. Therefore a continuation that retries also
+    samples a new instantiation at each nested level, and neither `genIndir` nor `genIndirPoly` needs a
+    change.
 
-    Retrying is meaningful only under `Plausible.Gen`, where a failed leaf throws.
-    Under `SetGen.Set` — the semantics the soundness/completeness theorems use —
-    `default` is `∅` rather than an error, so there is no failure to observe and
-    nothing to retry. The abstract `Gen` class deliberately provides no
-    `tryCatch`/`Alternative`, which is precisely why this is a caller-supplied
-    continuation rather than something this function could do itself.
+    A retry has an effect under `Plausible.Gen` only, where a failed leaf throws. Under `SetGen.Set`,
+    which is the semantics of the soundness and completeness theorems, `default` is `∅` and not an
+    error. There is therefore no failure to observe and nothing to retry. The abstract `Gen` class
+    gives no `tryCatch` and no `Alternative`, and that is why the caller supplies this continuation.
 
-    It defaults to `id` (retry nothing) and is placed **last**, after the
-    `optParam` `maxNumArgs`, so every existing positional call site elaborates
-    unchanged and `genLExpr … depth τ` is definitionally what it was before.
-    The ordering matters: putting `retryCont` earlier would silently swallow
-    positional arguments. The theorems in `HasTypeAGen.lean` /
-    `HasTypeAGenOpsConsistent.lean` continue to describe the `retryCont = id` case,
-    which is the honest scope — a retry changes how many attempts a draw needs, not
-    which terms are reachable. -/
+    The default value is `id`, which retries nothing. The parameter is **last**, after the optional
+    parameter `maxNumArgs`, so each positional call site elaborates as before. The order matters,
+    because `retryCont` in an earlier position would silently take a positional argument. The theorems
+    about this generator describe the case `retryCont = id`, which is the honest scope. A retry changes
+    the number of attempts that a draw needs, and not the set of reachable terms. -/
 def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
     (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G LExpr' :=
-  -- The argument generator for the Indir/IndirPoly rules. At the depth floor it is
-  -- the base generator (leaves); above it, `genLExpr` itself at the smaller index
-  -- `n` — which is what lets factory applications nest. The recursion is structural
-  -- on `depth`, so no `termination_by` is needed.
+  -- The argument generator for the two Indir rules. At the depth floor it is the base generator,
+  -- which gives a leaf. Above the floor it is `genLExpr` itself at the smaller index `n`, and that
+  -- is what lets a factory application nest. The recursion is structural on `depth`.
   --
-  -- `retryCont` is the caller's retry continuation (see the docstring): it wraps
-  -- whichever generator we use in argument position, and threads into the
-  -- recursive call so it applies at every level, not just this one.
+  -- `retryCont` is the retry continuation of the caller. It wraps the generator in the argument
+  -- position, and it goes into the recursive call, so it applies at each level.
   let genArg : LMonoTy → G LExpr' :=
     retryCont <|
       match depth with
@@ -1844,83 +1753,66 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         (9, fun () =>
         pick
           (fun () =>
-            -- Monomorphic Indir rule
+            -- The monomorphic Indir rule.
             genIndir octx τ genArg h)
           (fun () =>
-            -- Polymorphic IndirPoly rule (Pałka et al. 2011, Section 4)
+            -- The polymorphic IndirPoly rule.
             genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs genArg)) ]
       (by simp)
   else
-    -- No monomorphic Indir candidates; try IndirPoly or fall back to base
+    -- There is no monomorphic candidate, so try IndirPoly or the base generator.
     pick
       (fun () => genLExprBase fctx octx pctx tvars bctx depth τ)
       (fun () => genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs genArg)
 
 -- ── Top-level generators ─────────────────────────────────────────────
 
-/-- Generate a well-typed closed expression (no free variables, no operators)
-    with bounded depth. -/
+/-- Generate a well-typed closed expression of a bounded depth. Such an expression holds no free
+    variable and no operator. -/
 def genClosedLExpr [Gen G] (tvars : List TyIdentifier) (depth : Nat)
     (maxNumArgs : Nat := 3) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
   genLExpr [] ∅ [] tvars [] depth τ maxNumArgs
 
-/-! ## Core operator contexts
+/-! ## The operator contexts of Strata Core
 
-The monomorphic and polymorphic operator contexts drawn from Strata's
-`Core.Factory`. These live here (rather than in `TestSupport`) so that
-*generators* — not just the test harness — can be seeded with a realistic set of
-operators; `ProgramGen` uses them for axiom, function, and procedure bodies.
-`TestSupport` re-exports them for the property suites. -/
+The two definitions below give the monomorphic operators and the polymorphic operators of
+`Core.Factory`. They are here, and not in `TestSupport`, so that a *generator* can also start from a
+realistic set of operators. `ProgramGen` uses them for the body of an axiom, a function and a
+procedure. `TestSupport` exports them again for the property suites. -/
 
-/-- Every monomorphic operator of Strata's `Core.Factory`, as a pair of a name and
-    a curried type. The Indir generation rule uses this context.
+/-- Each monomorphic operator of `Core.Factory`, as a name and a curried type. The Indir generation
+    rule uses this context.
 
-    `factoryOps` derives the list from the factory itself, so the vocabulary here
-    cannot drift from the operators that Core defines. An earlier version of this
-    definition was a hand-written list of 40 entries. Each entry named a real
-    factory operator, and each type agreed with the factory, but the list held only
-    the operators on `int`, `bool` and a few on `string` and `regex`. It therefore
-    excluded most operators on `string`, and every operator on `real` and on
-    `bitvec`, out of the 310 that the factory defines.
+    The definition derives the list from the factory itself. Therefore the vocabulary here cannot differ
+    from the operators that Core defines. A list that a person writes by hand can differ from the
+    factory, and it then hides each operator that it does not name. A generator over such a list cannot
+    build a term such as `Str.Length "é"`, and a property about that operator then says nothing.
 
-    A generator over the smaller list cannot build a term such as `Str.Length "é"`
-    or `Bv8.SafeSDiv`, so each property about those operators passed vacuously. The
-    Tyche panels showed the same gap as an absence of coverage.
-
-    The body repeats the body of `factoryOps` rather than a call to it, because
-    `factoryOps` lives in `HasTypeAGen/Defs.lean`, and that file imports this one.
-    The two must stay the same. `coreMonoOps_eq_factoryOps` in `Defs.lean` proves
-    that they are, so a change to one of them and not the other breaks the build. -/
+    The body repeats the body of `factoryOps` and does not call it, because `factoryOps` is in
+    `HasTypeAGen/Defs.lean`, and that file imports this one. The two must stay the same, and a theorem
+    in `Defs.lean` proves that they are. Therefore a change to one of them alone breaks the build. -/
 def coreMonoOps : OpCtx :=
   OpCtx.ofList <| Core.Factory.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
-/-- Every **polymorphic** operator of Strata's `Core.Factory`, as a name paired with its
-    full type scheme `∀ typeArgs. mkArrow' output inputs`. The IndirPoly generation rule
-    uses this context (Pałka et al. 2011, Section 4).
+/-- Each **polymorphic** operator of `Core.Factory`, as a name and its full type scheme. The IndirPoly
+    generation rule uses this context.
 
-    Derived from the factory for exactly the reason `coreMonoOps` is (see there): a
-    hand-written list drifts. The list this replaced had drifted three ways against
-    `strata-org/Strata` `main`:
+    The definition derives the list from the factory, for the same reason as `coreMonoOps`. A list that
+    a person writes by hand can differ from the factory in three ways. It can omit an operator, and no
+    generated term can then apply that operator. It can name an operator that the factory does not
+    define, and a draw of that operator then gives a term that Core cannot interpret. It can also give
+    an operator the wrong arity, and the annotation on the generated term then disagrees with the
+    factory.
 
-    * it was **missing** `mapConst`, `Sequence.select!` and `TriggerGroup.addTrigger`, so
-      no generated term could apply them and every property about them passed vacuously;
-    * it carried a `const : ∀ k v. v → Map k v` that `Core.Factory` does **not** define —
-      the real entry is `mapConst`; and
-    * its `Sequence.build` was `∀ a. a → Sequence a`, while the factory's takes *two*
-      arguments (`∀ a. Sequence a → a → Sequence a`). A generated `Sequence.build e` was
-      therefore annotated at an arity the factory disagrees with, which is what the
-      printer reported as "unknown operation, rendering as generic call: Sequence.build".
+    A monomorphic entry of the factory is excluded, which is the condition `typeArgs ≠ []`.
+    `coreMonoOps` already covers such an entry through the Indir rule, and a second copy here would only
+    repeat that work at each draw.
 
-    Monomorphic factory entries are excluded (`typeArgs ≠ []`): `coreMonoOps` already
-    covers them through the Indir rule, and admitting them here would only duplicate that
-    work at every draw.
-
-    The body repeats the body of `factoryPolyOps` (restricted to the polymorphic entries)
-    rather than calling it, because `factoryPolyOps` lives in `HasTypeAGen/Defs.lean` and
-    that file imports this one. `corePolyOps_eq_factoryPolyOps` in `Defs.lean` proves the
-    two agree, so a change to one and not the other breaks the build. -/
+    The body repeats the body of `factoryPolyOps`, for the polymorphic entries, and does not call it,
+    because `factoryPolyOps` is in `HasTypeAGen/Defs.lean`, and that file imports this one. A theorem in
+    `Defs.lean` proves that the two agree, so a change to one of them alone breaks the build. -/
 def corePolyOps : PolyOpCtx :=
   Core.Factory.toArray.toList.filterMap fun f =>
     if f.typeArgs.isEmpty then none

@@ -1,32 +1,33 @@
 import Strata.Util.ListUtils
 
 /-!
-# A local fixed-point fact about `List.dedup`
+# A local fact about a fixed point of `List.dedup`
 
-Strata's `List.dedup` (in `Strata.Util.ListUtils`) is used by `genFunction` to make
-`typeArgs` and the input identifiers `Nodup`. Its lemmas live in
-`Strata.Util.ListUtilsProps`, which this package reaches transitively via
-`Strata.DL.Lambda.LTyUnify`, so `List.nodup_dedup` and `List.mem_of_dedup` are used
-directly at their call sites rather than re-proved here. Note that upstream's
-`mem_of_dedup` is oriented `a ∈ l ↔ a ∈ l.dedup`.
+`genFunction` uses the `List.dedup` of Strata to make `typeArgs` and the input identifiers
+hold no duplicate. The lemmas for that function are in another module of Strata, which this
+package reaches through its other imports. `List.nodup_dedup` and `List.mem_of_dedup`
+therefore appear at their call sites, and this file does not prove them again. Note that the
+`mem_of_dedup` of upstream reads `a ∈ l ↔ a ∈ l.dedup`.
 
-The one fact upstream does not provide is the fixed-point law below, which
-completeness needs: a well-typed function's `Nodup` `typeArgs`/inputs have to be
-reachable by the dedup-based generators. It is a short induction on `List.dedup`'s
-definition (`| a :: as => let as := as.dedup; if a ∈ as then as else a :: as`).
+Upstream gives no law about a fixed point, and the proof of completeness needs one: the
+generators that use `dedup` must be able to reach the `typeArgs` and the inputs of a
+well-typed function, and those lists hold no duplicate. The theorem below is a short
+induction on the definition of `List.dedup`, which is
+`| a :: as => let as := as.dedup; if a ∈ as then as else a :: as`.
 
-Mathlib also defines `List.dedup`, with a fixed-point lemma among others, but it is
-unavailable here: once `Strata.Util.ListUtils` is in the environment, importing a
-Mathlib module that defines `List.dedup` fails with an "environment already
-contains `List.dedup`" error. `List.nodup_cons` comes from core/Batteries (no
-clash), so this file compiles in the `HasTypeAGen`-importing environment.
+Mathlib also defines `List.dedup`, with a lemma about a fixed point. This file cannot use
+that lemma. Once the module of Strata that defines `List.dedup` is in the environment, an
+import of a Mathlib module that also defines `List.dedup` fails with the error that the
+environment already holds `List.dedup`. `List.nodup_cons` comes from the core library and
+from Batteries, and it therefore has no such collision. This file compiles in the
+environment that `HasTypeAGen` imports.
 -/
 
 namespace StrataGenerators.Dedup
 
-/-- A `Nodup` list is a fixed point of `List.dedup`. Needed for completeness:
-    a well-typed function's `Nodup` `typeArgs`/inputs are reachable by the
-    dedup-based generators. -/
+/-- A list that holds no duplicate is a fixed point of `List.dedup`. The proof of completeness needs
+    this theorem: the generators that use `dedup` must be able to reach the `typeArgs` and the inputs
+    of a well-typed function. -/
 theorem dedup_eq_self {α} [DecidableEq α] (l : List α) (h : l.Nodup) :
     l.dedup = l := by
   induction l with

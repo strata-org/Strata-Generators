@@ -7,21 +7,22 @@ import Strata.Languages.Core.Identifiers
 open Lambda
 
 /-!
-# SMT / concrete-eval agreement (opt-in)
+# Symbolic and concrete evaluation agree, under a gate
 
-A port of `StrataTest/Languages/Core/Tests/ExprEvalTest.lean`'s `checkValid` to
-run against *this repo's* generators. For a generated closed term `e`:
+This module runs the `checkValid` check of upstream against the generators of *this*
+repository. For a generated closed term `e`, the check does two steps:
 
-1. annotate `e`, then concretely evaluate it (`LExpr.evalWithLState`);
-2. if it reduces to a constant, SMT-encode both `e` and its evaluated result
-   (`Core.toSMTTerm`), assert their equality (`Strata.SMT.Factory.eq`), and ask
-   the solver whether that equality is provable (`Core.SMT.dischargeObligation`).
+1. It annotates `e`, and it then evaluates `e` concretely with `LExpr.evalWithLState`.
+2. If `e` reduces to a constant, it encodes both `e` and the result of the evaluation with
+   `Core.toSMTTerm`, it asserts that the two are equal with `Strata.SMT.Factory.eq`, and it
+   asks the solver whether that equality is provable, through
+   `Core.SMT.dischargeObligation`.
 
-This cross-checks the in-Lean evaluator against an independent SMT semantics.
+The check therefore compares the evaluator in Lean against the separate semantics of SMT.
 
-Because `checkValid` is `IO Bool` and needs a **live SMT solver** (`cvc5`/`z3`) at
-runtime, this property is opt-in: it is only added to the LSpec suite when the
-driver is run with `lake test -- --smt` (see `TestMain`). It is *not* part of the default run.
+The check is an `IO Bool` and it needs a **live SMT solver**, which is `cvc5` or `z3`, at run
+time. A gate therefore controls this property: the suite holds it only when the driver runs
+with `lake test -- --smt`. It is *not* a part of the default run.
 
 Two further constraints, which the code below matches:
 
@@ -70,18 +71,17 @@ For this reason the check runs each solver in `agreementSolvers` on each term. I
 also names each solver that this machine cannot launch, so that an absent solver
 does not become a silent loss of coverage.
 
-The harness reports a tally for each type, and it names each type that gave no
-checkable term. It does so because silent vacuity, which is a property that
-holds because it never truly ran, is the failure mode that this suite is most
-exposed to. In an earlier example of that failure mode, 599 of 600 inputs to the
-ANF properties were no-ops.
+The harness reports a count for each type, and it names each type that gave no term that it
+can check. It does so because silent vacuity is the failure mode that this suite meets most
+often. Silent vacuity is a property that holds because it never really ran.
 -/
 
 namespace StrataGenerators.SmtEval
 
-/-- Port of `ExprEvalTest.encode`: annotate `e`, evaluate it, and — when the
-    result is a constant — return the SMT term asserting `e = eval e` together
-    with the encoding context. `none` means `e` did not reduce to a constant. -/
+/-- Annotates `e` and evaluates it. When the result is a constant, the function returns the SMT term
+    that asserts that `e` equals the result, and the context of the encoder. A result of `none` means
+    that `e` did not reduce to a constant. This function follows the `encode` function of the
+    upstream test. -/
 def encodeExpr (e : LExpr') (tenv : TEnv Unit) (init_state : LState Core.CoreLParams) :
     Except Std.Format (Option (Strata.SMT.Term × Core.SMT.Context)) := do
   let init_state ← init_state.addFactory Core.Factory |>.mapError (fun dm => f!"{dm.message}")
@@ -97,19 +97,20 @@ def encodeExpr (e : LExpr') (tenv : TEnv Unit) (init_state : LState Core.CoreLPa
     return .some (Strata.SMT.Factory.eq smt_term_lhs smt_term_rhs, ctx)
   | _ => return .none
 
-/-- The verdict of the SMT/concrete cross-check on one term:
-    - `.ok none` — the term did not reduce to a constant (skip, not a failure);
-    - `.ok (some true)` — the solver confirmed `e = eval e`;
-    - `.ok (some false)` — the solver reported them *not* equal (a real
-      counterexample to evaluator/SMT agreement);
-    - `.error msg` — the term could not be encoded, or the solver errored / was
-      unavailable (reported, but not scored as a counterexample).
+/-- The verdict of the comparison between SMT and concrete evaluation, for one term. There are four
+    results:
+    - `.ok none`: the term did not reduce to a constant. This is a skip and not a failure.
+    - `.ok (some true)`: the solver confirmed that `e` equals the result of the evaluation.
+    - `.ok (some false)`: the solver reported that the two are *not* equal. This is a real
+      counterexample to the agreement between the evaluator and SMT.
+    - `.error msg`: the encoder could not write the term, or the solver gave an error, or the solver
+      is absent. The report gives the message, and it scores no counterexample.
 
-    `solver` names the executable to run. It defaults to
-    `Core.VerifyOptions.default.solver`, which is `cvc5`. The choice of solver
-    changes the verdict on a term whose SMT-LIB form is malformed: cvc5 gives a
-    parse error, which becomes `.error`, and z3 accepts the query and can then
-    disagree, which becomes `.ok (some false)`. Read `smtEvalAgreementAction`. -/
+    `solver` names the executable to run. Its default value is
+    `Core.VerifyOptions.default.solver`, which is `cvc5`. The choice of solver changes the verdict on
+    a term whose SMT-LIB form is not well formed. cvc5 gives a parse error, which becomes an
+    `.error`. z3 accepts the query, and it can then disagree, which becomes `.ok (some false)`. See
+    `smtEvalAgreementAction`. -/
 def checkValidExpr (e : LExpr')
     (solver : String := Core.VerifyOptions.default.solver) :
     IO (Except String (Option Bool)) := do
@@ -121,7 +122,7 @@ def checkValidExpr (e : LExpr')
   | .ok (.some (smt_term, ctx)) =>
     try
       let pctx ← Strata.Pipeline.PipelineContext.create (outputMode := .quiet) (profilePipeline := false)
-      -- Closed terms have no free variables, so the typed-ident list is empty.
+      -- A closed term holds no free variable, so the list of typed identifiers is empty.
       IO.FS.withTempDir (fun tempDir => do
         let filename := tempDir / "exprEvalTest.smt2"
         let ans ← Core.SMT.dischargeObligation
@@ -175,72 +176,63 @@ def solverAvailable : IO Bool := solverAvailableNamed solverName
 def availableAgreementSolvers : IO (List String) :=
   agreementSolvers.filterM solverAvailableNamed
 
--- ── The base-type schedule ────────────────────────────────────────────
+-- ── The schedule over the base types ──────────────────────────────────
 --
--- The schedule covers each base type that has an SMT encoding. That coverage is
--- what exercises the adversarial primitive generators
--- (`StrataGenerators.PrimitiveGens`) and the properties about bitvector overflow
--- and about strings and UTF-8.
+-- The schedule covers each base type that has an SMT encoding. That coverage is what exercises the
+-- adversarial primitive generators, and the properties about the overflow of a bitvector and about
+-- strings and UTF-8.
 --
--- Generation uses `coreOpCtx`, which is `factoryOps coreFactory`: every operator
--- that Strata's Core truly defines. Earlier versions of this file held four
--- hand-written contexts, one for bitvectors, one for the interpreted string
--- operators, one for the uninterpreted ones, and one for `real`. Each was a
--- transcription of names and types out of `Core.Factory`, and each could drift
--- from it. `coreOpCtx` cannot drift, because it *is* the factory.
+-- The draws use `coreOpCtx`, which is `factoryOps coreFactory` and therefore each operator that
+-- Strata Core defines. `coreOpCtx` cannot differ from the factory, because it *is* the factory. A
+-- separate context for each type, which a person writes as a list of names and types, can differ
+-- from the factory.
 --
--- Every operator in `coreOpCtx` satisfies the first condition that this property
--- needs: it lives in `Core.Factory`, so `addFactory` in `encodeExpr` can reduce
--- it. The second condition, an SMT encoding, does not hold for every operator. An
--- operator without one gives an error with the prefix `encode:`. The harness
--- *reports that error but does not score it*. Therefore an absent encoding becomes
--- a skip, and not a false counterexample, and the schedule needs no list of which
--- operators have an encoding.
+-- Each operator in `coreOpCtx` meets the first condition that this property needs: `Core.Factory`
+-- holds it, so `addFactory` inside `encodeExpr` can reduce it. The second condition, an SMT
+-- encoding, does not hold for each operator. An operator with no encoding gives an error whose
+-- message starts with `encode:`. The harness *gives that error in its report and it scores nothing*.
+-- An absent encoding therefore becomes a skip, and not a false counterexample, and the schedule
+-- needs no list of the operators that have an encoding.
 
-/-- The bitvector widths that `Core.Factory` registers. The list keeps width `1`
-    on purpose. At width 1, `INT_MIN`, `allOnes` and `-1` collapse to one value,
-    which is the discrepancy in the `SDivOverflow` encoding.
+/-- The bitvector widths that `Core.Factory` registers. The list holds the width `1` on purpose. At
+    width 1, `INT_MIN`, `allOnes` and `-1` are one value, and that is the difference in the encoding
+    of `SDivOverflow`.
 
-    Width `2` is **absent**, although `Factory.lean` *defines* the operators at
-    width 2. Compare `ExpandBVOpFuncDefs[1, 2, 8, …]` with
-    `ExpandBVOpFuncNames [1,8,…]` in `WFFactoryArray`. That gap is a known defect,
-    and `Bv2.*` confirms it: the name resolves to no factory entry. -/
+    The width `2` is **absent**, although upstream *defines* the operators at width 2. Compare the
+    list of definitions, which holds `1`, `2`, `8` and more widths, with the list of names in
+    `WFFactoryArray`, which holds `1`, `8` and more widths but not `2`. That difference is a known
+    defect, and a name such as `Bv2.*` shows it: the name resolves to no entry of the factory. -/
 def registeredBvWidths : List Nat := [1, 8, 16, 32, 64]
 
-/-- The base type to test, with the operator context to generate it over.
+/-- Each base type to test, with the operator context for the draws at that type.
 
-    Each entry is a triple of a label, a type and an `octx`. Each entry uses the
-    **same** `octx`, which is `coreOpCtx`, the whole of `Core.Factory`. Only the
-    target type differs between entries.
+    Each entry is a triple of a label, a type and an `octx`. Each entry uses the **same** `octx`,
+    which is `coreOpCtx` and therefore the whole of `Core.Factory`. Only the target type differs
+    between two entries.
 
-    One shared context is what makes each operator reachable at the type where its
-    *result* lives. An operator on strings whose result is not a string is
-    reachable only at the type of that result: `Str.Length` is `string → int`, so
-    it can head only a term of type `int`, and `Str.PrefixOf` can head only a term
-    of type `bool`. A per-type context that holds only the operators *named* for
-    that type therefore hides `Str.Length` from every entry, and the property never
-    builds a term such as `Str.Length "é"`. Then it cannot compare a count of
-    codepoints in Lean against a count of bytes in the solver, which is the
-    sharpest test of the escape function. A measurement confirms this: `Str.Length`
-    appeared in 0 of 40 terms of type `int` over the earlier context for `int` and
-    `bool` alone.
+    One shared context is what makes each operator reachable at the type of its *result*. An
+    operator on strings whose result is not a string is reachable only at the type of that result.
+    `Str.Length` has the type `string → int`, so it can head a term of the type `int` only, and
+    `Str.PrefixOf` can head a term of the type `bool` only. A separate context for each type, which
+    holds only the operators *named* for that type, therefore hides `Str.Length` from each entry, and
+    the property never builds a term such as `Str.Length "é"`. It then cannot compare a count of
+    codepoints in Lean against a count of bytes in the solver, and that comparison is the sharpest
+    test of the escape function.
 
-    The bitvector entries are per-width, because `Core.Factory` names each
-    bitvector operator by width. The width of the entry selects the target type,
-    and `coreOpCtx` supplies the operators at each registered width.
+    There is one entry for each bitvector width, because `Core.Factory` names each bitvector operator
+    with its width. The width of an entry selects the target type, and `coreOpCtx` gives the
+    operators at each registered width.
 
-    The schedule keeps `regex` **absent** as a top-level type, on purpose,
-    although `regex` is a base type and `pickBaseType` generates it. *This*
-    property can test nothing at type `regex`. `regex` has no constant form,
-    because `LConst` has no constructor for it, and Core interprets no `Re.*`
-    operator. Therefore a term of type `regex` can never reduce to a constant, and
-    the harness skips it 100% of the time. An entry for `regex` reports a permanent
-    `regex:0` that nobody can correct, and thus it trains the reader to ignore the
-    warning about vacuity. That warning must stay believable. `regex` still occurs
-    as the type of a *subterm*, through `Str.InRegEx` and `Str.ToRegEx`. To test it
-    directly, use a solver-only property about the regex laws. Two structural facts
-    support this decision: `Denote.lean` gives `regex` no denotation, and
-    `SMT/Translate.lean` refuses to reflect it. -/
+    The schedule holds **no** entry for `regex` as a top-level type, on purpose, although `regex` is
+    a base type and `pickBaseType` gives it. *This* property can test nothing at the type `regex`.
+    `regex` has no constant form, because `LConst` has no constructor for it, and Core interprets no
+    `Re.*` operator. A term of the type `regex` can therefore never reduce to a constant, and the
+    harness skips each such term. An entry for `regex` would report a permanent `regex:0` that no one
+    can correct, and it would teach a reader to ignore the warning about vacuity. That warning must
+    stay useful. `regex` still occurs as the type of a *subterm*, through `Str.InRegEx` and
+    `Str.ToRegEx`. To test the type directly, write a property that only a solver discharges, about
+    the laws of a regular expression. Two facts in the code support this decision: the denotational
+    semantics gives `regex` no denotation, and the translation to SMT refuses it. -/
 def baseTypeSchedule : List (String × LMonoTy × OpCtx) :=
   [ ("int",    .int,    coreOpCtx)
   , ("bool",   .bool,   coreOpCtx)
@@ -249,9 +241,9 @@ def baseTypeSchedule : List (String × LMonoTy × OpCtx) :=
   ++ registeredBvWidths.map (fun w =>
        (s!"bv{w}", (.bitvec w : LMonoTy), coreOpCtx))
 
-/-- Generate a closed term of type `ty` over the operator context `octx`. If the
-    generator hits its fallback for an empty support, try again with new
-    randomness. The result is `none` if no try succeeds. -/
+/-- Makes a closed term of the type `ty` over the operator context `octx`. If the generator reaches
+    its fallback for an empty support, the function tries again with new randomness. The result is
+    `none` when no attempt succeeds. -/
 partial def genClosedBaseTerm (octx : OpCtx) (ty : LMonoTy) (depth : Nat)
     (tries : Nat := 20) : IO (Option LExpr') := do
   if tries == 0 then return none
@@ -261,26 +253,23 @@ partial def genClosedBaseTerm (octx : OpCtx) (ty : LMonoTy) (depth : Nat)
   catch _ =>
     genClosedBaseTerm octx ty depth (tries - 1)
 
-/-- The agreement check between the concrete evaluator and SMT. The user opts in
-    with `--smt`. The result has the shape of the other suite nodes that use `IO`:
-    `(success, passed, attempted, errorMsg)` for `TestSeq.individualIO`.
-    `attempted` counts only the terms that reduced to a constant, which is
-    `passed + failed`. The message reports each term that did not reduce, and each
-    error from the encoder or the solver, but those never gate the exit code. Only
-    a solver verdict of "not equal" fails the suite, and the harness prints the
-    first few such counterexamples.
+/-- The check that the concrete evaluator and SMT agree. The `--smt` gate enables it. The result has
+    the shape of the other suite nodes that use `IO`, which is
+    `(success, passed, attempted, errorMsg)`. `attempted` counts only the terms that reduced to a
+    constant, so it is the sum of `passed` and the number of failures. The message gives each term
+    that did not reduce, and each error from the encoder or from the solver, and none of those change
+    the exit code. Only a verdict of "not equal" from the solver makes the suite fail, and the harness
+    prints the first few such counterexamples.
 
-    **The check runs every solver in `availableAgreementSolvers` on every term.**
-    One solver is not enough. A term whose SMT-LIB form holds a malformed string
-    literal gives a parse error on cvc5, and the harness reports that error without
-    a score. The same term parses on z3, which then measures `str.len` in bytes and
-    contradicts the count of codepoints from `Str.Length` in Lean. The harness
-    scores that contradiction as a counterexample. Therefore a run against cvc5
-    alone reports green on a true defect, and only the run against z3 finds it.
+    **The check runs each solver in `availableAgreementSolvers` on each term.** One solver is not
+    enough. A term whose SMT-LIB form holds a string literal that is not well formed gives a parse
+    error on cvc5, and the harness reports that error and scores nothing. The same term parses on z3,
+    which then measures `str.len` in bytes and contradicts the count of codepoints from `Str.Length`
+    in Lean. The harness scores that contradiction as a counterexample. A run against cvc5 alone
+    therefore passes on a true defect, and only the run against z3 finds it.
 
-    The report gives a tally for each pair of a solver and a type. It also names
-    each solver that this machine cannot launch, and each type that gave no
-    checkable term. -/
+    The report gives a count for each pair of a solver and a type. It also names each solver that this
+    machine cannot start, and each type that gave no term that the check can use. -/
 def smtEvalAgreementAction (numTrials maxSize : Nat) : IO (Bool × Nat × Nat × Option String) := do
   let total := min numTrials 200
   let schedule := baseTypeSchedule
@@ -295,26 +284,24 @@ def smtEvalAgreementAction (numTrials maxSize : Nat) : IO (Bool × Nat × Nat ×
   let mut errored := 0
   let mut firstErr : Option String := none
   let mut shownFails := 0
-  -- One tally for each pair of a solver and a type. Thus a pair that gives no
-  -- checkable term is visible as `0 checked`, and it does not hide behind a
-  -- healthy total. Silent vacuity is the failure mode that these properties are
-  -- most exposed to.
+  -- There is one count for each pair of a solver and a type. A pair that gives no term for the check
+  -- is therefore visible as `0 checked`, and it does not hide behind a good total. Silent vacuity is
+  -- the failure mode that these properties meet most often.
   let mut perCell : List (String × String × Nat × Nat) := []
   for (label, ty, octx) in schedule do
-    -- Each type gets its own part of the budget. Thus a new type makes the
-    -- coverage wider, and it does not dilute the coverage of `int` and `bool`.
+    -- Each type gets its own part of the budget. A new type therefore makes the coverage wider, and
+    -- it does not reduce the coverage of `int` and of `bool`.
     let perTypeTrials := max 1 (total / schedule.length)
     let mut cell : List (String × Nat × Nat) := solvers.map (fun s => (s, 0, 0))
     for i in List.range perTypeTrials do
       let size := i % (maxSize + 1)
-      let depth := max 1 (size / 20)
+      let depth := max 1 size
       match ← genClosedBaseTerm octx ty depth with
       | none => skipped := skipped + 1
       | some e =>
-        -- Run the *same* term through each solver. A term is generated once and
-        -- checked many times, so the solvers see identical input and a difference
-        -- between their verdicts is a fact about the solvers, and not about the
-        -- draw.
+        -- Run the *same* term through each solver. The code draws a term one time and checks it many
+        -- times, so each solver sees the same input. A difference between two verdicts is therefore a
+        -- fact about the solvers, and not about the draw.
         for solver in solvers do
           match ← checkValidExpr e solver with
           | .ok .none => skipped := skipped + 1

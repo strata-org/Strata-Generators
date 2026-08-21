@@ -9,75 +9,79 @@ import Std.Data.HashSet
 open Lambda RandomChoice Core Imperative ArbString Std
 
 /-!
-# Core generator definitions for well-typed Strata Core `Function`s
+# The core definitions of the generator for a well-typed Strata Core `Function`
 
-This file contains the canonical definition of `genFunction`, a generator of
-well-typed Strata Core functions (`Function = LFunc CoreLParams`) satisfying the
-`FuncHasTypeA` relation of `Strata.Languages.Core.FunctionTypeSpec`.
+This file holds the definition of `genFunction`, which is a generator for a well-typed
+Strata Core function. Such a function is a `Function` and therefore an `LFunc CoreLParams`,
+and it satisfies the relation `FuncHasTypeA`.
 
-The generator reuses `genLExpr` from `HasTypeAGen/Core.lean` to generate
-well-typed expressions for the function body and (optional) termination measure,
-and `genLMonoTy` to generate the input/output types.
+The generator uses `genLExpr` to make a well-typed expression for the body of the function
+and for its measure of termination, which is optional. It uses `genLMonoTy` to make the input
+types and the output type.
 
-A generated `Function` is well-typed in the sense of `FuncHasTypeA` because:
-1. Its `typeArgs` and its `inputs.keys` are produced via `List.dedup`, hence
-   `Nodup`.
-2. Its input and output types are produced by `genLMonoTy typeArgs`, hence every
-   free type variable in the signature is drawn from `typeArgs`
-   (`noUndeclaredVars`).
-3. Its body (when present) is produced by `genLExpr ... output`, hence has the
-   declared return type. Note the annotated typing spec `instHasTypeA` *ignores*
-   the ambient typing context, so `bodyTyped` reduces to `HasTypeA [] body output`.
-4. Its measure (when present) is produced by `genLExpr ... .int`, hence has type
+A generated `Function` is well-typed in the sense of `FuncHasTypeA` for four reasons:
+1. `List.dedup` builds its `typeArgs` and its `inputs.keys`, so both hold no duplicate.
+2. `genLMonoTy typeArgs` builds its input types and its output type, so each free type
+   variable of the signature comes from `typeArgs`. This is `noUndeclaredVars`.
+3. `genLExpr ... output` builds its body, when it has one, so the body has the declared
+   return type. The annotated typing specification `instHasTypeA` *ignores* the ambient
+   typing context, so `bodyTyped` reduces to `HasTypeA [] body output`.
+4. `genLExpr ... .int` builds its measure, when it has one, so the measure has the type
    `int`.
 
-`FuncHasTypeA` says nothing about `preconditions`, so the optional `requires`
-clause `genFunction` also emits (see `genPreconditions`) is invisible to the
-soundness proof. It is generated over the *formals only* — `FuncWF`'s
-`precond_freevars` field demands precondition free variables ⊆ input names — and
-it is what makes a generated function *partial*, hence what makes Strata's
-`PrecondElim` precondition-stripping path reachable from generated input.
+`FuncHasTypeA` says nothing about `preconditions`. The optional `requires` clause that
+`genFunction` also emits, through `genPreconditions`, is therefore invisible to the proof of
+soundness. The generator makes that clause over the *formal parameters only*, because the
+`precond_freevars` field of `FuncWF` asks that the free variables of a precondition be among
+the names of the inputs. Such a clause is also what makes a generated function *partial*,
+and it therefore makes the path of `PrecondElim` that strips a precondition reachable from
+generated input.
 -/
 
--- ── Name / type-argument generation ─────────────────────────────────────
+-- ── The generators for a name and for a type argument ───────────────────
 
 /-- The 52 ASCII letters `A-Z` followed by `a-z`. -/
 def alphaChars : List Char :=
   (List.range 26).map (fun n => Char.ofNat ('A'.toNat + n)) ++
   (List.range 26).map (fun n => Char.ofNat ('a'.toNat + n))
 
-/-- Valid first characters of a Core identifier, restricted to letters plus
-    `_`/`$`. This is a subset of Core's `strataIsIdFirst` (`isAlpha || '_' ||
-    '$'`), so every character here is legal in leading position. -/
+/-- The characters that a Core identifier can start with: a letter, a `_` or a `$`. This list is a
+    subset of `strataIsIdFirst` of Core, which accepts a letter, a `_` and a `$`. Each character
+    here is therefore legal at the start of an identifier. -/
 def startChars : List Char :=
   alphaChars ++ ['_', '$']
 
+/-- Draws one character from `startChars`. -/
 def genStartChar [Gen G] : G Char :=
   elements startChars (by decide)
 
+/-- The characters that a Core identifier can hold after its first character. -/
 def remainingChars : List Char :=
   startChars ++ "0123456789".toList ++ ['\'', '.', '?', '!', '$', '@']
 
+/-- Draws one character from `remainingChars`. -/
 def genRemainingChar [Gen G] : G Char :=
   elements remainingChars (by decide)
 
-/-- The Strata Core reserved keywords as a plain list — the *source of truth*.
-    These are the bare words the Core lexer tokenizes as keywords, so the parser
-    rejects them in identifier position (e.g. `function if () : int;` fails with
-    "unexpected token 'if'").
+/-- The reserved keywords of Strata Core, as a list. This list is the *source of truth*. Each entry
+    is a bare word that the Core lexer reads as a keyword, so the parser rejects it in the position
+    of an identifier. For example, `function if () : int;` fails with the message
+    "unexpected token 'if'".
 
-    Compiled from `Strata/Languages/Core/DDMTransform/Grammar.lean`:
-    - built-in type names (`type bool;` … and the `Map`/`Sequence`/`Type` cons),
-    - structured-statement / declaration leading words (`if`/`then`/`else`,
-      `forall`/`exists`, `var`/`assume`/`assert`/`cover`/`while`, `spec`/
-      `requires`/`ensures`/`free`, `procedure`/`function`/`type`/`const`/
-      `axiom`/`distinct`/`datatype`, `goto`/`branch`/`return`, `inline`/
-      `decreases`/`invariant`/`out`/`inout`/`old`/`have`),
-    - boolean literals (`true`/`false`).
+    The list comes from the grammar of Core, and it holds four groups:
+    - the names of the built-in types, such as `bool`, and the type constructors `Map`, `Sequence`
+      and `Type`;
+    - the words at the start of a structured statement, such as `if`, `then`, `else`, `forall`,
+      `exists`, `var`, `assume`, `assert`, `cover` and `while`;
+    - the words at the start of a declaration or of a specification, such as `spec`, `requires`,
+      `ensures`, `free`, `procedure`, `function`, `type`, `const`, `axiom`, `distinct`, `datatype`,
+      `goto`, `branch`, `return`, `inline`, `decreases`, `invariant`, `out`, `inout`, `old` and
+      `have`;
+    - the Boolean literals `true` and `false`.
 
-    The list is retained (rather than only the `HashSet` below) so `decide`/`simp`
-    can evaluate membership in proofs; runtime membership goes through the
-    `HashSet` via `reservedKeywords`. -/
+    The module keeps this list, and not only the `HashSet` below, so that `decide` and `simp` can
+    evaluate a membership test in a proof. A membership test at run time goes through the `HashSet`
+    in `reservedKeywords`. -/
 def reservedKeywordsList : List String :=
   -- type names
   [ "bool", "int", "string", "regex", "real",
@@ -98,116 +102,118 @@ def reservedKeywordsList : List String :=
   -- boolean literals
     "true", "false" ]
 
-/-- The reserved keywords as a `HashSet` for efficient membership testing in the
-    generator (`isReservedKeyword` runs on every generated name). Built from
-    `reservedKeywordsList`; `HashSet.contains_ofList` bridges the two so proofs
-    can still reason over the concrete list via `decide`. -/
+/-- The reserved keywords as a `HashSet`, for a fast membership test in the generator.
+    `isReservedKeyword` runs on each generated name. `reservedKeywordsList` builds this set, and
+    `HashSet.contains_ofList` joins the two, so a proof can still reason over the list with
+    `decide`. -/
 def reservedKeywords : Std.HashSet String := Std.HashSet.ofList reservedKeywordsList
 
-/-- `true` iff `s` is a reserved Strata Core keyword. Uses the `HashSet` for an
-    O(1) expected-time lookup (see `isReservedKeyword_eq_list_contains` for the
-    bridge to `reservedKeywordsList` used in proofs). -/
+/-- Whether `s` is a reserved keyword of Strata Core. The function uses the `HashSet`, so the
+    expected time of a lookup is constant. `isReservedKeyword_eq_list_contains` joins this function
+    to `reservedKeywordsList`, which the proofs use. -/
 def isReservedKeyword (s : String) : Bool := reservedKeywords.contains s
 
-/-- Membership via the `HashSet` agrees with membership in the source list. This
-    is the bridge that lets proofs reason over the concrete `reservedKeywordsList`
-    (which `decide` can evaluate) while the generator uses the efficient
-    `HashSet`. -/
+/-- A membership test on the `HashSet` agrees with a membership test on the list. This theorem lets a
+    proof reason over `reservedKeywordsList`, which `decide` can evaluate, while the generator uses
+    the fast `HashSet`. -/
 theorem isReservedKeyword_eq_list_contains (s : String) :
     isReservedKeyword s = reservedKeywordsList.contains s := by
   unfold isReservedKeyword reservedKeywords
   exact Std.HashSet.contains_ofList
 
-/-- Deterministically map a reserved keyword to a fresh non-keyword identifier by
-    appending `_`. No reserved keyword ends in `_`, and appending `_` to a legal
-    identifier yields a legal identifier (`_ ∈ strataIsIdRest`), so `dodgeKeyword
-    s` is always a legal, non-keyword identifier — and it is the identity on names
-    that were not keywords to begin with. -/
+/-- Maps a reserved keyword to an identifier that is not a keyword, by an added `_` at the end. The
+    map is deterministic. No reserved keyword ends with `_`, and an added `_` keeps a legal
+    identifier legal, because `_` is in `strataIsIdRest`. `dodgeKeyword s` is therefore always a
+    legal identifier and never a keyword. The function is the identity on a name that is not a
+    keyword. -/
 def dodgeKeyword (s : String) : String :=
   if isReservedKeyword s then s ++ "_" else s
 
-/-- Generate a valid Core identifier *by construction*: a first character from
-    `startChars` (letters plus `_`/`$`, all in `strataIsIdFirst`), then a
-    possibly-empty run of `remainingChars` (all in `strataIsIdRest`), finally
-    mapping any reserved keyword to a non-keyword via `dodgeKeyword`. Every
-    output is therefore a legal, non-keyword Core identifier — non-empty and
-    letter-initial (so it lexes as an `Ident`, never a `Num`), and never a
-    reserved word the parser would reject in identifier position.
+/-- Makes a legal Core identifier *by construction*. The name starts with a character from
+    `startChars`, which holds the letters, `_` and `$`, and each of those is in `strataIsIdFirst`. A
+    run of characters from `remainingChars` follows, and that run can be empty. Each character of
+    `remainingChars` is in `strataIsIdRest`. `dodgeKeyword` then maps a reserved keyword to a name
+    that is not a keyword.
 
-    This is the name source for `genFunction`. Note `remainingChars` includes
-    `.`, which is legal in a bare identifier but collides with binder /
-    qualified-name syntax under maximal munch — so an output containing `.` may
-    fail to round-trip. That is intentional: because the name is legal by
-    construction, such a failure is a genuine Core printer/parser bug to report,
-    not a generator artifact. For characters that are only representable via the
-    pipe-delimited form (`|`, `\`), see `genQuotedName`. -/
+    Each output is therefore a legal Core identifier and not a keyword. It is not empty, and it
+    starts with a letter, a `_` or a `$`, so the lexer reads it as an `Ident` and never as a `Num`.
+    The parser also accepts it in the position of an identifier.
+
+    `genFunction` takes its names from this generator. `remainingChars` holds `.`, which is legal in
+    a bare identifier but which collides with the syntax of a binder and of a qualified name under
+    maximal munch. An output that holds a `.` can therefore fail to round-trip. This is deliberate:
+    the name is legal by construction, so such a failure is a real defect of the Core printer or of
+    the Core parser to report, and not an artifact of the generator. For a character that only the
+    form with pipes can hold, such as `|` and `\`, see `genQuotedName`. -/
 def genIdentName [Gen G] : G String := do
   let x ← genStartChar
   let xs ← listOf genRemainingChar
   return dodgeKeyword (String.ofList (x :: xs))
 
--- ── Adversarial identifier generation (round-trip fuzzing) ───────────────
+-- ── The generator for a hard but legal identifier ────────────────────────
 
-/-- Alphabet for `genQuotedName`. Beyond the bare-legal characters this adds the
-    special characters that force interesting formatter/parser paths:
-    - `'` — accepted bare by the lexer but pipe-quoted on output;
-    - `.` — accepted bare by both, but collides with binder / qualified-name
-      syntax under maximal munch;
-    - `| \` — *not* bare-legal in any position; only representable via the
-      SMT-LIB-style pipe-delimited form (`|…|`) with `\|`/`\\` escaping. -/
+/-- The alphabet of `genQuotedName`. Beyond the characters that a bare identifier can hold, it adds
+    the special characters that force an interesting path in the printer or in the parser:
+    - `'`, which the lexer accepts bare and which the printer writes between pipes;
+    - `.`, which both accept bare, but which collides with the syntax of a binder and of a qualified
+      name under maximal munch;
+    - `|` and `\`, which a bare identifier can hold in no position. Only the form between pipes,
+      `|…|`, can hold them, and it needs the escapes `\|` and `\\`. -/
 def quotedNameChars : List Char :=
   remainingChars ++ ['|', '\\']
 
+/-- Draws one character from `quotedNameChars`. -/
 def genQuotedNameChar [Gen G] : G Char :=
   elements quotedNameChars (by decide)
 
-/-- Generate an adversarial-but-**legal** identifier: a first character from
-    `startChars` (letters plus `_`/`$`, all in `strataIsIdFirst`), followed by a
-    possibly-empty run of `quotedNameChars` (special characters `. ' ? ! $ @` and
-    the pipe-only `| \`) in the *interior*.
+/-- Makes an identifier that is hard for the printer and the parser, and that is still **legal**. The
+    name starts with a character from `startChars`, which holds the letters, `_` and `$`, and each of
+    those is in `strataIsIdFirst`. A run of characters from `quotedNameChars` follows, and that run
+    can be empty. That run holds the special characters `. ' ? ! $ @`, and it can also hold `|` and
+    `\`, which only the form between pipes can carry.
 
-    Constraining the first character to `strataIsIdFirst` is what keeps every
-    output a *legal Core identifier*: a leading `@`/`?`/digit/`|` is not a valid
-    identifier in any position (bare or pipe-quoted in a type-variable slot), so
-    without this restriction the probe would emit illegal names and its round-trip
-    "failures" would be generator artifacts, not Strata bugs. With it, a failure
-    is a genuine Core printer/parser faithfulness bug — the same guarantee
-    `genIdentName` gives — while still exercising the pipe-quote / escape path
-    (`escapePipeIdent` ↔ `parsePipeDelimitedIdent`) and bare-render hazards
-    (`.` munch collisions) via interior special characters.
+    The condition on the first character is what keeps each output a *legal Core identifier*. A
+    leading `@`, `?`, digit or `|` is not a legal identifier in any position, bare or between pipes in
+    the slot of a type variable. Without the condition, this generator would emit an illegal name, and
+    a failure of the round trip would be an artifact of the generator and not a defect of Strata. With
+    the condition, a failure is a real defect of faithfulness in the Core printer or in the Core
+    parser, and `genIdentName` gives the same guarantee. The special characters inside the name still
+    exercise the path that quotes and escapes, which is `escapePipeIdent` against
+    `parsePipeDelimitedIdent`, and the hazards of a bare form, such as a collision of a `.` under
+    maximal munch.
 
-    NOTE: kept separate from `genIdentName` on purpose — it does not feed
-    `genFunction` or the soundness/completeness proofs; drive it through a
-    dedicated single-identifier round-trip harness. The leading character also
-    guarantees a non-empty name (so `listOf` yielding `[]` for the tail is fine). -/
+    This generator is separate from `genIdentName` on purpose. It feeds neither `genFunction` nor the
+    proofs of soundness and completeness. Run it through the harness for the round trip of one
+    identifier. The first character also makes each name not empty, so a tail of `[]` from `listOf` is
+    correct. -/
 def genQuotedName [Gen G] : G String := do
   let c ← genStartChar
   let cs ← listOf genQuotedNameChar
   return String.ofList (c :: cs)
 
-/-- Generate a random list of alphanumeric names of length ≤ `depth`.
+/-- Makes a random list of names whose length is not more than `depth`.
 
-    Defined via the `listOfMaxLength` combinator (vendored from Basalt); its
-    support is characterized by `SetGen.mem_support_listOfMaxLength_iff`. -/
+    The definition uses the `listOfMaxLength` combinator, which this package vendors from Basalt.
+    `SetGen.mem_support_listOfMaxLength_iff` gives its support. -/
 def genNameList [Gen G] (depth : Nat) : G (List String) :=
   listOfMaxLength depth genIdentName
 
-/-- Generate a list of *distinct* type-argument names. Distinctness is
-    guaranteed by `List.dedup`. -/
+/-- Makes a list of names for the type arguments. The names are *different* in pairs, because
+    `List.dedup` builds the list. -/
 def genTypeArgs [Gen G] (depth : Nat) : G (List TyIdentifier) :=
   List.dedup <$> genNameList depth
 
-/-- Generate a list of *distinct* input identifiers. Distinctness of the
-    underlying names (and hence of the identifiers, since `⟨·, ()⟩` is injective)
-    is guaranteed by `List.dedup`. -/
+/-- Makes a list of identifiers for the inputs. The names are *different* in pairs, because
+    `List.dedup` builds the list. The identifiers are therefore also different, because the map from a
+    name to `⟨·, ()⟩` is injective. -/
 def genIdents [Gen G] (depth : Nat) : G (List (Identifier Unit)) :=
   (fun names => (names.map (fun s => (⟨s, ()⟩ : Identifier Unit))).dedup) <$> genNameList depth
 
--- ── Input signature generation ──────────────────────────────────────────
+-- ── The generator for the signature of the inputs ───────────────────────
 
-/-- Generate the parameter signature: a `ListMap` from distinct
-    identifiers to monotypes, where every type is drawn from `genLMonoTy tvars`
-    (so its free type variables all lie in `tvars`). -/
+/-- Makes the signature of the parameters. The result is a `ListMap` from identifiers that differ in
+    pairs to monotypes. `genLMonoTy tvars` draws each type, so each free type variable of a type is in
+    `tvars`. -/
 def genInputs [Gen G] (tvars : List TyIdentifier) (depth : Nat) :
     G (ListMap (Identifier Unit) LMonoTy) := do
   let idents ← genIdents depth
@@ -215,44 +221,41 @@ def genInputs [Gen G] (tvars : List TyIdentifier) (depth : Nat) :
     let ty ← genLMonoTy tvars depth
     pure (x, ty))
 
--- ── Optional body / measure generation ──────────────────────────────────
+-- ── The generator for an optional body and an optional measure ──────────
 
-/-- Generate an optional well-typed expression of type `τ`: either `none`, or
-    `some e` for `e` generated by `genLExpr` at type `τ` (empty bvar context,
-    empty polymorphic-op context). Biased 3:1 toward `some` (≈75%), so measures
-    and bodies are usually present rather than absent. -/
+/-- Makes an optional well-typed expression of the type `τ`. The result is `none`, or it is `some e`
+    where `genLExpr` made `e` at the type `τ`, in the empty context of bound variables and with an
+    empty context of polymorphic operators. The bias is 3 to 1 toward `some`, so a body and a measure
+    are usually present. -/
 def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx := []) : G (Option LExpr') :=
   biasedOptionGen (3 / 4) (genLExpr fctx octx pctx tvars [] depth τ)
 
--- ── Precondition generation ─────────────────────────────────────────────
+-- ── The generator for a precondition ────────────────────────────────────
 
-/-- Reinterpret a formal-parameter signature as a `FVarCtx`, so that a generated
-    expression can refer to the function's own inputs by name.
+/-- Reads the signature of the formal parameters as a `FVarCtx`, so that a generated expression can
+    refer to an input of the function by its name.
 
-    This is the *only* free-variable context a precondition may be generated in.
-    `FuncWF.precond_freevars` (`Strata/DL/Util/Func.lean`) requires the free
-    variables of every precondition to be a subset of the formal-parameter names,
-    exactly as `body_freevars` does for the body — so handing `genLExpr` the
-    ambient `fctx` here would produce ill-formed functions rather than merely
-    uninteresting ones. -/
+    This is the *only* free-variable context for a precondition. `FuncWF.precond_freevars` asks that
+    the free variables of each precondition be a subset of the names of the formal parameters, and
+    `body_freevars` asks the same for the body. A call that gave the ambient `fctx` to `genLExpr` here
+    would therefore make a function that is not well formed, and not only a function that is dull. -/
 def inputsAsFVarCtx (inputs : ListMap (Identifier Unit) LMonoTy) : FVarCtx :=
   inputs.toList.map (fun (id, mty) => (id.name, mty))
 
-/-- Generate a `bool`-typed expression that is *guaranteed* to mention one of the
-    function's formals: pick a formal `(x, τ)`, then build `x == e` for `e`
-    generated at that formal's own type `τ`.
+/-- Makes an expression of the type `bool` that *always* mentions a formal parameter of the function.
+    It picks a formal parameter `(x, τ)`, and it then builds `x == e`, where it made `e` at the type
+    `τ` of that parameter.
 
-    This is the mechanism behind the "prefer preconditions that mention the
-    inputs" bias. Going through `genLExpr` at `.bool` alone is not enough in
-    practice: `genLExprBase`'s `bool` rules can only reach a *variable* leaf via
-    `fvarsOfType fctx .bool`, so a formal is reachable only when it is itself
-    `bool`-typed — empirically ~2% of generated signatures. Equating a formal of
-    *any* type against a same-typed expression sidesteps that: the equality node
-    is `bool` whatever `τ` is, so every formal becomes usable.
+    This function gives the bias toward a precondition that mentions an input. A draw from `genLExpr`
+    at `.bool` alone is not enough. The `bool` rules of `genLExprBase` can reach a leaf that is a
+    *variable* only through `fvarsOfType fctx .bool`, so a formal parameter is reachable only when its
+    own type is `bool`, and few generated signatures have such a parameter. An equality between a
+    formal parameter of *any* type and an expression of that same type avoids the problem: the
+    equality node has the type `bool` whatever `τ` is, so each formal parameter becomes usable.
 
-    Requires a proof that `inputs` is non-empty, which is what makes the `elements`
-    pick total; `genPrecondition` supplies it from a `dif`. -/
+    The function needs a proof that `inputs` is not empty, and that proof is what makes the pick by
+    `elements` total. `genPrecondition` gives the proof from a `dif`. -/
 def genInputMentioningPrecond [Gen G] (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
     (depth : Nat) (hne : inputs.toList ≠ []) (pctx : PolyOpCtx := []) : G LExpr' := do
@@ -260,21 +263,19 @@ def genInputMentioningPrecond [Gen G] (octx : OpCtx)
   let e ← genLExpr (inputsAsFVarCtx inputs) octx pctx tvars [] depth τ
   pure (.eq () (.fvar () x (some τ)) e)
 
-/-- Generate an optional `bool`-typed precondition (a `requires` clause) over the
-    function's own formals, `some` with probability 1/2 via `optionGen`.
+/-- Makes an optional precondition of the type `bool`, which is a `requires` clause, over the formal
+    parameters of the function. `optionGen` gives a `some` with probability 1/2.
 
-    Biased 3:1 toward clauses that mention a formal (`genInputMentioningPrecond`)
-    over a plain `genLExpr` draw at `.bool`, per the "prefer expressions that
-    mention the inputs" requirement. Both branches generate in the free-variable
-    context `inputsAsFVarCtx inputs`, so *every* free variable is a formal either
-    way — the bias is about how often a variable appears at all, not about
-    well-formedness. A function with no formals has nothing to mention, so it
-    falls back to the unbiased draw (a closed boolean expression over `octx`).
+    The bias is 3 to 1 toward a clause that mentions a formal parameter, which
+    `genInputMentioningPrecond` builds, over a plain draw from `genLExpr` at `.bool`. Both branches
+    make an expression in the free-variable context `inputsAsFVarCtx inputs`, so *each* free variable
+    is a formal parameter in both branches. The bias is about how often a variable occurs at all, and
+    not about good form. A function with no formal parameter has nothing to mention, so it uses the
+    draw with no bias, which gives a closed Boolean expression over `octx`.
 
-    The `octx` is threaded through unchanged, so a precondition can itself call a
-    *partial* operator (e.g. `Int.SafeDiv`) when the caller supplies one — which is
-    what makes PrecondElim's precondition-stripping path reachable from generated
-    input. -/
+    The code threads `octx` through without a change, so a precondition can itself call a *partial*
+    operator, such as `Int.SafeDiv`, when the caller gives one. This is what makes the path of
+    `PrecondElim` that strips a precondition reachable from generated input. -/
 def genPrecondition [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
     (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (Option (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
@@ -289,44 +290,42 @@ def genPrecondition [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) L
         genLExpr (inputsAsFVarCtx inputs) octx pctx tvars [] depth .bool
     pure { expr := e, md := () })
 
-/-- The `preconditions` field for a generated function: the singleton list
-    `[p]` when `genPrecondition` yields `some p`, and `[]` otherwise.
+/-- The `preconditions` field of a generated function. The result is the list `[p]` when
+    `genPrecondition` gives `some p`, and it is `[]` otherwise.
 
-    A list (rather than an `Option`) is what the field wants, and one clause is
-    enough to make every precondition-sensitive code path non-vacuous; keeping it
-    at most one also keeps `genFunction_complete`'s reachability obligation a
-    single-expression side condition. -/
+    The field needs a list and not an `Option`. One clause is enough to make each code path that
+    reads a precondition non-vacuous. A limit of one clause also keeps the obligation about
+    reachability in `genFunction_complete` a side condition about one expression. -/
 def genPreconditions [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
     (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (List (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
   (fun o => o.toList) <$> genPrecondition octx inputs tvars depth pctx
 
--- ── Main function generator ─────────────────────────────────────────────
+-- ── The main generator for a function ───────────────────────────────────
 
-/-- Generate a well-typed `Function` (i.e. `LFunc CoreLParams`).
+/-- Makes a well-typed `Function`, which is an `LFunc CoreLParams`.
 
-    The generated function satisfies `FuncHasTypeA C Γ` for any ambient context
-    `Γ` (see `genFunction_sound`).
+    The function satisfies `FuncHasTypeA C Γ` for each ambient context `Γ`, as
+    `genFunction_sound` states.
 
-    Components generated:
-    - `typeArgs` — a `Nodup` list of type-variable names,
-    - `inputs`   — a `Nodup`-keyed signature with types over `typeArgs`,
-    - `output`   — a type over `typeArgs`,
-    - `body`     — an optional expression of type `output`,
-    - `measure`  — an optional expression of type `int`,
-    - `preconditions` — at most one `bool` clause over the *formals*
-      (`genPreconditions`; `some` half the time, and biased toward clauses that
-      actually mention a formal).
+    The generator makes these parts:
+    - `typeArgs`: a list of names for the type variables, with no duplicate;
+    - `inputs`: a signature whose keys hold no duplicate, and whose types are over `typeArgs`;
+    - `output`: a type over `typeArgs`;
+    - `body`: an optional expression of the type `output`;
+    - `measure`: an optional expression of the type `int`;
+    - `preconditions`: at most one clause of the type `bool` over the *formal parameters*, which
+      `genPreconditions` makes. It gives a clause half of the time, and it favours a clause that
+      mentions a formal parameter.
 
-    Preconditions are unconstrained by `FuncHasType'` — it has no precondition
-    field — so generating them cannot affect `genFunction_sound`. They matter
-    downstream: a function with a non-empty `preconditions` list is *partial*, so
-    this is what makes Strata's `PrecondElim` precondition-stripping path (and the
-    `preconditionsStripped` property) reachable from generated input rather than
-    only from hand-built reproducers.
+    `FuncHasType'` puts no condition on a precondition, because it has no field for one. A draw of a
+    precondition therefore cannot change `genFunction_sound`. A precondition matters later: a
+    function with a `preconditions` list that is not empty is *partial*. This is what makes the path
+    of `PrecondElim` that strips a precondition, and the property `preconditionsStripped`, reachable
+    from generated input, and not only from a reproducer that someone builds by hand.
 
-    The remaining fields not constrained by the typing spec (`isConstr`,
-    `isRecursive`, `attr`, `concreteEval`, `axioms`) are left at their defaults. -/
+    The fields that the typing specification does not constrain keep their default values. Those
+    fields are `isConstr`, `isRecursive`, `attr` and `axioms`. -/
 def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G Function := do
   let name ← genIdentName

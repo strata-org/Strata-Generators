@@ -1,59 +1,56 @@
 import Plausible
 
 /-!
-# Retry-on-failure wrappers for fallible `Plausible.Gen`s
+# The wrappers that retry a `Plausible.Gen` after a failure
 
-Two definitions, in their own module so that both test-facing consumers —
-`StrataGenerators.TestScaffold` (shared by the LSpec and Plausible-only drivers)
-and `StrataGenerators.TycheViz` (which deliberately does *not* import the
-scaffold) — can use the same wrappers instead of keeping copies in sync. This
-module depends only on `Plausible`, so importing it adds nothing to either
-module's dependency footprint.
+This module holds two definitions. It is a separate module, so that both consumers
+in the test code can use the same wrappers and no one must keep two copies in
+agreement. `StrataGenerators.TestScaffold` is the first consumer, and both drivers
+share it. `StrataGenerators.TycheViz` is the second, and it does *not* import the
+scaffold. This module depends only on `Plausible`, so an import of it adds no
+dependency to either consumer.
 
-`retryGen` retries a whole generator; `retryGenArg` retries a *parameterized* one
-and is the shape `genLExpr`'s `retryCont` parameter expects.
+`retryGen` retries a whole generator. `retryGenArg` retries a generator that takes
+a parameter, and it has the shape that the `retryCont` parameter of `genLExpr`
+needs.
 -/
 
-/-- Retry a fallible `Plausible.Gen` up to `fuel` times, advancing the RNG on
-    each failure so the retry sees fresh randomness.
+/-- Retries a `Plausible.Gen` that can fail, up to `fuel` times. After each failure
+    the wrapper advances the random number generator, so the next attempt sees
+    fresh randomness.
 
-    This replaces the `Gen.backtrack (List.replicate n (1, g))` idiom that the
-    `Arbitrary` instances and Tyche panels used to wrap their generators.
-    `backtrack` makes progress only by *shrinking* the weighted list it walks — so
-    it must materialize an `n`-element list and its per-draw cost is `O(n)` even
-    when the first attempt succeeds. `retryGen` instead threads `Rand.next`
-    through the failure handler exactly as `Gen.runUntil` does (Plausible's `Gen`
-    rolls the RNG state back on a caught exception, so without an explicit
-    `Rand.next` the retry would replay the same failing draw). It is `O(1)` in
-    memory and `O(attempts-until-success)` in time, and — since every `replicate`
-    entry was the *same* generator `g` — it is distribution-identical to the list
-    it replaces. -/
+    The failure handler threads `Rand.next` through, in the same way as
+    `Gen.runUntil`. This step is necessary: the `Gen` monad of Plausible rolls the
+    state of the random number generator back when it catches an exception, so
+    without `Rand.next` the next attempt makes the same draw again.
+
+    The wrapper uses `O(1)` memory, and its time is proportional to the number of
+    attempts before the first success. -/
 def retryGen (fuel : Nat) (g : Plausible.Gen α) : Plausible.Gen α :=
   match fuel with
   | 0 => g
   | fuel + 1 => tryCatch g (fun _ => do let _ ← Plausible.Rand.next; retryGen fuel g)
 
-/-- `retryGen` lifted over a generator that takes a parameter: the **retry
-    continuation** to hand to `genLExpr`'s `retryCont`, which retries a failed
-    *subterm* instead of discarding the whole term.
+/-- `retryGen` over a generator that takes a parameter. This is the **retry
+    continuation** for the `retryCont` parameter of `genLExpr`. It retries a
+    *subterm* that failed, and it does not discard the whole term.
 
-    `genLExpr` invokes this on whichever generator it would have used in
-    Indir/IndirPoly argument position, and threads it into its own recursive call,
-    so retrying applies at **every** nesting level. That matters because generation
-    failure compounds multiplicatively with depth: without it, one unfillable leaf
-    deep inside a term forces the caller's outer `retryGen` to redraw the entire
-    term from scratch.
+    `genLExpr` calls it on the generator for an argument of `Indir` or of
+    `IndirPoly`, and it threads the result into its own recursive call. A retry
+    therefore happens at **each** level of the nesting. This matters, because the
+    chance of a failure grows with the depth of a term. Without it, one leaf that
+    the generator cannot fill, deep inside a term, makes the outer `retryGen` of
+    the caller draw the whole term again.
 
-    Note this covers rather more than a single argument. At depth `n + 1` the
-    argument generator *is* the whole level-`n` generator, so a retry here also
-    resamples `genIndirPoly`'s type-variable instantiation (`sampledTys`) — which is
-    what rescues targets whose chosen instantiation was unfillable no matter how
-    often a fixed argument type is retried.
+    The continuation covers more than one argument. At depth `n + 1` the generator
+    for an argument *is* the whole generator for level `n`. A retry here therefore
+    also draws the instance of the type variables of `genIndirPoly`, which is
+    `sampledTys`. This is what rescues a target whose instance the generator cannot
+    fill, however often it retries a fixed argument type.
 
-    Definitionally this is just `retryGen` applied pointwise
-    (`retryGenArg fuel g σ = retryGen fuel (g σ)`); it exists as a named definition
-    because that is the type `retryCont` requires. Callers should keep their outer
-    `retryGen` as well — `retryCont` reaches every nested level but not the root
-    draw itself. -/
+    The definition is `retryGen` at each point: `retryGenArg fuel g σ` is
+    `retryGen fuel (g σ)`. It has a name because that is the type that `retryCont`
+    needs. A caller must also keep its outer `retryGen`, because `retryCont`
+    reaches each nested level but not the draw at the root. -/
 def retryGenArg (fuel : Nat) (g : α → Plausible.Gen β) : α → Plausible.Gen β :=
   fun a => retryGen fuel (g a)

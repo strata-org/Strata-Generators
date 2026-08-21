@@ -1,68 +1,70 @@
 /-!
 # The `StrataTests.lean` import root
 
-Writing the import root, and the check that it is fresh. This is plain file IO: a
-directory listing, and a text file of `import` lines. None of it is metaprogramming.
-The metaprogramming lives in `StrataGenerators.Test.Registry` (the attribute) and
-`StrataGenerators.Test.Collect` (the collector).
+This module writes the import root, and it checks that the root is fresh. The work is
+plain file IO: it reads a directory and it writes a text file of `import` lines. It uses
+no metaprogramming. `StrataGenerators.Test.Registry` holds the attribute and
+`StrataGenerators.Test.Collect` holds the collector.
 
-Lean links statically, so a `@[strata_property]` declaration is visible to a driver
-only if the driver transitively imports the module it lives in — the analogue of
-`mod tests;` in Rust, or of a file being part of a Dune library in OCaml. This module
-writes that import list from the contents of the `StrataTests/` directory, so it is
-not a file a property author edits.
+Lean links statically. Therefore a driver sees a `@[strata_property]` declaration only if
+the driver imports the module that holds the declaration, directly or indirectly. This is
+the same need as `mod tests;` in Rust, or as a file in a Dune library in OCaml. This
+module writes the import list from the contents of the `StrataTests/` directory, so the
+author of a property does not edit the root.
 
-Three consumers share it, which is why it lives here rather than in one of them:
+Three consumers use this module:
 
-* `lake exe write-test-imports`, to rewrite the root on demand;
-* both drivers, which refuse to run against a stale root — they rewrite it and ask to
-  be re-run, since the binary they are executing was already linked from the old one;
-* `#verify_test_root` in the generated root itself (see
-  `StrataGenerators.Test.Collect`), which fails the *build* on a stale root and is
-  what catches the case CI cares about.
+* `lake exe write-test-imports` rewrites the root on demand.
+* Both drivers refuse to run against a stale root. They rewrite the root and ask you to
+  run them again, because the linker built the binary from the old root.
+* `#verify_test_root` in the generated root fails the **build** on a stale root. See
+  `StrataGenerators.Test.Collect`.
 
 The driver check and the build check overlap on purpose. The build check is exact,
-because it compares against the modules Lean actually imported, but it only runs when
-the root is re-elaborated — a warm local build with an unchanged root skips it. The
-driver check is textual and always runs. Between them, a property file cannot go
-silently untested either locally or in CI.
+because it compares the list against the modules that Lean imported. However, it runs
+only when Lean elaborates the root again, and a warm local build with an unchanged root
+skips it. The driver check is textual and it always runs. Together, the two checks make
+sure that the suite tests each property file.
 
-Regeneration is needed only when a file is **added or removed** under `StrataTests/`.
-Adding a property to an existing file changes no import.
+You must run the generator again only when you **add or remove** a file under
+`StrataTests/`. If you add a property to a file that exists, the imports do not change.
 -/
 
 namespace StrataGenerators.Test.ImportRoot
 
-/-- The banner on the generated root. -/
+/-- The comment block at the start of the generated root. -/
 def header : String :=
-"-- GENERATED FILE — do not edit by hand.
+"-- GENERATED FILE. Do not edit it by hand.
 --
--- Regenerate with `lake exe write-test-imports` after you add or remove a file under
--- `StrataTests/`. Adding a property to an existing file needs no regeneration.
+-- Run `lake exe write-test-imports` again after you add or remove a file under
+-- `StrataTests/`. If you add a property to a file that exists, the imports do not
+-- change.
 --
--- Why this file exists: Lean links statically, so a `@[strata_property]` declaration
--- is only visible to the driver if the driver transitively imports the module it
--- lives in. This file is that import — the analogue of `mod tests;` in Rust, or of a
--- file being part of a Dune library in OCaml. It is generated rather than
--- hand-maintained precisely so that it is not a file a property author has to edit.
+-- Lean links statically. Therefore a driver sees a `@[strata_property]` declaration
+-- only if the driver imports the module that holds the declaration, directly or
+-- indirectly. This file is that import. It is the same need as `mod tests;` in Rust, or
+-- as a file in a Dune library in OCaml. A generator writes this file, so the author of
+-- a property does not edit it.
 "
 
-/-- The trailing guard, which fails the build when the list above is stale. -/
+/-- The guard at the end of the generated root. It fails the build when the import list
+    is stale. -/
 def footer : String :=
 "
--- Fails the build if a file under `StrataTests/` is missing from the list above, so a
--- property file added without regenerating this root cannot go silently untested.
+-- This guard fails the build if the list above does not hold a file that is under
+-- `StrataTests/`. Therefore the suite cannot miss a new property file.
 #verify_test_root
 "
 
-/-- The directory holding the property files. -/
+/-- The directory that holds the property files. -/
 def dir : System.FilePath := "StrataTests"
 
-/-- The generated root's path. -/
+/-- The path of the generated root. -/
 def rootPath : System.FilePath := "StrataTests.lean"
 
-/-- Every `.lean` file under `StrataTests/`, as module names, sorted so the generated
-    root is stable under whatever order a directory listing returns. -/
+/-- The module name of each `.lean` file under `StrataTests/`. The names are in sorted
+    order, so the generated root does not change with the order that the file system
+    gives. -/
 def testModules : IO (Array String) := do
   let mut names := #[]
   for entry in ← dir.readDir do
@@ -71,13 +73,13 @@ def testModules : IO (Array String) := do
         names := names.push s!"StrataTests.{stem}"
   return names.qsort (· < ·)
 
-/-- The text the root should have. -/
+/-- The correct contents of the generated root. -/
 def expectedRoot : IO String := do
   let mods ← testModules
   return header ++ String.join (mods.toList.map (s!"import {·}\n")) ++ footer
 
-/-- Rewrite the root if its contents would change. Returns whether it did, and how
-    many modules it lists. -/
+/-- Rewrites the root if the correct contents differ from the current contents. Returns
+    `true` if it wrote the file, and the number of modules in the list. -/
 def regenerate : IO (Bool × Nat) := do
   let contents ← expectedRoot
   let mods ← testModules
@@ -87,12 +89,13 @@ def regenerate : IO (Bool × Nat) := do
   IO.FS.writeFile rootPath contents
   return (true, mods.size)
 
-/-- A driver's setup check. When the root is stale this rewrites it and returns
-    `true`, meaning "do not run: the binary was linked from the old root, so re-run".
+/-- The setup check for a driver. If the root is stale, this rewrites the root and
+    returns `true`. A result of `true` tells the driver to stop, because the linker built
+    the binary from the old root. You must then run the driver again.
 
-    Best-effort: if `StrataTests/` cannot be read — an out-of-tree build, a different
-    working directory — this reports fresh rather than failing on something that is not
-    a property author's mistake. -/
+    If the module cannot read `StrataTests/`, it reports that the root is fresh. An
+    out-of-tree build or a different working directory can cause this, and neither is a
+    mistake of the author of a property. -/
 def ensureFresh : IO Bool := do
   if !(← dir.isDir) then
     return false

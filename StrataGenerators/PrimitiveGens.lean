@@ -25,10 +25,10 @@ The default Basalt primitives are too tame to reach the interesting cases:
   is `0`. Therefore a rational that takes its numerator from `Nat.arbitrary` is
   `0` about 46% of the time. Read the section on rationals below.
 
-Do not use these generators as drop-in replacements for the Basalt primitives
-elsewhere in the suite. They are biased on purpose, and a biased generator is a
-poor input for the properties about types and round trips, because those
-properties want broad coverage. These generators supply the constant leaves
+Do not use these generators in place of the Basalt primitives elsewhere in the
+suite. They are biased on purpose, and a biased generator is a poor input for the
+properties about types and round trips, because those properties want broad
+coverage. These generators supply the constant leaves
 `genStrConst`, `genRealConst` and `genBitvecConst` in `HasTypeAGen/Core.lean`,
 which is what the SMT-agreement property exercises.
 
@@ -39,10 +39,11 @@ completeness. These branches are the geometric tail of `genRat` and the uniform
 fallback of `genBiasedBitVec`. A `*_support_set` lemma in `HasTypeAGen.lean`
 witnesses each one.
 
-## Shape constraint (do not "simplify" these)
+## The shape that the proofs need
 
-The support proofs in `HasTypeAGen.lean` and `HasTypeAGenOpsConsistent.lean`
-destructure the constant leaves as one `bind` and then one `pure`:
+Do not "simplify" the generators below. The support proofs in `HasTypeAGen.lean`
+and `HasTypeAGenOpsConsistent.lean` take the constant leaves apart as one `bind`
+and then one `pure`:
 
 ```lean
 simp only [genStrConst, ..., SetGen.Set.mem_bind, SetGen.Set.mem_pure, ...] at he
@@ -195,30 +196,28 @@ def strMaxLen : Nat := 8
     becomes visible. A string that is fully ASCII, or fully astral, can agree by
     accident.
 
-    **Why not plain `listOf`.** `listOf` recurses through `pick`, so it stops
-    immediately half of the time. Its own docstring says that it "produces the
-    empty list 50% of the time, so for production generators, you should consider
-    using other combinators" (`Basalt/Combinators.lean`). Measured on this
-    character pool, **51% of the draws were `""`**. That result halves the
-    effective yield of each string property, because an empty string exercises no
-    codepoint at all. It also holds the non-ASCII rate down to 32%,
-    because each empty draw is trivially ASCII only.
+    **Why the generator does not use plain `listOf`.** `listOf` recurses through
+    `pick`, so it stops at once half of the time. Its own documentation says that
+    it gives the empty list half of the time, and that a production generator must
+    therefore use another combinator. About half of the draws from `listOf` on
+    this character pool are `""`. Such a draw exercises no codepoint, so it halves
+    the effective yield of each string property. It also holds the rate of
+    non-ASCII draws down, because an empty draw holds only ASCII characters.
 
     Therefore the primary branch, with weight 7, draws a length uniformly from
-    `[1, strMaxLen]` and then fills it. The result is about 79% non-ASCII, with a
-    mean length of 4.
+    `[1, strMaxLen]` and then fills it. Most of its results hold a non-ASCII
+    character, and the mean length is 4.
 
     The branch with weight 1 is plain `listOf`, and it keeps the generator
     **complete**. The primary branch alone limits the length to `strMaxLen`. That
-    limit falsifies `genInterestingString_support_set` and forces a bound on
-    length into `AllTypesSimple.strConst`. This branch has the same shape, bias
-    plus a completeness tail, as `genRat` and `genBiasedBitVec`.
+    limit falsifies `genInterestingString_support_set`, and it forces a bound on
+    the length into `AllTypesSimple.strConst`. This branch has the same shape as
+    `genRat` and `genBiasedBitVec`: a bias, and then a tail for completeness.
 
-    The tail also keeps `""` reachable at about 5%. This is wanted, and not merely
-    tolerated: the empty string is a true edge case. Examples are `Str.Length "" =
-    0`, the two-sided identity of `Str.Concat`, and an out-of-range `str.substr`.
-    This is why the generator does not use `nonEmptyListOf`, which drives the rate
-    of `""` to 0%. -/
+    The tail also keeps `""` reachable, and this is wanted. The empty string is a
+    true edge case: `Str.Length "" = 0`, the identity law of `Str.Concat` on both
+    sides, and a call to `str.substr` that is out of range. Therefore the
+    generator does not use `nonEmptyListOf`, which makes `""` unreachable. -/
 def genInterestingString [Gen G] : G String :=
   frequency
     [ (7, fun () => do
@@ -229,10 +228,10 @@ def genInterestingString [Gen G] : G String :=
 
 /-- A string that contains **one or more** non-ASCII characters.
 
-    The generator builds `prefix ++ [c] ++ suffix`, where `c` is non-ASCII. Thus
-    the guarantee is structural, and not probabilistic. A test run gave 300 such
-    strings out of 300 draws. Use this generator where an ASCII-only draw makes
-    the property vacuous. One example is the `Str.Length` differential.
+    The generator builds `prefix ++ [c] ++ suffix`, where `c` is non-ASCII. The
+    guarantee is therefore structural and not probabilistic. Use this generator
+    where a draw with only ASCII characters makes the property vacuous. The
+    differential for `Str.Length` is one example.
 
     The two affixes use plain `listOf`, so they can be empty. This is correct
     here, because the guarantee on the non-ASCII character is independent of
@@ -251,10 +250,10 @@ problems:
 
 1. **Almost half of the output is zero.** `Nat.arbitrary` flips a coin and then
    increments, so it returns `0` with probability `1/2`. A numerator of `0` makes
-   the whole rational `0`. Measured over 400 draws: **46% zeros**. A generator
-   that is one coin flip away from `0` hardly tests real arithmetic. Also, `0` is
-   the one value that makes `Real.Div` degenerate, so `0` crowds out the
-   interesting cases while the output looks varied.
+   the whole rational `0`. Almost half of the draws are therefore `0`. A generator
+   that is one coin flip away from `0` hardly tests the arithmetic on real
+   numbers. `0` is also the one value that makes `Real.Div` degenerate, so `0`
+   crowds out the interesting cases while the output looks varied.
 2. **Hand-made construction.** The expression `↑num / (↑den + 1)` depends on the
    division of `Rat` to normalize, and the `+ 1` is a manual guard against a zero
    denominator. `mkRat` is the smart constructor from the standard library. It
@@ -271,10 +270,9 @@ problems:
     up to `ratBound + 1`.
 
     The limit is modest on purpose. The printer emits an SMT-LIB real literal as a
-    decimal, or as `frac{num, den}` when the decimal does not terminate. Read
-    `Core.FracLit`. A large numerator mostly stresses how the printer handles
-    digits. It does not stress the arithmetic semantics that this property
-    tests. -/
+    decimal, or as `frac{num, den}` when the decimal does not terminate. A large
+    numerator mostly stresses how the printer handles digits. It does not stress
+    the semantics of the arithmetic that this property tests. -/
 def ratBound : Nat := 32
 
 /-- A rational that `mkRat`, the smart constructor from the standard library,
@@ -286,12 +284,12 @@ def ratBound : Nat := 32
     Denominators start at `1`, and not at `0`. Therefore the fold-to-`0` path in
     `mkRat` for a zero denominator is never the reason that a draw is zero.
 
-    **Measured overall: about 9% zeros.** The geometric completeness tail, and not
-    the uniform branch, is the main source. The prediction is about 7.6% in total:
-    `7/8 · 1/65 ≈ 1.4%` from the uniform branch, plus `1/8 · 1/2 ≈ 6.3%` from the
-    tail, whose `natArbGeom` numerator is `0` half of the time. If 9% is still too
-    high, give the tail a different weight. Do not make `ratBound` larger. You
-    cannot remove the tail without a loss of completeness.
+    **About 8% of the draws are `0`.** The geometric tail for completeness is the
+    main source, and not the uniform branch. The uniform branch gives
+    `7/8 · 1/65`, which is about 1.4%. The tail gives `1/8 · 1/2`, which is about
+    6.3%, because the `natArbGeom` numerator is `0` half of the time. If that rate
+    is too high, give the tail a different weight. Do not make `ratBound` larger,
+    and do not remove the tail, because the generator then loses completeness.
 
     The branch with weight 1 keeps the generator **complete**. `mkRat`, together
     with an unbounded draw of a numerator and a denominator, can give *any*
@@ -371,10 +369,9 @@ two and their neighbours, `2^k ± 1`, to catch an off-by-one in the arithmetic o
     uniform fallback still reaches each power of two. The pool simply gives them
     no priority.
 
-    `BitVec.allOnes w` is absent because it is *definitionally*
-    `BitVec.fill w true`. Both are `-1#w`, and
-    `simp [BitVec.fill, BitVec.neg_one_eq_allOnes]` proves it. An entry for both
-    is a duplicate that looks like additional coverage.
+    `BitVec.allOnes w` is absent, because it is *definitionally*
+    `BitVec.fill w true`. Both are `-1#w`. An entry for each of the two names is a
+    duplicate that looks like more coverage.
 
     * `BitVec.zero w`: the only false point of `unegOverflow x = (x != 0)`, and
       the divisor that trips the `y ≠ 0` precondition on `SafeSDiv` and
@@ -450,7 +447,7 @@ theorem zero_one_mem_bitvecBoundaries (w : Nat) :
     about `2^63` coin flips, and it never does so in practice. A uniform sample
     makes the "interior" half of the generator sample the interior truly, which is
     the whole function of that half. `chooseNat` handles a range of `2^64`
-    correctly. A check gives well-distributed values of 19 digits.
+    correctly, and it gives values across the full range.
 
     The bound must be `2^w - 1`, the full range. A bound of `log₂ w`, for example,
     reaches only 6 of the `2^64` values at `w = 64`. Then this branch is useless

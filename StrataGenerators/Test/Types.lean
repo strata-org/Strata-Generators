@@ -3,80 +3,72 @@ import Basalt.Tuning
 import StrataGenerators.Tyche
 
 /-!
-# The property-test vocabulary
+# The vocabulary for a property test
 
-The types a property author writes against, and the runner that executes one
-property. Everything here is harness-independent: nothing in this module knows
-about LSpec, about Tyche's output file, or about the CLI.
+This module holds the types that the author of a property uses, and the runner that runs one
+property. Nothing here depends on a harness. No declaration knows about LSpec, about the
+output file of Tyche, or about the command line.
 
 ## The one idea
 
-The old front end fixed the *input type* of a property in the harness: each
-family of properties had a bundle of a fixed `α`, and each driver had a
-hand-written fold per `α` that supplied `Arbitrary`/`Repr`/`Shrinkable` by
-instance synthesis. Adding a property over a new input type therefore meant
-editing the harness.
+A property *carries* its generator as data. A `PropertyRunner α` holds the `Plausible.Gen`,
+the renderer, the shrinker and the Tyche breakdown for the input type. `Body.sampled` then
+packs the input type away as an existential. One heterogeneous `List TestDecl` can therefore
+hold every property in the suite, and a driver is a fold over that list that never mentions
+an input type.
 
-Here a property instead *carries* its generator as data — a `PropertyRunner α` bundling
-the `Plausible.Gen`, the renderer, the shrinker and the Tyche breakdown — and the
-input type is then existentially packed away in `Body.sampled`. One heterogeneous
-`List TestDecl` can hold every property in the suite, so a driver is a fold over
-that list and never mentions an input type at all.
-
-`PropertyRunner` is exactly the data Plausible's `SampleableExt` class holds, so
-`TestDecl.run` hands it straight back to Plausible's own runner
-(`Testable.checkIO`) as an explicitly-supplied instance. The trial schedule,
-the counterexample minimisation and the `gaveUp` accounting are therefore
-Plausible's, unchanged — this module adds no sampling logic of its own.
+A `PropertyRunner` holds exactly the data of the `SampleableExt` class of Plausible.
+Therefore `TestDecl.run` gives it back to the runner of Plausible, `Testable.checkIO`, as an
+explicit instance. The schedule of the trials, the reduction of a counterexample and the
+count for `gaveUp` are all the work of Plausible. This module adds no logic for sampling.
 -/
 
 open Plausible
 
 namespace StrataGenerators.Test
 
-/-- Runtime knobs, parsed once from the command line and passed to every
-    property. `gates` holds the opt-in tags the run was started with (`--smt`
-    contributes `"smt"`); a property whose `TestDecl.gate` is not in this list is
-    reported as skipped rather than run. -/
+/-- The settings for a run. The driver reads them from the command line one time, and it
+    gives them to each property. `gates` holds the tags that the run enables, and the flag
+    `--smt` adds the tag `"smt"`. If the `TestDecl.gate` field of a property is not in this
+    list, the driver reports the property as skipped and does not run it. -/
 structure RunConfig where
   numTrials : Nat := 1000
   maxSize   : Nat := 100
   gates     : List String := []
   deriving Inhabited
 
-/-- The Plausible configuration a `RunConfig` induces. -/
+/-- The Plausible configuration for a `RunConfig`. -/
 def RunConfig.toConfiguration (cfg : RunConfig) : Configuration :=
   { numInst := cfg.numTrials, maxSize := cfg.maxSize }
 
-/-- What a self-driving `IO` property reports: its verdict, how many of its own
-    samples passed, how many it drew, and an optional message.
+/-- The report of a property that drives itself with `IO`. It gives the verdict, the number
+    of its own samples that passed, the number of samples that it drew, and a message.
 
-    The shape deliberately matches `LSpec.TestSeq.individualIO`'s tuple, because
-    these properties predate this front end (a format→parse round-trip that
-    shrinks and prints its own reproducers; an SMT agreement check that shells out
-    per term) and they join the registry unchanged. -/
+    The shape agrees with the tuple of `LSpec.TestSeq.individualIO`, so such a property joins
+    the registry without a change. A round trip from `format` to `parse` that shrinks and
+    prints its own reproducers is one example. A check for SMT agreement that starts a
+    subprocess for each term is another. -/
 structure ActionResult where
   passed  : Bool
   samples : Nat
   total   : Nat
   message : Option String := none
 
-/-- Adapt the `(success, samples, total, message)` tuple the pre-existing
-    self-driving checks return. -/
+/-- Builds an `ActionResult` from the tuple `(success, samples, total, message)` that a check
+    which drives itself returns. -/
 def ActionResult.ofTuple : Bool × Nat × Nat × Option String → ActionResult
   | (passed, samples, total, message) => { passed, samples, total, message }
 
-/-- The Tyche axes of an input type: a breakdown of a generated value into named
-    facets, so a panel can separate a *vacuous* draw from a live one.
+/-- The Tyche axes of an input type. The class breaks a generated value into named facets, so
+    a panel can separate a *vacuous* draw from a live one.
 
-    A fourth class alongside Plausible's `Arbitrary`/`Repr`/`Shrinkable`, and for the
-    same reason: `num_decls` / `decl_kinds` / `program_size` are facts about the
-    *type*, not about any one claim, so every property over that type wants the same
-    axes. Declaring the instance once is what makes a Tyche panel free for a property
-    written later.
+    This is a fourth class next to `Arbitrary`, `Repr` and `Shrinkable` of Plausible, and for
+    the same reason. An axis such as `num_decls`, `decl_kinds` or `program_size` is a fact
+    about the *type* and not about one claim, so each property over that type wants the same
+    axes. One instance therefore gives a Tyche panel to a property that someone writes later.
 
-    The catch-all instance below gives no axes, so a type needs an instance only if
-    it has something worth plotting. -/
+    The catch-all instance gives no axis. A type needs its own instance only when it has
+    something to plot. -/
 class TycheFeatures (α : Type) where
   features : α → List (String × Tyche.Feature)
 
@@ -139,32 +131,32 @@ instance (priority := low) : MaybeTunable α := ⟨none⟩
 instance [TunableGen α] : MaybeTunable α :=
   ⟨some ⟨TunableGen.genWith, TunableGen.arity α⟩⟩
 
-/-- The generator, the printer and the shrinker for one input type, as data — the
-    components a run needs for every input other than the check itself.
+/-- The generator, the printer and the shrinker for one input type, as data. These are the
+    parts of a run that are not the check.
 
-    This is the first-class form of the `Arbitrary`/`Repr`/`Shrinkable`/`TycheFeatures`
-    instances. Properties do not normally mention it: `TestDecl.property` builds it from
-    the instances, exactly as Plausible would. It exists as data because `Body.sampled`
-    makes the input type *existential*, and because a property may occasionally want
-    something other than its type's default.
+    This structure is the first-class form of the `Arbitrary`, `Repr`, `Shrinkable` and
+    `TycheFeatures` instances. A property does not name it in the usual case, because
+    `TestDecl.property` builds it from the instances in the same way as Plausible. It is data
+    for two reasons: `Body.sampled` makes the input type *existential*, and a property can
+    need something other than the default of its type.
 
-    Named after the "property runner" of Keles et al., *Programmable Property-Based
-    Testing* (ICFP 2026), whose figures decompose a runner into exactly these
-    components: a generator, a shrinker and a printer, feeding the check. Note that the
-    paper's *runner* is the generate-check-shrink-print loop over those components, and
-    that loop is `runSampled` below. -/
+    The name comes from the "property runner" of Keles et al., *Programmable Property-Based
+    Testing* (ICFP 2026). The figures of that paper divide a runner into these same parts: a
+    generator, a shrinker and a printer that feed the check. The *runner* of the paper is the
+    loop over those parts that generates, checks, shrinks and prints, and `runSampled` is that
+    loop. -/
 structure PropertyRunner (α : Type) where
   gen      : Gen α
   render   : α → String
-  /-- One-step reductions, smaller first. Defaults to no shrinking, which costs
-      only counterexample quality. -/
+  /-- The reductions of one step, with the smallest first. The default is an empty list. A
+      property that keeps the default loses only the quality of its counterexamples. -/
   shrink   : α → List α := fun _ => []
-  /-- Tyche axes computed from the input. -/
+  /-- The Tyche axes for an input value. -/
   features : α → List (String × Tyche.Feature) := fun _ => []
 
-/-- The `PropertyRunner` that Plausible's own instances induce. This is what
-    `TestDecl.property` uses, so "the generator for `α`" means the same thing here as it
-    does to `#test` or to `Plausible.Testable.check`. -/
+/-- The `PropertyRunner` that the instances of Plausible give. `TestDecl.property` uses this
+    function, so the phrase "the generator for `α`" means the same thing here as it means to
+    `#test` and to `Plausible.Testable.check`. -/
 def PropertyRunner.ofInstances (α : Type)
     [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α] : PropertyRunner α :=
   { gen      := Arbitrary.arbitrary
@@ -172,164 +164,165 @@ def PropertyRunner.ofInstances (α : Type)
     shrink   := Shrinkable.shrink
     features := TycheFeatures.features }
 
-/-- Add to a runner's Tyche breakdown. Used by the few properties whose panel needs an
-    axis the input type alone does not suggest. -/
+/-- Adds axes to the Tyche breakdown of a runner. A property uses this when its panel needs an
+    axis that the input type does not give. -/
 def PropertyRunner.withFeatures (runner : PropertyRunner α)
     (features : α → List (String × Tyche.Feature)) : PropertyRunner α :=
   { runner with features := fun x => runner.features x ++ features x }
 
-/-- Replace a generator's renderer, for a property whose counterexample needs a
-    diagnostic view rather than the input type's default rendering. -/
+/-- Replaces the renderer of a runner. A property uses this when its counterexample needs a
+    diagnostic view and not the default output of the input type. -/
 def PropertyRunner.withRender (spec : PropertyRunner α) (render : α → String) : PropertyRunner α :=
   { spec with render }
 
-/-- How a property gets its verdict. The `α` of the sampled shapes is existential,
-    so properties over different input types share one registry. -/
+/-- How a property gets its verdict. The type `α` of the sampled shapes is existential, so
+    properties over different input types share one registry. -/
 inductive Body where
-  /-- Draw `numTrials` inputs from `runner`, score each with `check`, and minimize the
-      first counterexample. The shape of essentially every property.
+  /-- Draws `numTrials` inputs from `runner`, scores each input with `check`, and reduces the
+      first counterexample. Almost every property has this shape.
 
-      `check` returns a `Prop`, and two instances travel with it because each is needed
-      by a different consumer and neither can be recovered later:
+      `check` returns a `Prop`. Two instances travel with it, because a different consumer
+      needs each one and neither instance is available later:
 
-      * `inst` is what Plausible runs. It has to be captured *here*, at the registration
-        site, because that is the only place the shape of `check x` is known — and the
-        shape is what selects the `PrintableProp` instance that makes a counterexample
-        legible. Rebuilding `Testable` from `dec` further down would fall back to the
-        catch-all and report `issue: ⋯ does not hold`.
-      * `dec` is what the Tyche panel and the shrinker need, since both must *decide*
-        each candidate rather than merely test it.
+      * Plausible runs `inst`. The registration site must capture it, because that site is
+        the only place that knows the shape of `check x`. The shape selects the
+        `PrintableProp` instance that makes a counterexample readable. A `Testable` instance
+        that a later step builds from `dec` falls back to the catch-all and reports
+        `issue: ⋯ does not hold`.
+      * The Tyche panel and the shrinker need `dec`, because both must *decide* each
+        candidate and not only test it.
 
       `retune?` is a third passenger of the same kind. It says how to rebuild `runner.gen`
-      from a `Tuning`, when the input type has a `TunableGen` instance. It must be captured
-      here too, because this is the last place where `α` is known.
+      from a `Tuning`, when the input type has a `TunableGen` instance. The registration site
+      must capture it too, because that site is the last place that knows `α`.
       `@[strata_property (tuning := θ)]` applies it afterwards, when `α` is gone. -/
   | sampled {α : Type} (runner : PropertyRunner α) (check : α → Prop)
       (dec : DecidablePred check) (inst : ∀ x, Testable (check x))
       (retune? : Option (Retuning α))
-  /-- One constructed witness: the verdict is a closed `Bool`, with no sampling.
-      For a claim whose sharpest statement is a single program or operator —
-      a pipeline phase's no-op, a specific bitvector width — where sampling would
-      only obscure which case is at stake. -/
+  /-- One witness that the author builds. The verdict is a closed `Bool` and there is no
+      sampling. Use it for a claim whose best statement is one program or one operator, such
+      as a phase that changes nothing, or one bitvector width. A random sample would hide
+      which case the claim covers. -/
   | witness (verdict : Bool)
-  /-- A *fixed finite* input space, scored element by element. The property is the
-      conjunction; the Tyche panel enumerates the space exactly once instead of
-      sampling it with replacement. -/
+  /-- A *fixed and finite* input space, scored one element at a time. The property is the
+      conjunction over the elements. The Tyche panel lists the space one time, and it does
+      not sample the space with replacement. -/
   | witnesses {α : Type} (cases : List α) (render : α → String) (check : α → Bool)
       (features : α → List (String × Tyche.Feature) := fun _ => [])
-  /-- A self-driving `IO` action: it samples, shrinks and prints on its own and
-      reports only a verdict. For a property whose oracle is a subprocess or whose
-      diagnostics have to be interleaved with generation. -/
+  /-- An `IO` action that drives itself. It samples, shrinks and prints on its own, and it
+      reports only a verdict. Use it when the oracle is a subprocess, or when the diagnostics
+      must come between the draws. -/
   | action (run : RunConfig → IO ActionResult)
 
 /-- What a property claims about its own verdict.
 
-    Almost every property claims to hold, which is `mustHold` and the default.
-    `knownFailure` is for a property that states a *real defect in the code under test*:
-    the claim is right and the implementation is wrong, so the property must stay in the
-    suite as the regression net around the eventual fix, while not holding a merge
-    hostage to a bug that is already reported.
+    Almost every property claims to hold. That claim is `mustHold`, and it is the default.
+    Use `knownFailure` for a property that states a *real defect in the code under test*. The
+    claim is right and the implementation is wrong. The property therefore stays in the suite
+    as the net around the future fix, and it does not block a merge for a defect that someone
+    already reported.
 
-    `reason` is prose, and the place to put the upstream issue. It replaces the
-    counterexample on the report line, so it is the only explanation a reader gets for
-    why a red property reads as green — make it name the defect.
+    `reason` is prose, and it is the place for the upstream report. It takes the place of the
+    counterexample on the report line, so it is the only explanation that a reader gets. Name
+    the defect in it.
 
-    This is *not* a way to quiet a property that is merely noisy. `knownFailure` fails the
-    run the moment the defect is fixed, so it cannot hide a regression in a property that
-    holds today, and it is the wrong tool for a property that fails only on an occasional
-    draw: such a property passes on most runs, and the mark would then turn the suite red
-    on those runs. Leave that one unmarked, and pin the defect with a `#guard` on a
-    hand-built witness instead. -/
+    `knownFailure` is *not* a way to quiet a property that is only noisy. The run fails as
+    soon as someone fixes the defect, so the mark cannot hide a change that breaks a property
+    that holds today. The mark is also wrong for a property that a draw falsifies only
+    sometimes. Such a property holds on most runs, and the mark would then make the suite red
+    on those runs. Leave that property without a mark, and pin the defect with a `#guard` on a
+    witness that you build by hand. -/
 inductive Expectation where
-  /-- The property must hold. Every property is this unless it says otherwise. -/
+  /-- The property must hold. This is the value for each property that does not say
+      otherwise. -/
   | mustHold
-  /-- The property must fail, because the code under test has a defect. Its
-      counterexample is suppressed and it does not fail the run — but if it ever
-      *passes*, the run fails, since a fixed defect must not go unnoticed. -/
+  /-- The property must not hold, because the code under test has a defect. The report hides
+      its counterexample and the run continues. If the property ever *holds*, the run fails,
+      because a fix must not go without notice. -/
   | knownFailure (reason : String)
   deriving Inhabited
 
-/-- One property under test. This is the whole of what a property author writes.
+/-- One property under test. This structure is all that the author of a property writes.
 
-    `name` is the only label there is: it is the line in every report, the Tyche panel
-    title, and — through its `area:` prefix — the report group. It must be unique across
-    the registry; `Report.duplicateNames` checks that at startup, since two properties
-    sharing a name would silently collapse their panels.
+    `name` is the only label. It is the line in each report and the title of the Tyche panel.
+    Its `area:` prefix also gives the report group. The name must be unique in the registry,
+    and `Report.duplicateNames` checks this at the start of a run, because two properties with
+    one name would join their panels.
 
-    There is deliberately no separate group field. A report group is a *function of the
-    name*, so a property author supplies one string and a check, and nothing else. -/
+    There is no separate field for the group. The report group is a *function of the name*, so
+    the author gives one string and a check, and nothing else. -/
 structure TestDecl where
   name  : String
-  /-- Opt-in gate: the property runs only when the driver was given this tag
-      (`--smt` supplies `"smt"`). `none` runs always. -/
+  /-- The tag that enables the property. The property runs only when the driver receives this
+      tag, and the flag `--smt` gives the tag `"smt"`. A value of `none` always runs. -/
   gate  : Option String := none
-  /-- What this property claims about its own verdict. Defaulted, so stating a property
-      says nothing about known defects until it says so with `knownFailure`. -/
+  /-- What this property claims about its own verdict. The field has a default, so a property
+      says nothing about a known defect until its author adds `knownFailure`. -/
   expect : Expectation := .mustHold
-  /-- Whether to emit a Tyche panel. Sampled and witness-set properties get one by
-      default; `witness` and `action` bodies have nothing to sample, so they
-      default to off via the smart constructors below. -/
+  /-- Whether the run emits a Tyche panel. A sampled property and a property over a set of
+      witnesses get a panel by default. A `witness` body and an `action` body have nothing to
+      sample, so the smart constructors below set this field to `false` for them. -/
   tyche : Bool := true
-  /-- A bespoke Tyche panel, overriding the one derived from the body.
+  /-- A Tyche panel of its own, in place of the panel that the body gives.
 
-      The derived panel covers a `Bool` check over a `PropertyRunner`, which is almost
-      every property. The exceptions are the handful whose oracle is itself an `IO`
-      action (a solver run, a format→parse round-trip) or whose panel wants a
-      breakdown that the input alone does not determine — those pass their own
-      writer here, so the panel stays next to the property it belongs to instead of
-      in a central file that has to be edited in step.
+      The panel from the body covers a `Bool` check over a `PropertyRunner`, and almost every
+      property has that shape. A property is an exception when its oracle is an `IO` action,
+      such as a solver run or a round trip from `format` to `parse`. It is also an exception
+      when its panel needs a breakdown that the input does not give. Such a property gives its
+      own writer here, so the panel stays next to the property and not in a central file that
+      someone must edit at the same time.
 
-      Arguments: the open output handle, the run configuration, the number of
-      samples for this panel, and the run's start timestamp. -/
+      The arguments are the open output handle, the configuration of the run, the number of
+      samples for this panel, and the start time of the run. -/
   panel : Option (IO.FS.Handle → RunConfig → Nat → Nat → IO Unit) := none
   body  : Body
 
-/-- A non-gating report: it prints, and never affects the exit code. Coverage
-    statistics and localisation tallies live here rather than as properties,
-    because they measure a distribution instead of asserting a fact — but they are
-    registered and discovered exactly like properties, so a new one is also a
-    one-file change. -/
+/-- A report that does not gate. It prints, and it never changes the exit code. Statistics for
+    coverage and counts that locate an error are diagnostics and not properties, because they
+    measure a distribution and they assert no fact. The registry holds them in the same way as
+    a property, so you add a new one in a single file. -/
 structure Diagnostic where
-  /-- Heading printed above the report, and the Tyche panel title if there is one. -/
+  /-- The heading above the report. It is also the title of the Tyche panel, if the diagnostic
+      has one. -/
   name : String
   run  : RunConfig → IO Unit
-  /-- A Tyche panel for the same measurement. A diagnostic may have one even though
-      it gates nothing: the panel is where a distribution is legible, which is the
-      whole point of measuring it. -/
+  /-- A Tyche panel for the same measurement. A diagnostic can have a panel although it gates
+      nothing, because a panel is where a reader can see a distribution. -/
   panel : Option (IO.FS.Handle → RunConfig → Nat → Nat → IO Unit) := none
 
 -- ── Smart constructors ────────────────────────────────────────────────
 
-/-- **The way to state a property.** A decidable `Prop` over a type Plausible can
-    sample: the generator, the printer and the shrinker come from that type's
-    `Arbitrary`/`Repr`/`Shrinkable` instances, and the Tyche axes from its
+/-- **Use this function to state a property.** It takes a decidable `Prop` over a type that
+    Plausible can sample. The generator, the printer and the shrinker come from the
+    `Arbitrary`, `Repr` and `Shrinkable` instances of that type. The Tyche axes come from its
     `TycheFeatures` instance.
 
-    This is QuickCheck's `quickCheck prop_foo`, where `prop_foo :: T -> Bool` picks its
-    generator from the type of its argument. Annotate the argument, since that
-    annotation is what selects the generator:
+    This is `quickCheck prop_foo` of QuickCheck, where `prop_foo :: T -> Bool` gets its
+    generator from the type of its argument. Give the argument a type annotation, because the
+    annotation selects the generator:
 
     ```lean
     .property "mypass: idempotent"
       fun (gp : GenProgram) => myPass (myPass gp.prog) = myPass gp.prog
     ```
 
-    A `Bool`-valued check works unchanged, since `Bool` coerces to `Prop`, so a named
-    `check*` predicate can be handed over as-is. Stating the claim as a `Prop` is worth
-    it wherever the shape is an equality or an order: Plausible's `PrintableProp` then
-    prints *both sides* of the failing comparison instead of the single word `false`.
+    A check that returns a `Bool` also works, because `Bool` coerces to `Prop`. You can
+    therefore give a named `check*` predicate to this function without a change. A claim whose
+    shape is an equality or an order is better as a `Prop`. The `PrintableProp` instance of
+    Plausible then prints *both sides* of the comparison, and not the single word `false`.
 
-    A named predicate may return `Prop` too, and keep that rendering, but it has to be an
-    `abbrev` rather than a `def` — `dec` below is resolved by instance search, which
-    unfolds reducible definitions only, so a plain `def … : Prop` fails to synthesize
-    *here*, at the registration site, while compiling perfectly well on its own. It also
-    has to carry the equality at its *top level*: `PrintableProp` reads the outermost
-    shape, so a predicate whose body is `∀ x ∈ …` reports `⋯` just as a `Bool` would. See
-    `docs/writing-properties.md` § "A named predicate that returns `Prop`", and
-    `StrataGenerators/MonomorphizeFns.lean` for a module written that way throughout.
+    A named predicate can also give a `Prop`, and it then keeps that rendering. Such a predicate must be an
+    `abbrev`, and not a `def`. The instance `dec` below comes from a search for an instance, and that search
+    unfolds a reducible definition only. Therefore a plain `def` that gives a `Prop` fails *here*, at the
+    registration of the property, and it compiles on its own.
 
-    `TestDecl.forAll` is the same thing with the runner named explicitly, for the rare
-    property that wants something other than its type's default. -/
+    Such a predicate must also carry the equality at its *top level*. `PrintableProp` reads the shape at the
+    top, so a predicate whose body starts with a bounded `∀` prints a placeholder, as a `Bool` does. Read the
+    section about a named predicate that gives a `Prop` in `docs/writing-properties.md`.
+    `StrataGenerators/MonomorphizeFns.lean` is a module that uses that form throughout.
+
+    `TestDecl.forAll` does the same work, and its caller names the runner. Use it for the rare property that
+    needs something other than the default of its type. -/
 def TestDecl.property (name : String)
     [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α] [MaybeTunable α]
     (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
@@ -337,10 +330,10 @@ def TestDecl.property (name : String)
   { name, gate,
     body := .sampled (PropertyRunner.ofInstances α) check dec inst MaybeTunable.retune? }
 
-/-- A property over an explicitly named `PropertyRunner`, for the case where the type's
-    default instances are not what you want — a narrowed draw, a diagnostic renderer,
-    an extra Tyche axis. The explicit-generator sense of QuickCheck's `forAll`. Prefer
-    `TestDecl.property`. -/
+/-- A property over a `PropertyRunner` that the caller names. Use it when the default
+    instances of the type are wrong for the property: a narrower draw, a diagnostic renderer,
+    or one more Tyche axis. This is the `forAll` of QuickCheck, which also names its generator.
+    Prefer `TestDecl.property`. -/
 def TestDecl.forAll (name : String) (runner : PropertyRunner α) (check : α → Prop)
     [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
     (gate : Option String := none) : TestDecl :=
@@ -433,83 +426,82 @@ def TestDecl.underTunings (name : String) (tunings : List (String × Tuning))
     (gate : Option String := none) : List TestDecl :=
   TestDecl.underTuningsOf tunings (TestDecl.property name check gate)
 
-/-- A closed-`Bool` property with no generated input. -/
+/-- A property whose verdict is a closed `Bool`. It has no generated input. -/
 def TestDecl.witness (name : String) (verdict : Bool)
     (gate : Option String := none) : TestDecl :=
   { name, gate, tyche := false, body := .witness verdict }
 
-/-- A property over a fixed finite input space. -/
+/-- A property over a fixed and finite input space. -/
 def TestDecl.witnesses (name : String) (cases : List α) (render : α → String)
     (check : α → Bool)
     (features : α → List (String × Tyche.Feature) := fun _ => [])
     (gate : Option String := none) : TestDecl :=
   { name, gate, body := .witnesses cases render check features }
 
-/-- A self-driving `IO` property. -/
+/-- A property that drives itself with `IO`. -/
 def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
     (gate : Option String := none) : TestDecl :=
   { name, gate, tyche := false, body := .action run }
 
-/-- **Mark a property as failing against a defect in the code under test.** Its
-    counterexample is suppressed and it stops gating the exit code; if it ever passes,
-    the run fails and names this call as the thing to delete.
+/-- **Marks a property that a defect in the code under test falsifies.** The report hides its
+    counterexample, and the property stops gating the exit code. If the property ever holds,
+    the run fails and it names this call as the code to delete.
 
-    A prefix rather than a method, so the mark is the first thing read and the property
-    needs no parentheses around it:
+    This is a prefix and not a method, so a reader sees the mark first and the property needs
+    no parentheses:
 
     ```lean
     @[strata_property]
     def liftOutputTypechecks : TestDecl :=
-      knownFailure "strata-org/Strata#123: a snapshot name escapes its scope" <|
+      knownFailure "a minted snapshot name escapes its scope" <|
         TestDecl.property "lift: the output typechecks"
           fun (gp : GenProgram) => checkLiftOutputTypechecks gp.prog
     ```
 
-    The reason travels with the mark rather than sitting in a central list that has to be
-    edited in step, so the registry is the single answer to "what is known to fail?" —
-    which `--list` prints. For one member of a `family`, give the `Expectation` as the
-    entry's third component instead; an attribute or a prefix cannot address one entry of
-    a list.
+    The reason travels with the mark, and it does not sit in a central list that someone must
+    edit at the same time. The registry is therefore the one answer to the question of which
+    properties are known to fail, and `--list` prints that answer. For one member of a
+    `family`, give the `Expectation` as the third component of the entry, because an attribute
+    and a prefix cannot address one entry of a list.
 
-    Prefer this to deleting or commenting out a property: a deleted property stops
-    watching the defect, and nothing then reports the fix. -/
+    Prefer this mark to the deletion of a property, and to a comment around it. A property
+    that you delete stops watching the defect, and nothing then reports the fix. -/
 def knownFailure (reason : String) (d : TestDecl) : TestDecl :=
   { d with expect := .knownFailure reason }
 
-/-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
-    already-classified sample.
+/-- Adds a Tyche panel of its own that samples `gen`. The argument `gen` is an `IO` action that
+    gives a sample with its classes.
 
-    For the handful of properties whose panel is richer than the derived one — an
-    `IO` oracle, or a breakdown of *why* a sample failed that the input alone does
-    not determine. The panel's title is taken from the property's own `name`, so the
-    two cannot drift apart. -/
+    Use this for a property whose panel needs more than the panel from the body: an `IO`
+    oracle, or a breakdown of *why* a sample did not hold that the input does not give. The
+    title of the panel comes from the `name` of the property, so the two always agree. -/
 def TestDecl.withPanel [Tyche.TycheSample β] (d : TestDecl) (gen : IO β) : TestDecl :=
   { d with tyche := true
            panel := some (fun handle _ numSamples runStart =>
              Tyche.runInto handle gen d.name numSamples runStart) }
 
-/-- Attach a bespoke Tyche panel that enumerates a fixed finite set of samples
-    rather than drawing them, for a property whose input space is finite. -/
+/-- Adds a Tyche panel of its own that lists a fixed and finite set of samples in place of a
+    draw. Use it for a property whose input space is finite. -/
 def TestDecl.withEnumeratedPanel [Tyche.TycheSample β] (d : TestDecl) (cases : List β) :
     TestDecl :=
   { d with tyche := true
            panel := some (fun handle _ _ runStart =>
              Tyche.writeInto handle cases d.name runStart) }
 
-/-- Give a diagnostic a Tyche panel sampling `gen`. -/
+/-- Gives a diagnostic a Tyche panel that samples `gen`. -/
 def Diagnostic.withPanel [Tyche.TycheSample β] (d : Diagnostic) (gen : IO β) :
     Diagnostic :=
   { d with panel := some (fun handle _ numSamples runStart =>
              Tyche.runInto handle gen d.name numSamples runStart) }
 
-/-- The report group: the `area` of an `area: description` name.
+/-- The report group, which is the `area` part of a name of the form `area: description`.
 
-    Grouping is derived rather than declared, so it cannot disagree with the name. A
-    name with no `": "` is its own group. -/
+    The group comes from the name and no one declares it, so the two cannot disagree. A name
+    that holds no `": "` is its own group. -/
 def TestDecl.group (d : TestDecl) : String :=
   (d.name.splitOn ": ").headD d.name
 
-/-- Whether this run's gates admit the property. -/
+/-- Whether the gates of this run let the property run. -/
 def TestDecl.enabled (d : TestDecl) (cfg : RunConfig) : Bool :=
   match d.gate with
   | none => true
@@ -520,59 +512,61 @@ def TestDecl.enabled (d : TestDecl) (cfg : RunConfig) : Bool :=
 /-- The verdict of one property, in the form every renderer needs. -/
 structure Outcome where
   passed  : Bool
-  /-- `(passing samples, total drawn)`, when the body knows them, for the `(n/m)`
-      a report line carries. `none` for a single-witness property, which has no
-      trial count to report. -/
+  /-- The number of samples that passed, and the number of samples that the run drew, when
+      the body knows them. A report line prints them as `(n/m)`. The value is `none` for a
+      property with one witness, which has no count of trials. -/
   counts  : Option (Nat × Nat) := none
   message : Option String := none
-  /-- Set when the property's gate was not enabled: the driver reports it as
-      skipped rather than as a pass, so an absent solver cannot read as green. -/
+  /-- `true` when the run did not enable the gate of the property. The driver then reports the
+      property as skipped and not as a pass, so a solver that is not present does not look
+      like a pass. -/
   skipped : Bool := false
-  /-- Set when `Outcome.reconcile` turned a raw verdict into its expected one: the
-      property is not asserting anything about this run, so a driver reports it as
-      `XFAIL` rather than as a pass. The same reasoning as `skipped` — a suppressed
-      defect must not read as green either. -/
+  /-- `true` when `Outcome.reconcile` changed a raw verdict into the expected verdict. The
+      property then asserts nothing about this run, so a driver reports it as `XFAIL` and not
+      as a pass. This is the same reason as for `skipped`: a defect that the report hides must
+      not look like a pass. -/
   xfail   : Bool := false
 
-/-- Read Plausible's own `TestResult` as an `Outcome`. Both Plausible-backed bodies go
-    through this, so a `Bool` property and a `Prop` property report identically. -/
+/-- Reads a `TestResult` of Plausible as an `Outcome`. Both bodies that use Plausible go
+    through this function, so a `Bool` property and a `Prop` property report in the same
+    way. -/
 def Outcome.ofTestResult (cfg : Configuration) {p : Prop} : TestResult p → Outcome
   | .success _ => { passed := true, counts := some (cfg.numInst, cfg.numInst) }
   | .gaveUp n => { passed := false, message := some s!"Gave up {n} times" }
   | .failure _ xs n =>
     { passed := false, message := some (Testable.formatFailure "Found problems!" xs n) }
 
-/-- Run a decidable `Prop` over a generator through Plausible's own runner.
+/-- Runs a decidable `Prop` over a generator through the runner of Plausible.
 
-    The runner's fields are supplied as explicit instances rather than synthesized,
-    which is the trick that lets the input type be existential:
-    `Plausible.Testable`'s `varTestable` needs `SampleableExt α`, and Plausible's
-    default `SampleableExt` instance holds precisely `Arbitrary`/`Repr`/`Shrinkable`.
-    So a property built by `TestDecl.property` is run against the very instances
-    Plausible would have found for itself.
+    The call gives the fields of the runner as explicit instances, and Lean does not
+    synthesize them. This is what lets the input type be existential. The `varTestable`
+    instance of `Plausible.Testable` needs `SampleableExt α`, and the default `SampleableExt`
+    instance of Plausible holds `Arbitrary`, `Repr` and `Shrinkable`. A property that
+    `TestDecl.property` builds therefore runs against the same instances that Plausible would
+    find.
 
-    `NamedBinder` is applied by hand because `varTestable` matches only on a
-    decorated `∀`; `mk_decorations` cannot help here, since the proposition is built
-    from a term rather than written as syntax.
+    The code applies `NamedBinder` by hand, because `varTestable` matches only a `∀` that has
+    that decoration. `mk_decorations` cannot help here, because a term builds the proposition
+    and no one writes it as syntax.
 
-    The `Prop` reaches Plausible *undecided*, which is what buys the readable
-    counterexample — `issue: 1 = 2 does not hold` rather than
-    `issue: false does not hold`. Deciding it first erases the shape `PrintableProp`
+    The `Prop` reaches Plausible *without a decision*, and this is what gives a readable
+    counterexample such as `issue: 1 = 2 does not hold` in place of
+    `issue: false does not hold`. A decision first erases the shape that `PrintableProp`
     reads. -/
 def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
     (check : α → Prop) [∀ x, Testable (check x)] (cfg : Configuration) : IO Outcome := do
   let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x)) cfg
   pure (Outcome.ofTestResult cfg r)
 
-/-- Reconcile a raw verdict with what the declaration claims about it.
+/-- Reconciles a raw verdict with the claim of the declaration.
 
-    Every verdict in the package passes through here, and every driver reads the result,
-    so the two drivers cannot disagree about a known failure any more than they can
-    disagree about a pass: the reconciliation happens once, below the rendering.
+    Each verdict in the package goes through this function, and each driver reads the result.
+    Therefore the two drivers cannot disagree about a known failure, and they cannot disagree
+    about a pass. The reconciliation happens one time, below the output.
 
-    A skipped property is returned untouched. Its gate was not enabled, so there is no
-    verdict to reconcile — and reporting `XFAIL` for a property that never ran would
-    claim the defect was observed. -/
+    The function returns a skipped property without a change. The run did not enable its gate,
+    so there is no verdict to reconcile. A report of `XFAIL` for a property that did not run
+    would claim that someone saw the defect. -/
 def Outcome.reconcile (o : Outcome) : Expectation → Outcome
   | .mustHold => o
   | .knownFailure reason =>
@@ -583,17 +577,18 @@ def Outcome.reconcile (o : Outcome) : Expectation → Outcome
                message := some s!"expected to fail, but passed — the defect appears to \
                  be fixed, so drop its known-failure mark ({reason})" }
     else
-      -- Drop `o.message`: that is where `Testable.formatFailure` put the counterexample,
-      -- and it is noise for a defect that is already understood and reported.
+      -- Drop `o.message`. `Testable.formatFailure` put the counterexample there, and it is
+      -- noise for a defect that someone already understands and reported.
       { o with passed := true, xfail := true, message := some reason }
 
-/-- Run one property and report the *raw* verdict, before reconciliation against
-    `TestDecl.expect`. Split out from `run` so that suppression is visibly one step
-    rather than woven through the four bodies, and so a consumer that wants the
-    unreconciled verdict has one. Nothing needs that today: the Tyche pass scores each
-    sample through the body's own `dec`, so a panel is already unaffected by a mark —
-    which is the behaviour to keep, since the distribution of a known failure is exactly
-    what a panel is for. -/
+/-- Runs one property and reports the *raw* verdict, before the reconciliation against
+    `TestDecl.expect`.
+
+    This function is separate from `run` for two reasons. The suppression is then one visible
+    step, and it is not part of each of the four bodies. A consumer that wants the verdict
+    without the reconciliation also has one. The Tyche pass scores each sample through the
+    `dec` field of the body, so a mark does not change a panel. This is the correct behaviour,
+    because a panel is where a reader sees the distribution of a known failure. -/
 def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
@@ -617,11 +612,12 @@ def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
     let r ← run cfg
     pure { passed := r.passed, counts := some (r.samples, r.total), message := r.message }
 
-/-- Run one property and reconcile the verdict against what it claims. **This is what a
-    driver calls**; `runRaw` is for a consumer that wants the unreconciled verdict.
+/-- Runs one property and reconciles the verdict against the claim of the property. **A driver
+    calls this function.** `runRaw` is for a consumer that wants the verdict without the
+    reconciliation.
 
-    Returns a `skipped` outcome when the run's gates do not admit it, and an `xfail` one
-    when `TestDecl.expect` says the property is known to fail. -/
+    The result is a `skipped` outcome when the gates of the run do not let the property run. It
+    is an `xfail` outcome when `TestDecl.expect` says that the property is known to fail. -/
 def TestDecl.run (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   let raw ← d.runRaw cfg
   return raw.reconcile d.expect

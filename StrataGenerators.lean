@@ -1,12 +1,12 @@
--- This module serves as the root of the `StrataGenerators` library.
--- Import modules here that should be built as part of the library.
+-- The root module of the `StrataGenerators` library. Add an import here for each
+-- module that the library must build.
 import StrataGenerators.HasTypeAGen
--- `genLExpr`'s `retryCont` parameter does not change what the generator can
--- produce, so the results above describe the retrying production generator too.
+-- The `retryCont` parameter of `genLExpr` does not change the set of terms that the
+-- generator can produce.
 import StrataGenerators.RetryGenSupport
--- The `SetGen.Set`/`Plausible.Gen` bridge: executing a generator can only produce
--- terms in its `Set` support (a refinement, not an adequacy -- the converse is not
--- proved), and retrying preserves that.
+-- The bridge between `SetGen.Set` and `Plausible.Gen`. A generator that runs can
+-- produce only terms in its `Set` support, and a retry keeps this property. The
+-- converse is not proved.
 import StrataGenerators.ExecRefinement
 import StrataGenerators.DatatypeGen
 import StrataGenerators.DatatypeGenProofs

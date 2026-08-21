@@ -4,34 +4,37 @@ import StrataGenerators.TycheViz
 /-!
 # Diagnostics
 
-Reports that measure rather than assert. Each prints and never gates the exit code,
-because each is a *distribution* — and a green property computed over inputs that all
-missed the interesting case is precisely what these exist to make visible.
+A diagnostic measures and it makes no assertion. Each diagnostic prints a report, and it
+never changes the exit code, because each result is a *distribution*. A property that holds
+over inputs that all miss the interesting case is the condition that these reports make
+visible.
 
-They are discovered exactly like properties, so adding one is also a one-file change.
+The suite finds a diagnostic in the same way as a property. Therefore you add one in a
+single file.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 
-/-- The verbatim `resolve` error messages behind any resolve-after-erase
-    counterexamples. Plausible's failure output shows one shrunk term; this samples
-    fresh terms and prints the errors, so the failure *mode* ("Quantifier body has
-    non-Boolean type") is visible rather than inferred. -/
+/-- The exact `resolve` error messages for the counterexamples of the resolve-after-erase
+    property. The output of Plausible shows one term that it shrank. This diagnostic draws
+    fresh terms and prints their errors, so it shows the *kind* of error, such as
+    `Quantifier body has non-Boolean type`. -/
 @[strata_diagnostic]
 def resolveErrors : Diagnostic where
   name := "Resolve-after-erase error diagnostics:"
   run cfg := do
     let _ ← printResolveErrors cfg.numTrials cfg.maxSize
 
-/-- Special-character identifier round-trip: for each syntactic position, a legal
-    identifier containing special characters (`. ' | \ ? ! @`) rendered and re-parsed,
-    with one reproducer per distinct (position, outcome, character class) so different
-    mechanisms surface separately instead of collapsing.
+/-- The round trip of an identifier that holds special characters. For each syntactic
+    position, the diagnostic prints a legal identifier that holds the characters
+    `. ' | \ ? ! @`, and then it parses the text again. It keeps one reproducer for each
+    triple of position, result and class of character, so it shows each cause on its own.
 
-    A diagnostic rather than a property: special-character round-tripping is a known
-    limitation, and `genIdentName` — which feeds the gating round-trip property — never
-    reaches these characters, so this is the only view of that path. -/
+    This is a diagnostic and not a property, because the round trip of a special character
+    is a known limitation. `genIdentName` feeds the round-trip property that controls the
+    exit code, and it draws none of these characters. Therefore this diagnostic is the only
+    view of that path. -/
 @[strata_diagnostic]
 def specialCharProbe : Diagnostic :=
   Diagnostic.withPanel
@@ -45,57 +48,54 @@ def specialCharProbe : Diagnostic :=
             — see reproducers above" }
     genAndCheckIdentProbe
 
-/-- What the block-based suites actually drew: how many blocks held two or more
-    datatypes, how many had uniform type parameters (the condition `elimFuncs`
-    assumes), how many Strata's `addMutualBlock` accepted, how many passed the
-    `blockIsSmtSafe` screen the `--smt` law properties apply, and how many independent
-    draws really were independent.
+/-- What the suites for datatype blocks drew. The report counts the blocks that hold two or
+    more datatypes, the blocks with uniform type parameters, which is the condition that
+    `elimFuncs` assumes, the blocks that `addMutualBlock` accepted, the blocks that passed
+    the `blockIsSmtSafe` screen of the `--smt` law properties, and the independent draws
+    that really were independent.
 
-    A green block property on blocks that are all single-datatype, or all rejected, is
-    a property that tested nothing. -/
+    A block property that holds on blocks that all have one datatype, or that Strata all
+    rejects, tests nothing. -/
 @[strata_diagnostic]
 def datatypeBlockCoverageReport : Diagnostic where
   name := "Datatype-block coverage (adt: / mutual: suites):"
   run cfg := printDatatypeBlockCoverage (min cfg.numTrials 40)
 
-/-- How often a generated function/procedure/axiom body actually **calls** a derived
-    function of an earlier datatype, broken down by family (constructor / tester / safe
-    accessor / unsafe accessor).
+/-- How often the body of a generated function, procedure or axiom **calls** a derived
+    function of an earlier datatype. The report gives one count for each family:
+    constructor, tester, safe accessor and unsafe accessor.
 
-    The interesting failure mode for the ADT work is silent regression to zero, which
-    no `True`-valued property would catch. Deliberately measured at a fixed, realistic
-    declaration count rather than through the size-scaled generator: a derived call
-    needs a datatype block *and* a later function in the same program, which the
-    property suite's small draws essentially never exhibit. -/
+    A count that falls to zero is the important condition, and no property that always
+    holds can find it. The report uses a fixed and realistic number of declarations, and
+    not the generator that scales with the size. A derived call needs a datatype block
+    *and* a later function in one program, and the small draws of the property suite almost
+    never give both. -/
 @[strata_diagnostic]
 def derivedCallCoverageReport : Diagnostic where
   name := "ADT-derived-function call coverage:"
-  run cfg := printDerivedCallCoverage (min cfg.numTrials 60) (min cfg.maxSize 20)
+  run cfg := printDerivedCallCoverage (min cfg.numTrials 60) cfg.maxSize
 
-/-- Which constructs `Core.formatProgram` cannot express, most frequent first, plus —
-    of the programs that logged an error — how many still re-parse. Those are the
-    dangerous ones: a placeholder produced a syntactically valid but *different*
-    program, which the string round-trip property cannot detect.
+/-- The constructs that `Core.formatProgram` cannot write, with the most frequent construct
+    first. For the programs that logged an error, the report also counts the programs that
+    still parse again. Those programs are the dangerous ones, because a placeholder gave a
+    program that is syntactically valid but *different*, and the round-trip property on
+    strings cannot find such a program.
 
-    This is the localisation behind the `printer:` suite. The gating property says
-    *that* the printer failed; this says *what* it could not print, across a whole
-    sample rather than from one minimized witness. -/
+    This report locates the errors of the `printer:` suite. The property that controls the
+    exit code says *that* the printer failed. This report says *what* the printer could not
+    write, over a whole sample and not from one small witness. -/
 @[strata_diagnostic]
 def printerErrors : Diagnostic where
   name := "Printer conversion-error diagnostics:"
   run cfg := do
     let _ ← printerErrorDiagnostic cfg.numTrials cfg.maxSize
 
-/-- Exercise the whole-program shrinker and report how far it reduces a program,
-    checking on the way that every candidate it emits is well-typed and that no
-    reduction leaves a `requires` clause stranded.
+/-- This diagnostic runs the whole-program shrinker and it reports how much the shrinker
+    reduces a program. During the run it also checks that each candidate is well-typed, and
+    that no reduction leaves a `requires` clause without its declaration.
 
-    Without this the `Shrinkable GenProgram` instance can go untouched for a whole
-    run: its one reliable failure (`program: typechecker accepts generated programs`)
-    fails only on gap-bearing programs, which are precisely the ones no shrinker with
-    this oracle can minimize, and the one shrinkable failure fires on roughly 1 draw
-    in 500. A regression in the shrinker would then pass unnoticed until the day it
-    matters. -/
+    Without this diagnostic, a whole run can use the `Shrinkable GenProgram` instance zero
+    times. A change that breaks the shrinker can then stay hidden. -/
 @[strata_diagnostic]
 def programShrinker : Diagnostic where
   name := "Whole-program shrinker diagnostics:"

@@ -7,9 +7,9 @@ A monolithic "every `ProgramHasTypeA` program is reachable" theorem is inherentl
 false for a *bounded sampler* without a union of per-declaration reachability side
 conditions (the same reason datatype completeness needs `BitvecWidthOnly`).
 
-What *is* cleanly provable — and is the useful completeness contribution — is that
-the **fold composes**: if each declaration step is individually reachable from its
-incoming state, the whole declaration list is reachable by `genDeclsFold`, and
+One claim is cleanly provable, and it is the useful contribution about completeness: the **fold composes**. If
+each step for one declaration is reachable from its input state, then `genDeclsFold` reaches the whole
+declaration list, and
 hence the assembled `Program` by `genProgram`. Composed with the sub-generators'
 own completeness lemmas (`genFunction_complete`, `genArgTy_complete_of_MutualADTWF`,
 `genLExpr_complete`), this reduces program reachability to per-declaration
@@ -32,20 +32,19 @@ generated, and `genLExpr` is itself incomplete). The `ArityOk` blocker is
 Four of the five lemmas have a useful property: their generators never call
 `genLExpr`, so they do not depend on the completeness of the expression generator
 at all. The `distinct` step does contain expressions, but `genDistinct` builds them
-directly as annotated `.fvar` nodes; and a datatype block is types only. The axiom
-lemma is the exception — it is stated *relative to* a `genLExpr` reachability
-hypothesis on the body, which the caller discharges from `genLExpr_complete`.
+each of them directly, as an annotated `.fvar` node, and a datatype block holds types only. The lemma for an
+axiom is the exception, because it takes a hypothesis about the reachability of the body by `genLExpr`, and the
+caller discharges that hypothesis from `genLExpr_complete`.
 
 `genNonRecursiveArgTy_complete` is a support lemma. It gives
 `genArgTy_complete_of_wf` at the empty block, which is what an alias body and the
 monotype of `distinct` need.
 
 The datatype step has two lemmas, in the same relation as `genDeclAlias_complete`
-to `genDeclAlias_complete_of_body`. `genDeclDatatype_complete` takes reachability
-of the block at the size in `b`; `genDeclDatatype_complete_of_MutualADTWF`
-discharges that from `MutualADTWF` alone through the capstone
-`genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, at the cost of an
-existential size.
+to `genDeclAlias_complete_of_body`. `genDeclDatatype_complete` takes the reachability of the block at the size
+in the bounds. `genDeclDatatype_complete_of_MutualADTWF` discharges that hypothesis from `MutualADTWF` alone,
+through `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, and the size in its conclusion is then
+existential.
 
 The two `example`s at the end of this file compose a per-step lemma through the
 dispatch, the fold and the assembly of a program, for an abstract-type step and for
@@ -56,10 +55,9 @@ Three items block a tighter result:
 
 * `BitvecWidthOnly` is a hypothesis of each lemma that generates a type. It is the
   one residual condition of the arity discipline, because `Core.KnownTypes`
-  registers `bitvec` at arity 1 but no `LMonoTy` argument position can hold a
-  width. The hand-written `ArityOk` predicate
-  that these lemmas used to carry is gone: `VocabOk` plus upstream's
-  `argsWellKinded` discharge the rest of the arity discipline.
+  registers `bitvec` at the arity 1, and no argument position of an `LMonoTy` can hold a width. These lemmas need
+  no separate predicate about an arity, because `VocabOk` and the field `argsWellKinded` of the specification
+  give the whole discipline of the arities.
 * The generator does not emit `recFuncBlock`, so the eighth constructor of
   `DeclHasType'` is unreachable by construction.
 * `genLExpr` is incomplete.
@@ -92,11 +90,10 @@ theorem genDeclsFold_cons_complete {s s₁ s₂ : GenState} {b : Bounds} {n : Na
     `(ds, s')` is reachable by *any* of the seven declaration generators, it is
     reachable by `genDeclStep`.
 
-    Deliberately stated **without mentioning the dispatch weights**. Weights are
-    irrelevant to reachability — `mem_support_frequency_iff` needs only that the
-    chosen entry's weight is positive, and every `genDeclStep` weight is — so
-    exposing them here would make a completeness statement break whenever the
-    distribution is re-tuned. The positivity witness is discharged inside the
+    The statement names **no weight of the dispatch**. A weight does not affect reachability, because
+    `mem_support_frequency_iff` needs only a positive weight for the chosen entry, and each weight of
+    `genDeclStep` is positive. A statement that named a weight would therefore break after each change to the
+    distribution. The proof discharges the condition about a positive weight inside the
     proof instead, one `exact` per branch. -/
 theorem genDeclStep_complete_of_mem {s s' : GenState} {b : Bounds} {ds : List Decl}
     (hmem :
@@ -391,11 +388,9 @@ theorem genDeclDistinct_complete {s : GenState} {b : Bounds} {nm : String}
 
 /-! ## Per-step reachability: datatype blocks
 
-The datatype step draws a block over the *combined* pool `s.tyCons ++ s.dtCons`
-(the external applied constructors, plus the datatypes that earlier blocks
-declared — interleaving direction (4)), and then gates on
-`LContext.addMutualBlock`. The generator pins the `CoreLParams`-native
-`Inhabited`/`ToFormat` instances at that gate, so the hypothesis below pins them
+The step for a datatype draws a block over the *combined* pool, which holds the external applied constructors
+and the datatypes that an earlier block gives. It then gates the block on `LContext.addMutualBlock`. The
+generator fixes the two instances of `CoreLParams` at that gate, so the hypothesis below fixes them
 too and matches the generator with no instance-diamond bridge.
 
 Unlike the three steps above, this step *does* generate types, so the arity
@@ -404,11 +399,9 @@ only. That is why
 the step is provable, and it is the fourth of the four `genLExpr`-free kinds.
 
 Two lemmas, in the same relation as `genDeclAlias_complete` to
-`genDeclAlias_complete_of_body`. The first takes reachability of the block at the
-size in `b` as a hypothesis. The second discharges that hypothesis from
-`MutualADTWF` alone, through the capstone
-`genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, at the cost of an
-existential size. -/
+`genDeclAlias_complete_of_body`. The first one takes the reachability of the block at the size in the bounds as
+a hypothesis. The second one discharges that hypothesis from `MutualADTWF` alone, through
+`genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, and the size in its conclusion is then existential. -/
 
 /-- **Reachability of the datatype step**, given a reachable block and the `.ok`
     branch of the gate. The state grows in six fields: `C` by the block, `reserved`
@@ -439,20 +432,19 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
   exact mem_support_pure_iff.mpr rfl
 
 open Core.TypeSpec DatatypeGen in
-/-- **Reachability of the datatype step from `MutualADTWF` alone.** This is
-    `genDeclDatatype_complete` with its block hypothesis discharged by the capstone
-    `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`. The caller gives no
-    order of the datatypes and no rank; the capstone builds those itself.
+/-- **The step for a datatype is reachable from `MutualADTWF` alone.** This theorem is
+    `genDeclDatatype_complete` with its hypothesis about the block discharged by
+    `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`. The caller gives no order of the datatypes and no
+    rank, because that theorem builds them itself.
 
-    The side conditions are the capstone's, at the combined pool
-    `s.tyCons ++ s.dtCons` and at `extraReserved := s.reserved`. They are the
-    reachability and the freshness of the names and the parameters,
+    The side conditions are the ones of that theorem, at the combined pool and at the reserved set of the state.
+    They are the reachability and the freshness of the names and of the parameters,
     `hasDefaultTesterName`, the limits of the generator, `VocabOk` on the pool and
     `BitvecWidthOnly` on each constructor argument type.
 
-    The size is existential, for the reason it is existential in the capstone: a
-    constructor argument type can be of any size, so no fixed `maxDatatypeSize`
-    reaches every block. Hence the conclusion varies that one field of `b`. -/
+    The size is existential, for the same reason as in the theorem that this one uses: an argument type of a
+    constructor can have any size, so no fixed size for a datatype reaches each block. Therefore the conclusion
+    varies that one field of the bounds. -/
 theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
     {block : MutualDatatype Unit} {C' : LContext CoreLParams}
     (hn : NamesOk s.baseTypes (s.tyCons ++ s.dtCons) (block.map (·.name)))

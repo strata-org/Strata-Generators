@@ -28,17 +28,16 @@ namespace ProgramGen
 
 The declaration fold threads:
 
-* `C`        — the ambient `LContext` (grows on type-con / datatype / func adds);
-* `Γ`        — the type scope (grows on alias adds);
-* `reserved` — every name declared so far, plus the seed reserved set, so newly
-               drawn declaration names are globally distinct (`getNames.Nodup`);
-* `baseTypes` / `tyCons` — the pool of referenceable type constructors, grown
-               by abstract-type declarations.
-
-* `octx` / `pctx` — the operator vocabularies feeding expression generation, grown
-               by each function declaration (`octx` for a monomorphic function,
-               `pctx` for a polymorphic one), so a later body may call any function
-               the program declares. -/
+* `C` is the ambient `LContext`. It grows at a declaration of a type constructor, of a datatype and of a
+  function.
+* `Γ` is the type scope. It grows at a declaration of an alias.
+* `reserved` holds each name that a declaration gives so far, together with the reserved set at the start.
+  Therefore each new name of a declaration differs from each other name of the program.
+* `baseTypes` and `tyCons` hold the pool of the type constructors that a type can reference. A declaration
+  of an abstract type grows that pool.
+* `octx` and `pctx` hold the vocabularies of the operators that the generation of an expression uses. Each
+  declaration of a function grows one of them: `octx` for a monomorphic function, and `pctx` for a
+  polymorphic one. Therefore a later body can call each function that the program declares. -/
 
 structure GenState where
   C : LContext CoreLParams
@@ -46,9 +45,9 @@ structure GenState where
   reserved : List String
   baseTypes : BaseTys
   tyCons : TyCons
-  /-- The *previously declared datatypes* a new block may reference, with their
-      arities: interleaving direction (4). Kept separate from `tyCons` because these
-      names are datatypes of `C`, not external known types: they reach
+  /-- The datatypes that an earlier declaration gives and that a new block can reference, with the arity of
+      each of them. This field is separate from `tyCons`, because these names are datatypes of `C` and not
+      external known types. They reach
       `TySymInhab` through `.datatype` (carried by
       `Inv.dtPoolOk`) rather than `.external`. Grown by each datatype step. -/
   dtCons : TyCons
@@ -59,60 +58,53 @@ structure GenState where
       which between them are what let a later body call anything the program
       declared earlier:
 
-      * each **datatype step**, with the ground-typed derived functions of the block
-        just declared — its constructors, testers, and safe/unsafe field accessors
-        (`adtDerivedOps`). Before this the list was fixed for the whole fold and no
-        body ever mentioned a datatype;
+      * Each **step for a datatype** adds the derived functions of the block that the step declares, at their
+        ground types. Those functions are the constructors, the testers, and the safe and unsafe accessors of a
+        field, which `adtDerivedOps` gives.
       * each **monomorphic function declaration** (`genDeclFunction`), so a body
         generated later may call a function the program declares. Without it a
         program declared functions none of its own bodies could name, and
         `FunctionInlining` ran as the identity on every draw.
 
       Soundness is *indifferent* to this list: under the annotated spec an `.op`
-      node is typed from its own annotation (`genLExpr_sound` quantifies over an
-      arbitrary `octx`), and `Inv` never mentions the field, which is why it needs
-      none. So growing it widens the support without touching any proof obligation —
-      unlike `procs`, whose threading needed a new invariant field. That is what made
-      both growths plumbing changes rather than proof efforts. -/
+      node takes its type from its own annotation, and `genLExpr_sound` quantifies over an arbitrary operator
+      context. No field of `Inv` names this field, and that is why it needs no invariant. Therefore growth of
+      this field widens the support and changes no obligation of a proof. The field `procs` differs, because its
+      threading needs a field of the invariant. -/
   octx : OpCtx
-  /-- Polymorphic operator context (the `IndirPoly` rule), grown from the same two
-      sources as `octx`: each datatype step adds the block's derived functions under
-      their full type *schemes* (`adtDerivedPolyOps`) — the projection that makes a
-      *polymorphic* datatype's accessors and testers reachable, since `IndirPoly`
-      unifies the scheme's return type against the target instead of comparing types
-      with `==` — and each **polymorphic function declaration** registers here rather
-      than in `octx`, so every declared function becomes callable by a later body
-      rather than only the monomorphic minority.
+  /-- The context of the polymorphic operators, which the `IndirPoly` rule uses. It grows from the same two
+      sources as `octx`. Each step for a datatype adds the derived functions of the block under their full type
+      *schemes*, which `adtDerivedPolyOps` gives. That form is what makes the accessors and the testers of a
+      *polymorphic* datatype reachable, because `IndirPoly` unifies the result type of a scheme against the
+      target, and it does not compare two types for equality. Each **declaration of a polymorphic function**
+      also registers here, and not in `octx`, so a later body can call each declared function, and not the
+      monomorphic ones only.
 
       Same soundness remark as `octx`: arbitrary values are sound, because
       `genLExpr_sound` quantifies over `pctx` and `Inv` never mentions it. -/
   pctx : PolyOpCtx
-  /-- The **datatype-derived** polymorphic schemes only — `pctx` minus Core's
-      primitives. This, not `pctx`, is what generated *function* and *procedure*
-      bodies receive.
+  /-- The polymorphic schemes that a datatype derives, and nothing else. This field is `pctx` without the
+      primitives of Core. The generator gives this field, and not `pctx`, to the body of a *function* and of a
+      *procedure*.
 
-      Function and procedure bodies previously ran at `pctx = []` (only axioms saw a
-      polymorphic vocabulary). Handing them the whole of `pctx` would newly expose
-      Core's 16 primitive schemes (`Sequence.map`, `select`, `update`, …) there, and
-      that is expensive out of proportion to its value: `IndirPoly` alpha-renames,
-      unifies at every split point, and samples instantiations for each candidate, so
-      a procedure draw went from ~60 ms to ~7 s — a change nothing in this task asks
-      for. Keeping the primitives where they were and forwarding only the derived
-      schemes gives bodies exactly the new reach they need (an earlier datatype's
-      testers and accessors) at a fraction of the cost.
+      The whole of `pctx` would give such a body the primitive schemes of Core, such as `Sequence.map`,
+      `select` and `update`. That cost is high against its value. `IndirPoly` renames each bound type variable,
+      it unifies at each split point, and it samples an instantiation for each candidate. Therefore a draw of a
+      procedure becomes much slower. This field keeps the primitives out and forwards the derived schemes only,
+      which gives a body exactly the reach that it needs. That reach is the constructors, the testers and the
+      accessors of a datatype that an earlier declaration gives, at a small part of the cost.
 
-      Soundness is indifferent, as for `octx`/`pctx`. -/
+      Soundness does not read this field, as it does not read `octx` and `pctx`. -/
   derivedPctx : PolyOpCtx
-  /-- The procedures declared *so far*, as callable signatures. Passed to
-      `genProcedure` so a generated body may `call` them — this is what makes the
-      emitted program contain genuine inter-procedure calls.
+  /-- The procedures that a declaration gives *so far*, as callable signatures. The fold gives this field to
+      `genProcedure`, so that a generated body can `call` one of them. That is what puts a real call between two
+      procedures into the emitted program.
 
       Unlike `octx`/`pctx`, this is **not** soundness-neutral:
       `genProcedure_sound` needs `ProcSigCorresponds procs P`, i.e. every entry must
-      resolve in the *enclosing* program. The fold cannot check that against a
-      program it has not finished building, so the obligation is carried as the
-      invariant field `Inv.procsResolve` and discharged at the top level — see
-      `ProgramGen.ProcSigThread`. -/
+      resolve in the *enclosing* program. The fold cannot check that condition against a program that it has
+      not finished, so the field `Inv.procsResolve` of the invariant carries the obligation, and a theorem
+      discharges it at the top level. Read `ProgramGen.ProcSigThread`. -/
   procs : StrataGenerators.Stmt.ProcSigCtx
   deriving Inhabited
 
@@ -171,10 +163,10 @@ structure Bounds where
 
 /-! ## Emitting declarations while threading state
 
-Each `genDecl*` returns a *list* of declarations to append (either `[]` when a
-checker add fails — leaving the state unchanged — or `[d]` when it succeeds) plus
-the updated state. Returning a list makes the "skip on failure" case first-class
-and keeps the soundness proof a clean `DeclsHasType'` cons/nil split. -/
+Each `genDecl*` gives a *list* of declarations to append, together with the new state. That list is empty
+when an add to the checker fails, and the state then stays the same. It holds one declaration when the add
+succeeds. A list makes the case of a skip after a failure a first-class case, and it keeps the soundness
+proof a split of `DeclsHasType'` into its two constructors. -/
 
 /-- Result of one declaration step: the declarations to append and the new
     state. -/
@@ -218,10 +210,10 @@ def genDeclAxiom [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let (decl, name) ← genAxiom s.octx s.pctx s.reserved b.exprDepth
   pure ([decl], { s with reserved := name :: s.reserved })
 
-/-- Declare a run of 0-ary constants at type `τ`, one per name, using the
-    checker's own `addFactoryFunctionWithError` — the same gate as the function
-    step. Returns the grown context and the emitted declarations, or `none` if any
-    name clashes in the factory (in which case the whole `distinct` step is
+/-- Declare a group of constants of arity 0 at the type `τ`, one for each name, through the
+    `addFactoryFunctionWithError` of the checker, which is the same gate as the step for a function. The
+    function gives the grown context and the emitted declarations. It gives `none` when a name clashes in the
+    factory, and the whole step for a `distinct` declaration is then
     abandoned, so the group never references an undeclared constant).
 
     All-or-nothing rather than skip-the-clashing-one: a `distinct` whose elements
@@ -267,11 +259,11 @@ def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     types (→ `MutualADTWF`) and every other declaration's name (→
     `getNames.Nodup`). -/
 def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
-  -- The applied-constructor pool is the external one *plus* the prior-datatype
-  -- pool (direction (4)). A prior datatype is drawn exactly like any other applied
-  -- constructor — at its declared arity, with `recCallsAllowed := false` inside its
-  -- arguments — so `argsWF`/`argVarsScoped` are unaffected; only the inhabitance
-  -- argument differs, and `DatatypePoolOk` supplies it.
+  -- The pool of the applied constructors is the external pool *and* the pool of the datatypes that an earlier
+  -- declaration gives. The generator draws such a datatype exactly as it draws each other applied constructor,
+  -- at its declared arity, and with no recursive call inside its arguments. Therefore the fields about the
+  -- arguments of a constructor need no change. Only the argument about inhabitance differs, and
+  -- `DatatypePoolOk` gives it.
   let block ← genMutuallyRecursiveDatatypes s.baseTypes (s.tyCons ++ s.dtCons)
     b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
     b.maxArgs b.maxDatatypeSize s.reserved
@@ -286,9 +278,9 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     -- Grow the prior-datatype pool by this block's datatypes, so a *later* block may
     -- reference them. Each enters at its own arity (`typeArgs.length`).
     let newPool := block.map (fun d => (d.name, d.typeArgs.length))
-    -- Grow the operator vocabularies by the block's *derived* functions —
-    -- constructors, testers, and both accessor variants — so every *later*
-    -- declaration's expressions can call them. `addMutualBlock` has just pushed
+    -- Grow the vocabularies of the operators by the *derived* functions of the block, which are the
+    -- constructors, the testers and both kinds of accessor. Therefore the expressions of each *later*
+    -- declaration can call them. `addMutualBlock` has pushed
     -- these very functions into `C'.functions` (it runs the same
     -- `genBlockFactory` that `adtDerivedOps`/`adtDerivedPolyOps` read), so the
     -- vocabulary and the context stay in step by construction.
@@ -305,7 +297,7 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
                      adtDerivedPolyOps block b.derivedFamilies ++ s.derivedPctx })
   | .error _ => pure ([], s)
 
-/-! ### A block that mentions a prior *alias* — deliberately not generated
+/-! ### The generator emits no block that names an earlier *alias*
 
 `genDeclDatatype` draws its block over a pool of type *constructors*, which
 never contains an alias name: `genDeclAlias` extends only `Γ.aliases` and
@@ -315,10 +307,10 @@ never contains an alias name: `genDeclAlias` extends only `Γ.aliases` and
 A step that *did* draw over the alias names and then de-aliased with the checker's
 own `MutualDatatype.resolveAliases` was prototyped and **removed**, because it
 could not be proved sound: generator soundness gives `MutualADTWF s.C block₀` for
-the block *drawn*, while `DeclHasType'.type_data` needs it for the block *stored*
-(`resolveAliases block₀`), and `MutualADTWF` is **not** preserved by alias
-resolution — an arrow-bodied alias can move a block name into an arrow's domain,
-breaking strict positivity.
+the block that it *draws*, and `DeclHasType'.type_data` needs it for the block that the context *stores*,
+which is the block after the resolution of the aliases. `MutualADTWF` does **not** survive that resolution.
+An alias whose body is an arrow can move a name of the block into the domain of an arrow, and that breaks
+strict positivity.
 
 That gap is not reachable by *this* generator (`genArgTy` draws application
 arguments at `recCallsAllowed := false`, so a block name never appears inside an
@@ -333,20 +325,18 @@ positivity is meant to be checked pre- or post-resolution. -/
     operator with `elements`, which is **uniform** over the candidates
     `findOpsInCtx` / `findPolymorphicOps` return for the target type. Those candidate
     lists are large: 105 operators of `Core.Factory` produce `bool` when fully
-    applied, and 27 produce `int`. So a single entry for a declared function gives it
-    a ~1% chance at a `bool`-typed leaf, and the measured result was 1 mention across
-    200 programs — the function was registered correctly and simply never drawn.
+    applied, and many of them give an `int`. Therefore one entry for a declared function has a very small share
+    at a leaf of the type `bool`, and a draw almost never selects it, although the context holds it.
 
-    Repeating the entry `n` times multiplies its share, because `elements` is uniform
-    over a list that now holds it `n` times. This is the same trick the weighted
-    `frequency` calls use elsewhere, expressed through list multiplicity because
-    `OpCtx` has no weight field.
+    A list that holds the entry `n` times gives it `n` times its share, because `elements` is uniform over that
+    list. That is the same method as a weight in a `frequency` call, through the number of the copies in a list,
+    because an `OpCtx` has no field for a weight.
 
     **Soundness is unaffected**, for the same reason the vocabularies can be grown at
     all: `genLExpr_sound` quantifies over an arbitrary `octx`/`pctx`, and a repeated
-    entry changes only the distribution, not the support (`opsOfTypeList` is a
-    `filterMap`, so a duplicate contributes a duplicate candidate naming the same
-    operator at the same type — an expression the generator could already produce).
+    entry changes the distribution only, and not the support. `opsOfTypeList` is a `filterMap`, so a duplicate
+    entry gives a duplicate candidate that names the same operator at the same type, and the generator can
+    already give that expression.
     `OpCtx.agrees` still holds by construction, since `OpCtx.ofList` recomputes the
     index from the list it is given.
 
@@ -372,17 +362,16 @@ def funcOpEntry (f : Function) : Option (String × LMonoTy) :=
 /-- The `PolyOpCtx` entry for a **polymorphic** declared function: its name paired
     with its type *scheme*, `∀ typeArgs. in₁ → ⋯ → inₙ → out`.
 
-    `none` for a monomorphic function, which belongs in `octx` instead — an entry
-    with an empty binder list would make `findPolymorphicOps` do the work of
-    `findOpsOfType` with extra steps, and would double-register the operator.
+    The function gives `none` for a monomorphic function, which belongs in `octx` instead. An entry with an
+    empty list of binders would make `findPolymorphicOps` do the work of `findOpsOfType` with more steps, and
+    it would register the operator two times.
 
     The binder list is the function's own `typeArgs`, which is what makes the entry
     well formed for `findPolymorphicOps`: that function alpha-renames `boundVars`
-    away from the type variables already in use, decomposes the arrow, and unifies
-    the residual result type against the target. So the binders must be exactly the
-    variables of the body that are meant to be instantiable — which for a generated
-    function is `typeArgs`, since `FuncWF` requires the signature's free type
-    variables to be a subset of them.
+    away from each type variable that is already in use, it decomposes the arrow, and it unifies the remaining
+    result type against the target. Therefore the binders must be exactly the variables of the body that a call
+    site can instantiate. For a generated function, those are the type arguments, because `FuncWF` needs each
+    free type variable of the signature to be one of them.
 
     A function whose `typeArgs` contains a variable the signature never mentions is
     still fine here: `findPolymorphicOps` samples an instantiation per bound
@@ -391,11 +380,10 @@ def funcPolyOpEntry (f : Function) : Option (String × LTy) :=
   if f.typeArgs.isEmpty then none
   else some (f.name.name, .forAll f.typeArgs (funcCurriedTy f))
 
-/-- Generate a non-recursive function, rename it to a globally fresh name (so the
-    program's names stay distinct without touching `FuncHasType'`, which does not
-    constrain the name), and — if `addFactoryFunctionWithError` accepts it — emit
-    it, grow the context's function factory, and register it in the operator
-    vocabulary.
+/-- Generate a function that is not recursive, and rename it to a fresh name, so that the names of the program
+    stay distinct and no change to `FuncHasType'` is necessary, because that specification puts no condition on
+    a name. When `addFactoryFunctionWithError` accepts the function, emit it, grow the factory of the context,
+    and register it in the vocabulary of the operators.
 
     **The `octx` growth is what lets a later body call this function.** Growing `C`
     alone registers the function with the *typechecker*; expression generation draws
@@ -485,21 +473,19 @@ def hasCallableFunc (s : GenState) : Bool :=
     weight's share.
 
     **Order-aware bias toward functions first.** A body can only call a function the
-    fold has *already* declared, because `genDeclFunction` registers it in
-    `octx`/`pctx` after the fact. Under uniform-at-weight selection a bodied function
-    preceded the first procedure in only 4 of 200 draws, so `FunctionInlining` had
-    almost nothing to inline. While no function is yet callable
-    (`hasCallableFunc s = false`) the function weight is therefore raised to 6 and
-    the procedure weight dropped to 1; once one exists the original 3-and-4 weights
-    resume. The effect is to front-load functions without removing procedures from
-    the early positions.
+    fold has *already* declared, because `genDeclFunction` registers it in the two operator contexts after the
+    step. Under the plain weights, a function with a body rarely comes before the first procedure, and a pass
+    that inlines a function then has almost nothing to inline. Therefore, while no function is callable yet,
+    which the predicate `hasCallableFunc` decides, the weight of a function rises to 6 and the weight of a
+    procedure falls to 1. After one function is callable, the original weights of 3 and 4 return. The effect is
+    to put a function early, and it removes no procedure from an early position.
 
     This is a **distribution-only** change, and that is what keeps it out of the
-    proofs: `frequency` and `oneOf` have the same support whenever every weight is
-    positive (`mem_support_frequency_iff` / `mem_support_oneOf_iff` both reduce to
-    "some branch produced it"), so no soundness or completeness statement changes —
-    only how often each kind is drawn. Both weight vectors keep every entry
-    positive, so the support is the same in either phase. `genDeclStep_sound`
+    proofs. `frequency` and `oneOf` have the same support whenever each weight is positive, because
+    `mem_support_frequency_iff` and `mem_support_oneOf_iff` each reduce to the statement that one branch gave
+    the value. Therefore no statement of soundness and no statement of completeness changes, and only the
+    frequency of each kind changes. Both vectors of the weights keep each entry positive, so the support is the
+    same in each phase. `genDeclStep_sound`
     discards the weight it inverts out of the `frequency` (`_hw`) and pins each
     branch by the list's structure, so it is unaffected. -/
 def genDeclStep [Gen G] (s : GenState) (b : Bounds) : G StepResult :=
@@ -514,9 +500,8 @@ def genDeclStep [Gen G] (s : GenState) (b : Bounds) : G StepResult :=
     , (wFunc, fun () => genDeclFunction s b)
     , (wProc, fun () => genDeclProcedure s b) ]
   frequency gs (by
-    -- The four fixed weight-1 entries and the datatype weight already make the sum
-    -- positive, so this holds whatever phase `(wFunc, wProc)` is in — no case split
-    -- on the `if` is needed.
+    -- The four fixed entries of the weight 1, and the weight of the datatype step, already make the sum
+    -- positive. Therefore this obligation holds in each phase, and the proof needs no split on the `if`.
     simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
     omega)
 
@@ -537,76 +522,41 @@ def genProgram [Gen G] (numDecls : Nat := 6) (b : Bounds := {}) : G Program := d
 
 /-! ## Running the generator -/
 
-/-! ### Sampling: run through `Plausible.Gen`, not `IO`
+/-! ### A draw goes through `Plausible.Gen`, and not through `IO`
 
-The direct `G := IO` interpretation is **unreliable for procedures**. Basalt's
-`IO` interpretation of `RandomChoice` turns an empty-support draw in a nested
-sub-generator into a `panic!`, and procedure bodies nest deeply enough to hit one
-often. Measured per-step survival under `G := IO`, 300 draws each:
+The direct interpretation at `G := IO` is **not reliable for a procedure**. The `IO` interpretation of
+`RandomChoice` in Basalt turns a draw from an empty support in a nested sub-generator into a panic, and the
+body of a procedure nests deeply enough to reach one often. Under `G := IO`, a draw of an abstract type, of
+an alias, of a `distinct` declaration and of a datatype almost always survives. A draw of an axiom and of a
+function survives most of the time. A draw of a procedure survives rarely, and a *longer* body of a procedure
+survives even less often. Therefore a larger size for a procedure is worse under `IO`, and not better.
 
-| step | survival at `procLen = 3` | at `procLen = 6` |
-| --- | --- | --- |
-| abstract / alias / distinct / datatype | 300/300 | 300/300 |
-| axiom | ~176/300 | ~182/300 |
-| function | ~205/300 | ~209/300 |
-| **procedure** | **~52/300** | **~5/300** |
+`Plausible.Gen` is the reliable interpretation, because a failed draw is a *catchable exception* there, and
+not a panic. Therefore `sample` runs the generator at `G := Plausible.Gen`, under `retryGen`, and it executes
+that generator with `Plausible.Gen.run`. Each Tyche panel for a procedure uses the same pattern.
 
-Note the direction: under `IO`, *longer* procedure bodies are ~10× **less** likely
-to survive, so raising `procSize`/`procLen` there is counter-productive.
+**The fuel for the retries must grow with the number of the declarations.** The remaining cause of a failure
+is the `inhabitedWitness` error of the expression generator, which happens when nothing in scope inhabits a
+compound argument type, and which is a known gap. Each declaration is an independent chance of that failure.
+Therefore the probability that a whole program succeeds falls quickly with the number of the declarations,
+and the fuel must absorb that fall.
 
-`Plausible.Gen` is the robust interpretation — a failed draw is a *catchable
-exception* rather than a panic — so `sample` runs the generator at
-`G := Plausible.Gen` under `retryGen` and executes it with `Plausible.Gen.run`.
-This is the same pattern the Tyche procedure panels use
-(`StrataGenerators/TycheViz.lean`).
+None of this changes a proof. Each proof is stated over `SetGen.Set`, which is the semantics of a support,
+and it does not depend on an interpretation. -/
 
-**Retry fuel has to scale with `numDecls`.** The residual failure mode is
-`inhabitedWitness` from the expression generator (a compound argument type that
-nothing in scope inhabits — a known incompleteness). Each
-declaration is an independent chance to hit it, so whole-program success decays
-geometrically in `numDecls` and the fuel must absorb it. Measured, default bounds,
-`size = 10`:
+/-- Draw one random well-typed program, through the `Plausible.Gen` interpretation, with retries.
 
-| `numDecls` | survival at `fuel = 200` |
-| --- | --- |
-| 2 / 4 / 6 | 40/40 |
-| 8 | 4/40 |
-| 12 | 0/40 |
+    The parameter `fuel` bounds the number of the retries for one draw, and it must grow with the number of
+    the declarations. The parameter `size` is the size parameter of the harness.
 
-| `fuel` (at `numDecls = 12`) | survival |
-| --- | --- |
-| 200 | 0/20 |
-| **2000** | **20/20** |
-| 8000 | 20/20 |
+    The default fuel is large, because a body can call a derived function of a datatype. A call to the tester
+    or to an accessor of a *polymorphic* datatype goes through the `IndirPoly` rule, which samples an
+    instantiation of the candidate, and nothing can often fill that instantiation. That is the same
+    `inhabitedWitness` failure as above, and a run reaches it more often when a body has more to reach.
 
-Hence the `fuel := 4000` default — comfortably inside the plateau. (For contrast,
-under `G := IO` the same failure is an uncatchable `panic!`, which is why that
-path is not used here.)
-
-None of this touches the proofs, which are stated over `SetGen.Set` (the support
-semantics) and are interpretation-independent. -/
-
-/-- Draw a single random well-typed program, via the `Plausible.Gen`
-    interpretation with retries.
-
-    `fuel` bounds the retries per draw — it must grow with `numDecls`, see the
-    table above; `size` is Plausible's size parameter.
-
-    **The default rose from 4000 to 30000** when datatype-derived functions became
-    callable. A body that calls a *polymorphic* datatype's tester or accessor goes
-    through the `IndirPoly` rule, whose candidate instantiation is sampled and so
-    is often unfillable — the same `inhabitedWitness` failure mode the table above
-    describes, just hit more often now that there is more to reach. Measured at
-    `numDecls = 12`, default bounds:
-
-    | configuration | `fuel = 4000` | `fuel = 30000` |
-    | --- | --- | --- |
-    | `derivedFamilies` all off (no ADT calls) | 8/8 | 8/8 |
-    | default (ADT calls enabled) | 1/8 | 8/8 |
-
-    Setting every `Bounds.derivedFamilies` flag to `false` recovers the old
-    behaviour *and* the old fuel requirement, which is the knob to reach for if a
-    consumer needs the cheaper draw more than it needs ADT coverage. -/
+    A value of `false` for each flag of `Bounds.derivedFamilies` removes each call to a derived function, and
+    it also removes the need for that fuel. That is the knob for a consumer that needs a cheaper draw more
+    than it needs the coverage of a datatype. -/
 def sample (numDecls : Nat := 12) (b : Bounds := {})
     (fuel : Nat := 30000) (size : Nat := 10) : IO Program :=
   Plausible.Gen.run (retryGen fuel (genProgram (G := Plausible.Gen) numDecls b)) size

@@ -10,15 +10,16 @@ import StrataGenerators.Test.ImportRoot
 import StrataGenerators.Test.Generators
 
 /-!
-# `StrataGenerators.Test` — the property-test front end
+# `StrataGenerators.Test`: the front end for a property test
 
-The single import for writing a property. Everything a property author needs is
-re-exported here: the `TestDecl` type, the `@[strata_property]` attribute, and the
-generator catalog `Generators`.
+This is the one import that you need to write a property. It exports each part that the author
+of a property needs: the `TestDecl` type, the `@[strata_property]` attribute, and the catalog of
+generators `Generators`.
 
-## Writing a property
+## How to write a property
 
-Any file under `StrataTests/` — an existing one or a new one, one property or forty:
+Put the property in any file under `StrataTests/`. The file can be new or it can exist already,
+and it can hold one property or forty properties:
 
 ```lean
 import StrataGenerators.Test
@@ -31,81 +32,78 @@ def myPassIdempotent : TestDecl :=
     fun (gp : GenProgram) => myPass (myPass gp.prog) = myPass gp.prog
 ```
 
-A name and a check. That is the whole registration: `lake test` runs it, reports it
-under a `mypass` group, and gives it a Tyche panel — with no other file edited.
-`lake test -- --list` shows what the harness picked up;
-`lake test -- --only="mypass:" --quick` iterates on just this group.
+A name and a check are the whole registration. `lake test` runs the property, reports it under a
+`mypass` group, and gives it a Tyche panel. You edit no other file. `lake test -- --list` shows
+what the harness found, and `lake test -- --only="mypass:" --quick` runs only this group.
 
-The check is a decidable `Prop`, so a claim reads as the statement it is, and a failing
-draw reports the comparison rather than the word `false`: `issue: 3 ≤ 2 does not hold`
-rather than `issue: false does not hold`. A `Bool`-valued predicate is accepted
-unchanged — `Bool` coerces to `Prop` — so a named `check*` helper can be handed over
-as-is, and most of this suite does exactly that.
+The check is a decidable `Prop`, so a claim reads as the statement that it is. A draw that
+falsifies the claim then reports the comparison, and not the word `false`. The report gives
+`issue: 3 ≤ 2 does not hold` in place of `issue: false does not hold`. A predicate that returns
+a `Bool` also works, because `Bool` coerces to `Prop`. You can therefore give a named `check*`
+helper to `.property` without a change, and most properties in this suite do that.
 
-The generator is chosen the way Plausible and QuickCheck choose it: **by the type of
-the quantified value**. `GenProgram` carries `Arbitrary`/`Repr`/`Shrinkable` instances,
-so annotating the binder selects the whole-program generator, its printer and its
-shrinker at once.
+Lean chooses the generator in the way that Plausible and QuickCheck choose it: **by the type of
+the quantified value**. `GenProgram` has `Arbitrary`, `Repr` and `Shrinkable` instances, so a type
+annotation on the binder selects the whole-program generator, its printer and its shrinker at one
+time.
 
-The report group is the `area` of an `area: description` name — derived, never declared,
-so it cannot disagree with the name. A prefix nothing has used before simply creates a
-new group.
+The report group is the `area` part of a name of the form `area: description`. The group comes
+from the name and no one declares it, so the two cannot disagree. A prefix that no property used
+before makes a new group.
 
 ## The generator instances
 
-A type is usable with `property` as soon as Plausible can sample it:
+You can use a type with `property` as soon as Plausible can sample it:
 
-| instance | supplies |
+| instance | what it gives |
 |---|---|
 | `Arbitrary α` | how to draw a value |
-| `Repr α` | how a counterexample is printed |
-| `Shrinkable α` | how a counterexample is reduced |
-| `TycheFeatures α` | the Tyche axes (optional; a catch-all instance gives none) |
+| `Repr α` | how the report prints a counterexample |
+| `Shrinkable α` | how the shrinker reduces a counterexample |
+| `TycheFeatures α` | the Tyche axes. It is optional, because a catch-all instance gives none. |
 
-The check's own `Decidable` instance is resolved at the registration site too. That is
-where it has to happen: Plausible receives the `Prop` undecided, so the shape is still
-visible to `PrintableProp` and the failure message can name both sides, while the Tyche
-panel and the shrinker receive the decided form, since they must classify every sample
-rather than merely test it. Both travel with the property in `Body.sampled`.
+Lean also resolves the `Decidable` instance of the check at the registration site. That site is
+where the resolution must happen. Plausible receives the `Prop` without a decision, so
+`PrintableProp` still sees the shape and the message can name both sides of a comparison. The
+Tyche panel and the shrinker receive the decided form, because they must classify each sample and
+not only test it. Both instances travel with the property in `Body.sampled`.
 
-`TycheFeatures` is this package's addition, for the same reason the other three are
-classes: `num_decls`, `decl_kinds` and `rejection_cause` are facts about the *type*,
-not about any one claim, so declaring them once gives every later property the axes
-that tell a vacuous draw from a live one. The instances for this package's shapes are
-in `StrataGenerators.Test.Generators`; the generators themselves are in
-`StrataGenerators.TestScaffold`.
+`TycheFeatures` is an addition of this package, for the same reason that the other three are
+classes. An axis such as `num_decls`, `decl_kinds` or `rejection_cause` is a fact about the
+*type* and not about one claim. One instance therefore gives each later property the axes that
+separate a vacuous draw from a live one. `StrataGenerators.Test.Generators` holds the instances
+for the shapes of this package, and `StrataGenerators.TestScaffold` holds the generators.
 
-To sample a type in a way its default instances do not, name a `PropertyRunner`
-explicitly with `TestDecl.forAll` — the explicit-generator sense of QuickCheck's
-`forAll`. `Generators.program.withRender …` keeps every axis and changes only the
-printer. That is the only reason a property ever mentions a `PropertyRunner`.
+To sample a type in a way that its default instances do not give, name a `PropertyRunner` with
+`TestDecl.forAll`. This is the `forAll` of QuickCheck, which also names its generator.
+`Generators.program.withRender …` keeps each axis and it changes only the printer. This is the
+only reason for a property to name a `PropertyRunner`.
 
 ## The other shapes
 
-`TestDecl.property` is the only entry point you need for a property that quantifies
-over one generated value, which is nearly all of them. Three other shapes exist for the
-cases that are not:
+`TestDecl.property` is the only entry point that you need for a property which quantifies over
+one generated value, and almost every property has that shape. Three other shapes cover the
+other cases:
 
-* `TestDecl.witness` — a closed `Bool`. For a claim whose sharpest statement is one
-  constructed program or one operator, where sampling would only obscure which case is
-  at stake.
-* `TestDecl.witnesses` — a *fixed finite* input space, scored element by element and
-  enumerated (not sampled) in Tyche.
-* `TestDecl.action` — a self-driving `IO` action, for an oracle that is a subprocess or
-  that must interleave its own diagnostics with generation. Pair it with
-  `gate := some "smt"` when it needs a live solver.
+* `TestDecl.witness` takes a closed `Bool`. Use it for a claim whose best statement is one
+  program that you build, or one operator. A random sample would hide which case the claim
+  covers.
+* `TestDecl.witnesses` takes a *fixed and finite* input space. It scores one element at a time,
+  and Tyche lists the space in place of a sample.
+* `TestDecl.action` takes an `IO` action that drives itself. Use it for an oracle that is a
+  subprocess, or for an oracle that must print its own diagnostics between the draws. Add
+  `gate := some "smt"` when the action needs a live solver.
 
-`@[strata_properties]` registers a `List TestDecl` at once, and `family T [ … ]` is
-sugar for building that list when the entries share an input type: it names `T` once and
-expands each entry to its own `TestDecl.property`, so an entry is a decidable `Prop`
-scored exactly as a standalone property is. There is one way to state a check across the
-whole API, with no exception for a family.
+`@[strata_properties]` registers a `List TestDecl` at one time. `family T [ … ]` is sugar that
+builds such a list when the entries share an input type. It names `T` one time, and it expands
+each entry to its own `TestDecl.property`. An entry is therefore a decidable `Prop` that the
+suite scores in the same way as a property that stands alone. There is one way to state a check
+in the whole API, and a family is no exception.
 
-`TestDecl.forAll` is the variant that names a `PropertyRunner` explicitly.
+`TestDecl.forAll` is the form that names a `PropertyRunner`.
 
-`@[strata_diagnostic]` registers a `Diagnostic`: a report that prints and never gates
-the exit code, for a coverage statistic or a localisation tally.
+`@[strata_diagnostic]` registers a `Diagnostic`, which is a report that prints and never gates
+the exit code. Use it for a statistic about coverage, or for a count that locates an error.
 
-See `docs/writing-properties.md` for the longer version, including how the harness
-discovers your file.
+`docs/writing-properties.md` gives the long form, and it says how the harness finds your file.
 -/

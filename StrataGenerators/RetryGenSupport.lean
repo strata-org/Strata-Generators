@@ -6,62 +6,68 @@ import Basalt.PlausibleGen
 /-!
 # `retryGenArg` does not change what `genLExpr` can produce
 
-The soundness/completeness/`OpsConsistentR` theorems in `HasTypeAGen.lean` and
-`HasTypeAGenOpsConsistent.lean` are all stated about
-`genLExpr (G := SetGen.Set) … ` with `retryCont` left at its `id` default. The
-*executable* generator the test harness runs is
+The theorems for soundness, for completeness and for `OpsConsistentR` in
+`HasTypeAGen.lean` and `HasTypeAGenOpsConsistent.lean` all speak about
+`genLExpr (G := SetGen.Set) … `, with `retryCont` at its default value `id`. The
+*executable* generator that the test harness runs is
 `genLExpr (G := Plausible.Gen) … (retryGenArg n)`.
 
-This module narrows that gap: it shows a retrying `retryCont` changes only *how many
-attempts* a draw needs, never *which terms are reachable*.
+This module closes that gap. A `retryCont` that retries changes only *the number of
+attempts* that a draw needs, and it never changes *which terms the generator can
+reach*.
 
-Note the two results below live in *different semantics* and this module does not by
-itself join them — `genLExpr_setSupport_retryCont` is about `SetGen.Set` (where its
-hypothesis is function equality, so `retryGenArg` does **not** satisfy it), while
-`runSupport_retryGen` is about `Plausible.Gen` (where `retryGenArg` genuinely lives).
-The `Set`/`Plausible` bridge is `StrataGenerators.ExecRefinement`, whose
-`refines_retryGen`/`refines_retryGenArg` are what actually carry the proven support
+The two results below hold in *different semantics*, and this module alone does not
+join them. `genLExpr_setSupport_retryCont` speaks about `SetGen.Set`, and its
+hypothesis is an equation between functions, which `retryGenArg` does **not** satisfy.
+`runSupport_retryGen` speaks about `Plausible.Gen`, where `retryGenArg` lives.
+`StrataGenerators.ExecRefinement` is the bridge between `Set` and `Plausible`, and its
+theorems `refines_retryGen` and `refines_retryGenArg` are what carry the proved support
 over to the executable generator.
 
-Two facts:
+There are two facts:
 
-1. `runSupport_retryGen` / `runSupport_retryGenArg` — retrying is reachability-neutral
-   at `Plausible.Gen`. Neither widening (a retry can only return what the underlying
-   generator returns) nor narrowing (the first attempt is still available).
+1. `runSupport_retryGen` and `runSupport_retryGenArg`: a retry does not change which
+   values `Plausible.Gen` can reach. It adds no value, because a retry returns only a
+   value that the generator under it returns. It removes no value, because the first
+   attempt is still there.
 
-2. `genLExpr_retryCont_ext` / `genLExpr_retryCont_id` — `genLExpr` is *congruent* in
-   `retryCont`: continuations that agree pointwise give literally equal generators, at
-   every depth and for any `G`.
+2. `genLExpr_retryCont_ext` and `genLExpr_retryCont_id`: `genLExpr` is *congruent* in
+   `retryCont`. Two continuations that agree at each point give generators that are
+   literally equal, at each depth and for every `G`.
 
-The headline results are `genLExpr_runSupport_retryGenArg` (the executable statement)
-and `genLExpr_setSupport_retryCont` (the `SetGen.Set` statement that connects directly
-to the existing theorems).
+The main results are `genLExpr_runSupport_retryGenArg`, which is the executable
+statement, and `genLExpr_setSupport_retryCont`, which is the statement about
+`SetGen.Set` that connects to the theorems.
 
-## Why the statement is phrased two ways
+## Why there are two statements
 
-One might hope to write `SetGen.support (genLExpr (G := SetGen.Set) … (retryGenArg n))`
-and be done. That does not typecheck, and the reason is the substance of the issue:
-`SetGen.support : SetGen.Set α → SetGen.Set α`, whereas `retryGenArg` is
-`Plausible.Gen`-specific (it needs `tryCatch`, which the abstract `Gen` class does not
-provide). Retrying is invisible in the `Set` semantics — there `default` is `∅`, not an
-error, so there is no failure to catch and nothing to retry.
+A reader can hope for one statement about
+`SetGen.support (genLExpr (G := SetGen.Set) … (retryGenArg n))`. That expression does
+not typecheck, and the reason is the substance of the matter.
+`SetGen.support` maps a `SetGen.Set α` to a `SetGen.Set α`, but `retryGenArg` works
+only at `Plausible.Gen`, because it needs `tryCatch` and the abstract `Gen` class has
+no such operation. A retry is also invisible in the `Set` semantics: there `default` is
+`∅` and not an error, so there is no failure to catch and nothing to retry.
 
-So "the support is unchanged" splits into the two halves above: a reachability claim
-about retrying, proved where retrying exists (`Plausible.Gen`), and a congruence claim
-about `genLExpr`, proved uniformly in `G` and therefore applicable at `SetGen.Set`.
+The claim that the support does not change therefore splits into the two halves above.
+The first half is a claim about which values a retry can reach, and the proof is at
+`Plausible.Gen`, where a retry exists. The second half is a claim that `genLExpr` is
+congruent, and the proof is uniform in `G` and therefore holds at `SetGen.Set`.
 -/
 
 open Lambda RandomChoice Plausible
 
 namespace RetryGenSupport
 
-/-! ## Part 1: retrying is reachability-neutral at `Plausible.Gen` -/
+/-! ## Part 1: a retry does not change what `Plausible.Gen` can reach -/
 
-/-- `tryCatch` at `Plausible.Gen`, applied to an rng state and a size, is the
-    obvious `Except` match: run `g`; on `.ok` keep the result, on `.error` run the
-    handler *at the same state*. Peeling the `StateT`/`ReaderT`/`Except` stack by
-    hand because `Plausible.Gen`'s `MonadExcept` instance is `by infer_instance`, so
-    there is no ready-made simp lemma. -/
+/-- `tryCatch` at `Plausible.Gen`, at a state of the random number generator and a
+    size, is a match on an `Except` value. It runs `g`. For `.ok` it keeps the
+    result, and for `.error` it runs the handler *at the same state*.
+
+    The proof takes the stack of `StateT`, `ReaderT` and `Except` apart by hand,
+    because the `MonadExcept` instance of `Plausible.Gen` comes from
+    `by infer_instance` and there is therefore no simp lemma for it. -/
 theorem tryCatch_apply {α} (g : Plausible.Gen α) (h : GenError → Plausible.Gen α)
     (sg : ULift StdGen) (size : ULift Nat) :
     (tryCatch g h) sg size
@@ -71,33 +77,32 @@ theorem tryCatch_apply {α} (g : Plausible.Gen α) (h : GenError → Plausible.G
   simp only [tryCatch, MonadExcept.tryCatch, tryCatchThe, MonadExceptOf.tryCatch]
   cases g sg size <;> rfl
 
-/-- The values a `Plausible.Gen` can return at a given size, over all rng states.
-    This is the executable analogue of `SetGen.support`: `a` is reachable when
-    *some* seed makes the generator return it.
+/-- The values that a `Plausible.Gen` can return at a given size, over each state of
+    the random number generator. This is the executable form of `SetGen.support`: the
+    generator can reach `a` when *some* seed makes it return `a`.
 
-    Quantifying over the state is what makes this the right notion. A generator is
-    run at whatever seed the harness happens to hold, so "reachable" must mean
-    "reachable at some seed", exactly as `SetGen.Set` records every branch a
-    generator could take. -/
+    The quantifier over the state is what makes this the correct definition. The
+    harness runs a generator at the seed that it holds, so "the generator can reach
+    a value" must mean "some seed makes the generator return the value". `SetGen.Set`
+    records each branch that a generator can take, in the same way. -/
 def runSupport {α} (g : Plausible.Gen α) (size : ULift Nat) : α → Prop :=
   fun a => ∃ sg sg', g sg size = .ok (a, sg')
 
-/-- **Retrying is reachability-neutral.** `retryGen fuel g` reaches exactly what `g`
-    reaches — for every `fuel`.
+/-- **A retry does not change what a generator can reach.** For every `fuel`,
+    `retryGen fuel g` reaches exactly what `g` reaches.
 
-    Both inclusions matter and neither is vacuous:
+    Both inclusions matter, and neither one is vacuous:
 
-    * (⊆, no widening) a retry only ever returns a value produced by some attempt of
-      `g` itself, at a bumped seed. It cannot invent terms outside `g`'s support —
-      this is the direction that would break soundness if it failed.
-    * (⊇, no narrowing) the first attempt is still there, so nothing `g` could
-      produce becomes unreachable. This is the direction that would break
-      completeness if it failed.
+    * A retry adds no value. It returns only a value that some attempt of `g` itself
+      gives, at a seed that the wrapper advanced. It cannot make a term outside the
+      support of `g`. Soundness needs this direction.
+    * A retry removes no value. The first attempt is still there, so each value that
+      `g` can give stays reachable. Completeness needs this direction.
 
-    The proof is induction on `fuel`. In the failure branch, `retryGen`'s handler
-    advances the rng (`Plausible.Rand.next`) and recurses, so the value comes from
-    `retryGen fuel' g` at state `ULift.up (RandomGen.next sg.down).2` — and the
-    induction hypothesis applies there. -/
+    The proof is by induction on `fuel`. In the branch for a failure, the handler of
+    `retryGen` advances the random number generator and calls itself. The value
+    therefore comes from `retryGen fuel' g` at the state that `Rand.next` gives, and
+    the induction hypothesis covers that case. -/
 theorem runSupport_retryGen {α} (fuel : Nat) (g : Plausible.Gen α) (size : ULift Nat) :
     runSupport (retryGen fuel g) size = runSupport g size := by
   induction fuel with
@@ -109,18 +114,18 @@ theorem runSupport_retryGen {α} (fuel : Nat) (g : Plausible.Gen α) (size : ULi
     · rintro ⟨sg, sg', h⟩
       rw [retryGen, tryCatch_apply] at h
       split at h
-      · -- first attempt succeeded: the witness is the state we started from
+      · -- The first attempt succeeded, so the witness is the state at the start.
         rename_i r heq; cases h; exact ⟨sg, sg', heq⟩
-      · -- first attempt failed: value came from the retry at the advanced state
+      · -- The first attempt failed, so the value comes from the retry at the new state.
         have hr : runSupport (retryGen n g) size a :=
           ⟨ULift.up (Prod.snd (RandomGen.next sg.down)), sg', h⟩
         exact ih ▸ hr
     · rintro ⟨sg, sg', h⟩
-      -- `g` succeeds at `sg`, so `retryGen`'s first attempt does too
+      -- `g` succeeds at `sg`, so the first attempt of `retryGen` also succeeds.
       exact ⟨sg, sg', by rw [retryGen, tryCatch_apply, h]⟩
 
-/-- `retryGenArg` inherits reachability-neutrality pointwise, since it is
-    `retryGen` applied pointwise (`retryGenArg fuel g a = retryGen fuel (g a)`). -/
+/-- `retryGenArg` also changes nothing that a generator can reach, at each point. It is
+    `retryGen` at each point: `retryGenArg fuel g a` is `retryGen fuel (g a)`. -/
 theorem runSupport_retryGenArg {α β} (fuel : Nat) (g : α → Plausible.Gen β)
     (a : α) (size : ULift Nat) :
     runSupport (retryGenArg fuel g a) size = runSupport (g a) size :=
@@ -128,16 +133,18 @@ theorem runSupport_retryGenArg {α β} (fuel : Nat) (g : α → Plausible.Gen β
 
 /-! ## Part 2: `genLExpr` is congruent in `retryCont` -/
 
-/-- **`genLExpr` only uses `retryCont` pointwise.** Two continuations that agree on
-    every generator and every type give *literally equal* generators — not merely
-    equal supports — at every depth, uniformly in `G`.
+/-- **`genLExpr` uses `retryCont` only at one point at a time.** Two continuations that
+    agree on each generator and each type give generators that are *literally equal*,
+    and not only generators with equal supports. This holds at each depth and it is
+    uniform in `G`.
 
-    This is what lets Part 1 transfer: `retryGenArg n` and `id` do not agree
-    pointwise as *functions*, but Part 1 shows they agree on reachability, and this
-    lemma shows reachability is all `genLExpr` can observe about `retryCont`.
+    This lemma is what carries Part 1 over. `retryGenArg n` and `id` do not agree as
+    *functions*, but Part 1 shows that they reach the same values, and this lemma shows
+    that what a continuation reaches is all that `genLExpr` can see about it.
 
-    Induction on `depth`: at the floor `retryCont` wraps `genLExprBase`; above it,
-    `retryCont` wraps the recursive call, which the induction hypothesis handles. -/
+    The proof is by induction on `depth`. At the lowest depth, `retryCont` wraps
+    `genLExprBase`. Above it, `retryCont` wraps the recursive call, and the induction
+    hypothesis covers that call. -/
 theorem genLExpr_retryCont_ext [_root_.Gen G]
     (retryCont retryCont' : (LMonoTy → G LExpr') → (LMonoTy → G LExpr'))
     (hext : ∀ (g : LMonoTy → G LExpr') (σ : LMonoTy), retryCont g σ = retryCont' g σ)
@@ -156,12 +163,12 @@ theorem genLExpr_retryCont_ext [_root_.Gen G]
       funext σ; exact ih σ
     simp only [funext (hext _), hrec]
 
-/-- Specialization of `genLExpr_retryCont_ext` to the default: any `retryCont` that
-    is pointwise the identity yields exactly the generator the theorems describe.
+/-- `genLExpr_retryCont_ext` at the default value. A `retryCont` that is the identity at
+    each point gives exactly the generator that the theorems describe.
 
-    This is the `SetGen.Set`-instantiable form. Since `SetGen.Set` has no failure to
-    catch, every sensible retry wrapper *is* pointwise the identity there, so the
-    proven support results apply verbatim. -/
+    This is the form that a reader can instantiate at `SetGen.Set`. `SetGen.Set` has no
+    failure to catch, so each sensible retry wrapper *is* the identity at each point
+    there, and the proved results about the support apply without a change. -/
 theorem genLExpr_retryCont_id [_root_.Gen G]
     (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr'))
     (hid : ∀ (g : LMonoTy → G LExpr') (σ : LMonoTy), retryCont g σ = g σ)
@@ -171,13 +178,12 @@ theorem genLExpr_retryCont_id [_root_.Gen G]
       = genLExpr fctx octx pctx tvars bctx depth τ maxNumArgs id :=
   genLExpr_retryCont_ext retryCont id hid fctx octx pctx tvars bctx depth τ maxNumArgs
 
-/-! ## Part 3: the headline results -/
+/-! ## Part 3: the main results -/
 
-/-- **The `SetGen.Set` statement.** Under the `Set` semantics the soundness and
-    completeness theorems use, a pointwise-identity `retryCont` leaves
-    `SetGen.support` completely unchanged. Immediate from `genLExpr_retryCont_id`,
-    and stated separately because "the support is unchanged" is the property being
-    claimed. -/
+/-- **The statement at `SetGen.Set`.** In the `Set` semantics, which the theorems for
+    soundness and completeness use, a `retryCont` that is the identity at each point
+    leaves `SetGen.support` unchanged. This theorem is separate, because the claim that
+    the support does not change is the property that matters. -/
 theorem genLExpr_setSupport_retryCont
     (retryCont : (LMonoTy → SetGen.Set LExpr') → (LMonoTy → SetGen.Set LExpr'))
     (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
@@ -189,13 +195,12 @@ theorem genLExpr_setSupport_retryCont
         (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs id) := by
   rw [genLExpr_retryCont_id retryCont hid]
 
-/-- **The executable statement about the argument generator.** The retrying argument
-    generator `genLExpr` actually uses in production reaches exactly what the plain one
-    reaches — at every depth, since this is just `runSupport_retryGenArg` at the
-    generator `genLExpr` passes to `retryCont`.
+/-- **The executable statement about the generator for an argument.** The generator that
+    `genLExpr` uses in production retries, and it reaches exactly what the plain
+    generator reaches, at each depth.
 
-    Stated at the depth floor (`genLExprBase`) and for the recursive case separately
-    below, because those are the two things `retryCont` is applied to. -/
+    This theorem covers the lowest depth, which is `genLExprBase`. The theorem below
+    covers the recursive case. `retryCont` applies to those two generators only. -/
 theorem genLExpr_runSupport_retryGenArg_base (n : Nat)
     (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (τ : LMonoTy) (size : ULift Nat) :
@@ -204,10 +209,10 @@ theorem genLExpr_runSupport_retryGenArg_base (n : Nat)
       = runSupport (genLExprBase (G := Plausible.Gen) fctx octx pctx tvars bctx 0 τ) size :=
   runSupport_retryGenArg n _ τ size
 
-/-- The same for the recursive case: at depth `n + 1` the argument generator is
-    `genLExpr … n`, and wrapping it in `retryGenArg` leaves its reachability alone.
-    Together with `genLExpr_runSupport_retryGenArg_base` this covers every position
-    `retryCont` is applied at. -/
+/-- The same claim for the recursive case. At depth `n + 1` the generator for an argument
+    is `genLExpr … n`, and a wrapper of `retryGenArg` around it changes nothing that the
+    generator can reach. With `genLExpr_runSupport_retryGenArg_base`, this covers each
+    position where `retryCont` applies. -/
 theorem genLExpr_runSupport_retryGenArg_rec (fuel : Nat)
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (n : Nat) (maxNumArgs : Nat)
@@ -220,39 +225,38 @@ theorem genLExpr_runSupport_retryGenArg_rec (fuel : Nat)
                       maxNumArgs retryCont) size :=
   runSupport_retryGenArg fuel _ τ size
 
-/-! ## Scope: what is and is not established here
+/-! ## What this module proves, and what it does not
 
-`genLExpr_setSupport_retryCont` is the result that matters for the proofs: under
-`SetGen.Set`, where every existing soundness/completeness theorem lives, a
-pointwise-identity `retryCont` leaves `SetGen.support` *literally* unchanged. Since
-`SetGen.Set` has no failure to catch, that covers every retry wrapper — so the proven
-results describe the production generator's reachable set, and there is no hidden
-specification debt in scoping the theorems to `retryCont = id`.
+`genLExpr_setSupport_retryCont` is the result that the proofs need. At `SetGen.Set`,
+where each theorem for soundness and for completeness lives, a `retryCont` that is the
+identity at each point leaves `SetGen.support` *literally* unchanged. `SetGen.Set` has
+no failure to catch, so this covers each retry wrapper. The proved results therefore
+describe the set of terms that the production generator can reach, and the theorems lose
+nothing when they fix `retryCont` to `id`.
 
-On the `Plausible.Gen` side, `runSupport_retryGen` establishes the substantive fact:
-retrying is reachability-neutral, neither widening nor narrowing. The results above
-apply it at exactly the positions `genLExpr` uses `retryCont`.
+At `Plausible.Gen`, `runSupport_retryGen` gives the fact of substance: a retry changes
+nothing that a generator can reach, and it neither adds nor removes a value. The results
+above apply that fact at exactly the positions where `genLExpr` uses `retryCont`.
 
-What is **not** proved here is a single end-to-end equation
-`runSupport (genLExpr … (retryGenArg n)) = runSupport (genLExpr … id)` at arbitrary
-depth. That is not an oversight about `retryGenArg`; `runSupport` simply does not
-compose through `bind` at `Plausible.Gen`. In `g >>= f`, the rng state `f` receives is
-*determined* by `g`, so from "`a` is reachable from `g` at some state" and "`b` is
-reachable from `f a` at some state" one cannot conclude "`b` is reachable from
-`g >>= f`" — the two witnessing states need not agree. Establishing the end-to-end
-equation would need a seed-surjectivity argument about `Rand.next`, which is a fact
-about `StdGen`'s implementation rather than about retrying. The `SetGen.Set` result is
-the one the theorems rely on, and it is unconditional. -/
+This module does **not** prove one equation from end to end,
+`runSupport (genLExpr … (retryGenArg n)) = runSupport (genLExpr … id)`, at an arbitrary
+depth. The reason is not about `retryGenArg`. `runSupport` does not compose through
+`bind` at `Plausible.Gen`. In `g >>= f`, the value of `g` *determines* the state of the
+random number generator that `f` receives. From the facts that `g` reaches `a` at some
+state and that `f a` reaches `b` at some state, a reader cannot conclude that `g >>= f`
+reaches `b`, because the two witness states can differ. An equation from end to end needs
+an argument that `Rand.next` is surjective on the seeds, and that is a fact about the
+implementation of `StdGen` and not about a retry. The result at `SetGen.Set` is the one
+that the theorems use, and it holds without a condition. -/
 
-/-! ## Part 4: the proven results transfer, verbatim
+/-! ## Part 4: the proved results carry over without a change
 
-Concrete demonstrations that scoping the theorems to `retryCont = id` costs nothing:
-each existing result holds for an arbitrary pointwise-identity `retryCont`, by
-rewriting with `genLExpr_setSupport_retryCont` and applying the original theorem
-unchanged. -/
+The two theorems below show that the theorems lose nothing when they fix
+`retryCont` to `id`. Each result holds for any `retryCont` that is the identity at each
+point. -/
 
-/-- Soundness survives an arbitrary pointwise-identity `retryCont`: every generated
-    term is still well-typed at the type it was generated for. -/
+/-- Soundness holds for any `retryCont` that is the identity at each point: each generated
+    term is well-typed at the type that it received. -/
 theorem genLExpr_sound_retryCont
     (retryCont : (LMonoTy → SetGen.Set LExpr') → (LMonoTy → SetGen.Set LExpr'))
     (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
@@ -266,8 +270,9 @@ theorem genLExpr_sound_retryCont
   rw [genLExpr_setSupport_retryCont retryCont hid] at he
   exact genLExpr_sound fctx octx pctx tvars bctx depth τ maxNumArgs e he
 
-/-- Completeness likewise: nothing becomes unreachable. Since the support is
-    *literally* unchanged, the original completeness theorem applies as-is. -/
+/-- Completeness also holds for such a `retryCont`: no term becomes unreachable. The
+    support is *literally* unchanged, so the completeness theorem applies without a
+    change. -/
 theorem genLExpr_complete_retryCont
     (retryCont : (LMonoTy → SetGen.Set LExpr') → (LMonoTy → SetGen.Set LExpr'))
     (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)

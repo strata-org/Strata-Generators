@@ -12,12 +12,12 @@ This file collects the *context-independent* helper lemmas required to establish
 be developed and verified in isolation, without perturbing the (large) main
 statement-generator proof.
 
-- `mkArgs` — the call-argument recipe, with the two projection lemmas
-  `getIn_mkArgs` / `getLhs_mkArgs` computing `getInputExprs` / `getLhs`.
-- `call_recipe_inout_sound` — discharges the 7 premises of `CmdExtHasTypeA.call`.
-- `initChain` / `insertAll` / `initChain_types` — the `init … nondet` chain that
-  brings the required `M ∪ O` names into scope at their declared types.
-- `StatementsHasTypeA_append` — chaining two statement-list judgments.
+- `mkArgs` builds the argument list of a call. The two lemmas `getIn_mkArgs` and `getLhs_mkArgs` compute the
+  two projections of that list.
+- `call_recipe_inout_sound` discharges the seven premises of `CmdExtHasTypeA.call`.
+- `initChain`, `insertAll` and `initChain_types` describe the chain of `init … nondet` statements that brings
+  each necessary name into scope, at its declared type.
+- `StatementsHasTypeA_append` joins two judgements about a statement list.
 -/
 
 namespace StrataGenerators.Stmt
@@ -32,12 +32,12 @@ open Core.TypeSpec
     respect. `M` = in-out block, `I` = input-only block, `O` = output-only block,
     so `inputs = M ++ I` and `outputs = M ++ O`.
 
-    `typeArgs` are the callee's **own** type parameters. A call site instantiates
-    them with a concrete substitution `σ` (the `CmdExtHasType'.call` rule's
-    existential `σ`), so the argument/target types the caller must supply are the
-    *instantiated* blocks `substSig σ M` etc. The declared blocks `M`/`I`/`O` are
-    stored un-instantiated (over `typeArgs`); `substSig` applies `σ` on demand.
-    `typeArgs = []` recovers the monomorphic case (`σ = []`, `substSig [] = id`). -/
+    The field `typeArgs` holds the **own** type parameters of the callee. A call site instantiates them with
+    a concrete substitution, which is the existential of the `CmdExtHasType'.call` rule. Therefore the types
+    that the caller must give for an argument and for a target are the *instantiated* blocks, such as
+    `substSig σ M`. This structure stores each declared block over its type parameters, with no instance, and
+    `substSig` applies the substitution when a proof needs it. An empty list of type parameters gives the
+    monomorphic case, where the substitution is empty and `substSig` is the identity. -/
 structure ProcSig where
   /-- The callee's name (matched against `Program.Procedure.find?`). -/
   pname : String
@@ -50,8 +50,8 @@ structure ProcSig where
   /-- The output-only parameter block. -/
   O : @LMonoTySignature Unit
 
-/-- The empty-signature procedure, so `ProcSig` is `Inhabited` (needed by
-    `elements` and its support-inversion lemma inside `genCallStmt`). -/
+/-- A procedure with an empty signature, so that `ProcSig` is `Inhabited`. `elements` and its lemma about the
+    inversion of a support need that instance inside `genCallStmt`. -/
 instance : Inhabited ProcSig := ⟨⟨"", [], [], [], []⟩⟩
 
 /-- Instantiate a parameter block's *types* by a substitution `σ`, leaving the
@@ -99,10 +99,9 @@ theorem substSig_values_getElem (σ : List (TyIdentifier × LMonoTy))
     (substSig σ b).values[i]'h = LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (b.values[i]'h') := by
   simp only [substSig_values, List.getElem_map]
 
-/-- With the empty (identity) instantiation, `substSig` is the identity: `subst [[]]`
-    fixes every monotype, so both name and type are unchanged. This is the bridge
-    that makes the monomorphic path (`typeArgs = []`, `σ = []`) a definitional
-    special case of the polymorphic one. -/
+/-- At the empty instantiation, `substSig` is the identity. A substitution with one empty scope fixes each
+    monotype, so both the name and the type of an entry stay the same. That fact makes the monomorphic path a
+    definitional special case of the polymorphic one. -/
 @[simp] theorem substSig_nil (block : @LMonoTySignature Unit) :
     substSig [] block = block := by
   simp only [substSig]
@@ -119,18 +118,17 @@ theorem substSig_values_getElem (σ : List (TyIdentifier × LMonoTy))
     leading both roles). -/
 abbrev ProcSigCtx := List ProcSig
 
-/-- `procs` faithfully describes callable procedures of `P`: each entry names a
-    procedure of `P` whose type parameters are `s.typeArgs` and whose (declared,
-    over-`typeArgs`) signature decomposes as recorded (shared block `M` leading both
-    `inputs` and `outputs`), with the input-only keys disjoint from the LHS (`M ∪ O`)
-    keys. Exactly the hypotheses `call_mixed_body_sound` consumes for the `.call`
-    case, once the caller instantiates the blocks by its chosen `σ`.
+/-- The context describes each callable procedure of the program faithfully. Each entry names a procedure of
+    the program whose type parameters are the ones that the entry records, and whose declared signature
+    decomposes as the entry records, with the shared block at the front of the inputs and of the outputs. The
+    keys of the input-only block are also disjoint from the keys of the two written-to blocks. Those are
+    exactly the hypotheses that `call_mixed_body_sound` uses for the `.call` case, after the caller
+    instantiates each block by the substitution that it chose.
 
-    The callee may be **polymorphic** (`s.typeArgs ≠ []`): the call site picks a
-    concrete instantiation `σ` and supplies arguments/targets at `substSig σ` of the
-    declared blocks. The disjointness clause is stated over the *declared* keys, but
-    `substSig` preserves keys (`substSig_keys`), so it transfers to the instantiated
-    blocks unchanged. -/
+    The callee can be **polymorphic**, which means that its list of type parameters is not empty. The call
+    site then chooses a concrete instantiation, and it gives each argument and each target at the instance of
+    the declared block. The condition about disjointness is stated over the *declared* keys, and `substSig`
+    keeps each key. Therefore that condition also holds for each instantiated block. -/
 def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
   ∀ s ∈ procs, ∃ proc, Program.Procedure.find? P s.pname = some proc ∧
     proc.header.typeArgs = s.typeArgs ∧
@@ -138,13 +136,12 @@ def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
     proc.header.outputs = s.M ++ s.O ∧
     (∀ i (hi : i < s.I.keys.length), (s.M ++ s.O).keys.contains (s.I.keys[i]'hi) = false)
 
-/-- **The converse correspondence, for completeness (Part 1 of call completeness).**
-    Whereas `ProcSigCorresponds` says every generator-side callee `s ∈ procs`
-    resolves in `P` (what *soundness* needs — a generated call is well-typed),
-    `ProcSigComplete` says the reverse: every procedure resolvable in `P` whose
-    signature admits the `M`/`I`/`O` decomposition is *listed in* `procs` (what
-    *completeness* needs — a well-typed call is reachable), recording its type
-    parameters `typeArgs` so the call site can instantiate them. -/
+/-- **The correspondence in the other direction, for completeness.** `ProcSigCorresponds` says that each
+    callee of the context resolves in the program, which is what *soundness* needs, because a generated call
+    must be well typed. This predicate says the reverse: the context *holds* each procedure of the program
+    whose signature admits the decomposition into the three blocks. That is what *completeness* needs, because
+    a well-typed call must be reachable. The entry also records the type parameters of the procedure, so that
+    a call site can instantiate them. -/
 def ProcSigComplete (procs : ProcSigCtx) (P : Program) : Prop :=
   ∀ pname proc typeArgs M I O,
     Program.Procedure.find? P pname = some proc →
@@ -278,10 +275,9 @@ def mergeBy {α : Type} : List Bool → List α → List α → List α
   | false :: bs, xs, y :: ys => y :: mergeBy bs xs ys
   | false :: bs, xs, [] => mergeBy bs xs []
 
-/-- `Interleave xs ys zs` — `zs` is an **order-preserving interleaving** (a shuffle)
-    of `xs` and `ys`: it holds every element of both, and it keeps the relative order
-    inside `xs` and the relative order inside `ys`. Nothing else is constrained, so
-    the two lists may interleave in any way at all.
+/-- `Interleave xs ys zs` says that `zs` is an **interleaving that keeps the order** of `xs` and of `ys`. It
+    holds each element of both lists, and it keeps the relative order inside `xs` and the relative order inside
+    `ys`. It puts no other condition, so the two lists can interleave in any way.
 
     This is exactly the freedom the `call` rule leaves between the by-value inputs
     and the out targets: `CallArg.getInputExprs` keeps the `inArg` order and drops
@@ -298,8 +294,8 @@ inductive Interleave {α : Type} : List α → List α → List α → Prop
     `ys` is `mergeBy mask xs ys` for some `mask`. The mask bits are read straight off
     the derivation: `left` becomes `true`, `right` becomes `false`.
 
-    This is what makes the `mask` existential in `CallOk` cost nothing — see
-    `mkArgs_surjective` for the reading at the call-argument level. -/
+    That fact is what makes the existential over the mask in `CallOk` cost nothing. Read
+    `mkArgs_surjective` for the form of this claim at the level of a call argument. -/
 theorem mergeBy_surjective {α : Type} {xs ys zs : List α} (h : Interleave xs ys zs) :
     ∃ mask : List Bool, mergeBy mask xs ys = zs := by
   induction h with
@@ -324,9 +320,9 @@ theorem interleave_append {α : Type} (xs ys : List α) : Interleave xs ys (xs +
   | nil => exact interleave_nil_left ys
   | cons _ _ ih => exact .left ih
 
-/-- **The mask produces nothing but interleavings** — the converse of
-    `mergeBy_surjective`. Needed for the characterisation below to say that the mask
-    is neither too weak nor too strong. -/
+/-- **The mask gives an interleaving only.** This lemma is the converse of `mergeBy_surjective`. The
+    statement below needs both directions, so that it says that the mask is neither too weak nor too
+    strong. -/
 theorem mergeBy_interleave {α : Type} (mask : List Bool) :
     ∀ (xs ys : List α), Interleave xs ys (mergeBy mask xs ys) := by
   induction mask with
@@ -411,7 +407,7 @@ theorem filterMap_mergeBy_right {α β : Type} (f : α → Option β) (bs : List
     premise requires). Then come the by-value inputs `exprs` (as `inArg` nodes) and
     the output-only *targets* `T` (as `outArg` nodes), merged under the mask `mask`.
     This layout makes the argument positions line up with the parameter positions
-    the callee declares — see `getIn_mkArgs` / `getLhs_mkArgs`.
+    the callee declares. Read `getIn_mkArgs` and `getLhs_mkArgs`.
 
     **Why `mask` exists.** The `call` rule constrains the input positions and the
     write positions one at a time, through `CallArg.getInputExprs` and
@@ -426,9 +422,9 @@ theorem filterMap_mergeBy_right {α β : Type} (f : α → Option β) (bs : List
     Core spec does not constrain an out argument's *name*: any writable
     variable of the declared type will do. `T` is therefore a caller-chosen list of
     receiving variables, required only to be as long as `O` and to match it
-    *positionally in type* — see `outTargets` (the generator's choice) and the
-    `hTinΓ` premise of the soundness theorems below, which pairs `T.keys[i]` with
-    `O.values[i]`. -/
+    *by position in its type*. Read `outTargets`, which is the choice of the generator, and the premise
+    `hTinΓ` of each soundness theorem below, which pairs the name of a target with the type that the callee
+    declares at that position. -/
 def mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
     (mask : List Bool) : List (CallArg Expression) :=
   M.map (fun p => CallArg.inoutArg p.1) ++
@@ -490,15 +486,12 @@ theorem getLhs_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Ex
     interleaving `rest` of the `inArg` nodes with the `outArg` nodes, some mask makes
     `mkArgs` emit exactly the in-out block followed by `rest`.
 
-    So `mkArgs` fixes only what the rule itself forces — that the in-out block leads,
-    because `M` heads both projections (see the `#guard`s above) — and the `mask`
-    existential in `CallOk` restricts nothing beyond that. Before the mask, `mkArgs`
-    fixed the order as in-out, then by-value input, then out target, and a well-typed
-    `call p(out y, 1);` was out of reach; `mkArgs_out_then_in` is that call as a
-    worked instance of this theorem. -/
--- **`Interleave` is inhabited at the swap that matters**, so `mkArgs_surjective` is
--- not vacuous: the single out target ahead of the single by-value input is exactly
--- the `call p(out y, 1);` shape that was unreachable before the mask.
+    Therefore `mkArgs` fixes only what the rule itself forces, which is that the in-out block comes first,
+    because that block heads both projections. Read the `#guard`s above. The existential over the mask in
+    `CallOk` puts no other limit on the order. `mkArgs_out_then_in` is one instance of this theorem, at the
+    call `call p(out y, 1);`. -/
+-- **`Interleave` holds at the swap that matters**, so `mkArgs_surjective` has real content. The one out
+-- target before the one by-value input is exactly the shape of the call `call p(out y, 1);`.
 example : Interleave [CallArg.inArg gcaExpr] [CallArg.outArg gcaY]
     ([CallArg.outArg gcaY, CallArg.inArg gcaExpr] : GcaArgs) :=
   .right (.left .nil)
@@ -556,7 +549,7 @@ theorem insertAll_equiv (news : List (Identifier Unit × LMonoTy)) {Γ Γ' : TCo
 /-- The flat `VarCtx` analogue of `insertAll`: the *generator-side* scope after
     running `initChain news` in the ambient scope. Because the chain is emitted
     **inline** (not inside a block), these declarations genuinely escape into the
-    enclosing sequence, so this — not `ctx` — is the call chunk's output scope.
+    enclosing sequence. Therefore this definition, and not `ctx`, gives the output scope of the call.
     `toTCtx_insertAllCtx` (in `StmtHasTypeAGen.lean`) relates it to `insertAll`. -/
 def insertAllCtx (ctx : VarCtx) (news : List (Identifier Unit × LMonoTy)) : VarCtx :=
   news.foldl (fun ctx p => Map.insert ctx p.1 p.2) ctx
@@ -568,7 +561,7 @@ theorem insertAllCtx_cons (ctx : VarCtx) (hd : Identifier Unit × LMonoTy)
   simp [insertAllCtx]
 
 /-- Looking up a name absent from `news` in `insertAllCtx ctx news` falls through
-    to `ctx` — the flat-context mirror of `insertAll_find_not_mem`. -/
+    to `ctx`. This lemma is the form of `insertAll_find_not_mem` for a flat context. -/
 theorem insertAllCtx_find_not_mem (news : List (Identifier Unit × LMonoTy)) :
     ∀ (ctx : VarCtx) (x : Identifier Unit),
     x ∉ news.map Prod.fst → Map.find? (insertAllCtx ctx news) x = Map.find? ctx x := by
@@ -582,7 +575,7 @@ theorem insertAllCtx_find_not_mem (news : List (Identifier Unit × LMonoTy)) :
 
 /-- Declaring a `Nodup` list of names, each absent from `ctx`, preserves
     functionality: every insert is of a key fresh at the point it happens (fresh in
-    `ctx` by hypothesis, and undisturbed by the earlier — distinct — inserts). This
+    `ctx` by hypothesis, and each earlier insert uses a different key. This
     is what carries the `Map.Functional` invariant across an inline `init` chain. -/
 theorem insertAllCtx_functional (news : List (Identifier Unit × LMonoTy)) :
     ∀ (ctx : VarCtx), Map.Functional ctx → (news.map Prod.fst).Nodup →
@@ -791,7 +784,7 @@ theorem call_recipe_inout_sound
     (hExLen : exprs.length = I.length)
     (hTLen : T.length = O.length)
     -- The variables the call writes back through are bound in `Γ` at the *instantiated*
-    -- formal type `subst [σ] (declared value)` — the type the caller supplied them at.
+    -- formal type `subst [σ] (declared value)`, which is the type that the caller gave them at.
     (hMinΓ : ∀ i (hi : i < M.keys.length) (hj : i < M.values.length),
       Γ.types.find? (M.keys[i]'hi) = some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (M.values[i]'hj))))
     (hTinΓ : ∀ i (hi : i < T.keys.length) (hj : i < O.values.length),
@@ -983,15 +976,15 @@ theorem lm_length_eq_of_values_eq {O T : @LMonoTySignature Unit}
 
 -- ── Chaining and block-wrapping ───────────────────────────────────────────
 
--- ── `TContext.Equiv`-congruence of the annotated specs ────────────────────
--- Upstream constrains every rule's *output* context only up to `TContext.Equiv`
--- (an `HMap`-backed scope stack ignores insertion order). Chaining two derivations
--- therefore needs the relations to be congruent in their *input* context as well:
--- `StatementsHasTypeA_append` inverts a `nil`, which hands back a context that is
--- only `Equiv` to the one the tail was typed in. At the annotated (`HasTypeA`)
--- instantiation this congruence is cheap: `exprTyped` ignores `Γ` outright and
--- `tyCompat` is plain equality, so `Γ` is read only through `types.find?` and
--- `aliases`, both of which `TContext.Equiv` preserves.
+-- ── The typing rules respect `TContext.Equiv` ────────────────────────
+--
+-- Each typing rule of Strata constrains its *output* context up to `TContext.Equiv` only, because a stack of
+-- scopes over a hash map reads no order of the insertions. Therefore a proof that joins two derivations also
+-- needs each relation to respect that equivalence in its *input* context.
+-- `StatementsHasTypeA_append` inverts a `nil` rule, which gives back a context that is only equivalent to the
+-- context of the tail. At the annotated instantiation, that property is cheap. `exprTyped` reads no context,
+-- and the compatibility of two types is a plain equality. Therefore a proof reads the context through
+-- `types.find?` and through the aliases only, and `TContext.Equiv` keeps both of them.
 
 /-- `TContext.Equiv` gives pointwise agreement of variable lookups. -/
 theorem tctxEquiv_find? {Γ Γ' : TContext Unit}
@@ -1006,9 +999,9 @@ theorem tctxEquiv_insert {Γ Γ' : TContext Unit}
       { Γ with types := Γ.types.insert x v } { Γ' with types := Γ'.types.insert x v } :=
   ⟨Strata.Util.HMaps.insert_equiv h.1 x v, h.2⟩
 
-/-- **`FuncHasTypeA` does not depend on the type-scope at all.** Every field is either
-    `Γ`-free or routed through `exprTyped`/`tyCompat`, which ignore `Γ` at the annotated
-    instantiation. -/
+/-- **`FuncHasTypeA` reads no type scope.** Each field either names no context, or it goes through
+    `exprTyped` or through the compatibility of two types, and neither of those reads a context at the
+    annotated instantiation. -/
 theorem funcHasTypeA_ctx_irrel {C : LContext CoreLParams} {Γ Γ₂ : TContext Unit}
     {func : Function} (h : FuncHasTypeA C Γ func) : FuncHasTypeA C Γ₂ func :=
   ⟨h.inputsNodup, h.typeArgsNodup, h.noUndeclaredVars, h.signatureWellKinded,
@@ -1055,9 +1048,9 @@ theorem cmdExtHasTypeA_equiv_congr {C : LContext CoreLParams} {P : Program}
     · intro i hi hj
       obtain ⟨mty, halias, hty⟩ := hinTy i hi hj
       refine ⟨mty, by rw [he.2]; exact halias, ?_⟩
-      -- The per-argument obligation matches on the argument shape, but only its
-      -- unannotated-`fvar` branch reads `Γ` (through `types.find?`); every other branch
-      -- goes through `exprTyped`, which ignores `Γ` at this instantiation.
+      -- The obligation for one argument matches on the shape of that argument. Only its branch for an `fvar`
+      -- with no annotation reads the context, through `types.find?`. Each other branch goes through
+      -- `exprTyped`, which reads no context at this instantiation.
       first
         | (simp only [tctxEquiv_find? he]; exact hty)
         | exact hty
@@ -1065,16 +1058,17 @@ theorem cmdExtHasTypeA_equiv_congr {C : LContext CoreLParams} {P : Program}
       obtain ⟨mty, halias, hty⟩ := houtTy i hi hj
       exact ⟨mty, by rw [he.2]; exact halias, (tctxEquiv_find? he _).trans hty⟩
 
-/-- Fuel-indexed form of `statementsHasTypeA_equiv_congr`.
+/-- The form of `statementsHasTypeA_equiv_congr` that takes a fuel parameter.
 
-    The statement case is inlined rather than split off into a mutually recursive lemma: the
-    relation lives in `Prop`, so the equation compiler cannot recurse on a derivation, and
-    recursing on the *syntax* covers both halves of the mutual definition in one function —
-    a block/branch/loop body nested inside the head statement is strictly smaller than the
-    list. The recursion is on an explicit `Nat` fuel bounding `sizeOf ss` rather than on
-    `sizeOf ss` directly, so that every context stays a genuine local variable that `cases`
-    can substitute (as a fixed function parameter it would instead pick up an equation, and
-    the recursive applications would not typecheck). -/
+    This lemma holds the case for one statement inside itself, and it is not a separate lemma of a mutual
+    recursion. The relation is a `Prop`, so the equation compiler cannot recurse on a derivation. Recursion on
+    the *syntax* covers both halves of the mutual definition in one function, because the body of a block, of a
+    branch or of a loop inside the head statement is strictly smaller than the list.
+
+    The recursion is on an explicit `Nat` fuel that bounds the size of the list, and not on that size directly.
+    Therefore each context stays a local variable that `cases` can substitute. As a fixed parameter of the
+    function, a context would instead pick up an equation, and each recursive application would then not type
+    check. -/
 private theorem statementsHasTypeA_equiv_congr_fuel {P : Program} : ∀ (n : Nat)
     (ss : List Statement) {C C' : LContext CoreLParams} {Γ Γ₂ Δ : TContext Unit}
     {L : List String}, sizeOf ss ≤ n →
@@ -1174,7 +1168,7 @@ theorem StatementsHasTypeA_singleton {P : Program} {C C' : LContext CoreLParams}
 
 /-- The sub-list of `news` whose names are **not** yet bound in `Γ`: exactly the
     names a call site must `init` before calling. Names already bound (at the
-    right type — see `call_mixed_body_sound`'s `hReuse`) are reused as-is. -/
+    right type, which the premise `hReuse` of `call_mixed_body_sound` gives, stay as they are. -/
 def missingIn (Γ : TContext Unit) (news : List (Identifier Unit × LMonoTy)) :
     List (Identifier Unit × LMonoTy) :=
   news.filter (fun p => (Γ.types.find? p.1).isNone)
@@ -1189,7 +1183,7 @@ theorem missingIn_find_none (Γ : TContext Unit) (news : List (Identifier Unit �
   have := (List.mem_filter.mp hp).2
   simpa [Option.isNone_iff_eq_none] using this
 
-/-- A name bound in `Γ` is untouched by `insertAll Γ (missingIn Γ news)` — the
+/-- `insertAll Γ (missingIn Γ news)` does not change a name that `Γ` already binds. The
     chain only inserts names that were absent, so reused bindings survive. -/
 theorem insertAll_missing_preserves (Γ : TContext Unit)
     (news : List (Identifier Unit × LMonoTy))
@@ -1216,7 +1210,7 @@ theorem insertAll_missing_preserves (Γ : TContext Unit)
     in `insertAll Γ (missingIn Γ news)`.
 
     When `missingIn Γ news = []` the chain is empty, so the body degenerates to the
-    bare `[call …]` and the output scope is `Γ` unchanged — the common shape in real
+    bare call, and the output scope is `Γ` itself. That is the common shape in real
     Strata code. Because this one lemma covers both the all-reused and the
     some-missing case uniformly, it is the *sole* soundness engine for the call
     group; `genCallStmt` needs no `isEmpty` split. -/
@@ -1242,14 +1236,14 @@ theorem call_mixed_body_sound
     -- Each written-to name is *either* already bound at its recorded type, *or* absent.
     (hReuse : ∀ p ∈ (substSig σ M ++ T).toList,
       Γ.types.find? p.1 = some (.forAll [] p.2) ∨ Γ.types.find? p.1 = none)
-    -- Every written-to name's type is well-kinded in `C` — the premise upstream added to
-    -- the `init` rules that `initChain_types` now has to discharge.
+    -- The type of each written-to name is well-kinded in `C`. That is the premise of the `init` rules that
+    -- `initChain_types` discharges.
     (hwk : ∀ p ∈ (substSig σ M ++ T).toList, C.WellKindedTy p.2) :
     StatementsHasTypeA P C Γ L
       (initChain (missingIn Γ (substSig σ M ++ T)) ++
         [Statement.call pname (mkArgs M T exprs mask) default]) C
       (insertAll Γ (missingIn Γ (substSig σ M ++ T))) := by
-  -- The instantiated write-list; kept spelled out (no `set` — Mathlib absent).
+  -- The instantiated list of the written-to names, written out, because this file uses no set type.
   have hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none := by
     intro i hi m x heq
     have hlen : i < I.values.length := by rw [lm_values_length, ← hExLen]; exact hi

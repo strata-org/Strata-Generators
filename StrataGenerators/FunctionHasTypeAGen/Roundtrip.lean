@@ -9,65 +9,65 @@ open Lambda Core Imperative Strata Strata.CoreDDM
 open StrataDDM (initDialect)
 
 /-!
-# Shared round-trip helpers for Strata Core `Function`s
+# The shared functions for the round trip of a Strata Core `Function`
 
-This module holds exactly what the parser/pretty-printer round-trip property
-needs. It is imported by *both* views in the merged `TestMain` driver — the
-Plausible/LSpec property suite and the Tyche panels (`StrataGenerators.TycheViz`)
-— so the pretty-print/parse round-trip machinery lives in exactly one place.
+This module holds exactly what the round-trip property for the parser and the printer needs.
+*Both* consumers import it: the property suite, and the Tyche panels in
+`StrataGenerators.TycheViz`. The code for the round trip from a printed form to a parsed form
+therefore has one place only.
 
-It provides:
-- `formatFuncAsProgram` / `parseCoreProgram` / `parseCoreProgramErr` — embed a
-  `Function` in a one-decl `Program`, format via `Core.formatProgram`, and parse
-  back via the Core DDM dialect (the error variant surfaces the parser message).
-- A greedy structural minimizer (`shrinkWhile`) plus failure predicates, used to
-  reduce a round-trip counterexample to a minimal reproducer. This is a
-  *signature-reducing* minimizer specific to the round-trip property — distinct
-  from the body-only `Shrinkable Function` instance shrinker, which lives in
+The module gives two groups of definitions:
+- `formatFuncAsProgram`, `parseCoreProgram` and `parseCoreProgramErr`. They put a `Function`
+  into a `Program` with one declaration, they print it with `Core.formatProgram`, and they
+  parse the text again through the Core dialect of DDM. The variant with `Err` in its name
+  also gives the message of the parser.
+- A greedy shrinker, `shrinkWhile`, and the predicates for a failure. They reduce a
+  counterexample of the round trip to a small reproducer. This shrinker also *reduces the
+  signature*, and it belongs to the round-trip property. It is separate from the shrinker for
+  the `Shrinkable Function` instance, which changes only the body and which lives in
   `StrataGenerators.FunctionHasTypeAGen.Shrink`.
 
-**Well-formedness invariant.** Every minimizer candidate is required to satisfy
-`funcWellFormed` (every free type variable in the signature is declared in
-`typeArgs`), matching the invariant `genFunction` maintains. Without this the
-minimizer could drop a `∀`-bound type-arg while leaving it used in a type,
-yielding an *undeclared type variable* — an ill-formed function whose parse
-failure is a minimizer artifact rather than a genuine printer/parser bug.
+**The invariant about good form.** Each candidate of the shrinker must satisfy
+`funcWellFormed`, which says that `typeArgs` declares each free type variable of the
+signature. `genFunction` keeps the same invariant. Without the filter, the shrinker could
+remove a type argument that a type still uses, and the result would hold a type variable with
+no declaration. Such a function is not well formed, and a failure of its parse is an artifact
+of the shrinker and not a real defect of the printer or of the parser.
 
-`funcWellFormed` is `public` here because `Shrink` reuses it as its candidate
-filter.
+`funcWellFormed` is public here, because the `Shrink` module uses it as its filter for a
+candidate.
 -/
 
--- ── Format / parse round-trip ────────────────────────────────────────────
+-- ── The round trip from a printed form to a parsed form ──────────────────
 
-/-- Embed a function into a one-decl Program and format it via Strata's own
-    `Core.formatProgram`. This is the string the round-trip property tests. -/
+/-- Puts a function into a `Program` with one declaration, and prints it with
+    `Core.formatProgram`. The round-trip property tests this string. -/
 def formatFuncAsProgram (func : Function) : String :=
   let prog : Core.Program := { decls := [ .func func .empty ] }
   (Core.formatProgram prog).pretty
 
-/-- Format a single `Function` using Strata's own `Core.formatProgram`, with the
-    `program Core;` header stripped — the Strata Core concrete syntax for the
-    function declaration alone, for use as a display label. Prefer this over any
-    hand-rolled printer so displays match the real formatter exactly. -/
+/-- Prints one `Function` with `Core.formatProgram`, and removes the `program Core;` header. The
+    result is the concrete syntax of Strata Core for the declaration of the function alone, for use
+    as a label in a report. Use this function and not a printer of your own, so that a report shows
+    the output of the real formatter. -/
 def formatFunc (func : Function) : String :=
   let s := formatFuncAsProgram func
   if s.startsWith "program Core;\n\n" then
     (s.drop "program Core;\n\n".length).toString else s.trimAscii.toString
 
-/-- Embed a statement list as the body of a trivial procedure `p` in a one-decl
-    `Program`, and format it via Strata's own `Core.formatProgram`. This yields
-    genuine Strata Core concrete syntax for the statements (a `funcDecl`, `block`,
-    `while`, etc. rendered exactly as the real grammar prescribes) rather than any
-    hand-rolled approximation.
+/-- Puts a list of statements into the body of a trivial procedure `p`, in a `Program` with one
+    declaration, and prints it with `Core.formatProgram`. The result is the real concrete syntax of
+    Strata Core for the statements, so a `funcDecl`, a `block`, a `while` and each other statement
+    appear as the grammar gives them, and not in a form that this package invents.
 
-    Caveat (a faithful reflection of a real limitation, not a display bug): the
-    Core CST formatter cannot represent a **bodiless `funcDecl` statement** — the
-    `funcDecl_statement` grammar requires a body, so `funcDeclToStatement`
-    substitutes a dummy `body` expression (and logs an internal error) for a
-    `funcDecl` whose declaration has no body. Such a statement is exactly the
-    typechecker-completeness counterexample (a `funcDecl` with a measure but no
-    body), so its rendered form shows a placeholder body. The `[body=…]` tag on
-    the counterexample (see the harness `Repr`) records the true shape. -/
+    One limit applies, and it shows a real limitation and not a defect of the output. The CST
+    formatter of Core cannot write a **`funcDecl` statement with no body**. The grammar rule
+    `funcDecl_statement` needs a body, so `funcDeclToStatement` writes a placeholder `body`
+    expression and it logs an internal error for a `funcDecl` whose declaration has no body. Such a
+    statement is exactly the counterexample to the completeness of the type checker, which is a
+    `funcDecl` with a measure and no body. Its printed form therefore shows a placeholder body. The
+    `[body=…]` tag on the counterexample, which the `Repr` instance of the harness writes, gives the
+    true shape. -/
 def formatStmtsAsProgram (ss : List Statement) : String :=
   let proc : Core.Procedure :=
     { header := { name := ⟨"p", ()⟩, typeArgs := [], inputs := [], outputs := [] },
@@ -76,16 +76,16 @@ def formatStmtsAsProgram (ss : List Statement) : String :=
   let prog : Core.Program := { decls := [ .proc proc .empty ] }
   (Core.formatProgram prog).pretty
 
-/-- Format a statement list using Strata's own formatter, with the `program Core;`
-    header stripped — for use as a display label in counterexamples. Renders
-    `funcDecl`/`block`/`while`/etc. in real Core concrete syntax. -/
+/-- Prints a list of statements with the formatter of Strata, and removes the `program Core;`
+    header. A report of a counterexample uses the result as a label. The output holds a `funcDecl`, a
+    `block`, a `while` and each other statement in the real concrete syntax of Core. -/
 def formatStmts (ss : List Statement) : String :=
   let s := formatStmtsAsProgram ss
   if s.startsWith "program Core;\n\n" then
     (s.drop "program Core;\n\n".length).toString else s.trimAscii.toString
 
-/-- Parse a Core program string back to the Strata Core AST (`none` on any
-    parse or translation failure). -/
+/-- Parses the text of a Core program back to the Strata Core AST. The result is `none` when the
+    parse fails or when the translation fails. -/
 def parseCoreProgram (input : String) : IO (Option Core.Program) := do
   let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
   let body := if input.startsWith "program Core;\n\n" then
@@ -98,8 +98,8 @@ def parseCoreProgram (input : String) : IO (Option Core.Program) := do
     else pure (some ast)
   catch _ => pure none
 
-/-- Like `parseCoreProgram`, but on failure returns the diagnostic message
-    (parser exception text, or the translation errors) instead of discarding it. -/
+/-- The same work as `parseCoreProgram`, but on a failure the result holds the message. That message
+    is the text of the exception from the parser, or the errors from the translation. -/
 def parseCoreProgramErr (input : String) : IO (Except String Core.Program) := do
   let dialects := StrataDDM.Elab.LoadedDialects.ofDialects! #[initDialect, Core]
   let body := if input.startsWith "program Core;\n\n" then
@@ -112,14 +112,15 @@ def parseCoreProgramErr (input : String) : IO (Except String Core.Program) := do
     else pure (.ok ast)
   catch e => pure (.error ((toString e).replace "\n" " "))
 
--- ── Structural shrinker ──────────────────────────────────────────────────
+-- ── The structural shrinker ──────────────────────────────────────────────
 
-/-- Structural size; each shrink step below strictly decreases it. -/
+/-- The structural size of a type. Each reduction below makes this size smaller. -/
 def sizeTy : LMonoTy → Nat
   | .ftvar _ => 2
   | .bitvec _ => 2
   | .tcons _ args => 1 + (args.map sizeTy).foldl (· + ·) 0
 
+/-- The structural size of a function. Each reduction below makes this size smaller. -/
 def sizeFunc (f : Function) : Nat :=
   f.name.name.length
     + sizeTy f.output
@@ -127,16 +128,15 @@ def sizeFunc (f : Function) : Nat :=
     + f.typeArgs.length
     + (match f.body with | some _ => 1 | none => 0)
     + (match f.measure with | some _ => 1 | none => 0)
-    -- Each `requires` clause counts its expression's AST size plus one for the
-    -- clause itself, so *dropping* a clause is strictly smaller than reducing its
-    -- expression to a leaf (the same convention as `sizeCheck` for a procedure's
-    -- contract). Without this summand the precondition reductions below would all
-    -- be filtered out by the strict-decrease test in `shrinkWhile`.
+    -- Each `requires` clause counts the size of its expression and one more for the clause
+    -- itself. The *removal* of a clause is therefore smaller than a reduction of its expression
+    -- to a leaf. `sizeCheck` uses the same convention for the contract of a procedure. Without
+    -- this part of the sum, the test for a smaller size in `shrinkWhile` would remove each
+    -- reduction of a precondition below.
     + (f.preconditions.map (fun pc => 1 + pc.expr.sizeOf)).foldl (· + ·) 0
 
-/-- Immediate smaller candidates for a monotype: collapse a compound toward a
-    child or toward `int`, a type variable / bitvector toward `int`, and shrink
-    children in place. Base types have no smaller form. -/
+/-- The smaller candidates for a monotype, in one step. The function replaces a compound type by one
+    of its children, and it reduces a child in place. A base type has no smaller form. -/
 partial def shrinkTy : LMonoTy → List LMonoTy
   | .ftvar _ => []
   | .bitvec _ => []
@@ -153,38 +153,35 @@ partial def shrinkTy : LMonoTy → List LMonoTy
     e :: (.tcons "Sequence" [·]) <$> shrinkTy e
   | .tcons _ args => args ++ List.flatMap shrinkTy args
 
-/-- Well-formedness of a shrink candidate. `genFunction` maintains all of these
-    invariants; the shrinker must preserve them so it never fabricates a failure
-    that is really an *ill-formed* function (which the parser would rightly
-    reject) rather than a genuine printer/parser bug. Four conditions:
+/-- Whether a candidate of the shrinker is well formed. `genFunction` keeps each of these
+    invariants, and the shrinker must keep them also, so that it never gives a failure that comes
+    from an *ill-formed* function. The parser correctly rejects such a function, and that rejection
+    is not a defect of the printer or of the parser. Four conditions must hold:
 
-    1. **Scoping** — every free type variable in the signature (inputs + output)
-       is declared in `typeArgs`.
-    2. **Body typing** — the body (if present) type-checks at the declared
-       `output`, and the measure (if present) at `int`. This is essential:
-       `shrinkFunc` can collapse `output` toward `int` (`shrinkOut`) *without*
-       touching the body, which would leave e.g. a `real`-returning lambda body
-       under an `int` output — an ill-typed function whose parse failure is a
-       shrinker artifact, not a Strata bug. Re-checking here rejects such
-       candidates.
-    3. **Precondition typing** — each `requires` clause type-checks at `bool`.
-    4. **Precondition scoping** — each clause's free variables are all formals.
+    1. **The scope.** `typeArgs` declares each free type variable of the signature, which holds the
+       inputs and the output.
+    2. **The typing of the body.** The body, when it exists, typechecks at the declared `output`, and
+       the measure, when it exists, typechecks at `int`. This condition is necessary. `shrinkFunc`
+       can replace `output` by `int` through `shrinkOut` and *not* change the body. The result can
+       then be a lambda body that returns a `real` under an output of `int`. Such a function is
+       ill-typed, and a failure of its parse is an artifact of the shrinker and not a defect of
+       Strata. A second type check here rejects such a candidate.
+    3. **The typing of a precondition.** Each `requires` clause typechecks at `bool`.
+    4. **The scope of a precondition.** Each free variable of a clause is a formal parameter.
 
-    Conditions 3 and 4 are *not* redundant with any typechecker: `Function.typeCheck`
-    never inspects `preconditions` at all — neither type-checking them nor free-var
-    checking them. So nothing but this predicate stops a shrink from stranding a
-    clause: dropping the input a clause mentions (`dropInput` below) leaves
-    `requires y == 0` with no `y` in sight, and reducing a clause's expression can
-    make it non-Boolean. `genFunction` emits a clause over the formals on roughly
-    half of its draws (measured 101/200), so both are reachable rather than
-    hypothetical.
+    Conditions 3 and 4 duplicate no type checker. `Function.typeCheck` never reads
+    `preconditions`, so it neither typechecks a clause nor checks its free variables. This predicate
+    is therefore the only thing that stops a reduction from leaving a clause without its variable.
+    The removal of an input that a clause mentions, which `dropInput` below offers, leaves
+    `requires y == 0` with no `y` in the signature. A reduction of the expression of a clause can
+    also make the expression not Boolean. `genFunction` emits a clause over the formal parameters on
+    about half of its draws, so both cases occur and neither is only theoretical.
 
-    Condition 4 is also available on its own as
-    `StrataGenerators.Program.TestSupport.funcPreconditionsScoped`, whose docstring
-    records the full analysis of the gap. Enforcing both here means every
-    function-shrinking family — this module's `shrinkFunc`, the `Shrinkable Function`
-    instance, and the whole-program shrinker's `.func` case — inherits them from one
-    filter. -/
+    `StrataGenerators.Program.TestSupport.funcPreconditionsScoped` also states condition 4 on its
+    own, and its documentation gives the full analysis of the gap. Both conditions are here, so each
+    family that reduces a function gets them from one filter. Those families are the `shrinkFunc` of
+    this module, the `Shrinkable Function` instance, and the `.func` case of the whole-program
+    shrinker. -/
 def funcWellFormed (f : Function) : Bool :=
   let used := f.output.freeVars ++ (f.inputs.toList.flatMap (fun p => p.2.freeVars))
   let scopedOk := used.all (· ∈ f.typeArgs)
@@ -200,24 +197,23 @@ def funcWellFormed (f : Function) : Bool :=
       && (LExpr.collectFvarNames pc.expr).all (fun x => x.name ∈ formals)
   scopedOk && bodyOk && measureOk && precondsOk
 
-/-- Candidate smaller functions: drop body/measure, drop a `requires` clause, drop
-    an input, drop a type-arg, reduce a `requires` clause's expression, shrink an
-    input type, shrink the output type, or shorten the name. All candidates are
-    strictly smaller by `sizeFunc`. Ill-formed candidates are filtered out by
-    `shrinkWhile` (via `funcWellFormed`).
+/-- The smaller candidates for a function. The shrinker removes the body, removes the measure,
+    removes a `requires` clause, removes an input, removes a type argument, reduces the expression of
+    a `requires` clause, reduces an input type, reduces the output type, or makes the name shorter.
+    Each candidate is smaller by `sizeFunc`. `shrinkWhile` removes a candidate that is not well
+    formed, through `funcWellFormed`.
 
-    The two precondition families delegate to the shared `shrinkLExpr`, exactly as
-    the procedure shrinker does for a contract clause. Dropping a clause is offered
-    before reducing one, so the bigger reduction is tried first. Both are guarded by
-    `funcWellFormed`, which keeps a reduced clause Boolean and scoped to the formals
-    — a guard nothing else provides, since `Function.typeCheck` does not check
-    preconditions at all.
+    The two families for a precondition use the shared `shrinkLExpr`, in the same way as the
+    shrinker for a procedure does for a clause of a contract. The removal of a clause comes before a
+    reduction of one, so the shrinker tries the larger reduction first. `funcWellFormed` guards both
+    families, and it keeps a reduced clause Boolean and in the scope of the formal parameters.
+    Nothing else gives that guard, because `Function.typeCheck` checks no precondition.
 
-    Note the interaction with `dropInput`: a candidate that drops the formal a clause
-    mentions *is* proposed here, and `funcWellFormed` rejects it, because the clause
-    would be left referring to nothing. Dropping that formal is still reachable in
-    two steps — drop the clause, then the input — which is why the drop-clause family
-    comes first. -/
+    Note how the families work with `dropInput`. This function *does* offer a candidate that removes
+    the formal parameter which a clause mentions, and `funcWellFormed` then rejects that candidate,
+    because the clause would refer to nothing. The removal of that formal parameter is still
+    reachable in two steps: remove the clause, and then remove the input. This is the reason why the
+    family that removes a clause comes first. -/
 def shrinkFunc (f : Function) : List Function :=
   let ins := f.inputs.toList
   let pres := f.preconditions
@@ -236,14 +232,13 @@ def shrinkFunc (f : Function) : List Function :=
   dropBody ++ dropMeasure ++ dropPrecond ++ dropInput ++ dropTyArg
     ++ shrinkPrecond ++ shrinkInput ++ shrinkOut ++ shrinkName
 
-/-- First candidate (in order) that still satisfies the failure predicate. -/
+/-- The first candidate in the list that still satisfies the predicate for a failure. -/
 partial def firstSatisfying (p : Function → IO Bool) : List Function → IO (Option Function)
   | [] => pure none
   | c :: rest => do if ← p c then pure (some c) else firstSatisfying p rest
 
-/-- Greedily shrink `f` while preserving `p`. Candidates must be strictly
-    smaller *and* well-formed, so the minimal witness is a genuine
-    `genFunction`-shaped function. -/
+/-- Reduces `f` greedily, and keeps `p` true. Each candidate must be smaller *and* well formed, so
+    the smallest witness is a function with the shape that `genFunction` gives. -/
 partial def shrinkWhile (p : Function → IO Bool) (fuel : Nat) (f : Function) : IO Function := do
   match fuel with
   | 0 => pure f
@@ -253,24 +248,26 @@ partial def shrinkWhile (p : Function → IO Bool) (fuel : Nat) (f : Function) :
     | some c => shrinkWhile p fuel c
     | none => pure f
 
--- ── Failure predicates (shrink targets) ──────────────────────────────────
+-- ── The predicates for a failure, which the shrinker keeps true ──────────
 
-/-- Any round-trip failure: the printed program either fails to parse, or
-    format→parse→re-format is not a fixed point. -/
+/-- Any failure of the round trip. Either the printed program does not parse, or the sequence of a
+    print, a parse and a second print is not a fixed point. -/
 def failsRoundtrip (f : Function) : IO Bool := do
   let s1 := formatFuncAsProgram f
   match ← parseCoreProgram s1 with
   | some ast2 => pure (s1 != (Core.formatProgram ast2).pretty)
   | none => pure true
 
-/-- The printed program PARSES but does not round-trip (mismatch class). -/
+/-- The printed program parses, and the round trip does not give the same text. This is the class of
+    failure where the two printed forms differ. -/
 def failsRoundtripParsed (f : Function) : IO Bool := do
   let s1 := formatFuncAsProgram f
   match ← parseCoreProgram s1 with
   | some ast2 => pure (s1 != (Core.formatProgram ast2).pretty)
   | none => pure false
 
-/-- The printed program does NOT parse at all (parse-failure class). -/
+/-- The printed program does not parse. This is the class of failure where the parser rejects the
+    text. -/
 def failsRoundtripParseFail (f : Function) : IO Bool := do
   match ← parseCoreProgram (formatFuncAsProgram f) with
   | some _ => pure false

@@ -46,12 +46,12 @@ representation of all three:
 
 The **annotated** spec `instHasTypeA` ignores both `C` and `Γ` when typing
 expressions, so `C` never influences *which expression* is produced. The only
-constructor whose well-typedness genuinely depends on `C` is `typeDecl` (its
-premise is `C.addKnownTypeWithError … = .ok C'`); we handle it by generating a
-`TypeConstructor` and then **matching** on the result of `addKnownTypeWithError`,
-so the `.ok` branch's output context is definitionally the required `C'`. On a
-name clash we produce the empty generator (`default`, whose `SetGen.Set` support
-is `∅`), so a clashing constructor simply contributes nothing.
+constructor whose well-typedness depends on the context is `typeDecl`, whose premise is
+`C.addKnownTypeWithError … = .ok C'`. The generator handles that case: it generates a `TypeConstructor`, and it
+then **matches** on the result of `addKnownTypeWithError`. Therefore the output context of the `.ok` branch is
+definitionally the context that the premise needs. After a clash of two names, the generator gives the empty
+generator, which is `default`, and its support at `SetGen.Set` is empty. A constructor whose name clashes
+therefore gives nothing.
 
 ## Labels
 
@@ -60,9 +60,8 @@ Under the new spec `exit label` requires `label ∈ L` and `block label` require
 
 - `genExitStmt` samples its target from the *enclosing* labels `L` (via
   `elements`), so the generated `exit` genuinely targets a live enclosing block.
-  When `L = []` (no enclosing block, e.g. at top level) no valid `exit` exists,
-  so it produces the empty generator (`default`) — the `exit` branch contributes
-  nothing there.
+  When the list of the labels is empty, so no block encloses the point, no valid `exit` exists. The generator
+  then gives the empty generator, and the `exit` branch gives nothing there.
 - The `block` generator draws its label from `genFreshLabel L`, guaranteeing
   `label ∉ L`, and generates the body under `label :: L`.
 
@@ -79,9 +78,8 @@ open TypeSpec
 
 -- ── Result of generating a statement ─────────────────────────────────────
 
-/-- The result of generating **one statement** — as a statement *list* — together
-    with the output ambient context `C'` and output variable-scope `Γ'` (as a
-    `VarCtx`).
+/-- The result of the generation of **one statement**, as a statement *list*, together with the output context
+    `C'` and the output scope of the variables, as a `VarCtx`.
 
     Almost every constructor yields a singleton `[s]`. The list is there for the
     one shape that genuinely spans several statements: a procedure `call` whose
@@ -91,7 +89,7 @@ open TypeSpec
     a layer of their own, `genStmt` returns a list uniformly and `genStmtChain`
     splices whatever comes back. -/
 structure GenStmtResult where
-  /-- The generated statement, as a list — a singleton except for a call group. -/
+  /-- The generated statement, as a list. That list holds one statement, except for a group of a call. -/
   stmts : List Statement
   /-- The output ambient `LContext` after the statement. -/
   outC : LContext CoreLParams
@@ -106,12 +104,12 @@ structure GenStmtResult where
 def fallbackFreshLabel (labels : List String) : String :=
   String.ofList (List.replicate (labels.foldl (fun acc l => max acc l.length) 0 + 1) 'x')
 
-/-- Generate a fresh block label not in `labels`. Uses `genIdentName` for
-    randomness — so the label is a non-empty, non-keyword identifier (a `block`
-    label appears in identifier position, so it must not be empty or a reserved
-    word) — and falls back to a length-based guarantee when the random label
-    collides. Guarantees `label ∉ labels`, the `block` premise of the new spec.
-    Mirrors `genFreshName` for variable names. -/
+/-- Generate a fresh label for a block that is not in `labels`. The function draws from `genIdentName`, so the
+    label is an identifier that is not empty and is not a keyword. A label of a `block` appears at the position
+    of an identifier, so it must not be empty and must not be a reserved word. After a collision, the function
+    falls back to a name whose length gives freshness. Therefore the result is never a member of `labels`, which
+    is the premise of the `block` rule. This function follows `genFreshName`, which gives the name of a
+    variable. -/
 def genFreshLabel [Gen G] (labels : List String) : G String := do
   let s ← genIdentName
   if s ∈ labels then
@@ -158,10 +156,10 @@ def Function.toPureFuncDecl (f : Function) : Imperative.PureFunc Expression :=
 /-- Generate a syntactic (non-recursive) function-declaration node by generating
     a well-typed `Function` via `genFunction` and lifting it to a `PureFunc`.
 
-    Note: per the declarative `funcDecl` rule, the syntactic declaration `decl`
-    and the well-typed witness `func` added to `C` are *independent* — the rule
-    only requires `¬decl.isRecursive` and `FuncHasType' func`. The generator
-    therefore samples them independently (see `genStmt`); this helper just
+    In the declarative `funcDecl` rule, the syntactic declaration and the well-typed witness function that the
+    rule adds to the context are *independent*. The rule asks only that the declaration is not recursive and
+    that the function is well typed. Therefore the generator draws them independently. Read `genStmt`. This
+    helper only
     supplies non-recursive `decl` nodes. -/
 def genDecl [Gen G] (octx : OpCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (Imperative.PureFunc Expression) :=
@@ -171,10 +169,10 @@ def genDecl [Gen G] (octx : OpCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
 
 /-- Generate an `ExprOrNondet` used as an `ite` condition or a `loop` guard:
     either `.nondet`, or `.det e` for a boolean expression `e`. Biased 80% toward a
-    *deterministic* guard (weights `1 : 4`) so generated `ite`/`loop`s more often
-    carry a real boolean condition rather than `*`; both branches keep positive
-    weight, so the support — hence the soundness/completeness statements — is
-    unchanged (see `genCondOrNondet_det_sound` / `genCondOrNondet_complete`). -/
+    *deterministic* guard, at the weights 1 and 4. Therefore a generated `ite` and a generated `loop` more often
+    carry a real boolean condition, and not a `*`. Both branches keep a positive weight, so the support does not
+    change, and each statement of soundness and of completeness therefore does not change either. Read
+    `genCondOrNondet_det_sound` and `genCondOrNondet_complete`. -/
 def genCondOrNondet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (ExprOrNondet Expression) :=
   frequency
@@ -217,11 +215,10 @@ def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   let r ← genCmd octx tvars immutableVars ctx depth pctx
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
-/-- Generate an `exit` statement targeting an enclosing block. Under the new
-    typing spec `StatementHasType'.exit` requires `label ∈ L`, so the target label is
-    sampled (via `elements`) from the enclosing-block `labels` — the generated
-    `exit` genuinely breaks out of a live enclosing block. When no block encloses
-    the current point (`labels = []`, e.g. at top level) *no* well-typed `exit`
+/-- Generate an `exit` statement that targets a block around it. The typing rule
+    `StatementHasType'.exit` needs the label to be a member of the list of the labels, so `elements` draws the
+    target label from that list. Therefore the generated `exit` leaves a block that truly encloses it. When no
+    block encloses the point, so the list of the labels is empty, *no* well-typed `exit`
     exists, so this produces the empty generator (`default`, whose `SetGen.Set`
     support is `∅`): the `exit` branch simply contributes nothing there. Context
     is unchanged. -/
@@ -244,11 +241,10 @@ def genFuncDeclStmt [Gen G] (octx : OpCtx)
   let func ← genFunction [] octx depth pctx
   pure ⟨[Stmt.funcDecl decl default], C.addFactoryFunction func.toLFunc, ctx⟩
 
-/-- Generate a `typeDecl` statement. A random `TypeConstructor` is generated and
-    checked against `C` via `addKnownTypeWithError`. On success the output context
-    is the extended `C'`; on a name clash we produce the empty generator
-    (`default`, support `∅`), so a clashing constructor simply contributes nothing.
-    This keeps the generator total and sound. -/
+/-- Generate a `typeDecl` statement. The function draws a random `TypeConstructor`, and it checks that
+    constructor against the context through `addKnownTypeWithError`. On a success, the output context is the
+    extended context. After a clash of two names, the function gives the empty generator, whose support is
+    empty, so a constructor whose name clashes gives nothing. Therefore the generator is total and sound. -/
 def genTypeDeclStmt [Gen G] (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) :
     G GenStmtResult := do
   let tc ← genTypeConstructor depth
@@ -271,15 +267,14 @@ def reusable (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
 def needsInit (ctx : VarCtx) (q : Identifier Unit × LMonoTy) : Bool :=
   ctx.isFresh q.1
 
-/-- A name the callee dictates is *usable* exactly when we can either reuse it or
-    `init` it. Anything else — bound at a **conflicting** type, or bound at the
-    right type but **immutable** — makes that callee genuinely uncallable at this
-    site, since the call rule gives the generator no naming freedom.
+/-- A name that the callee fixes is *usable* exactly when the call site can reuse it, or can declare it with an
+    `init` statement. Two other cases make the callee uncallable at this site: the scope binds the name at a
+    **conflicting** type, or it binds the name at the correct type and the name is **immutable**. The call rule
+    gives the generator no freedom over such a name.
 
-    This applies to the **in-out** arguments only: the call rule pins an in-out
-    argument to the very name the callee declares for it (`CmdExtHasType'.call`'s
-    last premise). Output-only arguments are *not* name-constrained — see
-    `outTarget`. -/
+    This predicate applies to an **in-out** argument only. The last premise of the call rule fixes an in-out
+    argument to exactly the name that the callee declares for it. The rule puts no condition on the name of an
+    output-only argument. Read `outTarget`. -/
 def usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (q : Identifier Unit × LMonoTy) : Bool :=
   reusable immutableVars ctx q || needsInit ctx q
@@ -290,31 +285,29 @@ def usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     it for the `out` parameter the callee declares as `q = (x, τ)` at position `i` of
     its output-only block; `base` is a length past which invented names are fresh.
 
-    The name is genuinely the caller's to choose. The Core spec requires an
-    `out` argument to exist, to have the declared type, and to be writable, but says
-    **nothing about its name** — unlike an in-out argument, which the call rule pins
-    to the name the callee declares. So:
+    The caller chooses that name. The specification of Core asks that an `out` argument exists, that it has the
+    declared type, and that it is writable. It says **nothing about its name**. The call rule does fix the name
+    of an in-out argument to the name that the callee declares. Therefore this function does two things:
 
-    * if the callee's own name `x` happens to already be in scope at exactly `τ` and
-      is writable (`reusable`), receive the result in that `x` — the shape real
-      Strata code most often has;
-    * otherwise pick the brand-new name `indexedFreshName base i`, which the caller
+    * When the scope already binds the name of the callee at exactly that type, and that name is writable, which
+      `reusable` decides, the function receives the result in that variable. Real Strata code most often has that
+      shape.
+    * Otherwise it picks the new name `indexedFreshName base i`, which the caller
       brings into scope with an `init` just before the call.
 
-    Because a brand-new name is *always* available, an output-only parameter can
-    never make a callee uncallable — so out names need (and admit) no `usableName`
-    guard. Either way the type of the chosen variable is `τ = q.2`, so the argument
-    positions still line up with the callee's declared output types. -/
+    A new name is *always* available, so an output-only parameter can never make a callee uncallable. Therefore
+    the name of an out argument needs no `usableName` guard, and it admits none. In each case, the type of the
+    chosen variable is the declared type, so each argument position still agrees with the declared output type of
+    the callee. -/
 def outTarget (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (base : Nat)
     (q : Identifier Unit × LMonoTy) (i : Nat) : Identifier Unit × LMonoTy :=
   if reusable immutableVars ctx q then q else (⟨indexedFreshName base i, ()⟩, q.2)
 
 /-- **Choose one receiving variable per `out` parameter**, across the callee's whole
     output-only block `O`: `outTarget` at each position, with the base taken past
-    every name in `ctx` so that every brand-new name is genuinely fresh and distinct
-    positions get distinct names. The resulting list has the same length as `O` and
-    the same types in the same order — see `outTargets_length`, `outTargets_values` —
-    only the names may differ. -/
+    each name of the scope, so that each new name is fresh and two different positions get two different names.
+    The result has the same length as the output-only block, and the same types in the same order, which
+    `outTargets_length` and `outTargets_values` prove. Only the names can differ. -/
 def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (O : @LMonoTySignature Unit) : @LMonoTySignature Unit :=
   O.toList.zipIdx.map (fun p => outTarget immutableVars ctx (maxNameLen ctx) p.1 p.2)
@@ -328,20 +321,19 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
        leading both), so the in-out block is
        exactly `s.M` (`getInoutParams = s.M`), the input-only block is `s.I`, and
        the output-only block is `s.O`. The in-out and out args are the ones the
-       callee *writes back through*, so each needs a caller variable rather than an
-       expression: the in-out args `s.M` together with one receiving variable per out
-       arg — `inoutNames` and `outTargets` below. When `s.M = []` there are no in-out
-       args and step 3 ranges over the out targets alone.
+       callee *writes back through*, so each of them needs a variable of the caller, and not an expression. Those
+       arguments are the in-out block, together with one receiving variable for each out argument, which
+       `inoutNames` and `outTargets` below give. When the in-out block is empty, there is no in-out argument, and
+       step 3 covers the out targets only.
     3. **For each in-out arg `x : τ` (then likewise each out arg), check whether
        `ctx` already has `x : τ`.** For an *in-out* arg the call rule forces the
        argument to be named *exactly* as the callee declares it, at exactly the
        declared type, so there is no naming freedom: `reusable` decides the check
        (and additionally requires `x` be writable, since the callee may assign it).
-        * **Yes** — pass the ambient variable `x` straight through as the in-out
-          argument. Nothing is emitted for `x`.
-        * **No** — `x` must be absent (`needsInit`); we emit `init x τ *` for it
-          *before* the call. If `x` is instead bound at a conflicting type, or is
-          immutable, this callee is skipped entirely (empty generator, `default`),
+        * **Yes.** Pass the variable of the scope through as the in-out argument, and emit nothing for it.
+        * **No.** The variable must be absent, which `needsInit` decides, and the generator emits an `init` for it
+          *before* the call. When the scope instead binds that name at a conflicting type, or binds it as an
+          immutable name, the generator skips this callee, through the empty generator,
           which keeps the generator total.
 
        For an *out* arg the same reuse-or-`init` choice is made, but the name is
@@ -355,19 +347,18 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
        assembled by `mkArgs`: `inout` args for `s.M`, `in` args for `exprs`, `out`
        args for `outTargets`.
 
-    The emitted shape is uniform: the `init`s for just the missing names, followed
-    by the `call`, spliced **inline** into the enclosing statement sequence — no
-    enclosing block and no label. When *every* in-out arg and out target was reused
-    the init list is empty and the sequence degenerates to the bare `[call]`, the
+    The emitted shape is uniform. It holds the `init` statements for the missing names only, then the `call`, and
+    the generator splices that group **inline** into the statement sequence around it, with no block and no
+    label. When the call reuses *each* in-out argument and each out target, the list of the `init` statements is
+    empty, and the group is the bare call, which is the
     common shape in real Strata code; otherwise the `init`s simply precede the call
     in the ambient scope.
 
     Because the `init`s are emitted in the *ambient* scope rather than inside a
-    lexically-scoped block, they genuinely extend the variable scope: the output
-    context is `insertAllCtx ctx toInit`, not the input `ctx`. That is the price of
-    inlining, and it is why `GenStmtResult.stmts` is a statement **list** — the
-    enclosing sequence (`genStmtChain`) splices the list in and threads the
-    extended context onward.
+    block with a lexical scope, they extend the scope of the variables. The output context is
+    `insertAllCtx ctx toInit`, and not the input context. That is the price of the inline form, and it is why the
+    field `GenStmtResult.stmts` is a statement **list**. The sequence around it, which `genStmtChain` builds,
+    splices that list in, and it threads the extended context onward.
 
     The `init`s use the nondeterministic form `init x τ *` (a havoc), which needs
     no initializer expression and hence no extra expression-typing obligation.
@@ -389,10 +380,9 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   | p₀ :: ps => do
     -- Step 1: pick a random procedure to call from the procedure context.
     let s ← elements (p₀ :: ps) (by simp)
-    -- Step 2: instantiate the callee's type parameters. A polymorphic callee's
-    -- signature is over `s.typeArgs`; the `CmdExtHasType'.call` rule lets us pick
-    -- any concrete instantiation `σ`. We sample one monotype per type parameter
-    -- from the generable types (mirroring `genIndirPoly`'s type sampling for
+    -- Step 2. Instantiate the type parameters of the callee. The signature of a polymorphic callee is over its
+    -- own type parameters, and the call rule permits each concrete instantiation. The generator therefore samples
+    -- one monotype for each type parameter, from the generable types, as `genIndirPoly` samples a type for
     -- polymorphic factory functions), then instantiate the three signature blocks
     -- by `σ`. A monomorphic callee (`s.typeArgs = []`) gives `σ = []`, and
     -- `substSig [] = id`, so this reduces to the previous behaviour verbatim.
@@ -408,19 +398,19 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     let Oσ := StrataGenerators.Stmt.substSig σ s.O
     -- Step 3: read the in-out args off the callee's (instantiated) signature. Front
     -- alignment (`inputs = M ++ I`, `outputs = M ++ O`) makes `Mσ` exactly the
-    -- in-out block; `Oσ` are the output-only args. Both blocks are written back
-    -- through, so both need caller variables, but only the in-out names are
-    -- dictated to us (step 4). (`substSig` preserves keys, so the in-out names are
-    -- still exactly `s.M`'s — the callee dictates names, `σ` only fixes types.)
+    -- in-out block, and the second holds the output-only arguments. The callee writes back through both blocks,
+    -- so both need a variable of the caller, and the callee fixes the name of an in-out argument only, which step
+    -- 4 handles. `substSig` keeps each key, so the in-out names are still exactly the names of the declared
+    -- block. The callee fixes each name, and the instantiation fixes each type.
     let inoutNames : List (Identifier Unit × LMonoTy) := Mσ
     let outTargets : @LMonoTySignature Unit := outTargets immutableVars ctx Oσ
-    -- Step 4: for each in-out arg, reuse the ambient `x : τ` when we have it,
-    -- otherwise plan an `init`. A name that is neither reusable nor absent makes
-    -- this callee uncallable here. (The out targets are always usable by
-    -- construction — see `outTargets_all_usableName`.)
+    -- Step 4. For each in-out argument, reuse the variable of the scope when the scope holds it at the correct
+    -- type, and otherwise plan an `init` for it. A name that the call can neither reuse nor declare makes this
+    -- callee uncallable here. Each out target is usable by construction, which `outTargets_all_usableName`
+    -- proves.
     if inoutNames.all (usableName immutableVars ctx) = true
         ∧ (Mσ ++ outTargets).keys.Nodup then
-      -- The in-out args we must `init` first, then the out targets we must `init`.
+      -- The in-out arguments that the group must declare first, and then the out targets that it must declare.
       let inoutToInit := inoutNames.filter (needsInit ctx)
       let outToInit := outTargets.filter (needsInit ctx)
       let toInit := inoutToInit ++ outToInit
@@ -449,11 +439,11 @@ mutual
 /-- Generate a well-typed `Statement` given the ambient context `C`, the variable
     scope `ctx`, and a single `size` budget.
 
-    `size` is the QuickCheck-style `sized` knob: it bounds the statement's nesting
-    depth *and* — as it is passed on to the leaf/expression sub-generators and to
-    the body-length `choose`s — the size of expressions and the length of
-    generated statement sequences. There is no separate nesting `fuel`: `size`
-    plays both roles, exactly as the single `Nat` argument of `genLExprBase` does
+    The parameter `size` is the knob for the size of a draw. It bounds the depth of the nesting of the statement
+    *and* the size of an expression and the length of a generated statement sequence, because the generator passes
+    it to each sub-generator for a leaf and for an expression, and to each `choose` for the length of a body.
+    There is no separate `fuel` for the nesting: `size` plays both roles, as the one `Nat` argument of
+    `genLExprBase` does
     for expressions.
 
     At `size = 0` only the *leaf* constructors are produced (`cmd`, `exit`,
@@ -467,38 +457,36 @@ mutual
     output scope (see `genCallStmt`). This is why the result type is a statement
     *list*; every other branch returns a singleton.
 
-    The generated statements satisfy `StatementsHasTypeA P C Γ ss C' Γ'` (for any
-    program `P`). `genStmt_sound` proves it.
+    Each generated statement satisfies `StatementsHasTypeA P C Γ ss C' Γ'`, at each program. Read
+    `genStmt_sound`.
 
-    Tagged `@[tunable]`, so every branch weight is a runtime knob, and `genStmt.tuned θ`
-    reads each weight from `θ`. There are two sites: the `size = 0` leaf list has arity 5,
-    and the `size + 1` list has arity 9. The second site carries `loop` at flat index 13,
-    which is the knob that a loop-transformation test wants turned up.
+    Tagged `@[tunable]`, so every branch weight is a runtime knob, and `genStmt.tuned θ` reads each
+    weight from `θ`. There are two sites: the `size = 0` leaf list has arity 5, and the `size + 1`
+    list has arity 9. The second site carries `loop` at flat index 13, which is the knob that a
+    loop-transformation test wants turned up.
 
-    The weights are *constant* rather than indexed by `size`, because no `depth` binder is
-    in scope and each site therefore reads its schedule at depth 0. This recursion cannot
-    run away, unlike an expression generator's: the nesting branches exist only at
-    `size + 1`, and they generate their bodies at `size`. A decaying schedule has nothing to
-    protect against. `StrataGenerators.TuningProfiles` holds the profiles that the suite
-    uses.
+    The weights are *constant* rather than indexed by `size`, because no `depth` binder is in scope
+    and each site therefore reads its schedule at depth 0. This recursion cannot run away, unlike an
+    expression generator's: the nesting branches exist only at `size + 1`, and they generate their
+    bodies at `size`. A decaying schedule has nothing to protect against.
+    `StrataGenerators.TuningProfiles` holds the profiles that the suite uses.
 
-    **Why `exit` and `call` fall back to a command.** An `exit` needs an enclosing block
-    label, and a `call` needs a callee. With `labels = []` or with `procs = []` those
-    generators have *empty support* and can only throw. The weight
-    `if labels.isEmpty then 0 else 1` used to prune them, and `frequency` skips a
-    zero-weight branch. But `@[tunable]` cannot see a weight that an `if` computes, and it
-    rejects a literal `0`, which would break support-completeness.
+    **Why `exit` and `call` fall back to a command.** An `exit` needs an enclosing block label, and a
+    `call` needs a callee. With `labels = []` or with `procs = []` those generators have *empty
+    support* and can only throw. The weight `if labels.isEmpty then 0 else 1` used to prune them, and
+    `frequency` skips a zero-weight branch. But `@[tunable]` cannot see a weight that an `if`
+    computes, and it rejects a literal `0`, which would break support-completeness.
 
-    So the *branch* prunes itself instead of its weight: it defers to `genCmdStmt`, which
-    branch 0 already offers. Every weight stays a positive literal, and the generator stays
-    throw-free. The branch's support is then `genExitStmt`'s support, or a subset of branch
-    0's, so the union over the list is unchanged. `genStmt`'s support is that union, which is
-    why the soundness and completeness proofs need only a `cases labels` or a `cases procs`.
+    So the *branch* prunes itself instead of its weight: it defers to `genCmdStmt`, which branch 0
+    already offers. Every weight stays a positive literal, and the generator stays throw-free. The
+    branch's support is then `genExitStmt`'s support, or a subset of branch 0's, so the union over the
+    list is unchanged. `genStmt`'s support is that union, which is why the soundness and completeness
+    proofs need only a `cases labels` or a `cases procs`.
 
-    The two distributions differ in one respect. This is not a regression, and it is worth
-    knowing. The old generator renormalised over the surviving branches. This one hands the
-    share of a pruned branch to `cmd`, which leaves `funcDecl` and `typeDecl` slightly rarer
-    in a scope with no label and no callee. -/
+    The two distributions differ in one respect. This is not a regression, and it is worth knowing.
+    The old generator renormalised over the surviving branches. This one hands the share of a pruned
+    branch to `cmd`, which leaves `funcDecl` and `typeDecl` slightly rarer in a scope with no label
+    and no callee. -/
 @[tunable]
 def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
@@ -574,13 +562,12 @@ termination_by n => (n, 0, 0)
     accumulator (the remaining number of groups).
 
     Named a *chain* rather than a sequence because it calls `genStmt` up to `len`
-    times and splices each result: a group is normally a single statement, but a
-    procedure call contributes its missing-name `init`s alongside it, so the
-    returned list may be *longer* than `len` — `len` bounds the number of
-    generation steps, not the statement count.
+    times, and it splices each result. A group is usually one statement, and a procedure call also gives the
+    `init` statements for each missing name. Therefore the result can be *longer* than the number of the steps.
+    That number bounds the steps of the generation, and not the number of the statements.
 
-    Returns the statement list together with the final `(C, Γ)`. Satisfies the
-    chained `StatementsHasTypeA` relation — see `genStmtChain_sound`. -/
+    The function gives the statement list together with the final context and scope. The result satisfies the
+    chained `StatementsHasTypeA` relation. Read `genStmtChain_sound`. -/
 def genStmtChain [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (procs : ProcSigCtx)
@@ -620,9 +607,9 @@ instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
   let ⟨ss, _, _⟩ ← genStmt [] [] [] [] [] (LContext.default) [] [] 2
   IO.println <| Std.format ss |>.pretty : IO Unit)
 
--- Smoke test: a statement started from a non-empty variable scope, so `set`
--- and control-flow guards over existing variables can appear. Body expressions
--- may now *read* those variables (the free-var context is derived from the scope).
+-- A quick check: a statement from a scope that holds a variable, so that a `set` command and a guard over an
+-- existing variable can appear. An expression of a body can also *read* such a variable, because the context of
+-- the free variables comes from the scope.
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do
   let ⟨ss, _, _⟩ ← genStmt [] [] [] [] (LContext.default)

@@ -4,10 +4,10 @@ import StrataGenerators.TuningProfiles
 import StrataGenerators.ProgramTuning
 
 /-!
-# The generator catalog
+# The catalog of generators
 
-A property picks its generator the way Plausible and QuickCheck do: by the **type** of
-the value it quantifies over.
+A property picks its generator in the way that Plausible and QuickCheck do: by the **type** of
+the value that it quantifies over.
 
 ```lean
 @[strata_property]
@@ -15,21 +15,20 @@ def myProp : TestDecl :=
   .property "mypass: idempotent" fun (gp : GenProgram) => checkMyPass gp.prog
 ```
 
-`GenProgram` already carries `Arbitrary`/`Repr`/`Shrinkable` instances — they live in
-`StrataGenerators.TestScaffold`, which stays the single source of truth for *how* each
-shape is drawn, shrunk and printed — so `TestDecl.property` needs nothing from this
-module in order to run that property.
+`GenProgram` already has `Arbitrary`, `Repr` and `Shrinkable` instances.
+`StrataGenerators.TestScaffold` holds them, and it stays the one source of truth for *how* a
+draw, a reduction and the output work for each shape. `TestDecl.property` therefore needs
+nothing from this module to run that property.
 
-What this module adds is a fourth instance: `TycheFeatures`, the breakdown of a
-generated value into Tyche axes. That belongs to the type rather than to any one
-property, because `num_decls`, `decl_kinds`, `program_size` and `rejection_cause` are
-facts about a generated program, and every property over `GenProgram` wants the same
-axes. Declaring them once here is what makes a Tyche panel free for a property written
-later, and what lets a reader tell a vacuous draw from a live one.
+This module adds a fourth instance, `TycheFeatures`, which breaks a generated value into Tyche
+axes. Those axes belong to the type and not to one property, because `num_decls`, `decl_kinds`,
+`program_size` and `rejection_cause` are facts about a generated program, and each property
+over `GenProgram` wants the same axes. One declaration here therefore gives a Tyche panel to a
+property that someone writes later, and it lets a reader tell a vacuous draw from a live one.
 
-The `Generators.*` values below are those same instances reified as `PropertyRunner`s.
-A property needs one only in order to *deviate* from the type's default — see
-`PropertyRunner.withRender`, `PropertyRunner.withFeatures` and `TestDecl.forAll`.
+The `Generators.*` values below are the same instances as `PropertyRunner` values. A property
+needs one only to *differ* from the default of its type. See `PropertyRunner.withRender`,
+`PropertyRunner.withFeatures` and `TestDecl.forAll`.
 -/
 
 open Lambda Core Imperative Plausible
@@ -39,13 +38,11 @@ open ProgramGen.TestSupport
 
 namespace StrataGenerators.Test.Generators
 
--- ── Feature extraction ────────────────────────────────────────────────
--- Ported from the hand-written panels of `StrataGenerators.TycheViz`, where each
--- of these was duplicated across the panels of one input shape. Attaching them to
--- the *type* instead removes the duplication and the possibility of a new panel
--- forgetting an axis.
+-- ── The features ──────────────────────────────────────────────────────
+-- Each function below gives the axes for one input *type*. One declaration therefore serves
+-- each panel over that type, and no new panel can miss an axis.
 
-/-- Nesting depth of an expression. -/
+/-- The depth of the nested subexpressions of an expression. -/
 private def exprDepth : LExpr' → Nat
   | .abs _ _ _ body => exprDepth body + 1
   | .app _ fn arg => max (exprDepth fn) (exprDepth arg) + 1
@@ -54,7 +51,7 @@ private def exprDepth : LExpr' → Nat
   | .quant _ _ _ _ tr body => max (exprDepth tr) (exprDepth body) + 1
   | _ => 0
 
-/-- Top-level expression constructor. -/
+/-- The name of the constructor at the top of an expression. -/
 private def exprKind : LExpr' → String
   | .bvar _ _ => "bvar"
   | .fvar _ _ _ => "fvar"
@@ -70,7 +67,7 @@ private def exprKind : LExpr' → String
   | .const _ (.bitvecConst _ _) => "bitvecConst"
   | .quant _ _ _ _ _ _ => "quant"
 
-/-- Top-level type constructor. -/
+/-- The name of the constructor at the top of a type. -/
 def typeKind : LMonoTy → String
   | .bool => "bool"
   | .int => "int"
@@ -79,13 +76,15 @@ def typeKind : LMonoTy → String
   | .bitvec _ => "bitvec"
   | .tcons _ _ => "tcons"
 
+/-- The Tyche axes for an expression and the type of that expression. -/
 def exprFeatures (e : LExpr') (τ : LMonoTy) : List (String × Tyche.Feature) :=
   [ ("expr_kind", .nominal (exprKind e)),
     ("type_kind", .nominal (typeKind τ)),
     ("expr_depth", .ordinal (exprDepth e)),
     ("expr_size", .ordinal (LExpr.size LExprParamsT' e)) ]
 
-/-- Top-level command constructor. -/
+/-- The name of the constructor at the top of a command. For `init` and `set`, the name also
+    gives whether the assignment is deterministic. -/
 def cmdKind : Cmd Expression → String
   | .init _ _ (.det _) _ => "init_det"
   | .init _ _ .nondet _ => "init_nondet"
@@ -95,10 +94,10 @@ def cmdKind : Cmd Expression → String
   | .assume _ _ _ => "assume"
   | .cover _ _ _ => "cover"
 
-/-- Whether a generated function has a body and/or a measure. The property under
-    test is often vacuous when both are absent, so this is the axis that shows how
-    often it was exercised non-trivially — and `measure` alone is precisely the
-    typechecker-completeness counterexample. -/
+/-- Whether a generated function has a body, a measure, both or neither. A property is often
+    vacuous when the function has neither, so this axis shows how often a draw was non-trivial. A
+    function with a measure and no body is the counterexample to the completeness of the type
+    checker. -/
 private def funcShape (f : Function) : String :=
   match f.body.isSome, f.measure.isSome with
   | true,  true  => "body+measure"
@@ -106,6 +105,7 @@ private def funcShape (f : Function) : String :=
   | false, true  => "measure"
   | false, false => "neither"
 
+/-- The Tyche axes for a generated function. -/
 def functionFeatures (f : Function) : List (String × Tyche.Feature) :=
   [ ("func_shape", .nominal (funcShape f)),
     ("has_body", .nominal (if f.body.isSome then "yes" else "no")),
@@ -114,6 +114,7 @@ def functionFeatures (f : Function) : List (String × Tyche.Feature) :=
     ("num_inputs", .ordinal f.inputs.toList.length),
     ("output_kind", .nominal (typeKind f.output)) ]
 
+/-- The Tyche axes for a list of generated statements. -/
 def stmtsFeatures (ss : List Statement) : List (String × Tyche.Feature) :=
   [ ("num_stmts", .ordinal ss.length),
     ("ast_size", .ordinal (sizeStmts ss)),
@@ -125,10 +126,12 @@ def stmtsFeatures (ss : List Statement) : List (String × Tyche.Feature) :=
     ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")) ]
 
 open StrataGenerators.Procedure.TestSupport in
+/-- The Tyche axes for a list of generated procedures. -/
 def procsFeatures (ps : List Core.Procedure) : List (String × Tyche.Feature) :=
   [ ("num_procs", .ordinal ps.length),
     ("total_body_stmts", .ordinal (ps.foldl (fun n p => n + (bodyStmts p.body).length) 0)) ]
 
+/-- The kind of a declaration, as a name. -/
 private def declKind : Core.Decl → String
   | .type (.con _) _ => "type.con"
   | .type (.syn _) _ => "type.syn"
@@ -139,9 +142,9 @@ private def declKind : Core.Decl → String
   | .func _ _ => "func"
   | .recFuncBlock _ _ => "recFuncBlock"
 
-/-- Declaration count, reducible size, which declaration kinds are present, and —
-    the axis that makes the completeness panels legible — which documented
-    typechecker gap (if any) the program bears. -/
+/-- The Tyche axes for a generated program: the number of declarations, the size, the kinds of
+    declaration that occur, and the documented gap of the type checker that the program holds.
+    The last axis is what makes a panel for completeness readable. -/
 def programFeatures (p : Core.Program) : List (String × Tyche.Feature) :=
   let causes := programRejectionCause p
   [ ("num_decls", .ordinal p.decls.length),
@@ -150,6 +153,7 @@ def programFeatures (p : Core.Program) : List (String × Tyche.Feature) :=
     ("rejection_cause", .nominal (if causes.isEmpty then "none" else "+".intercalate causes)) ]
 
 open StrataGenerators.MutualBlockShape StrataGenerators.AdtLaws in
+/-- The Tyche axes for a generated `mutual … end` datatype block. -/
 def blockFeatures (b : Lambda.MutualDatatype Unit) : List (String × Tyche.Feature) :=
   [ ("num_datatypes", .ordinal b.length),
     ("num_constrs", .ordinal (b.foldl (fun n d => n + d.constrs.length) 0)),
@@ -160,69 +164,72 @@ def blockFeatures (b : Lambda.MutualDatatype Unit) : List (String × Tyche.Featu
 
 -- ── The catalog ───────────────────────────────────────────────────────
 --
--- One `TycheFeatures` instance per input type, then the same thing reified as a
--- `PropertyRunner`. A property content with the type's default — almost every
--- property — mentions neither: `TestDecl.property` finds the instances.
+-- There is one `TycheFeatures` instance for each input type, and then the same data as a
+-- `PropertyRunner`. A property that accepts the default of its type names neither of them,
+-- because `TestDecl.property` finds the instances. Almost every property does that.
 
 section Instances
 open StrataGenerators.Test
 
-/-- A well-typed expression paired with its type, over `defaultFCtx` (so it may
-    contain free variables). -/
+/-- The axes for a well-typed expression and its type. The generator uses `defaultFCtx`, so the
+    expression can hold free variables. -/
 instance : TycheFeatures TypedExpr := ⟨fun te => exprFeatures te.expr te.ty⟩
 
-/-- A *closed* well-typed expression: no free variables, so the empty typing context
-    suffices (what progress and preservation are stated against). -/
+/-- The axes for a *closed* well-typed expression. Such an expression has no free variable, so
+    the empty typing context is enough. Progress and preservation use this shape. -/
 instance : TycheFeatures ClosedTypedExpr := ⟨fun te => exprFeatures te.expr te.ty⟩
 
-/-- A closed expression over `coreOpCtx`, for round-tripping through `eraseTypes` and
-    `resolve`. -/
+/-- The axes for a closed expression over `coreOpCtx`, for the round trip through `eraseTypes`
+    and `resolve`. -/
 instance : TycheFeatures ResolveTypedExpr := ⟨fun te => exprFeatures te.expr te.ty⟩
 
-/-- One command, paired with the variable context it was generated against. -/
+/-- The axes for one command and the variable context that the generator used for it. -/
 instance : TycheFeatures GenCmdWithCtx := ⟨fun gc =>
   [ ("cmd_kind", .nominal (cmdKind gc.cmd)),
     ("in_ctx_size", .ordinal gc.inCtx.length),
     ("out_ctx_size", .ordinal gc.outCtx.length) ]⟩
 
-/-- A command *sequence*, paired with its input and output contexts. -/
+/-- The axes for a *sequence* of commands and its input and output contexts. -/
 instance : TycheFeatures GenCmdsWithCtx := ⟨fun gc =>
   [ ("num_cmds", .ordinal gc.cmds.length),
     ("in_ctx_size", .ordinal gc.inCtx.length),
     ("out_ctx_size", .ordinal gc.outCtx.length) ]⟩
 
-/-- A function generated against `defaultFCtx`, carrying that context so a property
-    can consult the matching type map. -/
+/-- The axes for a function that the generator draws against `defaultFCtx`. The value also holds
+    that context, so a property can read the matching type map. -/
 instance : TycheFeatures GenFunction := ⟨fun gf => functionFeatures gf.func⟩
 
-/-- A function with a *closed* body, which `Function.typeCheck` can accept without an
-    ambient context. -/
+/-- The axes for a function with a *closed* body. `Function.typeCheck` accepts such a function
+    without an ambient context. -/
 instance : TycheFeatures ClosedGenFunction := ⟨fun gf => functionFeatures gf.func⟩
 
-/-- A well-typed statement list (`StatementsHasTypeA`: proven sound *and* complete
-    against the declarative spec, so it is a certified oracle input). -/
+/-- The axes for a well-typed list of statements, which the relation `StatementsHasTypeA`
+    describes. The generator is sound *and* complete against the declarative specification, so
+    its output is an input with a certificate for an oracle. -/
 instance : TycheFeatures GenStmts := ⟨fun gs => stmtsFeatures gs.stmts⟩
 
-/-- A list of well-typed procedures forming an acyclic call DAG, relabelled `P0…Pk` so
-    their identities never collide. -/
+/-- The axes for a list of well-typed procedures that form an acyclic call graph. The generator
+    gives them the names `P0` to `Pk`, so two identities never collide. -/
 instance : TycheFeatures GenProcs := ⟨fun gp => procsFeatures gp.procs⟩
 
-/-- A whole well-typed program: every declaration kind, with the ambient context
-    threaded across the declaration fold. The input of choice for anything that reads
-    more than one declaration. -/
+/-- The axes for a whole well-typed program. Such a program holds every kind of declaration, and
+    the generator threads the ambient context through the fold over the declarations. This is the
+    best input for a property that reads more than one declaration. -/
 instance : TycheFeatures GenProgram := ⟨fun gp => programFeatures gp.prog⟩
 
-/-- A `mutual … end` datatype block of the ordinary (usually connected) shape. -/
+/-- The axes for a `mutual … end` datatype block of the ordinary shape, which is usually
+    connected. -/
 instance : TycheFeatures GenAdtBlock := ⟨fun gb => blockFeatures gb.block⟩
 
-/-- A `mutual … end` block whose datatypes are pairwise *independent*: drawn separately
-    over a threaded reserved-name set, so no field can mention a sibling. -/
+/-- The axes for a `mutual … end` block whose datatypes are pairwise *independent*. The generator
+    draws each datatype on its own, and it threads one set of reserved names through the draws, so
+    no field can mention a sibling datatype. -/
 instance : TycheFeatures GenIndepBlock := ⟨fun gb => blockFeatures gb.block⟩
 
 end Instances
 
--- The same runners as first-class values, for a property that needs to deviate from the
--- default: `Generators.program.withRender …` keeps every axis and changes the printer.
+-- The same runners as first-class values, for a property that must differ from the default.
+-- `Generators.program.withRender …` keeps each axis and it changes only the printer.
 
 open StrataGenerators.Test in
 def typedExpr      : PropertyRunner TypedExpr        := .ofInstances _
@@ -277,8 +284,8 @@ open StrataGenerators.Procedure.TestSupport (relabelProcs)
     well. `stmtLoopHeavy` and the other statement profiles address this instance. -/
 instance : TunableGen GenStmts where
   genWith θ := retryGen 4000 <| Gen.sized fun s => do
-    let size := max 1 (min 3 (s / 25))
-    let len := max 1 (min 4 (s / 20))
+    let size := max 1 (min 3 s)
+    let len := max 1 s
     let (ss, _, _) ← genProgramStmtsT (G := Plausible.Gen) θ coreMonoOps [] size len
     pure ⟨ss⟩
   sites := StrataGenerators.Stmt.genStmt._mutual.sites
@@ -287,9 +294,9 @@ instance : TunableGen GenStmts where
     passes key on what those bodies contain, so the `proc:` properties tune through this instance. -/
 instance : TunableGen GenProcs where
   genWith θ := retryGen 8000 <| Gen.sized fun s => do
-    let n := max 2 (min 4 (2 + s / 30))
-    let size := max 1 (min 2 (s / 30))
-    let len := max 1 (min 3 (s / 25))
+    let n := max 2 s
+    let size := max 1 (min 2 s)
+    let len := max 1 (min 3 s)
     let (ps, _) ← (List.range n).foldlM
       (fun (acc : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
         let proc ← (retryGen 8000 (genProcedureT (G := Plausible.Gen) θ
@@ -319,7 +326,7 @@ instance : TunableGen GenCmdWithCtx where
     pure ⟨cmd, baseCtx, ctx'⟩
   sites := genCmd.sites
 
-/-- Typed expressions over `defaultFCtx`, with `genLExprBase`'s 79 branch weights read from `θ`. The
+/-- Typed expressions over `defaultFCtx`, with `genLExprBase`'s 84 branch weights read from `θ`. The
     four expression profiles address this instance.
 
     It draws through `genLExprT`, which restates the entry point that `Arbitrary` uses. That includes
@@ -327,7 +334,7 @@ instance : TunableGen GenCmdWithCtx where
     what make the pin below hold, and what keep a tuned property's cost equal to the untuned one's. -/
 instance : TunableGen TypedExpr where
   genWith θ := retryGen 500 <| Gen.sized fun s => do
-    let depth := max 1 (s / 20)
+    let depth := max 1 s
     let τ ← genLMonoTy (G := Plausible.Gen) [] depth
     let e ← genLExprT (G := Plausible.Gen) θ defaultFCtx coreMonoOps corePolyOps [] []
       depth τ 3 (retryGenArg 20)
@@ -340,7 +347,7 @@ instance : TunableGen TypedExpr where
 instance : TunableGen ClosedTypedExpr where
   genWith θ := retryGen 500 <|
     (fun (te : TypedExpr) => (⟨te.expr, te.ty⟩ : ClosedTypedExpr)) <$> (Gen.sized fun s => do
-      let depth := max 1 (s / 20)
+      let depth := max 1 s
       let τ ← genLMonoTy (G := Plausible.Gen) [] depth
       let e ← genLExprT (G := Plausible.Gen) θ [] coreMonoOps corePolyOps [] []
         depth τ 3 (retryGenArg 20)
@@ -353,7 +360,7 @@ instance : TunableGen ClosedTypedExpr where
     `MonomorphizeFunctions` has anything to specialize. -/
 instance : TunableGen GenProgram where
   genWith θ := retryGen 8000 <| Gen.sized fun s => do
-    let numDecls := max 2 (min 5 (2 + s / 25))
+    let numDecls := max 2 s
     let prog ← (retryGen 30000 (genProgramT (G := Plausible.Gen) θ numDecls {})
       : Gen Core.Program)
     pure ⟨prog⟩
@@ -364,7 +371,7 @@ instance : TunableGen GenProgram where
     `exprQuantHeavy` is for. -/
 instance : TunableGen ResolveTypedExpr where
   genWith θ := retryGen 500 <| Gen.sized fun s => do
-    let depth := max 1 (s / 20)
+    let depth := max 1 s
     let τ ← genLMonoTy (G := Plausible.Gen) [] depth
     let e ← genLExprT (G := Plausible.Gen) θ [] coreOpCtx [] [] [] depth τ 3 (retryGenArg 20)
     pure ⟨e, τ⟩
@@ -399,9 +406,9 @@ example : TunableGen.arity GenStmts = 14 := rfl
 example : TunableGen.arity GenProcs = 14 := rfl
 example : TunableGen.arity GenCmdsWithCtx = 12 := rfl
 example : TunableGen.arity GenCmdWithCtx = 12 := rfl
-example : TunableGen.arity TypedExpr = 79 := rfl
-example : TunableGen.arity ClosedTypedExpr = 79 := rfl
-example : TunableGen.arity ResolveTypedExpr = 79 := rfl
+example : TunableGen.arity TypedExpr = 84 := rfl
+example : TunableGen.arity ClosedTypedExpr = 84 := rfl
+example : TunableGen.arity ResolveTypedExpr = 84 := rfl
 example : TunableGen.arity GenProgram = 9 := rfl
 
 end Tunable

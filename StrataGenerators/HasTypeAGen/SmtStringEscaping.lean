@@ -15,21 +15,18 @@ accepts the query, but it reads each byte as a separate character. Thus
 `str.len "é"` is `2` for z3, and the interpreted `Str.Length` of Strata, which is
 `Int.ofNat s.length` and counts *codepoints*, gives `1`.
 
-The property is stated unweakened, so it pins a true defect rather than masking
-one — the same convention as the four `proc:` properties that `Properties.lean`
-documents. A correction to the escape function needs no change to this file, which
-is what makes it a regression test.
+The property states the full claim, so it pins a true defect and it hides none. The four
+`proc:` properties use the same convention. A correction to the escape function needs no
+change to this file, and that is what makes the file a net around the fix.
 
 ## Why the test has this shape
 
 Three things make this test better than a test that drives a solver:
 
-1. **It needs no solver.** The root cause is `escapeSMTStringLit`
-   (`StrataDDM/Util/String.lean`), which is a pure `String → String`. A check of
-   its output directly puts the property in the *default* suite, and not behind
-   `--smt`. Thus a machine without cvc5 cannot skip it. A property that does not
-   run, and that gives no message about it, is how this defect stayed open for so
-   long.
+1. **It needs no solver.** The cause is `escapeSMTStringLit`, which is a pure function from a
+   `String` to a `String`. A check of its output puts the property in the *default* suite,
+   and not behind the `--smt` gate. A machine with no cvc5 therefore cannot skip it. A
+   property that does not run, and that says nothing about the skip, hides a defect.
 2. **The oracle is exact, and not an approximation.** SMT-LIB 2.6+ requires a
    string literal to hold only printable ASCII, and it requires every other
    codepoint as a `\u{...}` escape. Thus "each character of the emitted literal is
@@ -41,10 +38,9 @@ Three things make this test better than a test that drives a solver:
 
 ## What the generator contributes
 
-The property is non-vacuous only because `genInterestingString`
-(`StrataGenerators.PrimitiveGens`) draws a non-ASCII codepoint. `String.arbitrary`
-of Basalt gives alphanumeric characters only. On that generator, this property
-passes on each input while the defect stays hidden. Therefore the property draws
+The property is not vacuous, because `genInterestingString` draws a non-ASCII codepoint. The
+`String.arbitrary` of Basalt gives an alphanumeric character only. On that generator, this
+property holds on each input and the defect stays hidden. Therefore the property draws
 from the *same* generator that the `strConst` leaf of the expression generator
 uses. Thus a verdict here is evidence about the true generation path, and not
 about a hand-picked pool.

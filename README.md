@@ -62,7 +62,8 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 
 To run a test executable, which tests a variety of properties using these Strata Core generators,
 run `lake test -- --quick`. (The `--quick` flag minimizes the no. of tests run, if we omit this flag,
-the entire test suite, consisting of 80+ properites, takes 10+ minutes to run.)
+the entire test suite, consisting of 80+ properites, takes 10+ minutes to run. This is because it runs each property with 1000 random trials, with 
+the randomly generated inputs having a larger size.)
 
 This executable runs a Plausible test suite via LSpec, and visualizes test results using [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
 inspecting property-based testing generators.
@@ -81,14 +82,14 @@ lake build test
 .lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
-- `numTrials` (default: 1000) — number of random test cases per property
-- `maxSize` (default: 100) — maximum size parameter for generation (controls
+- `numTrials` (default: 1000) —: umber of random test cases per property
+- `maxSize` (default: 5): maximum size parameter for generation (controls
   the depth of the generated AST)
 
 Flags (all optional; the Tyche visualization pass is on by default):
 
 - `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
-  Currently, this flag runs 100 trials for each property, where each input has a maximum size of 40.
+  Currently, this flag runs 100 trials for each property, with `size = 2` passed to the generators.
   This flag omits Tyche visualizations:
 - `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
 - `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
@@ -129,10 +130,10 @@ that exercise different Strata Core language features.
 These are stored in `TuningProfiles.lean` 
 and `ProgramTuning.lean`: here is a full list of the weights:
 
-| Lean file | Tunings | Index table |
-|---|---|---|
-| [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) | `stmtLoopHeavy`, `stmtFuncDeclHeavy`, `stmtKleeneBalanced`, `stmtLoopWide`, `stmtMixed`, `procCallHeavy`, `procPrecondHeavy`, `cmdSetHeavy`, `cmdInitHeavy`, `cmdCheckHeavy`, `exprEvalHeavy`, `exprQuantHeavy`, `exprIndirHeavy`, `exprFVarHeavy`, `tyCompoundHeavy` | `StmtIdx`, `CmdIdx`, `ExprIdx` |
-| [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) | `progPolyHeavy`, `progDatatypeHeavy` | `ProgIdx` |
+| Lean file | Tunings |
+|---|---|
+| [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) | <ul><li>`stmtLoopHeavy` (prioritizes loops)</li><li>`stmtFuncDeclHeavy` (prioritizes function declarations)</li><li>`stmtLoopWide` (prioritizes non-nested loops)</li><li>`stmtMixed` (general-purpose distribution for statements that exercises loop-related transformations & as well as the `detToKleene` pass)</li><li>`procCallHeavy` (prioritizes procedure call statements)</li><li>`procPrecondHeavy` (prioritizes functions with preconditions)</li><li>`cmdSetHeavy` (prioritizes the `.set` command)</li><li>`cmdInitHeavy` (prioritizes the `.init` command)</li><li>`cmdCheckHeavy` (prioritizes the `.check` command)</li><li>`exprEvalHeavy` (prioritizes expressions that are *not* values, i.e. expressions that change under evaluation)</li><li>`exprQuantHeavy` (prioritizes expressions with universal / existential quantification)</li><li>`exprIndirHeavy` (prioritizes factory function calls)</li><li>`exprFVarHeavy` (prioritizes expressions with free variables)</li><li>`tyCompoundHeavy` (prioritzes compound types, such as functions, `Map` & `Sequence`)</li></ul> |
+| [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) | <ul><li>`progPolyHeavy` (prioritizes polymorphic functions)</li><li>`progDatatypeHeavy` (prioritzes algebraic data type definitions)</li></ul> |
 
 Note: at time of writing, the generators for `GenFunction`, `GenAdtBlock` and `GenIndepBlock` do not support tuning.
 

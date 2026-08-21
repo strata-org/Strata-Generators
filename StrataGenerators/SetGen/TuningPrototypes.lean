@@ -55,7 +55,7 @@ made there can cost coverage.
      differ in one way: `cmd` now absorbs the share of a pruned branch, where the old list renormalised.
 
 * **§4 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` carry the same θ-invariance guarantee.
-  `genLExprBase` has 79 branch weights across ten per-type sites. The three cover one recursion form
+  `genLExprBase` has 84 branch weights across eleven per-type sites. The three cover one recursion form
   each: no recursion, `Nat.brecOn`, and `Nat.brecOn` under a wide match.
 -/
 
@@ -251,20 +251,7 @@ example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy
 
 /-! `StrataGenerators.Stmt.genStmt` carries the tag at its definition site, and
 `StrataGenerators.TuningProfiles` also tags the block's shared auxiliary `genStmt._mutual`. Both are
-needed, and the difference between them is the whole story of how tuning composes.
-
-`genStmt.tuned θ` reads the weights of the statement it produces itself. Its recursion runs through
-`genStmtChain`, which is the *other* member of the block, and `@[tunable]` does not rewrite that member.
-So a statement nested inside a `block`, an `ite` or a `loop` body comes from the untuned generator.
-Measured with `dist-report` at a `loop` weight of 40, a top-level loop went from 15% to 72%, and a loop
-inside a loop went only from 2% to 7.5%.
-
-`genStmt._mutual.tuned θ` is the whole block. Its recursion is internal, over one `WellFounded.fix` on
-a `PSum` of the two members' argument tuples, so `θ` threads through all of it. Under the same
-weighting, a loop inside a loop went from 3.5% to 66%.
-
-`TuningProfiles.genStmtT` and `genStmtChainT` are therefore built on the auxiliary, and pinned to the
-shipping generators at `θ = defaults`. -/
+needed, and the difference between them is the whole story of how tuning composes. -/
 
 /-- **The conversion preserves behaviour, for the whole mutual block.** For every `θ`, the tuned
     statement generator is *the same* `Set`-valued generator as the shipping one. The soundness and
@@ -403,7 +390,7 @@ theorem genLMonoTy_tuned_eq (θ : Tuning) (tvars : List TyIdentifier) (n : Nat) 
 
 set_option maxHeartbeats 1000000 in
 /-- At every `θ`, the tuned base expression generator is `genLExprBase`. This is the widest generator
-    here: ten sites, 79 branch weights, and a match on the target type as well as on the depth.
+    here: eleven sites, 84 branch weights, and a match on the target type as well as on the depth.
 
     It needs no more work than the others, because no arm of the match has to be *named*. `split`
     produces one goal per arm, and the same matcher constant appears on both sides, because

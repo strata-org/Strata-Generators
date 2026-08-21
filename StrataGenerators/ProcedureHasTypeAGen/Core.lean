@@ -9,10 +9,10 @@ import StrataGenerators.StmtHasTypeAGen.Core
 import Strata.Languages.Core.Procedure
 
 open Lambda LExpr RandomChoice Core Imperative ArbString Std
--- `StrataGenerators.Function` is *not* opened here: that namespace is introduced by
--- the proof file `FunctionHasTypeAGen.lean`, and nothing in this file needs it (the
--- function-generator *code* it uses — `genIdentName`, `genTypeArgs`, `genInputs` —
--- sits at the top level of `FunctionHasTypeAGen/Core.lean`).
+-- This file does *not* open `StrataGenerators.Function`. The proof file `FunctionHasTypeAGen.lean` introduces
+-- that namespace, and nothing here needs it. The *code* of the generator for a function that this file uses,
+-- which is `genIdentName`, `genTypeArgs` and `genInputs`, is at the top level of
+-- `FunctionHasTypeAGen/Core.lean`.
 open StrataGenerators.Stmt
 
 /-!
@@ -26,28 +26,29 @@ procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
 
 `ProcHasType'` has eight obligations (see `ProcHasType'`). The generator produces:
 
-- `typeArgs` — a `Nodup` list of type-variable names (via `genTypeArgs`, exactly
-  as `genFunction`), discharging `typeArgsNodup`; the input/output types are
-  drawn over these type arguments (`genLMonoTy typeArgs`), so `noUndeclaredVars`
+- The type arguments are a list of type-variable names that holds no duplicate, from `genTypeArgs`, exactly as
+  in `genFunction`. That list discharges the field about distinct type arguments. `genLMonoTy typeArgs` draws
+  each input type and each output type over those type arguments, so the field about an undeclared variable
   holds.
-- three mutually-disjoint signature blocks, each a `Nodup`-keyed signature via
-  `genInputs typeArgs`, made disjoint by `disjointInputs` filtering:
-  * `inout` (`M`)      — parameters appearing in *both* input and output roles;
-  * `inputOnly` (`I`)  — input-only parameters (filtered disjoint from `M`);
-  * `outputOnly` (`O`) — output-only parameters (filtered disjoint from `M ++ I`).
-  The shared in-out block `M` leads both signatures: `inputs := M ++ I`,
-  `outputs := M ++ O`, so the shared parameters occupy the same leading positions
+- Three signature blocks whose keys are disjoint in pairs. `genInputs typeArgs` gives each of them with distinct
+  keys, and the filter `disjointInputs` makes them disjoint:
+  * The in-out block holds each parameter that has *both* roles.
+  * The input-only block holds each parameter with the input role only, and the filter makes its keys disjoint
+    from the keys of the in-out block.
+  * The output-only block holds each parameter with the output role only, and the filter makes its keys disjoint
+    from the keys of the other two blocks.
+
+  The shared in-out block comes first in both signatures, so the shared parameters take the same first positions
   in both lists. So `getInoutParams = M` (the shared block), discharging
   `inputsNodup`/`outputsNodup` (each is an append of two disjoint `Nodup`-keyed
   blocks).
-- `preconditions` / `postconditions` — labeled `bool` expressions (via
-  `genChecks`). **Both** condition obligations reduce, under the annotated
-  `instHasTypeA` (whose `exprTyped C Γ e mty = HasTypeA [] e mty` ignores the
-  context), to `HasTypeA [] c.expr bool` — exactly what `genLExpr … .bool`
-  produces — so neither depends on the input/body context.
-- `body`     — a `structured` list of up to `len` statements, seeded with
-  `inputs ++ outputs ++ oldVars M` as the initial `VarCtx` (mirroring the
-  declarative `procBodyContext`, whose body scope is `inputScope ++ outputScope ++
+- The preconditions and the postconditions are labelled expressions of the type `bool`, from `genChecks`.
+  **Both** obligations reduce, under the annotated specification, whose `exprTyped` reads no context, to
+  `HasTypeA [] c.expr bool`. That is exactly what `genLExpr … .bool` gives, so neither obligation depends on the
+  context of the inputs or of the body.
+- The body is a `structured` list of statements. Its length is not more than the given length, and its initial
+  scope holds the inputs, the outputs and the old bindings of the in-out block. That scope follows the
+  declarative `procBodyContext`, whose scope for a body holds the scope of the inputs, of the outputs and of
   oldScope`) and with `inputs.keys ++ (oldVars M).keys` as the immutable names.
   The body may therefore freely *read* the inputs and the `old` bindings but can
   only *assign* to the output-only names `O` (`set` targets are drawn from the
@@ -57,11 +58,11 @@ procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
   (via `genStmtChain_mutableVars`, whose write-target tracking is over the mutable
   keys, i.e. exactly the output-only keys `O ⊆ outputs.keys`).
 
-The threaded soundness invariant is the `Functional` predicate (not `Nodup`):
-the in-out block `M` appears in both `inputs` and `outputs` bound to the *same*
-type, so the seed has duplicate keys — but they agree on their values, and the
-`old` keys (`"old " ++ name`, containing a space) never collide with the
-space-free generated parameter names (`genIdentName_no_space`).
+The invariant that the soundness proof threads is the `Functional` predicate, and not the one about distinct
+keys. The in-out block occurs in the inputs and in the outputs, at the *same* type, so the seed holds a
+duplicate key. The two entries agree on their values. A key of an old binding holds a space, and each generated
+parameter name holds no space, which `genIdentName_no_space` proves. Therefore no such key collides with a
+parameter name.
 
 The body and contract expressions are generated at an **empty operator context**
 (`octx = []`) and empty fvar/label contexts, matching the empty-context
@@ -93,11 +94,12 @@ def oldVars (M : ListMap (Identifier Unit) LMonoTy) : ListMap (Identifier Unit) 
   M.map (fun (id, ty) => (CoreIdent.mkOld id.name, ty))
 
 /-- Project a parameter signature to the expression-layer `FVarCtx` a contract
-    clause reads its free variables from: each entry `(⟨x, ()⟩, τ)` becomes `(x, τ)`.
-    Kept as a named def (rather than inlined at the `genChecks` call sites) so it
-    stays *folded* in `genProcedure`'s support unfolding — the pre/post soundness
-    and completeness proofs match against `sigFctx <block>` syntactically instead of
-    forcing an expensive zeta-expansion of the projection term. -/
+    clause reads its free variables from. Each entry of the signature becomes an entry of that context.
+
+    This definition has a name, and it is not inline at each call site of `genChecks`. Therefore it stays *folded*
+    when a proof unfolds the support of `genProcedure`, and each proof about a precondition and about a
+    postcondition matches against it syntactically. An inline form would instead force an expensive expansion of
+    the projection term. -/
 def sigFctx (sig : @LMonoTySignature Unit) : FVarCtx :=
   sig.map (fun p => (p.1.name, p.2))
 
@@ -118,27 +120,26 @@ def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
 
 /-- Generate a well-typed `Procedure`.
 
-    - `typeArgs` — a `Nodup` list of type-variable names (via `genTypeArgs`).
-    - `outputs`  — a `Nodup`-keyed signature with types over `typeArgs` (via
-      `genInputs typeArgs size`).
-    - `inputs`   — a `Nodup`-keyed signature with types over `typeArgs` (via
-      `genInputs typeArgs size`), filtered by `disjointInputs` to be disjoint
-      from the output keys (so no in-out parameters).
-    - `preconditions` / `postconditions` — labeled `bool` expressions over
-      `typeArgs` (via `genChecks`).
-    - `body`     — a `structured` list of up to `len` statements, each generated
-      at element size `size`, threaded from the inputs **and** outputs as the
-      initial variable scope (so `set`s and control-flow guards may reference
+    - The type arguments are a list of type-variable names with no duplicate, from `genTypeArgs`.
+    - The outputs are a signature with distinct keys, whose types are over the type arguments, from
+      `genInputs typeArgs size`.
+    - The inputs are a signature with distinct keys, whose types are over the type arguments, from
+      `genInputs typeArgs size`. The filter `disjointInputs` makes its keys disjoint from the keys of the
+      outputs, so this call gives no in-out parameter.
+    - The preconditions and the postconditions are labelled expressions of the type `bool` over the type
+      arguments, from `genChecks`.
+    - The body is a `structured` list of statements. Its length is not more than the given length, the generator
+      makes each element at the given size, and the initial scope holds the inputs **and** the outputs. Therefore
+      a `set` command and a guard can name
       either), with the *inputs'* keys marked immutable so the body may read but
       never assign to them.
 
-    - `procs`    — the signatures of the callable *sibling* procedures (the call
-      targets), each recorded as its in-out/input-only/output-only blocks with the
-      shared block leading both roles (`inputs = M ++ I`, `outputs = M ++ O`).
+    - The context of the callable procedures holds the signature of each procedure that the body can call. Each
+      entry records the in-out block, the input-only block and the output-only block, with the shared block first
+      in both roles.
       Threaded into `genStmtChain` so the body may emit `call` statements against
-      them; the empty `[]` recovers the old call-free behaviour. The generated body
-      is sound against any program `P` for which `ProcSigCorresponds procs P` holds
-      — see `genProcedure_sound`.
+      them, and an empty context gives a body with no call. The generated body is sound against each program for
+      which `ProcSigCorresponds procs P` holds. Read `genProcedure_sound`.
 
     `noFilter` / statement `MetaData` are at their defaults.
 
@@ -177,19 +178,18 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
   let preconditions ← genChecks (sigFctx inputs) octx typeArgs size pctx
   let postconditions ←
     genChecks (sigFctx (inputs ++ outputs ++ oldVars inout)) octx typeArgs size pctx
-  -- Seed the body's variable scope with the inputs, outputs, and the `old`
-  -- bindings of the in-out block (`old g` for each `g ∈ M`) — mirroring the
-  -- declarative `procBodyContext`. The inputs *and* the `old` bindings are marked
-  -- immutable, so the only writable keys are the output-only names (`O`), which
+  -- The scope of the body starts with the inputs, the outputs, and the old binding of each entry of the in-out
+  -- block. That scope follows the declarative `procBodyContext`. The inputs *and* each old binding are immutable,
+  -- so the writable keys are the output-only names, which
   -- are exactly the outputs the body is entitled to assign. `VarCtx` and
   -- `LMonoTySignature` are both `List ((Identifier Unit) × LMonoTy)`.
   --
   -- Body expressions draw their free variables from the *current* scope: the
-  -- statement generators derive their `FVarCtx` from `ctx` at each step (via
-  -- `VarCtx.toFVarCtx`), so a generated body may genuinely *read* its parameters
-  -- (including polymorphic-typed ones) — and any earlier-declared local — in
-  -- expressions, not just declare fresh locals. Because the emitted free variables
-  -- are always in the current scope, a freshly-`init`ed name never collides with
+  -- each statement generator computes its context of the free variables from the scope at each step, through
+  -- `VarCtx.toFVarCtx`. Therefore an expression of a generated body can *read* a parameter, including one whose
+  -- type is polymorphic, and it can read each local that an earlier statement declares. It does not only declare
+  -- a fresh local. Each emitted free variable is in the current scope, so a name that a fresh `init` gives never
+  -- collides with
   -- them (the `init_det` rule's `x ∉ getVars e` premise), which is what keeps the
   -- generator sound (see `freshNamesDisjointFromExprs_toFVarCtx`).
   let (body, _, _) ← genStmtChain octx typeArgs
@@ -220,16 +220,16 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     caller-chosen name `name` (the post-relabel `P{i}` a call site refers to). The
     three blocks are recovered exactly as `genProcedure` lays them out:
 
-    * `M` = `getInoutParams` — the in-out block (keys shared by inputs and outputs);
-    * `I` = the input-only block — inputs whose key is *not* an output key;
-    * `O` = `getOutputOnlyParams` — outputs whose key is *not* an input key.
+    * `getInoutParams` gives the in-out block, whose keys the inputs and the outputs share.
+    * The input-only block holds each input whose key is *not* an output key.
+    * `getOutputOnlyParams` gives the output-only block, which holds each output whose key is *not* an input key.
 
-    For a header `genProcedure` produced (`inputs = M ++ I`, `outputs = M ++ O`,
-    the three key-blocks mutually disjoint) this reconstructs `(M, I, O)` verbatim,
-    so `ProcSigCorresponds [headerProcSig name h] P` holds for a monomorphic
-    procedure of that header named `name` — which is why the harnesses feed only
-    the signatures of already-generated **monomorphic** (`typeArgs = []`) siblings
-    into later bodies (see `TestScaffold.genProcsWith`). -/
+    For a header that `genProcedure` gives, where the inputs are the shared block and then the input-only block,
+    the outputs are the shared block and then the output-only block, and the keys of the three blocks are
+    disjoint in pairs, this function recovers the three blocks exactly. Therefore
+    `ProcSigCorresponds [headerProcSig name h] P` holds for a monomorphic procedure of that header and that name.
+    That is why each harness gives the signature of an already generated **monomorphic** procedure only to a
+    later body. Read `TestScaffold.genProcsWith`. -/
 def headerProcSig (name : String) (h : Procedure.Header) : ProcSig where
   pname := name
   typeArgs := h.typeArgs

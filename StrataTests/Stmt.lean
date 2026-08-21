@@ -2,12 +2,13 @@ import StrataGenerators.Test
 import StrataGenerators.TycheViz
 
 /-!
-# Statement-generator properties
+# Properties of the statement generator
 
-`genProgramStmts` generates a well-typed Core statement list (`StatementsHasTypeA`),
-proven sound *and* complete against the declarative typing spec, so it is a
-certified-well-typed oracle input for the statement typechecker and the
-statement-level transformations. Every claim here is currently unproven upstream.
+`genProgramStmts` makes a well-typed list of Core statements, which the relation
+`StatementsHasTypeA` describes. The generator is sound *and* complete against the declarative
+typing specification. Its output is therefore an input with a certificate of good typing,
+both for the statement type checker and for the transformations on statements. Upstream
+proves none of the claims here.
 
 Two of the properties below name their *distribution* as well as their check. Soundness and
 completeness say that every sample is well-typed and that every well-typed program is
@@ -28,8 +29,9 @@ open StrataGenerators.Test
 open StrataGenerators.Stmt.TestSupport
 open StrataGenerators.TuningProfiles
 
-/-- The four statement transform and typechecker properties whose default distribution is
-    adequate. The two `LoopElim` claims are registered separately, under two weightings. -/
+/-- The four properties for the statement transformations and for the statement type checker whose
+    default distribution is adequate. The two `LoopElim` claims are registered separately, under two
+    weightings. -/
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
   family GenStmts
@@ -69,9 +71,9 @@ def loopElimZeroLoops : TestDecl :=
     fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
 
 /-- `StmtToKleeneStmt` is defined exactly when the block holds no `exit`, no `funcDecl` and
-    no `typeDecl`. For the invariant-loop caveat, it is also undefined when the block holds an
-    invariant-bearing loop. Its panel records the definedness verdict *and* the reason, so this
-    property keeps a bespoke panel. -/
+    no `typeDecl`. It is also not defined when the block holds a loop that has an invariant.
+    The panel gives the verdict on definedness *and* the reason for it, so this property keeps
+    a panel of its own. -/
 @[strata_property]
 def stmtKleeneDefinedIff : TestDecl :=
   (TestDecl.property "stmt: DetToKleene defined iff supported"

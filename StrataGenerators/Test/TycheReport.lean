@@ -1,42 +1,40 @@
 import StrataGenerators.Test.Types
 
 /-!
-# Tyche panels, derived
+# The Tyche panel that a body gives
 
-One panel per registered property, generated from the property's own `PropertyRunner`
-(which for almost every property is the one its input type's instances induce).
+There is one panel for each registered property, and it comes from the `PropertyRunner` of that
+property. For almost every property, that runner is the one that the instances of the input type
+give.
 
-The old front end wrote a panel by hand for each property family: a result
-structure, a `TycheSample` instance, a `gen*Prop` sampler, and a line in
-`runTychePanels`. Because a `PropertyRunner` already carries the printer, the shrinker
-and the feature breakdown, none of that is property-specific — so a panel comes
-free with a registration, and a property written in a user's own file is visible
-in Tyche without touching this module.
+A `PropertyRunner` already holds the printer, the shrinker and the breakdown into features. None
+of that data is specific to one property. A panel therefore comes with a registration, and Tyche
+shows a property from any file without a change to this module.
 
-What the derived panel does per sample, matching what the hand-written ones did:
+The panel does this work for each sample:
 
-* draw at a random generator size, and record that size as the `generator_size`
-  axis (so a vacuous small draw is distinguishable from a large one);
-* score the property, and record the verdict both as the sample's status and as an
-  axis named after the property (Tyche can then split a panel by pass/fail);
-* on a failure, minimize with the generator's own shrinker before displaying, so
-  the panel shows the smallest reproducer rather than the raw draw, and recompute
-  the features from the minimized value so the axes describe what is shown.
+* It draws at a random generator size, and it records that size as the `generator_size` axis. A
+  reader can then tell a small and vacuous draw from a large one.
+* It scores the property, and it records the verdict two times: as the status of the sample, and
+  as an axis with the name of the property. Tyche can then split a panel by the verdict.
+* When the property does not hold, the panel reduces the value with the shrinker of the
+  generator before it shows the value. The panel therefore shows the smallest reproducer and not
+  the raw draw. It also computes the features again from the smaller value, so the axes describe
+  what a reader sees.
 
-A `Body.witnesses` property enumerates its fixed input space exactly once instead
-of sampling it, since sampling a finite set with replacement would emit the same
-few marks repeatedly.
+A `Body.witnesses` property lists its fixed input space one time, and the panel does not sample
+the space. A sample of a finite set with replacement would give the same few marks many times.
 -/
 
 namespace StrataGenerators.Test
 
-/-- Greedy minimization against a failing check: repeatedly replace the value by
-    the first one-step reduction that still fails, until none does.
+/-- Greedy reduction against a check that does not hold. The function replaces the value by the
+    first reduction of one step that still does not hold, and it repeats this step while such a
+    reduction exists.
 
-    The same shape as the bespoke minimizers the old panels used
-    (`minimizeProgramCounterexample`, `shrinkWhile`), lifted to act on any
-    `PropertyRunner`'s shrinker. `fuel` bounds the walk; a shrinker that offers no
-    reduction (the default) makes this the identity. -/
+    The function acts on the shrinker of any `PropertyRunner`. `fuel` bounds the number of steps.
+    A shrinker that gives no reduction, which is the default, makes this function the
+    identity. -/
 def minimizeWith (shrink : α → List α) (fails : α → Bool) : Nat → α → α
   | 0, x => x
   | fuel + 1, x =>
@@ -44,7 +42,7 @@ def minimizeWith (shrink : α → List α) (fails : α → Bool) : Nat → α �
     | some y => minimizeWith shrink fails fuel y
     | none => x
 
-/-- One Tyche mark: a rendered value, a verdict, and the axes. -/
+/-- One Tyche mark. It holds the printed value, the verdict and the axes. -/
 private structure Mark where
   representation : String
   passed : Bool
@@ -56,14 +54,13 @@ private instance : Tyche.TycheSample Mark where
       status := if m.passed then .passed else .failed
       features := m.features }
 
-/-- Draw one sample for a property's panel and score it. `maxSize` bounds the
-    generator size drawn per sample.
+/-- Draws one sample for the panel of a property, and scores the sample. `maxSize` bounds the
+    generator size for each sample.
 
-    `check` is the *decided* form of the property. A panel has to classify every sample
-    and a shrinker has to reject every candidate, so both need a decision procedure
-    rather than a `Prop`; `Body.sampled` carries the `DecidablePred` instance that
-    supplies it. Plausible gets the undecided `Prop` instead, which is what keeps a
-    counterexample's failure message legible. -/
+    `check` is the *decided* form of the property. A panel must classify each sample, and a
+    shrinker must reject each candidate, so both need a decision procedure and not a `Prop`.
+    `Body.sampled` holds the `DecidablePred` instance that gives it. Plausible gets the `Prop`
+    without a decision, and that is what keeps the message of a counterexample readable. -/
 private def sampleMark (runner : PropertyRunner α) (check : α → Bool) (name : String)
     (maxSize : Nat) : IO Mark := do
   let size ← IO.rand 0 maxSize
@@ -76,9 +73,10 @@ private def sampleMark (runner : PropertyRunner α) (check : α → Bool) (name 
            :: ("generator_size", .ordinal size)
            :: runner.features shown }
 
-/-- Write the panel for one property. A property that supplied its own `panel`
-    writer gets that; otherwise the panel is derived from the body, and a
-    `Body.witness` or `Body.action` property (nothing to sample) is skipped. -/
+/-- Writes the panel for one property. A property that gives its own `panel` writer gets that
+    panel. For each other property, the panel comes from the body. A `Body.witness` property and
+    a `Body.action` property have nothing to sample, so this function writes no panel for
+    them. -/
 def writePanel (handle : IO.FS.Handle) (d : TestDecl) (cfg : RunConfig)
     (numSamples runStart : Nat) : IO Unit := do
   unless d.tyche do return
@@ -98,12 +96,12 @@ def writePanel (handle : IO.FS.Handle) (d : TestDecl) (cfg : RunConfig)
            features := (d.name, .nominal (if passed then "pass" else "fail"))
              :: features c } : Mark))
       d.name runStart
-  -- Nothing to sample: a closed `Bool`, or an action that reports only a verdict. Such
-  -- a property can still have a panel, through `TestDecl.withPanel` above.
+  -- There is nothing to sample: a closed `Bool`, or an action that reports only a verdict. Such
+  -- a property can still have a panel, through `TestDecl.withPanel`.
   | .witness _ | .action _ => pure ()
 
-/-- Write one panel per registered property with a sampled or enumerated body, and
-    one per diagnostic that supplied its own. Never affects the exit code. -/
+/-- Writes one panel for each registered property whose body samples or lists its inputs, and one
+    panel for each diagnostic that gives its own. The function never changes the exit code. -/
 def writePanels (handle : IO.FS.Handle) (ds : List TestDecl) (diags : List Diagnostic)
     (cfg : RunConfig) (numSamples : Nat) : IO Unit := do
   let runStart ← IO.monoMsNow

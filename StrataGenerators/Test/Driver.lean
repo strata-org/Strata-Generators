@@ -5,26 +5,26 @@ import StrataGenerators.Test.ImportRoot
 import StrataGenerators.HasTypeAGen.SmtEval
 
 /-!
-# What every driver does around the suite
+# The work that each driver does around the suite
 
-The package ships 2 drivers: `test`, which renders the registry through LSpec, and
-`test-plain`, which renders it through the package's own reporter and so carries no
-test-framework dependency at all.
+The package holds 2 drivers. `test` prints the registry through LSpec. `test-plain` prints it
+through the reporter of this package, so it depends on no test framework.
 
-Everything except the rendering lives here. That is deliberate: the reason for having a
-second driver is to keep the LSpec dependency droppable, and that argument is only worth
-anything if the two drivers agree on *everything else*. So the import-root check, the
-`--list` and `--only` handling, the `--smt` solver check, the diagnostics and the Tyche
-pass are written once, and a driver is a `setup`, a render, and a `cleanup`.
+This module holds all of the work except the output. The reason for the second driver is to
+keep the dependency on LSpec removable, and that argument holds only if the two drivers agree
+on *all other things*. Therefore this module holds the check of the import root, the work for
+`--list` and `--only`, the check of the solvers for `--smt`, the diagnostics and the Tyche
+pass. A driver is then a call to `setup`, the output, and a call to `cleanup`.
 -/
 
 namespace StrataGenerators.Test
 
-/-- `--smt` needs a live solver on `PATH`. The agreement property runs each solver in
-    `SmtEval.agreementSolvers`, so this errors out only when it can launch none of them:
-    without the check the suite reports a green "0/0 checked". When only some are absent
-    the property itself names them in its report, because each absent solver costs
-    coverage — cvc5 and z3 give different verdicts on a malformed string literal. -/
+/-- `--smt` needs a solver on the `PATH`. The agreement property runs each solver in
+    `SmtEval.agreementSolvers`, so this function gives an error only when it can start none of
+    them. Without the check, the suite reports `0/0 checked` as a pass. When only some solvers
+    are absent, the property names them in its own report, because each absent solver costs
+    coverage: cvc5 and z3 give different verdicts on a string literal that is not well
+    formed. -/
 def checkSolvers : IO (Option UInt32) := do
   let available ← StrataGenerators.SmtEval.availableAgreementSolvers
   if available.isEmpty then
@@ -38,22 +38,22 @@ def checkSolvers : IO (Option UInt32) := do
       {String.intercalate ", " absent}"
   return none
 
-/-- Everything a driver does before it renders anything: refuse a stale import root,
-    serve `--list`, reject an empty selection or a duplicate name, check the solvers, and
-    print the header.
+/-- The work that a driver does before it prints anything. It refuses a stale import root, it
+    answers `--list`, it rejects an empty selection and a duplicate name, it checks the solvers,
+    and it prints the header.
 
-    "Setup" in the xUnit sense of the work that precedes a test run, not in the sense of
-    building anything: it allocates nothing and it has no counterpart to release.
+    The name has the sense of xUnit: the work before a test run. The function builds nothing, it
+    allocates nothing, and it has no partner function that releases a resource.
 
-    Returns `some code` when the driver should stop with that code, and `none` when it
-    should go on and render `cli.select registry`. It does not return the selection,
-    because `TestDecl` lives in `Type 1` and so cannot cross an `IO` boundary;
-    `Cli.select` is pure, so a driver simply calls it. -/
+    The result is `some code` when the driver must stop with that code. It is `none` when the
+    driver must continue and print `cli.select registry`. The function does not return the
+    selection, because `TestDecl` is in `Type 1` and therefore cannot cross an `IO` boundary.
+    `Cli.select` is pure, so a driver calls it. -/
 def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
-  -- Refuse to run against a stale import root. This binary was linked from the old
-  -- root, so a property file added since then is not in `registry` at all. Rewriting
-  -- the root and asking for a re-run is the only honest option; a green suite that
-  -- silently omits a file is the failure this guards against.
+  -- Refuse to run against a stale import root. The linker built this binary from the old root,
+  -- so `registry` does not hold a property file that someone added later. The only correct
+  -- action is to write the root again and to ask for another run. Without this check, a suite
+  -- that misses a file reports a pass.
   if ← ImportRoot.ensureFresh then
     return some 1
 
@@ -68,10 +68,10 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
     IO.eprintln "Run with --list to see what is registered."
     return some 1
 
-  -- A mistyped `--known-failure=` must not pass silently: the run would look as though
-  -- the suppression took effect, and the property it was meant to name would still be
-  -- red. Checked against the *selected* registry, so combining it with a `--only` that
-  -- filters the property out is an error too rather than a no-op.
+  -- A `--known-failure=` name with a spelling mistake must not pass. The run would look as if
+  -- the mark took effect, and the property that the flag names would still fail. The check uses
+  -- the *selected* registry, so a `--only` filter that removes the property is also an error
+  -- and not a no-op.
   let unknown := cli.unknownKnownFailures selected
   unless unknown.isEmpty do
     IO.eprintln s!"error: --known-failure= names no property that this run selected:"
@@ -95,10 +95,10 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   IO.println s!"Running {selected.length} of {registry.length} properties \
     ({cli.run.numTrials} trials, max size {cli.run.maxSize})..."
 
-  -- Printed here rather than in either renderer, so both drivers report it: the LSpec
-  -- one aggregates through `lspecIO` and never sees an `Outcome`, so it cannot count
-  -- known failures itself. Naming the count up front also keeps a suite that is green
-  -- *because* of suppression from reading as a clean run.
+  -- This line is here and not in one of the two reporters, so both drivers print it. The LSpec
+  -- driver collects its results through `lspecIO` and never sees an `Outcome`, so it cannot
+  -- count the known failures itself. The count at the start also stops a suite that passes
+  -- *because* of the marks from looking like a clean run.
   let marked := selected.filter fun d => match d.expect with | .mustHold => false | _ => true
   unless marked.isEmpty do
     IO.println s!"{marked.length} of them are expected to fail and do not gate the exit \
@@ -106,20 +106,20 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   IO.println ""
   return none
 
-/-- Everything a driver does after the suite: run the registered diagnostics, then write
-    the Tyche panels. Neither part affects the exit code.
+/-- The work that a driver does after the suite. It runs the registered diagnostics, and then it
+    writes the Tyche panels. Neither part changes the exit code.
 
-    Note that this releases no resource, despite the name. It *reports*: the diagnostics
-    print coverage statistics and localisation tallies, and the Tyche pass writes the
-    panel file. Nothing here is safe to skip if you want those outputs. -/
+    The function releases no resource. It *reports*: the diagnostics print statistics for
+    coverage and counts that locate an error, and the Tyche pass writes the panel file. Skip
+    this function only when you want none of that output. -/
 def cleanup (cli : Cli) (selected : List TestDecl) (diags : List Diagnostic) : IO Unit := do
-  -- Diagnostics are skipped under a filter: a `--only` run is a run about one property,
-  -- and six unrelated distribution reports would bury its result.
+  -- A filter turns the diagnostics off. A `--only` run is a run about one property, and six
+  -- reports about other distributions would hide its result.
   if cli.only.isEmpty then
     runDiagnostics diags cli.run
 
-  -- One Tyche panel per property, scored with the *same* check the suite asserted, so a
-  -- panel and a result line can never disagree.
+  -- There is one Tyche panel for each property, and it uses the *same* check as the suite.
+  -- Therefore a panel and a result line always agree.
   if cli.tycheEnabled then
     IO.println ""
     IO.println s!"Generating Tyche visualizations ({cli.tycheSamples} samples/panel)..."
@@ -129,14 +129,14 @@ def cleanup (cli : Cli) (selected : List TestDecl) (diags : List Diagnostic) : I
     IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"
   else
     IO.println ""
-    -- Name the flag that actually held the pass off. `--quick` disables it too, and
-    -- reporting `--no-tyche` for a `--quick` run sends the reader looking for a flag
-    -- they did not pass, or worse at a stale `tycheOut` from an earlier run, since no
-    -- file is written here at all.
+    -- Name the flag that stopped the pass. `--quick` also turns the pass off. A report of
+    -- `--no-tyche` for a `--quick` run makes a reader look for a flag that they did not give,
+    -- or look at a stale `tycheOut` from an earlier run, because this branch writes no file.
     if cli.quick then
       IO.println s!"Tyche visualizations disabled (--quick); no file written, so \
         {cli.tycheOut} — if it exists — is from an earlier run."
-      IO.println "For the preset's trials/size *with* panels, pass them positionally instead: 100 40"
+      IO.println s!"For the preset's trials/size *with* panels, pass them positionally \
+        instead: {quickNumTrials} {quickMaxSize}"
     else
       IO.println "Tyche visualizations disabled (--no-tyche)."
 

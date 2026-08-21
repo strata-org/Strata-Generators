@@ -10,14 +10,14 @@ Combines the per-declaration soundness lemmas (`StrataGenerators.ProgramGen.Soun
 and the `ContextOk`-preservation lemmas (`StrataGenerators.ProgramGen.ContextOkPreserve`)
 into:
 
-* `genDeclDatatype_sound` — the last per-declaration step (datatype blocks), whose
-  `Inv`-preservation needs `contextOk_addMutualBlock`;
-* `genDeclStep_sound` — the six-way `oneOf` dispatch;
-* `genDeclsFold_sound` — the declaration fold, producing `DeclsHasTypeA` for the
-  whole emitted list (for *any* enclosing program `P`);
-* `genProgram_sound` — the top-level theorem: every generated program is
-  `ProgramHasTypeA coreContext {} P` (soundness w.r.t. `ProgramHasType'` at the
-  annotated spec), including `P.getNames.Nodup`.
+* `genDeclDatatype_sound` covers the last step for one declaration, which gives a block of datatypes. Its proof
+  that the step keeps the invariant needs `contextOk_addMutualBlock`.
+* `genDeclStep_sound` covers the dispatch of the `oneOf` over the six steps.
+* `genDeclsFold_sound` covers the fold over the declarations, and it gives `DeclsHasTypeA` for the whole emitted
+  list, at *each* enclosing program.
+* `genProgram_sound` is the top-level theorem. Each generated program satisfies
+  `ProgramHasTypeA coreContext {} P`, which is soundness against `ProgramHasType'` at the annotated
+  specification, and that includes the fact that each name of the program is distinct.
 -/
 
 open Lambda RandomChoice Core Core.TypeSpec Imperative SetGen
@@ -147,10 +147,9 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
         --
         -- * `known`: `C'.datatypes = C.datatypes.push block`, so both the block's
         --   names and the old pool's names are in `allTypeNames`.
-        -- * `inhab`: for the *new* entries this is exactly `hwf.inhabited` (the
-        --   `MutualADTWF` field we just proved, already stated in
-        --   `C.datatypes.push block`); for the *old* entries it is the previous
-        --   pool's inhabitance transported across the push by `tySymInhab_push`.
+        -- * The field `inhab`. For a *new* entry, it is exactly the field `inhabited` of the `MutualADTWF` proof
+        --   above, which already speaks about the factory after the push. For an *old* entry, it is the
+        --   inhabitance of the earlier pool, which `tySymInhab_push` transports across the push.
         have hdt : C'.datatypes = s.C.datatypes.push block := addMutualBlock_datatypes hadd
         have hstored : DatatypeGen.StoredRefsAbsent s.C block :=
           storedRefsAbsent_of_inv hinv hfresh_res
@@ -227,16 +226,15 @@ monotype to be well-kinded in the ambient context. For the procedure step that r
 
 Those last two are what remain **assumed**, guarded by `Inv` so the assumption ranges only
 over states the fold can actually reach, and threaded unchanged through the fold.
-Discharging them needs `ContextOk`-relative results about the operators a generated
-datatype block contributes to `s.octx` and about the signatures `genProcedure` records in
-`s.procs` — generator theory this file does not add.
+To discharge them, a proof needs results against `ContextOk` about the operators that a generated block of
+datatypes gives to the operator context, and about the signatures that `genProcedure` records in the context of
+the callable procedures. This file adds no such result.
 
-Two things that used to be assumed here no longer are:
+Two conditions here are theorems, and no theorem assumes them:
 
-* the *scope-local* half (`WellKindedOk.ctxWK`), which `genProcedure_sound` now proves at
-  the body seed and `wellKindedOk_preserved` carries along the body;
-* `WellKindedPreserved`, which is now the theorem
-  `StrataGenerators.Stmt.wellKindedOk_preserved`.
+* The *scope-local* half, which is the field `WellKindedOk.ctxWK`. `genProcedure_sound` proves it at the seed of
+  the body, and `wellKindedOk_preserved` carries it along the body.
+* The preservation of well-kindedness, which is the theorem `StrataGenerators.Stmt.wellKindedOk_preserved`.
 
 Both became provable by stating the invariant in `LContext.WellKindedTy` rather
 than in the generator's type vocabulary. See the note on
@@ -266,11 +264,11 @@ theorem procHasTypeA_rename {P : Program} {C : LContext CoreLParams} {Γ : TCont
     postconditionsTyped := h.postconditionsTyped
     bodyTyped := h.bodyTyped }
 
-/-- Soundness of the procedure step. The body is generated under the *real*
-    ambient `s.C`/`s.Γ` (Option B), so `genProcedure_sound_ambient` yields
-    `ProcHasTypeA P s.C s.Γ proc₀` directly — the `⊆`/`Γ.types = []` side
-    conditions are discharged by the fold invariant (`rigidNil`/`typesNil`).
-    Renaming to a fresh name preserves it (`procHasTypeA_rename`); the `.proc`
+/-- The soundness of the step for a procedure. The generator makes the body under the *real* context and scope of
+    the fold, so `genProcedure_sound_ambient` gives `ProcHasTypeA P s.C s.Γ proc₀` directly. The two side
+    conditions, about a subset and about an empty list of the value bindings, come from the fields `rigidNil` and
+    `typesNil` of the invariant of the fold. A rename to a fresh name keeps the property, which
+    `procHasTypeA_rename` proves. The `.proc`
     constructor leaves `C`/`Γ` unchanged, so `Inv` survives (only `reserved`
     grows). -/
 theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
@@ -282,9 +280,9 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
   simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨proc₀, hproc₀, nm, hnm, hds, hs'⟩ := h
   subst hds hs'
-  -- Body well-typed at the ambient context (Option B), rigid side condition from
-  -- `rigidNil`. The body may now contain `call`s to `s.procs`, so this consumes
-  -- `hProcs` rather than the vacuous `ProcSigCorresponds [] P`.
+  -- The body is well typed at the context of the fold, and the field `rigidNil` gives the side condition about
+  -- the rigid type variables. The body can hold a `call` to a procedure of the context, so this step uses the
+  -- hypothesis `hProcs`, and not a correspondence at an empty context, which has no content.
   have hpt : ProcHasTypeA P s.C s.Γ proc₀ :=
     genProcedure_sound_ambient P s.octx s.procs hProcs b.procSize b.procLen s.C s.Γ
       hinv.typesNil (simpleTyArities_of_inv hinv) (hWKA s hinv)
@@ -345,8 +343,8 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     simp only [genDeclsFold, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
     obtain ⟨⟨ds₁, s₁⟩, hstep, ⟨rest, s₂⟩, hrest, hds, hs'⟩ := h
     subst hds hs'
-    -- `procs` only grows across the fold, so the *final* correspondence implies the
-    -- one this step needs (`ProcSigCorresponds` is antitone — `ProcSigCorresponds.mono`).
+    -- The context of the callable procedures only grows across the fold, so the correspondence for the *final*
+    -- context gives the one that this step needs. `ProcSigCorresponds.mono` proves that.
     have hsub₁ : ∀ sig ∈ s₁.procs, sig ∈ s'.procs :=
       genDeclsFold_procs_mono _ hrest
     have hsub₀ : ∀ sig ∈ s.procs, sig ∈ s₁.procs :=
@@ -368,12 +366,10 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     soundness of the whole-program generator against `ProgramHasType'`
     (instantiated at `HasTypeA`).
 
-    Both conjuncts of `ProgramHasTypeA`:
-    * `P.getNames.Nodup` — every declared name is globally distinct (the generator
-      draws every declaration name fresh against a threaded reserved set that
-      accumulates all prior names); and
-    * `∃ C' Γ', DeclsHasType' … P.decls C' Γ'` — the declarations are well-typed
-      (the fold). -/
+    The theorem gives both parts of `ProgramHasTypeA`:
+    * Each declared name of the program is distinct. The generator draws each declaration name fresh against a
+      threaded reserved set, which holds each earlier name.
+    * The declarations are well typed, which the fold gives. -/
 theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
     (hWKA : ProgramWellKindedAssumption)
     (h : P ∈ SetGen.support (genProgram (G := SetGen.Set) numDecls b)) :
@@ -386,9 +382,9 @@ theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
     exact genProgram_getNames_nodup hfold
   · -- The declaration list is well-typed (threading from `initState`).
     --
-    -- The fold needs `ProcSigCorresponds sf.procs P` for the *finished* program —
-    -- the obligation that makes generated `call`s well-typed. It is discharged here,
-    -- where `P` finally exists: every registered signature describes a `.proc`
+    -- The fold needs the correspondence for the *finished* program, and that obligation is what makes each
+    -- generated `call` well typed. This proof discharges it here, where the program exists. Each registered
+    -- signature describes a `.proc`
     -- declaration present in `decls` (`ProcsEmitted`, a fold invariant), and the
     -- program's names are distinct, so `Program.Procedure.find?` resolves each one.
     have hem : ProcsEmitted sf.procs decls := by

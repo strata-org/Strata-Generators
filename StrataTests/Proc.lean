@@ -2,36 +2,35 @@ import StrataGenerators.Test
 import StrataGenerators.TycheViz
 
 /-!
-# Procedure-generator ↔ transform-pass properties
+# Properties that relate the procedure generator to a transform pass
 
-One property per *named field* of the three `*PhaseCorrect` structures in
-`Strata/Transform/CustomSpecifications.lean` — including the `ChangedFlagValid` and
-`PreservesCachedAnalysesWF` fields shared by all three — so coverage of those specs
-is complete rather than partial. See the module doc of
-`ProcedureHasTypeAGen/TestSupport` for the analysis and for which properties run on
-the mixed-declaration program shape.
+There is one property for each *named field* of the three `*PhaseCorrect` structures. This
+includes the `ChangedFlagValid` field and the `PreservesCachedAnalysesWF` field, which all
+three structures share. The coverage of those specifications is therefore complete. The
+module documentation of `ProcedureHasTypeAGen/TestSupport` gives the analysis, and it says
+which properties run on the program shape that mixes declarations.
 
-`genProcedure` is proven sound *and* complete against the declarative typing spec,
-and the generated procedures form an acyclic call DAG (body `i` drawn against the
-signatures of siblings `P0…P{i-1}`), so the callee-closure and call-graph dimensions
-of the FilterProcedures / PrecondElim properties are not vacuous.
+`genProcedure` is sound *and* complete against the declarative typing specification. The
+generated procedures also form an acyclic call graph, because the generator draws body `i`
+against the signatures of the siblings `P0` to `P{i-1}`. Therefore the properties for the
+closure of the callees and for the call graph are not vacuous.
 
-Two state a faithful `changed ↔ program changed` contract that the pass violates:
-`FilterProcedures changed flag is faithful` (the pass hardcodes `changed := true`
-even when it removes nothing) and `PrecondElim changed flag is faithful` (the
-`.funcDecl` branch reports unchanged while inserting a `$$wf` block).
+Two properties state a faithful contract between the `changed` flag and a real change to the
+program, and the passes break the contract in two places. `FilterProcedures` sets
+`changed := true` even when it removes nothing. The `.funcDecl` branch of `PrecondElim`
+reports no change while it inserts a `$$wf` block.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.Procedure.TestSupport
 
-/-- The twenty-eight procedure/transform properties: seven FilterProcedures,
-    thirteen PrecondElim, eight ANFEncoder. -/
+/-- The twenty-eight properties for the procedures and the transform passes: seven for
+    `FilterProcedures`, thirteen for `PrecondElim` and eight for `ANFEncoder`. -/
 @[strata_properties]
 def procTransforms : List TestDecl :=
   family GenProcs
-    [ -- FilterProcedures — `FilterProcedurePhaseCorrect`
+    [ -- FilterProcedures: `FilterProcedurePhaseCorrect`
       ("proc: FilterProcedures output decls are a sublist",
        fun gp => checkFilterDeclsSublist gp.procs),
       ("proc: FilterProcedures retains targets",
@@ -46,7 +45,7 @@ def procTransforms : List TestDecl :=
        fun gp => checkFilterChangedFlagValid gp.procs),
       ("proc: FilterProcedures preserves call-graph WF",
        fun gp => checkFilterAnalysisPreserving gp.procs),
-      -- PrecondElim — `PrecondElimPhaseCorrect`
+      -- PrecondElim: `PrecondElimPhaseCorrect`
       ("proc: PrecondElim $wf procs are well-formed",
        fun gp => checkPrecondGeneratedWF gp.procs),
       ("proc: PrecondElim strips all preconditions",
@@ -73,7 +72,7 @@ def procTransforms : List TestDecl :=
        fun gp => checkPrecondDeclaredFactoryStripped gp.procs),
       ("proc: PrecondElim preserves call-graph WF",
        fun gp => checkPrecondAnalysisPreserving gp.procs),
-      -- ANFEncoder — `ANFEncoderPhaseCorrect`
+      -- ANFEncoder: `ANFEncoderPhaseCorrect`
       ("proc: ANFEncoder preserves declaration count",
        fun gp => checkAnfDeclsLength gp.procs),
       ("proc: ANFEncoder leaves non-procedures unchanged",
@@ -91,12 +90,13 @@ def procTransforms : List TestDecl :=
       ("proc: ANFEncoder preserves call-graph WF",
        fun gp => checkAnfAnalysisPreserving gp.procs) ]
 
-/-- `PrecondElim factory entries are stripped` is separated out because its panel
-    needs a diagnostic view rather than the plain program: its minimized witness is
-    the *empty* program, and the cause — output-factory entries that still carry a
-    precondition — is not in the program text at all. So this is the one property that
-    names its `PropertyRunner` explicitly, to extend the printer with
-    `procFactoryStrippedDiagnostic`. -/
+/-- `PrecondElim` removes the precondition from each entry of the output factory.
+
+    This property is separate from the family, because its panel needs a diagnostic view and
+    not the plain program. Its smallest witness is the *empty* program, and the cause is not
+    in the text of the program: an entry of the output factory still holds a precondition.
+    Therefore this is the one property that names its `PropertyRunner`, so that the printer
+    also uses `procFactoryStrippedDiagnostic`. -/
 @[strata_property]
 def procPrecondFactoryStripped : TestDecl :=
   .forAll "proc: PrecondElim factory entries are stripped"

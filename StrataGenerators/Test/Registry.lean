@@ -4,8 +4,8 @@ import StrataGenerators.Test.Types
 /-!
 # The property registry
 
-The three attributes that let a property declare *itself* to the test harness.
-A property author writes one declaration in one file:
+The three attributes that let a property declare *itself* to the test harness. The author of a
+property writes one declaration in one file:
 
 ```lean
 @[strata_property]
@@ -13,58 +13,57 @@ def myPassIdempotent : TestDecl :=
   .property "mypass: the pass is idempotent" "mypass" Generators.program checkMyPass
 ```
 
-and `lake test` runs it. Nothing in this package's internals has to be edited:
-the attribute records the declaration's *name* in an environment extension, and
-`strata_registry%` (in `StrataGenerators.Test.Collect`) expands to the list of
-every name recorded in the current module and in everything it imports.
+`lake test` then runs it. You edit nothing inside this package. The attribute records the
+*name* of the declaration in an environment extension, and `strata_registry%` in
+`StrataGenerators.Test.Collect` expands to the list of each name in the current module and in
+each module that it imports.
 
-This is the mechanism Lake itself uses for `@[test_driver]`
-(`Lake/Util/OrderedTagAttribute.lean`), and the same idea as `ppx_quick_test`'s
-module-initialisation inventory and Rust `quickcheck`'s `#[quickcheck]`:
-registration is a side effect of writing the declaration, not a second edit
-somewhere else.
+Lake uses this same mechanism for `@[test_driver]`. It is also the same idea as the inventory
+that `ppx_quick_test` builds when a module starts, and as `#[quickcheck]` in Rust: the
+registration is an effect of the declaration itself, and not a second edit in another place.
 
-## What this can and cannot automate
+## What this can and cannot do for you
 
-Lean links statically, so a declaration is visible to the driver only if the
-driver's module transitively imports the module it lives in — the analogue of
-`mod tests;` in Rust, or of a file being part of a Dune library in OCaml. That last
-hop is the generated `StrataTests.lean` import root.
+Lean links statically. Therefore a driver sees a declaration only if the module of the driver
+imports the module of the declaration, directly or indirectly. This is the same need as
+`mod tests;` in Rust, or as a file in a Dune library in OCaml. The generated import root
+`StrataTests.lean` gives that last step.
 
-Adding a property to an existing file under `StrataTests/` needs nothing further.
-Adding or removing a *file* needs `lake exe write-test-imports`, which rewrites the root
-from the directory listing; see `StrataGenerators.Test.ImportRoot`. Forgetting is not
-silent — the driver rewrites a stale root and asks to be re-run, and
-`#verify_test_root` fails the build. See `docs/writing-properties.md`.
+If you add a property to a file that exists under `StrataTests/`, you need nothing more. If
+you add or remove a *file*, run `lake exe write-test-imports`. That executable writes the root
+again from the contents of the directory. See `StrataGenerators.Test.ImportRoot`. If you
+forget, a driver rewrites the stale root and asks you to run it again, and `#verify_test_root`
+fails the build. See `docs/writing-properties.md`.
 
-## Ordering
+## Order
 
-The extension keeps entries in declaration order within a module, and modules in
-import order, so report order is stable across runs and reviewable in a diff.
-That is why this uses `registerPersistentEnvExtension` with an `Array` state
-rather than core's `registerTagAttribute`, whose `NameSet` state loses the order.
+The extension keeps the entries of one module in declaration order, and it keeps the modules
+in import order. The order of a report is therefore the same on each run, and a reader can
+review it in a diff. This is the reason for `registerPersistentEnvExtension` with a state of
+type `Array`, in place of `registerTagAttribute` of the core library, whose `NameSet` state
+loses the order.
 -/
 
 open Lean
 
 namespace StrataGenerators.Test
 
-/-- What a registration records: the declaration, and whether it holds a single
+/-- What a registration records: the declaration, and whether the declaration holds one
     `TestDecl` or a `List TestDecl`.
 
-    `@[strata_property]` and `@[strata_properties]` write to the *same* extension, so
-    a file that mixes them still reports in the order it declares them. Two extensions
-    would group every list after every single, which reads as a shuffle in the
-    report. -/
+    `@[strata_property]` and `@[strata_properties]` write to the *same* extension. Therefore a
+    file that uses both attributes still reports its properties in declaration order. Two
+    extensions would put every list after every single property, and a reader would see that
+    as a random order. -/
 inductive Entry where
   /-- A `def _ : TestDecl`. -/
   | single (decl : Name)
-  /-- A `def _ : List TestDecl`, spliced in place. -/
+  /-- A `def _ : List TestDecl`. The collector splices the list in place. -/
   | many (decl : Name)
   deriving Inhabited, Repr
 
-/-- The registry: entries in declaration order within a module, and modules in import
-    order. -/
+/-- The registry. It holds the entries of one module in declaration order, and it holds the
+    modules in import order. -/
 initialize registryExt : PersistentEnvExtension Entry Entry (Array Entry) ←
   registerPersistentEnvExtension {
     name            := `StrataGenerators.Test.registryExt
@@ -74,8 +73,9 @@ initialize registryExt : PersistentEnvExtension Entry Entry (Array Entry) ←
     exportEntriesFn := fun es => es
   }
 
-/-- Every entry: imported ones first (in import order), then this module's (in
-    declaration order). Modelled on `Lake.OrderedTagAttribute.getAllEntries`. -/
+/-- Every entry. The imported entries come first, in import order. The entries of this module
+    come after them, in declaration order. The function follows
+    `Lake.OrderedTagAttribute.getAllEntries`. -/
 def registryEntries (env : Environment) : Array Entry :=
   let s := registryExt.toEnvExtension.getState env
   s.importedEntries.flatMap id ++ s.state
@@ -217,19 +217,19 @@ private def emitTuned (decl : Name) (arg : TuningArg) (single : Bool) :
         hints := ReducibilityHints.abbrev, safety := DefinitionSafety.safe }
   pure (tunedName, isList)
 
-/-- An attribute that records `mk decl` in `registryExt`. `validate` is where it
-    checks that the declaration has the type the collector will later ascribe to it,
-    so a mistyped registration fails at the declaration rather than as a confusing
-    elaboration failure inside `strata_registry%`.
+/-- Builds an attribute that records an entry in `registryExt`. `validate` checks that the
+    declaration has the type that the collector gives to it later. A registration with the
+    wrong type therefore fails at the declaration, and not as an unclear elaboration error
+    inside `strata_registry%`.
 
-    With a `tuningSpec` it registers the emitted `⟨decl⟩.tuned` instead. That may be a list even when
-    the tagged declaration was a single property, because `tunings` turns one claim into one property
-    per weighting.
+    With a `tuningSpec` it registers the emitted `⟨decl⟩.tuned` instead. That may be a list even
+    when the tagged declaration was a single property, because `tunings` turns one claim into one
+    property per weighting.
 
     `name` and `userName` differ, and every message uses `userName`. These attributes take an
-    argument, so they need a `syntax (name := …)` node, and `registerBuiltinAttribute`'s `name` must be
-    that node's name for the parser to reach this handler. A message that reported `name` would name an
-    attribute that nobody can write. -/
+    argument, so they need a `syntax (name := …)` node, and `registerBuiltinAttribute`'s `name` must
+    be that node's name for the parser to reach this handler. A message that reported `name` would
+    name an attribute that nobody can write. -/
 private def registerRegistryAttr (name userName : Name) (descr : String) (single : Bool)
     (validate : Name → AttrM Unit) (ref : Name := by exact decl_name%) : IO Unit :=
   registerBuiltinAttribute {
@@ -249,9 +249,9 @@ private def registerRegistryAttr (name userName : Name) (descr : String) (single
       modifyEnv fun env => registryExt.addEntry env entry
   }
 
-/-- Check that `decl` has the type `expected` names, so a registration the collector could not use is
-    rejected where the mistake was made. `expected` is matched up to head symbol, which is what
-    distinguishes `TestDecl` from `List TestDecl`. -/
+/-- Checks that `decl` has the type that `expected` names. A registration that the collector
+    cannot use therefore fails at the place of the mistake. The check compares only the head
+    symbol, and that is what separates `TestDecl` from `List TestDecl`. -/
 private def expectHead (attrName : Name) (expected : Name) (decl : Name) :
     AttrM Unit := do
   let some info := (← getEnv).find? decl
@@ -261,27 +261,26 @@ private def expectHead (attrName : Name) (expected : Name) (decl : Name) :
     throwError "`{attrName}` expects a declaration whose type is headed by \
       `{expected}`, but `{decl}` has type{indentExpr info.type}"
 
-/-- One property, registering itself. Attach to a `def _ : TestDecl`. Optionally
-    `(tuning := θ)` or `(tunings := [(label, θ), …])`. The syntax section above says more. -/
+/-- The attribute for one property. Attach it to a `def _ : TestDecl`. It also takes an optional
+    `(tuning := θ)` or `(tunings := [(label, θ), …])`, which the syntax section above covers. -/
 initialize
   registerRegistryAttr `strataPropertyAttr `strata_property
     "Register a `TestDecl` with the Strata property-test harness. Optionally \
      `(tuning := θ)` or `(tunings := [(label, θ), …])`."
     (single := true) (expectHead `strata_property ``TestDecl)
 
-/-- A family of properties registered together. Attach to a `def _ : List TestDecl`.
-    Use it when one shared generator or one list comprehension yields many properties
-    at once; a standalone property should use `@[strata_property]`, so its name is
-    greppable from its own declaration. `(tuning := θ)` applies one weighting to every
-    member. -/
+/-- The attribute for a family of properties. Attach it to a `def _ : List TestDecl`. Use it
+    when one shared generator, or one list comprehension, gives many properties at one time. A
+    property that stands alone uses `@[strata_property]`, so a search finds its name at its own
+    declaration. `(tuning := θ)` applies one weighting to every member. -/
 initialize
   registerRegistryAttr `strataPropertiesAttr `strata_properties
     "Register a `List TestDecl` with the Strata property-test harness. Optionally \
      `(tuning := θ)`, applied to every member."
     (single := false) (expectHead `strata_properties ``List)
 
-/-- The diagnostics registry, kept separate because a driver runs it at a different
-    point and it never gates the exit code. -/
+/-- The registry of the diagnostics. It is separate from the property registry, because a
+    driver runs the diagnostics at another point and they never gate the exit code. -/
 initialize diagnosticExt : PersistentEnvExtension Name Name (Array Name) ←
   registerPersistentEnvExtension {
     name            := `StrataGenerators.Test.diagnosticExt
@@ -291,11 +290,14 @@ initialize diagnosticExt : PersistentEnvExtension Name Name (Array Name) ←
     exportEntriesFn := fun es => es
   }
 
+/-- Every registered diagnostic. The imported entries come first, in import order. The entries
+    of this module come after them, in declaration order. -/
 def diagnosticEntries (env : Environment) : Array Name :=
   let s := diagnosticExt.toEnvExtension.getState env
   s.importedEntries.flatMap id ++ s.state
 
-/-- A non-gating diagnostic. Attach to a `def _ : Diagnostic`. -/
+/-- The attribute for a diagnostic, which does not gate the exit code. Attach it to a
+    `def _ : Diagnostic`. -/
 initialize registerBuiltinAttribute {
   ref   := `StrataGenerators.Test.diagnosticAttr
   name  := `strata_diagnostic

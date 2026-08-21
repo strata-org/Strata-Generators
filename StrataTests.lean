@@ -1,13 +1,14 @@
--- GENERATED FILE — do not edit by hand.
+-- GENERATED FILE. Do not edit it by hand.
 --
--- Regenerate with `lake exe write-test-imports` after you add or remove a file under
--- `StrataTests/`. Adding a property to an existing file needs no regeneration.
+-- Run `lake exe write-test-imports` again after you add or remove a file under
+-- `StrataTests/`. If you add a property to a file that exists, the imports do not
+-- change.
 --
--- Why this file exists: Lean links statically, so a `@[strata_property]` declaration
--- is only visible to the driver if the driver transitively imports the module it
--- lives in. This file is that import — the analogue of `mod tests;` in Rust, or of a
--- file being part of a Dune library in OCaml. It is generated rather than
--- hand-maintained precisely so that it is not a file a property author has to edit.
+-- Lean links statically. Therefore a driver sees a `@[strata_property]` declaration
+-- only if the driver imports the module that holds the declaration, directly or
+-- indirectly. This file is that import. It is the same need as `mod tests;` in Rust, or
+-- as a file in a Dune library in OCaml. A generator writes this file, so the author of
+-- a property does not edit it.
 import StrataTests.Adt
 import StrataTests.Alias
 import StrataTests.Cmd
@@ -25,6 +26,6 @@ import StrataTests.Program
 import StrataTests.Stmt
 import StrataTests.Transforms
 
--- Fails the build if a file under `StrataTests/` is missing from the list above, so a
--- property file added without regenerating this root cannot go silently untested.
+-- This guard fails the build if the list above does not hold a file that is under
+-- `StrataTests/`. Therefore the suite cannot miss a new property file.
 #verify_test_root
