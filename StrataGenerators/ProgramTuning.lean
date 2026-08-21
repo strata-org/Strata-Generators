@@ -28,9 +28,9 @@ open ProgramGen
 
 /-! ## Flat indices
 
-`Tuning.weight` addresses a branch by its index into `Tuning.schedules`. These are the names a
-profile is written in. Indices 0 to 4 are the five declaration kinds that carry a literal weight.
-Indices 5 to 8 are the two phases of the function and procedure weights. -/
+`Tuning.weight` addresses a branch by its index into `Tuning.schedules`, and these are the names a
+profile is written in. Indices 0 to 4 name the five declaration kinds that carry a literal weight.
+Indices 5 to 8 name the function weight and the procedure weight, once per phase. -/
 
 namespace ProgIdx
 def abstract : Nat := 0
@@ -54,11 +54,12 @@ function is callable, 6 : 1 before that. -/
 def progDefault : Tuning :=
   { schedules := #[(1, 0), (1, 0), (1, 0), (1, 0), (3, 0), (3, 0), (4, 0), (6, 0), (1, 0)] }
 
-/-- The one site a program tuning addresses, for the length check in `TestDecl.withTuning`.
+/-- The one site that a program tuning addresses. `TestDecl.withTuning` checks the length of a `θ`
+against it.
 
-The site holds nine weights but `genDeclStepT` offers seven branches, because the function and the
-procedure each carry one weight per phase. Nine is the number a hand-built tuning must match, which
-is what this table is for. -/
+The site holds nine weights, and `genDeclStepT` offers seven branches, because the function and the
+procedure each carry one weight per phase. Nine is the number that a hand-built tuning must match, and
+that is what this table is for. -/
 def progSites : Array Site :=
   #[⟨`genDeclStepT.site0, 0, 9, #[0, 0, 0, 0, 0, 0, 0, 0, 0]⟩]
 
@@ -105,9 +106,9 @@ def progDatatypeHeavy : Tuning :=
 /-- `genDeclStep` with the seven declaration-kind weights read from `θ`. `d` is the number of
 declaration steps that remain, so a schedule can taper a kind as the program fills up.
 
-The pair of function and procedure weights is chosen by one `if`, as `genDeclStep` chooses it. Two
-separate `if`s would read the same but would not be definitionally equal to it, because the
-projection of an `ite` does not reduce while the condition is a variable. -/
+One `if` chooses the pair of function and procedure weights, as `genDeclStep` chooses it. Two separate
+`if`s would read the same, and they would not be definitionally equal to it, because the projection of
+an `ite` does not reduce while the condition is a variable. -/
 def genDeclStepT [_root_.Gen G] (θ : Tuning) (s : GenState) (b : Bounds) (d : Nat) :
     G StepResult :=
   let (wFunc, wProc) :=
@@ -166,8 +167,8 @@ steps. -/
     genProgramT (G := G) progDefault numDecls b = genProgram numDecls b := by
   simp only [genProgramT, genProgram, genDeclsFoldT_defaults]
 
-/-! The index table names a branch each profile moves. These pin the two facts a reader needs: the
-table has an entry per branch, and each profile moves the branch it names. -/
+/-! The index table names the branch that each profile moves. The examples below pin the two facts a
+reader needs: the table has one entry per branch, and each profile moves the branch it names. -/
 
 example : progDefault.schedules.size = 9 := rfl
 example : (progSites.foldl (fun n s => n + s.arity) 0) = progDefault.schedules.size := rfl

@@ -114,47 +114,48 @@ fork that is pinned to Lean 4.29, because mainline LSpec is on Lean 4.31.
 
 ## Tuning the generators' distributions
 
-The generators are proven sound *and* complete, so every sample is well-typed and every well-typed
-program is reachable — but neither says anything about *how often* a shape appears, and the
-properties in the suite are not equally sensitive to all shapes. A property whose interesting
-precondition holds on 2% of samples spends 98% of its budget on a trivial case; one whose
-precondition never holds passes vacuously.
+The generators are sound *and* complete, so every sample is well-typed and every well-typed program is
+reachable. Neither law says how *often* a shape appears, and the properties in the suite are not equally
+sensitive to all shapes. A property whose interesting precondition holds on 2% of samples spends 98% of
+its budget on a trivial case. A property whose precondition never holds passes vacuously.
 
-Every generator the suite draws from is therefore tagged `@[tunable]` (Basalt's tuning attribute),
-which makes each `frequency` branch weight a runtime value:
+Every generator that the suite draws from therefore carries Basalt's `@[tunable]` attribute, which makes
+each `frequency` branch weight a runtime value:
 
 ```lean
 -- 24 : 2 in favour of `loop`, so a loop-elimination pass gets loops to eliminate
 def stmtLoopHeavy : Tuning := withWeights stmtDefault [(StmtIdx.loop, 24)]
 ```
 
-- [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) — one named `Tuning` per job the
-  suite has to do, with the desirable-distribution rationale per property family, the flat index
-  tables the profiles are written in, and the tuned entry points (`genProgramStmtsT`,
-  `genProcedureT`, `genCmdsT`) the harnesses draw from.
-- [`SetGen/TuningPrototypes.lean`](./StrataGenerators/SetGen/TuningPrototypes.lean) — a theorem per
-  generator that tuning is **behavior-preserving**: at `SetGen.Set` the tuned generator is *equal*
-  to the untuned one for every `θ`, so every soundness and completeness result carries over by one
-  `rw` and no profile can make a program shape unreachable.
-- [`SetGen/Tuning.lean`](./StrataGenerators/SetGen/Tuning.lean) — the reweighting lemmas those
+- [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) holds one named `Tuning` per job the
+  suite has to do. It gives the desirable distribution per property family, the flat index tables that
+  a profile is written in, and the tuned entry points that the harnesses draw from.
+- [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) holds the same for whole programs. It
+  is a separate module because the program generator's proof files import Mathlib.
+- [`SetGen/TuningPrototypes.lean`](./StrataGenerators/SetGen/TuningPrototypes.lean) proves one theorem
+  per generator that tuning **preserves behaviour**. At `SetGen.Set` the tuned generator is *equal* to
+  the untuned one for every `θ`. Every soundness and completeness result therefore carries over by one
+  `rw`, and no profile can make a program shape unreachable.
+- [`SetGen/Tuning.lean`](./StrataGenerators/SetGen/Tuning.lean) holds the reweighting lemmas that those
   proofs run on, and one recipe per recursion form.
-- [`SetGen/TuningWalkthrough.lean`](./StrataGenerators/SetGen/TuningWalkthrough.lean) — start here
-  to *use* tuning on a generator of your own.
+- [`SetGen/TuningWalkthrough.lean`](./StrataGenerators/SetGen/TuningWalkthrough.lean) is where to start
+  if you want to *use* tuning on a generator of your own.
 
 ### Measuring a distribution (`dist-report`)
 
-The weights above were derived by measurement, not by eye. `dist-report` samples each family's
-generator under each profile and reports how often the shapes the properties discriminate on
-actually appear — plus `1st-try`, the fraction of draws that succeed with no retry, since a profile
-that steers into failure-prone shapes buys coverage with generation time:
+The weights above come from measurement rather than from judgement. `dist-report` samples each family's
+generator under each profile, and reports how often the shapes that the properties discriminate on
+appear. It also reports `1st-try`, the fraction of draws that succeed with no retry, because a profile
+that steers into failure-prone shapes buys its coverage with generation time.
 
 ```bash
-lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]
+lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--prog]
 ```
 
-A property names the distribution it is checked over in its registration attribute, so choosing a
-weighting is a one-line change where the property is declared — and checking a claim under *two*
-weightings registers two properties, each with its own verdict, line in the report and Tyche panel:
+A property names the distribution it is checked over in its registration attribute, so a choice of
+weighting is a one-line change where the property is declared. A claim checked under *two* weightings
+registers two properties, and each has its own verdict, its own line in the report and its own Tyche
+panel:
 
 ```lean
 @[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
@@ -164,13 +165,15 @@ def loopElimPreservesTyping : TestDecl :=
 ```
 
 `(tuning := θ)` is the single-weighting form, and `θ` is an ordinary term, so
-`(tuning := withWeights stmtDefault [(StmtIdx.loop, 30)])` works for a one-off.
-`StrataTests/Stmt.lean` uses this for both `LoopElim` properties, and
-[`docs/writing-properties.md`](./docs/writing-properties.md#choosing-the-distribution) is the guide.
+`(tuning := withWeights stmtDefault [(StmtIdx.loop, 30)])` works for a one-off. `StrataTests/Stmt.lean`
+uses this for both `LoopElim` properties, and `StrataTests/Monomorphization.lean` uses it for five
+`mono:` properties. [`docs/writing-properties.md`](./docs/writing-properties.md#choosing-the-distribution)
+is the guide.
 
-Only some input types can be tuned (the statement, procedure, command and expression shapes — see
-`StrataGenerators.Test.Generators`); tuning a type without a `TunableGen` instance is an error at the
-declaration, naming the type, rather than a tuning that is silently ignored.
+Only some input types can be tuned. `StrataGenerators.Test.Generators` lists them: the statement,
+procedure, command, expression and whole-program shapes. A tuning on a type with no `TunableGen`
+instance is an error at the declaration, and the message names the type, rather than a tuning that is
+silently ignored.
 
 ## Adding a new property
 

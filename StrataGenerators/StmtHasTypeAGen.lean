@@ -832,7 +832,7 @@ theorem genStmt_outCtx_functional
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
       exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx 0 hFun rc hrc
-    · -- exit — or a `cmd`, since with `labels = []` the branch falls back to one
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
         replace hr : r ∈ SetGen.support
@@ -855,8 +855,8 @@ theorem genStmt_outCtx_functional
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call: the inline `init` chain genuinely extends the scope — or a `cmd`,
-      -- since with `procs = []` the branch falls back to one
+    · -- call: the inline `init` chain extends the scope, or a `cmd`,
+      -- the branch falls back to a `cmd` when `procs = []`
       cases procs with
       | nil =>
         replace hr : r ∈ SetGen.support
@@ -877,7 +877,7 @@ theorem genStmt_outCtx_functional
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
       exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx (size + 1) hFun rc hrc
-    · -- exit — or a `cmd`, since with `labels = []` the branch falls back to one
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
         replace hr : r ∈ SetGen.support
@@ -900,8 +900,8 @@ theorem genStmt_outCtx_functional
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call: the inline `init` chain genuinely extends the scope — or a `cmd`,
-      -- since with `procs = []` the branch falls back to one
+    · -- call: the inline `init` chain extends the scope, or a `cmd`,
+      -- the branch falls back to a `cmd` when `procs = []`
       cases procs with
       | nil =>
         replace hr : r ∈ SetGen.support
@@ -999,13 +999,13 @@ theorem wellKindedOk_preserved
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact hcmd 0 r hr
-    · -- `exit`, or the `cmd` the branch falls back to when `labels = []`
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact hcmd 0 r hr
       | cons hd tl => exact hexit r hr
     · exact hfunc 0 r hr
     · exact htype 0 r hr
-    · -- `call`, or the `cmd` the branch falls back to when `procs = []`
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact hcmd 0 r hr
       | cons hd tl => exact hcall 0 r hr
@@ -1015,13 +1015,13 @@ theorem wellKindedOk_preserved
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact hcmd (size + 1) r hr
-    · -- `exit`, or the `cmd` the branch falls back to when `labels = []`
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact hcmd (size + 1) r hr
       | cons hd tl => exact hexit r hr
     · exact hfunc (size + 1) r hr
     · exact htype (size + 1) r hr
-    · -- `call`, or the `cmd` the branch falls back to when `procs = []`
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact hcmd (size + 1) r hr
       | cons hd tl => exact hcall (size + 1) r hr
@@ -1066,13 +1066,13 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
-    · -- `exit`, or the `cmd` the branch falls back to when `labels = []`
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
       | cons hd tl => exact genExitStmt_sound P env C ctx r hr
     · exact genFuncDeclStmt_sound P env C hWK.arities ctx 0 r hr
     · exact genTypeDeclStmt_sound P env C ctx 0 r hr
-    · -- `call`, or the `cmd` the branch falls back to when `procs = []`
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
       | cons hd tl => exact genCallStmt_sound P env _ hProcs C ctx 0 hWK r hr
@@ -1082,13 +1082,13 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact genCmdStmt_sound P env C hWK.arities ctx (size + 1) hFun r hr
-    · -- `exit`, or the `cmd` the branch falls back to when `labels = []`
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact genCmdStmt_sound P env C hWK.arities ctx (size + 1) hFun r hr
       | cons hd tl => exact genExitStmt_sound P env C ctx r hr
     · exact genFuncDeclStmt_sound P env C hWK.arities ctx (size + 1) r hr
     · exact genTypeDeclStmt_sound P env C ctx (size + 1) r hr
-    · -- `call`, or the `cmd` the branch falls back to when `procs = []`
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact genCmdStmt_sound P env C hWK.arities ctx (size + 1) hFun r hr
       | cons hd tl => exact genCallStmt_sound P env _ hProcs C ctx (size + 1) hWK r hr

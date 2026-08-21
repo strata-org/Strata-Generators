@@ -1080,14 +1080,14 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     The depth-`0` cases deliberately have no Indir branches: a fully-applied
     operator at the depth floor would leave no budget for its arguments.
 
-    Tagged `@[tunable (depth := n)]`, so every branch weight is a runtime knob:
-    `genLExprBase.tuned θ` reads them from `θ` at the remaining depth `n`, and threads
-    `θ` through its own recursion. There is one site per generated type at `n + 1` —
-    ten sites, since the `n = 0` arms are uniform `oneOf`s with no weights to tune. A
-    weight is worth setting *per rule across all ten sites* rather than per site: see
-    `StrataGenerators.TuningProfiles`, whose `ExprIdx` role lists do exactly that, and
-    `TuningPrototypes.genLExprBase_tuned_eq` for the proof that no `θ` changes what is
-    reachable. -/
+    Tagged `@[tunable (depth := n)]`, so every branch weight is a runtime knob.
+    `genLExprBase.tuned θ` reads each weight from `θ` at the remaining depth `n`, and it
+    threads `θ` through its own recursion. There is one site per generated type at
+    `n + 1`, so there are ten sites. The `n = 0` arms are uniform `oneOf`s and have no
+    weight to tune.
+
+    Set a weight *per rule across all ten sites* rather than per site. The `ExprIdx` role
+    lists in `StrataGenerators.TuningProfiles` do exactly that. -/
 @[tunable (depth := n)]
 def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
@@ -1412,9 +1412,9 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
             (genLExprBase fctx octx pctx tvars bctx n .real)) ]
       (by show 0 < 1+1+2+2+2+2+4+4; omega)
   -- ── Bitvec type ───────────────────────────────────────────────────
-  -- The width binder is `w`, not `n`: `@[tunable (depth := n)]` resolves `n` to the
-  -- innermost `Nat` local of that name, so a width named `n` here would make this site
-  -- read its weight schedules at the bitvector width instead of the remaining depth.
+  -- The width binder is `w` and not `n`. `@[tunable (depth := n)]` resolves `n` to the innermost
+  -- `Nat` local of that name. A width named `n` here would therefore make this site read its weight
+  -- schedules at the bitvector width rather than at the remaining depth.
   | 0, .bitvec w =>
     let bvars := bvarsOfType bctx (.bitvec w)
     oneOf

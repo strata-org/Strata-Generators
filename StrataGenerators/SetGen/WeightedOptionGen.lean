@@ -12,35 +12,36 @@ open scoped SetGen.Set
 /-!
 # `weightedOptionGen`: a tunable option combinator
 
-`Basalt.Combinators.biasedOptionGen`/`optionGen` decide the `some`/`none` split with a rational
-`RandomChoice.coin`, which is *not* a `frequency` site — so `@[tunable]` (which only rewrites
-`frequency`) cannot expose that split as a tunable knob.
+`Basalt.Combinators.optionGen` and `biasedOptionGen` decide the `some` or `none` split with a
+rational `RandomChoice.coin`. A coin is not a `frequency` site, and `@[tunable]` rewrites only a
+`frequency`, so the attribute cannot expose that split.
 
-`weightedOptionGen` is a drop-in with the same support but a `frequency`-based split over two `Nat`
-weights. This is the combinator to reach for when the *presence* of an optional clause (e.g. a
-function precondition, for `PrecondElim`) is what you want to tune.
+`weightedOptionGen` has the same support and splits on two `Nat` weights instead. Reach for it when
+the *presence* of an optional clause is the knob you want. A function precondition is one such
+clause, and `PrecondElim` is the pass that acts on it.
 
-To make the split *addressable*, write it out in the generator being tagged: `@[tunable]` collects
-the `frequency` calls in the tagged declaration's own body (inlining only its own compiler-generated
-auxiliaries), and this combinator's weights are variables rather than literals, so tagging
-`weightedOptionGen` itself is rejected. `TuningPrototypes.genPreconditionW` writes the two-branch
-`frequency` inline and records — by `rfl` — that the result is this combinator at weights `1 : 1`, so
-`mem_support_weightedOptionGen_iff` still characterizes its support.
+A tuning can address the split only if the tagged generator writes the split out in its own body.
+`@[tunable]` collects the `frequency` calls in that body, and it inlines only that declaration's own
+compiler-generated auxiliaries. This combinator takes its weights as variables rather than as
+literals, so the attribute rejects the combinator itself.
+`TuningPrototypes.genPreconditionW` writes the two-branch `frequency` inline. It then records by
+`rfl` that the result is this combinator at weights 1 to 1, so the support lemma below still
+describes it.
 
-Both weights must be positive for the support to match `optionGen`'s (`none` and every `some a`
-reachable); `Tuning.weight` clamps to ≥ 1, so a tuned generator wrapping this stays total for every
-runtime `θ`, exactly as the `frequency`-site story guarantees elsewhere.
+Both weights must be positive for the support to match `optionGen`'s. `Tuning.weight` clamps every
+weight to 1 or more, so a tuned generator that wraps this stays total for every runtime `θ`.
 
-Meant to live in `Basalt.Combinators` next to `biasedOptionGen`; kept here for now to avoid a Basalt
-change (see the tuning-for-SetGen PR).
+This combinator belongs in `Basalt.Combinators`, next to `biasedOptionGen`. It is here to avoid a
+change to Basalt.
 -/
 
 namespace SetGen
 
-/-- Like `biasedOptionGen`, but the `some`/`none` split is a `frequency` over `Nat` weights rather
-than a rational `coin` — so a `@[tunable]` generator inlining this split exposes the bias as a site.
-`some <$> g` is written with an explicit `bind` (as in `biasedOptionGen`) because `Lean.Order` has
-no monotonicity lemma for `<$>`. -/
+/-- Like `biasedOptionGen`, but a `frequency` over two `Nat` weights decides the split. A
+`@[tunable]` generator that inlines this split therefore exposes the bias as a site.
+
+The `some` branch uses an explicit `bind`, as `biasedOptionGen` does, because `Lean.Order` has no
+monotonicity lemma for `<$>`. -/
 def weightedOptionGen [Gen G] (wSome wNone : Nat) (g : G α)
     (h : 0 < wSome + wNone := by omega) : G (Option α) :=
   frequency [
@@ -48,10 +49,9 @@ def weightedOptionGen [Gen G] (wSome wNone : Nat) (g : G α)
     (wNone, fun _ => pure none)
   ] (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)
 
-/-- Support of `weightedOptionGen`, given positive weights: `none` is reachable (via the `wNone`
-branch) and `some a` exactly when `a ∈ support g` (via the `wSome` branch). Identical to
-`SetGen.mem_support_biasedOptionGen_iff`, so a generator's soundness/completeness proof ports by
-swapping which option-support lemma it cites. -/
+/-- With both weights positive, `weightedOptionGen` reaches `none`, and it reaches `some a` exactly
+when `g` reaches `a`. A weight therefore decides how often the generator returns `none`, and never
+which values it can return. -/
 @[simp]
 theorem mem_support_weightedOptionGen_iff {wSome wNone : Nat} {g : Set α} {o : Option α}
     (hs : 0 < wSome) (hn : 0 < wNone) (h : 0 < wSome + wNone) :

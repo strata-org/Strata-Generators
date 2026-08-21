@@ -82,30 +82,28 @@ class TycheFeatures (α : Type) where
 
 instance (priority := low) : TycheFeatures α := ⟨fun _ => []⟩
 
-/-- An input type whose generator's branch weights can be read from a `Tuning` — the fourth thing a
-    property might want to say about its input, after the generator, the printer and the shrinker.
+/-- An input type whose generator reads its branch weights from a `Tuning`. This is the fourth thing
+    a property might say about its input, after the generator, the printer and the shrinker.
 
-    A `Tuning` is a *runtime* value (an array of weight schedules addressing the `frequency` sites of
-    the underlying Strata generator — see `StrataGenerators.TuningProfiles`), so it cannot arrive
-    through `Arbitrary`, whose `arbitrary : Gen α` has nowhere to put one. Hence a second class, and
-    hence `TestDecl.tuned` rather than an optional argument on `TestDecl.property`: a type with no
-    instance here simply cannot be tuned, and asking to tune it is a missing-instance error at the
-    property rather than a tuning that is silently ignored.
+    A `Tuning` is a *runtime* value: an array of weight schedules that address the `frequency` sites of
+    the underlying Strata generator. It cannot arrive through `Arbitrary`, because `arbitrary : Gen α`
+    has nowhere to put one. Hence a second class, and hence `TestDecl.tuned` rather than an optional
+    argument on `TestDecl.property`. A type with no instance here cannot be tuned, and a request to
+    tune it is a missing-instance error at the property rather than a tuning that is ignored.
 
-    Every instance satisfies `genWith defaults = Arbitrary.arbitrary`, pinned one `example` per
-    instance in `StrataGenerators.Test.Generators`. So a tuned property differs from its untuned form
-    only in the weights, and `underTunings`'s "default" row is exactly the property
-    `TestDecl.property` would register.
+    Every instance satisfies `genWith defaults = Arbitrary.arbitrary`, and one `example` per instance
+    in `StrataGenerators.Test.Generators` pins that. A tuned property therefore differs from its
+    untuned form only in the weights, and the "default" row of `underTunings` is exactly the property
+    that `TestDecl.property` would register.
 
-    Either way, because tuning is proven θ-invariant at `SetGen.Set`
-    (`StrataGenerators.SetGen.TuningPrototypes`), a tuning changes only the *distribution*: no `θ` can
-    make a well-typed shape unreachable, so a tuned property still tests the same claim over the same
+    Tuning is θ-invariant at `SetGen.Set`, so a tuning changes only the *distribution*. No `θ` can
+    make a well-typed shape unreachable, so a tuned property tests the same claim over the same
     language. -/
 class TunableGen (α : Type) where
   /-- The type's generator with the weights of the underlying Strata generator read from `θ`. -/
   genWith : Tuning → Gen α
-  /-- The sites `θ` addresses, so a mis-sized hand-built tuning can be caught rather than silently
-      reindexed, and so a report can say what a property's knobs are. -/
+  /-- The sites that `θ` addresses. `TestDecl.withTuning` checks a hand-built tuning against them, so
+      a tuning of the wrong length is rejected rather than read against the wrong branches. -/
   sites : Array Site
 
 /-- How many branch weights a type's tuning is expected to carry. -/
@@ -113,25 +111,26 @@ def TunableGen.arity (α : Type) [TunableGen α] : Nat :=
   (TunableGen.sites α).foldl (fun n s => n + s.arity) 0
 
 /-- What a `TunableGen` instance contributes to a registration: how to rebuild the generator from a
-    `Tuning`, and how many branch weights that `Tuning` has to carry.
+    `Tuning`, and how many branch weights that `Tuning` must carry.
 
-    The arity travels with the retuning because `TestDecl.withTuning` is the only place a `θ` and a
-    property meet, and by then `α` is gone — so `TunableGen.arity α` is no longer available to check
-    against. Without it a `Tuning` built for a *different* generator would be accepted and silently
-    misread, since `Tuning.weight` reads a missing index as the default `(1, 0)`. -/
+    The arity travels with the retuning because `TestDecl.withTuning` is the only place where a `θ`
+    and a property meet, and `α` is gone by then. `TunableGen.arity α` is therefore no longer
+    available to check against. Without the arity here, a `Tuning` built for a *different* generator
+    would be accepted and misread, because `Tuning.weight` answers a missing index with the default
+    `(1, 0)`. -/
 structure Retuning (α : Type) where
   genWith : Tuning → Gen α
   arity   : Nat
 
-/-- `TunableGen` as *data*, present for every type: `some` when the type has a `TunableGen` instance
-    and `none` when it does not.
+/-- `TunableGen` as *data*, present for every type. It is `some` when the type has a `TunableGen`
+    instance, and `none` when it does not.
 
-    This is the `TycheFeatures` pattern — a class with a low-priority catch-all — and it is here for
-    the same reason: `TestDecl.property` has to record the retuning *at the site where `α` is still
-    known*, because `Body.sampled` then packs `α` away existentially and nothing downstream can
-    recover it. `@[strata_property (tuning := θ)]` applies whatever was recorded; a type with no
-    `TunableGen` instance records `none`, and asking to tune it fails loudly (see
-    `TestDecl.withTuning`) rather than silently doing nothing. -/
+    This is the `TycheFeatures` pattern, a class with a low-priority catch-all, and it is here for the
+    same reason. `TestDecl.property` must record the retuning *where `α` is still known*, because
+    `Body.sampled` then packs `α` away existentially and nothing downstream can recover it.
+    `@[strata_property (tuning := θ)]` applies whatever the property recorded. A type with no
+    `TunableGen` instance records `none`, and a request to tune it then fails loudly rather than does
+    nothing. -/
 class MaybeTunable (α : Type) where
   retune? : Option (Retuning α)
 
@@ -201,10 +200,10 @@ inductive Body where
       * `dec` is what the Tyche panel and the shrinker need, since both must *decide*
         each candidate rather than merely test it.
 
-      `retune?` is a third passenger of the same kind: how to rebuild `runner.gen` from a
-      `Tuning`, when the input type has a `TunableGen` instance. It has to be captured here
-      too, because this is the last place `α` is known — `@[strata_property (tuning := θ)]`
-      applies it afterwards, when `α` is gone. See `MaybeTunable`. -/
+      `retune?` is a third passenger of the same kind. It says how to rebuild `runner.gen`
+      from a `Tuning`, when the input type has a `TunableGen` instance. It must be captured
+      here too, because this is the last place where `α` is known.
+      `@[strata_property (tuning := θ)]` applies it afterwards, when `α` is gone. -/
   | sampled {α : Type} (runner : PropertyRunner α) (check : α → Prop)
       (dec : DecidablePred check) (inst : ∀ x, Testable (check x))
       (retune? : Option (Retuning α))
@@ -345,36 +344,36 @@ def TestDecl.property (name : String)
 def TestDecl.forAll (name : String) (runner : PropertyRunner α) (check : α → Prop)
     [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]
     (gate : Option String := none) : TestDecl :=
-  -- No retuning: this property's generator was given explicitly, so there is nothing for a
-  -- `Tuning` to act on. `@[strata_property (tuning := …)]` on one of these says so.
+  -- No retuning. This property names its generator explicitly, so a `Tuning` has nothing to act on,
+  -- and `@[strata_property (tuning := …)]` on one of these says so.
   { name, gate, body := .sampled runner check dec inst none }
 
-/-- **Retune a property's generator.** Replaces the generator of a sampled property with the same
-    generator reading its branch weights from `θ`, and records `label` on the property's Tyche
-    breakdown so panels of the same claim under different weightings stay distinguishable.
+/-- **Retune a property's generator.** Replaces the generator of a sampled property by the same
+    generator with its branch weights read from `θ`. It also records `label` on the property's Tyche
+    breakdown, so panels of one claim under different weightings stay apart.
 
-    This is what `@[strata_property (tuning := θ)]` applies. Three things make a tuning
-    inapplicable, and all three fail loudly rather than quietly ignoring `θ`: an input type with no
-    `TunableGen` instance; a property stated with `TestDecl.forAll`, whose generator was given
-    explicitly; and a `θ` whose length does not match the generator's arity, which `Tuning.weight`
-    would otherwise read past the end of (returning the default `(1, 0)`) rather than reject. The
-    failure is a property that reports the reason, so it shows up as a red line naming the mistake
-    instead of a silently untuned — or silently *mis*-tuned — run.
+    This is what `@[strata_property (tuning := θ)]` applies. Three things make a tuning inapplicable,
+    and each fails loudly rather than ignores `θ`. The input type may have no `TunableGen` instance.
+    The property may come from `TestDecl.forAll`, which names its generator explicitly. Or the length
+    of `θ` may not match the generator's arity, and `Tuning.weight` would then read past the end of
+    the schedule and answer with the default `(1, 0)`. Each failure becomes a property that reports
+    the reason, so a mistake shows up as a red line rather than as a run that is untuned, or worse,
+    *mis*-tuned.
 
-    A bespoke Tyche panel is **dropped** here, falling back to the derived one. A panel attached by
-    `TestDecl.withPanel` closes over its own sampler and over the property's name at construction
-    time, so under a tuning it would plot the untuned generator and (in a `underTuningsOf` matrix)
-    write every row under one name, collapsing them in `tyche_output.jsonl`. The derived panel
-    samples `runner.gen`, which is the tuned generator, and takes its title from `d.name` when it
-    runs, so it survives the rename each row gets. -/
+    A bespoke Tyche panel is **dropped** here, and the derived panel takes over. A panel that
+    `TestDecl.withPanel` attaches closes over its own sampler, and over the property's name, when the
+    property is built. Under a tuning it would therefore plot the untuned generator. In a matrix of
+    weightings it would also write every row under one name, which collapses the rows in
+    `tyche_output.jsonl`. The derived panel samples `runner.gen`, which is the tuned generator, and it
+    takes its title from `d.name` as it runs, so it survives the rename that each row gets. -/
 def TestDecl.withTuning (θ : Tuning) (label : String) (d : TestDecl) : TestDecl :=
   match d.body with
   | .sampled runner check dec inst (some r) =>
     if θ.schedules.size != r.arity then
       tuningUnavailable d s!"the tuning carries {θ.schedules.size} weight schedules and this \
-        property's generator exposes {r.arity} — a tuning built for a different generator would be \
-        read index by index against the wrong branches, since `Tuning.weight` answers an \
-        out-of-range index with the default weight rather than failing"
+        property's generator exposes {r.arity}. A tuning built for a different generator is read \
+        index by index against the wrong branches, because `Tuning.weight` answers an out-of-range \
+        index with the default weight rather than fails"
     else
       let runner' : PropertyRunner _ :=
         { runner with
@@ -383,9 +382,8 @@ def TestDecl.withTuning (θ : Tuning) (label : String) (d : TestDecl) : TestDecl
       { d with panel := none, body := .sampled runner' check dec inst (some r) }
   | .sampled _ _ _ _ none =>
     tuningUnavailable d
-      "its input type has no `TunableGen` instance, or the property was stated with \
-       `TestDecl.forAll`, whose generator is given explicitly — either way a tuning has nothing \
-       to act on"
+      "its input type has no `TunableGen` instance, or the property comes from `TestDecl.forAll`, \
+       which names its generator explicitly. Either way, a tuning has nothing to act on"
   | _ => tuningUnavailable d "it does not sample a generated input"
 where
   /-- A property that fails with an explanation, so a tuning that cannot be applied is a red line
@@ -396,29 +394,31 @@ where
         message := some s!"a tuning was requested for this property, but {why}" }
     { d with tyche := false, panel := none, body := .action fun _ => pure res }
 
-/-- Rename a property. Used to suffix a weighting's label, so each row of a matrix has its own
-    (unique) name. -/
+/-- Rename a property. A matrix of weightings appends each label, so that every row has its own
+    unique name. -/
 def TestDecl.rename (name : String) (d : TestDecl) : TestDecl := { d with name }
 
-/-- **One claim, several distributions.** The same property once per labelled weighting, each named
-    `"⟨name⟩ [⟨label⟩]"` so each gets its own verdict, its own reported line and its own Tyche panel.
+/-- **One claim, several distributions.** Registers the same property once per labelled weighting.
+    Each row is named `"⟨name⟩ [⟨label⟩]"`, so each has its own verdict, its own reported line and its
+    own Tyche panel.
 
-    This is what `@[strata_property (tunings := …)]` applies, and it is usually what you want over a
-    single tuning: the interesting question is rarely "does the property hold under this weighting"
-    but "does it hold under this one *and* the default". A row that passes at the defaults and fails
-    loop-heavy is a distribution-sensitive defect, and it gates CI here rather than living in a report.
+    This is what `@[strata_property (tunings := …)]` applies, and it is usually better than a single
+    tuning. The interesting question is rarely whether a property holds under one weighting. It is
+    whether the property holds under that weighting *and* under the default. A row that passes at the
+    defaults and fails loop-heavy is a distribution-sensitive defect, and it gates CI here rather than
+    sits in a report.
 
-    Pass a generator's own `.defaults` for the untuned row: `genWith defaults` is the type's
+    Pass a generator's own `.defaults` for the untuned row. `genWith defaults` is the type's
     `Arbitrary` instance, so that row is exactly the property as written. -/
 def TestDecl.underTuningsOf (tunings : List (String × Tuning)) (d : TestDecl) : List TestDecl :=
   tunings.map fun (label, θ) => (d.withTuning θ label).rename s!"{d.name} [{label}]"
 
-/-- **A property over a tuned generator**, stated as a term rather than through the attribute:
+/-- **A property over a tuned generator**, stated as a term rather than through the attribute. It is
     `TestDecl.property` with the input's branch weights read from `θ`.
 
-    Prefer `@[strata_property (tuning := θ)]`, which says the same thing without repeating the
-    property's shape. This exists for a property built programmatically, where an attribute has no
-    declaration to attach to. -/
+    Prefer `@[strata_property (tuning := θ)]`, which says the same thing and does not repeat the
+    property's shape. This definition serves a property that a program builds, where an attribute has
+    no declaration to attach to. -/
 def TestDecl.tuned (name : String) (θ : Tuning)
     [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α] [MaybeTunable α]
     (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]

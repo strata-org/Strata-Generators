@@ -9,18 +9,18 @@ proven sound *and* complete against the declarative typing spec, so it is a
 certified-well-typed oracle input for the statement typechecker and the
 statement-level transformations. Every claim here is currently unproven upstream.
 
-Two of the properties below name their *distribution* as well as their check. Soundness
-and completeness say every sample is well-typed and every well-typed program is
-reachable; neither says how *often* a shape appears, and `LoopElim`'s two properties are
-the identity on a loop-free program — where they degenerate into
-`stmt: typechecker accepts generated statements`, which is already tested. `dist-report`
-measures a loop in 23–26% of statement lists at the source weights and 80–82% under
-`stmtLoopHeavy`, with a loop inside a loop — where a loop-elimination pass is likeliest
-to be wrong — going 0–2% to 27–28%. So those two are registered under both weightings, by naming them
-in the registration attribute: `@[strata_property (tunings := …)]`. Each row is its own
-verdict and its own Tyche panel, and the `[default]` row is exactly the property as
-written, since `genWith defaults` is the type's `Arbitrary` instance (pinned by `rfl` in
-`StrataGenerators.Test.Generators`).
+Two of the properties below name their *distribution* as well as their check. Soundness and
+completeness say that every sample is well-typed and that every well-typed program is
+reachable. Neither says how *often* a shape appears. `LoopElim`'s two properties are the
+identity on a loop-free program, where they degenerate into `stmt: typechecker accepts
+generated statements`, which the suite already tests.
+
+`dist-report` measures a loop in 23–26% of statement lists at the source weights, and in
+80–82% under `stmtLoopHeavy`. A loop inside a loop goes from 0–2% to 27–28%, and that is
+where a loop-elimination pass is most likely to be wrong. So those two properties are
+registered under both weightings, through `@[strata_property (tunings := …)]`. Each row has
+its own verdict and its own Tyche panel. The `[default]` row is exactly the property as
+written, because `genWith defaults` is the type's `Arbitrary` instance.
 -/
 
 open Lambda Core Imperative
@@ -28,7 +28,7 @@ open StrataGenerators.Test
 open StrataGenerators.Stmt.TestSupport
 open StrataGenerators.TuningProfiles
 
-/-- The four statement transform / typechecker properties whose default distribution is
+/-- The four statement transform and typechecker properties whose default distribution is
     adequate. The two `LoopElim` claims are registered separately, under two weightings. -/
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
@@ -42,35 +42,36 @@ def stmtTransforms : List TestDecl :=
       ("stmt: mapExprs id = id",
        fun gs => checkMapExprsId gs.stmts) ]
 
-/-- `LoopElim` preserves typeability — checked at the source weights *and* at weights
-    that make a loop the modal statement, since the claim has no content without one. -/
+/-- `LoopElim` preserves typeability. It is checked at the source weights *and* at weights
+    that make a loop the modal statement, because the claim has no content without a loop. -/
 @[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
 def loopElimPreservesTyping : TestDecl :=
   .property "stmt: LoopElim preserves typeability"
     fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
 
-/-- `LoopElim` eliminates every loop. Vacuously true on a loop-free program, so the
-    loop-heavy row is the one that carries the claim.
+/-- `LoopElim` eliminates every loop. The claim is vacuously true on a loop-free program, so the
+    loop-heavy row is the row that carries it.
 
-    **Both rows currently FAIL, and the mechanism is not the weights.** `Core.removeLoop`
-    throws on a loop that still carries an invariant or a measure, and `loopElimStmts`
-    returns the input unchanged when the pass throws (see its docstring), so such a loop
-    survives and the count is not zero. Machine-checked, with no generator involved:
+    **Both rows fail, and the weights are not the mechanism.** `Core.removeLoop` throws on a loop that
+    still carries an invariant or a measure. `loopElimStmts` returns the input unchanged when the pass
+    throws, so such a loop survives and the count is not zero.
+    This is machine-checked with no generator involved:
     `checkLoopElimZeroLoops [.loop .nondet none [("i", .const () (.boolConst true))] [] .empty]`
-    is `false`, while the same loop without the invariant gives `true`. An
-    invariant-bearing loop appears in 16% of samples at the source weights and 56–58% under
-    `stmtLoopHeavy`, which is why the loop-heavy row fails faster rather than differently.
-    The claim as stated is really "…unless the pass throws"; the fix is upstream (or in the
-    property), and this pins it either way. -/
+    is `false`, and the same loop without the invariant gives `true`.
+
+    An invariant-bearing loop appears in 16% of samples at the source weights and in 56–58%
+    under `stmtLoopHeavy`. That is why the loop-heavy row fails faster rather than differently.
+    The claim as stated really reads "unless the pass throws". The fix belongs upstream, or in
+    the property, and this property pins the defect either way. -/
 @[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
 def loopElimZeroLoops : TestDecl :=
   .property "stmt: LoopElim eliminates all loops"
     fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
 
-/-- `StmtToKleeneStmt` is defined exactly when the block has no
-    `exit`/`funcDecl`/`typeDecl` — and, for the invariant-loop caveat, not defined
-    when an invariant-bearing loop is present. Its panel records the definedness
-    verdict *and* why, so it keeps a bespoke one. -/
+/-- `StmtToKleeneStmt` is defined exactly when the block holds no `exit`, no `funcDecl` and
+    no `typeDecl`. For the invariant-loop caveat, it is also undefined when the block holds an
+    invariant-bearing loop. Its panel records the definedness verdict *and* the reason, so this
+    property keeps a bespoke panel. -/
 @[strata_property]
 def stmtKleeneDefinedIff : TestDecl :=
   (TestDecl.property "stmt: DetToKleene defined iff supported"

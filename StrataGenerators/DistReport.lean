@@ -8,38 +8,40 @@ import Basalt.PlausibleGen
 /-!
 # `dist-report`: measuring what a tuning actually generates
 
-The profiles in `StrataGenerators.TuningProfiles` are claims about a distribution ("this makes
-loops common"). This module checks them: it samples each family's generator under each profile and
-counts how often the shapes the properties discriminate on actually appear. It is the "empirically
-derive" half of choosing weights — pick a candidate, run `lake exe dist-report`, read the column
-that matters, adjust.
+Each profile in `StrataGenerators.TuningProfiles` is a claim about a distribution, such as "this makes
+loops common". This module checks those claims. It samples each family's generator under each profile,
+and counts how often the shapes that the properties discriminate on appear. This is how to derive a
+weight empirically: pick a candidate, run `lake exe dist-report`, read the column that matters, and
+adjust.
 
-Every column is either
+Every column is a coverage column or a cost column.
 
-* the **precondition of a property** in the suite — the shape without which that property is
-  vacuous or trivially true (`loop` for `stmt: LoopElim …`, `≥1 call` for the FilterProcedures
-  family, a quantifier for `expr: progress`), or a *witness that a transform did something*
-  (`LoopElim≠id`, `ANF≠id`, `PE fires`), which is the sharpest available form of "not vacuous"; or
-* a **cost**: `1st-try`, the fraction of draws that succeed with no retry, and `dropped`, the
-  fraction that produced nothing even after the retry budget. The generators are partial — a
-  sub-generator with empty support throws and `retryGen` redraws the *whole* sample — so a profile
-  that steers into failure-prone shapes buys coverage with generation time. Seeing that next to the
-  coverage it bought is the point.
+A **coverage** column is the precondition of a property in the suite, which is the shape without which
+that property is vacuous or trivially true. A `loop` for `stmt: LoopElim …`, one `call` for the
+FilterProcedures family and a quantifier for `expr: progress` are such shapes. A coverage column can
+instead witness that a transform did something, as `LoopElim≠id`, `ANF≠id` and `PE fires` do. That
+witness is the sharpest available form of "not vacuous".
 
-**Two denominators, and which column uses which.** A coverage column is a fraction of the samples
-that *exist*, so its denominator excludes dropped draws; sharing the cost columns' denominator would
-scale every coverage figure down by the drop rate and read as a distribution change that never
-happened. `1st-try` and `dropped` are fractions of draws *attempted*, so they keep the full count.
+A **cost** column is one of two. `1st-try` is the fraction of draws that succeed with no retry, and
+`dropped` is the fraction that produce nothing even after the retry budget. The generators are
+partial: a sub-generator with empty support throws, and `retryGen` then redraws the *whole* sample. So
+a profile that steers into failure-prone shapes buys its coverage with generation time. The point of
+these two columns is to show that price next to the coverage it bought.
 
-Samples are drawn exactly as the suite draws them: the same `size`/`len` schedules as
-`TestScaffold`'s `Arbitrary` instances, the same operator contexts (`coreMonoOps` for statements
-and commands, `corePartialOps` for procedures), the same `retryGen` budgets. So a rate here is the
-rate the corresponding property sees.
+**The two kinds of column use different denominators.** A coverage column is a fraction of the samples
+that *exist*, so its denominator excludes a dropped draw. The cost denominator would scale every
+coverage figure down by the drop rate, and that would read as a change in the distribution that never
+happened. `1st-try` and `dropped` are fractions of the draws *attempted*, so they keep the full count.
 
-**One caveat, stated in the output too.** The command rows measure the `GenCmdsWithCtx` chain, which
-starts from the empty context; the four `GenCmdWithCtx` properties draw one command against a
-context a first chain built, which conditions on a non-empty context and so reports higher `set`
-rates from the same weights (see `cmdsGen`).
+Samples are drawn as the suite draws them. The `size` and `len` schedules are those of
+`TestScaffold`'s `Arbitrary` instances. The operator contexts are the suite's: `coreMonoOps` for
+statements and commands, and `corePartialOps` for procedures. The `retryGen` budgets are the suite's
+too. A rate here is therefore the rate that the corresponding property sees.
+
+**One caveat, which the output repeats.** The command rows measure the `GenCmdsWithCtx` chain, and that
+chain starts from the empty context. The four `GenCmdWithCtx` properties draw one command against a
+context that a first chain built. They condition on a non-empty context, so they see a higher `set`
+rate from the same weights.
 -/
 
 open Lambda Core Imperative Plausible
@@ -67,8 +69,8 @@ def mean1 (sum n : Nat) : String :=
 
 def padTo (w : Nat) (s : String) : String := s ++ "".pushn ' ' (w - min w s.length)
 
-/-- One table: a fixed label column, then one column per header, each as wide as the widest of its
-    header and its cells. -/
+/-- Print one table. The label column has a fixed width. Each other column is as wide as the wider of
+    its header and its widest cell. -/
 def printTable (title : String) (labelWidth : Nat) (headers : List String)
     (rows : List (String × List String)) : IO Unit := do
   let widths := headers.zipIdx.map (fun (h, j) =>
@@ -87,9 +89,9 @@ def printTable (title : String) (labelWidth : Nat) (headers : List String)
 -- Drawing
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-- Draw once at Plausible size `size`, reporting whether the *first* attempt
-    succeeded. On failure, retry with `fuel` (exactly as the suite's `Arbitrary`
-    instances do) so the sample set is the suite's, not a biased subset of it. -/
+/-- Draw once at Plausible size `size`, and report whether the *first* attempt succeeded. On a
+    failure, retry with `fuel`, as the suite's `Arbitrary` instances do. The sample set is then the
+    suite's, and not a biased subset of it. -/
 def draw (g : Plausible.Gen α) (fuel size : Nat) : IO (Option α × Bool) := do
   match ← (try (some <$> Gen.run g size) catch _ => pure none) with
   | some a => pure (some a, true)
@@ -102,9 +104,9 @@ def draw (g : Plausible.Gen α) (fuel size : Nat) : IO (Option α × Bool) := do
 -- Statement family
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-- Deepest chain of nested `loop`s. `stmt: LoopElim …` is most likely to catch a
-    pass bug at depth ≥ 2, which one loop weight cannot buy unless the tuning
-    threads through the recursion. -/
+/-- The deepest chain of nested `loop`s. `stmt: LoopElim …` is most likely to catch a defect in the
+    pass at depth 2 or more, and one loop weight buys that only when the tuning threads through the
+    recursion. -/
 partial def loopNesting : Statement → Nat
   | .loop _ _ _ body _ => 1 + (body.map loopNesting).foldl max 0
   | .block _ body _ => (body.map loopNesting).foldl max 0
@@ -115,8 +117,8 @@ def isCallStmt : Statement → Bool
   | .call _ _ _ => true
   | _ => false
 
-/-- The statement family's sample, drawn with `TestScaffold.genStmtsWith`'s
-    `size`/`len` schedule but through the tuned entry point. -/
+/-- The statement family's sample. It uses the `size` and `len` schedule of
+    `TestScaffold.genStmtsWith`, and draws through the tuned entry point. -/
 def stmtsGen (θ : Tuning) (s : Nat) : Gen (List Statement) := do
   let size := max 1 (min 3 (s / 25))
   let len := max 1 (min 4 (s / 20))
@@ -180,8 +182,8 @@ def stmtHeaders : List String :=
 -- Procedure family
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-- The procedure family's sample: `TestScaffold.genProcsWith` verbatim, except
-    that each body is drawn through `genProcedureT θ`. -/
+/-- The procedure family's sample. It is `TestScaffold.genProcsWith`, and it draws each body through
+    `genProcedureT θ`. -/
 def procsGen (θ : Tuning) (s : Nat) : Gen (List Procedure) := do
   let n := max 2 (min 4 (2 + s / 30))
   let size := max 1 (min 2 (s / 30))
@@ -195,16 +197,16 @@ def procsGen (θ : Tuning) (s : Nat) : Gen (List Procedure) := do
     (([], []) : List Procedure × StrataGenerators.Stmt.ProcSigCtx)
   pure (relabelProcs ps)
 
-/-- Did PrecondElim rewrite the program at all? This is the precondition of all
-    thirteen `proc: PrecondElim …` properties: on a program with no partial call
-    and no declared precondition the pass is the identity and every one of them
-    holds for a reason that has nothing to do with the pass. -/
+/-- Did PrecondElim rewrite the program at all? This is the precondition of all thirteen
+    `proc: PrecondElim …` properties. The pass is the identity on a program with no partial call and no
+    declared precondition. Every one of those properties then holds for a reason that has nothing to do
+    with the pass. -/
 def precondFires (prog : Program) : Bool :=
   match runPhase Core.precondElimPipelinePhase prog with
   | some (_, out) => decide (out ≠ prog)
   | none => false
 
-/-- Did PrecondElim emit a well-formedness procedure? That is the shape
+/-- Did PrecondElim emit a well-formedness procedure? That is the shape that
     `proc: PrecondElim $wf procs are well-formed` inspects. -/
 def precondEmitsWF (prog : Program) : Bool :=
   match runPhase Core.precondElimPipelinePhase prog with
@@ -215,19 +217,18 @@ def precondEmitsWF (prog : Program) : Bool :=
       | _ => false)
   | none => false
 
-/-- Did FilterProcedures remove anything, with only the first procedure as the
-    entry target? The five `FilterCorrect` fields are about what a removal keeps;
-    on a run that removes nothing they are all trivially satisfied. -/
+/-- Did FilterProcedures remove anything, with the first procedure as the only entry target? The five
+    `FilterCorrect` fields say what a removal keeps, so a run that removes nothing satisfies all five
+    trivially. -/
 def filterDrops (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
   match runPhase (Core.filterProceduresPipelinePhase ["P0"] true) prog with
   | some (_, out) => out.decls.length < prog.decls.length
   | none => false
 
-/-- Did `CommonSubexprElim` (the pass formerly called ANFEncoder) rewrite the program?
-    It hoists a *duplicated* non-leaf subexpression into a `var`, so this fires only when
-    two independently drawn subterms happen to coincide — see the note in
-    `StrataGenerators.TuningProfiles` on why no weight buys this reliably. -/
+/-- Did `CommonSubexprElim` rewrite the program? The pass hoists a *duplicated* non-leaf subexpression
+    into a `var`, so it fires only when two independent draws coincide.
+    `StrataGenerators.TuningProfiles` says why no weight buys that reliably. -/
 def anfChanges (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
   match runPhase Core.commonSubexprElimPhase prog with
@@ -290,15 +291,15 @@ def isCheck : Cmd Expression → Bool
   | .assert _ _ _ | .assume _ _ _ | .cover _ _ _ => true
   | _ => false
 
-/-- The command family's sample: `TestScaffold.genCmdsWithCtx` verbatim — one chain of four
-    commands from the **empty** context — through the tuned chain.
+/-- The command family's sample. It is `TestScaffold.genCmdsWithCtx`, one chain of four commands from
+    the **empty** context, drawn through the tuned chain.
 
-    The empty start is not incidental. `genCmd` has two sites, and only the first (reached when
-    something in the context is writable) offers `set` at all, so the first command of a chain can
-    never be one; measuring against a pre-built context would report a `set` rate the
-    `GenCmdsWithCtx` properties never see. The four `GenCmdWithCtx` properties draw *one* command
-    against a context a first chain built, which is the second site's distribution conditioned on a
-    non-empty context — the same weights, so a profile moves both, but not the same rates. -/
+    The empty start is not incidental. `genCmd` has two sites, and only the site that a writable context
+    reaches offers `set`. The first command of a chain can therefore never be a `set`. A measurement
+    against a pre-built context would report a `set` rate that the `GenCmdsWithCtx` properties never
+    see. The four `GenCmdWithCtx` properties draw *one* command against a context that a first chain
+    built, which is the second site conditioned on a non-empty context. The weights are the same, so a
+    profile moves both, but the rates are not the same. -/
 def cmdsGen (θ : Tuning) : Gen (List (Cmd Expression) × VarCtx × VarCtx) := do
   let (cmds, outCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 4
   pure (cmds, [], outCtx)
@@ -350,15 +351,15 @@ partial def countQuant : LExpr' → Nat
   | .eq _ a b => countQuant a + countQuant b
   | _ => 0
 
-/-- Is the term already a value — a constant, a variable, or an operator with no
-    arguments? `expr: preservation` and `expr: progress` are about `LExpr.eval`,
-    and on a value they hold without the evaluator taking a step. -/
+/-- Is the term already a value? A constant, a variable and an operator with no arguments are values.
+    `expr: preservation` and `expr: progress` are about `LExpr.eval`, and on a value they hold without
+    the evaluator taking a step. -/
 def isLeaf : LExpr' → Bool
   | .bvar _ _ | .fvar _ _ _ | .op _ _ _ | .const _ _ => true
   | _ => false
 
-/-- Operator occurrences: the route by which a partial builtin (`Int.SafeDiv`) — and hence a
-    PrecondElim obligation — can enter a term. -/
+/-- Count the operator occurrences. An operator is how a partial builtin such as `Int.SafeDiv` enters
+    a term, and such a builtin is what gives PrecondElim an obligation. -/
 partial def countOps : LExpr' → Nat
   | .op _ _ _ => 1
   | .abs _ _ _ b => countOps b
@@ -368,8 +369,8 @@ partial def countOps : LExpr' → Nat
   | .quant _ _ _ _ tr b => countOps tr + countOps b
   | _ => 0
 
-/-- Does the term mention a free variable? `expr: eval preserves fvars` is about *not introducing*
-    one, so a term with none satisfies it for no interesting reason. -/
+/-- Does the term mention a free variable? `expr: eval preserves fvars` says that evaluation
+    introduces no new one, so a term with none satisfies it for no interesting reason. -/
 partial def hasFVarNode : LExpr' → Bool
   | .fvar _ _ _ => true
   | .abs _ _ _ b => hasFVarNode b
@@ -383,13 +384,13 @@ def hasRedexKind : LExpr' → Bool
   | .app _ _ _ | .ite _ _ _ _ | .eq _ _ _ => true
   | _ => false
 
-/-- The expression family's sample: a type, then a term of that type — `TestScaffold`'s
-    `genTypedExprWith` through the tuned entry point, so the root Indir/IndirPoly choice and the
+/-- The expression family's sample: a type, then a term of that type. It is `TestScaffold`'s
+    `genTypedExprWith` through the tuned entry point, so the root Indir and IndirPoly choice and the
     per-subterm `retryGenArg` continuation are the suite's.
 
-    The *type* generator is tuned too, which no property does: `genLMonoTy`'s weights are not
-    threaded into any `TunableGen` instance, so the `tyCompoundHeavy` row is exploratory. Every
-    other row passes `tyDefault`, at which `genLMonoTy.tuned` is `genLMonoTy`. -/
+    This sampler tunes the *type* generator as well, which no property does. `genLMonoTy`'s weights
+    reach no `TunableGen` instance, so the `tyCompoundHeavy` row is exploratory. Every other row passes
+    `tyDefault`, and at `tyDefault` the tuned type generator is `genLMonoTy`. -/
 def exprGen (θty θe : Tuning) (fctx : FVarCtx) (s : Nat) : Gen (LExpr' × LMonoTy) := do
   let depth := max 1 (s / 20)
   let τ ← genLMonoTy.tuned (G := Plausible.Gen) θty [] depth
@@ -443,7 +444,7 @@ def exprHeaders : List String :=
 -- ══════════════════════════════════════════════════════════════════════════
 
 open StrataGenerators.ProgramTuning StrataGenerators.Mono in
-/-- The program family's sample: `TestScaffold.genProgramWith` verbatim, through the tuned
+/-- The program family's sample. It is `TestScaffold.genProgramWith`, drawn through the tuned
     declaration fold. -/
 def programsGen (θ : Tuning) (s : Nat) : Gen Program := do
   let numDecls := max 2 (min 5 (2 + s / 25))
@@ -456,8 +457,8 @@ structure ProgStats where
   polyFn : Nat := 0
   polyData : Nat := 0
   monoFires : Nat := 0
-  /-- Declarations in the pass output. Reported next to `decls` rather than as a difference,
-      because the pass can also *shrink* a program and a `Nat` difference truncates at 0. -/
+  /-- Declarations in the pass output. The table reports it next to `decls` rather than as a
+      difference, because the pass can also *shrink* a program and a `Nat` difference truncates at 0. -/
   outDecls : Nat := 0
   decls : Nat := 0
 
@@ -487,18 +488,18 @@ def programRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
 def programHeaders : List String :=
   ["polyFn", "polyData", "mono≠id", "#decls", "#out", "1st-try", "dropped"]
 
-/-! There is deliberately no property-outcome table here. Running the suite's own properties under
-each profile is what `TestDecl.underTunings` does — one registered property per (claim, weighting)
-pair, each with its own verdict and Tyche panel — so the comparison belongs in the suite, where a
-distribution-sensitive failure gates CI, rather than in a report nobody runs. See
-`StrataTests/Stmt.lean` and `StrataTests/Monomorphization.lean` for the properties that use it. -/
+/-! There is deliberately no property-outcome table here. `TestDecl.underTunings` already runs the
+suite's own properties under each profile. It registers one property per claim and weighting, and each
+gets its own verdict and its own Tyche panel. So that comparison belongs in the suite, where a
+distribution-sensitive failure gates CI, rather than in a report that nobody runs.
+`StrataTests/Stmt.lean` and `StrataTests/Monomorphization.lean` hold the properties that use it. -/
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- The report
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-- The profiles each family is measured under. The first row of every table is
-    the shipping distribution, so every other row reads as a delta against it. -/
+/-- The profiles that each family is measured under. The first row of every table is the shipping
+    distribution, so every other row reads as a difference against it. -/
 def stmtProfiles : List (String × Tuning) :=
   [ ("(default)", stmtDefault),
     ("stmtLoopHeavy", stmtLoopHeavy),
@@ -520,8 +521,8 @@ def cmdProfiles : List (String × Tuning) :=
     ("cmdInitHeavy", cmdInitHeavy),
     ("cmdCheckHeavy", cmdCheckHeavy) ]
 
-/-- Expression rows carry two tunings: the type generator's and the term
-    generator's, since "what shapes appear" depends on both. -/
+/-- An expression row carries two tunings, one for the type generator and one for the term generator.
+    Which shapes appear depends on both. -/
 def exprProfiles : List (String × (Tuning × Tuning × FVarCtx)) :=
   [ ("(default), closed", (tyDefault, exprBreadth, [])),
     ("exprEvalHeavy", (tyDefault, exprEvalHeavy, [])),
@@ -547,33 +548,35 @@ def runFamily {θ : Type} (name : String) (headers : List String) (profiles : Li
   unless note.isEmpty do IO.println s!"  {note}"
 
 def report (samples maxSize : Nat) (families : List String) : IO Unit := do
-  IO.println s!"dist-report: {samples} samples/profile, max size {maxSize}"
+  IO.println s!"dist-report: {samples} samples per profile, max size {maxSize}"
   if families.contains "stmt" then
     runFamily "statements" stmtHeaders stmtProfiles (stmtRow · samples maxSize)
-      ("columns are % of samples; LpElim≠/ANF≠id/Kleene✓ = the transform did something / is "
-       ++ "defined. `call` is structurally 0 here: genProgramStmts is given no callable procedures, "
-       ++ "so a call statement has empty support whatever its weight — see the procedures table")
+      ("every column is a % of samples. LpElim≠ and ANF≠id say the transform did something, and "
+       ++ "Kleene✓ says it is defined. `call` is structurally 0 here, because genProgramStmts gets "
+       ++ "no callable procedure. A call statement then has empty support whatever its weight. See "
+       ++ "the procedures table")
   if families.contains "proc" then
     runFamily "procedures" procHeaders procProfiles (procRow · samples maxSize)
-      ("PE fires = PrecondElim rewrote the program; Filt cut = FilterProcedures removed a decl. "
-       ++ "1st-try is ~100% by construction: the harness retries each procedure individually "
-       ++ "(retryGen 8000) before assembling the list, as TestScaffold does")
+      ("PE fires = PrecondElim rewrote the program. Filt cut = FilterProcedures removed a decl. "
+       ++ "1st-try is near 100% by construction, because the harness retries each procedure on its "
+       ++ "own before it assembles the list, as TestScaffold does")
   if families.contains "cmd" then
     runFamily "commands" cmdHeaders cmdProfiles (fun θ => cmdRow θ samples)
       ("one chain of four commands from the empty context, as GenCmdsWithCtx draws it. The four "
-       ++ "GenCmdWithCtx properties draw one command against a context a first chain built, so "
-       ++ "their `set` rate is higher than `has set` here — same genCmd weights, different "
-       ++ "conditioning; see `cmdsGen`")
+       ++ "GenCmdWithCtx properties draw one command against a context that a first chain built, so "
+       ++ "their `set` rate is higher than `has set` here. The genCmd weights are the same and the "
+       ++ "conditioning is not. See `cmdsGen`")
   if families.contains "expr" then
     runFamily "expressions" exprHeaders exprProfiles (exprRow · samples maxSize)
-      ("closed rows use fctx = [] (the ClosedTypedExpr shape of progress/preservation), open rows "
-       ++ "defaultFCtx; drawn through genLExprT, the entry point the expr: properties use. "
-       ++ "tyCompoundHeavy tunes the *type* generator, which no property does")
+      ("a closed row uses fctx = [], which is the ClosedTypedExpr shape that progress and "
+       ++ "preservation quantify over. An open row uses defaultFCtx. Every row draws through "
+       ++ "genLExprT, the entry point the expr: properties use. tyCompoundHeavy tunes the *type* "
+       ++ "generator, which no property does")
   if families.contains "prog" then
     runFamily "programs" programHeaders programProfiles (programRow · samples maxSize)
-      ("polyFn and polyData = the program declares a polymorphic function, and a polymorphic "
-       ++ "datatype. Those are the two shapes the mono: family needs. mono≠id = "
-       ++ "MonomorphizeFunctions rewrote the program. #out is the output declaration count "
-       ++ "against the input count #decls, so a pass that replaces rather than appends shows here")
+      ("polyFn and polyData say the program declares a polymorphic function, and a polymorphic "
+       ++ "datatype. Those are the two shapes the mono: family needs. mono≠id says "
+       ++ "MonomorphizeFunctions rewrote the program. #out is the output declaration count, against "
+       ++ "the input count #decls, so a pass that replaces rather than appends shows here")
 
 end StrataGenerators.DistReport

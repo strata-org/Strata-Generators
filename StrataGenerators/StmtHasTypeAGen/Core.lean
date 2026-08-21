@@ -468,36 +468,37 @@ mutual
     *list*; every other branch returns a singleton.
 
     The generated statements satisfy `StatementsHasTypeA P C Γ ss C' Γ'` (for any
-    program `P`) — see `genStmt_sound`.
+    program `P`). `genStmt_sound` proves it.
 
-    Tagged `@[tunable]`, so every branch weight is a runtime knob: `genStmt.tuned θ`
-    reads them from `θ`. The two sites are the `size = 0` leaf list (arity 5) and the
-    `size + 1` list (arity 9), the latter having `loop` at flat index 13 — the knob a
-    loop-transformation test wants turned up. Weights are *constant* rather than
-    `size`-indexed (no `depth` binder is in scope, so each site reads its schedule at
-    depth 0): unlike an expression generator this recursion cannot run away, since the
-    nesting branches exist only at `size + 1` and generate their bodies at `size`, so a
-    decaying schedule has nothing to protect against. See
-    `StrataGenerators.TuningProfiles` for the profiles the suite uses, and
-    `TuningPrototypes.genStmt_mutual_tuned_eq` for the proof that no `θ` changes what is
-    reachable.
+    Tagged `@[tunable]`, so every branch weight is a runtime knob, and `genStmt.tuned θ`
+    reads each weight from `θ`. There are two sites: the `size = 0` leaf list has arity 5,
+    and the `size + 1` list has arity 9. The second site carries `loop` at flat index 13,
+    which is the knob that a loop-transformation test wants turned up.
 
-    **Why `exit`/`call` fall back to a command.** `exit` needs an enclosing block label
-    and `call` needs a callee, so with `labels = []` / `procs = []` those generators have
-    *empty support* and can only throw. They used to be pruned by the weight
-    `if labels.isEmpty then 0 else 1`, which `frequency` skips — but a weight computed by
-    an `if` is invisible to `@[tunable]`, and a literal `0` is rejected outright (it
-    would break support-completeness). Pruning the *branch* instead of its weight —
-    deferring to `genCmdStmt`, which branch 0 already offers — keeps every weight a
-    positive literal and is equally throw-free. The branch's support is then either
-    `genExitStmt`'s or a subset of branch 0's, so the union over the list, i.e.
-    `genStmt`'s support, is unchanged; that is why the soundness and completeness proofs
-    go through with only a `cases labels` / `cases procs` added.
+    The weights are *constant* rather than indexed by `size`, because no `depth` binder is
+    in scope and each site therefore reads its schedule at depth 0. This recursion cannot
+    run away, unlike an expression generator's: the nesting branches exist only at
+    `size + 1`, and they generate their bodies at `size`. A decaying schedule has nothing to
+    protect against. `StrataGenerators.TuningProfiles` holds the profiles that the suite
+    uses.
 
-    The distributions differ in one respect, which is not a regression but is worth
-    knowing: where the old generator renormalised over the surviving branches, this one
-    hands the pruned branches' share to `cmd`, leaving `funcDecl` and `typeDecl`
-    slightly rarer in a label-free, callee-free scope than before. -/
+    **Why `exit` and `call` fall back to a command.** An `exit` needs an enclosing block
+    label, and a `call` needs a callee. With `labels = []` or with `procs = []` those
+    generators have *empty support* and can only throw. The weight
+    `if labels.isEmpty then 0 else 1` used to prune them, and `frequency` skips a
+    zero-weight branch. But `@[tunable]` cannot see a weight that an `if` computes, and it
+    rejects a literal `0`, which would break support-completeness.
+
+    So the *branch* prunes itself instead of its weight: it defers to `genCmdStmt`, which
+    branch 0 already offers. Every weight stays a positive literal, and the generator stays
+    throw-free. The branch's support is then `genExitStmt`'s support, or a subset of branch
+    0's, so the union over the list is unchanged. `genStmt`'s support is that union, which is
+    why the soundness and completeness proofs need only a `cases labels` or a `cases procs`.
+
+    The two distributions differ in one respect. This is not a regression, and it is worth
+    knowing. The old generator renormalised over the surviving branches. This one hands the
+    share of a pruned branch to `cmd`, which leaves `funcDecl` and `typeDecl` slightly rarer
+    in a scope with no label and no callee. -/
 @[tunable]
 def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
@@ -506,10 +507,10 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) :
     Nat → G GenStmtResult
   | 0 =>
-    -- `exit` needs an enclosing block label and `call` needs a callee: with
-    -- `labels = []` / `procs = []` those generators have *empty support* and can only
-    -- throw, so the branch defers to `genCmdStmt` — branch 0's generator — instead.
-    -- See the docstring for why the pruning moved from the weight into the branch.
+    -- An `exit` needs an enclosing block label, and a `call` needs a callee. With
+    -- `labels = []` or with `procs = []` those generators have *empty support* and can only
+    -- throw, so the branch defers to `genCmdStmt`, which is branch 0's generator. The
+    -- docstring says why the pruning moved from the weight into the branch.
     frequency
       [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx 0 pctx),
         (1, fun () =>
@@ -522,8 +523,8 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
           else genCallStmt octx tvars immutableVars procs C ctx 0 pctx) ]
       (by show 0 < 4+1+1+1+3; omega)
   | size + 1 =>
-    -- See the `size = 0` case: `exit`/`call` defer to `genCmdStmt` when their own
-    -- support is provably empty (no enclosing label / no callee).
+    -- As in the `size = 0` case, `exit` and `call` defer to `genCmdStmt` when their own
+    -- support is provably empty, which happens with no enclosing label and with no callee.
     frequency
       [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
         (1, fun () =>

@@ -82,8 +82,8 @@ def registryEntries (env : Environment) : Array Entry :=
 
 /-! ## Attribute syntax
 
-Both registration attributes take an optional weighting, so a property can state the *distribution*
-it is checked over where it states its name and its check:
+Both registration attributes take an optional weighting. A property can therefore state the
+*distribution* it is checked over in the same place as its name and its check.
 
 ```lean
 @[strata_property (tuning := stmtLoopHeavy)]
@@ -95,22 +95,23 @@ def loopElimPreserves : TestDecl :=
   .property "stmt: LoopElim preserves typeability" fun gs => checkLoopElimPreservesTyping gs.stmts
 ```
 
-`(tuning := θ)` registers the property with `θ`'s weights. `(tunings := [(label, θ), …])` registers it
-once per weighting, named `"⟨name⟩ [⟨label⟩]"` — usually what you want, since the useful question is
-whether a claim holds under a weighting *and* under the default.
+`(tuning := θ)` registers the property with `θ`'s weights. `(tunings := [(label, θ), …])` registers
+it once per weighting, and names each row `"⟨name⟩ [⟨label⟩]"`. The second form is usually the one you
+want, because the useful question is whether a claim holds under a weighting *and* under the default.
 
-The attribute needs a declaration of its own to hold the result, so it emits `⟨decl⟩.tuned` (a
-`TestDecl`, or a `List TestDecl` for `tunings`) and registers *that*. The property the author wrote
-stays as it is, unregistered; nothing user-visible changes, because a property is reported under the
-name in its own string.
+The attribute needs a declaration of its own to hold the result. It therefore emits `⟨decl⟩.tuned` and
+registers that instead. The emitted declaration is a `TestDecl`, or a `List TestDecl` for `tunings`.
+The property the author wrote stays as it is and goes unregistered. Nothing user-visible changes,
+because a report names a property by the string the property carries.
 
-The mechanism is `TestDecl.withTuning`, which needs no cooperation from the property's shape: the
-retuning was recorded in `Body.sampled` when `α` was still known (see `MaybeTunable`), so the
-attribute is a one-line term and works for a `.property`, a `.withPanel`, or a whole `family`. A
-property whose input type is not tunable, or whose `θ` is the wrong length for its generator, does
-not silently ignore the request — it becomes a property that fails with the reason. A `.withPanel`
-property keeps its verdict but loses its bespoke panel to the derived one, because a hand-written
-panel closes over its own untuned sampler; `TestDecl.withTuning` says why.
+The mechanism is `TestDecl.withTuning`, and it needs no cooperation from the property's shape. The
+retuning went into `Body.sampled` while `α` was still known, so the attribute is a one-line term. It
+works for a `.property`, for a `.withPanel`, and for a whole `family`.
+
+Two requests fail rather than go unnoticed: a property whose input type is not tunable, and a `θ`
+whose length does not match its generator. Each becomes a property that reports the reason. A
+`.withPanel` property keeps its verdict and loses its bespoke panel to the derived one, because a
+hand-written panel closes over its own untuned sampler. `TestDecl.withTuning` says why.
 -/
 
 /-- The optional weighting on a registration attribute: `(tuning := θ)` for one, or
@@ -123,9 +124,9 @@ syntax (name := strataPropertiesAttr) "strata_properties" (tuningSpec)? : attr
 
 /-- Which of the two forms was written, and the weighting term. -/
 private inductive TuningArg where
-  /-- `(tuning := θ)` — one weighting. -/
+  /-- `(tuning := θ)`: one weighting. -/
   | one (stx : Term)
-  /-- `(tunings := [(label, θ), …])` — a labelled matrix. -/
+  /-- `(tunings := [(label, θ), …])`: a labelled matrix. -/
   | many (stx : Term)
 
 /-- Read the optional `tuningSpec` off an attribute's syntax. -/
@@ -137,14 +138,15 @@ private def parseTuningArg? (stx : Syntax) : Option TuningArg :=
       some (.many t)
   | _ => none
 
-/-- The input type of a `TestDecl.property` application, if the value is recognisably one — through
-    a `withPanel`, a `List.map`, or the elements of a list literal, which is what `family` expands to.
-    `none` means "not a shape this can read", not "not tunable".
+/-- The input type of a `TestDecl.property` application, when the value is recognisably one. It
+    reads through a `withPanel`, through a `List.map`, and through the elements of a list literal,
+    which is what `family` expands to. An empty result means "not a shape this can read", and not
+    "not tunable".
 
-    This exists only so that the common case fails at the declaration rather than at run time.
-    `TestDecl.withTuning` is what actually applies a tuning, and it needs no help from here: the
-    retuning was recorded in `Body.sampled`, so an unrecognised shape is still handled correctly — it
-    just reports the problem when the suite runs instead of when it compiles. -/
+    This function exists so that the common case fails at the declaration rather than at run time.
+    `TestDecl.withTuning` is what applies a tuning, and it needs no help from here. The retuning went
+    into `Body.sampled`, so a shape this function cannot read is still handled correctly. It reports
+    the problem when the suite runs rather than when it compiles. -/
 private partial def propertyInputTypes (e : Expr) : Array Expr :=
   let fn := e.getAppFn
   let args := e.getAppArgs
@@ -156,9 +158,9 @@ private partial def propertyInputTypes (e : Expr) : Array Expr :=
     args.foldl (fun acc a => acc ++ propertyInputTypes a) #[]
   else #[]
 
-/-- Reject a tuning on an input type with no `TunableGen` instance, where the property's shape lets us
-    see the type. The message names the type, since "this type is not tunable" is the whole content of
-    the mistake. -/
+/-- Reject a tuning on an input type that has no `TunableGen` instance, when the property's shape
+    shows the type. The message names the type, because "this type is not tunable" is the whole content
+    of the mistake. -/
 private def checkTunable (attrName : Name) (decl : Name) : AttrM Unit := do
   let some info := (← getEnv).find? decl | return
   let some value := info.value? | return
@@ -173,15 +175,15 @@ private def checkTunable (attrName : Name) (decl : Name) : AttrM Unit := do
 /-- Emit `⟨decl⟩.tuned`, the tuned form of the tagged property, and return its name along with
     whether it holds one `TestDecl` or a list.
 
-    `single` says whether the *tagged* declaration is one property or a family, which decides how the
-    weighting is applied: to the property, or to each member. -/
+    `single` says whether the *tagged* declaration is one property or a family. That decides where the
+    weighting goes: onto the property, or onto each member. -/
 private def emitTuned (decl : Name) (arg : TuningArg) (single : Bool) :
     AttrM (Name × Bool) := do
   let tunedName := decl ++ `tuned
   let declIdent := mkIdent decl
-  -- Build the value as syntax and let the elaborator do the work: the weighting is an arbitrary
-  -- user term (a named profile, or `stmtDefault.with […]` written inline), so it has to be
-  -- elaborated in the module's context rather than reconstructed.
+  -- Build the value as syntax and let the elaborator do the work. The weighting is an arbitrary user
+  -- term, such as a named profile or an inline `withWeights` call, so it must be elaborated in the
+  -- module's context rather than reconstructed here.
   let spec : Term × Bool ← match arg, single with
     | .one t,  true  => do
         let v ← `(StrataGenerators.Test.TestDecl.withTuning $t "tuned" $declIdent)
@@ -193,9 +195,9 @@ private def emitTuned (decl : Name) (arg : TuningArg) (single : Bool) :
         let v ← `(StrataGenerators.Test.TestDecl.underTuningsOf $t $declIdent)
         pure (v, true)
     | .many _, false => throwError
-        "`strata_properties (tunings := …)`: a matrix of weightings over a family is ambiguous — \
-         tag each property with `@[strata_property (tunings := …)]`, or apply one weighting to the \
-         whole family with `(tuning := θ)`"
+        "`strata_properties (tunings := …)`: a matrix of weightings over a family is ambiguous. Tag \
+         each property with `@[strata_property (tunings := …)]`, or apply one weighting to the whole \
+         family with `(tuning := θ)`"
   let (value, isList) := spec
   let type ← if isList then `(List StrataGenerators.Test.TestDecl)
              else `(StrataGenerators.Test.TestDecl)
@@ -220,14 +222,14 @@ private def emitTuned (decl : Name) (arg : TuningArg) (single : Bool) :
     so a mistyped registration fails at the declaration rather than as a confusing
     elaboration failure inside `strata_registry%`.
 
-    With a `tuningSpec` it registers the emitted `⟨decl⟩.tuned` instead, which may be a list even
-    when the tagged declaration was a single property (`tunings` turns one claim into one property
-    per weighting).
+    With a `tuningSpec` it registers the emitted `⟨decl⟩.tuned` instead. That may be a list even when
+    the tagged declaration was a single property, because `tunings` turns one claim into one property
+    per weighting.
 
-    `name` and `userName` differ, and every message uses the latter: because these attributes take
-    an argument they need a `syntax (name := …)` node, and `registerBuiltinAttribute`'s `name` has
-    to be *that* node's name (`strataPropertyAttr`) for the parser to reach this handler. Reporting
-    it would name an attribute nobody can write. -/
+    `name` and `userName` differ, and every message uses `userName`. These attributes take an
+    argument, so they need a `syntax (name := …)` node, and `registerBuiltinAttribute`'s `name` must be
+    that node's name for the parser to reach this handler. A message that reported `name` would name an
+    attribute that nobody can write. -/
 private def registerRegistryAttr (name userName : Name) (descr : String) (single : Bool)
     (validate : Name → AttrM Unit) (ref : Name := by exact decl_name%) : IO Unit :=
   registerBuiltinAttribute {
@@ -260,7 +262,7 @@ private def expectHead (attrName : Name) (expected : Name) (decl : Name) :
       `{expected}`, but `{decl}` has type{indentExpr info.type}"
 
 /-- One property, registering itself. Attach to a `def _ : TestDecl`. Optionally
-    `(tuning := θ)` or `(tunings := [(label, θ), …])` — see the syntax section above. -/
+    `(tuning := θ)` or `(tunings := [(label, θ), …])`. The syntax section above says more. -/
 initialize
   registerRegistryAttr `strataPropertyAttr `strata_property
     "Register a `TestDecl` with the Strata property-test harness. Optionally \

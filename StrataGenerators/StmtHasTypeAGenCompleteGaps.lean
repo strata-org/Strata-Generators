@@ -173,13 +173,13 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     simp only [List.mem_cons, Prod.mk.injEq] at hg
     rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | hg
     · exact Or.inl (hcmdstmt 0 hmem)
-    · -- `exit`, or the `cmd` the branch falls back to when `labels = []`
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact Or.inl (hcmdstmt 0 hmem)
       | cons hd tl => exact (hexit hmem).elim
     · exact (hfunc 0 hmem).elim
     · exact (htype 0 hmem).elim
-    · -- `call`, or the `cmd` the branch falls back to when `procs = []`
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact Or.inl (hcmdstmt 0 hmem)
       | cons hd tl => exact Or.inr (hcall 0 hmem)
@@ -191,13 +191,13 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ |
       ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | hg
     · exact Or.inl (hcmdstmt (m+1) hmem)
-    · -- `exit`, or the `cmd` the branch falls back to when `labels = []`
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact Or.inl (hcmdstmt (m+1) hmem)
       | cons hd tl => exact (hexit hmem).elim
     · exact (hfunc (m+1) hmem).elim
     · exact (htype (m+1) hmem).elim
-    · -- `call`, or the `cmd` the branch falls back to when `procs = []`
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact Or.inl (hcmdstmt (m+1) hmem)
       | cons hd tl => exact Or.inr (hcall (m+1) hmem)

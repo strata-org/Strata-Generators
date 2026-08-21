@@ -444,7 +444,7 @@ theorem genStmt_mutableVars
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
         Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
-    · -- exit — or a `cmd`, since with `labels = []` the branch falls back to one
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
         replace hr : r ∈ SetGen.support
@@ -480,7 +480,7 @@ theorem genStmt_mutableVars
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call — or a `cmd`, since with `procs = []` the branch falls back to one
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil =>
         replace hr : r ∈ SetGen.support
@@ -507,7 +507,7 @@ theorem genStmt_mutableVars
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
         Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
-    · -- exit — or a `cmd`, since with `labels = []` the branch falls back to one
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
         replace hr : r ∈ SetGen.support
@@ -543,7 +543,7 @@ theorem genStmt_mutableVars
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call — or a `cmd`, since with `procs = []` the branch falls back to one
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil =>
         replace hr : r ∈ SetGen.support

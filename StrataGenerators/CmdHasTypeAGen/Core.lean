@@ -244,13 +244,12 @@ def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     When the context is non-empty, `set` commands get higher weight to
     compensate for the structural bias toward `init` in sequences.
 
-    Tagged `@[tunable]`, so those weights are a runtime knob: `genCmd.tuned θ` reads
-    each branch's weight from `θ` at the current `depth`. There are two sites — the
-    writable-context list (arity 7) and the no-writable-variable list (arity 5) —
-    because `set` is only offered when there is something to assign to. See
-    `StrataGenerators.TuningProfiles` for the profiles the suite uses and
-    `TuningPrototypes.genCmd_tuned_eq` for the proof that tuning changes only the
-    distribution. -/
+    Tagged `@[tunable]`, so every weight is a runtime knob. `genCmd.tuned θ` reads each
+    branch's weight from `θ` at the current `depth`. There are two sites, because the
+    generator offers `set` only when the context holds something to assign to. The
+    writable-context list has arity 7, and the list for a context with no writable
+    variable has arity 5. `StrataGenerators.TuningProfiles` holds the profiles that the
+    suite uses. -/
 @[tunable]
 def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)

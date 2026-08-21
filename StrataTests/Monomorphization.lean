@@ -9,10 +9,10 @@ open StrataGenerators.ProgramTuning
 @[strata_properties]
 def monoProperties : List TestDecl :=
     family GenProgram
-        -- The pass either returns or raises a diagnostic; scored once, here, so that a
-        -- diagnostic cannot quietly make every property below vacuous.
+        -- The pass either returns a program or raises a diagnostic. Score that once, here, so that
+        -- a diagnostic cannot quietly make every property below vacuous.
         [ ("mono: the pass returns a program", fun gp => checkMonoSucceeds gp.prog),
-        -- Group A — upstream's three goldens, quantified, plus idempotence.
+        -- Group A: upstream's three goldens, quantified, and idempotence.
         ("mono: no top-level function keeps its type parameters",
             fun gp => checkMonoAllFuncsMonomorphic gp.prog),
         ("mono: no factory entry keeps its type parameters",
@@ -24,14 +24,14 @@ def monoProperties : List TestDecl :=
             fun gp => checkMonoStmtFuncDeclRefsRewritten gp.prog),
         ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
-        -- Type declarations: specialized only through their derived functions.
+        -- Type declarations, which the pass specializes only through their derived functions.
         ("mono: type declarations pass through unchanged",
             fun gp => checkMonoTypeDeclsUnchanged gp.prog),
         ("mono: a polymorphic datatype is still polymorphic after the pass",
             fun gp => checkMonoPolyDatatypesRemain gp.prog),
         ("mono: a polymorphic datatype's derived functions are rewritten",
             fun gp => checkMonoDerivedOpsRewritten gp.prog),
-        -- Group C — the naming convention, at program level.
+        -- Group C: the naming convention, at program level.
         ("mono: every specialization's base name was polymorphic in the input",
             fun gp => checkMonoMangledBaseWasPolymorphic gp.prog),
         ("mono: the output declares no name twice",
@@ -46,8 +46,8 @@ def monoProperties : List TestDecl :=
 
 /-- The three specialization properties, checked a second time under a distribution that makes a
     polymorphic function common. `MonomorphizeFunctions` is the identity on a program that declares
-    none, and then each of these three holds for a reason that has nothing to do with the pass.
-    `progPolyHeavy` takes the rate of such a program from 63% to 82%.
+    none, and each of these three then holds for a reason that has nothing to do with the pass.
+    `progPolyHeavy` takes the rate of a program with one from 63% to 82%.
 
     `mono: a program with no polymorphic function is unchanged` is deliberately absent. It wants the
     opposite input, and this weighting would make it vacuous. -/
@@ -62,9 +62,9 @@ def monoPolyHeavyProperties : List TestDecl :=
             fun gp => checkMonoMangledBaseWasPolymorphic gp.prog) ]).flatMap
       (TestDecl.underTuningsOf [("poly-heavy", progPolyHeavy)])
 
-/-- The two datatype properties, under the weighting that makes a polymorphic datatype common
-    (44% to 82%). These need a different profile from the three above: a declaration is a function
-    or a datatype block, so raising one rate lowers the other. -/
+/-- The two datatype properties, under the weighting that makes a polymorphic datatype common. That
+    rate goes from 44% to 82%. These two need a different profile from the three above, because a
+    declaration is a function or a datatype block. A raise of one rate lowers the other. -/
 @[strata_properties]
 def monoDatatypeHeavyProperties : List TestDecl :=
     (family GenProgram

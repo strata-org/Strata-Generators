@@ -3,10 +3,9 @@ import StrataGenerators.DistReport
 /-!
 # `dist-report` driver
 
-Prints, per property family and per tuning profile, how often the shapes the
-suite's properties discriminate on actually appear — see
-`StrataGenerators.DistReport` for what each column means and
-`StrataGenerators.TuningProfiles` for what each profile is trying to buy.
+Prints how often the shapes that the suite's properties discriminate on appear, per
+property family and per tuning profile. `StrataGenerators.DistReport` says what each
+column means, and `StrataGenerators.TuningProfiles` says what each profile tries to buy.
 
 ```bash
 lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--prog]
@@ -16,7 +15,7 @@ lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--p
 Plausible size the draws cycle through. With no family flag, all five run.
 
 To compare a *property's* verdict across profiles, register it with
-`TestDecl.underTunings` instead — see `StrataTests/Stmt.lean`.
+`TestDecl.underTunings` instead. `StrataTests/Stmt.lean` shows how.
 -/
 
 def main (args : List String) : IO UInt32 := do
@@ -25,8 +24,9 @@ def main (args : List String) : IO UInt32 := do
   let samples := (positional[0]? >>= String.toNat?).getD 200
   let maxSize := (positional[1]? >>= String.toNat?).getD 100
   let all := ["stmt", "proc", "cmd", "expr", "prog"]
-  -- An unrecognised flag is an error, not a no-op: silently ignoring one reads as "that family
-  -- was measured" when nothing was, which is how a `--props` flag stayed documented but unbuilt.
+  -- An unrecognised flag is an error rather than a no-op. If the driver ignores one, the output reads
+  -- as though that family was measured when nothing was. A `--props` flag stayed documented but
+  -- unbuilt for exactly that reason.
   let unknown := flags.filter (fun f => !all.any (fun n => f == s!"--{n}"))
   unless unknown.isEmpty do
     IO.eprintln s!"dist-report: unknown flag(s) {" ".intercalate unknown}; \

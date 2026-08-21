@@ -234,12 +234,12 @@ program, so its counterexample needs a diagnostic view instead).
 
 ### Choosing the distribution
 
-Soundness and completeness say every sample is well-typed and every well-typed program is
-reachable. Neither says how *often* a shape appears, and a property whose interesting shape
-is rare spends most of its trials on a case it does not discriminate on. `LoopElim`'s two
-properties are the identity on a loop-free program; `dist-report` measures a loop in 23–26% of
-statement lists at the source weights, and a loop *inside* a loop — where a loop-elimination
-pass is likeliest to be wrong — in 0–2%.
+Soundness and completeness say that every sample is well-typed and that every well-typed program
+is reachable. Neither says how *often* a shape appears, and a property whose interesting shape is
+rare spends most of its trials on a case it does not discriminate on. `LoopElim`'s two properties
+are the identity on a loop-free program. `dist-report` measures a loop in 23–26% of statement lists
+at the source weights, and a loop *inside* a loop in 0–2%. The nested loop is where a
+loop-elimination pass is most likely to be wrong.
 
 So a property can name its weights in its registration attribute. One weighting:
 
@@ -250,10 +250,10 @@ def loopElimZeroLoops : TestDecl :=
     fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
 ```
 
-Usually you want the default distribution *as well*, since a property that holds under one
-weighting and fails under another is exactly what you want to see. `tunings` registers one
-property per weighting, each with its own verdict, its own reported line and its own Tyche
-panel (which carries a `tuning` axis):
+Usually you want the default distribution *as well*, because a property that holds under one
+weighting and fails under another is exactly what you want to see. `tunings` registers one property
+per weighting. Each row has its own verdict, its own reported line and its own Tyche panel, and the
+panel carries a `tuning` axis:
 
 ```lean
 @[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
@@ -262,9 +262,9 @@ def loopElimPreservesTyping : TestDecl :=
     fun (gs : GenStmts) => checkLoopElimPreservesTyping gs.stmts
 ```
 
-Names come out as `stmt: LoopElim preserves typeability [loop-heavy]`, so `--only=` and the
-group still work. Passing a generator's own `.defaults` gives back the untuned property
-exactly: `genWith defaults` *is* the type's `Arbitrary` instance, pinned by `rfl`.
+A name comes out as `stmt: LoopElim preserves typeability [loop-heavy]`, so `--only=` and the
+group still work. Pass a generator's own `.defaults` to get the untuned property back exactly:
+`genWith defaults` *is* the type's `Arbitrary` instance, and an `example` pins that.
 
 The weighting is an ordinary term, so a one-off needs no named profile:
 
@@ -279,21 +279,22 @@ profiles and the index tables (`StmtIdx`, `CmdIdx`, `ExprIdx`) the inline form a
 Three things worth knowing:
 
 * **Only some input types can be tuned.** `GenStmts`, `GenProcs`, `GenCmdWithCtx`,
-  `GenCmdsWithCtx`, `TypedExpr`, `ClosedTypedExpr` and `ResolveTypedExpr` have a `TunableGen`
-  instance; `GenProgram`, `GenFunction`, `GenAdtBlock` and `GenIndepBlock` do not, because the
-  weights of the generators they draw through are not exposed yet. Tuning one of those is an error
-  at the declaration, naming the type — not a tuning that is silently ignored. So is a `θ` of the
-  wrong length for the generator it is handed to, which is reported when the suite runs.
-* **A tuning cannot weaken a property.** Reweighting is proven to leave the generator's
-  *support* unchanged at every `θ` (`StrataGenerators.SetGen.TuningPrototypes`), so no
-  weighting makes a well-typed shape unreachable. A tuned property tests the same claim over
-  the same language; only the order in which cases turn up changes.
-* **Weights are not free.** The generators are partial: a sub-generator with empty support
-  throws and `retryGen` redraws the whole sample. `dist-report`'s `1st-try` and `dropped`
-  columns are that cost — `stmtFuncDeclHeavy` buys a 17–19% → 64–65% `funcDecl` rate for a
-  73–75% → 64–65% drop in first-try success. Read the coverage and cost columns together
-  before adopting a profile, and note they have different denominators: coverage is a
-  fraction of the draws that produced a sample, `1st-try`/`dropped` of the draws attempted.
+  `GenCmdsWithCtx`, `TypedExpr`, `ClosedTypedExpr`, `ResolveTypedExpr` and `GenProgram` have a
+  `TunableGen` instance. `GenFunction`, `GenAdtBlock` and `GenIndepBlock` do not, because the
+  weights of the generators they draw through are not exposed yet. A tuning on one of those is an
+  error at the declaration, and the message names the type, rather than a tuning that is silently
+  ignored. So is a `θ` of the wrong length for the generator it reaches, and the suite reports that
+  one when it runs.
+* **A tuning cannot weaken a property.** A reweighting is proven to leave the generator's *support*
+  unchanged at every `θ`, so no weighting makes a well-typed shape unreachable. A tuned property
+  tests the same claim over the same language. Only the order in which the cases turn up changes.
+* **Weights are not free.** The generators are partial: a sub-generator with empty support throws,
+  and `retryGen` then redraws the whole sample. The `1st-try` and `dropped` columns of `dist-report`
+  are that cost. `stmtFuncDeclHeavy` buys a `funcDecl` rate of 64–65% against 17–19%, and pays with
+  a first-try success rate of 64–65% against 73–75%. Read the coverage and the cost columns together
+  before you adopt a profile, and note that they use different denominators. Coverage is a fraction
+  of the draws that produced a sample. `1st-try` and `dropped` are fractions of the draws
+  attempted.
 
 To pick a weighting, or to check one you invented:
 
@@ -301,8 +302,8 @@ To pick a weighting, or to check one you invented:
 lake exe dist-report 200 100 --stmt      # coverage and cost, per profile, per family
 ```
 
-`TestDecl.tuned` and `TestDecl.underTunings` are the same thing as terms, for a property built
-programmatically where there is no declaration to tag. Prefer the attribute.
+`TestDecl.tuned` and `TestDecl.underTunings` say the same thing as terms, for a property that a
+program builds and that has no declaration to tag. Prefer the attribute.
 
 ## The other three shapes of property
 

@@ -251,30 +251,30 @@ def indepBlock     : PropertyRunner GenIndepBlock    := .ofInstances _
 
 -- ── Tunable generators ────────────────────────────────────────────────
 --
--- One instance per input type whose generator's branch weights can be set at run time,
--- which is what `TestDecl.tuned` / `TestDecl.underTunings` need. Each is the sampler
--- above with the tuned entry point substituted for the shipping one — same `size`/`len`
--- schedule, same operator contexts, same `retryGen` budget — so `genWith defaults` is the
--- type's `Arbitrary` instance and a tuned property differs only in the distribution. The
--- wrappers, and the proof that no `θ` changes what is reachable, are in
--- `StrataGenerators.TuningProfiles` and `StrataGenerators.SetGen.TuningPrototypes`.
+-- One instance per input type whose generator can read its branch weights at run time. That is what
+-- `TestDecl.tuned` and `TestDecl.underTunings` need. Each instance is the sampler above with the
+-- tuned entry point in place of the shipping one. The `size` and `len` schedules, the operator
+-- contexts and the `retryGen` budget are all the sampler's own. So `genWith defaults` is the type's
+-- `Arbitrary` instance, and a tuned property differs only in the distribution.
+-- `StrataGenerators.TuningProfiles` holds the wrappers, and
+-- `StrataGenerators.SetGen.TuningPrototypes` holds the proof that no `θ` changes what is reachable.
 --
--- An instance here is what makes a *profile* reach the properties it was written for, so the list
--- tracks the input types the tuned families quantify over rather than the generators alone: both
--- command shapes, and all three expression shapes.
+-- An instance here is what makes a *profile* reach the properties it was written for. So this list
+-- tracks the input types that the tuned families quantify over, rather than the generators alone.
+-- That is why both command shapes and all three expression shapes appear.
 --
--- A type absent from this list cannot be tuned: `GenFunction`, `GenAdtBlock` and `GenIndepBlock`
--- draw through generators whose weights are not yet exposed, so `TestDecl.tuned` on one of them is
--- a missing-instance error rather than a silent no-op.
+-- A type that is absent cannot be tuned. `GenFunction`, `GenAdtBlock` and `GenIndepBlock` draw
+-- through generators whose weights are not yet exposed, so `TestDecl.tuned` on one of them is a
+-- missing-instance error rather than a silent no-op.
 
 section Tunable
 open StrataGenerators.Test StrataGenerators.TuningProfiles
 open StrataGenerators.ProgramTuning
 open StrataGenerators.Procedure.TestSupport (relabelProcs)
 
-/-- Statement lists, with `genStmt`'s branch weights read from `θ` — threaded through the
-    whole mutual recursion, so statements nested in a `block`/`ite`/`loop` body are tuned
-    too. `stmtLoopHeavy` and friends address this. -/
+/-- Statement lists, with `genStmt`'s branch weights read from `θ`. The tuning threads through the
+    whole mutual recursion, so a statement nested in a `block`, an `ite` or a `loop` body is tuned as
+    well. `stmtLoopHeavy` and the other statement profiles address this instance. -/
 instance : TunableGen GenStmts where
   genWith θ := retryGen 4000 <| Gen.sized fun s => do
     let size := max 1 (min 3 (s / 25))
@@ -283,9 +283,8 @@ instance : TunableGen GenStmts where
     pure ⟨ss⟩
   sites := StrataGenerators.Stmt.genStmt._mutual.sites
 
-/-- Procedure lists, with the statement weights of each *body* read from `θ`. The three
-    transform passes key on what those bodies contain, so this is the instance the
-    `proc:` properties tune through. -/
+/-- Procedure lists, with the statement weights of each *body* read from `θ`. The three transform
+    passes key on what those bodies contain, so the `proc:` properties tune through this instance. -/
 instance : TunableGen GenProcs where
   genWith θ := retryGen 8000 <| Gen.sized fun s => do
     let n := max 2 (min 4 (2 + s / 30))
@@ -301,18 +300,18 @@ instance : TunableGen GenProcs where
     pure ⟨relabelProcs ps⟩
   sites := StrataGenerators.Stmt.genStmt._mutual.sites
 
-/-- Command sequences, with `genCmd`'s branch weights read from `θ` (`cmdSetHeavy`,
-    `cmdInitHeavy`, `cmdCheckHeavy`). -/
+/-- Command sequences, with `genCmd`'s branch weights read from `θ`. `cmdSetHeavy`, `cmdInitHeavy`
+    and `cmdCheckHeavy` address this instance. -/
 instance : TunableGen GenCmdsWithCtx where
   genWith θ := retryGen 1000 <| do
     let (cmds, ctx') ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 4
     pure ⟨cmds, [], ctx'⟩
   sites := genCmd.sites
 
-/-- One command drawn against a context a first chain built, with `genCmd`'s branch weights read
-    from `θ`. This is the shape four of the five `cmd:` properties quantify over — including the two
-    `cmdSetHeavy` exists for, since `set` is offered only by the site reached when something in the
-    context is writable, and an empty context reaches the other one. -/
+/-- One command, drawn against a context that a first chain built, with `genCmd`'s branch weights read
+    from `θ`. Four of the five `cmd:` properties quantify over this shape, and two of those are the
+    properties `cmdSetHeavy` exists for. Only the site that a writable context reaches offers `set`, and
+    an empty context reaches the other site. -/
 instance : TunableGen GenCmdWithCtx where
   genWith θ := retryGen 1000 <| do
     let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 3
@@ -320,12 +319,12 @@ instance : TunableGen GenCmdWithCtx where
     pure ⟨cmd, baseCtx, ctx'⟩
   sites := genCmd.sites
 
-/-- Typed expressions over `defaultFCtx`, with `genLExprBase`'s 79 branch weights read from `θ`
-    (`exprEvalHeavy`, `exprQuantHeavy`, `exprIndirHeavy`, `exprFVarHeavy`).
+/-- Typed expressions over `defaultFCtx`, with `genLExprBase`'s 79 branch weights read from `θ`. The
+    four expression profiles address this instance.
 
-    Drawn through `genLExprWithOpsT`, the tuned restatement of the entry point `Arbitrary` uses —
-    root Indir/IndirPoly `frequency` and per-subterm `retryGenArg` continuation included, which is
-    what makes the pin below hold and keeps a tuned property's cost the same as the untuned one's. -/
+    It draws through `genLExprT`, which restates the entry point that `Arbitrary` uses. That includes
+    the root Indir and IndirPoly `frequency`, and the per-subterm `retryGenArg` continuation. Both are
+    what make the pin below hold, and what keep a tuned property's cost equal to the untuned one's. -/
 instance : TunableGen TypedExpr where
   genWith θ := retryGen 500 <| Gen.sized fun s => do
     let depth := max 1 (s / 20)
@@ -335,9 +334,9 @@ instance : TunableGen TypedExpr where
     pure ⟨e, τ⟩
   sites := genLExprBase.sites
 
-/-- The same over the *empty* fvar context: the shape `expr: preservation` and `expr: progress`
-    quantify over, and hence what `exprEvalHeavy`/`exprQuantHeavy`/`exprIndirHeavy` have to act on
-    to reach the properties their docstrings name. -/
+/-- The same over the *empty* fvar context. `expr: preservation` and `expr: progress` quantify over
+    this shape, so `exprEvalHeavy`, `exprQuantHeavy` and `exprIndirHeavy` must act on it to reach the
+    properties their docstrings name. -/
 instance : TunableGen ClosedTypedExpr where
   genWith θ := retryGen 500 <|
     (fun (te : TypedExpr) => (⟨te.expr, te.ty⟩ : ClosedTypedExpr)) <$> (Gen.sized fun s => do
@@ -348,10 +347,10 @@ instance : TunableGen ClosedTypedExpr where
       pure (⟨e, τ⟩ : TypedExpr))
   sites := genLExprBase.sites
 
-/-- Whole programs, with `genDeclStep`'s declaration-kind weights read from `θ`
-    (`progPolyHeavy`, `progDatatypeHeavy`). This is the instance the `mono:` family tunes
-    through: how many polymorphic functions and polymorphic datatype blocks a program declares is
-    what decides whether `MonomorphizeFunctions` has anything to specialize. -/
+/-- Whole programs, with `genDeclStep`'s declaration-kind weights read from `θ`. `progPolyHeavy` and
+    `progDatatypeHeavy` address this instance, and the `mono:` family tunes through it. The number of
+    polymorphic functions and polymorphic datatype blocks a program declares is what decides whether
+    `MonomorphizeFunctions` has anything to specialize. -/
 instance : TunableGen GenProgram where
   genWith θ := retryGen 8000 <| Gen.sized fun s => do
     let numDecls := max 2 (min 5 (2 + s / 25))
@@ -360,8 +359,8 @@ instance : TunableGen GenProgram where
     pure ⟨prog⟩
   sites := progSites
 
-/-- The same over `coreOpCtx` and no polymorphic operators: the shape
-    `expr: resolve after type erasure` quantifies over, which is the second property
+/-- The same over `coreOpCtx`, and with no polymorphic operators.
+    `expr: resolve after type erasure` quantifies over this shape, and it is the second property that
     `exprQuantHeavy` is for. -/
 instance : TunableGen ResolveTypedExpr where
   genWith θ := retryGen 500 <| Gen.sized fun s => do
@@ -371,10 +370,11 @@ instance : TunableGen ResolveTypedExpr where
     pure ⟨e, τ⟩
   sites := genLExprBase.sites
 
-/-! **Tuning is opt-in.** At a generator's own `.defaults` the tuned sampler is the type's
-`Arbitrary` instance, so `underTunings`'s "default" row is the property `TestDecl.property` would
-have registered, and adding a tuned row cannot perturb the untuned one. Every instance above is
-pinned, so a wrapper that drifts from the generator it claims to wrap fails the build here. -/
+/-! **Tuning is opt-in.** At a generator's own `.defaults`, the tuned sampler is the type's
+`Arbitrary` instance. The "default" row of `underTunings` is therefore the property that
+`TestDecl.property` would have registered, and a tuned row cannot disturb the untuned one. An example
+pins every instance above, so a wrapper that drifts from the generator it claims to wrap fails the
+build here. -/
 
 example : TunableGen.genWith (α := GenStmts) stmtDefault = Arbitrary.arbitrary := by
   simp only [TunableGen.genWith, genProgramStmtsT_defaults]; rfl
@@ -393,9 +393,8 @@ example : TunableGen.genWith (α := ResolveTypedExpr) exprBreadth = Arbitrary.ar
 example : TunableGen.genWith (α := GenProgram) progDefault = Arbitrary.arbitrary := by
   simp only [TunableGen.genWith, genProgramT_defaults]; rfl
 
-/-! The arity a hand-built tuning must match. `TestDecl.withTuning` checks a `θ` against it, so a
-tuning meant for another generator is a red line naming both numbers rather than a silent
-reindexing. -/
+/-! The arity that a hand-built tuning must match. `TestDecl.withTuning` checks a `θ` against it, so a
+tuning meant for another generator becomes a red line that names both numbers. -/
 example : TunableGen.arity GenStmts = 14 := rfl
 example : TunableGen.arity GenProcs = 14 := rfl
 example : TunableGen.arity GenCmdsWithCtx = 12 := rfl

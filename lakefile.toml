@@ -55,11 +55,11 @@ root = "PlainTestRunner"
 name = "write-test-imports"
 root = "WriteTestImports"
 
-# Distribution report: samples each tunable generator under each tuning profile in
-# `StrataGenerators.TuningProfiles` and prints how often the shapes the suite's
-# properties discriminate on actually appear. This is how the profiles' weights were
-# derived, and how to re-derive them after a generator change.
-# Run: `lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]`
+# Distribution report. It samples each tunable generator under each tuning profile and
+# prints how often the shapes that the suite's properties discriminate on appear. This is
+# how the weights of each profile were derived, and how to derive them again after a
+# change to a generator.
+# Run: `lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--prog]`
 [[lean_exe]]
 name = "dist-report"
 root = "DistReportMain"
