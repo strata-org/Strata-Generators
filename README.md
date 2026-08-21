@@ -235,6 +235,18 @@ def stmtTransforms' : List TestDecl :=
 ```
 
 
+A defect that only some draws expose becomes markable once you pin the seed that exposes
+it, since the property then fails on every run:
+
+```lean
+@[strata_property (seed := 8021)]
+def myPassOutputTypechecks : TestDecl :=
+  knownFailure "strata-org/Strata#123: …" <| …
+```
+
+To find the number, run with `--seed=N` until the property fails: the report prints the
+seed that property drew from, and that is the one to pin.
+
 ## Tyche visualization
 
 One can visualize the generators' output distributions with

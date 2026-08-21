@@ -106,6 +106,18 @@ whole API, with no exception for a family.
 `@[strata_diagnostic]` registers a `Diagnostic`: a report that prints and never gates
 the exit code, for a coverage statistic or a localisation tally.
 
+## Seeds
+
+`lake test -- --seed=N` makes a run reproducible: every property draws from `N` mixed
+with its own name, the same command line draws the same inputs, and a property that fails
+reports the seed to replay. Without it each run starts from OS randomness, so a
+counterexample is gone as soon as the run ends.
+
+`@[strata_property (seed := N)]` pins one property's seed instead, whatever the run was
+given. That is what turns a defect on a rare draw into one that fails every run — and so
+into one `knownFailure` can watch. The cost is that a pinned property stops looking for
+new defects. See `TestDecl.effectiveSeed` and `withSeed`.
+
 See `docs/writing-properties.md` for the longer version, including how the harness
 discovers your file.
 -/

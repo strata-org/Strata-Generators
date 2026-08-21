@@ -359,6 +359,13 @@ tree — it needs two field names differing by a trailing `!`, which a draw almo
 produces, so `AdtLaws.bangFieldWitness` is the real pin and the property is a net around
 it.
 
+The other way out is to [pin the seed](#pinning-a-seed). A property that fails on one draw
+in three hundred fails on *every* run once it is pinned to a draw that exposes the defect,
+and `knownFailure` then applies as it does to any other property. Prefer the `#guard`
+witness where you can build one by hand: it names the shape at stake, and the property
+keeps drawing freely. Pin the seed when you cannot, and the run that found the draw can
+tell you which seed to use.
+
 ### Marking one for a single run
 
 ```bash
@@ -373,6 +380,71 @@ gets committed, since only the declaration can carry a reason.
 
 `--list` prints every mark and its reason, so the registry is the answer to "what is
 known to fail?".
+
+## Reproducing a draw
+
+A property drew the input that broke it, printed it, and threw the rest away. `--seed=`
+is how you get the whole draw back:
+
+```bash
+lake test -- --seed=7 --only="mypass:"
+```
+
+Every property then draws from seed `7`, and **the same command line draws the same
+inputs every time**. A property that fails reports the seed it drew from:
+
+```
+  × FAIL (12/1000) mypass: the output typechecks
+…
+-------------------
+    seed: 1175335840147608452 — keep this draw with `@[strata_property (seed := 1175335840147608452)]`, or replay the whole run with the same `--seed=`
+```
+
+Without `--seed=`, nothing is reproducible: `IO.stdGenRef` is seeded from OS randomness at
+startup, so a counterexample that appears in CI and not on your machine is the normal
+case, and there is no number to report.
+
+Each property draws from the seed mixed with **its own name**, not from the seed itself.
+So properties still see different inputs from each other (a seed shared verbatim would
+make every property over `GenProgram` test the same thousand programs), and `--only=`
+replays exactly what the full run gave that property — the mix does not depend on how many
+properties ran, or in what order, or on what any of them drew.
+
+The seed also fixes the process-wide RNG, so the self-driving `IO` properties and the
+Tyche pass — which sample outside Plausible's runner — are reproducible too.
+
+### Pinning a seed
+
+A property can pin its own seed, and then draws the same inputs on every run whatever
+`--seed=` the run was given:
+
+```lean
+@[strata_property (seed := 8021)]
+def liftFreshSnapshotNames : TestDecl :=
+  knownFailure "strata-org/Strata#123: a minted snapshot name can collide with one \
+already in the program" <|
+    TestDecl.property "lift: the minted snapshot names are fresh"
+      fun (gp : GenProgram) => checkLiftFreshSnapshotNames gp.prog
+```
+
+`@[strata_properties (seed := N)]` pins every member of a list; `withSeed N` is the term
+form, for a `family` member or a property built in a term, and reads as a prefix like
+`knownFailure`.
+
+**What it is for** is a defect that lives on a rare draw. Pinning a draw that exposes it
+turns "fails about one run in three hundred" into "fails", which is the difference between
+a property that [cannot be marked at all](#when-not-to-mark) and one that `knownFailure`
+watches like any other, failing the run the day the defect is fixed.
+
+**What it costs** is exactly what it promises: a pinned property stops looking for new
+defects, because it draws the same inputs forever. Pin one property, not a group, and take
+the pin off with the `knownFailure` it was there to support.
+
+The pin beats `--seed=`, which is the opposite of the usual precedence, and deliberate: a
+pin is what makes that property's failure reliable, so letting the command line displace it
+would turn the property flaky again and its `knownFailure` mark would then fail the run on
+every draw where the defect does not show. `--list` prints the pins, and a run says how
+many properties have one.
 
 ## Tyche panels
 
@@ -422,8 +494,9 @@ lake test -- [numTrials] [maxSize] [flags]
 | flag | effect |
 |---|---|
 | `--quick` | 100 trials, max size 40, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
+| `--seed=N` | draw every property's inputs from seed `N`, and report the seed of any that fails. The same command line then draws the same inputs. See [Reproducing a draw](#reproducing-a-draw). |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
-| `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
+| `--list` | print the registry, with each property's pinned seed and expectation, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
 | `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
 | `--no-tyche` | skip the Tyche pass. |
@@ -433,9 +506,9 @@ lake test -- [numTrials] [maxSize] [flags]
 `--only=… --quick` is the loop to iterate in: it runs one property or one group, skips
 the diagnostics, and writes no Tyche file.
 
-Note that the suite is **not** seed-deterministic, and a few properties fail on
-roughly one draw in several hundred. Never conclude anything from comparing one run to
-one run.
+Note that a run **without** `--seed=` is not reproducible, and a few properties fail on
+roughly one draw in several hundred. Never conclude anything from comparing one unseeded
+run to one unseeded run: pass `--seed=N` to both, or run each of them several times.
 
 ## Where things live
 

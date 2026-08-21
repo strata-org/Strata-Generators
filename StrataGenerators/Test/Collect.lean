@@ -25,11 +25,20 @@ open Elab Term in
     hand-maintained list that can fall out of date.
 
     A `@[strata_properties]` list is spliced in place, so from a report's point of
-    view the two attributes are interchangeable. -/
+    view the two attributes are interchangeable.
+
+    An attribute's `(seed := N)` argument becomes a `withSeed` around the declaration —
+    over each member, for a list. The pin is therefore applied *here* rather than being
+    carried through the run as a second, parallel notion of what a property's seed is:
+    what a driver folds over is a plain `List TestDecl` whose `seed` fields are already
+    the ones the attributes asked for. -/
 elab "strata_registry%" : term => do
   let chunks ← (registryEntries (← getEnv)).mapM fun
-    | .single n => `(term| [($(mkIdent n) : TestDecl)])
-    | .many n   => `(term| ($(mkIdent n) : List TestDecl))
+    | .single n none      => `(term| [($(mkIdent n) : TestDecl)])
+    | .single n (some s)  => `(term| [withSeed $(quote s) ($(mkIdent n) : TestDecl)])
+    | .many n none        => `(term| ($(mkIdent n) : List TestDecl))
+    | .many n (some s)    =>
+      `(term| (($(mkIdent n) : List TestDecl).map (withSeed $(quote s))))
   elabTerm (← `(List.flatten [$chunks,*])) none
 
 open Elab Term in

@@ -21,11 +21,25 @@ property, default 1000; `maxSize` = maximum generator size, default 100).
 * `--tyche-samples=N` — samples per Tyche panel (default 1000).
 * `--smt` — enable the `smt` gate, admitting the properties whose oracle is a live
   `cvc5`/`z3`. Off by default, so the suite needs no solver.
+* `--seed=N` — run every property from seed `N`, and report the seed of any property that
+  fails. Two runs of the same command line then draw the same inputs, which is what makes
+  a counterexample reproducible: without it every run starts from OS randomness
+  (`IO.stdGenRef` is seeded from `IO.getRandomBytes` at startup), and a failing draw is
+  gone the moment the run ends.
+
+  Each property draws from `N` mixed with its own *name*, not from `N` itself, so
+  properties still see different inputs from each other and `--only=` replays exactly
+  what the full run gave that property. `N` also seeds the process-wide RNG, which is
+  what the self-driving `IO` properties and the Tyche pass draw from.
+
+  A property that pinned its own seed with `@[strata_property (seed := …)]` keeps it and
+  ignores this flag; see `StrataGenerators.Test.TestDecl.effectiveSeed` for why the
+  declaration wins here.
 * `--only=SUBSTRING` — run only the properties whose name contains `SUBSTRING`.
   Repeatable; a property matching any of them runs. The rest are not reported at
   all, which is what makes iterating on one new property cheap.
-* `--list` — print the registry (name, group, gate, expectation) and exit without running
-  anything. The answer to "did my property get picked up?".
+* `--list` — print the registry (name, group, gate, pinned seed, expectation) and exit
+  without running anything. The answer to "did my property get picked up?".
 * `--known-failure=NAME` — treat `NAME` as known to fail for this run: suppress its
   counterexample and stop it gating the exit code. Repeatable. The permanent form is
   `knownFailure` at the property, which carries a reason; this flag is for the
@@ -57,6 +71,11 @@ structure Cli where
       held the Tyche pass off (reporting `--no-tyche` for a `--quick` run sends the
       reader looking for a flag they did not pass). -/
   quick        : Bool
+  /-- Arguments that were given but could not be read. A driver refuses to run rather
+      than proceeding on a value it silently dropped: a `--seed=` that failed to parse
+      would produce an unseeded run reported as a seeded one, and the counterexample it
+      was passed to reproduce would not appear. -/
+  errors       : List String := []
 
 /-- The number of trials `--quick` selects. -/
 def quickNumTrials : Nat := 100
@@ -73,19 +92,25 @@ def parseCli (args : List String) : Cli :=
   let flagValues (key : String) : List String :=
     (flags.filter (·.startsWith key)).map (·.drop key.length |>.toString)
   let quick := flags.contains "--quick"
+  let seedArg := flagValue "--seed="
+  let seed := seedArg.bind String.toNat?
   { run :=
       { numTrials := (positional[0]? >>= String.toNat?).getD
                        (if quick then quickNumTrials else 1000)
         maxSize   := (positional[1]? >>= String.toNat?).getD
                        (if quick then quickMaxSize else 100)
-        gates     := if flags.contains "--smt" then ["smt"] else [] }
+        gates     := if flags.contains "--smt" then ["smt"] else []
+        seed      := seed }
     tycheEnabled := !flags.contains "--no-tyche" && !quick
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
     tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
     only          := flagValues "--only="
     knownFailures := flagValues "--known-failure="
     listOnly      := flags.contains "--list"
-    quick         := quick }
+    quick         := quick
+    errors        := match seedArg, seed with
+                     | some a, none => [s!"--seed={a}: not a natural number"]
+                     | _, _ => [] }
 
 /-- Whether `needle` occurs in `hay`. -/
 private def contains (hay needle : String) : Bool :=
@@ -126,10 +151,11 @@ def listRegistry (ds : List TestDecl) : IO Unit := do
   IO.println s!"{ds.length} propert{if ds.length == 1 then "y" else "ies"} registered"
   for d in ds do
     let gate := match d.gate with | some g => s!"  [--{g}]" | none => ""
+    let seed := match d.seed with | some s => s!"  [seed {s}]" | none => ""
     let expect := match d.expect with
       | .mustHold => ""
       | .knownFailure r => s!"\n{pad "" 15}known failure: {r}"
-    IO.println s!"  {pad d.group 12} {d.name}{gate}{expect}"
+    IO.println s!"  {pad d.group 12} {d.name}{gate}{seed}{expect}"
   let marked := ds.filter fun d => match d.expect with | .mustHold => false | _ => true
   unless marked.isEmpty do
     IO.println ""

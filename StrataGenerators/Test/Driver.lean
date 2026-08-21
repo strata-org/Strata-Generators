@@ -50,6 +50,12 @@ def checkSolvers : IO (Option UInt32) := do
     because `TestDecl` lives in `Type 1` and so cannot cross an `IO` boundary;
     `Cli.select` is pure, so a driver simply calls it. -/
 def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
+  -- An argument that could not be read is an error, not a default. See `Cli.errors`.
+  unless cli.errors.isEmpty do
+    for e in cli.errors do
+      IO.eprintln s!"error: {e}"
+    return some 1
+
   -- Refuse to run against a stale import root. This binary was linked from the old
   -- root, so a property file added since then is not in `registry` at all. Rewriting
   -- the root and asking for a re-run is the only honest option; a green suite that
@@ -92,8 +98,30 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
     if let some code ← checkSolvers then
       return some code
 
+  -- `--seed=N` also fixes the process-wide RNG, which is where everything this package
+  -- samples *outside* Plausible's own runner draws from: the self-driving `IO` properties
+  -- (`Gen.run`), the generator sizes the Tyche pass picks (`IO.rand`), and the panels
+  -- themselves. Plausible's schedule is seeded per property instead, through
+  -- `Configuration.randomSeed`; a seeded property therefore takes nothing from this
+  -- stream, which is what keeps the two kinds of property from perturbing each other.
+  if let some s := cli.run.seed then
+    IO.setRandSeed s
+
+  let seedNote := match cli.run.seed with
+    | some s => s!", seed {s}"
+    | none => ""
   IO.println s!"Running {selected.length} of {registry.length} properties \
-    ({cli.run.numTrials} trials, max size {cli.run.maxSize})..."
+    ({cli.run.numTrials} trials, max size {cli.run.maxSize}{seedNote})..."
+
+  -- A pinned property draws the same inputs on every run and ignores `--seed=`. Worth
+  -- naming up front either way: without `--seed=` a pin is the only reason a property's
+  -- inputs do not vary between runs, and with it a pin is the only reason a property's
+  -- inputs are not the ones the seed chose.
+  let pinned := selected.filter (·.seed.isSome)
+  unless pinned.isEmpty do
+    let ignores := if cli.run.seed.isSome then " and so ignore --seed=" else ""
+    IO.println s!"{pinned.length} of them pin their own seed{ignores}, and draw the same \
+      inputs on every run (--list shows which)."
 
   -- Printed here rather than in either renderer, so both drivers report it: the LSpec
   -- one aggregates through `lspecIO` and never sees an `Outcome`, so it cannot count

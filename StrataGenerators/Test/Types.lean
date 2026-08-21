@@ -41,11 +41,52 @@ structure RunConfig where
   numTrials : Nat := 1000
   maxSize   : Nat := 100
   gates     : List String := []
+  /-- The run's base seed (`--seed=N`), or `none` for a run seeded from the OS.
+
+      A property does not use this number directly: `TestDecl.effectiveSeed` mixes it
+      with the property's name, and a property that pinned its own seed ignores it
+      entirely. What it guarantees is that the *whole run* is a function of this number
+      — repeat the command line and every property draws what it drew before.
+
+      A `Body.action` reads this field as **its own** effective seed rather than the
+      run's base, because that is the number it would have to seed its own draws with;
+      `TestDecl.runRaw` substitutes it before handing the config over. -/
+  seed      : Option Nat := none
   deriving Inhabited
 
-/-- The Plausible configuration a `RunConfig` induces. -/
-def RunConfig.toConfiguration (cfg : RunConfig) : Configuration :=
-  { numInst := cfg.numTrials, maxSize := cfg.maxSize }
+/-- The modulus the seed mixer works in. -/
+private def seedModulus : Nat := 2 ^ 64
+
+/-- The seed a property with no pin of its own gets from a run started with
+    `--seed=base`: the base mixed with the property's name, by FNV-1a over the name's
+    characters — codepoints rather than bytes, so a seed does not depend on an encoding
+    detail, and written out here rather than taken from `String.hash`, so that a pinned
+    seed keeps meaning the same draw across toolchains.
+
+    Not `base` itself: handing every property the same seed makes every property over one
+    input type draw *the same inputs*, so a seeded run would test much less than an
+    unseeded one — a good part of what the suite covers comes from different properties
+    seeing different draws.
+
+    Not `base + index` either: that ties a property's inputs to its position in the
+    registry, so `--only=` — which filters the list — would not reproduce what the full
+    run did, and adding a property would shift every later one.
+
+    Mixing in the *name* is stable under both. Filtering, reordering and adding
+    properties all leave every other property's seed exactly where it was, which is what
+    makes `--seed=N --only="one property"` replay that property's share of the full run. -/
+def mixSeed (base : Nat) (name : String) : Nat :=
+  name.foldl (fun h c => (h ^^^ c.toNat) * 1099511628211 % seedModulus)
+    ((14695981039346656037 + base) % seedModulus)
+
+/-- The Plausible configuration a `RunConfig` induces, running at `seed` if one is given.
+
+    `randomSeed` is what buys reproducibility: `Testable.checkIO` then runs the whole
+    trial schedule from `mkStdGen seed` instead of from the process-wide `IO.stdGenRef`.
+    A seeded property therefore also *consumes nothing* from the global stream, so it
+    cannot shift what any other property draws. -/
+def RunConfig.toConfiguration (cfg : RunConfig) (seed : Option Nat := none) : Configuration :=
+  { numInst := cfg.numTrials, maxSize := cfg.maxSize, randomSeed := seed }
 
 /-- What a self-driving `IO` property reports: its verdict, how many of its own
     samples passed, how many it drew, and an optional message.
@@ -202,6 +243,11 @@ structure TestDecl where
   /-- What this property claims about its own verdict. Defaulted, so stating a property
       says nothing about known defects until it says so with `knownFailure`. -/
   expect : Expectation := .mustHold
+  /-- A seed pinned at the declaration: this property draws the same inputs on every
+      run, whatever the rest of the suite does and whatever `--seed=` the run was given.
+      `none` — the default — leaves it to the run. Written as
+      `@[strata_property (seed := 42)]`, or as `withSeed 42` in a term. -/
+  seed : Option Nat := none
   /-- Whether to emit a Tyche panel. Sampled and witness-set properties get one by
       default; `witness` and `action` bodies have nothing to sample, so they
       default to off via the smart constructors below. -/
@@ -324,6 +370,47 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
 def knownFailure (reason : String) (d : TestDecl) : TestDecl :=
   { d with expect := .knownFailure reason }
 
+/-- **Pin this property's seed**, so it draws the same inputs on every run — whatever
+    `--seed=` the run was given, and whatever the rest of the suite drew before it.
+
+    A prefix, like `knownFailure`, so the pin reads before the property. The attribute
+    form `@[strata_property (seed := 42)]` expands to this, and is the one to prefer at a
+    declaration; this is for a `family` member or a property built in a term.
+
+    What it is for is a property whose defect lives on a *rare* draw. Pinning the seed
+    that exhibits it turns "fails about one run in three hundred" into "fails", which is
+    the difference between a property that cannot be marked at all and one that
+    `knownFailure` watches like any other:
+
+    ```lean
+    @[strata_property (seed := 8021)]
+    def liftFreshSnapshotNames : TestDecl :=
+      knownFailure "strata-org/Strata#123: a minted snapshot name can collide" <|
+        TestDecl.property "lift: the minted snapshot names are fresh"
+          fun (gp : GenProgram) => checkLiftFreshSnapshotNames gp.prog
+    ```
+
+    The cost is exactly what it says: a pinned property stops looking for *new* defects,
+    since it draws the same inputs forever. Pin the one property that needs it, not a
+    group, and take the pin off when the defect is fixed. -/
+def withSeed (seed : Nat) (d : TestDecl) : TestDecl :=
+  { d with seed := some seed }
+
+/-- The seed this property actually runs at: its pin if it has one, otherwise the run's
+    base seed mixed with its name, otherwise nothing — in which case it draws from the
+    process-wide RNG and the run is not reproducible.
+
+    The pin wins over `--seed=`, which is the opposite of the usual "the command line
+    wins". A pin is load-bearing where it appears: it is what makes a rare failure
+    reliable enough to be marked, so letting `--seed=` displace it would turn that
+    property flaky again and its `knownFailure` mark would then fail the run on the draws
+    where the defect does not show. `--seed=` is a default for the properties that did
+    not care; a pin is a property that cared. -/
+def TestDecl.effectiveSeed (d : TestDecl) (cfg : RunConfig) : Option Nat :=
+  match d.seed with
+  | some s => some s
+  | none   => cfg.seed.map (mixSeed · d.name)
+
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
 
@@ -412,6 +499,55 @@ def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
   let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x)) cfg
   pure (Outcome.ofTestResult cfg r)
 
+/-- Note the seed on a *failing* verdict, so the run that found the counterexample can be
+    replayed exactly — the property-based-testing equivalent of a stack trace, and the
+    reason a seed is worth plumbing at all.
+
+    Only on a failure: a passing property has nothing to replay, and a line per pass
+    would bury the one line that matters. Nothing is noted for an unseeded run, because
+    there is then no number that would reproduce it — that is what `--seed=` is for. -/
+def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
+  match d.effectiveSeed cfg with
+  | none => o
+  | some s =>
+    if o.passed then o
+    else
+      -- What the number is good for depends on where it came from. A *derived* seed is
+      -- this property's share of `--seed=`, so the way to keep this exact draw is to pin
+      -- that number — passing it back as `--seed=` would mix it with the name again and
+      -- draw something else. A pin needs no advice; it says only that the draw below is
+      -- the one this property will keep reporting until the pin comes off.
+      let note :=
+        if d.seed.isSome then s!"seed: {s} (pinned at the declaration)"
+        else s!"seed: {s} — keep this draw with `@[strata_property (seed := {s})]`, or \
+          replay the whole run with the same `--seed=`"
+      { o with message := some (match o.message with
+                                | some m => s!"{m}\n    {note}"
+                                | none => note) }
+
+/-- Run `act` with the process-wide RNG seeded to `seed`, restoring the state it had
+    afterwards.
+
+    For `Body.action`, whose sampling this module does not perform and so cannot pass a
+    seed to: such a property draws with `Gen.run` or `IO.rand`, which read
+    `IO.stdGenRef`, so seeding that ref is the only handle on it from out here.
+
+    Restoring is what keeps the seeding *local*. A pinned action that left the global RNG
+    reseeded would silently make every property after it deterministic too, freezing the
+    draws of properties that asked for nothing — and a suite whose randomness quietly
+    stops varying is the failure mode this whole feature is supposed to make visible,
+    not cause. -/
+private def withSeededRng (seed : Option Nat) (act : IO α) : IO α := do
+  match seed with
+  | none => act
+  | some s =>
+    let saved ← IO.stdGenRef.get
+    try
+      IO.setRandSeed s
+      act
+    finally
+      IO.stdGenRef.set saved
+
 /-- Reconcile a raw verdict with what the declaration claims about it.
 
     Every verdict in the package passes through here, and every driver reads the result,
@@ -445,10 +581,12 @@ def Outcome.reconcile (o : Outcome) : Expectation → Outcome
 def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
+  let seed := d.effectiveSeed cfg
   match d.body with
   | .sampled runner check _ inst =>
-    @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
-      check inst cfg.toConfiguration
+    let o ← @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
+      check inst (cfg.toConfiguration seed)
+    pure (o.noteSeed d cfg)
   | .witness verdict => pure { passed := verdict }
   | .witnesses cases render check _ =>
     let failures := cases.filter (fun c => !check c)
@@ -462,8 +600,12 @@ def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
              message := some s!"{failures.length}/{total} cases fail, e.g. \
                {String.intercalate "; " shown}" }
   | .action run =>
-    let r ← run cfg
-    pure { passed := r.passed, counts := some (r.samples, r.total), message := r.message }
+    -- The action samples for itself, so the seed reaches it two ways: `cfg.seed` for one
+    -- that threads a seed through its own generators, and the process-wide RNG for the
+    -- (usual) one that just calls `Gen.run`.
+    let r ← withSeededRng seed (run { cfg with seed })
+    pure (Outcome.noteSeed { passed := r.passed, counts := some (r.samples, r.total),
+                             message := r.message } d cfg)
 
 /-- Run one property and reconcile the verdict against what it claims. **This is what a
     driver calls**; `runRaw` is for a consumer that wants the unreconciled verdict.
