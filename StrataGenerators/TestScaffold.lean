@@ -433,31 +433,31 @@ instance : Repr GenStmts where
 instance : Shrinkable GenStmts where
   shrink gs := (shrinkStmts gs.stmts).map (⟨·⟩)
 
-/-- The deepest statement nesting a generated statement list carries.
+/-- The deepest nesting of a statement that a generated statement list holds.
 
-    A ceiling on top of the run's size, not a rescaling of it: nesting is where the cost
-    of a draw grows fastest. Measured at 40 draws per level: 28 ms per sample at nesting
-    2, 116 ms at 3, 870 ms at 4. Level 4 buys nothing the properties need, and it would
-    add most of a minute of generation to a statement property of 1000 trials.
+    This value is a limit above the size of the run, and it is not a change of the scale of that size. The
+    nesting is where the cost of one draw grows fastest, and each further level multiplies that cost. One level
+    above this limit gives no shape that a property needs, and it would add a large amount of time to a
+    property over a statement list at the default number of the trials.
 
-    A deeper draw also fails more often: every nested sub-generator can hit its
-    empty-support fallback (`default`) — a `typeDecl` name clash, an `exit` with no
-    enclosing label — and one such leaf makes `retryGen` redraw the whole list. -/
+    A deeper draw also fails more often. Each nested sub-generator can reach its fallback for an empty support,
+    through a clash between two `typeDecl` names, or through an `exit` with no label around it. One such leaf
+    makes `retryGen` draw the whole list again. -/
 private def stmtNestingCap : Nat := 3
 
-/-- The deepest statement nesting a generated *procedure body* carries.
+/-- The deepest nesting of a statement that the body of a generated *procedure* holds.
 
-    Lower than `stmtNestingCap` because a procedure list pays it once per procedure, and
-    the body generator additionally has to satisfy the callee signatures. Measured at 20
-    draws per level: 111 ms per sample at nesting 2, 2.4 s at 3, 21.7 s at 4. -/
+    This value is below `stmtNestingCap`, for two reasons. A list of the procedures pays that cost one time for
+    each procedure, and the generator of a body must also satisfy the signature of each callee. The cost of one
+    draw grows sharply with each further level here too. -/
 private def procNestingCap : Nat := 2
 
-/-- The longest statement list a generated procedure body carries. See
-    `procNestingCap`; the same cost argument applies, less sharply. -/
+/-- The longest statement list that the body of a generated procedure holds. Read `procNestingCap`. The same
+    argument about the cost applies here, and the cost grows less sharply. -/
 private def procBodyLenCap : Nat := 3
 
-/-- Generate a well-typed statement list at the run's size: the size is the sequence
-    length, and the nesting depth up to `stmtNestingCap`. -/
+/-- Generate a well-typed statement list at the size of the run. That size is the length of the sequence, and
+    it is also the depth of the nesting, up to `stmtNestingCap`. -/
 private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
   let size := max 1 (min stmtNestingCap s)
   let len := max 1 s
@@ -528,8 +528,8 @@ instance : Shrinkable GenProcs where
 -- **polymorphic** procedure is also callable: `headerProcSig` records the type arguments of the callee, and
 -- `genCallStmt` samples a concrete instance of them at the call site.
 private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
-  -- At least 2 procedures: the call-graph edges are what these properties are about, and
-  -- one procedure has nobody to call.
+  -- The list holds two procedures or more. These properties are about the edges of the call graph, and one
+  -- procedure can call nothing.
   let n := max 2 s
   let size := max 1 (min procNestingCap s)
   let len := max 1 (min procBodyLenCap s)
@@ -613,8 +613,8 @@ instance : Shrinkable GenProgram where
 -- sample that nothing can fill is another failure for the retry loop to absorb. The number of the
 -- declarations here is far below the number at which that cost matters, so this fuel is ample.
 private def genProgramWith : Gen GenProgram := Gen.sized fun s => do
-  -- At least 2 declarations: a program of one declaration cannot exercise a pass that
-  -- reads one declaration while rewriting another.
+  -- The program holds two declarations or more. A program of one declaration cannot reach a pass that reads
+  -- one declaration and rewrites another one.
   let numDecls := max 2 s
   let prog ← (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) numDecls {})
     : Gen Core.Program)
@@ -707,9 +707,8 @@ def derivedCallCoverage (samples maxSize : Nat) (coverageNumDecls : Nat := 10) :
   for i in [:samples] do
     let r ← (try
       let prog ← Plausible.Gen.run
-        -- The size cycles for uniformity with the other sampling loops, but it changes
-        -- nothing here: `genProgram` takes its declaration count as an argument and reads
-        -- no ambient size.
+        -- The size cycles here, as it does in each other loop that draws a sample, and it changes nothing.
+        -- `genProgram` takes the number of the declarations as an argument, and it reads no size of the run.
         (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) coverageNumDecls {})
          : Gen Core.Program) (i % (maxSize + 1))
       pure (some prog)
@@ -800,9 +799,9 @@ instance : Arbitrary GenAdtBlock where
 
 instance : Arbitrary GenIndepBlock where
   arbitrary := Gen.sized fun s => do
-    -- One datatype per size level, so a block holds 1 at size 0 and `maxSize` at the
-    -- largest. A block of one is vacuous for the `mutual`-shape properties, and it is
-    -- what size 0 draws; the pairs and larger blocks come from the rest of the ramp.
+    -- One datatype for each level of the size, so a block holds one datatype at the size 0 and `maxSize`
+    -- datatypes at the largest size. A block of one datatype gives each property about the shape of a `mutual`
+    -- block no content, and the size 0 draws such a block. Each larger size gives a pair or a larger block.
     let extra := s
     let block ← StrataGenerators.MutualBlockShape.genIndependentBlock
       (G := Plausible.Gen) (extra + 1) (maxSize := 0)

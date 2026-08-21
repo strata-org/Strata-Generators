@@ -32,17 +32,16 @@ open StrataGenerators.Program.TestSupport
     `issue: 3 ≤ 2 does not hold`. A check that returns a `Bool` reports only
     `issue: false does not hold`.
 
-    So prefer an inline `Prop` for a claim whose shape is an equality or an order. Prefer
-    a named `check*` predicate in a `*/TestSupport` module when the check is long, is
-    reused, is worth pinning with a `#guard`, or is shared with a bespoke Tyche panel;
-    such a predicate usually returns a `Bool` and is accepted here unchanged, since
-    `Bool` coerces to `Prop`.
+    Therefore use an inline `Prop` for a claim that is an equality or an order. Use a named `check*` predicate
+    in a `*/TestSupport` module when the check is long, when more than one property uses it, when a `#guard`
+    must pin it, or when a special Tyche panel needs it. Such a predicate gives a `Bool`, and this position
+    accepts a `Bool` with no change, because a `Bool` coerces to a `Prop`.
 
-    A named predicate can return `Prop` instead and keep the readable counterexample, at
-    the cost of two rules that are easy to trip over: it must be an `abbrev` (a `def` is
-    not reducible enough for `DecidablePred` to synthesize at the registration site), and
-    the equality must sit at the predicate's *top level* (an outermost `∀ x ∈ …` renders
-    as `⋯`). `docs/writing-properties.md` spells both out. -/
+    A named predicate can also give a `Prop`, and it then keeps the readable counterexample. Two rules apply
+    to such a predicate. It must be an `abbrev`, because a `def` is not reducible enough for the search that
+    builds the `DecidablePred` instance at the registration of the property. The equality must also sit at the
+    *top level* of the predicate, because an outermost bounded `∀` prints a placeholder.
+    `docs/writing-properties.md` gives both rules. -/
 @[strata_property]
 def sizeAtLeastDecls : TestDecl :=
   .property "example: sizeProgram is at least the declaration count"

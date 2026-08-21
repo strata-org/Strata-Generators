@@ -152,15 +152,15 @@ instance : Tyche.TycheSample EvalResult where
 -- that *do* go through `Plausible.Gen`, such as the one for a list of procedures below, get the outer
 -- `retryGen` wrapper instead.
 
-/-- The largest size a panel samples at.
+/-- The largest size that a panel draws at.
 
-    A panel runs outside the property loop and so receives no `RunConfig`. This mirrors
-    `StrataGenerators.Test.defaultMaxSize`, which is the bound the properties themselves
-    run at, so a panel shows the distribution the suite actually tested. Keep the two in
-    step; a panel drawn at a size the suite never uses describes nothing the suite did. -/
+    A panel runs outside the loop over the properties, so it receives no configuration of the run. This value
+    follows `StrataGenerators.Test.defaultMaxSize`, which is the bound that each property runs at. Therefore a
+    panel shows the distribution that the suite tested. Keep the two values equal, because a panel at a size
+    that the suite never uses describes nothing that the suite did. -/
 def panelMaxSize : Nat := 5
 
-/-- Randomly choose a depth between 1 and `maxDepth` (inclusive). -/
+/-- Draw a depth at random, from 1 up to `maxDepth`. Both limits are included. -/
 def randomDepth (maxDepth : Nat := 5) : IO Nat := do
   let r ← IO.rand 1 maxDepth
   return r
@@ -745,9 +745,9 @@ def stmtRepr (ss : List Statement) : String :=
   let suffix := if shapes.isEmpty then "" else s!"\n-- {" ".intercalate shapes}"
   formatStmts ss ++ suffix
 
-/-- Generate one well-typed statement list in `IO` for the Tyche panels. Draws the nesting
-    and the length from one size, as `TestScaffold.genStmtsWith` does, so the panel shows
-    the shapes the gating property saw. -/
+/-- Generate one well-typed statement list at `IO`, for the Tyche panels. The function draws the nesting and the
+    length from one size, as `TestScaffold.genStmtsWith` does, so the panel shows the shapes that the property
+    behind the gate saw. -/
 def genStmtsForTyche : IO (List Statement × Nat) := do
   let d ← max 1 <$> IO.rand 0 panelMaxSize
   let len := d
