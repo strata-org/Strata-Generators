@@ -823,65 +823,73 @@ def findPolymorphicOps (pctx : PolyOpCtx) (τ : LMonoTy)
     (generableTys : List LMonoTy) (sampledTys : List LMonoTy) (maxNumArgs : Nat := 3)
     : List (String × List LMonoTy) :=
 
-  -- Each type variable in the set of generable types.
+   -- Collect all type variables in the set of generable types
   let tyVarsInGenerableSet := generableTys.flatMap LMonoTy.freeVars
 
-  -- The type variables that are already in use. Such a variable occurs in the target type or in
-  -- the set of generable types.
+  -- Determine the set of type variables which are already "in use",
+  -- i.e. mentioned either in the result type (the target type we're generating for)
+  -- or in `tyVarsInGenerableSet`
   let varsAlreadyInUse := (LMonoTy.freeVars τ ++ tyVarsInGenerableSet).eraseDups
 
-  -- Look at each polymorphic factory function.
+  -- For each polymorphic factory function:
   pctx.flatMap fun (name, .forAll boundVars monoTy) =>
 
-    -- Rename each bound type variable of the body away from the names that are in use. `monoTy` is
-    -- the body, which is the `τ` in `∀ α. τ`.
+    -- Alpha-rename bound type variables in `monoTy` (the body of the quantified type expression,
+    -- i.e. the `τ` in `∀ α. τ`) away from `varsAlreadyInUse` to avoid naming collisions
     let (freshBoundVars, freshMonoTy) := freshenBoundVars boundVars monoTy varsAlreadyInUse
 
-    -- The type of each of its arguments.
+    -- Obtain the type of its arguments
     let (argTys, retTy) := decomposeArrow freshMonoTy
 
-    -- Skip a factory function whose arity is more than `maxNumArgs`.
+    -- Skip over factory functions whose arity exceeds `maxNumArgs`
     if argTys.length > maxNumArgs then []
     else
-    -- Handle a partial application. For each `k` from 0 up to the arity, apply the first `k`
-    -- arguments. The remaining arguments stay in the result type, which then unifies with `τ`.
+    -- Handle partial application: Consider appplying only `k` arguments for each `k ∈ [0, argTys.length]`.
+    -- Specifically, apply the first `k` args and leave the remaining args as the result type to
+    -- unify with the target type `τ`.
     (List.range (argTys.length + 1)).filterMap fun k => do
 
-      -- The term applies the first `k` argument types. For a partial application, the remaining
-      -- argument types go into the result type.
+      -- The first `k` argument types are applied.
+      -- Update the return type if `k != argTys.length` (i.e. partial application).
       let appliedTys := argTys.take k
       let updatedRetTy := (argTys.drop k).foldr (fun σ acc => .arrow σ acc) retTy
 
-      -- Unify the result type, after the rename, with the target type `τ`.
+      -- Unify the (freshened) return type with our target type `τ`
       let subst ← unifyTypes updatedRetTy τ
 
-      -- The type variables that the substitution does not map.
+      -- Find type variables which aren't mapped to anything through the substittuion
       let uninstantiatedTyVars := findFreeTyVars freshBoundVars subst
 
-      -- Each type variable must have an instance. If one does not, the context must be able to
-      -- generate a random monotype for it.
+      -- There must be either no type variables which aren't instantiated yet.
+      -- If not, we must be able to generate random monotypes with which to instantiate them.
       guard (uninstantiatedTyVars.isEmpty || !generableTys.isEmpty)
 
-      -- Extend the substitution, so that it maps each remaining type variable to a sampled type.
+      -- Extend substitution to map the uninstantiated type variables to these newly sampled types
       let extendedSubst : Lambda.Subst := substScope (uninstantiatedTyVars.zip sampledTys) ++ subst
 
-      -- Apply the substitution to each applied argument type. Each such type is then concrete.
+      -- Apply the substitution to each of the applied argument types
+      -- This makes all the applied argument types fully instantiated (concrete)
       let concreteAppliedTys := appliedTys.map (LMonoTy.subst extendedSubst)
 
-      -- Keep this candidate only if `extendedSubst`, applied to the result type, gives the target
-      -- type `τ`. This condition makes the generated term satisfy `OpsConsistent`, which is to say
-      -- that the annotated type is a valid instance of the polymorphic type of the function.
+      -- We keep this candidate polymorphic factory function
+      -- only if the substitution we have built up so far (`extendedSubst`),
+      -- when applied to the return type gives us our desired target type `τ`.
+      -- This condition is needed in order to ensure that the generated term (which
+      -- invokes this factory function) satisfies `OpsConsistent`, i.e. that the
+      -- annotated type is a valid instantiation of the function's polymorphic type.
       guard (LMonoTy.subst extendedSubst updatedRetTy == τ)
 
       pure (name, concreteAppliedTys)
 
 -- ── Indir rule helpers ──────────────────────────────────────────────
 
-/-- The argument types of a curried function type whose result type is `τ`. The result is
-    `some args` when the type gives `τ`, and `none` when it does not. Three examples:
-    - `argsForResult (.arrow .int (.arrow .int .int)) .int = some [.int, .int]`
-    - `argsForResult (.arrow .int .bool) .int = none`
-    - `argsForResult .int .int = some []` -/
+/-- Extract the argument types from a curried function type, given that its
+    result type (after peeling all arrows) should equal `τ`. Returns `none`
+    if the type does not return `τ`, or `some args` where `args` is the list
+    of argument types.
+    E.g. `argsForResult (.arrow .int (.arrow .int .int)) .int = some [.int, .int]`
+         `argsForResult (.arrow .int .bool) .int = none`
+         `argsForResult .int .int = some []` -/
 def argsForResult (fullTy : LMonoTy) (τ : LMonoTy) : Option (List LMonoTy) :=
   match fullTy with
   | .tcons "arrow" [σ, rest] =>
@@ -890,46 +898,50 @@ def argsForResult (fullTy : LMonoTy) (τ : LMonoTy) : Option (List LMonoTy) :=
     | none => none
   | other => if other == τ then some [] else none
 
-/-- Each operator of `octx` that gives the type `τ` after a full application, as a name together with
-    its argument types. -/
+/-- All (name, argTypes) pairs from `octx` for operators that return `τ`
+    after they have been fully applied. -/
 def findOpsInCtx (octx : OpCtx) (τ : LMonoTy) : List (String × List LMonoTy) :=
   octx.ops.filterMap fun (name, ty) =>
     match argsForResult ty τ with
     | some (arg :: args) => some (name, arg :: args)
     | _ => none
 
--- ── The cores of the Indir and IndirPoly rules ──────────────────────
+-- ── Indir / IndirPoly rules (depth-agnostic cores) ──────────────────
 --
--- Both cores are *here*, before `genLExprBase`, because `genLExprBase` calls them. That call is what
--- makes a factory application reachable under an `ite` arm and under a binder body. Therefore neither
--- core can name `genLExprBase`, and each generator that a core needs is a parameter. Those
--- parameters are the argument generator `genArg`, and, for IndirPoly, the `fallback` for the case of
--- no polymorphic candidate. Each core is not recursive, so it has no obligation to terminate of its
--- own. The measure of the recursion belongs to the caller.
+-- Both rules are defined *here*, ahead of `genLExprBase`, because
+-- `genLExprBase` calls them (that is what makes factory applications reachable
+-- under `ite` arms and binder bodies). To make that possible they
+-- must not mention `genLExprBase` themselves, so every generator they need is a
+-- parameter: the argument generator `genArg`, and (for IndirPoly) the `fallback`
+-- used when no polymorphic candidate matches. Being non-recursive and
+-- generator-parametric, they impose no termination obligation of their own — the
+-- recursion measure lives entirely in the caller.
 --
--- `genIndirPoly`, which is the wrapper that adds the depth-indexed defaults, is *after*
--- `genLExprBase`, further down this file.
+-- `genIndirPoly` (the depth-indexed wrapper that restores the historical
+-- defaults) is defined *after* `genLExprBase`, further down this file.
 
-/-- The **monomorphic Indir rule** of Pałka et al. 2011. The generator draws an operator of `octx`
-    whose result type is `τ` after a full application. It then generates each argument at the argument
-    type that the operator gives, so it guesses no type.
+/-- The **monomorphic Indir rule** (Pałka et al. 2011): pick an operator from
+    `octx` whose result type is `τ` after full application, then generate all of
+    its arguments at the determined argument types (no type guessing needed).
 
-    The parameter `genArg` generates an argument. Therefore the caller owns the measure of the
-    recursion, and this function is not recursive. The hypothesis `h` is a witness that at least one
-    such operator exists. -/
+    Argument generation is the parameter `genArg`, so the caller owns the
+    recursion measure and this function stays non-recursive.
+    Requires `h` witnessing that at least one such operator exists. -/
 def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
     (genArg : LMonoTy → G LExpr')
     (h : (findOpsInCtx octx τ).length > 0) : G LExpr' := do
-  -- Each operator of the context that gives a term of the type `τ` after a full application.
+  -- Find all operators `ops` in the context that, when fully applied,
+  -- produce a term of the result type `τ`
   let ops := findOpsInCtx octx τ
-  -- Draw one of these operators at random.
+  -- Randomly choose one of these operators
   let (name, argTys) ← elements ops (by apply List.ne_nil_of_length_pos; assumption)
-  -- Build the `LExpr` for the operator.
+  -- Construct the `LExpr` corresponding to the chosen `op`
   let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
   let opExpr := .op () ⟨name, ()⟩ (some fullArrowTy)
-  -- Generate a random term at each argument type, in order.
+  -- Iterate through the argument types in order
+  -- and generate successive random terms of those types
   let args ← List.mapM genArg argTys
-  -- Apply the operator to each of the arguments.
+  -- Then, apply the operator to all the args
   pure (mkApps opExpr args)
 
 /-- Generate a well-typed `LExpr` of the type `τ` with the IndirPoly rule of Pałka et al. 2011,
@@ -948,17 +960,18 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
     gives a default value to each of the two parameters.
 
     This function takes **no `depth` parameter**, because only the argument generator and the fallback
-    need a depth, and the caller gives both of them. -/
+    need a depth, and the caller supplies both of them. -/
 def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (bctx : BVarCtx) (τ : LMonoTy)
     (genArg : LMonoTy → G LExpr') (fallback : G LExpr')
     (maxNumArgs : Nat := 3) : G LExpr' := do
-  -- The set of generable types of the current context.
+  -- Compute the set of generable types from the current context
   let generableTys := generableTypesFromCtx bctx fctx octx
 
-  -- Sample a random type for each type variable that a candidate can leave open. When the context
-  -- gives no generable type, draw a random base type with `pickBaseType`. A constant such as `.bool`
-  -- would make each ground type except one unreachable for an empty context.
+  -- For each possible type variable, sample a random type to instantiate it with.
+  -- When no generable types exist, fall back to an arbitrary base type
+  -- (`pickBaseType`: bool/int/string/real/regex/bitvec) rather than always `.bool`,
+  -- so the empty-context case still explores every ground type.
   let sampledTys ← List.replicate maxNumArgs ()
     |>.mapM (fun _ =>
       if hg : generableTys.length > 0 then do
@@ -966,27 +979,27 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
           apply List.ne_nil_of_length_pos
           assumption)
       else pickBaseType)
-  -- Each polymorphic library function that gives the target type `τ`.
+  -- Find all polymorphic library functions that result in the target type `τ`
   let ops := findPolymorphicOps pctx τ generableTys sampledTys maxNumArgs
   if h : ops.length > 0 then do
-    -- Draw one of them at random, together with its argument types.
+    -- Randomly choose a polymorphic library function, and obtain its argument types
     let (functionName, argTys) ← elements ops (by
       apply List.ne_nil_of_length_pos
       assumption)
 
-    -- Build the call to the factory function, with its fully instantiated type annotation. The
-    -- annotated type holds no quantified type variable. It can hold a free type variable of the
-    -- context.
+    -- Construct a call to the factory function, along with its (fully instantiated) type annotation
+    -- There are no quantified type variables in the annotated type (although it may contain free type variables
+    -- which appear in the context)
     let fullArrowTy := argTys.foldr (fun σ acc => .arrow σ acc) τ
     let opExpr : LExpr' := .op () ⟨functionName, ()⟩ (some fullArrowTy)
 
-    -- Generate a random term at each argument type.
+    -- For each argument, generate a random term of that type
     let args ← argTys.mapM genArg
 
-    -- Apply the annotated factory function to each of the argument terms.
+    -- Fully apply the factory function (carrying a type annotation) to its random argument terms
     pure (mkApps opExpr args)
   else
-    -- There is no polymorphic candidate, so use the fallback of the caller.
+    -- No polymorphic functions available: defer to the caller's fallback
     fallback
 
 -- ── Expression generator ─────────────────────────────────────────────
