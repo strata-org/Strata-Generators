@@ -59,7 +59,7 @@ coverage.
      a zero-weight branch); they differ only in that `cmd` now absorbs the pruned branches' share
      instead of the list being renormalised.
 
-* **§4 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` (59 branch weights across ten
+* **§4 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` (79 branch weights across ten
   per-type sites), each with the same θ-invariance guarantee, one recursion form each — no
   recursion, `Nat.brecOn`, and `Nat.brecOn` under a wide match.
 -/
@@ -401,7 +401,7 @@ theorem genLMonoTy_tuned_eq (θ : Tuning) (tvars : List TyIdentifier) (n : Nat) 
       all_goals simp [Tuning.weight_pos]
 
 set_option maxHeartbeats 1000000 in
-/-- `genLExprBase` is the widest of them: ten sites, 59 branch weights, and a match on the target
+/-- `genLExprBase` is the widest of them: ten sites, 79 branch weights, and a match on the target
     type as well as the depth. It needs no more work than the others, because none of the ten arms
     has to be *named*: `split` produces one goal per arm of the match — the same matcher constant
     appears on both sides, since `@[tunable]` reuses matchers rather than rebuilding them — and each

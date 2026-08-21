@@ -59,7 +59,7 @@ root = "WriteTestImports"
 # `StrataGenerators.TuningProfiles` and prints how often the shapes the suite's
 # properties discriminate on actually appear. This is how the profiles' weights were
 # derived, and how to re-derive them after a generator change.
-# Run: `lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr] [--props]`
+# Run: `lake exe dist-report [samples] [maxSize] [--stmt] [--proc] [--cmd] [--expr]`
 [[lean_exe]]
 name = "dist-report"
 root = "DistReportMain"

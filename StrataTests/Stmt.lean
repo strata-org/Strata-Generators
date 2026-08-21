@@ -14,9 +14,9 @@ and completeness say every sample is well-typed and every well-typed program is
 reachable; neither says how *often* a shape appears, and `LoopElim`'s two properties are
 the identity on a loop-free program — where they degenerate into
 `stmt: typechecker accepts generated statements`, which is already tested. `dist-report`
-measures a loop in 28% of statement lists at the source weights and 76% under
+measures a loop in 23–26% of statement lists at the source weights and 80–82% under
 `stmtLoopHeavy`, with a loop inside a loop — where a loop-elimination pass is likeliest
-to be wrong — going 3% to 24%. So those two are registered under both weightings, by naming them
+to be wrong — going 0–2% to 27–28%. So those two are registered under both weightings, by naming them
 in the registration attribute: `@[strata_property (tunings := …)]`. Each row is its own
 verdict and its own Tyche panel, and the `[default]` row is exactly the property as
 written, since `genWith defaults` is the type's `Arbitrary` instance (pinned by `rfl` in
@@ -58,7 +58,7 @@ def loopElimPreservesTyping : TestDecl :=
     survives and the count is not zero. Machine-checked, with no generator involved:
     `checkLoopElimZeroLoops [.loop .nondet none [("i", .const () (.boolConst true))] [] .empty]`
     is `false`, while the same loop without the invariant gives `true`. An
-    invariant-bearing loop appears in 19% of samples at the source weights and 59% under
+    invariant-bearing loop appears in 16% of samples at the source weights and 56–58% under
     `stmtLoopHeavy`, which is why the loop-heavy row fails faster rather than differently.
     The claim as stated is really "…unless the pass throws"; the fix is upstream (or in the
     property), and this pins it either way. -/

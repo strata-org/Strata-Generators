@@ -181,9 +181,9 @@ def loopElimPreservesTyping : TestDecl :=
 `StrataTests/Stmt.lean` uses this for both `LoopElim` properties, and
 [`docs/writing-properties.md`](./docs/writing-properties.md#choosing-the-distribution) is the guide.
 
-Only some input types can be tuned (`GenStmts`, `GenProcs`, `GenCmdsWithCtx`, `TypedExpr`); tuning a
-type without a `TunableGen` instance is an error at the declaration, naming the type, rather than a
-tuning that is silently ignored.
+Only some input types can be tuned (the statement, procedure, command and expression shapes — see
+`StrataGenerators.Test.Generators`); tuning a type without a `TunableGen` instance is an error at the
+declaration, naming the type, rather than a tuning that is silently ignored.
 
 ## Adding a new property
 

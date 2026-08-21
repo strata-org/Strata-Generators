@@ -107,8 +107,10 @@ name in its own string.
 The mechanism is `TestDecl.withTuning`, which needs no cooperation from the property's shape: the
 retuning was recorded in `Body.sampled` when `α` was still known (see `MaybeTunable`), so the
 attribute is a one-line term and works for a `.property`, a `.withPanel`, or a whole `family`. A
-property whose input type is not tunable does not silently ignore the request — it becomes a property
-that fails with the reason.
+property whose input type is not tunable, or whose `θ` is the wrong length for its generator, does
+not silently ignore the request — it becomes a property that fails with the reason. A `.withPanel`
+property keeps its verdict but loses its bespoke panel to the derived one, because a hand-written
+panel closes over its own untuned sampler; `TestDecl.withTuning` says why.
 -/
 
 /-- The optional weighting on a registration attribute: `(tuning := θ)` for one, or
@@ -190,7 +192,7 @@ private def emitTuned (decl : Name) (arg : TuningArg) (single : Bool) :
     | .many t, true  => do
         let v ← `(StrataGenerators.Test.TestDecl.underTuningsOf $t $declIdent)
         pure (v, true)
-    | .many t, false => throwError
+    | .many _, false => throwError
         "`strata_properties (tunings := …)`: a matrix of weightings over a family is ambiguous — \
          tag each property with `@[strata_property (tunings := …)]`, or apply one weighting to the \
          whole family with `(tuning := θ)`"
@@ -220,21 +222,26 @@ private def emitTuned (decl : Name) (arg : TuningArg) (single : Bool) :
 
     With a `tuningSpec` it registers the emitted `⟨decl⟩.tuned` instead, which may be a list even
     when the tagged declaration was a single property (`tunings` turns one claim into one property
-    per weighting). -/
-private def registerRegistryAttr (name : Name) (descr : String) (single : Bool)
+    per weighting).
+
+    `name` and `userName` differ, and every message uses the latter: because these attributes take
+    an argument they need a `syntax (name := …)` node, and `registerBuiltinAttribute`'s `name` has
+    to be *that* node's name (`strataPropertyAttr`) for the parser to reach this handler. Reporting
+    it would name an attribute nobody can write. -/
+private def registerRegistryAttr (name userName : Name) (descr : String) (single : Bool)
     (validate : Name → AttrM Unit) (ref : Name := by exact decl_name%) : IO Unit :=
   registerBuiltinAttribute {
     ref, name, descr
     applicationTime := .afterCompilation
     add := fun decl stx kind => do
-      unless kind == AttributeKind.global do throwAttrMustBeGlobal name kind
+      unless kind == AttributeKind.global do throwAttrMustBeGlobal userName kind
       unless ((← getEnv).getModuleIdxFor? decl).isNone do
-        throwAttrDeclInImportedModule name decl
+        throwAttrDeclInImportedModule userName decl
       validate decl
       let entry ← match parseTuningArg? stx with
         | none => pure (if single then Entry.single decl else Entry.many decl)
         | some arg =>
-          checkTunable name decl
+          checkTunable userName decl
           let (tunedName, isList) ← emitTuned decl arg single
           pure (if isList then Entry.many tunedName else Entry.single tunedName)
       modifyEnv fun env => registryExt.addEntry env entry
@@ -255,7 +262,7 @@ private def expectHead (attrName : Name) (expected : Name) (decl : Name) :
 /-- One property, registering itself. Attach to a `def _ : TestDecl`. Optionally
     `(tuning := θ)` or `(tunings := [(label, θ), …])` — see the syntax section above. -/
 initialize
-  registerRegistryAttr `strataPropertyAttr
+  registerRegistryAttr `strataPropertyAttr `strata_property
     "Register a `TestDecl` with the Strata property-test harness. Optionally \
      `(tuning := θ)` or `(tunings := [(label, θ), …])`."
     (single := true) (expectHead `strata_property ``TestDecl)
@@ -266,7 +273,7 @@ initialize
     greppable from its own declaration. `(tuning := θ)` applies one weighting to every
     member. -/
 initialize
-  registerRegistryAttr `strataPropertiesAttr
+  registerRegistryAttr `strataPropertiesAttr `strata_properties
     "Register a `List TestDecl` with the Strata property-test harness. Optionally \
      `(tuning := θ)`, applied to every member."
     (single := false) (expectHead `strata_properties ``List)

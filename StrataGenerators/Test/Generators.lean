@@ -258,7 +258,11 @@ def indepBlock     : PropertyRunner GenIndepBlock    := .ofInstances _
 -- wrappers, and the proof that no `θ` changes what is reachable, are in
 -- `StrataGenerators.TuningProfiles` and `StrataGenerators.SetGen.TuningPrototypes`.
 --
--- A type absent from this list cannot be tuned: `GenProgram`, `GenAdtBlock` and
+-- An instance here is what makes a *profile* reach the properties it was written for, so the list
+-- tracks the input types the tuned families quantify over rather than the generators alone: both
+-- command shapes, and all three expression shapes.
+--
+-- A type absent from this list cannot be tuned: `GenProgram`, `GenFunction`, `GenAdtBlock` and
 -- `GenIndepBlock` draw through generators whose weights are not yet exposed, so
 -- `TestDecl.tuned` on one of them is a missing-instance error rather than a silent no-op.
 
@@ -303,26 +307,60 @@ instance : TunableGen GenCmdsWithCtx where
     pure ⟨cmds, [], ctx'⟩
   sites := genCmd.sites
 
-/-- Typed expressions, with `genLExprBase`'s 79 branch weights read from `θ`
+/-- One command drawn against a context a first chain built, with `genCmd`'s branch weights read
+    from `θ`. This is the shape four of the five `cmd:` properties quantify over — including the two
+    `cmdSetHeavy` exists for, since `set` is offered only by the site reached when something in the
+    context is writable, and an empty context reaches the other one. -/
+instance : TunableGen GenCmdWithCtx where
+  genWith θ := retryGen 1000 <| do
+    let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 3
+    let ⟨cmd, ctx'⟩ ← genCmd.tuned (G := Plausible.Gen) θ coreMonoOps [] [] baseCtx 2 []
+    pure ⟨cmd, baseCtx, ctx'⟩
+  sites := genCmd.sites
+
+/-- Typed expressions over `defaultFCtx`, with `genLExprBase`'s 79 branch weights read from `θ`
     (`exprEvalHeavy`, `exprQuantHeavy`, `exprIndirHeavy`, `exprFVarHeavy`).
 
-    Note this draws through `genLExprBase` directly rather than `genLExprWithOps`: the
-    weights live in the former, and the latter reaches it by name and so untuned. The
-    Indir/IndirPoly rules that `genLExprWithOps` adds at the root are *also* branches of
-    `genLExprBase` at every type, so they are tunable here — see `ExprIdx.indirAll`. -/
+    Drawn through `genLExprWithOpsT`, the tuned restatement of the entry point `Arbitrary` uses —
+    root Indir/IndirPoly `frequency` and per-subterm `retryGenArg` continuation included, which is
+    what makes the pin below hold and keeps a tuned property's cost the same as the untuned one's. -/
 instance : TunableGen TypedExpr where
   genWith θ := retryGen 500 <| Gen.sized fun s => do
     let depth := max 1 (s / 20)
     let τ ← genLMonoTy (G := Plausible.Gen) [] depth
-    let e ← genLExprBase.tuned (G := Plausible.Gen) θ defaultFCtx coreMonoOps corePolyOps
-      [] [] depth τ
+    let e ← genLExprT (G := Plausible.Gen) θ defaultFCtx coreMonoOps corePolyOps [] []
+      depth τ 3 (retryGenArg 20)
+    pure ⟨e, τ⟩
+  sites := genLExprBase.sites
+
+/-- The same over the *empty* fvar context: the shape `expr: preservation` and `expr: progress`
+    quantify over, and hence what `exprEvalHeavy`/`exprQuantHeavy`/`exprIndirHeavy` have to act on
+    to reach the properties their docstrings name. -/
+instance : TunableGen ClosedTypedExpr where
+  genWith θ := retryGen 500 <|
+    (fun (te : TypedExpr) => (⟨te.expr, te.ty⟩ : ClosedTypedExpr)) <$> (Gen.sized fun s => do
+      let depth := max 1 (s / 20)
+      let τ ← genLMonoTy (G := Plausible.Gen) [] depth
+      let e ← genLExprT (G := Plausible.Gen) θ [] coreMonoOps corePolyOps [] []
+        depth τ 3 (retryGenArg 20)
+      pure (⟨e, τ⟩ : TypedExpr))
+  sites := genLExprBase.sites
+
+/-- The same over `coreOpCtx` and no polymorphic operators: the shape
+    `expr: resolve after type erasure` quantifies over, which is the second property
+    `exprQuantHeavy` is for. -/
+instance : TunableGen ResolveTypedExpr where
+  genWith θ := retryGen 500 <| Gen.sized fun s => do
+    let depth := max 1 (s / 20)
+    let τ ← genLMonoTy (G := Plausible.Gen) [] depth
+    let e ← genLExprT (G := Plausible.Gen) θ [] coreOpCtx [] [] [] depth τ 3 (retryGenArg 20)
     pure ⟨e, τ⟩
   sites := genLExprBase.sites
 
 /-! **Tuning is opt-in.** At a generator's own `.defaults` the tuned sampler is the type's
-`Arbitrary` instance *definitionally*, so `underTunings`'s "default" row is the property
-`TestDecl.property` would have registered, and adding a tuned row cannot perturb the untuned one.
-`Eq.refl`, checked by the kernel. -/
+`Arbitrary` instance, so `underTunings`'s "default" row is the property `TestDecl.property` would
+have registered, and adding a tuned row cannot perturb the untuned one. Every instance above is
+pinned, so a wrapper that drifts from the generator it claims to wrap fails the build here. -/
 
 example : TunableGen.genWith (α := GenStmts) stmtDefault = Arbitrary.arbitrary := by
   simp only [TunableGen.genWith, genProgramStmtsT_defaults]; rfl
@@ -330,13 +368,25 @@ example : TunableGen.genWith (α := GenProcs) stmtDefault = Arbitrary.arbitrary 
   simp only [TunableGen.genWith, genProcedureT_defaults]; rfl
 example : TunableGen.genWith (α := GenCmdsWithCtx) cmdDefault = Arbitrary.arbitrary := by
   simp only [TunableGen.genWith, genCmdsT_defaults]; rfl
+example : TunableGen.genWith (α := GenCmdWithCtx) cmdDefault = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, cmdDefault, genCmd.tuned_defaults]; rfl
+example : TunableGen.genWith (α := TypedExpr) exprBreadth = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, genLExprT_defaults]; rfl
+example : TunableGen.genWith (α := ClosedTypedExpr) exprBreadth = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, genLExprT_defaults]; rfl
+example : TunableGen.genWith (α := ResolveTypedExpr) exprBreadth = Arbitrary.arbitrary := by
+  simp only [TunableGen.genWith, genLExprT_defaults]; rfl
 
-/-! The arity a hand-built tuning must match, so a mis-sized one is a wrong number rather than a
-silent reindexing. -/
+/-! The arity a hand-built tuning must match. `TestDecl.withTuning` checks a `θ` against it, so a
+tuning meant for another generator is a red line naming both numbers rather than a silent
+reindexing. -/
 example : TunableGen.arity GenStmts = 14 := rfl
 example : TunableGen.arity GenProcs = 14 := rfl
 example : TunableGen.arity GenCmdsWithCtx = 12 := rfl
+example : TunableGen.arity GenCmdWithCtx = 12 := rfl
 example : TunableGen.arity TypedExpr = 79 := rfl
+example : TunableGen.arity ClosedTypedExpr = 79 := rfl
+example : TunableGen.arity ResolveTypedExpr = 79 := rfl
 
 end Tunable
 

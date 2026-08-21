@@ -1412,54 +1412,57 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
             (genLExprBase fctx octx pctx tvars bctx n .real)) ]
       (by show 0 < 1+1+2+2+2+2+4+4; omega)
   -- ── Bitvec type ───────────────────────────────────────────────────
-  | 0, .bitvec n =>
-    let bvars := bvarsOfType bctx (.bitvec n)
+  -- The width binder is `w`, not `n`: `@[tunable (depth := n)]` resolves `n` to the
+  -- innermost `Nat` local of that name, so a width named `n` here would make this site
+  -- read its weight schedules at the bitvector width instead of the remaining depth.
+  | 0, .bitvec w =>
+    let bvars := bvarsOfType bctx (.bitvec w)
     oneOf
-      [ (fun () => genBitvecConst n),
+      [ (fun () => genBitvecConst w),
         (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx (.bitvec n) hv
-          else genBitvecConst n),
+          if hv : bvars.length > 0 then pickBVar bctx (.bitvec w) hv
+          else genBitvecConst w),
         (fun () =>
-          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
-          then pickFVar fctx (.bitvec n) hf
-          else genBitvecConst n),
+          if hf : (fvarsOfType fctx (.bitvec w)).length > 0
+          then pickFVar fctx (.bitvec w) hf
+          else genBitvecConst w),
         (fun () =>
-          if ho : (opsOfType octx (.bitvec n)).length > 0
-          then pickOp octx (.bitvec n) ho
-          else genBitvecConst n) ]
+          if ho : (opsOfType octx (.bitvec w)).length > 0
+          then pickOp octx (.bitvec w) ho
+          else genBitvecConst w) ]
       (by simp)
-  | m + 1, .bitvec n =>
-    let bvars := bvarsOfType bctx (.bitvec n)
+  | n + 1, .bitvec w =>
+    let bvars := bvarsOfType bctx (.bitvec w)
     frequency
-      [ (1, fun () => genBitvecConst n),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx m (.bitvec n)) (genLExprBase fctx octx pctx tvars bctx m) (.bitvec n)),
-        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx m .bool)
-                              (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))
-                              (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))),
+      [ (1, fun () => genBitvecConst w),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.bitvec w)) (genLExprBase fctx octx pctx tvars bctx n) (.bitvec w)),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n (.bitvec w))
+                              (genLExprBase fctx octx pctx tvars bctx n (.bitvec w))),
         (2, fun () =>
           if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else genBitvecConst n),
+          else genBitvecConst w),
         (2, fun () =>
-          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
-          then pickFVar fctx (.bitvec n) hf
-          else genBitvecConst n),
+          if hf : (fvarsOfType fctx (.bitvec w)).length > 0
+          then pickFVar fctx (.bitvec w) hf
+          else genBitvecConst w),
         (2, fun () =>
-          if ho : (opsOfType octx (.bitvec n)).length > 0
-          then pickOp octx (.bitvec n) ho
-          else genBitvecConst n),
+          if ho : (opsOfType octx (.bitvec w)).length > 0
+          then pickOp octx (.bitvec w) ho
+          else genBitvecConst w),
         -- Monomorphic Indir rule: a fully-applied operator whose
-        -- result type is (.bitvec n), with arguments drawn from this generator at `m`.
+        -- result type is (.bitvec w), with arguments drawn from this generator at `n`.
         (4, fun () =>
-          if hi : (findOpsInCtx octx (.bitvec n)).length > 0
-          then genIndir octx (.bitvec n) (genLExprBase fctx octx pctx tvars bctx m) hi
-          else genLExprBase fctx octx pctx tvars bctx m (.bitvec n)),
+          if hi : (findOpsInCtx octx (.bitvec w)).length > 0
+          then genIndir octx (.bitvec w) (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n (.bitvec w)),
         -- Polymorphic IndirPoly rule. Having it *here* rather than
         -- only at `genLExpr`'s root is what makes a polymorphic factory call
         -- reachable under `ite` arms and `abs`/`quant` bodies.
         (4, fun () =>
-          genIndirPolyCore fctx octx pctx bctx (.bitvec n)
-            (genLExprBase fctx octx pctx tvars bctx m)
-            (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))) ]
+          genIndirPolyCore fctx octx pctx bctx (.bitvec w)
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n (.bitvec w))) ]
       (by show 0 < 1+1+2+2+2+2+4+4; omega)
   -- ── Regex type (base type, no constants) ───────────────────────────
   | 0, .regex =>

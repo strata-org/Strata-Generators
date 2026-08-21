@@ -25,6 +25,13 @@ def main (args : List String) : IO UInt32 := do
   let samples := (positional[0]? >>= String.toNat?).getD 200
   let maxSize := (positional[1]? >>= String.toNat?).getD 100
   let all := ["stmt", "proc", "cmd", "expr"]
+  -- An unrecognised flag is an error, not a no-op: silently ignoring one reads as "that family
+  -- was measured" when nothing was, which is how a `--props` flag stayed documented but unbuilt.
+  let unknown := flags.filter (fun f => !all.any (fun n => f == s!"--{n}"))
+  unless unknown.isEmpty do
+    IO.eprintln s!"dist-report: unknown flag(s) {" ".intercalate unknown}; \
+      expected any of {" ".intercalate (all.map (s!"--{·}"))}"
+    return 1
   let asked := all.filter (fun f => flags.contains s!"--{f}")
   let families := if asked.isEmpty then all else asked
   StrataGenerators.DistReport.report samples maxSize families

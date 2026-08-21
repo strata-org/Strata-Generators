@@ -28,47 +28,67 @@ profile is the fix: it moves probability onto the shapes a given family of prope
 discriminates on, and (because tuning is θ-invariant at `Set`) it cannot cost coverage — every
 shape stays reachable, so a shape a profile makes rare is still eventually drawn.
 
-Concretely, here is the measured baseline against what a profile buys — `lake exe dist-report 250`,
-one row per shape the properties discriminate on. (These are one run's figures; nothing here is
-seed-deterministic, and rates move a few points run to run — `exit` under `stmtKleeneBalanced` has
-been measured anywhere from 13% to 19%. Re-run before reading a small difference as a change.)
+Concretely, here is the measured baseline against what a profile buys — two runs of
+`lake exe dist-report 250 100`, one row per shape the properties discriminate on, quoted as the
+range across the two. Nothing here is seed-deterministic, so re-run before reading a small
+difference as a change; a row whose range already spans the gap between the two columns is telling
+you the profile does nothing.
 
 | properties | interesting shape | default | tuned | profile |
 | --- | --- | --- | --- | --- |
-| `stmt: LoopElim …` (#3, #4) | ≥ 1 `loop` | 32% | **78%** | `stmtLoopHeavy` |
-| ” | a loop inside a loop | 3% | **32%** | ” |
-| ” | an invariant-bearing loop | 19% | **59%** | ” |
-| `stmt: typechecker accepts …` | ≥ 1 `funcDecl` | 18% | **68%** | `stmtFuncDeclHeavy` |
-| `stmt: DetToKleene …` | ≥ 1 `exit` | 4% | **17%** | `stmtKleeneBalanced` |
-| `cmd: set …` (2) | mean `set`s per sample | 1.3 | **2.1** | `cmdSetHeavy` |
-| `cmd: context growth …` | variables added by `init` (mean) | 0.9 | **2.1** | `cmdInitHeavy` |
-| `cmd: symbolic/concrete eval …` | ≥ 1 `assert`/`assume`/`cover` | 91% | **99%** | `cmdCheckHeavy` |
-| `expr: preservation`/`progress` | term is not already a value | 42% | **54%** | `exprEvalHeavy` |
-| `expr: progress` | the failure the gap predicts | 22% | **38%** | `exprIndirHeavy` |
-| `expr: eval preserves fvars` | term mentions a free variable | 28% | **41%** | `exprFVarHeavy` |
-| `proc: PrecondElim …` (13) | the pass rewrites the program | 67% | **78%** | `procPrecondHeavy` |
-| ” | ≥ 1 declared function | 40% | **81%** | ” |
-| `proc: FilterProcedures …` (7) | ≥ 1 `call` | 57% | **82%** | `procCallHeavy` |
+| `stmt: LoopElim …` (#3, #4) | ≥ 1 `loop` | 23–26% | **80–82%** | `stmtLoopHeavy` |
+| ” | a loop inside a loop | 0–2% | **27–28%** | ” |
+| ” | an invariant-bearing loop | 16% | **56–58%** | ” |
+| `stmt: typechecker accepts …` | ≥ 1 `funcDecl` | 17–19% | **64–65%** | `stmtFuncDeclHeavy` |
+| `stmt: DetToKleene …` | ≥ 1 `exit` | 2% | **13–14%** | `stmtKleeneBalanced` |
+| `cmd: set …` (2) | mean `set`s per sample | 0.7 | **1.0–1.2** | `cmdSetHeavy` |
+| `cmd: context growth …` | variables added by `init` (mean) | 1.3 | **2.3** | `cmdInitHeavy` |
+| `cmd: symbolic/concrete eval …` | ≥ 1 `assert`/`assume`/`cover` | 91–95% | **99%** | `cmdCheckHeavy` |
+| `expr: preservation`/`progress` | term is not already a value | 92–93% | 96% | `exprEvalHeavy` |
+| `expr: progress` | the failure the gap predicts | 40–45% | 45–49% | `exprIndirHeavy` |
+| `expr: eval preserves fvars` | term mentions a free variable | 52–55% | 53–57% | `exprFVarHeavy` |
+| `proc: PrecondElim …` (13) | the pass rewrites the program | 60–65% | **75–77%** | `procPrecondHeavy` |
+| ” | ≥ 1 declared function | 32–34% | **81–82%** | ” |
+| `proc: FilterProcedures …` (7) | ≥ 1 `call` | 58% | **79–81%** | `procCallHeavy` |
+
+**The three `expr:` rows are not bold, and that is the honest result.** Each is inside the run-to-run
+range: through the generator those properties actually draw from, these profiles do essentially
+nothing. The reason is one weight they do not address — `genLExpr`'s own root `frequency`, a 1 : 9
+split in favour of a fully-applied operator, which `θ` does not reach (see `genLExprT`). So ~90% of
+terms are an operator application at the root before any of `genLExprBase`'s 79 weights get a say,
+the base rules are reached only in argument position, and a 24× weight on a base-rule branch moves
+the top-level shape by a few points. Redex-heavy and value-light is what the *default* already gives
+here (92% not-a-value, not the 42% an earlier measurement of the bare `genLExprBase` reported), which
+is why `exprEvalHeavy` has so little left to buy.
+
+Exposing that root split is the missing knob, and it wants a wider index space than
+`genLExprBase.defaults` — 81 weights rather than 79 — so it is a change to the arity every expression
+profile is checked against rather than a new profile. Until then, treat the `expr:` profiles as
+documentation of intent: they are applied, they are proven not to cost coverage, and they are
+measurably weak.
 
 The `proc:` rows are the ones to read sceptically, and they are a good advertisement for measuring
 rather than assuming: when these profiles were first written, calls appeared in 15% of generated
-programs and PrecondElim fired on 26%. Both numbers are now 57% and 67% *without* any tuning, because
-`genProcedure` and `genCallStmt` were improved in the meantime (every sibling is callable, and the
-`call` weight is 3 rather than 1). What was a 4× gain is now a sharpener worth about 1.2–2×, and
-`stmtLoopHeavy` raises `PrecondElim fires` (78%) just as much as `procPrecondHeavy` does. Keep the
-`proc:` profiles for the declared-function rate, which is still 40% → 81%; do not expect them to
-rescue a vacuous property, because that family is no longer vacuous.
+programs and PrecondElim fired on 26%. Both numbers are now 58% and 60–65% *without* any tuning,
+because `genProcedure` and `genCallStmt` were improved in the meantime (every sibling is callable,
+and the `call` weight is 3 rather than 1). What was a 4× gain is now a sharpener worth about 1.2–1.4×,
+and `stmtLoopHeavy` raises `PrecondElim fires` (67–69%) about as much as `procPrecondHeavy` does. Keep
+the `proc:` profiles for the declared-function rate, which is still 32–34% → 81–82%; do not expect
+them to rescue a vacuous property, because that family is no longer vacuous.
 
 Two rows are honestly *not* there: `stmt: ANF …` and `proc: ANFEncoder …` (ten properties) run as
-identity checks — the encoder changed the program on 0–4% of samples under every profile. The reason
+identity checks — the encoder changed the program on 0–2% of samples under every profile. The reason
 is not a weight that is set wrong but the shape the pass keys on; see the ANF note below the
 procedure profiles.
 
 ## What the profiles do to the suite's own properties
 
-Coverage of a *shape* is a proxy. `lake exe dist-report --props` measures the thing itself: it runs
-every property in `Properties.stmtTransforms` / `Properties.procTransforms` under each profile and
-reports how often each one fails. Over 300 samples per profile:
+Coverage of a *shape* is a proxy. Measuring the thing itself means running the suite's own
+properties under each profile, which is what a registration attribute already does: tag the
+statement and procedure families with `@[strata_properties (tuning := θ)]`, one profile at a time,
+and read the per-property verdicts out of `lake test`. (`StrataGenerators.DistReport` deliberately
+has no property-outcome table; it says there why that comparison belongs in the suite, where a
+distribution-sensitive failure gates CI.) Over 300 trials per profile:
 
 * **No profile introduces a new failure.** Every property that passes under the default weights
   passes under all of them — which is the outcome the θ-invariance theorems predict but do not
@@ -86,8 +106,10 @@ reports how often each one fails. Over 300 samples per profile:
 
 ## Desirable distributions, family by family
 
-**Expressions** (`expr: …`, 5 properties over `genLExprBase`). Three different jobs pull in
-different directions:
+**Expressions** (`expr: …`, 5 properties, drawn through `genLExprT`). Three different jobs pull in
+different directions — and, per the note under the table, all three are currently pulling against a
+root split they cannot move, so what follows is the intent each profile encodes rather than a
+measured gain:
 
 * *Generator soundness* (`expr: generated terms typecheck`) wants **breadth** — every rule of
   every type, since the property is only as strong as the set of shapes it visits. That is what
@@ -95,13 +117,14 @@ different directions:
 * *Evaluator properties* (`preservation`, `progress`, `eval preserves fvars`) want terms that
   actually **reduce**. A leaf — a constant, an `fvar`, an `op` — is already a value, so the
   property holds for a reason that has nothing to do with the evaluator. `exprEvalHeavy` raises
-  `app`/`ite`/`eq` (the redex-forming rules) and drops the three leaf branches to 1.
+  `app`/`ite`/`eq` (the redex-forming rules) and drops the three leaf branches to 1. Measured, this
+  is the one job the *default* distribution already does: only 7–8% of draws are already a value.
 * *Known gaps* want the opposite of avoidance. `expr: progress` fails on `∀`/`∃` (`LExpr.eval`
   has no rule for a quantifier, so `if (∀x. e) then …` is stuck) and `resolve after type erasure`
   fails on an erased quantifier whose body type is the bound variable. `exprQuantHeavy` makes a
-  quantifier the modal `bool` shape, which turns those two properties from "fails on a small
-  fraction of runs" into "fails on almost every run" — the difference between a flaky signal and
-  a regression test for the characterization.
+  quantifier the modal `bool` shape — and measures at 2% of terms carrying one, against 0% at the
+  defaults, because a quantifier branch exists only at the `bool` site and the root is an operator
+  application nine times in ten. It does not currently turn either gap into a reliable reproducer.
 
 **Commands** (`cmd: …`, 6 properties). `cmd: set preserves variable` and `cmd: store type
 preservation` only bite on a `set`; `cmd: context growth matches inits` only bites on an `init`.
@@ -167,11 +190,15 @@ thread it into a *different* definition the body calls by name. Two consequences
   built on it.
 * An **expression** weight set here does not reach the expressions inside generated statements:
   `genStmt` calls `genLExpr` by name, and `genLExpr`/`genIndirPoly` call `genLExprBase` by name.
-  So `exprEvalHeavy` shapes the `expr:` family (which draws from `genLExprBase` directly) but
-  not the expressions inside a `cmd` or a loop guard. Reaching those needs the sub-generator
-  calls to take the tuning — tuning-passing style — which is a Basalt-level change, not a
-  weighting. Until then the PrecondElim-partial-call rate is not tunable from here, and neither is
-  the one expression-level lever that would move the ANF rate (see the ANF note above).
+  Where the by-name call is one hop, restating the caller is cheap and this module does it —
+  `genLExprT` below is `genLExpr`'s body with the tuned callee substituted, which is what lets
+  `exprEvalHeavy` and friends reach the `expr:` family through the entry point those properties
+  actually draw from. Doing the same for `genStmt`'s expressions would mean restating the whole
+  statement generator, so `exprEvalHeavy` still does not shape the expressions inside a `cmd` or a
+  loop guard: that wants the sub-generator calls to take the tuning — tuning-passing style, a
+  Basalt-level change rather than a weighting. Until then the PrecondElim-partial-call rate is not
+  tunable from here, and neither is the one expression-level lever that would move the ANF rate
+  (see the ANF note above).
 -/
 
 namespace StrataGenerators.TuningProfiles
@@ -366,7 +393,7 @@ side at about 60% of samples.
 `block` is raised with them, and that is not cosmetic: `exit` needs an enclosing label, so at the
 top level (`labels = []`) it is unreachable no matter what its weight is — a `block` is what creates
 the scope an `exit` can target. Measured, raising `exit` alone left it at 3–4% of samples (the
-default rate); raising `block` to 8 alongside it took it to 15%. -/
+default rate); raising `block` to 8 alongside it takes it to 13–15%. -/
 def stmtKleeneBalanced : Tuning :=
   withWeights stmtDefault
     [(StmtIdx.exit, 8), (StmtIdx.funcDecl, 4), (StmtIdx.typeDecl, 4), (StmtIdx.loop, 4),
@@ -454,7 +481,11 @@ def exprBreadth : Tuning := genLExprBase.defaults
 properties are trivial on a term that is already a value, so the rules that build a redex — `app`
 and `ite`, at *every* type — go up and the leaf rules (`bvar`/`fvar`/`op`) and literals go to the
 floor. Quantifiers stay at 1: they are what makes `progress` fail, and this profile is for
-exercising the evaluator, not for pinning that gap. -/
+exercising the evaluator, not for pinning that gap.
+
+Measured, this buys 7–8% already-a-value down to 4%: the smallest margin of any profile here, because
+the job was already done before tuning. `genLExpr`'s root split makes the modal term an operator
+application, which is a redex. -/
 def exprEvalHeavy : Tuning :=
   let θ := withWeightsAt exprBreadth ExprIdx.appAll 6
   let θ := withWeightsAt θ ExprIdx.iteAll 8
@@ -466,9 +497,10 @@ def exprEvalHeavy : Tuning :=
 /-- **Quantifier-heavy** (`expr: progress`, `expr: resolve after type erasure`). Both properties
 fail on a quantifier — `LExpr.eval` has no rule for one, and `resolve` rejects an erased `∃x. x` —
 and both failures are the documented gap rather than a soundness bug, so what a regression test
-wants is for them to fail *reliably*.
+wants is for them to fail *reliably*. **This profile does not deliver that**: measured through
+`genLExprT`, a quantifier appears in 2% of terms against 0% at the defaults.
 
-Two measurements shaped this one:
+Three measurements shaped it, the third of which is why it does not work:
 
 * Raising `∀`/`∃` alone is not enough. They live only at the `bool` site, and a uniformly drawn base
   type is `bool` one time in six, so a 10× quantifier weight moved the rate from 3% to 13% and
@@ -478,12 +510,14 @@ Two measurements shaped this one:
   root is not stuck, because `LExpr.eval` leaves it alone and the property scores it as a value. It
   is a quantifier in an **eliminator** position — an `ite` guard, an `eq` operand — that gets stuck.
   So the eliminators outweigh the quantifiers here rather than the other way round.
+* Both of those were measured on `genLExprBase` alone. The properties draw through `genLExpr`, whose
+  root `frequency` sends nine draws in ten to a fully-applied operator before any of these weights
+  applies, and whose sub-terms bottom out in the `n = 0` arms — which have no quantifier branch at
+  all. So the binding constraints are the root split and the depth schedule, neither of which `θ`
+  addresses; see the note under this module's coverage table.
 
-What this profile therefore buys is quantifier *presence*, not `progress` failures: 8% → 27% over
-the suite's whole size range, and 10% → 53% at max size 60 (where the depth budget is 3 — at depth
-1 the sub-terms of an `ite` are drawn from the `n = 0` arms, which have no quantifier branch at
-all, so the depth schedule, not the weight, is the binding constraint). For reproducing the
-`progress` gap use `exprIndirHeavy` instead, and see its docstring for why. -/
+For reproducing the `progress` gap `exprIndirHeavy` is the better bet, though not by much — see its
+docstring. -/
 def exprQuantHeavy : Tuning :=
   let θ := withWeightsAt exprBreadth ExprIdx.quantAll 8
   let θ := withWeightsAt θ ExprIdx.iteAll 14
@@ -495,8 +529,14 @@ def exprQuantHeavy : Tuning :=
 
 /-- **fvar-heavy** (`expr: eval preserves fvars`). The property says evaluation introduces no *new*
 free variable; on a closed term it holds for want of any free variable at all. Only useful with a
-non-empty `fctx` — with `fctx = []` the branch falls back to the site's constant. Measured against
-`defaultFCtx`, it takes the fraction of terms that mention a free variable from 31% to 48%. -/
+non-empty `fctx` — with `fctx = []` the branch falls back to the site's constant.
+
+Measured against `defaultFCtx` through `genLExprT`, the fraction of terms mentioning a free variable
+is 52–55% at the defaults and 53–57% here: no effect outside the run-to-run range. An earlier 31% →
+48% was measured on `genLExprBase` alone, where the root is a base rule rather than an operator
+application 90% of the time. The property is *already* non-vacuous on half the samples, so what this
+profile was for is largely moot; see the note under this module's coverage table for the knob that
+would make it bite. -/
 def exprFVarHeavy : Tuning :=
   withWeightsAt exprBreadth ExprIdx.fvarAll 10
 
@@ -506,7 +546,8 @@ now offers the **Indir** and **IndirPoly** rules — a fully-applied operator wh
 target — at every type, so an operator application is a branch here rather than something only the
 `genLExpr` wrapper added at the root.
 
-Measured (400 draws per row, `dist-report`'s expression sampler):
+Measured on `genLExprBase` alone (400 draws per row), which is what an earlier `dist-report`
+sampled:
 
 | | default | `op` leaf ×30 | Indir ×12 | Indir ×24 |
 | --- | --- | --- | --- | --- |
@@ -518,11 +559,15 @@ Measured (400 draws per row, `dist-report`'s expression sampler):
 Note the middle column, which is why this profile replaced an earlier `exprStuckOpHeavy` that raised
 the bare-`op` *leaf* branch instead: raising a leaf **crowds out** Indir, so it lowered the failure
 rate and the operator content it was supposed to raise. The `op` branch draws an operator whose
-*type is* the target type — a leaf, not an application — and the two are easy to confuse.
+*type is* the target type — a leaf, not an application — and the two are easy to confuse. That
+lesson stands; the numbers do not carry over.
 
-The price is the highest in this module: first-try success 51% → 32%, so every sample costs about
-1.6× as much to draw. An operator application needs a term per argument, and each is another chance
-to fail. -/
+Through `genLExprT`, the entry point the property uses, the columns above are all but flat:
+`progress` fails on 40–45% of default draws and 45–49% here, an operator occurs in 90–91% either way,
+and first-try success is 78–80% against 80–84%. `genLExpr`'s root split already puts a
+fully-applied operator at the root in nine draws out of ten, so raising Indir *inside*
+`genLExprBase` has little left to raise and costs little. Both the gain and the price were real of a
+sampler no property used. -/
 def exprIndirHeavy : Tuning :=
   withWeightsAt (withWeightsAt exprBreadth ExprIdx.indirAll 24) ExprIdx.indirPolyAll 24
 
@@ -625,6 +670,48 @@ def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCt
     body := .structured body
   }
 
+/-- `genIndirPoly` with the weights of the generator it falls back to read from `θ`. Identical to
+`StrataGenerators.genIndirPoly` except that both `genLExprBase`-valued defaults are tuned. -/
+def genIndirPolyT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
+    (genArg : LMonoTy → G LExpr' := genLExprBase.tuned θ fctx octx pctx tvars bctx depth) :
+    G LExpr' :=
+  genIndirPolyCore fctx octx pctx bctx τ genArg
+    (genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ) maxNumArgs
+
+/-- `genLExpr` with `genLExprBase`'s branch weights read from `θ`, threaded through its own
+recursion on `depth`.
+
+This is what makes the expression weights reach the generator the `expr:` properties actually draw
+from. `genLExpr` calls `genLExprBase` — and `genIndirPoly`, which calls it again — *by name*, so
+`@[tunable]` cannot thread `θ` across that boundary; this wrapper restates `genLExpr`'s body with
+the tuned callee, exactly as `genProcedureT` does for `genProcedure`. `genLExprT_defaults` below is
+what keeps the restatement from drifting.
+
+Note that `genLExpr`'s own root `frequency` (the 1 : 9 base-rules versus operator-application split)
+is left at its literal weights: `θ` addresses `genLExprBase`'s 79 branches, and mixing a second
+generator's sites into the same flat index space would silently repoint every `ExprIdx` name. -/
+def genLExprT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
+    (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G LExpr' :=
+  let genArg : LMonoTy → G LExpr' :=
+    retryCont <|
+      match depth with
+      | 0 => genLExprBase.tuned θ fctx octx pctx tvars bctx 0
+      | n + 1 => fun σ => genLExprT θ fctx octx pctx tvars bctx n σ maxNumArgs retryCont
+  if h : (findOpsInCtx octx τ).length > 0 then
+    frequency
+      [ (1, fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ),
+        (9, fun () =>
+        pick
+          (fun () => genIndir octx τ genArg h)
+          (fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg)) ]
+      (by simp)
+  else
+    pick
+      (fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ)
+      (fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg)
+
 -- ══════════════════════════════════════════════════════════════════════════
 -- The plumbing is the shipping generator
 -- ══════════════════════════════════════════════════════════════════════════
@@ -671,6 +758,32 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
     (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx) :
     genProcedureT (G := G) stmtDefault octx procs C Γ size len pctx
       = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx := rfl
+
+/-- The tuned argument generator at the defaults, as a *function* of the target type. `@[tunable]`
+states `tuned_defaults` at full application, so this is the partially applied form `genLExprT`'s
+`genArg` needs. -/
+theorem genLExprBase_tuned_defaults_fn [_root_.Gen G] (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) :
+    genLExprBase.tuned (G := G) exprBreadth fctx octx pctx tvars bctx n
+      = genLExprBase fctx octx pctx tvars bctx n :=
+  funext fun _ => genLExprBase.tuned_defaults ..
+
+@[simp] theorem genLExprT_defaults [_root_.Gen G] (fctx : FVarCtx) (octx : OpCtx)
+    (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
+    (maxNumArgs : Nat) (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr')) :
+    genLExprT (G := G) exprBreadth fctx octx pctx tvars bctx depth τ maxNumArgs retryCont
+      = genLExpr fctx octx pctx tvars bctx depth τ maxNumArgs retryCont := by
+  induction depth generalizing τ with
+  | zero =>
+    simp only [genLExprT, genLExpr, genIndirPolyT, genIndirPoly,
+      genLExprBase_tuned_defaults_fn]
+  | succ n ih =>
+    have hArg : (fun σ => genLExprT (G := G) exprBreadth fctx octx pctx tvars bctx n σ
+                            maxNumArgs retryCont)
+              = (fun σ => genLExpr (G := G) fctx octx pctx tvars bctx n σ maxNumArgs retryCont) :=
+      funext fun σ => ih σ
+    simp only [genLExprT, genLExpr, genIndirPolyT, genIndirPoly, hArg,
+      genLExprBase_tuned_defaults_fn]
 
 /-! The index tables above name the branch each profile means to move; these pin them. A branch
 reordering in `genStmt`/`genCmd`/`genLExprBase` changes an arity or an offset and breaks one of

@@ -18,21 +18,26 @@ Every column is either
   vacuous or trivially true (`loop` for `stmt: LoopElim …`, `≥1 call` for the FilterProcedures
   family, a quantifier for `expr: progress`), or a *witness that a transform did something*
   (`LoopElim≠id`, `ANF≠id`, `PE fires`), which is the sharpest available form of "not vacuous"; or
-* a **cost**: `1st-try`, the fraction of draws that succeed with no retry. The generators are
-  partial — a sub-generator with empty support throws and `retryGen` redraws the *whole* sample —
-  so a profile that steers into failure-prone shapes buys coverage with generation time. Seeing
-  that next to the coverage it bought is the point.
+* a **cost**: `1st-try`, the fraction of draws that succeed with no retry, and `dropped`, the
+  fraction that produced nothing even after the retry budget. The generators are partial — a
+  sub-generator with empty support throws and `retryGen` redraws the *whole* sample — so a profile
+  that steers into failure-prone shapes buys coverage with generation time. Seeing that next to the
+  coverage it bought is the point.
+
+**Two denominators, and which column uses which.** A coverage column is a fraction of the samples
+that *exist*, so its denominator excludes dropped draws; sharing the cost columns' denominator would
+scale every coverage figure down by the drop rate and read as a distribution change that never
+happened. `1st-try` and `dropped` are fractions of draws *attempted*, so they keep the full count.
 
 Samples are drawn exactly as the suite draws them: the same `size`/`len` schedules as
 `TestScaffold`'s `Arbitrary` instances, the same operator contexts (`coreMonoOps` for statements
 and commands, `corePartialOps` for procedures), the same `retryGen` budgets. So a rate here is the
 rate the corresponding property sees.
 
-**One caveat, stated in the output too.** The expression rows sample `genLExprBase` directly,
-because that is the definition the expression weights live in. The suite's `expr:` properties draw
-through `genLExprWithOps`, which reaches `genLExprBase` by name and therefore *unmodified* — see
-the "Composition" section of `StrataGenerators.TuningProfiles`. The expression rows are the
-distribution of the tuned generator, not of the suite's current entry point.
+**One caveat, stated in the output too.** The command rows measure the `GenCmdsWithCtx` chain, which
+starts from the empty context; the four `GenCmdWithCtx` properties draw one command against a
+context a first chain built, which conditions on a non-empty context and so reports higher `set`
+rates from the same weights (see `cmdsGen`).
 -/
 
 open Lambda Core Imperative Plausible
@@ -117,7 +122,11 @@ def stmtsGen (θ : Tuning) (s : Nat) : Gen (List Statement) := do
   pure ss
 
 structure StmtStats where
+  /-- Draws attempted: the denominator of `1st-try` and `dropped`. -/
   n : Nat := 0
+  /-- Draws that produced nothing even after the retry budget. `n - dropped` is the denominator of
+      every coverage column; see the module docstring on the two denominators. -/
+  dropped : Nat := 0
   firstTry : Nat := 0
   loop : Nat := 0
   loop2 : Nat := 0
@@ -137,7 +146,7 @@ def stmtRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
   for i in List.range samples do
     let (o, ok) ← draw (stmtsGen θ (i % (maxSize + 1))) 4000 (i % (maxSize + 1))
     match o with
-    | none => t := { t with n := t.n + 1 }
+    | none => t := { t with n := t.n + 1, dropped := t.dropped + 1 }
     | some ss =>
       let nest := (ss.map loopNesting).foldl max 0
       t := { t with
@@ -155,14 +164,15 @@ def stmtRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
         kleene := t.kleene + (if (kleeneStmts ss).isSome then 1 else 0)
         stmts := t.stmts + ss.length
         size := t.size + sizeStmts ss }
-  pure [pct t.loop t.n, pct t.loop2 t.n, pct t.invLoop t.n, pct t.exit t.n,
-        pct t.funcDecl t.n, pct t.typeDecl t.n, pct t.call t.n,
-        pct t.loopElim t.n, pct t.anf t.n, pct t.kleene t.n,
-        mean1 t.stmts t.n, mean1 t.size t.n, pct t.firstTry t.n]
+  let k := t.n - t.dropped
+  pure [pct t.loop k, pct t.loop2 k, pct t.invLoop k, pct t.exit k,
+        pct t.funcDecl k, pct t.typeDecl k, pct t.call k,
+        pct t.loopElim k, pct t.anf k, pct t.kleene k,
+        mean1 t.stmts k, mean1 t.size k, pct t.firstTry t.n, pct t.dropped t.n]
 
 def stmtHeaders : List String :=
   ["loop", "loop²", "invLoop", "exit", "fnDecl", "tyDecl", "call",
-   "LpElim≠", "ANF≠id", "Kleene✓", "#stmts", "astSize", "1st-try"]
+   "LpElim≠", "ANF≠id", "Kleene✓", "#stmts", "astSize", "1st-try", "dropped"]
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- Procedure family
@@ -224,6 +234,7 @@ def anfChanges (ps : List Procedure) : Bool :=
 
 structure ProcStats where
   n : Nat := 0
+  dropped : Nat := 0
   firstTry : Nat := 0
   call : Nat := 0
   funcDecl : Nat := 0
@@ -239,7 +250,7 @@ def procRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
   for i in List.range samples do
     let (o, ok) ← draw (procsGen θ (i % (maxSize + 1))) 8000 (i % (maxSize + 1))
     match o with
-    | none => t := { t with n := t.n + 1 }
+    | none => t := { t with n := t.n + 1, dropped := t.dropped + 1 }
     | some ps =>
       let bodies := ps.flatMap (fun p => bodyStmts p.body)
       t := { t with
@@ -253,11 +264,13 @@ def procRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
         filt := t.filt + (if filterDrops ps then 1 else 0)
         anf := t.anf + (if anfChanges ps then 1 else 0)
         bodyStmts := t.bodyStmts + bodies.length }
-  pure [pct t.call t.n, pct t.funcDecl t.n, pct t.loop t.n, pct t.pe t.n, pct t.peWF t.n,
-        pct t.filt t.n, pct t.anf t.n, mean1 t.bodyStmts t.n, pct t.firstTry t.n]
+  let k := t.n - t.dropped
+  pure [pct t.call k, pct t.funcDecl k, pct t.loop k, pct t.pe k, pct t.peWF k,
+        pct t.filt k, pct t.anf k, mean1 t.bodyStmts k, pct t.firstTry t.n, pct t.dropped t.n]
 
 def procHeaders : List String :=
-  ["call", "fnDecl", "loop", "PE fires", "PE $wf", "Filt cut", "ANF≠id", "#body", "1st-try"]
+  ["call", "fnDecl", "loop", "PE fires", "PE $wf", "Filt cut", "ANF≠id", "#body", "1st-try",
+   "dropped"]
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- Command family
@@ -275,16 +288,22 @@ def isCheck : Cmd Expression → Bool
   | .assert _ _ _ | .assume _ _ _ | .cover _ _ _ => true
   | _ => false
 
-/-- The command family's sample: `TestScaffold.genCmdFromBuiltCtx`'s shape (a
-    context built by a first chain, then the commands under test), through the
-    tuned chain. -/
+/-- The command family's sample: `TestScaffold.genCmdsWithCtx` verbatim — one chain of four
+    commands from the **empty** context — through the tuned chain.
+
+    The empty start is not incidental. `genCmd` has two sites, and only the first (reached when
+    something in the context is writable) offers `set` at all, so the first command of a chain can
+    never be one; measuring against a pre-built context would report a `set` rate the
+    `GenCmdsWithCtx` properties never see. The four `GenCmdWithCtx` properties draw *one* command
+    against a context a first chain built, which is the second site's distribution conditioned on a
+    non-empty context — the same weights, so a profile moves both, but not the same rates. -/
 def cmdsGen (θ : Tuning) : Gen (List (Cmd Expression) × VarCtx × VarCtx) := do
-  let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 3
-  let (cmds, outCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] baseCtx 2 4
-  pure (cmds, baseCtx, outCtx)
+  let (cmds, outCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 4
+  pure (cmds, [], outCtx)
 
 structure CmdStats where
   n : Nat := 0
+  dropped : Nat := 0
   firstTry : Nat := 0
   set : Nat := 0
   init : Nat := 0
@@ -298,7 +317,7 @@ def cmdRow (θ : Tuning) (samples : Nat) : IO (List String) := do
   for _ in List.range samples do
     let (o, ok) ← draw (cmdsGen θ) 1000 20
     match o with
-    | none => t := { t with n := t.n + 1 }
+    | none => t := { t with n := t.n + 1, dropped := t.dropped + 1 }
     | some ((cmds : List (Cmd Expression)), (inCtx : VarCtx), (outCtx : VarCtx)) =>
       t := { t with
         n := t.n + 1
@@ -309,11 +328,13 @@ def cmdRow (θ : Tuning) (samples : Nat) : IO (List String) := do
         setCmds := t.setCmds + (cmds.filter isSet).length
         cmds := t.cmds + cmds.length
         growth := t.growth + (outCtx.length - inCtx.length) }
-  pure [pct t.set t.n, pct t.init t.n, pct t.check t.n,
-        mean1 t.setCmds t.n, mean1 t.growth t.n, mean1 t.cmds t.n, pct t.firstTry t.n]
+  let k := t.n - t.dropped
+  pure [pct t.set k, pct t.init k, pct t.check k,
+        mean1 t.setCmds k, mean1 t.growth k, mean1 t.cmds k, pct t.firstTry t.n,
+        pct t.dropped t.n]
 
 def cmdHeaders : List String :=
-  ["has set", "has init", "has chk", "#sets", "growth", "#cmds", "1st-try"]
+  ["has set", "has init", "has chk", "#sets", "growth", "#cmds", "1st-try", "dropped"]
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- Expression family
@@ -360,18 +381,23 @@ def hasRedexKind : LExpr' → Bool
   | .app _ _ _ | .ite _ _ _ _ | .eq _ _ _ => true
   | _ => false
 
-/-- The expression family's sample: a type from `genLMonoTy`, then a term of that
-    type from `genLExprBase` — both tuned. See the module doc's caveat: this is the
-    tuned generator's distribution, not that of the suite's `genLExprWithOps`
-    entry point, which reaches `genLExprBase` by name and so untuned. -/
+/-- The expression family's sample: a type, then a term of that type — `TestScaffold`'s
+    `genTypedExprWith` through the tuned entry point, so the root Indir/IndirPoly choice and the
+    per-subterm `retryGenArg` continuation are the suite's.
+
+    The *type* generator is tuned too, which no property does: `genLMonoTy`'s weights are not
+    threaded into any `TunableGen` instance, so the `tyCompoundHeavy` row is exploratory. Every
+    other row passes `tyDefault`, at which `genLMonoTy.tuned` is `genLMonoTy`. -/
 def exprGen (θty θe : Tuning) (fctx : FVarCtx) (s : Nat) : Gen (LExpr' × LMonoTy) := do
   let depth := max 1 (s / 20)
   let τ ← genLMonoTy.tuned (G := Plausible.Gen) θty [] depth
-  let e ← genLExprBase.tuned (G := Plausible.Gen) θe fctx coreMonoOps corePolyOps [] [] depth τ
+  let e ← genLExprT (G := Plausible.Gen) θe fctx coreMonoOps corePolyOps [] [] depth τ 3
+    (retryGenArg 20)
   pure (e, τ)
 
 structure ExprStats where
   n : Nat := 0
+  dropped : Nat := 0
   firstTry : Nat := 0
   quant : Nat := 0
   leaf : Nat := 0
@@ -389,7 +415,7 @@ def exprRow (θ : Tuning × Tuning × FVarCtx) (samples maxSize : Nat) : IO (Lis
     let sz := i % (maxSize + 1)
     let (o, ok) ← draw (exprGen θty θe fctx sz) 500 sz
     match o with
-    | none => t := { t with n := t.n + 1 }
+    | none => t := { t with n := t.n + 1, dropped := t.dropped + 1 }
     | some (e, τ) =>
       t := { t with
         n := t.n + 1
@@ -402,11 +428,13 @@ def exprRow (θ : Tuning × Tuning × FVarCtx) (samples maxSize : Nat) : IO (Lis
         progress := t.progress + (if checkProgress e then 1 else 0)
         preservation := t.preservation + (if checkPreservation e τ then 1 else 0)
         fvars := t.fvars + (if checkFvarsPreserved e then 1 else 0) }
-  pure [pct t.quant t.n, pct t.leaf t.n, pct t.redex t.n, pct t.op t.n, pct t.hasFVar t.n,
-        pct t.progress t.n, pct t.preservation t.n, pct t.fvars t.n, pct t.firstTry t.n]
+  let k := t.n - t.dropped
+  pure [pct t.quant k, pct t.leaf k, pct t.redex k, pct t.op k, pct t.hasFVar k,
+        pct t.progress k, pct t.preservation k, pct t.fvars k, pct t.firstTry t.n,
+        pct t.dropped t.n]
 
 def exprHeaders : List String :=
-  ["quant", "value", "redex", "op", "hasFvar", "prog✓", "presv✓", "fvars✓", "1st-try"]
+  ["quant", "value", "redex", "op", "hasFvar", "prog✓", "presv✓", "fvars✓", "1st-try", "dropped"]
 
 /-! There is deliberately no property-outcome table here. Running the suite's own properties under
 each profile is what `TestDecl.underTunings` does — one registered property per (claim, weighting)
@@ -475,9 +503,14 @@ def report (samples maxSize : Nat) (families : List String) : IO Unit := do
        ++ "(retryGen 8000) before assembling the list, as TestScaffold does")
   if families.contains "cmd" then
     runFamily "commands" cmdHeaders cmdProfiles (fun θ => cmdRow θ samples)
+      ("one chain of four commands from the empty context, as GenCmdsWithCtx draws it. The four "
+       ++ "GenCmdWithCtx properties draw one command against a context a first chain built, so "
+       ++ "their `set` rate is higher than `has set` here — same genCmd weights, different "
+       ++ "conditioning; see `cmdsGen`")
   if families.contains "expr" then
     runFamily "expressions" exprHeaders exprProfiles (exprRow · samples maxSize)
       ("closed rows use fctx = [] (the ClosedTypedExpr shape of progress/preservation), open rows "
-       ++ "defaultFCtx; sampled from genLExprBase, which the suite reaches by name and so untuned")
+       ++ "defaultFCtx; drawn through genLExprT, the entry point the expr: properties use. "
+       ++ "tyCompoundHeavy tunes the *type* generator, which no property does")
 
 end StrataGenerators.DistReport
