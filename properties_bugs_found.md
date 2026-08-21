@@ -25,6 +25,7 @@
   - 6 counterexamples found, previously unknown
 - Functions are well-annotated (they satisfy the `fvars_annotated_by` predicate)
 - Preservation (of the function body's type)
+- Completeness of executable typechecker with respect to the declarative typing spec
 
 **Statement-related transformations**
 
@@ -34,22 +35,26 @@
 - The `detToKleene` transformation (converts deterministic control-flow to Kleene Algebra with Tests) produces a result when there are no `exit` or function + type declarations in the original list
 
 **`FilterProcedures` transformation**
+(Removes procedures that are unreachable from an input list of procedure declarations, where unreachable = "not in the transitive closure")
 
 - The `FilterProcedures` transformation updates its `changed` flag correctly
   - This transformation removes unreachable procedures (unreachable from a given starting point, which is a list of procedures)
 - `FilterProcedures` keeps the procedures that were specified as starting points
 - `FilterProcedures` keeps all procedures that are in the transitive closure of the starting list of procedures
 - `FilterProcedures` only removes procedures (and not other declarations)
-- `FilterProcedures` removes all unreachable procedures (where unreachable = "not in the transitive closure")
+- `FilterProcedures` removes all unreachable procedures 
+- List of output procedure declarations is a subset of the procedures fed as input to `FilterProcedures`
+- Call-graphs remain well-formed after the `FilterProcedures` transformation
 
-**Precondition-filtering transformation**
-
+**`PrecondElim` transformation**
 (removes preconditions from procedures)
 
 - This transformation indeed removes preconditions
 - This transformation preserves the name + type signature of procedures & functions
 - This transformation does not remove any declarations and preserves declaration order
 - Each precondition is transformed into one `assert` in the body of the procedure
+- All calls to partial procedures are translated into an assertion
+- Call-graphs remain well-formed after the `PrecondElim` transformation
 
 **ANF encoding / Common-subexpression elimination (CSE)**
 
@@ -60,6 +65,7 @@
 - CSE does not result in dangling (unbound) bound De Bruijn variables
 - Result of the symbolic evaluator is the same before/after CSE
   - (By the same, we mean that the path-condition expressions and the stores are the same after resolving the value of new variables that are created during CSE)
+- Declaration order is preserved after ANF encoding
 
 **`LiftInternalFuncDecls` transformation (Lambda lifting)**
 - Every hoisted function declaration is closed
@@ -80,6 +86,11 @@
 - Monomorphization does not change programs that don't contain polymorphic functions
 - Declaration order is preserved by monomorphization
 - Result of evaluation is preserved by monomorphization
+
+**SMT dialect**
+- Decimal comparison is a total order
+- Two decimals which are mathematically equal (but have different mantissa-exponent representations) are still considered to be equal by the equality check
+- All string literals passed to SMT are printable ASCII
 
 **Uniform `changed`-flag contract over every pipeline phase**
 
