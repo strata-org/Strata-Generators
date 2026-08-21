@@ -487,8 +487,7 @@ def hasCallableFunc (s : GenState) : Bool :=
     frequency of each kind changes. Both vectors of the weights keep each entry positive, so the support is the
     same in each phase. `genDeclStep_sound`
     discards the weight it inverts out of the `frequency` (`_hw`) and pins each
-    branch by the list's structure, so it is unaffected. The same argument licenses
-    the `wExit`/`wCall` weights inside `genStmt`. -/
+    branch by the list's structure, so it is unaffected. -/
 def genDeclStep [Gen G] (s : GenState) (b : Bounds) : G StepResult :=
   -- `(wFunc, wProc)`: front-load functions until one is callable.
   let (wFunc, wProc) := if hasCallableFunc s then (3, 4) else (6, 1)

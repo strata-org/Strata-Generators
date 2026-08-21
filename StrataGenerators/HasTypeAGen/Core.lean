@@ -2,6 +2,7 @@ import Std.Data.HashMap
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import Basalt.Tuning.Attr
 import BasaltExamples.ArbChar.Def
 import BasaltExamples.ArbString.Def
 import StrataGenerators.PrimitiveGens
@@ -1027,7 +1028,16 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     it makes `genLExprBase` irreducible, and it then breaks each of those proofs.
 
     The cases at the depth 0 hold no Indir branch, because a full application at the depth floor
-    leaves no budget for its arguments. -/
+    leaves no budget for its arguments.
+
+    Tagged `@[tunable (depth := n)]`, so every branch weight is a runtime knob.
+    `genLExprBase.tuned θ` reads each weight from `θ` at the remaining depth `n`, and it threads `θ`
+    through its own recursion. There is one site per generated type at `n + 1`. The `n = 0` arms are
+    uniform `oneOf`s and have no weight to tune.
+
+    Set a weight *per rule across every site* rather than per site. The `ExprIdx` role lists in
+    `StrataGenerators.TuningProfiles` do exactly that. -/
+@[tunable (depth := n)]
 def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) : Nat → LMonoTy → G LExpr'
   -- ── Arrow type ────────────────────────────────────────────────────
@@ -1048,7 +1058,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .arrow τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.arrow τ₁ τ₂)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (4, fun () => genAbs (genLExprBase fctx octx pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx octx pctx tvars bctx n) (.arrow τ₁ τ₂)),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
@@ -1075,8 +1085,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx (.arrow τ₁ τ₂)
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n (.arrow τ₁ τ₂))) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 4+1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 4+1+2+2+2+2+4+4; omega)
   -- ── Bool type ─────────────────────────────────────────────────────
   | 0, .bool =>
     let bvars := bvarsOfType bctx .bool
@@ -1096,7 +1105,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .bool =>
     let bvars := bvarsOfType bctx .bool
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genBoolConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .bool) (genLExprBase fctx octx pctx tvars bctx n) .bool),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
@@ -1130,8 +1139,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx .bool
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n .bool)) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2+2+2+2+4+4; omega)
   -- ── Int type ──────────────────────────────────────────────────────
   | 0, .int =>
     let bvars := bvarsOfType bctx .int
@@ -1151,7 +1159,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .int =>
     let bvars := bvarsOfType bctx .int
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genIntConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .int) (genLExprBase fctx octx pctx tvars bctx n) .int),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
@@ -1178,8 +1186,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx .int
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n .int)) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2+4+4; omega)
   -- ── FtVar type (rigid type variable) ────────────────────────────────
   | 0, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
@@ -1208,7 +1215,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .ftvar name =>
     let bvars := bvarsOfType bctx (.ftvar name)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.ftvar name)) (genLExprBase fctx octx pctx tvars bctx n) (.ftvar name)),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
                               (genLExprBase fctx octx pctx tvars bctx n (.ftvar name))
@@ -1240,8 +1247,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx (.ftvar name)
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n (.ftvar name))) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2+4+4; omega)
   -- ── String type ────────────────────────────────────────────────────
   | 0, .string =>
     let bvars := bvarsOfType bctx .string
@@ -1261,7 +1267,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .string =>
     let bvars := bvarsOfType bctx .string
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genStrConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .string) (genLExprBase fctx octx pctx tvars bctx n) .string),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
@@ -1288,8 +1294,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx .string
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n .string)) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2+4+4; omega)
   -- ── Real type ─────────────────────────────────────────────────────
   | 0, .real =>
     let bvars := bvarsOfType bctx .real
@@ -1309,7 +1314,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .real =>
     let bvars := bvarsOfType bctx .real
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genRealConst),
         (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .real) (genLExprBase fctx octx pctx tvars bctx n) .real),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
@@ -1336,56 +1341,57 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx .real
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n .real)) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+1+2+2+2+2+4+4; omega)
   -- ── Bitvec type ───────────────────────────────────────────────────
-  | 0, .bitvec n =>
-    let bvars := bvarsOfType bctx (.bitvec n)
+  -- The width binder is `w` and not `n`. `@[tunable (depth := n)]` resolves `n` to the innermost
+  -- `Nat` local of that name. A width named `n` here would therefore make this site read its weight
+  -- schedules at the bitvector width rather than at the remaining depth.
+  | 0, .bitvec w =>
+    let bvars := bvarsOfType bctx (.bitvec w)
     oneOf
-      [ (fun () => genBitvecConst n),
+      [ (fun () => genBitvecConst w),
         (fun () =>
-          if hv : bvars.length > 0 then pickBVar bctx (.bitvec n) hv
-          else genBitvecConst n),
+          if hv : bvars.length > 0 then pickBVar bctx (.bitvec w) hv
+          else genBitvecConst w),
         (fun () =>
-          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
-          then pickFVar fctx (.bitvec n) hf
-          else genBitvecConst n),
+          if hf : (fvarsOfType fctx (.bitvec w)).length > 0
+          then pickFVar fctx (.bitvec w) hf
+          else genBitvecConst w),
         (fun () =>
-          if ho : (opsOfType octx (.bitvec n)).length > 0
-          then pickOp octx (.bitvec n) ho
-          else genBitvecConst n) ]
+          if ho : (opsOfType octx (.bitvec w)).length > 0
+          then pickOp octx (.bitvec w) ho
+          else genBitvecConst w) ]
       (by simp)
-  | m + 1, .bitvec n =>
-    let bvars := bvarsOfType bctx (.bitvec n)
-    let gs : List (Nat × (Unit → G LExpr')) :=
-      [ (1, fun () => genBitvecConst n),
-        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx m (.bitvec n)) (genLExprBase fctx octx pctx tvars bctx m) (.bitvec n)),
-        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx m .bool)
-                              (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))
-                              (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))),
+  | n + 1, .bitvec w =>
+    let bvars := bvarsOfType bctx (.bitvec w)
+    frequency
+      [ (1, fun () => genBitvecConst w),
+        (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.bitvec w)) (genLExprBase fctx octx pctx tvars bctx n) (.bitvec w)),
+        (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
+                              (genLExprBase fctx octx pctx tvars bctx n (.bitvec w))
+                              (genLExprBase fctx octx pctx tvars bctx n (.bitvec w))),
         (2, fun () =>
           if hv : bvars.length > 0 then pickBVar bctx _ hv
-          else genBitvecConst n),
+          else genBitvecConst w),
         (2, fun () =>
-          if hf : (fvarsOfType fctx (.bitvec n)).length > 0
-          then pickFVar fctx (.bitvec n) hf
-          else genBitvecConst n),
+          if hf : (fvarsOfType fctx (.bitvec w)).length > 0
+          then pickFVar fctx (.bitvec w) hf
+          else genBitvecConst w),
         (2, fun () =>
-          if ho : (opsOfType octx (.bitvec n)).length > 0
-          then pickOp octx (.bitvec n) ho
-          else genBitvecConst n),
+          if ho : (opsOfType octx (.bitvec w)).length > 0
+          then pickOp octx (.bitvec w) ho
+          else genBitvecConst w),
         -- The monomorphic Indir rule.
         (4, fun () =>
-          if hi : (findOpsInCtx octx (.bitvec n)).length > 0
-          then genIndir octx (.bitvec n) (genLExprBase fctx octx pctx tvars bctx m) hi
-          else genLExprBase fctx octx pctx tvars bctx m (.bitvec n)),
+          if hi : (findOpsInCtx octx (.bitvec w)).length > 0
+          then genIndir octx (.bitvec w) (genLExprBase fctx octx pctx tvars bctx n) hi
+          else genLExprBase fctx octx pctx tvars bctx n (.bitvec w)),
         -- The polymorphic IndirPoly rule.
         (4, fun () =>
-          genIndirPolyCore fctx octx pctx bctx (.bitvec n)
-            (genLExprBase fctx octx pctx tvars bctx m)
-            (genLExprBase fctx octx pctx tvars bctx m (.bitvec n))) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+1+2+2+2+2+4+4; omega
-    frequency gs hw
+          genIndirPolyCore fctx octx pctx bctx (.bitvec w)
+            (genLExprBase fctx octx pctx tvars bctx n)
+            (genLExprBase fctx octx pctx tvars bctx n (.bitvec w))) ]
+      (by show 0 < 1+1+2+2+2+2+4+4; omega)
   -- ── Regex type (base type, no constants) ───────────────────────────
   | 0, .regex =>
     let bvars := bvarsOfType bctx .regex
@@ -1414,7 +1420,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .regex =>
     let bvars := bvarsOfType bctx .regex
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n .regex) (genLExprBase fctx octx pctx tvars bctx n) .regex),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
                               (genLExprBase fctx octx pctx tvars bctx n .regex)
@@ -1446,8 +1452,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx .regex
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n .regex)) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2+4+4; omega)
   -- ── Map type ──────────────────────────────────────────────────────
   | 0, .map τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.map τ₁ τ₂)
@@ -1476,7 +1481,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .map τ₁ τ₂ =>
     let bvars := bvarsOfType bctx (.map τ₁ τ₂)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx octx pctx tvars bctx n) (.map τ₁ τ₂)),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
                               (genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂))
@@ -1508,8 +1513,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx (.map τ₁ τ₂)
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n (.map τ₁ τ₂))) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2+4+4; omega)
   -- ── Sequence type ─────────────────────────────────────────────────
   | 0, .seq τ =>
     let bvars := bvarsOfType bctx (.seq τ)
@@ -1538,7 +1542,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       (by simp)
   | n + 1, .seq τ =>
     let bvars := bvarsOfType bctx (.seq τ)
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (1, fun () => genApp (genAppArgTy fctx octx tvars bctx n (.seq τ)) (genLExprBase fctx octx pctx tvars bctx n) (.seq τ)),
         (2, fun () => genIte (genLExprBase fctx octx pctx tvars bctx n .bool)
                               (genLExprBase fctx octx pctx tvars bctx n (.seq τ))
@@ -1570,8 +1574,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx (.seq τ)
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n (.seq τ))) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 1+2+2+2+2+4+4; omega)
   -- ── The other type constructors ──────────────────────────────────
   --
   -- Such a type is a datatype, an abstract type or the body of an alias. There is no constant at such a type,
@@ -1610,7 +1613,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   -- and a constructor of arity 0 are the two other terms that can fill that position.
   | n + 1, τ =>
     let bvars := bvarsOfType bctx τ
-    let gs : List (Nat × (Unit → G LExpr')) :=
+    frequency
       [ (2, fun () =>
           if hv : bvars.length > 0 then pickBVar bctx _ hv
           else if hf : (fvarsOfType fctx τ).length > 0
@@ -1642,8 +1645,7 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           genIndirPolyCore fctx octx pctx bctx τ
             (genLExprBase fctx octx pctx tvars bctx n)
             (genLExprBase fctx octx pctx tvars bctx n τ)) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 2+2+2+4+4; omega
-    frequency gs hw
+      (by show 0 < 2+2+2+4+4; omega)
 
 
 /-- The depth-indexed IndirPoly rule, which is `genIndirPolyCore` with a default value for each of its

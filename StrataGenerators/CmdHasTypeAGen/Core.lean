@@ -1,6 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
@@ -236,13 +237,20 @@ def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 
     The generator uses `frequency`, so the distribution over the kinds of command is more uniform.
     When the context is not empty, a `set` command gets a higher weight, because the structure of a
-    sequence otherwise favours an `init`. -/
+    sequence otherwise favours an `init`.
+
+    Tagged `@[tunable]`, so every weight is a runtime knob. `genCmd.tuned θ` reads each branch's
+    weight from `θ` at the current `depth`. There are two sites, because the generator offers `set`
+    only when the context holds something to assign to. The writable-context list has arity 7, and
+    the list for a context with no writable variable has arity 5.
+    `StrataGenerators.TuningProfiles` holds the profiles that the suite uses. -/
+@[tunable]
 def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenCmdResult :=
   let tyDepth := depth
   if h : (ctx.writable immutableVars).length > 0 then
-    let gs : List (Nat × (Unit → G GenCmdResult)) :=
+    frequency
       [ (2, fun () => genInitDet octx tvars ctx tyDepth depth pctx),
         (1, fun () => genInitNondet tvars ctx tyDepth),
         (3, fun () => genSetDet octx tvars immutableVars ctx depth h pctx),
@@ -250,17 +258,15 @@ def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
         (2, fun () => genAssertCmd octx tvars ctx depth pctx),
         (2, fun () => genAssumeCmd octx tvars ctx depth pctx),
         (2, fun () => genCoverCmd octx tvars ctx depth pctx) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 2+1+3+2+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 2+1+3+2+2+2+2; omega)
   else
-    let gs : List (Nat × (Unit → G GenCmdResult)) :=
+    frequency
       [ (3, fun () => genInitDet octx tvars ctx tyDepth depth pctx),
         (1, fun () => genInitNondet tvars ctx tyDepth),
         (2, fun () => genAssertCmd octx tvars ctx depth pctx),
         (2, fun () => genAssumeCmd octx tvars ctx depth pctx),
         (2, fun () => genCoverCmd octx tvars ctx depth pctx) ]
-    have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 3+1+2+2+2; omega
-    frequency gs hw
+      (by show 0 < 3+1+2+2+2; omega)
 
 -- ── The generator for a sequence of commands ────────────────────────────
 

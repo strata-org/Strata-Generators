@@ -62,7 +62,8 @@ in the same file, as `List.Forall₂` is defined by both libraries.
 
 To run a test executable, which tests a variety of properties using these Strata Core generators,
 run `lake test -- --quick`. (The `--quick` flag minimizes the no. of tests run, if we omit this flag,
-the entire test suite, consisting of 80+ properites, takes 10+ minutes to run.)
+the entire test suite, consisting of 80+ properites, takes 10+ minutes to run. This is because it runs each property with 1000 random trials, with 
+the randomly generated inputs having a larger size.)
 
 This executable runs a Plausible test suite via LSpec, and visualizes test results using [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
 inspecting property-based testing generators.
@@ -109,6 +110,52 @@ lake build test-plain
 .lake/build/bin/test-plain [numTrials] [maxSize] [--smt]
 ```
 
+`test-plain` keeps the LSpec dependency droppable. LSpec reaches this package only through a
+fork that is pinned to Lean 4.29, because mainline LSpec is on Lean 4.31.
+
+## Tuning the generators' distributions
+
+A generator's distribution is controlled by a set of weights called a *tuning* (these are 
+the `Nat` weights which are passed to Basalt's `frequency` combinator, which chooses 
+between a list of sub-generators based on the weights provided).
+
+We have observed that effective testing of different properties necessitates different generator distributions. 
+For example, for testing loop-related Strata Core transformations, we want to tune our generators 
+so that they generate programs containing loops more frequently. 
+
+To target different testing scenarios, we have come up with different sets of generator weights 
+(obtained empirically) which increase the frequency of generating programs
+that exercise different Strata Core language features. 
+
+These are stored in `TuningProfiles.lean` 
+and `ProgramTuning.lean`: here is a full list of the weights:
+
+| Lean file | Tunings |
+|---|---|
+| [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) | <ul><li>`stmtLoopHeavy` (prioritizes loops)</li><li>`stmtFuncDeclHeavy` (prioritizes function declarations)</li><li>`stmtLoopWide` (prioritizes non-nested loops)</li><li>`stmtMixed` (general-purpose distribution for statements that exercises loop-related transformations & as well as the `detToKleene` pass)</li><li>`procCallHeavy` (prioritizes procedure call statements)</li><li>`procPrecondHeavy` (prioritizes functions with preconditions)</li><li>`cmdSetHeavy` (prioritizes the `.set` command)</li><li>`cmdInitHeavy` (prioritizes the `.init` command)</li><li>`cmdCheckHeavy` (prioritizes the `.check` command)</li><li>`exprEvalHeavy` (prioritizes expressions that are *not* values, i.e. expressions that change under evaluation)</li><li>`exprQuantHeavy` (prioritizes expressions with universal / existential quantification)</li><li>`exprIndirHeavy` (prioritizes factory function calls)</li><li>`exprFVarHeavy` (prioritizes expressions with free variables)</li><li>`tyCompoundHeavy` (prioritzes compound types, such as functions, `Map` & `Sequence`)</li></ul> |
+| [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) | <ul><li>`progPolyHeavy` (prioritizes polymorphic functions)</li><li>`progDatatypeHeavy` (prioritzes algebraic data type definitions)</li></ul> |
+
+Note: at time of writing, the generators for `GenFunction`, `GenAdtBlock` and `GenIndepBlock` do not support tuning.
+
+(Aside: These weights 
+were measured using the `dist-report` executable in this repo, which measures
+the frequency of different Strata Core language features in the generated programs.
+Run `lake exe dist-report` to see measurements, but note that end-users of this repo,
+e.g. Strata engineers, should not need to use this executable -- the pre-computed
+weights measured above should be sufficient.)
+
+To override the default distribution used for a generator for a particular property, 
+add the `tuning` argument to the `strata_property` and specify a named tuning, like so:
+
+```lean
+-- This overrides the generator to use a tuning which prioritizes generating loops, 
+-- since we are testing a Strata Core transformation involving loops
+@[strata_property (tuning := stmtLoopHeavy)] -- <- Note the `tuning` argument here!
+def loopElimZeroLoops : TestDecl :=
+  .property "stmt: LoopElim eliminates all loops"
+    fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
+```
+
 ## Adding a new property
 
 Properties to test are defined in the `StrataTests/` directory. 
@@ -137,6 +184,9 @@ See "Choosing the input type" below for instructions on how to pick the right ty
 to be generated. Note that the body of the function should be a `Prop` that is decidable 
 (or alternatively a function that returns `Bool`). In our experience, functions 
 that are decidable `Prop`s have better error messages (coming from the Plausible property-based testing library).
+
+Note: properties that are `Prop`s should be defined using `abbrev` or be defined as  `@[reducible] def`, 
+in order for typeclass resolution to succeed. 
 
 The `@[strata_property]` attribute records the test declaration, allowing 
 the test driver to pick it up.

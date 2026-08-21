@@ -832,10 +832,16 @@ theorem genStmt_outCtx_functional
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
       exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx 0 hFun rc hrc
-    · -- exit
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
-      | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx 0 hFun rc hrc
       | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr; exact hFun
@@ -849,8 +855,19 @@ theorem genStmt_outCtx_functional
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call: the inline `init` chain genuinely extends the scope
-      exact genCallStmt_outCtx hFun r hr
+    · -- call: the inline `init` chain extends the scope, or a `cmd`,
+      -- the branch falls back to a `cmd` when `procs = []`
+      cases procs with
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx 0 hFun rc hrc
+      | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+          immutableVars (hd :: tl) C ctx 0 pctx) := hr
+        exact genCallStmt_outCtx hFun r hr
   | succ size =>
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
@@ -860,10 +877,16 @@ theorem genStmt_outCtx_functional
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
       exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx (size + 1) hFun rc hrc
-    · -- exit
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
-      | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size + 1) pctx) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx (size + 1) hFun rc hrc
       | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr; exact hFun
@@ -877,8 +900,19 @@ theorem genStmt_outCtx_functional
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
       · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
-    · -- call: the inline `init` chain genuinely extends the scope
-      exact genCallStmt_outCtx hFun r hr
+    · -- call: the inline `init` chain extends the scope, or a `cmd`,
+      -- the branch falls back to a `cmd` when `procs = []`
+      cases procs with
+      | nil =>
+        replace hr : r ∈ SetGen.support
+            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size + 1) pctx) := hr
+        simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨rc, hrc, rfl⟩ := hr
+        exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx (size + 1) hFun rc hrc
+      | cons hd tl =>
+        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+          immutableVars (hd :: tl) C ctx (size + 1) pctx) := hr
+        exact genCallStmt_outCtx hFun r hr
     · -- block: outCtx = ctx
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨_, _, ⟨⟨_, _⟩⟩, _, _, _, rfl⟩ := hr; exact hFun
@@ -965,20 +999,32 @@ theorem wellKindedOk_preserved
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact hcmd 0 r hr
-    · exact hexit r hr
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
+      cases labels with
+      | nil => exact hcmd 0 r hr
+      | cons hd tl => exact hexit r hr
     · exact hfunc 0 r hr
     · exact htype 0 r hr
-    · exact hcall 0 r hr
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
+      cases procs with
+      | nil => exact hcmd 0 r hr
+      | cons hd tl => exact hcall 0 r hr
   | succ size =>
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact hcmd (size + 1) r hr
-    · exact hexit r hr
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
+      cases labels with
+      | nil => exact hcmd (size + 1) r hr
+      | cons hd tl => exact hexit r hr
     · exact hfunc (size + 1) r hr
     · exact htype (size + 1) r hr
-    · exact hcall (size + 1) r hr
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
+      cases procs with
+      | nil => exact hcmd (size + 1) r hr
+      | cons hd tl => exact hcall (size + 1) r hr
     · -- block: `C`/`ctx` both unchanged
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨_, _, ⟨⟨_, _⟩⟩, _, _, _, rfl⟩ := hr; exact hWK
@@ -1020,20 +1066,32 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
-    · exact genExitStmt_sound P env C ctx r hr
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
+      cases labels with
+      | nil => exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
+      | cons hd tl => exact genExitStmt_sound P env C ctx r hr
     · exact genFuncDeclStmt_sound P env C hWK.arities ctx 0 r hr
     · exact genTypeDeclStmt_sound P env C ctx 0 r hr
-    · exact genCallStmt_sound P env procs hProcs C ctx 0 hWK r hr
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
+      cases procs with
+      | nil => exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
+      | cons hd tl => exact genCallStmt_sound P env _ hProcs C ctx 0 hWK r hr
   | succ size =>
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · exact genCmdStmt_sound P env C hWK.arities ctx (size + 1) hFun r hr
-    · exact genExitStmt_sound P env C ctx r hr
+    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
+      cases labels with
+      | nil => exact genCmdStmt_sound P env C hWK.arities ctx (size + 1) hFun r hr
+      | cons hd tl => exact genExitStmt_sound P env C ctx r hr
     · exact genFuncDeclStmt_sound P env C hWK.arities ctx (size + 1) r hr
     · exact genTypeDeclStmt_sound P env C ctx (size + 1) r hr
-    · exact genCallStmt_sound P env procs hProcs C ctx (size + 1) hWK r hr
+    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
+      cases procs with
+      | nil => exact genCmdStmt_sound P env C hWK.arities ctx (size + 1) hFun r hr
+      | cons hd tl => exact genCallStmt_sound P env _ hProcs C ctx (size + 1) hWK r hr
     · -- block
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨label, hlabel, ⟨⟨len, _⟩⟩, _hlenbd, triple, htriple, rfl⟩ := hr
