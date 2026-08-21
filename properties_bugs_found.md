@@ -144,22 +144,19 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 - Loops with measures are translated to KAT and not dropped
 - The `detToKleene` transformation produces a result when there are no `exit` or function + type declarations in the original list 
 
-
-
-
 - **`InsertLoopInvariantAsserts` transformation**
 (Converts loop invariants into relevant `assert`/`assume` statements)
 - For a program containing `n` loop invariants and `m` measure-carrying loops, the transformation inserts exactly `2n + 2m` assertions
 - Loops in the output program don't contain loop variants or measures
 - Transformation is idempotent
 - Non-deterministic loops with `decreases` clauses are rejected
+- Proof obligations incurred by symbolic evaluation are preserved by this transformation
 
 **`LoopElim` transformation**
 (Removes loops to simplify verification problems, keeping only the relevant assertions related to loop invariants, facilitating verification)
 - There are no loops in the output program
 - `LoopElim` does not drop any verification conditions
 - All block labels in the output program are distinct
-
 
 **Common sub-expression elimination (`CommonSubexprElim`)**
 - No fresh variables are declared twice in the output program
@@ -175,21 +172,33 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 - Function inlining preserves the types of expressions
 - The number of still-inlinable calls if we supply `fuel = 4` ≤ no. of inlinable calls if we supply `fuel = 1`
 
+**Procedure inlining**
+- No duplicate labels are introduced by this transformation
+- No assertions are removed
+- The `visitedCalls` and `inlinedCalls` statistics are consistent after this transformation
+- Output program typechecks
+- The call-graph remains well-formed after this transformation
+- Proof obligations produced via symbolic evaluation are preserved by this transformation (specifically the set of proof obligations for the input program is a subset of the proof obligations for the output program)
 
-- `ProcedureInlining` — inlining introduces no duplicate label; no `assert` is lost; `visitedCalls`/`inlinedCalls` are consistent; the output typechecks; the cached call graph stays well-formed; and **symbolic evaluation loses no proof obligation**. The last one uses Strata's executable symbolic evaluator (`toCoreProofObligationProgram`, the `symbolicEval` phase of `corePipelinePhases`, preceded by the `nondetElim` phase it now requires) as a differential oracle, and it found the worst defect in the set (see below).
+**`NondetElim` transformation**
+- No non-deterministic loops or conditionals are present in the output program
+- All fresh labels for guards are distinct 
+- Proof obligations incurred by symbolic evaluation are preserved by this transformation
 
-  Getting that claim right was the difficulty. Comparing the two obligation programs for *equality* is false by design — inlining verifies the callee's body once per call site, so the multiset grows (`[inner] → [inner, Callee_inner_1, Callee_inner_3]` on two call sites) — and an equality claim would report correct behaviour as a bug, the trap #79's `useArrayTheory` property fell into. Weakening it to *containment* keeps it true and still sharp enough to catch a dropped obligation.
-- `NondetElim` and `LoopInitHoist` — the headline postcondition each module doc states but neither file proves: no `.nondet` guard is left after `NondetElim`, and no loop body holds an `init` after `LoopInitHoist`; plus `NondetElim`'s fresh guard names are distinct and `LoopInitHoist` preserves `uniqueInits` (the condition its same-name lift is sound under)
+**`LoopInitHoist` transformation**
+(Hoists variable initialization inside a loop to outside the loop)
+- No loop body contains a variable initialization command after this transformation
+- The set of all initialized variables is preserved by this transformation
+- Proof obligations incurred by symbolic evaluation are preserved by this transformation
 
-- **The three loop passes preserve the result of symbolic evaluation** — `InsertLoopInvariantAsserts`, `NondetElim` and `LoopInitHoist` each lose no proof obligation. The families above state these passes' claims *syntactically*; these three use Strata's executable symbolic evaluator instead, which is the only oracle that can see an obligation surviving as syntax but never being emitted to SMT.
+**Injectivity and disjointness of constructors for algebraic data types**
+- SMT encoding of algebraic data types allows the SMT solver to prove injectivity of constructors
+- SMT encoding of algebraic data types allows the SMT solver to prove disjointness of constructors 
+- The Core program which encodes injectivity and disjointness assertions typechecks
 
-  The evaluator refuses a loop (it *panics*, per the note above), and all three passes act on loops and leave loops behind, so neither side of the comparison can go straight to it: `LoopElim` runs after the pass **and** after the baseline. `InsertLoopInvariantAsserts` cannot be its own baseline, and `LoopElim` throws on a loop that still carries an invariant or a measure, so there the baseline is the same program with the loop annotations stripped — sound precisely because an invariant is an *annotation*: `while (c) invariant I { B }` and `while (c) { B }` run the same and owe the same obligations, and adding the ones `I` licenses is the pass's entire job.
+**Functions derived from ADT definitions**
+- No ADT definition triggers functions with duplicate names
 
-  All three are stated as containment ("no obligation is lost"). `InsertLoopInvariantAsserts` adds obligations *by design*, so equality would report the pass working as a bug. `NondetElim` and `LoopInitHoist` both preserve the set exactly, by measurement; they are still stated as containment so a benign addition cannot turn one red while a lost obligation — a lost proof — still does.
-
-  `NondetElim`'s claim changed shape once upstream fixed the evaluator defect below. Running the pass used to make the obligation set *grow*, because it repaired the defect, and that growth is how the defect was found. The evaluator now rejects a surviving `if *` outright and `nondetElimPipelinePhase` runs immediately before `symbolicEval` in `corePipelinePhases`, so there is no "without the pass" baseline left — a program only reaches the evaluator post-elimination. The oracle mirrors that phase pair, and the property now compares **early against late**: eliminating nondeterminism at the source, ahead of `InsertLoopInvariantAsserts` and `LoopElim`, against leaving it to the phase at the end.
-
-  Live on 396–397 of 400 draws over two runs; the pass has something to do on 10–12 / 11–12 / 0–2 of those respectively. All three pass, so the small "fires" counts are what the `#guard`s exist to cover — and `LoopInitHoist` can be scored vacuously for a whole run. Mirroring the phase pair in the oracle is what keeps these numbers up: calling `symbolicEval` alone would make every draw carrying an `if *` return "no baseline, no claim", which measured `fires = 0` for `NondetElim` across two runs.
 
 **Algebraic datatypes: injectivity and disjointness (`adt:`)**
 
