@@ -32,7 +32,7 @@ def main (args : List String) : IO UInt32 := do
   let cli := parseCli args
   if let some code ← setup cli registry then
     return code
-  let selected := cli.select registry
+  let selected := cli.resolve registry
 
   let exitCode ← runRegistry selected cli.run
   cleanup cli selected diagnostics

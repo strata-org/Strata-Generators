@@ -63,6 +63,8 @@ reads the *shape* of the proposition:
 | `fun gp => sizeProgram gp.prog ≤ 2` | `issue: 3 ≤ 2 does not hold` |
 | `fun gp => gp.prog.decls.length = 99` | `issue: 0 = 99 does not hold` |
 | `fun gp => checkMine gp.prog` (a `Bool`) | `issue: false does not hold` |
+| `fun gp => checkMine gp.prog` (an `abbrev … : Prop`, top level `=`) | `issue: ["f"] = [] does not hold` |
+| `fun gp => checkMine gp.prog` (a `Prop`, top level `∀ x ∈ …`) | `issue: ⋯ does not hold` |
 
 So state the claim inline as a `Prop` where its shape is an equality or an order. Reach
 for a named `check*` predicate in a `*/TestSupport` module when the check is long, is
@@ -70,6 +72,65 @@ reused, is worth pinning with a `#guard`, or is shared with a bespoke Tyche pane
 of this suite is in that position, which is why most of it returns `Bool`.
 
 A `family` entry is scored exactly the same way, so this table applies there too.
+
+### A named predicate that returns `Prop`
+
+The last two rows are the same predicate, and they show that the two options above are
+not the only ones: a named `check*` predicate can return `Prop` and keep the readable
+counterexample. `StrataGenerators/MonomorphizeFns.lean` is the worked example. Three
+things are needed, and none of them is guessable from the error you get without them.
+
+**1. `abbrev`, not `def`.** Typeclass resolution unfolds reducible definitions only, so a
+plain `def … : Prop` is opaque to it and the property fails to register:
+
+```
+failed to synthesize instance of type class
+  DecidablePred fun gp => checkMine gp.prog
+```
+
+Note where that error lands: at the `TestDecl.property` call, not at the definition. The
+definition compiles fine on its own, so a module can build green and still refuse to be
+registered. `abbrev` (or `@[reducible] def`) fixes it.
+
+**2. No `match` on a scrutinee that is not a constructor.** This is not decidable:
+
+```lean
+abbrev checkMine (p : Program) : Prop :=
+  match runMyPass p with            -- stuck: `p` is a variable, so this cannot reduce
+  | none => True
+  | some p' => f p' = []
+```
+
+`DecidablePred` is `∀ x, Decidable (check x)`, elaborated with `x` a variable, so the
+match never reduces and no instance exists. Write `∀ p' ∈ runMyPass p, f p' = []`
+instead — bounded quantification over an `Option` is decidable — or project through
+`Option.getD` / `Option.elim`, which is what the next point wants anyway.
+
+**3. `abbrev` alone buys nothing; the *top level* has to be the equality.** This is the
+trap, because it costs you the benefit silently rather than failing. `PrintableProp`
+reads the outermost shape, and a bounded `∀` is not a shape it renders — so
+`∀ p' ∈ runMyPass p, f p' = []` reports `issue: ⋯ does not hold`, exactly as a `Bool`
+would. Push the `Option` handling into a total helper, using the *vacuous* value as the
+default, so the `=` ends up on top:
+
+```lean
+def onOutput (p : Program) (dflt : α) (f : Program → α) : α :=
+  ((runMyPass p).map f).getD dflt
+
+abbrev checkMine (p : Program) : Prop := onOutput p [] f = []
+```
+
+Same meaning — a pass that raised a diagnostic still makes no claim — and now a failure
+names what went wrong: `issue: ["f"] = [] does not hold`.
+
+The same reasoning favours stating a claim as `namesOf x = []` rather than as
+`List.all`, and as a length equality rather than through a `nodup` helper: in each case
+the equality is what prints the offending value. A guard belongs on the left of a `→`
+(`progTypeChecks p = true → …`) rather than inside a `||`, for the same reason.
+
+One API edge: `TestDecl.witnesses` takes a `Bool`-valued `check`, so a `Prop`-valued
+predicate needs `decide (…)` there. `TestDecl.property` and `family` take the `Prop`
+directly.
 
 ## How it gets picked up
 
@@ -321,6 +382,70 @@ For a family whose entries want an explicit `PropertyRunner`, write the list out
 Prefer `@[strata_property]` for a standalone property, so its name is greppable from
 its own declaration.
 
+## A property that is known to fail
+
+Sometimes the property is right and Strata is wrong. Marking it as a known failure keeps
+it in the suite — watching the defect, ready to report the fix — without holding a merge
+hostage to a bug that is already reported:
+
+```lean
+@[strata_property]
+def myPassOutputTypechecks : TestDecl :=
+  knownFailure "strata-org/Strata#123: the pass drops a type annotation on a nested call" <|
+    TestDecl.property "mypass: the output typechecks"
+      fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog
+```
+
+`knownFailure` is a prefix rather than a method, so the mark is the first thing you read
+and the property needs no parentheses around it.
+
+A marked property prints `? XFAIL`, its counterexample is suppressed, and it does not
+gate the exit code. **If it ever passes, the run fails** and tells you to drop the mark —
+so a fixed defect cannot go unnoticed, which is the whole reason to mark a property
+rather than delete or comment it out.
+
+Inside a `family`, give the `Expectation` as a third component of the entry instead. A
+prefix cannot address one entry of a list, and lifting the member out would cost the
+family its shape — so the member stays where its neighbours can be read in order:
+
+```lean
+      ("lift: the minted snapshot names are fresh",
+       fun gp => checkLiftFreshSnapshotNames gp.prog,
+       .knownFailure "reported upstream: `StringGenState.gen` is a bare counter, so a \
+minted snapshot name can collide with a name already in the program"),
+```
+
+Put the upstream issue in the reason. It replaces the counterexample on the report line,
+so it is the only explanation a reader gets for why a red property reads as green.
+
+### When not to mark
+
+`knownFailure` says the property fails on *every* run at the default trial count. Do not
+use it for a property that fails only on an occasional draw: such a property passes on
+most runs, so the mark reports "expected to fail, but passed" and turns the suite red on
+exactly the runs that went well.
+
+Leave that property unmarked, and pin the defect with a `#guard` on a hand-built witness
+instead. `adt: no datatype derives the same function name twice` is the example in the
+tree — it needs two field names differing by a trailing `!`, which a draw almost never
+produces, so `AdtLaws.bangFieldWitness` is the real pin and the property is a net around
+it.
+
+### Marking one for a single run
+
+```bash
+lake test -- --known-failure="mypass: the output typechecks" --quick
+```
+
+Repeatable, and it takes a **whole property name** rather than a substring — unlike
+`--only=`, since a substring would claim that every property in a group must fail, and
+the ones that hold would then be reported as failures. A name matching nothing is an
+error rather than a silent no-op. Use this while triaging; use `knownFailure` for what
+gets committed, since only the declaration can carry a reason.
+
+`--list` prints every mark and its reason, so the registry is the answer to "what is
+known to fail?".
+
 ## Tyche panels
 
 A registered property gets a panel automatically, built from its `PropertyRunner` —
@@ -370,7 +495,8 @@ lake test -- [numTrials] [maxSize] [flags]
 |---|---|
 | `--quick` | 100 trials, max size 40, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
-| `--list` | print the registry and exit. The answer to "did my property get picked up?" |
+| `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
+| `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
 | `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
 | `--no-tyche` | skip the Tyche pass. |
 | `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). |

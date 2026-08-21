@@ -47,7 +47,9 @@ def Outcome.line (o : Outcome) (name : String) : String :=
     let counts := match o.counts with
       | some (ok, total) => s!" ({ok}/{total})"
       | none => ""
-    let verdict := if o.passed then s!"  ✓ PASS{counts} {name}" else s!"  × FAIL{counts} {name}"
+    let verdict :=
+      if o.xfail then s!"  ? XFAIL{counts} {name}"
+      else if o.passed then s!"  ✓ PASS{counts} {name}" else s!"  × FAIL{counts} {name}"
     match o.message with
     | some m => s!"{verdict}\n    {m}"
     | none => verdict
@@ -57,9 +59,15 @@ structure Totals where
   passed  : Nat := 0
   failed  : Nat := 0
   skipped : Nat := 0
+  /-- Known failures: reconciled against a `TestDecl.expect` that is not `mustHold`.
+      Counted apart from `passed` for the same reason `skipped` is — the run learned
+      nothing from them, so folding them into the pass count would overstate what is
+      actually verified. -/
+  xfailed : Nat := 0
 
 def Totals.add (t : Totals) (o : Outcome) : Totals :=
   if o.skipped then { t with skipped := t.skipped + 1 }
+  else if o.xfail then { t with xfailed := t.xfailed + 1 }
   else if o.passed then { t with passed := t.passed + 1 }
   else { t with failed := t.failed + 1 }
 
@@ -67,7 +75,11 @@ def Totals.add (t : Totals) (o : Outcome) : Totals :=
     per property as it completes, and return the exit code: `0` when nothing
     failed, `1` otherwise. A skipped property never fails the run, but it is
     reported as `SKIP` rather than as a pass — an absent solver must not read as
-    green. -/
+    green. A known failure is `XFAIL`, for the same reason.
+
+    The exit code needs no knowledge of either: `TestDecl.run` has already reconciled
+    every verdict against what its property claims, so `failed` counts exactly the
+    properties whose result was not the one declared. -/
 def runRegistry (ds : List TestDecl) (cfg : RunConfig) : IO UInt32 := do
   let dups := duplicateNames ds
   unless dups.isEmpty do
@@ -83,8 +95,8 @@ def runRegistry (ds : List TestDecl) (cfg : RunConfig) : IO UInt32 := do
       IO.println (o.line d.name)
       tally := tally.add o
   IO.println ""
-  IO.println s!"{tally.passed} passed, {tally.failed} failed, {tally.skipped} skipped \
-    (of {ds.length} run)"
+  IO.println s!"{tally.passed} passed, {tally.failed} failed, \
+    {tally.xfailed} known to fail, {tally.skipped} skipped (of {ds.length} run)"
   return if tally.failed == 0 then 0 else 1
 
 /-- Run every registered diagnostic, printing its heading first. Diagnostics never
