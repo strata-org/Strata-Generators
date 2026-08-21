@@ -210,19 +210,19 @@ produced by `k` individual blocks `mutual t1 end; mutual t2 end; ..., mutual tk 
 
 ## Implementation bugs caught
 
-- `LExpr` type inference is incomplete (if we erase type annotations on a well-typed term, if the resultant term contains an unannotated quantified free variable e.g. `\forall x. x`, type inference fails to reconstruct a type)
+- **(FIXED)** `LExpr` type inference is incomplete (if we erase type annotations on a well-typed term, if the resultant term contains an unannotated quantified free variable e.g. `\forall x. x`, type inference fails to reconstruct a type)
 - Progress doesn't hold for `LExpr`s (this was previously known, due to uninterpreted functions, the fact that `\forall` and `\exists` quantifiers don't evaluate under `if` and equality of lambda expressions is conservative)
 - 11 situations in which the parser + pretty-printer round-trip fails:
-  - Type parameters to functions can't begin with `s` in their name (conflicts with `<s` signed less-than operator):
-  - Pretty-printer mis-prints `real` numbers that are represented as rationals with a non-terminating decimal representation (e.g. `1/3` is `0.333...`, but is printed as `0.0` instead)
+  - **(FIXED)** `Type parameters to functions can't begin with `s` in their name (conflicts with `<s` signed less-than operator):
+  - **(FIXED)** `Pretty-printer mis-prints `real` numbers that are represented as rationals with a non-terminating decimal representation (e.g. `1/3` is `0.333...`, but is printed as `0.0` instead)
   - Unapplied unary operators can't be pretty-printed (e.g. `Bool.Not` can't be printed if it's not applied to an argument)
-  - Pretty-printer misses parentheses around arrow / type constructors, so `Map int (int -> int)` is printed as `Map int int -> int`, which is mis-parsed as `(Map int int) -> int` (since type application binds tighter than `->`)
+  - **(FIXED)** `Pretty-printer misses parentheses around arrow / type constructors, so `Map int (int -> int)` is printed as `Map int int -> int`, which is mis-parsed as `(Map int int) -> int` (since type application binds tighter than `->`)
   - Pipe-escaping identifiers for types (wrapping identifiers with `|...|` to handle SMTLib names) is not done uniformly (only done for type annotations but not the return type for functions)
-  - Periods are allowed in the grammar for identifiers but not accepted by the parser (which uses them to resolve namespaces)
-  - Applying the factory function `Real.Neg` on a negative real number literal fails the round-trip property due to missing parenthesization (`Real.Neg (-3.0)` is printed as `--3.0`, which re-parses as `-(-3.0)`; note `Int.Neg (-3)` correctly prints as `-(-3)`)
+  - **(FIXED)** Periods are allowed in the grammar for identifiers but not accepted by the parser (which uses them to resolve namespaces)
+  - **(FIXED)** `Applying the factory function `Real.Neg` on a negative real number literal fails the round-trip property due to missing parenthesization (`Real.Neg (-3.0)` is printed as `--3.0`, which re-parses as `-(-3.0)`; note `Int.Neg (-3)` correctly prints as `-(-3)`)
   - Typechecker accepts bit-vector types with non-power-of-2 lengths, but the printer only supports printing the types `bv{1, 8, 16, 32, 64} `-- unsupported bitvec types are printed as `$__unknown_type` instead
-  - Bit-vector literals with some width `n`, where `n` is not a power of 2, are printed as `bv{64}(n) `(i.e. the width `n` becomes the value, and the actual value of the bit-vector is discarded), changing the meaning of the term
-  - `bv128` is registered in the Core factory & the DDM, but `bv128` literals are unprintable / unparseable 
+  - **(FIXED)** `Bit-vector literals with some width `n`, where `n` is not a power of 2, are printed as `bv{64}(n) `(i.e. the width `n` becomes the value, and the actual value of the bit-vector is discarded), changing the meaning of the term
+  - **(FIXED)** ``bv128` is registered in the Core factory & the DDM, but `bv128` literals are unprintable / unparseable 
   - Core contains factory functions `Bv{n}.ToInt` and `Int.ToBv{n}` for converting from bitvec <-> int, but these functions are unprintable
 - The precondition elimination transformation erroneously reports its `changed` flag as false, even though it rewrites procedures to gain an `assert` statement in its body. This happens
 for nested function declarations that don't have preconditions, but whose bodies invoke a precondition-carrying function (e.g. `Int.SafeDiv`).
@@ -230,7 +230,7 @@ for nested function declarations that don't have preconditions, but whose bodies
 - The SMT dialect's comparison operator on real numbers (represented as decimal orders) isn't a total order, i.e. it is possible for `r1 <= r2`, `r2 <= r1` and `r1 == r2` to all be false, violating trichotomy
 - The SMT dialect's equality check returns false on two decimals that are mathematically equal but have different mantissa-exponent representations (e.g. `3.0` can be represented as `3 * 10^0` or `30 * 10^-1` , which are mathematically the same but considered to be not equal)
 - `bitvec 128` literals cannot be pretty-printed, even though the width is registered in the factory (`Factory.lean`) and has a grammar production (`bv128Lit`, `Grammar.lean:113`): `lconstToExpr` logs `unsupported bitvec width: 128`. Every other registered width prints.
-- **None** of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean`) but have no grammar production, so each of these is 
+- **(FIXED)** `None of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean`) but have no grammar production, so each of these is 
 rendered as a fresh type variable instead. 
 - `Function.typeCheck` accepts `bitvec w` for all natural numbers `w`, but the pretty-printer only support widths in the set `{1, 8, 16, 32, 64}`
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
@@ -381,7 +381,7 @@ Note that we only have `assert [a]`, and `assert [b]` is missing.
 
 - The datatype `bitvec 0` is legal in Core and illegal in SMT-LIB: cvc5 emits the error `Parse Error: Illegal bitvector size: 0` and z3 emits the error `bit-vector size must be greater than zero`
 
-- Naming collisions for auto-derived ADT functions in Core: An ADT field named `f!` (which is legal, since `!` is a valid identifier character) collides with the name of the automatically derived unsafe field accessor for another field `f`
+- **(FIXED)** Naming collisions for auto-derived ADT functions in Core: An ADT field named `f!` (which is legal, since `!` is a valid identifier character) collides with the name of the automatically derived unsafe field accessor for another field `f`
 
 - Type of auto-derived eliminators for Core ADTs contain free type variables. Consider these two Core datatype definitions which are put in the same mutual block (even though they are not actually mutually recursive):
 
@@ -440,15 +440,16 @@ No free variables are allowed here! Free Variables: [G]
 
 
 ## Specification bugs caught during testing
-- The function typing spec `FuncHasType'` permits a measure (a `decreases` clause) to exist without requiring the function body to also exist, even though the executable typechecker rejects a function if it has a measure but no body
+- **(FIXED)** `The function typing spec `FuncHasType'` permits a measure (a `decreases` clause) to exist without requiring the function body to also exist, even though the executable typechecker rejects a function if it has a measure but no body
   - The same gap is reachable at whole-program level, via both a top-level `function` declaration and an inline `funcDecl` inside a procedure body: it accounts for ~28% of generated programs being rejected by `Program.typeCheck`
-- The `FilterProcedures` transformation returns a Boolean flag to indicate whether the transformation changed the program: this flag is hard-coded to `true`, even though the `Bool` is meant to be interpreted
+- **(FIXED)** `The `FilterProcedures` transformation returns a Boolean flag to indicate whether the transformation changed the program: this flag is hard-coded to `true`, even though the `Bool` is meant to be interpreted
 as whether the transformation modified the analysis state (`CoreTransformState`)
+  - Note: after discussion with the Strata Core team, this is a larger design ambiguity related to inconsistent interpreteations of this Boolean flag for a range of transformations across the Strata codebase. This issue has since been rectified.
 - The spec for the precondition elimination transformation expects all functions in the output factory to have no preconditions, but this is not true, since the transformation doesn't eliminate preconditions for built-ins (e.g. `safeDiv`, safe destructors, etc)
 
 
 ## Specification bugs caught when trying to prove completeness about generators
-- `MutualADTWF` doesn't require applications of type constructors to be well-kinded (i.e. match their known arities)
+- **(FIXED)** `MutualADTWF` doesn't require applications of type constructors to be well-kinded (i.e. match their known arities)
   - Note: this is a broader specification bug: `FuncHasTypeA`, `ProcHasTypeA`, `CmdHasTypeA` also need to enforce well-kindedness of type constructors (i.e. they're applied with the right arity). The following ill-kinded declarations are accepted by the current typing specs but rejected by the typechecker (with an error message `Type Sequence a a is not an instance of a previously registered type`):
 
 ```
@@ -465,8 +466,8 @@ var y : Sequence a a := ...
 The issue is that in `HasTypeA`, the `fvar` and `op` rules read off the type from the annotation, but it doesn't enforce well-kindedness, so any rule that relies on `HasTypeA.fvar/op` might be susceptible to the arity issue
 
 - `MutualADTWF` doesn't allow arguments to constructors of algebraic data types to refer to type aliases 
-- `MutualADTWF` doesn't require free type variables in constructor argument types (for an algebraic datta type) to be among the type parameters of the type being defined
-- `CmdHasType` allows type annotations for variable initialization commands to be polymorphic, although the executable command type-checker enforces that type annotations must be monomorphic
+- **(FIXED)** `MutualADTWF` doesn't require free type variables in constructor argument types (for an algebraic data type) to be among the type parameters of the type being defined
+- **(FIXED)** `CmdHasType` allows type annotations for variable initialization commands to be polymorphic, although the executable command type-checker enforces that type annotations must be monomorphic
 - `ProgramHasType` is quantified over source programs (before type aliases are resolved), so it conservatively rejects some type definitions that pass the typechecker (which resolves type aliases before checking well-formedness of algebraic data type definitions).
 
 Consider this source program:
