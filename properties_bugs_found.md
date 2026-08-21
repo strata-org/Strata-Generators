@@ -61,6 +61,26 @@
 - Result of the symbolic evaluator is the same before/after CSE
   - (By the same, we mean that the path-condition expressions and the stores are the same after resolving the value of new variables that are created during CSE)
 
+**`LiftInternalFuncDecls` transformation (Lambda lifting)**
+- Every hoisted function declaration is closed
+- After lambda lifting, no procedure body contains a local function declaration
+- Lambda lifting does not change a program that has no local function declarations
+- No hoisted functions have free type variables
+- Output of lambda lifting typechecks
+- Lambda lifting transformation is idempotent
+
+**Monomorphization of top-level functions**
+- A monomorphized program still typechecks
+- In monomorphized programs, there are no top-level functions / factory functions that are parameterized by type variables
+- Monomorphization transformation is idempotent
+- Monomorphization does not change type definitions / declarations
+- Polymorphic datatype definitions remain polymorphic after monomorphization
+- Derived tester / field projection functions for polymorphic datatypes are monomorphized 
+- No naming collisions in output program
+- Monomorphization does not change programs that don't contain polymorphic functions
+- Declaration order is preserved by monomorphization
+- Result of evaluation is preserved by monomorphization
+
 **Uniform `changed`-flag contract over every pipeline phase**
 
 Rather than one property per pass, these quantify over a *phase list*, so a phase
