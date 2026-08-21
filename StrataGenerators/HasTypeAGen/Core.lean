@@ -1653,15 +1653,8 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     have hw : 0 < List.sum (List.map Prod.fst gs) := by show 0 < 1+2+2+2+2+4+4; omega
     frequency gs hw
   -- ── Other type constructors (datatypes, abstract types, aliases) ──
-  -- This arm gets each `tcons` that the arms above do not name. In practice the
-  -- type is a datatype from a declaration earlier in the program, an abstract
-  -- type, or an alias body. `List<int>` and `Opt<a>` are examples.
-  --
-  -- No constant has such a type. Therefore the leaves are the three context ones:
-  -- a bound variable, a free variable, or a nullary operator of that exact type.
-  -- A nullary operator here is a nullary constructor such as `Nil : List<a>`.
-  -- Each leaf gives `default` when the context holds none of the three, so the
-  -- support is empty only when no term of the type is in scope.
+  -- No constants (literals) have these types, so when the relevant context is empty,
+  -- we return `default`.
   | 0, τ =>
     let bvars := bvarsOfType bctx τ
     oneOf
@@ -1694,9 +1687,6 @@ def genLExprBase [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
   -- samples, and a derived function of a polymorphic datatype is such an operator.
   -- The two branches put a compound term such as `Cons(1, Nil)` in an argument
   -- position, which only a variable or a nullary constructor could fill before.
-  --
-  -- There are no constants and no `genApp` branch at this target, so the weights are
-  -- 2, 2, 2, 4, 4 and not the 1, 2, 2, 2, 2, 4, 4 of a named arm.
   | n + 1, τ =>
     let bvars := bvarsOfType bctx τ
     let gs : List (Nat × (Unit → G LExpr')) :=
