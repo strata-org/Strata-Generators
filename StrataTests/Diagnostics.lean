@@ -73,7 +73,7 @@ def datatypeBlockCoverageReport : Diagnostic where
 @[strata_diagnostic]
 def derivedCallCoverageReport : Diagnostic where
   name := "ADT-derived-function call coverage:"
-  run cfg := printDerivedCallCoverage (min cfg.numTrials 60) (min cfg.maxSize 20)
+  run cfg := printDerivedCallCoverage (min cfg.numTrials 60) cfg.maxSize
 
 /-- The constructs that `Core.formatProgram` cannot write, with the most frequent construct
     first. For the programs that logged an error, the report also counts the programs that

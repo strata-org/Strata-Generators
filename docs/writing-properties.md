@@ -63,6 +63,8 @@ reads the *shape* of the proposition:
 | `fun gp => sizeProgram gp.prog ≤ 2` | `issue: 3 ≤ 2 does not hold` |
 | `fun gp => gp.prog.decls.length = 99` | `issue: 0 = 99 does not hold` |
 | `fun gp => checkMine gp.prog` (a `Bool`) | `issue: false does not hold` |
+| `fun gp => checkMine gp.prog` (an `abbrev … : Prop`, top level `=`) | `issue: ["f"] = [] does not hold` |
+| `fun gp => checkMine gp.prog` (a `Prop`, top level `∀ x ∈ …`) | `issue: ⋯ does not hold` |
 
 So state the claim inline as a `Prop` where its shape is an equality or an order. Reach
 for a named `check*` predicate in a `*/TestSupport` module when the check is long, is
@@ -70,6 +72,65 @@ reused, is worth pinning with a `#guard`, or is shared with a bespoke Tyche pane
 of this suite is in that position, which is why most of it returns `Bool`.
 
 A `family` entry is scored exactly the same way, so this table applies there too.
+
+### A named predicate that returns `Prop`
+
+The last two rows are the same predicate, and they show that the two options above are
+not the only ones: a named `check*` predicate can return `Prop` and keep the readable
+counterexample. `StrataGenerators/MonomorphizeFns.lean` is the worked example. Three
+things are needed, and none of them is guessable from the error you get without them.
+
+**1. `abbrev`, not `def`.** Typeclass resolution unfolds reducible definitions only, so a
+plain `def … : Prop` is opaque to it and the property fails to register:
+
+```
+failed to synthesize instance of type class
+  DecidablePred fun gp => checkMine gp.prog
+```
+
+Note where that error lands: at the `TestDecl.property` call, not at the definition. The
+definition compiles fine on its own, so a module can build green and still refuse to be
+registered. `abbrev` (or `@[reducible] def`) fixes it.
+
+**2. No `match` on a scrutinee that is not a constructor.** This is not decidable:
+
+```lean
+abbrev checkMine (p : Program) : Prop :=
+  match runMyPass p with            -- stuck: `p` is a variable, so this cannot reduce
+  | none => True
+  | some p' => f p' = []
+```
+
+`DecidablePred` is `∀ x, Decidable (check x)`, elaborated with `x` a variable, so the
+match never reduces and no instance exists. Write `∀ p' ∈ runMyPass p, f p' = []`
+instead — bounded quantification over an `Option` is decidable — or project through
+`Option.getD` / `Option.elim`, which is what the next point wants anyway.
+
+**3. `abbrev` alone buys nothing; the *top level* has to be the equality.** This is the
+trap, because it costs you the benefit silently rather than failing. `PrintableProp`
+reads the outermost shape, and a bounded `∀` is not a shape it renders — so
+`∀ p' ∈ runMyPass p, f p' = []` reports `issue: ⋯ does not hold`, exactly as a `Bool`
+would. Push the `Option` handling into a total helper, using the *vacuous* value as the
+default, so the `=` ends up on top:
+
+```lean
+def onOutput (p : Program) (dflt : α) (f : Program → α) : α :=
+  ((runMyPass p).map f).getD dflt
+
+abbrev checkMine (p : Program) : Prop := onOutput p [] f = []
+```
+
+Same meaning — a pass that raised a diagnostic still makes no claim — and now a failure
+names what went wrong: `issue: ["f"] = [] does not hold`.
+
+The same reasoning favours stating a claim as `namesOf x = []` rather than as
+`List.all`, and as a length equality rather than through a `nodup` helper: in each case
+the equality is what prints the offending value. A guard belongs on the left of a `→`
+(`progTypeChecks p = true → …`) rather than inside a `||`, for the same reason.
+
+One API edge: `TestDecl.witnesses` takes a `Bool`-valued `check`, so a `Prop`-valued
+predicate needs `decide (…)` there. `TestDecl.property` and `family` take the `Prop`
+directly.
 
 ## How it gets picked up
 
@@ -358,9 +419,20 @@ No `True`-valued property catches that.
 lake test -- [numTrials] [maxSize] [flags]
 ```
 
+`maxSize` (default 5) is the structural bound your generator receives: `Gen.sized fun s`
+hands you `s`, ramped from 0 to `maxSize` over the property's trials, and you use it as a
+depth, a nesting level or a count directly. Do not rescale it — that is what the wrappers
+used to do (`s / 20`, `s / 25`, `s / 30`), and it left the flag meaning something
+different in each generator.
+
+If your generator cannot afford the largest size, cap it with a *named* constant carrying
+the measurement that sets it, as `TestScaffold.stmtNestingCap` and
+`TestScaffold.procNestingCap` do. A cap is a statement about your generator's cost; a
+divisor is a statement about the flag, and it will be wrong the moment the flag changes.
+
 | flag | effect |
 |---|---|
-| `--quick` | 100 trials, max size 40, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
+| `--quick` | 100 trials, max size 2, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
 | `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |

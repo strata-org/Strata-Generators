@@ -94,7 +94,7 @@ instance : Shrinkable TypedExpr where
   shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
 private def genTypedExprWith (fctx : FVarCtx) : Gen TypedExpr := Gen.sized fun s => do
-  let depth := max 1 (s / 20)
+  let depth := max 1 s
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
   -- `retryGenArg` is the retry continuation. After a failure at a *subterm*, it draws that subterm again,
@@ -179,7 +179,7 @@ instance : Shrinkable ResolveTypedExpr where
   shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
 private def genResolveTypedExpr : Gen ResolveTypedExpr := Gen.sized fun s => do
-  let depth := max 1 (s / 20)
+  let depth := max 1 s
   let tvars : List TyIdentifier := []
   let ty ← genLMonoTy (G := Plausible.Gen) tvars depth
   -- Read `genTypedExprWith`. `retryGenArg` draws a failed subterm again, in place.
@@ -223,7 +223,7 @@ instance : Shrinkable GenCmdWithCtx where
     { gc with cmd := c', outCtx := cmdOutCtx gc.inCtx c' }
 
 private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
-  let depth := max 1 (s / 20)
+  let depth := max 1 s
   let tvars : List TyIdentifier := []
   let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) coreMonoOps tvars [] ctx depth
   pure ⟨cmd, ctx, ctx'⟩
@@ -298,7 +298,7 @@ instance : Shrinkable GenFunction where
     property can read the matching type map. The depth grows with the size parameter of the harness, as it
     does in `genCmdWith`. -/
 private def genFunctionWith (fctx : FVarCtx) : Gen GenFunction := Gen.sized fun s => do
-  let depth := max 1 (s / 20)
+  let depth := max 1 s
   let func ← genFunction (G := Plausible.Gen) fctx coreMonoOps depth
   pure ⟨func, fctx⟩
 
@@ -331,7 +331,7 @@ instance : Shrinkable ClosedGenFunction where
   shrink gf := (shrinkFuncWellFormed gf.func).map fun f' => { gf with func := f' }
 
 private def genClosedFunctionWith : Gen ClosedGenFunction := Gen.sized fun s => do
-  let depth := max 2 (s / 20)
+  let depth := max 2 s
   let func ← genFunction (G := Plausible.Gen) [] coreMonoOps depth
   pure ⟨func⟩
 
@@ -433,16 +433,34 @@ instance : Repr GenStmts where
 instance : Shrinkable GenStmts where
   shrink gs := (shrinkStmts gs.stmts).map (⟨·⟩)
 
-/-- Generate a well-typed statement list. The parameter `size`, which is the size of the nesting and of an
-    expression, and the length of the sequence both grow with the size parameter of the harness. -/
--- The nesting `size` and the length `len` each stay small, because the properties under test need no large
--- program. A larger `size` also raises the chance that a nested sub-generator reaches its fallback for an
--- empty support. Two examples of such a case are a clash between two `typeDecl` names, and an `exit` with
--- no label around it. Such a failure makes `retryGen` draw the *whole* statement list again, and it can
--- use up the fuel at a large size.
+/-- The deepest statement nesting a generated statement list carries.
+
+    A ceiling on top of the run's size, not a rescaling of it: nesting is where the cost
+    of a draw grows fastest. Measured at 40 draws per level: 28 ms per sample at nesting
+    2, 116 ms at 3, 870 ms at 4. Level 4 buys nothing the properties need, and it would
+    add most of a minute of generation to a statement property of 1000 trials.
+
+    A deeper draw also fails more often: every nested sub-generator can hit its
+    empty-support fallback (`default`) — a `typeDecl` name clash, an `exit` with no
+    enclosing label — and one such leaf makes `retryGen` redraw the whole list. -/
+private def stmtNestingCap : Nat := 3
+
+/-- The deepest statement nesting a generated *procedure body* carries.
+
+    Lower than `stmtNestingCap` because a procedure list pays it once per procedure, and
+    the body generator additionally has to satisfy the callee signatures. Measured at 20
+    draws per level: 111 ms per sample at nesting 2, 2.4 s at 3, 21.7 s at 4. -/
+private def procNestingCap : Nat := 2
+
+/-- The longest statement list a generated procedure body carries. See
+    `procNestingCap`; the same cost argument applies, less sharply. -/
+private def procBodyLenCap : Nat := 3
+
+/-- Generate a well-typed statement list at the run's size: the size is the sequence
+    length, and the nesting depth up to `stmtNestingCap`. -/
 private def genStmtsWith : Gen GenStmts := Gen.sized fun s => do
-  let size := max 1 (min 3 (s / 25))
-  let len := max 1 (min 4 (s / 20))
+  let size := max 1 (min stmtNestingCap s)
+  let len := max 1 s
   let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := Plausible.Gen) coreMonoOps [] size len
   pure ⟨ss⟩
 
@@ -510,9 +528,11 @@ instance : Shrinkable GenProcs where
 -- **polymorphic** procedure is also callable: `headerProcSig` records the type arguments of the callee, and
 -- `genCallStmt` samples a concrete instance of them at the call site.
 private def genProcsWith : Gen GenProcs := Gen.sized fun s => do
-  let n := max 2 (min 4 (2 + s / 30))
-  let size := max 1 (min 2 (s / 30))
-  let len := max 1 (min 3 (s / 25))
+  -- At least 2 procedures: the call-graph edges are what these properties are about, and
+  -- one procedure has nobody to call.
+  let n := max 2 s
+  let size := max 1 (min procNestingCap s)
+  let len := max 1 (min procBodyLenCap s)
   let (ps, _) ← (List.range n).foldlM
     (fun (acc : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx) (i : Nat) => do
       let proc ← (retryGen 8000
@@ -593,7 +613,9 @@ instance : Shrinkable GenProgram where
 -- sample that nothing can fill is another failure for the retry loop to absorb. The number of the
 -- declarations here is far below the number at which that cost matters, so this fuel is ample.
 private def genProgramWith : Gen GenProgram := Gen.sized fun s => do
-  let numDecls := max 2 (min 5 (2 + s / 25))
+  -- At least 2 declarations: a program of one declaration cannot exercise a pass that
+  -- reads one declaration while rewriting another.
+  let numDecls := max 2 s
   let prog ← (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) numDecls {})
     : Gen Core.Program)
   pure ⟨prog⟩
@@ -685,8 +707,11 @@ def derivedCallCoverage (samples maxSize : Nat) (coverageNumDecls : Nat := 10) :
   for i in [:samples] do
     let r ← (try
       let prog ← Plausible.Gen.run
+        -- The size cycles for uniformity with the other sampling loops, but it changes
+        -- nothing here: `genProgram` takes its declaration count as an argument and reads
+        -- no ambient size.
         (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) coverageNumDecls {})
-         : Gen Core.Program) (4 + i % (maxSize + 1))
+         : Gen Core.Program) (i % (maxSize + 1))
       pure (some prog)
      catch _ => pure none)
     match r with
@@ -775,9 +800,10 @@ instance : Arbitrary GenAdtBlock where
 
 instance : Arbitrary GenIndepBlock where
   arbitrary := Gen.sized fun s => do
-    -- Between two and four datatypes. A `mutual` block of one datatype gives each property no content, and a
-    -- property needs two or more datatypes to be about the *block* and not about one datatype.
-    let extra := min 2 (s / 30)
+    -- One datatype per size level, so a block holds 1 at size 0 and `maxSize` at the
+    -- largest. A block of one is vacuous for the `mutual`-shape properties, and it is
+    -- what size 0 draws; the pairs and larger blocks come from the rest of the ramp.
+    let extra := s
     let block ← StrataGenerators.MutualBlockShape.genIndependentBlock
       (G := Plausible.Gen) (extra + 1) (maxSize := 0)
     pure ⟨block⟩

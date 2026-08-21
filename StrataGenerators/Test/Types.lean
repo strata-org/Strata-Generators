@@ -247,8 +247,17 @@ structure Diagnostic where
     shape is an equality or an order is better as a `Prop`. The `PrintableProp` instance of
     Plausible then prints *both sides* of the comparison, and not the single word `false`.
 
-    `TestDecl.forAll` does the same work, but its caller names the runner. Use it for the rare
-    property that needs something other than the default of its type. -/
+    A named predicate may return `Prop` too, and keep that rendering, but it has to be an
+    `abbrev` rather than a `def` — `dec` below is resolved by instance search, which
+    unfolds reducible definitions only, so a plain `def … : Prop` fails to synthesize
+    *here*, at the registration site, while compiling perfectly well on its own. It also
+    has to carry the equality at its *top level*: `PrintableProp` reads the outermost
+    shape, so a predicate whose body is `∀ x ∈ …` reports `⋯` just as a `Bool` would. See
+    `docs/writing-properties.md` § "A named predicate that returns `Prop`", and
+    `StrataGenerators/MonomorphizeFns.lean` for a module written that way throughout.
+
+    `TestDecl.forAll` is the same thing with the runner named explicitly, for the rare
+    property that wants something other than its type's default. -/
 def TestDecl.property (name : String)
     [Arbitrary α] [Repr α] [Shrinkable α] [TycheFeatures α]
     (check : α → Prop) [dec : DecidablePred check] [inst : ∀ x, Testable (check x)]

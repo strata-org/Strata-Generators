@@ -295,7 +295,7 @@ def smtEvalAgreementAction (numTrials maxSize : Nat) : IO (Bool × Nat × Nat ×
     let mut cell : List (String × Nat × Nat) := solvers.map (fun s => (s, 0, 0))
     for i in List.range perTypeTrials do
       let size := i % (maxSize + 1)
-      let depth := max 1 (size / 20)
+      let depth := max 1 size
       match ← genClosedBaseTerm octx ty depth with
       | none => skipped := skipped + 1
       | some e =>

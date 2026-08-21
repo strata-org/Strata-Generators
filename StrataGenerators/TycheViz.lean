@@ -152,7 +152,15 @@ instance : Tyche.TycheSample EvalResult where
 -- that *do* go through `Plausible.Gen`, such as the one for a list of procedures below, get the outer
 -- `retryGen` wrapper instead.
 
-/-- Draw a depth at random, from 1 up to `maxDepth`. Both limits are included. -/
+/-- The largest size a panel samples at.
+
+    A panel runs outside the property loop and so receives no `RunConfig`. This mirrors
+    `StrataGenerators.Test.defaultMaxSize`, which is the bound the properties themselves
+    run at, so a panel shows the distribution the suite actually tested. Keep the two in
+    step; a panel drawn at a size the suite never uses describes nothing the suite did. -/
+def panelMaxSize : Nat := 5
+
+/-- Randomly choose a depth between 1 and `maxDepth` (inclusive). -/
 def randomDepth (maxDepth : Nat := 5) : IO Nat := do
   let r ← IO.rand 1 maxDepth
   return r
@@ -737,12 +745,12 @@ def stmtRepr (ss : List Statement) : String :=
   let suffix := if shapes.isEmpty then "" else s!"\n-- {" ".intercalate shapes}"
   formatStmts ss ++ suffix
 
-/-- Generate one well-typed statement list at `IO`, for the Tyche panels. The function keeps `size` and
-    `len` small, as the wrapper in the other harness does, so that the generation of a whole list rarely
-    reaches a sub-generator with an empty support. -/
+/-- Generate one well-typed statement list in `IO` for the Tyche panels. Draws the nesting
+    and the length from one size, as `TestScaffold.genStmtsWith` does, so the panel shows
+    the shapes the gating property saw. -/
 def genStmtsForTyche : IO (List Statement × Nat) := do
-  let d ← IO.rand 1 3
-  let len ← IO.rand 1 4
+  let d ← max 1 <$> IO.rand 0 panelMaxSize
+  let len := d
   let ss ← genProgramStmtsIO d len
   return (ss, d)
 
@@ -837,10 +845,10 @@ open StrataGenerators.Procedure.TestSupport in
     the generator makes the body of each procedure against the monomorphic procedures before it. Therefore
     each panel sees a program with real edges in its call graph. -/
 def genProcsForTyche : IO (List Core.Procedure × Nat) := do
-  let genSize ← IO.rand 0 60
-  let n ← IO.rand 2 4
-  let size := max 1 (min 2 (genSize / 30))
-  let len := max 1 (min 3 (genSize / 25))
+  let genSize ← IO.rand 0 panelMaxSize
+  let n := max 2 genSize
+  let size := max 1 genSize
+  let len := max 1 genSize
   let mut ps : List Core.Procedure := []
   let mut sigs : StrataGenerators.Stmt.ProcSigCtx := []
   for i in List.range n do
@@ -953,8 +961,8 @@ private def programFeatures (p : Core.Program) (genSize : Nat) :
     at `G := IO` is not reliable. The docstring of `ProgramGen.sample` records that fact. This function
     uses the same limits as `TestScaffold.genProgramWith`. -/
 def genProgramForTyche : IO (Core.Program × Nat) := do
-  let genSize ← IO.rand 0 60
-  let numDecls := max 2 (min 5 (2 + genSize / 25))
+  let genSize ← IO.rand 0 panelMaxSize
+  let numDecls := max 2 genSize
   let prog ← ProgramGen.sample numDecls {} 30000 genSize
   return (prog, genSize)
 

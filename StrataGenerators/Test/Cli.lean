@@ -9,33 +9,37 @@ Each driver shares this module, so a flag means the same thing in each driver.
 lake test -- [numTrials] [maxSize] [flags]
 ```
 
-The positional arguments configure the Plausible run. `numTrials` is the number of trials for
-each property, and its default is 1000. `maxSize` is the maximum generator size, and its
-default is 100.
+Positional arguments configure the Plausible run (`numTrials` = trials per
+property, default 1000; `maxSize` = maximum generator size, default 5).
 
-* `--quick` gives a fast preset for a short cycle of work: 100 trials, maximum size 40, and no
-  Tyche pass. Use it to find a defect, and use the defaults to gate a merge. A positional
-  argument has higher precedence, so `--quick 500` gives 500 trials and keeps the other parts
-  of the preset.
-* `--no-tyche` skips the Tyche visualization pass, which runs by default.
-* `--tyche-out=PATH` gives the path of the Tyche JSONL output. The default is
-  `tyche_output.jsonl`.
-* `--tyche-samples=N` gives the number of samples for each Tyche panel. The default is 1000.
-* `--smt` enables the `smt` gate. The gate admits the properties whose oracle is a live `cvc5`
-  or `z3`. It is off by default, so the suite needs no solver.
-* `--only=SUBSTRING` runs only the properties whose name holds `SUBSTRING`. You can give the
-  flag more than one time, and a property that matches one of them runs. The report holds no
-  other property, and this is what makes work on one new property cheap.
-* `--list` prints the registry with the name, the group, the gate and the expectation of each
-  property. The driver then stops and runs nothing. Use it to make sure that the harness found
-  your property.
-* `--known-failure=NAME` marks `NAME` as known to fail for this run. The report hides its
-  counterexample, and the property stops gating the exit code. You can give the flag more than
-  one time. The permanent form is `knownFailure` at the property, which also carries a reason.
-  Use this flag for a short cycle of work, when you want the results of the other properties
-  while someone triages a defect. Unlike `--only=`, this flag takes a **whole property name**
-  and not a substring. A substring would claim that each property in a group must fail, and the
-  report would then give a failure for each property in the group that holds.
+`maxSize` is the number a generator receives directly: a term depth, a statement
+nesting level, a declaration count. Plausible ramps the size from 0 to this number
+over the trials of a property, so a run tests the small shapes first and the
+largest ones last. The number is small because these are *structural* bounds — a
+depth-6 term or a 6-declaration program is already a large input, and the cost of
+generating one grows with the bound rather than in proportion to it.
+
+* `--quick` — a fast preset for a short cycle of work: 100 trials, maximum size
+  2, and no Tyche pass. Use it to find a defect and the defaults to gate a merge.
+  A positional argument has higher precedence, so `--quick 500` gives 500 trials
+  and keeps the rest of the preset.
+* `--no-tyche` — skip the Tyche visualization pass (on by default).
+* `--tyche-out=PATH` — Tyche JSONL output path (default `tyche_output.jsonl`).
+* `--tyche-samples=N` — samples per Tyche panel (default 1000).
+* `--smt` — enable the `smt` gate, admitting the properties whose oracle is a live
+  `cvc5`/`z3`. Off by default, so the suite needs no solver.
+* `--only=SUBSTRING` — run only the properties whose name contains `SUBSTRING`.
+  Repeatable; a property matching any of them runs. The rest are not reported at
+  all, which is what makes iterating on one new property cheap.
+* `--list` — print the registry (name, group, gate, expectation) and exit without running
+  anything. The answer to "did my property get picked up?".
+* `--known-failure=NAME` — treat `NAME` as known to fail for this run: suppress its
+  counterexample and stop it gating the exit code. Repeatable. The permanent form is
+  `knownFailure` at the property, which carries a reason; this flag is for the
+  short cycle of work where you want the rest of the suite's colour while a defect is
+  being triaged. Unlike `--only=`, it takes a **whole property name**, not a substring:
+  a substring would silently claim that every property in a group must fail, and the
+  ones that hold would then be reported as failures.
 
 There is no `--suite=` flag. A report group *is* a prefix of a name, so `--only="lift:"` selects
 the `lift` group exactly.
@@ -64,8 +68,15 @@ structure Cli where
 /-- The number of trials that `--quick` selects. -/
 def quickNumTrials : Nat := 100
 
-/-- The maximum generator size that `--quick` selects. -/
-def quickMaxSize : Nat := 40
+/-- The maximum generator size a run uses by default.
+
+    A generator reads this number as its own bound — a term depth, a nesting level, a
+    declaration count — so it is small. `TestScaffold`'s generators receive it unchanged. -/
+def defaultMaxSize : Nat := 5
+
+/-- The maximum generator size `--quick` selects. Two levels of structure: enough for a
+    non-trivial shape, small enough that a full pass costs seconds. -/
+def quickMaxSize : Nat := 2
 
 /-- Parses `args`. For the flags, see the documentation of this module. -/
 def parseCli (args : List String) : Cli :=
@@ -80,7 +91,7 @@ def parseCli (args : List String) : Cli :=
       { numTrials := (positional[0]? >>= String.toNat?).getD
                        (if quick then quickNumTrials else 1000)
         maxSize   := (positional[1]? >>= String.toNat?).getD
-                       (if quick then quickMaxSize else 100)
+                       (if quick then quickMaxSize else defaultMaxSize)
         gates     := if flags.contains "--smt" then ["smt"] else [] }
     tycheEnabled := !flags.contains "--no-tyche" && !quick
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
