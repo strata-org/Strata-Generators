@@ -27,12 +27,6 @@
 - Preservation (of the function body's type)
 - Completeness of executable typechecker with respect to the declarative typing spec
 
-**Statement-related transformations**
-
-- Completeness of typechecker with respect to the declarative typing spec
-- Result of loop elimination is well-typed
-- Loop elimination removes all loopsf
-
 **`FilterProcedures` transformation**
 (Removes procedures that are unreachable from an input list of procedure declarations, where unreachable = "not in the transitive closure")
 
