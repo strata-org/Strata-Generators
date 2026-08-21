@@ -397,21 +397,21 @@ inputs every time**. A property that fails reports the seed it drew from:
   × FAIL (12/1000) mypass: the output typechecks
 …
 -------------------
-    seed: 1175335840147608452 — keep this draw with `@[strata_property (seed := 1175335840147608452)]`, or replay the whole run with the same `--seed=`
+    seed: 7 — replay with `--seed=7`, or keep this draw with `@[strata_property (seed := 7)]`
 ```
 
 Without `--seed=`, nothing is reproducible: `IO.stdGenRef` is seeded from OS randomness at
 startup, so a counterexample that appears in CI and not on your machine is the normal
 case, and there is no number to report.
 
-Each property draws from the seed mixed with **its own name**, not from the seed itself.
-So properties still see different inputs from each other (a seed shared verbatim would
-make every property over `GenProgram` test the same thousand programs), and `--only=`
-replays exactly what the full run gave that property — the mix does not depend on how many
-properties ran, or in what order, or on what any of them drew.
-
 The seed also fixes the process-wide RNG, so the self-driving `IO` properties and the
 Tyche pass — which sample outside Plausible's runner — are reproducible too.
+
+**One seed serves every property**, which is what `hspec` and `tasty-quickcheck` do with
+their own `--seed`. Two properties over `GenProgram` therefore test the *same* thousand
+programs as each other, so a seeded run covers less ground than an unseeded one. Use
+`--seed=` to reproduce a failure and to narrow it down; leave it off for a run that is
+meant to find something new.
 
 ### Pinning a seed
 

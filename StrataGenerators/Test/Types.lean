@@ -41,43 +41,18 @@ structure RunConfig where
   numTrials : Nat := 1000
   maxSize   : Nat := 100
   gates     : List String := []
-  /-- The run's base seed (`--seed=N`), or `none` for a run seeded from the OS.
+  /-- The seed every property runs at (`--seed=N`), or `none` for a run seeded from the
+      OS. A property that pinned its own seed ignores it.
 
-      A property does not use this number directly: `TestDecl.effectiveSeed` mixes it
-      with the property's name, and a property that pinned its own seed ignores it
-      entirely. What it guarantees is that the *whole run* is a function of this number
-      — repeat the command line and every property draws what it drew before.
+      One seed for the whole run, which is how `hspec` and `tasty-quickcheck` treat their
+      own `--seed`. The consequence is worth knowing: two properties over one input type
+      then draw *the same inputs* as each other, so a seeded run covers less than an
+      unseeded one. Use it to reproduce a failure, not as a default for a gating run.
 
-      A `Body.action` reads this field as **its own** effective seed rather than the
-      run's base, because that is the number it would have to seed its own draws with;
-      `TestDecl.runRaw` substitutes it before handing the config over. -/
+      A `Body.action` reads this field as its own seed, because that is the number it
+      would have to seed its own draws with. -/
   seed      : Option Nat := none
   deriving Inhabited
-
-/-- The modulus the seed mixer works in. -/
-private def seedModulus : Nat := 2 ^ 64
-
-/-- The seed a property with no pin of its own gets from a run started with
-    `--seed=base`: the base mixed with the property's name, by FNV-1a over the name's
-    characters — codepoints rather than bytes, so a seed does not depend on an encoding
-    detail, and written out here rather than taken from `String.hash`, so that a pinned
-    seed keeps meaning the same draw across toolchains.
-
-    Not `base` itself: handing every property the same seed makes every property over one
-    input type draw *the same inputs*, so a seeded run would test much less than an
-    unseeded one — a good part of what the suite covers comes from different properties
-    seeing different draws.
-
-    Not `base + index` either: that ties a property's inputs to its position in the
-    registry, so `--only=` — which filters the list — would not reproduce what the full
-    run did, and adding a property would shift every later one.
-
-    Mixing in the *name* is stable under both. Filtering, reordering and adding
-    properties all leave every other property's seed exactly where it was, which is what
-    makes `--seed=N --only="one property"` replay that property's share of the full run. -/
-def mixSeed (base : Nat) (name : String) : Nat :=
-  name.foldl (fun h c => (h ^^^ c.toNat) * 1099511628211 % seedModulus)
-    ((14695981039346656037 + base) % seedModulus)
 
 /-- The Plausible configuration a `RunConfig` induces, running at `seed` if one is given.
 
@@ -397,8 +372,8 @@ def withSeed (seed : Nat) (d : TestDecl) : TestDecl :=
   { d with seed := some seed }
 
 /-- The seed this property actually runs at: its pin if it has one, otherwise the run's
-    base seed mixed with its name, otherwise nothing — in which case it draws from the
-    process-wide RNG and the run is not reproducible.
+    seed, otherwise nothing — in which case it draws from the process-wide RNG and the
+    run cannot be replayed.
 
     The pin wins over `--seed=`, which is the opposite of the usual "the command line
     wins". A pin is load-bearing where it appears: it is what makes a rare failure
@@ -409,7 +384,7 @@ def withSeed (seed : Nat) (d : TestDecl) : TestDecl :=
 def TestDecl.effectiveSeed (d : TestDecl) (cfg : RunConfig) : Option Nat :=
   match d.seed with
   | some s => some s
-  | none   => cfg.seed.map (mixSeed · d.name)
+  | none   => cfg.seed
 
 /-- Attach a bespoke Tyche panel that samples `gen`, an `IO` action producing an
     already-classified sample.
@@ -512,15 +487,14 @@ def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
   | some s =>
     if o.passed then o
     else
-      -- What the number is good for depends on where it came from. A *derived* seed is
-      -- this property's share of `--seed=`, so the way to keep this exact draw is to pin
-      -- that number — passing it back as `--seed=` would mix it with the name again and
-      -- draw something else. A pin needs no advice; it says only that the draw below is
-      -- the one this property will keep reporting until the pin comes off.
+      -- A pin needs no advice: it says only that the draw below is the one this property
+      -- will keep reporting until the pin comes off. A seed from the flag is worth
+      -- repeating on the line, so that the number and the counterexample it produced are
+      -- read together rather than the number sitting alone in the header.
       let note :=
         if d.seed.isSome then s!"seed: {s} (pinned at the declaration)"
-        else s!"seed: {s} — keep this draw with `@[strata_property (seed := {s})]`, or \
-          replay the whole run with the same `--seed=`"
+        else s!"seed: {s} — replay with `--seed={s}`, or keep this draw with \
+          `@[strata_property (seed := {s})]`"
       { o with message := some (match o.message with
                                 | some m => s!"{m}\n    {note}"
                                 | none => note) }

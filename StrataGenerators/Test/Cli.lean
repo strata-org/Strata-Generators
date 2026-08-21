@@ -25,12 +25,12 @@ property, default 1000; `maxSize` = maximum generator size, default 100).
   fails. Two runs of the same command line then draw the same inputs, which is what makes
   a counterexample reproducible: without it every run starts from OS randomness
   (`IO.stdGenRef` is seeded from `IO.getRandomBytes` at startup), and a failing draw is
-  gone the moment the run ends.
+  gone the moment the run ends. `N` also seeds the process-wide RNG, which is what the
+  self-driving `IO` properties and the Tyche pass draw from.
 
-  Each property draws from `N` mixed with its own *name*, not from `N` itself, so
-  properties still see different inputs from each other and `--only=` replays exactly
-  what the full run gave that property. `N` also seeds the process-wide RNG, which is
-  what the self-driving `IO` properties and the Tyche pass draw from.
+  One seed for every property, as in `hspec` and `tasty-quickcheck`. Two properties over
+  one input type therefore draw the same inputs as each other, so a seeded run covers
+  less than an unseeded one: reach for this to reproduce a failure, not to gate a merge.
 
   A property that pinned its own seed with `@[strata_property (seed := …)]` keeps it and
   ignores this flag; see `StrataGenerators.Test.TestDecl.effectiveSeed` for why the
