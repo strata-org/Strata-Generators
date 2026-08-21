@@ -38,7 +38,7 @@ def adtBlockChecks : List TestDecl :=
     [ -- The screen that keeps the solver properties from being fed an ill-typed
       -- program, and a claim in its own right: a derived constructor is usable in an
       -- equality at its ground instance. Holds on every block Strata accepts.
-      ("adt: the law program typechecks",
+      ("adt: the Core program which encodes injectivity and disjointness assertions typechecks",
        fun gb => checkLawProgramTypeChecks gb.block),
       -- FAILS honestly, but only on a rare draw. A datatype with a field `f` *and* a
       -- field `f!` derives the name `d..f!` twice — once as `f!`'s safe destructor,
