@@ -10,10 +10,17 @@ lake test -- [numTrials] [maxSize] [flags]
 ```
 
 Positional arguments configure the Plausible run (`numTrials` = trials per
-property, default 1000; `maxSize` = maximum generator size, default 100).
+property, default 1000; `maxSize` = maximum generator size, default 5).
+
+`maxSize` is the number a generator receives directly: a term depth, a statement
+nesting level, a declaration count. Plausible ramps the size from 0 to this number
+over the trials of a property, so a run tests the small shapes first and the
+largest ones last. The number is small because these are *structural* bounds — a
+depth-6 term or a 6-declaration program is already a large input, and the cost of
+generating one grows with the bound rather than in proportion to it.
 
 * `--quick` — a fast preset for a short cycle of work: 100 trials, maximum size
-  40, and no Tyche pass. Use it to find a defect and the defaults to gate a merge.
+  2, and no Tyche pass. Use it to find a defect and the defaults to gate a merge.
   A positional argument has higher precedence, so `--quick 500` gives 500 trials
   and keeps the rest of the preset.
 * `--no-tyche` — skip the Tyche visualization pass (on by default).
@@ -61,8 +68,15 @@ structure Cli where
 /-- The number of trials `--quick` selects. -/
 def quickNumTrials : Nat := 100
 
-/-- The maximum generator size `--quick` selects. -/
-def quickMaxSize : Nat := 40
+/-- The maximum generator size a run uses by default.
+
+    A generator reads this number as its own bound — a term depth, a nesting level, a
+    declaration count — so it is small. `TestScaffold`'s generators receive it unchanged. -/
+def defaultMaxSize : Nat := 5
+
+/-- The maximum generator size `--quick` selects. Two levels of structure: enough for a
+    non-trivial shape, small enough that a full pass costs seconds. -/
+def quickMaxSize : Nat := 2
 
 /-- Parse `args`. See the module doc for the flags. -/
 def parseCli (args : List String) : Cli :=
@@ -77,7 +91,7 @@ def parseCli (args : List String) : Cli :=
       { numTrials := (positional[0]? >>= String.toNat?).getD
                        (if quick then quickNumTrials else 1000)
         maxSize   := (positional[1]? >>= String.toNat?).getD
-                       (if quick then quickMaxSize else 100)
+                       (if quick then quickMaxSize else defaultMaxSize)
         gates     := if flags.contains "--smt" then ["smt"] else [] }
     tycheEnabled := !flags.contains "--no-tyche" && !quick
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"

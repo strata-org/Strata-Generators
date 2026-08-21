@@ -136,7 +136,8 @@ def cleanup (cli : Cli) (selected : List TestDecl) (diags : List Diagnostic) : I
     if cli.quick then
       IO.println s!"Tyche visualizations disabled (--quick); no file written, so \
         {cli.tycheOut} — if it exists — is from an earlier run."
-      IO.println "For the preset's trials/size *with* panels, pass them positionally instead: 100 40"
+      IO.println s!"For the preset's trials/size *with* panels, pass them positionally \
+        instead: {quickNumTrials} {quickMaxSize}"
     else
       IO.println "Tyche visualizations disabled (--no-tyche)."
 
