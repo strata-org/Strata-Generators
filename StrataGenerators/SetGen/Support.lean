@@ -3,7 +3,7 @@ Copyright (c) 2026 Harrison Goldstein. All rights reserved.
 Released under MIT license as described in the file LICENSE.
 Authors: Harrison Goldstein
 
-Vendored from https://github.com/hgoldstein95/basalt (SetGen branch, not yet on `main`).
+Vendored from https://github.com/hgoldstein95/basalt, from the `SetGen` branch.
 -/
 import StrataGenerators.SetGen.Core
 import Basalt.Combinators
@@ -12,14 +12,14 @@ open Lean.Order RandomChoice
 open scoped SetGen.Set
 
 /-!
-# SetGen Support
+# The support of a generator on `Set`
 
-This file sets up basic definitions for working with the support of `Set`-based generators.
-Since a `Set α` *is* its own support, these lemmas characterize membership after monadic operations.
+This file gives the definitions for work with the support of a generator on `Set`. A `Set α` *is*
+its own support, so the lemmas here give the membership relation after a monadic operation.
 
-## Main Definitions
+## The main definitions
 
-- `SetGen.support` — The support of a `Set`-based generator is the set itself.
+- `SetGen.support`: the support of a generator on `Set` is the set itself.
 -/
 
 namespace SetGen
@@ -90,7 +90,7 @@ theorem mem_support_pick_iff {x y : Set α} :
     a ∈ support (pick (fun () => x) (fun () => y)) ↔ a ∈ support x ∨ a ∈ support y := by
   simp [support, pick_mem_iff]
 
-/-- The support of `oneOf gs` is exactly the union of the support of all the generators in `gs` -/
+/-- The support of `oneOf gs` is exactly the union of the supports of the generators in `gs`. -/
 @[simp]
 theorem support_oneOf
     {gs : List (Unit → Set α)}
@@ -119,8 +119,8 @@ theorem support_oneOf
       subst heq
       assumption
 
-/-- Any element in the support of `oneOf gs` is in the support of some
-    generator in `gs` -/
+/-- An element is in the support of `oneOf gs` exactly when it is in the support of one generator
+    in `gs`. -/
 @[simp]
 theorem mem_support_oneOf_iff
     {gs : List (Unit → Set α)}
@@ -129,8 +129,8 @@ theorem mem_support_oneOf_iff
   rw [show support (oneOf gs hne) = _ from support_oneOf hne]
   simp only [Set.mem_setOf_eq, support]
 
-/-- If `n < sum (fst <$> gs)`, then `Helpers.frequencySelect gs n` picks a sub-generator
-    from `gs` that has non-zero weight `w` -/
+/-- If `n` is less than the sum of the weights in `gs`, then `Helpers.frequencySelect gs n` picks a
+    generator from `gs` whose weight is not zero. -/
 private theorem frequencySelect_mem
     {gs : List (Nat × (Unit → Set α))}
     {n : Nat}
@@ -149,8 +149,8 @@ private theorem frequencySelect_mem
       exact ⟨w', g', List.mem_cons_of_mem _ hmem, hpos, heq⟩
 
 
-/-- If a weighted generator `(w, g) ∈ gs` where the weight `w` is non-zero,
-    then there exists `n` such that `Helpers.frequencySelect gs n` produces `g ()` -/
+/-- If `gs` holds the pair `(w, g)` and the weight `w` is not zero, then some `n` makes
+    `Helpers.frequencySelect gs n` give `g ()`. -/
 private theorem frequencySelect_n_exists
     {gs : List (Nat × (Unit → Set α))}
     {w : Nat} {g : Unit → Set α}
@@ -173,8 +173,8 @@ private theorem frequencySelect_n_exists
         have : ¬ (w' + n < w') := by omega
         simp [this, heq]
 
-/-- Any element in the support of `frequency gs` is in the support
-    of some generator in `gs` with non-zero weight -/
+/-- An element is in the support of `frequency gs` exactly when it is in the support of one
+    generator in `gs` whose weight is not zero. -/
 @[simp]
 theorem mem_support_frequency_iff
     {gs : List (Nat × (Unit → Set α))}
@@ -197,8 +197,8 @@ theorem mem_support_frequency_iff
     simp only [dif_pos hn_lt, hn_eq]
     exact ha
 
-/-- If the sum of weights in `gs` is non-zero, then the support of `frequency gs`
-    is exactly the union of the support of the generators in `gs` with non-zero weights -/
+/-- If the sum of the weights in `gs` is not zero, then the support of `frequency gs` is exactly the
+    union of the supports of the generators in `gs` whose weight is not zero. -/
 @[simp]
 theorem support_frequency
     {gs : List (Nat × (Unit → Set α))}
@@ -208,7 +208,7 @@ theorem support_frequency
   exact mem_support_frequency_iff h_pos
 
 
-/-- The support of `elements xs` is exactly the elements of `xs` -/
+/-- The support of `elements xs` is exactly the set of the elements of `xs`. -/
 @[simp]
 theorem support_elements
     [Inhabited α]
@@ -234,7 +234,7 @@ theorem support_elements
       ⟨⟨⟨i, Nat.zero_le _, hle⟩⟩, ⟨⟨Nat.zero_le _, hle⟩, rfl⟩⟩,
       by dsimp; simp; exact heq.symm⟩
 
-/-- `a` is in the support of `elements xs` if and only if `a ∈ xs` -/
+/-- An element `a` is in the support of `elements xs` exactly when `xs` holds `a`. -/
 @[simp]
 theorem mem_support_elements_iff
     [Inhabited α]
@@ -264,15 +264,15 @@ theorem mem_support_csup {c : Set α → Prop} (hc : chain c) {a : α} :
   · intro ⟨s, hs, ha⟩
     exact le_csup hc hs a ha
 
--- ── vectorOf / listOfMaxLength support ────────────────────────────────
--- Ported to `SetGen.Set` from the `SPMF`-based lemmas in `Basalt.Combinators`.
+-- ── The support of `vectorOf` and of `listOfMaxLength` ────────────────
+-- These lemmas follow the lemmas for `SPMF` in `Basalt.Combinators`.
 
-/-- `vectorOf 0 g` produces the empty list. (`Basalt.Combinators` ships
-    `vectorOf_succ` but not the base case, which we need below.) -/
+/-- `vectorOf 0 g` gives the empty list. `Basalt.Combinators` has `vectorOf_succ`, but it has no
+    lemma for this base case. -/
 @[simp] theorem vectorOf_zero [Gen G] (g : G α) : vectorOf 0 g = pure [] := rfl
 
-/-- `xs ∈ support (vectorOf n g)` iff `xs` has length exactly `n` and every
-    element is in `support g`. -/
+/-- A list is in the support of `vectorOf n g` exactly when its length is `n` and each of its
+    elements is in the support of `g`. -/
 @[simp]
 theorem mem_support_vectorOf_iff {n : Nat} {g : Set α} {xs : List α} :
     xs ∈ support (vectorOf n g) ↔ xs.length = n ∧ ∀ x ∈ xs, x ∈ support g := by
@@ -299,12 +299,13 @@ theorem mem_support_vectorOf_iff {n : Nat} {g : Set α} {xs : List α} :
         refine ⟨x, hmem x List.mem_cons_self, tl, ?_, rfl⟩
         exact ih.mpr ⟨by simpa using hlen, fun y hy => hmem y (List.mem_cons_of_mem _ hy)⟩
 
+/-- The same claim as `mem_support_vectorOf_iff`, as an equation between sets. -/
 theorem support_vectorOf {n : Nat} {g : Set α} :
     support (vectorOf n g) = {xs | xs.length = n ∧ ∀ x ∈ xs, x ∈ support g} := by
   ext xs; exact mem_support_vectorOf_iff
 
-/-- The support of `listOfMaxLength n g` is the set of all lists of length at
-    most `n` whose every element is in `support g`. -/
+/-- The support of `listOfMaxLength n g` is the set of the lists whose length is not more than `n`
+    and whose elements are all in the support of `g`. -/
 theorem support_listOfMaxLength {n : Nat} {g : Set α} :
     support (listOfMaxLength n g) = {xs | xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g} := by
   ext xs
@@ -319,18 +320,17 @@ theorem support_listOfMaxLength {n : Nat} {g : Set α} :
             ⟨⟨⟨xs.length, Nat.zero_le _, hlen⟩⟩, ⟨Nat.zero_le _, hlen⟩, rfl⟩,
             mem_support_vectorOf_iff.mpr ⟨rfl, hmem⟩⟩
 
-/-- `xs ∈ support (listOfMaxLength n g)` iff `xs` has length at most `n` and every
-    element is in `support g`. -/
+/-- A list is in the support of `listOfMaxLength n g` exactly when its length is not more than `n`
+    and each of its elements is in the support of `g`. -/
 @[simp]
 theorem mem_support_listOfMaxLength_iff {n : Nat} {g : Set α} {xs : List α} :
     xs ∈ support (listOfMaxLength n g) ↔ xs.length ≤ n ∧ ∀ x ∈ xs, x ∈ support g := by
   rw [support_listOfMaxLength]; rfl
 
-/-- Every element of a list in the support of `listOf g` is in `support g`.
-    (`listOf` either returns `[]` or draws a head from `g` and recurses; the head
-    is in `support g` and the tail is again in `support (listOf g)`.) This is the
-    forward direction needed to read off per-character facts about a generated
-    identifier's tail run. -/
+/-- Each element of a list in the support of `listOf g` is in the support of `g`.
+
+    `listOf` returns `[]`, or it draws a head from `g` and then calls itself. The head is therefore
+    in the support of `g`, and the tail is again in the support of `listOf g`. -/
 theorem mem_support_listOf {g : Set α} {xs : List α}
     (hxs : xs ∈ support (listOf g)) :
     ∀ x ∈ xs, x ∈ support g := by
@@ -348,20 +348,14 @@ theorem mem_support_listOf {g : Set α} {xs : List α}
       · exact hz
       · exact ih (by rw [support]; exact hzs) x hx
 
-/-- Converse of `mem_support_listOf`. If each element of a list is in `support g`,
-    then the list is in `support (listOf g)`.
+/-- The converse of `mem_support_listOf`. If each element of a list is in the support of `g`, then
+    the list is in the support of `listOf g`.
 
-    `listOf` does a `pick` between two branches: the branch for `[]`, and the branch
-    that draws one element and then calls itself. To show that the generator reaches
-    a given list, follow the recursive branch one time for each element, then follow
-    the branch for `[]`. No branch puts a bound on the length. Therefore the support
-    of `listOf g` is all of the lists over `support g`. `listOfMaxLength` is
-    different, because it has a bound on the length.
-
-    `support_listOf` in `Basalt.SPMF.Support` gives this direction for the `SPMF`
-    interpretation. This lemma gives it for `SetGen.Set`. The support lemma for
-    `genIdentName` needs this direction, because the run of characters after the
-    first character of a name is a `listOf`. -/
+    `listOf` makes a `pick` between two branches: the branch for `[]`, and the branch that draws one
+    element and then calls itself. To show that the generator reaches a given list, follow the
+    recursive branch one time for each element, and then follow the branch for `[]`. No branch
+    bounds the length. The support of `listOf g` is therefore each list over the support of `g`.
+    `listOfMaxLength` is different, because it bounds the length. -/
 theorem mem_support_listOf_of_forall {g : Set α} {xs : List α}
     (hxs : ∀ x ∈ xs, x ∈ support g) :
     xs ∈ support (listOf g) := by
@@ -377,26 +371,23 @@ theorem mem_support_listOf_of_forall {g : Set α} {xs : List α}
     refine Or.inr ⟨y, hxs y List.mem_cons_self, ys, ?_, rfl⟩
     exact ih (fun x hx => hxs x (List.mem_cons_of_mem y hx))
 
-/-- **Support of `listOf`, in both directions.** `xs ∈ support (listOf g)` holds
-    exactly when each element of `xs` is in `support g`. There is no bound on the
-    length. The proof puts `mem_support_listOf` together with
-    `mem_support_listOf_of_forall`. -/
+/-- **The support of `listOf`, in both directions.** A list is in the support of `listOf g` exactly
+    when each of its elements is in the support of `g`. There is no bound on the length. -/
 theorem mem_support_listOf_iff {g : Set α} {xs : List α} :
     xs ∈ support (listOf g) ↔ ∀ x ∈ xs, x ∈ support g :=
   ⟨mem_support_listOf, mem_support_listOf_of_forall⟩
 
-/-- Set form of `mem_support_listOf_iff`. -/
+/-- The same claim as `mem_support_listOf_iff`, as an equation between sets. -/
 theorem support_listOf {g : Set α} :
     support (listOf g) = {xs | ∀ x ∈ xs, x ∈ support g} := by
   ext xs; exact mem_support_listOf_iff
 
--- ── coin / biasedOptionGen / optionGen support ───────────────────────────
--- Ported to `SetGen.Set` from the `SPMF`-based lemmas in `Basalt.SPMF.Support`.
+-- ── The support of `coin`, `biasedOptionGen` and `optionGen` ──────────
+-- These lemmas follow the lemmas for `SPMF` in `Basalt.SPMF.Support`.
 
-/-- The support of `coin r` is all of `Bool` when the bias is strictly between 0
-    and 1: `true` is reachable because `0 < r.num`, and `false` because
-    `r.num < r.den`. The rational arithmetic is quarantined here, exactly as in
-    the `SPMF` version. -/
+/-- The support of `coin r` is all of `Bool` when the bias `r` is more than 0 and less than 1. The
+    generator can give `true` because `0 < r.num`, and it can give `false` because
+    `r.num < r.den`. This lemma holds all of the arithmetic on rational numbers. -/
 @[simp]
 theorem mem_support_coin_iff {r : Rat} {b : Bool} (h0 : 0 < r) (h1 : r < 1) :
     b ∈ support (RandomChoice.coin r : Set Bool) ↔ b = true ∨ b = false := by
@@ -418,9 +409,9 @@ theorem mem_support_coin_iff {r : Rat} {b : Bool} (h0 : 0 < r) (h1 : r < 1) :
     · -- `true`: reachable via the minimal index `0` (where `idx < r.num`)
       refine ⟨⟨⟨0, ?_, ?_⟩⟩, ⟨?_, ?_⟩, Or.inl ⟨?_, rfl⟩⟩ <;> dsimp only <;> omega
 
-/-- Support of `biasedOptionGen`: `none` is reachable (via the `false` coin
-    branch, needing `r < 1`) and `some x` is reachable exactly when `x ∈ support g`
-    (via the `true` branch, needing `0 < r`). -/
+/-- The support of `biasedOptionGen r g`. The generator can give `none` through the `false` branch of
+    the coin, and this needs `r < 1`. It can give `some x` exactly when `x` is in the support of `g`,
+    through the `true` branch, and this needs `0 < r`. -/
 @[simp]
 theorem mem_support_biasedOptionGen_iff {r : Rat} {g : Set α} {o : Option α}
     (h0 : 0 < r) (h1 : r < 1) :
@@ -437,8 +428,8 @@ theorem mem_support_biasedOptionGen_iff {r : Rat} {g : Set α} {o : Option α}
     · exact ⟨false, Or.inr rfl, Or.inr ⟨by simp, rfl⟩⟩
     · exact ⟨true, Or.inl rfl, Or.inl ⟨rfl, a, ha, rfl⟩⟩
 
-/-- Support of `optionGen` (the unbiased 1/2 instance). Hypothesis-free: the
-    `0 < 1/2` / `1/2 < 1` obligations discharge by `norm_num`. -/
+/-- The support of `optionGen g`, which uses the bias 1/2. The lemma needs no hypothesis, because
+    the two bounds on that bias are closed facts. -/
 @[simp]
 theorem mem_support_optionGen_iff {g : Set α} {o : Option α} :
     o ∈ support (optionGen g) ↔ o = none ∨ ∃ a ∈ support g, o = some a := by

@@ -6,16 +6,15 @@ import StrataGenerators.HasTypeAGen
 # Soundness of the whole-program generator
 
 Every program `ProgramGen.genProgram` produces is well-typed with respect to
-`Core.TypeSpec.ProgramHasTypeA` — i.e. `ProgramHasType'` at the annotated
-`HasTypeA` spec.
+`Core.TypeSpec.ProgramHasTypeA`, which is `ProgramHasType'` at the annotated `HasTypeA` specification.
 
 The proof is layered to mirror the generator:
 
 * **Bridge lemmas** turn a successful checker add into the exact premise a
   `DeclHasType'` constructor asks for (`FactoryExtendedBy` from
   `addFactoryFunctionWithError = .ok`; the trivial `type_con` success handling).
-* **Per-declaration soundness** — each `genDecl*` step's support consists of
-  `(ds, s')` with `ds` well-typed under `DeclsHasType'` from the input to the
+* **The soundness of one declaration step.** The support of each `genDecl*` step holds a pair of a
+  declaration list and a state, and that list is well typed under `DeclsHasType'`, from the input state to the
   output state.
 * **The fold** chains per-step soundness into `DeclsHasType'` over the whole
   program, and the top-level theorem adds `getNames.Nodup`.
@@ -48,9 +47,8 @@ theorem declNames_append (ds₁ ds₂ : List Decl) :
   simp [declNames]
 
 /-- The name-tracking postcondition of a declaration step. `reserved` grows by
-    exactly the emitted names (as a *set* — the generator prepends, so the literal
-    order is reversed across the fold, but only membership matters for
-    `getNames.Nodup`). -/
+    exactly the emitted names, as a *set*. The generator puts each new name at the front, so the literal order
+    is reversed across the fold, and only the membership matters for the claim about distinct names. -/
 structure NamesStep (s : GenState) (ds : List Decl) (s' : GenState) : Prop where
   /-- Every name reserved after the step is either newly emitted or was already
       reserved. -/
@@ -97,8 +95,8 @@ theorem declsHasType_append {P : Program} {C C' C'' : LContext CoreLParams}
 /-! ## Bridge lemmas -/
 
 /-- Membership in a pushed factory, proved by unfolding `Factory.push`'s effect
-    on the underlying `nameMap` (a `HashMap`) — the private `Factory.push_mem_iff`
-    is not exported from its `module`, so we re-derive it here. -/
+    on the `nameMap` inside it, which is a hash map. The corresponding lemma of Strata is private to its own
+    `module`, so this file proves the fact again. -/
 theorem mem_push_iff (F : Factory CoreLParams) (fn : LFunc CoreLParams)
     (h : ¬ fn.name.name ∈ F) (name : String) :
     name ∈ F.push fn h ↔ name = fn.name.name ∨ name ∈ F := by
@@ -297,7 +295,7 @@ theorem contextOk_addKnownType {C C' : LContext CoreLParams} {nm : String} {ar :
 
 `contextOk_addKnownType` keeps `ContextOk` at a *fixed* pool across an
 abstract-type add. To let a later datatype block *reference* the new abstract
-type, the pool itself must grow — so `ContextOk` has to be re-established
+type, the pool itself must grow. Therefore a proof must establish `ContextOk` again,
 with `nm` added to `baseTypes` (arity 0) or `tyCons` (arity ≥ 1).
 
 Two facts about the new entry carry it:
@@ -305,7 +303,7 @@ Two facts about the new entry carry it:
 * **known**: `nm ∈ C'.knownTypes.keywords`, immediate from the `insertIfNew` the
   gate ran, giving `base_known`/`tyCon_known`;
 * **external**: `C'.datatypes.getType nm = none`. `addKnownTypeWithError` leaves
-  `datatypes` untouched, so this is a fact about `C` — supplied by the caller from
+  `datatypes` unchanged, so this is a fact about `C`. The caller gives it, from
   the fold's `datatypesReserved` invariant plus `nm ∉ reserved`. -/
 
 /-- A name absent from `allTypeNames` resolves to `none`. Contrapositive of
@@ -452,7 +450,7 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
 /-! ## Expression-typing bridge
 
 Under the annotated spec `instHasTypeA`, `exprTyped C Γ e mty` is definitionally
-`LExpr.HasTypeA [] e mty` — it ignores the context. So a `bool`-typed expression
+`LExpr.HasTypeA [] e mty`, and it reads no context. Therefore a `bool`-typed expression
 from `genLExpr … [] [] depth .bool` discharges the `.ax` obligation, and any
 annotated expression from the generator discharges a `.distinct` element's
 `∃ mty, exprTyped …` obligation. -/
@@ -517,8 +515,8 @@ structure Inv (s : GenState) : Prop where
       reserved against the threaded `reserved` set (what the datatype generator
       needs).
 
-      This is stated at `s.baseTypes`/`s.tyCons` — the pool grown by abstract-type
-      declarations — rather than at the fixed default, which is what lets a
+      This field is stated at the pool `s.baseTypes` and `s.tyCons`, which a declaration of an abstract type
+      grows, and not at the fixed default pool. That choice is what lets a
       datatype block reference a previously declared abstract type (interleaving
       direction (2)). The abstract-type
       step re-establishes it at the grown pool via
@@ -527,7 +525,7 @@ structure Inv (s : GenState) : Prop where
   /-- Every type name the context knows is reserved (needed for the alias/type-con
       name-clash guards). -/
   knownReserved : ∀ k ∈ s.C.knownTypes.keywords, k ∈ s.reserved
-  /-- No alias name in `Γ` is a base type, applied constructor, or `"arrow"` — so
+  /-- No alias name of `Γ` is a base type, an applied constructor or `"arrow"`. Therefore
       an alias-body reference (confined to those) never matches an alias name,
       giving `aliasFree`. -/
   aliasPoolDisjoint : ∀ a ∈ s.Γ.aliases,
@@ -541,14 +539,14 @@ structure Inv (s : GenState) : Prop where
       the growing one). Grown only by abstract types. -/
   baseSupset : DatatypeGen.defaultBaseTypes ⊆ s.baseTypes
   tyConsSupset : DatatypeGen.defaultTyCons ⊆ s.tyCons
-  /-- The *current* pool names are all reserved — so a freshly drawn name
+  /-- Each name of the *current* pool is reserved. Therefore a fresh name,
       (∉ reserved) differs from every base type, applied constructor, and
       `"arrow"`. This is what a new alias/abstract-type name uses to stay
       disjoint from the pool. -/
   baseReserved : ∀ x ∈ s.baseTypes, x ∈ s.reserved
   tyConReserved : ∀ x ∈ s.tyCons.map (·.1), x ∈ s.reserved
   arrowReserved : "arrow" ∈ s.reserved
-  /-- The type scope holds no *value* bindings — only aliases. Top-level
+  /-- The type scope holds no binding of a *value*, and it holds aliases only. A top-level
       declarations never bind expression variables, so `Γ.types` stays empty
       throughout the fold. Needed to align a generated procedure body's context
       with `procBodyContext Γ proc` (which pushes the body scope onto `Γ.types`). -/
@@ -569,7 +567,7 @@ structure Inv (s : GenState) : Prop where
       `C.datatypes`, which is exactly the `getType … = none` that `ContextOk`'s
       externality fields demand of the new pool entry. -/
   datatypesReserved : ∀ n ∈ s.C.datatypes.allTypeNames, n ∈ s.reserved
-  /-- The prior-datatype pool resolves and is inhabited in `C` — the hypothesis
+  /-- Each datatype of the earlier pool resolves in `C` and is inhabited there. That is the hypothesis
       that lets a new block reference a *previously declared* datatype
       (interleaving direction (4)). Re-established at each datatype step from the
       `MutualADTWF.inhabited` field of the block just added. -/
@@ -594,8 +592,8 @@ theorem simpleTyArities_of_inv {s : GenState} (hinv : Inv s) : SimpleTyArities s
     fun b hb => hinv.ctxOk.base_arity b (hinv.baseSupset hb)
   have htc : ∀ kc ∈ DatatypeGen.defaultTyCons, s.C.knownTypes[kc.1]? = some kc.2 :=
     fun kc hkc => hinv.ctxOk.tyCon_arity kc (hinv.tyConsSupset hkc)
-  -- Membership in the *derived* pool is now an arity lookup in `Core.KnownTypes`
-  -- (`mem_defaultBaseTypes_iff` / `mem_defaultTyCons_iff`), which `native_decide` settles.
+  -- Membership in the *derived* pool is a lookup of an arity in `Core.KnownTypes`, which
+  -- `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` give, and which `native_decide` settles.
   refine ⟨?_, ?_, ?_, ?_, ?_, hinv.ctxOk.arrow_arity, ?_, ?_⟩
   · exact hb "bool" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
   · exact hb "int" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
@@ -710,7 +708,7 @@ theorem aliasFree_of_refs_disjoint {aliases : List TypeAlias} :
         exact ⟨hargs hd (by simp), ihl (fun a ha => hargs a (by simp [ha]))⟩
 
 /-- Every element of a generated `distinct` is an annotated `.op` node, hence
-    well-typed at its annotation — discharging the `∃ mty, exprTyped …` obligation
+    well-typed at its annotation. Therefore it discharges the obligation `∃ mty, exprTyped …`
     of `DeclHasType'.distinct` in any `C`/`Γ`.
 
     `HasTypeA.op` reads the type off the annotation, exactly as `HasTypeA.fvar` would;
@@ -729,8 +727,8 @@ theorem distinctElems_typed {τ : LMonoTy} {names : List String}
     over `tyParams := []`, so `genArgTy_freeVars` (at the vacuous
     `BlockRefsWF [] [] []`) leaves it no free type variables.
 
-    This is what each emitted constant's `FuncHasType'.noUndeclaredVars` needs — a
-    constant declares no type arguments, so its signature must be closed. -/
+    This is what the field `FuncHasType'.noUndeclaredVars` of each emitted constant needs. A constant declares
+    no type argument, so its signature must be closed. -/
 theorem genDistinctAssertion_ground {bt : BaseTys} {tc : TyCons}
     {reserved : List String} {maxVars size : Nat}
     {name : String} {τ : LMonoTy} {constNames : List String}
@@ -900,9 +898,9 @@ theorem inv_cons_reserved {s : GenState} (hinv : Inv s) (name : String) :
       rigidNil := hinv.rigidNil }
 
 /-- A state whose only changes from `s` are prepending `name` to `reserved` and
-    `sig` to `procs` preserves `Inv`. No `Inv` field mentions `procs` — the
-    callable-signature context is constrained by `ProcSigCorresponds` at the top
-    level instead (see `ProgramGen.ProcSigThread`), not by the fold invariant. -/
+    `sig` to `procs` keeps `Inv`. No field of `Inv` names `procs`, because
+    `ProcSigCorresponds` constrains the context of the callable signatures at the top level, and the invariant
+    of the fold does not. Read `ProgramGen.ProcSigThread`. -/
 theorem inv_cons_reserved_procs {s : GenState} (hinv : Inv s) (name : String)
     (sig : StrataGenerators.Stmt.ProcSig) :
     Inv { s with reserved := name :: s.reserved, procs := sig :: s.procs } := by
@@ -955,14 +953,14 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
       rigidNil := hinv.rigidNil }
 
 /-- **`Inv` is preserved by any change to the operator contexts.** No `Inv`
-    field mentions `octx`, `pctx` or `derivedPctx` — under the annotated spec an
-    `.op` node is typed from its own annotation, so the operator contexts constrain
-    which programs are *drawn*, never which are well-typed — hence every field of
+    field names `octx`, `pctx` or `derivedPctx`. Under the annotated specification, an
+    `.op` node takes its type from its own annotation. Therefore an operator context constrains
+    which programs the generator *draws*, and never which programs are well typed. Each field of
     `hinv` transfers verbatim and `{ hinv with }` copies them.
 
-    Needed because two steps now grow an operator context while `Inv` is being
-    re-established: the datatype step (with the block's derived functions) and the
-    function step (registering the declared function so a later body can call it).
+    This lemma is necessary, because two steps grow an operator context while the proof establishes the invariant
+    again. Those steps are the step for a datatype, which adds the derived functions of the block, and the step
+    for a function, which registers the declared function so that a later body can call it.
     Compose with `inv_addFactory` / `inv_grow_reserved`, which cover the fields that
     *do* move. -/
 theorem inv_setOpCtxs {s : GenState} (hinv : Inv s)
@@ -973,8 +971,8 @@ theorem inv_setOpCtxs {s : GenState} (hinv : Inv s)
 /-- **`Inv` is preserved by a factory add alone.** A successful
     `addFactoryFunctionWithError` touches only `C.functions`, and no `Inv` field
     mentions the function factory (`knownTypes`, `datatypes`, `rigidTypeVars` and
-    everything derived from them are unchanged — `addFactory_fields`,
-    `addFactory_rigid`), so the invariant survives with `reserved` untouched.
+    everything from them stay the same, by `addFactory_fields` and
+    `addFactory_rigid`), so the invariant holds with `reserved` unchanged.
 
     Compose with `inv_grow_reserved` to also account for the names the step
     reserves. Shared by the function step and the `distinct` step's constants. -/
@@ -1024,9 +1022,8 @@ theorem genDeclAxiom_sound (P : Program) {s : GenState} {b : Bounds}
 
 The `distinct` step emits one 0-ary constant per element before the `distinct`
 itself. Each constant is an ordinary `.func` declaration, so its
-`DeclHasType'.func` premises are discharged exactly as the function step's are —
-only far more cheaply, since a constant is body-less, measure-less and
-`typeArgs`-free. -/
+proof discharges each `DeclHasType'.func` premise as the step for a function does, and each step is much
+cheaper, because a constant has no body, no measure and no type argument. -/
 
 /-- A generated constant is non-recursive: `constantFunc` leaves `isRecursive` at
     its `false` default. -/
@@ -1397,7 +1394,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
           · exact List.mem_cons_of_mem _ (hinv.tyConReserved x hx)
       · exact List.mem_cons_of_mem _ hinv.arrowReserved
       · -- tyConsNeArrow: the new applied constructor is `nm`, which is fresh, while
-        -- `"arrow"` is reserved — so `nm ≠ "arrow"`.
+        -- `"arrow"` is reserved, so the new name differs from it.
         by_cases har0 : ar = 0
         · subst har0; simp only [if_pos]; exact hinv.tyConsNeArrow
         · simp only [if_neg har0]
@@ -1432,8 +1429,8 @@ For `getNames.Nodup`, the block's datatype names must be pairwise distinct and
 disjoint from every other declaration's name. Both read off
 `genMutuallyRecursiveDatatypes_shape` directly: it pins the block's names to its
 headers' names (`block.map name = headers.map name`), which are `Nodup` and fresh
-against `initialReserved`. No permutation reasoning is needed — the rank-based
-generator emits its datatypes without a shuffle pass. -/
+against `initialReserved`. The proof needs no argument about a permutation, because the generator emits its
+datatypes in the order of their ranks and it shuffles nothing. -/
 
 theorem genDatatypeBlock_names {baseTypes : BaseTys} {tyCons : TyCons}
     {mExtra mTyP mBase mRec mArgs mSize : Nat} {extraReserved : List String}
@@ -1460,7 +1457,7 @@ theorem genDatatypeBlock_names {baseTypes : BaseTys} {tyCons : TyCons}
 /-- **`StoredRefsAbsent` from the invariant.** Every reference in a stored
     datatype's constructor arguments is reserved (`Inv.storedRefsReserved`), while
     the block's names are freshly drawn and hence unreserved. So no block name can
-    appear anywhere in the stored datatypes — the side condition
+    occur in a stored datatype. That fact is the side condition that
     `tySymInhab_push` needs to transport a prior datatype's inhabitance across the
     push. -/
 theorem storedRefsAbsent_of_inv {s : GenState} {block : MutualDatatype Unit}
@@ -1497,8 +1494,8 @@ theorem genDatatypeBlock_MutualADTWF {s : GenState} {b : Bounds}
     ?_ hinv.ctxOk hinv.dtPoolOk (storedRefsAbsent_of_inv hinv hfresh_res)
     tyCons_append_split (fun kc hkc => List.mem_append_left _ hkc) hblock
   -- No name in the combined pool is `"arrow"`: external ones by
-  -- `tyConsNeArrow`, pool ones because they are reserved while `"arrow"`… is too —
-  -- so instead use that a pool name is a *datatype* of `C` and `"arrow"` is not.
+  -- `tyConsNeArrow`. A pool name is reserved, and `"arrow"` is reserved too, so that route fails. The proof
+  -- therefore uses the fact that a pool name is a *datatype* of `C` and `"arrow"` is not.
   intro kc hkc
   rcases List.mem_append.mp hkc with hext | hdt
   · exact hinv.tyConsNeArrow kc hext
@@ -1532,7 +1529,7 @@ theorem genDeclAxiom_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Ge
 
     Freshness and internal distinctness come from the two draws: `nm` is fresh
     against `s.reserved`, and the constant names are drawn against `nm ::
-    s.reserved` — hence fresh, pairwise distinct, and different from `nm`. On a
+    s.reserved`. Therefore each of them is fresh, they are different in pairs, and each differs from `nm`. On a
     factory clash nothing is emitted (`namesStep_nil`). -/
 theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclDistinct (G := SetGen.Set) s b)) :

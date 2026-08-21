@@ -3,48 +3,46 @@ import StrataGenerators.FunctionHasTypeAGen.Roundtrip
 open Lambda Core Imperative
 
 /-!
-# Signature-preserving shrinker for the `Shrinkable Function` instance
+# The shrinker for the `Shrinkable Function` instance, which keeps the signature
 
-The candidate list backing the `Shrinkable Function` instance (wired up in
-`StrataGenerators.TestScaffold`). It deliberately **holds the entire type signature
-fixed** — inputs, output, type-args and measure — and reduces only the two things
-that are not part of it: the body *expression* and the `requires` clauses (dropped
-or reduced). A shrunk function is therefore still a drop-in replacement at the same
-type.
+This file holds the list of candidates for the `Shrinkable Function` instance, which
+`StrataGenerators.TestScaffold` connects. The shrinker **keeps the whole type signature**:
+the inputs, the output, the type arguments and the measure. It reduces only the two parts
+that are not in the signature: the *expression* of the body, and the `requires` clauses,
+which it removes or reduces. A smaller function is therefore still usable in place of the
+original function at the same type.
 
-This is kept separate from `StrataGenerators.FunctionHasTypeAGen.Roundtrip`, whose
-contents are exactly what the parser/pretty-printer round-trip property needs (the
-format/parse machinery, the failure predicates, and the greedy signature-reducing
-minimizer `shrinkWhile`). This shrinker reuses two pieces from there —
-`funcWellFormed` (the candidate well-formedness filter) and the shared
-`shrinkLExpr` (from `HasTypeAGen.TestSupport`) — but is otherwise independent.
+This file is separate from `StrataGenerators.FunctionHasTypeAGen.Roundtrip`. That module
+holds exactly what the round-trip property for the parser and the printer needs: the code
+that formats and parses, the predicates for a failure, and the greedy shrinker `shrinkWhile`,
+which also reduces the signature. This shrinker uses two parts from that module,
+`funcWellFormed`, which filters a candidate, and the shared `shrinkLExpr`. It is otherwise
+independent.
 -/
 
-/-- Candidate set for the `Shrinkable Function` instance: **signature-preserving**
-    structural shrinks (reusing the shared `shrinkLExpr`), holding the entire type
-    signature fixed — same inputs (count and types), same output type, same
-    type-args, and same measure. Two things are reduced: the body *expression*,
-    toward a minimal expression that still type-checks at the declared `output`; and
-    the `requires` clauses, either dropped or reduced.
+/-- The candidates for the `Shrinkable Function` instance. The structural reductions **keep the
+    signature**, and they use the shared `shrinkLExpr`. The inputs keep their number and their types,
+    the output type stays the same, the type arguments stay the same, and the measure stays the same.
+    The shrinker reduces two parts: the *expression* of the body, toward the smallest expression that
+    still typechecks at the declared `output`; and the `requires` clauses, which it removes or
+    reduces.
 
-    Preconditions are reduced here even though this reducer is otherwise
-    conservative, because a `requires` clause is not part of the type signature —
-    the promise this family makes is that a shrunk function is still a drop-in
-    replacement at the same *type*, and dropping a clause preserves that. Reducing
-    them also matters for reach: `genFunction` carries a clause on roughly half its
-    draws, so a counterexample resting on one is only minimizable through this
-    instance if the clause can go. Dropping precedes reducing, so the bigger
-    reduction is tried first.
+    The shrinker reduces a precondition, although it is careful in each other part, because a
+    `requires` clause is not in the type signature. The promise of this family is that a smaller
+    function is still usable in place of the original at the same *type*, and the removal of a clause
+    keeps that promise. The reduction also matters for reach: `genFunction` gives a clause on about
+    half of its draws, so this instance can reduce a counterexample that rests on a clause only when
+    the clause can go. The removal comes before the reduction, so the shrinker tries the larger
+    reduction first.
 
-    Well-typedness of every candidate is enforced by `funcWellFormed` in
-    `shrinkFuncWellFormed`: since `output` is unchanged here, that filter keeps only
-    bodies whose type still matches the (fixed) output, and it keeps every surviving
-    clause Boolean and scoped to the formals — which matters because
-    `Function.typeCheck` does not check preconditions at all.
+    `funcWellFormed` in `shrinkFuncWellFormed` keeps each candidate well-typed. The `output` does not
+    change here, so that filter keeps only a body whose type still matches the output. It also keeps
+    each remaining clause Boolean and in the scope of the formal parameters. That matters, because
+    `Function.typeCheck` checks no precondition.
 
-    (Note: this is intentionally narrower than the round-trip `shrinkFunc`, which
-    also drops/retypes the signature and drops the body/measure. That broader
-    reducer is what the greedy round-trip minimizer `shrinkWhile` uses.) -/
+    This shrinker is narrower than `shrinkFunc` in the module for the round trip, which also removes a
+    part of the signature, gives it another type, and removes the body and the measure. The greedy
+    shrinker `shrinkWhile` for the round trip uses that wider reducer. -/
 def shrinkFuncCandidates (f : Function) : List Function :=
   let pres := f.preconditions
   let shrinkBody := match f.body with
@@ -56,11 +54,11 @@ def shrinkFuncCandidates (f : Function) : List Function :=
       <$> shrinkLExpr pc.expr
   dropPrecond ++ shrinkBody ++ shrinkPrecond
 
-/-- Well-typed signature-preserving shrinks of a function (for the `Shrinkable
-    Function` instance): every candidate that satisfies `funcWellFormed`. The type
-    signature — inputs, output, type-args, and measure — is preserved exactly; the
-    body expression and the `requires` clauses are what get reduced. Unlike the
-    round-trip `shrinkWhile`, this is a plain one-step candidate list, as the
-    `Shrinkable` typeclass expects. -/
+/-- The reductions of a function that keep the signature and stay well-typed, for the
+    `Shrinkable Function` instance. The list holds each candidate that satisfies `funcWellFormed`.
+    The type signature does not change: the inputs, the output, the type arguments and the measure
+    stay the same. The shrinker reduces the expression of the body and the `requires` clauses. Unlike
+    `shrinkWhile` for the round trip, this function gives a plain list of candidates for one step,
+    which is what the `Shrinkable` class needs. -/
 def shrinkFuncWellFormed (f : Function) : List Function :=
   (shrinkFuncCandidates f).filter funcWellFormed

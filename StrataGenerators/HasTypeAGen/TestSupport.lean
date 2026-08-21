@@ -76,8 +76,8 @@ def defaultFCtx : FVarCtx :=
   , ("s", .string), ("r", .regex), ("m", .map .int .bool)
   , ("q", .seq .int) ]
 
-/-- Strata's full `Core.Factory` at our parameter types. This is the **single
-    source of truth** for the operator vocabulary of every harness in this repo.
+/-- The full `Core.Factory` of Strata, at the parameter types of this package. It is the **one source of
+    truth** for the vocabulary of the operators of each harness here.
 
     Each harness draws its operators from this one factory, through `coreOpCtx`
     below. Therefore a harness cannot drift from the operators that Core truly
@@ -105,11 +105,8 @@ def coreFactory : Factory LExprParams' := Core.Factory
     `PrecondElim` to discharge, and a generated procedure exercises the pass that
     eliminates a precondition instead of running it as a no-op.
 
-    This context is now the same as `coreMonoOps`. Earlier it was `coreMonoOps`
-    plus four hand-written entries for `Int.SafeDiv`, `Int.SafeMod`, `Int.SafeDivT`
-    and `Int.SafeModT`, because the hand-written `coreMonoOps` held only the total
-    operators. `coreMonoOps` now comes from `Core.Factory`, which defines each
-    `Int.Safe*` operator, so those four entries became duplicates.
+    This context is the same as `coreMonoOps`. `coreMonoOps` comes from `Core.Factory`, which defines each
+    `Int.Safe*` operator, so this context needs no separate entry for one of them.
 
     The definition stays as a separate name, and each call site for procedures
     keeps it. The name records the *intent* that a procedure body must be able to
@@ -119,9 +116,8 @@ def corePartialOps : OpCtx := coreMonoOps
 
 -- ── Evaluator ───────────────────────────────────────────────────────────
 
-/-- An evaluation state with the full `coreFactory` loaded. An operator such as
-    `Int.Add` reduces when it has concrete arguments. The operators on `string`,
-    `real` and `bitvec` now reduce too, which `IntBoolFactory` could not do. -/
+/-- A state for the evaluator, with the full `coreFactory` in it. An operator such as `Int.Add` reduces when it
+    has concrete arguments. An operator on a string, on a real number and on a bitvector also reduces. -/
 def coreState : LState LExprParams' :=
   { state := [],
     config := { factory := coreFactory,
@@ -214,17 +210,17 @@ def isInstanceOf (target inferred : LMonoTy) : Bool :=
   | .ok _ => true
   | .error _ => false
 
-/-- Re-infer the type of `expr` after erasing all annotations. `none` when
-    `resolve` errors (e.g. on a fully-erased quantifier whose body type is the
-    bound variable — an incompleteness of `resolve`, not a soundness bug). -/
+/-- Infer the type of `expr` again, after an erasure of each annotation. The result is `none` when `resolve`
+    gives an error. One such case is a quantifier after a full erasure, whose body has the type of the bound
+    variable. That case is a gap in the completeness of `resolve`, and not a defect in its soundness. -/
 def resolveErasedTy (expr : LExpr') : Option LMonoTy :=
   match LExpr.resolve resolveLContext Lambda.TEnv.default (eraseAllTypes expr) with
   | .ok (resolved, _) => some resolved.toLMonoTy
   | .error _ => none
 
-/-- Resolve-after-erase property: after erasing all annotations, `resolve`
-    succeeds and infers a type the generation type `expectedTy` is an instance of.
-    (A `resolve` failure is scored as a counterexample — see `resolveErasedTy`.) -/
+/-- The property about a resolve after an erasure. After an erasure of each annotation, `resolve` succeeds, and
+    it infers a type that the type of the generation is an instance of. A failure of `resolve` counts as a
+    counterexample. Read `resolveErasedTy`. -/
 def checkResolveAfterErase (expr : LExpr') (expectedTy : LMonoTy) : Bool :=
   match resolveErasedTy expr with
   | some inferred => isInstanceOf expectedTy inferred
@@ -235,10 +231,9 @@ def checkResolveAfterErase (expr : LExpr') (expectedTy : LMonoTy) : Bool :=
 -- The single expression shrinker reused by *every* term-level shrinker in the
 -- suite (`TypedExpr`/`ClosedTypedExpr`/`ResolveTypedExpr` in `TestScaffold`, and
 -- the command / statement / function shrinkers). It only proposes *structurally
--- smaller* expressions; the caller is responsible for keeping candidates
--- well-typed (typically by re-`typeCheck`ing and rejecting failures), so a shrunk
--- expression may legitimately change type — e.g. `(f x) : bool` shrinks toward its
--- subterm `f : int -> bool`.
+-- smaller* expression. The caller keeps each candidate well typed, usually by a second type check that rejects
+-- a failure. Therefore a shrunk expression can change its type. For an example, `(f x) : bool` shrinks toward
+-- its subterm `f : int -> bool`.
 
 /-- All ways to drop exactly one element of a list. Shared by every sequence
     shrinker in the suite (command / statement / function). -/
@@ -246,10 +241,9 @@ def dropEach {α} : List α → List (List α)
   | [] => []
   | x :: xs => xs :: (x :: ·) <$> dropEach xs
 
-/-- For terms that don't involve top-level binders (e.g. `lam` or `quant`),
-    extract their immediate sub-terms. Excludes bare `.op` nodes since
-    unapplied operators (interpreted functions) are trivial degenerate results
-    (they aren't values and can't reduce without arguments). -/
+/-- The immediate subterms of a term that holds no binder at its top, such as a lambda or a quantifier. The
+    result holds no bare `.op` node, because an operator with no argument is a degenerate result: it is not a
+    value, and it cannot reduce with no argument. -/
 def immediateSubtermsWithoutBinders (e : LExpr') : List LExpr' :=
   (match e with
   | .app _ fn arg => [fn, arg]
@@ -259,12 +253,14 @@ def immediateSubtermsWithoutBinders (e : LExpr') : List LExpr' :=
     | .op _ _ _ => false
     | _ => true
 
-/-- Structurally shrink an `LExpr'`.
-    - For terms involving binders (`abs`/`quant`), we shrink the body but keep the
-      binder, so the shrunken term stays well-scoped.
-    - For terms without binders, we also extract their top-level subterms.
-    - For integer constants we defer to the default `Nat`/`Int` shrinker.
-    Candidates are structurally smaller but not re-typechecked here; callers filter. -/
+/-- Shrink an `LExpr'` structurally.
+    - For a term with a binder, which is an `abs` or a `quant`, the function shrinks the body and keeps the
+      binder, so that the shrunk term stays well scoped.
+    - For a term with no binder, the function also gives each subterm at the top.
+    - For an integer constant, the function calls the default shrinker for a `Nat` or for an `Int`.
+
+    Each candidate is structurally smaller, and this function type checks none of them. The caller filters
+    them. -/
 partial def shrinkLExpr (e : LExpr') : List LExpr' :=
   immediateSubtermsWithoutBinders e ++
   match e with

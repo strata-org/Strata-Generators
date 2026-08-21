@@ -1,9 +1,9 @@
 import StrataGenerators.Test.Types
 
 /-!
-# `family` — many properties over one input type
+# `family`: many properties over one input type
 
-Sugar over `TestDecl.property` for a family of claims that share an input type and
+`family` is sugar over `TestDecl.property` for a group of claims that share an input type and
 differ only in the check:
 
 ```lean
@@ -14,51 +14,51 @@ def stmtTransforms : List TestDecl :=
       ("stmt: LoopElim eliminates all loops",  fun gs => checkLoopElimZeroLoops gs.stmts) ]
 ```
 
-It is a macro rather than a function, and that is the whole point. A function would
-receive the entries as a `List (String × (α → Prop))`, and the `Decidable` and `Testable`
-instances a check needs are resolved *per check*, at the site where the check is written
-— a list literal handed to a function offers no such site. The macro expands each entry
-to its own `TestDecl.property` call, so every entry resolves its own instances and
-reports a failure as precisely as a standalone property does:
+`family` is a macro and not a function, and this is the point of it. A function would receive
+the entries as a `List (String × (α → Prop))`. Lean resolves the `Decidable` instance and the
+`Testable` instance of a check *at the site of that check*, and a list literal that goes to a
+function gives no such site. The macro expands each entry to its own `TestDecl.property` call.
+Each entry therefore resolves its own instances, and it reports a counterexample as exactly as
+a property that stands alone:
 
 ```
-issue: 3 ≤ 2 does not hold          -- an entry stating an order
-issue: 0 = 99 does not hold         -- an entry stating an equality
+issue: 3 ≤ 2 does not hold          -- an entry that states an order
+issue: 0 = 99 does not hold         -- an entry that states an equality
 ```
 
-A function `family` could only take the *decided* form, and every entry would report
-`issue: false does not hold`. There is therefore one way to state a check throughout the
-API — a decidable `Prop` — with no exception for a family.
+A function `family` could take only the *decided* form, and each entry would report
+`issue: false does not hold`. There is therefore one way to state a check in the whole API, a
+decidable `Prop`, and a family is no exception.
 
-Naming the type once, in the `family GenStmts` position, is what lets the entries drop
-their binder annotations: each check is ascribed to `GenStmts → Prop` during expansion.
+The `family GenStmts` position names the type one time. The entries can then drop their type
+annotations, because the macro ascribes each check to `GenStmts → Prop`.
 -/
 
 open Lean
 
 namespace StrataGenerators.Test
 
-/-- `family T [ (name, check), … ]` — one registered property per entry, each check a
-    decidable `Prop` over `T`.
+/-- `family T [ (name, check), … ]` gives one registered property for each entry. Each check is
+    a decidable `Prop` over `T`.
 
-    An entry may carry a third component, an `Expectation`, for a member that is known
-    to fail against a defect in the code under test:
+    An entry can hold a third component, an `Expectation`, for a member that a defect in the
+    code under test falsifies:
 
     ```lean
     ("lift: the output typechecks", fun gp => checkLiftOutputTypechecks gp.prog,
-     .knownFailure "strata-org/Strata#123: a snapshot name escapes its scope")
+     .knownFailure "a minted snapshot name escapes its scope")
     ```
 
-    The alternative would be to lift such a member out of the family into a standalone
-    declaration, which costs the family its shape: these lists are ordered and commented
-    by what the pass is supposed to do (`P1 — closedness`, `P6/P7 — name hygiene`), and
-    the members that fail are exactly the ones a reader most needs to find in that
-    order.
+    The other option is to move such a member out of the family into its own declaration, and
+    this costs the family its shape. These lists have an order, and a comment gives what the
+    pass must do for each part, such as `P1: closedness` or `P6 and P7: name hygiene`. The
+    members that do not hold are the members that a reader most needs to find in that order.
 
     `T` parses at maximum precedence, so a compound type needs parentheses:
     `family (List Nat) [ … ]`.
 
-    Scoped, so `family` is a keyword only where `StrataGenerators.Test` is open. -/
+    The macro is scoped, so `family` is a keyword only where `StrataGenerators.Test` is
+    open. -/
 scoped macro "family " α:term:max " [" entries:term,* "]" : term => do
   let mut out := #[]
   for e in entries.getElems do

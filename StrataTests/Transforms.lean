@@ -1,53 +1,52 @@
 import StrataGenerators.Test
 
 /-!
-# The Core transform passes that carry no correctness proof
+# The Core transform passes that have no correctness proof
 
-`Strata/Transform/` holds 23 files and only four passes have a correctness
-companion. These properties cover the ones that have no correctness file and no
-theorem in-file (`StructuredToUnstructured`, `LoopElim`,
-`InsertLoopInvariantAsserts`, `CommonSubexprElim`, `FunctionInlining`,
-`ProcedureInlining`, `IrrelevantAxioms`), plus the two whose headline postcondition
-is stated in a module doc but never proven (`NondetElim`, `LoopInitHoist`).
-`TerminationCheck` is not covered: its properties need a recursive function to be
-non-vacuous, which the generator cannot yet build.
+`Strata/Transform/` holds 23 files, and only four passes have a companion file for
+correctness. These properties cover the passes that have no such file and no theorem in
+their own file: `StructuredToUnstructured`, `LoopElim`, `InsertLoopInvariantAsserts`,
+`CommonSubexprElim`, `FunctionInlining`, `ProcedureInlining` and `IrrelevantAxioms`. They
+also cover the two passes whose main postcondition a module document states but no theorem
+proves: `NondetElim` and `LoopInitHoist`. `TerminationCheck` has no property here, because
+its properties need a recursive function to be non-vacuous, and the generator cannot build
+one.
 
-Each takes a whole generated `Program`, so the passes that read a declaration other
-than a procedure — the axioms and the function call graph for `IrrelevantAxioms`, the
-callee declaration for `ProcedureInlining`, a function body for `FunctionInlining` —
-are exercised on real input rather than on a statement list that cannot express them.
+Each property receives a whole generated `Program`. Therefore the passes that read a
+declaration other than a procedure get real input, and not a list of statements that cannot
+hold such a declaration. `IrrelevantAxioms` reads the axioms and the call graph of the
+functions, `ProcedureInlining` reads the declaration of the callee, and `FunctionInlining`
+reads the body of a function.
 
-Two caveats worth reading before trusting a green result:
+Two limits apply to these results:
 
-* `CommonSubexprElim` fires only on a duplicated subexpression, which a generated
-  body rarely holds, so the four `cse:` properties are silent on most runs and the
-  `#guard`s in `ProgramGen/UnprovenTransforms` are what exercise them on every build.
-  When a run does reach the pass, `cse: the output typechecks` goes red: the pass
-  hoists an extracted subexpression above the declaration of a local it mentions
-  (issue #126, "CommonSubexprElim hoists above a local's declaration"), which a
-  `--quick` run found on `assume [||]: str.le(P(G), P(G))`. Read a green tick on
-  these four as "not reached this run", not as "the pass is right".
-* the three `procInline:` properties need a sample that holds a call, which is rare,
-  so a short run may not reach them.
+* `CommonSubexprElim` acts only on a subexpression that occurs two or more times, and a
+  generated body rarely holds one. The four `cse:` properties are therefore silent on most
+  runs, and the `#guard`s in `ProgramGen/UnprovenTransforms` are what cover the pass on each
+  build. A `cse:` property that holds means that the run did not reach the pass, and it does
+  not mean that the pass is correct. The pass also hoists a subexpression that it extracts
+  above the declaration of a local variable that the subexpression mentions.
+* The three `procInline:` properties need a sample that holds a call, and such a sample is
+  rare. A short run may not reach them.
 
-The last three properties run each loop pass through `LoopElim` (the evaluator
-refuses a loop) and then through Strata's symbolic evaluator, comparing the
-obligations against the same chain without the pass. They are stated as containment
-rather than equality, and they are what found a defect in the **evaluator** rather
-than in any pass: a nondeterministic guard is named after the current path-condition
-depth instead of by a counter, so a second `if *` at the same depth silently drops
-every obligation to the end of the procedure.
+The last three properties send each loop pass through `LoopElim`, because the evaluator
+refuses a loop, and then through the symbolic evaluator of Strata. They compare the
+obligations against the same chain without the pass. They state containment and not equality.
+They also show a defect in the **evaluator** and not in a pass: the evaluator names a
+nondeterministic guard after the current depth of the path condition, and not with a counter.
+A second `if *` at the same depth therefore drops every obligation from that point to the end
+of the procedure.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.Program.UnprovenTransforms
 
-/-- The forty-five properties for the unproven passes. -/
+/-- The forty-five properties for the passes that have no correctness proof. -/
 @[strata_properties]
 def unprovenTransforms : List TestDecl :=
   family GenProgram
-    [ -- IrrelevantAxioms — the relevance oracle
+    [ -- IrrelevantAxioms: the oracle for relevance
       ("axioms: IrrelevantAxioms removes only axioms",
        fun gp => checkAxiomsOnlyAxRemoved gp.prog),
       ("axioms: IrrelevantAxioms preserves declaration order",
@@ -60,14 +59,16 @@ def unprovenTransforms : List TestDecl :=
        fun gp => checkAxiomsRemovedNotSeedReachable gp.prog),
       ("axioms: the pruned program typechecks",
        fun gp => checkAxiomsPrunedTypechecks gp.prog),
-      -- The semantic counterpart to the five syntactic axiom properties: an axiom is
-      -- an assumption, never an obligation, so pruning one must leave the proof
-      -- obligations *exactly* equal. Necessary but not sufficient for the pass's
-      -- `modelPreserving` annotation — pruning an axiom some obligation needed leaves
-      -- that obligation present but unprovable, which only a solver can see.
+      -- The semantic companion to the five syntactic properties for axioms. An axiom is an
+      -- assumption and never an obligation, so the removal of an axiom must leave the proof
+      -- obligations *exactly* equal. This is necessary for the `modelPreserving` annotation
+      -- of the pass, but it is not sufficient. If the pass removes an axiom that an
+      -- obligation needs, the obligation stays but no proof for it exists, and only a solver
+      -- can see this.
       ("axioms: pruning leaves the proof obligations unchanged",
        fun gp => checkAxiomsObligationsUnchanged gp.prog),
-      -- StructuredToUnstructured — structural properties of the emitted CFG
+      -- StructuredToUnstructured: structural properties of the control-flow graph that it
+      -- emits
       ("s2u: every goto target is a block label",
        fun gp => checkS2uNoDanglingLabel gp.prog),
       ("s2u: block labels are distinct",
@@ -82,10 +83,10 @@ def unprovenTransforms : List TestDecl :=
        fun gp => checkS2uCmdCountGrows gp.prog),
       ("s2u: a cfg-bodied procedure prints",
        fun gp => checkS2uCfgPrintable gp.prog),
-      -- DetToKleene — the measure the transform silently drops
+      -- DetToKleene: the measure that the transform drops
       ("kleene: a measure-carrying loop translates (the measure is dropped)",
        fun gp => checkKleeneMeasureAccepted gp.prog),
-      -- LoopElim + InsertLoopInvariantAsserts — accounting of the verification conditions
+      -- LoopElim and InsertLoopInvariantAsserts: the count of the verification conditions
       ("loop: the inserted assert count is exact",
        fun gp => checkLoopVcAssertCount gp.prog),
       ("loop: every loop is bare after the pass",
@@ -102,20 +103,20 @@ def unprovenTransforms : List TestDecl :=
        fun gp => checkLoopBlockLabelsNodup gp.prog),
       ("loop: erasedLoops is faithful",
        fun gp => checkLoopElimStatFaithful gp.prog),
-      -- CommonSubexprElim — fresh names and ordering
+      -- CommonSubexprElim: fresh names and order
       ("cse: no fresh name is declared twice",
        fun gp => checkCseFreshNamesFresh gp.prog),
       ("cse: the assert labels are preserved",
        fun gp => checkCseAssertLabelsPreserved gp.prog),
-      -- The order claim, and not "bound before its first use": stating the latter
-      -- exactly needs a scope-aware traversal, and `cse: the output typechecks`
-      -- covers part of it, since the checker rejects a reference that precedes its
-      -- declaration.
+      -- This is a claim about the order, and not the claim that each name is bound before
+      -- its first use. An exact statement of the second claim needs a traversal that knows
+      -- the scopes. `cse: the output typechecks` covers part of it, because the checker
+      -- rejects a reference that comes before its declaration.
       ("cse: the fresh declarations are in index order",
        fun gp => checkCseFreshDeclOrder gp.prog),
       ("cse: the output typechecks",
        fun gp => checkCseOutputTypechecks gp.prog),
-      -- FunctionInlining — a pure expression transform
+      -- FunctionInlining: a transform on expressions only
       ("funcInline: fuel 0 is the identity",
        fun gp => checkInlineFuelZeroIdentity gp.prog),
       ("funcInline: more fuel never un-inlines",
@@ -124,11 +125,12 @@ def unprovenTransforms : List TestDecl :=
        fun gp => checkInlineTypePreserved gp.prog),
       ("funcInline: no free variable is introduced",
        fun gp => checkInlineCaptureFree gp.prog),
-      -- Value preservation under the concrete evaluator — the sharpest of the five,
-      -- since it constrains the *meaning* of the result and not only its shape.
+      -- The concrete evaluator keeps the value. This is the strongest of the five
+      -- properties, because it constrains the *meaning* of the result and not only its
+      -- shape.
       ("funcInline: evaluation agrees before/after inlining",
        fun gp => checkInlineEvalAgreement gp.prog),
-      -- ProcedureInlining — freshening of the labels
+      -- ProcedureInlining: fresh labels
       ("procInline: inlining introduces no duplicate label",
        fun gp => checkInlineProcLabelsNodup gp.prog),
       ("procInline: no assert is lost",
@@ -139,12 +141,12 @@ def unprovenTransforms : List TestDecl :=
        fun gp => checkInlineProcTypechecks gp.prog),
       ("procInline: preserves call-graph WF",
        fun gp => checkInlineProcAnalysisPreserved gp.prog),
-      -- Agreement under Strata's executable *symbolic* evaluator, as containment
-      -- rather than equality, because inlining duplicates the callee's obligations at
-      -- each call site by design.
+      -- Agreement under the executable *symbolic* evaluator of Strata. The property states
+      -- containment and not equality, because the pass copies the obligations of the callee
+      -- to each call site by design.
       ("procInline: symbolic evaluation loses no obligation",
        fun gp => checkInlineProcSymbolicAgreement gp.prog),
-      -- NondetElim + LoopInitHoist — the postconditions neither file proves
+      -- NondetElim and LoopInitHoist: the postconditions that neither file proves
       ("nondetElim: no nondet guard is left",
        fun gp => checkNondetElimNoNondetGuard gp.prog),
       ("nondetElim: the fresh guard names are distinct",
@@ -156,12 +158,13 @@ def unprovenTransforms : List TestDecl :=
       -- The three loop passes under the symbolic evaluator
       ("loop: symbolic evaluation loses no obligation through InsertLoopInvariantAsserts",
        fun gp => checkLoopVcSymbolicNoLoss gp.prog),
-      -- Containment and not equality *because of a defect in the evaluator, not the
-      -- pass*: `StatementEval.lean` names a nondeterministic guard after the current
-      -- path-condition depth instead of using a counter, so a second `if *` at the
-      -- same depth re-declares the name, the path errors, and every obligation from
-      -- there to the end of the procedure is dropped with no diagnostic. `NondetElim`
-      -- removes every `if *`, so the dropped obligations come back and the set grows.
+      -- The property states containment and not equality, because of a defect in the
+      -- evaluator and not in the pass. The evaluator names a nondeterministic guard after
+      -- the current depth of the path condition, and not with a counter. A second `if *` at
+      -- the same depth therefore declares the name again, the path gives an error, and the
+      -- evaluator drops every obligation from that point to the end of the procedure without
+      -- a message. `NondetElim` removes each `if *`, so the dropped obligations come back
+      -- and the set of obligations grows.
       ("nondetElim: symbolic evaluation loses no obligation",
        fun gp => checkNondetElimSymbolicNoLoss gp.prog),
       ("hoist: symbolic evaluation loses no obligation",

@@ -5,10 +5,9 @@ import StrataGenerators.StmtHasTypeAGen
 # Threading callable procedure signatures through the declaration fold
 
 `genProcedure` accepts a `procs : ProcSigCtx` and will emit `call` statements to
-its entries, and `genProcedure_sound` is proved *given*
-`ProcSigCorresponds procs P`. The whole-program generator originally passed `[]`,
-making that hypothesis vacuous — at the cost that no generated program contained
-an inter-procedure call.
+its entries, and the soundness proof of `genProcedure` takes `ProcSigCorresponds procs P` as a hypothesis. An
+empty context makes that hypothesis hold with no content, and no generated program then holds a call between
+two procedures.
 
 This module supplies what is needed to pass a *non-empty* `procs`.
 
@@ -24,8 +23,8 @@ So the fold cannot establish `ProcSigCorresponds` step-by-step against a `P` it
 has not finished building. What it *can* do is record the signatures it has
 emitted so far and prove they resolve in the final program, using two facts:
 
-* `find?` is a **first-match linear scan** (`Program.find?.go`), so a hit in a
-  prefix survives appending more declarations — `findGo_append`;
+* `find?`, which `Program.find?.go` computes, is a **linear scan that gives the first match**. Therefore a
+  match in a prefix survives an append of more declarations, which `findGo_append` proves.
 * the fold already proves `P.getNames.Nodup` (`genProgram_getNames_nodup`), so a
   later declaration cannot shadow an earlier procedure's name.
 
@@ -130,8 +129,9 @@ def procSigOf (p : Procedure) (M I O : @LMonoTySignature Unit) :
 
 /-- **A generated procedure exposes an `M`/`I`/`O` decomposition.** Reading the
     blocks back off `genProcedure`'s support: `inputs = M ++ I`,
-    `outputs = M ++ O`, and `I`'s keys avoid `(M ++ O)`'s keys — the three clauses
-    `ProcSigCorresponds` asks for, besides `find?` resolution.
+    the outputs are the shared block and the output-only block, and the keys of the input-only block differ from
+    the keys of the two written-to blocks. Those are the three conditions that `ProcSigCorresponds` asks for,
+    besides the resolution by `find?`.
 
     The disjointness clause comes from `disjointInputs`: the generator builds
     `I := disjointInputs rawInputOnly M` and
@@ -228,8 +228,8 @@ theorem procedure_find?_of_mem {decls : List Decl} {p : Procedure}
   obtain ⟨pre, suf, rfl⟩ := List.append_of_mem hmem
   refine procedure_find?_of_split (md := md) ?_
   intro d' hd' ⟨_hkind, hname⟩
-  -- `d'.name ∈ d'.names`, and `p.header.name ∈ (Decl.proc p md).names`, so the
-  -- shared name occurs twice in `getNames` — contradicting `Nodup`.
+  -- The name of each declaration is a member of its own list of the names. Therefore the shared name occurs two
+  -- times in the list of the names of the program, and that list holds no duplicate.
   have hgn : (Program.mk (decls := pre ++ Decl.proc p md :: suf)).getNames
       = (pre.flatMap Decl.names) ++ (Decl.proc p md).names ++ (suf.flatMap Decl.names) := by
     simp only [Program.getNames, Program.getNames.go, List.flatMap_append,
@@ -271,10 +271,9 @@ theorem procSigCorresponds_of_emitted {procs : ProcSigCtx} {decls : List Decl}
 
 /-! ## `procs` grows monotonically across the fold
 
-Only `genDeclProcedure` touches `procs`, and it *prepends*. Every other step
-copies it. So the accumulated context only grows, which — with
-`ProcSigCorresponds.mono` — lets the fold consume a single correspondence for the
-*final* state at every intermediate step. -/
+Only `genDeclProcedure` changes the context of the callable procedures, and it puts each new entry at the
+front. Each other step copies that context. Therefore the context only grows, and `ProcSigCorresponds.mono`
+then lets the fold use one correspondence for the *final* state at each step in the middle. -/
 
 /-- One declaration step never drops a registered signature. -/
 theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
@@ -354,7 +353,7 @@ theorem genDeclsFold_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
 The generator registers a callee by recomputing `M` as the longest common prefix
 of `inputs`/`outputs`. That is exact for a generated procedure:
 `lcp (M ++ I) (M ++ O) = M ++ lcp I O`, and `lcp I O = []` because `I` and `O`
-have disjoint keys — so their first entries differ whenever both are non-empty. -/
+have disjoint keys, so their first entries differ whenever neither list is empty. -/
 
 /-- `ProgramGen.commonPrefix` distributes over a shared prefix. -/
 theorem commonPrefixList_append {α : Type} [DecidableEq α] :

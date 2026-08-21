@@ -7,17 +7,14 @@ open StrataGenerators.Stmt
 /-!
 # A concrete `GenStmtSoundEnv` for the procedure generator
 
-`genProcedure` generates a structured body via `genStmtChain` seeded from the
-procedure's *output* parameters. To reuse the statement-generator soundness proof
-(`genStmt_sound` / `genStmtChain_sound`), we need an actual `GenStmtSoundEnv`
-instance — a bundle exhibiting a semantic `TContext` for each flat `VarCtx`,
-together with the `VarCtxCorresponds` correspondence and the expression-level
-obligations.
+`genProcedure` gives a structured body through `genStmtChain`, from a scope that holds the *output* parameters of
+the procedure. The soundness proofs of the statement generator need a `GenStmtSoundEnv` instance, which is a
+bundle that gives a semantic `TContext` for each flat `VarCtx`, together with the correspondence
+`VarCtxCorresponds` and the obligations at the level of an expression.
 
-This file constructs the *first concrete* such environment, `procStmtEnv`, at an
-empty fvar context (`fctx = []`). The construction is possible precisely because
-`VarCtxCorresponds` is now stated in terms of `Map.find?` (rather than raw
-`List.Mem`): with the find?-based statement, the natural single-scope reading
+This file builds one concrete such environment, `procStmtEnv`, at an empty context of the free variables. The
+construction is possible because `VarCtxCorresponds` is stated in terms of `Map.find?`, and not in terms of a
+raw membership in a list. With the form over `find?`, the natural reading of one scope
 
     toTCtx ctx := { types := [ctx.fmap (LTy.forAll [])] }
 
@@ -75,8 +72,8 @@ theorem procToTCtx_find (ctx : VarCtx) (x : Identifier Unit) :
   rw [Strata.Util.HMaps.find?_single_scope, Freshening.find?_ofList_reverse,
     ← Map.find?_eq_lookup, Map.find?_fmap]
 
-/-- The `VarCtx ↔ TContext` correspondence holds for `procToTCtx` at *every* flat
-    context — unconditionally, thanks to the find?-based `VarCtxCorresponds`. -/
+/-- The correspondence between a flat context and a `TContext` holds for `procToTCtx` at *each* flat context, and
+    it needs no hypothesis, because `VarCtxCorresponds` is stated over `find?`. -/
 theorem procToTCtx_corr (ctx : VarCtx) : VarCtxCorresponds ctx (procToTCtx ctx) := by
   constructor
   · intro x mty hfind
@@ -113,10 +110,10 @@ private theorem procToTCtx_scope_find (ctx : VarCtx) (k : Identifier Unit) :
       = (Map.find? ctx k).map (fun mty => (LTy.forAll [] mty)) := by
   rw [Freshening.find?_ofList_reverse, ← Map.find?_eq_lookup, Map.find?_fmap]
 
-/-- `procToTCtx` commutes with `VarCtx.insert` up to `TContext.Equiv`: this is the
-    `init`-command obligation of `GenCmdSoundEnv`/`GenStmtSoundEnv`. Only `Equiv` is
-    available — and only `Equiv` is needed — because a scope is an opaque hash map, so
-    `ofList` of an extended list is not the same *map value* as an insertion. -/
+/-- `procToTCtx` commutes with `VarCtx.insert`, up to `TContext.Equiv`. That is the obligation about an `init`
+    command in each environment for the soundness proofs. Only that equivalence is available, and only it is
+    necessary, because a scope is a hash map. Therefore `ofList` over an extended list gives a different *map
+    value* than an insertion gives. -/
 theorem procToTCtx_insert (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
     TContext.Equiv (T := CoreLParams) (procToTCtx (ctx.insert x mty))
       { procToTCtx ctx with types := (procToTCtx ctx).types.insert x (LTy.forAll [] mty) } := by
@@ -143,9 +140,9 @@ theorem procToTCtx_insert (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
     - `toTCtx` / `corr` / `toTCtx_insert`: the single-scope construction above.
     - `exprSound`: discharged by the unconditional `genLExpr_sound` (at each scope's
       derived free-variable context `ctx.toFVarCtx`).
-    - `freshDisjoint`: discharged by `freshNamesDisjointFromExprs_toFVarCtx` — valid
-      at *every* `ctx`, since generated free variables come from `ctx.toFVarCtx`
-      (whose names are `ctx`'s) and a fresh `init` name avoids `ctx`. This is what
+    - `freshNamesDisjointFromExprs_toFVarCtx` discharges the field `freshDisjoint`. That lemma holds at *each*
+      scope, because each generated free variable comes from `ctx.toFVarCtx`, whose names are the names of the
+      scope, and a fresh name of an `init` differs from each name of the scope. That fact is what
       lets a generated procedure body genuinely *read* its parameters. -/
 def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx := []) :
     GenStmtSoundEnv octx tvars pctx where
@@ -176,9 +173,9 @@ theorem procToTCtxΓ_find (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier Un
     (procToTCtxΓ Γ ctx).types.find? x = (Map.find? ctx x).map (fun mty => (LTy.forAll [] mty)) :=
   procToTCtx_find ctx x
 
-/-- The `VarCtx ↔ TContext` correspondence holds for `procToTCtxΓ Γ` at *every*
-    flat context, for *any* `Γ` — the correspondence only inspects the `.types`
-    field, which is independent of `Γ.aliases`. -/
+/-- The correspondence between a flat context and a `TContext` holds for `procToTCtxΓ Γ` at *each* flat context,
+    and at *each* `Γ`. The correspondence reads the `.types` field only, and that field does not depend on the
+    aliases of `Γ`. -/
 theorem procToTCtxΓ_corr (Γ : TContext Unit) (ctx : VarCtx) :
     VarCtxCorresponds ctx (procToTCtxΓ Γ ctx) := by
   constructor

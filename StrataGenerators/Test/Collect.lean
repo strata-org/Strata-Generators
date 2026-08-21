@@ -1,14 +1,14 @@
 import StrataGenerators.Test.Registry
 
 /-!
-# Collecting the registry
+# The collection of the registry
 
-The two term elaborators that turn what the attributes of
-`StrataGenerators.Test.Registry` recorded into ordinary Lean values. They live in
-their own module because an `initialize` value cannot be *evaluated* in the module
-that declares it, and these elaborators evaluate `propertyTag` and friends.
+The two term elaborators that turn the records of the attributes in
+`StrataGenerators.Test.Registry` into ordinary Lean values. They are in their own module,
+because Lean cannot *evaluate* an `initialize` value in the module that declares it, and these
+elaborators evaluate `propertyTag` and the other extensions.
 
-A driver's whole knowledge of the suite is one line:
+One line gives a driver its whole knowledge of the suite:
 
 ```lean
 def registry : List TestDecl := strata_registry%
@@ -20,12 +20,12 @@ open Lean
 namespace StrataGenerators.Test
 
 open Elab Term in
-/-- Expands to the `List TestDecl` of every `@[strata_property]` and
-    `@[strata_properties]` declaration visible from here — the whole suite, with no
-    hand-maintained list that can fall out of date.
+/-- Expands to the `List TestDecl` of each `@[strata_property]` and `@[strata_properties]`
+    declaration that this module sees. This is the whole suite, and no one keeps a list by hand
+    that can go out of date.
 
-    A `@[strata_properties]` list is spliced in place, so from a report's point of
-    view the two attributes are interchangeable. -/
+    The elaborator splices a `@[strata_properties]` list in place. A report therefore cannot
+    tell the two attributes apart. -/
 elab "strata_registry%" : term => do
   let chunks ← (registryEntries (← getEnv)).mapM fun
     | .single n => `(term| [($(mkIdent n) : TestDecl)])
@@ -33,29 +33,29 @@ elab "strata_registry%" : term => do
   elabTerm (← `(List.flatten [$chunks,*])) none
 
 open Elab Term in
-/-- Expands to the `List Diagnostic` of every `@[strata_diagnostic]` declaration
-    visible from here. -/
+/-- Expands to the `List Diagnostic` of each `@[strata_diagnostic]` declaration that this
+    module sees. -/
 elab "strata_diagnostics%" : term => do
   let terms ← (diagnosticEntries (← getEnv)).mapM fun n =>
     `(term| ($(mkIdent n) : Diagnostic))
   elabTerm (← `([$terms,*])) none
 
 open Elab Command in
-/-- Check that every `.lean` file under `StrataTests/` is imported by the module this
-    command appears in, and error naming the ones that are not.
+/-- Checks that the module which holds this command imports each `.lean` file under
+    `StrataTests/`. The command gives an error that names each file that the module does not
+    import.
 
-Silent absence is the failure mode worth spending a command on: without this, a
-    property file added but never imported leaves the suite green, having tested one
-    thing less than it claims. Adding a property to an *existing* file changes no
-    import, so this only ever fires when a file is added or removed.
+    A file that no module imports is the condition that needs a command. Without this check, a
+    new property file that no one imports leaves the suite green, and the suite tests one thing
+    less than it claims. A new property in a file that *exists* changes no import, so this
+    command acts only when someone adds or removes a file.
 
-    Two honest limitations. Reading the directory is best-effort: if it cannot be read
-    (an out-of-tree build, a different working directory) the command passes rather than
-    failing on something that is not a property author's mistake. And the check only
-    runs when this module is *re-elaborated* — adding a file does not invalidate a
-    cached `StrataTests.olean`, so a warm local build will not see it. Neither matters
-    for what the check is for: CI builds from a fresh checkout, and a local `lake test`
-    regenerates the root before building. -/
+    The command has two limits. If it cannot read the directory, it passes. An out-of-tree
+    build or a different working directory can cause this, and neither is a mistake of the
+    author of a property. The check also runs only when Lean *elaborates this module again*. A
+    new file does not make a cached `StrataTests.olean` stale, so a warm local build does not
+    see it. Neither limit matters for the purpose of the check: CI builds from a fresh
+    checkout, and a local `lake test` writes the root again before the build. -/
 elab "#verify_test_root" : command => do
   let dir : System.FilePath := "StrataTests"
   let entries ← liftM (m := IO) (do

@@ -32,9 +32,9 @@ or functions.
 ## The single `size` budget
 
 `genStmt`/`genStmtChain` take a single `size` (the QuickCheck-style `sized` knob):
-there is no separate nesting `fuel`. `size` bounds nesting depth *and* — being
-passed on to the leaf/expression sub-generators — the size of expressions and the
-length of generated statement sequences, exactly as the single `Nat` argument of
+there is no separate `fuel` for the nesting. The parameter `size` bounds the depth of the nesting *and* the
+size of an expression and the length of a generated statement sequence, because each sub-generator for a leaf
+and for an expression receives it. That is the same role as the one `Nat` argument of
 `genLExprBase` does for expressions. As a statement nests, `size` shrinks, so the
 leaf/expression sub-generators are invoked at *varying* depths.
 
@@ -48,8 +48,8 @@ generated command/expression may sit at any depth reached while nesting.
 `S.exprTyped C Γ e (S.embed τ)` reduces definitionally to `HasTypeA [] e τ`. So
 the only constructor whose well-typedness genuinely depends on `C` is `typeDecl`,
 whose premise `C.addKnownTypeWithError … = .ok C'` is discharged by *matching* on
-the same operation the generator performs — no reasoning about the underlying
-`HashMap` is needed.
+the same operation that the generator performs. Therefore no proof needs an argument about the hash map inside
+the context.
 
 ## Threading
 
@@ -93,14 +93,14 @@ structure GenStmtSoundEnv (octx : OpCtx) (tvars : List TyIdentifier)
       free-variable projection `ctx.toFVarCtx` (the statement generators feed that
       into `genLExpr`). -/
   exprSound : ∀ d (ctx : VarCtx), GenLExprSound ctx.toFVarCtx octx tvars d pctx
-  /-- Fresh names never collide with the free variables of generated expressions, at
-      every depth — now unconditional at each `ctx`, since free variables are drawn
-      from `ctx.toFVarCtx` (whose names are `ctx`'s) and a fresh name avoids `ctx`. -/
+  /-- A fresh name never collides with a free variable of a generated expression, at each depth. The condition
+      holds at each context, because the generator draws each free variable from `ctx.toFVarCtx`, whose names
+      are the names of `ctx`, and a fresh name differs from each name of `ctx`. -/
   freshDisjoint :
     ∀ d (ctx : VarCtx), FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx d pctx
-  /-- `toTCtx` commutes with `VarCtx.insert` up to `TContext.Equiv` (needed for the `init`
-      command case). Equality is unavailable now that a scope is an opaque hash map —
-      see `GenCmdSoundEnv.toTCtx_insert`. -/
+  /-- `toTCtx` commutes with `VarCtx.insert`, up to `TContext.Equiv`. The case for an `init` command needs that
+      fact. An equality is not available, because a scope is a hash map. Read
+      `GenCmdSoundEnv.toTCtx_insert`. -/
   toTCtx_insert : ∀ ctx (x : Identifier Unit) mty,
     TContext.Equiv (T := CoreLParams) (toTCtx (ctx.insert x mty))
       { toTCtx ctx with types := (toTCtx ctx).types.insert x (.forAll [] mty) }
@@ -119,9 +119,9 @@ def GenStmtSoundEnv.toCmdEnv {octx tvars pctx}
 
 /-- `toTCtx` commutes with a *whole* `init` chain, not just one insertion: the
     generator-side `insertAllCtx` and the semantic `insertAll` are the same `foldl`,
-    and `toTCtx_insert` matches them step by step. This is what lets the inline call
-    chunk — whose output scope is `insertAllCtx ctx toInit` — be typed by the
-    call-soundness lemmas, which speak about `insertAll Γ …`. -/
+    and `toTCtx_insert` matches them at each step. That fact is what lets the soundness lemmas for a call type
+    the inline group of a call. The output scope of that group is `insertAllCtx ctx toInit`, and those lemmas
+    speak about `insertAll Γ …`. -/
 theorem GenStmtSoundEnv.toTCtx_insertAllCtx {octx tvars pctx}
     (env : GenStmtSoundEnv octx tvars pctx) (news : List (Identifier Unit × LMonoTy)) :
     ∀ ctx, TContext.Equiv (T := CoreLParams)
@@ -163,12 +163,11 @@ variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
 -- `LContext.WellKindedTy` rather than through the generator's type vocabulary.
 -- The difference matters twice over:
 --
--- * `WellKindedTy` is closed under everything the generators do to context types —
---   `syntacticSubtypes`, `addNewTypes`, `LMonoTy.subst` (`generableTypesFromCtx_wellKinded`,
---   `subst_wellKinded`) — so the invariant is *provably preserved* rather than assumed:
---   see `wellKindedOk_preserved` below, which is what used to be the separate
---   `WellKindedPreserved` premise.
--- * Generability would be *false* at the program level: a generated `MutualDatatype`
+-- * `WellKindedTy` is closed under each operation that a generator performs on a type of the context. Those
+--   operations are `syntacticSubtypes`, `addNewTypes` and `LMonoTy.subst`, and
+--   `generableTypesFromCtx_wellKinded` and `subst_wellKinded` prove the closure. Therefore the invariant has a
+--   *proof* that each step keeps it, and no theorem assumes it. Read `wellKindedOk_preserved` below.
+-- * Generability would be *false* at the level of a program. A generated `MutualDatatype`
 --   block contributes constructor operators to `octx` whose types mention the datatype's
 --   own `tcons`. Those types are well-kinded in the context that registers the block, but
 --   the type generator cannot produce them.
@@ -186,8 +185,8 @@ structure WellKindedAmbient (octx : OpCtx) (procs : ProcSigCtx)
   /-- Every operator's type is well-kinded in `C`. Together with `ctxWK` this is what
       makes the call generator's sampled instantiations well-kinded (`generable`). -/
   octxWK : ∀ p ∈ octx.ops, C.WellKindedTy p.2
-  /-- Every type in a callable procedure's in-out and out-only blocks — the blocks the
-      call generator writes back through, and therefore `init`s — is well-kinded in `C`. -/
+  /-- Each type of the in-out block and of the out-only block of a callable procedure is well-kinded in `C`.
+      Those are the blocks that the call generator writes back through, and therefore also declares. -/
   sigsWK : ∀ s ∈ procs, ∀ ty ∈ (s.M ++ s.O).values, C.WellKindedTy ty
 
 /-- `WellKindedAmbient` plus the scope-local half: every type currently in scope is
@@ -200,10 +199,10 @@ structure WellKindedOk (octx : OpCtx) (procs : ProcSigCtx)
   /-- Every type in scope is well-kinded in `C`. -/
   ctxWK : ∀ ty ∈ ctx.values, C.WellKindedTy ty
 
-/-- Every type the call generator can sample for a callee's type parameter is well-kinded
-    in `C`. This was a field of `WellKindedOk`; it is now *derived* from `ctxWK`/`octxWK`,
-    because `generableTypesFromCtx` only takes syntactic subtypes and `arrow` result types
-    of context types and `C.WellKindedTy` is closed under both. -/
+/-- Each type that the call generator can sample for a type parameter of a callee is well-kinded in `C`. This
+    lemma *derives* that fact from the two fields `ctxWK` and `octxWK`, because `generableTypesFromCtx` takes a
+    syntactic subtype of a type of the context and the result type of an `arrow` only, and `C.WellKindedTy` is
+    closed under both operations. -/
 theorem WellKindedOk.generable {octx : OpCtx} {procs : ProcSigCtx}
     {C : LContext CoreLParams} {ctx : VarCtx} (h : WellKindedOk octx procs C ctx) :
     ∀ ty ∈ generableTypesFromCtx ctx.values [] octx, C.WellKindedTy ty :=
@@ -389,8 +388,8 @@ theorem outTargets_all_usableName (immutableVars : List (Identifier Unit)) (ctx 
   · rename_i h; simp [usableName, h]
   · simp [usableName, needsInit, indexedFreshName_isFresh]
 
-/-- The recipe's in-out usability check, extended over `M ++ T` — the out targets
-    contribute nothing to prove (`outTargets_all_usableName`). -/
+/-- The check about the usability of an in-out name, over the whole write-list. Each out target needs no proof,
+    which `outTargets_all_usableName` gives. -/
 theorem all_usableName_append (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (M O : @LMonoTySignature Unit)
     (hM : M.all (usableName immutableVars ctx) = true) :
@@ -522,10 +521,10 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
       · exact hWK.ctxWK ty hold
     · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
-/-- Soundness of `genCallStmt` (at any depth `d`). Every emitted call *group* — the
-    missing-name `init`s followed by the call, spliced inline — is a well-typed
-    statement **list**: the callee's signature is read off `hProcs`, the drawn
-    by-value inputs are typed via `env.exprSound`, and the sequence is assembled by
+/-- The soundness of `genCallStmt`, at each depth. Each emitted *group* of a call is a well-typed statement
+    **list**. That group holds the `init` statements for each missing name, then the call, and the generator
+    splices it inline. The signature of the callee comes from the hypothesis `hProcs`, `env.exprSound` gives the
+    type of each drawn by-value input, and the sequence comes from
     `call_mixed_body_sound`. Its output scope is the `insertAllCtx`-extended `ctx`,
     which `toTCtx_insertAllCtx` identifies with the `insertAll`-extended `Γ` the
     lemma produces; when nothing was missing the chain is empty and this degenerates
@@ -562,8 +561,9 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     · rename_i hcond
       obtain ⟨hMusable, hNodup⟩ := hcond
       -- Name the out targets the generator picked for itself, and record the two
-      -- facts the call-soundness lemmas need: usability (free — a new name is
-      -- always fresh) and positional type alignment with the *instantiated* `Oσ`.
+      -- facts that the soundness lemmas for a call need. The first is usability, which is free, because a new
+      -- name is always fresh. The second is the alignment of the types by position with the *instantiated*
+      -- out-only block.
       obtain ⟨T, hT⟩ : ∃ T, outTargets immutableVars ctx Oσ = T := ⟨_, rfl⟩
       have hallusable : (List.append Mσ T).all (usableName immutableVars ctx) = true := by
         rw [← hT]; exact all_usableName_append immutableVars ctx Mσ Oσ hMusable
@@ -602,8 +602,8 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
           congr 1 <;> rw [hIσ]
         rwa [hval] at hbind
       -- Each required name (in the instantiated write-list `Mσ ++ T`) is *either*
-      -- already bound at its recorded type (reuse) *or* absent (init) — the
-      -- generator's `usable` guard, transported across `VarCtxCorresponds`.
+      -- already bound at its recorded type, so the call reuses it, *or* absent, so the call declares it. That
+      -- is the `usable` guard of the generator, moved across `VarCtxCorresponds`.
       have hReuse : ∀ p ∈ (Mσ ++ T).toList,
           (env.toTCtx ctx).types.find? p.1 = some (.forAll [] p.2) ∨
           (env.toTCtx ctx).types.find? p.1 = none := by
@@ -692,8 +692,8 @@ theorem mem_support_argMask (mask : List Bool) :
     callee `s` in the procedure context, whose in-out block is usable and whose
     combined write-key list is `Nodup` (the generator's own guard), and by-value
     inputs `exprs` each reachable by `genLExpr` at the declared input type, the
-    generator's own recipe output — the missing-name `init` chain followed by the
-    assembled call — is in `genCallStmt`'s support.
+    output of the recipe of the generator, which is the chain of the `init` statements for each missing name
+    followed by the assembled call, is in the support of `genCallStmt`.
 
     This is the completeness analogue of `genCallStmt_sound`: it runs the
     `genCallStmt` `do`-block *forward* (`elements` membership of `s`, the
@@ -808,10 +808,10 @@ theorem genInvariants_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (c
 
 -- ── Mutual soundness of genStmt / genStmtChain ───────────────────────────────
 
-/-- `genStmt` preserves *functionality* of the context. The nesting
-    constructors (`block`, `ite`, `loop`) are lexically scoped — their output
-    scope is the *input* `ctx` (the body's threaded scope is discarded) — and the
-    non-`cmd` leaves also leave `ctx` unchanged, so the only case that can grow
+/-- `genStmt` keeps the context *functional*. Each nesting constructor, which is a `block`, an `ite` or a
+    `loop`, has a lexical scope. Its output scope is the *input* context, and the code discards the scope that
+    the body threads. Each leaf that is not a `cmd` also leaves the context unchanged. Therefore the only case
+    that can grow
     the context is `cmd`, handled by `genCmd_outCtx_functional`. No recursion into
     the body is needed, so this stands outside the soundness `mutual` block. -/
 theorem genStmt_outCtx_functional
@@ -892,16 +892,16 @@ theorem genStmt_outCtx_functional
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨_, _, _, _, _, _, ⟨⟨_, _⟩⟩, _, _, _, rfl⟩ := hr; exact hFun
 
-/-- **`genStmt` preserves `WellKindedOk`.** This used to be the separate
-    `WellKindedPreserved` premise; stating the invariant in `LContext.WellKindedTy` rather
-    than in the generator's vocabulary makes it provable, because `WellKindedTy` is closed under every
+/-- **`genStmt` keeps `WellKindedOk`.** The invariant is stated in `LContext.WellKindedTy`, and not in the
+    vocabulary of the generator, and that choice is what makes it provable. `WellKindedTy` is closed under each
     operation the generators perform on context types and is undisturbed by the two ways a
     generator extends `C`.
 
-    Case by case: only `cmd` and `call` grow the scope (`genCmd_outCtx_wellKinded`,
-    `genCallStmt_outCtx_wellKinded`), and only `funcDecl` and `typeDecl` change `C` — the
-    former leaves `knownTypes` alone (`addFactoryFunction_knownTypes`) and the latter only
-    *adds* a name (`addKnownTypeWithError_mono`), so `WellKindedOk.mono` carries the
+    The proof goes case by case. Only a `cmd` and a `call` grow the scope, and
+    `genCmd_outCtx_wellKinded` and `genCallStmt_outCtx_wellKinded` handle them. Only a `funcDecl` and a
+    `typeDecl` change `C`. A `funcDecl` leaves `knownTypes` unchanged, which `addFactoryFunction_knownTypes`
+    proves, and a `typeDecl` only *adds* a name, which `addKnownTypeWithError_mono` proves. Therefore
+    `WellKindedOk.mono` carries the
     invariant across both. `block`/`ite`/`loop` discard the body's threaded contexts and
     return `C`/`ctx` unchanged, so no recursion into the body is needed and this stands
     outside the soundness `mutual` block. -/
@@ -1347,8 +1347,8 @@ theorem genInvariant_complete (depth : Nat) (ctx : VarCtx) (p : String × Expres
   simp only [genInvariant, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨p.1, hlabel, p.2, hexpr, rfl⟩
 
-/-- Completeness of `genInvariants`. A list of invariants is reachable when it is
-    no longer than `depth` and each element is reachable by `genInvariant`. -/
+/-- The completeness of `genInvariants`. A list of the invariants is reachable when its length is not more than
+    the depth, and each of its elements is reachable by `genInvariant`. -/
 theorem genInvariants_complete (depth : Nat) (ctx : VarCtx) (invs : List (String × Expression.Expr))
     (hlen : invs.length ≤ depth)
     (hinvs : ∀ p ∈ invs, p.1 ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧
@@ -1358,11 +1358,10 @@ theorem genInvariants_complete (depth : Nat) (ctx : VarCtx) (invs : List (String
   refine ⟨hlen, fun p hp => ?_⟩
   exact genInvariant_complete depth ctx p (hinvs p hp).1 (hinvs p hp).2
 
-/-- Completeness of `genTypeConstructor`. A type constructor is reachable when its
-    name and each parameter name are reachable identifiers (via `genIdentName`, so
-    non-empty and non-keyword) and its parameter list is no longer than `depth`.
-    The `bound` field carries no side-condition: the generator samples over both
-    `Boundedness` values, so either is reachable. -/
+/-- The completeness of `genTypeConstructor`. A type constructor is reachable when its name and each of its
+    parameter names is a reachable identifier of `genIdentName`, which means that the name is not empty and is
+    not a keyword, and when the length of its parameter list is not more than the depth. The `bound` field
+    needs no side condition, because the generator draws over both values of `Boundedness`. -/
 theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
     (hname : tc.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hlen : tc.params.length ≤ depth)

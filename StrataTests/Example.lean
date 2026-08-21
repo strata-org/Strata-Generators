@@ -3,39 +3,40 @@ import StrataGenerators.Test
 /-!
 # A worked example
 
-This file exists to be copied. The property here is complete on its own: the check,
-the type it draws from, and the name — with nothing registered anywhere else.
+Copy this file when you write a new property. The property here is complete on its own.
+It holds the check, the type that it draws from, and the name. No other file holds a part
+of it.
 
 ```
-lake test -- --list                        # confirm it was picked up
-lake test -- --only="example:" --quick     # run just this group
+lake test -- --list                        # make sure that the suite found it
+lake test -- --only="example:" --quick     # run only this group
 ```
 
-To add your own, put it in whatever file under `StrataTests/` it belongs in — this one,
-another, or a new one — and run `lake test`. A new *file* also needs
-`lake exe write-test-imports`, which rewrites the `StrataTests.lean` import root from the
-directory listing, so there is no list you maintain by hand.
+To add your own property, put it in the file under `StrataTests/` that fits it best. This
+can be this file, another file, or a new file. Then run `lake test`. For a new *file*,
+also run `lake exe write-test-imports`. That executable writes the import root
+`StrataTests.lean` from the contents of the directory, so you keep no list by hand.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.Program.TestSupport
 
-/-- The reducible size of a program is at least its declaration count.
+/-- The size of a program is not less than the number of its declarations.
 
-    A modest claim, but a load-bearing one: `sizeProgram` is the measure the whole-program
-    shrinker reports progress against, so a size that could ignore declarations would make
-    the shrinker's reduction figures meaningless.
+    `sizeProgram` is the measure that the whole-program shrinker uses to report its
+    progress. A size that can ignore declarations would make those figures useless.
 
-    Stated inline as a `Prop`. A failing draw then reports the comparison itself —
-    `issue: 3 ≤ 2 does not hold` — because Plausible reads the shape of the proposition.
-    A `Bool`-valued check reports only `issue: false does not hold`.
+    This property states the claim inline as a `Prop`. Plausible reads the shape of the
+    proposition, so a draw that falsifies the claim reports the comparison itself, such as
+    `issue: 3 ≤ 2 does not hold`. A check that returns a `Bool` reports only
+    `issue: false does not hold`.
 
-    So prefer an inline `Prop` for a claim whose shape is an equality or an order. Prefer
-    a named `check*` predicate in a `*/TestSupport` module when the check is long, is
-    reused, is worth pinning with a `#guard`, or is shared with a bespoke Tyche panel;
-    such a predicate returns a `Bool` and is accepted here unchanged, since `Bool`
-    coerces to `Prop`. -/
+    Therefore use an inline `Prop` for a claim that is an equality or an order. Use a
+    named `check*` predicate in a `*/TestSupport` module when the check is long, when more
+    than one property uses it, when a `#guard` must pin it, or when a special Tyche panel
+    needs it. Such a predicate returns a `Bool`, and this position accepts a `Bool`
+    without a change, because `Bool` coerces to `Prop`. -/
 @[strata_property]
 def sizeAtLeastDecls : TestDecl :=
   .property "example: sizeProgram is at least the declaration count"

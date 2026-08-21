@@ -4,35 +4,35 @@ import Strata.Languages.Core.Verifier
 import Strata.Languages.Core.SMTEncoder
 
 /-!
-# The two laws every algebraic datatype satisfies: injectivity and disjointness
+# The two laws of an algebraic datatype: injectivity and disjointness
 
-`DatatypeGen.genMutuallyRecursiveDatatypes` draws a random well-formed
-`mutual … end` block of (possibly mutually recursive) algebraic datatypes. Any
-such block denotes an *initial* algebra, so — exactly as in Software Foundations'
-`Tactics` chapter, where the two facts appear as the `injection` and
-`discriminate` tactics — its constructors must satisfy:
+`DatatypeGen.genMutuallyRecursiveDatatypes` draws a random and well-formed
+`mutual … end` block of algebraic datatypes, which can be mutually recursive. Each
+such block denotes an *initial* algebra. Its constructors must therefore obey two
+laws, which are the `injection` and `discriminate` tactics of the `Tactics` chapter
+of Software Foundations:
 
-* **injectivity.** For each constructor `C` of arity `k ≥ 1`,
+* **Injectivity.** For each constructor `C` of arity `k ≥ 1`,
   `C x₁ … x_k = C y₁ … y_k → x₁ = y₁ ∧ … ∧ x_k = y_k`.
-* **disjointness.** For each pair of *distinct* constructors `C ≠ D` of the same
+* **Disjointness.** For each pair of *different* constructors `C ≠ D` of one
   datatype, `C x_1 ... x_k ≠ D y_1 ... y_k`.
 
-Uniformness is deliberately not covered here (`TypeFactory.addMutualBlock`
-already checks it syntactically, via `checkConstructorArgsWF`).
+Uniformness has no property here, because `TypeFactory.addMutualBlock` already
+checks it syntactically through `checkConstructorArgsWF`.
 
-Neither law is a claim about the generator: they are claims about **Strata's SMT
-encoding of a datatype**. The generator's job is to supply the datatypes, and the
-oracle is a real solver — `cvc5`/`z3` through the whole Core verification
-pipeline (`Core.verify`), so the path under test is
-typecheck → transform → symbolic eval → `SMT.Context.emitDatatypes` → solver.
+Neither law is a claim about the generator. Both are claims about **the SMT encoding
+of a datatype in Strata**. The generator supplies the datatypes, and the oracle is a
+real solver: `cvc5` or `z3` through the whole Core verification pipeline, which is
+`Core.verify`. The path under test is therefore the type check, the transforms, the
+symbolic evaluation, `SMT.Context.emitDatatypes` and then the solver.
 
 ## How a law becomes a proof obligation
 
-There is no quantifier in the emitted assertion. Instead each universally
-quantified variable becomes an *uninitialised local* — `var x : τ;`, i.e.
-`Statement.init … .nondet` — which symbolic evaluation turns into an
-unconstrained symbolic constant. So for a two-field constructor `C(a : int, b : bool)`
-the injectivity obligation is the procedure
+The emitted assertion holds no quantifier. Each universally quantified variable
+becomes an *uninitialized local*, which is `var x : τ;` and therefore a
+`Statement.init … .nondet`. Symbolic evaluation turns such a local into a symbolic
+constant with no constraint. For a constructor `C(a : int, b : bool)` with two
+fields, the obligation for injectivity is therefore the procedure
 
 ```
 procedure inj_0_0 () {
@@ -44,7 +44,7 @@ procedure inj_0_0 () {
 }
 ```
 
-and the disjointness obligation for `C ≠ D` is
+and the obligation for disjointness of `C` and `D` is
 
 ```
 procedure disj_0_0_1 () {
@@ -53,142 +53,141 @@ procedure disj_0_0_1 () {
 }
 ```
 
-One `assert` per field rather than one conjunction, so a solver verdict names the
-field that failed rather than only the constructor.
+There is one `assert` for each field, and not one conjunction. A verdict from the
+solver then names the field that failed, and not only the constructor.
 
-**The obligation labels carry indices, never generated names.** A generated
-datatype name is an arbitrary Core identifier (`genIdentName` draws
-non-alphanumeric characters such as `.`, `?` and `@`), and an obligation label
-reaches SMT-LIB as a
-symbol; a label built from a generated name would therefore risk turning a *law*
-failure into an encoder failure, and the two must stay distinguishable. The
-indices are positions in the block: `inj_{d}_{c}_f{i}` is field `i` of
-constructor `c` of datatype `d`. The failing block is printed in full alongside.
+**The label of an obligation holds indices, and never a generated name.** A generated
+datatype name is an arbitrary Core identifier, because `genIdentName` draws a
+character that is not alphanumeric, such as `.`, `?` and `@`. A label reaches SMT-LIB
+as a symbol, so a label that a generated name builds can turn a failure of a *law*
+into a failure of the encoder, and the two must stay separate. The indices are
+positions in the block: `inj_{d}_{c}_f{i}` is field `i` of constructor `c` of datatype
+`d`. The report also prints the whole block that failed.
 
 ## Which blocks are eligible
 
-`validateDatatypesForSMT` rejects a datatype with a function-typed field
-outright ("Function types cannot be represented in SMT-LIB datatypes"), and it
-throws for the whole *block*, not for one obligation. A block holding an arrow
-anywhere is therefore skipped before the solver is ever launched — and counted, so
-the skip is visible rather than silent. `blockIsSmtEligible` is that screen.
+`validateDatatypesForSMT` rejects a datatype that has a field with a function type. It
+reports "Function types cannot be represented in SMT-LIB datatypes", and it throws for
+the whole *block* and not for one obligation. A block that holds an arrow anywhere is
+therefore skipped before the solver starts, and the suite counts the skip so that it
+is visible. `blockIsSmtEligible` is that screen.
 
-Arrow-typed fields are common at the generator's default `maxSize` (an arrow is
-one of three alternatives in `genArgTy` at every non-zero size), so the eligible
-fraction is small there. Drawing at `maxSize := 0` makes `genArgTy` return
-`genLeafTy`, whose range is base types / type parameters / recursive occurrences
-only — never an arrow. `smtBlockSizeSchedule` mixes both, so the property gets
-guaranteed non-vacuous coverage from size 0 while still seeing `Map`/`Sequence`-
-and arrow-shaped draws (the latter as counted skips) from the larger sizes.
+A field with an arrow type is common at the default `maxSize` of the generator,
+because an arrow is one of three alternatives in `genArgTy` at each size above zero.
+The eligible part of the draws is therefore small at that size. A draw at
+`maxSize := 0` makes `genArgTy` return `genLeafTy`, whose range holds only a base
+type, a type parameter or a recursive occurrence, and never an arrow.
+`smtBlockSizeSchedule` mixes both sizes. Size 0 therefore gives the property coverage
+that is not vacuous, and the larger sizes still give draws with a `Map` field, a
+`Sequence` field, and an arrow field, which the suite counts as a skip.
 
 ## Type parameters
 
-A polymorphic datatype has no SMT sort until its parameters are given. Every type
-parameter is instantiated with `int` (`groundInstantiation`), which is the
-cheapest SMT-encodable choice and is enough: the laws are parametric, so an
-instance at one ground type witnesses a failure at every other. The instantiation
-is applied to field types only — the *declaration* keeps its parameters, since
-that is what the pipeline must handle.
+A polymorphic datatype has no SMT sort until it receives its parameters.
+`groundInstantiation` gives each type parameter the type `int`. This is the cheapest
+choice that SMT can encode, and it is enough, because the laws are parametric: an
+instance at one ground type is a witness for a failure at each other ground type. The
+instantiation applies to the field types only. The *declaration* keeps its parameters,
+because that is what the pipeline must handle.
 -/
 
 open Lambda Core Imperative
 
 namespace StrataGenerators.AdtLaws
 
-/-! ## Monotype instantiation -/
+/-! ## How the module instantiates a monotype -/
 
 mutual
-/-- Substitute type variables per `σ`. Written here rather than reusing
-    `LMonoTy.subst` because the latter takes Lambda's scoped `Subst` (a stack of
-    hash maps with a well-formedness field), and all that is needed is a lookup in
-    an association list. -/
+/-- Substitutes the type variables of a type, as `σ` gives. This module has its own
+    function and it does not use `LMonoTy.subst`, because that function takes the scoped
+    `Subst` of Lambda, which is a stack of hash maps with a field for well-formedness. A
+    lookup in an association list is all that this module needs. -/
 def instTy (σ : List (String × LMonoTy)) : LMonoTy → LMonoTy
   | .ftvar v => (σ.lookup v).getD (.ftvar v)
   | .bitvec n => .bitvec n
   | .tcons n args => .tcons n (instTys σ args)
 
-/-- `instTy` over a list. -/
+/-- `instTy` over a list of types. -/
 def instTys (σ : List (String × LMonoTy)) : LMonoTys → LMonoTys
   | [] => []
   | t :: ts => instTy σ t :: instTys σ ts
 end
 
-/-- Instantiate every type parameter of `d` with `int`: the ground instance whose
+/-- Gives each type parameter of `d` the type `int`. This is the ground instance whose
     fields the assertions range over. -/
 def groundInstantiation (d : LDatatype Unit) : List (String × LMonoTy) :=
   d.typeArgs.map (fun v => (v, (.int : LMonoTy)))
 
-/-- The ground type of datatype `d`, i.e. `d` applied to `int` at each parameter —
-    the type an obligation's constructor applications live at. -/
+/-- The ground type of the datatype `d`, which is `d` with `int` at each parameter. The
+    constructor applications of an obligation have this type. -/
 def groundTy (d : LDatatype Unit) : LMonoTy :=
   .tcons d.name (d.typeArgs.map (fun _ => (.int : LMonoTy)))
 
-/-- The field types of constructor `c` of `d`, at `d`'s ground instance. A
-    recursive occurrence `d αs` in a field becomes `d int…` too, since `αs` are
-    exactly `d`'s parameters (uniformity, which `addMutualBlock` enforces). -/
+/-- The field types of the constructor `c` of `d`, at the ground instance of `d`. A
+    recursive occurrence `d αs` in a field also becomes `d int…`, because `αs` are the
+    parameters of `d`. `addMutualBlock` enforces that uniformity. -/
 def groundFieldTys (d : LDatatype Unit) (c : LConstr Unit) : List LMonoTy :=
   c.args.map (fun (_, τ) => instTy (groundInstantiation d) τ)
 
-/-! ## Eligibility -/
+/-! ## Which blocks the properties accept -/
 
-/-- Whether Strata's own `LContext.addMutualBlock` accepts the block, starting
-    from the real Core context. This is a *screen*, not a property: it is the same
-    call `ProgramGen.genDeclDatatype` gates its emission on, so a block it rejects
-    is one no generated program would ever contain.
+/-- Whether the `LContext.addMutualBlock` function of Strata accepts the block, from the
+    real Core context. This is a *screen* and not a property. It is the same call that
+    `ProgramGen.genDeclDatatype` uses to gate its emission, so no generated program holds a
+    block that this call rejects.
 
-    It has to be applied here because `DatatypeGen.genMutuallyRecursiveDatatypes`
-    is gated on nothing — it establishes `MutualADTWF`, which is strictly weaker
-    than what `addMutualBlock` demands. Two causes show up in practice, and only
-    the first is a defect in Strata:
+    The screen must apply here, because nothing gates
+    `DatatypeGen.genMutuallyRecursiveDatatypes`. That generator establishes `MutualADTWF`,
+    which is weaker than the condition of `addMutualBlock`. Two causes occur, and only the
+    first one is a defect in Strata:
 
-    * **`field` versus `field!`** — the two field names collide with Strata's own
-      unsafe-destructor naming scheme, which appends `!`. See
-      `checkNoDerivedNameCollisions`, the property that states it.
-    * **a constructor name shared by two datatypes of the block** — a *generator*
-      gap: `genConstructorsForAllTypes` passes the same `reserved` list to each
-      datatype of the block rather than threading it, so two of them can declare a
-      constructor (or field, or tester) of the same name, and `genBlockFactory`
-      fails with "A function of name f already exists!". Measured at 1–3 of 40
-      blocks. Screened rather than asserted, since it is this repo's generator to
-      fix, not Strata's; threading `reserved` through
-      `genConstructorsForAllTypes` would change the shape the soundness proofs in
-      `DatatypeGenProofs` are stated against, so it is left as follow-up work. -/
+    * **A field `field` and a field `field!`.** The two names collide with the naming scheme
+      of Strata for an unsafe destructor, which adds `!` to the end of a name.
+      `checkNoDerivedNameCollisions` is the property that states this.
+    * **Two datatypes of the block share a constructor name.** This is a gap in the
+      *generator*. `genConstructorsForAllTypes` gives the same `reserved` list to each
+      datatype of the block, and it does not thread the list through the draws. Two
+      datatypes can therefore declare a constructor, a field or a tester with one name, and
+      `genBlockFactory` then reports "A function of name f already exists!". This is a
+      screen and not an assertion, because the generator of this repository must fix it and
+      Strata must not. A change that threads `reserved` through
+      `genConstructorsForAllTypes` also changes the shape that the soundness proofs in
+      `DatatypeGenProofs` use, so that change is later work. -/
 def blockAccepted (block : MutualDatatype Unit) : Bool :=
   match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams DatatypeGen.coreContext block with
   | .ok _ => true
   | .error _ => false
 
-/-- Whether *every* constructor field of *every* datatype in the block is
-    arrow-free. This is `validateDatatypesForSMT`'s own criterion, applied ahead
-    of time: that function throws for the whole block (from inside
-    `emitDatatypes`, as an `IO.userError`), so an ineligible block cannot be
-    partially tested and is skipped as a whole.
+/-- Whether *each* constructor field of *each* datatype in the block holds no arrow type.
+    This is the criterion of `validateDatatypesForSMT`, applied before the pipeline runs.
+    That function throws for the whole block, from inside `emitDatatypes` and as an
+    `IO.userError`. A block that fails the criterion therefore cannot get a partial test,
+    and the suite skips the whole block.
 
-    Checked on the *declared* field types rather than the ground instance: `instTy`
-    only replaces type variables with `int`, so it can neither introduce nor remove
-    an arrow. -/
+    The check reads the *declared* field types and not the ground instance. `instTy` only
+    replaces a type variable by `int`, so it can neither add nor remove an arrow. -/
 def blockIsSmtEligible (block : MutualDatatype Unit) : Bool :=
   block.all fun d => d.constrs.all fun c => c.args.all fun (_, τ) => !τ.containsArrow
 
-/-- Every name the block occupies: datatype names, constructor names, tester
-    names and field names. The variables of an obligation are drawn fresh against
-    this list, so a local can never capture a derived function's name. -/
+/-- Each name that the block uses: a datatype name, a constructor name, a tester name and a
+    field name. The generator draws the variables of an obligation fresh against this list,
+    so a local can never capture the name of a derived function. -/
 def blockNames (block : MutualDatatype Unit) : List String :=
   block.flatMap fun d =>
     d.name :: d.constrs.flatMap fun c =>
       c.name.name :: c.testerName :: c.args.map (fun (f, _) => f.name)
 
-/-- Whether `τ` mentions `bitvec 0` anywhere.
+/-- Whether `τ` mentions `bitvec 0`.
 
-    **`bitvec 0` is legal in Core and illegal in SMT-LIB.** `pickBitvecWidth`
-    draws a width with no bound, so a field of type `bitvec 0`
-    occurs; `Function.typeCheck` and `addMutualBlock` both accept it, and the
-    encoder emits `(_ BitVec 0)`, whose index SMT-LIB 2.6 requires to be positive.
-    cvc5 answers `Parse Error: Illegal bitvector size: 0` and z3
-    `bit-vector size must be greater than zero`, so *every* obligation mentioning
-    the datatype is lost. See `adtSolverAcceptsQuery` for the property that pins
-    this. -/
+    **`bitvec 0` is legal in Core and illegal in SMT-LIB.** `pickBitvecWidth` draws a width
+    with no bound, so a field of the type `bitvec 0` occurs. `Function.typeCheck` and
+    `addMutualBlock` both accept such a field. The encoder then emits `(_ BitVec 0)`, and
+    SMT-LIB 2.6 needs a positive index. cvc5 answers
+    `Parse Error: Illegal bitvector size: 0`, and z3 answers
+    `bit-vector size must be greater than zero`. *Each* obligation that mentions the
+    datatype is therefore lost. `adtSolverAcceptsQuery` is the property that pins this
+    defect. -/
 def mentionsBv0 : LMonoTy → Bool
   | .bitvec w => w == 0
   | .ftvar _ => false
@@ -196,144 +195,139 @@ def mentionsBv0 : LMonoTy → Bool
   termination_by t => SizeOf.sizeOf t
   decreasing_by cases a; term_by_mem
 
-/-- The characters an SMT-LIB 2.6 *simple symbol* may contain: letters, digits and
-    `~ ! @ $ % ^ & * _ - + = < > . ? /` (§3.1 of the standard). Anything else has
-    to be written in the pipe-quoted form `|…|`. -/
+/-- The characters that a *simple symbol* of SMT-LIB 2.6 can hold: a letter, a digit, and
+    one of `~ ! @ $ % ^ & * _ - + = < > . ? /`. Section 3.1 of the standard gives this rule.
+    Each other character needs the quoted form `|…|`. -/
 def smtSymbolExtraChars : List Char :=
   "~!@$%^&*_-+=<>.?/".toList
 
-/-- The SMT-LIB 2.6 reserved words that a bare symbol may not be (§3.1). A Core
-    identifier may be any of them: `_` in particular is a legal Core name and is
-    what the generator produces when `genIdentName` draws the single start
-    character `_`. cvc5 then reports
-    `Expected SMT-LIBv2 symbol, got '_' (INDEX_TOK)`. -/
+/-- The reserved words of SMT-LIB 2.6, which a bare symbol must not be. Section 3.1 of the
+    standard gives the list. A Core identifier can be any of them. `_` is a legal Core name,
+    and the generator gives it when `genIdentName` draws the single start character `_`. cvc5
+    then reports `Expected SMT-LIBv2 symbol, got '_' (INDEX_TOK)`. -/
 def smtReservedWords : List String :=
   ["_", "!", "as", "let", "exists", "forall", "match", "par",
    "BINARY", "DECIMAL", "HEXADECIMAL", "NUMERAL", "STRING"]
 
-/-- Whether `s` is emittable as a bare SMT-LIB symbol.
+/-- Whether the encoder can emit `s` as a bare SMT-LIB symbol.
 
-    **A legal Core identifier need not be one.** `remainingChars` (the alphabet
-    `genIdentName` draws from, and the one Core's lexer accepts) contains `'`,
-    which is *not* an SMT-LIB simple-symbol character, and the datatype emitters
-    interpolate a name verbatim — so `datatype Qu { c'x(g'y : int), d() }`, which
-    typechecks, produces
+    **A legal Core identifier is not always such a symbol.** `remainingChars` is the alphabet
+    that `genIdentName` draws from, and it is also the alphabet that the lexer of Core
+    accepts. It holds `'`, which is *not* a simple-symbol character of SMT-LIB. The emitters
+    for a datatype put a name into the output without a change. Therefore
+    `datatype Qu { c'x(g'y : int), d() }`, which typechecks, gives
 
     ```
     (declare-datatype Qu ( (c'x (Qu..g'y Int)) (d)))
     ```
 
-    and cvc5 stops at `Parse Error: … Error finding token`. The same holds for a
-    *type parameter*, where the inconsistency is visible within a single line: a
-    parameter is pipe-quoted where it occurs in a field type but not in the `par`
-    binder that introduces it —
+    and cvc5 stops with `Parse Error: … Error finding token`. The same holds for a *type
+    parameter*, and there the difference is visible inside one line. Pipes quote a parameter
+    where it occurs in a field type, but not in the `par` binder that introduces it:
 
     ```
     (par (vx' NK) ((b (U..r Int) (U..bz4! (U |vx'| NK))) …))
            ^^^ bare                            ^^^^^ quoted
     ```
 
-    Field types are rendered through the DDM SMT dialect formatter
-    (`SMTDDM.termTypeToString`), which quotes; the datatype name, the `par` binder
-    list and the constructor/selector names are raw `s!"…"` interpolations
-    (`DL/SMT/Solver.lean:244`, `DL/SMT/IncrementalSolver.lean:254`), which do not.
+    The formatter of the SMT dialect of DDM, `SMTDDM.termTypeToString`, prints a field type
+    and it quotes. The datatype name, the list of `par` binders, and the names of a
+    constructor and of a selector come from raw string interpolation, which does not quote.
 
-    Measured over the special characters `genIdentName` draws, `'` is the only
-    offending character: `. ? @ ! $ _` all pass *inside* a name. -/
+    Of the special characters that `genIdentName` draws, `'` is the only character that breaks
+    a bare symbol. The characters `. ? @ ! $ _` all pass *inside* a name. -/
 def isSmtSafeSymbol (s : String) : Bool :=
   !s.isEmpty
   && !smtReservedWords.contains s
   && s.all (fun c => c.isAlphanum || smtSymbolExtraChars.contains c)
 
-/-- Every symbol the block contributes to the emitted SMT-LIB: the names of
-    `blockNames` plus every datatype's **type parameters**, which appear in the
-    `par` binder list. The parameters have to be included: they are drawn by the
-    same `genFreshName` as every other name, so they carry the same characters. -/
+/-- Each symbol that the block gives to the emitted SMT-LIB: the names in `blockNames`, and
+    the **type parameters** of each datatype, which occur in the list of `par` binders. The
+    parameters must be in this list, because `genFreshName` draws them in the same way as each
+    other name and they therefore hold the same characters. -/
 def blockSymbols (block : MutualDatatype Unit) : List String :=
   blockNames block ++ block.flatMap (·.typeArgs)
 
-/-- Whether every obligation the block generates can even be *put to* a solver:
-    arrow-free (so `validateDatatypesForSMT` does not throw), no `bitvec 0` field,
-    and every emitted symbol a bare SMT-LIB symbol.
+/-- Whether a solver can receive each obligation of the block. Three conditions must hold: the
+    block holds no arrow type, so that `validateDatatypesForSMT` does not throw; the block
+    holds no `bitvec 0` field; and each emitted symbol is a bare SMT-LIB symbol.
 
-    This is the screen the two law properties apply, and it is *not* a claim about
-    Strata: the last two conjuncts are exactly the encoder defects
-    `adtSolverAcceptsQuery` reports. Screening them out here is what keeps
-    "injectivity holds" a statement about injectivity rather than a re-run of
-    already-reported defects — the alternative is a property whose obligations are
-    largely refused by the solver, where a real counterexample would be lost in the
-    noise. -/
+    This is the screen that the two law properties apply, and it is *not* a claim about
+    Strata. The last two conditions are the defects of the encoder that
+    `adtSolverAcceptsQuery` reports. The screen keeps the claim about injectivity a claim
+    about injectivity, and not a second report of a known defect. Without the screen, the
+    solver refuses most of the obligations, and a real counterexample is then hard to see. -/
 def blockIsSmtSafe (block : MutualDatatype Unit) : Bool :=
   blockIsSmtEligible block
   && block.all (fun d => d.constrs.all fun c => c.args.all fun (_, τ) => !mentionsBv0 τ)
   && (blockSymbols block).all isSmtSafeSymbol
 
-/-! ## Building the assertion program -/
+/-! ## How the module builds the assertion program -/
 
 /-- A free variable at a known type. -/
 private def fv (n : String) (τ : LMonoTy) : Expression.Expr := .fvar () ⟨n, ()⟩ (some τ)
 
-/-- `f a₁ … a_n` for an operator `f` named in the factory — here always a
-    datatype constructor, which `addMutualBlock`'s `genBlockFactory` has
-    registered. The type annotation is left `none`: `LExpr.resolve` infers it by
-    unification, and the *binding* the application is stored into carries the
-    ground result type (see `letDecl`), which is what instantiates the
-    constructor's type parameters. -/
+/-- `f a₁ … a_n` for an operator `f` that the factory names. Here `f` is always a datatype
+    constructor, and `genBlockFactory` inside `addMutualBlock` registered it. The type
+    annotation stays `none`: `LExpr.resolve` infers it by unification, and the *binding* that
+    receives the application holds the ground result type. `letDecl` builds that binding, and
+    the ground type is what gives the type parameters of the constructor their values. -/
 private def opApp (name : String) (args : List Expression.Expr) : Expression.Expr :=
   args.foldl (fun acc a => .app () acc a) (.op () ⟨name, ()⟩ none)
 
-/-- `var n : τ;` — an uninitialised local, i.e. the universally quantified
-    variable of a law. Symbolic evaluation gives it an unconstrained symbolic
-    value; the negative controls at the bottom of this file are what confirm that
-    (with `assert x == y` on two such locals *failing*). -/
+/-- `var n : τ;`, which is a local with no initial value. It is the universally quantified
+    variable of a law. Symbolic evaluation gives such a local a symbolic value with no
+    constraint. -/
 private def varDecl (n : String) (τ : LMonoTy) : Statement :=
   Statement.init ⟨n, ()⟩ (.forAll [] τ) .nondet .empty
 
-/-- `var n : τ := e;` — a local *with* an initialiser and an explicit type.
+/-- `var n : τ := e;`, which is a local that has an initial value and an explicit type.
 
-    **The explicit type is what makes a polymorphic constructor encodable.** A
-    datatype may declare a type parameter that no constructor field mentions
-    (`genParamsList` draws the parameters independently of the fields, and
-    `addMutualBlock` permits a phantom parameter), so unification from the argument
-    types alone can leave a parameter undetermined: for
-    `datatype D α { C(f : int) }`, `C(x) = C(y)` is an equality at `D ?α` and the
-    encoder then reports `Unimplemented encoding for type var $__ty27` rather than
-    a verdict on the law. Binding the application to a local declared at
-    `groundTy d` pins every parameter to `int` by unification, which is also how
-    upstream's own datatype tests are written (`var x : Option int; x := None();`). -/
+    **The explicit type is what lets the encoder handle a polymorphic constructor.** A
+    datatype can declare a type parameter that no constructor field mentions. `genParamsList`
+    draws the parameters and the fields independently, and `addMutualBlock` allows such a
+    phantom parameter. Unification from the argument types alone can therefore leave a
+    parameter without a value. For `datatype D α { C(f : int) }`, the equality `C(x) = C(y)`
+    holds at `D ?α`, and the encoder then reports
+    `Unimplemented encoding for type var $__ty27` in place of a verdict on the law. A local
+    that the code declares at `groundTy d` receives the application, and unification then
+    gives each parameter the type `int`. The datatype tests of upstream also use this form, as
+    in `var x : Option int; x := None();`. -/
 private def letDecl (n : String) (τ : LMonoTy) (e : Expression.Expr) : Statement :=
   Statement.init ⟨n, ()⟩ (.forAll [] τ) (.det e) .empty
 
+/-- `assume [l]: e;`. -/
 private def assumeSt (l : String) (e : Expression.Expr) : Statement :=
   .cmd (.cmd (.assume l e .empty))
 
+/-- `assert [l]: e;`. -/
 private def assertSt (l : String) (e : Expression.Expr) : Statement :=
   .cmd (.cmd (.assert l e .empty))
 
-/-- A body-only procedure with no inputs, outputs or spec: the container for one
-    law's obligations. `noFilter := true` keeps `FilterProcedures` from pruning it
-    (it is reachable from nothing). -/
+/-- A procedure that has a body and no input, no output and no specification. It is the
+    container for the obligations of one law. `noFilter := true` stops `FilterProcedures` from
+    the removal of the procedure, because nothing calls it. -/
 private def lawProc (name : String) (body : List Statement) : Decl :=
   .proc { header := { name := ⟨name, ()⟩, typeArgs := [], inputs := [], outputs := [],
                       noFilter := true }
           spec := { preconditions := [], postconditions := [] }
           body := .structured body } .empty
 
-/-- The variable names for one obligation: `n` names, all fresh for the block and
-    pairwise distinct (distinct indices give distinct lengths — see
-    `indexedFreshName`). The last two are the names of the two *constructed*
-    values; the rest are the constructor arguments. -/
+/-- The variable names for one obligation. There are `n` names. Each name is fresh for the
+    block, and the names are pairwise different, because `indexedFreshName` gives a different
+    length for each index. The last two names are the names of the two values that the
+    obligation *builds*. The other names are the arguments of the constructors. -/
 private def lawVarNames (block : MutualDatatype Unit) (n : Nat) : List String :=
   let base := DatatypeGen.maxNameLength (blockNames block)
   (List.range n).map (fun i => indexedFreshName base i)
 
-/-- The injectivity obligation for constructor `c` (at index `ci`) of datatype `d`
-    (at index `di`), or `none` when `c` has no fields — injectivity is vacuous for
-    a nullary constructor, and an obligation-free procedure would only inflate the
-    "attempted" count.
+/-- The obligation for injectivity of the constructor `c`, at index `ci`, of the datatype `d`,
+    at index `di`. The result is `none` when `c` has no field, because injectivity is vacuous
+    for a nullary constructor and a procedure with no obligation only makes the count of
+    attempts larger.
 
-    Returns the declaration together with the labels it asserts, so the caller can
-    map a solver verdict back to a field without re-deriving the naming scheme. -/
+    The result holds the declaration and the labels that it asserts. A caller can therefore
+    map a verdict from the solver back to a field, and it does not build the names again. -/
 def injObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit)
     (ci : Nat) (c : LConstr Unit) : Option (Decl × List String) :=
   let τs := groundFieldTys d c
@@ -357,13 +351,14 @@ def injObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit)
             assertSt l (.eq () (fv x.1 x.2) (fv y.1 y.2)))
     some (lawProc s!"inj_{di}_{ci}" decls, labels)
 
-/-- The disjointness obligation for the constructor pair `(c₁, c₂)` at indices
-    `(c₁i, c₂i)` of datatype `d` at index `di`. Unlike injectivity this is
-    non-vacuous for nullary constructors, so no arity screen applies.
+/-- The obligation for disjointness of the pair of constructors `(c₁, c₂)`, at the indices
+    `(c₁i, c₂i)`, of the datatype `d` at index `di`. Unlike injectivity, this obligation is
+    not vacuous for a nullary constructor, so no screen on the arity applies.
 
-    The two constructors get disjoint variable blocks (`x⃗` then `y⃗`), so the
-    claim is the strong one — *no* pair of argument tuples makes the two
-    applications equal — rather than the special case of shared arguments. -/
+    The two constructors receive disjoint blocks of variables, first `x⃗` and then `y⃗`. The
+    claim is therefore the strong claim that *no* pair of tuples of arguments makes the two
+    applications equal, and not the special case where the two applications share their
+    arguments. -/
 def disjObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit)
     (c1i : Nat) (c1 : LConstr Unit) (c2i : Nat) (c2 : LConstr Unit) : Decl × String :=
   let τ1s := groundFieldTys d c1
@@ -385,24 +380,24 @@ def disjObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit)
          assertSt label (opApp "Bool.Not" [.eq () (fv u dτ) (fv v dτ)]) ]
   (lawProc s!"disj_{di}_{c1i}_{c2i}" body, label)
 
-/-- The **tester form** of disjointness: for a symbolic `u : d`, no two distinct
-    testers hold of it — `¬(isC₁ u ∧ isC₂ u)`.
+/-- The **tester form** of disjointness: for a symbolic `u : d`, no two different testers hold
+    of `u`, which is `¬(isC₁ u ∧ isC₂ u)`.
 
-    This form exists because the application form above **never reaches the
-    solver**. Strata's partial evaluator folds an equality of two applications of
-    *distinct* constructors to `false` on its own, so `symbolicEval` turns
-    `assert !(C x⃗ == D y⃗)` into the literal `assert true` and the solver is asked
-    nothing:
+    This form exists because the form with constructor applications **never reaches the
+    solver**. The partial evaluator of Strata folds an equality of two applications of
+    *different* constructors to `false` by itself. `symbolicEval` therefore turns
+    `assert !(C x⃗ == D y⃗)` into the literal `assert true`, and the solver receives no
+    question:
 
     ```
     procedure inj_0_0 () { … } else { assert [disj_0_0_1]: true; }
     ```
 
-    That is a genuine (and reassuring) fact about the evaluator, but it is not a
-    fact about the SMT encoding, and reporting it as one would be exactly the kind
-    of silent vacuity this suite exists to avoid. With `u` symbolic and only its
-    *testers* mentioned, there is nothing to fold: the query reaches the solver,
-    which has to derive exclusivity from the `declare-datatype` it was sent. -/
+    That is a real and useful fact about the evaluator, but it is not a fact about the SMT
+    encoding. A report of it as one is exactly the silent vacuity that this suite prevents.
+    With a symbolic `u` and only its *testers* in the assertion, there is nothing to fold. The
+    query reaches the solver, which must derive the exclusivity from the `declare-datatype`
+    that it received. -/
 def disjTesterObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit)
     (c1i : Nat) (c1 : LConstr Unit) (c2i : Nat) (c2 : LConstr Unit) : Decl × String :=
   let dτ := groundTy d
@@ -415,14 +410,15 @@ def disjTesterObligation (block : MutualDatatype Unit) (di : Nat) (d : LDatatype
           [opApp "Bool.And" [opApp c1.testerName [fv u dτ], opApp c2.testerName [fv u dτ]]]) ]
   (lawProc s!"disjT_{di}_{c1i}_{c2i}" body, label)
 
-/-- Unordered pairs of distinct positions, as `(i, xᵢ, j, xⱼ)` with `i < j`. -/
+/-- The pairs of different positions in a list, in the form `(i, xᵢ, j, xⱼ)` with `i < j`. The
+    order inside a pair does not matter. -/
 private def indexedPairs (xs : List α) : List (Nat × α × Nat × α) :=
   let ixs := xs.zipIdx
   ixs.flatMap fun (x, i) => ixs.filterMap fun (y, j) =>
     if i < j then some (i, x, j, y) else none
 
-/-- Every obligation for one datatype of the block: injectivity per constructor,
-    then both disjointness forms per constructor pair. -/
+/-- Each obligation for one datatype of the block: injectivity for each constructor, and then
+    both forms of disjointness for each pair of constructors. -/
 def datatypeObligations (block : MutualDatatype Unit) (di : Nat) (d : LDatatype Unit) :
     List (Decl × List String) :=
   (d.constrs.zipIdx.filterMap (fun (c, ci) => injObligation block di d ci c))
@@ -431,56 +427,55 @@ def datatypeObligations (block : MutualDatatype Unit) (di : Nat) (d : LDatatype 
         let (dT, lT) := disjTesterObligation block di d c1i c1 c2i c2
         [(dA, [lA]), (dT, [lT])])
 
-/-- The whole law program for a block: the block's own declaration, then one
-    procedure per law. The `List String` is the labels of the `assert`s, i.e. the
-    proof obligations a verification run should be asked to discharge — returned so
-    that a block contributing none (a block of one nullary constructor, say) is
-    visible as an empty list rather than as a silent pass. -/
+/-- The whole law program for a block: the declaration of the block, and then one procedure for
+    each law. The `List String` holds the labels of the `assert` statements, which are the
+    proof obligations that a verification run must discharge. The function returns those
+    labels, so a block that gives no obligation, such as a block with one nullary constructor,
+    is visible as an empty list and not as a silent pass. -/
 def lawProgram (block : MutualDatatype Unit) : Program × List String :=
   let obls := block.zipIdx.flatMap (fun (d, di) => datatypeObligations block di d)
   ({ decls := .type (.data block) .empty :: obls.map Prod.fst }, obls.flatMap Prod.snd)
 
-/-- Which law an obligation label states, recovered from the label's prefix. The
-    three families are reported separately, because they are discharged by
-    different machinery: `inj` and `disjTester` reach the solver, while `disjApp`
-    is folded by the partial evaluator before the solver is called (see
-    `disjTesterObligation`). -/
+/-- Which law the label of an obligation states. The prefix of the label gives the answer.
+
+    The report keeps the three families separate, because different machinery discharges
+    them. `inj` and `disjTester` reach the solver. The partial evaluator folds `disjApp`
+    before the solver runs, as `disjTesterObligation` describes. -/
 inductive LawKind where
   | inj | disjApp | disjTester
   deriving DecidableEq, Repr, Inhabited
 
+/-- The law that a label states, or `none` when the label belongs to no law family. -/
 def LawKind.ofLabel (l : String) : Option LawKind :=
   if l.startsWith "inj_" then some .inj
   else if l.startsWith "disjT_" then some .disjTester
   else if l.startsWith "disj_" then some .disjApp
   else none
 
+/-- The name of a law family, for a report. -/
 def LawKind.name : LawKind → String
   | .inj => "injectivity"
   | .disjApp => "disjointness (constructor form)"
   | .disjTester => "disjointness (tester form)"
 
-/-! ## The non-solver companion: does the law program typecheck?
+/-! ## The companion that needs no solver: does the law program typecheck?
 
-The solver property below needs `cvc5`/`z3`, so it is opt-in. This one needs
-nothing, runs in the default suite, and screens the exact same programs: if
+The solver property below needs `cvc5` or `z3`, so a flag enables it. This property needs
+nothing, it runs in the default suite, and it screens the same programs. If
 `Program.typeCheck` rejects an equality between two applications of a generated
-constructor, then the solver property is being fed an ill-typed program and its
-green result would be worthless. It is also a claim worth making on its own —
-that a *derived* constructor is usable in an ordinary equality at its ground
-instance. -/
+constructor, then the solver property receives an ill-typed program and its result says
+nothing. The property is also a claim on its own: a *derived* constructor is usable in an
+ordinary equality at its ground instance. -/
 
-/-- Whether the law program for `block` typechecks. Vacuously `true` for a block
-    that contributes no obligation, and *not* screened on
-    `blockIsSmtEligible` — the typechecker has no trouble with an arrow-typed
-    field, only the SMT encoder does.
+/-- Whether the law program for `block` typechecks. The property is vacuously `true` for a
+    block that gives no obligation. It has *no* screen on `blockIsSmtEligible`, because the
+    type checker handles a field with an arrow type and only the SMT encoder does not.
 
-    Screened on `blockAccepted`: a block Strata's own `addMutualBlock` refuses
-    cannot yield a well-typed program, and the reasons it refuses are the business
-    of `checkNoDerivedNameCollisions` and of the generator gap that function's
-    docstring names — not of this property, which is about the *law program*.
-    Under that screen it held on 40/40 blocks at each of the four block sizes
-    measured. -/
+    `blockAccepted` screens the block. A block that `addMutualBlock` refuses cannot give a
+    well-typed program, and the reasons for a refusal belong to
+    `checkNoDerivedNameCollisions` and to the gap in the generator that the documentation of
+    that function names. They do not belong to this property, which is about the *law
+    program*. -/
 def checkLawProgramTypeChecks (block : MutualDatatype Unit) : Bool :=
   if !blockAccepted block then true
   else
@@ -490,56 +485,56 @@ def checkLawProgramTypeChecks (block : MutualDatatype Unit) : Bool :=
 
 /-! ## The derived names of one datatype
 
-`genBlockFactory` derives, for each datatype, a constructor and a tester per
-constructor and a *pair* of destructors per field: `d..f` (safe, guarded by the
-tester) and `d..f!` (unsafe). The unsafe name is the safe name with `!` appended
-(`mkDestructorFunc`, `TypeFactory.lean:539`), and nothing checks that the result
-does not collide with another derived name. -/
+For each datatype, `genBlockFactory` derives a constructor and a tester for each
+constructor, and a *pair* of destructors for each field. `d..f` is the safe destructor,
+which the tester guards, and `d..f!` is the unsafe destructor. `mkDestructorFunc` builds
+the unsafe name by an added `!` at the end of the safe name, and nothing checks that the
+result differs from each other derived name. -/
 
-/-- Every function name `genBlockFactory` derives from datatype `d`, in emission
-    order: constructors, testers, safe destructors, unsafe destructors. -/
+/-- Each function name that `genBlockFactory` derives from the datatype `d`, in the order of
+    emission: the constructors, the testers, the safe destructors, and then the unsafe
+    destructors. -/
 def derivedNamesOf (d : LDatatype Unit) : List String :=
   d.constrs.map (·.name.name)
   ++ d.constrs.map (·.testerName)
   ++ d.constrs.flatMap (fun c => c.args.map (fun (f, _) => d.name ++ ".." ++ f.name))
   ++ d.constrs.flatMap (fun c => c.args.map (fun (f, _) => d.name ++ ".." ++ f.name ++ "!"))
 
-/-- The derived names datatype `d` produces more than once. -/
+/-- The derived names that the datatype `d` gives more than one time. -/
 def derivedNameCollisions (d : LDatatype Unit) : List String :=
   let names := derivedNamesOf d
   (names.filter (fun n => (names.filter (· == n)).length > 1)).eraseDups
 
-/-- **No datatype derives the same function name twice.**
+/-- **No datatype derives the same function name two times.**
 
-    **FAILS honestly.** A field named `f!` and a field named `f` in the same
-    datatype both derive the name `d..f!` — the first as its *safe* destructor, the
-    second as its *unsafe* one — and `Factory.tryAddAll` then rejects the whole
-    block with "A function of name `d..f!` already exists!". Both field names are
-    legal Core identifiers (`!` is in the identifier alphabet, and Core's own lexer
-    accepts it), so this is a legal datatype that cannot be declared:
+    A field named `f!` and a field named `f` in one datatype both derive the name `d..f!`. The
+    first derives it as its *safe* destructor, and the second as its *unsafe* one.
+    `Factory.tryAddAll` then rejects the whole block with the message "A function of name
+    `d..f!` already exists!". Both field names are legal Core identifiers, because `!` is in
+    the identifier alphabet and the lexer of Core accepts it. This is therefore a legal
+    datatype that no one can declare:
 
     ```
     datatype SZ3z I N { … (Y : …) … (Y! : …) … }
     ⇒ A function of name SZ3z..Y! already exists! Redefinitions are not allowed.
     ```
 
-    The collision is silent at the definition site and surfaces as a
-    whole-declaration rejection, which is what makes it worth pinning: the message
-    names the derived function, not the two fields responsible. A fix is to mint the
-    unsafe name from a character the identifier alphabet excludes, or to check for
-    the clash where the pair is generated.
+    The collision is silent at the site of the definition, and it appears as a rejection of
+    the whole declaration. This is what makes the defect worth a property: the message names
+    the derived function, and not the two fields that caused the collision. A fix builds the
+    unsafe name from a character that the identifier alphabet does not hold, or it checks for
+    the collision where the code makes the pair.
 
-    Stated per *datatype* rather than per block, so that a cross-datatype collision
-    — which is this repo's generator to fix, see `blockAccepted` — cannot make it
-    red for an unrelated reason. -/
+    The property speaks about one *datatype* and not about a block, so a collision across two
+    datatypes cannot make it fail for another reason. `blockAccepted` describes that other
+    collision. -/
 def checkNoDerivedNameCollisions (block : MutualDatatype Unit) : Bool :=
   block.all (fun d => (derivedNameCollisions d).isEmpty)
 
-/-- The minimal witness for the `f`/`f!` collision: one datatype, one constructor,
-    two fields. Kept as a `#guard`ed constant as well as being searched for at
-    random, so the defect is pinned deterministically at build time — the random
-    search needs a draw in which `genConstrArgs` happens to produce both `f` and
-    `f!`, which is rare. -/
+/-- The smallest witness for the collision between `f` and `f!`: one datatype, one constructor
+    and two fields. A `#guard` holds this constant, and the suite also searches for such a
+    block at random. The build therefore pins the defect deterministically, because a random
+    draw needs `genConstrArgs` to give both `f` and `f!`, and that is rare. -/
 def bangFieldWitness : MutualDatatype Unit :=
   [ { name := "AdtBang"
       typeArgs := []
@@ -549,47 +544,49 @@ def bangFieldWitness : MutualDatatype Unit :=
             testerName := "AdtBang..isMkBang" } ]
       constrs_ne := by decide } ]
 
--- The two fields derive the name `AdtBang..f!` twice: as `f!`'s *safe* destructor
--- and as `f`'s *unsafe* one.
+-- The two fields derive the name `AdtBang..f!` two times: as the *safe* destructor of `f!`,
+-- and as the *unsafe* destructor of `f`.
 #guard derivedNameCollisions bangFieldWitness[0]! == ["AdtBang..f!"]
 #guard !checkNoDerivedNameCollisions bangFieldWitness
 
--- And that is enough for Strata to refuse the whole declaration, so a legal Core
--- datatype cannot be declared at all.
+-- That collision is enough for Strata to refuse the whole declaration, so no one can declare
+-- this legal Core datatype.
 #guard !blockAccepted bangFieldWitness
 
--- The `f`-only datatype is fine, which is what makes the *pair* the cause.
+-- The datatype with the field `f` alone is correct, which shows that the *pair* of fields is
+-- the cause.
 #guard blockAccepted
   [ { name := "AdtBang", typeArgs := [],
       constrs := [ { name := ⟨"mkBang", ()⟩, args := [(⟨"f", ()⟩, (.int : LMonoTy))],
                      testerName := "AdtBang..isMkBang" } ],
       constrs_ne := by decide } ]
 
-/-! ## The other non-solver companion: the evaluator decides constructor-form
-disjointness on its own
+/-! ## The second companion that needs no solver: the evaluator decides disjointness in
+constructor form by itself
 
-`disjTesterObligation` explains why the constructor-application form of
-disjointness never reaches a solver: Strata's partial evaluator folds
-`!(C x⃗ == D y⃗)` to `true` while symbolically evaluating the procedure. That fact
-is worth *asserting* rather than only noting, for two reasons: it is a real
-guarantee about the evaluator (it knows constructors are disjoint even with
-symbolic arguments), and it is what justifies the tester form's existence — if
-this property ever went red, `disjTester` would be the only remaining form and the
-`disjApp` obligations would silently start costing solver calls. -/
+`disjTesterObligation` says why the form of disjointness that uses constructor applications
+never reaches a solver. The partial evaluator of Strata folds `!(C x⃗ == D y⃗)` to `true`
+while it evaluates the procedure symbolically. A property *asserts* that fact for two
+reasons. The fact is a real guarantee about the evaluator, which knows that two constructors
+are disjoint even for symbolic arguments. It also justifies the tester form: if the evaluator
+stopped folding the constructor form, then `disjTester` would be the only remaining form and
+the `disjApp` obligations would start to cost solver calls. -/
 
-/-- The proof-obligation program Strata's symbolic evaluator produces, or `none`
-    on a diagnostic. Same call as `ProgramGen.UnprovenTransforms.symbolicObligations`
-    (inlined rather than imported to keep this module's dependencies to
-    `DatatypeGen` plus Strata); `.quiet`, since the evaluator `dbg_trace`s the whole
-    obligation list at `.normal` or above. A law program holds no loop, so the
-    evaluator's loop panic is unreachable here. -/
+/-- The program of proof obligations that the symbolic evaluator of Strata gives, or `none`
+    when the evaluator returns a diagnostic.
+
+    This is the same call as `ProgramGen.UnprovenTransforms.symbolicObligations`. This module
+    has its own copy, so that its dependencies stay `DatatypeGen` and Strata. The call uses
+    `.quiet`, because the evaluator traces the whole list of obligations at `.normal` and
+    above. A law program holds no loop, so the panic of the evaluator on a loop cannot happen
+    here. -/
 def symbolicObligations (p : Program) : Option Program :=
   match Core.toCoreProofObligationProgram Core.VerifyOptions.quiet p with
   | .ok (out, _) => some out
   | .error _ => none
 
 mutual
-/-- Every `(label, expression)` of an `assert` in a statement, at any depth. -/
+/-- Each pair of a label and an expression from an `assert` in a statement, at any depth. -/
 def stmtAsserts (s : Statement) : List (String × Expression.Expr) :=
   match s with
   | .cmd (.cmd (.assert l e _)) => [(l, e)]
@@ -599,14 +596,14 @@ def stmtAsserts (s : Statement) : List (String × Expression.Expr) :=
   | .loop _ _ _ b _ => stmtsAsserts b
   | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
 
-/-- `stmtAsserts` over a statement list. -/
+/-- `stmtAsserts` over a list of statements. -/
 def stmtsAsserts (ss : List Statement) : List (String × Expression.Expr) :=
   match ss with
   | [] => []
   | s :: rest => stmtAsserts s ++ stmtsAsserts rest
 end
 
-/-- Every `(label, expression)` of an `assert` in any procedure body of `p`. -/
+/-- Each pair of a label and an expression from an `assert` in a procedure body of `p`. -/
 def programAsserts (p : Program) : List (String × Expression.Expr) :=
   p.decls.flatMap fun d =>
     match d with
@@ -616,17 +613,18 @@ def programAsserts (p : Program) : List (String × Expression.Expr) :=
       | _ => []
     | _ => []
 
-/-- **Every constructor-form disjointness obligation is folded to `true` by
-    symbolic evaluation, and every tester-form one survives it.** Both halves
-    matter: the first is the guarantee about the evaluator, the second is the
-    non-vacuity guard for the solver property — were the tester form folded too,
-    the solver would be asked nothing at all about disjointness and would still
-    report green.
+/-- **Symbolic evaluation folds each disjointness obligation in constructor form to `true`,
+    and each obligation in tester form reaches the solver.**
 
-    Vacuously `true` for a block with no constructor pair (one constructor) and for
-    a block Strata refuses (same screen, and for the same reason, as
-    `checkLawProgramTypeChecks`); `false` if symbolic evaluation fails on a block
-    that *was* accepted. -/
+    Both halves matter. The first half is the guarantee about the evaluator. The second half
+    guards the solver property against vacuity: if the evaluator also folded the tester form,
+    then the solver would receive no question about disjointness and it would still report a
+    pass.
+
+    The property is vacuously `true` for a block that holds no pair of constructors, which is
+    a block with one constructor. It is also vacuously `true` for a block that Strata refuses,
+    and `checkLawProgramTypeChecks` uses the same screen for the same reason. The property is
+    `false` when symbolic evaluation fails on a block that Strata *did* accept. -/
 def checkDisjFoldsDuringSymEval (block : MutualDatatype Unit) : Bool :=
   if !blockAccepted block then true else
   match symbolicObligations (lawProgram block).fst with
@@ -638,15 +636,15 @@ def checkDisjFoldsDuringSymEval (block : MutualDatatype Unit) : Bool :=
       | some .disjTester => e != .const () (.boolConst true)
       | _ => true
 
-/-! ## Witness blocks for the two SMT-encoder defects
+/-! ## The witness blocks for the two defects of the SMT encoder
 
-Held here rather than in `AdtLawsSmt` so that the `#guard`s below — which need no
-solver — sit next to the screen they exercise. `AdtLawsSmt` runs the same blocks
-against a live solver. -/
+These blocks are here and not in `AdtLawsSmt`, so that the `#guard` statements below stay
+next to the screen that they exercise. Those statements need no solver. `AdtLawsSmt` runs
+the same blocks against a live solver. -/
 
 namespace AdtLawsWitnesses
 
-/-- A block with a `bitvec 0` field: legal Core, illegal SMT-LIB. -/
+/-- A block that has a `bitvec 0` field. Core accepts it, and SMT-LIB does not. -/
 def bv0Block : MutualDatatype Unit :=
   [ { name := "AdtBv0"
       typeArgs := []
@@ -656,8 +654,8 @@ def bv0Block : MutualDatatype Unit :=
           { name := ⟨"Bv0One", ()⟩, args := [], testerName := "AdtBv0..isBv0One" } ]
       constrs_ne := by decide } ]
 
-/-- A block whose constructor and field names contain `'`: legal Core identifiers
-    that are not bare SMT-LIB symbols. -/
+/-- A block whose constructor names and field names hold `'`. They are legal Core identifiers,
+    and they are not bare SMT-LIB symbols. -/
 def quoteBlock : MutualDatatype Unit :=
   [ { name := "AdtQuote"
       typeArgs := []
@@ -669,28 +667,28 @@ def quoteBlock : MutualDatatype Unit :=
 
 end AdtLawsWitnesses
 
--- ── The two SMT-encoder defects, pinned without a solver ──────────────
+-- ── The two defects of the SMT encoder, pinned without a solver ───────
 --
--- `AdtLawsSmt.adtSolverAcceptsQuery` is the property that reports these, and it
--- needs a live solver. The classification they rest on does not, so it is pinned
--- here: each `#guard` says that the *screen* sees the defect, which is what keeps
--- the screen and the reported cause in step.
+-- `AdtLawsSmt.adtSolverAcceptsQuery` is the property that reports these two defects, and it
+-- needs a live solver. The classification under that property needs no solver, so the
+-- statements below pin it. Each `#guard` says that the *screen* sees the defect, and this
+-- keeps the screen and the reported cause in agreement.
 
--- A `bitvec 0` field is arrow-free and its names are fine, so only the width screen
--- rejects it — and it is Core-legal (`Function.typeCheck` and `addMutualBlock` both
--- accept it) while `(_ BitVec 0)` is not SMT-LIB.
+-- A `bitvec 0` field holds no arrow and its names are correct, so only the screen on the width
+-- rejects the block. Core accepts the block, because `Function.typeCheck` and
+-- `addMutualBlock` both accept it, and `(_ BitVec 0)` is not legal SMT-LIB.
 #guard blockAccepted AdtLawsWitnesses.bv0Block
 #guard blockIsSmtEligible AdtLawsWitnesses.bv0Block
 #guard !blockIsSmtSafe AdtLawsWitnesses.bv0Block
 
--- A `'` in a name is likewise Core-legal and not a bare SMT-LIB symbol.
+-- Core also accepts a `'` in a name, and such a name is not a bare SMT-LIB symbol.
 #guard blockAccepted AdtLawsWitnesses.quoteBlock
 #guard blockIsSmtEligible AdtLawsWitnesses.quoteBlock
 #guard !blockIsSmtSafe AdtLawsWitnesses.quoteBlock
 #guard !isSmtSafeSymbol "c'x"
--- `_` is a legal Core identifier and an SMT-LIB *reserved word*.
+-- `_` is a legal Core identifier and a *reserved word* of SMT-LIB.
 #guard !isSmtSafeSymbol "_"
--- The other special characters `genIdentName` draws are all fine.
+-- The other special characters that `genIdentName` draws are all correct.
 #guard ["a.b", "a?b", "a@b", "a!b", "a$b", "a_b"].all isSmtSafeSymbol
 
 end StrataGenerators.AdtLaws

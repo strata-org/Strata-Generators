@@ -7,11 +7,10 @@ open scoped SetGen.Set
 /-!
 # The support of `genIdentName`, in both directions
 
-`genIdentName` is in `FunctionHasTypeAGen/Core.lean`. It is the only source of
-names in this package. Each function name, type parameter, parameter name,
-statement label, datatype name, constructor name and field name comes from it.
-Some names come from it directly. The other names come through `genNameList`,
-`DatatypeGen.genFreshName`, or the label generator in `StmtHasTypeAGen`.
+`genIdentName` is the only source of names in this package. Each function name, type
+parameter, parameter name, statement label, datatype name, constructor name and field name
+comes from it. Some names come from it directly. The other names come through
+`genNameList`, `DatatypeGen.genFreshName`, or the generator for a statement label.
 
 `mem_support_genIdentName_iff` gives the support exactly:
 
@@ -42,10 +41,10 @@ keywords, and this is the conjunct `isReservedKeyword s = false`.
 
 ## Contents
 
-- keyword-freedom of `dodgeKeyword` and `genIdentName`. These results are in this
-  file, and not in `FunctionHasTypeAGen.lean`, to make them available to
-  `DatatypeGenProofs.lean` without the full development of the function
-  generator;
+- the theorems that say that no name from `dodgeKeyword` or from `genIdentName` is a
+  keyword. These results are in this file, and not in the main module for a function, so
+  that the proofs for a datatype can use them without the whole development of the
+  generator for a function;
 - `IsGenIdentName` and its decidability;
 - `mem_support_genIdentName_iff`, the support lemma in both directions;
 - corollaries: the one-directional lemmas, and the
@@ -54,7 +53,7 @@ keywords, and this is the conjunct `isReservedKeyword s = false`.
 
 namespace StrataGenerators.Function
 
--- ── Keyword-freedom of generated names ───────────────────────────────
+-- ── A generated name is never a keyword ──────────────────────────────
 -- `genIdentName` sends each candidate through `dodgeKeyword`. Therefore it never
 -- gives a reserved Strata Core keyword. The lemmas below make this guarantee
 -- explicit and provable. It is a soundness property of the name generator. No
@@ -127,19 +126,17 @@ theorem dodgeKeyword_no_space (s : String) (h : ' ' ∉ s.toList) :
 -- lexer. Therefore `IsGenIdentName` is the spec-level notion "legal Core
 -- identifier", and the support lemma is a true completeness result for names.
 --
--- `strataIsIdFirst` and `strataIsIdRest` are `private` in `StrataDDM/Parser.lean`,
--- so this file cannot refer to them. They are transcribed here as `isIdFirst` and
--- `isIdRest`. If the character classes of the lexer change, you must change these
--- two transcriptions also. The equality proofs below cannot find the difference.
+-- `strataIsIdFirst` and `strataIsIdRest` are `private` in the parser of DDM, so this file cannot
+-- refer to them. `isIdFirst` and `isIdRest` below are copies of them. If the character classes of
+-- the lexer change, you must change these two copies also. The proofs of equality below cannot
+-- find such a difference.
 
-/-- Transcription of `strataIsIdFirst`, which is `private` in
-    `StrataDDM/Parser.lean`. These are the characters that are legal in first
-    position of a bare Core identifier. -/
+/-- A copy of `strataIsIdFirst`, which is `private` in the parser of DDM. These are the
+    characters that are legal in the first position of a bare Core identifier. -/
 def isIdFirst (c : Char) : Bool := c.isAlpha || c == '_' || c == '$'
 
-/-- Transcription of `strataIsIdRest`, which is `private` in
-    `StrataDDM/Parser.lean`. These are the characters that are legal after the
-    first position of a bare Core identifier. -/
+/-- A copy of `strataIsIdRest`, which is `private` in the parser of DDM. These are the
+    characters that are legal after the first position of a bare Core identifier. -/
 def isIdRest (c : Char) : Bool :=
   c.isAlphanum || c == '_' || c == '\'' || c == '.' || c == '?' || c == '!' ||
   c == '$' || c == '@'
@@ -349,7 +346,7 @@ theorem mem_support_genIdentName_iff (s : String) :
     · -- `dodgeKeyword` is the identity on `s`, and `String.ofList (c :: cs) = s`.
       rw [← hsplit, String.ofList_toList, dodgeKeyword_eq_self hnotkw]
 
-/-- Set form of `mem_support_genIdentName_iff`. -/
+/-- The same claim as `mem_support_genIdentName_iff`, as an equation between sets. -/
 theorem support_genIdentName :
     SetGen.support (genIdentName (G := SetGen.Set)) =
       {s | IsGenIdentName s ∧ isReservedKeyword s = false} := by
@@ -357,16 +354,15 @@ theorem support_genIdentName :
 
 -- ── Corollaries ──────────────────────────────────────────────────────
 
-/-- **Keyword-freedom of `genIdentName`.** Each name in the support of
-    `genIdentName` is an identifier that is not a keyword. This is the right
-    conjunct of `mem_support_genIdentName_iff`. -/
+/-- **No name in the support of `genIdentName` is a keyword.** This claim is the right part of
+    `mem_support_genIdentName_iff`. -/
 theorem genIdentName_not_keyword (s : String)
     (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
     isReservedKeyword s = false :=
   (mem_support_genIdentName_iff s).mp hs |>.2
 
-/-- Each name in the support of `genIdentName` is drawable in syntax. This is the
-    left conjunct of `mem_support_genIdentName_iff`. -/
+/-- Each name in the support of `genIdentName` has the syntax that the generator can draw. This
+    claim is the left part of `mem_support_genIdentName_iff`. -/
 theorem genIdentName_isGenIdentName (s : String)
     (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
     IsGenIdentName s :=
@@ -436,14 +432,13 @@ theorem mem_support_genIdentName_of_cons {c : Char} {cs : List Char} {s : String
     s ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
   mem_support_genIdentName_of_syntactic ⟨c, cs, hsplit, hc, hcs⟩ hnotkw
 
-/-- **Space-freedom of `genIdentName`.** The character list of a generated
-    identifier has no space. The generator draws the first character from
-    `startChars` and the other characters from `remainingChars`, and `' '` is not
-    in these two lists.
+/-- **No name in the support of `genIdentName` holds a space.** The generator draws the first
+    character from `startChars` and each other character from `remainingChars`, and `' '` is in
+    neither of those two lists.
 
-    The body seed for an in-out procedure needs this fact. `CoreIdent.mkOld` puts
-    the prefix `"old "` onto a name, and that prefix has a space. Therefore no
-    generated parameter name is equal to a key of an `old` binding. -/
+    The first context of a body for an `inout` procedure needs this fact. `CoreIdent.mkOld` adds the
+    prefix `"old "` to a name, and that prefix holds a space. No generated parameter name is
+    therefore equal to a key of an `old` binding. -/
 theorem genIdentName_no_space (s : String)
     (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
     ' ' ∉ s.toList := by

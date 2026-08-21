@@ -2,19 +2,21 @@ import StrataGenerators.Test
 import StrataGenerators.TycheViz
 
 /-!
-# Statement-generator properties
+# Properties of the statement generator
 
-`genProgramStmts` generates a well-typed Core statement list (`StatementsHasTypeA`),
-proven sound *and* complete against the declarative typing spec, so it is a
-certified-well-typed oracle input for the statement typechecker and the
-statement-level transformations. Every claim here is currently unproven upstream.
+`genProgramStmts` makes a well-typed list of Core statements, which the relation
+`StatementsHasTypeA` describes. The generator is sound *and* complete against the declarative
+typing specification. Its output is therefore an input with a certificate of good typing,
+both for the statement type checker and for the transformations on statements. Upstream
+proves none of the claims here.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.Stmt.TestSupport
 
-/-- The six statement transform / typechecker properties. -/
+/-- The six properties for the statement transformations and for the statement type
+    checker. -/
 @[strata_properties]
 def stmtTransforms : List TestDecl :=
   family GenStmts
@@ -31,10 +33,10 @@ def stmtTransforms : List TestDecl :=
       ("stmt: mapExprs id = id",
        fun gs => checkMapExprsId gs.stmts) ]
 
-/-- `StmtToKleeneStmt` is defined exactly when the block has no
-    `exit`/`funcDecl`/`typeDecl` — and, for the invariant-loop caveat, not defined
-    when an invariant-bearing loop is present. Its panel records the definedness
-    verdict *and* why, so it keeps a bespoke one. -/
+/-- `StmtToKleeneStmt` is defined exactly when the block holds no `exit`, no `funcDecl` and
+    no `typeDecl`. It is also not defined when the block holds a loop that has an invariant.
+    The panel gives the verdict on definedness *and* the reason for it, so this property keeps
+    a panel of its own. -/
 @[strata_property]
 def stmtKleeneDefinedIff : TestDecl :=
   (TestDecl.property "stmt: DetToKleene defined iff supported"

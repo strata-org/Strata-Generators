@@ -1,31 +1,32 @@
 import StrataGenerators.Test
 
 /-!
-# Eager versus incremental type-alias resolution
+# Eager and incremental resolution of a type alias
 
-Strata resolves a type alias *during* type checking, one declaration at a time. These
-two properties say that this is equivalent to expanding every alias up front — that an
-alias is the transparent abbreviation it is documented to be. Both pass.
+Strata resolves a type alias *during* type checking, one declaration at a time. These two
+properties say that this order gives the same result as the expansion of every alias before
+type checking. An alias is therefore the transparent abbreviation that the documents
+describe.
 
-Non-vacuity needed work: `ProgramGen` emits alias declarations that nothing ever
-*uses* (`Inv.aliasVocabDisjoint` keeps the type vocabulary disjoint from the alias
-names), so resolution on a raw draw is the identity. `introduceAlias` therefore *adds*
-a use — it aliases a ground type the program mentions and rewrites every occurrence —
-measured introducible on 29/30 draws.
+The properties need help to stay away from vacuity. `ProgramGen` emits alias declarations
+that nothing *uses*, because `Inv.aliasVocabDisjoint` keeps the type vocabulary disjoint
+from the alias names. Resolution on such a draw is the identity function. Therefore
+`introduceAlias` *adds* a use: it makes an alias for a ground type that the program
+mentions, and it rewrites each occurrence of that type.
 -/
 
 open Lambda Core Imperative
 open StrataGenerators.Test
 open StrataGenerators.AliasResolution
 
-/-- The two alias-resolution properties. Same input shape as the `program:` suite, so
-    counterexamples go through the whole-program shrinker. -/
+/-- The two properties for alias resolution. They use the same input shape as the
+    `program:` suite, so the whole-program shrinker reduces a counterexample. -/
 @[strata_properties]
 def aliasChecks : List TestDecl :=
   family GenProgram
     [ ("alias: eager and incremental resolution agree on acceptance",
        fun gp => checkAliasAcceptanceAgrees gp.prog),
-      -- The "evaluates the same" half: the two resolution orders give the same proof
-      -- obligations under Strata's own symbolic evaluator.
+      -- The second half: the two orders of resolution give the same proof obligations
+      -- under the symbolic evaluator of Strata.
       ("alias: eager and incremental resolution give the same obligations",
        fun gp => checkAliasObligationsAgree gp.prog) ]

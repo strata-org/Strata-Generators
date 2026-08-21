@@ -14,10 +14,9 @@ open StrataGenerators.Stmt.TestSupport
 The procedure-level analogue of the expression (`shrinkLExpr`), command
 (`shrinkCmd`), statement (`shrinkStmts`) and function (`shrinkFuncWellFormed`)
 shrinkers: it proposes structurally smaller procedures and rejection-samples them
-on a well-typedness oracle. Nothing here re-implements a reduction that already
-exists — body reductions are delegated wholesale to `shrinkStmtsList` (which
-recurses through `shrinkStmt` into `shrinkCmd` and `shrinkLExpr`), and contract
-clauses are reduced with `shrinkLExpr` directly.
+against an oracle for well-typedness. Nothing here writes a reduction again that already exists.
+`shrinkStmtsList` performs each reduction of a body, and it recurses through `shrinkStmt` into `shrinkCmd` and
+`shrinkLExpr`. `shrinkLExpr` reduces a contract clause directly.
 
 ## The oracle
 
@@ -35,8 +34,8 @@ the delegation above sound, and it is what decides several obligations for free:
   so a clause reduced to a non-Boolean subterm is filtered out rather than
   emitted. Clauses may therefore be shrunk freely.
 - **Modification rights stay valid.** Dropping a body statement can leave a `set x`
-  whose defining `init x` is gone, which `checkModificationRights` rejects
-  (ProcedureType.lean) — again caught by the filter, not by local reasoning.
+  whose declaration is gone, and `checkModificationRights` rejects that shape. The filter catches such a
+  candidate, and no local argument is necessary.
 - **`old v` stays in scope.** Postconditions may mention `old v` for in-out
   parameters; since the header is held fixed (below), those bindings survive every
   reduction.
@@ -47,15 +46,14 @@ Following the convention of the function shrinker
 (`FunctionHasTypeAGen.Shrink.shrinkFuncCandidates`, which is body-only), the
 **entire header is held fixed**: name, `typeArgs`, `inputs`, `outputs` and
 `noFilter`. A shrunk procedure therefore has exactly the original's type
-signature, and stays a drop-in replacement for it in any program the properties
-assemble — in particular the modifies-clause obligation is unchanged, and the
-`P0…Pk` names the procedure properties key off stay put.
+signature, and it therefore replaces the original one in each program that a property assembles. The obligation
+about the modified variables does not change either, and each name from `P0` up to `Pk` that a property reads
+stays the same.
 
-The contract and the body are *not* preserved: clauses may be dropped or reduced
-and the body may be reduced to `[]` (an abstract procedure). This is intended and
-is what the requirement permits — the shrunk procedure need not have the same
-*behaviour* or contract, only the same signature and the well-typedness
-invariant.
+The contract and the body do *not* stay the same. The shrinker can drop a clause or reduce it, and it can reduce
+the body to the empty list, which gives an abstract procedure. That behaviour is deliberate, and the requirement
+permits it. A shrunk procedure needs the same signature and the invariant about well-typedness, and it needs
+neither the same *behaviour* nor the same contract.
 
 CFG bodies are left alone entirely: `Procedure.typeCheck` rejects them outright
 ("CFG procedures not supported yet"), so no CFG-bodied candidate could pass the
@@ -69,13 +67,11 @@ namespace StrataGenerators.Procedure.TestSupport
 
 /-- Whether Strata's whole-procedure typechecker accepts `p` as a declaration of
     `prog`, in the standard Core ambient context. The `prog` argument is consulted
-    only by the `call` branch of the statement typechecker; generated procedures
-    now *do* emit calls against their siblings (see the module doc of
-    `StrataGenerators.ProcedureHasTypeAGen.TestSupport`, point 1), so the
-    procedure-*list* shrinker must pass the assembled program (`mkProgram ps`) for
-    the check to stay faithful — a candidate that still calls `P{j}` only
-    typechecks against a program in which `P{j}` is declared. The default empty
-    program is retained only for the call-free standalone sanity `#guard`s below. -/
+    by the `call` branch of the typechecker for a statement. A generated procedure *does* emit a call to a
+    procedure beside it, which the module docstring of `StrataGenerators.ProcedureHasTypeAGen.TestSupport`
+    records. Therefore the shrinker for a *list* of procedures must give the assembled program, so that the check
+    stays faithful. A candidate that still calls a procedure type checks only against a program that declares
+    that procedure. The default empty program is there for the `#guard`s below, which hold no call. -/
 def procTypeChecks (p : Procedure) (prog : Program := Program.init) : Bool :=
   match Procedure.typeCheck stmtCheckContext TEnv.default prog p .empty with
   | .ok _ => true
@@ -85,19 +81,19 @@ def procTypeChecks (p : Procedure) (prog : Program := Program.init) : Bool :=
     list assembles to. This is the invariant the list-level shrinker maintains:
     *every* candidate family is filtered through it, including the drop family.
 
-    Filtering drops as well may look redundant — removing a procedure cannot break
-    the ones that remain — and on well-typed input it never rejects anything. It
-    matters for *ill-typed* input, which does occur: `Procedure.typeCheck` rejects
+    The filter also applies to the family that drops a procedure. That choice can look unnecessary, because a
+    removal of a procedure cannot break the procedures that stay, and on well-typed input the filter rejects
+    nothing. It matters for input that is *not* well typed, which does occur. `Procedure.typeCheck` rejects
     a body declaring a function with a `decreases` clause but no body, the known
     completeness gap (measured at 7 of 400 generated procedures). Without this
     filter, shrinking such a list would emit smaller *ill-typed* lists and quietly
     break the shrinker's contract. With it, the guarantee is unconditional: every
     list this shrinker returns is well-typed regardless of what it was handed.
 
-    The cost is that a counterexample resting on the completeness gap cannot be
-    minimized — no smaller candidate passes, so the input is reported unshrunk.
-    That is deliberate and matches `shrinkStmts`, which makes the same trade for
-    the same reason (see its comment in `StmtHasTypeAGen.TestSupport`): an unshrunk
+    The cost is that a counterexample which depends on a gap in completeness cannot shrink. No smaller candidate
+    passes the filter, so the harness reports the input at its full size. That behaviour is deliberate, and
+    `shrinkStmts` makes the same trade for the same reason. Read its comment in
+    `StmtHasTypeAGen.TestSupport`. An input at its full size
     counterexample is a worse report, never a wrong one. -/
 def procsTypeCheck (ps : List Procedure) : Bool :=
   let prog := mkProgram ps
@@ -133,9 +129,9 @@ private def setClause (cs : ListMap CoreLabel Procedure.Check) (i : Nat)
 
     1. drop the body entirely, leaving an abstract procedure;
     2. drop one precondition; 3. drop one postcondition;
-    4. reduce the body via `shrinkStmtsList` (drop a statement, replace one by a
-       smaller one, or splice a compound's body in place of the compound —
-       recursing into `shrinkCmd` and `shrinkLExpr`);
+    4. Reduce the body with `shrinkStmtsList`, which drops a statement, replaces one statement by a smaller one,
+       or puts the body of a compound statement in place of that statement, and which recurses into `shrinkCmd`
+       and `shrinkLExpr`.
     5. reduce one precondition expression via `shrinkLExpr`;
     6. reduce one postcondition expression via `shrinkLExpr`.
 
@@ -183,10 +179,11 @@ def relabelProcs (ps : List Procedure) : List Procedure :=
     { p with header := { p.header with name := ⟨s!"P{i}", ()⟩ } }
 
 /-- Structurally smaller, **well-typed** candidate procedure *lists*: drop one
-    procedure, or replace one procedure by a smaller one. Dropping comes first (the
-    larger reduction). Every candidate is relabelled `P0…Pk`, and every candidate —
-    drops included — is filtered through `procsTypeCheck`, so the well-typedness
-    guarantee holds even on ill-typed input (see `procsTypeCheck`).
+    procedure, or replace one procedure by a smaller one. The family that drops a procedure comes first, because
+    it gives the larger reduction. The function renames each candidate to the names from `P0` up to `Pk`, and
+    `procsTypeCheck` filters each candidate, and also each candidate of the family that drops a procedure.
+    Therefore the guarantee about well-typedness holds on input that is not well typed too. Read
+    `procsTypeCheck`.
 
     Per-procedure candidates are proposed against the program assembled from the
     *original* list, which is the program shape the procedure properties run the
@@ -210,9 +207,9 @@ def sizeProcs (ps : List Procedure) : Nat := (ps.map sizeProc).sum
 
     Used by the Tyche panels to report the *minimal* counterexample to a procedure
     property rather than the raw generated one. Because a candidate is kept only
-    when it still fails, the returned list is always a genuine counterexample —
-    and because every candidate passed `procTypeChecks`, it is always a well-typed
-    one. If the property's failure hinges on something no smaller well-typed list
+    when it still fails, the result is always a genuine counterexample. Each candidate also passed
+    `procTypeChecks`, so the result is always well typed. When the failure of the property depends on something
+    that no smaller well-typed list
     reproduces, this returns `ps` unchanged: never a wrong answer, just an
     unshrunk one. -/
 partial def minimizeProcsWhile (fails : List Procedure → Bool) (fuel : Nat)
@@ -255,8 +252,9 @@ private def specProc : Procedure :=
 #guard procTypeChecks emptyProc == true
 #guard procTypeChecks specProc == true
 
--- Fully minimal already: nothing smaller to propose. (`sizeProc` bottoms out at 1,
--- not 0 — `Block.sizeOf []` is 1 — which is immaterial: only *differences* matter.)
+-- This procedure is already smallest, so the shrinker proposes nothing. `sizeProc` bottoms out at 1, and not at
+-- 0, because `Block.sizeOf []` is 1. That value does not matter, because only a *difference* of two sizes
+-- matters.
 #guard (shrinkProcWellTyped emptyProc).isEmpty == true
 #guard sizeProc emptyProc == 1
 
@@ -268,7 +266,7 @@ private def specProc : Procedure :=
 #guard (shrinkProcWellTyped specProc).any (fun p => p.spec.postconditions.isEmpty) == true
 #guard (shrinkProcWellTyped specProc).all (fun p => sizeProc p < sizeProc specProc) == true
 
--- The header is preserved by *every* candidate — the signature-fixing convention.
+-- *Each* candidate keeps the header, by the convention that fixes the signature.
 #guard (shrinkProcCandidates specProc).all (fun p => p.header == specProc.header) == true
 
 -- A non-Boolean clause is not well-typed, so the oracle refuses it. This is what
@@ -293,11 +291,8 @@ private def specProc : Procedure :=
 
 /-- A procedure whose body declares a function with a `decreases` clause but no body.
 
-    This used to be the reproducer for a completeness gap: the declarative spec permitted
-    the shape while the *algorithmic* typechecker rejected it (`genProcedure` hit it on
-    roughly 2% of draws). **`strata-org/Strata` `main` accepts it**, so the gap is closed
-    and this is now simply a well-typed procedure — kept as a regression pin for the shape
-    and for the shrinker's well-typedness invariant. -/
+    The typechecker accepts that shape, so this procedure is well typed. This definition stays as a pin for the
+    shape and for the invariant of the shrinker about well-typedness. -/
 private def measureNoBodyProc : Procedure :=
   { emptyProc with
     body := .structured [
@@ -306,16 +301,15 @@ private def measureNoBodyProc : Procedure :=
                   measure := some (.const () (.intConst 0)),
                   preconditions := [] } .empty ] }
 
--- The oracle now *accepts* the shape (upstream closed the gap), so this input is
--- well-typed and every shrink candidate stays well-typed trivially.
+-- The oracle *accepts* that shape, so this input is well typed, and each candidate of the shrinker is then well
+-- typed for a trivial reason.
 #guard procTypeChecks measureNoBodyProc == true
 #guard procsTypeCheck [measureNoBodyProc] == true
 -- The headline invariant still holds on this input, which is what the pin is for: the
 -- `procsTypeCheck` filter covers the drop family as well as the reduce family, so no
 -- candidate list can be ill-typed regardless of which shape the checker accepts.
 #guard (shrinkProcsList [measureNoBodyProc, specProc]).all procsTypeCheck == true
--- Because the procedure is now well-typed, candidates may legitimately *retain* it —
--- the old pin (no candidate keeps the offending body) no longer applies.
+-- The procedure is well typed, so a candidate can *keep* it.
 #guard (shrinkProcsList [measureNoBodyProc, specProc]).any
   (fun c => c.any (fun p => p.body == measureNoBodyProc.body)) == true
 -- Dropping is still a legitimate reduction, so a singleton minimizes to the empty list

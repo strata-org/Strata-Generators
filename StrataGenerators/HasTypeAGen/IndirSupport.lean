@@ -3,45 +3,43 @@ import StrataGenerators.HasTypeAGen.Core
 import Strata.DL.Lambda.LTyUnify
 
 /-!
-# Generator-parametric support lemmas for the Indir / IndirPoly rules
+# The lemmas for the `Indir` and `IndirPoly` rules, over any argument generator
 
-`genLExprBase` itself carries the Indir/IndirPoly rules in its
-per-type `frequency` lists. That creates a proof-order problem: the four
-"forward" results about `genLExprBase` —
+`genLExprBase` holds the `Indir` rule and the `IndirPoly` rule in the `frequency` list of each
+type. This creates a question about the order of the proofs. Four results about
+`genLExprBase` each need a matching fact about `genIndir` and about `genIndirPolyCore`:
 
-  * `genLExprBase_sound`            (`HasTypeAGen.lean`)
-  * `genLExprBase_termDepth_bound`  (`HasTypeAGen.lean`)
-  * `genLExprBase_fvars_subset`     (`HasTypeAGen.lean`)
-  * `genLExprBase_opsConsistentR`   (`HasTypeAGenOpsConsistent.lean`)
+  * `genLExprBase_sound`
+  * `genLExprBase_termDepth_bound`
+  * `genLExprBase_fvars_subset`
+  * `genLExprBase_opsConsistentR`
 
-— each now need a corresponding fact about `genIndir` / `genIndirPolyCore`, but
-the existing `genIndir_sound` / `genIndirPoly_*` lemmas are stated *downstream* of
-them (and, in the `opsConsistentR` case, in a different file entirely).
+The lemmas `genIndir_sound` and the `genIndirPoly_*` lemmas are *after* those four results,
+and the one for `opsConsistentR` is even in another file.
 
-This module breaks the cycle the same way `Core.lean` breaks it for the
-generators themselves: every lemma here is **parametric in the argument generator
-`genArg` and the fallback**, taking the property it needs as a hypothesis
-(`hArg`, `hFallback`) rather than referring to `genLExprBase`. Each
-`genLExprBase_*` proof then discharges `hArg`/`hFallback` with its *own* recursive
-call at the smaller depth index `n`, which is exactly the induction hypothesis it
-already has.
+This module answers that question in the same way as the core module for the generators
+themselves. Each lemma here takes **the argument generator `genArg` and the fallback as
+parameters**, and it takes the property that it needs as a hypothesis, which is `hArg` or
+`hFallback`. No lemma here refers to `genLExprBase`. Each proof of a `genLExprBase_*` result
+then discharges `hArg` and `hFallback` with its *own* recursive call at the smaller depth
+index `n`, and that call is its induction hypothesis.
 
-Consequently nothing in this file mentions `genLExprBase`, so it can sit before
-both proof files, and each lemma is proved once instead of once per type × depth
-case.
+No definition in this file therefore mentions `genLExprBase`, and the file can come before
+both proof files. Each lemma also has one proof, and not one proof for each pair of a type and
+a depth.
 -/
 
 open Lambda RandomChoice SetGen
 
 namespace StrataGenerators.IndirSupport
 
--- ── Shared spine plumbing ───────────────────────────────────────────
+-- ── The shared lemmas about an application spine ─────────────────────
 
-/-- Membership in `List.mapM f l` on `SetGen.Set`: `args` is in the support iff
-    each element is pointwise in the support of `f` at the corresponding input.
+/-- Membership in the support of `List.mapM f l` at `SetGen.Set`. The support holds `args` exactly
+    when each element of `args` is in the support of `f` at the matching input.
 
-    (Duplicated from `HasTypeAGen.lean`'s `private mem_mapM_iff` so this module
-    stays upstream of it; the two are the same statement.) -/
+    The main proof file holds the same statement as a `private mem_mapM_iff`. This module has its own
+    copy, so that it can come before that file. -/
 theorem mem_mapM_iff' (f : LMonoTy → SetGen.Set LExpr')
     (argTys : List LMonoTy) (args : List LExpr') :
     args ∈ (List.mapM (m := SetGen.Set) f argTys) ↔
@@ -62,14 +60,13 @@ theorem mem_mapM_iff' (f : LMonoTy → SetGen.Set LExpr')
       | _ :: _, .cons harg htail =>
         exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
 
-/-- Pointwise version of `mapM_forall` for a `genArg` whose guarantee is
-    *conditional on the argument type*: if `genArg σ` only produces `P`-terms
-    whenever `Q σ` holds, and every type in `argTys` satisfies `Q`, then every
-    element of the produced list satisfies `P`.
+/-- The form of `mapM_forall` for a `genArg` whose guarantee holds *only for some argument types*.
+    If `genArg σ` gives only terms that satisfy `P` when `Q σ` holds, and each type in `argTys`
+    satisfies `Q`, then each element of the list satisfies `P`.
 
-    Needed because a proof can apply `genLExprBase_termDepth_bound` only at a
-    generable type. Therefore the per-argument bound is conditional on the argument
-    type being generable. -/
+    A proof needs this form, because it can apply `genLExprBase_termDepth_bound` only at a type that
+    the generator can make. The bound for one argument therefore has the condition that the generator
+    can make the type of that argument. -/
 theorem forall₂_forall_of_cond {P : LExpr' → Prop} {Q : LMonoTy → Prop}
     {genArg : LMonoTy → SetGen.Set LExpr'}
     (hArg : ∀ σ, Q σ → ∀ a, a ∈ SetGen.support (genArg σ) → P a)
@@ -85,9 +82,8 @@ theorem forall₂_forall_of_cond {P : LExpr' → Prop} {Q : LMonoTy → Prop}
     · exact hArg σ (hQ σ (by simp)) a hx
     · exact ih (fun σ' hσ' => hQ σ' (by simp [hσ'])) a ha'
 
-/-- Every element of a list produced by `mapM genArg` satisfies `P`, provided
-    everything `genArg` can produce does. The workhorse behind the per-argument
-    obligations of every lemma below. -/
+/-- Each element of a list from `mapM genArg` satisfies `P`, when each term that `genArg` can give
+    satisfies `P`. Each lemma below uses this theorem for its obligation about one argument. -/
 theorem mapM_forall {P : LExpr' → Prop}
     (genArg : LMonoTy → SetGen.Set LExpr')
     (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → P a)
@@ -106,14 +102,14 @@ theorem mapM_forall {P : LExpr' → Prop}
     · exact hArg σ a hx
     · exact ih tl htl a hrest
 
-/-- The **shape** of everything the Indir rule can emit: either an application
-    spine `mkApps (.op … ) args` whose arguments all come from `genArg`, or
-    (`genIndirPolyCore` only) the caller's fallback.
+/-- The **shape** of each term that the `Indir` rule can emit. Such a term is an application spine
+    `mkApps (.op … ) args`, and each of its arguments comes from `genArg`.
 
-    Factoring the two rules' support down to this single disjunction is what lets
-    the four `genLExprBase_*` proofs share one case analysis: each of them cares
-    only about "a spine over an op node, with `genArg` arguments" versus "the
-    fallback", never about `findOpsInCtx`/`findPolymorphicOps` internals. -/
+    This theorem, and the theorem for `genIndirPolyCore` below, reduce the support of the two rules to
+    one disjunction. The four proofs of a `genLExprBase_*` result therefore share one case analysis.
+    Each of them needs only the choice between a spine over an `.op` node with arguments from
+    `genArg`, and the fallback. No proof needs the internals of `findOpsInCtx` or of
+    `findPolymorphicOps`. -/
 theorem genIndir_shape (octx : OpCtx) (τ : LMonoTy)
     (genArg : LMonoTy → SetGen.Set LExpr')
     (h : (findOpsInCtx octx τ).length > 0) (e : LExpr')
@@ -129,8 +125,8 @@ theorem genIndir_shape (octx : OpCtx) (τ : LMonoTy)
   rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
   exact ⟨entry.1, entry.2, args, hentry_mem, (mem_mapM_iff' genArg entry.2 args).mp hargs, rfl⟩
 
-/-- The shape of everything `genIndirPolyCore` can emit: a spine over a
-    `findPolymorphicOps` candidate, or the caller's `fallback`. -/
+/-- The shape of each term that `genIndirPolyCore` can emit. Such a term is a spine over a candidate
+    from `findPolymorphicOps`, or it comes from the `fallback` of the caller. -/
 theorem genIndirPolyCore_shape (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (bctx : BVarCtx) (τ : LMonoTy)
     (genArg : LMonoTy → SetGen.Set LExpr') (fallback : SetGen.Set LExpr')
@@ -156,10 +152,11 @@ theorem genIndirPolyCore_shape (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx
       (mem_mapM_iff' genArg entry.2 args).mp hargs, rfl⟩
   · exact Or.inr he
 
--- ── Well-typedness ──────────────────────────────────────────────────
+-- ── The typing of a spine ───────────────────────────────────────────
 
-/-- `mkApps` preserves typing via the iterated `app` rule. (Same statement as
-    `HasTypeAGen.lean`'s `mkApps_hasType`, restated here to stay upstream.) -/
+/-- `mkApps` keeps the typing, through repeated use of the `app` rule. The main proof file holds the
+    same statement as `mkApps_hasType`. This module has its own copy, so that it can come before that
+    file. -/
 theorem mkApps_hasType' (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
     (argTys : List LMonoTy) (τ : LMonoTy)
     (hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))
@@ -169,7 +166,7 @@ theorem mkApps_hasType' (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
   | nil => exact hbase
   | cons harg _ ih => exact ih _ (LExpr.HasTypeA.app hbase harg)
 
-/-- Pointwise-membership implies pointwise-typing, given `hArg`. -/
+/-- With `hArg`, membership of each argument in a support gives the type of each argument. -/
 private theorem forall₂_typed {bctx : BVarCtx}
     {genArg : LMonoTy → SetGen.Set LExpr'}
     (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → HasTypeA' bctx a σ)
@@ -180,7 +177,7 @@ private theorem forall₂_typed {bctx : BVarCtx}
   | nil => exact .nil
   | @cons a ty _ _ hmem _ ih => exact .cons (hArg ty a hmem) ih
 
-/-- Soundness of the monomorphic Indir rule, parametric in `genArg`. -/
+/-- Soundness of the monomorphic `Indir` rule, over any argument generator `genArg`. -/
 theorem genIndir_hasType (octx : OpCtx) (bctx : BVarCtx) (τ : LMonoTy)
     (genArg : LMonoTy → SetGen.Set LExpr')
     (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → HasTypeA' bctx a σ)
@@ -190,9 +187,9 @@ theorem genIndir_hasType (octx : OpCtx) (bctx : BVarCtx) (τ : LMonoTy)
   obtain ⟨name, argTys, args, _, hargs, rfl⟩ := genIndir_shape octx τ genArg h e he
   exact mkApps_hasType' bctx _ args argTys τ .op (forall₂_typed hArg hargs)
 
-/-- Soundness of the polymorphic IndirPoly rule, parametric in `genArg` and the
-    fallback. The op node types at its annotation, and the annotation is by
-    construction `concreteArgTys.foldr arrow τ`, so `mkApps` folds back to `τ`. -/
+/-- Soundness of the polymorphic `IndirPoly` rule, over any argument generator `genArg` and any
+    fallback. The `.op` node has the type of its annotation, and that annotation is by construction
+    the chain of arrows from `concreteArgTys` to `τ`. `mkApps` therefore gives the type `τ`. -/
 theorem genIndirPolyCore_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (bctx : BVarCtx) (τ : LMonoTy)
     (genArg : LMonoTy → SetGen.Set LExpr') (fallback : SetGen.Set LExpr')
@@ -208,10 +205,11 @@ theorem genIndirPolyCore_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpC
   · exact mkApps_hasType' bctx _ args concreteArgTys τ .op (forall₂_typed hArg hargs)
   · exact hFallback e hfb
 
--- ── Free variables ──────────────────────────────────────────────────
+-- ── The free variables of a spine ───────────────────────────────────
 
-/-- `getVars` of a spine is contained in `keys` when the head and every argument
-    are. (Same statement as `HasTypeAGen.lean`'s `mkApps_fvars_subset`.) -/
+/-- The `getVars` of a spine is a subset of `keys` when the `getVars` of the head and of each
+    argument is a subset of `keys`. The main proof file holds the same statement as
+    `mkApps_fvars_subset`. -/
 theorem mkApps_getVars_subset (base : LExpr') (args : List LExpr')
     (keys : List (Lambda.Identifier Unit))
     (hbase : LExpr.LExpr.getVars base ⊆ keys) (hargs : ∀ a ∈ args, LExpr.LExpr.getVars a ⊆ keys) :
@@ -225,8 +223,8 @@ theorem mkApps_getVars_subset (base : LExpr') (args : List LExpr')
       exact List.append_subset.mpr ⟨hbase, hargs a (by simp)⟩
     · intro x hx; exact hargs x (by simp [hx])
 
-/-- The monomorphic Indir rule introduces no free variables of its own: the head
-    is an `.op` node (no `getVars`) and the arguments come from `genArg`. -/
+/-- The monomorphic `Indir` rule adds no free variable of its own. The head is an `.op` node, whose
+    `getVars` is empty, and the arguments come from `genArg`. -/
 theorem genIndir_getVars_subset (octx : OpCtx) (τ : LMonoTy)
     (keys : List (Lambda.Identifier Unit))
     (genArg : LMonoTy → SetGen.Set LExpr')
@@ -238,7 +236,8 @@ theorem genIndir_getVars_subset (octx : OpCtx) (τ : LMonoTy)
   refine mkApps_getVars_subset _ args keys (by simp only [LExpr.LExpr.getVars]; exact List.nil_subset _) ?_
   exact mapM_forall genArg hArg argTys args ((mem_mapM_iff' genArg argTys args).mpr hargs)
 
-/-- Likewise for IndirPoly, with the fallback's free variables assumed bounded. -/
+/-- The same claim for the `IndirPoly` rule. The hypothesis `hFallback` bounds the free variables of
+    the fallback. -/
 theorem genIndirPolyCore_getVars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (bctx : BVarCtx) (τ : LMonoTy) (keys : List (Lambda.Identifier Unit))
     (genArg : LMonoTy → SetGen.Set LExpr') (fallback : SetGen.Set LExpr')
@@ -259,45 +258,39 @@ theorem genIndirPolyCore_getVars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : 
 
 end StrataGenerators.IndirSupport
 
--- ── Spine arity, and the depth budget a spine actually needs ─────────
+-- ── The arity of a spine, and the depth budget that a spine needs ────
 --
--- `termDepth` charges **one level per `app` node**, so a fully-applied operator
--- of arity `k` costs `k` levels, not one. Formerly that did not matter: the
--- Indir rules lived only in `genLExpr`, and `genLExprBase_termDepth_bound` — the
--- theorem asserting `termDepth e ≤ depth` — only ever saw `genLExprBase`, whose
--- every branch is a single constructor.
+-- `termDepth` counts **one level for each `app` node**, so an operator of arity `k` with each
+-- argument present costs `k` levels and not one level.
 --
--- With the rules folded into `genLExprBase` that statement is no longer
--- merely unproved, it is **false**: at `depth = 1` the Indir branch can emit
--- `Int.Add #1 #2`, whose `termDepth` is `2`. So the bound has to be restated
--- rather than re-proved, and the honest restatement charges each level the
--- maximum arity available, not `1`.
+-- The bound must therefore give each level the largest arity that is available, and not the value 1.
+-- At `depth = 1`, the `Indir` branch can emit `Int.Add #1 #2`, whose `termDepth` is 2. A bound of
+-- `termDepth e ≤ depth` is therefore false.
 --
--- The budget is kept as an explicit recursive function rather than the closed
--- form `depth * K` so the arithmetic in the proof stays **linear**: goals are
--- discharged with `depthBudget K n` as an opaque atom, which `omega` can handle,
--- whereas `n * K` (with `K` a variable) it cannot.
+-- The budget is an explicit recursive function, and not the closed form `depth * K`, so that the
+-- arithmetic in a proof stays **linear**. A goal then holds `depthBudget K n` as an opaque atom, and
+-- `omega` can close such a goal. `omega` cannot close a goal that holds `n * K` with a variable `K`.
 
 namespace StrataGenerators.IndirSupport
 
-/-- The largest number of arguments any operator in `octx` can be applied to,
-    i.e. the longest argument prefix `findOpsInCtx` can return. Bounded by each
-    entry's arrow nesting.
+/-- The largest number of arguments that an operator in `octx` can take. This number is also the
+    length of the longest list of arguments that `findOpsInCtx` can return. The depth of the arrows in
+    the type of each entry bounds it.
 
-    The fold runs over `octx.ops`, the plain operator list. `OpCtx` also carries an
-    index by type (`byType`), but the arity of a candidate depends only on the arrow
-    nesting of its type, so the index plays no part here. -/
+    The fold runs over `octx.ops`, which is the plain list of operators. An `OpCtx` also holds an
+    index by type, which is `byType`. The arity of a candidate depends only on the depth of the
+    arrows in its type, so that index takes no part here. -/
 def opCtxArity (octx : OpCtx) : Nat :=
   (octx.ops.map (fun p => (decomposeArrow p.2).1.length)).foldl max 0
 
-/-- `argsForResult` returns a prefix of `decomposeArrow`'s argument list, so its
-    length is bounded by the full arity. -/
+/-- `argsForResult` returns a first part of the list of arguments from `decomposeArrow`, so the full
+    arity bounds its length. -/
 theorem argsForResult_length_le (fullTy τ : LMonoTy) (args : List LMonoTy)
     (h : argsForResult fullTy τ = some args) :
     args.length ≤ (decomposeArrow fullTy).1.length := by
-  -- Mirror `argsForResult`'s own recursion (on the arrow spine, measured by
-  -- `sizeOf`), not structural recursion on `LMonoTy`: the recursive call is on
-  -- `rest`, which sits inside a `List LMonoTy` argument of `tcons`.
+  -- The proof follows the recursion of `argsForResult` itself, which runs over the chain of arrows
+  -- and which `sizeOf` measures. It does not use structural recursion on an `LMonoTy`, because the
+  -- recursive call is on `rest`, which is inside a `List LMonoTy` argument of a `tcons`.
   unfold argsForResult at h
   split at h
   · rename_i σ rest
@@ -318,14 +311,15 @@ theorem argsForResult_length_le (fullTy τ : LMonoTy) (args : List LMonoTy)
     · simp at h
   termination_by sizeOf fullTy
 
-/-- Any member of a list is `≤` the running `foldl max` of that list. -/
+/-- Each member of a list is not more than the result of a fold that takes the maximum over that
+    list. -/
 theorem le_foldl_max (l : List Nat) (init : Nat) (x : Nat) (hx : x ∈ l) :
     x ≤ l.foldl max init := by
   induction l generalizing init with
   | nil => simp at hx
   | cons a rest ih =>
     rcases List.mem_cons.mp hx with rfl | hrest
-    · -- `x = a` is folded in at this step, and `foldl max` only grows after.
+    · -- The fold takes `x` into the accumulator at this step, and the accumulator then only grows.
       have hmono : ∀ (rs : List Nat) (b : Nat), b ≤ rs.foldl max b := by
         intro rs
         induction rs with
@@ -339,7 +333,7 @@ theorem le_foldl_max (l : List Nat) (init : Nat) (x : Nat) (hx : x ∈ l) :
     · simp only [List.foldl_cons]
       exact ih _ hrest
 
-/-- Every candidate the monomorphic Indir rule can pick has arity at most
+/-- The arity of each candidate that the monomorphic `Indir` rule can pick is not more than
     `opCtxArity octx`. -/
 theorem findOpsInCtx_length_le {octx : OpCtx} {τ : LMonoTy}
     {name : String} {argTys : List LMonoTy}
@@ -353,7 +347,7 @@ theorem findOpsInCtx_length_le {octx : OpCtx} {τ : LMonoTy}
     simp only [Option.some.injEq, Prod.mk.injEq] at hfilt
     obtain ⟨rfl, rfl⟩ := hfilt
     have hle := argsForResult_length_le ty τ (arg :: args) hargs
-    -- `(decomposeArrow ty).1.length` is one of the values folded by `opCtxArity`.
+    -- The length of the argument list of `ty` is one of the values that `opCtxArity` folds.
     have hmem' : (decomposeArrow ty).1.length
         ∈ octx.ops.map (fun p => (decomposeArrow p.2).1.length) :=
       List.mem_map.mpr ⟨(n, ty), hmem, rfl⟩
@@ -363,9 +357,9 @@ theorem findOpsInCtx_length_le {octx : OpCtx} {τ : LMonoTy}
     omega
   · simp at hfilt
 
-/-- Every candidate the polymorphic IndirPoly rule can pick has arity at most
-    `maxNumArgs`: `findPolymorphicOps` skips schemes of greater arity, and returns
-    a `take k` prefix with `k ≤ arity`. -/
+/-- The arity of each candidate that the polymorphic `IndirPoly` rule can pick is not more than
+    `maxNumArgs`. `findPolymorphicOps` skips a scheme of a larger arity, and it returns the first `k`
+    arguments for a `k` that is not more than the arity. -/
 theorem findPolymorphicOps_length_le {pctx : PolyOpCtx} {τ : LMonoTy}
     {generableTys sampledTys : List LMonoTy} {maxNumArgs : Nat}
     {name : String} {argTys : List LMonoTy}
@@ -381,41 +375,26 @@ theorem findPolymorphicOps_length_le {pctx : PolyOpCtx} {τ : LMonoTy}
     · rename_i harity
       simp only [List.mem_filterMap, List.mem_range] at hin
       obtain ⟨k, hk, hopt⟩ := hin
-      -- The candidate is `(schemeArgTys.take k).map (subst …)`. Rather than peel
-      -- the `Option` `do`-block by hand, note that *whatever* it returns, the
-      -- second component is that `map`, so `cases` on the bind plus the two
-      -- guards leaves an equation we can read the length off.
-      -- Peel the `Option` `do`-block. `findPolymorphicOps` writes it in `do`
-      -- notation over `Option`, which elaborates through `Option.bind` but not in
-      -- a form `rw` matches directly, so normalize with `simp` first.
+      -- `findPolymorphicOps` writes its body in `do` notation over `Option`, which elaborates
+      -- through `Option.bind`. `rw` does not match that form directly, so `simp` normalizes it
+      -- first.
       simp only [bind, Option.bind_eq_some_iff,
         Option.some.injEq, Prod.mk.injEq, pure] at hopt
-      -- Peel the remaining guard binds; the surviving conjunct equates `argTys`
-      -- with `(schemeArgTys.take k).map (subst …)`, of length `min k arity`.
-      -- The surviving conjunct equates `argTys` with
-      -- `(schemeArgTys.take k).map (subst …)`, whose length is `min k arity`.
-      -- Let `simp_all` find it rather than hard-coding the guard nesting.
-      -- The surviving conjunct equates `argTys` with
-      -- `(schemeArgTys.take k).map (subst …)`, of length `min k arity ≤ arity`.
-      -- Extract just that equation, whatever guard nesting sits above it.
-      -- The surviving conjunct equates `argTys` with
-      -- `(schemeArgTys.take k).map (subst …)`, of length `min k arity ≤ arity`.
-      -- `omega` can finish once the length equation is in scope, so let `simp_all`
-      -- normalize the guard nesting and then read the bound off `List.length_take`.
-      -- The last conjunct equates `argTys` with `(schemeArgTys.take k).map (subst …)`.
-      -- `rfl` substitutes it into the goal directly, leaving `min k arity ≤ maxNumArgs`,
-      -- which `harity` (from the `split` above) settles.
+      -- The last part of `hopt` says that `argTys` is the first `k` types of the scheme, after a
+      -- substitution. `rfl` puts that equation into the goal, which then reads
+      -- `min k arity ≤ maxNumArgs`. The hypothesis `harity` from the `split` above closes it.
       obtain ⟨-, -, -, -, -, -, -, rfl⟩ := hopt
       simp only [List.length_map, List.length_take]
       omega
 
-/-- The depth budget a generator needs when each level may emit an application
-    spine of arity up to `K`: `depthBudget K n = n * K`, written recursively so
-    the proof's arithmetic stays linear in `depthBudget K n`. -/
+/-- The depth budget that a generator needs when each level can emit an application spine of an arity
+    up to `K`. The value is `n * K`, and the definition is recursive, so that the arithmetic in a
+    proof stays linear in `depthBudget K n`. -/
 def depthBudget (K : Nat) : Nat → Nat
   | 0 => 0
   | n + 1 => K + depthBudget K n
 
+/-- The budget grows with the depth. -/
 theorem depthBudget_mono_le (K : Nat) {m n : Nat} (h : m ≤ n) :
     depthBudget K m ≤ depthBudget K n := by
   induction n with
@@ -426,7 +405,8 @@ theorem depthBudget_mono_le (K : Nat) {m n : Nat} (h : m ≤ n) :
     · have : m = n + 1 := by omega
       subst this; exact Nat.le_refl _
 
-/-- `1 ≤ K` makes each structural level (`abs`/`app`/`ite`/`eq`/`quant`) fit too. -/
+/-- When `K` is 1 or more, the budget is also large enough for a term that has one structural level
+    for each unit of depth. Examples of such a level are `abs`, `app`, `ite`, `eq` and `quant`. -/
 theorem le_depthBudget_self (K : Nat) (hK : 1 ≤ K) (n : Nat) : n ≤ depthBudget K n := by
   induction n with
   | zero => simp [depthBudget]
@@ -434,19 +414,17 @@ theorem le_depthBudget_self (K : Nat) (hK : 1 ≤ K) (n : Nat) : n ≤ depthBudg
 
 end StrataGenerators.IndirSupport
 
--- ── Generic spine-measure bound for the two rules ───────────────────
+-- ── A generic bound on the measure of a spine, for the two rules ─────
 --
--- `termDepth` is defined in `HasTypeAGen.lean`, downstream of this module, so
--- these two lemmas are stated over an **abstract measure** `m : LExpr' → Nat`
--- with the one property the argument actually needs (`hspine`: a spine over an
--- `.op` head costs at most the argument bound plus the arity). `HasTypeAGen.lean`
--- instantiates `m := termDepth bctx` and discharges `hspine` with
--- `termDepth_mkApps_le`.
+-- The two lemmas below hold for an **abstract measure** `m : LExpr' → Nat`. The proofs need only
+-- one property of `m`, which the hypothesis `hspine` gives: the measure of a spine over an `.op`
+-- head is not more than the bound on the arguments plus the arity. A caller instantiates `m` with
+-- its own measure, and it then proves `hspine` for that measure.
 
 namespace StrataGenerators.IndirSupport
 
-/-- The monomorphic Indir rule's output is bounded by `d + opCtxArity octx`, where
-    `d` bounds everything `genArg` produces. -/
+/-- The measure of each term from the monomorphic `Indir` rule is not more than
+    `d + opCtxArity octx`. Here `d` is a bound on the measure of each term that `genArg` gives. -/
 theorem genIndir_measure_le {m : LExpr' → Nat} {tvars : List TyIdentifier}
     (octx : OpCtx) (τ : LMonoTy)
     (genArg : LMonoTy → SetGen.Set LExpr') (d : Nat)
@@ -460,7 +438,7 @@ theorem genIndir_measure_le {m : LExpr' → Nat} {tvars : List TyIdentifier}
     (he : e ∈ SetGen.support (genIndir (G := SetGen.Set) octx τ genArg h)) :
     m e ≤ d + opCtxArity octx := by
   obtain ⟨nm, argTys, args, hmem, hargs, rfl⟩ := genIndir_shape octx τ genArg h e he
-  -- Each argument sits at a type from `argTys`, which `hSimple` says is simple.
+  -- Each argument has a type from `argTys`, and `hSimple` says that each such type is simple.
   have hall : ∀ a ∈ args, m a ≤ d :=
     forall₂_forall_of_cond hArg (hSimple nm argTys hmem) hargs
   have hlen : args.length = argTys.length := hargs.length_eq
@@ -468,8 +446,9 @@ theorem genIndir_measure_le {m : LExpr' → Nat} {tvars : List TyIdentifier}
   refine Nat.le_trans (hspine nm _ args hall) ?_
   omega
 
-/-- The polymorphic IndirPoly rule's output is bounded by `d + maxNumArgs`
-    (`findPolymorphicOps` skips wider schemes), or by the fallback's own bound. -/
+/-- The measure of each term from the polymorphic `IndirPoly` rule is not more than `d + maxNumArgs`,
+    because `findPolymorphicOps` skips a scheme of a larger arity. A term from the fallback keeps the
+    bound of the fallback. -/
 theorem genIndirPolyCore_measure_le {m : LExpr' → Nat} {tvars : List TyIdentifier}
     (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (bctx : BVarCtx) (τ : LMonoTy)

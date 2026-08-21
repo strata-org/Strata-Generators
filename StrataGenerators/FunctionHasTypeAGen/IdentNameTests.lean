@@ -102,10 +102,9 @@ example : "a b" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
   rw [mem_support_genIdentName_iff']
   intro h; exact absurd h.1 (by decide +kernel)
 
--- The equivalent check at a true use site is at the end of
--- `DatatypeGenProofs.lean`. There, `decide` discharges the side condition on
--- reachability for `DatatypeGen.genFreshName`. That check cannot be in this file,
--- because this file would then import the datatype development, which imports this
--- file.
+-- The same check at a real use site is at the end of the module for the proofs about a datatype.
+-- There, `decide` discharges the side condition about the reach of `DatatypeGen.genFreshName`. That
+-- check cannot be in this file, because this file would then import the development for a datatype,
+-- and that development imports this file.
 
 end StrataGenerators.Function.Tests

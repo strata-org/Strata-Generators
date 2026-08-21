@@ -5,64 +5,62 @@ import Strata.Languages.Core.FactoryWF
 open Lambda RandomChoice
 
 /-!
-# Generator definitions for well-typed `LExpr`s (lightweight, no Mathlib)
+# The definitions of the generator for a well-typed `LExpr`, without Mathlib
 
-This file re-exports the core generator definitions from `Core.lean` and adds
-`Factory`-accepting wrappers.
+This file exports the core definitions of the generator again, and it adds the wrappers that
+take a `Factory`. It needs no part of Mathlib.
 
-The full `HasTypeAGen` module re-exports everything here plus soundness/completeness proofs.
+The main `HasTypeAGen` module exports each definition of this file, and it adds the proofs of
+soundness and of completeness.
 -/
 
--- Re-export everything from Core
+-- This line exports each definition of the core module again.
 export ArbNat (Nat.arbitrary)
 
--- ── Factory conversion ──────────────────────────────────────────────
+-- ── How the module reads a `Factory` ────────────────────────────────
 
-/-- Extract the flat operator list from a `Factory` by computing the curried
-    type of each operation (inputs → output).
+/-- The flat list of operators of a `Factory`. The function computes the type of each operation as a
+    chain of arrows, from its inputs to its output.
 
-    The curried type is built with `mkArrow'` — exactly the *generic type* form
-    `OpsConsistent`/`OpsConsistentR` canonicalize each operator to
-    (`mkArrow' fn.output fn.inputs.values`). Using the same builder here means the
-    annotation the generator stamps on a `factoryOps`-sourced `.op` node *is*
-    definitionally the operator's generic type, so no `destructArrow`/`mkArrow`
-    reconciliation (nor an `ArrowSpineOK`/`FactoryOutputWF` side condition) is
-    needed to see it is op-consistent. -/
+    `mkArrow'` builds that chain. It is exactly the *generic type* form that `OpsConsistent` and
+    `OpsConsistentR` give to each operator, which is `mkArrow' fn.output fn.inputs.values`. This
+    function uses the same builder, so the annotation that the generator puts on an `.op` node from
+    `factoryOps` *is*, by definition, the generic type of the operator. A proof of op-consistency
+    therefore needs no reconciliation between `destructArrow` and `mkArrow`, and it needs no side
+    condition such as `ArrowSpineOK` or `FactoryOutputWF`. -/
 def factoryOps (F : @Factory LExprParams') : OpCtx :=
   OpCtx.ofList <| F.toArray.toList.filterMap fun f =>
     some (f.name.name, LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))
 
-/-- `coreMonoOps` is `factoryOps` applied to `Core.Factory`.
+/-- `coreMonoOps` equals `factoryOps Core.Factory`.
 
-    `coreMonoOps` lives in `HasTypeAGen/Core.lean`, and that file cannot call
-    `factoryOps`, because this file imports it. Therefore `coreMonoOps` repeats the
-    body of `factoryOps`. This lemma pins the two together: a change to one of them
-    and not the other makes the build fail here, instead of making the operator
-    vocabulary of the generators drift from the factory in silence. -/
+    `coreMonoOps` is in the core module, and that module cannot call `factoryOps`, because this file
+    imports it. `coreMonoOps` therefore repeats the body of `factoryOps`. This theorem joins the two
+    definitions: a change to one of them alone makes the build fail here, and it does not let the
+    vocabulary of operators of the generators differ from the factory in silence. -/
 theorem coreMonoOps_eq_factoryOps : coreMonoOps = factoryOps Core.Factory := rfl
 
-/-- Extract the polymorphic operator context from a `Factory` by recording each
-    operation's full type *scheme*: quantify over the operation's type arguments,
-    then curry its inputs to its output.
+/-- The context of polymorphic operators of a `Factory`. The function records the full type *scheme*
+    of each operation: it quantifies over the type arguments of the operation, and it then makes a
+    chain of arrows from the inputs to the output.
 
-    This is the polymorphic analogue of `factoryOps`. Where `factoryOps` collapses
-    each function to a single `LMonoTy` (losing polymorphism), `factoryPolyOps`
-    keeps the `∀ typeArgs. …` scheme that the polymorphic generation rules
-    (`genIndirPoly`/`findPolymorphicOps`) need. The scheme is built with the same
-    `mkArrow'` builder as `factoryOps`, so an entry here is *by construction* the
-    generic type of a real factory function — that is exactly the `PCtxWF F`
-    well-formedness condition, discharged as a lemma rather than assumed. -/
+    This function is the polymorphic form of `factoryOps`. `factoryOps` reduces each function to one
+    `LMonoTy` and it loses the polymorphism. `factoryPolyOps` keeps the scheme `∀ typeArgs. …`, and
+    the polymorphic rules of the generator need that scheme. Those rules are `genIndirPoly` and
+    `findPolymorphicOps`. The scheme uses the same `mkArrow'` builder as `factoryOps`, so an entry
+    here is *by construction* the generic type of a real function of the factory. That is exactly the
+    condition `PCtxWF F` for good form, and a lemma proves it and does not assume it. -/
 def factoryPolyOps (F : @Factory LExprParams') : PolyOpCtx :=
   F.toArray.toList.filterMap fun f =>
     some (f.name.name,
       Lambda.LTy.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)))
 
-/-- Every `corePolyOps` entry is a genuine `factoryPolyOps Core.Factory` entry.
+/-- Each entry of `corePolyOps` is an entry of `factoryPolyOps Core.Factory`.
 
-    `corePolyOps` has to repeat `factoryPolyOps`' body (it lives in `HasTypeAGen/Core.lean`,
-    which this file imports), so this is what keeps the two from drifting. It is also the
-    fact `PCtxWF Core.Factory corePolyOps` needs: an entry of `corePolyOps` is the generic
-    type of a real factory function, not a hand-written approximation of one. -/
+    `corePolyOps` must repeat the body of `factoryPolyOps`, because it is in the core module and this
+    file imports that module. This theorem therefore keeps the two definitions in agreement. It is
+    also the fact that `PCtxWF Core.Factory corePolyOps` needs: an entry of `corePolyOps` is the
+    generic type of a real function of the factory, and not a form that someone wrote by hand. -/
 theorem corePolyOps_subset_factoryPolyOps :
     ∀ e ∈ corePolyOps, e ∈ factoryPolyOps Core.Factory := by
   intro e he
@@ -73,33 +71,32 @@ theorem corePolyOps_subset_factoryPolyOps :
   · exact absurd hfe (by simp)
   · exact hfe
 
--- …and nothing is *missing*: `corePolyOps` is exactly the polymorphic part of the factory.
--- Checked by evaluation rather than `rfl`, which does not reduce through the 353-entry
--- factory. This is the guard that would have caught `Sequence.select!`, `mapConst` and
--- `TriggerGroup.addTrigger` being absent from the old hand-written list.
+-- No entry is *absent* either: `corePolyOps` is exactly the polymorphic part of the factory. This
+-- guard uses evaluation and not `rfl`, because `rfl` does not reduce through the whole factory,
+-- which holds 353 entries. The guard finds an operator that `corePolyOps` misses, such as
+-- `Sequence.select!`, `mapConst` or `TriggerGroup.addTrigger`.
 #guard corePolyOps ==
   (factoryPolyOps Core.Factory).filter (fun e => !(e.2.boundVars.isEmpty))
 
-/-- **Scheme closedness holds for the real operator vocabulary.**
+/-- **Each type scheme of the real vocabulary of operators is closed.** A scheme is closed when its
+    binder list holds each free type variable of its monotype.
 
-    The `hclosed` conjunct of `SchemeInstAt` is the one condition that stays as a
-    premise. This theorem shows that the condition is easy to satisfy: every entry of
-    `corePolyOps` satisfies it. A caller that has a concrete `pctx` can discharge
-    `hclosed` the same way.
+    The `hclosed` part of `SchemeInstAt` is the one condition that stays a premise. This theorem
+    shows that the condition is easy to meet: each entry of `factoryPolyOps` of a well-formed factory
+    meets it. A caller with a concrete `pctx` can discharge `hclosed` in the same way.
 
-    Now that `corePolyOps` is derived from `Core.Factory`, this is *proved* rather than
-    `decide`d — and from an upstream invariant rather than by enumeration. `FuncWF` (which
-    `LFuncWF` extends) carries `inputs_typevars_in_typeArgs` and
-    `output_typevars_in_typeArgs`, and upstream proves `Core.Factory_wf`, so scheme
-    closedness holds for *any* well-formed factory (`factoryPolyOps_closed`). The old
-    `by decide` could not survive the change anyway: the kernel does not reduce through the
-    353-entry factory. -/
+    The proof uses an invariant of upstream, and it does not enumerate the entries. `FuncWF`, which
+    `LFuncWF` extends, holds the fields `inputs_typevars_in_typeArgs` and
+    `output_typevars_in_typeArgs`, and upstream proves `Core.Factory_wf`. Closedness of a scheme
+    therefore holds for *each* well-formed factory. A proof by `decide` cannot work here, because the
+    kernel does not reduce through the whole factory, which holds 353 entries. -/
 theorem factoryPolyOps_closed {F : @Lambda.Factory LExprParams'}
     (hwf : Lambda.FactoryWF F) :
     ∀ p ∈ factoryPolyOps F,
       match p.2 with
       | .forAll boundVars monoTy => ∀ v ∈ monoTy.freeVars, v ∈ boundVars := by
-  -- `freeVars (mkArrow' out ins)` splits into the output's and the inputs' free vars.
+  -- A free variable of `mkArrow' out ins` is a free variable of the output, or it is a free variable
+  -- of an input.
   have hsplit : ∀ (out : LMonoTy) (vals : List LMonoTy) (v : TyIdentifier),
       v ∈ LMonoTy.freeVars (LMonoTy.mkArrow' out vals) →
       v ∈ LMonoTy.freeVars out ∨ ∃ t ∈ vals, v ∈ LMonoTy.freeVars t := by
@@ -127,6 +124,8 @@ theorem factoryPolyOps_closed {F : @Lambda.Factory LExprParams'}
   · exact hfwf.output_typevars_in_typeArgs hout
   · exact hfwf.inputs_typevars_in_typeArgs t (by rwa [ListMap.values_eq_map_snd]) hvt
 
+/-- Each type scheme in `corePolyOps` is closed. This is `factoryPolyOps_closed` at
+    `Core.Factory`. -/
 theorem corePolyOps_closed :
     ∀ p ∈ corePolyOps,
       match p.2 with
@@ -134,33 +133,31 @@ theorem corePolyOps_closed :
   fun p hp => factoryPolyOps_closed Core.Factory_wf p
     (corePolyOps_subset_factoryPolyOps p hp)
 
--- ── Factory-accepting wrappers ──────────────────────────────────────
+-- ── The wrappers that take a `Factory` ──────────────────────────────
 
-/-- Generate a well-typed `LExpr` using a `Factory` for operators.
-    This is a convenience wrapper around `genLExpr` that converts the factory
-    to an `OpCtx` via `factoryOps`. Uses the Indir and IndirPoly rules to
-    generate fully-applied operator applications. -/
+/-- Makes a well-typed `LExpr` and takes its operators from a `Factory`. This wrapper around
+    `genLExpr` turns the factory into an `OpCtx` with `factoryOps`. It uses the `Indir` rule and the
+    `IndirPoly` rule, so it makes an application of an operator to each of its arguments. -/
 def genLExprWithFactory [Gen G] (fctx : FVarCtx) (F : @Factory LExprParams')
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (pctx : PolyOpCtx := factoryPolyOps F) : G LExpr' :=
   genLExpr fctx (factoryOps F) pctx tvars bctx depth τ
 
-/-- Generate a well-typed closed expression (no free variables) using the
-    given factory for operators. -/
+/-- Makes a well-typed closed expression, which holds no free variable, and takes its operators from
+    the given factory. -/
 def genClosedLExprWithFactory [Gen G] (F : @Factory LExprParams')
     (tvars : List TyIdentifier) (depth : Nat)
     (pctx : PolyOpCtx := factoryPolyOps F) : G LExpr' := do
   let τ ← genLMonoTy tvars depth
   genLExprWithFactory [] F tvars [] depth τ pctx
 
-/-- Generate a well-typed `LExpr` using explicit operator and polymorphic
-    operator contexts. This is a convenience wrapper around `genLExpr` that
-    avoids requiring a `Factory` value.
+/-- Makes a well-typed `LExpr` from an operator context and a context of polymorphic operators that
+    the caller gives. This wrapper around `genLExpr` needs no `Factory` value.
 
-    `retryCont` is forwarded verbatim to `genLExpr`: it is the continuation invoked
-    to retry generation when a subterm fails, applied at every nesting level. It
-    defaults to `id` (no retrying), so existing call sites are unaffected; the test
-    harness passes `retryGenArg` here. See `genLExpr` for the full rationale. -/
+    The wrapper gives `retryCont` to `genLExpr` without a change. That continuation retries a draw
+    when a subterm fails, and it applies at each level of the nesting. Its default value is `id`,
+    which makes no retry. The test harness gives `retryGenArg` here. The documentation of `genLExpr`
+    gives the full reason. -/
 def genLExprWithOps [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx)
     (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat := 3)
