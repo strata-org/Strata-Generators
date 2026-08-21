@@ -199,35 +199,14 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 **Functions derived from ADT definitions**
 - No ADT definition triggers functions with duplicate names
 
+**Type aliases**
+- Resolving all type aliases before typechecking vs incrementally resolving type aliases during typechecking (one declaration at a time) result in the same proof obligations and agree on whether they accept the program
 
-**Algebraic datatypes: injectivity and disjointness (`adt:`)**
-
-Every generated `mutual … end` block denotes an initial algebra, so its constructors satisfy the `injection` and `discriminate` facts of [Software Foundations' `Tactics` chapter](https://softwarefoundations.cis.upenn.edu/lf-current/Tactics.html). The claims are about **Strata's SMT encoding of a datatype**, not about the generator, and the oracle is a real solver run through the whole Core pipeline (`Core.verify`). Universal quantification is expressed without quantifiers: each variable is an uninitialised local, which symbolic evaluation turns into an unconstrained symbolic constant. Uniformness is not covered — `addMutualBlock` already checks it syntactically.
-
-- Constructor **injectivity** — `C x⃗ = C y⃗ → x_i = y_i`, one `assert` per field so a verdict names the field: **74/74 obligations proved by cvc5, 75/75 by z3** (opt-in, `--smt`)
-- Constructor **disjointness** — in the *tester* form `!(isC u && isD u)` on a symbolic `u`: **45/45 and 53/53 proved** (opt-in, `--smt`)
-  - The constructor-application form `!(C x⃗ == D y⃗)` never reaches the solver: Strata's partial evaluator folds it to `true`, so `symbolicEval` emits `assert: true`. That is asserted as a property of its own (and so is the fact that the tester form is *not* folded, which is what keeps the solver property non-vacuous)
-- The law program typechecks — the screen that keeps the solver properties from being handed an ill-typed program
-- No datatype derives the same function name twice (**fails honestly**, see below — though only on a rare draw: the deterministic pin is a `#guard`ed witness)
-- Every emitted law query reaches a solver *verdict* — the deliberately unscreened property, which **fails honestly** on two encoder defects and reports them by cause (opt-in, `--smt`)
-
-**Type aliases: eager versus incremental resolution (`alias:`)**
-
-Strata resolves a type alias *during* typechecking, one declaration at a time. Both properties say this is equivalent to expanding every alias up front — that an alias is the transparent abbreviation it is documented to be. Both hold on every draw.
-
-- The two resolution orders agree on **acceptance**
-- The two resolution orders give the **same proof obligations** (the "evaluates the same" half, under Strata's own symbolic evaluator, with both sides normalised so a difference cannot be one of spelling)
-- Non-vacuity took work: a generated program declares aliases that nothing *uses* (the generator's type vocabulary is kept disjoint from the alias names, repo issue #65), so resolution on a raw draw is the identity. `introduceAlias` adds the use — it aliases a ground type the program mentions and rewrites every occurrence. Introducible on 29/30 draws; 27/30 reach the obligation comparison
-
-**`mutual … end` blocks of non-mutually-recursive datatypes (`mutual:`)**
-
-Drawn by concatenating *independently* generated datatypes, so no field can name a sibling (verified per sample, so the properties cannot degrade into claims about connected blocks). All four hold.
-
-- Joining datatypes that are each accepted alone into one `mutual` block keeps them accepted
-- The block survives `Program.typeCheck` and its constructors are callable
-- Splitting the block into one-datatype blocks preserves the derived vocabulary — the "same meaning" half (excluding the eliminators, which are block-wide by design)
-- The block prints without a conversion error (screened against the printer gaps of #48, so the claim is about the block)
-- Derived functions bind every type variable they mention (**fails honestly**, see below)
+**Mutually recursive datatypes**
+- Typechecker accepts individual non-mutually-recursive datatypes which are placed in the same `mutual` block
+- The types of all derived functions don't contain free type variables
+- The derived functions produced by a block `mutual t1, ..., tk end` where all the `ti` are *not* mutually-recursive are the same as the functions
+produced by `k` individual blocks `mutual t1 end; mutual t2 end; ..., mutual tk end` 
 
 ## Implementation bugs caught
 
