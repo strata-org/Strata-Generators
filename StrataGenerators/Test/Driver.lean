@@ -101,7 +101,7 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   -- `--seed=N` also fixes the process-wide RNG, which is where everything this package
   -- samples *outside* Plausible's own runner draws from: the self-driving `IO` properties
   -- (`Gen.run`), the generator sizes the Tyche pass picks (`IO.rand`), and the panels
-  -- themselves. Plausible's schedule is seeded per property instead, through
+  -- themselves. Plausible's own trial schedule is seeded separately, through
   -- `Configuration.randomSeed`; a seeded property therefore takes nothing from this
   -- stream, which is what keeps the two kinds of property from perturbing each other.
   if let some s := cli.run.seed then
