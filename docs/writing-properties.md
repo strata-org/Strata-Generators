@@ -419,9 +419,20 @@ No `True`-valued property catches that.
 lake test -- [numTrials] [maxSize] [flags]
 ```
 
+`maxSize` (default 5) is the structural bound your generator receives: `Gen.sized fun s`
+hands you `s`, ramped from 0 to `maxSize` over the property's trials, and you use it as a
+depth, a nesting level or a count directly. Do not rescale it — that is what the wrappers
+used to do (`s / 20`, `s / 25`, `s / 30`), and it left the flag meaning something
+different in each generator.
+
+If your generator cannot afford the largest size, cap it with a *named* constant carrying
+the measurement that sets it, as `TestScaffold.stmtNestingCap` and
+`TestScaffold.procNestingCap` do. A cap is a statement about your generator's cost; a
+divisor is a statement about the flag, and it will be wrong the moment the flag changes.
+
 | flag | effect |
 |---|---|
-| `--quick` | 100 trials, max size 40, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
+| `--quick` | 100 trials, max size 2, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
 | `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
