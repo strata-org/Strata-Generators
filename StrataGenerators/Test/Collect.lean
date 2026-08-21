@@ -27,11 +27,10 @@ open Elab Term in
     A `@[strata_properties]` list is spliced in place, so from a report's point of
     view the two attributes are interchangeable.
 
-    An attribute's `(seed := N)` argument becomes a `withSeed` around the declaration —
-    over each member, for a list. The pin is therefore applied *here* rather than being
-    carried through the run as a second, parallel notion of what a property's seed is:
-    what a driver folds over is a plain `List TestDecl` whose `seed` fields are already
-    the ones the attributes asked for. -/
+    The `(seed := N)` argument of an attribute becomes a `withSeed` around the
+    declaration, or around each member of a list. The seed is applied here, so a driver
+    folds a plain `List TestDecl` whose `seed` fields already hold what the attributes
+    asked for. The run needs no second idea of what the seed of a property is. -/
 elab "strata_registry%" : term => do
   let chunks ← (registryEntries (← getEnv)).mapM fun
     | .single n none      => `(term| [($(mkIdent n) : TestDecl)])

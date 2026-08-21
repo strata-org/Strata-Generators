@@ -108,16 +108,16 @@ the exit code, for a coverage statistic or a localisation tally.
 
 ## Seeds
 
-`lake test -- --seed=N` makes a run reproducible: every property draws from `N`, the same
-command line draws the same inputs, and a property that fails reports the seed to replay.
-Without it each run starts from OS randomness, so a counterexample is gone as soon as the
-run ends. One seed serves the whole run, so a seeded run covers less than an unseeded one:
-use it to reproduce a failure rather than to gate a merge.
+`lake test -- --seed=N` makes a run repeatable. Each property gets the seed `N`, the same
+command line gets the same inputs, and a property that fails reports the seed to use again.
+Without the flag, each run starts from the operating system, so a counterexample is gone at
+the end of the run. 1 seed serves the whole run, so a run with a seed covers less than a
+run without one. Use it to get a failure again, not to gate a merge.
 
-`@[strata_property (seed := N)]` pins one property's seed instead, whatever the run was
-given. That is what turns a defect on a rare draw into one that fails every run — and so
-into one `knownFailure` can watch. The cost is that a pinned property stops looking for
-new defects. See `TestDecl.effectiveSeed` and `withSeed`.
+`@[strata_property (seed := N)]` gives 1 property its own seed, whatever the run has. A
+defect that only some inputs show then fails on each run, and `knownFailure` can watch it.
+The cost: that property stops the search for new defects. See `TestDecl.effectiveSeed` and
+`withSeed`.
 
 See `docs/writing-properties.md` for the longer version, including how the harness
 discovers your file.

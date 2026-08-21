@@ -9,7 +9,7 @@ the type it draws from, and the name — with nothing registered anywhere else.
 ```
 lake test -- --list                        # confirm it was picked up
 lake test -- --only="example:" --quick     # run just this group
-lake test -- --only="example:" --seed=7    # …reproducibly, reporting the seed on a failure
+lake test -- --only="example:" --seed=7    # the same inputs each time; a failure gives the seed
 ```
 
 To add your own, put it in whatever file under `StrataTests/` it belongs in — this one,

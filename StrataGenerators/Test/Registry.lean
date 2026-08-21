@@ -13,8 +13,8 @@ def myPassIdempotent : TestDecl :=
   .property "mypass: the pass is idempotent" "mypass" Generators.program checkMyPass
 ```
 
-and `lake test` runs it. An optional argument pins the property's seed, so it draws the
-same inputs on every run:
+and `lake test` runs it. An optional argument gives the property its own seed, so it gets
+the same inputs on each run:
 
 ```lean
 @[strata_property (seed := 8021)]
@@ -67,7 +67,7 @@ namespace StrataGenerators.Test
 inductive Entry where
   /-- A `def _ : TestDecl`. -/
   | single (decl : Name) (seed : Option Nat)
-  /-- A `def _ : List TestDecl`, spliced in place. `seed` pins every member. -/
+  /-- A `def _ : List TestDecl`, spliced in place. `seed` applies to each member. -/
   | many (decl : Name) (seed : Option Nat)
   deriving Inhabited, Repr
 
@@ -88,18 +88,15 @@ def registryEntries (env : Environment) : Array Entry :=
   let s := registryExt.toEnvExtension.getState env
   s.importedEntries.flatMap id ++ s.state
 
-/-- The optional argument both registration attributes take: `(seed := 42)` pins the
-    property's seed, so it draws the same inputs on every run. See
-    `StrataGenerators.Test.withSeed`, which is what this expands to.
+/-- The optional argument of the 2 registration attributes: `(seed := 42)` gives the
+    property its own seed. It expands to `StrataGenerators.Test.withSeed`.
 
-    One attribute with an argument, rather than a second attribute alongside it — the
-    `@[strata_property, seed = 42]` that `ppx_quick_test`'s `[@config … seed = …]` would
-    suggest. In Lean `@[a, b]` is a list of two *independent* attributes, so `seed = 42`
-    would have to be a globally registered attribute called `seed`: a name any other
-    package may also want, meaningless on its own, and — worst — a silent no-op on a
-    declaration that forgot `strata_property`, since nothing would then be reading it.
-    An argument cannot be written without the attribute it belongs to. This is the form
-    core uses for the same reason: `@[deprecated (since := "2024-01-01")]`. -/
+    1 attribute with an argument, and not a second attribute as in
+    `@[strata_property, seed = 42]`. Lean reads that form as 2 independent attributes, so
+    `seed` must be a global attribute name. Other packages then cannot use the name, and the
+    name means nothing on its own. Worse, it does nothing at all on a declaration that has
+    no `strata_property`. An argument cannot appear without its attribute. Lean core uses
+    the same form for `@[deprecated (since := "2024-01-01")]`. -/
 syntax seedArg := " (" &"seed" " := " num ")"
 
 @[inherit_doc seedArg]
@@ -108,10 +105,9 @@ syntax (name := strata_property) "strata_property" (seedArg)? : attr
 @[inherit_doc seedArg]
 syntax (name := strata_properties) "strata_properties" (seedArg)? : attr
 
-/-- Read the `(seed := N)` argument off an attribute, if it carries one. An argument that
-    parsed but holds no numeral is an error rather than a silently absent pin: a pin that
-    quietly failed to take would leave the property drawing fresh inputs while its author
-    believed it was fixed to one draw. -/
+/-- Read the `(seed := N)` argument of an attribute, if the attribute has one. An argument
+    that parses but has no numeral is an error. A seed that does not take effect leaves the
+    property with new inputs on each run, and the author expects 1 input. -/
 private def seedOf? (stx : Syntax) : AttrM (Option Nat) := do
   let some arg := stx[1].getOptional? | return none
   let some n := (arg.find? (·.isOfKind numLitKind)).bind Syntax.isNatLit?
@@ -151,11 +147,11 @@ private def expectHead (attrName : Name) (expected : Name) (decl : Name) :
 
 /-- One property, registering itself. Attach to a `def _ : TestDecl`.
 
-    `@[strata_property (seed := 42)]` also pins the property's seed. -/
+    `@[strata_property (seed := 42)]` also gives the property its own seed. -/
 initialize
   registerRegistryAttr `strata_property
     "Register a `TestDecl` with the Strata property-test harness. \
-     `(seed := N)` pins the seed it draws its inputs from."
+     `(seed := N)` sets the seed for its inputs."
     Entry.single (expectHead `strata_property ``TestDecl)
 
 /-- A family of properties registered together. Attach to a `def _ : List TestDecl`.
@@ -165,7 +161,7 @@ initialize
 initialize
   registerRegistryAttr `strata_properties
     "Register a `List TestDecl` with the Strata property-test harness. \
-     `(seed := N)` pins that seed on every member of the list."
+     `(seed := N)` sets that seed on each member of the list."
     Entry.many (expectHead `strata_properties ``List)
 
 /-- The diagnostics registry, kept separate because a driver runs it at a different

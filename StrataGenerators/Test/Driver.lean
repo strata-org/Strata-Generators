@@ -98,12 +98,11 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
     if let some code ← checkSolvers then
       return some code
 
-  -- `--seed=N` also fixes the process-wide RNG, which is where everything this package
-  -- samples *outside* Plausible's own runner draws from: the self-driving `IO` properties
-  -- (`Gen.run`), the generator sizes the Tyche pass picks (`IO.rand`), and the panels
-  -- themselves. Plausible's own trial schedule is seeded separately, through
-  -- `Configuration.randomSeed`; a seeded property therefore takes nothing from this
-  -- stream, which is what keeps the two kinds of property from perturbing each other.
+  -- `--seed=N` also sets the process-wide generator. Everything that samples outside
+  -- Plausible's own runner reads it: the self-driving `IO` properties (`Gen.run`), the
+  -- generator sizes of the Tyche pass (`IO.rand`), and the panels. Plausible gets its seed
+  -- separately, through `Configuration.randomSeed`. A property with a seed thus takes
+  -- nothing from this generator, and it cannot change the inputs of another property.
   if let some s := cli.run.seed then
     IO.setRandSeed s
 
@@ -113,15 +112,15 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   IO.println s!"Running {selected.length} of {registry.length} properties \
     ({cli.run.numTrials} trials, max size {cli.run.maxSize}{seedNote})..."
 
-  -- A pinned property draws the same inputs on every run and ignores `--seed=`. Worth
-  -- naming up front either way: without `--seed=` a pin is the only reason a property's
-  -- inputs do not vary between runs, and with it a pin is the only reason a property's
-  -- inputs are not the ones the seed chose.
+  -- A property with its own seed gets the same inputs on each run and ignores `--seed=`.
+  -- Report the count either way. Without the flag, such a property is the only one whose
+  -- inputs do not change between runs. With the flag, it is the only one whose inputs are
+  -- not the inputs of the flag.
   let pinned := selected.filter (·.seed.isSome)
   unless pinned.isEmpty do
     let ignores := if cli.run.seed.isSome then " and so ignore --seed=" else ""
-    IO.println s!"{pinned.length} of them pin their own seed{ignores}, and draw the same \
-      inputs on every run (--list shows which)."
+    IO.println s!"{pinned.length} of them set their own seed{ignores}, and get the same \
+      inputs on each run (--list shows which)."
 
   -- Printed here rather than in either renderer, so both drivers report it: the LSpec
   -- one aggregates through `lspecIO` and never sees an `Outcome`, so it cannot count

@@ -90,6 +90,13 @@ Flags (all optional; the Tyche visualization pass is on by default):
 - `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
   Currently, this flag runs 100 trials for each property, where each input has a maximum size of 40.
   This flag omits Tyche visualizations:
+- `--seed=N` — give each property the seed `N`, and print the seed of each property that
+  fails. The same command line then gets the same inputs, so a counterexample comes back.
+  Without the flag, each run starts from the operating system, and a failing input is gone
+  at the end of the run. Each property gets the same seed, so a run with a seed covers less
+  than a run without one. Use the flag to get a failure again, not to gate a merge. A
+  property with its own seed from `@[strata_property (seed := …)]` keeps that seed and
+  ignores the flag.
 - `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
 - `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
 - `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
@@ -235,8 +242,8 @@ def stmtTransforms' : List TestDecl :=
 ```
 
 
-A defect that only some draws expose becomes markable once you pin the seed that exposes
-it, since the property then fails on every run:
+You can mark a defect that only some inputs show. Give the property the seed that gives
+such an input, and the property then fails on each run:
 
 ```lean
 @[strata_property (seed := 8021)]
@@ -244,8 +251,8 @@ def myPassOutputTypechecks : TestDecl :=
   knownFailure "strata-org/Strata#123: …" <| …
 ```
 
-To find the number, run with `--seed=N` until the property fails: the report prints the
-seed that property drew from, and that is the one to pin.
+To find the number, run with `--seed=N` until the property fails. The report prints the
+seed of that property, and that is the number to use.
 
 ## Tyche visualization
 
