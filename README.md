@@ -243,15 +243,17 @@ inspecting property-based testing generators.
 
 ### Generating samples
 
-The test driver writes Tyche panels by default, so a plain run produces the
-JSONL file alongside the property-test results:
+The boilerplate code to produce Tyche visualizations are automatically added
+when a new property is registered. By default, the test driver updates the Tyche panels
+in VS Code (the `--quick` / `--no-tyche` CLI flags suppress this behavior).
 
-```bash
-lake build test
-.lake/build/bin/test [numTrials] [maxSize]
-```
+To add auxiliary information to a Tyche panel, modify the 
+instance of the `TycheFeatures` typeclass for the type being generated 
+(see
+[`StrataGenerators/Test/Generators.lean`](./StrataGenerators/Test/Generators.lean) for details).
+For example, one can add a feature that explains why a property-based test failed (`rejection_cause`).
 
-Use these CLI flags to control the output:
+To further control the Tyche visualizations, use these CLI flags:
 
 - `--tyche-samples=N` (default: 1000) — number of samples per generator
 - `--tyche-out=PATH` (default: `tyche_output.jsonl`) — output file path
@@ -272,103 +274,6 @@ Open VS Code, press `Cmd+Shift+P` (on macOS), run
 `Tyche: Open`, and select the generated `.jsonl` file. Tyche displays
 interactive histograms and distribution charts for each property.
 
-### Adding a Tyche visualization for a new property
-
-Note: the following steps assume the property is already defined in the test harness
-(see [Adding a new property](#adding-a-new-property) on how to add a new property).
-
-#### 1. Define the type containing the data to be visualized
-
-This type is typically a `structure` that contains the generated value,
-along with auxiliary featuers that cannot be recomputed, e.g.:
-
-```lean
-structure PropResult where
-  value   : MyThing       -- Value produced by generator
-  passed  : Bool          -- No. of trials passed
-  genSize : Nat           -- The generator size `value` was sampled at
-```
-
-If several properties share the same `PropResult` type, define an extra `tag` field 
-in the `structure` and distinguish them using the name of the visualization distinguish 
-(see `StmtPropResult` and `ProcPropResult` for an example of how this is done).
-
-#### 2. Implement an instance of `Tyche.TycheSample` typeclass for the type defined in step (1)
-
-```lean
-instance : Tyche.TycheSample PropResult where
-  toSample r :=
-    { representation := formatMyThing r.value              -- Function for serializing `r.value`
-      status         := if r.passed then .passed else .failed
-      statusReason   := if r.passed then "" else explainFailure r.value
-      features := [
-        ("verdict", .nominal (if r.passed then "pass" else "fail")),
-        ("cause",   .nominal (classifyCause r.value)),     -- Why a property failed
-        ("size",    .ordinal (sizeOf r.value)) ] }
-```
-
-- **`representation`**: If generating random Strata Core programs, use 
-  Strata Core's own pretty-printer (`Core.formatProgram`, `formatStmts`, `formatFunc`) .
-- **`status`**: this must be the same property function that is invoked by the test harnes
-  (i.e. a function in the relevant `*.TestSupport` module).
-- **`features`**: `.nominal` for grouping, `.ordinal` / `.continuous` for
-  distributions. Include at least one field that explains why a property failed
-  (e.g. `rejection_cause`, `measure_no_body`, `violating_phases`, `error_sites`).
-  For samples that pass a property vacuously, use an explicit `"—"` indicator
-  rather than treating them as trials that passed.
-
-#### 3. Write the generator wrapper
-
-An `IO MyPropResult`. Reuse an existing draw (`genStmtsForTyche`,
-`genProcsForTyche`, `genProgramForTyche`) rather than a fresh generator call, so
-the panel samples the same distribution as its neighbours, and vary the generator
-size per sample. If the property's counterexamples are shrinkable, minimize on
-failure and recompute the features from the minimized value, so they describe what
-is actually displayed:
-
-```lean
-def generatorWrapper (prop : MyThing → Bool) : IO PropResult := do
-  let (x, genSize) ← genMyThingForTyche -- Invoke the actual generator`
-  if prop x then
-    return { value := x, passed := true, genSize }
-  else
-    -- `minimizeProcsCounterexample` / `minimizeProgramCounterexample` keep every
-    -- candidate well-typed *and* still-failing, so the verdict is unchanged.
-    return { value := minimizeMyCounterexample prop 200 x, passed := false, genSize }
-```
-
-#### 4. Register it in `runTychePanels`
-
-Add the following expression in the `runTychePanels` function in `TycheViz.lean`:
-```lean
-panel PropertyNames.myProperty (generatorWrapper myProperty)
-```
-
-Alternatively, if the property belongs to an existing list of `Property`s in
-[`Properties.lean`](./StrataGenerators/Properties.lean) 
-(e.g. `StmtTransforms`), you can iterate over them like so:
-
-
-```lean
-for p in Properties.stmtTransforms do
-  panel p.name (genStmtProp p.name p.check)
-```
-
-Note that `panel` defaults to `--tyche-samples` samples. 
-To override this option, pass `(count := n)` .
-
-**For properties with a finite and small no. of inputs**:
-For properties whose input space is finite and small (e.g., all bitvectors of width 4),
-use the `enumerate` function instead of `panel`. 
-The `enumerate` function performs one trial per element in the input space, 
-as opposed to running `--tyche-samples` times:
-
-```lean
-enumerate PropertyNames.printerBvIntConversions bvIntConversionSamples
-```
-
-The test oracle for these properties is a conjunction over all elements
-in the input space (e.g. `checkBvIntConversionsPrint`). 
 
 #### Checking that the Tyche visualizations appear
 Run the following to produce the Tyche visualizations with a small no. of tests:
