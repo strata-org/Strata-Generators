@@ -184,6 +184,9 @@ to be generated. Note that the body of the function should be a `Prop` that is d
 (or alternatively a function that returns `Bool`). In our experience, functions 
 that are decidable `Prop`s have better error messages (coming from the Plausible property-based testing library).
 
+Note: properties that are `Prop`s should be defined using `abbrev` or be defined as  `@[reducible] def`, 
+in order for typeclass resolution to succeed. 
+
 The `@[strata_property]` attribute records the test declaration, allowing 
 the test driver to pick it up.
 

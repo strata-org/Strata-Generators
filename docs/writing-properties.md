@@ -1,10 +1,11 @@
-# Writing a property
+# Adding properties to Strata-Generators
 
-A property goes in whatever file under `StrataTests/` you think it belongs in — an
-existing one or a new one, one property or forty. You never edit a file in
-`StrataGenerators/`.
+Note: the documentation in `README.md` should already be sufficient for most end-users of Strata-Generators
+for testing Strata Core infrastructure + transformations. This document contains extra details, 
+but it is not necessary to read this document in order to use this repo (reading the `README` is sufficient).
 
-## The short version
+
+## Summary
 
 Add this to any file under `StrataTests/`, or create a new one:
 
