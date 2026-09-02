@@ -118,7 +118,7 @@ def isCallStmt : Statement → Bool
   | _ => false
 
 /-- The statement family's sample. It uses the `size` and `len` schedule of
-    `TestScaffold.genStmtsWith`, and draws through the tuned entry point. -/
+    `TestScaffold.genStmtsG`, and draws through the tuned entry point. -/
 def stmtsGen (θ : Tuning) (s : Nat) : Gen (List Statement) := do
   let size := max 1 (min 3 s)
   let len := max 1 s
@@ -182,7 +182,7 @@ def stmtHeaders : List String :=
 -- Procedure family
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-- The procedure family's sample. It is `TestScaffold.genProcsWith`, and it draws each body through
+/-- The procedure family's sample. It is `TestScaffold.genProcsG`, and it draws each body through
     `genProcedureT θ`. -/
 def procsGen (θ : Tuning) (s : Nat) : Gen (List Procedure) := do
   let n := max 2 s
@@ -291,7 +291,7 @@ def isCheck : Cmd Expression → Bool
   | .assert _ _ _ | .assume _ _ _ | .cover _ _ _ => true
   | _ => false
 
-/-- The command family's sample. It is `TestScaffold.genCmdsWithCtx`, one chain of four commands from
+/-- The command family's sample. It is `TestScaffold.genCmdsWithCtxG`, one chain of four commands from
     the **empty** context, drawn through the tuned chain.
 
     The empty start is not incidental. `genCmd` has two sites, and only the site that a writable context
@@ -444,7 +444,7 @@ def exprHeaders : List String :=
 -- ══════════════════════════════════════════════════════════════════════════
 
 open StrataGenerators.ProgramTuning StrataGenerators.Mono in
-/-- The program family's sample. It is `TestScaffold.genProgramWith`, drawn through the tuned
+/-- The program family's sample. It is `TestScaffold.genProgramG`, drawn through the tuned
     declaration fold. -/
 def programsGen (θ : Tuning) (s : Nat) : Gen Program := do
   let numDecls := max 2 s
