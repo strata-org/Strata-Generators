@@ -101,28 +101,32 @@ instance : Shrinkable TypedExpr where
 
     `retryCont` is `genLExpr`'s per-subterm retry continuation (draw a failed subterm again in place).
     It is `Plausible.Gen`-specific and defaults to `id` — the retry-free generator any interpretation
-    can run; the `Arbitrary` instance passes `retryGenArg 20` on top. -/
-def genTypedExprG [_root_.Gen G] (fctx : FVarCtx) (depth : Nat)
-    (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G (LExpr' × LMonoTy) := do
+    can run; the `Arbitrary` instance passes `retryGenArg 20` on top.
+
+    As in `shrinkTypedExpr`, `mk` builds the concrete wrapper, here in the final `pure`. It is a
+    parameter rather than a `Functor.map` over a pair-valued generator because `Test.Generators` pins
+    each `TunableGen` instance to the matching `Arbitrary` instance by `rfl`: a `map` outside the bind
+    chain is stuck on an unreducible scrutinee, so the pin no longer holds definitionally. -/
+def genTypedExprG [_root_.Gen G] (mk : LExpr' → LMonoTy → α) (fctx : FVarCtx) (depth : Nat)
+    (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G α := do
   let ty ← genLMonoTy (G := G) [] depth
   let expr ← genLExprWithOps (G := G) fctx coreMonoOps corePolyOps [] [] depth ty 3 retryCont
-  pure (expr, ty)
+  pure (mk expr ty)
 
 /-- As `genTypedExprG`, but over `coreOpCtx` with no polymorphic operators — the context the
     resolve-after-erasure property draws from (the old `genResolveTypedExpr`). -/
-def genResolveTypedExprG [_root_.Gen G] (depth : Nat)
-    (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G (LExpr' × LMonoTy) := do
+def genResolveTypedExprG [_root_.Gen G] (mk : LExpr' → LMonoTy → α) (depth : Nat)
+    (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G α := do
   let ty ← genLMonoTy (G := G) [] depth
   let expr ← genLExprWithOps (G := G) [] coreOpCtx [] [] [] depth ty 3 retryCont
-  pure (expr, ty)
+  pure (mk expr ty)
 
 -- `genLExpr` can fail through `default` when an arrow case at the depth 0 finds no bound variable, free
 -- variable or operator in the context. `Plausible.Gen` does not backtrack, so `retryGen` draws again with
 -- new randomness after such a failure.
 instance : Arbitrary TypedExpr where
   arbitrary := retryGen 500 (Gen.sized fun s =>
-    (fun p => (⟨p.1, p.2⟩ : TypedExpr)) <$>
-      genTypedExprG (G := Plausible.Gen) defaultFCtx (max 1 s) (retryGenArg 20))
+    genTypedExprG (G := Plausible.Gen) (⟨·, ·⟩) defaultFCtx (max 1 s) (retryGenArg 20))
 
 /-- A generated closed expression, which holds no free variable. Each property that the suite states for
     the empty typing context uses this wrapper. Those properties are the ones about progress and about
@@ -138,10 +142,13 @@ instance : Repr ClosedTypedExpr where
 instance : Shrinkable ClosedTypedExpr where
   shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
+-- The draw is `TypedExpr`'s over the empty context, mapped to this wrapper. That is the shape the
+-- `TunableGen ClosedTypedExpr` instance of `Test.Generators` pins, and the `map` stays outside the
+-- `Gen.sized` for the pin to hold definitionally.
 instance : Arbitrary ClosedTypedExpr where
-  arbitrary := retryGen 500 (Gen.sized fun s =>
-    (fun p => (⟨p.1, p.2⟩ : ClosedTypedExpr)) <$>
-      genTypedExprG (G := Plausible.Gen) [] (max 1 s) (retryGenArg 20))
+  arbitrary := retryGen 500 ((fun (te : TypedExpr) => (⟨te.expr, te.ty⟩ : ClosedTypedExpr)) <$>
+    (Gen.sized fun s =>
+      genTypedExprG (G := Plausible.Gen) (⟨·, ·⟩) [] (max 1 s) (retryGenArg 20)))
 
 -- ── Printing ─────────────────────────────────────────────────────────
 
@@ -194,23 +201,19 @@ instance : Shrinkable ResolveTypedExpr where
 
 instance : Arbitrary ResolveTypedExpr where
   arbitrary := retryGen 500 (Gen.sized fun s =>
-    (fun p => (⟨p.1, p.2⟩ : ResolveTypedExpr)) <$>
-      genResolveTypedExprG (G := Plausible.Gen) (max 1 s) (retryGenArg 20))
+    genResolveTypedExprG (G := Plausible.Gen) (⟨·, ·⟩) (max 1 s) (retryGenArg 20))
 
 /-! The retry-free canonical generators (`Generable`): each `Arbitrary` above is one of these at
 `Plausible.Gen` plus the `Gen.sized`/`retryGen`/`retryGenArg` harness wrapping. -/
 
 instance : StrataGenerators.Generable TypedExpr where
-  gen G _ depth := (fun p => (⟨p.1, p.2⟩ : TypedExpr)) <$>
-    genTypedExprG (G := G) defaultFCtx depth
+  gen G _ depth := genTypedExprG (G := G) (⟨·, ·⟩) defaultFCtx depth
 
 instance : StrataGenerators.Generable ClosedTypedExpr where
-  gen G _ depth := (fun p => (⟨p.1, p.2⟩ : ClosedTypedExpr)) <$>
-    genTypedExprG (G := G) [] depth
+  gen G _ depth := genTypedExprG (G := G) (⟨·, ·⟩) [] depth
 
 instance : StrataGenerators.Generable ResolveTypedExpr where
-  gen G _ depth := (fun p => (⟨p.1, p.2⟩ : ResolveTypedExpr)) <$>
-    genResolveTypedExprG (G := G) depth
+  gen G _ depth := genResolveTypedExprG (G := G) (⟨·, ·⟩) depth
 
 /-- Run `resolve` on the term after a full erasure, and report the result as a string. The result is `none`
     when the property holds, which means that `resolve` succeeded and inferred a type that is general
