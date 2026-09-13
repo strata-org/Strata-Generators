@@ -57,9 +57,13 @@ The properties themselves are **not** here. Each property is a `@[strata_propert
 `docs/writing-properties.md`. This module holds the generation only.
 -/
 
-open Lambda RandomChoice ArbNat Basalt.PlausibleGen Plausible Core Imperative
+open Lambda RandomChoice ArbNat Basalt.PlausibleGen Core Imperative
+-- `Plausible.Gen` is one interpretation; `Gen` (from `Basalt.Gen`) is the _class_ of interpretations,
+-- so `Gen` stays hidden and each Plausible-specific site says `Plausible.Gen`.
+open Plausible hiding Gen
 open Strata Strata.CoreDDM
 open StrataDDM (initDialect)
+open StrataGenerators (Generable)
 
 -- ── The generation of a typed expression ─────────────────────────────
 
@@ -97,7 +101,7 @@ instance : Shrinkable TypedExpr where
 /-- The suite's expression generator, over the core operator contexts, **polymorphic in the
     interpretation `G`** — the same term runs at `Plausible.Gen` (for `lake test`) and, e.g., at
     `FuzzGen`. This is the old `genTypedExprWith` with two changes: `depth` is a parameter (the caller's
-    size knob) rather than read from `Gen.sized`, and `G` is open.
+    size knob) rather than read from `Plausible.Gen.sized`, and `G` is open.
 
     `retryCont` is `genLExpr`'s per-subterm retry continuation (draw a failed subterm again in place).
     It is `Plausible.Gen`-specific and defaults to `id` — the retry-free generator any interpretation
@@ -107,7 +111,7 @@ instance : Shrinkable TypedExpr where
     parameter rather than a `Functor.map` over a pair-valued generator because `Test.Generators` pins
     each `TunableGen` instance to the matching `Arbitrary` instance by `rfl`: a `map` outside the bind
     chain is stuck on an unreducible scrutinee, so the pin no longer holds definitionally. -/
-def genTypedExprG [_root_.Gen G] (mk : LExpr' → LMonoTy → α) (fctx : FVarCtx) (depth : Nat)
+def genTypedExprG [Gen G] (mk : LExpr' → LMonoTy → α) (fctx : FVarCtx) (depth : Nat)
     (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G α := do
   let ty ← genLMonoTy (G := G) [] depth
   let expr ← genLExprWithOps (G := G) fctx coreMonoOps corePolyOps [] [] depth ty 3 retryCont
@@ -115,7 +119,7 @@ def genTypedExprG [_root_.Gen G] (mk : LExpr' → LMonoTy → α) (fctx : FVarCt
 
 /-- As `genTypedExprG`, but over `coreOpCtx` with no polymorphic operators — the context the
     resolve-after-erasure property draws from (the old `genResolveTypedExpr`). -/
-def genResolveTypedExprG [_root_.Gen G] (mk : LExpr' → LMonoTy → α) (depth : Nat)
+def genResolveTypedExprG [Gen G] (mk : LExpr' → LMonoTy → α) (depth : Nat)
     (retryCont : (LMonoTy → G LExpr') → (LMonoTy → G LExpr') := id) : G α := do
   let ty ← genLMonoTy (G := G) [] depth
   let expr ← genLExprWithOps (G := G) [] coreOpCtx [] [] [] depth ty 3 retryCont
@@ -125,7 +129,7 @@ def genResolveTypedExprG [_root_.Gen G] (mk : LExpr' → LMonoTy → α) (depth 
 -- variable or operator in the context. `Plausible.Gen` does not backtrack, so `retryGen` draws again with
 -- new randomness after such a failure.
 instance : Arbitrary TypedExpr where
-  arbitrary := retryGen 500 (Gen.sized fun s =>
+  arbitrary := retryGen 500 (Plausible.Gen.sized fun s =>
     genTypedExprG (G := Plausible.Gen) (⟨·, ·⟩) defaultFCtx (max 1 s) (retryGenArg 20))
 
 /-- A generated closed expression, which holds no free variable. Each property that the suite states for
@@ -144,10 +148,10 @@ instance : Shrinkable ClosedTypedExpr where
 
 -- The draw is `TypedExpr`'s over the empty context, mapped to this wrapper. That is the shape the
 -- `TunableGen ClosedTypedExpr` instance of `Test.Generators` pins, and the `map` stays outside the
--- `Gen.sized` for the pin to hold definitionally.
+-- `Plausible.Gen.sized` for the pin to hold definitionally.
 instance : Arbitrary ClosedTypedExpr where
   arbitrary := retryGen 500 ((fun (te : TypedExpr) => (⟨te.expr, te.ty⟩ : ClosedTypedExpr)) <$>
-    (Gen.sized fun s =>
+    (Plausible.Gen.sized fun s =>
       genTypedExprG (G := Plausible.Gen) (⟨·, ·⟩) [] (max 1 s) (retryGenArg 20)))
 
 -- ── Printing ─────────────────────────────────────────────────────────
@@ -200,19 +204,19 @@ instance : Shrinkable ResolveTypedExpr where
   shrink te := shrinkTypedExpr (⟨·, ·⟩) te.expr
 
 instance : Arbitrary ResolveTypedExpr where
-  arbitrary := retryGen 500 (Gen.sized fun s =>
+  arbitrary := retryGen 500 (Plausible.Gen.sized fun s =>
     genResolveTypedExprG (G := Plausible.Gen) (⟨·, ·⟩) (max 1 s) (retryGenArg 20))
 
 /-! The retry-free canonical generators (`Generable`): each `Arbitrary` above is one of these at
-`Plausible.Gen` plus the `Gen.sized`/`retryGen`/`retryGenArg` harness wrapping. -/
+`Plausible.Gen` plus the `Plausible.Gen.sized`/`retryGen`/`retryGenArg` harness wrapping. -/
 
-instance : StrataGenerators.Generable TypedExpr where
+instance : Generable TypedExpr where
   gen G _ depth := genTypedExprG (G := G) (⟨·, ·⟩) defaultFCtx depth
 
-instance : StrataGenerators.Generable ClosedTypedExpr where
+instance : Generable ClosedTypedExpr where
   gen G _ depth := genTypedExprG (G := G) (⟨·, ·⟩) [] depth
 
-instance : StrataGenerators.Generable ResolveTypedExpr where
+instance : Generable ResolveTypedExpr where
   gen G _ depth := genResolveTypedExprG (G := G) (⟨·, ·⟩) depth
 
 /-- Run `resolve` on the term after a full erasure, and report the result as a string. The result is `none`
@@ -247,13 +251,7 @@ instance : Shrinkable GenCmdWithCtx where
   shrink gc := (shrinkCmd gc.cmd).map fun c' =>
     { gc with cmd := c', outCtx := cmdOutCtx gc.inCtx c' }
 
-private def genCmdWith (ctx : VarCtx) : Gen GenCmdWithCtx := Gen.sized fun s => do
-  let depth := max 1 s
-  let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := Plausible.Gen) coreMonoOps tvars [] ctx depth
-  pure ⟨cmd, ctx, ctx'⟩
-
-def genCmdWithCtxG [_root_.Gen G] (ctxSize : Nat) : G GenCmdWithCtx := do
+def genCmdWithCtxG [Gen G] (ctxSize : Nat) : G GenCmdWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
   let (_, baseCtx) ← genCmds (G := G) coreMonoOps tvars [] [] depth ctxSize
@@ -263,7 +261,7 @@ def genCmdWithCtxG [_root_.Gen G] (ctxSize : Nat) : G GenCmdWithCtx := do
 instance : Arbitrary GenCmdWithCtx where
   arbitrary := retryGen 1000 (genCmdWithCtxG (G := Plausible.Gen) 3)
 
-instance : StrataGenerators.Generable GenCmdWithCtx where
+instance : Generable GenCmdWithCtx where
   gen G _ size := genCmdWithCtxG (G := G) size
 
 /-- A generated sequence of commands together with its context. -/
@@ -284,7 +282,7 @@ instance : Shrinkable GenCmdsWithCtx where
   shrink gc := (shrinkCmds gc.inCtx gc.cmds).map fun cs' =>
     { gc with cmds := cs', outCtx := cmdsOutCtx gc.inCtx cs' }
 
-def genCmdsWithCtxG [_root_.Gen G] (n : Nat) : G GenCmdsWithCtx := do
+def genCmdsWithCtxG [Gen G] (n : Nat) : G GenCmdsWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
   let (cmds, ctx') ← genCmds (G := G) coreMonoOps tvars [] [] depth n
@@ -293,7 +291,7 @@ def genCmdsWithCtxG [_root_.Gen G] (n : Nat) : G GenCmdsWithCtx := do
 instance : Arbitrary GenCmdsWithCtx where
   arbitrary := retryGen 1000 (genCmdsWithCtxG (G := Plausible.Gen) 4)
 
-instance : StrataGenerators.Generable GenCmdsWithCtx where
+instance : Generable GenCmdsWithCtx where
   gen G _ size := genCmdsWithCtxG (G := G) size
 
 -- ── The properties about a command ───────────────────────────────────
@@ -326,15 +324,15 @@ instance : Shrinkable GenFunction where
 
 /-- Generate a function against `defaultFCtx`, and give the context of the free variables, so that a
     property can read the matching type map. The depth grows with the size parameter of the harness, as it
-    does in `genCmdWith`. -/
-def genFunctionG [_root_.Gen G] (fctx : FVarCtx) (depth : Nat) : G GenFunction := do
+    does in `genCmdWithCtxG`. -/
+def genFunctionG [Gen G] (fctx : FVarCtx) (depth : Nat) : G GenFunction := do
   let func ← genFunction (G := G) fctx coreMonoOps depth
   pure ⟨func, fctx⟩
 
 instance : Arbitrary GenFunction where
-  arbitrary := retryGen 1000 (Gen.sized fun s => genFunctionG (G := Plausible.Gen) defaultFCtx (max 1 s))
+  arbitrary := retryGen 1000 (Plausible.Gen.sized fun s => genFunctionG (G := Plausible.Gen) defaultFCtx (max 1 s))
 
-instance : StrataGenerators.Generable GenFunction where
+instance : Generable GenFunction where
   gen G _ size := genFunctionG (G := G) defaultFCtx size
 
 -- ── The properties about a function ──────────────────────────────────
@@ -362,14 +360,14 @@ instance : Repr ClosedGenFunction where
 instance : Shrinkable ClosedGenFunction where
   shrink gf := (shrinkFuncWellFormed gf.func).map fun f' => { gf with func := f' }
 
-def genClosedFunctionG [_root_.Gen G] (depth : Nat) : G ClosedGenFunction := do
+def genClosedFunctionG [Gen G] (depth : Nat) : G ClosedGenFunction := do
   let func ← genFunction (G := G) [] coreMonoOps depth
   pure ⟨func⟩
 
 instance : Arbitrary ClosedGenFunction where
-  arbitrary := retryGen 2000 (Gen.sized fun s => genClosedFunctionG (G := Plausible.Gen) (max 2 s))
+  arbitrary := retryGen 2000 (Plausible.Gen.sized fun s => genClosedFunctionG (G := Plausible.Gen) (max 2 s))
 
-instance : StrataGenerators.Generable ClosedGenFunction where
+instance : Generable ClosedGenFunction where
   gen G _ size := genClosedFunctionG (G := G) size
 
 -- ── The soundness of `Function.typeCheck` ────────────────────────────
@@ -492,7 +490,7 @@ private def procBodyLenCap : Nat := 3
 
 /-- Generate a well-typed statement list at the size of the run. That size is the length of the sequence, and
     it is also the depth of the nesting, up to `stmtNestingCap`. -/
-def genStmtsG [_root_.Gen G] (size len : Nat) : G GenStmts := do
+def genStmtsG [Gen G] (size len : Nat) : G GenStmts := do
   let (ss, _, _) ← StrataGenerators.Stmt.genProgramStmts (G := G) coreMonoOps [] size len
   pure ⟨ss⟩
 
@@ -500,10 +498,10 @@ def genStmtsG [_root_.Gen G] (size len : Nat) : G GenStmts := do
 -- `typeDecl` names. Therefore `retryGen` draws again with new randomness, as it does for each other
 -- generator here.
 instance : Arbitrary GenStmts where
-  arbitrary := retryGen 4000 (Gen.sized fun s =>
+  arbitrary := retryGen 4000 (Plausible.Gen.sized fun s =>
     genStmtsG (G := Plausible.Gen) (max 1 (min stmtNestingCap s)) (max 1 s))
 
-instance : StrataGenerators.Generable GenStmts where
+instance : Generable GenStmts where
   gen G _ size := genStmtsG (G := G) (max 1 (min stmtNestingCap size)) (max 1 size)
 
 -- ── The properties about a statement ─────────────────────────────────
@@ -563,7 +561,7 @@ instance : Shrinkable GenProcs where
 -- about FilterProcedures and about PrecondElim that reads the call graph has real content. A
 -- **polymorphic** procedure is also callable: `headerProcSig` records the type arguments of the callee, and
 -- `genCallStmt` samples a concrete instance of them at the call site.
-def genProcsG [_root_.Gen G] (n size len : Nat)
+def genProcsG [Gen G] (n size len : Nat)
     (retryProc : G Core.Procedure → G Core.Procedure := id) : G GenProcs := do
   -- The list holds two procedures or more. These properties are about the edges of the call graph, and one
   -- procedure can call nothing.
@@ -580,11 +578,11 @@ def genProcsG [_root_.Gen G] (n size len : Nat)
   pure ⟨relabelProcs ps⟩
 
 instance : Arbitrary GenProcs where
-  arbitrary := retryGen 8000 (Gen.sized fun s =>
+  arbitrary := retryGen 8000 (Plausible.Gen.sized fun s =>
     genProcsG (G := Plausible.Gen) (max 2 s) (max 1 (min procNestingCap s)) (max 1 (min procBodyLenCap s))
       (retryGen 8000))
 
-instance : StrataGenerators.Generable GenProcs where
+instance : Generable GenProcs where
   gen G _ size := genProcsG (G := G) (max 2 size) (max 1 (min procNestingCap size))
     (max 1 (min procBodyLenCap size))
 
@@ -651,7 +649,7 @@ instance : Shrinkable GenProgram where
 -- accessor of a *polymorphic* datatype goes through the `IndirPoly` rule, which samples an instance, and a
 -- sample that nothing can fill is another failure for the retry loop to absorb. The number of the
 -- declarations here is far below the number at which that cost matters, so this fuel is ample.
-def genProgramG [_root_.Gen G] (numDecls : Nat)
+def genProgramG [Gen G] (numDecls : Nat)
     (retryProg : G Core.Program → G Core.Program := id) : G GenProgram := do
   -- The program holds two declarations or more. A program of one declaration cannot reach a pass that reads
   -- one declaration and rewrites another one.
@@ -659,10 +657,10 @@ def genProgramG [_root_.Gen G] (numDecls : Nat)
   pure ⟨prog⟩
 
 instance : Arbitrary GenProgram where
-  arbitrary := retryGen 8000 (Gen.sized fun s =>
+  arbitrary := retryGen 8000 (Plausible.Gen.sized fun s =>
     genProgramG (G := Plausible.Gen) (max 2 s) (retryGen 30000))
 
-instance : StrataGenerators.Generable GenProgram where
+instance : Generable GenProgram where
   gen G _ size := genProgramG (G := G) (max 2 size)
 
 -- ── The diagnostic for the whole-program shrinker ────────────────────
@@ -752,7 +750,7 @@ def derivedCallCoverage (samples maxSize : Nat) (coverageNumDecls : Nat := 10) :
         -- The size cycles here, as it does in each other loop that draws a sample, and it changes nothing.
         -- `genProgram` takes the number of the declarations as an argument, and it reads no size of the run.
         (retryGen 30000 (ProgramGen.genProgram (G := Plausible.Gen) coverageNumDecls {})
-         : Gen Core.Program) (i % (maxSize + 1))
+         : Plausible.Gen Core.Program) (i % (maxSize + 1))
       pure (some prog)
      catch _ => pure none)
     match r with
@@ -833,27 +831,27 @@ instance : Shrinkable GenAdtBlock where
 instance : Shrinkable GenIndepBlock where
   shrink b := (shrinkBlock b.block).map (⟨·⟩)
 
-def genAdtBlockG [_root_.Gen G] (maxSize : Nat) : G GenAdtBlock := do
+def genAdtBlockG [Gen G] (maxSize : Nat) : G GenAdtBlock := do
   let block ← DatatypeGen.genMutuallyRecursiveDatatypes (G := G) (maxSize := maxSize)
   pure ⟨block⟩
 
 instance : Arbitrary GenAdtBlock where
   arbitrary := genAdtBlockG (G := Plausible.Gen) 0
 
-instance : StrataGenerators.Generable GenAdtBlock where
+instance : Generable GenAdtBlock where
   gen G _ size := genAdtBlockG (G := G) size
 
 /-- One datatype for each level of the size, so a block holds one datatype at size 0 and `maxSize`
     datatypes at the largest size. A block of one datatype gives each property about the shape of a
     `mutual` block no content, and size 0 draws such a block; each larger size gives a pair or more. -/
-def genIndepBlockG [_root_.Gen G] (extra : Nat) : G GenIndepBlock := do
+def genIndepBlockG [Gen G] (extra : Nat) : G GenIndepBlock := do
   let block ← StrataGenerators.MutualBlockShape.genIndependentBlock (G := G) (extra + 1) (maxSize := 0)
   pure ⟨block⟩
 
 instance : Arbitrary GenIndepBlock where
-  arbitrary := Gen.sized fun s => genIndepBlockG (G := Plausible.Gen) s
+  arbitrary := Plausible.Gen.sized fun s => genIndepBlockG (G := Plausible.Gen) s
 
-instance : StrataGenerators.Generable GenIndepBlock where
+instance : Generable GenIndepBlock where
   gen G _ size := genIndepBlockG (G := G) size
 
 -- ── The diagnostic for the coverage of a block of datatypes ──────────
@@ -910,7 +908,7 @@ def printResolveErrors (numTrials maxSize : Nat) : IO Nat := do
   IO.println "    ── resolve error messages on counterexamples ──"
   for i in List.range attempts do
     let size := i % (maxSize + 1)
-    let te ← try Gen.run (Arbitrary.arbitrary (α := ResolveTypedExpr)) size
+    let te ← try Plausible.Gen.run (Arbitrary.arbitrary (α := ResolveTypedExpr)) size
              catch _ => pure ⟨.const () (.boolConst true), .bool⟩
     match resolveErrorMessage te with
     | none => pure ()
@@ -950,7 +948,7 @@ def roundtripFunctionAction (numTrials maxSize : Nat) : IO (Bool × Nat × Nat �
   let mut rtMismatch := 0
   for i in List.range total do
     let size := i % (maxSize + 1)
-    let gf ← try Gen.run (Arbitrary.arbitrary (α := ClosedGenFunction)) size
+    let gf ← try Plausible.Gen.run (Arbitrary.arbitrary (α := ClosedGenFunction)) size
              catch _ => pure ⟨default⟩
     let s := formatFuncAsProgram gf.func
     match ← parseCoreProgram s with
@@ -1005,7 +1003,7 @@ def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
   let mut shownReprs : List String := []
   for i in List.range (min numTrials 200) do
     let size := i % (maxSize + 1)
-    let name ← try Gen.run genQuotedName size catch _ => pure "x"
+    let name ← try Plausible.Gen.run genQuotedName size catch _ => pure "x"
     for pos in positions do
       match ← probeIdentRoundtrip pos name with
       | none => probeOk := probeOk + 1
@@ -1058,7 +1056,7 @@ def printerErrorDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat × Nat) :=
   let mut tally : List (String × Nat) := []
   for i in List.range total do
     let size := i % (maxSize + 1)
-    let gp ← try Gen.run (Arbitrary.arbitrary (α := GenProgram)) size
+    let gp ← try Plausible.Gen.run (Arbitrary.arbitrary (α := GenProgram)) size
              catch _ => pure ⟨{ decls := [] }⟩
     -- A draw that used up its retries gives the empty program. The action scores such a draw in neither
     -- direction.
