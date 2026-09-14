@@ -229,7 +229,7 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     disjoint in pairs, this function recovers the three blocks exactly. Therefore
     `ProcSigCorresponds [headerProcSig name h] P` holds for a monomorphic procedure of that header and that name.
     That is why each harness gives the signature of an already generated **monomorphic** procedure only to a
-    later body. Read `TestScaffold.genProcsWith`. -/
+    later body. Read `TestScaffold.genProcsG`. -/
 def headerProcSig (name : String) (h : Procedure.Header) : ProcSig where
   pname := name
   typeArgs := h.typeArgs

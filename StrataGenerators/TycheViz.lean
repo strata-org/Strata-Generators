@@ -746,7 +746,7 @@ def stmtRepr (ss : List Statement) : String :=
   formatStmts ss ++ suffix
 
 /-- Generate one well-typed statement list at `IO`, for the Tyche panels. The function draws the nesting and the
-    length from one size, as `TestScaffold.genStmtsWith` does, so the panel shows the shapes that the property
+    length from one size, as `TestScaffold.genStmtsG` does, so the panel shows the shapes that the property
     behind the gate saw. -/
 def genStmtsForTyche : IO (List Statement × Nat) := do
   let d ← max 1 <$> IO.rand 0 panelMaxSize
@@ -841,7 +841,7 @@ open StrataGenerators.Procedure.TestSupport in
     empty support. Therefore this function runs the `Plausible.Gen` interpretation, which retries, at a
     random size. It also renames each procedure to `P0` up to `Pk`, so that no two names collide.
 
-    The function follows `TestScaffold.genProcsWith`. The procedures form an acyclic graph of calls, and
+    The function follows `TestScaffold.genProcsG`. The procedures form an acyclic graph of calls, and
     the generator makes the body of each procedure against the monomorphic procedures before it. Therefore
     each panel sees a program with real edges in its call graph. -/
 def genProcsForTyche : IO (List Core.Procedure × Nat) := do
@@ -959,7 +959,7 @@ private def programFeatures (p : Core.Program) (genSize : Nat) :
 /-- Generate a whole program at `IO`, for the Tyche panels, through `ProgramGen.sample`. That function
     runs the generator through the `Plausible.Gen` interpretation, which retries, because the direct path
     at `G := IO` is not reliable. The docstring of `ProgramGen.sample` records that fact. This function
-    uses the same limits as `TestScaffold.genProgramWith`. -/
+    uses the same limits as `TestScaffold.genProgramG`. -/
 def genProgramForTyche : IO (Core.Program × Nat) := do
   let genSize ← IO.rand 0 panelMaxSize
   let numDecls := max 2 genSize
