@@ -1,8 +1,8 @@
 # Random generators for Strata Core programs 
 
 This repo contains random generators for well-typed [Strata](https://github.com/strata-org/strata)
-Core programs. These generators are built using the [Basalt](https://github.com/hgoldstein95/basalt) Lean 
-framework, which allows us to prove these generators sound and complete with respect to Strata Core's typing relations.
+Core programs. These generators are built using [Basalt](https://github.com/hgoldstein95/basalt), 
+a Lean property-based testing library. Using Basalt, we prove these generators sound and complete with respect to Strata Core's typing relations.
 
 Specifically, the repo contains generators for the following fragment of Strata Core:
 - Expressions (`LExpr`s) (typing relation: `HasTypeA`)
