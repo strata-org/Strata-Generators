@@ -227,7 +227,7 @@ for nested function declarations that don't have preconditions, but whose bodies
 - **(FIXED)** `None of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean`) but have no grammar production, so each of these is 
 rendered as a fresh type variable instead. 
 - `Function.typeCheck` accepts `bitvec w` for all natural numbers `w`, but the pretty-printer only support widths in the set `{1, 8, 16, 32, 64}`
-- `Set` is registered in the Core factory (`Factory.lean`, `KnownLTys` holds `∀a. Set %a`) and the typechecker accepts a `Set` type, but the DDM printer has no mapping for it: `lmonoTyToCoreType` logs `unknown type: Lambda.LMonoTy.tcons "Set" [...]` and prints `$__unknown_type`, and `handleZeroaryOps` / `handleBinaryOps` render `Set.empty` and `Set.contains` as generic calls that do not re-parse. `Triggers` and `TriggerGroup` are unprintable in the same way and for the same reason: the generator's type vocabulary is *derived* from `Core.KnownTypes` (`DatatypeGen.defaultBaseTypes` / `defaultTyCons`), so any type the register holds and the printer does not is reported by `printer: no conversion error on generated programs`.
+- `Set` is registered in the list of known types in the Core factory  and the typechecker accepts a `Set` type, but the DDM printer does not support printing `Set` factory functions (e.g. `Set.empty`)
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
 
 ```
@@ -477,7 +477,7 @@ After the type alias `B` is resolved, we get:
 datatype T3 { Base(), MkT3 (f : int -> T3) }
 ```
 which is a legal datatype definition. However, `ProgramHasType` erroneously rejects the source program as violating the non-nested requirement for ADTs as it doesn't resolve type aliases.
-- **(FIXED)** Typing spec for local function declarations allows for arbitrary well-typed functions in output context. The rule now carries the premise `Function.ofPureFunc decl = .ok func`, which is what the executable typechecker already computed, so the declaration determines both the function and the output context. `Gaps.funcDecl_func_determined` reads the tie back out of a derivation and `Gaps.funcDecl_illTyped_rejected` refutes the counterexample below. Consider the following (declarative) typing rule for local function declarations (in `StatementHasType`):
+- **(FIXED)** Typing spec for local function declarations allows for arbitrary well-typed functions in output context. Consider the following (declarative) typing rule for local function declarations (in `StatementHasType`):
 
 ```
   /-- Local function declaration. The function is non-recursive and well-typed
