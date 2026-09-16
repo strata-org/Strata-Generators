@@ -1,0 +1,4 @@
+# Local run outputs (coverage-study logs/tables, saved corpora, crash artifacts). Regenerable; the
+# distilled results live in ../STATUS.md, which is the single ledger. Keep the directory, ignore contents.
+*
+!.gitignore
