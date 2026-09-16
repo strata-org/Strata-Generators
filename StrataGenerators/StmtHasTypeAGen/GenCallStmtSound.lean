@@ -1107,8 +1107,8 @@ private theorem statementsHasTypeA_equiv_congr_fuel {P : Program} : ∀ (n : Nat
           hg hm hinv (ih body (by simp at hfuel; omega) hbody he) (heq.trans he.symm)
       | exit _ _ L label md _ hlab heq =>
         exact StatementHasType'.exit C Γ₂ L label md _ hlab (heq.trans he.symm)
-      | funcDecl _ _ L decl func md _ hrec hfunc heq =>
-        exact StatementHasType'.funcDecl C Γ₂ L decl func md _ hrec
+      | funcDecl _ _ L decl func md _ hrec hof hfunc heq =>
+        exact StatementHasType'.funcDecl C Γ₂ L decl func md _ hrec hof
           (funcHasTypeA_ctx_irrel hfunc) (heq.trans he.symm)
       | typeDecl _ C'' _ L tc md _ hadd heq =>
         exact StatementHasType'.typeDecl C _ Γ₂ L tc md _ hadd (heq.trans he.symm)

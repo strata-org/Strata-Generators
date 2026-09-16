@@ -153,14 +153,53 @@ def Function.toPureFuncDecl (f : Function) : Imperative.PureFunc Expression :=
     preconditions := f.preconditions,
     measure := f.measure }
 
+/-- **`toPureFuncDecl` is a section of `Function.ofPureFunc`.** Wrapping each monotype field as
+    `∀ []. mty` is exactly what `LTy.toMonoType?` reads back, so the lift loses nothing and the
+    roundtrip returns the function it started from.
+
+    The hypothesis is the one field that `Function` has and that the roundtrip cannot recover on its
+    own: `toPureFuncDecl` writes `isRecursive := false` into the declaration, and `ofPureFunc` leaves
+    `isRecursive` at its `false` default, so a *recursive* `f` comes back with the flag cleared. Every
+    `f` the suite lifts is non-recursive — `genFunction` leaves the flag at its default, which
+    `genFunction_not_isRecursive` reads off the support.
+
+    This is the premise `Function.ofPureFunc decl = .ok func` of `StatementHasType'.funcDecl`. -/
+theorem ofPureFunc_toPureFuncDecl (f : Function) (hrec : f.isRecursive = false) :
+    Function.ofPureFunc (Function.toPureFuncDecl f) = .ok f := by
+  -- The `inputs` field is the only one that `ofPureFunc` traverses: `mapM` over the wrapped
+  -- signature reads each `∀ []. mty` back as `mty`, so it gives `f.inputs` unchanged. The step
+  -- function stays a *variable* `g` with its one relevant value as a hypothesis, so that the
+  -- rewrite matches whatever `ofPureFunc` unfolds to, and the error message it builds plays no
+  -- part.
+  have hinputs : ∀ (g : CoreLParams.Identifier × LTy →
+        Except Std.Format (CoreLParams.Identifier × LMonoTy)),
+      (∀ (id : CoreLParams.Identifier) (mty : LMonoTy),
+        g (id, (.forAll [] mty : LTy)) = .ok (id, mty)) →
+      ∀ (l : ListMap CoreLParams.Identifier LMonoTy),
+        List.mapM g (l.map (fun p => (p.1, (.forAll [] p.2 : LTy)))) = .ok l := by
+    intro g hg l
+    induction l with
+    | nil => rfl
+    | cons hd tl ih =>
+      rw [List.map_cons, List.mapM_cons, hg hd.1 hd.2, ih]
+      rfl
+  cases f with
+  | mk name typeArgs isConstr isRecursive inputs output body attr axioms preconditions measure =>
+    simp only at hrec
+    subst hrec
+    -- Unfold, tie off the `inputs` traversal with `hinputs`, and let the `output` field's
+    -- `toMonoType?` reduce on its own.
+    simp only [Function.ofPureFunc, Function.toPureFuncDecl, bind, Except.bind]
+    rw [hinputs _ (fun _ _ => rfl) inputs]
+    rfl
+
 /-- Generate a syntactic (non-recursive) function-declaration node by generating
     a well-typed `Function` via `genFunction` and lifting it to a `PureFunc`.
 
-    In the declarative `funcDecl` rule, the syntactic declaration and the well-typed witness function that the
-    rule adds to the context are *independent*. The rule asks only that the declaration is not recursive and
-    that the function is well typed. Therefore the generator draws them independently. Read `genStmt`. This
-    helper only
-    supplies non-recursive `decl` nodes. -/
+    `genFuncDeclStmt` no longer calls this: since the `funcDecl` rule ties the declaration to the
+    witness function, it draws one `Function` and lifts it in place. What is left of this definition is
+    the *set of declarations* that a generated `funcDecl` statement can carry, which is what the
+    `funcDecl` clause of `SpecComplete.AlphabetOk` states. Read `genStmt`. -/
 def genDecl [Gen G] (octx : OpCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
     G (Imperative.PureFunc Expression) :=
   Function.toPureFuncDecl <$> genFunction [] octx depth pctx
@@ -230,16 +269,21 @@ def genExitStmt [Gen G] (labels : List String)
       let lbl ← elements (l :: ls) (by simp)
       pure ⟨[Stmt.exit lbl default], C, ctx⟩
 
-/-- Generate a `funcDecl` statement. The syntactic declaration `decl` (a
-    non-recursive `PureFunc`) and the well-typed witness `func` (added to `C`)
-    are sampled independently, mirroring the declarative rule's decoupling of the
-    two. `Γ` is unchanged; `C` becomes `C.addFactoryFunction func`. -/
+/-- Generate a `funcDecl` statement. **One** well-typed `Function` is drawn, and it is both the
+    witness that `C` gains and, through `Function.toPureFuncDecl`, the syntactic declaration the
+    statement carries.
+
+    The rule `StatementHasType'.funcDecl` asks for `Function.ofPureFunc decl = .ok func`, so the
+    declaration determines the function, and a generator that drew the two independently would emit a
+    statement whose output context no derivation can produce. `ofPureFunc_toPureFuncDecl` is the
+    roundtrip that discharges the premise for the single drawn function. `Γ` is unchanged; `C` becomes
+    `C.addFactoryFunction func`. -/
 def genFuncDeclStmt [Gen G] (octx : OpCtx)
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenStmtResult := do
-  let decl ← genDecl octx depth pctx
   let func ← genFunction [] octx depth pctx
-  pure ⟨[Stmt.funcDecl decl default], C.addFactoryFunction func.toLFunc, ctx⟩
+  pure ⟨[Stmt.funcDecl (Function.toPureFuncDecl func) default],
+        C.addFactoryFunction func.toLFunc, ctx⟩
 
 /-- Generate a `typeDecl` statement. The function draws a random `TypeConstructor`, and it checks that
     constructor against the context through `addKnownTypeWithError`. On a success, the output context is the

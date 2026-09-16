@@ -460,8 +460,8 @@ theorem genStmt_mutableVars
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
     · -- funcDecl
-      simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, _, _, rfl⟩ := hr
+      simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+      obtain ⟨_, _, rfl⟩ := hr
       exact ⟨fun v hv => by
                simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
                  List.not_mem_nil] at hv,
@@ -523,8 +523,8 @@ theorem genStmt_mutableVars
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
     · -- funcDecl
-      simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, _, _, rfl⟩ := hr
+      simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+      obtain ⟨_, _, rfl⟩ := hr
       exact ⟨fun v hv => by
                simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
                  List.not_mem_nil] at hv,

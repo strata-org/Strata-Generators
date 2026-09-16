@@ -340,14 +340,19 @@ abbrev checkTypeCheckerComplete (ss : List Statement) : Bool := checkTypeChecks 
     the generator gave a statement that the specification accepts and that the algorithm rejects for some
     *other* reason, which is a gap in completeness of a new kind.
 
-    The difference at a `funcDecl` is this. The declarative rule `StatementHasType'.funcDecl` asks only that the
-    *witness* function that it adds to the context is well typed, and that the syntactic declaration node is
-    not recursive. The two are **independent**, because no premise ties the declaration to the function. The
-    generator therefore draws them independently. The *algorithm* instead derives the witness *from* the
-    declaration node, through `PureFunc.typeCheck`. Therefore it rejects a `funcDecl` whose declaration node
-    does not type check itself. The specification is therefore strictly more permissive at a `funcDecl`, and its
-    rule is arguably too loose, because it should relate the declaration to the function. Either way, that is a
-    true disagreement between the specification and the algorithm. -/
+    The difference at a `funcDecl` **was** this. The declarative rule `StatementHasType'.funcDecl` asked only
+    that the *witness* function it adds to the context be well typed, and that the syntactic declaration node
+    be non-recursive. The two were independent, because no premise tied the declaration to the function, and
+    the generator drew them independently. The *algorithm* derives the witness *from* the declaration node,
+    through `PureFunc.typeCheck`, so it rejected a `funcDecl` whose declaration node does not type check
+    itself. The specification was strictly more permissive there.
+
+    Strata `fe3e80574` closed the difference: the rule now requires `Function.ofPureFunc decl = .ok func`, so
+    the declaration determines the witness, exactly as the algorithm does. `genFuncDeclStmt` follows — it
+    draws one `Function` and derives the declaration from it — so a generated `funcDecl` no longer carries a
+    declaration unrelated to the function that was checked, and this predicate's escape clause may well be
+    dead. A `funcDecl` clause that never fires makes the property pass for the wrong reason, so read a green
+    result together with `checkTypeCheckerComplete`, which states the claim with no escape clause at all. -/
 def rejectionImpliesFuncDecl (ss : List Statement) : Bool :=
   checkTypeChecks ss || stmtsHaveFuncDecl ss
 

@@ -275,14 +275,15 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pc
     (C : LContext CoreLParams) (hC : SimpleTyArities C) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx d pctx)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
-  simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
-             mem_support_pure_iff] at hr
-  obtain ⟨decl, ⟨f0, _hf0, rfl⟩, func, hfunc, rfl⟩ := hr
+  simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+  obtain ⟨func, hfunc, rfl⟩ := hr
   have hwt : FuncHasTypeA C (env.toTCtx ctx) func :=
     genFunction_sound [] octx d C (env.toTCtx ctx) pctx hC func hfunc
   exact StatementsHasTypeA_singleton
-    (StatementHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl f0) func default _
-      (by simp) hwt (tctxEquivRefl _))
+    (StatementHasType'.funcDecl C (env.toTCtx ctx) labels (Function.toPureFuncDecl func) func default _
+      (by simp)
+      (ofPureFunc_toPureFuncDecl func (genFunction_not_isRecursive [] octx d pctx func hfunc))
+      hwt (tctxEquivRefl _))
 
 /-- Soundness of `genTypeDeclStmt` (at any depth `d`). The `.ok` branch discharges
     `typeDecl`; the `.error` (name-clash) branch is the empty generator (support
@@ -846,9 +847,8 @@ theorem genStmt_outCtx_functional
                    mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr; exact hFun
     · -- funcDecl
-      simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
-                 mem_support_pure_iff] at hr
-      obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
+      simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+      obtain ⟨_, _, rfl⟩ := hr; exact hFun
     · -- typeDecl
       simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr
@@ -891,9 +891,8 @@ theorem genStmt_outCtx_functional
                    mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr; exact hFun
     · -- funcDecl
-      simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
-                 mem_support_pure_iff] at hr
-      obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
+      simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+      obtain ⟨_, _, rfl⟩ := hr; exact hFun
     · -- typeDecl
       simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr
@@ -972,9 +971,8 @@ theorem wellKindedOk_preserved
       (genFuncDeclStmt (G := SetGen.Set) octx C ctx d pctx),
       WellKindedOk octx procs r'.outC r'.outCtx := by
     intro d r' hr'
-    simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff,
-               mem_support_pure_iff] at hr'
-    obtain ⟨_, _, _, _, rfl⟩ := hr'
+    simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr'
+    obtain ⟨_, _, rfl⟩ := hr'
     -- `addFactoryFunction` leaves `knownTypes` untouched.
     exact WellKindedOk.mono (by simp) hWK
   have htype : ∀ d, ∀ r' ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d),

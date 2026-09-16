@@ -286,6 +286,21 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     intro m hm _
     exact genOptExpr_sound fctx octx typeArgs depth .int pctx measure hmeasure m hm
 
+/-- **A generated function is never recursive.** `genFunction` writes no `isRecursive` field, so each
+    function in its support carries the `false` default. `genFunction_complete` asks for the same fact
+    in the other direction (`hRec`).
+
+    Two places need it. `Function.toPureFuncDecl` writes `isRecursive := false` into the declaration it
+    builds, so `ofPureFunc_toPureFuncDecl` recovers the function it started from only for a
+    non-recursive one; and the `funcDecl` typing rule asks the declaration to be non-recursive. -/
+theorem genFunction_not_isRecursive (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
+    (pctx : PolyOpCtx) (func : Function)
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth pctx)) :
+    func.isRecursive = false := by
+  simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
+  obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, rfl⟩ := hfunc
+  rfl
+
 /-- Soundness of `genFunction` at an empty operator context. This is a special case of
     `genFunction_sound`, which needs no condition on `octx`. -/
 theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
