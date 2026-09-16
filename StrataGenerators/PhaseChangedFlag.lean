@@ -73,18 +73,23 @@ structure NamedPhase where
   label : String
   phase : Core.PipelinePhase
 
+/-- A list of target procedures. A value for `proceduresToVerify` is what makes
+    `corePipelinePhases` hold the two `FilterProcedures` phases. With `none`, those two phases
+    are absent and the sweep misses the one site that a report already names. `"P0"` is the
+    first procedure name that `relabelProcs` gives, so on generated input this is a real target
+    and not a name that filters each procedure away. -/
+def phaseTargets : List String := ["P0"]
+
 /-- The options that the module uses to build the pipeline. `.quiet` matters, because
     `typeCheck` and `symbolicEval` trace their progress at a verbosity of `.normal` and above.
     Such a trace would put a line about a successful type check, and a dump of the
-    verification conditions, into the output of the harness on each trial. -/
-def phaseOptions : Core.VerifyOptions := Core.VerifyOptions.quiet
+    verification conditions, into the output of the harness on each trial.
 
-/-- A list of target procedures. A value for `procs` is what makes `corePipelinePhases` hold
-    the two `FilterProcedures` phases. With `procs := none`, those two phases are absent and
-    the sweep misses the one site that a report already names. `"P0"` is the first procedure
-    name that `relabelProcs` gives, so on generated input this is a real target and not a name
-    that filters each procedure away. -/
-def phaseTargets : List String := ["P0"]
+    `proceduresToVerify` carries the targets. Strata used to take them as a separate `procs`
+    argument of `corePipelinePhases`; since `ff8241b8f` the phase list is built from the options
+    alone, so the targets travel here. -/
+def phaseOptions : Core.VerifyOptions :=
+  { Core.VerifyOptions.quiet with proceduresToVerify := some phaseTargets }
 
 /-- The phase of `corePipelinePhases` whose name is `name`, or `none`.
 
@@ -94,7 +99,7 @@ def phaseTargets : List String := ["P0"]
     package and not the code of Strata. If Strata renames or removes a phase, this function
     returns `none` and the suite skips the property, and it does not test another phase. -/
 def verifierPhase (name : String) : Option Core.PipelinePhase :=
-  (Core.corePipelinePhases (procs := some phaseTargets) (options := phaseOptions)).find?
+  (Core.corePipelinePhases (options := phaseOptions)).find?
     (fun ph => ph.phase.name == name)
 
 /-- The phases that set `changed := true` without a test, as far as a name addresses them.
@@ -120,7 +125,7 @@ def hardcodedPhases : List NamedPhase :=
     tests both configurations. Two labels can therefore be equal, and `violators` removes a
     duplicate for the report. -/
 def allCorePhases : List NamedPhase :=
-  (Core.corePipelinePhases (procs := some phaseTargets) (options := phaseOptions)).map
+  (Core.corePipelinePhases (options := phaseOptions)).map
     (fun ph => ⟨ph.phase.name, ph⟩)
   ++ [⟨"RemoveIrrelevantAxioms", Core.irrelevantAxiomsPipelinePhase phaseTargets⟩]
 

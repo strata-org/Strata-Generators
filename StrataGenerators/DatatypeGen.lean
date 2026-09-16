@@ -217,7 +217,7 @@ def coreAppliedTyCons : List KnownTyCon :=
     (fun k => k.2 != 0 && k.1 != "arrow")).mergeSort (fun a b => a.1 ≤ b.1)
 
 /-- The type constructors of arity 1 or more that Strata Core knows, as pairs of a name and an
-    arity. The list holds `[("Map", 2), ("Sequence", 1)]`.
+    arity. The list holds `[("Map", 2), ("Sequence", 1), ("Set", 1)]`.
 
     The list does not hold `arrow`, because `genArgTy` has a branch of its own for an arrow. It
     also does not hold `bitvec`, because the argument of a `bitvec` is a *width* and not a type,
@@ -233,8 +233,8 @@ def defaultTyCons : List KnownTyCon :=
 -- part of the build depends on these two values.
 #guard defaultBaseTypes ==
   ["TriggerGroup", "Triggers", "bool", "int", "real", "regex", "string"]
-#guard coreAppliedTyCons == [("Map", 2), ("Sequence", 1), ("bitvec", 1)]
-#guard defaultTyCons == [("Map", 2), ("Sequence", 1)]
+#guard coreAppliedTyCons == [("Map", 2), ("Sequence", 1), ("Set", 1), ("bitvec", 1)]
+#guard defaultTyCons == [("Map", 2), ("Sequence", 1), ("Set", 1)]
 
 /-! ## How the generator makes a name
 

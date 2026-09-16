@@ -143,7 +143,7 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 - For a program containing `n` loop invariants and `m` measure-carrying loops, the transformation inserts exactly `2n + 2m` assertions
 - Loops in the output program don't contain loop variants or measures
 - Transformation is idempotent
-- Non-deterministic loops with `decreases` clauses are rejected
+- The transformation rejects nothing (it used to reject a non-deterministic loop carrying a `decreases` clause; Strata now accepts that shape, since none of the four verification conditions mentions the guard)
 - Proof obligations incurred by symbolic evaluation are preserved by this transformation
 
 **`LoopElim` transformation**
@@ -227,6 +227,7 @@ for nested function declarations that don't have preconditions, but whose bodies
 - **(FIXED)** `None of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean`) but have no grammar production, so each of these is 
 rendered as a fresh type variable instead. 
 - `Function.typeCheck` accepts `bitvec w` for all natural numbers `w`, but the pretty-printer only support widths in the set `{1, 8, 16, 32, 64}`
+- `Set` is registered in the Core factory (`Factory.lean`, `KnownLTys` holds `∀a. Set %a`) and the typechecker accepts a `Set` type, but the DDM printer has no mapping for it: `lmonoTyToCoreType` logs `unknown type: Lambda.LMonoTy.tcons "Set" [...]` and prints `$__unknown_type`, and `handleZeroaryOps` / `handleBinaryOps` render `Set.empty` and `Set.contains` as generic calls that do not re-parse. `Triggers` and `TriggerGroup` are unprintable in the same way and for the same reason: the generator's type vocabulary is *derived* from `Core.KnownTypes` (`DatatypeGen.defaultBaseTypes` / `defaultTyCons`), so any type the register holds and the printer does not is reported by `printer: no conversion error on generated programs`.
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
 
 ```
@@ -275,11 +276,11 @@ function f5 () : bool {
 }
 ```
 
-The five findings below come from testing the eight Core transform passes that have no correctness proof (issue #69). The first four have a self-contained reproducer in [`docs/strata-unproven-transform-bugs.md`](docs/strata-unproven-transform-bugs.md); the fifth — which is in the symbolic evaluator rather than in a pass — is in [`docs/strata-symbolic-eval-nondet-collision.md`](docs/strata-symbolic-eval-nondet-collision.md). Each is pinned by a `#guard` in `StrataGenerators/ProgramGen/UnprovenTransforms.lean` so a fix turns the guard red.
+The five findings below come from testing the eight Core transform passes that have no correctness proof (issue #69). The first four have a self-contained reproducer in [`docs/strata-unproven-transform-bugs.md`](docs/strata-unproven-transform-bugs.md); the fifth — which is in the symbolic evaluator rather than in a pass — is in [`docs/strata-symbolic-eval-nondet-collision.md`](docs/strata-symbolic-eval-nondet-collision.md). Each is pinned by a `#guard` in `StrataGenerators/ProgramGen/UnprovenTransforms.lean` so a fix turns the guard red. Two of the five have since been fixed upstream (Strata `38115786d`), and their guards are stated positively now, so a regression turns them red instead.
 
 
 - For a given loop, the `LoopElim` transformation creates two blocks that share the same label. Minimal counterexample: a procedure whose body is a non-determinsitic loop (`while * { }`).
-- `ProcedureInlining` gives two call sites of the same procedure identical labels
+- **(FIXED)** `ProcedureInlining` gives two call sites of the same procedure identical labels. The wrapper block label now carries a per-call-site counter (`$__inline1_Callee$inlined`, `$__inline2_Callee$inlined`)
 - `ProcedureInlining` drops the callee's `requires` obligation. Consider this sourc ep
 
 Consider this source Core program:
@@ -311,7 +312,7 @@ procedure Main () {
 The symbolic evaluator returns 1 obligation on the source program, but 0 obligations in the transformed program (a missing proof obligation).
 
 
-- `ProcedureInlining` copies `old x` expressions verbatim while renaming `x`, turning a well-typed program into an ill-typed one. Consider this source Core program:
+- **(FIXED)** `ProcedureInlining` copies `old x` expressions verbatim while renaming `x`, turning a well-typed program into an ill-typed one. Consider this source Core program:
 ```
 procedure Foo (inout T : bool) {
   assert [inner]: old T;
@@ -476,7 +477,7 @@ After the type alias `B` is resolved, we get:
 datatype T3 { Base(), MkT3 (f : int -> T3) }
 ```
 which is a legal datatype definition. However, `ProgramHasType` erroneously rejects the source program as violating the non-nested requirement for ADTs as it doesn't resolve type aliases.
-- Typing spec for local function declarations allows for arbitrary well-typed functions in output context. Consider the following (declarative) typing rule for local function declarations (in `StatementHasType`):
+- **(FIXED)** Typing spec for local function declarations allows for arbitrary well-typed functions in output context. The rule now carries the premise `Function.ofPureFunc decl = .ok func`, which is what the executable typechecker already computed, so the declaration determines both the function and the output context. `Gaps.funcDecl_func_determined` reads the tie back out of a derivation and `Gaps.funcDecl_illTyped_rejected` refutes the counterexample below. Consider the following (declarative) typing rule for local function declarations (in `StatementHasType`):
 
 ```
   /-- Local function declaration. The function is non-recursive and well-typed

@@ -96,15 +96,23 @@ a depth that bounds it. `ExprOk` is that predicate. `exprOk_assert_of_syntactic`
 it from exactly the syntactic side conditions of `genLExpr_complete`, and `exprOk_assert_true` gives a
 statement that satisfies it.
 
-A hypothesis about the reachability of a function fails for the same kind of reason, and no side condition
-on the *statement* can repair it. The rule `StatementHasType'.funcDecl` of Strata adds an **arbitrary**
-well-typed function to the context, and that function has no relation to the declaration of the statement.
-Therefore the statement does not determine the function whose reachability a proof needs. The two sides
-also disagree: `genFunction_complete` needs the name to be in the support of `genIdentName`, at most one
-precondition, no recursion, no attribute and no axiom, and `FuncHasType'`, which is a structure of six
-fields, constrains none of them. Therefore the `.funcDecl` clause of `ExprOk` is `False`, and **this
-theorem covers each statement except a local `funcDecl`**. That is a real restriction, and the
-specification must tie the function of the rule to the declaration of the statement to remove it.
+A hypothesis about the reachability of a function fails for a related reason, and the `.funcDecl` clause of
+`ExprOk` is therefore `False`: **this theorem covers each statement except a local `funcDecl`**. That is a
+real restriction, and the reason for it has changed.
+
+It used to be that no side condition on the *statement* could repair it. The rule
+`StatementHasType'.funcDecl` of Strata added an **arbitrary** well-typed function to the context, with no
+relation to the declaration of the statement, so the statement did not determine the function whose
+reachability a proof needs. Strata `fe3e80574` added the premise `Function.ofPureFunc decl = .ok func`, so
+the declaration determines the function.
+`Gaps.funcDecl_func_determined` reads that tie back out of a derivation.
+
+What remains is a genuine gap on *this* side, and it is now expressible. `genFunction_complete` needs the
+name to be in the support of `genIdentName`, at most one precondition, no recursion, no attribute and no
+axiom, and each generated part to be reachable; `FuncHasType'`, which is a structure of six fields,
+constrains none of that. Those are reachability conditions of exactly the kind `ExprOk` already supplies
+for an expression, and they can now be stated about the declaration the statement carries. Removing the
+clause is work, and no longer blocked upstream.
 -/
 
 namespace StrataGenerators.Stmt.SpecComplete
@@ -185,7 +193,7 @@ theorem stmtHasType_rigid_eq {P : Program} {C C' : LContext CoreLParams}
   | ite_nondet => rfl
   | loop => rfl
   | exit => rfl
-  | funcDecl _ _ _ decl func md _ h_nrec h_func _ =>
+  | funcDecl _ _ _ decl func md _ h_nrec h_of h_func _ =>
     simp only [LContext.addFactoryFunction]; split <;> rfl
   | typeDecl _ C0' _ _ tc md _ h_add _ =>
     simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at h_add
@@ -445,17 +453,19 @@ def ExprOk (ctx : VarCtx) (n : Nat) : Statement → Prop
         SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
       ExprOkList ctx (n - 1) body
   | .exit _ _ => True
-  -- **A local `funcDecl` is out of scope, and that is forced.** The old
+  -- **A local `funcDecl` is out of scope.** The old
   -- `hFuncReach : ∀ d C Γ func, FuncHasTypeA C Γ func → func ∈ support (genFunction … d)`
-  -- was unsatisfiable, for a reason no side condition on the *statement* can repair:
-  -- upstream's `StatementHasType'.funcDecl` adds an **arbitrary** well-typed `func` to
-  -- the context, unrelated to the `decl` the statement declares, so the statement does
-  -- not even determine the function whose reachability is needed. The two sides also
-  -- disagree outright: `genFunction_complete` requires the name to be in
-  -- `genIdentName`'s support, `preconditions.length ≤ 1`, `isRecursive = false`,
-  -- no attribute and no axiom, and `FuncHasType'`, which is a structure of six fields, constrains none of
-  -- them. To remove this restriction, the *specification* must tie the function of the rule to the declaration
-  -- of the statement.
+  -- was unsatisfiable, and it used to be unrepairable: upstream's `StatementHasType'.funcDecl`
+  -- added an **arbitrary** well-typed `func` to the context, unrelated to the `decl` the statement
+  -- declares, so the statement did not even determine the function whose reachability is needed.
+  -- Strata `fe3e80574` closed that half by requiring `Function.ofPureFunc decl = .ok func`.
+  --
+  -- The clause stays `False` because of what is left: `genFunction_complete` requires the name to be
+  -- in `genIdentName`'s support, `preconditions.length ≤ 1`, `isRecursive = false`, no attribute and
+  -- no axiom, and each generated part to be reachable, and `FuncHasType'`, which is a structure of
+  -- six fields, constrains none of them. Those are conditions of the same kind as the ones this
+  -- predicate already carries for an expression, and they are now about the declaration the
+  -- statement holds, so a clause that states them is possible. Writing it is work on this side.
   | .funcDecl _ _ => False
   | .typeDecl _ _ => True
 
@@ -734,7 +744,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     | cons hd tl =>
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff]
       exact ⟨label, hmem, rfl⟩
-  | funcDecl C Γ L decl func md Δ hrec hfunc hequiv =>
+  | funcDecl C Γ L decl func md Δ hrec hof hfunc hequiv =>
     intro ctx n hRig hΓ hnf hok hcall hexpr
     have hmdc : md = default := hnf
     subst hmdc

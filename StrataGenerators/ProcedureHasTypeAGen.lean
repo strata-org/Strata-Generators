@@ -80,7 +80,9 @@ theorem getInoutParams_inout (name : String) (tyArgs : List TyIdentifier)
   simp only [Procedure.Header.getInoutParams]
   show List.filter _ (M ++ I) = M
   rw [List.filter_append, List.filter_eq_self.mpr hM,
-      List.filter_eq_nil_iff.mpr (by intro p hp; rw [hI p hp]; simp)]
+      -- `getInoutParams`' predicate is a pattern-matching lambda, so `rw` has no `p.fst` to
+      -- key on; `exact` closes the goal up to the structure eta that reduces the match.
+      List.filter_eq_nil_iff.mpr (by intro p hp; simp only [Bool.not_eq_true]; exact hI p hp)]
   simp
 
 /-- Rotating a three-way append is a permutation. (Lean core has `perm_append_comm` for
@@ -646,7 +648,7 @@ theorem StatementHasTypeA_rigid_eq {P : Program} {C C' : LContext CoreLParams}
   | ite_nondet => rfl
   | loop => rfl
   | exit => rfl
-  | funcDecl _ _ _ decl func md _ h_nrec h_func _ =>
+  | funcDecl _ _ _ decl func md _ h_nrec h_of h_func _ =>
     simp only [LContext.addFactoryFunction]; split <;> rfl
   | typeDecl _ C0' _ _ tc md _ h_add _ =>
     simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at h_add
@@ -685,7 +687,7 @@ theorem StatementHasTypeA_weaken_rigid {P : Program} {C C' : LContext CoreLParam
       invariants body md Δ hg hm hi (ih hsub) hequiv
   | exit C Γ L label md Δ hmem hequiv =>
     intro _; exact StatementHasType'.exit _ Γ L label md Δ hmem hequiv
-  | funcDecl C Γ L decl func md Δ hrec hfunc hequiv =>
+  | funcDecl C Γ L decl func md Δ hrec hof hfunc hequiv =>
     intro _
     -- `addFactoryFunction` leaves `rigidTypeVars` untouched, so the output context
     -- is `{ (C.addFactoryFunction …) with rigidTypeVars := rv }`.
@@ -693,7 +695,7 @@ theorem StatementHasTypeA_weaken_rigid {P : Program} {C C' : LContext CoreLParam
         = { C.addFactoryFunction func.toLFunc with rigidTypeVars := rv } := by
       simp only [LContext.addFactoryFunction]; split <;> rfl
     rw [← hcong]
-    exact StatementHasType'.funcDecl _ Γ L decl func md Δ hrec
+    exact StatementHasType'.funcDecl _ Γ L decl func md Δ hrec hof
       (FuncHasTypeA_C_irrel hfunc rfl) hequiv
   | typeDecl C C0' Γ L tc md Δ hadd hequiv =>
     intro _
@@ -749,12 +751,12 @@ theorem StatementsHasTypeA_weaken_rigid {P : Program} {C C' : LContext CoreLPara
       invariants body md Δ hg hm hi (ih hsub) hequiv
   | exit C Γ L label md Δ hmem hequiv =>
     exact StatementHasType'.exit _ Γ L label md Δ hmem hequiv
-  | funcDecl C Γ L decl func md Δ hrec hfunc hequiv =>
+  | funcDecl C Γ L decl func md Δ hrec hof hfunc hequiv =>
     have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addFactoryFunction func.toLFunc
         = { C.addFactoryFunction func.toLFunc with rigidTypeVars := rv } := by
       simp only [LContext.addFactoryFunction]; split <;> rfl
     rw [← hcong]
-    exact StatementHasType'.funcDecl _ Γ L decl func md Δ hrec
+    exact StatementHasType'.funcDecl _ Γ L decl func md Δ hrec hof
       (FuncHasTypeA_C_irrel hfunc rfl) hequiv
   | typeDecl C C0' Γ L tc md Δ hadd hequiv =>
     have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addKnownTypeWithError
