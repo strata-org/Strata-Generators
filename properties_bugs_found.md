@@ -227,7 +227,7 @@ for nested function declarations that don't have preconditions, but whose bodies
 - **(FIXED)** `None of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean`) but have no grammar production, so each of these is 
 rendered as a fresh type variable instead. 
 - `Function.typeCheck` accepts `bitvec w` for all natural numbers `w`, but the pretty-printer only support widths in the set `{1, 8, 16, 32, 64}`
-- `Set` is registered in the list of known types in the Core factory  and the typechecker accepts a `Set` type, but the DDM printer does not support printing `Set` factory functions (e.g. `Set.empty`)
+- `Set` is registered in the list of known types in the Core factory and the typechecker accepts a `Set` type, but the DDM printer does not support printing `Set` factory functions (e.g. `Set.empty`)
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
 
 ```
