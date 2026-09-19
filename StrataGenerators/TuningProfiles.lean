@@ -12,8 +12,8 @@ weights to use. It names one `Tuning` per job the test suite has to do, and it h
 points that the suite and the `dist-report` executable draw from.
 
 This module holds `Tuning` values and generator plumbing, and no proofs. It is therefore Mathlib-free,
-and a Strata transform pass can import it. `StrataGenerators.SetGen.TuningPrototypes` holds the
-θ-invariance theorems, one per generator. Each says that every `θ` denotes the same `SetGen.Set`, so
+and a Strata transform pass can import it. `StrataGenerators.TuningPrototypes` holds the
+θ-invariance theorems, one per generator. Each says that every `θ` denotes the same `SPMF`, so
 no profile can invalidate a soundness or a completeness result.
 
 -/
@@ -495,7 +495,7 @@ def genLExprT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
 /-! At `θ = defaults` each wrapper is the shipping generator *definitionally*, and the kernel checks
 each `Eq.refl`. `genProcedureT` and `genLExprT` restate a generator body rather than delegate to one,
 and these theorems are what keep them from drifting: a divergence in any field fails one of them.
-`SetGen.TuningPrototypes` states the same facts at `SetGen.Set`, for every `θ` rather than for the
+`SetGen.TuningPrototypes` states the same facts at `SPMF`, for every `θ` rather than for the
 defaults alone. -/
 
 /-! Well-founded recursion makes `genStmt` and `genStmtChain` irreducible. Unseal them, so that the

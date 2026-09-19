@@ -46,7 +46,7 @@ and `HasTypeAGenOpsConsistent.lean` take the constant leaves apart as one `bind`
 and then one `pure`:
 
 ```lean
-simp only [genStrConst, ..., SetGen.Set.mem_bind, SetGen.Set.mem_pure, ...] at he
+simp only [genStrConst, ..., SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff, ...] at he
 · obtain ⟨s, _, rfl⟩ := he; exact .const
 ```
 
@@ -63,7 +63,7 @@ namespace StrataGenerators.PrimitiveGens
 
     This file holds its own copy of the generator instead of an import, for the
     same reason that `HasTypeAGen/Core.lean` holds a copy: `BasaltExamples.ArbNat`
-    pulls in the full `Basalt` umbrella, and thus Mathlib's `List.dedup`, which
+    pulls in the full `Basalt` umbrella, and thus Mathlib's `List.uniq`, which
     collides with Strata's. `HasTypeAGen/Core.lean` imports this file, so this
     file cannot depend on it. This copy is definitionally the same as the upstream
     generator. -/

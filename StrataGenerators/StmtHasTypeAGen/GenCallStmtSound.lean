@@ -1,7 +1,7 @@
 import StrataGenerators.CmdHasTypeAGen
 import Strata.Languages.Core.StatementTypeSpec
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec
 
 /-!
 # Soundness of the procedure-call statement generator
@@ -193,14 +193,14 @@ theorem lm_values_length {α β} (m : ListMap α β) : m.values.length = m.lengt
 
 -- ── mapM support inversion (public) ───────────────────────────────────────
 
-/-- Membership in `List.mapM f l` on `SetGen.Set`: `args` is in the support iff
+/-- Membership in `List.mapM f l` on `SPMF`: `args` is in the support iff
     each element is pointwise in the support of `f` at the corresponding input.
     A public re-statement of the private lemma in `HasTypeAGen.lean`, generic in
     the element/index types. -/
-theorem mem_support_mapM_iff {α β} (f : α → SetGen.Set β)
+theorem mem_support_mapM_iff {α β} (f : α → SPMF β)
     (inputs : List α) (outs : List β) :
-    outs ∈ SetGen.support (List.mapM (m := SetGen.Set) f inputs) ↔
-    List.Forall₂ (fun out σ => out ∈ SetGen.support (f σ)) outs inputs := by
+    outs ∈ SPMF.support (List.mapM (m := SPMF) f inputs) ↔
+    List.Rel₂ (fun out σ => out ∈ SPMF.support (f σ)) outs inputs := by
   induction inputs generalizing outs with
   | nil =>
     simp only [List.mapM_nil, mem_support_pure_iff]
@@ -217,10 +217,10 @@ theorem mem_support_mapM_iff {α β} (f : α → SetGen.Set β)
       | _ :: _, .cons harg htail =>
         exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
 
-/-- Membership on the left of a `List.Forall₂`: every element of the first list is related
-    to some element of the second. (Lean core has no `List.Forall₂.mem_left`.) -/
+/-- Membership on the left of a `List.Rel₂`: every element of the first list is related
+    to some element of the second. (Lean core has no `List.Rel₂.mem_left`.) -/
 theorem forall₂_mem_left {α β} {R : α → β → Prop} :
-    ∀ {as : List α} {bs : List β}, List.Forall₂ R as bs → ∀ a ∈ as, ∃ b ∈ bs, R a b := by
+    ∀ {as : List α} {bs : List β}, List.Rel₂ R as bs → ∀ a ∈ as, ∃ b ∈ bs, R a b := by
   intro as bs h
   induction h with
   | nil => intro a ha; simp at ha

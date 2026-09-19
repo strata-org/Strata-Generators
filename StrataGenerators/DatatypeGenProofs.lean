@@ -1,11 +1,11 @@
-import StrataGenerators.SetGen
+import StrataGenerators.GenSupport
 import StrataGenerators.DatatypeGen
 import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.DL.Lambda.DatatypeWF
 import Strata.Languages.Core.DatatypeTypeSpec
 import Strata.Languages.Core.Factory
 
-open Lambda RandomChoice ArbNat ArbChar ArbString SetGen
+open Lambda RandomChoice ArbNat ArbChar ArbString
 
 /-!
 # Soundness and completeness of the generator for algebraic data types
@@ -416,13 +416,13 @@ induction on `size` through these two lemmas. -/
 
 section Support
 
-/-- Each natural number is in the support of `Nat.arbitrary` at `SetGen.Set`. Therefore the
+/-- Each natural number is in the support of `Nat.arbitrary` at `SPMF`. Therefore the
     width generator inside `pickBitvecWidth` can make each width.
 
     A private lemma of the same shape is in `HasTypeAGen.lean`. That file does not export
     it, therefore this file states it again. -/
 private theorem Nat_arbitrary_support_set (n : Nat) :
-    n ∈ SetGen.support (Nat.arbitrary (G := SetGen.Set)) := by
+    n ∈ SPMF.support (Nat.arbitrary (G := SPMF)) := by
   induction n with
   | zero => rw [Nat.arbitrary]; simp
   | succ n ih =>
@@ -433,19 +433,19 @@ private theorem Nat_arbitrary_support_set (n : Nat) :
 /-- `genBaseTy` makes exactly two kinds of type. It makes the bitvectors of each width, and
     it makes the applications of a `baseTypes` name to no arguments. -/
 theorem genBaseTy_support (baseTypes : List String) (ty : LMonoTy) :
-    ty ∈ SetGen.support (genBaseTy (G := SetGen.Set) baseTypes) ↔
+    ty ∈ SPMF.support (genBaseTy (G := SPMF) baseTypes) ↔
       (∃ w, ty = .bitvec w) ∨
       (∃ b ∈ baseTypes, ty = .tcons b []) := by
-  simp only [genBaseTy, mem_support_oneOf_iff, List.mem_cons, List.mem_map]
+  simp only [mem_support_pure_iff, genBaseTy, mem_support_oneOf_iff, List.mem_cons, List.mem_map]
   constructor
   · rintro ⟨g, (rfl | ⟨b, hb, rfl⟩), hmem⟩
-    · simp only [pickBitvecWidth, mem_support_map_iff] at hmem
+    · simp only [mem_support_pure_iff, pickBitvecWidth, mem_support_map_iff] at hmem
       obtain ⟨w, _, rfl⟩ := hmem
       exact Or.inl ⟨w, rfl⟩
-    · exact Or.inr ⟨b, hb, hmem⟩
+    · exact Or.inr ⟨b, hb, mem_support_pure_iff.mp hmem⟩
   · rintro (⟨w, rfl⟩ | ⟨b, hb, rfl⟩)
     · refine ⟨_, Or.inl rfl, ?_⟩
-      simp only [pickBitvecWidth, mem_support_map_iff]
+      simp only [mem_support_pure_iff, pickBitvecWidth, mem_support_map_iff]
       exact ⟨w, Nat_arbitrary_support_set w, rfl⟩
     · exact ⟨_, Or.inr ⟨b, hb, rfl⟩, by simp⟩
 
@@ -453,9 +453,9 @@ theorem genBaseTy_support (baseTypes : List String) (ty : LMonoTy) :
 /-- The support of the generator for a recursive occurrence. That generator makes exactly
     the uniform occurrences `.tcons p.1 p.2` for the block references `p`. -/
 theorem genRecOcc_mem_iff (br : BlockRef) (brs : List BlockRef) (t : LMonoTy) :
-    t ∈ SetGen.support
+    t ∈ SPMF.support
       ((do let (n, args) ← elements (br :: brs) (List.cons_ne_nil br brs)
-           pure (.tcons n args)) : SetGen.Set LMonoTy) ↔
+           pure (.tcons n args)) : SPMF LMonoTy) ↔
     ∃ p ∈ br :: brs, t = .tcons p.1 p.2 := by
   simp only [mem_support_bind_iff, mem_support_pure_iff,
              mem_support_elements_iff (List.cons_ne_nil br brs)]
@@ -473,18 +473,18 @@ theorem genRecOcc_mem_iff (br : BlockRef) (brs : List BlockRef) (t : LMonoTy) :
     below. -/
 theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
     (tyParams : List TyIdentifier) (rca : Bool) (ty : LMonoTy) :
-    ty ∈ SetGen.support
-      (genLeafTy (G := SetGen.Set) baseTypes blockRefs tyParams rca) ↔
+    ty ∈ SPMF.support
+      (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca) ↔
       (∃ w, ty = .bitvec w) ∨
       (∃ b ∈ baseTypes, ty = .tcons b []) ∨
       (∃ v ∈ tyParams, ty = .ftvar v) ∨
       (rca = true ∧ ∃ br ∈ blockRefs, ty = .tcons br.1 br.2) := by
   have hvar : ∀ (v : TyIdentifier) vs t,
-      t ∈ SetGen.support
-        ((LMonoTy.ftvar <$> elements (v :: vs) (List.cons_ne_nil v vs) : SetGen.Set LMonoTy)) ↔
+      t ∈ SPMF.support
+        ((LMonoTy.ftvar <$> elements (v :: vs) (List.cons_ne_nil v vs) : SPMF LMonoTy)) ↔
       ∃ v' ∈ v :: vs, t = .ftvar v' := by
     intro v vs t
-    simp only [mem_support_map_iff, mem_support_elements_iff (List.cons_ne_nil v vs)]
+    simp only [mem_support_pure_iff, mem_support_map_iff, mem_support_elements_iff (List.cons_ne_nil v vs)]
   unfold genLeafTy
   match tyParams, rca, blockRefs with
   | [], false, _ =>
@@ -510,7 +510,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact absurd hv (by simp)
       · exact absurd hbr (by simp)
   | [], true, br :: brs =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -524,7 +524,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact absurd hv (by simp)
       · exact ⟨_, Or.inr rfl, (genRecOcc_mem_iff br brs _).mpr ⟨p, List.mem_cons.mpr hp, rfl⟩⟩
   | v :: vs, false, _ =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -538,7 +538,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact ⟨_, Or.inr rfl, (hvar v vs _).mpr ⟨v', List.mem_cons.mpr hv', rfl⟩⟩
       · exact absurd h (by simp)
   | v :: vs, true, [] =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -552,7 +552,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact ⟨_, Or.inr rfl, (hvar v vs _).mpr ⟨v', List.mem_cons.mpr hv', rfl⟩⟩
       · exact absurd hbr (by simp)
   | v :: vs, true, br :: brs =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -579,7 +579,7 @@ well-formed. These positions are the domain of an arrow and the arguments of an
 application. The recursion at those positions carries the flag `false`.
 
 `genArgTy_mem_iff` describes the support in one step. Its right side is a disjunction, and
-that disjunction refers back to `SetGen.support (genArgTy … (size/2))`. This file adds no
+that disjunction refers back to `SPMF.support (genArgTy … (size/2))`. This file adds no
 helper relation. The theorems for soundness and for completeness then do their own strong
 induction on `size` through this lemma. -/
 
@@ -594,17 +594,17 @@ induction on `size` through this lemma. -/
 theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
     (blockRefs : List BlockRef) (tyParams : List TyIdentifier)
     (rca : Bool) (size : Nat) (ty : LMonoTy) :
-    ty ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs tyParams rca size) ↔
-      ty ∈ SetGen.support
-        (genLeafTy (G := SetGen.Set) baseTypes blockRefs tyParams rca) ∨
+    ty ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons blockRefs tyParams rca size) ↔
+      ty ∈ SPMF.support
+        (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca) ∨
       (size ≠ 0 ∧ ∃ t1 t2, ty = .arrow t1 t2 ∧
-        t1 ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+        t1 ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
           tyParams false (size / 2)) ∧
-        t2 ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+        t2 ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
           tyParams rca (size / 2))) ∨
       (size ≠ 0 ∧ ∃ k args, ty = .tcons k args ∧ (k, args.length) ∈ tyCons ∧
-        ∀ a ∈ args, a ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons
+        ∀ a ∈ args, a ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons
           blockRefs tyParams false (size / 2))) := by
   by_cases hs : size = 0
   · -- Only the leaf disjunct is available.
@@ -614,16 +614,16 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
   · rw [genArgTy]
     simp only [if_neg hs]
     -- The arrow branch's support, shared by both `tyCons` cases.
-    have harrow : ∀ t, t ∈ SetGen.support
-        ((do let t1 ← genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+    have harrow : ∀ t, t ∈ SPMF.support
+        ((do let t1 ← genArgTy (G := SPMF) baseTypes tyCons blockRefs
                tyParams false (size / 2)
-             let t2 ← genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+             let t2 ← genArgTy (G := SPMF) baseTypes tyCons blockRefs
                tyParams rca (size / 2)
-             pure (.arrow t1 t2)) : SetGen.Set LMonoTy) ↔
+             pure (.arrow t1 t2)) : SPMF LMonoTy) ↔
         ∃ t1 t2, t = .arrow t1 t2 ∧
-          t1 ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+          t1 ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
             tyParams false (size / 2)) ∧
-          t2 ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+          t2 ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
             tyParams rca (size / 2)) := by
       intro t
       simp only [mem_support_bind_iff, mem_support_pure_iff]
@@ -632,7 +632,7 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
       · rintro ⟨t1, t2, rfl, h1, h2⟩; exact ⟨t1, h1, t2, h2, rfl⟩
     match tyCons with
     | [] =>
-      simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+      simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
       constructor
       · rintro ⟨g, (rfl | rfl), hmem⟩
         · exact Or.inr (Or.inl ⟨hs, (harrow ty).mp hmem⟩)
@@ -642,13 +642,13 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
         · exact ⟨_, Or.inl rfl, (harrow _).mpr ⟨t1, t2, rfl, h1, h2⟩⟩
         · exact absurd hkc (by simp)
     | kc :: kcs =>
-      have happ : ∀ t, t ∈ SetGen.support
+      have happ : ∀ t, t ∈ SPMF.support
           ((do let (tyCtor, arity) ← elements (kc :: kcs) (List.cons_ne_nil kc kcs)
-               let argTys ← vectorOf arity (genArgTy (G := SetGen.Set) baseTypes
+               let argTys ← vectorOf arity (genArgTy (G := SPMF) baseTypes
                  (kc :: kcs) blockRefs tyParams false (size / 2))
-               pure (.tcons tyCtor argTys)) : SetGen.Set LMonoTy) ↔
+               pure (.tcons tyCtor argTys)) : SPMF LMonoTy) ↔
           ∃ k args, t = .tcons k args ∧ (k, args.length) ∈ kc :: kcs ∧
-            ∀ a ∈ args, a ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes
+            ∀ a ∈ args, a ∈ SPMF.support (genArgTy (G := SPMF) baseTypes
               (kc :: kcs) blockRefs tyParams false (size / 2)) := by
         intro t
         simp only [mem_support_bind_iff, mem_support_pure_iff,
@@ -660,7 +660,7 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
         · rintro ⟨k, args, rfl, hkc, hall⟩
           exact ⟨(k, args.length), hkc, args,
             mem_support_vectorOf_iff.mpr ⟨rfl, hall⟩, rfl⟩
-      simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+      simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
       constructor
       · rintro ⟨g, (rfl | rfl | rfl), hmem⟩
         · exact Or.inr (Or.inl ⟨hs, (harrow ty).mp hmem⟩)
@@ -687,9 +687,9 @@ theorem genArgTy_blockRefs_mono {baseTypes : List String} {tyCons : List KnownTy
     {blockRefs blockRefs' : List BlockRef} {tyParams : List TyIdentifier}
     (hsub : ∀ br ∈ blockRefs, br ∈ blockRefs') :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) →
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs'
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs'
         tyParams rca size) := by
   intro size
   induction size using Nat.strongRecOn with
@@ -885,7 +885,7 @@ theorem genLeafTy_absent {baseTypes : List String} {tyCons : List KnownTyCon}
     {block : MutualDatatype Unit} {blockRefs : List BlockRef}
     {tyParams : List TyIdentifier} {ty : LMonoTy}
     (hn : NamesOk baseTypes tyCons (block.map (·.name)))
-    (h : ty ∈ SetGen.support (genLeafTy (G := SetGen.Set) baseTypes blockRefs
+    (h : ty ∈ SPMF.support (genLeafTy (G := SPMF) baseTypes blockRefs
             tyParams false)) :
     BlockAbsent block ty := by
   rcases (genLeafTy_mem_iff _ _ _ _ _).mp h with
@@ -906,7 +906,7 @@ theorem genArgTy_absent {baseTypes : List String} {tyCons : List KnownTyCon}
     {tyParams : List TyIdentifier}
     (hn : NamesOk baseTypes tyCons (block.map (·.name))) :
     ∀ (size : Nat) {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams false size) →
       BlockAbsent block ty := by
   intro size
@@ -943,7 +943,7 @@ theorem genArgTy_notNested {baseTypes : List String} {tyCons : List KnownTyCon}
     (hn : NamesOk baseTypes tyCons (block.map (·.name)))
     (hbr : BlockRefsWF block tyParams blockRefs) :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) →
       NotNested block ty := by
   intro size
@@ -983,7 +983,7 @@ theorem genArgTy_strictPosUnif {baseTypes : List String} {tyCons : List KnownTyC
     (hn : NamesOk baseTypes tyCons (block.map (·.name)))
     (hbr : BlockRefsWF block tyParams blockRefs) :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) →
       StrictPosUnif block ty := by
   intro size
@@ -1037,7 +1037,7 @@ theorem genArgTy_constrArgWF {baseTypes : List String} {tyCons : List KnownTyCon
     {tyParams : List TyIdentifier} {rca : Bool} {size : Nat} {ty : LMonoTy}
     (hn : NamesOk baseTypes tyCons (block.map (·.name)))
     (hbr : BlockRefsWF block tyParams blockRefs)
-    (h : ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+    (h : ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
             tyParams rca size)) :
     ConstrArgWF block ty :=
   ⟨genArgTy_notNested hn hbr size h, genArgTy_strictPosUnif hn hbr size h⟩
@@ -1072,7 +1072,7 @@ theorem fallbackName_not_mem (reserved : List String) :
     `reserved`. It returns the random draw only when that draw is absent from `reserved`, and
     the fallback name is never a reserved name. -/
 theorem genFreshName_fresh (reserved : List String) :
-    ∀ s ∈ SetGen.support (genFreshName (G := SetGen.Set) reserved), s ∉ reserved := by
+    ∀ s ∈ SPMF.support (genFreshName (G := SPMF) reserved), s ∉ reserved := by
   intro s hs
   simp only [genFreshName, mem_support_bind_iff, mem_support_ite_iff,
              mem_support_pure_iff] at hs
@@ -1193,14 +1193,10 @@ theorem seq_two_not_mem_defaultTyCons : ("Sequence", 2) ∉ defaultTyCons := by
 
 /-! ### From one type to a full constructor and a full datatype -/
 
-/-- The support of `chooseNat lo hi` holds exactly the natural numbers in the range
-    `[lo, hi]`. -/
-@[simp] theorem mem_support_chooseNat_iff {lo hi n : Nat} {h : lo ≤ hi} :
-    n ∈ SetGen.support (chooseNat (G := SetGen.Set) lo hi h) ↔ lo ≤ n ∧ n ≤ hi := by
-  simp only [chooseNat, mem_support_map_iff, mem_support_choose_iff]
-  constructor
-  · rintro ⟨u, ⟨hlo, hhi⟩, rfl⟩; exact ⟨hlo, hhi⟩
-  · rintro ⟨hlo, hhi⟩; exact ⟨⟨⟨n, hlo, hhi⟩⟩, ⟨hlo, hhi⟩, rfl⟩
+/-! `SPMF.mem_support_chooseNat_iff` (from `Basalt.SPMF.Support`, re-exported by
+`StrataGenerators.GenSupport`) says that the support of `chooseNat lo hi` is exactly the range
+`[lo, hi]`. This file used to carry its own copy, because the vendored `SetGen` interpretation had no
+`chooseNat` lemma; the upstream one now serves. -/
 
 /-- Each argument type in a list from `genConstrArgs` is in the support of `genArgTy` at some
     size. Therefore soundness goes from one type to a full constructor. The size is an
@@ -1213,10 +1209,10 @@ theorem genConstrArgs_mem_support {baseTypes : List String} {tyCons : List Known
     {blockRefs : List BlockRef} {tyParams : List TyIdentifier}
     {rca : Bool} {maxArgs maxSize : Nat} {reserved reserved' : List String}
     {args : List (Identifier Unit × LMonoTy)}
-    (hargs : (args, reserved') ∈ SetGen.support (genConstrArgs (G := SetGen.Set)
+    (hargs : (args, reserved') ∈ SPMF.support (genConstrArgs (G := SPMF)
             baseTypes tyCons blockRefs tyParams rca maxArgs maxSize reserved)) :
-    ∀ arg ∈ args, ∃ size, arg.2 ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs tyParams rca size) := by
+    ∀ arg ∈ args, ∃ size, arg.2 ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons blockRefs tyParams rca size) := by
   simp only [genConstrArgs, mem_support_bind_iff, mem_support_pure_iff,
              mem_support_vectorOf_iff] at hargs
   obtain ⟨_, _, fieldNames, _, argTys, ⟨_, hall⟩, hpair⟩ := hargs
@@ -1239,10 +1235,10 @@ theorem genConstrs_mem_support {baseTypes : List String} {tyCons : List KnownTyC
     {rca : Bool} {maxArgs maxSize : Nat} :
     ∀ (n : Nat) (reserved : List String) (cs : List (LConstr Unit))
       (reserved' : List String),
-      (cs, reserved') ∈ SetGen.support (genConstrs (G := SetGen.Set) baseTypes tyCons
+      (cs, reserved') ∈ SPMF.support (genConstrs (G := SPMF) baseTypes tyCons
         blockRefs tyParams rca maxArgs maxSize n reserved) →
-      ∀ c ∈ cs, ∀ arg ∈ c.args, ∃ size, arg.2 ∈ SetGen.support
-        (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs tyParams rca size) := by
+      ∀ c ∈ cs, ∀ arg ∈ c.args, ∃ size, arg.2 ∈ SPMF.support
+        (genArgTy (G := SPMF) baseTypes tyCons blockRefs tyParams rca size) := by
   intro n
   induction n with
   | zero =>
@@ -1281,7 +1277,7 @@ and from some size. -/
     member of the first list. -/
 theorem genFreshNames_fresh :
     ∀ (n : Nat) (reserved : List String) (names : List String),
-      names ∈ SetGen.support (genFreshNames (G := SetGen.Set) reserved n) →
+      names ∈ SPMF.support (genFreshNames (G := SPMF) reserved n) →
       ∀ nm ∈ names, nm ∉ reserved := by
   intro n
   induction n with
@@ -1303,7 +1299,7 @@ theorem genFreshNames_fresh :
 /-- `genFreshNames reserved n` always makes a list of `n` names. -/
 theorem genFreshNames_length :
     ∀ (n : Nat) (reserved : List String) (names : List String),
-      names ∈ SetGen.support (genFreshNames (G := SetGen.Set) reserved n) →
+      names ∈ SPMF.support (genFreshNames (G := SPMF) reserved n) →
       names.length = n := by
   intro n
   induction n with
@@ -1321,8 +1317,8 @@ theorem genFreshNames_length :
 theorem genParamsList_length :
     ∀ (n : Nat) (reserved : List String) (maxTyParams : Nat)
       (paramsList : List (List TyIdentifier)),
-      paramsList ∈ SetGen.support
-        (genParamsList (G := SetGen.Set) reserved maxTyParams n) →
+      paramsList ∈ SPMF.support
+        (genParamsList (G := SPMF) reserved maxTyParams n) →
       paramsList.length = n := by
   intro n
   induction n with
@@ -1339,7 +1335,7 @@ theorem genParamsList_length :
 /-- `genRanks` makes a list of exactly `n` ranks. -/
 theorem genRanks_length :
     ∀ (maxRank n : Nat) (ranks : List Nat),
-      ranks ∈ SetGen.support (genRanks (G := SetGen.Set) maxRank n) →
+      ranks ∈ SPMF.support (genRanks (G := SPMF) maxRank n) →
       ranks.length = n := by
   intro maxRank n
   induction n with
@@ -1375,7 +1371,7 @@ theorem map_name_headers_of_length_le :
     `genFreshNames_fresh` then says that each name of the tail is absent from that list. -/
 theorem genFreshNames_nodup :
     ∀ (n : Nat) (reserved : List String) (names : List String),
-      names ∈ SetGen.support (genFreshNames (G := SetGen.Set) reserved n) →
+      names ∈ SPMF.support (genFreshNames (G := SPMF) reserved n) →
       names.Nodup := by
   intro n
   induction n with
@@ -1656,14 +1652,14 @@ theorem genConstructors_shape {baseTypes : List String} {tyCons : List KnownTyCo
     {maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat} {reserved : List String}
     {d : LDatatype Unit}
     (hsub : ∀ br ∈ inhabRefs, br ∈ visibleRefs allHeaders params)
-    (hd : d ∈ SetGen.support (genConstructors (G := SetGen.Set) baseTypes tyCons allHeaders
+    (hd : d ∈ SPMF.support (genConstructors (G := SPMF) baseTypes tyCons allHeaders
             inhabRefs nm params maxExtraBaseConstrs maxRecConstrs maxArgs maxSize reserved)) :
     d.name = nm ∧ d.typeArgs = params ∧
-    (∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ rca size, arg.2 ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons (visibleRefs allHeaders params)
+    (∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ rca size, arg.2 ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons (visibleRefs allHeaders params)
         params rca size)) ∧
-    (∃ c₀ ∈ d.constrs, ∀ arg ∈ c₀.args, ∃ size, arg.2 ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons inhabRefs params true size)) := by
+    (∃ c₀ ∈ d.constrs, ∀ arg ∈ c₀.args, ∃ size, arg.2 ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons inhabRefs params true size)) := by
   simp only [genConstructors, mem_support_bind_iff, mem_support_pure_iff] at hd
   obtain ⟨cname₀, _, ⟨args₀, res₀⟩, hargs₀, numExtraBase, _, ⟨baseConstrs, res₁⟩,
           hbase, numRec, _, ⟨recConstrs, res₂⟩, hrec, p, _, hdeq⟩ := hd
@@ -1701,7 +1697,7 @@ theorem genConstructorsForAllTypes_names {baseTypes : List String} {tyCons : Lis
     (hrhsub : ∀ hr ∈ rankedHeaders, hr.1 ∈ allHeaders) :
     ∀ (todo : List (TypeConstructor × Nat)) (block : MutualDatatype Unit),
       (∀ hr ∈ todo, hr.1 ∈ allHeaders) →
-      block ∈ SetGen.support (genConstructorsForAllTypes (G := SetGen.Set) baseTypes tyCons allHeaders
+      block ∈ SPMF.support (genConstructorsForAllTypes (G := SPMF) baseTypes tyCons allHeaders
         rankedHeaders maxExtraBaseConstrs maxRecConstrs maxArgs maxSize reserved todo) →
       block.map (·.name) = todo.map (·.1.name) := by
   intro todo
@@ -1734,11 +1730,11 @@ theorem genConstructorsForAllTypes_shape {baseTypes : List String} {tyCons : Lis
     (hrhsub : ∀ hr ∈ rankedHeaders, hr.1 ∈ allHeaders) :
     ∀ (todo : List (TypeConstructor × Nat)) (block : MutualDatatype Unit),
       (∀ hr ∈ todo, hr.1 ∈ allHeaders) →
-      block ∈ SetGen.support (genConstructorsForAllTypes (G := SetGen.Set) baseTypes tyCons allHeaders
+      block ∈ SPMF.support (genConstructorsForAllTypes (G := SPMF) baseTypes tyCons allHeaders
         rankedHeaders maxExtraBaseConstrs maxRecConstrs maxArgs maxSize reserved todo) →
       ∀ d ∈ block, (∃ hr ∈ todo, hr.1.name = d.name ∧ hr.1.params = d.typeArgs) ∧
-        (∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ rca size, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons (visibleRefs allHeaders d.typeArgs)
+        (∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ rca size, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons (visibleRefs allHeaders d.typeArgs)
             d.typeArgs rca size)) := by
   intro todo
   induction todo with
@@ -1777,11 +1773,11 @@ theorem genConstructorsForAllTypes_witness {baseTypes : List String} {tyCons : L
     (hrhsub : ∀ hr ∈ rankedHeaders, hr.1 ∈ allHeaders) :
     ∀ (todo : List (TypeConstructor × Nat)) (block : MutualDatatype Unit),
       (∀ hr ∈ todo, hr.1 ∈ allHeaders) →
-      block ∈ SetGen.support (genConstructorsForAllTypes (G := SetGen.Set) baseTypes tyCons allHeaders
+      block ∈ SPMF.support (genConstructorsForAllTypes (G := SPMF) baseTypes tyCons allHeaders
         rankedHeaders maxExtraBaseConstrs maxRecConstrs maxArgs maxSize reserved todo) →
       ∀ d ∈ block, ∃ hr ∈ todo, hr.1.name = d.name ∧ hr.1.params = d.typeArgs ∧
-        ∃ c₀ ∈ d.constrs, ∀ arg ∈ c₀.args, ∃ size, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons
+        ∃ c₀ ∈ d.constrs, ∀ arg ∈ c₀.args, ∃ size, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons
             (visibleRefs (lowerRankHeaders rankedHeaders hr.2) hr.1.params) hr.1.params true size) := by
   intro todo
   induction todo with
@@ -1817,7 +1813,7 @@ theorem genConstructorsForAllTypes_witness {baseTypes : List String} {tyCons : L
 theorem genMutuallyRecursiveDatatypes_shape {baseTypes : List String} {tyCons : List KnownTyCon}
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {extraReserved : List String} {block : MutualDatatype Unit}
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∃ headers : List TypeConstructor,
@@ -1826,10 +1822,10 @@ theorem genMutuallyRecursiveDatatypes_shape {baseTypes : List String} {tyCons : 
       (headers.map (·.name)).Nodup ∧
       (∀ h ∈ headers, h.name ∉ initialReserved baseTypes tyCons extraReserved) ∧
       (∀ d ∈ block, ∃ h ∈ headers, h.name = d.name ∧ h.params = d.typeArgs) ∧
-      (∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ rca size, arg.2 ∈ SetGen.support
-        (genArgTy (G := SetGen.Set) baseTypes tyCons (visibleRefs headers d.typeArgs)
+      (∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ rca size, arg.2 ∈ SPMF.support
+        (genArgTy (G := SPMF) baseTypes tyCons (visibleRefs headers d.typeArgs)
           d.typeArgs rca size)) := by
-  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
+  simp only [mem_support_pure_iff, genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
   obtain ⟨numExtra, _, names, hnames, paramsList, hparams, ranks, hranksmem, hbodies⟩ := hb
   -- The header names are exactly `names` (the zipped-then-mapped first projection),
   -- which is nodup.
@@ -1900,7 +1896,7 @@ theorem genMutuallyRecursiveDatatypes_argsWF {baseTypes : List String} {tyCons :
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {extraReserved : List String} {block : MutualDatatype Unit}
     (harrow : ∀ kc ∈ tyCons, kc.1 ≠ "arrow")
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ConstrArgWF block arg.2 := by
@@ -1917,7 +1913,7 @@ theorem genMutuallyRecursiveDatatypes_argsWF {baseTypes : List String} {tyCons :
 theorem genMutuallyRecursiveDatatypes_argsWF_default
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {block : MutualDatatype Unit}
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) defaultBaseTypes
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) defaultBaseTypes
             defaultTyCons maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs
             maxArgs maxSize)) :
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ConstrArgWF block arg.2 :=
@@ -1947,7 +1943,7 @@ theorem genArgTy_refs {baseTypes : List String} {tyCons : List KnownTyCon}
     {tyParams : List TyIdentifier}
     (hbr : BlockRefsWF block tyParams blockRefs) :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) →
       ∀ r ∈ getTypeRefs ty,
         r ∈ baseTypes ∨ r ∈ tyCons.map (·.1) ∨ r ∈ block.map (·.name) ∨ r = "arrow" := by
@@ -2016,7 +2012,7 @@ theorem genArgTy_arities {baseTypes : List String} {tyCons : List KnownTyCon}
     {tyParams : List TyIdentifier}
     (hbr : BlockRefsWF block tyParams blockRefs) :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) →
       ∀ ref n, (ref, n) ∈ getTypeConsArities ty →
         (ref ∈ baseTypes ∧ n = 0) ∨ (ref, n) ∈ tyCons ∨
@@ -2083,7 +2079,7 @@ theorem genArgTy_freeVars {baseTypes : List String} {tyCons : List KnownTyCon}
     {tyParams : List TyIdentifier}
     (hbr : BlockRefsWF block tyParams blockRefs) :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) →
       ∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams := by
   intro size
@@ -2125,7 +2121,7 @@ theorem genArgTy_freeVars {baseTypes : List String} {tyCons : List KnownTyCon}
 theorem genMutuallyRecursiveDatatypes_refsKnown {baseTypes : List String} {tyCons : List KnownTyCon}
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {extraReserved : List String} {block : MutualDatatype Unit}
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∀ r ∈ getTypeRefs arg.2,
@@ -2145,7 +2141,7 @@ theorem genMutuallyRecursiveDatatypes_refsKnown {baseTypes : List String} {tyCon
 theorem genMutuallyRecursiveDatatypes_arities {baseTypes : List String} {tyCons : List KnownTyCon}
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {extraReserved : List String} {block : MutualDatatype Unit}
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∀ ref n, (ref, n) ∈ getTypeConsArities arg.2 →
@@ -2164,7 +2160,7 @@ theorem genMutuallyRecursiveDatatypes_arities {baseTypes : List String} {tyCons 
 theorem genMutuallyRecursiveDatatypes_argVarsScoped {baseTypes : List String} {tyCons : List KnownTyCon}
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {extraReserved : List String} {block : MutualDatatype Unit}
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∀ v ∈ LMonoTy.freeVars arg.2,
@@ -2570,7 +2566,7 @@ theorem genArgTy_tyInhab {C : LContext CoreLParams} {block : MutualDatatype Unit
     (harrow_ext : TypeFactory.getType (C.datatypes.push block) "arrow" = none)
     (hinhab : ∀ br ∈ poolRefs, TySymInhab (C.datatypes.push block) br.1) :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes allTyCons poolRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes allTyCons poolRefs
         tyParams rca size) →
       TyInhab (C.datatypes.push block) ty := by
   -- A head from `baseTypes` is external in the longer factory. It is not a block name,
@@ -2734,11 +2730,11 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String}
     (hstored : StoredRefsAbsent C block)
     (hsplit : ∀ kc ∈ allTyCons, kc ∈ tyCons ∨ kc ∈ dtCons)
     (hsubTC : ∀ kc ∈ tyCons, kc ∈ allTyCons)
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes allTyCons
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes allTyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∀ d ∈ block, TySymInhab (C.datatypes.push block) d.name := by
-  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
+  simp only [mem_support_pure_iff, genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
   obtain ⟨numExtra, _, names, hnames, paramsList, hparams, ranks, hranksmem, hbodies⟩ := hb
   let headers : List TypeConstructor :=
     (names.zip paramsList).map (fun p => { name := p.1, params := p.2 })
@@ -2879,7 +2875,7 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
     (hstored : StoredRefsAbsent C block)
     (hsplit : ∀ kc ∈ allTyCons, kc ∈ tyCons ∨ kc ∈ dtCons)
     (hsubTC : ∀ kc ∈ tyCons, kc ∈ allTyCons)
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes allTyCons
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes allTyCons
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     MutualADTWF C block := by
@@ -3040,7 +3036,7 @@ theorem defaultContextOk :
 theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {block : MutualDatatype Unit}
-    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) defaultBaseTypes
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) defaultBaseTypes
             defaultTyCons maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs
             maxArgs maxSize Core.KnownTypes.keywords)) :
     MutualADTWF coreContext block :=
@@ -3433,10 +3429,10 @@ theorem ArgsWellKinded.knownArity {C : LContext Core.CoreLParams} {block : Mutua
 theorem genArgTy_mono {baseTypes : List String} {tyCons : List KnownTyCon}
     {blockRefs : List BlockRef} {tyParams : List TyIdentifier} :
     ∀ (size : Nat) {rca : Bool} {ty : LMonoTy},
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) →
       ∀ {size' : Nat}, size ≤ size' →
-      ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size') := by
   intro size
   induction size using Nat.strongRecOn with
@@ -3483,9 +3479,9 @@ theorem exists_uniform_bound {α : Type} (l : List α) (P : α → Nat → Prop)
 theorem genArgTy_common_size {baseTypes : List String} {tyCons : List KnownTyCon}
     {blockRefs : List BlockRef} {tyParams : List TyIdentifier}
     {args : LMonoTys}
-    (h : ∀ a ∈ args, ∃ size, a ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes
+    (h : ∀ a ∈ args, ∃ size, a ∈ SPMF.support (genArgTy (G := SPMF) baseTypes
           tyCons blockRefs tyParams false size)) :
-    ∃ S, ∀ a ∈ args, a ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons
+    ∃ S, ∀ a ∈ args, a ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons
       blockRefs tyParams false S) := by
   induction args with
   | nil => exact ⟨0, by simp⟩
@@ -3531,7 +3527,7 @@ theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTy
       ArgsWellKinded C block ty →
       BitvecWidthOnly ty →
       ∀ (rca : Bool), (rca = false → BlockAbsent block ty) →
-      ∃ size, ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ∃ size, ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) := by
   intro ty
   induction ty using LMonoTy.induct with
@@ -3670,7 +3666,7 @@ theorem genArgTy_complete_of_wf_partial {baseTypes : List String} {tyCons : List
       ArgsWellKinded C block ty →
       BitvecWidthOnly ty →
       ∀ (rca : Bool), (rca = false → BlockAbsent block ty) →
-      ∃ size, ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+      ∃ size, ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
         tyParams rca size) := by
   intro ty
   induction ty using LMonoTy.induct with
@@ -3797,7 +3793,7 @@ theorem genArgTy_complete_of_arity {baseTypes : List String} {tyCons : List Know
     (hvars : ∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams)
     (hwk : ArgsWellKinded C block ty)
     (hbv : BitvecWidthOnly ty) :
-    ∃ size, ty ∈ SetGen.support (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs
+    ∃ size, ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
       tyParams true size) :=
   genArgTy_complete_of_wf hn hvocab hcover ty hwf hvars hwk hbv true (by simp)
 
@@ -3827,8 +3823,8 @@ theorem genArgTy_complete_of_MutualADTWF {baseTypes : List String}
     (hcover : ∀ d ∈ block, (d.name, d.typeArgs.map .ftvar) ∈ blockRefs)
     (hwf : MutualADTWF C block)
     (hbv : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, BitvecWidthOnly arg.2) :
-    ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ size, arg.2 ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs d.typeArgs true size) := by
+    ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ size, arg.2 ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons blockRefs d.typeArgs true size) := by
   intro d hd c hc arg harg
   refine genArgTy_complete_of_arity hn hvocab hcover
     (hwf.argsWF d hd c hc arg harg)
@@ -3848,7 +3844,7 @@ theorem genArgTy_complete_of_MutualADTWF {baseTypes : List String}
     flag. Therefore the generator makes the rigid type variable `a` there. The set of references
     holds the one block datatype `MyList a`. -/
 example : (LMonoTy.arrow (.ftvar "a") (.tcons "MyList" [.ftvar "a"])) ∈
-    SetGen.support (genArgTy (G := SetGen.Set) defaultBaseTypes defaultTyCons
+    SPMF.support (genArgTy (G := SPMF) defaultBaseTypes defaultTyCons
       [("MyList", [.ftvar "a"])] ["a"] true 1) := by
   refine (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inl
     ⟨by omega, _, _, rfl, ?_, ?_⟩))
@@ -3914,8 +3910,8 @@ theorem not_complete_without_bitvecWidthOnly (d : LDatatype Unit)
     -- The generator also cannot make it at any flag and at any size. This result holds for
     -- each set of references whose names are `d.name`, such as the set that
     -- `genMutuallyRecursiveDatatypes` gives for `[d]`.
-    (.tcons "bitvec" [.ftvar a]) ∉ SetGen.support
-      (genArgTy (G := SetGen.Set) defaultBaseTypes defaultTyCons blockRefs
+    (.tcons "bitvec" [.ftvar a]) ∉ SPMF.support
+      (genArgTy (G := SPMF) defaultBaseTypes defaultTyCons blockRefs
         d.typeArgs rca size) := by
   -- `d.name` is absent from the type. It is not the head, because `d.name ≠ "bitvec"`, and
   -- it is not in a type variable.
@@ -4025,9 +4021,9 @@ concrete name. -/
     reserved list. Then `genFreshName` returns `s` with no change, through the branch for a
     name that is absent from that list. -/
 theorem genFreshName_complete (reserved : List String) (s : String)
-    (hident : s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hident : s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnotmem : s ∉ reserved) :
-    s ∈ SetGen.support (genFreshName (G := SetGen.Set) reserved) := by
+    s ∈ SPMF.support (genFreshName (G := SPMF) reserved) := by
   simp only [genFreshName, mem_support_bind_iff, mem_support_ite_iff,
              mem_support_pure_iff]
   refine ⟨s, hident, Or.inr ⟨?_, rfl⟩⟩
@@ -4048,7 +4044,7 @@ theorem genFreshName_complete_of_syntactic (reserved : List String) (s : String)
     (hsyn : StrataGenerators.Function.IsGenIdentName s)
     (hnotkw : isReservedKeyword s = false)
     (hnotmem : s ∉ reserved) :
-    s ∈ SetGen.support (genFreshName (G := SetGen.Set) reserved) :=
+    s ∈ SPMF.support (genFreshName (G := SPMF) reserved) :=
   genFreshName_complete reserved s
     (StrataGenerators.Function.mem_support_genIdentName_of_syntactic hsyn hnotkw) hnotmem
 
@@ -4063,9 +4059,9 @@ theorem genFreshName_complete_of_syntactic (reserved : List String) (s : String)
 theorem genFreshNames_complete :
     ∀ (names reserved : List String),
       names.Nodup →
-      (∀ s ∈ names, s ∈ SetGen.support (genIdentName (G := SetGen.Set))) →
+      (∀ s ∈ names, s ∈ SPMF.support (genIdentName (G := SPMF))) →
       (∀ s ∈ names, s ∉ reserved) →
-      names ∈ SetGen.support (genFreshNames (G := SetGen.Set) reserved names.length) := by
+      names ∈ SPMF.support (genFreshNames (G := SPMF) reserved names.length) := by
   intro names
   induction names with
   | nil =>
@@ -4127,7 +4123,7 @@ theorem insertIdx_eraseIdx_getElem_self {α : Type} :
 theorem permutationOf_complete {α : Type} :
     ∀ (xs zs : List α) (hp : xs.Perm zs),
       (⟨zs, hp⟩ : { ys // xs.Perm ys }) ∈
-        SetGen.support (permutationOf (G := SetGen.Set) xs) := by
+        SPMF.support (permutationOf (G := SPMF) xs) := by
   intro xs
   induction xs with
   | nil =>
@@ -4154,10 +4150,10 @@ theorem permutationOf_complete {α : Type} :
       rwa [hreconstruct] at hins
     have hxs'_perm : xs'.Perm (zs.eraseIdx i) := (hp.trans hzs_perm).cons_inv
     rw [permutationOf]
-    simp only [mem_support_bind_iff, mem_support_map_iff, mem_support_choose_iff]
+    simp only [mem_support_pure_iff, mem_support_bind_iff, mem_support_map_iff, mem_support_choose_iff]
     -- Give the shorter list from the induction hypothesis, and then the index `i`.
     refine ⟨⟨zs.eraseIdx i, hxs'_perm⟩, ih _ hxs'_perm,
-      ⟨i, Nat.zero_le _, hilen⟩, ⟨⟨⟨i, Nat.zero_le _, hilen⟩⟩, ⟨Nat.zero_le _, hilen⟩, rfl⟩, ?_⟩
+      ⟨i, Nat.zero_le _, hilen⟩, ⟨⟨⟨i, Nat.zero_le _, hilen⟩⟩, trivial, rfl⟩, ?_⟩
     -- The value of the subtype that the generator returns is `⟨zs, hp⟩`. Only the field `.val`
     -- matters here, because two proofs of one statement are equal.
     rw [mem_support_pure_iff]
@@ -4210,12 +4206,12 @@ theorem genConstrArgs_complete {baseTypes : List String} {tyCons : List KnownTyC
     {args : List (Identifier Unit × LMonoTy)}
     (hlen : args.length ≤ maxArgs)
     (hnodup : (args.map (·.1.name)).Nodup)
-    (hident : ∀ arg ∈ args, arg.1.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hident : ∀ arg ∈ args, arg.1.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : ∀ arg ∈ args, arg.1.name ∉ reserved)
-    (htys : ∀ arg ∈ args, arg.2 ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs tyParams rca maxSize)) :
-    (args, args.map (·.1.name) ++ reserved) ∈ SetGen.support
-      (genConstrArgs (G := SetGen.Set) baseTypes tyCons blockRefs tyParams rca
+    (htys : ∀ arg ∈ args, arg.2 ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons blockRefs tyParams rca maxSize)) :
+    (args, args.map (·.1.name) ++ reserved) ∈ SPMF.support
+      (genConstrArgs (G := SPMF) baseTypes tyCons blockRefs tyParams rca
         maxArgs maxSize reserved) := by
   simp only [genConstrArgs, mem_support_bind_iff, mem_support_pure_iff,
              mem_support_vectorOf_iff]
@@ -4230,8 +4226,7 @@ theorem genConstrArgs_complete {baseTypes : List String} {tyCons : List KnownTyC
   · -- The generator can make each argument type at the limit `maxSize`.
     intro ty hty
     obtain ⟨arg, harg, rfl⟩ := List.mem_map.mp hty
-    exact mem_support_bind_iff.mpr
-      ⟨maxSize, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, Nat.le_refl _⟩, htys arg harg⟩
+    exact ⟨maxSize, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, Nat.le_refl _⟩, htys arg harg⟩
   · -- The zip and then the wrap rebuild `args`. The output list of reserved names agrees.
     rw [constrArgs_reassemble]
 
@@ -4282,13 +4277,13 @@ theorem genConstrs_complete {baseTypes : List String} {tyCons : List KnownTyCon}
     ∀ (cs : List (LConstr Unit)) (reserved : List String),
       (∀ c ∈ cs, hasDefaultTesterName c) →
       (∀ c ∈ cs, c.args.length ≤ maxArgs) →
-      (∀ nm ∈ ctorsNames cs, nm ∈ SetGen.support (genIdentName (G := SetGen.Set))) →
+      (∀ nm ∈ ctorsNames cs, nm ∈ SPMF.support (genIdentName (G := SPMF))) →
       (ctorsNames cs).Nodup →
       (∀ nm ∈ ctorsNames cs, nm ∉ reserved) →
-      (∀ c ∈ cs, ∀ arg ∈ c.args, arg.2 ∈ SetGen.support
-        (genArgTy (G := SetGen.Set) baseTypes tyCons blockRefs tyParams rca maxSize)) →
+      (∀ c ∈ cs, ∀ arg ∈ c.args, arg.2 ∈ SPMF.support
+        (genArgTy (G := SPMF) baseTypes tyCons blockRefs tyParams rca maxSize)) →
       ∃ reserved', SameReserved reserved' (ctorsNames cs ++ reserved) ∧
-        (cs, reserved') ∈ SetGen.support (genConstrs (G := SetGen.Set) baseTypes tyCons
+        (cs, reserved') ∈ SPMF.support (genConstrs (G := SPMF) baseTypes tyCons
           blockRefs tyParams rca maxArgs maxSize cs.length reserved) := by
   intro cs
   induction cs with
@@ -4316,7 +4311,7 @@ theorem genConstrs_complete {baseTypes : List String} {tyCons : List KnownTyCon}
     -- The name of `c`.
     have hcname_fresh : c.name.name ∉ reserved :=
       hfresh c.name.name (List.mem_append_left _ hcname_in)
-    have hcname_ident : c.name.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    have hcname_ident : c.name.name ∈ SPMF.support (genIdentName (G := SPMF)) :=
       hident c.name.name (List.mem_append_left _ hcname_in)
     -- The field names are absent from `c.name.name :: reserved`, and the generator can reach
     -- them.
@@ -4325,7 +4320,7 @@ theorem genConstrs_complete {baseTypes : List String} {tyCons : List KnownTyCon}
       simp only [List.mem_cons, not_or]
       refine ⟨fun heq => hcname_notfield (heq ▸ List.mem_map.mpr ⟨arg, harg, rfl⟩), ?_⟩
       exact hfresh arg.1.name (List.mem_append_left _ (hfield_in arg harg))
-    have hfieldident : ∀ arg ∈ c.args, arg.1.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    have hfieldident : ∀ arg ∈ c.args, arg.1.name ∈ SPMF.support (genIdentName (G := SPMF)) :=
       fun arg harg => hident arg.1.name (List.mem_append_left _ (hfield_in arg harg))
     -- Reach the argument list of `c`. The proof adds `c.name.name` to the list of reserved
     -- names, and then the field names.
@@ -4416,15 +4411,15 @@ theorem genConstructors_complete {baseTypes : List String} {tyCons : List KnownT
     (hperm : (c₀ :: restCs).Perm d.constrs)
     (hnf : ∀ c ∈ c₀ :: restCs, hasDefaultTesterName c)
     (hargslen : ∀ c ∈ c₀ :: restCs, c.args.length ≤ maxArgs)
-    (hident : ∀ nm' ∈ ctorsNames (c₀ :: restCs), nm' ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hident : ∀ nm' ∈ ctorsNames (c₀ :: restCs), nm' ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnodup : (ctorsNames (c₀ :: restCs)).Nodup)
     (hfresh : ∀ nm' ∈ ctorsNames (c₀ :: restCs), nm' ∉ params ++ reserved)
     (hreclen : restCs.length ≤ maxRecConstrs)
-    (hwit : ∀ arg ∈ c₀.args, arg.2 ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons inhabRefs params true maxSize))
-    (hrest : ∀ c ∈ restCs, ∀ arg ∈ c.args, arg.2 ∈ SetGen.support
-      (genArgTy (G := SetGen.Set) baseTypes tyCons (visibleRefs allHeaders params) params true maxSize)) :
-    d ∈ SetGen.support (genConstructors (G := SetGen.Set) baseTypes tyCons allHeaders
+    (hwit : ∀ arg ∈ c₀.args, arg.2 ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons inhabRefs params true maxSize))
+    (hrest : ∀ c ∈ restCs, ∀ arg ∈ c.args, arg.2 ∈ SPMF.support
+      (genArgTy (G := SPMF) baseTypes tyCons (visibleRefs allHeaders params) params true maxSize)) :
+    d ∈ SPMF.support (genConstructors (G := SPMF) baseTypes tyCons allHeaders
       inhabRefs nm params maxExtraBaseConstrs maxRecConstrs maxArgs maxSize reserved) := by
   -- Divide the names that the constructors add. The names of `c₀` come first, and the names of
   -- the other constructors come after them.
@@ -4443,14 +4438,14 @@ theorem genConstructors_complete {baseTypes : List String} {tyCons : List KnownT
   -- The name of `c₀` and its field names, against `params ++ reserved`.
   have hc₀name_fresh : c₀.name.name ∉ params ++ reserved :=
     hfresh c₀.name.name (List.mem_append_left _ hc₀name_in)
-  have hc₀name_ident : c₀.name.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+  have hc₀name_ident : c₀.name.name ∈ SPMF.support (genIdentName (G := SPMF)) :=
     hident c₀.name.name (List.mem_append_left _ hc₀name_in)
   have hfieldfresh : ∀ arg ∈ c₀.args, arg.1.name ∉ (c₀.name.name :: (params ++ reserved)) := by
     intro arg harg
     simp only [List.mem_cons, not_or]
     exact ⟨fun heq => hc₀name_notfield (heq ▸ List.mem_map.mpr ⟨arg, harg, rfl⟩),
       hfresh arg.1.name (List.mem_append_left _ (hfield_in arg harg))⟩
-  have hfieldident : ∀ arg ∈ c₀.args, arg.1.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+  have hfieldident : ∀ arg ∈ c₀.args, arg.1.name ∈ SPMF.support (genIdentName (G := SPMF)) :=
     fun arg harg => hident arg.1.name (List.mem_append_left _ (hfield_in arg harg))
   -- Unfold `genConstructors`. A `let` binds `blockRefs` and `reserved`.
   simp only [genConstructors, mem_support_bind_iff, mem_support_pure_iff]
@@ -4548,19 +4543,19 @@ theorem genConstructorsForAllTypes_complete {baseTypes : List String} {tyCons : 
           (∀ c ∈ witness :: rest, hasDefaultTesterName c) ∧
           (∀ c ∈ witness :: rest, c.args.length ≤ maxArgs) ∧
           (∀ nm' ∈ ctorsNames (witness :: rest),
-            nm' ∈ SetGen.support (genIdentName (G := SetGen.Set))) ∧
+            nm' ∈ SPMF.support (genIdentName (G := SPMF))) ∧
           (ctorsNames (witness :: rest)).Nodup ∧
           (∀ nm' ∈ ctorsNames (witness :: rest), nm' ∉ (blockTodo[i]'hi).typeArgs ++ reserved) ∧
           rest.length ≤ maxRecConstrs ∧
-          (∀ arg ∈ witness.args, arg.2 ∈ SetGen.support
-            (genArgTy (G := SetGen.Set) baseTypes tyCons
+          (∀ arg ∈ witness.args, arg.2 ∈ SPMF.support
+            (genArgTy (G := SPMF) baseTypes tyCons
               (visibleRefs (lowerRankHeaders rankedHeaders (todo[i]'hi').2) (blockTodo[i]'hi).typeArgs)
               (blockTodo[i]'hi).typeArgs true maxSize)) ∧
-          (∀ c ∈ rest, ∀ arg ∈ c.args, arg.2 ∈ SetGen.support
-            (genArgTy (G := SetGen.Set) baseTypes tyCons
+          (∀ c ∈ rest, ∀ arg ∈ c.args, arg.2 ∈ SPMF.support
+            (genArgTy (G := SPMF) baseTypes tyCons
               (visibleRefs allHeaders (blockTodo[i]'hi).typeArgs)
               (blockTodo[i]'hi).typeArgs true maxSize))) →
-      blockTodo ∈ SetGen.support (genConstructorsForAllTypes (G := SetGen.Set) baseTypes tyCons
+      blockTodo ∈ SPMF.support (genConstructorsForAllTypes (G := SPMF) baseTypes tyCons
         allHeaders rankedHeaders maxExtraBaseConstrs maxRecConstrs maxArgs maxSize reserved todo) := by
   intro todo
   induction todo with
@@ -4615,10 +4610,10 @@ theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat} :
     ∀ (paramsList : List (List TyIdentifier)),
       (∀ params ∈ paramsList, params.length ≤ maxTyParams) →
       (∀ params ∈ paramsList, params.Nodup) →
-      (∀ params ∈ paramsList, ∀ p ∈ params, p ∈ SetGen.support (genIdentName (G := SetGen.Set))) →
+      (∀ params ∈ paramsList, ∀ p ∈ params, p ∈ SPMF.support (genIdentName (G := SPMF))) →
       (∀ params ∈ paramsList, ∀ p ∈ params, p ∉ reserved) →
-      paramsList ∈ SetGen.support
-        (genParamsList (G := SetGen.Set) reserved maxTyParams paramsList.length) := by
+      paramsList ∈ SPMF.support
+        (genParamsList (G := SPMF) reserved maxTyParams paramsList.length) := by
   intro paramsList
   induction paramsList with
   | nil =>
@@ -4639,7 +4634,7 @@ theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat} :
     rank. The proof is an induction on `ranks`. -/
 theorem genRanks_complete {maxRank : Nat} :
     ∀ (ranks : List Nat), (∀ r ∈ ranks, r ≤ maxRank) →
-      ranks ∈ SetGen.support (genRanks (G := SetGen.Set) maxRank ranks.length) := by
+      ranks ∈ SPMF.support (genRanks (G := SPMF) maxRank ranks.length) := by
   intro ranks
   induction ranks with
   | nil => intro _; simp only [List.length_nil, genRanks, mem_support_pure_iff]
@@ -4721,11 +4716,11 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     (hne : block ≠ [])
     (hcount : block.length ≤ maxExtraDatatypes + 1)
     (hnamesNodup : (block.map (·.name)).Nodup)
-    (hnamesIdent : ∀ d ∈ block, d.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hnamesIdent : ∀ d ∈ block, d.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnamesFresh : ∀ d ∈ block, d.name ∉ initialReserved baseTypes tyCons extraReserved)
     (hparamsLen : ∀ d ∈ block, d.typeArgs.length ≤ maxTyParams)
     (hparamsNodup : ∀ d ∈ block, d.typeArgs.Nodup)
-    (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SPMF.support (genIdentName (G := SPMF)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
     (ranks : List Nat)
@@ -4737,22 +4732,22 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
         (∀ c ∈ witness :: rest, hasDefaultTesterName c) ∧
         (∀ c ∈ witness :: rest, c.args.length ≤ maxArgs) ∧
         (∀ nm' ∈ ctorsNames (witness :: rest),
-          nm' ∈ SetGen.support (genIdentName (G := SetGen.Set))) ∧
+          nm' ∈ SPMF.support (genIdentName (G := SPMF))) ∧
         (ctorsNames (witness :: rest)).Nodup ∧
         (∀ nm' ∈ ctorsNames (witness :: rest),
           nm' ∉ (block[i]'hi).typeArgs ++
             (block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)) ∧
         rest.length ≤ maxRecConstrs ∧
-        (∀ arg ∈ witness.args, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons
+        (∀ arg ∈ witness.args, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons
             (visibleRefs (lowerRankHeaders ((blockHeaders block).zip ranks) (ranks[i]'hi'))
               (block[i]'hi).typeArgs)
             (block[i]'hi).typeArgs true maxSize)) ∧
-        (∀ c ∈ rest, ∀ arg ∈ c.args, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons
+        (∀ c ∈ rest, ∀ arg ∈ c.args, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons
             (visibleRefs (blockHeaders block) (block[i]'hi).typeArgs)
             (block[i]'hi).typeArgs true maxSize))) :
-    block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
       maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
       maxSize extraReserved) := by
   -- The block has the form `d₀ :: _`, therefore `block.length = (block.length - 1) + 1`.
@@ -4760,7 +4755,7 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     cases block with
     | nil => exact absurd rfl hne
     | cons d ds => exact ⟨ds.length, by simp⟩
-  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff]
+  simp only [mem_support_pure_iff, genMutuallyRecursiveDatatypes, mem_support_bind_iff]
   -- Here `numExtra := block.length - 1`, which is `len`.
   refine ⟨len, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, by omega⟩, ?_⟩
   -- Here `names := block.map (·.name)`, and that list holds `len + 1` names.
@@ -4866,24 +4861,24 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
     (hwf : MutualADTWF C block)
     (hnew : ∀ d ∈ block, C.datatypes.getType d.name = none)
     (hcount : block.length ≤ maxExtraDatatypes + 1)
-    (hnamesIdent : ∀ d ∈ block, d.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hnamesIdent : ∀ d ∈ block, d.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnamesFresh : ∀ d ∈ block, d.name ∉ initialReserved baseTypes tyCons extraReserved)
     (hparamsLen : ∀ d ∈ block, d.typeArgs.length ≤ maxTyParams)
     (hparamsNodup : ∀ d ∈ block, d.typeArgs.Nodup)
-    (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SPMF.support (genIdentName (G := SPMF)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
     (hctors_nf : ∀ d ∈ block, ∀ c ∈ d.constrs, hasDefaultTesterName c)
     (hctors_len : ∀ d ∈ block, ∀ c ∈ d.constrs, c.args.length ≤ maxArgs)
     (hnames_ident : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
-      nm' ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+      nm' ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnames_nd : ∀ d ∈ block, (ctorsNames d.constrs).Nodup)
     (hnames_fresh : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
       nm' ∉ d.typeArgs ++ (block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved))
     (hreclen : ∀ d ∈ block, d.constrs.length ≤ maxRecConstrs + 1)
     (hvocab : VocabOk C baseTypes tyCons)
     (hbv : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, BitvecWidthOnly arg.2) :
-    ∃ maxSize, block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    ∃ maxSize, block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
       maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
       maxSize extraReserved) := by
   -- Short names, and the facts about the block names that `rankExists` needs.
@@ -4981,29 +4976,29 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
   have hthresh : ∀ d ∈ block, ∀ cw ∈ d.constrs,
       (∀ ref ∈ constrRefs cw, ref ∈ block.map (·.name) → rank ref < rank d.name) →
       ∃ S,
-      (∀ arg ∈ cw.args, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons (witPool d) d.typeArgs true S)) ∧
-      (∀ c ∈ d.constrs, ∀ arg ∈ c.args, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons (fullPool d) d.typeArgs true S)) := by
+      (∀ arg ∈ cw.args, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons (witPool d) d.typeArgs true S)) ∧
+      (∀ c ∈ d.constrs, ∀ arg ∈ c.args, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons (fullPool d) d.typeArgs true S)) := by
     intro d hd cw hcw hcwlower
     -- The arguments of the inhabited constructor, from `witPool d`. The generator can make
     -- each of them at some size.
-    have hwit_some : ∀ arg ∈ cw.args, ∃ s, arg.2 ∈ SetGen.support
-        (genArgTy (G := SetGen.Set) baseTypes tyCons (witPool d) d.typeArgs true s) := by
+    have hwit_some : ∀ arg ∈ cw.args, ∃ s, arg.2 ∈ SPMF.support
+        (genArgTy (G := SPMF) baseTypes tyCons (witPool d) d.typeArgs true s) := by
       intro arg harg
       exact genArgTy_complete_of_wf_partial hn hvocab arg.2
         (fun d' hd' happ => hcover_wit d hd cw hcw hcwlower arg harg d' hd' happ)
         (hwf.argsWF d hd cw hcw arg harg) (hwf.argVarsScoped d hd cw hcw arg harg)
         (argsWellKinded_ty hwf d hd cw hcw arg harg) (hbv d hd cw hcw arg harg) true (by simp)
     obtain ⟨Sw, hSw⟩ := exists_uniform_bound cw.args
-      (fun arg s => arg.2 ∈ SetGen.support
-        (genArgTy (G := SetGen.Set) baseTypes tyCons (witPool d) d.typeArgs true s))
+      (fun arg s => arg.2 ∈ SPMF.support
+        (genArgTy (G := SPMF) baseTypes tyCons (witPool d) d.typeArgs true s))
       (fun _ _ _ _ hle hs => genArgTy_mono _ hs hle) hwit_some
     -- Each constructor argument, from `fullPool d`. The generator can make each of them at some
     -- size. Put the pairs of a constructor and an argument into one list.
     let fullArgs : List (LMonoTy) := d.constrs.flatMap (fun c => c.args.map (·.2))
-    have hfull_some : ∀ ty ∈ fullArgs, ∃ s, ty ∈ SetGen.support
-        (genArgTy (G := SetGen.Set) baseTypes tyCons (fullPool d) d.typeArgs true s) := by
+    have hfull_some : ∀ ty ∈ fullArgs, ∃ s, ty ∈ SPMF.support
+        (genArgTy (G := SPMF) baseTypes tyCons (fullPool d) d.typeArgs true s) := by
       intro ty hty
       simp only [fullArgs, List.mem_flatMap, List.mem_map] at hty
       obtain ⟨c, hc, arg, harg, rfl⟩ := hty
@@ -5012,8 +5007,8 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
         (hwf.argsWF d hd c hc arg harg) (hwf.argVarsScoped d hd c hc arg harg)
         (argsWellKinded_ty hwf d hd c hc arg harg) (hbv d hd c hc arg harg) true (by simp)
     obtain ⟨Sf, hSf⟩ := exists_uniform_bound fullArgs
-      (fun ty s => ty ∈ SetGen.support
-        (genArgTy (G := SetGen.Set) baseTypes tyCons (fullPool d) d.typeArgs true s))
+      (fun ty s => ty ∈ SPMF.support
+        (genArgTy (G := SPMF) baseTypes tyCons (fullPool d) d.typeArgs true s))
       (fun _ _ _ _ hle hs => genArgTy_mono _ hs hle) hfull_some
     refine ⟨max Sw Sf, ?_, ?_⟩
     · intro arg harg; exact genArgTy_mono _ (hSw arg harg) (Nat.le_max_left _ _)
@@ -5027,10 +5022,10 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
   obtain ⟨N, hN⟩ := exists_uniform_bound block
       (fun d S => ∃ cw ∈ d.constrs,
         (∀ ref ∈ constrRefs cw, ref ∈ block.map (·.name) → rank ref < rank d.name) ∧
-        (∀ arg ∈ cw.args, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons (witPool d) d.typeArgs true S)) ∧
-        (∀ c ∈ d.constrs, ∀ arg ∈ c.args, arg.2 ∈ SetGen.support
-          (genArgTy (G := SetGen.Set) baseTypes tyCons (fullPool d) d.typeArgs true S)))
+        (∀ arg ∈ cw.args, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons (witPool d) d.typeArgs true S)) ∧
+        (∀ c ∈ d.constrs, ∀ arg ∈ c.args, arg.2 ∈ SPMF.support
+          (genArgTy (G := SPMF) baseTypes tyCons (fullPool d) d.typeArgs true S)))
       (fun d _ s s' hle hS => by
         obtain ⟨cw, hcw, hcwl, hw, hf⟩ := hS
         exact ⟨cw, hcw, hcwl, fun arg harg => genArgTy_mono _ (hw arg harg) hle,
@@ -5077,7 +5072,7 @@ for a concrete name, with no hypothesis `∈ support genIdentName` at any point.
 tightness checks for `genIdentName` are in `FunctionHasTypeAGen/IdentNameTests.lean`. Those checks
 include the names that the generator provably cannot draw. -/
 
-example : "myType" ∈ SetGen.support (genFreshName (G := SetGen.Set) ["bool", "int"]) := by
+example : "myType" ∈ SPMF.support (genFreshName (G := SPMF) ["bool", "int"]) := by
   apply genFreshName_complete_of_syntactic
   · decide +kernel
   · rw [isReservedKeyword_eq_list_contains]; decide +kernel

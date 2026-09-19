@@ -20,7 +20,7 @@ and for its measure of termination, which is optional. It uses `genLMonoTy` to m
 types and the output type.
 
 A generated `Function` is well-typed in the sense of `FuncHasTypeA` for four reasons:
-1. `List.dedup` builds its `typeArgs` and its `inputs.keys`, so both hold no duplicate.
+1. `List.uniq` builds its `typeArgs` and its `inputs.keys`, so both hold no duplicate.
 2. `genLMonoTy typeArgs` builds its input types and its output type, so each free type
    variable of the signature comes from `typeArgs`. This is `noUndeclaredVars`.
 3. `genLExpr ... output` builds its body, when it has one, so the body has the declared
@@ -194,20 +194,20 @@ def genQuotedName [Gen G] : G String := do
 /-- Makes a random list of names whose length is not more than `depth`.
 
     The definition uses the `listOfMaxLength` combinator, which this package vendors from Basalt.
-    `SetGen.mem_support_listOfMaxLength_iff` gives its support. -/
+    `SPMF.mem_support_listOfMaxLength_iff` gives its support. -/
 def genNameList [Gen G] (depth : Nat) : G (List String) :=
   listOfMaxLength depth genIdentName
 
 /-- Makes a list of names for the type arguments. The names are *different* in pairs, because
-    `List.dedup` builds the list. -/
+    `List.uniq` builds the list. -/
 def genTypeArgs [Gen G] (depth : Nat) : G (List TyIdentifier) :=
-  List.dedup <$> genNameList depth
+  List.uniq <$> genNameList depth
 
 /-- Makes a list of identifiers for the inputs. The names are *different* in pairs, because
-    `List.dedup` builds the list. The identifiers are therefore also different, because the map from a
+    `List.uniq` builds the list. The identifiers are therefore also different, because the map from a
     name to `⟨·, ()⟩` is injective. -/
 def genIdents [Gen G] (depth : Nat) : G (List (Identifier Unit)) :=
-  (fun names => (names.map (fun s => (⟨s, ()⟩ : Identifier Unit))).dedup) <$> genNameList depth
+  (fun names => (names.map (fun s => (⟨s, ()⟩ : Identifier Unit))).uniq) <$> genNameList depth
 
 -- ── The generator for the signature of the inputs ───────────────────────
 

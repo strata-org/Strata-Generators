@@ -264,7 +264,7 @@ def indepBlock     : PropertyRunner GenIndepBlock    := .ofInstances _
 -- contexts and the `retryGen` budget are all the sampler's own. So `genWith defaults` is the type's
 -- `Arbitrary` instance, and a tuned property differs only in the distribution.
 -- `StrataGenerators.TuningProfiles` holds the wrappers, and
--- `StrataGenerators.SetGen.TuningPrototypes` holds the proof that no `θ` changes what is reachable.
+-- `StrataGenerators.TuningPrototypes` holds the proof that no `θ` changes what is reachable.
 --
 -- An instance here is what makes a *profile* reach the properties it was written for. So this list
 -- tracks the input types that the tuned families quantify over, rather than the generators alone.

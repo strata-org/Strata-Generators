@@ -1066,7 +1066,7 @@ def printerErrorDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat × Nat) :=
     let lines := StrataGenerators.PrinterCoverage.strataErrorLines s
     if !lines.isEmpty then
       withErrors := withErrors + 1
-      for line in lines.dedup do
+      for line in lines.uniq do
         tally := match tally.find? (·.1 == line) with
           | some _ => tally.map (fun (m, c) => if m == line then (m, c + 1) else (m, c))
           | none => (line, 1) :: tally

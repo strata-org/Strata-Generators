@@ -4,7 +4,7 @@ import StrataGenerators.HasTypeAGen.IndirSupport
 import StrataGenerators.HasTypeAGen.OpsConsistentBridge
 import Strata.DL.Lambda.Denote.Assumptions
 
-open Lambda RandomChoice ArbNat ArbChar ArbString SetGen
+open Lambda RandomChoice ArbNat ArbChar ArbString
 
 set_option linter.unusedSimpArgs false
 
@@ -174,10 +174,10 @@ private theorem list_map_ne_nil_of_length_pos' {α β : Type} {xs : List α} {f 
 
 theorem mem_support_pickOp_iff' {octx : OpCtx} {τ : LMonoTy}
     {hv : (opsOfType octx τ).length > 0} {e : LExpr'} :
-    e ∈ (pickOp (G := SetGen.Set) octx τ hv) ↔
+    e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔
       ∃ name ∈ opsOfType octx τ, e = .op () ⟨name, ()⟩ (some τ) := by
-  change e ∈ SetGen.support (pickOp (G := SetGen.Set) octx τ hv) ↔ _
-  simp only [pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv), List.mem_map]
+  change e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔ _
+  simp only [mem_support_pure_iff, pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv), List.mem_map]
   constructor
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
@@ -185,7 +185,7 @@ theorem mem_support_pickOp_iff' {octx : OpCtx} {τ : LMonoTy}
 /-- Any op node produced by `pickOp` on `factoryOps F` is `Lambda.OpsConsistentR`. -/
 theorem pickOp_mem_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
     {hv : (opsOfType (factoryOps F) τ).length > 0} {e : LExpr'}
-    (he : e ∈ (pickOp (G := SetGen.Set) (factoryOps F) τ hv)) :
+    (he : e ∈ SPMF.support (pickOp (G := SPMF) (factoryOps F) τ hv)) :
     Lambda.OpsConsistentR F e := by
   rw [mem_support_pickOp_iff'] at he
   obtain ⟨name, hmem, rfl⟩ := he
@@ -195,10 +195,10 @@ theorem pickOp_mem_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
 /-- Any node produced by `pickBVar` is a `.bvar`, hence `Lambda.OpsConsistentR`. -/
 theorem pickBVar_mem_opsConsistentR (F : @Factory LExprParams') (bctx : BVarCtx) (τ : LMonoTy)
     {hv : (bvarsOfType bctx τ).length > 0} {e : LExpr'}
-    (he : e ∈ (pickBVar (G := SetGen.Set) bctx τ hv)) :
+    (he : e ∈ SPMF.support (pickBVar (G := SPMF) bctx τ hv)) :
     Lambda.OpsConsistentR F e := by
-  change e ∈ SetGen.support (pickBVar (G := SetGen.Set) bctx τ hv) at he
-  simp only [pickBVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
+  change e ∈ SPMF.support (pickBVar (G := SPMF) bctx τ hv) at he
+  simp only [mem_support_pure_iff, pickBVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
     List.mem_map] at he
   obtain ⟨i, _, rfl⟩ := he
   exact .bvar
@@ -206,10 +206,10 @@ theorem pickBVar_mem_opsConsistentR (F : @Factory LExprParams') (bctx : BVarCtx)
 /-- Any node produced by `pickFVar` is a `.fvar`, hence `Lambda.OpsConsistentR`. -/
 theorem pickFVar_mem_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (τ : LMonoTy)
     {hv : (fvarsOfType fctx τ).length > 0} {e : LExpr'}
-    (he : e ∈ (pickFVar (G := SetGen.Set) fctx τ hv)) :
+    (he : e ∈ SPMF.support (pickFVar (G := SPMF) fctx τ hv)) :
     Lambda.OpsConsistentR F e := by
-  change e ∈ SetGen.support (pickFVar (G := SetGen.Set) fctx τ hv) at he
-  simp only [pickFVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
+  change e ∈ SPMF.support (pickFVar (G := SPMF) fctx τ hv) at he
+  simp only [mem_support_pure_iff, pickFVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv),
     List.mem_map] at he
   obtain ⟨name, _, rfl⟩ := he
   exact .fvar
@@ -247,17 +247,17 @@ theorem mkApps_opsConsistentR (F : @Factory LExprParams') (base : LExpr') (args 
     statement holds for an arbitrary generator, because `genLExpr` uses `genLExprBase` in the argument
     position at the depth floor, and it uses *itself* above the floor. -/
 theorem mapM_genArg_opsConsistentR (F : @Factory LExprParams')
-    (genArg : LMonoTy → SetGen.Set LExpr')
-    (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)
+    (genArg : LMonoTy → SPMF LExpr')
+    (hArg : ∀ σ a, a ∈ SPMF.support (genArg σ) → Lambda.OpsConsistentR F a)
     (argTys : List LMonoTy) (args : List LExpr')
-    (hargs : args ∈ (List.mapM (m := SetGen.Set) genArg argTys)) :
+    (hargs : args ∈ SPMF.support (List.mapM (m := SPMF) genArg argTys)) :
     ∀ a ∈ args, Lambda.OpsConsistentR F a := by
   induction argTys generalizing args with
   | nil =>
-    simp only [List.mapM_nil, SetGen.Set.mem_pure] at hargs
+    simp only [List.mapM_nil, SPMF.mem_support_pure_iff] at hargs
     subst hargs; intro a ha; simp at ha
   | cons σ rest ih =>
-    simp only [List.mapM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at hargs
+    simp only [List.mapM_cons, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at hargs
     obtain ⟨x, hx, tl, htl, rfl⟩ := hargs
     intro a ha
     simp only [List.mem_cons] at ha
@@ -569,10 +569,10 @@ open StrataGenerators.IndirSupport in
     The statement holds for an arbitrary `genArg`, for the same reason as each other result in
     `IndirSupport`: `genLExprBase` gives its own recursive call at the smaller depth index. -/
 theorem genIndir_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
-    (genArg : LMonoTy → SetGen.Set LExpr')
-    (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)
+    (genArg : LMonoTy → SPMF LExpr')
+    (hArg : ∀ σ a, a ∈ SPMF.support (genArg σ) → Lambda.OpsConsistentR F a)
     (h : (findOpsInCtx (factoryOps F) τ).length > 0) (e : LExpr')
-    (he : e ∈ SetGen.support (genIndir (G := SetGen.Set) (factoryOps F) τ genArg h)) :
+    (he : e ∈ SPMF.support (genIndir (G := SPMF) (factoryOps F) τ genArg h)) :
     Lambda.OpsConsistentR F e := by
   obtain ⟨nm, argTys, args, hmem, hargs, rfl⟩ :=
     genIndir_shape (factoryOps F) τ genArg h e he
@@ -586,11 +586,11 @@ open StrataGenerators.IndirSupport in
 theorem genIndirPolyCore_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     (pctx : PolyOpCtx) (bctx : BVarCtx) (τ : LMonoTy) (maxNumArgs : Nat)
     (hPoly : PolyOpsConsistentR F pctx bctx fctx τ maxNumArgs)
-    (genArg : LMonoTy → SetGen.Set LExpr') (fallback : SetGen.Set LExpr')
-    (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)
-    (hFallback : ∀ a, a ∈ SetGen.support fallback → Lambda.OpsConsistentR F a)
+    (genArg : LMonoTy → SPMF LExpr') (fallback : SPMF LExpr')
+    (hArg : ∀ σ a, a ∈ SPMF.support (genArg σ) → Lambda.OpsConsistentR F a)
+    (hFallback : ∀ a, a ∈ SPMF.support fallback → Lambda.OpsConsistentR F a)
     (e : LExpr')
-    (he : e ∈ SetGen.support (genIndirPolyCore (G := SetGen.Set) fctx (factoryOps F) pctx
+    (he : e ∈ SPMF.support (genIndirPolyCore (G := SPMF) fctx (factoryOps F) pctx
       bctx τ genArg fallback maxNumArgs)) :
     Lambda.OpsConsistentR F e := by
   rcases genIndirPolyCore_shape fctx (factoryOps F) pctx bctx τ genArg fallback maxNumArgs e he with
@@ -609,16 +609,16 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     -- change.
     (hPoly : ∀ bc σ m, PolyOpsConsistentR F pctx bc fctx σ m)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
-    (he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
+    (he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e := by
   rw [genLExprBase.eq_def] at he
   split at he
   case h_1 τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 (.arrow τ₁ τ₂)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.arrow τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_arrow'] at he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨hf, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     · exact pickBVar_mem_opsConsistentR F bctx (.arrow τ₁ τ₂) h
     · exact h.elim
@@ -627,11 +627,11 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · exact pickOp_mem_opsConsistentR F (.arrow τ₁ τ₂) h
     · exact h.elim
   case h_3 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 .bool) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 .bool) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_bool'] at he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite] at he
+    simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨hf, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     · exact .const
     · exact .const
@@ -645,12 +645,12 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · exact .const
     · exact .const
   case h_5 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 .int) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 .int) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_int'] at he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
-      mem_support_iff, SetGen.mem_dite] at he
+    simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      SPMF.mem_support_dite_iff] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     · exact .const
     · exact .const
@@ -664,12 +664,12 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · exact .const
     · exact .const
   case h_9 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 .string) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 .string) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_string'] at he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
-      mem_support_iff, SetGen.mem_dite] at he
+    simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      SPMF.mem_support_dite_iff] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     · exact .const
     · exact pickBVar_mem_opsConsistentR F bctx .string h
@@ -679,12 +679,12 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · exact pickOp_mem_opsConsistentR F .string h
     · exact .const
   case h_11 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 .real) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 .real) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_real'] at he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
-      mem_support_iff, SetGen.mem_dite] at he
+    simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      SPMF.mem_support_dite_iff] at he
     rcases he with ⟨r, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩)))
     · exact .const
     · exact pickBVar_mem_opsConsistentR F bctx .real h
@@ -694,11 +694,11 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · exact pickOp_mem_opsConsistentR F .real h
     · exact .const
   case h_13 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 (.bitvec n)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
-      mem_support_iff, SetGen.mem_dite] at he
+    simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      SPMF.mem_support_dite_iff] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     · exact .const
     · exact pickBVar_mem_opsConsistentR F bctx (.bitvec n) h
@@ -708,11 +708,11 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     · exact pickOp_mem_opsConsistentR F (.bitvec n) h
     · exact .const
   case h_4 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) .bool) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) .bool) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_bool'] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genBoolConst (G := SetGen.Set)),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genBoolConst (G := SPMF)),
          (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .bool) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) .bool),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
@@ -746,8 +746,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genBoolConst, genApp, genIte, genEq, genQuant, pick_mem_iff, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    simp only [genBoolConst, genApp, genIte, genEq, genQuant, mem_support_pick_iff, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · rcases he with rfl | rfl <;> exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
@@ -772,21 +772,21 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact .const
       · exact .const
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_6 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) .int) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) .int) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_int'] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genIntConst (G := SetGen.Set)),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genIntConst (G := SPMF)),
          (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .int) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) .int),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n .int)
@@ -813,8 +813,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genIntConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    simp only [genIntConst, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · rcases he with ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩ <;> exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
@@ -833,21 +833,21 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact .const
       · exact .const
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_10 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) .string) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) .string) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_string'] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genStrConst (G := SetGen.Set)),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genStrConst (G := SPMF)),
          (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .string) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) .string),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n .string)
@@ -874,8 +874,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genStrConst, genApp, genIte, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    simp only [genStrConst, genApp, genIte, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · obtain ⟨s, _, rfl⟩ := he; exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
@@ -891,21 +891,21 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F .string h
       · exact .const
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_12 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) .real) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) .real) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_real'] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genRealConst (G := SetGen.Set)),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genRealConst (G := SPMF)),
          (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n .real) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) .real),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n .real)
@@ -932,8 +932,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    simp only [genRealConst, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · obtain ⟨r, _, rfl⟩ := he; exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
@@ -949,21 +949,21 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F .real h
       · exact .const
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_14 m n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (m + 1) (.bitvec n)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (m + 1) (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genBitvecConst (G := SetGen.Set) n),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genBitvecConst (G := SPMF) n),
          (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx m (.bitvec n)) (genLExprBase fctx (factoryOps F) pctx tvars bctx m) (.bitvec n)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx m .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx m (.bitvec n))
@@ -990,8 +990,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genBitvecConst, genApp, genIte, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    simp only [genBitvecConst, genApp, genIte, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · obtain ⟨k, _, rfl⟩ := he; exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx m _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx m _ _ harg)
@@ -1007,21 +1007,21 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F (.bitvec n) h
       · exact .const
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx m σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx m _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx m σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx m _ a ha) e he
   case h_2 n τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) (.arrow τ₁ τ₂)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) (.arrow τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     rw [norm_arrow'] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (4, fun () => genAbs (G := SetGen.Set) (genLExprBase fctx (factoryOps F) pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (4, fun () => genAbs (G := SPMF) (genLExprBase fctx (factoryOps F) pctx tvars (τ₁ :: bctx) n τ₂) τ₁),
          (1, fun () => genApp (genAppArgTy fctx (factoryOps F) tvars bctx n (.arrow τ₁ τ₂)) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) (.arrow τ₁ τ₂)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n (.arrow τ₁ τ₂))
@@ -1048,8 +1048,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genAbs, genApp, genIte, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
+    simp only [genAbs, genApp, genIte, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · obtain ⟨body, hbody, rfl⟩ := he
       exact .abs (genLExprBase_opsConsistentR F fctx pctx tvars hPoly (τ₁ :: bctx) n _ _ hbody)
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
@@ -1066,42 +1066,42 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickOp_mem_opsConsistentR F (.arrow τ₁ τ₂) h
       · exact .abs (genLExprBase_opsConsistentR F fctx pctx tvars hPoly (τ₁ :: bctx) n _ _ hbody)
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_7 name =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 (.ftvar name)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.ftvar name)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
-               bot_mem_iff] at he
+    simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+               mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
     · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
     · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
     · exact pickOp_mem_opsConsistentR F (.ftvar name) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
     · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
     · exact pickOp_mem_opsConsistentR F (.ftvar name) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickOp_mem_opsConsistentR F (.ftvar name) h
     · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
     · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
   case h_8 n name =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) (.ftvar name)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) (.ftvar name)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n (.ftvar name)) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) (.ftvar name)),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genApp (G := SPMF) (genAppArgTy fctx (factoryOps F) tvars bctx n (.ftvar name)) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) (.ftvar name)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n (.ftvar name))
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n (.ftvar name))),
@@ -1131,8 +1131,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    simp only [genApp, genIte, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
@@ -1141,52 +1141,52 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
       · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
       · exact pickOp_mem_opsConsistentR F (.ftvar name) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickFVar_mem_opsConsistentR F fctx (.ftvar name) h
       · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickOp_mem_opsConsistentR F (.ftvar name) h
       · exact pickBVar_mem_opsConsistentR F bctx (.ftvar name) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_15 =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 .regex) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 .regex) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
-               bot_mem_iff] at he
+    simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+               mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
     · exact pickBVar_mem_opsConsistentR F bctx .regex h
     · exact pickFVar_mem_opsConsistentR F fctx .regex h
     · exact pickOp_mem_opsConsistentR F .regex h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickFVar_mem_opsConsistentR F fctx .regex h
     · exact pickBVar_mem_opsConsistentR F bctx .regex h
     · exact pickOp_mem_opsConsistentR F .regex h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickOp_mem_opsConsistentR F .regex h
     · exact pickBVar_mem_opsConsistentR F bctx .regex h
     · exact pickFVar_mem_opsConsistentR F fctx .regex h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
   case h_16 n =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) .regex) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) .regex) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n .regex) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) .regex),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genApp (G := SPMF) (genAppArgTy fctx (factoryOps F) tvars bctx n .regex) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) .regex),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n .regex)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n .regex)),
@@ -1216,8 +1216,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    simp only [genApp, genIte, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
@@ -1226,52 +1226,52 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickBVar_mem_opsConsistentR F bctx .regex h
       · exact pickFVar_mem_opsConsistentR F fctx .regex h
       · exact pickOp_mem_opsConsistentR F .regex h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickFVar_mem_opsConsistentR F fctx .regex h
       · exact pickBVar_mem_opsConsistentR F bctx .regex h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickOp_mem_opsConsistentR F .regex h
       · exact pickBVar_mem_opsConsistentR F bctx .regex h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_17 τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 (.map τ₁ τ₂)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.map τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
-               bot_mem_iff] at he
+    simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+               mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
     · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
     · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
     · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
     · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
     · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
     · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
     · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
   case h_18 n τ₁ τ₂ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) (.map τ₁ τ₂)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) (.map τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) (.map τ₁ τ₂)),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genApp (G := SPMF) (genAppArgTy fctx (factoryOps F) tvars bctx n (.map τ₁ τ₂)) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) (.map τ₁ τ₂)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n (.map τ₁ τ₂))
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n (.map τ₁ τ₂))),
@@ -1301,8 +1301,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    simp only [genApp, genIte, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
@@ -1311,52 +1311,52 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
       · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
       · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickFVar_mem_opsConsistentR F fctx (.map τ₁ τ₂) h
       · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickOp_mem_opsConsistentR F (.map τ₁ τ₂) h
       · exact pickBVar_mem_opsConsistentR F bctx (.map τ₁ τ₂) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   case h_19 τ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 (.seq τ)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.seq τ)) := by
       rw [genLExprBase.eq_def]; exact he
-    simp only [genLExprBase, mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
-               bot_mem_iff] at he
+    simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+               mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, h⟩⟩⟩))
     · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
     · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
     · exact pickOp_mem_opsConsistentR F (.seq τ) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
     · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
     · exact pickOp_mem_opsConsistentR F (.seq τ) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · exact pickOp_mem_opsConsistentR F (.seq τ) h
     · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
     · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
-    · exact absurd h (by simp)
+    · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
   case h_20 n τ =>
-    replace he : e ∈ SetGen.support (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx (n + 1) (.seq τ)) := by
+    replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx (n + 1) (.seq τ)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase] at he
-    have hfreq : e ∈ SetGen.support (frequency
-      ([ (1, fun () => genApp (G := SetGen.Set) (genAppArgTy fctx (factoryOps F) tvars bctx n (.seq τ)) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) (.seq τ)),
+    have hfreq : e ∈ SPMF.support (frequency
+      ([ (1, fun () => genApp (G := SPMF) (genAppArgTy fctx (factoryOps F) tvars bctx n (.seq τ)) (genLExprBase fctx (factoryOps F) pctx tvars bctx n) (.seq τ)),
          (2, fun () => genIte (genLExprBase fctx (factoryOps F) pctx tvars bctx n .bool)
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n (.seq τ))
                               (genLExprBase fctx (factoryOps F) pctx tvars bctx n (.seq τ))),
@@ -1386,8 +1386,8 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genApp, genIte, SetGen.Set.mem_bind,
-      SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    simp only [genApp, genIte, SPMF.mem_support_bind_iff,
+      SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ hfn) (genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ _ harg)
     · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
@@ -1396,22 +1396,22 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
       · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
       · exact pickOp_mem_opsConsistentR F (.seq τ) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickFVar_mem_opsConsistentR F fctx (.seq τ) h
       · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
       · exact pickOp_mem_opsConsistentR F (.seq τ) h
       · exact pickBVar_mem_opsConsistentR F bctx (.seq τ) h
-      · exact absurd h (by simp)
+      · exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true])
     -- The Indir branch and the IndirPoly branch.
-    · try simp only [mem_support_iff, SetGen.mem_dite] at he
+    · try simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
       rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ e he
-    · try simp only [mem_support_iff] at he
+    · try simp only [] at he
       exact genIndirPolyCore_opsConsistentR F fctx pctx bctx _ _ (hPoly bctx _ 3) _ _
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
@@ -1420,17 +1420,17 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     -- arm is the three context leaves. The annotation on a `pickOp` leaf is the
     -- generic factory type of the operator, so it is the identity instance that
     -- `OpsConsistentR.op_in` accepts. The other two leaves carry no `.op` node.
-    simp only [mem_oneOf_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, mem_support_iff, SetGen.mem_dite,
-               bot_mem_iff] at he
+    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+               mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
        (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
     all_goals first
-      | exact pickBVar_mem_opsConsistentR F bctx _ h
-      | exact pickFVar_mem_opsConsistentR F fctx _ h
-      | exact pickOp_mem_opsConsistentR F _ h
-      | exact absurd h (by simp)
+      | exact h.elim
+      | exact pickBVar_mem_opsConsistentR F bctx τ h
+      | exact pickFVar_mem_opsConsistentR F fctx τ h
+      | exact pickOp_mem_opsConsistentR F τ h
   -- Name all 13 binders of the matcher, with `n` third. See the same case of
   -- `genLExprBase_sound`.
   case h_22 _ _ n _ _ _ _ _ _ _ _ _ _ =>
@@ -1439,7 +1439,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     -- the operator. `indir_op_opsConsistentR` gives that monomorphically and `hPoly`
     -- gives it polymorphically. The arguments come from `genLExprBase … n`, and this
     -- theorem's own recursive call gives their consistency.
-    have hfreq : e ∈ SetGen.support (frequency (G := SetGen.Set)
+    have hfreq : e ∈ SPMF.support (frequency (G := SPMF)
       ([ (2, fun () =>
            if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv
            else if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf
@@ -1468,25 +1468,25 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [pick_mem_iff, mem_support_iff, SetGen.mem_dite, bot_mem_iff] at he
+    simp only [mem_support_pure_iff, mem_support_pick_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
       all_goals first
-        | exact pickBVar_mem_opsConsistentR F bctx _ h
-        | exact pickFVar_mem_opsConsistentR F fctx _ h
-        | exact pickOp_mem_opsConsistentR F _ h
-        | exact absurd h (by simp)
+        | exact h.elim
+        | exact pickBVar_mem_opsConsistentR F bctx τ h
+        | exact pickFVar_mem_opsConsistentR F fctx τ h
+        | exact pickOp_mem_opsConsistentR F τ h
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
       all_goals first
-        | exact pickBVar_mem_opsConsistentR F bctx _ h
-        | exact pickFVar_mem_opsConsistentR F fctx _ h
-        | exact pickOp_mem_opsConsistentR F _ h
-        | exact absurd h (by simp)
+        | exact h.elim
+        | exact pickBVar_mem_opsConsistentR F bctx τ h
+        | exact pickFVar_mem_opsConsistentR F fctx τ h
+        | exact pickOp_mem_opsConsistentR F τ h
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
       all_goals first
-        | exact pickBVar_mem_opsConsistentR F bctx _ h
-        | exact pickFVar_mem_opsConsistentR F fctx _ h
-        | exact pickOp_mem_opsConsistentR F _ h
-        | exact absurd h (by simp)
+        | exact h.elim
+        | exact pickBVar_mem_opsConsistentR F bctx τ h
+        | exact pickFVar_mem_opsConsistentR F fctx τ h
+        | exact pickOp_mem_opsConsistentR F τ h
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact genIndir_opsConsistentR F _ _
           (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha) _ e he
@@ -1503,7 +1503,7 @@ theorem mapM_genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVa
     (tvars : List TyIdentifier)
     (hPoly : ∀ bc σ m, PolyOpsConsistentR F pctx bc fctx σ m)
     (bctx : BVarCtx) (depth : Nat) (argTys : List LMonoTy) (args : List LExpr')
-    (hargs : args ∈ (List.mapM (m := SetGen.Set)
+    (hargs : args ∈ SPMF.support (List.mapM (m := SPMF)
       (genLExprBase fctx (factoryOps F) pctx tvars bctx depth) argTys)) :
     ∀ a ∈ args, Lambda.OpsConsistentR F a :=
   mapM_genArg_opsConsistentR F _
@@ -1525,11 +1525,11 @@ theorem genIndirPoly_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     -- at each position of a subterm, so the fallback needs the condition at those types too, and not at `τ`
     -- only. `PolyOpsConsistentR_of_PCtxWF` gives each of them from one `PCtxWF`.
     (hPoly : ∀ bc σ m, PolyOpsConsistentR F pctx bc fctx σ m)
-    (genArg : LMonoTy → SetGen.Set LExpr')
-    (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)
+    (genArg : LMonoTy → SPMF LExpr')
+    (hArg : ∀ σ a, a ∈ SPMF.support (genArg σ) → Lambda.OpsConsistentR F a)
     (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ
+    (he : e ∈ SPMF.support
+      (genIndirPoly (G := SPMF) fctx (factoryOps F) pctx tvars bctx depth τ
         maxNumArgs genArg)) :
     Lambda.OpsConsistentR F e := by
   -- `genIndirPoly` is a wrapper around `genIndirPolyCore`, so the result for an arbitrary argument generator
@@ -1558,8 +1558,8 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
     -- needs its own condition. `PolyOpsConsistentR_of_PCtxWF` gives each of them from one `PCtxWF`, so each
     -- corollary below needs no change.
     (hPoly : ∀ bc σ m, PolyOpsConsistentR F pctx bc fctx σ m) (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
+    (he : e ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx (factoryOps F) pctx tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e := by
   -- The induction is on the depth index, as in the soundness proof. Each argument of an Indir rule comes from
   -- `genLExpr` at the smaller index, so the op-consistency of the argument generator at that index is the
@@ -1567,14 +1567,14 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
   -- survives the generalization unchanged.
   induction depth generalizing τ e with
   | zero =>
-    have hArg : ∀ σ a, a ∈ SetGen.support
-        (genLExprBase (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx 0 σ) →
+    have hArg : ∀ σ a, a ∈ SPMF.support
+        (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 σ) →
         Lambda.OpsConsistentR F a :=
       fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx 0 σ a ha
     unfold genLExpr at he
-    simp only [mem_support_iff, SetGen.mem_dite] at he
+    simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
-    · rw [← mem_support_iff, mem_support_frequency_iff] at he
+    · rw [mem_support_frequency_iff] at he
       obtain ⟨_, g, hg, _, he⟩ := he
       simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
       rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -1582,26 +1582,26 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
       rw [mem_support_pick_iff] at he
       rcases he with he | he
       · unfold genIndir at he
-        simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+        simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at he
         obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
-        rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+        rw [mem_support_elements_iff] at hentry_mem
         apply mkApps_opsConsistentR
         · exact indir_op_opsConsistentR F τ _ _ hentry_mem
         · exact mapM_genArg_opsConsistentR F _ hArg _ args hargs
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx 0 τ _ hPoly _ hArg e he
-    · rw [pick_mem_iff] at he
+    · rw [mem_support_pick_iff] at he
       rcases he with he | he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx 0 τ e he
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx 0 τ _ hPoly _ hArg e he
   | succ n ih =>
-    have hArg : ∀ σ a, a ∈ SetGen.support
-        (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx n σ) →
+    have hArg : ∀ σ a, a ∈ SPMF.support
+        (genLExpr (G := SPMF) fctx (factoryOps F) pctx tvars bctx n σ) →
         Lambda.OpsConsistentR F a :=
       fun σ a ha => ih σ a ha
     unfold genLExpr at he
-    simp only [mem_support_iff, SetGen.mem_dite] at he
+    simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
-    · rw [← mem_support_iff, mem_support_frequency_iff] at he
+    · rw [mem_support_frequency_iff] at he
       obtain ⟨_, g, hg, _, he⟩ := he
       simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
       rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -1609,14 +1609,14 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
       rw [mem_support_pick_iff] at he
       rcases he with he | he
       · unfold genIndir at he
-        simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
+        simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at he
         obtain ⟨⟨name, argTys⟩, hentry_mem, args, hargs, rfl⟩ := he
-        rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
+        rw [mem_support_elements_iff] at hentry_mem
         apply mkApps_opsConsistentR
         · exact indir_op_opsConsistentR F τ _ _ hentry_mem
         · exact mapM_genArg_opsConsistentR F _ hArg _ args hargs
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx (n + 1) τ _ hPoly _ hArg e he
-    · rw [pick_mem_iff] at he
+    · rw [mem_support_pick_iff] at he
       rcases he with he | he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx (n + 1) τ e he
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx (n + 1) τ _ hPoly _ hArg e he
@@ -1630,8 +1630,8 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
 theorem genLExprWithFactory_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx)
     (hPoly : ∀ bc σ m, PolyOpsConsistentR F pctx bc fctx σ m) (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genLExprWithFactory (G := SetGen.Set) fctx F tvars bctx depth τ pctx)) :
+    (he : e ∈ SPMF.support
+      (genLExprWithFactory (G := SPMF) fctx F tvars bctx depth τ pctx)) :
     Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ hPoly e he
 
@@ -1643,8 +1643,8 @@ theorem genLExprWithFactory_opsConsistentR (F : @Factory LExprParams') (fctx : F
 theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FVarCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (hPctx : PCtxWF F pctx) (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx (factoryOps F) pctx tvars bctx depth τ)) :
+    (he : e ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx (factoryOps F) pctx tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR F fctx pctx tvars bctx depth τ
     (fun bc σ m => PolyOpsConsistentR_of_PCtxWF F pctx bc fctx σ m hPctx) e he
@@ -1657,8 +1657,8 @@ theorem genLExpr_opsConsistentR_of_PCtxWF (F : @Factory LExprParams') (fctx : FV
     discharges no side condition. -/
 theorem genLExpr_opsConsistentR_factory (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx (factoryOps F) (factoryPolyOps F) tvars bctx depth τ)) :
+    (he : e ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx (factoryOps F) (factoryPolyOps F) tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR_of_PCtxWF F fctx (factoryPolyOps F) tvars bctx depth τ
     (PCtxWF_factoryPolyOps F) e he
@@ -1667,8 +1667,8 @@ theorem genLExpr_opsConsistentR_factory (F : @Factory LExprParams') (fctx : FVar
     factory, gives a term that satisfies `OpsConsistentR`, with no hypothesis. -/
 theorem genLExprWithFactory_opsConsistentR_factory (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genLExprWithFactory (G := SetGen.Set) fctx F tvars bctx depth τ (factoryPolyOps F))) :
+    (he : e ∈ SPMF.support
+      (genLExprWithFactory (G := SPMF) fctx F tvars bctx depth τ (factoryPolyOps F))) :
     Lambda.OpsConsistentR F e :=
   genLExpr_opsConsistentR_factory F fctx tvars bctx depth τ e he
 
@@ -1687,13 +1687,13 @@ theorem genLExprWithFactory_opsConsistentR_factory (F : @Factory LExprParams') (
     its terms satisfies `OpsConsistentR`. -/
 theorem genIndirPoly_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (maxNumArgs : Nat) (genArg : LMonoTy → SetGen.Set LExpr')
+    (maxNumArgs : Nat) (genArg : LMonoTy → SPMF LExpr')
     -- This hypothesis is necessary, because each *argument* of `genIndirPolyCore` also comes from `genArg`. At
     -- an empty polymorphic context only the fallback acts, and the lemma states one claim over both branches.
-    (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → Lambda.OpsConsistentR F a)
+    (hArg : ∀ σ a, a ∈ SPMF.support (genArg σ) → Lambda.OpsConsistentR F a)
     (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genIndirPoly (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ
+    (he : e ∈ SPMF.support
+      (genIndirPoly (G := SPMF) fctx (factoryOps F) [] tvars bctx depth τ
         maxNumArgs genArg)) :
     Lambda.OpsConsistentR F e := by
   -- At an empty polymorphic context, the condition about a polymorphic annotation has no content, because
@@ -1714,8 +1714,8 @@ set_option maxHeartbeats 800000 in
 theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx (factoryOps F) [] tvars bctx depth τ)) :
+    (he : e ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx (factoryOps F) [] tvars bctx depth τ)) :
     Lambda.OpsConsistentR F e :=
   -- At an empty polymorphic context, the condition about a polymorphic annotation has no content. The context
   -- holds no entry, so `findPolymorphicOps` gives the empty list, and no proof can give a membership in the
@@ -2193,7 +2193,7 @@ theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
 theorem genLExpr_complete_poly_opsConsistentR
     (F : @Factory LExprParams') (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hτ : ∃ m, τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) (maxNumArgs : Nat)
+    (hτ : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m)) (maxNumArgs : Nat)
     (name : String) (annot : LMonoTy) (args : List LExpr')
     (concreteArgTys : List LMonoTy)
     (boundVars : List TyIdentifier) (monoTy : LMonoTy)
@@ -2205,11 +2205,11 @@ theorem genLExpr_complete_poly_opsConsistentR
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
       (¬((generableTypesFromCtx bctx fctx octx).length > 0) →
-        σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
+        σ ∈ SPMF.support (pickBaseType (G := SPMF))))
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hArgLen : args.length = concreteArgTys.length)
-    (hArgsComplete : List.Forall₂
-      (fun arg σ => (∃ m, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) ∧
+    (hArgsComplete : List.Rel₂
+      (fun arg σ => (∃ m, σ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m)) ∧
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
       args concreteArgTys)
@@ -2227,8 +2227,8 @@ theorem genLExpr_complete_poly_opsConsistentR
       v ∈ (((decomposeArrow monoTy).1.drop concreteArgTys.length).foldr
         (fun σ acc => LMonoTy.arrow σ acc) (decomposeArrow monoTy).2).freeVars) :
     (mkApps (.op () ⟨name, ()⟩ (some annot)) args)
-      ∈ SetGen.support
-        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
+      ∈ SPMF.support
+        (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs) :=
   genLExpr_complete_poly_fullySpecShaped fctx octx pctx tvars bctx depth τ hτ name annot args
     hwt sampledTys concreteArgTys hLen hValid hAnnot hArgLen hArgsComplete hgen
     (schemeInstAt_of_opsConsistentR F fctx octx pctx bctx τ name annot concreteArgTys

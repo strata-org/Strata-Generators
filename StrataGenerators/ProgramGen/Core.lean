@@ -92,11 +92,11 @@ def mkAbstractTypeDecl (name : String) (arity : Nat) : Decl :=
     free type variables of the body `body`.
 
     The type arguments come from the body, and that choice makes each guard of `TEnv.addTypeAlias` hold by
-    construction. Those guards ask that the type arguments are distinct, which the dedup gives, and that the
+    construction. Those guards ask that the type arguments are distinct, which the uniq gives, and that the
     free variables of the body and the type arguments are the same set, so the alias has no parameter that its
     body does not name. Read `DeclHasType'.type_syn`. -/
 def mkAliasDecl (name : String) (body : LMonoTy) : Decl :=
-  .type (.syn { name := name, typeArgs := (LMonoTy.freeVars body).dedup, type := body }) .empty
+  .type (.syn { name := name, typeArgs := (LMonoTy.freeVars body).uniq, type := body }) .empty
 
 /-- An axiom declaration `axiom name : e;`. `e` is expected to be a `bool`. -/
 def mkAxiomDecl (name : String) (e : PExpr) : Decl :=

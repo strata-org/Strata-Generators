@@ -88,7 +88,7 @@ instance (priority := low) : TycheFeatures α := ⟨fun _ => []⟩
     untuned form only in the weights, and the "default" row of `underTunings` is exactly the property
     that `TestDecl.property` would register.
 
-    Tuning is θ-invariant at `SetGen.Set`, so a tuning changes only the *distribution*. No `θ` can
+    Tuning is θ-invariant at `SPMF`, so a tuning changes only the *distribution*. No `θ` can
     make a well-typed shape unreachable, so a tuned property tests the same claim over the same
     language. -/
 class TunableGen (α : Type) where

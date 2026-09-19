@@ -1,8 +1,7 @@
-import StrataGenerators.SetGen
+import StrataGenerators.GenSupport
 import StrataGenerators.FunctionHasTypeAGen.Core
 
-open RandomChoice SetGen
-open scoped SetGen.Set
+open RandomChoice
 
 /-!
 # The support of `genIdentName`, in both directions
@@ -288,7 +287,7 @@ instance decidableIsGenIdentName (s : String) : Decidable (IsGenIdentName s) :=
 
     `genIdentName` draws the first character from `startChars`. Then it draws a run
     of characters from `remainingChars` with `listOf`. Then it sends the result
-    through `dodgeKeyword`. By `SetGen.mem_support_listOf_iff`, the support of
+    through `dodgeKeyword`. By `SPMF.mem_support_listOf_iff`, the support of
     `listOf` is all of the lists over the support of the element generator. The run
     therefore has no bound on its length. The support of `genIdentName` is the set
     of names that are drawable in syntax and are not reserved keywords.
@@ -304,7 +303,7 @@ instance decidableIsGenIdentName (s : String) : Decidable (IsGenIdentName s) :=
     two draws. `dodgeKeyword` is the identity on `s`, because `s` is not a keyword.
     `dodgeKeyword_eq_self` gives this step, and `String.ofList` builds `s` again. -/
 theorem mem_support_genIdentName_iff (s : String) :
-    s ∈ SetGen.support (genIdentName (G := SetGen.Set)) ↔
+    s ∈ SPMF.support (genIdentName (G := SPMF)) ↔
       IsGenIdentName s ∧ isReservedKeyword s = false := by
   simp only [genIdentName, mem_support_bind_iff, mem_support_pure_iff]
   constructor
@@ -315,7 +314,7 @@ theorem mem_support_genIdentName_iff (s : String) :
         mem_support_elements_iff (show startChars ≠ [] from by decide +kernel)] using hx
     have hrest : ∀ c ∈ xs, c ∈ remainingChars := by
       intro c hc
-      have := SetGen.mem_support_listOf hxs c hc
+      have := SPMF.mem_support_listOf.mp hxs c hc
       simpa only [genRemainingChar,
         mem_support_elements_iff (show remainingChars ≠ [] from by decide +kernel)] using this
     refine ⟨?_, dodgeKeyword_not_keyword _⟩
@@ -339,7 +338,7 @@ theorem mem_support_genIdentName_iff (s : String) :
     refine ⟨c, ?_, cs, ?_, ?_⟩
     · simpa only [genStartChar,
         mem_support_elements_iff (show startChars ≠ [] from by decide +kernel)] using hc
-    · refine SetGen.mem_support_listOf_of_forall (fun c' hc' => ?_)
+    · refine SPMF.mem_support_listOf_of_forall (fun c' hc' => ?_)
       simpa only [genRemainingChar,
         mem_support_elements_iff (show remainingChars ≠ [] from by decide +kernel)]
         using hcs c' hc'
@@ -348,7 +347,7 @@ theorem mem_support_genIdentName_iff (s : String) :
 
 /-- The same claim as `mem_support_genIdentName_iff`, as an equation between sets. -/
 theorem support_genIdentName :
-    SetGen.support (genIdentName (G := SetGen.Set)) =
+    SPMF.support (genIdentName (G := SPMF)) =
       {s | IsGenIdentName s ∧ isReservedKeyword s = false} := by
   ext s; exact mem_support_genIdentName_iff s
 
@@ -357,14 +356,14 @@ theorem support_genIdentName :
 /-- **No name in the support of `genIdentName` is a keyword.** This claim is the right part of
     `mem_support_genIdentName_iff`. -/
 theorem genIdentName_not_keyword (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
+    (hs : s ∈ SPMF.support (genIdentName (G := SPMF))) :
     isReservedKeyword s = false :=
   (mem_support_genIdentName_iff s).mp hs |>.2
 
 /-- Each name in the support of `genIdentName` has the syntax that the generator can draw. This
     claim is the left part of `mem_support_genIdentName_iff`. -/
 theorem genIdentName_isGenIdentName (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
+    (hs : s ∈ SPMF.support (genIdentName (G := SPMF))) :
     IsGenIdentName s :=
   (mem_support_genIdentName_iff s).mp hs |>.1
 
@@ -374,7 +373,7 @@ theorem genIdentName_isGenIdentName (s : String)
     so `decide` closes this for a concrete name. -/
 theorem mem_support_genIdentName_of_syntactic {s : String}
     (hsyn : IsGenIdentName s) (hnotkw : isReservedKeyword s = false) :
-    s ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    s ∈ SPMF.support (genIdentName (G := SPMF)) :=
   (mem_support_genIdentName_iff s).mpr ⟨hsyn, hnotkw⟩
 
 /-- **The spec-level form of the support lemma.** This states `IsGenIdentName` over
@@ -386,7 +385,7 @@ theorem mem_support_genIdentName_of_syntactic {s : String}
     not reserved keywords. No internal alphabet of the generator is in the
     statement. -/
 theorem mem_support_genIdentName_iff_isId (s : String) :
-    s ∈ SetGen.support (genIdentName (G := SetGen.Set)) ↔
+    s ∈ SPMF.support (genIdentName (G := SPMF)) ↔
       (∃ c cs, s.toList = c :: cs ∧ isIdFirst c ∧ ∀ c' ∈ cs, isIdRest c') ∧
         isReservedKeyword s = false := by
   rw [mem_support_genIdentName_iff]
@@ -410,7 +409,7 @@ theorem mem_support_genIdentName_iff_isId (s : String) :
     condition back onto a concrete `List String`, which `decide` can reduce. Use
     this form when the name is concrete. -/
 theorem mem_support_genIdentName_iff' (s : String) :
-    s ∈ SetGen.support (genIdentName (G := SetGen.Set)) ↔
+    s ∈ SPMF.support (genIdentName (G := SPMF)) ↔
       IsGenIdentName s ∧ s ∉ reservedKeywordsList := by
   rw [mem_support_genIdentName_iff, isReservedKeyword_eq_list_contains,
       Bool.eq_false_iff, Ne, List.contains_eq_mem, decide_eq_true_eq]
@@ -419,7 +418,7 @@ theorem mem_support_genIdentName_iff' (s : String) :
     over concrete lists, which is the form that `decide` can close. -/
 theorem mem_support_genIdentName_of_syntactic' {s : String}
     (hsyn : IsGenIdentName s) (hnotkw : s ∉ reservedKeywordsList) :
-    s ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    s ∈ SPMF.support (genIdentName (G := SPMF)) :=
   (mem_support_genIdentName_iff' s).mpr ⟨hsyn, hnotkw⟩
 
 /-- Reachability of a name that is given as an explicit split into a first
@@ -429,7 +428,7 @@ theorem mem_support_genIdentName_of_cons {c : Char} {cs : List Char} {s : String
     (hsplit : s.toList = c :: cs)
     (hc : c ∈ startChars) (hcs : ∀ c' ∈ cs, c' ∈ remainingChars)
     (hnotkw : isReservedKeyword s = false) :
-    s ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    s ∈ SPMF.support (genIdentName (G := SPMF)) :=
   mem_support_genIdentName_of_syntactic ⟨c, cs, hsplit, hc, hcs⟩ hnotkw
 
 /-- **No name in the support of `genIdentName` holds a space.** The generator draws the first
@@ -440,7 +439,7 @@ theorem mem_support_genIdentName_of_cons {c : Char} {cs : List Char} {s : String
     prefix `"old "` to a name, and that prefix holds a space. No generated parameter name is
     therefore equal to a key of an `old` binding. -/
 theorem genIdentName_no_space (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
+    (hs : s ∈ SPMF.support (genIdentName (G := SPMF))) :
     ' ' ∉ s.toList := by
   obtain ⟨c, cs, hsplit, hc, hcs⟩ := genIdentName_isGenIdentName s hs
   rw [hsplit]
@@ -452,7 +451,7 @@ theorem genIdentName_no_space (s : String)
 /-- A generated identifier is not empty. This is immediate from the split into a
     first character and a list of other characters. -/
 theorem genIdentName_ne_empty (s : String)
-    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
+    (hs : s ∈ SPMF.support (genIdentName (G := SPMF))) :
     s.toList ≠ [] := by
   obtain ⟨c, cs, hsplit, _, _⟩ := genIdentName_isGenIdentName s hs
   rw [hsplit]; simp

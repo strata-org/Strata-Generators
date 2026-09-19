@@ -541,7 +541,7 @@ compound argument type, and which is a known gap. Each declaration is an indepen
 Therefore the probability that a whole program succeeds falls quickly with the number of the declarations,
 and the fuel must absorb that fall.
 
-None of this changes a proof. Each proof is stated over `SetGen.Set`, which is the semantics of a support,
+None of this changes a proof. Each proof is stated over `SPMF`, which is the semantics of a support,
 and it does not depend on an interpretation. -/
 
 /-- Draw one random well-typed program, through the `Plausible.Gen` interpretation, with retries.
