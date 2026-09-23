@@ -176,7 +176,6 @@ theorem mem_support_pickOp_iff' {octx : OpCtx} {τ : LMonoTy}
     {hv : (opsOfType octx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔
       ∃ name ∈ opsOfType octx τ, e = .op () ⟨name, ()⟩ (some τ) := by
-  change e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔ _
   simp only [mem_support_pure_iff, pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos' hv), List.mem_map]
   constructor
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
@@ -1495,7 +1494,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
         (fun σ a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n σ a ha)
         (fun a ha => genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx n _ a ha) e he
   termination_by depth
-  decreasing_by all_goals simp_wf; omega
+  decreasing_by all_goals omega
 
 /-- Each argument that `mapM (genLExprBase fctx (factoryOps F) …)` gives satisfies
     `Lambda.OpsConsistentR`. This is a special case of `mapM_genArg_opsConsistentR`. -/

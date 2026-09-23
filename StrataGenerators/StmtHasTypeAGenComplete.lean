@@ -140,7 +140,7 @@ theorem freshName_reach (ctx : VarCtx) (x : Identifier Unit)
     (hname : x.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : Map.find? ctx x = none) :
     x.name ∈ SPMF.support (genFreshName (G := SPMF) ctx) := by
-  simp only [mem_support_pure_iff, genFreshName, mem_support_bind_iff]
+  simp only [genFreshName, mem_support_bind_iff]
   refine ⟨x.name, hname, ?_⟩
   simp only [mem_support_ite_iff, mem_support_pure_iff]
   refine Or.inl ⟨?_, trivial⟩
@@ -662,7 +662,7 @@ theorem genFreshLabel_complete (labels : List String) (label : String)
     (hreach : label ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : label ∉ labels) :
     label ∈ SPMF.support (genFreshLabel (G := SPMF) labels) := by
-  simp only [mem_support_pure_iff, genFreshLabel, mem_support_bind_iff]
+  simp only [genFreshLabel, mem_support_bind_iff]
   exact ⟨label, hreach, by simp only [mem_support_ite_iff, mem_support_pure_iff]; exact Or.inr ⟨hfresh, trivial⟩⟩
 
 /-- `genFreshLabel_complete`, and `mem_support_genIdentName_iff` discharges its hypothesis on
@@ -758,7 +758,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     obtain ⟨hname_tc, hlen, hparams⟩ := hok
     refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine genTypeDeclStmt_mem procs C ctx n _ ?_
-    simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff]
+    simp only [genTypeDeclStmt, mem_support_bind_iff]
     refine ⟨tc, genTypeConstructor_complete n tc hname_tc hlen hparams, ?_⟩
     rw [hoktc]; simp only [mem_support_pure_iff]
   | block C Γ Cb Γb L label body md Δ hlabel hbody hequiv ihbody =>

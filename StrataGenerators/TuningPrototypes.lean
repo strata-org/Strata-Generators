@@ -202,7 +202,7 @@ theorem genPreconditionW_support_eq (octx : OpCtx)
       = optionGen (genPrecondClause octx inputs tvars depth) := rfl
   ext o
   rw [hrhs, SPMF.mem_support_optionGen_iff]
-  simp only [mem_support_pure_iff, genPreconditionW, SPMF.mem_support_frequency_iff]
+  simp only [genPreconditionW, SPMF.mem_support_frequency_iff]
   constructor
   · rintro ⟨w, g, hmem, _, hg⟩
     rcases List.mem_cons.mp hmem with heq | hmem'

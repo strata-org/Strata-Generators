@@ -116,7 +116,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     cases procs with
     | nil => exact ((SPMF.mem_support_bot_iff _).mp hmem).elim
     | cons p0 ps =>
-      simp only [mem_support_pure_iff, genCallStmt, mem_support_bind_iff] at hmem
+      simp only [genCallStmt, mem_support_bind_iff] at hmem
       obtain ⟨s, hs, σvals, _, hmem⟩ := hmem
       split at hmem
       · simp only [mem_support_bind_iff, mem_support_pure_iff] at hmem
@@ -158,7 +158,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
         SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d) → False := by
     intro d hmem
-    simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff] at hmem
+    simp only [genTypeDeclStmt, mem_support_bind_iff] at hmem
     obtain ⟨tc, _, hmem⟩ := hmem
     split at hmem
     · simp only [mem_support_pure_iff, GenStmtResult.mk.injEq, List.cons.injEq,
