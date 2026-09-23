@@ -373,7 +373,7 @@ theorem genIdents_complete (depth : Nat) (ids : List (Identifier Unit))
     | cons a as ih =>
       simp only [List.map_cons, List.cons.injEq]
       refine ⟨?_, ih⟩; obtain ⟨n, u⟩ := a; trivial
-  rw [hmapeq, dedup_eq_self ids hnd]
+  rw [hmapeq, uniq_eq_self ids hnd]
 
 /-- `genTypeArgs depth` can reach a list of type arguments `l` that holds no duplicate, if
     `genNameList depth` can reach `l`. -/
@@ -382,7 +382,7 @@ theorem genTypeArgs_complete (depth : Nat) (l : List TyIdentifier)
     (hnames : l ∈ SPMF.support (genNameList (G := SPMF) depth)) :
     l ∈ SPMF.support (genTypeArgs (G := SPMF) depth) := by
   simp only [mem_support_pure_iff, genTypeArgs, mem_support_map_iff]
-  exact ⟨l, hnames, (dedup_eq_self l hnd).symm⟩
+  exact ⟨l, hnames, (uniq_eq_self l hnd).symm⟩
 
 /-- Completeness of `genInputs`. The support of `genInputs tvars depth` holds a `ListMap` when three
     conditions hold: the keys of the map hold no duplicate; `genLMonoTy tvars depth` can reach each

@@ -17,20 +17,22 @@ Specifically, the repo contains generators for the following fragment of Strata 
 Basalt generators are polymorphic in their monad (see the [Basalt repo](https://github.com/hgoldstein95/basalt) for more details): this means they can be interpreted differently for execution / proofs. 
 
 - To run these generators, we interpret them using `Plausible`'s `Gen` monad. 
-- To prove properties about the generators, we interpret them using `SetGen`, which reasons about
-a generator's *support* (the set of all values that can be produced by the generator)
+- To prove properties about the generators, we interpret them using Basalt's `SPMF` (generators are
+sub-probability mass functions) and reason about a generator's *support* (the set of all values that
+can be produced by the generator), via `SPMF.support`.
 
-**Note**: Basalt allows reasoning about generators' distributions via another interpretation (`SPMF`, in 
-which generators are viewed as sub-probability mass functions), but this repo does not use this interpretation at the moment. `SetGen.lean` contains `SetGen` variants of some `SPMF` results that appear 
-in the Basalt source code, which are required for proofs about Strata generators.
+**Note**: this repo used to carry its own `SetGen` interpretation, which read a generator as a plain
+`Set`. It existed only because `SPMF` is built on Mathlib and Strata used to declare its own
+root-namespace copies of `List.Forall₂`, `List.dedup` and friends, so no module could import Strata
+and Mathlib at once. Strata has since renamed those declarations, so `SetGen` is gone.
+`StrataGenerators/GenSupport.lean` holds the few support results this package needs beyond the ones
+Basalt provides.
 
 ### Organization
 
 Each generator is split into a `Core.lean` (containing the generator's executable code) and a
 separate proof file. For example, for the `LExpr` generator, `HasTypeAGen/Core.lean` contains 
 the actual code for the generator, while `HasTypeAGen.lean` contains the generator's correctness proofs. 
-This allows us to avoid importing both Strata and Batteries (imported transitively via Mathlib) 
-in the same file, as `List.Forall₂` is defined by both libraries. 
 
 ## Dependencies
 

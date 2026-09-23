@@ -6,13 +6,7 @@ testDriver = "test"
 [[require]]
 name = "Strata"
 git = "https://github.com/strata-org/Strata"
-# Temporary: a local branch off upstream `main` (`spmf-namespace-fix`) that renames the
-# root-namespace declarations Strata keeps its own copies of — `List.Forall₂`,
-# `List.Disjoint`, `List.dedup`, `List.foldlIdx`, `Reflexive`, `Transitive`, `Dense`,
-# `String.IsSuffix`, `List.reverse_injective`. Without those renames no module can import
-# Strata and Mathlib at once, because Lean refuses two imported modules that declare the
-# same constant — and `SPMF` needs Mathlib. See docs/spmf_refactor.md.
-rev = "8ccdc0882a6db57a756df969df2c502033d20f4b"
+rev = "main"
 
 [[require]]
 name = "basalt"

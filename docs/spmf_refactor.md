@@ -22,7 +22,7 @@ Dumping `env.constants` with each constant's defining module from two processes 
 package, one importing `Basalt`) and intersecting on same-name/different-module gave 33 hits. The
 auto-generated equation and congruence lemmas (`guard.eq_1`, `Fin.val.hcongr_2`, `List.dedup.eq_1`, …)
 are *not* a problem — verified by importing the offending module pairs directly, Lean tolerates those.
-Ten real declarations were, all in Strata, and a branch off upstream `main` renames them:
+Ten real declarations were, all in Strata, and upstream `main` now renames them:
 
 | Before | After | Strata module |
 |---|---|---|
@@ -38,10 +38,11 @@ Ten real declarations were, all in Strata, and a branch off upstream `main` rena
 | `List.reverse_injective` | `List.reverse_injective'` | `Strata/DL/Util/StringGen.lean` |
 
 Each stays in its original namespace, so generalized field notation (`l.uniq`, `h.symm`,
-`s.IsSuffixOf t`) is unaffected. The fork is commit `8ccdc0882` on branch `spmf-namespace-fix` in the
-local Strata checkout, pinned from both `lakefile.toml` and `lake-manifest.json`. **Editing
-`lakefile.toml` alone is not enough** — `lake build` re-checks-out the manifest's rev and silently
-discards the working tree. This wants to go upstream; until it does, the pin is a fork.
+`s.IsSuffixOf t`) is unaffected. The renames landed upstream in `e318079876`, which is the rev this
+package pins, so `lakefile.toml` asks for `main` again and no fork is involved. (While the work was
+still a fork, one thing was worth knowing: **editing `lakefile.toml` alone is not enough** — `lake
+build` re-checks-out the manifest's rev and silently discards the working tree, so `lake-manifest.json`
+has to move too.)
 
 Two Mathlib-arrival consequences inside this package:
 
@@ -114,3 +115,11 @@ relating two `Nat.below` bundles.
 run-for-run on a second run of each; the suite is not seed-deterministic, so a single run apart shows
 spurious differences — `mono: output of monomorphization typechecks` differed on the first pair and
 agreed on the second).
+
+After merging `main` (Strata `e318079876`, which carries the renames above, and Basalt `c4b7ed20`) the
+build is still green — 2047 jobs, one `sorry`, the one named above. None of the Basalt work since
+`a9daf35525` touches what this package reads: `SPMF/Core.lean`, `SPMF/Support.lean`, `Laws.lean`'s
+`IsSoundAndComplete` and `Tuning/Attr.lean` are unchanged or only extended. The churn there is in the
+cost and mass-bound machinery (`SPMF/Cost.lean` → `SPMF/CostBound.lean`, the new `SPMF/Walk.lean`) and
+in the executable interpretations (`IO.lean` drops `UniformIO` and its clamp for the new `Random.lean`
+`stdChoose`; `Sized.lean` is new), and this package imports none of it.

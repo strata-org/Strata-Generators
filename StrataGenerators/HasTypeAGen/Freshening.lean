@@ -22,8 +22,7 @@ The chain of the argument has four steps:
 
 This file is a separate module, and it is not a part of the core module. It imports only
 `HasTypeAGen.Core`. It imports no part of Mathlib, and it imports no part of Batteries. The
-note about the imports at the start of the main `HasTypeAGen` module gives the reason, which
-is a collision on the name `List.Rel₂`.
+note about the imports at the start of the main `HasTypeAGen` module gives the reason.
 -/
 
 open Lambda

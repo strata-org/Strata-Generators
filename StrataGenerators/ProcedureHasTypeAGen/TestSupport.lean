@@ -2,8 +2,8 @@
 -- `ProcedureHasTypeAGen.Core` gives the generator and the syntax of Strata Core.
 -- `HasTypeAGen.TestSupport` gives the operator contexts `coreMonoOps` and `corePartialOps`, and it needs
 -- no Mathlib. The three `Strata.Transform.*` modules are the passes under test. An import of
--- `StmtHasTypeAGen.TestSupport` here would make this file impossible to import beside a transform pass,
--- because Strata and Batteries each define `List.Rel₂`.
+-- `StmtHasTypeAGen.TestSupport` here would drag Mathlib in beside a transform pass, which only adds
+-- build cost.
 import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.Transform.FilterProcedures

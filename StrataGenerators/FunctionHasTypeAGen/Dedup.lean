@@ -15,11 +15,9 @@ well-typed function, and those lists hold no duplicate. The theorem below is a s
 induction on the definition of `List.uniq`, which is
 `| a :: as => let as := as.uniq; if a ∈ as then as else a :: as`.
 
-Mathlib also defines `List.uniq`, with a lemma about a fixed point. This file cannot use
-that lemma. Once the module of Strata that defines `List.uniq` is in the environment, an
-import of a Mathlib module that also defines `List.uniq` fails with the error that the
-environment already holds `List.uniq`. `List.nodup_cons` comes from the core library and
-from Batteries, and it therefore has no such collision. This file compiles in the
+Mathlib defines a separate `List.dedup`, with a lemma about a fixed point. That lemma is
+about a different constant, so this file cannot use it, whatever the imports are.
+`List.nodup_cons` comes from the core library and from Batteries. This file compiles in the
 environment that `HasTypeAGen` imports.
 -/
 
@@ -28,7 +26,7 @@ namespace StrataGenerators.Dedup
 /-- A list that holds no duplicate is a fixed point of `List.uniq`. The proof of completeness needs
     this theorem: the generators that use `uniq` must be able to reach the `typeArgs` and the inputs
     of a well-typed function. -/
-theorem dedup_eq_self {α} [DecidableEq α] (l : List α) (h : l.Nodup) :
+theorem uniq_eq_self {α} [DecidableEq α] (l : List α) (h : l.Nodup) :
     l.uniq = l := by
   induction l with
   | nil => simp [List.uniq]

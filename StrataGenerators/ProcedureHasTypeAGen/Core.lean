@@ -1,7 +1,7 @@
 -- Only the *executable* statement generator is needed here (`genStmtChain`), not its
 -- proofs: importing the proof module `StmtHasTypeAGen` would pull in Mathlib and
--- so make this file unimportable alongside Strata's transform passes (`List.Rel₂`
--- is defined by both Strata and Batteries). Keeping to `.Core` preserves the
+-- so make this file expensive to build alongside Strata's transform passes. Keeping to
+-- `.Core` preserves the
 -- repo-wide "Core.lean = code, sibling = proofs" split and is what lets
 -- `ProcedureHasTypeAGen/TestSupport.lean` exist. The proof file
 -- (`ProcedureHasTypeAGen.lean`) still sees the statement proofs via `Support.lean`.

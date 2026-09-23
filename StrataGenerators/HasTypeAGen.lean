@@ -11,10 +11,8 @@ import Strata.DL.Lambda.LTyUnify
 -- `Constraints.unify` gives a most general unifier, and the substitution that it gives therefore has
 -- the name `Su` and not `mgu`.
 import Strata.DL.Lambda.LTyUnifyProps
--- This file does NOT import `Batteries.Data.List.Basic`. That module defines its own
--- `List.Rel₂`, which collides with the `List.Rel₂` of Strata on the generated
--- `List.Rel₂.below.casesOn` symbol. Strata and the Lean core library give each `List` lemma that
--- this file uses.
+-- This file does NOT import `Batteries.Data.List.Basic`. Strata and the Lean core library give each
+-- `List` lemma that this file uses, so that import would only add build cost.
 
 -- Mathlib marks `Nat.le_refl` with `@[refl]`. This attribute does the same, so that the file needs
 -- no dependency on Mathlib.

@@ -218,7 +218,7 @@ theorem mem_support_mapM_iff {α β} (f : α → SPMF β)
         exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
 
 /-- Membership on the left of a `List.Rel₂`: every element of the first list is related
-    to some element of the second. (Lean core has no `List.Rel₂.mem_left`.) -/
+    to some element of the second. (Strata gives no `List.Rel₂.mem_left`.) -/
 theorem forall₂_mem_left {α β} {R : α → β → Prop} :
     ∀ {as : List α} {bs : List β}, List.Rel₂ R as bs → ∀ a ∈ as, ∃ b ∈ bs, R a b := by
   intro as bs h
