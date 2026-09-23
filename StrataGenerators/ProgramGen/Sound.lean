@@ -782,11 +782,11 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
   have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
   -- The built synonym.
   let ts : TypeSynonym :=
-    { name := nm, typeArgs := (LMonoTy.freeVars body).dedup, type := body }
+    { name := nm, typeArgs := (LMonoTy.freeVars body).uniq, type := body }
   -- `mkAliasDecl nm body = .type (.syn ts) .empty`.
   have hmk : mkAliasDecl nm body = .type (.syn ts) .empty := rfl
   -- Establish the six `type_syn` premises.
-  have hNodup : ts.typeArgs.Nodup := (LMonoTy.freeVars body).nodup_dedup
+  have hNodup : ts.typeArgs.Nodup := (LMonoTy.freeVars body).nodup_uniq
   have hclosed : ∀ v, v ∈ LMonoTy.freeVars ts.type → v ∈ ts.typeArgs := by
     intro v hv; exact (List.mem_of_dedup _ _).mp hv
   have hnophantom : ∀ v, v ∈ ts.typeArgs → v ∈ LMonoTy.freeVars ts.type := by

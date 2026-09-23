@@ -200,7 +200,7 @@ theorem lm_values_length {α β} (m : ListMap α β) : m.values.length = m.lengt
 theorem mem_support_mapM_iff {α β} (f : α → SetGen.Set β)
     (inputs : List α) (outs : List β) :
     outs ∈ SetGen.support (List.mapM (m := SetGen.Set) f inputs) ↔
-    List.Forall₂ (fun out σ => out ∈ SetGen.support (f σ)) outs inputs := by
+    List.Rel₂ (fun out σ => out ∈ SetGen.support (f σ)) outs inputs := by
   induction inputs generalizing outs with
   | nil =>
     simp only [List.mapM_nil, mem_support_pure_iff]
@@ -217,10 +217,10 @@ theorem mem_support_mapM_iff {α β} (f : α → SetGen.Set β)
       | _ :: _, .cons harg htail =>
         exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
 
-/-- Membership on the left of a `List.Forall₂`: every element of the first list is related
-    to some element of the second. (Lean core has no `List.Forall₂.mem_left`.) -/
+/-- Membership on the left of a `List.Rel₂`: every element of the first list is related
+    to some element of the second. (Strata gives no `List.Rel₂.mem_left`.) -/
 theorem forall₂_mem_left {α β} {R : α → β → Prop} :
-    ∀ {as : List α} {bs : List β}, List.Forall₂ R as bs → ∀ a ∈ as, ∃ b ∈ bs, R a b := by
+    ∀ {as : List α} {bs : List β}, List.Rel₂ R as bs → ∀ a ∈ as, ∃ b ∈ bs, R a b := by
   intro as bs h
   induction h with
   | nil => intro a ha; simp at ha

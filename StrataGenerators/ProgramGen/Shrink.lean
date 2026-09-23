@@ -185,7 +185,7 @@ private def setConstrs (d : LDatatype Unit) (cs : List (LConstr Unit)) :
 def shrinkTypeDecl : TypeDecl → List TypeDecl
   | .con tc => (fun ps => .con { tc with params := ps }) <$> dropEach tc.params
   | .syn ts =>
-    (fun τ => .syn { ts with type := τ, typeArgs := (LMonoTy.freeVars τ).dedup })
+    (fun τ => .syn { ts with type := τ, typeArgs := (LMonoTy.freeVars τ).uniq })
       <$> shrinkTy ts.type
   | .data block =>
     -- Drop one datatype (only when at least two remain, so the block stays non-empty).

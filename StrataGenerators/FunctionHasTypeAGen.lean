@@ -107,20 +107,20 @@ theorem freeVars_mkArrow' (out : LMonoTy) (vals : List LMonoTy) (v : TyIdentifie
 
 -- ── The support of the generators for a name, a type argument and an input ──
 
-/-- Each list in the support of `genTypeArgs` holds no duplicate, because `List.dedup` builds
+/-- Each list in the support of `genTypeArgs` holds no duplicate, because `List.uniq` builds
     it. -/
 theorem genTypeArgs_nodup (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact List.nodup_dedup names
+  exact List.nodup_uniq names
 
-/-- Each list in the support of `genIdents` holds no duplicate, because `List.dedup` builds it. -/
+/-- Each list in the support of `genIdents` holds no duplicate, because `List.uniq` builds it. -/
 theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact List.nodup_dedup _
+  exact List.nodup_uniq _
 
 -- ── A generated name is not a keyword and it holds no space ──────────
 -- The `IdentName` module holds these results. Each one follows from
@@ -175,7 +175,7 @@ theorem genInputs_support (tvars : List TyIdentifier) (depth : Nat)
   exact ⟨hkeys ▸ hnd, hvals⟩
 
 /-- `genIdentName` can reach the `name` of each key of a signature that `genInputs` gives. The keys
-    are the list of identifiers after `List.dedup`, their names come from `genNameList`, and
+    are the list of identifiers after `List.uniq`, their names come from `genNameList`, and
     `genNameList` takes each name from `genIdentName`. -/
 theorem genInputs_key_name_reachable (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap (Identifier Unit) LMonoTy)
@@ -365,7 +365,7 @@ theorem genIdents_complete (depth : Nat) (ids : List (Identifier Unit))
   simp only [genIdents, mem_support_map_iff]
   refine ⟨ids.map (·.name), hnames, ?_⟩
   -- The map back over the names gives `ids` again, because the metadata of an `Identifier Unit` is
-  -- `()`. `List.dedup` then leaves the list unchanged.
+  -- `()`. `List.uniq` then leaves the list unchanged.
   have hmapeq : (ids.map (·.name)).map (fun s => (⟨s, ()⟩ : Identifier Unit)) = ids := by
     clear hnames hnd
     induction ids with
@@ -373,7 +373,7 @@ theorem genIdents_complete (depth : Nat) (ids : List (Identifier Unit))
     | cons a as ih =>
       simp only [List.map_cons, List.cons.injEq]
       refine ⟨?_, ih⟩; obtain ⟨n, u⟩ := a; trivial
-  rw [hmapeq, dedup_eq_self ids hnd]
+  rw [hmapeq, uniq_eq_self ids hnd]
 
 /-- `genTypeArgs depth` can reach a list of type arguments `l` that holds no duplicate, if
     `genNameList depth` can reach `l`. -/
@@ -382,7 +382,7 @@ theorem genTypeArgs_complete (depth : Nat) (l : List TyIdentifier)
     (hnames : l ∈ SetGen.support (genNameList (G := SetGen.Set) depth)) :
     l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth) := by
   simp only [genTypeArgs, mem_support_map_iff]
-  exact ⟨l, hnames, (dedup_eq_self l hnd).symm⟩
+  exact ⟨l, hnames, (uniq_eq_self l hnd).symm⟩
 
 /-- Completeness of `genInputs`. The support of `genInputs tvars depth` holds a `ListMap` when three
     conditions hold: the keys of the map hold no duplicate; `genLMonoTy tvars depth` can reach each
@@ -630,7 +630,7 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
           func.body, ?_,
           func.measure, ?_,
           func.preconditions, ?_, ?_⟩
-  · -- `genTypeArgs` reaches the type arguments. They hold no duplicate, so `List.dedup` leaves
+  · -- `genTypeArgs` reaches the type arguments. They hold no duplicate, so `List.uniq` leaves
     -- them unchanged.
     exact genTypeArgs_complete depth func.typeArgs hwt.typeArgsNodup
       (mem_support_genNameList_iff depth func.typeArgs |>.mpr ⟨hTyArgsLen, hTyArgsReach⟩)
@@ -658,7 +658,7 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
 
 /-- Every type-argument name produced by `genTypeArgs` is a non-keyword: the
     names come from `genNameList` (all non-keyword by `genNameList_not_keyword`),
-    and `List.dedup` only removes elements. -/
+    and `List.uniq` only removes elements. -/
 theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) :
     ∀ s ∈ l, isReservedKeyword s = false := by
@@ -669,14 +669,14 @@ theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
 
 /-- Every input-identifier name produced by `genIdents` is a non-keyword: each
     identifier `⟨s, ()⟩` comes from mapping over the `genNameList` names, and
-    `List.dedup` only removes elements. -/
+    `List.uniq` only removes elements. -/
 theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) :
     ∀ x ∈ l, isReservedKeyword x.name = false := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
   intro x hx
-  -- `x ∈ (names.map ⟨·,()⟩).dedup` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
+  -- `x ∈ (names.map ⟨·,()⟩).uniq` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
   have hx' : x ∈ names.map (fun s => (⟨s, ()⟩ : Identifier Unit)) :=
     (List.mem_of_dedup _ x).mpr hx
   obtain ⟨s, hs_mem, rfl⟩ := List.mem_map.mp hx'

@@ -63,10 +63,9 @@ namespace StrataGenerators.PrimitiveGens
 
     This file holds its own copy of the generator instead of an import, for the
     same reason that `HasTypeAGen/Core.lean` holds a copy: `BasaltExamples.ArbNat`
-    pulls in the full `Basalt` umbrella, and thus Mathlib's `List.dedup`, which
-    collides with Strata's. `HasTypeAGen/Core.lean` imports this file, so this
-    file cannot depend on it. This copy is definitionally the same as the upstream
-    generator. -/
+    pulls in the full `Basalt` umbrella, and thus Mathlib. `HasTypeAGen/Core.lean`
+    imports this file, so this file cannot depend on it. This copy is
+    definitionally the same as the upstream generator. -/
 def natArbGeom [Gen G] : G Nat := do
   pick
     (fun () => pure 0)

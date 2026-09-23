@@ -268,7 +268,7 @@ theorem genDeclAbstract_complete {s : GenState} {b : Bounds} {nm : String} {ar :
 The alias step draws a fresh name, a count of parameters, a fresh list of
 parameters, and a body over the type constructors in scope *and* those parameters.
 It then emits `mkAliasDecl nm body`, whose `typeArgs` field is
-`(LMonoTy.freeVars body).dedup`.
+`(LMonoTy.freeVars body).uniq`.
 
 Two facts give the lemma its shape:
 
@@ -302,7 +302,7 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
     (([mkAliasDecl nm body]),
         { s with
           Γ := { s.Γ with aliases :=
-                   { typeArgs := (LMonoTy.freeVars body).dedup, name := nm, type := body }
+                   { typeArgs := (LMonoTy.freeVars body).uniq, name := nm, type := body }
                      :: s.Γ.aliases }
           reserved := nm :: s.reserved }) ∈
       SetGen.support (genDeclAlias (G := SetGen.Set) s b) := by
@@ -315,23 +315,23 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
     rfl
 
 /-- **Reachability of the alias step at the usual list of parameters.** This is
-    `genDeclAlias_complete` with `tyParams := (LMonoTy.freeVars body).dedup`, which
+    `genDeclAlias_complete` with `tyParams := (LMonoTy.freeVars body).uniq`, which
     is the list that `mkAliasDecl` calculates. Thus the caller must supply only a
     reachable body and the bound on the count of parameters. -/
 theorem genDeclAlias_complete_of_body {s : GenState} {b : Bounds} {nm : String}
     {body : LMonoTy}
     (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
-    (hlen : (LMonoTy.freeVars body).dedup.length ≤ b.maxAliasTyParams)
-    (hparams : (LMonoTy.freeVars body).dedup ∈ SetGen.support
+    (hlen : (LMonoTy.freeVars body).uniq.length ≤ b.maxAliasTyParams)
+    (hparams : (LMonoTy.freeVars body).uniq ∈ SetGen.support
       (DatatypeGen.genFreshNames (G := SetGen.Set) s.reserved
-        (LMonoTy.freeVars body).dedup.length))
+        (LMonoTy.freeVars body).uniq.length))
     (hbody : body ∈ SetGen.support
       (genNonRecursiveArgTy (G := SetGen.Set) s.baseTypes s.tyCons
-        (LMonoTy.freeVars body).dedup b.tySize)) :
+        (LMonoTy.freeVars body).uniq b.tySize)) :
     (([mkAliasDecl nm body]),
         { s with
           Γ := { s.Γ with aliases :=
-                   { typeArgs := (LMonoTy.freeVars body).dedup, name := nm, type := body }
+                   { typeArgs := (LMonoTy.freeVars body).uniq, name := nm, type := body }
                      :: s.Γ.aliases }
           reserved := nm :: s.reserved }) ∈
       SetGen.support (genDeclAlias (G := SetGen.Set) s b) :=

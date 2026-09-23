@@ -43,7 +43,7 @@ namespace StrataGenerators.IndirSupport
 theorem mem_mapM_iff' (f : LMonoTy → SetGen.Set LExpr')
     (argTys : List LMonoTy) (args : List LExpr') :
     args ∈ (List.mapM (m := SetGen.Set) f argTys) ↔
-    List.Forall₂ (fun arg σ => arg ∈ f σ) args argTys := by
+    List.Rel₂ (fun arg σ => arg ∈ f σ) args argTys := by
   induction argTys generalizing args with
   | nil =>
     simp only [List.mapM_nil, SetGen.Set.mem_pure]
@@ -72,7 +72,7 @@ theorem forall₂_forall_of_cond {P : LExpr' → Prop} {Q : LMonoTy → Prop}
     (hArg : ∀ σ, Q σ → ∀ a, a ∈ SetGen.support (genArg σ) → P a)
     {args : List LExpr'} {argTys : List LMonoTy}
     (hQ : ∀ σ ∈ argTys, Q σ)
-    (h : List.Forall₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args argTys) :
+    (h : List.Rel₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args argTys) :
     ∀ a ∈ args, P a := by
   induction h with
   | nil => intro a ha; simp at ha
@@ -116,7 +116,7 @@ theorem genIndir_shape (octx : OpCtx) (τ : LMonoTy)
     (he : e ∈ SetGen.support (genIndir (G := SetGen.Set) octx τ genArg h)) :
     ∃ (name : String) (argTys : List LMonoTy) (args : List LExpr'),
       (name, argTys) ∈ findOpsInCtx octx τ ∧
-      List.Forall₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args argTys ∧
+      List.Rel₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args argTys ∧
       e = mkApps (.op () ⟨name, ()⟩
         (some (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args := by
   unfold genIndir at he
@@ -137,7 +137,7 @@ theorem genIndirPolyCore_shape (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx
        (concreteArgTys : List LMonoTy) (args : List LExpr'),
        (name, concreteArgTys) ∈ findPolymorphicOps pctx τ
          (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs ∧
-       List.Forall₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args concreteArgTys ∧
+       List.Rel₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args concreteArgTys ∧
        e = mkApps (.op () ⟨name, ()⟩
          (some (concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args)
     ∨ e ∈ SetGen.support fallback := by
@@ -160,7 +160,7 @@ theorem genIndirPolyCore_shape (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx
 theorem mkApps_hasType' (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
     (argTys : List LMonoTy) (τ : LMonoTy)
     (hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))
-    (hargs : List.Forall₂ (HasTypeA' bctx) args argTys) :
+    (hargs : List.Rel₂ (HasTypeA' bctx) args argTys) :
     HasTypeA' bctx (mkApps base args) τ := by
   induction hargs generalizing base with
   | nil => exact hbase
@@ -171,8 +171,8 @@ private theorem forall₂_typed {bctx : BVarCtx}
     {genArg : LMonoTy → SetGen.Set LExpr'}
     (hArg : ∀ σ a, a ∈ SetGen.support (genArg σ) → HasTypeA' bctx a σ)
     {args : List LExpr'} {argTys : List LMonoTy}
-    (h : List.Forall₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args argTys) :
-    List.Forall₂ (HasTypeA' bctx) args argTys := by
+    (h : List.Rel₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args argTys) :
+    List.Rel₂ (HasTypeA' bctx) args argTys := by
   induction h with
   | nil => exact .nil
   | @cons a ty _ _ hmem _ ih => exact .cons (hArg ty a hmem) ih

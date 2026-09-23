@@ -16,9 +16,9 @@ open RandomChoice
 /-- A generator for a `Nat`.
 
     This file keeps the definition local and does not import `BasaltExamples.ArbNat`, because that
-    module imports the full `Basalt` library. `Basalt` gives `List.dedup` of Mathlib, which collides
-    with `List.dedup` of Strata. This file must stay free of Mathlib. The definition here is
-    definitionally equal to the one in Basalt, so a proof can unfold either one. -/
+    module imports the full `Basalt` library, and so Mathlib. This file stays free of Mathlib, to keep
+    itself and the proof modules that import it cheap to build. The definition here is definitionally
+    equal to the one in Basalt, so a proof can unfold either one. -/
 def Nat.arbitrary [Gen G] : G Nat := do
   pick
     (fun () => pure 0)
