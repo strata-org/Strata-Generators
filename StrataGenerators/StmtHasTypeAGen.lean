@@ -724,7 +724,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
       (usableName immutableVars ctx) = true)
     (hNodup : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
       ++ outTargets immutableVars ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup)
-    (hexprs : List.Forall₂
+    (hexprs : List.Rel₂
       (fun e τ => e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] d τ))
       exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values) :
     (⟨StrataGenerators.Stmt.initChain

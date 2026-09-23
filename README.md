@@ -29,8 +29,6 @@ in the Basalt source code, which are required for proofs about Strata generators
 Each generator is split into a `Core.lean` (containing the generator's executable code) and a
 separate proof file. For example, for the `LExpr` generator, `HasTypeAGen/Core.lean` contains 
 the actual code for the generator, while `HasTypeAGen.lean` contains the generator's correctness proofs. 
-This allows us to avoid importing both Strata and Batteries (imported transitively via Mathlib) 
-in the same file, as `List.Forall₂` is defined by both libraries. 
 
 ## Dependencies
 

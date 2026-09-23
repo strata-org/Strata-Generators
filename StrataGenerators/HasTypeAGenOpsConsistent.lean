@@ -2208,7 +2208,7 @@ theorem genLExpr_complete_poly_opsConsistentR
         σ ∈ SetGen.support (pickBaseType (G := SetGen.Set))))
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hArgLen : args.length = concreteArgTys.length)
-    (hArgsComplete : List.Forall₂
+    (hArgsComplete : List.Rel₂
       (fun arg σ => (∃ m, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) ∧
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)

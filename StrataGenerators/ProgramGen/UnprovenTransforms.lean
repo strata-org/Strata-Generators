@@ -429,7 +429,7 @@ def checkAxiomsRemovedNotSeedReachable (p : Program) : Bool :=
     let kept := programAxiomNames out
     let cg := p.toFunctionCG
     let closure := ((axiomSeedFunctions p).flatMap fun f =>
-      f :: cg.getCalleesClosure f ++ cg.getCallersClosure f).dedup
+      f :: cg.getCalleesClosure f ++ cg.getCallersClosure f).uniq
     p.decls.all fun d =>
       match d with
       | .ax a _ =>
@@ -542,7 +542,7 @@ where
            | .condGoto _ lt lf _ => [lt, lf]
            | .finish _ => [])
         | none => []).filter fun t => !seen.contains t
-      if next.isEmpty then seen else go fuel (seen ++ next.dedup)
+      if next.isEmpty then seen else go fuel (seen ++ next.uniq)
 
 /-- The number of `.finish` blocks of a CFG. -/
 def cfgFinishCount (c : Core.DetCFG) : Nat :=

@@ -96,7 +96,7 @@ def mkAbstractTypeDecl (name : String) (arity : Nat) : Decl :=
     free variables of the body and the type arguments are the same set, so the alias has no parameter that its
     body does not name. Read `DeclHasType'.type_syn`. -/
 def mkAliasDecl (name : String) (body : LMonoTy) : Decl :=
-  .type (.syn { name := name, typeArgs := (LMonoTy.freeVars body).dedup, type := body }) .empty
+  .type (.syn { name := name, typeArgs := (LMonoTy.freeVars body).uniq, type := body }) .empty
 
 /-- An axiom declaration `axiom name : e;`. `e` is expected to be a `bool`. -/
 def mkAxiomDecl (name : String) (e : PExpr) : Decl :=

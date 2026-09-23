@@ -11,10 +11,8 @@ import Strata.DL.Lambda.LTyUnify
 -- `Constraints.unify` gives a most general unifier, and the substitution that it gives therefore has
 -- the name `Su` and not `mgu`.
 import Strata.DL.Lambda.LTyUnifyProps
--- This file does NOT import `Batteries.Data.List.Basic`. That module defines its own
--- `List.Forall₂`, which collides with the `List.Forall₂` of Strata on the generated
--- `List.Forall₂.below.casesOn` symbol. Strata and the Lean core library give each `List` lemma that
--- this file uses.
+-- This file does NOT import `Batteries.Data.List.Basic`. Strata and the Lean core library give each
+-- `List` lemma that this file uses, so that import would only add build cost.
 
 -- Mathlib marks `Nat.le_refl` with `@[refl]`. This attribute does the same, so that the file needs
 -- no dependency on Mathlib.
@@ -4648,7 +4646,7 @@ theorem argsForResult_eq (fullTy τ : LMonoTy) (args : List LMonoTy)
 theorem mkApps_hasType (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
     (argTys : List LMonoTy) (τ : LMonoTy)
     (hbase : HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))
-    (hargs : List.Forall₂ (HasTypeA' bctx) args argTys) :
+    (hargs : List.Rel₂ (HasTypeA' bctx) args argTys) :
     HasTypeA' bctx (mkApps base args) τ := by
   induction hargs generalizing base with
   | nil => exact hbase
@@ -4922,7 +4920,7 @@ theorem mkApps_hasType_inv (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
     (hwt : HasTypeA' bctx (mkApps base args) τ) :
     ∃ argTys : List LMonoTy,
       HasTypeA' bctx base (argTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) ∧
-      List.Forall₂ (HasTypeA' bctx) args argTys := by
+      List.Rel₂ (HasTypeA' bctx) args argTys := by
   induction args generalizing base with
   | nil =>
     -- `mkApps base [] = base`, so `base` has the type `τ`, and there is no arrow to remove.
@@ -4970,7 +4968,7 @@ theorem foldr_arrow_inj_of_length_eq (as bs : List LMonoTy) (τ : LMonoTy)
 private theorem mem_mapM_iff (f : LMonoTy → SetGen.Set LExpr')
     (argTys : List LMonoTy) (args : List LExpr') :
     args ∈ (List.mapM (m := SetGen.Set) f argTys) ↔
-    List.Forall₂ (fun arg σ => arg ∈ f σ) args argTys := by
+    List.Rel₂ (fun arg σ => arg ∈ f σ) args argTys := by
   induction argTys generalizing args with
   | nil =>
     simp only [List.mapM_nil, SetGen.Set.mem_pure]
@@ -5330,10 +5328,10 @@ theorem genIndir_sound (octx : OpCtx) (bctx : BVarCtx) (τ : LMonoTy)
   have hbase : HasTypeA' bctx (.op () ⟨entry.1, ()⟩ _)
       (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
   have hforall₂ := (mem_mapM_iff genArg entry.2 args).mp hargs
-  have hargs_typed : List.Forall₂ (HasTypeA' bctx) args entry.2 := by
+  have hargs_typed : List.Rel₂ (HasTypeA' bctx) args entry.2 := by
     suffices hsuff : ∀ (tys : List LMonoTy) (es : List LExpr'),
-        List.Forall₂ (fun arg σ => arg ∈ (genArg σ)) es tys →
-        List.Forall₂ (HasTypeA' bctx) es tys from
+        List.Rel₂ (fun arg σ => arg ∈ (genArg σ)) es tys →
+        List.Rel₂ (HasTypeA' bctx) es tys from
       hsuff entry.2 args hforall₂
     intro tys es hf₂
     induction hf₂ with
@@ -6735,7 +6733,7 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
       (generableTypesFromCtx bctx fctx octx) sampledTys maxNumArgs)
     (genArg : LMonoTy → SetGen.Set LExpr')
     (args : List LExpr')
-    (hArgs : List.Forall₂ (fun arg σ => arg ∈ (genArg σ)) args concreteArgTys) :
+    (hArgs : List.Rel₂ (fun arg σ => arg ∈ (genArg σ)) args concreteArgTys) :
     let fullArrowTy := concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ
     mkApps (.op () ⟨name, ()⟩ (some fullArrowTy)) args ∈
       SetGen.support
@@ -6846,7 +6844,7 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- Each argument comes from the generator that `genLExpr` uses in the argument position at this
     -- depth. That generator is `genLExprBase` at the depth 0 at the floor, and `genLExpr` at `n` above
     -- the floor. The second case is the one that admits a *nested* factory application.
-    List.Forall₂ (fun arg σ =>
+    List.Rel₂ (fun arg σ =>
       arg ∈ (match (motive := Nat → LMonoTy → SetGen.Set LExpr') depth with
              | 0 => genLExprBase (G := SetGen.Set) fctx octx pctx tvars bctx 0
              | n + 1 => fun σ' =>
@@ -6902,7 +6900,7 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- The depth budget here is `depth - 1`, and not `depth`. `genLExpr` is recursive, so each argument
     -- comes from the generator at the *smaller* index. An argument of a factory application therefore has
     -- one unit of depth less than the application itself, because the node of the spine takes one unit.
-    (hArgsComplete : List.Forall₂
+    (hArgsComplete : List.Rel₂
       (fun arg σ => (∃ m, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) ∧
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
@@ -6925,7 +6923,7 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- Derive the generability of each argument from its type. The goal is about the generator that
     -- `genLExpr` uses in the argument position, so each argument goes through
     -- `mem_genArg_of_baseComplete`, and not through `genLExprBase_complete` directly.
-    have hArgsGen : List.Forall₂
+    have hArgsGen : List.Rel₂
         (fun arg σ =>
           arg ∈ (match (motive := Nat → LMonoTy → SetGen.Set LExpr') depth with
                  | 0 => genLExprBase (G := SetGen.Set) fctx octx pctx tvars bctx 0
@@ -7158,7 +7156,7 @@ theorem isPolyApp_of_hasType_specShaped
     (hArgLen : args.length = concreteArgTys.length)
     -- The depth budget is `depth - 1`, because each argument comes from the generator at the smaller
     -- index.
-    (hArgsComplete : List.Forall₂
+    (hArgsComplete : List.Rel₂
       (fun arg σ => (∃ m, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) ∧
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
@@ -7293,7 +7291,7 @@ theorem genLExpr_complete_poly_specShaped
     (hArgLen : args.length = concreteArgTys.length)
     -- The depth budget is `depth - 1`, because each argument comes from the generator at the smaller
     -- index.
-    (hArgsComplete : List.Forall₂
+    (hArgsComplete : List.Rel₂
       (fun arg σ => (∃ m, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) ∧
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
@@ -7359,7 +7357,7 @@ theorem genLExpr_complete_poly_fullySpecShaped
     (hArgLen : args.length = concreteArgTys.length)
     -- The depth budget is `depth - 1`, because each argument comes from the generator at the smaller
     -- index.
-    (hArgsComplete : List.Forall₂
+    (hArgsComplete : List.Rel₂
       (fun arg σ => (∃ m, σ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) ∧
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)
@@ -7415,7 +7413,7 @@ theorem genLExprBase_complete_polyApp (fctx : FVarCtx) (octx : OpCtx)
     (hEntry : (name, concreteArgTys) ∈ findPolymorphicOps pctx .bool
       (generableTypesFromCtx bctx fctx octx) sampledTys 3)
     (args : List LExpr')
-    (hArgs : List.Forall₂
+    (hArgs : List.Rel₂
       (fun arg σ => arg ∈ SetGen.support
         (genLExprBase (G := SetGen.Set) fctx octx pctx tvars bctx n σ)) args concreteArgTys) :
     mkApps (.op () ⟨name, ()⟩

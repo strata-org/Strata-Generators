@@ -374,7 +374,7 @@ def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName [] ctx) = true ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
           ++ outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
-        List.Forall₂
+        List.Rel₂
           (fun e τ => e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n τ))
           exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
