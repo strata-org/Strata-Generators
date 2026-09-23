@@ -334,7 +334,7 @@ theorem genCallStmt_mutableVars
   cases procs with
   | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
-    simp only [mem_support_pure_iff, genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
+    simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
     -- Peel the type-instantiation sampling; name the instantiated blocks.
     obtain ⟨σvals, _, hr⟩ := hr
@@ -428,7 +428,7 @@ theorem genStmt_mutableVars
       k ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) := by
   cases n with
   | zero =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -466,7 +466,7 @@ theorem genStmt_mutableVars
                  List.not_mem_nil] at hv,
              fun k hk => List.mem_append_left _ hk⟩
     · -- typeDecl
-      simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff] at hr
+      simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr
@@ -491,7 +491,7 @@ theorem genStmt_mutableVars
           immutableVars (hd :: tl) C ctx 0 pctx) := hr
         exact genCallStmt_mutableVars octx pctx tvars immutableVars (hd :: tl) C ctx 0 _ hr
   | succ size =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -529,7 +529,7 @@ theorem genStmt_mutableVars
                  List.not_mem_nil] at hv,
              fun k hk => List.mem_append_left _ hk⟩
     · -- typeDecl
-      simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff] at hr
+      simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr

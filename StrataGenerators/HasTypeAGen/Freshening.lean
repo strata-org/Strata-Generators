@@ -20,9 +20,7 @@ The chain of the argument has four steps:
    therefore drops no name.
 4. `freshenBoundVars_disjoint`: the main result.
 
-This file is a separate module, and it is not a part of the core module. It imports only
-`HasTypeAGen.Core`. It imports no part of Mathlib, and it imports no part of Batteries. The
-note about the imports at the start of the main `HasTypeAGen` module gives the reason.
+This file is a separate module, and it is not a part of the core module.
 -/
 
 open Lambda

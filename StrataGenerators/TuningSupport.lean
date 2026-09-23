@@ -17,9 +17,7 @@ can zero a branch out. The intended guarantee is that a tuning changes how often
 and never whether it is reachable.
 
 At `SPMF` that guarantee is an equality of **supports** and not of generators: a weight is part of the
-mass, so `genFoo.tuned θ ≠ genFoo` as soon as `θ` differs from the defaults. (This package used to read
-generators as plain `Set`s, where the support *was* the generator and the two were literally equal.
-`StrataGenerators.GenSupport` records what changed.)
+mass, so `genFoo.tuned θ ≠ genFoo` as soon as `θ` differs from the defaults.
 
 `Basalt.SPMF.Support` supplies the fact at one site:
 

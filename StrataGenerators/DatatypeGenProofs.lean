@@ -436,16 +436,16 @@ theorem genBaseTy_support (baseTypes : List String) (ty : LMonoTy) :
     ty ∈ SPMF.support (genBaseTy (G := SPMF) baseTypes) ↔
       (∃ w, ty = .bitvec w) ∨
       (∃ b ∈ baseTypes, ty = .tcons b []) := by
-  simp only [mem_support_pure_iff, genBaseTy, mem_support_oneOf_iff, List.mem_cons, List.mem_map]
+  simp only [genBaseTy, mem_support_oneOf_iff, List.mem_cons, List.mem_map]
   constructor
   · rintro ⟨g, (rfl | ⟨b, hb, rfl⟩), hmem⟩
-    · simp only [mem_support_pure_iff, pickBitvecWidth, mem_support_map_iff] at hmem
+    · simp only [pickBitvecWidth, mem_support_map_iff] at hmem
       obtain ⟨w, _, rfl⟩ := hmem
       exact Or.inl ⟨w, rfl⟩
     · exact Or.inr ⟨b, hb, mem_support_pure_iff.mp hmem⟩
   · rintro (⟨w, rfl⟩ | ⟨b, hb, rfl⟩)
     · refine ⟨_, Or.inl rfl, ?_⟩
-      simp only [mem_support_pure_iff, pickBitvecWidth, mem_support_map_iff]
+      simp only [pickBitvecWidth, mem_support_map_iff]
       exact ⟨w, Nat_arbitrary_support_set w, rfl⟩
     · exact ⟨_, Or.inr ⟨b, hb, rfl⟩, by simp⟩
 
@@ -484,7 +484,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
         ((LMonoTy.ftvar <$> elements (v :: vs) (List.cons_ne_nil v vs) : SPMF LMonoTy)) ↔
       ∃ v' ∈ v :: vs, t = .ftvar v' := by
     intro v vs t
-    simp only [mem_support_pure_iff, mem_support_map_iff, mem_support_elements_iff (List.cons_ne_nil v vs)]
+    simp only [mem_support_map_iff, mem_support_elements_iff (List.cons_ne_nil v vs)]
   unfold genLeafTy
   match tyParams, rca, blockRefs with
   | [], false, _ =>
@@ -510,7 +510,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact absurd hv (by simp)
       · exact absurd hbr (by simp)
   | [], true, br :: brs =>
-    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -524,7 +524,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact absurd hv (by simp)
       · exact ⟨_, Or.inr rfl, (genRecOcc_mem_iff br brs _).mpr ⟨p, List.mem_cons.mpr hp, rfl⟩⟩
   | v :: vs, false, _ =>
-    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -538,7 +538,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact ⟨_, Or.inr rfl, (hvar v vs _).mpr ⟨v', List.mem_cons.mpr hv', rfl⟩⟩
       · exact absurd h (by simp)
   | v :: vs, true, [] =>
-    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -552,7 +552,7 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       · exact ⟨_, Or.inr rfl, (hvar v vs _).mpr ⟨v', List.mem_cons.mpr hv', rfl⟩⟩
       · exact absurd hbr (by simp)
   | v :: vs, true, br :: brs =>
-    simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
     constructor
     · rintro ⟨g, (rfl | rfl | rfl), hmem⟩
       · rcases (genBaseTy_support _ _).mp hmem with h | h
@@ -632,7 +632,7 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
       · rintro ⟨t1, t2, rfl, h1, h2⟩; exact ⟨t1, h1, t2, h2, rfl⟩
     match tyCons with
     | [] =>
-      simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+      simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
       constructor
       · rintro ⟨g, (rfl | rfl), hmem⟩
         · exact Or.inr (Or.inl ⟨hs, (harrow ty).mp hmem⟩)
@@ -660,7 +660,7 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
         · rintro ⟨k, args, rfl, hkc, hall⟩
           exact ⟨(k, args.length), hkc, args,
             mem_support_vectorOf_iff.mpr ⟨rfl, hall⟩, rfl⟩
-      simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
+      simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
       constructor
       · rintro ⟨g, (rfl | rfl | rfl), hmem⟩
         · exact Or.inr (Or.inl ⟨hs, (harrow ty).mp hmem⟩)
@@ -1195,8 +1195,7 @@ theorem seq_two_not_mem_defaultTyCons : ("Sequence", 2) ∉ defaultTyCons := by
 
 /-! `SPMF.mem_support_chooseNat_iff` (from `Basalt.SPMF.Support`, re-exported by
 `StrataGenerators.GenSupport`) says that the support of `chooseNat lo hi` is exactly the range
-`[lo, hi]`. This file used to carry its own copy, because the vendored `SetGen` interpretation had no
-`chooseNat` lemma; the upstream one now serves. -/
+`[lo, hi]`. -/
 
 /-- Each argument type in a list from `genConstrArgs` is in the support of `genArgTy` at some
     size. Therefore soundness goes from one type to a full constructor. The size is an
@@ -1825,7 +1824,7 @@ theorem genMutuallyRecursiveDatatypes_shape {baseTypes : List String} {tyCons : 
       (∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ∃ rca size, arg.2 ∈ SPMF.support
         (genArgTy (G := SPMF) baseTypes tyCons (visibleRefs headers d.typeArgs)
           d.typeArgs rca size)) := by
-  simp only [mem_support_pure_iff, genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
+  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
   obtain ⟨numExtra, _, names, hnames, paramsList, hparams, ranks, hranksmem, hbodies⟩ := hb
   -- The header names are exactly `names` (the zipped-then-mapped first projection),
   -- which is nodup.
@@ -2734,7 +2733,7 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String}
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∀ d ∈ block, TySymInhab (C.datatypes.push block) d.name := by
-  simp only [mem_support_pure_iff, genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
+  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
   obtain ⟨numExtra, _, names, hnames, paramsList, hparams, ranks, hranksmem, hbodies⟩ := hb
   let headers : List TypeConstructor :=
     (names.zip paramsList).map (fun p => { name := p.1, params := p.2 })
@@ -4094,9 +4093,8 @@ they need the opposite fact. Each permutation of `xs` is in the support of
 /-- Remove the member of a list at the index `i`, and then put that member back at the index
     `i`. The result is the list itself.
 
-    The lemma `insertIdx_eraseIdx_getElem` in `Mathlib.Data.List.InsertIdx` states this fact.
-    This file does not import the list files of Mathlib. Therefore this file proves the fact
-    again, by an induction on the list. -/
+    Mathlib's `insertIdx_eraseIdx_getElem` states this fact; the proof below establishes it again, by
+    an induction on the list. -/
 theorem insertIdx_eraseIdx_getElem_self {α : Type} :
     ∀ (l : List α) (i : Nat) (h : i < l.length),
       (l.eraseIdx i).insertIdx i l[i] = l := by
@@ -4150,7 +4148,7 @@ theorem permutationOf_complete {α : Type} :
       rwa [hreconstruct] at hins
     have hxs'_perm : xs'.Perm (zs.eraseIdx i) := (hp.trans hzs_perm).cons_inv
     rw [permutationOf]
-    simp only [mem_support_pure_iff, mem_support_bind_iff, mem_support_map_iff, mem_support_choose_iff]
+    simp only [mem_support_bind_iff, mem_support_map_iff, mem_support_choose_iff]
     -- Give the shorter list from the induction hypothesis, and then the index `i`.
     refine ⟨⟨zs.eraseIdx i, hxs'_perm⟩, ih _ hxs'_perm,
       ⟨i, Nat.zero_le _, hilen⟩, ⟨⟨⟨i, Nat.zero_le _, hilen⟩⟩, trivial, rfl⟩, ?_⟩
@@ -4755,7 +4753,7 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     cases block with
     | nil => exact absurd rfl hne
     | cons d ds => exact ⟨ds.length, by simp⟩
-  simp only [mem_support_pure_iff, genMutuallyRecursiveDatatypes, mem_support_bind_iff]
+  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff]
   -- Here `numExtra := block.length - 1`, which is `len`.
   refine ⟨len, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, by omega⟩, ?_⟩
   -- Here `names := block.map (·.name)`, and that list holds `len + 1` names.

@@ -48,7 +48,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
-  simp only [mem_support_pure_iff, genDeclDatatype, mem_support_bind_iff] at h
+  simp only [genDeclDatatype, mem_support_bind_iff] at h
   obtain ⟨block, hblock, hmatch⟩ := h
   -- Well-formedness of the block (consumes `ContextOk` from `Inv`).
   have hwf : MutualADTWF s.C block := genDatatypeBlock_MutualADTWF hinv hblock
@@ -311,7 +311,7 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so each branch equation pins both components.
-  simp only [mem_support_pure_iff, genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
+  simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _hw, hmem⟩ := h
   rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩

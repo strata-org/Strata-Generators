@@ -21,12 +21,9 @@ Basalt generators are polymorphic in their monad (see the [Basalt repo](https://
 sub-probability mass functions) and reason about a generator's *support* (the set of all values that
 can be produced by the generator), via `SPMF.support`.
 
-**Note**: this repo used to carry its own `SetGen` interpretation, which read a generator as a plain
-`Set`. It existed only because `SPMF` is built on Mathlib and Strata used to declare its own
-root-namespace copies of `List.Forall₂`, `List.dedup` and friends, so no module could import Strata
-and Mathlib at once. Strata has since renamed those declarations, so `SetGen` is gone.
 `StrataGenerators/GenSupport.lean` holds the few support results this package needs beyond the ones
-Basalt provides.
+Basalt provides. See [docs/spmf_refactor.md](docs/spmf_refactor.md) for how the proofs are organised
+at `SPMF`.
 
 ### Organization
 

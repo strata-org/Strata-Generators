@@ -1164,7 +1164,7 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDistinct (G := SPMF) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
-  simp only [mem_support_pure_iff, genDeclDistinct, mem_support_bind_iff] at h
+  simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, constNames⟩, hparts, hmatch⟩ := h
   have hτ : LMonoTy.freeVars τ = [] := genDistinctAssertion_ground hparts
   -- The group's type comes from `genNonRecursiveArgTy`, so it is well-kinded in `s.C` by `ctxOk`.
@@ -1222,7 +1222,7 @@ theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclFunction (G := SPMF) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
-  simp only [mem_support_pure_iff, genDeclFunction, mem_support_bind_iff] at h
+  simp only [genDeclFunction, mem_support_bind_iff] at h
   obtain ⟨func₀, hfunc₀, nm, hnm, hmatch⟩ := h
   -- The renamed function.
   let func : Function := { func₀ with name := ⟨nm, ()⟩ }
@@ -1534,7 +1534,7 @@ theorem genDeclAxiom_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Ge
 theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDistinct (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  simp only [mem_support_pure_iff, genDeclDistinct, mem_support_bind_iff] at h
+  simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, cs⟩, hparts, hmatch⟩ := h
   obtain ⟨hnm_fresh, hcs_fresh, hcs_nodup⟩ := genDistinctAssertion_names hparts
   cases hadd : addConstants s.C τ cs with
@@ -1621,7 +1621,7 @@ theorem genDeclAbstract_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclFunction (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  simp only [mem_support_pure_iff, genDeclFunction, mem_support_bind_iff] at h
+  simp only [genDeclFunction, mem_support_bind_iff] at h
   obtain ⟨func₀, _hfunc₀, nm, hnm, hmatch⟩ := h
   have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
   let func : Function := { func₀ with name := ⟨nm, ()⟩ }
@@ -1664,7 +1664,7 @@ theorem genDeclProcedure_names {s : GenState} {b : Bounds} {ds : List Decl} {s' 
 theorem genDeclDatatype_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  simp only [mem_support_pure_iff, genDeclDatatype, mem_support_bind_iff] at h
+  simp only [genDeclDatatype, mem_support_bind_iff] at h
   obtain ⟨block, hblock, hmatch⟩ := h
   obtain ⟨hNodup, hFresh⟩ := genDatatypeBlock_names hblock
   cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
@@ -1699,7 +1699,7 @@ theorem genDeclStep_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Gen
     NamesStep s ds s' := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so each branch equation pins both components.
-  simp only [mem_support_pure_iff, genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
+  simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _hw, hmem⟩ := h
   rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩

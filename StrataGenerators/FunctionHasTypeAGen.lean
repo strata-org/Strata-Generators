@@ -111,14 +111,14 @@ theorem freeVars_mkArrow' (out : LMonoTy) (vals : List LMonoTy) (v : TyIdentifie
     it. -/
 theorem genTypeArgs_nodup (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SPMF.support (genTypeArgs (G := SPMF) depth)) : l.Nodup := by
-  simp only [mem_support_pure_iff, genTypeArgs, mem_support_map_iff] at hl
+  simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
   exact List.nodup_uniq names
 
 /-- Each list in the support of `genIdents` holds no duplicate, because `List.uniq` builds it. -/
 theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SPMF.support (genIdents (G := SPMF) depth)) : l.Nodup := by
-  simp only [mem_support_pure_iff, genIdents, mem_support_map_iff] at hl
+  simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
   exact List.nodup_uniq _
 
@@ -168,7 +168,7 @@ theorem genInputs_support (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap (Identifier Unit) LMonoTy)
     (hm : m ∈ SPMF.support (genInputs (G := SPMF) tvars depth)) :
     m.keys.Nodup ∧ ∀ ty ∈ m.values, ty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth) := by
-  simp only [mem_support_pure_iff, genInputs, mem_support_bind_iff] at hm
+  simp only [genInputs, mem_support_bind_iff] at hm
   obtain ⟨idents, hidents, hm⟩ := hm
   have hnd := genIdents_nodup depth idents hidents
   obtain ⟨hkeys, hvals⟩ := mapM_genInputs_keys_values tvars depth idents m hm
@@ -182,11 +182,11 @@ theorem genInputs_key_name_reachable (tvars : List TyIdentifier) (depth : Nat)
     (hm : m ∈ SPMF.support (genInputs (G := SPMF) tvars depth))
     (k : Identifier Unit) (hk : k ∈ m.keys) :
     k.name ∈ SPMF.support (genIdentName (G := SPMF)) := by
-  simp only [mem_support_pure_iff, genInputs, mem_support_bind_iff] at hm
+  simp only [genInputs, mem_support_bind_iff] at hm
   obtain ⟨idents, hidents, hmapM⟩ := hm
   obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values tvars depth idents m hmapM
   rw [hkeys] at hk
-  simp only [mem_support_pure_iff, genIdents, mem_support_map_iff] at hidents
+  simp only [genIdents, mem_support_map_iff] at hidents
   obtain ⟨names, hnames, rfl⟩ := hidents
   rw [← List.mem_of_dedup] at hk
   obtain ⟨s, hs, rfl⟩ := List.mem_map.mp hk
@@ -362,7 +362,7 @@ theorem genIdents_complete (depth : Nat) (ids : List (Identifier Unit))
     (hnd : ids.Nodup)
     (hnames : ids.map (·.name) ∈ SPMF.support (genNameList (G := SPMF) depth)) :
     ids ∈ SPMF.support (genIdents (G := SPMF) depth) := by
-  simp only [mem_support_pure_iff, genIdents, mem_support_map_iff]
+  simp only [genIdents, mem_support_map_iff]
   refine ⟨ids.map (·.name), hnames, ?_⟩
   -- The map back over the names gives `ids` again, because the metadata of an `Identifier Unit` is
   -- `()`. `List.uniq` then leaves the list unchanged.
@@ -381,7 +381,7 @@ theorem genTypeArgs_complete (depth : Nat) (l : List TyIdentifier)
     (hnd : l.Nodup)
     (hnames : l ∈ SPMF.support (genNameList (G := SPMF) depth)) :
     l ∈ SPMF.support (genTypeArgs (G := SPMF) depth) := by
-  simp only [mem_support_pure_iff, genTypeArgs, mem_support_map_iff]
+  simp only [genTypeArgs, mem_support_map_iff]
   exact ⟨l, hnames, (uniq_eq_self l hnd).symm⟩
 
 /-- Completeness of `genInputs`. The support of `genInputs tvars depth` holds a `ListMap` when three
@@ -393,7 +393,7 @@ theorem genInputs_complete (tvars : List TyIdentifier) (depth : Nat)
     (hnames : m.keys.map (·.name) ∈ SPMF.support (genNameList (G := SPMF) depth))
     (hvals : ∀ ty ∈ m.values, ty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth)) :
     m ∈ SPMF.support (genInputs (G := SPMF) tvars depth) := by
-  simp only [mem_support_pure_iff, genInputs, mem_support_bind_iff]
+  simp only [genInputs, mem_support_bind_iff]
   exact ⟨m.keys, genIdents_complete depth m.keys hnd hnames, mapM_genInputs_complete tvars depth m hvals⟩
 
 /-- Completeness of `genOptExpr`. The generator can always reach `none`. It can reach `some e` when
@@ -436,7 +436,7 @@ theorem genPreconditions_complete (octx : OpCtx)
     (hreach : ∀ p ∈ ps, p.expr ∈ SPMF.support
       (genLExpr (G := SPMF) (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool)) :
     ps ∈ SPMF.support (genPreconditions (G := SPMF) octx inputs tvars depth) := by
-  simp only [mem_support_pure_iff, genPreconditions, genPrecondition, mem_support_map_iff,
+  simp only [genPreconditions, genPrecondition, mem_support_map_iff,
     mem_support_optionGen_iff]
   match ps with
   | [] =>
@@ -662,7 +662,7 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
 theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SPMF.support (genTypeArgs (G := SPMF) depth)) :
     ∀ s ∈ l, isReservedKeyword s = false := by
-  simp only [mem_support_pure_iff, genTypeArgs, mem_support_map_iff] at hl
+  simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
   intro s hs
   exact genNameList_not_keyword depth names hnames s ((List.mem_of_dedup names s).mpr hs)
@@ -673,7 +673,7 @@ theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
 theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SPMF.support (genIdents (G := SPMF) depth)) :
     ∀ x ∈ l, isReservedKeyword x.name = false := by
-  simp only [mem_support_pure_iff, genIdents, mem_support_map_iff] at hl
+  simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
   intro x hx
   -- `x ∈ (names.map ⟨·,()⟩).uniq` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
@@ -699,7 +699,7 @@ theorem genFunction_names_not_keyword (fctx : FVarCtx) (octx : OpCtx) (depth : N
           preconditions, _hpre, rfl⟩ := hfunc
   refine ⟨genIdentName_not_keyword name hname, genTypeArgs_not_keyword depth typeArgs htypeArgs, ?_⟩
   -- `inputs.keys = idents`, and each ident's name is non-keyword by `genIdents_not_keyword`.
-  simp only [mem_support_pure_iff, genInputs, mem_support_bind_iff] at hinputs
+  simp only [genInputs, mem_support_bind_iff] at hinputs
   obtain ⟨idents, hidents, hmap⟩ := hinputs
   obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values typeArgs depth idents inputs hmap
   rw [hkeys]

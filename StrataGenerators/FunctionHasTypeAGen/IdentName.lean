@@ -214,6 +214,11 @@ theorem startChars_of_isIdFirst (c : Char) (h : isIdFirst c = true) : c ∈ star
   · rw [beq_iff_eq] at h; subst h; right; decide +kernel
   · rw [beq_iff_eq] at h; subst h; right; decide +kernel
 
+-- `all_goals (subst h; first | … | …)` runs the same three-alternative block on seven goals, so each
+-- alternative wins on some of them. `unusedTactic` aggregates over all seven and reports the
+-- `decide +kernel` of the middle alternative as a no-op, because on the goals that alternative wins,
+-- `left; right` happens to close the goal by itself. Deleting it leaves the other goals unsolved.
+set_option linter.unusedTactic false in
 /-- **`remainingChars` holds all of `strataIsIdRest`.** With
     `remainingChars_isIdRest`, this makes the two character classes equal.
     Therefore the condition on the other characters in `IsGenIdentName` is the

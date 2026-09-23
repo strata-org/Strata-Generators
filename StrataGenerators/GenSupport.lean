@@ -28,20 +28,9 @@ This file holds the three things Basalt does not.
    functional alone. They lift a per-site fact to a whole recursive generator, and they are not
    specific to any interpretation.
 
-## History
-
-This package used to carry a whole vendored interpretation, `SetGen`, which read a generator as a
-plain `Set` — its support, with no probability. It existed because `SPMF` is built on Mathlib
-(`ENNReal`, `tsum`) and, until Strata stopped declaring `List.Forall₂`, `List.Disjoint`, `List.dedup`
-and friends in the root namespace, no module could import Strata and Mathlib at once. With that fixed
-upstream, `SetGen` is gone and this package reasons at `SPMF` directly.
-
-One consequence is worth knowing when reading old proofs. `SetGen.support` was the identity function,
-so `a ∈ g` and `a ∈ SetGen.support g` were interchangeable, and a weight was invisible: a `frequency`
-with positive weights was *equal* to the uniform `oneOf` over its branches. Neither holds at `SPMF`.
-Membership must go through `SPMF.support`, and a reweighting preserves the support but not the
-generator, so the tuning results in `StrataGenerators.TuningPrototypes` are stated as equalities of
-supports.
+Two facts about `SPMF` shape every proof here. Membership goes through `SPMF.support`, never through
+the generator itself; and a reweighting preserves the support but not the generator, so the tuning
+results in `StrataGenerators.TuningPrototypes` are stated as equalities of supports.
 -/
 
 namespace SPMF

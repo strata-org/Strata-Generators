@@ -499,7 +499,7 @@ theorem genChecks_support (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdenti
     (hm : m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth pctx)) :
     ∀ c ∈ m.values, c.expr ∈ SPMF.support
       (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
-  simp only [mem_support_pure_iff, genChecks, mem_support_bind_iff] at hm
+  simp only [genChecks, mem_support_bind_iff] at hm
   obtain ⟨labels, _, hm⟩ := hm
   exact mapM_genChecks_values fctx octx tvars depth labels m pctx hm
 
@@ -553,7 +553,7 @@ theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdent
     (hmd : ∀ c ∈ m.values, c.md = #[])
     (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
     m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth) := by
-  simp only [mem_support_pure_iff, genChecks, mem_support_bind_iff]
+  simp only [genChecks, mem_support_bind_iff]
   exact ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
 
 -- ── rigidTypeVars weakening ───────────────────────────────────────────────

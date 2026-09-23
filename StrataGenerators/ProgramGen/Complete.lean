@@ -105,7 +105,7 @@ theorem genDeclStep_complete_of_mem {s s' : GenState} {b : Bounds} {ds : List De
       (ds, s') ∈ SPMF.support (genDeclFunction (G := SPMF) s b) ∨
       (ds, s') ∈ SPMF.support (genDeclProcedure (G := SPMF) s b)) :
     (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b) := by
-  simp only [mem_support_pure_iff, genDeclStep, mem_support_frequency_iff]
+  simp only [genDeclStep, mem_support_frequency_iff]
   -- One branch per kind, each naming its generator and that generator's weight.
   -- The weights appear *only here*, never in the statement, so re-tuning the
   -- dispatch touches at most these seven witnesses and no downstream user.
@@ -425,7 +425,7 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
                  derivedPctx :=
                    adtDerivedPolyOps block b.derivedFamilies ++ s.derivedPctx }) ∈
       SPMF.support (genDeclDatatype (G := SPMF) s b) := by
-  simp only [mem_support_pure_iff, genDeclDatatype, mem_support_bind_iff]
+  simp only [genDeclDatatype, mem_support_bind_iff]
   refine ⟨block, hblock, ?_⟩
   -- Take the `.ok` branch of the gate using `hC`.
   rw [hC]

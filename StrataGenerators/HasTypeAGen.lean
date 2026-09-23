@@ -11,11 +11,8 @@ import Strata.DL.Lambda.LTyUnify
 -- `Constraints.unify` gives a most general unifier, and the substitution that it gives therefore has
 -- the name `Su` and not `mgu`.
 import Strata.DL.Lambda.LTyUnifyProps
--- This file does NOT import `Batteries.Data.List.Basic`. Strata and the Lean core library give each
--- `List` lemma that this file uses, so that import would only add build cost.
 
--- Mathlib marks `Nat.le_refl` with `@[refl]`. This attribute does the same, so that the file needs
--- no dependency on Mathlib.
+-- Mathlib marks `Nat.le_refl` with `@[refl]`; this attribute does the same.
 attribute [refl] Nat.le_refl
 
 open Lambda RandomChoice ArbNat ArbChar ArbString
@@ -24,7 +21,7 @@ open Lambda RandomChoice ArbNat ArbChar ArbString
 # A generator of well-typed terms that satisfy `HasTypeA`
 
 This module holds a random generator of well-typed Strata `LExpr` terms. Each generated term satisfies
-the `HasTypeA` relation. The generator uses the `SetGen` semantics of Basalt. The `LExprParams` are
+the `HasTypeA` relation. The proofs read the generator at Basalt's `SPMF`. The `LExprParams` are
 `LExprParams.mono ⟨Unit, Unit⟩`, which is unit metadata, unit identifier metadata and monotype
 annotations.
 
@@ -110,8 +107,7 @@ private theorem mem_support_pickBVar_iff {bctx : BVarCtx} {τ : LMonoTy}
     {hv : (bvarsOfType bctx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickBVar (G := SPMF) bctx τ hv) ↔
       ∃ i ∈ bvarsOfType bctx τ, e = .bvar () i := by
-  change e ∈ SPMF.support (pickBVar (G := SPMF) bctx τ hv) ↔ _
-  simp only [mem_support_pure_iff, pickBVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
+  simp only [pickBVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
   constructor
   · rintro ⟨i, hmem, rfl⟩; exact ⟨i, hmem, rfl⟩
   · rintro ⟨i, hmem, rfl⟩; exact ⟨i, hmem, rfl⟩
@@ -122,8 +118,7 @@ private theorem mem_support_pickFVar_iff {fctx : FVarCtx} {τ : LMonoTy}
     {hv : (fvarsOfType fctx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickFVar (G := SPMF) fctx τ hv) ↔
       ∃ name ∈ fvarsOfType fctx τ, e = .fvar () ⟨name, ()⟩ (some τ) := by
-  change e ∈ SPMF.support (pickFVar (G := SPMF) fctx τ hv) ↔ _
-  simp only [mem_support_pure_iff, pickFVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
+  simp only [pickFVar, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
   constructor
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
@@ -134,8 +129,7 @@ private theorem mem_support_pickOp_iff {octx : OpCtx} {τ : LMonoTy}
     {hv : (opsOfType octx τ).length > 0} {e : LExpr'} :
     e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔
       ∃ name ∈ opsOfType octx τ, e = .op () ⟨name, ()⟩ (some τ) := by
-  change e ∈ SPMF.support (pickOp (G := SPMF) octx τ hv) ↔ _
-  simp only [mem_support_pure_iff, pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
+  simp only [pickOp, mem_support_elements_iff (list_map_ne_nil_of_length_pos hv), List.mem_map]
   constructor
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
   · rintro ⟨name, hmem, rfl⟩; exact ⟨name, hmem, rfl⟩
@@ -249,7 +243,7 @@ private theorem pickTyVar_mem (tvars : List TyIdentifier) (h : tvars.length > 0)
     (hτ : τ ∈ SPMF.support (pickTyVar (G := SPMF) tvars h)) :
     ∃ name, name ∈ tvars ∧ τ = .ftvar name := by
   have hne : tvars ≠ [] := List.ne_nil_of_length_pos h
-  simp only [mem_support_pure_iff, pickTyVar, mem_support_map_iff,
+  simp only [pickTyVar, mem_support_map_iff,
              mem_support_elements_iff hne] at hτ
   assumption
 
@@ -259,7 +253,7 @@ private theorem pickTyVar_complete (tvars : List TyIdentifier)
     (hmem : name ∈ tvars) :
     LMonoTy.ftvar name ∈ SPMF.support (pickTyVar (G := SPMF) tvars h) := by
   have hne : tvars ≠ [] := List.ne_nil_of_length_pos h
-  simp only [mem_support_pure_iff, pickTyVar, mem_support_map_iff,
+  simp only [pickTyVar, mem_support_map_iff,
              mem_support_elements_iff hne]
   exact ⟨name, hmem, rfl⟩
 
@@ -308,7 +302,7 @@ private theorem Nat_arbitrary_support_set (n : Nat) :
   induction n with
   | zero =>
     rw [Nat.arbitrary]
-    simp [mem_support_pure_iff, mem_support_pick_iff]
+    simp
   | succ n ih =>
     rw [Nat.arbitrary]
     simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
@@ -319,7 +313,7 @@ private theorem Nat_arbitrary_support_set (n : Nat) :
 private theorem pickBitvecWidth_mem (τ : LMonoTy)
     (hτ : τ ∈ SPMF.support (pickBitvecWidth (G := SPMF))) :
     ∃ n, τ = .bitvec n := by
-  simp only [mem_support_pure_iff, pickBitvecWidth, mem_support_map_iff] at hτ
+  simp only [pickBitvecWidth, mem_support_map_iff] at hτ
   obtain ⟨n, _, rfl⟩ := hτ
   exact ⟨n, rfl⟩
 
@@ -327,7 +321,7 @@ private theorem pickBitvecWidth_mem (τ : LMonoTy)
     width `n`. -/
 private theorem pickBitvecWidth_complete (n : Nat) :
     LMonoTy.bitvec n ∈ SPMF.support (pickBitvecWidth (G := SPMF)) := by
-  simp only [mem_support_pure_iff, pickBitvecWidth, mem_support_map_iff]
+  simp only [pickBitvecWidth, mem_support_map_iff]
   exact ⟨n, Nat_arbitrary_support_set n, rfl⟩
 
 -- ── The structural facts about `inGenLMonoTySupport` ─────────────────
@@ -343,7 +337,7 @@ private theorem pickBitvecWidth_complete (n : Nat) :
 theorem inGenLMonoTySupport_depth (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy)
     (h : inGenLMonoTySupport tvars n τ = true) : monoTyDepth τ ≤ n := by
   fun_induction inGenLMonoTySupport tvars n τ <;>
-    simp_all [monoTyDepth] <;> omega
+    simp_all [monoTyDepth]
 
 /-- `inGenLMonoTySupport` says that `tvars` declares each `ftvar` name. -/
 theorem inGenLMonoTySupport_ftvars (tvars : List TyIdentifier) (n : Nat) (τ : LMonoTy)
@@ -432,7 +426,7 @@ private theorem pickBaseType_complete_bitvec (n : Nat) :
 private theorem genLMonoTy_zero_mem (tvars : List TyIdentifier) (τ : LMonoTy) :
     τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars 0) ↔
       inGenLMonoTySupport tvars 0 τ = true := by
-  simp only [mem_support_pure_iff, genLMonoTy, mem_support_dite_iff, mem_support_pick_iff]
+  simp only [genLMonoTy, mem_support_dite_iff, mem_support_pick_iff]
   constructor
   · rintro (⟨htv, (hbase | hftv)⟩ | ⟨htv, hbase⟩)
     · exact pickBaseType_mem tvars τ hbase
@@ -1832,7 +1826,7 @@ private theorem genAlphanumList_support_set (cs : List Char)
   induction cs with
   | nil =>
     rw [genAlphanumList, listOf]
-    simp [mem_support_pure_iff, mem_support_pick_iff]
+    simp
   | cons c cs ih =>
     rw [genAlphanumList, listOf]
     simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
@@ -1845,7 +1839,7 @@ private theorem genAlphanumList_support_set (cs : List Char)
 private theorem String_arbitrary_support_set (s : String)
     (hs : ∀ c ∈ s.toList, c ∈ alphanumChars) :
     s ∈ SPMF.support (String.arbitrary (G := SPMF)) := by
-  simp only [mem_support_pure_iff, String.arbitrary, mem_support_map_iff]
+  simp only [String.arbitrary, mem_support_map_iff]
   refine ⟨s.toList, genAlphanumList_support_set s.toList hs, ?_⟩
   exact String.ofList_toList.symm
 
@@ -1876,7 +1870,7 @@ private theorem genInterestingCharList_support_set (cs : List Char)
   induction cs with
   | nil =>
     rw [listOf]
-    simp [mem_support_pure_iff, mem_support_pick_iff]
+    simp
   | cons c cs ih =>
     rw [listOf]
     simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
@@ -1910,7 +1904,7 @@ private theorem natArbGeom_support_set (n : Nat) :
   induction n with
   | zero =>
     rw [natArbGeom]
-    simp [mem_support_pure_iff, mem_support_pick_iff]
+    simp
   | succ n ih =>
     rw [natArbGeom]
     simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
@@ -1940,14 +1934,14 @@ private theorem genRat_support_set (r : Rat) :
     have hneg : -((r.num.natAbs : Int)) = r.num := by omega
     rw [hneg]; exact (Rat.mkRat_self r).symm
 
-/-- Each `n` in the range `[lo, hi]` is in the support of `chooseNat lo hi` at `SPMF`. This lemma
-    is the `SetGen` form of a lemma of Basalt. It proves only the direction that the lemmas below need,
-    which goes from membership in the range to membership in the support. -/
+/-- Each `n` in the range `[lo, hi]` is in the support of `chooseNat lo hi` at `SPMF`. This is the
+    weaker form of a lemma of Basalt: it proves only the direction that the lemmas below need, which
+    goes from membership in the range to membership in the support. -/
 private theorem chooseNat_support_set {lo hi n : Nat} (h : lo ≤ hi)
     (hn : lo ≤ n ∧ n ≤ hi) :
     n ∈ SPMF.support (chooseNat (G := SPMF) lo hi h) := by
-  simp only [mem_support_pure_iff, chooseNat, SPMF.mem_support_map_iff]
-  exact ⟨ULift.up ⟨n, hn⟩, by simp [hn], rfl⟩
+  simp only [chooseNat, SPMF.mem_support_map_iff]
+  exact ⟨ULift.up ⟨n, hn⟩, by simp, rfl⟩
 
 open StrataGenerators.PrimitiveGens in
 /-- **Each** `BitVec w` is in the support of `genBiasedBitVec w`.
@@ -2086,6 +2080,14 @@ abbrev genDepthBudget (K depth : Nat) : Nat := depthBudget K depth
 
 set_option maxHeartbeats 6400000 in
 set_option linter.unusedSimpArgs false in
+-- The proof below supplies each `σ ∈ support (genLMonoTy …)` side goal with one uniform
+-- `first | exact genLMonoTy_mem_bool | … | assumption` block, pasted unchanged at every type case, so
+-- that no case needs bespoke reasoning. At any one of those sites all but one alternative is dead by
+-- construction, which is what `first` is for, so `unusedTactic` and `unreachableTactic` fire on every
+-- alternative that did not win. Narrowing each block to its winner would trade a uniform dispatcher for
+-- twenty bespoke ones, so the two linters are off for this declaration alone.
+set_option linter.unusedTactic false in
+set_option linter.unreachableTactic false in
 open StrataGenerators.IndirSupport in
 /-- The `termDepth` of each expression in the support of `genLExprBase` at the depth `depth` is not
     more than `depthBudget K depth`. Here `K` is `max (opCtxArity octx) maxNumArgs`, and it is 1 or
@@ -5377,7 +5379,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         (genLExprBase (G := SPMF) fctx octx pctx tvars bctx 0 σ) → HasTypeA' bctx a σ :=
       fun σ a ha => genLExprBase_sound fctx octx pctx tvars bctx 0 σ a ha
     unfold genLExpr at he
-    simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
+    simp only [SPMF.mem_support_dite_iff] at he
     rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
     · -- Monomorphic Indir candidates: two-element frequency, then a binary pick
       rw [mem_support_frequency_iff] at he
@@ -5401,7 +5403,7 @@ theorem genLExpr_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         HasTypeA' bctx a σ :=
       fun σ a ha => ih σ a ha
     unfold genLExpr at he
-    simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
+    simp only [SPMF.mem_support_dite_iff] at he
     rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
     · rw [mem_support_frequency_iff] at he
       obtain ⟨_, g, hg, _, he⟩ := he
@@ -6457,7 +6459,7 @@ theorem genLExprBase_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
         (fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n σ a ha)
         (fun a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx n _ a ha) e he
   termination_by depth
-  decreasing_by all_goals simp_wf; omega
+  decreasing_by all_goals omega
 
 set_option maxHeartbeats 1600000 in
 /-- With an empty context of free variables, each expression in the support of `genLExprBase` holds no
@@ -6584,7 +6586,7 @@ theorem genLExpr_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         LExpr.getVars a ⊆ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) :=
       fun σ a ha => genLExprBase_fvars_subset fctx octx pctx tvars bctx 0 σ a ha
     unfold genLExpr at he
-    simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
+    simp only [SPMF.mem_support_dite_iff] at he
     rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
     · rw [mem_support_frequency_iff] at he
       obtain ⟨_, g, hg, _, he⟩ := he
@@ -6610,7 +6612,7 @@ theorem genLExpr_fvars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         LExpr.getVars a ⊆ fctx.map (fun p => (⟨p.1, ()⟩ : Lambda.Identifier Unit)) :=
       fun σ a ha => ih σ a ha
     unfold genLExpr at he
-    simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
+    simp only [SPMF.mem_support_dite_iff] at he
     rcases he with ⟨hpos, he⟩ | ⟨_, he⟩
     · rw [mem_support_frequency_iff] at he
       obtain ⟨_, g, hg, _, he⟩ := he
@@ -6764,7 +6766,7 @@ theorem genLExprBase_mem_genLExpr (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOp
     e ∈ SPMF.support
       (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs) := by
   unfold genLExpr
-  simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff]
+  simp only [SPMF.mem_support_dite_iff]
   by_cases hops : (findOpsInCtx octx τ).length > 0
   · refine Or.inl ⟨hops, ?_⟩
     rw [mem_support_frequency_iff]
@@ -7196,7 +7198,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     e ∈ SPMF.support
       (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs) := by
   unfold genLExpr
-  simp only [mem_support_pure_iff, SPMF.mem_support_dite_iff]
+  simp only [SPMF.mem_support_dite_iff]
   -- `genLExprBase` has the weight 1 in the `frequency` of two elements. Both it and `genIndirPoly` are
   -- reachable in each branch of the `dite`. In the branch with monomorphic candidates, the proof gives the
   -- witness for the `frequency` through `mem_support_frequency_iff`. The base rule has the weight 1, and

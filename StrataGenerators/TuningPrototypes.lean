@@ -359,7 +359,7 @@ theorem genProcedureT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (procs : Pro
 -- ══════════════════════════════════════════════════════════════════════════
 
 /-- At every `θ`, the tuned command generator is `genCmd`. `genCmd` is not recursive, so this uses the
-    first recipe in `SetGen.Tuning`'s list, with one addition. Its two sites sit in the two branches of a
+    site-under-`bind` shape of `StrataGenerators.TuningSupport`, with one addition. Its two sites sit in the two branches of a
     `dite`, and the `set` branches *use* that `dite`'s proof, so the proof splits on the condition first.
     §1 does the same for `genPrecondition`. -/
 theorem genCmd_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)

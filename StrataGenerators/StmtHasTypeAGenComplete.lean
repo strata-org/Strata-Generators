@@ -182,7 +182,7 @@ theorem writable_nil_eq (ctx : VarCtx) : ctx.writable [] = ctx := by
 /-- Statement typing preserves the ambient `rigidTypeVars`: `funcDecl` extends only
     the factory functions and `typeDecl` only the known types, neither touching the
     rigid set; every other constructor leaves `C` unchanged. (Local copy of Strata's
-    `StatementHasType'_rigid_eq`, whose file is not imported here.) -/
+    `StatementHasType'_rigid_eq`.) -/
 theorem stmtHasType_rigid_eq {P : Program} {C C' : LContext CoreLParams}
     {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
     (h : StatementHasTypeA P C Γ L s C' Γ') : C'.rigidTypeVars = C.rigidTypeVars := by

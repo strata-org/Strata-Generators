@@ -7,9 +7,8 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 /-!
 # A generator for a well-typed command that satisfies `CmdHasTypeA`
 
-A random generator on the `SetGen` interpretation of Basalt, for a well-typed imperative
-command of Strata. Such a command is a `Cmd Expression`, and it satisfies the relation
-`CmdHasTypeA`.
+A random generator for a well-typed imperative command of Strata, reasoned about at Basalt's `SPMF`.
+Such a command is a `Cmd Expression`, and it satisfies the relation `CmdHasTypeA`.
 
 ## Contents
 
@@ -421,7 +420,7 @@ theorem genCmd_support_iff
      r ∈ SPMF.support (genAssertCmd (G := SPMF) octx tvars ctx depth pctx) ∨
      r ∈ SPMF.support (genAssumeCmd (G := SPMF) octx tvars ctx depth pctx) ∨
      r ∈ SPMF.support (genCoverCmd (G := SPMF) octx tvars ctx depth pctx)) := by
-  simp only [mem_support_pure_iff, genCmd, mem_support_dite_iff]
+  simp only [genCmd, mem_support_dite_iff]
   constructor
   · intro hr
     rcases hr with ⟨h, hr⟩ | ⟨hne, hr⟩
@@ -545,7 +544,7 @@ theorem genFreshName_produces_fresh (ctx : VarCtx) :
     ∀ name, name ∈ SPMF.support (genFreshName (G := SPMF) ctx) →
       VarCtx.isFresh ctx ⟨name, ()⟩ = true := by
   intro name hmem
-  simp only [mem_support_pure_iff, genFreshName, mem_support_bind_iff] at hmem
+  simp only [genFreshName, mem_support_bind_iff] at hmem
   obtain ⟨s, _, hname⟩ := hmem
   simp only [mem_support_ite_iff, mem_support_pure_iff] at hname
   rcases hname with ⟨hfresh, rfl⟩ | ⟨_, rfl⟩
@@ -615,7 +614,7 @@ theorem genFreshName_not_keyword (ctx : VarCtx) :
     ∀ name, name ∈ SPMF.support (genFreshName (G := SPMF) ctx) →
       isReservedKeyword name = false := by
   intro name hmem
-  simp only [mem_support_pure_iff, genFreshName, mem_support_bind_iff] at hmem
+  simp only [genFreshName, mem_support_bind_iff] at hmem
   obtain ⟨s, hs, hname⟩ := hmem
   simp only [mem_support_ite_iff, mem_support_pure_iff] at hname
   rcases hname with ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -1068,7 +1067,7 @@ theorem genCmds_sound
     obtain ⟨⟨cmd, ctx'⟩, hcmd, rest_hr⟩ := hr
     dsimp only [GenCmdResult.outCtx, GenCmdResult.cmd] at rest_hr
     obtain ⟨⟨cmds, ctx''⟩, hcmds, hpure⟩ := rest_hr
-    simp only [mem_support_pure_iff] at hpure
+    simp only [] at hpure
     have heq : result = (cmd :: cmds, ctx'') := by
       cases hpure; rfl
     subst heq

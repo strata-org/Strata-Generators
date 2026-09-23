@@ -1051,9 +1051,7 @@ theorem cmdExtHasTypeA_equiv_congr {C : LContext CoreLParams} {P : Program}
       -- The obligation for one argument matches on the shape of that argument. Only its branch for an `fvar`
       -- with no annotation reads the context, through `types.find?`. Each other branch goes through
       -- `exprTyped`, which reads no context at this instantiation.
-      first
-        | (simp only [tctxEquiv_find? he]; exact hty)
-        | exact hty
+      simp only [tctxEquiv_find? he]; exact hty
     · intro i hi hj
       obtain ⟨mty, halias, hty⟩ := houtTy i hi hj
       exact ⟨mty, by rw [he.2]; exact halias, (tctxEquiv_find? he _).trans hty⟩

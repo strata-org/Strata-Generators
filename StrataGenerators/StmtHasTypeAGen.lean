@@ -292,7 +292,7 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pc
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
-  simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff] at hr
+  simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
   obtain ⟨tc, _htc, hr⟩ := hr
   -- Branch on the same `addKnownTypeWithError` the generator computed.
   split at hr
@@ -325,7 +325,7 @@ theorem fallbackFreshLabel_not_mem (labels : List String) :
 theorem genFreshLabel_not_mem (labels : List String) :
     ∀ l, l ∈ SPMF.support (genFreshLabel (G := SPMF) labels) → l ∉ labels := by
   intro l hmem
-  simp only [mem_support_pure_iff, genFreshLabel, mem_support_bind_iff] at hmem
+  simp only [genFreshLabel, mem_support_bind_iff] at hmem
   obtain ⟨s, _, hl⟩ := hmem
   simp only [mem_support_ite_iff, mem_support_pure_iff] at hl
   rcases hl with ⟨_, rfl⟩ | ⟨hns, rfl⟩
@@ -444,7 +444,7 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
   cases procs with
   | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
-    simp only [mem_support_pure_iff, genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
+    simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
     -- Peel the type-instantiation (`σvals`) sampling `mapM`.
     obtain ⟨σvals, hσvals, hr⟩ := hr
@@ -487,7 +487,7 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
   cases procs with
   | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
-    simp only [mem_support_pure_iff, genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
+    simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
     obtain ⟨σvals, hσvals, hr⟩ := hr
     split at hr
@@ -546,7 +546,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
   cases procs with
   | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
-    simp only [mem_support_pure_iff, genCallStmt, mem_support_bind_iff] at hr
+    simp only [genCallStmt, mem_support_bind_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
     rw [mem_support_elements_iff] at hs
     -- Peel the type-instantiation sampling; name the chosen instantiation `σ`.
@@ -600,7 +600,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
         have hval : Iσ.values[i]'hjσ = LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj) := by
           have hjσ' : i < (StrataGenerators.Stmt.substSig σ s.I).values.length := by rw [hIσ]; exact hjσ
           rw [← StrataGenerators.Stmt.substSig_values_getElem σ s.I i hjσ' hj]
-          congr 1 <;> rw [hIσ]
+          congr 1; rw [hIσ]
         rwa [hval] at hbind
       -- Each required name (in the instantiated write-list `Mσ ++ T`) is *either*
       -- already bound at its recorded type, so the call reuses it, *or* absent, so the call declares it. That
@@ -744,7 +744,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
   cases procs with
   | nil => exact absurd hs (by simp)
   | cons p₀ ps =>
-    simp only [mem_support_pure_iff, genCallStmt, mem_support_bind_iff]
+    simp only [genCallStmt, mem_support_bind_iff]
     refine ⟨s, (mem_support_elements_iff (by simp)).mpr hs, ?_⟩
     -- Exhibit the sampled `σvals` for the type-instantiation `mapM`.
     refine ⟨σvals, hσvals, ?_⟩
@@ -824,7 +824,7 @@ theorem genStmt_outCtx_functional
     Map.Functional r.outCtx := by
   cases n with
   | zero =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -849,7 +849,7 @@ theorem genStmt_outCtx_functional
       simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨_, _, rfl⟩ := hr; exact hFun
     · -- typeDecl
-      simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff] at hr
+      simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
@@ -868,7 +868,7 @@ theorem genStmt_outCtx_functional
           immutableVars (hd :: tl) C ctx 0 pctx) := hr
         exact genCallStmt_outCtx hFun r hr
   | succ size =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -893,7 +893,7 @@ theorem genStmt_outCtx_functional
       simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨_, _, rfl⟩ := hr; exact hFun
     · -- typeDecl
-      simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff] at hr
+      simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
@@ -977,7 +977,7 @@ theorem wellKindedOk_preserved
   have htype : ∀ d, ∀ r' ∈ SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d),
       WellKindedOk octx procs r'.outC r'.outCtx := by
     intro d r' hr'
-    simp only [mem_support_pure_iff, genTypeDeclStmt, mem_support_bind_iff] at hr'
+    simp only [genTypeDeclStmt, mem_support_bind_iff] at hr'
     obtain ⟨tc, _, hr'⟩ := hr'
     split at hr'
     · rename_i C' hadd
@@ -991,7 +991,7 @@ theorem wellKindedOk_preserved
     exact genCallStmt_outCtx_wellKinded hWK r' hr'
   cases n with
   | zero =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -1007,7 +1007,7 @@ theorem wellKindedOk_preserved
       | nil => exact hcmd 0 r hr
       | cons hd tl => exact hcall 0 r hr
   | succ size =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -1058,7 +1058,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases n with
   | zero =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -1074,7 +1074,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       | nil => exact genCmdStmt_sound P env C hWK.arities ctx 0 hFun r hr
       | cons hd tl => exact genCallStmt_sound P env _ hProcs C ctx 0 hWK r hr
   | succ size =>
-    simp only [mem_support_pure_iff, genStmt, mem_support_frequency_iff] at hr
+    simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩

@@ -281,7 +281,7 @@ theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
     ∀ sig ∈ s.procs, sig ∈ s'.procs := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so the branch equations pin both components.
-  simp only [mem_support_pure_iff, genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
+  simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _hw, hmem⟩ := h
   rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -303,14 +303,14 @@ theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
       Prod.mk.injEq] at hmem
     obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; exact fun _ h => h
   -- Distinct: gated on the constants' factory adds; both branches copy `procs`.
-  · simp only [mem_support_pure_iff, genDeclDistinct, mem_support_bind_iff] at hmem
+  · simp only [genDeclDistinct, mem_support_bind_iff] at hmem
     obtain ⟨pr, _, hmatch⟩ := hmem
     split at hmatch
     all_goals (
       simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
       obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
   -- Datatype: gated; both branches copy `procs`.
-  · simp only [mem_support_pure_iff, genDeclDatatype, mem_support_bind_iff] at hmem
+  · simp only [genDeclDatatype, mem_support_bind_iff] at hmem
     obtain ⟨block, _, hmatch⟩ := hmem
     split at hmatch
     all_goals (
@@ -318,7 +318,7 @@ theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
       obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
   -- Function: gated; both branches copy `procs`. `split` cases the `match` without
   -- naming the (projection-typed) scrutinee.
-  · simp only [mem_support_pure_iff, genDeclFunction, mem_support_bind_iff] at hmem
+  · simp only [genDeclFunction, mem_support_bind_iff] at hmem
     obtain ⟨func₀, _, nm, _, hmatch⟩ := hmem
     split at hmatch
     all_goals (
@@ -455,7 +455,7 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
           (sig.M ++ sig.O).keys.contains (sig.I.keys[i]'hi) = false) := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so the branch equations pin both components.
-  simp only [mem_support_pure_iff, genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
+  simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _hw, hmem⟩ := h
   rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -476,19 +476,19 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
       Prod.mk.injEq] at hmem
     obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; rfl
   · left
-    simp only [mem_support_pure_iff, genDeclDistinct, mem_support_bind_iff] at hmem
+    simp only [genDeclDistinct, mem_support_bind_iff] at hmem
     obtain ⟨pr, _, hmatch⟩ := hmem
     split at hmatch
     all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
                obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
   · left
-    simp only [mem_support_pure_iff, genDeclDatatype, mem_support_bind_iff] at hmem
+    simp only [genDeclDatatype, mem_support_bind_iff] at hmem
     obtain ⟨block, _, hmatch⟩ := hmem
     split at hmatch
     all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
                obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
   · left
-    simp only [mem_support_pure_iff, genDeclFunction, mem_support_bind_iff] at hmem
+    simp only [genDeclFunction, mem_support_bind_iff] at hmem
     obtain ⟨func₀, _, nm, _, hmatch⟩ := hmem
     split at hmatch
     all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch

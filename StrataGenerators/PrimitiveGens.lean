@@ -61,11 +61,8 @@ namespace StrataGenerators.PrimitiveGens
     Only the completeness tail of `genRat` uses it. Every other branch in this
     file samples uniformly with `chooseNat`.
 
-    This file holds its own copy of the generator instead of an import, for the
-    same reason that `HasTypeAGen/Core.lean` holds a copy: `BasaltExamples.ArbNat`
-    pulls in the full `Basalt` umbrella, and thus Mathlib. `HasTypeAGen/Core.lean`
-    imports this file, so this file cannot depend on it. This copy is
-    definitionally the same as the upstream generator. -/
+    A local copy of Basalt's geometric `Nat` generator, definitionally the same as
+    it, for the same reason that `HasTypeAGen/Core.lean` holds one. -/
 def natArbGeom [Gen G] : G Nat := do
   pick
     (fun () => pure 0)
