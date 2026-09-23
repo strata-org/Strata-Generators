@@ -451,49 +451,42 @@ theorem genLMonoTy_tuned_support_eq (θ : Tuning) (tvars : List TyIdentifier) :
         exact List.Forall₂.cons (harrow LMonoTy.arrow)
           (List.Forall₂.cons (harrow LMonoTy.map) (List.Forall₂.cons (hseq LMonoTy.seq) .nil))
 
-set_option maxHeartbeats 1000000 in
-/-- At every `θ`, the tuned base expression generator is `genLExprBase`. This is the widest generator
-    here: eleven sites, 84 branch weights, and a match on the target type as well as on the depth.
+/-! ### The two argument-generator wrappers that `support_congr` cannot walk into
 
-    It needs no more work than the others, because no arm of the match has to be *named*. `split`
-    produces one goal per arm, and the same matcher constant appears on both sides, because
-    `@[tunable]` reuses a matcher rather than rebuilds it. Each goal is then an `n = 0` arm, which is a
-    `oneOf` and closes by `rfl`, or one `frequency` whose weights are the only difference.
+`genAbs`, `genApp`, `genIte`, `genEq` and `genQuant` are `@[reducible]`, so the `support_congr` tactic
+unfolds them and descends through their `bind`s on its own. `genIndir` and `genIndirPolyCore` are plain
+`def`s, so it cannot, and a leaf that mentions one of them would fall through to the tactic's expensive
+last resorts. These two lemmas are the leaves for those branches: each says that the generator's support
+depends on its argument generator (and, for the polymorphic rule, its fallback) only through *their*
+supports. -/
 
-    The proof uses `refine congrFun (congrFun …)` rather than `apply`, because the equation compiler
-    moved `bctx` and the target type into `Nat.brecOn`'s motive. `delta` therefore leaves them applied
-    outside the `brecOn`. -/
-theorem genLExprBase_tuned_support_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
-    (pctx : PolyOpCtx) (tvars : List TyIdentifier) :
-    ∀ (n : Nat) (bctx : BVarCtx) (τ : LMonoTy),
-      SPMF.support (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx n τ)
-        = SPMF.support (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n τ) := by
-  -- **Not proved.** The recipe that closes `genLMonoTy_tuned_support_eq` — induct on the depth,
-  -- unfold the shipping generator with `eq_def`, `delta`-and-`dsimp` the tuned copy's `Nat.brecOn`,
-  -- then `support_congr` — does not reach here, and the obstruction is specific to this generator.
-  --
-  -- `genLExprBase` recurses structurally on the depth but *matches on the depth and the target type
-  -- together*, and the equation compiler moves `bctx` and `τ` into `Nat.brecOn`'s motive. So `delta`
-  -- leaves the tuned side as `Nat.brecOn.go … 0 (fun x f bctx τ => match x, τ with …)`, with the
-  -- matcher applied to an argument the tactic block cannot see through: `dsimp only` reduces neither
-  -- the `brecOn.go` nor the matcher, and `split` therefore splits the shipping side alone and the two
-  -- sides fall out of step. The old proof sidestepped all of this by working at the *functional*
-  -- level (`brecOn_congr` reduced the goal to an equality of step functions, which `Set` made true);
-  -- at `SPMF` the step functions are genuinely unequal, so that route is closed.
-  --
-  -- What it needs is a support-level congruence for `Nat.brecOn` — the analogue of
-  -- `SPMF.support_wellFounded_fix_congr`, which is what made the `genStmt` block go through. That
-  -- means relating two `Nat.below` bundles, and it is a piece of work rather than a missing line.
-  sorry
+/-- The support of the monomorphic Indir rule depends on `genArg` only through its support: the rule
+    draws one operator and then draws each argument with a `mapM` over `genArg`. -/
+theorem support_genIndir_congr (octx : OpCtx) (τ : LMonoTy)
+    {genArg genArg' : LMonoTy → SPMF LExpr'}
+    (hArg : ∀ σ, (genArg σ).support = (genArg' σ).support)
+    (h : (findOpsInCtx octx τ).length > 0) :
+    (genIndir (G := SPMF) octx τ genArg h).support
+      = (genIndir (G := SPMF) octx τ genArg' h).support := by
+  unfold genIndir
+  refine SPMF.support_bind_congr rfl (fun p => ?_)
+  obtain ⟨name, argTys⟩ := p
+  exact SPMF.support_bind_congr (SPMF.support_mapM_congr hArg argTys) (fun _ => rfl)
 
-/-- The payoff, stated once. Any soundness and completeness fact about the shipping expression
-    generator holds of every tuning of it, and the proof never mentions the predicate. -/
-example (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
-    (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) (P : LExpr' → Prop)
-    (h : IsSoundAndComplete
-      (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n τ) P) :
-    IsSoundAndComplete
-      (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx n τ) P :=
-  IsSoundAndComplete.of_support_eq (genLExprBase_tuned_support_eq θ fctx octx pctx tvars n bctx τ) h
+/-- The support of the polymorphic IndirPoly rule depends on `genArg` and on `fallback` only through
+    their supports. The type-sampling prefix does not mention either, so it stays put. -/
+theorem support_genIndirPolyCore_congr (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (bctx : BVarCtx) (τ : LMonoTy)
+    {genArg genArg' : LMonoTy → SPMF LExpr'} {fallback fallback' : SPMF LExpr'}
+    (hArg : ∀ σ, (genArg σ).support = (genArg' σ).support)
+    (hfb : fallback.support = fallback'.support) (maxNumArgs : Nat) :
+    (genIndirPolyCore (G := SPMF) fctx octx pctx bctx τ genArg fallback maxNumArgs).support
+      = (genIndirPolyCore (G := SPMF) fctx octx pctx bctx τ genArg' fallback' maxNumArgs).support := by
+  unfold genIndirPolyCore
+  refine SPMF.support_bind_congr rfl (fun sampledTys => ?_)
+  refine SPMF.support_dite_congr (fun hops => ?_) (fun _ => hfb)
+  refine SPMF.support_bind_congr rfl (fun p => ?_)
+  obtain ⟨functionName, argTys⟩ := p
+  exact SPMF.support_bind_congr (SPMF.support_mapM_congr hArg argTys) (fun _ => rfl)
 
 end TuningPrototypes
