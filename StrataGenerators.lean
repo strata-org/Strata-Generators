@@ -19,3 +19,6 @@ import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
+-- Expectations and coverage probabilities: expected loop count, factory-operator
+-- coverage, loop coverage.
+import StrataGenerators.Expectations
