@@ -8,10 +8,13 @@ name = "Strata"
 git = "https://github.com/strata-org/Strata"
 rev = "main"
 
+# Pinned to the head of Basalt's `lean-4.29` branch. That branch carries the
+# library reorganization (`Basalt.Walk.*`, `Basalt.Tactic.*`, `Basalt.Obs.*`) and
+# the SplitMix-based PRNG, so the pin is not interchangeable with older revisions.
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
-rev = "lean-4.29"
+rev = "9f1c4acce8d8ed681d4cef3a367ca91785764444"
 
 # Note: Strata is on Lean 4.29.1, but mainline LSpec is on 4.31,
 # so we currently depend on a custom fork of LSpec that is on 4.29

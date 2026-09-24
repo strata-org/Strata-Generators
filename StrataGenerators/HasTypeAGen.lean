@@ -1822,18 +1822,8 @@ private theorem Char_arbitrary_support_set (c : Char) (hc : c ∈ alphanumChars)
 /-- Every alphanumeric char-list is in the support of `genAlphanumList` at `SPMF`. -/
 private theorem genAlphanumList_support_set (cs : List Char)
     (hcs : ∀ c ∈ cs, c ∈ alphanumChars) :
-    cs ∈ SPMF.support (genAlphanumList (G := SPMF)) := by
-  induction cs with
-  | nil =>
-    rw [genAlphanumList, listOf]
-    simp
-  | cons c cs ih =>
-    rw [genAlphanumList, listOf]
-    simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
-    right
-    refine ⟨c, ?_, cs, ?_, rfl⟩
-    · exact Char_arbitrary_support_set c (hcs c List.mem_cons_self)
-    · exact ih (fun c' hc' => hcs c' (List.mem_cons_of_mem c hc'))
+    cs ∈ SPMF.support (genAlphanumList (G := SPMF)) :=
+  mem_support_listOf_of_forall fun c hc => Char_arbitrary_support_set c (hcs c hc)
 
 /-- Every alphanumeric string is in the support of `String.arbitrary` at `SPMF`. -/
 private theorem String_arbitrary_support_set (s : String)
@@ -1866,18 +1856,8 @@ open StrataGenerators.PrimitiveGens in
     `genAlphanumList_support_set`. -/
 private theorem genInterestingCharList_support_set (cs : List Char)
     (hcs : ∀ c ∈ cs, c ∈ interestingChars) :
-    cs ∈ SPMF.support (listOf (genInterestingChar (G := SPMF))) := by
-  induction cs with
-  | nil =>
-    rw [listOf]
-    simp
-  | cons c cs ih =>
-    rw [listOf]
-    simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
-    right
-    refine ⟨c, ?_, cs, ?_, rfl⟩
-    · exact genInterestingChar_support_set c (hcs c List.mem_cons_self)
-    · exact ih (fun c' hc' => hcs c' (List.mem_cons_of_mem c hc'))
+    cs ∈ SPMF.support (listOf (genInterestingChar (G := SPMF))) :=
+  mem_support_listOf_of_forall fun c hc => genInterestingChar_support_set c (hcs c hc)
 
 open StrataGenerators.PrimitiveGens in
 /-- Each string over `interestingChars` is in the support of `genInterestingString`, at **each** length.
@@ -4572,7 +4552,9 @@ theorem genLMonoTy_isSoundAndComplete {tvars : List TyIdentifier} {n : Nat} :
     IsSoundAndComplete
       (genLMonoTy (G := SPMF) tvars n)
       (fun τ => inGenLMonoTySupport tvars n τ = true) :=
-  fun τ => genLMonoTy_support tvars n τ
+  IsSoundAndComplete.intro
+    (fun τ hτ => (genLMonoTy_support tvars n τ).mp hτ)
+    (fun τ hτ => (genLMonoTy_support tvars n τ).mpr hτ)
 
 -- ── Quick test ────────────────────────────────────────────────────────
 

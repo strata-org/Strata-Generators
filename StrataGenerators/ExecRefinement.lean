@@ -164,24 +164,23 @@ theorem refines_default {α} [Inhabited α] (size : ULift Nat) :
              Function.comp_def, StateT.lift, bind, ReaderT.bind, Except.bind] at h
   exact absurd h (by simp)
 
+set_option linter.deprecated false in
 /-- `pick` refines `pick` when both of its branches refine their branches. A choice between
-    two branches cannot reach a value outside the union of the two supports. -/
+    two branches cannot reach a value outside the union of the two supports.
+
+    Basalt now defines `pick x y` as `oneOf [x, y]`, so the proof is `refines_bind` over the
+    `choose 0 1` that picks the index, and then a case split on that index. -/
 theorem refines_pick {α} (p q : Plausible.Gen α) (s t : SPMF α) (size : ULift Nat)
     (hp : Refines p s size) (hq : Refines q t size) :
     Refines (pick (fun () => p) (fun () => q))
             (pick (fun () => s) (fun () => t)) size := by
-  rintro a ⟨sg, sg', h⟩
-  rw [SPMF.mem_support_pick_iff]
-  -- `pick` is `choose 0 1 >>= fun i => if i.down.val == 0 then _ else _`.
-  simp only [RandomChoice.pick, bind_apply] at h
-  split at h
-  · rename_i v sgmid heq
-    by_cases hv : v.down.val == 0
-    · simp only [hv, if_pos] at h
-      exact Or.inl (hp a ⟨sgmid, sg', by simpa using h⟩)
-    · simp only [hv] at h
-      exact Or.inr (hq a ⟨sgmid, sg', by simpa using h⟩)
-  · exact absurd h (by simp)
+  rw [RandomChoice.pick, RandomChoice.pick]
+  unfold oneOf
+  refine refines_bind _ _ _ _ _ (refines_choose 0 _ (Nat.zero_le _) size) fun i => ?_
+  obtain ⟨⟨n, -, hn⟩⟩ := i
+  rcases Nat.le_one_iff_eq_zero_or_eq_one.mp hn with rfl | rfl
+  · simpa using hp
+  · simpa using hq
 
 /-! ## The result: a retry keeps refinement -/
 

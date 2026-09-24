@@ -2,10 +2,15 @@
 Copyright (c) 2026 Amazon.com, Inc. or its affiliates. All rights reserved.
 Released under the Apache-2.0 or MIT license (see LICENSE-APACHE / LICENSE-MIT).
 -/
-import Basalt.SPMF
-import Basalt.Laws
-import Basalt.Tactics
 import Basalt.Combinators
+import Basalt.Laws
+import Basalt.SPMF.Expect.Basic
+import Basalt.SPMF.Mass
+import Basalt.SPMF.Ranking
+import Basalt.SPMF.Support
+import Basalt.SPMF.Termination
+import Basalt.Tactic.Support
+import StrataGenerators.BasaltCompat.Support
 
 open Lean.Order RandomChoice
 
@@ -14,11 +19,13 @@ open Lean.Order RandomChoice
 
 The proofs in this package read a generator as an `SPMF` — a sub-probability mass function — and
 speak about `SPMF.support`, the set of values whose mass is not zero. Basalt owns that reading and
-almost all of the lemmas about it: `Basalt/SPMF/Support.lean` has the `mem_support_*_iff` family for
-every combinator this package draws from, `Basalt/Laws.lean` has `IsSoundAndComplete`, and
-`Basalt/Tactics.lean` has `support_simp`, the packaged `simp only` set for support inversion.
+most of the lemmas about it: `Basalt/SPMF/Support.lean` has the support laws of the host constructs
+and of the list combinators, `Basalt/Laws.lean` has `IsSoundAndComplete`, and
+`Basalt/Tactic/Support.lean` has `support_simp`, the packaged `simp only` set for support inversion.
+`StrataGenerators.BasaltCompat.Support` has the rest of the `mem_support_*_iff` family, which Basalt
+stated until its `lean-4.29` reorganization and this package still uses.
 
-This file holds the three things Basalt does not.
+This file holds the three things neither of them does.
 
 1. `SPMF.mem_support_bot_iff`, so that a `simp` set can discharge the branch of a generator that
    produces nothing.

@@ -3,6 +3,7 @@ import Basalt.IO
 import Basalt.Combinators
 import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.Function
+import StrataGenerators.BasaltCompat.Combinators
 import StrataGenerators.HasTypeAGen.Core
 import Std.Data.HashSet
 

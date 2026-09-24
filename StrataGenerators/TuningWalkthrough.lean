@@ -6,7 +6,7 @@ Authors: Harrison Goldstein
 import StrataGenerators.GenSupport
 import StrataGenerators.TuningSupport
 import Basalt.Tuning.Attr
-import Basalt.GenStats
+import Basalt.GenStats.Basic
 
 open RandomChoice
 

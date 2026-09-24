@@ -1,5 +1,6 @@
 import StrataGenerators.StmtHasTypeAGen
 import StrataGenerators.HasTypeAGen.IndirSupport
+import StrataGenerators.BasaltCompat.Measure
 
 /-!
 # Expectations and coverage probabilities for the statement generator
@@ -598,8 +599,7 @@ theorem genStmt_prob_rootLoop_ge :
       ≤ prob (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx (size + 1))
           RootLoop := by
   rw [genStmt, prob_frequency]
-  have hden : ((4 + (1 + (1 + (1 + (3 + (2 + (2 + (1 + 2))))))) : ℕ) : ℝ≥0∞) = 17 := by norm_num
-  simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, hden]
+  simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
   rw [← loop_branch_prob_rootLoop]
   refine ENNReal.div_le_div_right ?_ _
   show 2 * prob (loopBranch octx tvars immutableVars procs labels C ctx pctx size) RootLoop ≤ _
