@@ -194,7 +194,7 @@ def genQuotedName [Gen G] : G String := do
 /-- Makes a random list of names whose length is not more than `depth`.
 
     The definition uses the `listOfMaxLength` combinator, which this package vendors from Basalt.
-    `SetGen.mem_support_listOfMaxLength_iff` gives its support. -/
+    `SPMF.mem_support_listOfMaxLength_iff` gives its support. -/
 def genNameList [Gen G] (depth : Nat) : G (List String) :=
   listOfMaxLength depth genIdentName
 

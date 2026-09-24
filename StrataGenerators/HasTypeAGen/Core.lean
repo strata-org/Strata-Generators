@@ -13,12 +13,8 @@ import Strata.DL.Lambda.LTyUnify
 namespace ArbNat
 open RandomChoice
 
-/-- A generator for a `Nat`.
-
-    This file keeps the definition local and does not import `BasaltExamples.ArbNat`, because that
-    module imports the full `Basalt` library, and so Mathlib. This file stays free of Mathlib, to keep
-    itself and the proof modules that import it cheap to build. The definition here is definitionally
-    equal to the one in Basalt, so a proof can unfold either one. -/
+/-- A generator for a `Nat`. A local copy of Basalt's `Nat.arbitrary`, definitionally equal to it, so
+    a proof can unfold either one. -/
 def Nat.arbitrary [Gen G] : G Nat := do
   pick
     (fun () => pure 0)
@@ -460,11 +456,11 @@ other, are the reason:
 - The membership tests `argTy ∈ tys` and `retTy ∉ tys` in the loop of `addNewTypes`.
 
 Each fast form below holds a `Std.HashSet` as an index for membership. `OpCtx` holds a hash map for a
-lookup by type in the same way. Both functions keep their lists, and the dedup keeps the order of the
+lookup by type in the same way. Both functions keep their lists, and the uniq keeps the order of the
 input.
 
 The order is not necessary for the distribution. `elements` takes the result, draws a uniform index,
-and gives that element. The list holds no duplicate element, because a dedup makes it. Therefore a
+and gives that element. The list holds no duplicate element, because a uniq makes it. Therefore a
 uniform index is a uniform element for each possible order, and the support is the same set.
 
 The order gives one other property: the draws are a function of the seed only. `Std.HashSet` does not
@@ -475,7 +471,7 @@ A `@[csimp]` lemma connects each fast form to the original function. Therefore t
 fast form, but `simp`, `rw` and `unfold` use the original definition. Each proof about `addNewTypes`
 and `generableTypesFromCtx` therefore needs no change. -/
 
-/-- A dedup that keeps the order. It keeps the first occurrence of each element, in the
+/-- A uniq that keeps the order. It keeps the first occurrence of each element, in the
     same way as `List.eraseDups`. The cost is linear and not quadratic. -/
 def dedupTys (l : List LMonoTy) : List LMonoTy := go l ∅ []
 where
@@ -608,7 +604,7 @@ private theorem fastAddNewTypes_go_eq (fuel : Nat) (tys : List LMonoTy)
     The function first computes the syntactic subtypes of each type in the context. It then adds a new
     type to the set by this rule: if the set holds `σ → τ` and it also holds `σ`, then add `τ`.
 
-    The `@[csimp]` lemmas above apply to the dedup and to `addNewTypes`. Therefore the cost at run
+    The `@[csimp]` lemmas above apply to the uniq and to `addNewTypes`. Therefore the cost at run
     time is linear in the size of the context, and this definition stays the one that each proof
     uses. -/
 def generableTypesFromCtx (bctx : BVarCtx) (fctx : FVarCtx) (octx : OpCtx) : List LMonoTy :=
@@ -1722,7 +1718,7 @@ def genIndirPoly [Gen G] (fctx : FVarCtx) (octx : OpCtx)
     samples a new instantiation at each nested level, and neither `genIndir` nor `genIndirPoly` needs a
     change.
 
-    A retry has an effect under `Plausible.Gen` only, where a failed leaf throws. Under `SetGen.Set`,
+    A retry has an effect under `Plausible.Gen` only, where a failed leaf throws. Under `SPMF`,
     which is the semantics of the soundness and completeness theorems, `default` is `∅` and not an
     error. There is therefore no failure to observe and nothing to retry. The abstract `Gen` class
     gives no `tryCatch` and no `Alternative`, and that is why the caller supplies this continuation.

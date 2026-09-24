@@ -3,12 +3,12 @@ Copyright (c) 2026 Harrison Goldstein. All rights reserved.
 Released under MIT license as described in the file LICENSE.
 Authors: Harrison Goldstein
 -/
-import StrataGenerators.SetGen
+import StrataGenerators.GenSupport
+import StrataGenerators.TuningSupport
 import Basalt.Tuning.Attr
 import Basalt.GenStats
 
 open RandomChoice
-open scoped SetGen.Set
 
 /-!
 # How to tune a generator: the end-user walkthrough
@@ -17,8 +17,8 @@ This file takes a generator with hard-coded branch weights through six steps. At
 weighting is selectable at run time, and a proof shows that no weighting changes what the generator
 can produce. Each step compiles below.
 
-`StrataGenerators.SetGen.TuningExamples` is the reference for *what the attribute emits*: the site
-tables, the error cases and every recursion form. `StrataGenerators.SetGen.TuningPrototypes` applies
+`StrataGenerators.TuningExamples` is the reference for *what the attribute emits*: the site
+tables, the error cases and every recursion form. `StrataGenerators.TuningPrototypes` applies
 the same steps to this repo's shipping generators. This file is the practical guide.
 
 | step | what you write |
@@ -241,30 +241,45 @@ First, the defaults *are* the generator as written. `tuned_defaults` is `Eq.refl
 it, so tuning cannot change the behaviour you already had. -/
 
 example (depth : Nat) :
-    (genTree.tuned genTree.defaults depth : SetGen.Set Tree) = genTree depth :=
+    (genTree.tuned genTree.defaults depth : SPMF Tree) = genTree depth :=
   genTree.tuned_defaults depth
 
-/-! Second, and this is the reason to care: at the `Set` interpretation *every* `θ` denotes the same
-generator, so no weighting changes what is reachable. The `unseal` is needed because a
-`partial_fixpoint` definition is irreducible. `StrataGenerators.SetGen.Tuning` holds this recipe, and
-the recipes for the other recursion forms. -/
+/-! Second, and this is the reason to care: *every* `θ` reaches exactly the same trees, so no weighting
+changes what is generable. At `SPMF` the weights are part of the mass, so this is an equality of
+supports and not of generators. The `unseal` is needed because a `partial_fixpoint` definition is
+irreducible. `StrataGenerators.TuningSupport` holds this recipe, and the recipes for the other
+recursion forms. -/
 
 unseal genTree genTree.tuned
 
-theorem genTree_tuned_eq (θ : Tuning) :
-    (genTree.tuned θ : Nat → SetGen.Set Tree) = genTree := by
-  apply SetGen.fix_congr
-  funext f depth
-  apply SetGen.frequency_congr_weights
-  · rfl
-  all_goals simp [Tuning.weight_pos]
+theorem genTree_tuned_support_eq (θ : Tuning) :
+    ∀ depth, SPMF.support (genTree.tuned θ depth : SPMF Tree)
+      = SPMF.support (genTree depth : SPMF Tree) := by
+  apply SPMF.support_fix_congr_of_pointwise
+  case hpt =>
+    intro x i
+    apply SPMF.support_frequency_congr_weights
+    · rfl
+    all_goals simp [Tuning.weight_pos]
+  case hmono =>
+    intro x y hxy i a ha
+    rw [SPMF.mem_support_frequency_iff] at ha ⊢
+    obtain ⟨w, g, hg, hw, ha⟩ := ha
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+    · exact ⟨1, fun _ => pure Tree.leaf, by simp, by omega, ha⟩
+    · refine ⟨2, fun _ => do let l ← y (i + 1); let r ← y (i + 1); pure (Tree.node l r),
+        by simp, by omega, ?_⟩
+      simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at ha ⊢
+      obtain ⟨l, hl, r, hr, rfl⟩ := ha
+      exact ⟨l, hxy _ hl, r, hxy _ hr, rfl⟩
 
 /-- A soundness and completeness result that is proved once for the untuned generator therefore holds
     of every tuning of it. This proof does not need to know what the property is. That is the whole
     payoff: a tuning changes the distribution and never the language. -/
 example (θ : Tuning) (depth : Nat) (P : Tree → Prop)
-    (h : SetGen.IsSoundAndComplete (genTree depth : SetGen.Set Tree) P) :
-    SetGen.IsSoundAndComplete (genTree.tuned θ depth : SetGen.Set Tree) P :=
-  SetGen.IsSoundAndComplete.of_support_eq (by rw [genTree_tuned_eq]) h
+    (h : IsSoundAndComplete (genTree depth : SPMF Tree) P) :
+    IsSoundAndComplete (genTree.tuned θ depth : SPMF Tree) P :=
+  IsSoundAndComplete.of_support_eq (genTree_tuned_support_eq θ depth) h
 
 end TuningWalkthrough

@@ -15,7 +15,7 @@
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "a9daf3552539f951011afa4ca510121123c9d165",
+   "rev": "c4b7ed20c9092a1ff640bdae4c373fb309dd4382",
    "name": "basalt",
    "manifestFile": "lake-manifest.json",
    "inputRev": "lean-4.29",

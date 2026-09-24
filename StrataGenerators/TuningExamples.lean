@@ -3,27 +3,27 @@ Copyright (c) 2026 Harrison Goldstein. All rights reserved.
 Released under MIT license as described in the file LICENSE.
 Authors: Harrison Goldstein
 -/
-import StrataGenerators.SetGen
+import StrataGenerators.GenSupport
+import StrataGenerators.TuningSupport
 import Basalt.Tuning.Attr
 
 open RandomChoice
-open scoped SetGen.Set
 
 /-!
 # `@[tunable]` on `Set`-based generators
 
-This file is the counterpart of Basalt's `BasaltTest/Tuning.lean`, run against the `SetGen.Set`
+This file is the counterpart of Basalt's `BasaltTest/Tuning.lean`, run against the `SPMF`
 interpretation rather than against `SPMF`. The `@[tunable]` attribute and the `Tuning` data are generic
-over `[Gen G]`, and `SetGen.Set` is a `Gen`, so the attribute applies unchanged. Seven sections check
+over `[Gen G]`, and `SPMF` is a `Gen`, so the attribute applies unchanged. Seven sections check
 that:
 
 1. `genTree.tuned genTree.defaults` and `genTree` are interchangeable. `tuned_defaults` is `Eq.refl`
-   and the kernel checks it, so a generator's existing `SetGen` support proofs compile unchanged.
+   and the kernel checks it, so a generator's existing `SPMF` support proofs compile unchanged.
 2. `sites` reports each site's name, offset and arity, and the recursive calls of each branch.
 3. `defaults` holds the literal weights from the source.
 4. Elaboration rejects a literal `0` weight, and `Tuning.weight` clamps a `0` in a *runtime* `θ` to 1.
-5. **Every `θ` denotes the same set.** At `SetGen.Set`, `genFoo.tuned θ = genFoo` for every `θ`. These
-   are equal generators and not merely generators with equal supports, because `SetGen.support` is the
+5. **Every `θ` denotes the same set.** At `SPMF`, `genFoo.tuned θ = genFoo` for every `θ`. These
+   are equal generators and not merely generators with equal supports, because `SPMF.support` is the
    identity. Any soundness or completeness property of the untuned generator therefore holds of every
    tuning of it, with no work per property.
 6. Structural, well-founded and `partial_fixpoint` recursion are all tunable, because `@[tunable]`
@@ -32,12 +32,12 @@ that:
    `@[tunable (depth := …)]` names.
 
 The `SPMF` version also compares distributions, with `#genstats`, `p50` and head-constructor splits.
-Those sections have no counterpart here, because `SetGen.Set` tracks *reachability* alone rather than
+Those sections have no counterpart here, because `SPMF` tracks *reachability* alone rather than
 probabilities, and is noncomputable. Section 5 is what tuning buys on the `Set` side: a reweighting
 never changes the support, so a generator's soundness and completeness survive any `θ`.
 -/
 
-namespace SetGenTunableExamples
+namespace SpmfTunableExamples
 
 /-- A tiny binary tree, standing in for `BasaltExamples.BST.Tree`. -/
 inductive Tree where
@@ -63,25 +63,25 @@ partial_fixpoint
 
 /-! ## 1. The defaults are the generator as written
 
-The attribute emits `tuned_defaults`, and it holds definitionally at `SetGen.Set` as it does at
+The attribute emits `tuned_defaults`, and it holds definitionally at `SPMF` as it does at
 `SPMF`. -/
 
 example (depth : Nat) :
-    (genTree.tuned genTree.defaults depth : SetGen.Set Tree) = genTree depth :=
+    (genTree.tuned genTree.defaults depth : SPMF Tree) = genTree depth :=
   genTree.tuned_defaults depth
 
 /-- A support fact about the untuned generator transfers to the default-tuned form by one rewrite, so
-    tuning does not change an existing `SetGen` proof. -/
+    tuning does not change an existing `SPMF` proof. -/
 example (depth : Nat) (t : Tree) :
-    t ∈ SetGen.support (genTree.tuned genTree.defaults depth : SetGen.Set Tree) ↔
-      t ∈ SetGen.support (genTree depth : SetGen.Set Tree) := by
+    t ∈ SPMF.support (genTree.tuned genTree.defaults depth : SPMF Tree) ↔
+      t ∈ SPMF.support (genTree depth : SPMF Tree) := by
   rw [genTree.tuned_defaults]
 
 /-! ## 2. The site table
 
 The attribute names a site by its position, as `<defName>.site<i>`, outside-in in traversal order. -/
 
-example : genTree.sites = #[⟨`SetGenTunableExamples.genTree.site0, 0, 2, #[0, 2]⟩] := rfl
+example : genTree.sites = #[⟨`SpmfTunableExamples.genTree.site0, 0, 2, #[0, 2]⟩] := rfl
 
 /-! ## 3. The defaults are the literal weights from the source. -/
 
@@ -108,50 +108,61 @@ example (i d : Nat) :
   simp only [Tuning.weight]
   rcases i with _ | _ | i <;> simp
 
-/-! ## 5. Every `θ` denotes the same generator
+/-! ## 5. Every `θ` reaches the same values
 
-This section has no `SPMF` counterpart, and it is the reason to interpret a tuned generator at `Set`
-at all. `Set` ignores weights, so `genFoo.tuned θ` and `genFoo` are *the same set-valued generator* for
-every `θ`. They are literally equal, and not merely equal in support up to a lemma. Every existing
-result about the untuned generator therefore applies to the tuned one by `rw`.
+A weight is part of the mass at `SPMF`, so `genFoo.tuned θ` and `genFoo` are *not* equal generators
+once `θ` leaves the defaults. What a tuning preserves is the **support**: every branch keeps a positive
+weight, because `Tuning.weight` clamps to 1 or more, so no value becomes unreachable and none becomes
+reachable. That is the guarantee every soundness-and-completeness result needs.
 
-For a `partial_fixpoint` generator, both sides are `Lean.Order.fix` over functionals that differ only
-in their `frequency` weights. `@[tunable]` binds `θ` outside the fix and re-proves monotonicity.
-`SetGen.fix_congr` reduces the goal to equality of those functionals, and
-`SetGen.frequency_congr_weights` closes it.
+For a `partial_fixpoint` generator there is no argument to induct on, so the proof is fixpoint
+induction: `SPMF.support_fix_congr_of_pointwise` (in `StrataGenerators.TuningSupport`) takes the
+site-level fact at a shared argument (`hpt`, closed by
+`SPMF.support_frequency_congr_weights`) together with the support-monotonicity of the functional
+(`hmono`, one walk over the body) and produces the support equation for the whole fixpoint.
 
 The `unseal` is needed because `partial_fixpoint` definitions are irreducible, and `@[tunable]`
-deliberately copies that status onto `.tuned` so that `simp`/`rw` behave the same on both. -/
+deliberately copies that status onto `.tuned`, so that the two sides expose their functionals
+together. -/
 
 unseal genTree genTree.tuned
 
-theorem genTree_tuned_eq (θ : Tuning) :
-    (genTree.tuned θ : Nat → SetGen.Set Tree) = genTree := by
-  apply SetGen.fix_congr
-  funext f depth
-  apply SetGen.frequency_congr_weights
-  · rfl
-  all_goals simp [Tuning.weight_pos]
-
-/-- The consequence for the support, at any `θ` and any depth: the tuned generator loses no reachable
-    tree and gains none. -/
-example (θ : Tuning) (depth : Nat) :
-    SetGen.support (genTree.tuned θ depth : SetGen.Set Tree) =
-      SetGen.support (genTree depth : SetGen.Set Tree) := by
-  rw [genTree_tuned_eq]
+theorem genTree_tuned_support_eq (θ : Tuning) :
+    ∀ depth, SPMF.support (genTree.tuned θ depth : SPMF Tree)
+      = SPMF.support (genTree depth : SPMF Tree) := by
+  apply SPMF.support_fix_congr_of_pointwise
+  case hpt =>
+    -- The two functionals at the *same* argument `x`: same branches, different weights.
+    intro x i
+    apply SPMF.support_frequency_congr_weights
+    · rfl
+    all_goals simp [Tuning.weight_pos]
+  case hmono =>
+    -- The functional's support is monotone in the support of its argument. One case per branch.
+    intro x y hxy i a ha
+    rw [SPMF.mem_support_frequency_iff] at ha ⊢
+    obtain ⟨w, g, hg, hw, ha⟩ := ha
+    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
+    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩
+    · exact ⟨1, fun _ => pure Tree.leaf, by simp, by omega, ha⟩
+    · refine ⟨2, fun _ => do let l ← y (i + 1); let r ← y (i + 1); pure (Tree.node l r),
+        by simp, by omega, ?_⟩
+      simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at ha ⊢
+      obtain ⟨l, hl, r, hr, rfl⟩ := ha
+      exact ⟨l, hxy _ hl, r, hxy _ hr, rfl⟩
 
 /-- The consequence at the level of a property: every tuning of `genTree` is sound and complete for
     *whatever* predicate `genTree` is sound and complete for. The proof does not need to know what `P`
-    is, and that is the whole point of the equality of generators. -/
+    is, and that is the whole point of the support equation. -/
 example (θ : Tuning) (depth : Nat) (P : Tree → Prop)
-    (h : SetGen.IsSoundAndComplete (genTree depth : SetGen.Set Tree) P) :
-    SetGen.IsSoundAndComplete (genTree.tuned θ depth : SetGen.Set Tree) P :=
-  SetGen.IsSoundAndComplete.of_support_eq (by rw [genTree_tuned_eq]) h
+    (h : IsSoundAndComplete (genTree depth : SPMF Tree) P) :
+    IsSoundAndComplete (genTree.tuned θ depth : SPMF Tree) P :=
+  IsSoundAndComplete.of_support_eq (genTree_tuned_support_eq θ depth) h
 
 /-! ## 6. A *tunable* option split via `weightedOptionGen`
 
 Basalt's `optionGen` and `biasedOptionGen` decide the `some` or `none` split with a rational `coin`. A
-coin is not a `frequency` site, so `@[tunable]` cannot address it. `SetGen.weightedOptionGen` splits on
+coin is not a `frequency` site, so `@[tunable]` cannot address it. `StrataGenerators.weightedOptionGen` splits on
 a `frequency` over two `Nat` weights instead. A generator that inlines that split under `@[tunable]`
 therefore records a site, and a `Tuning` can bias the `some` weight at run time.
 
@@ -170,32 +181,28 @@ def genOptNat [Gen G] : G (Option Nat) :=
   ] (by simp)
 
 /-- One tunable site of arity 2, for `some` and `none`, with no recursive call. -/
-example : genOptNat.sites = #[⟨`SetGenTunableExamples.genOptNat.site0, 0, 2, #[0, 0]⟩] := rfl
+example : genOptNat.sites = #[⟨`SpmfTunableExamples.genOptNat.site0, 0, 2, #[0, 0]⟩] := rfl
 
 /-- The defaults are the inline 1 to 1 split. -/
 example : genOptNat.defaults = ⟨#[(1, 0), (1, 0)]⟩ := rfl
 
 /-- `tuned_defaults` is definitional here too. -/
-example : (genOptNat.tuned genOptNat.defaults : SetGen.Set (Option Nat)) = genOptNat :=
+example : (genOptNat.tuned genOptNat.defaults : SPMF (Option Nat)) = genOptNat :=
   genOptNat.tuned_defaults
 
-/-- A bias on the split leaves the generator fixed at `Set`. For *any* `θ`, both `none` and every
-    reachable `some x` stay reachable, because `Tuning.weight` keeps both branch weights at 1 or more.
-    The distribution shifts and the language does not.
+/-- A bias on the split leaves the *support* fixed. For *any* `θ`, both `none` and every reachable
+    `some x` stay reachable, because `Tuning.weight` keeps both branch weights at 1 or more. The
+    distribution shifts and the language does not.
 
-    This proof needs no `unseal`. A non-recursive generator whose body *is* the `frequency` needs only
-    an `unfold`. -/
-theorem genOptNat_tuned_eq (θ : Tuning) :
-    (genOptNat.tuned θ : SetGen.Set (Option Nat)) = genOptNat := by
+    This proof needs no `unseal` and no induction. A non-recursive generator whose body *is* the
+    `frequency` needs only an `unfold` and the site lemma. -/
+theorem genOptNat_tuned_support_eq (θ : Tuning) :
+    SPMF.support (genOptNat.tuned θ : SPMF (Option Nat))
+      = SPMF.support (genOptNat : SPMF (Option Nat)) := by
   unfold genOptNat genOptNat.tuned
-  apply SetGen.frequency_congr_weights
+  apply SPMF.support_frequency_congr_weights
   · rfl
   all_goals simp [Tuning.weight_pos]
-
-example (θ : Tuning) :
-    SetGen.support (genOptNat.tuned θ : SetGen.Set (Option Nat)) =
-      SetGen.support (genOptNat : SetGen.Set (Option Nat)) := by
-  rw [genOptNat_tuned_eq]
 
 /-! ## 7. Every recursion form, not just `partial_fixpoint`
 
@@ -218,10 +225,10 @@ def genStruct [Gen G] (size : Nat) : G Tree :=
 
 /-- Structural recursion hands the recursive results to the branch as a `below` bundle, and the two
     projections of that bundle are the two holes. -/
-example : genStruct.sites = #[⟨`SetGenTunableExamples.genStruct.site0, 0, 2, #[0, 2]⟩] := rfl
+example : genStruct.sites = #[⟨`SpmfTunableExamples.genStruct.site0, 0, 2, #[0, 2]⟩] := rfl
 
 example (size : Nat) :
-    (genStruct.tuned genStruct.defaults size : SetGen.Set Tree) = genStruct size :=
+    (genStruct.tuned genStruct.defaults size : SPMF Tree) = genStruct size :=
   genStruct.tuned_defaults size
 
 @[tunable]
@@ -240,10 +247,10 @@ decreasing_by all_goals omega
 
 /-- Well-founded recursion passes an `ih` that lands in the generator's own monad, and the two
     applications of it are the two holes. -/
-example : genWF.sites = #[⟨`SetGenTunableExamples.genWF.site0, 0, 2, #[0, 2]⟩] := rfl
+example : genWF.sites = #[⟨`SpmfTunableExamples.genWF.site0, 0, 2, #[0, 2]⟩] := rfl
 
 example (fuel : Nat) :
-    (genWF.tuned genWF.defaults fuel : SetGen.Set Tree) = genWF fuel :=
+    (genWF.tuned genWF.defaults fuel : SPMF Tree) = genWF fuel :=
   genWF.tuned_defaults fuel
 
 /-! ## 8. Naming the depth binder
@@ -262,14 +269,14 @@ def genLvl [Gen G] (lvl : Nat) : G Tree :=
 partial_fixpoint
 
 example (lvl : Nat) :
-    (genLvl.tuned genLvl.defaults lvl : SetGen.Set Tree) = genLvl lvl :=
+    (genLvl.tuned genLvl.defaults lvl : SPMF Tree) = genLvl lvl :=
   genLvl.tuned_defaults lvl
 
 /-! The attribute must find a depth binder that you name. A site that cannot see it is an error, and
 not a silent fall back to depth 0. -/
 
 /--
-error: tunable: `SetGenTunableExamples.genNoLvl` has no `Nat` binder named `lvl` in scope at one of its `frequency` sites — `(depth := lvl)` names the binder whose value each site reads its weight schedules at
+error: tunable: `SpmfTunableExamples.genNoLvl` has no `Nat` binder named `lvl` in scope at one of its `frequency` sites — `(depth := lvl)` names the binder whose value each site reads its weight schedules at
 -/
 #guard_msgs in
 @[tunable (depth := lvl)]
@@ -279,36 +286,32 @@ def genNoLvl [Gen G] : G Nat :=
     (1, fun _ => pure 1)
   ] (by simp)
 
-end SetGenTunableExamples
+end SpmfTunableExamples
 
 section ReweightObligation
 
 variable {α : Type}
 
 -- Reweight a uniform choice: `oneOf` becomes `frequency`.
-example (gs : List (Unit → SetGen.Set α)) (gs' : List (Nat × (Unit → SetGen.Set α)))
+example (gs : List (Unit → SPMF α)) (gs' : List (Nat × (Unit → SPMF α)))
     (hsnd : gs'.map Prod.snd = gs) (hpos : ∀ p ∈ gs', 0 < p.1)
     (hne : gs ≠ []) (h' : 0 < List.sum (List.map Prod.fst gs')) :
-    SetGen.support (frequency gs' h') = SetGen.support (oneOf gs hne) :=
-  SetGen.support_frequency_reweight hsnd hpos hne h'
+    SPMF.support (frequency gs' h') = SPMF.support (oneOf gs hne) :=
+  SPMF.support_frequency_reweight hsnd hpos hne h'
 
 -- Change the weights in place: `frequency` becomes `frequency`, which is the shape `@[tunable]`
 -- rewrites.
-example (gs gs' : List (Nat × (Unit → SetGen.Set α)))
+example (gs gs' : List (Nat × (Unit → SPMF α)))
     (hsnd : gs'.map Prod.snd = gs.map Prod.snd)
     (hpos : ∀ p ∈ gs', 0 < p.1) (hpos' : ∀ p ∈ gs, 0 < p.1)
     (h : 0 < List.sum (List.map Prod.fst gs)) (h' : 0 < List.sum (List.map Prod.fst gs')) :
-    SetGen.support (frequency gs' h') = SetGen.support (frequency gs h) :=
-  SetGen.support_frequency_congr_weights hsnd hpos hpos' h h'
+    SPMF.support (frequency gs' h') = SPMF.support (frequency gs h) :=
+  SPMF.support_frequency_congr_weights hsnd hpos hpos' h h'
 
--- The strengthening that only `Set` admits. These are the same two facts as equalities of
--- *generators*, because `support` is the identity. They are what rewrites a `frequency` inside a `do`
--- block.
-example (gs : List (Nat × (Unit → SetGen.Set α)))
-    (hpos : ∀ p ∈ gs, 0 < p.1) (h : 0 < List.sum (List.map Prod.fst gs))
-    (hne : gs.map Prod.snd ≠ []) :
-    frequency gs h = oneOf (gs.map Prod.snd) hne :=
-  SetGen.frequency_eq_oneOf hpos h hne
+-- There is no generator-level strengthening of the two facts above. `frequency gs h` and
+-- `oneOf (gs.map Prod.snd) hne` assign different mass, so they are equal only in support. The
+-- congruences in `StrataGenerators.TuningSupport` are what carries a support equation out of a
+-- surrounding `do` block, in place of the `rw` that a generator equality would allow.
 
 -- `Tuning.weight` satisfies the positivity hypothesis for every `θ` and every depth, so no tuning a
 -- user supplies can fail it. The `SPMF` side shares this fact.
@@ -316,15 +319,15 @@ example (θ : Tuning) (i d : Nat) : 0 < θ.weight i d := Tuning.weight_pos θ i 
 
 -- `frequency`'s own side condition holds for every `θ` before any `θ` exists. That is what lets
 -- `@[tunable]` rewrite the weights during elaboration.
-example (θ : Tuning) (i d : Nat) (g : Unit → SetGen.Set α) (tl : List (Nat × (Unit → SetGen.Set α))) :
+example (θ : Tuning) (i d : Nat) (g : Unit → SPMF α) (tl : List (Nat × (Unit → SPMF α))) :
     0 < List.sum (List.map Prod.fst ((θ.weight i d, g) :: tl)) :=
   Tuning.sum_map_fst_pos θ i d g tl
 
 -- Given an equality of supports, soundness and completeness transfer in one application.
-example {g g' : SetGen.Set α} {P : α → Prop}
-    (tuned_support : SetGen.support g' = SetGen.support g)
-    (sound_complete : SetGen.IsSoundAndComplete g P) :
-    SetGen.IsSoundAndComplete g' P :=
-  SetGen.IsSoundAndComplete.of_support_eq tuned_support sound_complete
+example {g g' : SPMF α} {P : α → Prop}
+    (tuned_support : SPMF.support g' = SPMF.support g)
+    (sound_complete : IsSoundAndComplete g P) :
+    IsSoundAndComplete g' P :=
+  IsSoundAndComplete.of_support_eq tuned_support sound_complete
 
 end ReweightObligation

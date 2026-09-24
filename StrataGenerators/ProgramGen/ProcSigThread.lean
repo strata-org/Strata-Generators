@@ -32,7 +32,7 @@ Together: a procedure emitted at step `i` is found by `find?` in the *whole*
 program, which is exactly `ProcSigCorresponds` for the accumulated context.
 -/
 
-open Lambda RandomChoice Core Core.TypeSpec Imperative SetGen
+open Lambda RandomChoice Core Core.TypeSpec Imperative
 open DatatypeGen
 open StrataGenerators.Procedure StrataGenerators.Stmt
 
@@ -141,8 +141,8 @@ def procSigOf (p : Procedure) (M I O : @LMonoTySignature Unit) :
     against `M ++ I`. -/
 theorem genProcedure_sig_decomp {octx : OpCtx} {pctx : PolyOpCtx} {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
-    (hp : p ∈ SetGen.support
-      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
+    (hp : p ∈ SPMF.support
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
     ∃ M I O : @LMonoTySignature Unit,
       p.header.inputs = M ++ I ∧ p.header.outputs = M ++ O ∧
       (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) := by
@@ -277,7 +277,7 @@ then lets the fold use one correspondence for the *final* state at each step in 
 
 /-- One declaration step never drops a registered signature. -/
 theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
-    (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
     ∀ sig ∈ s.procs, sig ∈ s'.procs := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so the branch equations pin both components.
@@ -333,7 +333,7 @@ theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
 
 /-- The whole fold never drops a registered signature. -/
 theorem genDeclsFold_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
-    (n : Nat) (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n)) :
+    (n : Nat) (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n)) :
     ∀ sig ∈ s.procs, sig ∈ s'.procs := by
   induction n generalizing s ds s' with
   | zero =>
@@ -421,8 +421,8 @@ theorem keys_disjoint_of_decomp {M I O : @LMonoTySignature Unit}
 theorem genProcedure_commonPrefix_decomp {octx : OpCtx} {pctx : PolyOpCtx}
     {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
-    (hp : p ∈ SetGen.support
-      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
+    (hp : p ∈ SPMF.support
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
     ∃ M I O : @LMonoTySignature Unit,
       ProgramGen.commonPrefix p.header.inputs p.header.outputs = M ∧
       p.header.inputs.drop M.length = I ∧
@@ -443,7 +443,7 @@ theorem genProcedure_commonPrefix_decomp {octx : OpCtx} {pctx : PolyOpCtx}
 /-- One step's effect on `procs`: unchanged, or one entry prepended describing the
     procedure the step emitted. -/
 theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
-    (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
     s'.procs = s.procs ∨
       ∃ (p : Procedure) (sig : ProcSig),
         ds = [Decl.proc p .empty] ∧ s'.procs = sig :: s.procs ∧
@@ -514,7 +514,7 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
 /-- The whole fold preserves `ProcsEmitted`, relative to the declarations emitted
     so far. Membership survives the append a later step performs. -/
 theorem genDeclsFold_procsEmitted {s s' : GenState} {b : Bounds} {ds : List Decl}
-    (n : Nat) (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n))
+    (n : Nat) (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n))
     {prior : List Decl} (hprior : ProcsEmitted s.procs prior) :
     ProcsEmitted s'.procs (prior ++ ds) := by
   induction n generalizing s ds s' prior with

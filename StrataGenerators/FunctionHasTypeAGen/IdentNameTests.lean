@@ -24,37 +24,37 @@ namespace StrataGenerators.Function.Tests
 -- ── Names that the generator reaches ─────────────────────────────────
 
 /-- A usual lower-case name. -/
-example : "foo" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "foo" ∈ SPMF.support (genIdentName (G := SPMF)) := by
   apply mem_support_genIdentName_of_syntactic' <;> decide +kernel
 
 /-- The generator reaches the digits and the special characters `$ . ' ? ! @` in
     each position after the first. -/
-example : "x$y.z'w?v!u@t0" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "x$y.z'w?v!u@t0" ∈ SPMF.support (genIdentName (G := SPMF)) := by
   apply mem_support_genIdentName_of_syntactic' <;> decide +kernel
 
 /-- The generator reaches a name that starts with `_` or with `$`. Both characters
     are in `strataIsIdFirst`. -/
-example : "_x" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "_x" ∈ SPMF.support (genIdentName (G := SPMF)) := by
   apply mem_support_genIdentName_of_syntactic' <;> decide +kernel
 
-example : "$x" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "$x" ∈ SPMF.support (genIdentName (G := SPMF)) := by
   apply mem_support_genIdentName_of_syntactic' <;> decide +kernel
 
 /-- A name of one character. The run of `remainingChars` can be empty. -/
-example : "q" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "q" ∈ SPMF.support (genIdentName (G := SPMF)) := by
   apply mem_support_genIdentName_of_syntactic' <;> decide +kernel
 
 /-- The generator reaches a name of only `x` characters, at each length.
     `DatatypeGen.fallbackName` and `CmdHasTypeAGen.indexedFreshName` use such a
     name after a collision. -/
-example : "xxxxxxx" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "xxxxxxx" ∈ SPMF.support (genIdentName (G := SPMF)) := by
   apply mem_support_genIdentName_of_syntactic' <;> decide +kernel
 
 /-- **`dodgeKeyword` does not make the support larger.** The generator reaches the
     dodged form of a keyword. But it reaches that form because the form is itself a
     usual draw, and `_` is legal after the first character. The dodge branch adds
     no new name. -/
-example : "if_" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "if_" ∈ SPMF.support (genIdentName (G := SPMF)) := by
   apply mem_support_genIdentName_of_syntactic' <;> decide +kernel
 
 -- ── Names that the generator does not reach: the tight half ──────────
@@ -63,34 +63,34 @@ example : "if_" ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
     effect of `dodgeKeyword`. The name `if` has the shape of a legal identifier, but
     the generator can never give it. Each completeness statement over names must
     carry this exclusion, and therefore it is a conjunct of the support lemma. -/
-example : "if" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "if" ∉ SPMF.support (genIdentName (G := SPMF)) := by
   rw [mem_support_genIdentName_iff']
   intro h; exact h.2 (by decide +kernel)
 
-example : "procedure" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "procedure" ∉ SPMF.support (genIdentName (G := SPMF)) := by
   rw [mem_support_genIdentName_iff']
   intro h; exact h.2 (by decide +kernel)
 
 /-- The generator does not reach the empty name. It always draws a first
     character. -/
-example : "" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := fun h =>
+example : "" ∉ SPMF.support (genIdentName (G := SPMF)) := fun h =>
   genIdentName_ne_empty _ h (by decide +kernel)
 
 /-- The generator does not reach a name that starts with a digit. Therefore the
     lexer never reads a generated identifier as a `Num`. Read the docstring of
     `genIdentName`. -/
-example : "1x" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "1x" ∉ SPMF.support (genIdentName (G := SPMF)) := by
   rw [mem_support_genIdentName_iff']
   intro h; exact absurd h.1 (by decide +kernel)
 
 /-- The generator does not reach a character that only the form with pipe
     delimiters can hold. `genQuotedName` reaches such a character. `genIdentName`
     does not, and the support lemma records this. -/
-example : "a|b" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "a|b" ∉ SPMF.support (genIdentName (G := SPMF)) := by
   rw [mem_support_genIdentName_iff']
   intro h; exact absurd h.1 (by decide +kernel)
 
-example : "a\\b" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "a\\b" ∉ SPMF.support (genIdentName (G := SPMF)) := by
   rw [mem_support_genIdentName_iff']
   intro h; exact absurd h.1 (by decide +kernel)
 
@@ -98,7 +98,7 @@ example : "a\\b" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
     gives this fact in general, and this example is one concrete case. The fact
     separates a generated parameter name from a key `"old "` of
     `CoreIdent.mkOld`. -/
-example : "a b" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+example : "a b" ∉ SPMF.support (genIdentName (G := SPMF)) := by
   rw [mem_support_genIdentName_iff']
   intro h; exact absurd h.1 (by decide +kernel)
 

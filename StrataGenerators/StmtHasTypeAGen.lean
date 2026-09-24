@@ -2,7 +2,7 @@ import StrataGenerators.StmtHasTypeAGen.Core
 import StrataGenerators.CmdHasTypeAGen
 import StrataGenerators.FunctionHasTypeAGen
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
+open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt
 
 /-!
@@ -240,7 +240,7 @@ theorem WellKindedOk.mono {octx : OpCtx} {procs : ProcSigCtx}
 theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (hC : SimpleTyArities C) (ctx : VarCtx) (d : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d pctx)) :
+    (hr : r ∈ SPMF.support (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx d pctx)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
   obtain ⟨rc, hrc, rfl⟩ := hr
@@ -257,12 +257,12 @@ theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     prove. -/
 theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
+    (hr : r ∈ SPMF.support (genExitStmt (G := SPMF) labels C ctx)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases labels with
   | nil =>
     -- `genExitStmt [] … = default`, whose support is `∅`.
-    simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+    simp only [genExitStmt, SPMF.mem_support_bot_iff] at hr
   | cons hd tl =>
     simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
@@ -273,7 +273,7 @@ theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
 /-- Soundness of `genFuncDeclStmt` (at any depth `d`). -/
 theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (hC : SimpleTyArities C) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx d pctx)) :
+    (hr : r ∈ SPMF.support (genFuncDeclStmt (G := SPMF) octx C ctx d pctx)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
   obtain ⟨func, hfunc, rfl⟩ := hr
@@ -290,7 +290,7 @@ theorem genFuncDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pc
     `∅`), so there is nothing to prove. -/
 theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d)) :
+    (hr : r ∈ SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
   obtain ⟨tc, _htc, hr⟩ := hr
@@ -304,7 +304,7 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pc
       (tctxEquivRefl _))
   · -- `.error`: the empty generator `default`, whose support is `∅`.
     rename_i heq
-    simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+    simp only [SPMF.mem_support_bot_iff] at hr
 
 -- ── Fresh-label freshness (for the `block` premise) ──────────────────────
 
@@ -323,7 +323,7 @@ theorem fallbackFreshLabel_not_mem (labels : List String) :
 /-- Every label in the support of `genFreshLabel labels` is absent from `labels`,
     discharging the `label ∉ L` premise of the `block` typing rule. -/
 theorem genFreshLabel_not_mem (labels : List String) :
-    ∀ l, l ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) → l ∉ labels := by
+    ∀ l, l ∈ SPMF.support (genFreshLabel (G := SPMF) labels) → l ∉ labels := by
   intro l hmem
   simp only [genFreshLabel, mem_support_bind_iff] at hmem
   obtain ⟨s, _, hl⟩ := hmem
@@ -438,11 +438,11 @@ theorem filter_needsInit_eq_missingIn (env : GenStmtSoundEnv octx tvars pctx)
 theorem genCallStmt_outCtx {procs : ProcSigCtx}
     {C : LContext CoreLParams} {ctx : VarCtx} {d : Nat} (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support
-      (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d pctx)) :
+    (hr : r ∈ SPMF.support
+      (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d pctx)) :
     Map.Functional r.outCtx := by
   cases procs with
-  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
     simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
@@ -463,7 +463,7 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
         intro p hp
         have := (List.mem_filter.mp hp).2
         simpa [needsInit, VarCtx.isFresh, VarCtx.find?, Option.isNone_iff_eq_none] using this
-    · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+    · simp only [SPMF.mem_support_bot_iff] at hr
 
 /-- **The `call` case of the well-kindedness invariant.** The inline `init` chain declares
     the callee's `σ`-instantiated in-out and out-only types, and those are well-kinded in
@@ -474,8 +474,8 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
     {C : LContext CoreLParams} {ctx : VarCtx} {d : Nat}
     (hWK : WellKindedOk octx procs C ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support
-      (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d pctx)) :
+    (hr : r ∈ SPMF.support
+      (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d pctx)) :
     WellKindedOk octx procs r.outC r.outCtx := by
   -- A filtered signature block's values are among the block's values.
   have hfilt : ∀ (L : @LMonoTySignature Unit) (p : Identifier Unit × LMonoTy → Bool)
@@ -485,7 +485,7 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
     rw [ListMap.values_eq_map_snd]
     exact List.mem_map_of_mem (List.mem_filter.mp hq).1
   cases procs with
-  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
     simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
@@ -520,7 +520,7 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
           rw [← outTargets_values immutableVars ctx (StrataGenerators.Stmt.substSig _ s.O)]
           exact hfilt _ _ ty hT
       · exact hWK.ctxWK ty hold
-    · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+    · simp only [SPMF.mem_support_bot_iff] at hr
 
 /-- The soundness of `genCallStmt`, at each depth. Each emitted *group* of a call is a well-typed statement
     **list**. That group holds the `init` statements for each missing name, then the call, and the generator
@@ -541,10 +541,10 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     -- in `C`. `WellKindedOk` is exactly what that needs.
     (hWK : WellKindedOk octx procs C ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d pctx)) :
+    (hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d pctx)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases procs with
-  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
     simp only [genCallStmt, mem_support_bind_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
@@ -571,7 +571,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       have hTVals : T.values = Oσ.values := by
         rw [← hT]; exact outTargets_values immutableVars ctx Oσ
       rw [hT] at hNodup hr
-      simp only [mem_support_bind_iff] at hr
+      simp only [mem_support_pure_iff, mem_support_bind_iff] at hr
       obtain ⟨exprs, hexprs, hr⟩ := hr
       -- Peel the argument-order mask sampling. The mask is typing-irrelevant: the
       -- two projections `getIn_mkArgs` / `getLhs_mkArgs` hold at every mask.
@@ -580,7 +580,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       obtain ⟨proc, hfind, _htyargs, hInputs, hOutputs, hIdisjOut⟩ := hProcs s hs
       -- The drawn inputs are pointwise reachable, at the *instantiated* input types.
       have hF₂ := (mem_support_mapM_iff
-        (fun τ => genLExpr (G := SetGen.Set) ctx.toFVarCtx octx pctx tvars [] d τ) Iσ.values exprs).mp hexprs
+        (fun τ => genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] d τ) Iσ.values exprs).mp hexprs
       have hExLen : exprs.length = s.I.length := by
         rw [hF₂.length_eq, ← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length]
       -- `hExTy` at the instantiated input types `subst [σ] (s.I.values[i])`.
@@ -600,7 +600,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
         have hval : Iσ.values[i]'hjσ = LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj) := by
           have hjσ' : i < (StrataGenerators.Stmt.substSig σ s.I).values.length := by rw [hIσ]; exact hjσ
           rw [← StrataGenerators.Stmt.substSig_values_getElem σ s.I i hjσ' hj]
-          congr 1 <;> rw [hIσ]
+          congr 1; rw [hIσ]
         rwa [hval] at hbind
       -- Each required name (in the instantiated write-list `Mσ ++ T`) is *either*
       -- already bound at its recorded type, so the call reuses it, *or* absent, so the call declares it. That
@@ -656,7 +656,6 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
               rw [lm_values_append]; exact List.mem_append_right _ hty))
             q.2 this
       -- One uniform shape: the (possibly empty) init chain, then the call.
-      simp only [mem_support_pure_iff] at hr
       obtain rfl := hr
       -- Move both the emitted chain and the output scope to the single `missingIn`
       -- filter over `env.toTCtx ctx` that `call_mixed_body_sound` speaks about:
@@ -676,7 +675,7 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       rw [← hOσ] at hTVals
       exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hfind hInputs hOutputs
         hExLen hTVals hExTy hIdisjOut hNodup hReuse hwk
-    · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+    · simp only [SPMF.mem_support_bot_iff] at hr
 
 -- ── Procedure-call completeness (forward membership) ──────────────────────
 
@@ -684,9 +683,9 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     `listOf` over both Boolean values, whose support holds every finite `List Bool`.
     So the mask puts no restriction on which interleaving a call site can use. -/
 theorem mem_support_argMask (mask : List Bool) :
-    mask ∈ SetGen.support
-      (listOf (elements [true, false] (by simp)) : SetGen.Set (List Bool)) :=
-  SetGen.mem_support_listOf_of_forall (fun b _ =>
+    mask ∈ SPMF.support
+      (listOf (elements [true, false] (by simp)) : SPMF (List Bool)) :=
+  SPMF.mem_support_listOf_of_forall (fun b _ =>
     (mem_support_elements_iff (by simp)).mpr (by cases b <;> simp))
 
 /-- **Forward membership for `genCallStmt` (Part 2 of call completeness).** Given a
@@ -713,19 +712,19 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat)
     (s : ProcSig) (hs : s ∈ procs)
     (σvals : List LMonoTy)
-    (hσvals : σvals ∈ SetGen.support
+    (hσvals : σvals ∈ SPMF.support
       (s.typeArgs.mapM (fun _ =>
         if hg : (generableTypesFromCtx ctx.values [] octx).length > 0 then
           elements (generableTypesFromCtx ctx.values [] octx)
             (by apply List.ne_nil_of_length_pos; assumption)
-        else pure (.bool : LMonoTy)) : SetGen.Set (List LMonoTy)))
+        else pure (.bool : LMonoTy)) : SPMF (List LMonoTy)))
     (exprs : List Expression.Expr) (mask : List Bool)
     (hMusable : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all
       (usableName immutableVars ctx) = true)
     (hNodup : (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
       ++ outTargets immutableVars ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup)
     (hexprs : List.Rel₂
-      (fun e τ => e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] d τ))
+      (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] d τ))
       exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values) :
     (⟨StrataGenerators.Stmt.initChain
         ((StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
@@ -740,7 +739,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
           ++ (outTargets immutableVars ctx
                 (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter (needsInit ctx))⟩
       : GenStmtResult) ∈
-      SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d) := by
+      SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d) := by
   -- `procs` is non-empty (it contains `s`), so the `p₀ :: ps` branch fires.
   cases procs with
   | nil => exact absurd hs (by simp)
@@ -761,7 +760,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     boolean expression. -/
 theorem genCondOrNondet_det_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (ctx : VarCtx)
     (cond : ExprOrNondet Expression)
-    (hc : cond ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) octx tvars ctx d pctx))
+    (hc : cond ∈ SPMF.support (genCondOrNondet (G := SPMF) octx tvars ctx d pctx))
     (g : Expression.Expr) (hg : cond = .det g) :
     HasTypeA' [] g .bool := by
   rw [genCondOrNondet, mem_support_frequency_iff] at hc
@@ -782,7 +781,7 @@ theorem genCondOrNondet_det_sound (env : GenStmtSoundEnv octx tvars pctx) (d : N
     integer expression. -/
 theorem genOptMeasure_some_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (ctx : VarCtx)
     (m? : Option Expression.Expr)
-    (hm : m? ∈ SetGen.support (genOptMeasure (G := SetGen.Set) octx tvars ctx d pctx))
+    (hm : m? ∈ SPMF.support (genOptMeasure (G := SPMF) octx tvars ctx d pctx))
     (m : Expression.Expr) (hmeq : m? = some m) :
     HasTypeA' [] m .int := by
   simp only [genOptMeasure,
@@ -798,7 +797,7 @@ theorem genOptMeasure_some_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Na
     expression. -/
 theorem genInvariants_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (ctx : VarCtx)
     (invs : List (String × Expression.Expr))
-    (hinv : invs ∈ SetGen.support (genInvariants (G := SetGen.Set) octx tvars ctx d pctx))
+    (hinv : invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx d pctx))
     (p : String × Expression.Expr) (hp : p ∈ invs) :
     HasTypeA' [] p.2 .bool := by
   simp only [genInvariants, mem_support_listOfMaxLength_iff] at hinv
@@ -820,8 +819,8 @@ theorem genStmt_outCtx_functional
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support
-      (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
+    (hr : r ∈ SPMF.support
+      (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n)) :
     Map.Functional r.outCtx := by
   cases n with
   | zero =>
@@ -836,13 +835,13 @@ theorem genStmt_outCtx_functional
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx 0 pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx 0 hFun rc hrc
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
+        replace hr : r ∈ SPMF.support (genExitStmt (G := SPMF) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr; exact hFun
@@ -854,18 +853,18 @@ theorem genStmt_outCtx_functional
       obtain ⟨tc, _, hr⟩ := hr
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
-      · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+      · simp only [SPMF.mem_support_bot_iff] at hr
     · -- call: the inline `init` chain extends the scope, or a `cmd`,
       -- the branch falls back to a `cmd` when `procs = []`
       cases procs with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx 0 pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx 0 hFun rc hrc
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+        replace hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars
           immutableVars (hd :: tl) C ctx 0 pctx) := hr
         exact genCallStmt_outCtx hFun r hr
   | succ size =>
@@ -880,13 +879,13 @@ theorem genStmt_outCtx_functional
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size + 1) pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx (size + 1) pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx (size + 1) hFun rc hrc
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
+        replace hr : r ∈ SPMF.support (genExitStmt (G := SPMF) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr; exact hFun
@@ -898,18 +897,18 @@ theorem genStmt_outCtx_functional
       obtain ⟨tc, _, hr⟩ := hr
       split at hr
       · simp only [mem_support_pure_iff] at hr; subst hr; exact hFun
-      · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+      · simp only [SPMF.mem_support_bot_iff] at hr
     · -- call: the inline `init` chain extends the scope, or a `cmd`,
       -- the branch falls back to a `cmd` when `procs = []`
       cases procs with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size + 1) pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx (size + 1) pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         exact genCmd_outCtx_functional octx pctx tvars immutableVars ctx (size + 1) hFun rc hrc
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+        replace hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars
           immutableVars (hd :: tl) C ctx (size + 1) pctx) := hr
         exact genCallStmt_outCtx hFun r hr
     · -- block: outCtx = ctx
@@ -944,12 +943,12 @@ theorem wellKindedOk_preserved
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (hWK : WellKindedOk octx procs C ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support
-      (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
+    (hr : r ∈ SPMF.support
+      (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n)) :
     WellKindedOk octx procs r.outC r.outCtx := by
   -- The five leaf branches, shared between the two `size` cases.
-  have hcmd : ∀ d, ∀ r' ∈ SetGen.support
-      (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d pctx),
+  have hcmd : ∀ d, ∀ r' ∈ SPMF.support
+      (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx d pctx),
       WellKindedOk octx procs r'.outC r'.outCtx := by
     intro d r' hr'
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr'
@@ -958,24 +957,24 @@ theorem wellKindedOk_preserved
     exact { hWK with
       ctxWK := genCmd_outCtx_wellKinded octx pctx tvars immutableVars hWK.arities ctx d
         hWK.ctxWK rc hrc }
-  have hexit : ∀ r' ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx),
+  have hexit : ∀ r' ∈ SPMF.support (genExitStmt (G := SPMF) labels C ctx),
       WellKindedOk octx procs r'.outC r'.outCtx := by
     intro r' hr'
     cases labels with
-    | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr'
+    | nil => simp only [genExitStmt, SPMF.mem_support_bot_iff] at hr'
     | cons hd tl =>
       simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
                  mem_support_elements_iff] at hr'
       obtain ⟨_, _, rfl⟩ := hr'; exact hWK
-  have hfunc : ∀ d, ∀ r' ∈ SetGen.support
-      (genFuncDeclStmt (G := SetGen.Set) octx C ctx d pctx),
+  have hfunc : ∀ d, ∀ r' ∈ SPMF.support
+      (genFuncDeclStmt (G := SPMF) octx C ctx d pctx),
       WellKindedOk octx procs r'.outC r'.outCtx := by
     intro d r' hr'
     simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr'
     obtain ⟨_, _, rfl⟩ := hr'
     -- `addFactoryFunction` leaves `knownTypes` untouched.
     exact WellKindedOk.mono (by simp) hWK
-  have htype : ∀ d, ∀ r' ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d),
+  have htype : ∀ d, ∀ r' ∈ SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d),
       WellKindedOk octx procs r'.outC r'.outCtx := by
     intro d r' hr'
     simp only [genTypeDeclStmt, mem_support_bind_iff] at hr'
@@ -984,9 +983,9 @@ theorem wellKindedOk_preserved
     · rename_i C' hadd
       simp only [mem_support_pure_iff] at hr'; subst hr'
       exact WellKindedOk.mono (addKnownTypeWithError_mono hadd) hWK
-    · simp only [SetGen.support, SetGen.bot_mem_iff] at hr'
-  have hcall : ∀ d, ∀ r' ∈ SetGen.support
-      (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d pctx),
+    · simp only [SPMF.mem_support_bot_iff] at hr'
+  have hcall : ∀ d, ∀ r' ∈ SPMF.support
+      (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d pctx),
       WellKindedOk octx procs r'.outC r'.outCtx := by
     intro d r' hr'
     exact genCallStmt_outCtx_wellKinded hWK r' hr'
@@ -1055,7 +1054,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (hWK : WellKindedOk octx procs C ctx)
     (n : Nat) (hFun : Map.Functional ctx)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
+    (hr : r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels r.stmts r.outC (env.toTCtx r.outCtx) := by
   cases n with
   | zero =>
@@ -1148,7 +1147,7 @@ theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (hWK : WellKindedOk octx procs C ctx)
     (size len : Nat) (hFun : Map.Functional ctx)
     (result : List Statement × LContext CoreLParams × VarCtx)
-    (hr : result ∈ SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx size len)) :
+    (hr : result ∈ SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size len)) :
     StatementsHasTypeA P C (env.toTCtx ctx) labels result.1 result.2.1 (env.toTCtx result.2.2) := by
   cases len with
   | zero =>
@@ -1182,8 +1181,8 @@ end
 /-- A `genCmdStmt` result (at depth `n`) is reachable by `genStmt … n`. -/
 theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
+    (hr : r ∈ SPMF.support (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx n)) :
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -1195,13 +1194,13 @@ theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
 /-- A `genExitStmt` result is reachable by `genStmt … n` at *every* size `n`. -/
 theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
+    (hr : r ∈ SPMF.support (genExitStmt (G := SPMF) labels C ctx)) :
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
   -- With `labels = []` the `exit` branch is weighted 0, but there `genExitStmt`
   -- is `default` (support `∅`), so `hr` is impossible; with `labels ≠ []` the
   -- branch weight reduces to `1`.
   cases labels with
-  | nil => simp only [genExitStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | nil => simp only [genExitStmt, SPMF.mem_support_bot_iff] at hr
   | cons hd tl =>
     cases n with
     | zero =>
@@ -1214,8 +1213,8 @@ theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : V
 /-- A `genFuncDeclStmt` result (at depth `n`) is reachable by `genStmt … n`. -/
 theorem genFuncDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
+    (hr : r ∈ SPMF.support (genFuncDeclStmt (G := SPMF) octx C ctx n)) :
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -1227,8 +1226,8 @@ theorem genFuncDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx
 /-- A `genTypeDeclStmt` result (at depth `n`) is reachable by `genStmt … n`. -/
 theorem genTypeDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
+    (hr : r ∈ SPMF.support (genTypeDeclStmt (G := SPMF) C ctx n)) :
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -1241,13 +1240,13 @@ theorem genTypeDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx
     branch sits at frequency index 4 in both the size-0 and size+1 lists. -/
 theorem genCallStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx n)) :
-    r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
+    (hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx n)) :
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
   -- With `procs = []` the `call` branch is weighted 0, but there `genCallStmt`
   -- is `default` (support `∅`), so `hr` is impossible; with `procs ≠ []` the
   -- branch weight reduces to `1`.
   cases procs with
-  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons hd tl =>
     cases n with
     | zero =>
@@ -1264,14 +1263,14 @@ theorem block_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx)
     (label : String) (body : List Statement) (C_body : LContext CoreLParams) (Γ_body : VarCtx)
     (len : Nat) (hlen : len ≤ size + 1)
     (hbody : (body, C_body, Γ_body) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs (label :: labels) C ctx [] size len))
-    (hlabel : label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs (label :: labels) C ctx [] size len))
+    (hlabel : label ∈ SPMF.support (genFreshLabel (G := SPMF) labels)) :
     (⟨[Stmt.block label body default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
-  exact ⟨label, hlabel, ⟨⟨len, Nat.zero_le _, hlen⟩⟩, ⟨Nat.zero_le _, hlen⟩,
+  exact ⟨label, hlabel, ⟨⟨len, Nat.zero_le _, hlen⟩⟩, trivial,
     (body, C_body, Γ_body), hbody, rfl⟩
 
 /-- An `ite (.det cond)` statement is reachable by `genStmt … (size+1)` when the
@@ -1281,18 +1280,18 @@ theorem ite_det_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCt
     (cond : Expression.Expr) (thenb elseb : List Statement)
     (Ct : LContext CoreLParams) (Γt : VarCtx) (Ce : LContext CoreLParams) (Γe : VarCtx)
     (tlen elen : Nat) (htlen : tlen ≤ size + 1) (helen : elen ≤ size + 1)
-    (hcond : cond ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] (size + 1) .bool))
+    (hcond : cond ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] (size + 1) .bool))
     (hthen : (thenb, Ct, Γt) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size tlen))
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size tlen))
     (helse : (elseb, Ce, Γe) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size elen)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size elen)) :
     (⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
-  exact ⟨cond, hcond, ⟨⟨tlen, Nat.zero_le _, htlen⟩⟩, ⟨Nat.zero_le _, htlen⟩,
-    ⟨⟨elen, Nat.zero_le _, helen⟩⟩, ⟨Nat.zero_le _, helen⟩,
+  exact ⟨cond, hcond, ⟨⟨tlen, Nat.zero_le _, htlen⟩⟩, trivial,
+    ⟨⟨elen, Nat.zero_le _, helen⟩⟩, trivial,
     (thenb, Ct, Γt), hthen, (elseb, Ce, Γe), helse, rfl⟩
 
 /-- An `ite .nondet` statement is reachable by `genStmt … (size+1)` when both
@@ -1302,16 +1301,16 @@ theorem ite_nondet_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
     (Ct : LContext CoreLParams) (Γt : VarCtx) (Ce : LContext CoreLParams) (Γe : VarCtx)
     (tlen elen : Nat) (htlen : tlen ≤ size + 1) (helen : elen ≤ size + 1)
     (hthen : (thenb, Ct, Γt) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size tlen))
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size tlen))
     (helse : (elseb, Ce, Γe) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size elen)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size elen)) :
     (⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
-  exact ⟨⟨⟨tlen, Nat.zero_le _, htlen⟩⟩, ⟨Nat.zero_le _, htlen⟩,
-    ⟨⟨elen, Nat.zero_le _, helen⟩⟩, ⟨Nat.zero_le _, helen⟩,
+  exact ⟨⟨⟨tlen, Nat.zero_le _, htlen⟩⟩, trivial,
+    ⟨⟨elen, Nat.zero_le _, helen⟩⟩, trivial,
     (thenb, Ct, Γt), hthen, (elseb, Ce, Γe), helse, rfl⟩
 
 /-- A `loop` statement is reachable by `genStmt … (size+1)` when its guard, measure,
@@ -1322,18 +1321,18 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
     (invs : List (String × Expression.Expr)) (body : List Statement)
     (C_body : LContext CoreLParams) (Γ_body : VarCtx)
     (blen : Nat) (hblen : blen ≤ size + 1)
-    (hguard : guard ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) octx tvars ctx (size + 1)))
-    (hmeasure : measure ∈ SetGen.support (genOptMeasure (G := SetGen.Set) octx tvars ctx (size + 1)))
-    (hinvs : invs ∈ SetGen.support (genInvariants (G := SetGen.Set) octx tvars ctx (size + 1)))
+    (hguard : guard ∈ SPMF.support (genCondOrNondet (G := SPMF) octx tvars ctx (size + 1)))
+    (hmeasure : measure ∈ SPMF.support (genOptMeasure (G := SPMF) octx tvars ctx (size + 1)))
+    (hinvs : invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx (size + 1)))
     (hbody : (body, C_body, Γ_body) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size blen)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size blen)) :
     (⟨[Stmt.loop guard measure invs body default], C, ctx⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1)) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨guard, hguard, measure, hmeasure, invs, hinvs,
-    ⟨⟨blen, Nat.zero_le _, hblen⟩⟩, ⟨Nat.zero_le _, hblen⟩,
+    ⟨⟨blen, Nat.zero_le _, hblen⟩⟩, trivial,
     (body, C_body, Γ_body), hbody, rfl⟩
 
 -- ── genStmtChain membership: cons / nil ──────────────────────────────────────
@@ -1341,7 +1340,7 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
 /-- The empty statement list is in `genStmtChain`'s support at length `0`. -/
 theorem genStmtChain_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
     ((([] : List Statement)), C, ctx) ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size 0) := by
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size 0) := by
   rw [genStmtChain]; exact mem_support_pure_iff.mpr rfl
 
 /-- If the head statement `r` is reachable by `genStmt` (at `size`) and the tail is
@@ -1349,11 +1348,11 @@ theorem genStmtChain_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ct
     length `len`), then the whole `cons` is reachable at length `len+1`. -/
 theorem genStmtChain_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (r : GenStmtResult) (rest : List Statement) (C'' : LContext CoreLParams) (Γ'' : VarCtx)
-    (hhead : r ∈ SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size))
+    (hhead : r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] size))
     (htail : (rest, C'', Γ'') ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels r.outC r.outCtx [] size len)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels r.outC r.outCtx [] size len)) :
     (r.stmts ++ rest, C'', Γ'') ∈
-      SetGen.support (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] size (len + 1)) := by
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size (len + 1)) := by
   rw [genStmtChain]
   simp only [mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨r, hhead, (rest, C'', Γ''), htail, rfl⟩
@@ -1369,8 +1368,8 @@ theorem genStmtChain_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (c
     reachable when `g` is reachable by `genLExpr` at type `bool`. -/
 theorem genCondOrNondet_complete (depth : Nat) (ctx : VarCtx) (cond : ExprOrNondet Expression)
     (hcond : ∀ g, cond = .det g →
-      g ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
-    cond ∈ SetGen.support (genCondOrNondet (G := SetGen.Set) octx tvars ctx depth) := by
+      g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
+    cond ∈ SPMF.support (genCondOrNondet (G := SPMF) octx tvars ctx depth) := by
   rw [genCondOrNondet, mem_support_frequency_iff]
   cases cond with
   | nondet =>
@@ -1385,8 +1384,8 @@ theorem genCondOrNondet_complete (depth : Nat) (ctx : VarCtx) (cond : ExprOrNond
     reachable when `m` is reachable by `genLExpr` at type `int`. -/
 theorem genOptMeasure_complete (depth : Nat) (ctx : VarCtx) (measure : Option Expression.Expr)
     (hmeasure : ∀ m, measure = some m →
-      m ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] depth .int)) :
-    measure ∈ SetGen.support (genOptMeasure (G := SetGen.Set) octx tvars ctx depth) := by
+      m ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .int)) :
+    measure ∈ SPMF.support (genOptMeasure (G := SPMF) octx tvars ctx depth) := by
   simp only [genOptMeasure,
     mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)]
   cases measure with
@@ -1397,9 +1396,9 @@ theorem genOptMeasure_complete (depth : Nat) (ctx : VarCtx) (measure : Option Ex
     label is a reachable identifier (via `genIdentName`, so non-empty and
     non-keyword) and `e` is a reachable boolean. -/
 theorem genInvariant_complete (depth : Nat) (ctx : VarCtx) (p : String × Expression.Expr)
-    (hlabel : p.1 ∈ SetGen.support (genIdentName (G := SetGen.Set)))
-    (hexpr : p.2 ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
-    p ∈ SetGen.support (genInvariant (G := SetGen.Set) octx tvars ctx depth) := by
+    (hlabel : p.1 ∈ SPMF.support (genIdentName (G := SPMF)))
+    (hexpr : p.2 ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
+    p ∈ SPMF.support (genInvariant (G := SPMF) octx tvars ctx depth) := by
   simp only [genInvariant, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨p.1, hlabel, p.2, hexpr, rfl⟩
 
@@ -1407,9 +1406,9 @@ theorem genInvariant_complete (depth : Nat) (ctx : VarCtx) (p : String × Expres
     the depth, and each of its elements is reachable by `genInvariant`. -/
 theorem genInvariants_complete (depth : Nat) (ctx : VarCtx) (invs : List (String × Expression.Expr))
     (hlen : invs.length ≤ depth)
-    (hinvs : ∀ p ∈ invs, p.1 ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧
-      p.2 ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
-    invs ∈ SetGen.support (genInvariants (G := SetGen.Set) octx tvars ctx depth) := by
+    (hinvs : ∀ p ∈ invs, p.1 ∈ SPMF.support (genIdentName (G := SPMF)) ∧
+      p.2 ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
+    invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx depth) := by
   simp only [genInvariants, mem_support_listOfMaxLength_iff]
   refine ⟨hlen, fun p hp => ?_⟩
   exact genInvariant_complete depth ctx p (hinvs p hp).1 (hinvs p hp).2
@@ -1419,10 +1418,10 @@ theorem genInvariants_complete (depth : Nat) (ctx : VarCtx) (invs : List (String
     not a keyword, and when the length of its parameter list is not more than the depth. The `bound` field
     needs no side condition, because the generator draws over both values of `Boundedness`. -/
 theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
-    (hname : tc.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hname : tc.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hlen : tc.params.length ≤ depth)
-    (hparams : ∀ s ∈ tc.params, s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
-    tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth) := by
+    (hparams : ∀ s ∈ tc.params, s ∈ SPMF.support (genIdentName (G := SPMF))) :
+    tc ∈ SPMF.support (genTypeConstructor (G := SPMF) depth) := by
   simp only [genTypeConstructor, mem_support_bind_iff, mem_support_pure_iff,
              mem_support_listOfMaxLength_iff]
   refine ⟨tc.name, hname, tc.params, ⟨hlen, hparams⟩, tc.bound, ?_, ?_⟩
@@ -1440,7 +1439,7 @@ theorem genTypeConstructor_complete_of_syntactic (depth : Nat) (tc : TypeConstru
     (hlen : tc.params.length ≤ depth)
     (hparams : ∀ s ∈ tc.params,
       StrataGenerators.Function.IsGenIdentName s ∧ isReservedKeyword s = false) :
-    tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth) :=
+    tc ∈ SPMF.support (genTypeConstructor (G := SPMF) depth) :=
   genTypeConstructor_complete depth tc
     (StrataGenerators.Function.mem_support_genIdentName_of_syntactic hnameSyn hnameKw) hlen
     (fun s hs => StrataGenerators.Function.mem_support_genIdentName_of_syntactic

@@ -1,4 +1,4 @@
-import StrataGenerators.SetGen
+import StrataGenerators.GenSupport
 import StrataGenerators.HasTypeAGen
 import StrataGenerators.RetryGen
 import Basalt.PlausibleGen
@@ -8,7 +8,7 @@ import Basalt.PlausibleGen
 
 The theorems for soundness, for completeness and for `OpsConsistentR` in
 `HasTypeAGen.lean` and `HasTypeAGenOpsConsistent.lean` all speak about
-`genLExpr (G := SetGen.Set) … `, with `retryCont` at its default value `id`. The
+`genLExpr (G := SPMF) … `, with `retryCont` at its default value `id`. The
 *executable* generator that the test harness runs is
 `genLExpr (G := Plausible.Gen) … (retryGenArg n)`.
 
@@ -17,7 +17,7 @@ attempts* that a draw needs, and it never changes *which terms the generator can
 reach*.
 
 The two results below hold in *different semantics*, and this module alone does not
-join them. `genLExpr_setSupport_retryCont` speaks about `SetGen.Set`, and its
+join them. `genLExpr_setSupport_retryCont` speaks about `SPMF`, and its
 hypothesis is an equation between functions, which `retryGenArg` does **not** satisfy.
 `runSupport_retryGen` speaks about `Plausible.Gen`, where `retryGenArg` lives.
 `StrataGenerators.ExecRefinement` is the bridge between `Set` and `Plausible`, and its
@@ -37,14 +37,14 @@ There are two facts:
 
 The main results are `genLExpr_runSupport_retryGenArg`, which is the executable
 statement, and `genLExpr_setSupport_retryCont`, which is the statement about
-`SetGen.Set` that connects to the theorems.
+`SPMF` that connects to the theorems.
 
 ## Why there are two statements
 
 A reader can hope for one statement about
-`SetGen.support (genLExpr (G := SetGen.Set) … (retryGenArg n))`. That expression does
+`SPMF.support (genLExpr (G := SPMF) … (retryGenArg n))`. That expression does
 not typecheck, and the reason is the substance of the matter.
-`SetGen.support` maps a `SetGen.Set α` to a `SetGen.Set α`, but `retryGenArg` works
+`SPMF.support` maps a `SPMF α` to a `SPMF α`, but `retryGenArg` works
 only at `Plausible.Gen`, because it needs `tryCatch` and the abstract `Gen` class has
 no such operation. A retry is also invisible in the `Set` semantics: there `default` is
 `∅` and not an error, so there is no failure to catch and nothing to retry.
@@ -52,7 +52,7 @@ no such operation. A retry is also invisible in the `Set` semantics: there `defa
 The claim that the support does not change therefore splits into the two halves above.
 The first half is a claim about which values a retry can reach, and the proof is at
 `Plausible.Gen`, where a retry exists. The second half is a claim that `genLExpr` is
-congruent, and the proof is uniform in `G` and therefore holds at `SetGen.Set`.
+congruent, and the proof is uniform in `G` and therefore holds at `SPMF`.
 -/
 
 open Lambda RandomChoice Plausible
@@ -78,12 +78,12 @@ theorem tryCatch_apply {α} (g : Plausible.Gen α) (h : GenError → Plausible.G
   cases g sg size <;> rfl
 
 /-- The values that a `Plausible.Gen` can return at a given size, over each state of
-    the random number generator. This is the executable form of `SetGen.support`: the
+    the random number generator. This is the executable form of `SPMF.support`: the
     generator can reach `a` when *some* seed makes it return `a`.
 
     The quantifier over the state is what makes this the correct definition. The
     harness runs a generator at the seed that it holds, so "the generator can reach
-    a value" must mean "some seed makes the generator return the value". `SetGen.Set`
+    a value" must mean "some seed makes the generator return the value". `SPMF`
     records each branch that a generator can take, in the same way. -/
 def runSupport {α} (g : Plausible.Gen α) (size : ULift Nat) : α → Prop :=
   fun a => ∃ sg sg', g sg size = .ok (a, sg')
@@ -166,7 +166,7 @@ theorem genLExpr_retryCont_ext [_root_.Gen G]
 /-- `genLExpr_retryCont_ext` at the default value. A `retryCont` that is the identity at
     each point gives exactly the generator that the theorems describe.
 
-    This is the form that a reader can instantiate at `SetGen.Set`. `SetGen.Set` has no
+    This is the form that a reader can instantiate at `SPMF`. `SPMF` has no
     failure to catch, so each sensible retry wrapper *is* the identity at each point
     there, and the proved results about the support apply without a change. -/
 theorem genLExpr_retryCont_id [_root_.Gen G]
@@ -180,19 +180,19 @@ theorem genLExpr_retryCont_id [_root_.Gen G]
 
 /-! ## Part 3: the main results -/
 
-/-- **The statement at `SetGen.Set`.** In the `Set` semantics, which the theorems for
+/-- **The statement at `SPMF`.** In the `Set` semantics, which the theorems for
     soundness and completeness use, a `retryCont` that is the identity at each point
-    leaves `SetGen.support` unchanged. This theorem is separate, because the claim that
+    leaves `SPMF.support` unchanged. This theorem is separate, because the claim that
     the support does not change is the property that matters. -/
 theorem genLExpr_setSupport_retryCont
-    (retryCont : (LMonoTy → SetGen.Set LExpr') → (LMonoTy → SetGen.Set LExpr'))
-    (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
+    (retryCont : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr'))
+    (hid : ∀ (g : LMonoTy → SPMF LExpr') (σ : LMonoTy), retryCont g σ = g σ)
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy) (maxNumArgs : Nat) :
-    SetGen.support
-        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs retryCont)
-      = SetGen.support
-        (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs id) := by
+    SPMF.support
+        (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs retryCont)
+      = SPMF.support
+        (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs id) := by
   rw [genLExpr_retryCont_id retryCont hid]
 
 /-- **The executable statement about the generator for an argument.** The generator that
@@ -227,9 +227,9 @@ theorem genLExpr_runSupport_retryGenArg_rec (fuel : Nat)
 
 /-! ## What this module proves, and what it does not
 
-`genLExpr_setSupport_retryCont` is the result that the proofs need. At `SetGen.Set`,
+`genLExpr_setSupport_retryCont` is the result that the proofs need. At `SPMF`,
 where each theorem for soundness and for completeness lives, a `retryCont` that is the
-identity at each point leaves `SetGen.support` *literally* unchanged. `SetGen.Set` has
+identity at each point leaves `SPMF.support` *literally* unchanged. `SPMF` has
 no failure to catch, so this covers each retry wrapper. The proved results therefore
 describe the set of terms that the production generator can reach, and the theorems lose
 nothing when they fix `retryCont` to `id`.
@@ -246,7 +246,7 @@ random number generator that `f` receives. From the facts that `g` reaches `a` a
 state and that `f a` reaches `b` at some state, a reader cannot conclude that `g >>= f`
 reaches `b`, because the two witness states can differ. An equation from end to end needs
 an argument that `Rand.next` is surjective on the seeds, and that is a fact about the
-implementation of `StdGen` and not about a retry. The result at `SetGen.Set` is the one
+implementation of `StdGen` and not about a retry. The result at `SPMF` is the one
 that the theorems use, and it holds without a condition. -/
 
 /-! ## Part 4: the proved results carry over without a change
@@ -258,13 +258,13 @@ point. -/
 /-- Soundness holds for any `retryCont` that is the identity at each point: each generated
     term is well-typed at the type that it received. -/
 theorem genLExpr_sound_retryCont
-    (retryCont : (LMonoTy → SetGen.Set LExpr') → (LMonoTy → SetGen.Set LExpr'))
-    (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
+    (retryCont : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr'))
+    (hid : ∀ (g : LMonoTy → SPMF LExpr') (σ : LMonoTy), retryCont g σ = g σ)
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (maxNumArgs : Nat) (e : LExpr')
-    (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs
+    (he : e ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs
         retryCont)) :
     HasTypeA' bctx e τ := by
   rw [genLExpr_setSupport_retryCont retryCont hid] at he
@@ -274,17 +274,17 @@ theorem genLExpr_sound_retryCont
     support is *literally* unchanged, so the completeness theorem applies without a
     change. -/
 theorem genLExpr_complete_retryCont
-    (retryCont : (LMonoTy → SetGen.Set LExpr') → (LMonoTy → SetGen.Set LExpr'))
-    (hid : ∀ (g : LMonoTy → SetGen.Set LExpr') (σ : LMonoTy), retryCont g σ = g σ)
+    (retryCont : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr'))
+    (hid : ∀ (g : LMonoTy → SPMF LExpr') (σ : LMonoTy), retryCont g σ = g σ)
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
-    (hτ : ∃ m, τ ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m))
+    (hτ : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m))
     (maxNumArgs : Nat) (e : LExpr')
     (he : (HasTypeA' bctx e τ ∧ emptyNames e ∧ allVarsInCtx fctx octx e ∧
             AllTypesSimple tvars depth bctx e ∧ termDepth bctx e ≤ depth)
           ∨ IsPolyApp fctx octx pctx tvars bctx depth τ maxNumArgs e) :
-    e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx octx pctx tvars bctx depth τ maxNumArgs
+    e ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx octx pctx tvars bctx depth τ maxNumArgs
         retryCont) := by
   rw [genLExpr_setSupport_retryCont retryCont hid]
   exact genLExpr_complete fctx octx pctx tvars bctx depth τ hτ maxNumArgs e he

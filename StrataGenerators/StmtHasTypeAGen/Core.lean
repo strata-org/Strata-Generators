@@ -50,7 +50,7 @@ constructor whose well-typedness depends on the context is `typeDecl`, whose pre
 `C.addKnownTypeWithError … = .ok C'`. The generator handles that case: it generates a `TypeConstructor`, and it
 then **matches** on the result of `addKnownTypeWithError`. Therefore the output context of the `.ok` branch is
 definitionally the context that the premise needs. After a clash of two names, the generator gives the empty
-generator, which is `default`, and its support at `SetGen.Set` is empty. A constructor whose name clashes
+generator, which is `default`, and its support at `SPMF` is empty. A constructor whose name clashes
 therefore gives nothing.
 
 ## Labels
@@ -258,7 +258,7 @@ def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     `StatementHasType'.exit` needs the label to be a member of the list of the labels, so `elements` draws the
     target label from that list. Therefore the generated `exit` leaves a block that truly encloses it. When no
     block encloses the point, so the list of the labels is empty, *no* well-typed `exit`
-    exists, so this produces the empty generator (`default`, whose `SetGen.Set`
+    exists, so this produces the empty generator (`default`, whose `SPMF`
     support is `∅`): the `exit` branch simply contributes nothing there. Context
     is unchanged. -/
 def genExitStmt [Gen G] (labels : List String)
