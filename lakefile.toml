@@ -8,6 +8,9 @@ name = "Strata"
 git = "https://github.com/strata-org/Strata"
 rev = "main"
 
+# The reworked FuzzGen + `Basalt.PBT` API is now merged on basalt's Lean-4.29 branch
+# (`lean-4.29`, carrying `Basalt/PBT/*` + `Basalt/Fuzz/*`), so consume it over the network like
+# any other dependency — the same rev the mainline suite pins.
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
@@ -23,6 +26,13 @@ rev = "aa07f8c"
 [[lean_lib]]
 name = "StrataGenerators"
 globs = ["StrataGenerators.*"]
+
+# FuzzGen experiment (branch `fuzz/experiment`): the Mathlib-free root of the opt-in `strata-fuzz`
+# executable. `fuzz-experiment/scripts/build.sh` elaborates and links it against libFuzzer; the
+# default `lake build` only elaborates it. Mirrors basalt's `BasaltFuzzMain` target.
+[[lean_lib]]
+name = "StrataFuzzMain"
+globs = ["StrataFuzzMain", "StrataFuzz.+"]
 
 # The property files. Globbed, so a new file under `StrataTests/` is compiled without
 # a configuration change. A default target, so a plain `lake build` — which is all CI
