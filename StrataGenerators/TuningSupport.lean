@@ -30,9 +30,9 @@ This file supplies what carries that fact from a site to a whole generator.
 
 **A site under `bind`, `map`, `dite` or `ite`.** `SPMF.support_bind` says the support of a bind is
 determined by the support of its parts, so the support-level congruences below (`support_bind_congr`
-and friends) push a site-level equation out through the surrounding `do` block. This is what replaces
-the old `rw`-with-a-generator-equality recipe, which could rewrite anywhere in a term but is no longer
-available.
+and friends) push a site-level equation out through the surrounding `do` block. A site-level
+*generator* equality would let `rw` do the same work anywhere in a term, but a reweighting gives no
+such equality: it changes the generator and preserves only its support.
 
 **A recursive generator.**
 

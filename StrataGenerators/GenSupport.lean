@@ -24,8 +24,8 @@ This file holds the three things Basalt does not.
    produces nothing.
 2. `weightedOptionGen`, an `optionGen` whose `some`/`none` split is a two-branch `frequency` rather
    than a `RandomChoice.coin`, so that `@[tunable]` can see it.
-3. `fix_congr`, `wellFounded_fix_congr` and `brecOn_congr`, which say that a fixpoint depends on its
-   functional alone. They lift a per-site fact to a whole recursive generator, and they are not
+3. `wellFounded_fix_rel`, which lifts a relation between two step functions to a relation between
+   their fixpoints. It carries a per-site fact up to a whole recursive generator, and it is not
    specific to any interpretation.
 
 Two facts about `SPMF` shape every proof here. Membership goes through `SPMF.support`, never through
@@ -59,10 +59,9 @@ end SPMF
 
 /-! ## The support API, unqualified
 
-The proofs in this package name these lemmas without a prefix, and they long predate the move to
-`SPMF`. Re-export them at the root so that no `open` is needed at each use site — an `open SPMF`
-would also bring `SPMF.pure` into scope and make every bare `pure` in a generator ambiguous with
-`Pure.pure`.
+The proofs in this package name these lemmas without a prefix. Re-export them at the root so that no
+`open` is needed at each use site — an `open SPMF` would also bring `SPMF.pure` into scope and make
+every bare `pure` in a generator ambiguous with `Pure.pure`.
 
 `SPMF.mem_support_iff` is deliberately *not* re-exported. It unfolds `a ∈ g.support` to `g a ≠ 0`,
 which is the wrong direction for every proof here: these proofs invert a generator's support down to
@@ -138,37 +137,23 @@ theorem mem_support_weightedOptionGen_iff {wSome wNone : Nat} {g : SPMF α} {o :
       simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
       exact ⟨a, ha, rfl⟩
 
-/-! ## Fixpoints depend on their functional alone
+/-! ## A relation a fixpoint preserves
 
-Each lemma below turns a per-site fact — typically a reweighting of one `frequency` — into a fact
+The lemma below turns a per-site fact — typically a reweighting of one `frequency` — into a fact
 about a whole recursive generator. `@[tunable]` binds `θ` *outside* the fixpoint and re-proves
 monotonicity for the rewritten functional, so `genFoo.tuned θ` and `genFoo` are one fixpoint over two
-functionals that differ only inside their `frequency` sites. None of these lemmas is specific to an
-interpretation; they belong upstream in Basalt. -/
+functionals that differ only inside their `frequency` sites. The lemma is not specific to an
+interpretation; it belongs upstream in Basalt. -/
 
-/-- Two `Lean.Order.fix` terms over equal functionals are equal. The monotonicity proof is a `Prop`,
-so proof irrelevance makes it immaterial. This is the lemma a `partial_fixpoint` generator needs. -/
-theorem fix_congr {α : Sort u} [Lean.Order.CCPO α] {f g : α → α}
-    (hf : Lean.Order.monotone f) (hg : Lean.Order.monotone g) (h : f = g) :
-    Lean.Order.fix f hf = Lean.Order.fix g hg := by
-  subst h; rfl
-
-/-- Two `WellFounded.fix` terms over equal functionals are equal. The accessibility argument is a
-`Prop`, so only the functional matters.
+/-- **A relation that a well-founded recursion preserves.** The two step functions of a tuned
+generator and its untuned original are not *equal* — they differ in their `frequency` weights — so
+`congrArg` does not apply. Give a relation `R` on results instead, show that the two step functions
+map `R`-related recursive bundles to `R`-related results, and conclude that the two fixpoints are
+`R`-related everywhere.
 
 The equation compiler uses `WellFounded.fix` for a generator with `termination_by`, and the members
 of a `mutual` block share one such fix over a `PSum` of their argument tuples. This lemma is
-therefore what lifts a per-site fact to a whole block. -/
-theorem wellFounded_fix_congr {α : Sort u} {r : α → α → Prop} {C : α → Sort v}
-    (hwf : WellFounded r) {F F' : ∀ x, (∀ y, r y x → C y) → C x} (h : F = F') :
-    WellFounded.fix hwf F = WellFounded.fix hwf F' := by
-  subst h; rfl
-
-/-- **A relation that a well-founded recursion preserves.** `wellFounded_fix_congr` needs the two step
-functions to be *equal*; when they are not — a tuned generator differs from its untuned original in
-its `frequency` weights — this is the tool that replaces it. Give a relation `R` on results, show that
-the two step functions map `R`-related recursive bundles to `R`-related results, and conclude that the
-two fixpoints are `R`-related everywhere.
+therefore what lifts a per-site fact to a whole block.
 
 `R` is indexed by the argument so that a `mutual` block, whose shared auxiliary recurses on a `PSum`
 and whose result type is a `PSum.casesOn`, can state one relation per member. -/
@@ -182,16 +167,5 @@ theorem wellFounded_fix_rel {ι : Sort u} {r : ι → ι → Prop} (hwf : WellFo
   | _ x ih =>
     rw [WellFounded.fix_eq, WellFounded.fix_eq]
     exact h x _ _ (fun y hy => ih y hy)
-
-/-- Two `Nat.brecOn` terms over equal step functions are equal. The recursive results arrive in a
-`Nat.below` bundle, which is one bound variable on both sides, so equality of the step functions is
-enough.
-
-The equation compiler uses `Nat.brecOn` for a generator that recurses structurally on a `Nat`, as
-`genLMonoTy` and `genLExprBase` do. -/
-theorem brecOn_congr {motive : Nat → Sort u}
-    {F F' : (n : Nat) → @Nat.below motive n → motive n} (h : F = F') (n : Nat) :
-    @Nat.brecOn motive n F = @Nat.brecOn motive n F' := by
-  subst h; rfl
 
 end StrataGenerators

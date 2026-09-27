@@ -13,8 +13,16 @@ import Strata.DL.Lambda.LTyUnify
 namespace ArbNat
 open RandomChoice
 
-/-- A generator for a `Nat`. A local copy of Basalt's `Nat.arbitrary`, definitionally equal to it, so
-    a proof can unfold either one. -/
+/-- A generator for a `Nat`. A local copy of Basalt's `ArbNat.Nat.arbitrary`, definitionally equal to
+    it, so a proof can unfold either one.
+
+    `BasaltExamples.ArbNat` is one module that holds both this definition and its `SPMF` theory, and
+    it therefore does `import Basalt`, which brings in `Basalt.SPMF` and so Mathlib. This file has no
+    `Basalt.SPMF` import and stays Mathlib-free, which keeps itself and the modules that import it
+    cheap to build; `BasaltExamples.ArbChar.Def` and `BasaltExamples.ArbString.Def` above are the
+    definition-only splits that make the same thing possible for those two generators. `ArbNat` has
+    no such split upstream, so the definition is repeated here. Delete this copy once Basalt gains
+    `BasaltExamples/ArbNat/Def.lean`. -/
 def Nat.arbitrary [Gen G] : G Nat := do
   pick
     (fun () => pure 0)

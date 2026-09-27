@@ -1,7 +1,6 @@
 /-
-Copyright (c) 2026 Harrison Goldstein. All rights reserved.
-Released under MIT license as described in the file LICENSE.
-Authors: Harrison Goldstein
+Copyright (c) 2026 Amazon.com, Inc. or its affiliates. All rights reserved.
+Released under the Apache-2.0 or MIT license (see LICENSE-APACHE / LICENSE-MIT).
 -/
 import StrataGenerators.FunctionHasTypeAGen
 import StrataGenerators.StmtHasTypeAGen
@@ -396,9 +395,10 @@ theorem genCmdsT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyI
 /-- At every `θ`, the tuned type generator is `genLMonoTy`. Both of its sites are the same 9 to 1 split
     between a base type and a compound type, once with type variables in scope and once without.
 
-    `genLMonoTy` recurses structurally on its depth, so this uses the `Nat.brecOn` recipe: `delta`, then
-    `StrataGenerators.brecOn_congr`, then one `frequency_congr_weights` per branch of the `n + 1` arm. The `0` arm
-    is a `pick` and carries no weight, so it closes by `rfl`. -/
+    `genLMonoTy` recurses structurally on its depth, so this is an induction on that depth: `delta`
+    plus `dsimp only` reduces the tuned copy's `Nat.brecOn` at the successor, leaving the recursive
+    occurrences definitionally equal to `genLMonoTy.tuned θ tvars k`, which the induction hypothesis
+    closes. The `0` arm is a `pick` and carries no weight, so it closes by `rfl`. -/
 theorem genLMonoTy_tuned_support_eq (θ : Tuning) (tvars : List TyIdentifier) :
     ∀ n, SPMF.support (genLMonoTy.tuned (G := SPMF) θ tvars n)
       = SPMF.support (genLMonoTy (G := SPMF) tvars n) := by
@@ -707,7 +707,7 @@ private theorem arm_zero_all (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
       (fun _ _ _ _ _ _ _ _ _ _ _ _ h => absurd h (by omega))
     rfl
 
-set_option maxHeartbeats 4000000 in
+set_option maxHeartbeats 8000000 in
 /-- **At every `θ`, the tuned base expression generator has the support `genLExprBase` has.** Eleven
     sites, 84 branch weights, and a match on the target type as well as on the depth. The section note
     above explains the three moves; this theorem is only the dispatch, one line per arm.

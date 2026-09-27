@@ -1,7 +1,6 @@
 /-
-Copyright (c) 2026 Harrison Goldstein. All rights reserved.
-Released under MIT license as described in the file LICENSE.
-Authors: Harrison Goldstein
+Copyright (c) 2026 Amazon.com, Inc. or its affiliates. All rights reserved.
+Released under the Apache-2.0 or MIT license (see LICENSE-APACHE / LICENSE-MIT).
 -/
 import StrataGenerators.GenSupport
 import StrataGenerators.TuningSupport
