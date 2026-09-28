@@ -524,100 +524,361 @@ abbrev TunedIH (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars b k σ).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars b k σ).support
 
-/-- Close one successor arm. Both sides are a `frequency` over the same branch list, so the three real
-    obligations are: every tuned weight is positive (`Tuning.weight_pos`), every shipping weight is
-    (they are literals), and the branches agree in support. The last one walks down through the
-    `@[reducible]` wrappers — `genAbs`, `genApp`, `genIte`, `genEq`, `genQuant` — to leaves closed by the
-    induction hypothesis, or by the two congruences above for the `Indir` and `IndirPoly` branches,
-    whose generators are plain `def`s the walk cannot enter. -/
-macro "arm_close " ih:ident : tactic =>
-  `(tactic|
-    (apply SPMF.support_frequency_congr_branches <;>
-      first
-        | (intro _ hmem; (fin_cases hmem <;> simp [Tuning.weight_pos]); done)
-        | exact Tuning.sum_map_fst_pos _ _ _ _ _
-        | ((repeat' first
-              | exact $ih _ _
-              | exact support_genIndir_congr _ _ (fun σ' => $ih _ σ') _
-              | exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => $ih _ σ') ($ih _ _) 3
-              | refine SPMF.support_bind_congr ?_ (fun _ => ?_)
-              | refine SPMF.support_dite_congr (fun _ => ?_) (fun _ => ?_)
-              | refine List.Forall₂.cons ?_ ?_
-              | exact List.Forall₂.nil
-              | rfl); done)
-        | (simp; done)))
+/-! ### Why each arm is spelled out rather than searched
 
-set_option maxHeartbeats 8000000 in
+Each arm below is one `frequency` congruence over its type's branch list, and each closes by naming the
+lemma for every branch: a `List.Forall₂.cons` chain with one `case` per element. No search, so nothing
+fails, and the cost is linear in the branch count.
+
+The arms used to share one `arm_close` tactic that searched — `repeat' first` over a dozen alternatives
+at every node — and that was expensive enough to need `set_option maxHeartbeats 8000000` on all eleven.
+`genAbs`, `genApp`, `genIte`, `genEq` and `genQuant` are `@[reducible]`, so an alternative that does not
+apply still whnfs through the branch's whole `do` block before failing, and an arm paid that once per
+branch per failed alternative. `arm_bool_succ`, the widest at eleven branches, cost **6186164**
+heartbeats; the others ran from 1290060 to 3803450. Spelled out, `arm_bool_succ` costs **14799**, a
+factor of 418, and no arm now needs a budget above the default.
+
+**Two things that do not work**, so nobody repeats them. Adding a congruence lemma per wrapper
+(matching by head symbol instead of unfolding) *raised* `arm_bool_succ` to 30710862: because the
+wrappers are reducible such a lemma gives unification no syntactic discrimination, so it behaves as a
+costlier `SPMF.support_bind_congr` tried at every node. And the natural repair,
+`attribute [local irreducible] genAbs genApp …`, is rejected — Lean will not make a `@[reducible]`
+definition irreducible. The weight obligations were never the cost: replacing their
+`simp [Tuning.weight_pos]` with `simp only` moved `arm_bool_succ` by 0.01%. -/
+
 private theorem arm_arrow_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (τ₁ τ₂ : LMonoTy)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) (LMonoTy.arrow τ₁ τ₂)).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) (LMonoTy.arrow τ₁ τ₂)).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?abs (List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?bvar (List.Forall₂.cons ?fvar (List.Forall₂.cons ?op (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil)))))))
+    -- `genAbs` draws the body under the extended binder context.
+    case abs =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ => rfl)
+    -- Unlike the other arms, each leaf branch here falls back to `genAbs` rather than to a constant,
+    -- so its `else` does mention the recursive call.
+    case bvar =>
+      exact SPMF.support_dite_congr (fun _ => rfl)
+        (fun _ => SPMF.support_bind_congr (ih _ _) (fun _ => rfl))
+    case fvar =>
+      exact SPMF.support_dite_congr (fun _ => rfl)
+        (fun _ => SPMF.support_bind_congr (ih _ _) (fun _ => rfl))
+    case op =>
+      exact SPMF.support_dite_congr (fun _ => rfl)
+        (fun _ => SPMF.support_bind_congr (ih _ _) (fun _ => rfl))
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_bool_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) LMonoTy.bool).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) LMonoTy.bool).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?const (List.Forall₂.cons ?app (List.Forall₂.cons ?ite
+      (List.Forall₂.cons ?eq (List.Forall₂.cons ?all (List.Forall₂.cons ?exist
+      (List.Forall₂.cons ?bvar (List.Forall₂.cons ?fvar (List.Forall₂.cons ?op
+      (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil))))))))))
+    -- A branch that does not mention the recursive call is the same term on both sides.
+    case const => rfl
+    case bvar => rfl
+    case fvar => rfl
+    case op => rfl
+    -- `genApp` draws the argument type first, and that draw is shared.
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case eq =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    -- `genQuant` draws the binder's type and the trigger's type, both shared, then the trigger and
+    -- the body under the extended binder context.
+    case all =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr rfl (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ =>
+            SPMF.support_bind_congr (ih _ _) (fun _ => rfl))))
+    case exist =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr rfl (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ =>
+            SPMF.support_bind_congr (ih _ _) (fun _ => rfl))))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_int_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) LMonoTy.int).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) LMonoTy.int).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?const (List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?bvar (List.Forall₂.cons ?fvar (List.Forall₂.cons ?op (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil)))))))
+    -- The constant branch, and the three leaf branches that fall back to it, mention no recursive
+    -- call.
+    case const => rfl
+    case bvar => rfl
+    case fvar => rfl
+    case op => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_ftvar_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (name : TyIdentifier)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) (LMonoTy.ftvar name)).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) (LMonoTy.ftvar name)).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?vars1 (List.Forall₂.cons ?vars2 (List.Forall₂.cons ?vars3 (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil))))))
+    -- A leaf branch draws a variable or an operator, or gives `default`. No recursive call, so the
+    -- two sides are the same term.
+    case vars1 => rfl
+    case vars2 => rfl
+    case vars3 => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_string_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) LMonoTy.string).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) LMonoTy.string).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?const (List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?bvar (List.Forall₂.cons ?fvar (List.Forall₂.cons ?op (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil)))))))
+    -- The constant branch, and the three leaf branches that fall back to it, mention no recursive
+    -- call.
+    case const => rfl
+    case bvar => rfl
+    case fvar => rfl
+    case op => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_real_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) LMonoTy.real).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) LMonoTy.real).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?const (List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?bvar (List.Forall₂.cons ?fvar (List.Forall₂.cons ?op (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil)))))))
+    -- The constant branch, and the three leaf branches that fall back to it, mention no recursive
+    -- call.
+    case const => rfl
+    case bvar => rfl
+    case fvar => rfl
+    case op => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_bitvec_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (w : Nat)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) (LMonoTy.bitvec w)).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) (LMonoTy.bitvec w)).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?const (List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?bvar (List.Forall₂.cons ?fvar (List.Forall₂.cons ?op (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil)))))))
+    -- The constant branch, and the three leaf branches that fall back to it, mention no recursive
+    -- call.
+    case const => rfl
+    case bvar => rfl
+    case fvar => rfl
+    case op => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_regex_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) LMonoTy.regex).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) LMonoTy.regex).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?vars1 (List.Forall₂.cons ?vars2 (List.Forall₂.cons ?vars3 (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil))))))
+    -- A leaf branch draws a variable or an operator, or gives `default`. No recursive call, so the
+    -- two sides are the same term.
+    case vars1 => rfl
+    case vars2 => rfl
+    case vars3 => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_map_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (τ₁ τ₂ : LMonoTy)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) (LMonoTy.map τ₁ τ₂)).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) (LMonoTy.map τ₁ τ₂)).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?vars1 (List.Forall₂.cons ?vars2 (List.Forall₂.cons ?vars3 (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil))))))
+    -- A leaf branch draws a variable or an operator, or gives `default`. No recursive call, so the
+    -- two sides are the same term.
+    case vars1 => rfl
+    case vars2 => rfl
+    case vars3 => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 private theorem arm_seq_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (σ : LMonoTy)
     (ih : TunedIH θ fctx octx pctx tvars k) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx (k + 1) (LMonoTy.seq σ)).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (k + 1) (LMonoTy.seq σ)).support := by
-  arm_close ih
-set_option maxHeartbeats 8000000 in
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel ?sum ?sum'
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case sum => exact Tuning.sum_map_fst_pos _ _ _ _ _
+  case sum' => simp
+  case rel =>
+    refine List.Forall₂.cons ?app (List.Forall₂.cons ?ite (List.Forall₂.cons ?vars1 (List.Forall₂.cons ?vars2 (List.Forall₂.cons ?vars3 (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil))))))
+    -- A leaf branch draws a variable or an operator, or gives `default`. No recursive call, so the
+    -- two sides are the same term.
+    case vars1 => rfl
+    case vars2 => rfl
+    case vars3 => rfl
+    case app =>
+      exact SPMF.support_bind_congr rfl (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case ite =>
+      exact SPMF.support_bind_congr (ih _ _) (fun _ =>
+        SPMF.support_bind_congr (ih _ _) (fun _ =>
+          SPMF.support_bind_congr (ih _ _) (fun _ => rfl)))
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 /-- The successor catch-all: a target type the generator has no rule for. The matcher cannot reduce at
     an opaque `τ`, so `genLExprBase.match_1.eq_22` does it instead, consuming the ten negative facts
     that `split` provides. -/
@@ -640,9 +901,22 @@ private theorem arm_other_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
   dsimp only
   rw [genLExprBase.eq_def]
   simp only [genLExprBase.match_1.eq_22]
-  arm_close ih
+  -- This arm reaches the `frequency` through `genLExprBase.match_1.eq_22`, which leaves both weight
+  -- sums already determined, so `refine` solves them by unification and only three goals remain.
+  refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel _ _
+  case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
+  case pos' => intro _ hmem; fin_cases hmem <;> simp
+  case rel =>
+    refine List.Forall₂.cons ?vars1 (List.Forall₂.cons ?vars2 (List.Forall₂.cons ?vars3 (List.Forall₂.cons ?indir (List.Forall₂.cons ?indirPoly List.Forall₂.nil))))
+    case vars1 => rfl
+    case vars2 => rfl
+    case vars3 => rfl
+    case indir =>
+      exact SPMF.support_dite_congr
+        (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
+    case indirPoly =>
+      exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 
-set_option maxHeartbeats 8000000 in
 /-- The depth-0 catch-all. Same shape as `arm_other_succ`, with `eq_21`; at depth 0 the two `oneOf`s
     carry no weight, so the branches agree by reflexivity. -/
 private theorem arm_other_zero (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
@@ -669,7 +943,6 @@ private theorem arm_other_zero (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
   try dsimp only
   rw [genLExprBase.eq_def]
   simp only [genLExprBase.match_1.eq_21]
-set_option maxHeartbeats 8000000 in
 /-- Depth 0, every target type. No arm carries a weight at depth 0 — each is a uniform `oneOf` — so the
     tuned generator and the shipping one are the *same* generator there, and every arm closes by
     reflexivity. The case analysis goes through the matcher's own splitter rather than `split`, so the
@@ -707,7 +980,6 @@ private theorem arm_zero_all (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
       (fun _ _ _ _ _ _ _ _ _ _ _ _ h => absurd h (by omega))
     rfl
 
-set_option maxHeartbeats 8000000 in
 /-- **At every `θ`, the tuned base expression generator has the support `genLExprBase` has.** Eleven
     sites, 84 branch weights, and a match on the target type as well as on the depth. The section note
     above explains the three moves; this theorem is only the dispatch, one line per arm.
