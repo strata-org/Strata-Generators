@@ -2,9 +2,9 @@
 Copyright (c) 2026 Amazon.com, Inc. or its affiliates. All rights reserved.
 Released under the Apache-2.0 or MIT license (see LICENSE-APACHE / LICENSE-MIT).
 -/
-import Basalt.SPMF
+import StrataGenerators.BasaltCompat
 import Basalt.Laws
-import Basalt.Tactics
+import Basalt.Tactic.Support
 import Basalt.Combinators
 
 open Lean.Order RandomChoice
@@ -13,18 +13,21 @@ open Lean.Order RandomChoice
 # What this package adds to Basalt's `SPMF` support API
 
 The proofs in this package read a generator as an `SPMF` — a sub-probability mass function — and
-speak about `SPMF.support`, the set of values whose mass is not zero. Basalt owns that reading and
-almost all of the lemmas about it: `Basalt/SPMF/Support.lean` has the `mem_support_*_iff` family for
-every combinator this package draws from, `Basalt/Laws.lean` has `IsSoundAndComplete`, and
-`Basalt/Tactics.lean` has `support_simp`, the packaged `simp only` set for support inversion.
+speak about `SPMF.support`, the set of values whose mass is not zero. Basalt owns that reading:
+`Basalt/SPMF/Support.lean` has the set-level `support_*` equalities and the monadic
+`mem_support_*_iff` lemmas, `Basalt/Laws.lean` has `IsSoundAndComplete`, and
+`Basalt/Tactic/Support.lean` has `support_simp`, the packaged `simp only` set for support inversion.
 
-This file holds the three things Basalt does not.
+This file holds four things Basalt does not.
 
 1. `SPMF.mem_support_bot_iff`, so that a `simp` set can discharge the branch of a generator that
    produces nothing.
-2. `weightedOptionGen`, an `optionGen` whose `some`/`none` split is a two-branch `frequency` rather
+2. The `mem_support_*_iff` family for the **choice** combinators — `oneOf`, `frequency`, `pick`,
+   `elements`, `chooseNat`, `chooseInt`, `coin`, `biasedOptionGen`, `optionGen` — and the `support_*`
+   equalities Basalt no longer states for them. See the section note below.
+3. `weightedOptionGen`, an `optionGen` whose `some`/`none` split is a two-branch `frequency` rather
    than a `RandomChoice.coin`, so that `@[tunable]` can see it.
-3. `wellFounded_fix_rel`, which lifts a relation between two step functions to a relation between
+4. `wellFounded_fix_rel`, which lifts a relation between two step functions to a relation between
    their fixpoints. It carries a per-site fact up to a whole recursive generator, and it is not
    specific to any interpretation.
 

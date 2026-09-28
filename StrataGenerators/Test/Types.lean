@@ -1,5 +1,5 @@
 import Plausible
-import Basalt.Tuning
+import Basalt.Tuning.Basic
 import StrataGenerators.Tyche
 
 /-!

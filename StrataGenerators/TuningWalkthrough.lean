@@ -5,7 +5,7 @@ Released under the Apache-2.0 or MIT license (see LICENSE-APACHE / LICENSE-MIT).
 import StrataGenerators.GenSupport
 import StrataGenerators.TuningSupport
 import Basalt.Tuning.Attr
-import Basalt.GenStats
+import Basalt.GenStats.Command
 
 open RandomChoice
 

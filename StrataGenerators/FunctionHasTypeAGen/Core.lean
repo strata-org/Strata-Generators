@@ -1,6 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import StrataGenerators.BasaltCompat.Defs
 import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.Function
 import StrataGenerators.HasTypeAGen.Core

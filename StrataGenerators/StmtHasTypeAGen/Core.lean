@@ -1,6 +1,7 @@
 import Basalt.Gen
 import Basalt.IO
 import Basalt.Combinators
+import StrataGenerators.BasaltCompat.Defs
 import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.StatementTypeSpec

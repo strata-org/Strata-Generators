@@ -1,4 +1,6 @@
 import StrataGenerators.GenSupport
+import Basalt.Walk.Entry
+import Basalt.Walk.Sound
 import StrataGenerators.HasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.IndirSupport
 -- The coverage lemmas for `freshenBoundVars`. `schemeInstAt_freshening_disjoint` below uses them to
@@ -907,6 +909,13 @@ private theorem norm_real : LMonoTy.real = LMonoTy.tcons "real" [] := rfl
 /-- Normalize `.arrow` abbreviation so `simp [genLExpr]` equation lemmas can match. -/
 private theorem norm_arrow (τ₁ τ₂ : LMonoTy) :
     LMonoTy.arrow τ₁ τ₂ = LMonoTy.tcons "arrow" [τ₁, τ₂] := rfl
+/-- Normalize `.regex` abbreviation so `simp [genLExpr]` equation lemmas can match. -/
+private theorem norm_regex : LMonoTy.regex = LMonoTy.tcons "regex" [] := rfl
+/-- Normalize `.map` abbreviation so `simp [genLExpr]` equation lemmas can match. -/
+private theorem norm_map (τ₁ τ₂ : LMonoTy) :
+    LMonoTy.map τ₁ τ₂ = LMonoTy.tcons "Map" [τ₁, τ₂] := rfl
+/-- Normalize `.seq` abbreviation so `simp [genLExpr]` equation lemmas can match. -/
+private theorem norm_seq (τ : LMonoTy) : LMonoTy.seq τ = LMonoTy.tcons "Sequence" [τ] := rfl
 
 
 set_option maxHeartbeats 800000 in
@@ -1822,18 +1831,12 @@ private theorem Char_arbitrary_support_set (c : Char) (hc : c ∈ alphanumChars)
 /-- Every alphanumeric char-list is in the support of `genAlphanumList` at `SPMF`. -/
 private theorem genAlphanumList_support_set (cs : List Char)
     (hcs : ∀ c ∈ cs, c ∈ alphanumChars) :
-    cs ∈ SPMF.support (genAlphanumList (G := SPMF)) := by
-  induction cs with
-  | nil =>
-    rw [genAlphanumList, listOf]
-    simp
-  | cons c cs ih =>
-    rw [genAlphanumList, listOf]
-    simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
-    right
-    refine ⟨c, ?_, cs, ?_, rfl⟩
-    · exact Char_arbitrary_support_set c (hcs c List.mem_cons_self)
-    · exact ih (fun c' hc' => hcs c' (List.mem_cons_of_mem c hc'))
+    cs ∈ SPMF.support (genAlphanumList (G := SPMF)) :=
+  -- `genAlphanumList` is `listOf Char.arbitrary`, and `listOf` puts no bound on the length, so the
+  -- elementwise fact is the whole obligation. Going through `mem_support_listOf_of_forall` rather
+  -- than unfolding `listOf` keeps this proof independent of which choice combinator `listOf`'s body
+  -- uses.
+  SPMF.mem_support_listOf_of_forall fun c hc => Char_arbitrary_support_set c (hcs c hc)
 
 /-- Every alphanumeric string is in the support of `String.arbitrary` at `SPMF`. -/
 private theorem String_arbitrary_support_set (s : String)
@@ -1866,18 +1869,8 @@ open StrataGenerators.PrimitiveGens in
     `genAlphanumList_support_set`. -/
 private theorem genInterestingCharList_support_set (cs : List Char)
     (hcs : ∀ c ∈ cs, c ∈ interestingChars) :
-    cs ∈ SPMF.support (listOf (genInterestingChar (G := SPMF))) := by
-  induction cs with
-  | nil =>
-    rw [listOf]
-    simp
-  | cons c cs ih =>
-    rw [listOf]
-    simp only [mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
-    right
-    refine ⟨c, ?_, cs, ?_, rfl⟩
-    · exact genInterestingChar_support_set c (hcs c List.mem_cons_self)
-    · exact ih (fun c' hc' => hcs c' (List.mem_cons_of_mem c hc'))
+    cs ∈ SPMF.support (listOf (genInterestingChar (G := SPMF))) :=
+  SPMF.mem_support_listOf_of_forall fun c hc => genInterestingChar_support_set c (hcs c hc)
 
 open StrataGenerators.PrimitiveGens in
 /-- Each string over `interestingChars` is in the support of `genInterestingString`, at **each** length.
@@ -2078,16 +2071,295 @@ open StrataGenerators.IndirSupport in
     application spine of an arity up to `K`. -/
 abbrev genDepthBudget (K depth : Nat) : Nat := depthBudget K depth
 
-set_option maxHeartbeats 6400000 in
-set_option linter.unusedSimpArgs false in
--- The proof below supplies each `σ ∈ support (genLMonoTy …)` side goal with one uniform
--- `first | exact genLMonoTy_mem_bool | … | assumption` block, pasted unchanged at every type case, so
--- that no case needs bespoke reasoning. At any one of those sites all but one alternative is dead by
--- construction, which is what `first` is for, so `unusedTactic` and `unreachableTactic` fire on every
--- alternative that did not win. Narrowing each block to its winner would trade a uniform dispatcher for
--- twenty bespoke ones, so the two linters are off for this declaration alone.
-set_option linter.unusedTactic false in
-set_option linter.unreachableTactic false in
+/-! ## `termDepth` is bounded by the depth budget
+
+The theorem below is a **soundness** statement: every expression in a generator's support satisfies a
+predicate. That is `Basalt`'s `IsSoundFor`, and `Basalt.Walk` proves such a statement by recursion on
+the generator's *syntax* — one `@[gen_rule]` lemma per combinator, with `Walk/Match.lean` entering a
+`match` alternative by alternative. The proof therefore names no branch of `genLExprBase`: it hands
+`walk` one fact per sub-generator and closes the leaves the walk leaves behind by arithmetic.
+
+The facts below are those sub-generator statements. Each is small and each is reused by every arm.
+-/
+
+section TermDepthBound
+
+-- `depthBudget`, `opCtxArity`, `le_depthBudget_self` and the two `*_measure_le` lemmas live here.
+-- The `open` is a command rather than an `open … in` so that the arm tactics below can name them.
+open StrataGenerators.IndirSupport
+
+/-- Generability of a type: that `genLMonoTy` can produce it at some depth. `genLExprBase`'s recursion
+    needs this at the type of each recursive call, so it is threaded through the induction. -/
+private abbrev GenTy (tvars : List TyIdentifier) (σ : LMonoTy) : Prop :=
+  ∃ m, σ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m)
+
+/-! ### The primitive draws
+
+A constant generator bottoms out in one of these. None of them constrains the expression, so the
+trivial postcondition is the fact the walk needs — it only has to know that *some* fact exists. -/
+
+private theorem natArbitrary_true : IsSoundFor (ArbNat.Nat.arbitrary (G := SPMF)) (fun _ => True) :=
+  fun _ _ => trivial
+
+private theorem genInterestingChar_true :
+    IsSoundFor (StrataGenerators.PrimitiveGens.genInterestingChar (G := SPMF)) (fun _ => True) :=
+  fun _ _ => trivial
+
+private theorem natArbGeom_true :
+    IsSoundFor (StrataGenerators.PrimitiveGens.natArbGeom (G := SPMF)) (fun _ => True) :=
+  fun _ _ => trivial
+
+/-! ### The variable and operator pools
+
+A leaf from one of these is a `bvar`, an `fvar` or an `op` node, each of `termDepth` 0 — in *any*
+binder context, which is why `bctx` is free of the pool's own context. -/
+
+private theorem pickBVar_termDepth (bc : BVarCtx) (σ : LMonoTy)
+    (h : (bvarsOfType bc σ).length > 0) (bctx : BVarCtx) :
+    IsSoundFor (pickBVar (G := SPMF) bc σ h) (fun e => termDepth bctx e = 0) := by
+  intro e he
+  obtain ⟨i, -, rfl⟩ := mem_support_pickBVar_iff.mp he
+  rfl
+
+private theorem pickFVar_termDepth (fc : FVarCtx) (σ : LMonoTy)
+    (h : (fvarsOfType fc σ).length > 0) (bctx : BVarCtx) :
+    IsSoundFor (pickFVar (G := SPMF) fc σ h) (fun e => termDepth bctx e = 0) := by
+  intro e he
+  obtain ⟨x, -, rfl⟩ := mem_support_pickFVar_iff.mp he
+  rfl
+
+private theorem pickOp_termDepth (oc : OpCtx) (σ : LMonoTy)
+    (h : (opsOfType oc σ).length > 0) (bctx : BVarCtx) :
+    IsSoundFor (pickOp (G := SPMF) oc σ h) (fun e => termDepth bctx e = 0) := by
+  intro e he
+  obtain ⟨x, -, rfl⟩ := mem_support_pickOp_iff.mp he
+  rfl
+
+/-! ### The type draws
+
+`genGenerableTy` and `genAppArgTy` have exactly `genLMonoTy`'s support, so a drawn type is generable
+*and* has `monoTyDepth` at most `n`. Both halves are needed: the first feeds the induction hypothesis,
+and the second is what the `quant` arm's `termDepth` charges for the binder's type. Passing these as
+facts also keeps the walk out of `generableTypesFromCtx`. -/
+
+private theorem genGenerableTy_genTy (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (bc : BVarCtx) (n : Nat) :
+    IsSoundFor (genGenerableTy (G := SPMF) fctx octx tvars bc n)
+      (fun σ => GenTy tvars σ ∧ monoTyDepth σ ≤ n) :=
+  fun σ hσ =>
+    have h := (genGenerableTy_support fctx octx tvars bc n σ).mp hσ
+    ⟨⟨n, h⟩, genLMonoTy_mem_depth h⟩
+
+private theorem genAppArgTy_genTy (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
+    (bc : BVarCtx) (n : Nat) (τ : LMonoTy) :
+    IsSoundFor (genAppArgTy (G := SPMF) fctx octx tvars bc n τ)
+      (fun σ => GenTy tvars σ ∧ monoTyDepth σ ≤ n) :=
+  fun σ hσ =>
+    have h := (genAppArgTy_support fctx octx tvars bc n τ σ).mp hσ
+    ⟨⟨n, h⟩, genLMonoTy_mem_depth h⟩
+
+private theorem genLMonoTy_genTy (tvars : List TyIdentifier) (n : Nat) :
+    IsSoundFor (genLMonoTy (G := SPMF) tvars n)
+      (fun σ => GenTy tvars σ ∧ monoTyDepth σ ≤ n) :=
+  fun σ hσ => ⟨⟨n, hσ⟩, genLMonoTy_mem_depth hσ⟩
+
+/-! ### Generability as a rewrite
+
+The induction hypothesis is conditional on its target type being generable, so every use site owes
+that condition. Stated as a `simp` rewrite — `True` at a base type, the components' conditions at a
+compound one — one `simp_all` discharges every one of them.
+
+Each type comes in two spellings: `LMonoTy.arrow` as `genLExprBase`'s source writes it, and
+`.tcons "arrow" [_, _]` as the `norm_*` lemmas leave it. The two are definitionally but not
+syntactically equal, and `simp` matches syntactically, so both are here. -/
+
+section generability
+variable (tvars : List TyIdentifier)
+
+private theorem genTy_bool : GenTy tvars .bool ↔ True := iff_true_intro genLMonoTy_mem_bool
+private theorem genTy_int : GenTy tvars .int ↔ True := iff_true_intro genLMonoTy_mem_int
+private theorem genTy_string : GenTy tvars .string ↔ True := iff_true_intro genLMonoTy_mem_string
+private theorem genTy_real : GenTy tvars .real ↔ True := iff_true_intro genLMonoTy_mem_real
+private theorem genTy_regex : GenTy tvars .regex ↔ True := iff_true_intro genLMonoTy_mem_regex
+private theorem genTy_bitvec (w : Nat) : GenTy tvars (.bitvec w) ↔ True :=
+  iff_true_intro genLMonoTy_mem_bitvec
+private theorem genTy_arrow (a b : LMonoTy) :
+    GenTy tvars (.arrow a b) ↔ GenTy tvars a ∧ GenTy tvars b :=
+  ⟨genLMonoTy_mem_arrow_inv, fun h => genLMonoTy_mem_arrow h.1 h.2⟩
+private theorem genTy_map (a b : LMonoTy) :
+    GenTy tvars (.map a b) ↔ GenTy tvars a ∧ GenTy tvars b :=
+  ⟨genLMonoTy_mem_map_inv, fun h => genLMonoTy_mem_map h.1 h.2⟩
+private theorem genTy_seq (a : LMonoTy) : GenTy tvars (.seq a) ↔ GenTy tvars a :=
+  ⟨genLMonoTy_mem_seq_inv, genLMonoTy_mem_seq⟩
+
+private theorem genTy_bool' : GenTy tvars (.tcons "bool" []) ↔ True :=
+  iff_true_intro genLMonoTy_mem_bool
+private theorem genTy_int' : GenTy tvars (.tcons "int" []) ↔ True :=
+  iff_true_intro genLMonoTy_mem_int
+private theorem genTy_string' : GenTy tvars (.tcons "string" []) ↔ True :=
+  iff_true_intro genLMonoTy_mem_string
+private theorem genTy_real' : GenTy tvars (.tcons "real" []) ↔ True :=
+  iff_true_intro genLMonoTy_mem_real
+private theorem genTy_regex' : GenTy tvars (.tcons "regex" []) ↔ True :=
+  iff_true_intro genLMonoTy_mem_regex
+private theorem genTy_arrow' (a b : LMonoTy) :
+    GenTy tvars (.tcons "arrow" [a, b]) ↔ GenTy tvars a ∧ GenTy tvars b :=
+  ⟨genLMonoTy_mem_arrow_inv, fun h => genLMonoTy_mem_arrow h.1 h.2⟩
+private theorem genTy_map' (a b : LMonoTy) :
+    GenTy tvars (.tcons "Map" [a, b]) ↔ GenTy tvars a ∧ GenTy tvars b :=
+  ⟨genLMonoTy_mem_map_inv, fun h => genLMonoTy_mem_map h.1 h.2⟩
+private theorem genTy_seq' (a : LMonoTy) :
+    GenTy tvars (.tcons "Sequence" [a]) ↔ GenTy tvars a :=
+  ⟨genLMonoTy_mem_seq_inv, genLMonoTy_mem_seq⟩
+
+end generability
+
+/-! ### The two arm tactics
+
+`termDepth_arm_zero` and `termDepth_arm_succ` each expose one arm of `genLExprBase`, walk it, and
+close the leaves the walk leaves behind. Both are the *same* tactic at every type, which is the point:
+no arm needs bespoke reasoning.
+
+`termDepth_arm_succ` takes the induction hypothesis and the two `Indir` facts as arguments because a
+`macro` cannot reach a `have` in the caller. -/
+
+/-- Expose `genLExprBase`'s arm at the depth floor, walk it, close the leaves. Every leaf at depth 0
+is a constant, a variable, an operator or `default`, each of `termDepth` 0, and the budget there is
+0. -/
+local macro "termDepth_arm_zero " bctx:term : tactic =>
+  `(tactic| (
+    try dsimp only
+    simp only [norm_bool, norm_int, norm_string, norm_real, norm_regex, norm_arrow, norm_map,
+      norm_seq, genLExprBase]
+    rw [IsSoundFor.iff_obs]
+    walk [natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs,
+      (pickBVar_termDepth _ _ _ $bctx).obs, (pickFVar_termDepth _ _ _ $bctx).obs,
+      (pickOp_termDepth _ _ _ $bctx).obs]
+    all_goals (first
+      | (simp only [termDepth, depthBudget]; omega)
+      | (intro a ha; simp only [termDepth, depthBudget] at ha ⊢; omega))))
+
+/-- Expose `genLExprBase`'s arm above the floor, walk it, close the leaves by arithmetic over
+`termDepth` and `depthBudget`. `hgen` is the arm's own generability witness: the `IndirPoly` fallback
+recurses at the arm's target type. -/
+local macro "termDepth_arm_succ " bctx:term ", " ihW:term ", " hIndir:term ", "
+    hIndirPoly:term ", " hgen:term : tactic =>
+  `(tactic| (
+    try dsimp only
+    simp only [norm_bool, norm_int, norm_string, norm_real, norm_regex, norm_arrow, norm_map,
+      norm_seq, genLExprBase]
+    rw [IsSoundFor.iff_obs]
+    walk [natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs,
+      (pickBVar_termDepth _ _ _ $bctx).obs, (pickFVar_termDepth _ _ _ $bctx).obs,
+      (pickOp_termDepth _ _ _ $bctx).obs, ($ihW _ _).obs,
+      (genGenerableTy_genTy _ _ _ _ _).obs, (genAppArgTy_genTy _ _ _ _ _ _).obs,
+      (genLMonoTy_genTy _ _).obs, ($hIndir _ _).obs, ($hIndirPoly _ $hgen).obs]
+    all_goals (first
+      | (simp only [termDepth, depthBudget]; omega)
+      | (intros
+         simp_all only [termDepth, depthBudget,
+           genTy_bool, genTy_int, genTy_string, genTy_real, genTy_regex, genTy_bitvec,
+           genTy_arrow, genTy_map, genTy_seq,
+           genTy_bool', genTy_int', genTy_string', genTy_real', genTy_regex',
+           genTy_arrow', genTy_map', genTy_seq',
+           and_imp, forall_const, true_implies, and_true, true_and, and_self]
+         omega))))
+
+-- Measured at 196717 heartbeats, which is just under the default of 200000. The bound here is a
+-- factor of two above that, so a small drift in Lean or Mathlib does not break the build; the figure
+-- is worth re-measuring with `#count_heartbeats` if this proof is edited. The walk is what makes the
+-- number small: the previous proof inverted the support of every branch by hand and needed 5461285.
+set_option maxHeartbeats 400000 in
+/-- **The `termDepth` bound, by induction on the depth.** This is the statement
+`genLExprBase_termDepth_bound` below reports; the induction needs it quantified over `bctx` and `τ`,
+because the `abs` and `quant` arms recurse under an extended binder context and at a drawn type.
+
+The generability premise `GenTy tvars τ` is what lets `genLMonoTy_mem_cases` pick the arm. It is also
+what the `IndirPoly` fallback needs, since that branch recurses at the arm's own target type. -/
+private theorem genLExprBase_termDepth_bound_aux (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
+    (tvars : List TyIdentifier) (K : Nat)
+    (hK : 1 ≤ K) (hKops : opCtxArity octx ≤ K) (hKpoly : 3 ≤ K)
+    (hSimpleArgs : ∀ bc σ m,
+      (∀ (name : String) (argTys : List LMonoTy),
+        (name, argTys) ∈ findOpsInCtx octx σ →
+        ∀ σ' ∈ argTys, ∃ k, σ' ∈ SPMF.support (genLMonoTy (G := SPMF) tvars k)) ∧
+      (∀ (sampledTys : List LMonoTy) (name : String) (argTys : List LMonoTy),
+        (name, argTys) ∈ findPolymorphicOps pctx σ
+          (generableTypesFromCtx bc fctx octx) sampledTys m →
+        ∀ σ' ∈ argTys, ∃ k, σ' ∈ SPMF.support (genLMonoTy (G := SPMF) tvars k))) :
+    ∀ depth bctx τ, GenTy tvars τ →
+      IsSoundFor (genLExprBase (G := SPMF) fctx octx pctx tvars bctx depth τ)
+        (fun e => termDepth bctx e ≤ depthBudget K depth) := by
+  intro depth
+  induction depth with
+  | zero =>
+    intro bctx τ hτ
+    refine genLMonoTy_mem_cases
+      (motive := fun σ => IsSoundFor (genLExprBase (G := SPMF) fctx octx pctx tvars bctx 0 σ)
+        (fun e => termDepth bctx e ≤ depthBudget K 0))
+      ?bool ?int ?string ?real ?regex ?bitvec ?ftvar ?arrow ?map ?seq hτ
+    case bool => termDepth_arm_zero bctx
+    case int => termDepth_arm_zero bctx
+    case string => termDepth_arm_zero bctx
+    case real => termDepth_arm_zero bctx
+    case regex => termDepth_arm_zero bctx
+    case bitvec => intro w; termDepth_arm_zero bctx
+    case ftvar => intro name _; termDepth_arm_zero bctx
+    case arrow => intro τ₁ τ₂ _ _; termDepth_arm_zero bctx
+    case map => intro τ₁ τ₂ _ _; termDepth_arm_zero bctx
+    case seq => intro τ' _; termDepth_arm_zero bctx
+  | succ n ih =>
+    intro bctx τ hτ
+    -- The induction hypothesis with its generability side condition moved into the postcondition. A
+    -- `walk` fact may not take a hypothesis, and the condition is owed at the leaf anyway, where the
+    -- surrounding type draw has already supplied it.
+    have ihW : ∀ bc σ, IsSoundFor (genLExprBase (G := SPMF) fctx octx pctx tvars bc n σ)
+        (fun e => GenTy tvars σ → termDepth bc e ≤ depthBudget K n) :=
+      fun bc σ e he hgen => ih bc σ hgen e he
+    -- The `quant` arm charges `monoTyDepth τ'` for the binder's type, and a drawn `τ'` has
+    -- `monoTyDepth τ' ≤ n`; this turns that into a bound by the budget.
+    have hbud : n ≤ depthBudget K n := le_depthBudget_self K hK n
+    -- The measure of an application spine over an `.op` head, which is what both `Indir` rules emit.
+    have hspine : ∀ (nm : String) (annot : LMonoTy) (args : List LExpr'),
+        (∀ a ∈ args, termDepth bctx a ≤ depthBudget K n) →
+        termDepth bctx (mkApps (.op () ⟨nm, ()⟩ (some annot)) args)
+          ≤ depthBudget K n + args.length :=
+      fun nm annot args hall => termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall
+    -- The two `Indir` branches, as facts. `genIndir_measure_le` and `genIndirPolyCore_measure_le`
+    -- already bound a spine over an abstract measure, the `List.mapM` over the arguments included, so
+    -- the walk never has to enter the spine.
+    have hIndir : ∀ σ (h : (findOpsInCtx octx σ).length > 0),
+        IsSoundFor (genIndir (G := SPMF) octx σ
+            (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n) h)
+          (fun e => termDepth bctx e ≤ depthBudget K n + opCtxArity octx) :=
+      fun σ h e he =>
+        genIndir_measure_le (m := termDepth bctx) (tvars := tvars) octx σ _ (depthBudget K n)
+          (hSimpleArgs bctx σ 3).1 (fun σ' hσ' a ha => ih bctx σ' hσ' a ha) hspine h e he
+    have hIndirPoly : ∀ σ, GenTy tvars σ →
+        IsSoundFor (genIndirPolyCore (G := SPMF) fctx octx pctx bctx σ
+            (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n)
+            (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n σ) 3)
+          (fun e => termDepth bctx e ≤ max (depthBudget K n + 3) (depthBudget K n)) :=
+      fun σ hσ e he =>
+        genIndirPolyCore_measure_le (m := termDepth bctx) (tvars := tvars) fctx octx pctx bctx σ
+          _ _ 3 (depthBudget K n) (depthBudget K n) (hSimpleArgs bctx σ 3).2
+          (fun σ' hσ' a ha => ih bctx σ' hσ' a ha) (fun a ha => ih bctx σ hσ a ha) hspine e he
+    refine genLMonoTy_mem_cases
+      (motive := fun σ => GenTy tvars σ →
+        IsSoundFor (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) σ)
+          (fun e => termDepth bctx e ≤ depthBudget K (n + 1)))
+      ?bool ?int ?string ?real ?regex ?bitvec ?ftvar ?arrow ?map ?seq hτ hτ
+    case bool => intro hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case int => intro hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case string => intro hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case real => intro hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case regex => intro hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case bitvec => intro w hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case ftvar => intro name _ hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case arrow => intro τ₁ τ₂ _ _ hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case map => intro τ₁ τ₂ _ _ hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+    case seq => intro τ' _ hg; termDepth_arm_succ bctx, ihW, hIndir, hIndirPoly, hg
+
 open StrataGenerators.IndirSupport in
 /-- The `termDepth` of each expression in the support of `genLExprBase` at the depth `depth` is not
     more than `depthBudget K depth`. Here `K` is `max (opCtxArity octx) maxNumArgs`, and it is 1 or
@@ -2144,1065 +2416,11 @@ theorem genLExprBase_termDepth_bound (fctx : FVarCtx) (octx : OpCtx) (pctx : Pol
     (τ : LMonoTy) (hτ : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m))
     (e : LExpr')
     (he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx octx pctx tvars bctx depth τ)) :
-    termDepth bctx e ≤ depthBudget K depth := by
-  match depth with
-  | 0 =>
-    revert he
-    refine genLMonoTy_mem_cases ?bool ?int ?string ?real ?regex ?bitvec ?ftvar ?arrow ?map ?seq hτ
-    case bool =>
-      intro he
-      rw [norm_bool] at he; simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff,
-        SPMF.mem_support_dite_iff] at he
-      rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
-      all_goals first | rfl | (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl))
-    case int =>
-      intro he
-      rw [norm_int] at he; simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      rcases he with (⟨_, _, rfl⟩ | ⟨_, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩)))
-      all_goals first | rfl | (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl))
-    case string =>
-      intro he
-      rw [norm_string] at he; simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      rcases he with ⟨_, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩)))
-      all_goals first | rfl | (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl))
-    case real =>
-      intro he
-      rw [norm_real] at he; simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      rcases he with ⟨_, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩)))
-      all_goals first | rfl | (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl))
-    case bitvec =>
-      intro w he
-      simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      rcases he with ⟨_, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩)))
-      all_goals first | rfl | (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl))
-    case arrow =>
-      intro τ₁ τ₂ hs₁ hs₂ he
-      rw [norm_arrow] at he; simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff,
-        SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
-      rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨_, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
+    termDepth bctx e ≤ depthBudget K depth :=
+  genLExprBase_termDepth_bound_aux fctx octx pctx tvars K hK hKops hKpoly hSimpleArgs
+    depth bctx τ hτ e he
 
-      all_goals (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true]))
-    case ftvar =>
-      intro name hname he
-      simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
-                 mem_support_bot_iff] at he
-      rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
-
-      all_goals (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true]))
-    case regex =>
-      intro he
-      simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
-                 mem_support_bot_iff] at he
-      rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
-
-      all_goals (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true]))
-    case map =>
-      intro τ₁ τ₂ hs₁ hs₂ he
-      simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff,
-        SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
-      rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
-
-      all_goals (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true]))
-    case seq =>
-      intro τ₁ hs he
-      simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-        or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
-                 mem_support_bot_iff] at he
-      rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-        ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
-         (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩))
-
-      all_goals (
-        first
-        | (rw [mem_support_pickBVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickFVar_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | (rw [mem_support_pickOp_iff] at h
-           obtain ⟨_, _, rfl⟩ := h; rfl)
-        | exact absurd h (by simp only [mem_support_bot_iff, not_false_eq_true]))
-  | n + 1 =>
-    revert he
-    refine genLMonoTy_mem_cases ?bool ?int ?string ?real ?regex ?bitvec ?ftvar ?arrow ?map ?seq hτ
-    case bool =>
-      intro he
-      rw [norm_bool] at he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genBoolConst, genApp, genIte, genEq, genQuant, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      · rcases he with rfl | rfl; all_goals exact Nat.zero_le _
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ genLMonoTy_mem_bool) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ he'
-        omega
-      · obtain ⟨τ', hτ'm, e₁, he₁, e₂, he₂, rfl⟩ := he
-        show termDepth bctx (.eq () e₁ e₂) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genGenerableTy_support _ _ _ _ _ _).mp hτ'm⟩ _ he₁
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genGenerableTy_support _ _ _ _ _ _).mp hτ'm⟩ _ he₂
-        omega
-      · obtain ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ := he
-        show termDepth bctx (.quant () .all "" (some τ') tr body) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars (τ' :: bctx) n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genGenerableTy_support _ _ _ _ _ _).mp hτ_tr_m⟩ _ htr
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars (τ' :: bctx) n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hbody
-        have := genLMonoTy_mem_depth ((genGenerableTy_support _ _ _ _ _ _).mp hτ'm)
-        have := le_depthBudget_self K hK n
-        omega
-      · obtain ⟨τ', hτ'm, τ_tr, hτ_tr_m, tr, htr, body, hbody, rfl⟩ := he
-        show termDepth bctx (.quant () .exist "" (some τ') tr body) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars (τ' :: bctx) n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genGenerableTy_support _ _ _ _ _ _).mp hτ_tr_m⟩ _ htr
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars (τ' :: bctx) n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hbody
-        have := genLMonoTy_mem_depth ((genGenerableTy_support _ _ _ _ _ _).mp hτ'm)
-        have := le_depthBudget_self K hK n
-        omega
-
-      -- Five goals remain: the three leaf `pick*` branches, the Indir branch and the IndirPoly
-      -- branch. A `first` combinator discharges them, and not positional bullets, because the order of
-      -- the goals changes with the type case. A positional script assigns them to the wrong goals
-      -- without a message.
-      all_goals (
-        first
-        | (rcases he with ⟨_, h⟩ | ⟨_, rfl | rfl⟩
-           · first
-             | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-             | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-             | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-           all_goals simp [termDepth])
-        -- The Indir branch and the IndirPoly branch.
-        | (rcases he with ⟨_, he⟩ | ⟨_, he⟩
-           · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-               (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-               (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-                 hKpoly hSimpleArgs σ hσ a ha)
-               (fun nm annot args hall =>
-                 termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-               _ e he) ?_
-             simp only [depthBudget]; omega
-           · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-               (depthBudget_mono_le K (by omega)))
-        -- The IndirPoly branch. The pair of `refine` and `exact` appears two times, and the second
-        -- time is after a normalization step with `mem_support_iff`. In some type cases the `simp only`
-        -- above already unfolds `he` to `support …`, and in others it leaves `e ∈ g ()`. `simp only`
-        -- gives an error, and not a no-op, when it has nothing to rewrite.
-        | (simp only [] at he
-           refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-             (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-             (hSimpleArgs bctx _ 3).2
-             (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs σ hσ a ha)
-             (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-               hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-             (fun nm annot args hall =>
-               termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-             e he) ?_
-           simp only [depthBudget]; omega)
-        | (refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-             (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-             (hSimpleArgs bctx _ 3).2
-             (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs σ hσ a ha)
-             (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-               hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-             (fun nm annot args hall =>
-               termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-             e he) ?_
-           simp only [depthBudget]; omega))
-    case int =>
-      intro he
-      rw [norm_int] at he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genIntConst, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      · rcases he with ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩; all_goals simp [termDepth]
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ genLMonoTy_mem_int) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_int _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_int _ he'
-        omega
-
-      all_goals (
-        first
-        | (
-          rcases he with ⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩ | ⟨_, _, rfl⟩⟩
-          · first
-            | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-          all_goals simp [termDepth]
-  )
-        -- The Indir branch and the IndirPoly branch.
-        | (rcases he with ⟨_, he⟩ | ⟨_, he⟩
-           · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-               (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-               (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-                 hKpoly hSimpleArgs σ hσ a ha)
-               (fun nm annot args hall =>
-                 termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-               _ e he) ?_
-             simp only [depthBudget]; omega
-           · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-               (depthBudget_mono_le K (by omega)))
-        | (first | simp only [] at he | skip
-           refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-             (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-             (hSimpleArgs bctx _ 3).2
-             (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs σ hσ a ha)
-             (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-               hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-             (fun nm annot args hall =>
-               termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-             e he) ?_
-           simp only [depthBudget]; omega)
-        )
-    case string =>
-      intro he
-      rw [norm_string] at he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genStrConst, genApp, genIte, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      · obtain ⟨_, _, rfl⟩ := he; simp [termDepth]
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ genLMonoTy_mem_string) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_string _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_string _ he'
-        omega
-
-      all_goals (
-        first
-        | (
-          rcases he with ⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩
-          · first
-            | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-          · simp [termDepth]
-  )
-        -- The Indir branch and the IndirPoly branch.
-        | (rcases he with ⟨_, he⟩ | ⟨_, he⟩
-           · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-               (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-               (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-                 hKpoly hSimpleArgs σ hσ a ha)
-               (fun nm annot args hall =>
-                 termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-               _ e he) ?_
-             simp only [depthBudget]; omega
-           · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-               (depthBudget_mono_le K (by omega)))
-        | (first | simp only [] at he | skip
-           refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-             (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-             (hSimpleArgs bctx _ 3).2
-             (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs σ hσ a ha)
-             (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-               hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-             (fun nm annot args hall =>
-               termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-             e he) ?_
-           simp only [depthBudget]; omega)
-        )
-    case real =>
-      intro he
-      rw [norm_real] at he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genRealConst, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      · obtain ⟨_, _, rfl⟩ := he; simp [termDepth]
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ genLMonoTy_mem_real) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_real _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_real _ he'
-        omega
-
-      all_goals (
-        first
-        | (
-          rcases he with ⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩
-          · first
-            | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-          · simp [termDepth]
-  )
-        -- The Indir branch and the IndirPoly branch.
-        | (rcases he with ⟨_, he⟩ | ⟨_, he⟩
-           · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-               (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-               (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-                 hKpoly hSimpleArgs σ hσ a ha)
-               (fun nm annot args hall =>
-                 termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-               _ e he) ?_
-             simp only [depthBudget]; omega
-           · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-               (depthBudget_mono_le K (by omega)))
-        | (first | simp only [] at he | skip
-           refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-             (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-             (hSimpleArgs bctx _ 3).2
-             (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs σ hσ a ha)
-             (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-               hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-             (fun nm annot args hall =>
-               termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-             e he) ?_
-           simp only [depthBudget]; omega)
-        )
-    case bitvec =>
-      intro w he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genBitvecConst, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      · obtain ⟨_, _, rfl⟩ := he; simp [termDepth]
-      · obtain ⟨τ', hτ'n, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _
-          (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'n⟩
-            genLMonoTy_mem_bitvec) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'n⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bitvec _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bitvec _ he'
-        omega
-
-      all_goals (
-        first
-        | (
-          rcases he with ⟨_, h⟩ | ⟨_, ⟨_, _, rfl⟩⟩
-          · first
-            | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-          · simp [termDepth]
-  )
-        -- The Indir branch and the IndirPoly branch.
-        | (rcases he with ⟨_, he⟩ | ⟨_, he⟩
-           · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-               (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-               (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-                 hKpoly hSimpleArgs σ hσ a ha)
-               (fun nm annot args hall =>
-                 termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-               _ e he) ?_
-             simp only [depthBudget]; omega
-           · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-               (depthBudget_mono_le K (by omega)))
-        | (first | simp only [] at he | skip
-           refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-             (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-             (hSimpleArgs bctx _ 3).2
-             (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs σ hσ a ha)
-             (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-               hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-             (fun nm annot args hall =>
-               termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-             e he) ?_
-           simp only [depthBudget]; omega)
-        )
-    case arrow =>
-      intro τ₁ τ₂ hs₁ hs₂ he
-      rw [norm_arrow] at he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genAbs, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
-      · obtain ⟨body, hbody, rfl⟩ := he
-        show termDepth bctx (.abs () "" (some τ₁) body) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars (τ₁ :: bctx) n K hK hKops hKpoly hSimpleArgs _ hs₂ _ hbody
-        omega
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ (genLMonoTy_mem_arrow hs₁ hs₂)) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow hs₁ hs₂) _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow hs₁ hs₂) _ he'
-        omega
-
-      all_goals (
-        first
-        | (
-          rcases he with ⟨_, h⟩ | ⟨_, body, hbody, rfl⟩
-          · first
-            | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-            | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; simp [termDepth])
-          · show termDepth bctx (.abs () "" (some τ₁) body) ≤ depthBudget K (n + 1); unfold termDepth
-            simp only [depthBudget]
-            have := genLExprBase_termDepth_bound fctx octx pctx tvars (τ₁ :: bctx) n K hK hKops hKpoly hSimpleArgs _ hs₂ _ hbody
-            omega
-  )
-        -- The Indir branch and the IndirPoly branch.
-        | (rcases he with ⟨_, he⟩ | ⟨_, he⟩
-           · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-               (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-               (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-                 hKpoly hSimpleArgs σ hσ a ha)
-               (fun nm annot args hall =>
-                 termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-               _ e he) ?_
-             simp only [depthBudget]; omega
-           · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-               (depthBudget_mono_le K (by omega)))
-        | (first | simp only [] at he | skip
-           refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-             (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-             (hSimpleArgs bctx _ 3).2
-             (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-               hKpoly hSimpleArgs σ hσ a ha)
-             (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-               hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-             (fun nm annot args hall =>
-               termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-             e he) ?_
-           simp only [depthBudget]; omega)
-        )
-    case ftvar =>
-      intro name hname he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ (genLMonoTy_mem_ftvar hname)) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_ftvar hname) _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_ftvar hname) _ he'
-        omega
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      -- The Indir branch and the IndirPoly branch.
-      · rcases he with ⟨_, he⟩ | ⟨_, he⟩
-        · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-            (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-            (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-              hKpoly hSimpleArgs σ hσ a ha)
-            (fun nm annot args hall =>
-              termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-            _ e he) ?_
-          simp only [depthBudget]; omega
-        · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-            (depthBudget_mono_le K (by omega))
-      · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-          (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-          (hSimpleArgs bctx _ 3).2
-          (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs σ hσ a ha)
-          (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-            hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-          (fun nm annot args hall =>
-            termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-          e he) ?_
-        simp only [depthBudget]; omega
-    case regex =>
-      intro he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ genLMonoTy_mem_regex) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_regex _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_regex _ he'
-        omega
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      -- The Indir branch and the IndirPoly branch.
-      · rcases he with ⟨_, he⟩ | ⟨_, he⟩
-        · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-            (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-            (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-              hKpoly hSimpleArgs σ hσ a ha)
-            (fun nm annot args hall =>
-              termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-            _ e he) ?_
-          simp only [depthBudget]; omega
-        · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-            (depthBudget_mono_le K (by omega))
-      · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-          (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-          (hSimpleArgs bctx _ 3).2
-          (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs σ hσ a ha)
-          (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-            hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-          (fun nm annot args hall =>
-            termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-          e he) ?_
-        simp only [depthBudget]; omega
-    case map =>
-      intro τ₁ τ₂ hs₁ hs₂ he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ (genLMonoTy_mem_map hs₁ hs₂)) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_map hs₁ hs₂) _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_map hs₁ hs₂) _ he'
-        omega
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      -- The Indir branch and the IndirPoly branch.
-      · rcases he with ⟨_, he⟩ | ⟨_, he⟩
-        · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-            (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-            (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-              hKpoly hSimpleArgs σ hσ a ha)
-            (fun nm annot args hall =>
-              termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-            _ e he) ?_
-          simp only [depthBudget]; omega
-        · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-            (depthBudget_mono_le K (by omega))
-      · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-          (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-          (hSimpleArgs bctx _ 3).2
-          (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs σ hσ a ha)
-          (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-            hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-          (fun nm annot args hall =>
-            termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-          e he) ?_
-        simp only [depthBudget]; omega
-    case seq =>
-      intro τ₁ hs he
-      simp only [genLExprBase] at he
-      rw [mem_support_frequency_iff] at he
-      obtain ⟨_, g, hg, _, he⟩ := he
-      simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-      rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-      simp only [genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
-        SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
-      · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
-        show termDepth bctx (.app () fn arg) ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_arrow ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ (genLMonoTy_mem_seq hs)) _ hfn
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ ⟨_, (genAppArgTy_support _ _ _ _ _ _ _).mp hτ'm⟩ _ harg
-        omega
-      · obtain ⟨c, hc, t, ht, e', he', rfl⟩ := he
-        show termDepth bctx (.ite () c t e') ≤ depthBudget K (n + 1); unfold termDepth
-        simp only [depthBudget]
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ genLMonoTy_mem_bool _ hc
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_seq hs) _ ht
-        have := genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly hSimpleArgs _ (genLMonoTy_mem_seq hs) _ he'
-        omega
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickFVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩
-        all_goals first
-          | (rw [mem_support_pickBVar_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | (rw [mem_support_pickOp_iff] at h; obtain ⟨_, _, rfl⟩ := h; exact Nat.zero_le _)
-          | exact absurd h (by simp)
-      -- The Indir branch and the IndirPoly branch.
-      · rcases he with ⟨_, he⟩ | ⟨_, he⟩
-        · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndir_measure_le
-            (m := termDepth bctx) octx _ _ (depthBudget K n) (hSimpleArgs bctx _ 3).1
-            (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-              hKpoly hSimpleArgs σ hσ a ha)
-            (fun nm annot args hall =>
-              termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-            _ e he) ?_
-          simp only [depthBudget]; omega
-        · exact Nat.le_trans (genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) e he)
-            (depthBudget_mono_le K (by omega))
-      · refine Nat.le_trans (StrataGenerators.IndirSupport.genIndirPolyCore_measure_le
-          (m := termDepth bctx) fctx octx pctx bctx _ _ _ 3 (depthBudget K n) (depthBudget K n)
-          (hSimpleArgs bctx _ 3).2
-          (fun σ hσ a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops
-            hKpoly hSimpleArgs σ hσ a ha)
-          (fun a ha => genLExprBase_termDepth_bound fctx octx pctx tvars bctx n K hK hKops hKpoly
-            hSimpleArgs _ (by first
-              | exact genLMonoTy_mem_bool
-              | exact genLMonoTy_mem_int
-              | exact genLMonoTy_mem_string
-              | exact genLMonoTy_mem_real
-              | exact genLMonoTy_mem_regex
-              | exact genLMonoTy_mem_bitvec
-              | exact genLMonoTy_mem_ftvar hname
-              | exact genLMonoTy_mem_arrow hs₁ hs₂
-              | exact genLMonoTy_mem_map hs₁ hs₂
-              | exact genLMonoTy_mem_seq hs
-              | assumption) a ha)
-          (fun nm annot args hall =>
-            termDepth_mkApps_le bctx _ args _ (by simp [termDepth]) hall)
-          e he) ?_
-        simp only [depthBudget]; omega
-  termination_by (depth, sizeOf τ)
-  decreasing_by all_goals simp_wf; omega
+end TermDepthBound
 
 -- ── Completeness for genLExpr ─────────────────────────────────────────
 
@@ -4572,7 +3790,8 @@ theorem genLMonoTy_isSoundAndComplete {tvars : List TyIdentifier} {n : Nat} :
     IsSoundAndComplete
       (genLMonoTy (G := SPMF) tvars n)
       (fun τ => inGenLMonoTySupport tvars n τ = true) :=
-  fun τ => genLMonoTy_support tvars n τ
+  .intro (fun τ hτ => (genLMonoTy_support tvars n τ).mp hτ)
+         (fun τ hτ => (genLMonoTy_support tvars n τ).mpr hτ)
 
 -- ── Quick test ────────────────────────────────────────────────────────
 

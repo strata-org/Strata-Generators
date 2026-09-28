@@ -172,14 +172,30 @@ theorem refines_pick {α} (p q : Plausible.Gen α) (s t : SPMF α) (size : ULift
             (pick (fun () => s) (fun () => t)) size := by
   rintro a ⟨sg, sg', h⟩
   rw [SPMF.mem_support_pick_iff]
-  -- `pick` is `choose 0 1 >>= fun i => if i.down.val == 0 then _ else _`.
-  simp only [RandomChoice.pick, bind_apply] at h
+  -- `pick x y` is `oneOf [x, y]`, which is
+  -- `choose 0 1 >>= fun i => ([x, y][i.down.val]'_) ()`. The drawn index is 0 or 1, so the
+  -- `getElem` is one of the two branches.
+  -- Whichever index the draw gives, the `getElem` *is* one of the two branches. The index sits under
+  -- a dependent `getElem` proof, so neither `rw` nor `simp` can substitute for it; casing on the
+  -- index inside this `have`, where the proof obligation is discharged per case, avoids that.
+  have key : ∀ (j : Nat) (hj : j < ([fun (_ : Unit) => p, fun _ => q]).length),
+      ([fun (_ : Unit) => p, fun _ => q][j]'hj) = (fun _ => p)
+        ∨ ([fun (_ : Unit) => p, fun _ => q][j]'hj) = (fun _ => q) := by
+    intro j hj
+    match j with
+    | 0 => exact Or.inl rfl
+    | 1 => exact Or.inr rfl
+    | _ + 2 => simp at hj
+  simp only [RandomChoice.pick, oneOf, bind_apply] at h
   split at h
   · rename_i v sgmid heq
-    by_cases hv : v.down.val == 0
-    · simp only [hv, if_pos] at h
+    rcases key v.down.val (by
+      have hlt := v.down.property.2
+      simp only [List.length_cons, List.length_nil] at hlt ⊢
+      omega) with hk | hk
+    · rw [hk] at h
       exact Or.inl (hp a ⟨sgmid, sg', by simpa using h⟩)
-    · simp only [hv] at h
+    · rw [hk] at h
       exact Or.inr (hq a ⟨sgmid, sg', by simpa using h⟩)
   · exact absurd h (by simp)
 
