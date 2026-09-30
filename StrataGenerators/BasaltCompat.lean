@@ -8,21 +8,21 @@ import Basalt.SPMF.Support
 open Lean.Order RandomChoice
 
 /-!
-# What the Basalt library used to export
+# The support lemmas the Basalt library does not state
 
-Basalt's `SPMF` support API was reorganised around the **observation walk**: a judgment about a
-generator is proved by `walk`, which recurses on the generator's syntax and applies one `@[gen_rule]`
-lemma per combinator. Two consequences for a caller:
+Basalt's `SPMF` support API is organised around the **observation walk**: a judgment about a generator
+is proved by `walk`, which recurses on the generator's syntax and applies one `@[gen_rule]` lemma per
+combinator. Two consequences for a caller:
 
-* `Basalt/SPMF/Support.lean` keeps the set-level equalities `support_oneOf` and `support_frequency`,
-  and the monadic membership lemmas (`mem_support_bind_iff`, `mem_support_pure_iff`,
-  `mem_support_map_iff`, `mem_support_choose_iff`, `mem_support_dite_iff`, `mem_support_ite_iff`).
-  It no longer states a **membership** form for a choice combinator, and states nothing at all for
-  `RandomChoice.pick`, `elements`, `chooseNat`, `chooseInt` or `RandomChoice.coin`.
-* `biasedOptionGen` and `optionGen` left the library for `BasaltTest/OptionGen.lean`, where they are
+* `Basalt/SPMF/Support.lean` has the set-level equalities `support_oneOf` and `support_frequency`, and
+  the monadic membership lemmas (`mem_support_bind_iff`, `mem_support_pure_iff`,
+  `mem_support_map_iff`, `mem_support_choose_iff`, `mem_support_dite_iff`, `mem_support_ite_iff`). It
+  has no **membership** form for a choice combinator, and nothing at all for `RandomChoice.pick`,
+  `elements`, `chooseNat`, `chooseInt` or `RandomChoice.coin`.
+* `biasedOptionGen` and `optionGen` live in `BasaltTest/OptionGen.lean` rather than the library, as
   fixtures that pin the walk's behaviour on a combinator with no law.
 
-This file restores exactly what this package draws on, and nothing else.
+This file holds exactly what this package draws on of the two, and nothing else.
 
 ## Why a membership form and not the walk
 

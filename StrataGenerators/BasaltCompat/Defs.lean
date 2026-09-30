@@ -7,10 +7,10 @@ import Basalt.Combinators
 open Lean.Order RandomChoice
 
 /-!
-# The option combinators Basalt's library no longer holds
+# The option combinators the Basalt library does not hold
 
-`biasedOptionGen` and `optionGen` left the Basalt library for `BasaltTest/OptionGen.lean`, where they
-are fixtures that pin the walk's behaviour on a combinator with no law. The generators in this package
+`biasedOptionGen` and `optionGen` live in `BasaltTest/OptionGen.lean` rather than the Basalt library,
+as fixtures that pin the walk's behaviour on a combinator with no law. The generators in this package
 draw from them, so the definitions live here.
 
 This module imports `Basalt.Combinators` only, and therefore no `Basalt.SPMF` and no Mathlib. That is

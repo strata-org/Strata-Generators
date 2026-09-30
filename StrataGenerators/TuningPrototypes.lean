@@ -504,9 +504,9 @@ Three moves get around it.
    `hgen` of each branch below — so `split` fires on the shipping side at a *variable* discriminant and
    substitutes the depth and `τ` into the tuned side as well. Both then reduce together.
 2. **One lemma per arm.** At a constructor pattern the tuned side whnfs to its `frequency`, so
-   `apply SPMF.support_frequency_congr_branches` unifies straight through the matcher. That whnf costs
-   between 1M and 8M heartbeats *per arm*, so all 21 arms in one declaration overruns any budget; each
-   arm is its own lemma with its own.
+   `apply SPMF.support_frequency_congr_branches` unifies straight through the matcher. That whnf is the
+   dominant cost of an arm, and a heartbeat budget is per declaration, so each of the 21 arms is its own
+   lemma with its own budget rather than all of them sharing one.
 3. **The catch-alls by matcher equation.** `genLExprBase.match_1.eq_21` and `.eq_22` take exactly the
    ten negative facts about `τ` that `split` hands over, and rewrite the matcher — the over-applied one
    included — to the catch-all arm. They are generated on demand and resolve by name.
@@ -527,24 +527,22 @@ abbrev TunedIH (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 /-! ### Why each arm is spelled out rather than searched
 
 Each arm below is one `frequency` congruence over its type's branch list, and each closes by naming the
-lemma for every branch: a `List.Forall₂.cons` chain with one `case` per element. No search, so nothing
-fails, and the cost is linear in the branch count.
+lemma for every branch: a `List.Forall₂.cons` chain with one `case` per element. It is verbose, and the
+verbosity is the point.
 
-The arms used to share one `arm_close` tactic that searched — `repeat' first` over a dozen alternatives
-at every node — and that was expensive enough to need `set_option maxHeartbeats 8000000` on all eleven.
-`genAbs`, `genApp`, `genIte`, `genEq` and `genQuant` are `@[reducible]`, so an alternative that does not
-apply still whnfs through the branch's whole `do` block before failing, and an arm paid that once per
-branch per failed alternative. `arm_bool_succ`, the widest at eleven branches, cost **6186164**
-heartbeats; the others ran from 1290060 to 3803450. Spelled out, `arm_bool_succ` costs **14799**, a
-factor of 418, and no arm now needs a budget above the default.
+A tactic that searched the branch list instead — `repeat' first` over the dozen or so lemmas that can
+apply — is far more expensive here than the shape of the goal suggests. `genAbs`, `genApp`, `genIte`,
+`genEq` and `genQuant` are `@[reducible]`, so an alternative that does *not* apply still whnfs through
+the branch's whole `do` block before it fails, and an arm pays that once per branch per failed
+alternative. The widest arm, `arm_bool_succ` at eleven branches, pays it most. Naming the lemma per
+branch means nothing fails, and the cost is linear in the branch count and stays inside the default
+heartbeat budget.
 
-**Two things that do not work**, so nobody repeats them. Adding a congruence lemma per wrapper
-(matching by head symbol instead of unfolding) *raised* `arm_bool_succ` to 30710862: because the
-wrappers are reducible such a lemma gives unification no syntactic discrimination, so it behaves as a
-costlier `SPMF.support_bind_congr` tried at every node. And the natural repair,
-`attribute [local irreducible] genAbs genApp …`, is rejected — Lean will not make a `@[reducible]`
-definition irreducible. The weight obligations were never the cost: replacing their
-`simp [Tuning.weight_pos]` with `simp only` moved `arm_bool_succ` by 0.01%. -/
+Two repairs that look obvious do not work. A congruence lemma per wrapper, to match by head symbol
+instead of unfolding, gives unification no syntactic discrimination *because* the wrappers are
+reducible, so it behaves as a costlier `SPMF.support_bind_congr` tried at every node. And
+`attribute [local irreducible] genAbs genApp …` is rejected: Lean will not make a `@[reducible]`
+definition irreducible. The weight obligations are not where the cost is; only the `rel` one is. -/
 
 private theorem arm_arrow_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (τ₁ τ₂ : LMonoTy)

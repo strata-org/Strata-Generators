@@ -2265,11 +2265,9 @@ local macro "termDepth_arm_succ " bctx:term ", " ihW:term ", " hIndir:term ", "
            and_imp, forall_const, true_implies, and_true, true_and, and_self]
          omega))))
 
--- Measured at 196717 heartbeats, which is just under the default of 200000. The bound here is a
--- factor of two above that, so a small drift in Lean or Mathlib does not break the build; the figure
--- is worth re-measuring with `#count_heartbeats` if this proof is edited. The walk is what makes the
--- number small: the previous proof inverted the support of every branch by hand and needed 5461285.
-set_option maxHeartbeats 400000 in
+-- This proof runs on the default heartbeat budget, and deliberately carries no `set_option`: the walk
+-- is what keeps it there, so an edit that pushes it over should break the build and be looked at
+-- rather than be absorbed by a larger number. `#count_heartbeats` reports the current figure.
 /-- **The `termDepth` bound, by induction on the depth.** This is the statement
 `genLExprBase_termDepth_bound` below reports; the induction needs it quantified over `bctx` and `τ`,
 because the `abs` and `quant` arms recurse under an extended binder context and at a drawn type.

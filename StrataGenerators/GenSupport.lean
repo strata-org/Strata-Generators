@@ -24,7 +24,7 @@ This file holds four things Basalt does not.
    produces nothing.
 2. The `mem_support_*_iff` family for the **choice** combinators — `oneOf`, `frequency`, `pick`,
    `elements`, `chooseNat`, `chooseInt`, `coin`, `biasedOptionGen`, `optionGen` — and the `support_*`
-   equalities Basalt no longer states for them. See the section note below.
+   equalities Basalt does not state for them. See `StrataGenerators.BasaltCompat`.
 3. `weightedOptionGen`, an `optionGen` whose `some`/`none` split is a two-branch `frequency` rather
    than a `RandomChoice.coin`, so that `@[tunable]` can see it.
 4. `wellFounded_fix_rel`, which lifts a relation between two step functions to a relation between
