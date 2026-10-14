@@ -398,7 +398,7 @@ theorem genCmdsT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyI
     `genLMonoTy` recurses structurally on its depth, so this is an induction on that depth: `delta`
     plus `dsimp only` reduces the tuned copy's `Nat.brecOn` at the successor, leaving the recursive
     occurrences definitionally equal to `genLMonoTy.tuned θ tvars k`, which the induction hypothesis
-    closes. The `0` arm is a `pick` and carries no weight, so it closes by `rfl`. -/
+    closes. The `0` arm is a two-branch `oneOf` and carries no weight, so it closes by `rfl`. -/
 theorem genLMonoTy_tuned_support_eq (θ : Tuning) (tvars : List TyIdentifier) :
     ∀ n, SPMF.support (genLMonoTy.tuned (G := SPMF) θ tvars n)
       = SPMF.support (genLMonoTy (G := SPMF) tvars n) := by

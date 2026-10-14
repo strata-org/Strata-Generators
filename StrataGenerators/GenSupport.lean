@@ -22,7 +22,7 @@ This file holds four things Basalt does not.
 
 1. `SPMF.mem_support_bot_iff`, so that a `simp` set can discharge the branch of a generator that
    produces nothing.
-2. The `mem_support_*_iff` family for the **choice** combinators — `oneOf`, `frequency`, `pick`,
+2. The `mem_support_*_iff` family for the **choice** combinators — `oneOf` (and its two-branch form), `frequency`,
    `elements`, `chooseNat`, `chooseInt`, `coin`, `biasedOptionGen`, `optionGen` — and the `support_*`
    equalities Basalt does not state for them. See `StrataGenerators.BasaltCompat`.
 3. `weightedOptionGen`, an `optionGen` whose `some`/`none` split is a two-branch `frequency` rather
@@ -72,7 +72,7 @@ its branches, and want the `mem_support_*_iff` family instead. -/
 
 export SPMF (support support_bind mem_support_bind_iff support_pure mem_support_pure_iff support_map
   mem_support_map_iff mem_support_dite_iff mem_support_ite_iff support_choose mem_support_choose_iff
-  mem_support_chooseNat_iff mem_support_chooseInt_iff support_pick mem_support_pick_iff support_oneOf
+  mem_support_chooseNat_iff mem_support_chooseInt_iff support_oneOf_pair mem_support_oneOf_pair_iff support_oneOf
   mem_support_oneOf_iff support_frequency mem_support_frequency_iff support_elements
   mem_support_elements_iff support_vectorOf mem_support_vectorOf_iff support_listOfMaxLength
   mem_support_listOfMaxLength_iff support_listOf mem_support_listOf mem_support_listOf_iff

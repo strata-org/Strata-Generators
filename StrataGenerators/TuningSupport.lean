@@ -86,12 +86,12 @@ theorem support_ite_congr {p : Prop} [Decidable p] {t t' e e' : SPMF α}
     (ite p t e).support = (ite p t' e').support := by
   by_cases hp : p <;> simp [hp, ht, he]
 
-/-- The support of a `pick` is the union of the two branches' supports. -/
-theorem support_pick_congr {x x' y y' : SPMF α}
+/-- The support of a two-branch `oneOf` is the union of the two branches' supports. -/
+theorem support_oneOf_pair_congr {x x' y y' : SPMF α}
     (hx : x.support = x'.support) (hy : y.support = y'.support) :
-    (pick (fun () => x) (fun () => y)).support
-      = (pick (fun () => x') (fun () => y')).support := by
-  rw [support_pick, support_pick, hx, hy]
+    (oneOf [fun () => x, fun () => y]).support
+      = (oneOf [fun () => x', fun () => y']).support := by
+  rw [support_oneOf_pair, support_oneOf_pair, hx, hy]
 
 /-- The support of `optionGen` depends only on the support of its payload. `optionGen` splits on a
 rational `coin`, which no tuning can address, so a site inside the payload has to travel out through
@@ -234,7 +234,7 @@ end SPMF
 /-! ## A tactic for the per-branch obligations
 
 The congruences above are structural, so applying them to a generator's body is mechanical: descend
-through every `bind`, `dite`, `ite`, `map`, `pick`, `oneOf` and `frequency`, and finish each leaf
+through every `bind`, `dite`, `ite`, `map`, `oneOf` and `frequency`, and finish each leaf
 either by reflexivity (the leaf does not mention the recursive call) or with the induction hypothesis.
 `support_congr` does exactly that. Pass the induction hypotheses as arguments; they are tried at every
 leaf. -/
@@ -257,7 +257,7 @@ macro_rules
         | refine SPMF.support_bind_congr ?_ (fun _ => ?_)
         | refine SPMF.support_dite_congr (fun _ => ?_) (fun _ => ?_)
         | refine SPMF.support_ite_congr ?_ ?_
-        | refine SPMF.support_pick_congr ?_ ?_
+        | refine SPMF.support_oneOf_pair_congr ?_ ?_
         | refine SPMF.support_map_congr ?_
         | refine SPMF.support_mapM_congr (fun _ => ?_) _
         | refine SPMF.support_optionGen_congr ?_

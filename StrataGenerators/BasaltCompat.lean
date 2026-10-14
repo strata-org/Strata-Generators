@@ -17,7 +17,7 @@ combinator. Two consequences for a caller:
 * `Basalt/SPMF/Support.lean` has the set-level equalities `support_oneOf` and `support_frequency`, and
   the monadic membership lemmas (`mem_support_bind_iff`, `mem_support_pure_iff`,
   `mem_support_map_iff`, `mem_support_choose_iff`, `mem_support_dite_iff`, `mem_support_ite_iff`). It
-  has no **membership** form for a choice combinator, and nothing at all for `RandomChoice.pick`,
+  has no **membership** form for a choice combinator, and nothing at all for a two-branch `oneOf`,
   `elements`, `chooseNat`, `chooseInt` or `RandomChoice.coin`.
 * `biasedOptionGen` and `optionGen` live in `BasaltTest/OptionGen.lean` rather than the library, as
   fixtures that pin the walk's behaviour on a combinator with no law.
@@ -59,26 +59,21 @@ theorem mem_support_frequency_iff {gs : List (Nat × (Unit → SPMF α))}
     a ∈ (frequency gs h_pos).support ↔ ∃ w g, (w, g) ∈ gs ∧ 0 < w ∧ a ∈ (g ()).support := by
   simp [support_frequency]
 
-section pick
-set_option linter.deprecated false
-
-/-- `RandomChoice.pick x y` is `oneOf [x, y]`, so its support is the union of the two branches'. -/
+/-- A two-branch `oneOf [x, y]` (the form that replaces Basalt's deprecated `RandomChoice.pick`) has
+the union of the two branches' supports. -/
 @[simp]
-theorem support_pick {x y : SPMF α} :
-    (pick (fun () => x) (fun () => y)).support = x.support ∪ y.support := by
-  unfold RandomChoice.pick
+theorem support_oneOf_pair {x y : SPMF α} :
+    (oneOf [fun () => x, fun () => y]).support = x.support ∪ y.support := by
   rw [support_oneOf]
   ext b
   simp only [Set.mem_setOf_eq, Set.mem_union, List.mem_cons, List.not_mem_nil, or_false,
     exists_eq_or_imp, exists_eq_left]
 
-/-- Membership form of `support_pick`. -/
+/-- Membership form of `support_oneOf_pair`. -/
 @[simp]
-theorem mem_support_pick_iff {x y : SPMF α} {a : α} :
-    a ∈ (pick (fun () => x) (fun () => y)).support ↔ a ∈ x.support ∨ a ∈ y.support := by
+theorem mem_support_oneOf_pair_iff {x y : SPMF α} {a : α} :
+    a ∈ (oneOf [fun () => x, fun () => y]).support ↔ a ∈ x.support ∨ a ∈ y.support := by
   simp
-
-end pick
 
 /-- The support of `elements xs` is exactly the elements of `xs`. Basalt's own proof. -/
 @[simp]

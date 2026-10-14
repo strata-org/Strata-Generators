@@ -479,14 +479,14 @@ def genLExprT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
     frequency
       [ (1, fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ),
         (9, fun () =>
-        pick
-          (fun () => genIndir octx τ genArg h)
-          (fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg)) ]
+        oneOf
+          [ fun () => genIndir octx τ genArg h,
+            fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg ]) ]
       (by simp)
   else
-    pick
-      (fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ)
-      (fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg)
+    oneOf
+      [ fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ,
+        fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg ]
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- The plumbing is the shipping generator

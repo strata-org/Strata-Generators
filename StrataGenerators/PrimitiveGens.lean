@@ -57,18 +57,18 @@ depend on the outer `do let v ← gen; pure (.const … v)` shape. Keep that sha
 
 namespace StrataGenerators.PrimitiveGens
 
-/-- An unbounded geometric `Nat` generator, a `pick` between `0` and `(· + 1)`.
+/-- An unbounded geometric `Nat` generator, a two-branch `oneOf` between `0` and `(· + 1)`.
     Only the completeness tail of `genRat` uses it. Every other branch in this
     file samples uniformly with `chooseNat`.
 
     A local copy of Basalt's geometric `Nat` generator, definitionally the same as
     it, for the same reason that `HasTypeAGen/Core.lean` holds one. -/
 def natArbGeom [Gen G] : G Nat := do
-  pick
-    (fun () => pure 0)
-    (fun () => do
-      let n ← natArbGeom
-      pure (n + 1))
+  oneOf
+    [ fun () => pure 0,
+      fun () => do
+        let n ← natArbGeom
+        pure (n + 1) ]
 partial_fixpoint
 
 /-! ## Non-ASCII characters and strings -/
@@ -312,8 +312,8 @@ def genRat [Gen G] : G Rat :=
         -- window is reachable, and the generator is then not complete.
         let n ← natArbGeom
         let d ← natArbGeom
-        pick (fun () => pure (mkRat (n : Int) d))
-             (fun () => pure (mkRat (-(n : Int)) d))) ]
+        oneOf [fun () => pure (mkRat (n : Int) d),
+               fun () => pure (mkRat (-(n : Int)) d)]) ]
     (by simp)
 
 /-! ## Boundary-biased bitvectors
