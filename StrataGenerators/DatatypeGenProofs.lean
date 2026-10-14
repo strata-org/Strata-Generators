@@ -427,7 +427,7 @@ private theorem Nat_arbitrary_support_set (n : Nat) :
   | zero => rw [Nat.arbitrary]; simp
   | succ n ih =>
     rw [Nat.arbitrary]
-    simp only [mem_support_pick_iff, mem_support_bind_iff, mem_support_pure_iff]
+    simp only [mem_support_oneOf_pair_iff, mem_support_bind_iff, mem_support_pure_iff]
     exact Or.inr ⟨n, ih, rfl⟩
 
 /-- `genBaseTy` makes exactly two kinds of type. It makes the bitvectors of each width, and

@@ -24,11 +24,11 @@ open RandomChoice
     no such split upstream, so the definition is repeated here. Delete this copy once Basalt gains
     `BasaltExamples/ArbNat/Def.lean`. -/
 def Nat.arbitrary [Gen G] : G Nat := do
-  pick
-    (fun () => pure 0)
-    (fun () => do
-      let n ← Nat.arbitrary
-      pure (n + 1))
+  oneOf
+    [ fun () => pure 0,
+      fun () => do
+        let n ← Nat.arbitrary
+        pure (n + 1) ]
 partial_fixpoint
 
 end ArbNat
@@ -279,8 +279,8 @@ def pickBaseType [Gen G] : G LMonoTy :=
 def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
   | 0 =>
     if h : tvars.length > 0 then
-      pick (fun () => pickBaseType)
-           (fun () => pickTyVar tvars h)
+      oneOf [fun () => pickBaseType,
+             fun () => pickTyVar tvars h]
     else
       pickBaseType
   | n + 1 =>
@@ -329,13 +329,13 @@ def genLMonoTy [Gen G] (tvars : List TyIdentifier) : Nat → G LMonoTy
 
 /-- Generate a random boolean constant, which is `true` or `false`. -/
 @[reducible] def genBoolConst [Gen G] : G LExpr' :=
-  pick (fun () => pure (.boolConst () true))
-       (fun () => pure (.boolConst () false))
+  oneOf [fun () => pure (.boolConst () true),
+         fun () => pure (.boolConst () false)]
 
 /-- Generate a random integer constant. The value can be negative or not negative. -/
 @[reducible] def genIntConst [Gen G] : G LExpr' :=
-  pick (fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)))
-       (fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int))))
+  oneOf [fun () => do let k ← Nat.arbitrary; pure (.intConst () (k : Int)),
+         fun () => do let k ← Nat.arbitrary; pure (.intConst () (-(↑k + 1 : Int)))]
 
 /-- The list of characters that `String.arbitrary` of Basalt draws from. -/
 abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
@@ -1755,19 +1755,19 @@ def genLExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     frequency
       [ (1, fun () => genLExprBase fctx octx pctx tvars bctx depth τ),
         (9, fun () =>
-        pick
-          (fun () =>
-            -- The monomorphic Indir rule.
-            genIndir octx τ genArg h)
-          (fun () =>
-            -- The polymorphic IndirPoly rule.
-            genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs genArg)) ]
+        oneOf
+          [ fun () =>
+              -- The monomorphic Indir rule.
+              genIndir octx τ genArg h,
+            fun () =>
+              -- The polymorphic IndirPoly rule.
+              genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs genArg ]) ]
       (by simp)
   else
     -- There is no monomorphic candidate, so try IndirPoly or the base generator.
-    pick
-      (fun () => genLExprBase fctx octx pctx tvars bctx depth τ)
-      (fun () => genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs genArg)
+    oneOf
+      [ fun () => genLExprBase fctx octx pctx tvars bctx depth τ,
+        fun () => genIndirPoly fctx octx pctx tvars bctx depth τ maxNumArgs genArg ]
 
 -- ── Top-level generators ─────────────────────────────────────────────
 

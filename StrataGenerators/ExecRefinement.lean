@@ -14,7 +14,7 @@ The bridge is the relation `Refines p s size`:
 > each value that `p` can return, at some seed and at this size, is in
 > `SPMF.support s`.
 
-`Refines` is *compositional*. `pure`, `bind`, `map`, `choose`, `pick` and `default` all
+`Refines` is *compositional*. `pure`, `bind`, `map`, `choose`, a two-branch `oneOf` and `default` all
 keep it, and `retryGen` and `retryGenArg` also keep it. A generator that is polymorphic
 in `[Gen G]` and built from those combinators therefore refines its own instance at
 `SPMF` when it runs at `Plausible.Gen`. The proved results about the support then
@@ -164,15 +164,16 @@ theorem refines_default {α} [Inhabited α] (size : ULift Nat) :
              Function.comp_def, StateT.lift, bind, ReaderT.bind, Except.bind] at h
   exact absurd h (by simp)
 
-/-- `pick` refines `pick` when both of its branches refine their branches. A choice between
-    two branches cannot reach a value outside the union of the two supports. -/
-theorem refines_pick {α} (p q : Plausible.Gen α) (s t : SPMF α) (size : ULift Nat)
+/-- A two-branch `oneOf` refines a two-branch `oneOf` when both of its branches refine their
+    branches. A choice between two branches cannot reach a value outside the union of the two
+    supports. -/
+theorem refines_oneOf_pair {α} (p q : Plausible.Gen α) (s t : SPMF α) (size : ULift Nat)
     (hp : Refines p s size) (hq : Refines q t size) :
-    Refines (pick (fun () => p) (fun () => q))
-            (pick (fun () => s) (fun () => t)) size := by
+    Refines (oneOf [fun () => p, fun () => q])
+            (oneOf [fun () => s, fun () => t]) size := by
   rintro a ⟨sg, sg', h⟩
-  rw [SPMF.mem_support_pick_iff]
-  -- `pick x y` is `oneOf [x, y]`, which is
+  rw [SPMF.mem_support_oneOf_pair_iff]
+  -- `oneOf [x, y]` is
   -- `choose 0 1 >>= fun i => ([x, y][i.down.val]'_) ()`. The drawn index is 0 or 1, so the
   -- `getElem` is one of the two branches.
   -- Whichever index the draw gives, the `getElem` *is* one of the two branches. The index sits under
@@ -186,7 +187,7 @@ theorem refines_pick {α} (p q : Plausible.Gen α) (s t : SPMF α) (size : ULift
     | 0 => exact Or.inl rfl
     | 1 => exact Or.inr rfl
     | _ + 2 => simp at hj
-  simp only [RandomChoice.pick, oneOf, bind_apply] at h
+  simp only [oneOf, bind_apply] at h
   split at h
   · rename_i v sgmid heq
     rcases key v.down.val (by
@@ -226,7 +227,7 @@ theorem refines_retryGenArg {α β} (fuel : Nat) (f : α → Plausible.Gen β)
 /-! ## What this module covers
 
 `refines_choose` and `refines_default` are the base cases. `refines_bind`, `refines_map`
-and `refines_pick` carry refinement through the combinators of the `Gen` class of
+and `refines_oneOf_pair` carry refinement through the combinators of the `Gen` class of
 `Basalt`. `refines_retryGen` and `refines_retryGenArg` cover the harness in production.
 
 This module does *not* prove one theorem

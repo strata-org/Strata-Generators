@@ -617,7 +617,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     rw [norm_arrow'] at he
     simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, h⟩) | ((⟨hf, h⟩ | ⟨_, h⟩) | (⟨_, h⟩ | ⟨_, h⟩))
     · exact pickBVar_mem_opsConsistentR F bctx (.arrow τ₁ τ₂) h
     · exact h.elim
@@ -630,7 +630,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     rw [norm_bool'] at he
     simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff] at he
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff] at he
     rcases he with (rfl | rfl) | ((⟨_, h⟩ | ⟨_, rfl | rfl⟩) | ((⟨hf, h⟩ | ⟨_, rfl | rfl⟩) | (⟨_, h⟩ | ⟨_, rfl | rfl⟩)))
     · exact .const
     · exact .const
@@ -648,7 +648,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     rw [norm_int'] at he
     simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
       SPMF.mem_support_dite_iff] at he
     rcases he with (⟨k, _, rfl⟩ | ⟨k, _, rfl⟩) | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩⟩)))
     · exact .const
@@ -667,7 +667,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     rw [norm_string'] at he
     simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
       SPMF.mem_support_dite_iff] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     · exact .const
@@ -682,7 +682,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
       rw [genLExprBase.eq_def]; exact he
     rw [norm_real'] at he
     simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
       SPMF.mem_support_dite_iff] at he
     rcases he with ⟨r, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩)))
     · exact .const
@@ -696,7 +696,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.bitvec n)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff,
       SPMF.mem_support_dite_iff] at he
     rcases he with ⟨k, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | ((⟨hf, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨k, _, rfl⟩⟩)))
     · exact .const
@@ -745,7 +745,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genBoolConst, genApp, genIte, genEq, genQuant, mem_support_pick_iff, SPMF.mem_support_bind_iff,
+    simp only [genBoolConst, genApp, genIte, genEq, genQuant, mem_support_oneOf_pair_iff, SPMF.mem_support_bind_iff,
       SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · rcases he with rfl | rfl <;> exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
@@ -812,7 +812,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genIntConst, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
+    simp only [genIntConst, genApp, genIte, mem_support_oneOf_pair_iff, SPMF.mem_support_bind_iff,
       SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · rcases he with ⟨k, _, rfl⟩ | ⟨k, _, rfl⟩ <;> exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
@@ -931,7 +931,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [genRealConst, genApp, genIte, mem_support_pick_iff, SPMF.mem_support_bind_iff,
+    simp only [genRealConst, genApp, genIte, mem_support_oneOf_pair_iff, SPMF.mem_support_bind_iff,
       SPMF.mem_support_pure_iff, SPMF.mem_support_dite_iff] at he
     · obtain ⟨r, _, rfl⟩ := he; exact .const
     · obtain ⟨τ', hτ'm, arg, harg, fn, hfn, rfl⟩ := he
@@ -1078,7 +1078,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.ftvar name)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff,
                mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1163,7 +1163,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 .regex) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff,
                mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1248,7 +1248,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.map τ₁ τ₂)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff,
                mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1333,7 +1333,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     replace he : e ∈ SPMF.support (genLExprBase (G := SPMF) fctx (factoryOps F) pctx tvars bctx 0 (.seq τ)) := by
       rw [genLExprBase.eq_def]; exact he
     simp only [mem_support_pure_iff, genLExprBase, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff,
                mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨hf, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1420,7 +1420,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     -- generic factory type of the operator, so it is the identity instance that
     -- `OpsConsistentR.op_in` accepts. The other two leaves carry no `.op` node.
     simp only [mem_support_pure_iff, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-      or_false, exists_eq_or_imp, exists_eq_left, mem_support_pick_iff, SPMF.mem_support_dite_iff,
+      or_false, exists_eq_or_imp, exists_eq_left, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff,
                mem_support_bot_iff] at he
     rcases he with (⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
       ((⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩) |
@@ -1467,7 +1467,7 @@ theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx)
     obtain ⟨_, g, hg, _, he⟩ := hfreq
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
     rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ <;>
-    simp only [mem_support_pure_iff, mem_support_pick_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
+    simp only [mem_support_pure_iff, mem_support_oneOf_pair_iff, SPMF.mem_support_dite_iff, mem_support_bot_iff] at he
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, ⟨_, h⟩ | ⟨_, h⟩⟩⟩
       all_goals first
         | exact h.elim
@@ -1578,7 +1578,7 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
       simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
       rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx 0 τ e he
-      rw [mem_support_pick_iff] at he
+      rw [mem_support_oneOf_pair_iff] at he
       rcases he with he | he
       · unfold genIndir at he
         simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at he
@@ -1588,7 +1588,7 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
         · exact indir_op_opsConsistentR F τ _ _ hentry_mem
         · exact mapM_genArg_opsConsistentR F _ hArg _ args hargs
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx 0 τ _ hPoly _ hArg e he
-    · rw [mem_support_pick_iff] at he
+    · rw [mem_support_oneOf_pair_iff] at he
       rcases he with he | he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx 0 τ e he
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx 0 τ _ hPoly _ hArg e he
@@ -1605,7 +1605,7 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
       simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
       rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx (n + 1) τ e he
-      rw [mem_support_pick_iff] at he
+      rw [mem_support_oneOf_pair_iff] at he
       rcases he with he | he
       · unfold genIndir at he
         simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at he
@@ -1615,7 +1615,7 @@ theorem genLExpr_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pc
         · exact indir_op_opsConsistentR F τ _ _ hentry_mem
         · exact mapM_genArg_opsConsistentR F _ hArg _ args hargs
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx (n + 1) τ _ hPoly _ hArg e he
-    · rw [mem_support_pick_iff] at he
+    · rw [mem_support_oneOf_pair_iff] at he
       rcases he with he | he
       · exact genLExprBase_opsConsistentR F fctx pctx tvars hPoly bctx (n + 1) τ e he
       · exact genIndirPoly_opsConsistentR F fctx pctx tvars bctx (n + 1) τ _ hPoly _ hArg e he
