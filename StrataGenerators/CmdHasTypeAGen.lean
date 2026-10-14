@@ -1,15 +1,14 @@
-import StrataGenerators.SetGen
+import StrataGenerators.GenSupport
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
+open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 
 /-!
 # A generator for a well-typed command that satisfies `CmdHasTypeA`
 
-A random generator on the `SetGen` interpretation of Basalt, for a well-typed imperative
-command of Strata. Such a command is a `Cmd Expression`, and it satisfies the relation
-`CmdHasTypeA`.
+A random generator for a well-typed imperative command of Strata, reasoned about at Basalt's `SPMF`.
+Such a command is a `Cmd Expression`, and it satisfies the relation `CmdHasTypeA`.
 
 ## Contents
 
@@ -413,14 +412,14 @@ theorem genCmd_support_iff
     (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (r : GenCmdResult) (pctx : PolyOpCtx := []) :
-    r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx) ↔
-    (r ∈ SetGen.support (genInitDet (G := SetGen.Set) octx tvars ctx depth depth pctx) ∨
-     r ∈ SetGen.support (genInitNondet (G := SetGen.Set) tvars ctx depth) ∨
-     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetDet (G := SetGen.Set) octx tvars immutableVars ctx depth h pctx)) ∨
-     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetNondet (G := SetGen.Set) immutableVars ctx h)) ∨
-     r ∈ SetGen.support (genAssertCmd (G := SetGen.Set) octx tvars ctx depth pctx) ∨
-     r ∈ SetGen.support (genAssumeCmd (G := SetGen.Set) octx tvars ctx depth pctx) ∨
-     r ∈ SetGen.support (genCoverCmd (G := SetGen.Set) octx tvars ctx depth pctx)) := by
+    r ∈ SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx) ↔
+    (r ∈ SPMF.support (genInitDet (G := SPMF) octx tvars ctx depth depth pctx) ∨
+     r ∈ SPMF.support (genInitNondet (G := SPMF) tvars ctx depth) ∨
+     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SPMF.support (genSetDet (G := SPMF) octx tvars immutableVars ctx depth h pctx)) ∨
+     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SPMF.support (genSetNondet (G := SPMF) immutableVars ctx h)) ∨
+     r ∈ SPMF.support (genAssertCmd (G := SPMF) octx tvars ctx depth pctx) ∨
+     r ∈ SPMF.support (genAssumeCmd (G := SPMF) octx tvars ctx depth pctx) ∨
+     r ∈ SPMF.support (genCoverCmd (G := SPMF) octx tvars ctx depth pctx)) := by
   simp only [genCmd, mem_support_dite_iff]
   constructor
   · intro hr
@@ -542,7 +541,7 @@ private theorem dodgeKeyword_fallbackFreshName_isFresh (ctx : VarCtx) :
 /-- Each name in the support of `genFreshName ctx` is fresh in `ctx`. The identifier
     `⟨name, ()⟩` of such a name is therefore absent from the context. -/
 theorem genFreshName_produces_fresh (ctx : VarCtx) :
-    ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
+    ∀ name, name ∈ SPMF.support (genFreshName (G := SPMF) ctx) →
       VarCtx.isFresh ctx ⟨name, ()⟩ = true := by
   intro name hmem
   simp only [genFreshName, mem_support_bind_iff] at hmem
@@ -612,7 +611,7 @@ theorem indexedFreshName_not_keyword (base i : Nat) :
     `genInitNondet` bind in an `init` command are therefore never a reserved word, and the Core
     parser accepts each of them in the position of an identifier. -/
 theorem genFreshName_not_keyword (ctx : VarCtx) :
-    ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
+    ∀ name, name ∈ SPMF.support (genFreshName (G := SPMF) ctx) →
       isReservedKeyword name = false := by
   intro name hmem
   simp only [genFreshName, mem_support_bind_iff] at hmem
@@ -627,7 +626,7 @@ theorem genFreshName_not_keyword (ctx : VarCtx) :
     `C` registers each constructor of such a type at its own arity. -/
 theorem wellKindedTy_of_genLMonoTy {C : LContext CoreLParams} (hC : SimpleTyArities C)
     (tvars : List TyIdentifier) (depth : Nat) (mty : LMonoTy)
-    (hmty : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth)) :
+    (hmty : mty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth)) :
     C.WellKindedTy mty :=
   genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
 
@@ -638,7 +637,7 @@ theorem wellKindedTy_of_genLMonoTy {C : LContext CoreLParams} (hC : SimpleTyArit
     a hypothesis. -/
 def GenLExprSound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (pctx : PolyOpCtx := []) : Prop :=
-  ∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ) →
+  ∀ τ e, e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ) →
     LExpr.HasTypeA (T := LExprParams') [] e τ
 
 /-- The predicate that says that a fresh name from `genFreshName` occurs as a free variable in no
@@ -648,8 +647,8 @@ def GenLExprSound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
 def FreshNamesDisjointFromExprs (fctx : FVarCtx) (octx : OpCtx)
     (tvars : List TyIdentifier) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : Prop :=
-  ∀ name, name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) →
-    ∀ τ e, e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ) →
+  ∀ name, name ∈ SPMF.support (genFreshName (G := SPMF) ctx) →
+    ∀ τ e, e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ) →
       (⟨name, ()⟩ : Identifier Unit) ∉ HasFvars.getFvars (P := Expression) e
 
 /-- Soundness of `genCmd`: each result in the support of the generator gives a well-typed command.
@@ -668,7 +667,7 @@ theorem genCmd_sound
     (hExprSound : GenLExprSound ctx.toFVarCtx octx tvars depth)
     (hDisjoint : FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth)) :
+    (hr : r ∈ SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth)) :
     ∃ Γ', CmdHasTypeA C Γ r.cmd Γ' := by
   rw [genCmd_support_iff] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -728,7 +727,7 @@ theorem genCmd_sound
 def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : Prop :=
   ∀ τ e, LExpr.HasTypeA (T := LExprParams') [] e τ →
-    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ)
+    e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth τ)
 
 /-- Completeness of `genCmd` against `CmdHasTypeA`: if a command is well-typed and the smaller
     generators can reach each of its parts, then the support of `genCmd` holds it.
@@ -761,14 +760,14 @@ theorem genCmd_complete
     (hExprComplete : GenLExprComplete ctx.toFVarCtx octx tvars depth)
     (hNameReach : ∀ x : Identifier Unit,
       (∃ xty eOrNd md, cmd = .init x xty eOrNd md) →
-      x.name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx))
+      x.name ∈ SPMF.support (genFreshName (G := SPMF) ctx))
     (hTyReach : ∀ (mty : LMonoTy),
-      mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth))
+      mty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth))
     (hVarInCtx : ∀ (x : Identifier Unit) (mty : LMonoTy),
       Γ.types.find? x = some (.forAll [] mty) →
       List.Mem (x, mty) (ctx.writable immutableVars)) :
     ∃ r : GenCmdResult,
-      r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) ∧
+      r ∈ SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) ∧
       CmdHasTypeA C Γ r.cmd Γ' := by
   cases hwt with
   | init_det x xty e mty tys md Δ hfresh hnovar _ _ hwk hexpr hequiv =>
@@ -776,7 +775,7 @@ theorem genCmd_complete
     have hmty := hTyReach mty
     have he := hExprComplete mty e hexpr
     have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
+        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inl (by
         simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, e, he, rfl⟩))
@@ -786,7 +785,7 @@ theorem genCmd_complete
     have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
     have hmty := hTyReach mty
     have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
+        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inl (by
         simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨x.name, hname, mty, hmty, rfl⟩)))
@@ -796,7 +795,7 @@ theorem genCmd_complete
     have hentry := hVarInCtx x mty hfind
     have he := hExprComplete mty e hexpr
     have hinSupport : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
+        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry, by
         simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
@@ -805,7 +804,7 @@ theorem genCmd_complete
   | set_nondet x mty md Δ hfind hequiv =>
     have hentry := hVarInCtx x mty hfind
     have hinSupport : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
+        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry, by
         simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
                    mem_support_elements_iff]
@@ -814,33 +813,33 @@ theorem genCmd_complete
   | assert l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
     -- `"l"` is a legal identifier and not a keyword, so the support of `genIdentName` holds it.
-    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    have hlblL : "l" ∈ SPMF.support (genIdentName (G := SPMF)) :=
       StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
         (by decide +kernel) (by decide +kernel)
     have hinSupport : (⟨.assert "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
+        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"l", hlblL, e, he, rfl⟩))))))
     exact ⟨_, hinSupport, CmdHasType'.assert _ "l" e default _ hexpr hequiv⟩
   | assume l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
-    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    have hlblL : "l" ∈ SPMF.support (genIdentName (G := SPMF)) :=
       StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
         (by decide +kernel) (by decide +kernel)
     have hinSupport : (⟨.assume "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
+        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
         simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"l", hlblL, e, he, rfl⟩)))))))
     exact ⟨_, hinSupport, CmdHasType'.assume _ "l" e default _ hexpr hequiv⟩
   | cover l e md Δ hexpr hequiv =>
     have he := hExprComplete .bool e hexpr
-    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
+    have hlblL : "l" ∈ SPMF.support (genIdentName (G := SPMF)) :=
       StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
         (by decide +kernel) (by decide +kernel)
     have hinSupport : (⟨.cover "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth) :=
+        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth) :=
       (genCmd_support_iff ..).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
         simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
         exact ⟨"l", hlblL, e, he, rfl⟩)))))))
@@ -905,8 +904,8 @@ theorem genCmd_sound_env
     (hC : SimpleTyArities C)
     (hFun : Map.Functional ctx)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx)) :
+    (hr : r ∈ SPMF.support
+      (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx)) :
     CmdHasTypeA C (env.toTCtx ctx) r.cmd (env.toTCtx r.outCtx) := by
   rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -963,8 +962,8 @@ theorem genCmd_outCtx_functional
     (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (hFun : Map.Functional ctx)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx)) :
+    (hr : r ∈ SPMF.support
+      (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx)) :
     Map.Functional r.outCtx := by
   rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
@@ -1009,7 +1008,7 @@ theorem genCmd_outCtx_wellKinded
     (hC : SimpleTyArities C) (ctx : VarCtx) (depth : Nat)
     (hctx : ∀ ty ∈ ctx.values, C.WellKindedTy ty)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx)) :
+    (hr : r ∈ SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx)) :
     ∀ ty ∈ r.outCtx.values, C.WellKindedTy ty := by
   rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx] at hr
   rcases hr with hr | (hr | (⟨_, hr⟩ | (⟨_, hr⟩ | (hr | (hr | hr)))))
@@ -1056,7 +1055,7 @@ theorem genCmds_sound
     (hC : SimpleTyArities C)
     (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
-    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n)) :
+    (hr : result ∈ SPMF.support (genCmds (G := SPMF) octx tvars immutableVars ctx depth n)) :
     CmdsHasTypeA C (env.toTCtx ctx) result.1 (env.toTCtx result.2) := by
   induction n generalizing ctx result with
   | zero =>
@@ -1064,11 +1063,11 @@ theorem genCmds_sound
     subst hr
     exact CmdsHasTypeA.nil _
   | succ n ih =>
-    simp only [genCmds, mem_support_bind_iff] at hr
+    simp only [mem_support_pure_iff, genCmds, mem_support_bind_iff] at hr
     obtain ⟨⟨cmd, ctx'⟩, hcmd, rest_hr⟩ := hr
     dsimp only [GenCmdResult.outCtx, GenCmdResult.cmd] at rest_hr
     obtain ⟨⟨cmds, ctx''⟩, hcmds, hpure⟩ := rest_hr
-    simp only [mem_support_pure_iff] at hpure
+    simp only [] at hpure
     have heq : result = (cmd :: cmds, ctx'') := by
       cases hpure; rfl
     subst heq

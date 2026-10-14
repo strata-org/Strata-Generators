@@ -34,7 +34,7 @@ Indices 5 to 8 name the function weight and the procedure weight, once per phase
 
 namespace ProgIdx
 def abstract : Nat := 0
-def alias : Nat := 1
+def «alias» : Nat := 1
 def «axiom» : Nat := 2
 def distinct : Nat := 3
 def datatype : Nat := 4
@@ -94,7 +94,7 @@ def genDeclStepT [_root_.Gen G] (θ : Tuning) (s : GenState) (b : Bounds) (d : N
     else (θ.weight ProgIdx.funcFrontLoad d, θ.weight ProgIdx.procFrontLoad d)
   frequency
     [ (θ.weight ProgIdx.abstract d, fun () => genDeclAbstract s b)
-    , (θ.weight ProgIdx.alias d, fun () => genDeclAlias s b)
+    , (θ.weight ProgIdx.«alias» d, fun () => genDeclAlias s b)
     , (θ.weight ProgIdx.axiom d, fun () => genDeclAxiom s b)
     , (θ.weight ProgIdx.distinct d, fun () => genDeclDistinct s b)
     , (θ.weight ProgIdx.datatype d, fun () => genDeclDatatype s b)

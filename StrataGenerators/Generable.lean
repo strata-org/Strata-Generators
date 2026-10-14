@@ -9,7 +9,7 @@ import Basalt.Gen
 
 Each type the suite generates has a *canonical* generator that is polymorphic in the Basalt `Gen`
 interpretation `G` — the same term runs at `Plausible.Gen` (for `lake test`), and is reasoned about at
-`SetGen` for the correctness proofs. `Generable` names that canonical generator once, so it need not be
+`SPMF` for the correctness proofs. `Generable` names that canonical generator once, so it need not be
 duplicated across the `Arbitrary` instance and any other consumer.
 
 Convention: the canonical generator is **retry-free** (it uses `genLExpr`'s default `retryCont = id`),

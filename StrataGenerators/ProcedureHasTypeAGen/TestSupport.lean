@@ -1,9 +1,6 @@
--- This file imports the *code* modules only, and no sibling with a proof that brings in Mathlib.
 -- `ProcedureHasTypeAGen.Core` gives the generator and the syntax of Strata Core.
--- `HasTypeAGen.TestSupport` gives the operator contexts `coreMonoOps` and `corePartialOps`, and it needs
--- no Mathlib. The three `Strata.Transform.*` modules are the passes under test. An import of
--- `StmtHasTypeAGen.TestSupport` here would make this file impossible to import beside a transform pass,
--- because Strata and Batteries each define `List.Forall₂`.
+-- `HasTypeAGen.TestSupport` gives the operator contexts `coreMonoOps` and `corePartialOps`. The three
+-- `Strata.Transform.*` modules are the passes under test.
 import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.Transform.FilterProcedures
@@ -311,7 +308,7 @@ def headerEq (h k : Procedure.Header) : Bool := decide (h = k)
     and `calls.count c = 0`). -/
 def calleesCountEqual (k : Std.HashMap String Nat) (p : Procedure) : Bool :=
   let calls := Core.extractCallsFromProcedure p
-  ((k.keys ++ calls).dedup).all fun c => k[c]?.getD 0 == calls.count c
+  ((k.keys ++ calls).uniq).all fun c => k[c]?.getD 0 == calls.count c
 
 /-- **`Core.CallGraphWF`**, decided field by field:
 

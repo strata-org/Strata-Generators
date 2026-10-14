@@ -188,7 +188,7 @@ def changedFlagValidGuarded (np : NamedPhase) (prog : Program) : Bool :=
     the diagnostic that names the phases both use this list. -/
 def violators (phases : List NamedPhase) (prog : Program) : List String :=
   (phases.filterMap fun np =>
-    if changedFlagValidGuarded np prog then none else some np.label).dedup
+    if changedFlagValidGuarded np prog then none else some np.label).uniq
 
 -- ── The report ────────────────────────────────────────────────────────────
 -- A sweep that fails says only *that* the flag of some phase is wrong. The functions below say

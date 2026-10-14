@@ -132,7 +132,7 @@ def checkProgramPrintsWithoutError (prog : Program) : Bool :=
     them to report *which* constructs the printer cannot write, and not only the number of
     programs with an error. -/
 def programErrorLines (prog : Program) : List String :=
-  (strataErrorLines (Core.formatProgram prog).pretty).dedup
+  (strataErrorLines (Core.formatProgram prog).pretty).uniq
 
 -- ── The witnesses for the two gaps ────────────────────────────────────────
 -- These checks use a fixed input and not a generated one, on purpose. Both gaps are about a

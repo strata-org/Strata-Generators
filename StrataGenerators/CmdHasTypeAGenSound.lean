@@ -1,7 +1,7 @@
 import StrataGenerators.HasTypeAGen
 import StrataGenerators.CmdHasTypeAGen
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec
 
 /-!
 # The proof of the freshness hypothesis of `genCmd_sound`
@@ -86,7 +86,7 @@ theorem genCmd_sound_nil
     (hFun : Map.Functional ctx)
     (hExprSound : GenLExprSound ctx.toFVarCtx octx tvars depth)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth)) :
+    (hr : r ∈ SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth)) :
     ∃ Γ', CmdHasTypeA C Γ r.cmd Γ' :=
   genCmd_sound octx tvars immutableVars ctx depth C Γ hC hCorr hFun hExprSound
     (freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx depth) r hr
@@ -120,6 +120,6 @@ theorem genCmds_sound_nil
     (hC : SimpleTyArities C)
     (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
-    (hr : result ∈ SetGen.support (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n)) :
+    (hr : result ∈ SPMF.support (genCmds (G := SPMF) octx tvars immutableVars ctx depth n)) :
     CmdsHasTypeA C (env.toTCtx ctx) result.1 (env.toTCtx result.2) :=
   genCmds_sound octx tvars immutableVars ctx depth n C env hC hFun result hr

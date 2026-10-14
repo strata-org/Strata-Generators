@@ -230,7 +230,7 @@ def openVars (f : Function) : List String :=
     ++ f.axioms.flatMap Lambda.LExpr.freeVars
     ++ f.preconditions.flatMap (fun q => Lambda.LExpr.freeVars q.expr)
     ++ (f.measure.map Lambda.LExpr.freeVars).getD []
-  ((fvs.map (fun v => v.1.name)).filter (fun n => !formals.contains n)).dedup
+  ((fvs.map (fun v => v.1.name)).filter (fun n => !formals.contains n)).uniq
 
 /-- `Lambda.LFuncClosed` is a structure with no `Decidable` instance, though each
     of its two inherited `FuncClosed` fields has one
@@ -279,7 +279,7 @@ def ownCaptures (d : Imperative.PureFunc Expression) : List String :=
     ++ d.axioms.flatMap Lambda.LExpr.freeVars
     ++ d.preconditions.flatMap (fun q => Lambda.LExpr.freeVars q.expr)
     ++ (d.measure.map Lambda.LExpr.freeVars).getD []
-  ((fvs.map (fun v => v.1.name)).filter (fun n => !formals.contains n)).dedup
+  ((fvs.map (fun v => v.1.name)).filter (fun n => !formals.contains n)).uniq
 
 /-- The siblings `d` calls: operator references in any of its four fields whose
     name is another internal function of the same procedure. -/
@@ -289,7 +289,7 @@ def calledSiblingsRef (siblings : List String) (d : Imperative.PureFunc Expressi
     ++ d.axioms.flatMap Lambda.LExpr.getOps
     ++ d.preconditions.flatMap (fun q => Lambda.LExpr.getOps q.expr)
     ++ (d.measure.map Lambda.LExpr.getOps).getD []
-  ((ops.map (fun o => o.name)).filter siblings.contains).dedup
+  ((ops.map (fun o => o.name)).filter siblings.contains).uniq
 
 /-- One round of the propagation of the second clause of the definition. -/
 def extStep (decls : List (Imperative.PureFunc Expression)) (siblings : List String)
@@ -299,7 +299,7 @@ def extStep (decls : List (Imperative.PureFunc Expression)) (siblings : List Str
     let mine := (cur.find? (fun e => e.1 == nm)).map (·.2) |>.getD []
     let inherited := (calledSiblingsRef siblings d).flatMap fun g =>
       (cur.find? (fun e => e.1 == g)).map (·.2) |>.getD []
-    (nm, (mine ++ inherited).dedup)
+    (nm, (mine ++ inherited).uniq)
 
 /-- The least fixed point of the definition, for the internal functions of one procedure, as a pair of a
     function name and the names of the captured variables. This definition shares no code with the pass. -/

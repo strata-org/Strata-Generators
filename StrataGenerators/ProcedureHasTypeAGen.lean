@@ -4,7 +4,7 @@ import StrataGenerators.ProcedureHasTypeAGen.MutableVars
 import StrataGenerators.CmdHasTypeAGenSound
 import Strata.Languages.Core.ProcedureTypeSpec
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec
 open StrataGenerators.Stmt StrataGenerators.Function
 
 /-!
@@ -386,13 +386,11 @@ theorem oldVars_keys_nodup (M : ListMap (Identifier Unit) LMonoTy)
   rw [hcomp, ← List.map_map]
   apply hM.map
   intro a b hab
-  apply mt _ hab
-  intro heq
-  simp only [CoreIdent.mkOld, CoreIdent.oldStr, Identifier.mk.injEq, String.append_right_inj] at heq
+  simp only [CoreIdent.mkOld, CoreIdent.oldStr, Identifier.mk.injEq,
+    String.append_right_inj] at hab
   obtain ⟨a1, a2⟩ := a; obtain ⟨b1, b2⟩ := b
   cases a2; cases b2
-  simp only at heq
-  simp [heq]
+  simp_all
 
 /-- Two maps whose *keys* come from disjoint classes of characters share no key. One class holds no space, and
     the other holds a space in each name. Therefore the append of the two maps is functional whenever each half
@@ -473,19 +471,19 @@ theorem seed_functional
     is a `bool` expression in the support of `genLExpr … .bool`. -/
 theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (labels : List CoreLabel) (m : ListMap CoreLabel Procedure.Check) (pctx : PolyOpCtx := [])
-    (hm : m ∈ SetGen.support
-      (labels.mapM (m := SetGen.Set) (fun l => do
-        let e ← genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .bool
+    (hm : m ∈ SPMF.support
+      (labels.mapM (m := SPMF) (fun l => do
+        let e ← genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check))))) :
-    ∀ c ∈ m.values, c.expr ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .bool) := by
+    ∀ c ∈ m.values, c.expr ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
   induction labels generalizing m with
   | nil =>
-    simp only [List.mapM_nil] at hm
+    simp only [ListMap, List.mapM_nil, mem_support_pure_iff] at hm
     subst hm
     intro c hc; simp only [ListMap.values, List.not_mem_nil] at hc
   | cons l ls ih =>
-    simp only [List.mapM_cons] at hm
+    simp only [ListMap, List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff] at hm
     obtain ⟨pair, hpair, rest, hrest, rfl⟩ := hm
     obtain ⟨e, he, rfl⟩ := hpair
     intro c hc
@@ -498,9 +496,9 @@ theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyId
     expression reachable by `genLExpr`. -/
 theorem genChecks_support (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check) (pctx : PolyOpCtx := [])
-    (hm : m ∈ SetGen.support (genChecks (G := SetGen.Set) fctx octx tvars depth pctx)) :
-    ∀ c ∈ m.values, c.expr ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .bool) := by
+    (hm : m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth pctx)) :
+    ∀ c ∈ m.values, c.expr ∈ SPMF.support
+      (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
   simp only [genChecks, mem_support_bind_iff] at hm
   obtain ⟨labels, _, hm⟩ := hm
   exact mapM_genChecks_values fctx octx tvars depth labels m pctx hm
@@ -512,22 +510,22 @@ theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List Ty
     (m : ListMap CoreLabel Procedure.Check)
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool)) :
-    m ∈ SetGen.support
-      (m.keys.mapM (m := SetGen.Set) (fun l => do
-        let e ← genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
+    m ∈ SPMF.support
+      (m.keys.mapM (m := SPMF) (fun l => do
+        let e ← genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check)))) := by
   induction m with
   | nil =>
-    show [] ∈ SetGen.support (pure [] : SetGen.Set _)
+    show [] ∈ SPMF.support (pure [] : SPMF _)
     rw [mem_support_pure_iff]
   | cons p rest ih =>
     obtain ⟨l, c⟩ := p
-    simp only [ListMap.keys, List.mapM_cons]
+    simp only [ListMap, ListMap.keys, List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff]
     have hc_mem : c ∈ ListMap.values ((l, c) :: rest) := by simp [ListMap.values]
     have hce := hvals c hc_mem
     have hrest : ∀ c' ∈ ListMap.values rest,
-        c'.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool) := by
+        c'.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool) := by
       intro c' hc'; exact hvals c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
     have hrest_attr : ∀ c' ∈ ListMap.values rest, c'.attr = .Default := by
       intro c' hc'; exact hattr c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
@@ -542,9 +540,7 @@ theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List Ty
       | mk e a md => subst ha; subst hmm; rfl
     -- Witness the actual head pair `(l, c)`; its membership in the generator's
     -- head step holds because `pure` produces `(l, { expr := c.expr }) = (l, c)`.
-    refine ⟨(l, c), ⟨c.expr, hce, ?_⟩, rest, ih hrest_attr hrest_md hrest, rfl⟩
-    show (l, c) ∈ SetGen.support (pure (l, ({ expr := c.expr } : Procedure.Check)) : SetGen.Set _)
-    rw [mem_support_pure_iff, hc_eq]
+    exact ⟨(l, c), ⟨c.expr, hce, by rw [hc_eq]⟩, rest, ih hrest_attr hrest_md hrest, rfl⟩
 
 /-- Completeness of `genChecks`: a check `ListMap` whose labels' names are
     reachable by `genNameList`, whose clauses are all default-`attr`/empty-`md`,
@@ -552,11 +548,11 @@ theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List Ty
     of `genChecks`. -/
 theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check)
-    (hlabels : m.keys ∈ SetGen.support (genNameList (G := SetGen.Set) depth))
+    (hlabels : m.keys ∈ SPMF.support (genNameList (G := SPMF) depth))
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth .bool)) :
-    m ∈ SetGen.support (genChecks (G := SetGen.Set) fctx octx tvars depth) := by
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
+    m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth) := by
   simp only [genChecks, mem_support_bind_iff]
   exact ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
 
@@ -817,8 +813,8 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (proc : Procedure) (pctx : PolyOpCtx := [])
-    (hproc : proc ∈ SetGen.support
-      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
+    (hproc : proc ∈ SPMF.support
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
     ProcHasTypeA P { C with rigidTypeVars := proc.header.typeArgs } Γ proc := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hproc
   obtain ⟨name, _hname, typeArgs, htypeArgs, M, hM, rawInputOnly, hrawInputOnly,
@@ -913,7 +909,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
   have key : ∀ (ty : LMonoTy),
       (ty ∈ (M ++ disjointInputs rawInputOnly M).values ∨
        ty ∈ (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)).values) →
-      ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) typeArgs size) := by
+      ty ∈ SPMF.support (genLMonoTy (G := SPMF) typeArgs size) := by
     intro ty hty
     rcases hty with h | h
     · rw [ListMap_values_append, List.mem_append] at h
@@ -1062,8 +1058,8 @@ theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSig
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (proc : Procedure) (pctx : PolyOpCtx := [])
-    (hproc : proc ∈ SetGen.support
-      (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx))
+    (hproc : proc ∈ SPMF.support
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx))
     (hCrigid : C.rigidTypeVars ⊆ proc.header.typeArgs) :
     ProcHasTypeA P C Γ proc := by
   have hbase :=
@@ -1143,48 +1139,48 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
     (hIdisjM : ∀ k ∈ ListMap.keys I, k ∉ ListMap.keys M)
     (hOdisjMI : ∀ k ∈ ListMap.keys O, k ∉ ListMap.keys (M ++ I))
     -- name / typeArgs reachability:
-    (hName : proc.header.name.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hName : proc.header.name.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hTyArgsNodup : proc.header.typeArgs.Nodup)
     (hTyArgsLen : proc.header.typeArgs.length ≤ size)
-    (hTyArgsReach : ∀ s ∈ proc.header.typeArgs, s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hTyArgsReach : ∀ s ∈ proc.header.typeArgs, s ∈ SPMF.support (genIdentName (G := SPMF)))
     -- in-out block `M` reachability:
     (hMNodup : M.keys.Nodup)
     (hMNamesLen : (M.keys.map (·.name)).length ≤ size)
-    (hMNamesReach : ∀ s ∈ M.keys.map (·.name), s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hMNamesReach : ∀ s ∈ M.keys.map (·.name), s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hMTyReach : ∀ ty ∈ M.values,
-      ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) proc.header.typeArgs size))
+      ty ∈ SPMF.support (genLMonoTy (G := SPMF) proc.header.typeArgs size))
     -- input-only block `I` reachability:
     (hINodup : I.keys.Nodup)
     (hINamesLen : (I.keys.map (·.name)).length ≤ size)
-    (hINamesReach : ∀ s ∈ I.keys.map (·.name), s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hINamesReach : ∀ s ∈ I.keys.map (·.name), s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hITyReach : ∀ ty ∈ I.values,
-      ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) proc.header.typeArgs size))
+      ty ∈ SPMF.support (genLMonoTy (G := SPMF) proc.header.typeArgs size))
     -- output-only block `O` reachability:
     (hONodup : O.keys.Nodup)
     (hONamesLen : (O.keys.map (·.name)).length ≤ size)
-    (hONamesReach : ∀ s ∈ O.keys.map (·.name), s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hONamesReach : ∀ s ∈ O.keys.map (·.name), s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hOTyReach : ∀ ty ∈ O.values,
-      ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) proc.header.typeArgs size))
+      ty ∈ SPMF.support (genLMonoTy (G := SPMF) proc.header.typeArgs size))
     -- preconditions:
-    (hPreLabels : proc.spec.preconditions.keys ∈ SetGen.support (genNameList (G := SetGen.Set) size))
+    (hPreLabels : proc.spec.preconditions.keys ∈ SPMF.support (genNameList (G := SPMF) size))
     (hPreAttr : ∀ c ∈ proc.spec.preconditions.values, c.attr = .Default)
     (hPreMd : ∀ c ∈ proc.spec.preconditions.values, c.md = #[])
     (hPreExpr : ∀ c ∈ proc.spec.preconditions.values,
-      c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set)
+      c.expr ∈ SPMF.support (genLExpr (G := SPMF)
         (sigFctx (M ++ I)) octx [] proc.header.typeArgs [] size .bool))
     -- postconditions:
-    (hPostLabels : proc.spec.postconditions.keys ∈ SetGen.support (genNameList (G := SetGen.Set) size))
+    (hPostLabels : proc.spec.postconditions.keys ∈ SPMF.support (genNameList (G := SPMF) size))
     (hPostAttr : ∀ c ∈ proc.spec.postconditions.values, c.attr = .Default)
     (hPostMd : ∀ c ∈ proc.spec.postconditions.values, c.md = #[])
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
-      c.expr ∈ SetGen.support (genLExpr (G := SetGen.Set)
+      c.expr ∈ SPMF.support (genLExpr (G := SPMF)
         (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx [] proc.header.typeArgs [] size .bool))
-    (hBodyReach : (bodyss, C', ctx') ∈ SetGen.support
-      (genStmtChain (G := SetGen.Set) octx proc.header.typeArgs
+    (hBodyReach : (bodyss, C', ctx') ∈ SPMF.support
+      (genStmtChain (G := SPMF) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { C with rigidTypeVars := proc.header.typeArgs }
         (M ++ I ++ (M ++ O) ++ oldVars M) [] size len)) :
-    proc ∈ SetGen.support (genProcedure (G := SetGen.Set) octx procs C Γ size len) := by
+    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM
