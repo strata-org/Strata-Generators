@@ -1,7 +1,7 @@
 import StrataGenerators.StmtHasTypeAGen
 import StrataGenerators.CmdHasTypeAGenSound
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec
 open StrataGenerators.Stmt
 
 /-!

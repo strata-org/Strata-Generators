@@ -1,7 +1,7 @@
 import StrataGenerators.CmdHasTypeAGen
 import Strata.Languages.Core.StatementTypeSpec
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec
 
 /-!
 # Soundness of the procedure-call statement generator
@@ -193,14 +193,14 @@ theorem lm_values_length {α β} (m : ListMap α β) : m.values.length = m.lengt
 
 -- ── mapM support inversion (public) ───────────────────────────────────────
 
-/-- Membership in `List.mapM f l` on `SetGen.Set`: `args` is in the support iff
+/-- Membership in `List.mapM f l` on `SPMF`: `args` is in the support iff
     each element is pointwise in the support of `f` at the corresponding input.
     A public re-statement of the private lemma in `HasTypeAGen.lean`, generic in
     the element/index types. -/
-theorem mem_support_mapM_iff {α β} (f : α → SetGen.Set β)
+theorem mem_support_mapM_iff {α β} (f : α → SPMF β)
     (inputs : List α) (outs : List β) :
-    outs ∈ SetGen.support (List.mapM (m := SetGen.Set) f inputs) ↔
-    List.Rel₂ (fun out σ => out ∈ SetGen.support (f σ)) outs inputs := by
+    outs ∈ SPMF.support (List.mapM (m := SPMF) f inputs) ↔
+    List.Rel₂ (fun out σ => out ∈ SPMF.support (f σ)) outs inputs := by
   induction inputs generalizing outs with
   | nil =>
     simp only [List.mapM_nil, mem_support_pure_iff]
@@ -1051,9 +1051,7 @@ theorem cmdExtHasTypeA_equiv_congr {C : LContext CoreLParams} {P : Program}
       -- The obligation for one argument matches on the shape of that argument. Only its branch for an `fvar`
       -- with no annotation reads the context, through `types.find?`. Each other branch goes through
       -- `exprTyped`, which reads no context at this instantiation.
-      first
-        | (simp only [tctxEquiv_find? he]; exact hty)
-        | exact hty
+      simp only [tctxEquiv_find? he]; exact hty
     · intro i hi hj
       obtain ⟨mty, halias, hty⟩ := houtTy i hi hj
       exact ⟨mty, by rw [he.2]; exact halias, (tctxEquiv_find? he _).trans hty⟩

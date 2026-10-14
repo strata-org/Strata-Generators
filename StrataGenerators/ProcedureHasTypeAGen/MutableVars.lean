@@ -2,7 +2,7 @@ import StrataGenerators.StmtHasTypeAGen
 import StrataGenerators.CmdHasTypeAGenSound
 import Strata.Languages.Core.Procedure
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec
 open StrataGenerators.Stmt
 
 /-!
@@ -87,8 +87,8 @@ theorem genCmd_mutableVars
     (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (r : GenCmdResult)
-    (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx)) :
+    (hr : r ∈ SPMF.support
+      (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx)) :
     (∀ v ∈ HasVarsImp.modifiedVars (P := Expression) r.cmd,
       v ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
@@ -325,14 +325,14 @@ theorem genCallStmt_mutableVars
     (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support
-      (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx n pctx)) :
+    (hr : r ∈ SPMF.support
+      (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx n pctx)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) r.stmts,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
       k ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) := by
   cases procs with
-  | nil => simp only [genCallStmt, SetGen.support, SetGen.bot_mem_iff] at hr
+  | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr
   | cons p₀ ps =>
     simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr
     obtain ⟨s, hs, hr⟩ := hr
@@ -351,7 +351,7 @@ theorem genCallStmt_mutableVars
       have hallusable : (List.append Mσ T).all (usableName immutableVars ctx) = true := by
         rw [← hT]; exact all_usableName_append immutableVars ctx Mσ Oσ hMusable
       rw [hT] at hr
-      simp only [mem_support_bind_iff] at hr
+      simp only [mem_support_pure_iff, mem_support_bind_iff] at hr
       obtain ⟨exprs, hexprs, hr⟩ := hr
       -- Peel the argument-order mask; `getLhs_mkArgs` holds at every mask.
       obtain ⟨mask, _, hr⟩ := hr
@@ -370,7 +370,6 @@ theorem genCallStmt_mutableVars
           ⟨Map.find?_mem_keys ctx hfind_q, hreuse.2⟩
       -- One uniform shape now: `initChain toInit ++ [call]`, with no `isEmpty`
       -- split (when nothing needs `init`ing the chain is simply `[]`).
-      simp only [mem_support_pure_iff] at hr
       obtain rfl := hr
       -- Fuse the recipe's in-out-then-out-target init lists into the single filter
       -- over `Mσ ++ T`, which is the form both `definedVars` and `insertAllCtx`
@@ -399,7 +398,7 @@ theorem genCallStmt_mutableVars
         · exact List.mem_append_left _
             ((mem_writable_keys_iff ctx immutableVars k).mpr ⟨h, hk_ro⟩)
         · exact List.mem_append_right _ h
-    · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+    · simp only [SPMF.mem_support_bot_iff] at hr
 
 -- ── The statement-level invariant (mutual over genStmt / genStmtChain) ────────
 
@@ -421,8 +420,8 @@ theorem genStmt_mutableVars
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SetGen.support
-      (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx n)) :
+    (hr : r ∈ SPMF.support
+      (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) r.stmts,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
@@ -443,8 +442,8 @@ theorem genStmt_mutableVars
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx 0 pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
@@ -452,7 +451,7 @@ theorem genStmt_mutableVars
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
+        replace hr : r ∈ SPMF.support (genExitStmt (G := SPMF) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr
         exact ⟨fun v hv => by
@@ -475,12 +474,12 @@ theorem genStmt_mutableVars
                  simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
-      · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+      · simp only [SPMF.mem_support_bot_iff] at hr
     · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx 0 pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx 0 pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
@@ -488,7 +487,7 @@ theorem genStmt_mutableVars
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+        replace hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars
           immutableVars (hd :: tl) C ctx 0 pctx) := hr
         exact genCallStmt_mutableVars octx pctx tvars immutableVars (hd :: tl) C ctx 0 _ hr
   | succ size =>
@@ -506,8 +505,8 @@ theorem genStmt_mutableVars
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size+1) pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx (size+1) pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
@@ -515,7 +514,7 @@ theorem genStmt_mutableVars
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genExitStmt (G := SetGen.Set) (hd :: tl) C ctx) := hr
+        replace hr : r ∈ SPMF.support (genExitStmt (G := SPMF) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff] at hr
         obtain ⟨_, _, rfl⟩ := hr
         exact ⟨fun v hv => by
@@ -538,12 +537,12 @@ theorem genStmt_mutableVars
                  simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
-      · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+      · simp only [SPMF.mem_support_bot_iff] at hr
     · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil =>
-        replace hr : r ∈ SetGen.support
-            (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx (size+1) pctx) := hr
+        replace hr : r ∈ SPMF.support
+            (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx (size+1) pctx) := hr
         simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
         obtain ⟨rc, hrc, rfl⟩ := hr
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
@@ -551,7 +550,7 @@ theorem genStmt_mutableVars
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
           Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
       | cons hd tl =>
-        replace hr : r ∈ SetGen.support (genCallStmt (G := SetGen.Set) octx tvars
+        replace hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars
           immutableVars (hd :: tl) C ctx (size+1) pctx) := hr
         exact genCallStmt_mutableVars octx pctx tvars immutableVars (hd :: tl) C ctx (size+1) _ hr
     · -- block: outCtx = ctx, modified/defined delegate to body
@@ -602,8 +601,8 @@ theorem genStmtChain_mutableVars
     (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (result : List Statement × LContext CoreLParams × VarCtx)
-    (hr : result ∈ SetGen.support
-      (genStmtChain (G := SetGen.Set) octx tvars immutableVars procs labels C ctx pctx size len)) :
+    (hr : result ∈ SPMF.support
+      (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size len)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) result.1,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) result.1 false) ∧
     (∀ k ∈ Map.keys (result.2.2.writable immutableVars),

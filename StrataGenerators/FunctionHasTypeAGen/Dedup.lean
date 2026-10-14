@@ -16,9 +16,7 @@ induction on the definition of `List.uniq`, which is
 `| a :: as => let as := as.uniq; if a ∈ as then as else a :: as`.
 
 Mathlib defines a separate `List.dedup`, with a lemma about a fixed point. That lemma is
-about a different constant, so this file cannot use it, whatever the imports are.
-`List.nodup_cons` comes from the core library and from Batteries. This file compiles in the
-environment that `HasTypeAGen` imports.
+about a different constant, so this file cannot use it.
 -/
 
 namespace StrataGenerators.Dedup

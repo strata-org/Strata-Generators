@@ -1,6 +1,6 @@
 import StrataGenerators.ProcedureHasTypeAGen.Support
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
+open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
@@ -137,9 +137,9 @@ theorem procToTCtx_fresh_rev (ctx : VarCtx) (x : Identifier Unit)
     draws from `genIdentName`, whose support holds no keyword, so this needs no
     separate `dodgeKeyword` premise. -/
 theorem freshName_reach (ctx : VarCtx) (x : Identifier Unit)
-    (hname : x.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hname : x.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : Map.find? ctx x = none) :
-    x.name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx) := by
+    x.name ∈ SPMF.support (genFreshName (G := SPMF) ctx) := by
   simp only [genFreshName, mem_support_bind_iff]
   refine ⟨x.name, hname, ?_⟩
   simp only [mem_support_ite_iff, mem_support_pure_iff]
@@ -182,7 +182,7 @@ theorem writable_nil_eq (ctx : VarCtx) : ctx.writable [] = ctx := by
 /-- Statement typing preserves the ambient `rigidTypeVars`: `funcDecl` extends only
     the factory functions and `typeDecl` only the known types, neither touching the
     rigid set; every other constructor leaves `C` unchanged. (Local copy of Strata's
-    `StatementHasType'_rigid_eq`, whose file is not imported here.) -/
+    `StatementHasType'_rigid_eq`.) -/
 theorem stmtHasType_rigid_eq {P : Program} {C C' : LContext CoreLParams}
     {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
     (h : StatementHasTypeA P C Γ L s C' Γ') : C'.rigidTypeVars = C.rigidTypeVars := by
@@ -205,7 +205,7 @@ theorem stmtHasType_rigid_eq {P : Program} {C C' : LContext CoreLParams}
     `genLMonoTy_mem_ftvars` gives `allFtvarsIn tvars mty`, and `allFtvarsIn_freeVars`
     turns that into a `freeVars ⊆ tvars` statement. -/
 theorem freeVars_subset_of_reachable {mty : LMonoTy} {tvars : List TyIdentifier} {n : Nat}
-    (h : mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n)) :
+    (h : mty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n)) :
     ∀ v ∈ mty.freeVars, v ∈ tvars :=
   allFtvarsIn_freeVars (genLMonoTy_mem_ftvars h)
 
@@ -281,20 +281,20 @@ mutual
     `genIdentName`'s support already excludes every keyword. -/
 def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
   | n, .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)) =>
-      x.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧
-      mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n)
+      x.name ∈ SPMF.support (genIdentName (G := SPMF)) ∧
+      mty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n)
   | _, .cmd (CmdExt.cmd (.init _ _ _ _)) => True
   | _, .cmd (CmdExt.cmd (.set _ _ _)) => True
   | _, .cmd (CmdExt.cmd (.assert l _ _)) =>
-      l ∈ SetGen.support (genIdentName (G := SetGen.Set))
+      l ∈ SPMF.support (genIdentName (G := SPMF))
   | _, .cmd (CmdExt.cmd (.assume l _ _)) =>
-      l ∈ SetGen.support (genIdentName (G := SetGen.Set))
+      l ∈ SPMF.support (genIdentName (G := SPMF))
   | _, .cmd (CmdExt.cmd (.cover l _ _)) =>
-      l ∈ SetGen.support (genIdentName (G := SetGen.Set))
+      l ∈ SPMF.support (genIdentName (G := SPMF))
   | _, .cmd (CmdExt.call _ _ _) => True
   | 0, .block .. => False
   | (n+1), .block label body _ =>
-      label ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧
+      label ∈ SPMF.support (genIdentName (G := SPMF)) ∧
       body.length ≤ n + 1 ∧ AlphabetOkList tvars n body
   | 0, .ite .. => False
   | (n+1), .ite _ t e _ =>
@@ -302,13 +302,13 @@ def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
       AlphabetOkList tvars n t ∧ AlphabetOkList tvars n e
   | 0, .loop .. => False
   | (n+1), .loop _ _ invs body _ =>
-      invs.length ≤ n + 1 ∧ (∀ p ∈ invs, p.1 ∈ SetGen.support (genIdentName (G := SetGen.Set))) ∧
+      invs.length ≤ n + 1 ∧ (∀ p ∈ invs, p.1 ∈ SPMF.support (genIdentName (G := SPMF))) ∧
       body.length ≤ n + 1 ∧ AlphabetOkList tvars n body
   | _, .exit _ _ => True
-  | n, .funcDecl decl _ => decl ∈ SetGen.support (genDecl (G := SetGen.Set) octx n)
+  | n, .funcDecl decl _ => decl ∈ SPMF.support (genDecl (G := SPMF) octx n)
   | n, .typeDecl tc _ =>
-      tc.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) ∧ tc.params.length ≤ n ∧
-      (∀ s ∈ tc.params, s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+      tc.name ∈ SPMF.support (genIdentName (G := SPMF)) ∧ tc.params.length ≤ n ∧
+      (∀ s ∈ tc.params, s ∈ SPMF.support (genIdentName (G := SPMF)))
 
 /-- `AlphabetOk` lifted to a statement list at size `n`. -/
 def AlphabetOkList (tvars : List TyIdentifier) : Nat → List Statement → Prop
@@ -362,12 +362,12 @@ def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
         (mask : List Bool),
         s ∈ procs ∧
         s.pname = pname ∧
-        σvals ∈ SetGen.support
+        σvals ∈ SPMF.support
           (s.typeArgs.mapM (fun _ =>
             if hg : (generableTypesFromCtx ctx.values [] octx).length > 0 then
               elements (generableTypesFromCtx ctx.values [] octx)
                 (by apply List.ne_nil_of_length_pos; assumption)
-            else pure (.bool : LMonoTy)) : SetGen.Set (List LMonoTy)) ∧
+            else pure (.bool : LMonoTy)) : SPMF (List LMonoTy)) ∧
         args = StrataGenerators.Stmt.mkArgs s.M
           (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧
@@ -375,7 +375,7 @@ def CallOk (procs : ProcSigCtx) (ctx : VarCtx) (n : Nat) : Statement → Prop
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
           ++ outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
         List.Rel₂
-          (fun e τ => e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n τ))
+          (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n τ))
           exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
           ++ (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
@@ -405,18 +405,18 @@ end
     that is the type the generator draws the right-hand side at. -/
 def CmdExprOk (ctx : VarCtx) (n : Nat) : Cmd Expression → Prop
   | .init _ (.forAll [] mty) (.det e) _ =>
-      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n mty)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n mty)
   | .init _ _ _ _ => True
   | .set x (.det e) _ =>
       ∀ mty, Map.find? ctx x = some mty →
-        e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n mty)
+        e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n mty)
   | .set _ _ _ => True
   | .assert _ e _ =>
-      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)
   | .assume _ e _ =>
-      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)
   | .cover _ e _ =>
-      e ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)
 
 mutual
 /-- **Expression reachability, threaded through the evolving scope and size.** Every
@@ -442,15 +442,15 @@ def ExprOk (ctx : VarCtx) (n : Nat) : Statement → Prop
   | .block _ body _ => ExprOkList ctx (n - 1) body
   | .ite cond t e _ =>
       (∀ g, cond = .det g →
-        g ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+        g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
       ExprOkList ctx (n - 1) t ∧ ExprOkList ctx (n - 1) e
   | .loop guard measure invs body _ =>
       (∀ g, guard = .det g →
-        g ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+        g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
       (∀ m, measure = some m →
-        m ∈ SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .int)) ∧
+        m ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .int)) ∧
       (∀ p ∈ invs, p.2 ∈
-        SetGen.support (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+        SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
       ExprOkList ctx (n - 1) body
   | .exit _ _ => True
   -- **A local `funcDecl` is out of scope.** The old
@@ -549,13 +549,13 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     ∃ ctx', TContext.Equiv (T := CoreLParams) (procToTCtx ctx') Γ' ∧
       ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
       (⟨[Stmt.cmd (CmdExt.cmd c)], C, ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n) := by
   -- Reduce the goal to membership in `genCmd`'s support via the `genCmdStmt` wrapper
   -- and the `genCmdStmt_mem` lifting into `genStmt`.
   have hlift : ∀ (r : GenCmdResult),
-      r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars [] ctx n) →
+      r ∈ SPMF.support (genCmd (G := SPMF) octx tvars [] ctx n) →
       (⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩ : GenStmtResult) ∈
-        SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n) := by
     intro r hr
     refine genCmdStmt_mem procs C ctx n _ ?_
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff]
@@ -630,7 +630,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
       exact Map.find?_mem ctx x mty (procToTCtx_find_rev ctx x mty hfind)
   | assert l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
-    have hlreach : l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := hok
+    have hlreach : l ∈ SPMF.support (genIdentName (G := SPMF)) := hok
     refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.assert l e default, ctx⟩ ?_
     · subst hmdc; exact this
@@ -639,7 +639,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
       exact ⟨l, hlreach, e, (by simpa [CmdExprOk] using hExprC), rfl⟩
   | assume l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
-    have hlreach : l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := hok
+    have hlreach : l ∈ SPMF.support (genIdentName (G := SPMF)) := hok
     refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.assume l e default, ctx⟩ ?_
     · subst hmdc; exact this
@@ -648,7 +648,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
       exact ⟨l, hlreach, e, (by simpa [CmdExprOk] using hExprC), rfl⟩
   | cover l e md Δ hexpr hequiv =>
     have hmdc : md = default := hshape
-    have hlreach : l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := hok
+    have hlreach : l ∈ SPMF.support (genIdentName (G := SPMF)) := hok
     refine ⟨ctx, hequiv.symm, rfl, ?_⟩
     have := hlift ⟨.cover l e default, ctx⟩ ?_
     · subst hmdc; exact this
@@ -659,9 +659,9 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
 /-- A reachable, non-enclosing label is in `genFreshLabel`'s support (discharges the
     `block` rule's `label ∉ L` premise against the generator's freshness filter). -/
 theorem genFreshLabel_complete (labels : List String) (label : String)
-    (hreach : label ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hreach : label ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : label ∉ labels) :
-    label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) := by
+    label ∈ SPMF.support (genFreshLabel (G := SPMF) labels) := by
   simp only [genFreshLabel, mem_support_bind_iff]
   exact ⟨label, hreach, by simp only [mem_support_ite_iff, mem_support_pure_iff]; exact Or.inr ⟨hfresh, trivial⟩⟩
 
@@ -673,7 +673,7 @@ theorem genFreshLabel_complete_of_syntactic (labels : List String) (label : Stri
     (hsyn : StrataGenerators.Function.IsGenIdentName label)
     (hnotkw : isReservedKeyword label = false)
     (hfresh : label ∉ labels) :
-    label ∈ SetGen.support (genFreshLabel (G := SetGen.Set) labels) :=
+    label ∈ SPMF.support (genFreshLabel (G := SPMF) labels) :=
   genFreshLabel_complete labels label
     (StrataGenerators.Function.mem_support_genIdentName_of_syntactic hsyn hnotkw) hfresh
 
@@ -699,7 +699,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
         ctx' = stepCtx ctx s ∧
         (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
-          SetGen.support (genStmt (G := SetGen.Set) octx tvars [] procs labels C ctx [] n) := by
+          SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n) := by
   induction h using StatementHasType'.rec (motive_2 := fun C Γ L ss C' Γ' _ =>
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars →
       TContext.Equiv (T := CoreLParams) Γ (procToTCtx ctx) →
@@ -708,7 +708,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
         ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-          SetGen.support (genStmtChain (G := SetGen.Set) octx tvars [] procs L C ctx [] n ss.length)) with
+          SPMF.support (genStmtChain (G := SPMF) octx tvars [] procs L C ctx [] n ss.length)) with
   | cmd C Γ Γ2 L c Δ hc hequiv =>
     intro ctx n hRig hΓ hnf hok hcall hexpr
     cases cmdExtHasTypeA_equiv_congr hc hΓ.symm with

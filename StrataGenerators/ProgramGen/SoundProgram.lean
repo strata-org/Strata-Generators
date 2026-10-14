@@ -20,7 +20,7 @@ into:
   specification, and that includes the fact that each name of the program is distinct.
 -/
 
-open Lambda RandomChoice Core Core.TypeSpec Imperative SetGen
+open Lambda RandomChoice Core Core.TypeSpec Imperative
 open DatatypeGen
 open StrataGenerators.Procedure StrataGenerators.Stmt
 
@@ -46,7 +46,7 @@ theorem addMutualBlock_rigid {C C' : LContext CoreLParams} {block : MutualDataty
     from `genDatatypeBlock_names`. -/
 theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclDatatype (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
   simp only [genDeclDatatype, mem_support_bind_iff] at h
   obtain ⟨block, hblock, hmatch⟩ := h
@@ -275,7 +275,7 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hWKA : ProgramWellKindedAssumption)
     (hProcs : ProcSigCorresponds s.procs P)
     {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclProcedure (G := SPMF) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
   simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨proc₀, hproc₀, nm, hnm, hds, hs'⟩ := h
@@ -307,7 +307,7 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hWKA : ProgramWellKindedAssumption)
     (hProcs : ProcSigCorresponds s.procs P)
     {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so each branch equation pins both components.
@@ -330,7 +330,7 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     program `P`, and `Inv` is preserved throughout. -/
 theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hWKA : ProgramWellKindedAssumption) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n))
+    (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n))
     (hProcs : ProcSigCorresponds s'.procs P) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
   induction n generalizing s ds s' with
@@ -372,7 +372,7 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     * The declarations are well typed, which the fold gives. -/
 theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
     (hWKA : ProgramWellKindedAssumption)
-    (h : P ∈ SetGen.support (genProgram (G := SetGen.Set) numDecls b)) :
+    (h : P ∈ SPMF.support (genProgram (G := SPMF) numDecls b)) :
     ProgramHasTypeA DatatypeGen.coreContext {} P := by
   simp only [genProgram, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨⟨decls, sf⟩, hfold, hP⟩ := h
