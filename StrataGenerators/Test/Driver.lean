@@ -94,6 +94,17 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
     IO.eprintln "Each `TestDecl.name` must be unique; rename one of them."
     return some 1
 
+  -- A pin on a property that draws no inputs does nothing, but `--list` and the header would
+  -- still show it as a pin. The author would then think that the property is repeatable.
+  let idlePins := selected.filter fun d => d.seed.isSome && !d.drawsInputs
+  unless idlePins.isEmpty do
+    IO.eprintln s!"error: {idlePins.length} property(ies) set a seed but draw no inputs, so \
+      the seed does nothing:"
+    for d in idlePins do
+      IO.eprintln s!"  {d.name}"
+    IO.eprintln "Remove the `(seed := …)` argument or the `withSeed`."
+    return some 1
+
   if cli.run.gates.contains "smt" then
     if let some code ← checkSolvers then
       return some code
@@ -116,7 +127,8 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   -- ignores the trial count and the maximum size of the header. Report the count either way.
   -- Without the flag, such a property is the only one whose inputs do not change between
   -- runs. With the flag, it is the only one whose inputs are not the inputs of the flag.
-  let pinned := selected.filter (·.seed.isSome)
+  -- Count only the properties that run. A property that its gate skips draws nothing.
+  let pinned := selected.filter fun d => d.seed.isSome && d.enabled cli.run
   unless pinned.isEmpty do
     let ignores := if cli.run.seed.isSome then "--seed=, " else ""
     IO.println s!"{pinned.length} of them set their own seed, trials and max size, and so \

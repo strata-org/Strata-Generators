@@ -75,6 +75,10 @@ structure SeedPin where
 def SeedPin.attrArg (p : SeedPin) : String :=
   s!"(seed := {p.seed}, numTrials := {p.numTrials}, maxSize := {p.maxSize})"
 
+/-- The pin as a term: `withSeed 7 1000 5`. -/
+def SeedPin.term (p : SeedPin) : String :=
+  s!"withSeed {p.seed} {p.numTrials} {p.maxSize}"
+
 /-- The Plausible configuration for a `RunConfig`, at `seed` if the run has one.
 
     With `randomSeed`, `Testable.checkIO` runs the trials from `mkStdGen seed` and not from
@@ -548,11 +552,12 @@ def TestDecl.runConfig (d : TestDecl) (cfg : RunConfig) : RunConfig :=
   | some p => { cfg with seed := some p.seed, numTrials := p.numTrials, maxSize := p.maxSize }
   | none   => cfg
 
-/-- The seed for this property: its own seed, or the seed of the run, or none. With none,
-    the property draws from the process-wide generator and no one can replay the run. See
-    `TestDecl.runConfig` for why the seed at the declaration wins. -/
-def TestDecl.effectiveSeed (d : TestDecl) (cfg : RunConfig) : Option Nat :=
-  (d.runConfig cfg).seed
+/-- Whether the body of this property draws random inputs. Only such a body reads the seed,
+    the trial count and the maximum size. A `witness` body and a `witnesses` body do not. -/
+def TestDecl.drawsInputs (d : TestDecl) : Bool :=
+  match d.body with
+  | .sampled .. | .action _ => true
+  | .witness _ | .witnesses .. => false
 
 /-- Adds a Tyche panel of its own that samples `gen`. The argument `gen` is an `IO` action that
     gives a sample with its classes.
@@ -676,14 +681,21 @@ def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
       -- Show the settings next to the counterexample, so the reader does not have to find
       -- them in the header. A seed at the declaration needs no advice: the property gets
       -- this input until someone removes the seed.
+      --
+      -- The advice cannot see how the property was registered, so it covers the 2 cases.
+      -- `@[strata_properties (seed := …)]` pins each member of the list, so a member gets
+      -- the term form. The attribute keeps an existing `(tuning := …)`, because the tuning
+      -- also decides the inputs.
       let pin : SeedPin := { seed := s, numTrials := eff.numTrials, maxSize := eff.maxSize }
       let settings := s!"seed {s}, {eff.numTrials} trials, max size {eff.maxSize}"
       let note :=
         if d.seed.isSome then
           s!"{settings} (set at the declaration). Replay with `{d.replayCommand cfg}`"
         else
-          s!"{settings}. Replay with `{d.replayCommand cfg}`, or keep this input with \
-            `@[strata_property {pin.attrArg}]`"
+          s!"{settings}. Replay with `{d.replayCommand cfg}`. To keep this input, add \
+            `{pin.attrArg}` to the `@[strata_property]` attribute of the property, after its \
+            `(tuning := …)` if it has one. For a member of a `@[strata_properties]` list, put \
+            `{pin.term} <|` in front of the member."
       { o with message := some (match o.message with
                                 | some m => s!"{m}\n    {note}"
                                 | none => note) }
@@ -743,6 +755,12 @@ def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
   let eff := d.runConfig cfg
+  -- 0 trials draws nothing, and Plausible then reports a pass. A `knownFailure` property would
+  -- report a false fix, and a plain property would hide its defect.
+  if d.drawsInputs && eff.numTrials == 0 then
+    return { passed := false
+             message := some "0 trials: the property draws no inputs and tests nothing. \
+               Give at least 1 trial." }
   match d.body with
   | .sampled runner check _ inst _ =>
     let o ← @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩

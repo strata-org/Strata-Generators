@@ -483,7 +483,7 @@ again:
   × FAIL (12/1000) mypass: the output typechecks
 …
 -------------------
-    seed 7, 1000 trials, max size 5. Replay with `lake test -- 1000 5 --seed=7 --only='mypass: the output typechecks'`, or keep this input with `@[strata_property (seed := 7, numTrials := 1000, maxSize := 5)]`
+    seed 7, 1000 trials, max size 5. Replay with `lake test -- 1000 5 --seed=7 --only='mypass: the output typechecks'`. To keep this input, add `(seed := 7, numTrials := 1000, maxSize := 5)` to the `@[strata_property]` attribute of the property, after its `(tuning := …)` if it has one. For a member of a `@[strata_properties]` list, put `withSeed 7 1000 5 <|` in front of the member.
 ```
 
 **The seed alone does not fix the inputs.** Plausible gives each trial a size that comes
@@ -522,7 +522,9 @@ the inputs. Give them as `(seed := N, numTrials := T, maxSize := S)`, in this or
 number that you do not give gets the default value of a run (1000 trials, max size 5). The
 pinned property runs at these numbers, whatever the command line gives, so `--quick` does
 not change its inputs. Copy the attribute that the failure report suggests: it holds the
-numbers of the run that found the input.
+numbers of the run that found the input. `numTrials := 0` is an error, because 0 trials
+tests nothing. A seed on a `witness` or `witnesses` property is also an error, because such
+a property draws no inputs.
 
 `@[strata_properties (seed := N)]` sets the seed on each member of a list. `withSeed N` is
 the term form, for a `family` member or for a property built in a term. It reads as a
