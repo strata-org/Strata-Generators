@@ -27,17 +27,20 @@ open Elab Term in
     The elaborator splices a `@[strata_properties]` list in place. A report therefore cannot
     tell the two attributes apart.
 
-    The `(seed := N)` argument of an attribute becomes a `withSeed` around the
+    The `(seed := N, …)` argument of an attribute becomes a `withSeed` around the
     declaration, or around each member of a list. The seed is applied here, so a driver
     folds a plain `List TestDecl` whose `seed` fields already hold what the attributes
     asked for. The run needs no second idea of what the seed of a property is. -/
 elab "strata_registry%" : term => do
   let chunks ← (registryEntries (← getEnv)).mapM fun
     | .single n none      => `(term| [($(mkIdent n) : TestDecl)])
-    | .single n (some s)  => `(term| [withSeed $(quote s) ($(mkIdent n) : TestDecl)])
+    | .single n (some p)  =>
+      `(term| [withSeed $(quote p.seed) $(quote p.numTrials) $(quote p.maxSize)
+                 ($(mkIdent n) : TestDecl)])
     | .many n none        => `(term| ($(mkIdent n) : List TestDecl))
-    | .many n (some s)    =>
-      `(term| (($(mkIdent n) : List TestDecl).map (withSeed $(quote s))))
+    | .many n (some p)    =>
+      `(term| (($(mkIdent n) : List TestDecl).map
+                 (withSeed $(quote p.seed) $(quote p.numTrials) $(quote p.maxSize))))
   elabTerm (← `(List.flatten [$chunks,*])) none
 
 open Elab Term in

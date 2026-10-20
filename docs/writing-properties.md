@@ -476,14 +476,20 @@ lake test -- --seed=7 --only="mypass:"
 ```
 
 Each property then gets the seed `7`, and **the same command line gets the same inputs each
-time**. A property that fails reports its seed:
+time**. A property that fails reports its seed, and the command line that gives its inputs
+again:
 
 ```
   × FAIL (12/1000) mypass: the output typechecks
 …
 -------------------
-    seed: 7. Replay with `--seed=7`, or keep this input with `@[strata_property (seed := 7)]`
+    seed 7, 1000 trials, max size 5. Replay with `lake test -- 1000 5 --seed=7 --only='mypass: the output typechecks'`, or keep this input with `@[strata_property (seed := 7, numTrials := 1000, maxSize := 5)]`
 ```
+
+**The seed alone does not fix the inputs.** Plausible gives each trial a size that comes
+from the trial count and the maximum size, so `--seed=7 --quick` and `--seed=7` get
+different inputs. The replay command and the suggested attribute therefore hold all 3
+numbers. Copy them as they are.
 
 Without `--seed=`, no run comes back: `IO.stdGenRef` gets its seed from the operating system
 at startup. A counterexample that occurs in CI but not on your machine is the usual case,
@@ -500,7 +506,7 @@ it off for a run that must find something new.
 ### A seed for 1 property
 
 A property can hold its own seed. It then gets the same inputs on each run, whatever
-`--seed=` the run has:
+the command line gives:
 
 ```lean
 @[strata_property (seed := 8021)]
@@ -510,6 +516,13 @@ already in the program" <|
     TestDecl.property "lift: the minted snapshot names are fresh"
       fun (gp : GenProgram) => checkLiftFreshSnapshotNames gp.prog
 ```
+
+The pin also holds a trial count and a maximum size, because the seed alone does not fix
+the inputs. Give them as `(seed := N, numTrials := T, maxSize := S)`, in this order. A
+number that you do not give gets the default value of a run (1000 trials, max size 5). The
+pinned property runs at these numbers, whatever the command line gives, so `--quick` does
+not change its inputs. Copy the attribute that the failure report suggests: it holds the
+numbers of the run that found the input.
 
 `@[strata_properties (seed := N)]` sets the seed on each member of a list. `withSeed N` is
 the term form, for a `family` member or for a property built in a term. It reads as a
@@ -524,11 +537,12 @@ fails the run on the day someone corrects the defect. Without a seed, such a pro
 search for new defects. Give a seed to 1 property, not to a group, and remove it together
 with the `knownFailure` mark that it helps.
 
-A seed at the declaration wins over `--seed=`. This is the opposite of the usual
-precedence, and it is deliberate: the seed at the declaration is what makes the failure
-reliable. If the flag replaced it, the property becomes unreliable again, and its
-`knownFailure` mark then fails the run on each input that does not show the defect.
-`--list` prints these seeds, and a run reports how many properties have one.
+A pin at the declaration wins over `--seed=` and over the trial count and the maximum size
+of the command line. This is the opposite of the usual precedence, and it is deliberate: the
+pin is what makes the failure reliable. If the command line replaced a part of it, the
+property becomes unreliable again, and its `knownFailure` mark then fails the run on each
+input that does not show the defect. `--list` prints these pins, and a run reports how many
+properties have one.
 
 ## Tyche panels
 

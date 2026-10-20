@@ -65,10 +65,10 @@ namespace StrataGenerators.Test
     as a random order. -/
 inductive Entry where
   /-- A `def _ : TestDecl`. -/
-  | single (decl : Name) (seed : Option Nat)
+  | single (decl : Name) (seed : Option SeedPin)
   /-- A `def _ : List TestDecl`. The collector splices the list in place. `seed` applies to
       each member. -/
-  | many (decl : Name) (seed : Option Nat)
+  | many (decl : Name) (seed : Option SeedPin)
   deriving Inhabited, Repr
 
 /-- The registry. It holds the entries of one module in declaration order, and it holds the
@@ -136,13 +136,20 @@ syntax tuningSpec :=
     property its own seed. It expands to `StrataGenerators.Test.withSeed`. If the attribute
     also has a `tuningSpec`, the seed comes second: `@[strata_property (tuning := θ) (seed := 42)]`.
 
+    The argument can also set the trial count and the maximum size, in this order:
+    `(seed := 42, numTrials := 100, maxSize := 2)`. The seed alone does not fix the inputs (see
+    `SeedPin`), so a pin always holds all 3 numbers. A number that the argument does not give
+    gets the default value of a run. The `, numTrials` and `, maxSize` parts are `atomic` for the
+    same reason as the start of `tuningSpec`.
+
     1 attribute with an argument, and not a second attribute as in
     `@[strata_property, seed = 42]`. Lean reads that form as 2 independent attributes, so
     `seed` must be a global attribute name. Other packages then cannot use the name, and the
     name means nothing on its own. Worse, it does nothing at all on a declaration that has
     no `strata_property`. An argument cannot appear without its attribute. Lean core uses
     the same form for `@[deprecated (since := "2024-01-01")]`. -/
-syntax seedArg := " (" &"seed" " := " num ")"
+syntax seedArg := " (" &"seed" " := " num (atomic(", " &"numTrials") " := " num)?
+  (atomic(", " &"maxSize") " := " num)? ")"
 
 syntax (name := strataPropertyAttr) "strata_property" (tuningSpec)? (seedArg)? : attr
 syntax (name := strataPropertiesAttr) "strata_properties" (tuningSpec)? (seedArg)? : attr
@@ -166,14 +173,19 @@ private def parseTuningArg? (stx : Syntax) : Option TuningArg := do
   | some "tunings" => some (.many t)
   | _              => none
 
-/-- Read the `(seed := N)` argument of an attribute, if the attribute has one. An argument
+/-- Read the `(seed := N, …)` argument of an attribute, if the attribute has one. An argument
     that parses but has no numeral is an error. A seed that does not take effect leaves the
     property with new inputs on each run, and the author expects 1 input. -/
-private def seedOf? (stx : Syntax) : AttrM (Option Nat) := do
+private def seedOf? (stx : Syntax) : AttrM (Option SeedPin) := do
   let some arg := stx[2].getOptional? | return none
-  let some n := (arg.find? (·.isOfKind numLitKind)).bind Syntax.isNatLit?
-    | throwErrorAt arg "expected `(seed := N)` for a numeral `N`"
-  return some n
+  let num (s : Syntax) : AttrM Nat := do
+    let some n := s.isNatLit? | throwErrorAt s "expected a numeral"
+    return n
+  -- An optional part is a null node: empty, or `", " kw " := " num`.
+  let part (i : Nat) (default : Nat) : AttrM Nat :=
+    if arg[i].getNumArgs == 0 then pure default else num arg[i][3]
+  return some { seed := ← num arg[3], numTrials := ← part 4 defaultNumTrials,
+                maxSize := ← part 5 defaultMaxSize }
 
 /-- The input type of a `TestDecl.property` application, when the value is recognisably one. It
     reads through a `withPanel`, through a `List.map`, and through the elements of a list literal,

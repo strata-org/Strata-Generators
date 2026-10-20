@@ -112,15 +112,15 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
   IO.println s!"Running {selected.length} of {registry.length} properties \
     ({cli.run.numTrials} trials, max size {cli.run.maxSize}{seedNote})..."
 
-  -- A property with its own seed gets the same inputs on each run and ignores `--seed=`.
-  -- Report the count either way. Without the flag, such a property is the only one whose
-  -- inputs do not change between runs. With the flag, it is the only one whose inputs are
-  -- not the inputs of the flag.
+  -- A property with a pin gets the same inputs on each run. It ignores `--seed=`, and it also
+  -- ignores the trial count and the maximum size of the header. Report the count either way.
+  -- Without the flag, such a property is the only one whose inputs do not change between
+  -- runs. With the flag, it is the only one whose inputs are not the inputs of the flag.
   let pinned := selected.filter (·.seed.isSome)
   unless pinned.isEmpty do
-    let ignores := if cli.run.seed.isSome then " and so ignore --seed=" else ""
-    IO.println s!"{pinned.length} of them set their own seed{ignores}, and get the same \
-      inputs on each run (--list shows which)."
+    let ignores := if cli.run.seed.isSome then "--seed=, " else ""
+    IO.println s!"{pinned.length} of them set their own seed, trials and max size, and so \
+      ignore {ignores}the trials and the max size above (--list shows which)."
 
   -- This line is here and not in one of the two reporters, so both drivers print it. The LSpec
   -- driver collects its results through `lspecIO` and never sees an `Outcome`, so it cannot
