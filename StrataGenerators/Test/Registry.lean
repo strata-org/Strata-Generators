@@ -184,8 +184,11 @@ private def seedOf? (stx : Syntax) : AttrM (Option SeedPin) := do
   -- An optional part is a null node: empty, or `", " kw " := " num`.
   let part (i : Nat) (default : Nat) : AttrM Nat :=
     if arg[i].getNumArgs == 0 then pure default else num arg[i][3]
-  return some { seed := ← num arg[3], numTrials := ← part 4 defaultNumTrials,
-                maxSize := ← part 5 defaultMaxSize }
+  let numTrials ← part 4 defaultNumTrials
+  if numTrials == 0 then
+    throwErrorAt arg[4] "`numTrials := 0` draws no inputs, so the property tests nothing. \
+      Give at least 1 trial."
+  return some { seed := ← num arg[3], numTrials, maxSize := ← part 5 defaultMaxSize }
 
 /-- The input type of a `TestDecl.property` application, when the value is recognisably one. It
     reads through a `withPanel`, through a `List.map`, and through the elements of a list literal,

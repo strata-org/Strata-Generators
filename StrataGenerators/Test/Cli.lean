@@ -110,7 +110,7 @@ private def cliErrors (flags positional : List String) : List String := Id.run d
   for f in flags do
     if switchFlags.contains f then continue
     if valueFlags.any (f.startsWith ·.1) then continue
-    match valueFlags.find? (fun (k, _) => f.startsWith (k.dropRight 1)) with
+    match valueFlags.find? (fun (k, _) => f.startsWith (k.dropEnd 1)) with
     | some (k, _) => errs := errs ++ [s!"`{f}`: write `{k}VALUE`, with `=` and no space"]
     | none => errs := errs ++ [s!"`{f}`: unknown flag"]
   for (k, repeatable) in valueFlags do
@@ -129,7 +129,12 @@ private def cliErrors (flags positional : List String) : List String := Id.run d
         `numTrials` and `maxSize`"]
     | some name =>
       if a.toNat?.isNone then
-        errs := errs ++ [s!"`{a}`: `{name}` must be a natural number"]
+        if a.startsWith "-" then
+          errs := errs ++ [s!"`{a}`: unknown argument; a flag starts with `--`"]
+        else
+          errs := errs ++ [s!"`{a}`: `{name}` must be a natural number"]
+      else if name == "numTrials" && a.toNat? == some 0 then
+        errs := errs ++ [s!"`{a}`: `numTrials` must be at least 1; 0 trials tests nothing"]
   return errs
 
 /-- Parses `args`. For the flags, see the documentation of this module. -/
