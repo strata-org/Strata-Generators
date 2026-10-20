@@ -108,14 +108,18 @@ the exit code. Use it for a statistic about coverage, or for a count that locate
 ## Seeds
 
 `lake test -- --seed=N` makes a run repeatable. Each property gets the seed `N`, the same
-command line gets the same inputs, and a property that fails reports the seed to use again.
+command line gets the same inputs, and a property that fails reports the command line to use
+again. The seed alone does not fix the inputs: the trial count and the maximum size also
+decide them, so that command line holds all 3.
 Without the flag, each run starts from the operating system, so a counterexample is gone at
 the end of the run. 1 seed serves the whole run, so a run with a seed covers less than a
 run without one. Use it to get a failure again, not to gate a merge.
 
-`@[strata_property (seed := N)]` gives 1 property its own seed, whatever the run has. A
+`@[strata_property (seed := N)]` gives 1 property its own seed, whatever the run has. The
+pin also fixes the trial count and the maximum size of that property: write
+`(seed := N, numTrials := T, maxSize := S)`, or let them take the default values. A
 defect that only some inputs show then fails on each run, and `knownFailure` can watch it.
-The cost: that property stops the search for new defects. See `TestDecl.effectiveSeed` and
+The cost: that property stops the search for new defects. See `SeedPin`, `TestDecl.runConfig` and
 `withSeed`.
 
 `docs/writing-properties.md` gives the long form, and it says how the harness finds your file.
