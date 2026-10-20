@@ -27,19 +27,65 @@ open Plausible
 
 namespace StrataGenerators.Test
 
+/-- The number of trials for each property that a run uses by default. -/
+def defaultNumTrials : Nat := 1000
+
+/-- The maximum size of a generator that a run uses by default.
+
+    A generator reads this number as its own bound, which is the depth of a term, a level of the nesting or a
+    number of the declarations. Therefore the number is small. Each generator of `TestScaffold` receives it
+    unchanged. -/
+def defaultMaxSize : Nat := 5
+
 /-- The settings for a run. The driver reads them from the command line one time, and it
     gives them to each property. `gates` holds the tags that the run enables, and the flag
     `--smt` adds the tag `"smt"`. If the `TestDecl.gate` field of a property is not in this
     list, the driver reports the property as skipped and does not run it. -/
 structure RunConfig where
-  numTrials : Nat := 1000
-  maxSize   : Nat := 100
+  numTrials : Nat := defaultNumTrials
+  maxSize   : Nat := defaultMaxSize
   gates     : List String := []
+  /-- The seed for each property (`--seed=N`), or `none` for a seed from the operating
+      system. A property with a seed of its own ignores this field.
+
+      1 seed serves all properties, as `hspec` and `tasty-quickcheck` also do. Two
+      properties of 1 input type then get the same inputs, so a run with a seed covers
+      less than a run without one. Use a seed to get a failure again, not to gate a merge.
+
+      A `Body.action` reads this field as its own seed, because the action must give the
+      seed to its own generators. -/
+  seed      : Option Nat := none
   deriving Inhabited
 
-/-- The Plausible configuration for a `RunConfig`. -/
-def RunConfig.toConfiguration (cfg : RunConfig) : Configuration :=
-  { numInst := cfg.numTrials, maxSize := cfg.maxSize }
+/-- A seed set at the declaration, together with the trial count and the maximum size of the
+    run that found it.
+
+    The seed alone does not fix the inputs. Plausible gives trial `n` the size
+    `(numTrials - n - 1) * maxSize / numTrials`, so a change to either number changes the
+    inputs of each trial. A pin therefore holds all 3 numbers, and a property with a pin runs
+    at its own trial count and maximum size, whatever the command line gives. The default
+    values are the default values of a run. -/
+structure SeedPin where
+  seed      : Nat
+  numTrials : Nat := defaultNumTrials
+  maxSize   : Nat := defaultMaxSize
+  deriving Inhabited, Repr, BEq
+
+/-- The pin as the attribute that writes it: `(seed := 7, numTrials := 1000, maxSize := 5)`. -/
+def SeedPin.attrArg (p : SeedPin) : String :=
+  s!"(seed := {p.seed}, numTrials := {p.numTrials}, maxSize := {p.maxSize})"
+
+/-- The pin as a term: `withSeed 7 1000 5`. -/
+def SeedPin.term (p : SeedPin) : String :=
+  s!"withSeed {p.seed} {p.numTrials} {p.maxSize}"
+
+/-- The Plausible configuration for a `RunConfig`, at `seed` if the run has one.
+
+    With `randomSeed`, `Testable.checkIO` runs the trials from `mkStdGen seed` and not from
+    the process-wide `IO.stdGenRef`. A property with a seed thus takes nothing from the
+    global generator, and it cannot change the inputs of another property. -/
+def RunConfig.toConfiguration (cfg : RunConfig) (seed : Option Nat := none) : Configuration :=
+  { numInst := cfg.numTrials, maxSize := cfg.maxSize, randomSeed := seed }
 
 /-- The report of a property that drives itself with `IO`. It gives the verdict, the number
     of its own samples that passed, the number of samples that it drew, and a message.
@@ -259,6 +305,11 @@ structure TestDecl where
   /-- What this property claims about its own verdict. The field has a default, so a property
       says nothing about a known defect until its author adds `knownFailure`. -/
   expect : Expectation := .mustHold
+  /-- A seed for this property alone, with its trial count and maximum size. The property then
+      gets the same inputs on each run, whatever the command line gives. `none` is the default
+      and lets the run decide. Write `@[strata_property (seed := 42)]`, or `withSeed 42` in a
+      term. See `SeedPin`. -/
+  seed : Option SeedPin := none
   /-- Whether the run emits a Tyche panel. A sampled property and a property over a set of
       witnesses get a panel by default. A `witness` body and an `action` body have nothing to
       sample, so the smart constructors below set this field to `false` for them. -/
@@ -469,6 +520,45 @@ def TestDecl.action (name : String) (run : RunConfig → IO ActionResult)
 def knownFailure (reason : String) (d : TestDecl) : TestDecl :=
   { d with expect := .knownFailure reason }
 
+/-- **Give this property its own seed**, so it gets the same inputs on each run, whatever
+    the command line gives. The pin also sets the trial count and the maximum size, because
+    the seed alone does not fix the inputs (see `SeedPin`). Their default values are the
+    default values of a run.
+
+    A prefix, as `knownFailure` is, so the seed reads before the property. The attribute
+    `@[strata_property (seed := 42)]` expands to this. Use the attribute at a declaration.
+    Use this function for a `family` member, or for a property built in a term.
+
+    Use a seed for a defect that only some inputs show. A seed that gives such an input
+    makes the property fail on each run, and `knownFailure` can then watch it. Before,
+    such a property could not have a mark at all.
+
+    The cost: the property gets the same inputs forever, so it stops the search for new
+    defects. Give a seed to 1 property, not to a group, and remove it together with the
+    `knownFailure` mark that it helps. -/
+def withSeed (seed : Nat) (numTrials := defaultNumTrials) (maxSize := defaultMaxSize)
+    (d : TestDecl) : TestDecl :=
+  { d with seed := some { seed, numTrials, maxSize } }
+
+/-- The settings that this property runs at: the settings of the run, with the pin of the
+    property in place of the seed, the trial count and the maximum size.
+
+    A pin at the declaration wins over the command line. This is the opposite of the usual
+    precedence, and it is deliberate: the pin is what makes a rare failure reliable. If the
+    command line replaced a part of it, the property becomes unreliable again. Its
+    `knownFailure` mark then fails the run on each input that does not show the defect. -/
+def TestDecl.runConfig (d : TestDecl) (cfg : RunConfig) : RunConfig :=
+  match d.seed with
+  | some p => { cfg with seed := some p.seed, numTrials := p.numTrials, maxSize := p.maxSize }
+  | none   => cfg
+
+/-- Whether the body of this property draws random inputs. Only such a body reads the seed,
+    the trial count and the maximum size. A `witness` body and a `witnesses` body do not. -/
+def TestDecl.drawsInputs (d : TestDecl) : Bool :=
+  match d.body with
+  | .sampled .. | .action _ => true
+  | .witness _ | .witnesses .. => false
+
 /-- Adds a Tyche panel of its own that samples `gen`. The argument `gen` is an `IO` action that
     gives a sample with its classes.
 
@@ -558,6 +648,78 @@ def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
   let r ← Testable.checkIO (NamedBinder "input" (∀ x : α, check x)) cfg
   pure (Outcome.ofTestResult cfg r)
 
+/-- Quote `s` for a POSIX shell. A property name has spaces and colons, and it can have a `'`. -/
+private def shellQuote (s : String) : String :=
+  "'" ++ s.replace "'" "'\\''" ++ "'"
+
+/-- The command line that runs only `d`, at the settings `cfg`, and gives its inputs again.
+
+    It holds each setting that decides the inputs: the trial count, the maximum size and the
+    seed. It holds the gate too, because without the gate the property does not run. A
+    property with a pin needs no settings on the command line, because its pin wins. -/
+def TestDecl.replayCommand (d : TestDecl) (cfg : RunConfig) : String :=
+  let gate := match d.gate with | some g => s!" --{g}" | none => ""
+  let only := s!" --only={shellQuote d.name}"
+  match d.seed, cfg.seed with
+  | some _, _ => s!"lake test --{only}{gate}"
+  | none, some s => s!"lake test -- {cfg.numTrials} {cfg.maxSize} --seed={s}{only}{gate}"
+  | none, none => s!"lake test -- {cfg.numTrials} {cfg.maxSize}{only}{gate}"
+
+/-- Put the seed on a *failing* verdict, with the command line that gives the counterexample
+    again. `cfg` is the configuration of the run, before `TestDecl.runConfig`.
+
+    Only on a failure. A property that passes has nothing to replay, and 1 line for each
+    property that passes hides the 1 line that counts. A run without a seed gets no note,
+    because no number can give its inputs again. -/
+def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
+  let eff := d.runConfig cfg
+  match eff.seed with
+  | none => o
+  | some s =>
+    if o.passed then o
+    else
+      -- Show the settings next to the counterexample, so the reader does not have to find
+      -- them in the header. A seed at the declaration needs no advice: the property gets
+      -- this input until someone removes the seed.
+      --
+      -- The advice cannot see how the property was registered, so it covers the 2 cases.
+      -- `@[strata_properties (seed := …)]` pins each member of the list, so a member gets
+      -- the term form. The attribute keeps an existing `(tuning := …)`, because the tuning
+      -- also decides the inputs.
+      let pin : SeedPin := { seed := s, numTrials := eff.numTrials, maxSize := eff.maxSize }
+      let settings := s!"seed {s}, {eff.numTrials} trials, max size {eff.maxSize}"
+      let note :=
+        if d.seed.isSome then
+          s!"{settings} (set at the declaration). Replay with `{d.replayCommand cfg}`"
+        else
+          s!"{settings}. Replay with `{d.replayCommand cfg}`. To keep this input, add \
+            `{pin.attrArg}` to the `@[strata_property]` attribute of the property, after its \
+            `(tuning := …)` if it has one. For a member of a `@[strata_properties]` list, put \
+            `{pin.term} <|` in front of the member."
+      { o with message := some (match o.message with
+                                | some m => s!"{m}\n    {note}"
+                                | none => note) }
+
+/-- Run `act` with the process-wide generator at `seed`, then put back the old state.
+
+    A `Body.action` samples for itself, and this module cannot give it a seed. The action
+    calls `Gen.run` or `IO.rand`, and both read `IO.stdGenRef`, so that ref is the only
+    way in from here.
+
+    The old state goes back to keep the seed local to the action. Without this step, each
+    property after the action also gets fixed inputs. The suite then stops the search for
+    new defects in properties that asked for no seed. -/
+private def withSeededRng (seed : Option Nat) (act : IO α) : IO α := do
+  match seed with
+  | none => act
+  | some s =>
+    let saved ← IO.stdGenRef.get
+    try
+      IO.setRandSeed s
+      act
+    finally
+      IO.stdGenRef.set saved
+
 /-- Reconciles a raw verdict with the claim of the declaration.
 
     Each verdict in the package goes through this function, and each driver reads the result.
@@ -592,10 +754,18 @@ def Outcome.reconcile (o : Outcome) : Expectation → Outcome
 def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   if !d.enabled cfg then
     return { passed := true, skipped := true }
+  let eff := d.runConfig cfg
+  -- 0 trials draws nothing, and Plausible then reports a pass. A `knownFailure` property would
+  -- report a false fix, and a plain property would hide its defect.
+  if d.drawsInputs && eff.numTrials == 0 then
+    return { passed := false
+             message := some "0 trials: the property draws no inputs and tests nothing. \
+               Give at least 1 trial." }
   match d.body with
   | .sampled runner check _ inst _ =>
-    @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
-      check inst cfg.toConfiguration
+    let o ← @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
+      check inst (eff.toConfiguration eff.seed)
+    pure (o.noteSeed d cfg)
   | .witness verdict => pure { passed := verdict }
   | .witnesses cases render check _ =>
     let failures := cases.filter (fun c => !check c)
@@ -609,8 +779,13 @@ def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
              message := some s!"{failures.length}/{total} cases fail, e.g. \
                {String.intercalate "; " shown}" }
   | .action run =>
-    let r ← run cfg
-    pure { passed := r.passed, counts := some (r.samples, r.total), message := r.message }
+    -- The action samples for itself, so the seed goes to it 2 ways: `eff.seed` if the
+    -- action gives a seed to its own generators, and the process-wide generator if the
+    -- action calls `Gen.run`, which is the usual case. A pin also reaches the action as
+    -- `eff.numTrials` and `eff.maxSize`.
+    let r ← withSeededRng eff.seed (run eff)
+    pure (Outcome.noteSeed { passed := r.passed, counts := some (r.samples, r.total),
+                             message := r.message } d cfg)
 
 /-- Runs one property and reconciles the verdict against the claim of the property. **A driver
     calls this function.** `runRaw` is for a consumer that wants the verdict without the

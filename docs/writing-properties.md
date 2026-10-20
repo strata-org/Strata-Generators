@@ -444,6 +444,13 @@ tree — it needs two field names differing by a trailing `!`, which a draw almo
 produces, so `AdtLaws.bangFieldWitness` is the real pin and the property is a net around
 it.
 
+The other way is [a seed for that property](#a-seed-for-1-property). A property that fails
+on 1 input in 300 fails on *every* run when it has a seed that gives such an input, and
+`knownFailure` then applies as it does to any other property. Use the `#guard` witness if
+you can build one by hand: it names the shape that counts, and the property keeps its free
+inputs. Use a seed if you cannot, and the run that found the input tells you which seed to
+use.
+
 ### Marking one for a single run
 
 ```bash
@@ -458,6 +465,86 @@ gets committed, since only the declaration can carry a reason.
 
 `--list` prints every mark and its reason, so the registry is the answer to "what is
 known to fail?".
+
+## Get the same inputs again
+
+A property found the input that broke it, printed it, and then discarded the input. Use
+`--seed=` to get the input back:
+
+```bash
+lake test -- --seed=7 --only="mypass:"
+```
+
+Each property then gets the seed `7`, and **the same command line gets the same inputs each
+time**. A property that fails reports its seed, and the command line that gives its inputs
+again:
+
+```
+  × FAIL (12/1000) mypass: the output typechecks
+…
+-------------------
+    seed 7, 1000 trials, max size 5. Replay with `lake test -- 1000 5 --seed=7 --only='mypass: the output typechecks'`. To keep this input, add `(seed := 7, numTrials := 1000, maxSize := 5)` to the `@[strata_property]` attribute of the property, after its `(tuning := …)` if it has one. For a member of a `@[strata_properties]` list, put `withSeed 7 1000 5 <|` in front of the member.
+```
+
+**The seed alone does not fix the inputs.** Plausible gives each trial a size that comes
+from the trial count and the maximum size, so `--seed=7 --quick` and `--seed=7` get
+different inputs. The replay command and the suggested attribute therefore hold all 3
+numbers. Copy them as they are.
+
+Without `--seed=`, no run comes back: `IO.stdGenRef` gets its seed from the operating system
+at startup. A counterexample that occurs in CI but not on your machine is the usual case,
+and there is no number to report.
+
+The seed also sets the process-wide generator. The self-driving `IO` properties and the
+Tyche pass sample outside Plausible's runner, so the seed makes them repeatable too.
+
+**1 seed serves each property**, as `hspec` and `tasty-quickcheck` also do. Two properties
+of `GenProgram` therefore get the *same* 1000 programs, so a run with a seed covers less
+than a run without one. Use `--seed=` to get a failure again and to make it smaller. Leave
+it off for a run that must find something new.
+
+### A seed for 1 property
+
+A property can hold its own seed. It then gets the same inputs on each run, whatever
+the command line gives:
+
+```lean
+@[strata_property (seed := 8021)]
+def liftFreshSnapshotNames : TestDecl :=
+  knownFailure "strata-org/Strata#123: a minted snapshot name can collide with one \
+already in the program" <|
+    TestDecl.property "lift: the minted snapshot names are fresh"
+      fun (gp : GenProgram) => checkLiftFreshSnapshotNames gp.prog
+```
+
+The pin also holds a trial count and a maximum size, because the seed alone does not fix
+the inputs. Give them as `(seed := N, numTrials := T, maxSize := S)`, in this order. A
+number that you do not give gets the default value of a run (1000 trials, max size 5). The
+pinned property runs at these numbers, whatever the command line gives, so `--quick` does
+not change its inputs. Copy the attribute that the failure report suggests: it holds the
+numbers of the run that found the input. `numTrials := 0` is an error, because 0 trials
+tests nothing. A seed on a `witness` or `witnesses` property is also an error, because such
+a property draws no inputs.
+
+`@[strata_properties (seed := N)]` sets the seed on each member of a list. `withSeed N` is
+the term form, for a `family` member or for a property built in a term. It reads as a
+prefix, as `knownFailure` does.
+
+**Use it** for a defect that only some inputs show. A seed that gives such an input makes
+the property fail on each run. The property can then have a `knownFailure` mark, which
+fails the run on the day someone corrects the defect. Without a seed, such a property
+[can have no mark](#when-not-to-mark).
+
+**The cost** is what it promises: the property gets the same inputs forever, so it stops the
+search for new defects. Give a seed to 1 property, not to a group, and remove it together
+with the `knownFailure` mark that it helps.
+
+A pin at the declaration wins over `--seed=` and over the trial count and the maximum size
+of the command line. This is the opposite of the usual precedence, and it is deliberate: the
+pin is what makes the failure reliable. If the command line replaced a part of it, the
+property becomes unreliable again, and its `knownFailure` mark then fails the run on each
+input that does not show the defect. `--list` prints these pins, and a run reports how many
+properties have one.
 
 ## Tyche panels
 
@@ -518,8 +605,9 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 | flag | effect |
 |---|---|
 | `--quick` | 100 trials, max size 2, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
+| `--seed=N` | give each property the seed `N`, and report the seed of each property that fails. The same command line then gets the same inputs. See [Get the same inputs again](#get-the-same-inputs-again). |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
-| `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
+| `--list` | print the registry, with the seed and the expectation of each property, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
 | `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
 | `--no-tyche` | skip the Tyche pass. |
@@ -529,9 +617,9 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 `--only=… --quick` is the loop to iterate in: it runs one property or one group, skips
 the diagnostics, and writes no Tyche file.
 
-Note that the suite is **not** seed-deterministic, and a few properties fail on
-roughly one draw in several hundred. Never conclude anything from comparing one run to
-one run.
+A run **without** `--seed=` does not come back the same, and a few properties fail on about
+1 input in several hundred. Do not make a conclusion from 1 run against 1 run: give
+`--seed=N` to both runs, or run each of them several times.
 
 ## Where things live
 

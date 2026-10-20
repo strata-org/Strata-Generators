@@ -50,6 +50,12 @@ def checkSolvers : IO (Option UInt32) := do
     selection, because `TestDecl` is in `Type 1` and therefore cannot cross an `IO` boundary.
     `Cli.select` is pure, so a driver calls it. -/
 def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
+  -- An argument that could not be read is an error, not a default. See `Cli.errors`.
+  unless cli.errors.isEmpty do
+    for e in cli.errors do
+      IO.eprintln s!"error: {e}"
+    return some 1
+
   -- Refuse to run against a stale import root. The linker built this binary from the old root,
   -- so `registry` does not hold a property file that someone added later. The only correct
   -- action is to write the root again and to ask for another run. Without this check, a suite
@@ -88,12 +94,45 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
     IO.eprintln "Each `TestDecl.name` must be unique; rename one of them."
     return some 1
 
+  -- A pin on a property that draws no inputs does nothing, but `--list` and the header would
+  -- still show it as a pin. The author would then think that the property is repeatable.
+  let idlePins := selected.filter fun d => d.seed.isSome && !d.drawsInputs
+  unless idlePins.isEmpty do
+    IO.eprintln s!"error: {idlePins.length} property(ies) set a seed but draw no inputs, so \
+      the seed does nothing:"
+    for d in idlePins do
+      IO.eprintln s!"  {d.name}"
+    IO.eprintln "Remove the `(seed := …)` argument or the `withSeed`."
+    return some 1
+
   if cli.run.gates.contains "smt" then
     if let some code ← checkSolvers then
       return some code
 
+  -- `--seed=N` also sets the process-wide generator. Everything that samples outside
+  -- Plausible's own runner reads it: the self-driving `IO` properties (`Gen.run`), the
+  -- generator sizes of the Tyche pass (`IO.rand`), and the panels. Plausible gets its seed
+  -- separately, through `Configuration.randomSeed`. A property with a seed thus takes
+  -- nothing from this generator, and it cannot change the inputs of another property.
+  if let some s := cli.run.seed then
+    IO.setRandSeed s
+
+  let seedNote := match cli.run.seed with
+    | some s => s!", seed {s}"
+    | none => ""
   IO.println s!"Running {selected.length} of {registry.length} properties \
-    ({cli.run.numTrials} trials, max size {cli.run.maxSize})..."
+    ({cli.run.numTrials} trials, max size {cli.run.maxSize}{seedNote})..."
+
+  -- A property with a pin gets the same inputs on each run. It ignores `--seed=`, and it also
+  -- ignores the trial count and the maximum size of the header. Report the count either way.
+  -- Without the flag, such a property is the only one whose inputs do not change between
+  -- runs. With the flag, it is the only one whose inputs are not the inputs of the flag.
+  -- Count only the properties that run. A property that its gate skips draws nothing.
+  let pinned := selected.filter fun d => d.seed.isSome && d.enabled cli.run
+  unless pinned.isEmpty do
+    let ignores := if cli.run.seed.isSome then "--seed=, " else ""
+    IO.println s!"{pinned.length} of them set their own seed, trials and max size, and so \
+      ignore {ignores}the trials and the max size above (--list shows which)."
 
   -- This line is here and not in one of the two reporters, so both drivers print it. The LSpec
   -- driver collects its results through `lspecIO` and never sees an `Outcome`, so it cannot
