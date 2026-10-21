@@ -1,0 +1,523 @@
+import StrataGenerators.SizeDistribution
+import StrataGenerators.StmtHasTypeAGen
+
+/-!
+# How the size parameter shapes commands and statements
+
+Continues `StrataGenerators.SizeDistribution` (expressions) one level up.
+
+**Commands** (`genCmd`). The size is the expression size of the command's expression.
+`genCmd_coverage_threshold`: for a factory with no operator of positive arity, a command never
+carries an expression covering all seven forms below size `3`; from size `3` on it does with
+probability at least `coverBound / 140` (`prob_genCmd_covers`, which holds for every factory).
+
+**Statements** (`genStmt`). `genStmt_nesting_threshold`: at size `0` the top level never holds a
+`block`, `ite` or `loop`, in every context; at size `n + 1` it holds each of them with positive
+probability: `ite ≥ 1/(17 (n+2)²)`, `block ≥ 1/(17 (n+2))`, `loop ≥ 1/(170 (n+2)²)`. Each witness
+is the empty form of the statement (empty branches, empty body, nondeterministic guard), so it
+needs no sub-draw to succeed. The bounds fall with the size only because each body length is
+uniform on `[0, size]`, and the witness takes it to be `0`. `prob_genStmt_covers` lifts the
+command coverage bound to statements from size `3` on.
+
+**Sequences.** `stmtMassBound` bounds the mass of one statement at each size, and
+`prob_genStmtChain_top_ge` turns an event on the first statement of a chain into an event on the
+chain, paying `stmtMassBound size ^ len` for the rest. This is what the procedure and program
+results in `StrataGenerators.SizeDistributionProgram` build on.
+
+**The primitive draws.** `genIdentName`, `genFreshName`, `genFreshLabel` and `listOf` are
+`partial_fixpoint` definitions whose termination is not proved here. Each still has mass at least
+`1/2`, through its terminating branch (`prob_listOf_univ`), and that is all the bounds use.
+-/
+
+open Lambda RandomChoice SPMF NNReal ENNReal Core Imperative
+open StrataGenerators.SizeDistribution StrataGenerators.Stmt
+
+namespace StrataGenerators.SizeDistributionStmt
+
+-- ── Primitive draws: a guaranteed terminating branch ────────────────
+
+theorem prob_listOf_univ {α} (g : SPMF α) : 1 / 2 ≤ prob (listOf g) Set.univ := by
+  rw [listOf]
+  simp only [oneOfWith_eq]
+  refine le_trans ?_ (prob_oneOf_ge _ _ 0 (by simp) _)
+  simp only [List.getElem_cons_zero, List.length_cons, List.length_nil,
+    prob_pure_of_mem (Set.mem_univ _)]
+  ennr
+
+theorem prob_bind_univ_ge {α β} {x : SPMF α} {f : α → SPMF β} {c d : ℝ≥0∞}
+    (hx : c ≤ prob x Set.univ) (hf : ∀ a, d ≤ prob (f a) Set.univ) :
+    c * d ≤ prob (x >>= f) Set.univ :=
+  le_trans (mul_le_mul' hx le_rfl) (prob_bind_ge Set.univ fun a _ => hf a)
+
+theorem prob_genIdentName_univ : 1 / 2 ≤ prob (genIdentName (G := SPMF)) Set.univ := by
+  unfold genIdentName genStartChar
+  refine le_trans (le_of_eq (one_mul _).symm) (prob_bind_univ_ge
+    (prob_elements_of_forall _ fun _ _ => trivial).ge fun x => ?_)
+  refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (prob_listOf_univ _) fun _ => ?_)
+  exact (prob_pure_of_mem (Set.mem_univ _)).ge
+
+-- ── Commands ────────────────────────────────────────────────────────
+
+/-- The expressions a command carries. -/
+def cmdExprs : Cmd Expression → List LExpr'
+  | .init _ _ (.det e) _ => [e]
+  | .set _ (.det e) _ => [e]
+  | .assert _ e _ => [e]
+  | .assume _ e _ => [e]
+  | .cover _ e _ => [e]
+  | _ => []
+
+/-- A command covers the fragment when one of its expressions does. -/
+def CmdCovers (c : Cmd Expression) : Prop := ∃ e ∈ cmdExprs c, Covers e
+
+variable (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx)
+
+theorem prob_genAssertCmd_covers (ctx : VarCtx) (n : Nat) :
+    1 / 2 * (1 / 10 * coverBound) ≤
+      prob (genAssertCmd (G := SPMF) octx tvars ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
+  unfold genAssertCmd
+  refine le_trans (mul_le_mul' prob_genIdentName_univ le_rfl) (prob_bind_ge Set.univ fun l _ => ?_)
+  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
+    (prob_genLExpr_covers_ge _ octx pctx tvars n [] 3 id) le_rfl)
+    (prob_bind_ge {e | Covers e} fun e he => ?_))
+  refine (prob_pure_of_mem ?_).ge
+  exact ⟨e, List.mem_singleton_self _, he⟩
+
+/-- **From expression size `3` on, a command carries a covering expression** with probability at
+least `coverBound / 140`, in every variable context. -/
+theorem prob_genCmd_covers (imm : List (Identifier Unit)) (ctx : VarCtx) (n : Nat) :
+    1 / 7 * (1 / 2 * (1 / 10 * coverBound)) ≤
+      prob (genCmd (G := SPMF) octx tvars imm ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
+  have ha := prob_genAssertCmd_covers octx tvars pctx ctx n
+  unfold genCmd; dsimp only; split
+  · refine le_trans ?_ (prob_frequency_ge _ _ 4 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil]
+    exact mul_le_mul' (by ennr) ha
+  · refine le_trans ?_ (prob_frequency_ge _ _ 2 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil]
+    exact mul_le_mul' (by ennr) ha
+
+theorem genLExpr_not_covers (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (hn : n ≤ 2)
+    (fc : FVarCtx) (bc : BVarCtx) (τ : LMonoTy) (k : Nat)
+    (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr')) :
+    IsSoundFor (genLExpr (G := SPMF) fc octx [] tvars bc n τ k rc) (fun e => ¬ Covers e) :=
+  fun e he => ((prob_eq_zero_iff _ _).mp
+    (prob_genLExpr_covers_eq_zero fc octx tvars hops n hn bc τ k rc)) e he
+
+theorem genFreshName_true (ctx : VarCtx) :
+    IsSoundFor (_root_.genFreshName (G := SPMF) ctx) (fun _ => True) := fun _ _ => trivial
+theorem genIdentName_true : IsSoundFor (genIdentName (G := SPMF)) (fun _ => True) :=
+  fun _ _ => trivial
+
+/-- **Below expression size `3`, no command carries a covering expression**, for a factory with no
+operator of positive arity and no polymorphic operator. -/
+theorem genCmd_not_covers (hops : ∀ σ, findOpsInCtx octx σ = []) (imm : List (Identifier Unit))
+    (ctx : VarCtx) (n : Nat) (hn : n ≤ 2) :
+    IsSoundFor (genCmd (G := SPMF) octx tvars imm ctx n []) (fun r => ¬ CmdCovers r.cmd) := by
+  have hL := genLExpr_not_covers octx tvars hops n hn
+  rw [IsSoundFor.iff_obs]
+  unfold genCmd genInitDet genInitNondet genSetDet genSetNondet genAssertCmd genAssumeCmd genCoverCmd
+  walk [(hL _ _ _ _ _).obs, (genFreshName_true _).obs, (genLMonoTy_true tvars _).obs,
+    genIdentName_true.obs]
+  all_goals simp_all [CmdCovers, cmdExprs]
+
+-- ── Statements: which root forms each size produces ─────────────────
+
+/-- The three statement forms that nest a body. -/
+def IsNesting : Statement → Prop
+  | .block .. => True
+  | .ite .. => True
+  | .loop .. => True
+  | _ => False
+
+/-- A draw holds a nesting statement at its top level. -/
+def HasNesting (r : GenStmtResult) : Prop := ∃ s ∈ r.stmts, IsNesting s
+
+section leaves
+variable (imm : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
+  (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat)
+
+theorem genCmdStmt_flat :
+    IsSoundFor (genCmdStmt (G := SPMF) octx tvars imm C ctx d pctx) (fun r => ¬ HasNesting r) := by
+  intro r hr
+  simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+  obtain ⟨_, _, rfl⟩ := hr
+  simp [HasNesting, IsNesting]
+
+theorem genExitStmt_flat :
+    IsSoundFor (genExitStmt (G := SPMF) labels C ctx) (fun r => ¬ HasNesting r) := by
+  intro r hr
+  cases labels with
+  | nil => simp only [genExitStmt, mem_support_bot_iff] at hr
+  | cons l ls =>
+    simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+    obtain ⟨_, _, rfl⟩ := hr
+    simp [HasNesting, IsNesting]
+
+theorem genFuncDeclStmt_flat :
+    IsSoundFor (genFuncDeclStmt (G := SPMF) octx C ctx d pctx) (fun r => ¬ HasNesting r) := by
+  intro r hr
+  simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
+  obtain ⟨_, _, rfl⟩ := hr
+  simp [HasNesting, IsNesting]
+
+theorem genTypeDeclStmt_flat :
+    IsSoundFor (genTypeDeclStmt (G := SPMF) C ctx d) (fun r => ¬ HasNesting r) := by
+  intro r hr
+  simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
+  obtain ⟨_, _, hr⟩ := hr
+  split at hr
+  · simp only [mem_support_pure_iff] at hr; subst hr; simp [HasNesting, IsNesting]
+  · simp only [mem_support_bot_iff] at hr
+
+theorem genCallStmt_flat :
+    IsSoundFor (genCallStmt (G := SPMF) octx tvars imm procs C ctx d pctx)
+      (fun r => ¬ HasNesting r) := by
+  intro r hr
+  cases procs with
+  | nil => simp only [genCallStmt, mem_support_bot_iff] at hr
+  | cons p₀ ps =>
+    simp only [genCallStmt, mem_support_bind_iff] at hr
+    obtain ⟨_, _, _, _, hr⟩ := hr
+    split at hr
+    · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
+      obtain ⟨_, _, _, _, rfl⟩ := hr
+      simp only [HasNesting, List.mem_append, List.mem_singleton, not_exists, not_and]
+      rintro s (hs | rfl)
+      · simp only [StrataGenerators.Stmt.initChain, List.mem_map] at hs
+        obtain ⟨_, _, rfl⟩ := hs
+        simp [IsNesting]
+      · simp [IsNesting]
+    · simp only [mem_support_bot_iff] at hr
+
+end leaves
+
+/-- **Size 0 gives no nesting statement**, in every context. -/
+theorem genStmt_zero_flat (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) :
+    IsSoundFor (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx 0)
+      (fun r => ¬ HasNesting r) := by
+  rw [IsSoundFor.iff_obs, genStmt]
+  walk [(genCmdStmt_flat octx tvars pctx _ _ _ _).obs, (genExitStmt_flat _ _ _).obs,
+    (genFuncDeclStmt_flat octx pctx _ _ _).obs, (genTypeDeclStmt_flat _ _ _).obs,
+    (genCallStmt_flat octx tvars pctx _ _ _ _ _).obs]
+  all_goals assumption
+
+def IsIte : Statement → Prop
+  | .ite .. => True
+  | _ => False
+def IsBlock : Statement → Prop
+  | .block .. => True
+  | _ => False
+def IsLoop : Statement → Prop
+  | .loop .. => True
+  | _ => False
+
+/-- The event that the top level of a draw holds a statement satisfying `P`. -/
+def Top (P : Statement → Prop) : Set GenStmtResult := {r | ∃ s ∈ r.stmts, P s}
+
+theorem prob_choose_zero (m : Nat) (h : 0 ≤ m) :
+    1 / ((m : ℝ≥0∞) + 1) ≤
+      prob (RandomChoice.choose 0 m h : SPMF (ULift {x : Nat // 0 ≤ x ∧ x ≤ m}))
+        {x | x.down.val = 0} := by
+  refine le_trans ?_ (prob_mono (E := {⟨⟨0, by omega, by omega⟩⟩}) ?_)
+  · rw [prob_singleton, choose_apply]
+    simp
+  · rintro x rfl; rfl
+
+theorem genStmtChain_zero (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
+    genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx size 0 = Pure.pure ([], C, ctx) := by
+  rw [genStmtChain]
+
+/-- **From size 1 on, the top level is an `ite` with probability at least `1/(17 (size+1)²)`.** The
+witness is the nondeterministic `ite` with two empty branches, which needs no sub-draw to succeed;
+each branch length is uniform on `[0, size]`, which is where the size-dependence comes from. -/
+theorem prob_genStmt_ite_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
+    1 / 17 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))
+      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsIte) := by
+  rw [genStmt]
+  refine le_trans ?_ (prob_frequency_ge _ _ 7 (by simp) _)
+  simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+    List.sum_cons, List.sum_nil]
+  refine mul_le_mul' (le_of_eq (by norm_num)) ?_
+  have hc := prob_choose_zero (n + 1) (Nat.zero_le _)
+  push_cast at hc
+  rw [show (n : ℝ≥0∞) + 1 + 1 = n + 2 by ring] at hc
+  refine le_trans (mul_le_mul' hc le_rfl) (prob_bind_ge _ fun x hx => ?_)
+  obtain ⟨⟨v, hv⟩⟩ := x
+  simp only [Set.mem_setOf_eq] at hx; subst hx
+  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' hc le_rfl)
+    (prob_bind_ge _ fun y hy => ?_))
+  obtain ⟨⟨w, hw⟩⟩ := y
+  simp only [Set.mem_setOf_eq] at hy; subst hy
+  simp only [genStmtChain_zero, LawfulMonad.pure_bind]
+  refine (prob_pure_of_mem ?_).ge
+  exact ⟨_, List.mem_singleton_self _, trivial⟩
+
+theorem prob_genFreshLabel_univ (labels : List String) :
+    1 / 2 ≤ prob (genFreshLabel (G := SPMF) labels) Set.univ := by
+  unfold genFreshLabel
+  refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge prob_genIdentName_univ fun s => ?_)
+  split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
+
+theorem prob_genCondOrNondet_univ (ctx : VarCtx) (d : Nat) :
+    1 / 5 ≤ prob (genCondOrNondet (G := SPMF) octx tvars ctx d pctx) Set.univ := by
+  unfold genCondOrNondet
+  refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
+  simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
+    prob_pure_of_mem (Set.mem_univ _)]
+  ennr
+
+theorem prob_genOptMeasure_univ (ctx : VarCtx) (d : Nat) :
+    1 / 4 ≤ prob (genOptMeasure (G := SPMF) octx tvars ctx d pctx) Set.univ := by
+  unfold genOptMeasure biasedOptionGen
+  refine le_trans ?_ (prob_bind_ge {false} (d := 1) fun b hb => ?_)
+  · rw [mul_one, prob_singleton, coin_apply_false (by norm_num) (by norm_num)]
+    have h34 : (3 / 4 : ℚ) = (3 : ℤ) / (4 : ℤ) := by norm_num
+    have hd : (3 / 4 : ℚ).den = 4 := by
+      have := Rat.den_div_eq_of_coprime (a := 3) (b := 4) (by norm_num) (by decide)
+      rw [h34]; exact_mod_cast this
+    have hn : (3 / 4 : ℚ).num = 3 := by
+      rw [h34, Rat.num_div_eq_of_coprime (by norm_num) (by decide)]
+    rw [hd, hn, show Int.toNat 3 = 3 from rfl]
+    norm_num
+  · rw [Set.mem_singleton_iff.mp hb]
+    exact (prob_pure_of_mem (Set.mem_univ _)).ge
+
+theorem prob_listOfMaxLength_univ {α} (m : Nat) (g : SPMF α) :
+    1 / ((m : ℝ≥0∞) + 1) ≤ prob (listOfMaxLength m g) Set.univ := by
+  unfold listOfMaxLength
+  rw [map_eq_pure_bind, LawfulMonad.bind_assoc]
+  refine le_trans (le_of_eq (mul_one _).symm)
+    (le_trans (mul_le_mul' (prob_choose_zero m (Nat.zero_le _)) le_rfl)
+      (prob_bind_ge _ fun x hx => ?_))
+  obtain ⟨⟨v, hv⟩⟩ := x
+  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [LawfulMonad.pure_bind, vectorOf, List.replicate, List.foldr]
+  exact (prob_pure_of_mem (Set.mem_univ _)).ge
+
+theorem prob_genInvariants_univ (ctx : VarCtx) (d : Nat) :
+    1 / ((d : ℝ≥0∞) + 1) ≤ prob (genInvariants (G := SPMF) octx tvars ctx d pctx) Set.univ := by
+  unfold genInvariants; exact prob_listOfMaxLength_univ _ _
+
+/-- **From size 1 on, the top level is a `block` with probability at least
+`1/(17 (size+1))`**: an empty block, under a label from `genFreshLabel`. -/
+theorem prob_genStmt_block_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
+    2 / 17 * (1 / 2 * (1 / ((n : ℝ≥0∞) + 2)))
+      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsBlock) := by
+  rw [genStmt]
+  refine le_trans ?_ (prob_frequency_ge _ _ 5 (by simp) _)
+  simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+    List.sum_cons, List.sum_nil]
+  refine mul_le_mul' (le_of_eq (by norm_num)) ?_
+  have hc := prob_choose_zero (n + 1) (Nat.zero_le _)
+  push_cast at hc
+  rw [show (n : ℝ≥0∞) + 1 + 1 = n + 2 by ring] at hc
+  refine le_trans (mul_le_mul' (prob_genFreshLabel_univ labels) le_rfl)
+    (prob_bind_ge Set.univ fun l _ => ?_)
+  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' hc le_rfl)
+    (prob_bind_ge _ fun x hx => ?_))
+  obtain ⟨⟨v, hv⟩⟩ := x
+  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [genStmtChain_zero, LawfulMonad.pure_bind]
+  refine (prob_pure_of_mem ?_).ge
+  exact ⟨_, List.mem_singleton_self _, trivial⟩
+
+/-- **From size 1 on, the top level is a `loop` with probability at least
+`1/(170 (size+1)²)`**: a nondeterministic guard, no measure, no invariant, an empty body. -/
+theorem prob_genStmt_loop_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
+    2 / 17 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))))
+      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsLoop) := by
+  rw [genStmt]
+  refine le_trans ?_ (prob_frequency_ge _ _ 8 (by simp) _)
+  simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+    List.sum_cons, List.sum_nil]
+  refine mul_le_mul' (le_of_eq (by norm_num)) ?_
+  have hc := prob_choose_zero (n + 1) (Nat.zero_le _)
+  push_cast at hc
+  rw [show (n : ℝ≥0∞) + 1 + 1 = n + 2 by ring] at hc
+  have hi := prob_genInvariants_univ octx tvars pctx ctx (n + 1)
+  push_cast at hi
+  rw [show (n : ℝ≥0∞) + 1 + 1 = n + 2 by ring] at hi
+  refine le_trans (mul_le_mul' (prob_genCondOrNondet_univ octx tvars pctx ctx _) le_rfl)
+    (prob_bind_ge Set.univ fun _ _ => ?_)
+  refine le_trans (mul_le_mul' (prob_genOptMeasure_univ octx tvars pctx ctx _) le_rfl)
+    (prob_bind_ge Set.univ fun _ _ => ?_)
+  refine le_trans (mul_le_mul' hi le_rfl) (prob_bind_ge Set.univ fun _ _ => ?_)
+  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' hc le_rfl)
+    (prob_bind_ge _ fun x hx => ?_))
+  obtain ⟨⟨v, hv⟩⟩ := x
+  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [genStmtChain_zero, LawfulMonad.pure_bind]
+  refine (prob_pure_of_mem ?_).ge
+  exact ⟨_, List.mem_singleton_self _, trivial⟩
+
+/-- A top-level statement is a command that carries a covering expression. -/
+def IsCoveringCmd : Statement → Prop
+  | .cmd (.cmd c) => CmdCovers c
+  | _ => False
+
+/-- **From size 3 on, a statement draw carries a covering expression** with probability at least
+`4/17` of the command bound, in every context. -/
+theorem prob_genStmt_covers (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
+    4 / 17 * (1 / 7 * (1 / 2 * (1 / 10 * coverBound)))
+      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 3))
+          (Top IsCoveringCmd) := by
+  rw [genStmt]
+  refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
+  simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+  refine mul_le_mul' (le_of_eq (by norm_num)) ?_
+  unfold genCmdStmt
+  refine le_trans (le_of_eq (mul_one _).symm) (le_trans
+    (mul_le_mul' (prob_genCmd_covers octx tvars pctx imm ctx n) le_rfl)
+    (prob_bind_ge _ fun r hr => ?_))
+  refine (prob_pure_of_mem ?_).ge
+  exact ⟨_, List.mem_singleton_self _, hr⟩
+
+-- ── Masses, for threading through sequences ─────────────────────────
+
+theorem prob_genFreshName_univ (ctx : VarCtx) :
+    1 / 2 ≤ prob (_root_.genFreshName (G := SPMF) ctx) Set.univ := by
+  unfold _root_.genFreshName
+  refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge prob_genIdentName_univ fun s => ?_)
+  split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
+
+theorem prob_genCmd_univ (imm : List (Identifier Unit)) (ctx : VarCtx) (d : Nat) :
+    1 / 14 * (1 / 2 * (1 / 12)) ≤
+      prob (genCmd (G := SPMF) octx tvars imm ctx d pctx) Set.univ := by
+  have hi : 1 / 2 * (1 / 12) ≤ prob (genInitNondet (G := SPMF) tvars ctx d) Set.univ := by
+    unfold genInitNondet
+    refine prob_bind_univ_ge (prob_genFreshName_univ ctx) fun _ => ?_
+    refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
+      (le_trans (prob_genLMonoTy_bool tvars d) (prob_mono (Set.subset_univ _))) le_rfl)
+      (prob_bind_ge Set.univ fun _ _ => (prob_pure_of_mem (Set.mem_univ _)).ge))
+  unfold genCmd; dsimp only; split
+  · refine le_trans ?_ (prob_frequency_ge _ _ 1 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil]
+    exact mul_le_mul' (by ennr) hi
+  · refine le_trans ?_ (prob_frequency_ge _ _ 1 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil]
+    exact mul_le_mul' (by ennr) hi
+
+/-- A size-indexed lower bound on the mass of `genStmt`. At size 0 it is the command branch; above,
+the empty nondeterministic `ite`. -/
+noncomputable def stmtMassBound : Nat → ℝ≥0∞
+  | 0 => 4 / 10 * (1 / 14 * (1 / 2 * (1 / 12)))
+  | n + 1 => 1 / 17 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))
+
+theorem prob_genStmt_univ (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
+    stmtMassBound n ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx n)
+      Set.univ := by
+  cases n with
+  | zero =>
+    rw [genStmt]
+    refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
+    simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+    refine mul_le_mul' (le_of_eq (by norm_num)) ?_
+    unfold genCmdStmt
+    exact le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge
+      (prob_genCmd_univ octx tvars pctx imm ctx 0) fun _ => (prob_pure_of_mem (Set.mem_univ _)).ge)
+  | succ n =>
+    exact le_trans (prob_genStmt_ite_ge octx tvars pctx imm procs labels C ctx n)
+      (prob_mono (Set.subset_univ _))
+
+theorem prob_genStmtChain_univ (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (size : Nat) :
+    ∀ (len : Nat) (C : LContext CoreLParams) (ctx : VarCtx),
+      stmtMassBound size ^ len ≤
+        prob (genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx size len) Set.univ := by
+  intro len
+  induction len with
+  | zero => intro C ctx; rw [genStmtChain_zero, pow_zero]; exact (prob_pure_of_mem (Set.mem_univ _)).ge
+  | succ len ih =>
+    intro C ctx
+    rw [genStmtChain, pow_succ, mul_comm]
+    refine prob_bind_univ_ge (prob_genStmt_univ octx tvars pctx imm procs labels C ctx size) fun r => ?_
+    refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (ih _ _) fun _ => ?_)
+    exact (prob_pure_of_mem (Set.mem_univ _)).ge
+
+/-- The event that a statement chain holds, at its top level, a statement satisfying `P`. -/
+def TopChain (P : Statement → Prop) : Set (List Statement × LContext CoreLParams × VarCtx) :=
+  {t | ∃ s ∈ t.1, P s}
+
+/-- A chain of length `len + 1` inherits a top-level event from its first statement, at the cost
+of the mass of the remaining `len` statements. -/
+theorem prob_genStmtChain_top_ge (P : Statement → Prop) (imm : List (Identifier Unit))
+    (procs : ProcSigCtx) (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx)
+    (size len : Nat) :
+    prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx size) (Top P) *
+        stmtMassBound size ^ len ≤
+      prob (genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx size (len + 1))
+        (TopChain P) := by
+  rw [genStmtChain]
+  refine prob_bind_ge (Top P) fun r hr => ?_
+  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
+    (prob_genStmtChain_univ octx tvars pctx imm procs labels size len _ _) le_rfl)
+    (prob_bind_ge Set.univ fun t _ => ?_))
+  refine (prob_pure_of_mem ?_).ge
+  obtain ⟨s, hs, hP⟩ := hr
+  exact ⟨s, List.mem_append_left _ hs, hP⟩
+
+/-- **A size-0 chain has no nesting statement at its top level.** -/
+theorem genStmtChain_zero_flat (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) :
+    ∀ (len : Nat) (C : LContext CoreLParams) (ctx : VarCtx),
+      IsSoundFor (genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx 0 len)
+        (fun t => ∀ s ∈ t.1, ¬ IsNesting s) := by
+  intro len
+  induction len with
+  | zero =>
+    intro C ctx t ht
+    rw [genStmtChain_zero, mem_support_pure_iff] at ht
+    subst ht; simp
+  | succ len ih =>
+    intro C ctx t ht
+    rw [genStmtChain] at ht
+    simp only [mem_support_bind_iff, mem_support_pure_iff] at ht
+    obtain ⟨r, hr, ⟨rest, C'', ctx''⟩, hrest, rfl⟩ := ht
+    intro s hs
+    rcases List.mem_append.mp hs with hs | hs
+    · exact fun hn => genStmt_zero_flat octx tvars pctx imm procs labels C ctx r hr ⟨s, hs, hn⟩
+    · exact ih _ _ _ hrest s hs
+
+/-- **The statement threshold.** At size `0` a statement draw never has a `block`, `ite` or
+`loop` at its top level; at every size `n + 1` it has each of them with positive probability. -/
+theorem genStmt_nesting_threshold (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) :
+    prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx 0) (Top IsNesting) = 0 ∧
+    ∀ n : Nat,
+      1 / 17 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))
+        ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsIte) ∧
+      2 / 17 * (1 / 2 * (1 / ((n : ℝ≥0∞) + 2)))
+        ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsBlock) ∧
+      2 / 17 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))))
+        ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsLoop) :=
+  ⟨(prob_eq_zero_iff _ _).mpr fun r hr hn =>
+      genStmt_zero_flat octx tvars pctx imm procs labels C ctx r hr hn,
+   fun n => ⟨prob_genStmt_ite_ge octx tvars pctx imm procs labels C ctx n,
+     prob_genStmt_block_ge octx tvars pctx imm procs labels C ctx n,
+     prob_genStmt_loop_ge octx tvars pctx imm procs labels C ctx n⟩⟩
+
+/-- **The command threshold.** For a factory with no operator of positive arity, a command never
+carries a covering expression below expression size `3`; from size `3` on it does with
+probability at least `coverBound / 140`, and that lower bound holds for every factory. -/
+theorem genCmd_coverage_threshold (hops : ∀ σ, findOpsInCtx octx σ = [])
+    (imm : List (Identifier Unit)) (ctx : VarCtx) :
+    (∀ n ≤ 2, prob (genCmd (G := SPMF) octx tvars imm ctx n []) {r | CmdCovers r.cmd} = 0) ∧
+    (∀ n, 1 / 7 * (1 / 2 * (1 / 10 * coverBound)) ≤
+      prob (genCmd (G := SPMF) octx tvars imm ctx (n + 3) []) {r | CmdCovers r.cmd}) :=
+  ⟨fun n hn => (prob_eq_zero_iff _ _).mpr fun r hr hc =>
+      genCmd_not_covers octx tvars hops imm ctx n hn r hr hc,
+   fun n => prob_genCmd_covers octx tvars [] imm ctx n⟩
+
+end StrataGenerators.SizeDistributionStmt

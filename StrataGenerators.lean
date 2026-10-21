@@ -19,3 +19,9 @@ import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
+-- `SPMF.prob` bounds on how the size parameter shapes `genLExprBase`'s distribution: which root
+-- forms each size can produce, and the size threshold for covering every form in one draw.
+import StrataGenerators.SizeDistribution
+import StrataGenerators.SizeDistributionStmt
+import StrataGenerators.SizeDistributionFactory
+import StrataGenerators.SizeDistributionProgram
