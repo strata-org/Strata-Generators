@@ -3,22 +3,37 @@ version = "0.1.0"
 defaultTargets = ["StrataGenerators", "StrataTests"]
 testDriver = "test"
 
+# Strata and StrataDDM are local checkouts. Strata's own lakefile names StrataDDM and
+# plausible without a source, so this package supplies both.
 [[require]]
 name = "Strata"
-git = "https://github.com/strata-org/Strata"
-rev = "main"
+path = "/workplace/cohenjo/strata-gen-pin/Strata"
+
+[[require]]
+name = "StrataDDM"
+path = "/workplace/cohenjo/strata-gen-pin/StrataDDM"
+
+# The plausible revision that Strata, LSpec and mathlib v4.31.0 all use.
+[[require]]
+name = "plausible"
+git = "https://github.com/leanprover-community/plausible"
+rev = "63045536fe95024e6c18fc7b48e03f506701c5bc"
 
 [[require]]
 name = "basalt"
-git = "https://github.com/hgoldstein95/basalt"
-rev = "lean-4.29"
+path = "/workplace/cohenjo/strata-gen-pin/basalt"
 
-# Note: Strata is on Lean 4.29.1, but mainline LSpec is on 4.31,
-# so we currently depend on a custom fork of LSpec that is on 4.29
 [[require]]
 name = "LSpec"
-git = "https://github.com/ngernest/LSpec"
-rev = "aa07f8c"
+git = "https://github.com/argumentcomputer/LSpec"
+rev = "fb195bc"
+
+# basalt pins mathlib v4.29.1; this require selects the release for Lean 4.31.0. It is
+# last so that mathlib's own pins of its dependencies take precedence over basalt's.
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.31.0"
 
 [[lean_lib]]
 name = "StrataGenerators"

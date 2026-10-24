@@ -138,8 +138,6 @@ theorem procToTCtx_insert (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
     context `octx` and type-variable list `tvars`.
 
     - `toTCtx` / `corr` / `toTCtx_insert`: the single-scope construction above.
-    - `exprSound`: discharged by the unconditional `genLExpr_sound` (at each scope's
-      derived free-variable context `ctx.toFVarCtx`).
     - `freshNamesDisjointFromExprs_toFVarCtx` discharges the field `freshDisjoint`. That lemma holds at *each*
       scope, because each generated free variable comes from `ctx.toFVarCtx`, whose names are the names of the
       scope, and a fresh name of an `init` differs from each name of the scope. That fact is what
@@ -148,7 +146,6 @@ def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx := 
     GenStmtSoundEnv octx tvars pctx where
   toTCtx := procToTCtx
   corr := procToTCtx_corr
-  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx pctx tvars [] d τ _ e he
   freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d pctx
   toTCtx_insert := procToTCtx_insert
 
@@ -156,7 +153,7 @@ def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx := 
     (pctx : PolyOpCtx) :
     (procStmtEnv octx tvars pctx).toTCtx = procToTCtx := rfl
 
--- ── Γ-parameterized environment (ambient-context threading) ────────────────
+-- ── The flat context under the aliases of an ambient context ──────────────
 
 /-- The `Γ`-parameterized single-scope `TContext` for a flat `VarCtx`: one new
     scope in which every variable is bound to its declared monotype as a trivial
@@ -165,55 +162,5 @@ def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx := 
     `Γ.types` and preserves `Γ.aliases`; when `Γ.types = []` the two agree. -/
 def procToTCtxΓ (Γ : TContext Unit) (ctx : VarCtx) : TContext Unit :=
   { types := (procToTCtx ctx).types, aliases := Γ.aliases }
-
-/-- Looking up `x` in `procToTCtxΓ Γ ctx` is the flat-context lookup with its
-    monotype wrapped as a trivial polytype (the `types` field is independent of
-    `Γ`, so this is `procToTCtx_find` verbatim). -/
-theorem procToTCtxΓ_find (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier Unit) :
-    (procToTCtxΓ Γ ctx).types.find? x = (Map.find? ctx x).map (fun mty => (LTy.forAll [] mty)) :=
-  procToTCtx_find ctx x
-
-/-- The correspondence between a flat context and a `TContext` holds for `procToTCtxΓ Γ` at *each* flat context,
-    and at *each* `Γ`. The correspondence reads the `.types` field only, and that field does not depend on the
-    aliases of `Γ`. -/
-theorem procToTCtxΓ_corr (Γ : TContext Unit) (ctx : VarCtx) :
-    VarCtxCorresponds ctx (procToTCtxΓ Γ ctx) := by
-  constructor
-  · intro x mty hfind
-    rw [procToTCtxΓ_find]
-    unfold VarCtx.find? at hfind
-    rw [hfind]; rfl
-  · intro x hfresh
-    rw [procToTCtxΓ_find]
-    unfold VarCtx.isFresh VarCtx.find? at hfresh
-    rw [Option.isNone_iff_eq_none] at hfresh
-    rw [hfresh]; rfl
-
-/-- `procToTCtxΓ Γ` commutes with `VarCtx.insert`: the `init`-command obligation
-    (aliases carry through unchanged, and the `types` update mirrors
-    `procToTCtx_insert`). -/
-theorem procToTCtxΓ_insert (Γ : TContext Unit) (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy) :
-    TContext.Equiv (T := CoreLParams) (procToTCtxΓ Γ (ctx.insert x mty))
-      { procToTCtxΓ Γ ctx with
-        types := (procToTCtxΓ Γ ctx).types.insert x (LTy.forAll [] mty) } :=
-  -- Only `types` is at stake, and it is `procToTCtx`'s verbatim.
-  ⟨(procToTCtx_insert ctx x mty).1, rfl⟩
-
-/-- **The Γ-parameterized statement-generator soundness environment**: identical
-    to `procStmtEnv` except its `toTCtx` carries the ambient `Γ`'s alias list. All
-    non-`toTCtx` obligations (`corr`/`toTCtx_insert`) are unaffected by aliases,
-    and `exprSound`/`freshDisjoint` hold at every `ctx`'s own derived
-    free-variable projection `ctx.toFVarCtx` (exactly as in `procStmtEnv`). -/
-def procStmtEnvΓ (Γ : TContext Unit) (octx : OpCtx) (tvars : List TyIdentifier)
-    (pctx : PolyOpCtx := []) : GenStmtSoundEnv octx tvars pctx where
-  toTCtx := procToTCtxΓ Γ
-  corr := procToTCtxΓ_corr Γ
-  exprSound := fun d ctx τ e he => genLExpr_sound ctx.toFVarCtx octx pctx tvars [] d τ _ e he
-  freshDisjoint := fun d ctx => freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx d pctx
-  toTCtx_insert := procToTCtxΓ_insert Γ
-
-@[simp] theorem procStmtEnvΓ_toTCtx (Γ : TContext Unit) (octx : OpCtx)
-    (tvars : List TyIdentifier) (pctx : PolyOpCtx) :
-    (procStmtEnvΓ Γ octx tvars pctx).toTCtx = procToTCtxΓ Γ := rfl
 
 end StrataGenerators.Procedure

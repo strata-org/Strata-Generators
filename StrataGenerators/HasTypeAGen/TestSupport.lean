@@ -46,7 +46,7 @@ def ppExpr (e : LExpr') (prec : Nat := 0) : String :=
   | .const _ (.boolConst b) => s!"#{b}"
   | .const _ (.intConst i) => s!"#{i}"
   | .const _ (.strConst s) => s!"\"{s}\""
-  | .const _ (.realConst r) => s!"#{r}"
+  | .const _ (.rationalConst r) => s!"#{r}"
   | .const _ (.bitvecConst _ b) => s!"#{b.toNat}"
   | .op _ o _ => s!"{o.name}"
   | .bvar _ i => s!"%{i}"
@@ -129,9 +129,9 @@ def coreState : LState LExprParams' :=
 def eval (fuel : Nat) (e : LExpr') : LExpr' :=
   (LExpr.evalWithLState fuel coreState e).fst
 
-/-- Report whether an expression is a canonical value over `coreFactory`. -/
+/-- Report whether an expression is a value over `coreFactory`. -/
 def isValue (e : LExpr') : Bool :=
-  LExpr.isCanonicalValue coreState.config.factory e
+  LExpr.isValue coreState.config.factory e
 
 -- ── Expression property checks (shared by both harnesses) ────────────────
 -- The pass/fail decision for each expression-generator property lives here so

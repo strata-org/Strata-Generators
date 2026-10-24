@@ -16,8 +16,7 @@ open RandomChoice
 /-- A generator for a `Nat`.
 
     This file keeps the definition local and does not import `BasaltExamples.ArbNat`, because that
-    module imports the full `Basalt` library. `Basalt` gives `List.dedup` of Mathlib, which collides
-    with `List.dedup` of Strata. This file must stay free of Mathlib. The definition here is
+    module imports the full `Basalt` library and, with it, Mathlib. The definition here is
     definitionally equal to the one in Basalt, so a proof can unfold either one. -/
 def Nat.arbitrary [Gen G] : G Nat := do
   pick
@@ -164,7 +163,7 @@ def monoTyDepth : LMonoTy → Nat
 
 -- ── Well-typing relation ─────────────────────────────────────────────
 
-/-- The `HasTypeA` typing judgement of Strata, at the parameter types of this package. -/
+/-- The `HasTypeA` typing judgment of Strata, at the parameter types of this package. -/
 abbrev HasTypeA' := LExpr.HasTypeA (T := LExprParams')
 
 -- ── Helpers ──────────────────────────────────────────────────────────
@@ -367,7 +366,7 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
     `genStrConst`. -/
 @[reducible] def genRealConst [Gen G] : G LExpr' := do
   let r ← StrataGenerators.PrimitiveGens.genRat
-  pure (.realConst () r)
+  pure (.rationalConst () r)
 
 /-- Generate a random bitvector constant of width `n`.
 
@@ -945,6 +944,10 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
   -- Then, apply the operator to all the args
   pure (mkApps opExpr args)
 
+/-- The largest number of binders of a scheme of `pctx`, and `0` for an empty context. -/
+def maxBinders (pctx : PolyOpCtx) : Nat :=
+  pctx.foldr (fun p acc => match p.2 with | .forAll bvs _ => max bvs.length acc) 0
+
 /-- Generate a well-typed `LExpr` of the type `τ` with the IndirPoly rule of Pałka et al. 2011,
     Section 4. The rule applies a polymorphic library function in three steps:
     1. It unifies the result type of the function with the target type `τ`.
@@ -969,11 +972,12 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
   -- Compute the set of generable types from the current context
   let generableTys := generableTypesFromCtx bctx fctx octx
 
-  -- For each possible type variable, sample a random type to instantiate it with.
+  -- Sample one random type for each binder that unification can leave open: as many as the scheme
+  -- of `pctx` with the most binders has, and never fewer than `maxNumArgs`.
   -- When no generable types exist, fall back to an arbitrary base type
   -- (`pickBaseType`: bool/int/string/real/regex/bitvec) rather than always `.bool`,
   -- so the empty-context case still explores every ground type.
-  let sampledTys ← List.replicate maxNumArgs ()
+  let sampledTys ← List.replicate (max maxNumArgs (maxBinders pctx)) ()
     |>.mapM (fun _ =>
       if hg : generableTys.length > 0 then do
         elements generableTys (by

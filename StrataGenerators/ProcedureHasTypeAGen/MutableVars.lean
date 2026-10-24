@@ -85,28 +85,33 @@ theorem mem_writable_keys_iff (ctx : VarCtx) (immutableVars : List (Identifier U
     either a mutable input key or the freshly-`init`-defined name. -/
 theorem genCmd_mutableVars
     (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) {avoid : List String}
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx)) :
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
     (∀ v ∈ HasVarsImp.modifiedVars (P := Expression) r.cmd,
       v ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
       k ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx] at hr
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
-  · -- init_det: modified [], defined [name], outCtx = ctx.insert
+  · -- init_det, or init_nondet when the initializer is filtered out: modified [],
+    -- defined [name], outCtx = ctx.insert
     simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, _, mty, _, e, _, rfl⟩ := hr
-    refine ⟨fun v hv => by simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv, ?_⟩
-    intro k hk
-    rw [mem_writable_keys_iff] at hk
-    obtain ⟨hk_keys, hk_ro⟩ := hk
-    have hkk : k ∈ (⟨name,()⟩ : Identifier Unit) :: Map.keys ctx := Map.insert_keys ctx hk_keys
-    simp only [HasVarsImp.definedVars, Cmd.definedVars]
-    rcases List.mem_cons.mp hkk with rfl | h
-    · exact List.mem_append_right _ (by simp)
-    · exact List.mem_append_left _ (mem_writable_keys_iff ctx immutableVars k |>.mpr ⟨h, hk_ro⟩)
+    dsimp only
+    split
+    all_goals
+      refine ⟨fun v hv => by
+        simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.not_mem_nil] at hv, ?_⟩
+      intro k hk
+      rw [mem_writable_keys_iff] at hk
+      obtain ⟨hk_keys, hk_ro⟩ := hk
+      have hkk : k ∈ (⟨name,()⟩ : Identifier Unit) :: Map.keys ctx := Map.insert_keys ctx hk_keys
+      simp only [HasVarsImp.definedVars, Cmd.definedVars]
+      rcases List.mem_cons.mp hkk with rfl | h
+      · exact List.mem_append_right _ (by simp)
+      · exact List.mem_append_left _ (mem_writable_keys_iff ctx immutableVars k |>.mpr ⟨h, hk_ro⟩)
   · -- init_nondet
     simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, _, mty, _, rfl⟩ := hr
@@ -123,13 +128,16 @@ theorem genCmd_mutableVars
     simp only [genSetDet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
     obtain ⟨⟨name, mty⟩, hmem, e, he, rfl⟩ := hr
-    refine ⟨?_, fun k hk => List.mem_append_left _ hk⟩
-    intro v hv
-    simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.mem_singleton] at hv
-    rw [hv]; apply List.mem_append_left
-    show name ∈ Map.keys (ctx.writable immutableVars)
-    rw [VarCtx.writable, Map.keys_eq_map_fst]
-    exact List.mem_map.mpr ⟨(name, mty), hmem, rfl⟩
+    dsimp only
+    split
+    all_goals
+      refine ⟨?_, fun k hk => List.mem_append_left _ hk⟩
+      intro v hv
+      simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.mem_singleton] at hv
+      rw [hv]; apply List.mem_append_left
+      show name ∈ Map.keys (ctx.writable immutableVars)
+      rw [VarCtx.writable, Map.keys_eq_map_fst]
+      exact List.mem_map.mpr ⟨(name, mty), hmem, rfl⟩
   · -- set_nondet
     simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
@@ -344,15 +352,19 @@ theorem genCallStmt_mutableVars
     simp only [hσ, hMσ, hOσ] at hr
     split at hr
     · rename_i hcond
-      obtain ⟨hMusable, _hNodup⟩ := hcond
+      obtain ⟨hMusable, _, _⟩ := hcond
       -- Name the generator's chosen out targets; every one of them is usable
       -- (`outTargets_all_usableName`), so the guard over `Mσ` extends to `Mσ ++ T`.
-      obtain ⟨T, hT⟩ : ∃ T, outTargets immutableVars ctx Oσ = T := ⟨_, rfl⟩
+      obtain ⟨T, hT⟩ : ∃ T, outTargets immutableVars ctx Oσ (functionNames C) = T := ⟨_, rfl⟩
       have hallusable : (List.append Mσ T).all (usableName immutableVars ctx) = true := by
-        rw [← hT]; exact all_usableName_append immutableVars ctx Mσ Oσ hMusable
+        rw [← hT]; exact all_usableName_append immutableVars ctx Mσ Oσ _ hMusable
       rw [hT] at hr
       simp only [mem_support_bind_iff] at hr
       obtain ⟨exprs, hexprs, hr⟩ := hr
+      split at hr
+      swap
+      · simp only [SetGen.support, SetGen.bot_mem_iff] at hr
+      simp only [mem_support_bind_iff] at hr
       -- Peel the argument-order mask; `getLhs_mkArgs` holds at every mask.
       obtain ⟨mask, _, hr⟩ := hr
       -- A name that the group reuses is bound in the scope, so `reusable` holds for it and `needsInit` does not.
@@ -409,7 +421,7 @@ mutual
     statement modifies is a key of the threaded input context or is defined by the
     statement; and every output-context key is likewise accounted for.
 
-    Leaves: `cmd` reduces to `genCmd_mutableVars`; `exit`/`funcDecl`/`typeDecl`
+    Leaves: `cmd` reduces to `genCmd_mutableVars`; `exit`/`typeDecl`
     modify and define nothing (and leave `ctx` unchanged). Nesting constructors
     (`block`, `ite`, `loop`) have output scope `= ctx` and delegate both
     `modifiedVars` and `definedVars _ false` to the recursively-generated body, so
@@ -432,7 +444,7 @@ theorem genStmt_mutableVars
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · -- cmd
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
@@ -459,13 +471,6 @@ theorem genStmt_mutableVars
                  simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
-    · -- funcDecl
-      simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, _, _, rfl⟩ := hr
-      exact ⟨fun v hv => by
-               simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
-                 List.not_mem_nil] at hv,
-             fun k hk => List.mem_append_left _ hk⟩
     · -- typeDecl
       simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr
@@ -495,7 +500,7 @@ theorem genStmt_mutableVars
     simp only [genStmt, mem_support_frequency_iff] at hr
     obtain ⟨w, g, hg, _, hr⟩ := hr
     simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
     · -- cmd
       simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
       obtain ⟨rc, hrc, rfl⟩ := hr
@@ -522,13 +527,6 @@ theorem genStmt_mutableVars
                  simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
                    List.not_mem_nil] at hv,
                fun k hk => List.mem_append_left _ hk⟩
-    · -- funcDecl
-      simp only [genFuncDeclStmt, genDecl, mem_support_bind_iff, mem_support_map_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, _, _, rfl⟩ := hr
-      exact ⟨fun v hv => by
-               simp only [block_modifiedVars_singleton, Stmt.modifiedVars,
-                 List.not_mem_nil] at hv,
-             fun k hk => List.mem_append_left _ hk⟩
     · -- typeDecl
       simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
       obtain ⟨tc, _, hr⟩ := hr

@@ -32,7 +32,7 @@ annotations.
 
 ## Contents
 
-- `HasTypeA'`: the typing judgement `HasTypeA`, at these `LExprParams`.
+- `HasTypeA'`: the typing judgment `HasTypeA`, at these `LExprParams`.
 - `genLMonoTy`: a generator of a monotype.
 - `genLMonoTy_mem_*`: the lemmas about the types that `genLMonoTy` can generate.
 - `genLExpr`: a generator of a well-typed `LExpr` at a given type and depth budget.
@@ -163,7 +163,7 @@ private theorem pickBVar_complete (bctx : BVarCtx) (τ : LMonoTy) (i : Nat)
 -- ── pickFVar soundness/completeness ───────────────────────────────────
 
 /-- `x ∈ fvarsOfType fctx τ` iff `(x, τ) ∈ fctx`. -/
-private theorem fvarsOfType_mem_iff (fctx : FVarCtx) (τ : LMonoTy) (x : String) :
+theorem fvarsOfType_mem_iff (fctx : FVarCtx) (τ : LMonoTy) (x : String) :
     x ∈ fvarsOfType fctx τ ↔ (x, τ) ∈ fctx := by
   simp only [fvarsOfType, List.mem_filterMap]
   constructor
@@ -1348,7 +1348,7 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     rcases he with ⟨r, _, rfl⟩ | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | ((⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩) | (⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩)))
     all_goals first
-      | exact (by unfold LExpr.realConst; exact .const)
+      | exact (by unfold LExpr.rationalConst; exact .const)
       | exact pickBVar_sound bctx .real _ _ h
       | exact pickFVar_sound fctx .real _ _ h
       | exact pickOp_sound octx .real _ _ h
@@ -1387,7 +1387,7 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     simp only [genRealConst, genApp, genIte, pick_mem_iff, SetGen.Set.mem_bind,
       SetGen.Set.mem_pure, mem_support_iff, SetGen.mem_dite] at he
     · obtain ⟨r, _, rfl⟩ := he
-      exact (by unfold LExpr.realConst; exact .const)
+      exact (by unfold LExpr.rationalConst; exact .const)
     · obtain ⟨τ', _, arg, harg, fn, hfn, rfl⟩ := he
       exact .app (genLExprBase_sound fctx octx pctx tvars bctx n _ _ hfn)
                   (genLExprBase_sound fctx octx pctx tvars bctx n _ _ harg)
@@ -1397,13 +1397,13 @@ theorem genLExprBase_sound (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
                   (genLExprBase_sound fctx octx pctx tvars bctx n _ _ he')
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickBVar_sound bctx .real _ _ h
-      · exact (by unfold LExpr.realConst; exact .const)
+      · exact (by unfold LExpr.rationalConst; exact .const)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickFVar_sound fctx .real _ _ h
-      · exact (by unfold LExpr.realConst; exact .const)
+      · exact (by unfold LExpr.rationalConst; exact .const)
     · rcases he with ⟨_, h⟩ | ⟨_, ⟨r, _, rfl⟩⟩
       · exact pickOp_sound octx .real _ _ h
-      · exact (by unfold LExpr.realConst; exact .const)
+      · exact (by unfold LExpr.rationalConst; exact .const)
     -- The Indir branch.
     · rcases he with ⟨_, he⟩ | ⟨_, he⟩
       · exact StrataGenerators.IndirSupport.genIndir_hasType octx bctx _ _
@@ -2033,8 +2033,8 @@ inductive AllTypesSimple (tvars : List TyIdentifier) : Nat → BVarCtx → LExpr
   | intConst    : AllTypesSimple tvars n bctx (.intConst () k)
   | strConst    : (∀ c ∈ s.toList, c ∈ StrataGenerators.PrimitiveGens.interestingChars) →
                   AllTypesSimple tvars n bctx (.strConst () s)
-  | realConst   : (r : Rat) →
-                  AllTypesSimple tvars n bctx (.realConst () r)
+  | rationalConst   : (r : Rat) →
+                  AllTypesSimple tvars n bctx (.rationalConst () r)
   | bitvecConst : (w : Nat) → (bv : BitVec w) →
                   AllTypesSimple tvars n bctx (.bitvecConst () w bv)
   | bvar      : AllTypesSimple tvars n bctx (.bvar () i)
@@ -3288,7 +3288,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.bool, LMonoTy.real])
       | bitvecConst _ _ =>
@@ -3341,7 +3341,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.int, LMonoTy.real])
       | bitvecConst _ _ =>
@@ -3391,7 +3391,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | intConst =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
       | bitvecConst _ _ =>
@@ -3430,7 +3430,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         or_false, exists_eq_or_imp, exists_eq_left, pick_mem_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure,
         mem_support_iff, SetGen.mem_dite]
       cases hats with
-      | realConst r =>
+      | rationalConst r =>
         cases hwt with
         | const =>
           left
@@ -3493,7 +3493,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.string])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.real])
       | bvar =>
@@ -3538,7 +3538,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.real, LMonoTy.arrow])
       | bitvecConst _ _ =>
@@ -3581,7 +3581,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int] at h)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
       | bitvecConst _ _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty] at h)
@@ -3622,7 +3622,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.regex] at h)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.regex] at h)
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.regex] at h)
       | bitvecConst _ _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.regex] at h)
@@ -3667,7 +3667,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.string, LMonoTy.map])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.real, LMonoTy.map])
       | bitvecConst _ _ =>
@@ -3710,7 +3710,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.seq] at h)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.seq] at h)
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.seq] at h)
       | bitvecConst _ _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.seq] at h)
@@ -3760,7 +3760,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.bool, LMonoTy.string])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.bool, LMonoTy.real])
       | bitvecConst _ _ =>
@@ -3878,7 +3878,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.int, LMonoTy.real])
       | bitvecConst _ _ =>
@@ -3961,7 +3961,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | intConst =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.int, LMonoTy.string])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.string, LMonoTy.real])
       | bitvecConst _ _ =>
@@ -4033,7 +4033,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       simp only [genLExprBase]
       rw [mem_support_frequency_iff]
       cases hats with
-      | realConst r =>
+      | rationalConst r =>
         cases hwt with
         | const =>
           refine ⟨_, _, .head _, by omega, ?_⟩
@@ -4130,7 +4130,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
           (by simp [LConst.ty, LMonoTy.int])
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
       | abs _ _ =>
         exact absurd (LExpr.HasTypeA_to_typeCheck hwt)
@@ -4206,7 +4206,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.string, LMonoTy.arrow])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.real, LMonoTy.arrow])
       | bitvecConst _ _ =>
@@ -4288,7 +4288,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int] at h)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string] at h)
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real] at h)
       | bitvecConst _ _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty] at h)
@@ -4361,7 +4361,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.regex] at h)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.regex] at h)
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.regex] at h)
       | bitvecConst _ _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.regex] at h)
@@ -4437,7 +4437,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.string, LMonoTy.map])
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const)
           (by simp [LConst.ty, LMonoTy.real, LMonoTy.map])
       | bitvecConst _ _ =>
@@ -4514,7 +4514,7 @@ theorem genLExprBase_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.int, LMonoTy.seq] at h)
       | strConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.string, LMonoTy.seq] at h)
-      | realConst _ =>
+      | rationalConst _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.real, LMonoTy.seq] at h)
       | bitvecConst _ _ =>
         exact absurd (HasTypeA_unique hwt .const) (by intro h; simp [LConst.ty, LMonoTy.seq] at h)
@@ -4798,7 +4798,7 @@ theorem extended_subst_guard2 (freshBoundVars : List TyIdentifier) (Su : Lambda.
 /-- **The bridge from `Sm` to `Su` on the applied prefix.**
 
     The generator instantiates the applied prefix with its own unifier output, extended by the samples.
-    A caller who reasons from the typing judgement instantiates the prefix with a matcher `Sm`. This
+    A caller who reasons from the typing judgment instantiates the prefix with a matcher `Sm`. This
     lemma says that the two agree, if the split point is **determined**. The hypothesis `hdet` gives
     that condition: each type variable of the applied prefix also occurs in the remaining suffix.
 
@@ -4915,7 +4915,7 @@ theorem findPolymorphicOps_complete
     each argument is well-typed at its own type in `argTys`.
 
     `isPolyApp_of_hasType` uses this lemma to recover, from a typing derivation, the concrete argument
-    types that `findPolymorphicOps` gave. The `.app` rule of the typing judgement removes one arrow for
+    types that `findPolymorphicOps` gave. The `.app` rule of the typing judgment removes one arrow for
     each applied argument, and the induction builds `argTys` from the outermost argument. -/
 theorem mkApps_hasType_inv (bctx : BVarCtx) (base : LExpr') (args : List LExpr')
     (τ : LMonoTy)
@@ -5078,12 +5078,88 @@ theorem genLMonoTy_mem_wellKindedTy {C : LContext CoreLParams} (hC : SimpleTyAri
     · exact hC.seq
     · exact ih ref n hn
 
+namespace StrataGenerators.Function
+
+/-- `allFtvarsIn tvars τ` says that each free type variable of `τ` comes from `tvars`. This theorem
+    states the same claim through `LMonoTy.freeVars`, which is the form that `noUndeclaredVars`
+    uses. -/
+theorem allFtvarsIn_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
+    (h : allFtvarsIn tvars τ) : ∀ v ∈ LMonoTy.freeVars τ, v ∈ tvars := by
+  induction τ with
+  | ftvar f =>
+    intro v hv
+    simp only [LMonoTy.freeVars, List.mem_singleton] at hv
+    subst hv
+    unfold allFtvarsIn at h
+    exact h
+  | bitvec n =>
+    intro v hv
+    simp [LMonoTy.freeVars] at hv
+  | tcons name args ih =>
+    intro v hv
+    simp only [LMonoTy.freeVars] at hv
+    -- `allFtvarsIn tvars (.tcons name args)` unfolds to one claim for each argument.
+    have hargs : ∀ a ∈ args, allFtvarsIn tvars a := by unfold allFtvarsIn at h; exact h
+    -- Reduce membership in `LMonoTys.freeVars` to an element that holds `v`.
+    obtain ⟨ty, hty_mem, hv_ty⟩ := Freshening.exists_of_freeVars_mem hv
+    exact ih ty hty_mem (hargs ty hty_mem) v hv_ty
+
+/-- A type that `genLMonoTy` can make is an instance of a known type in each context that registers
+    the built-in type constructors at their arities. -/
+theorem genLMonoTy_mem_knownInstance {C : LContext CoreLParams} (hC : SimpleTyArities C)
+    {tvars : List TyIdentifier} {ty : LMonoTy}
+    (h : ∃ m, ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars m)) :
+    LMonoTy.knownInstance ty C.knownTypes = true := by
+  -- A constructor registered at the arity it is applied at, over known arguments, is known.
+  have htcons : ∀ (nm : String) (args : List LMonoTy), C.knownTypes[nm]? = some args.length →
+      LMonoTys.knownInstances args C.knownTypes = true →
+      LMonoTy.knownInstance (.tcons nm args) C.knownTypes = true := by
+    intro nm args hnm hargs
+    simp only [LMonoTy.knownInstance, Bool.and_eq_true]
+    refine ⟨?_, hargs⟩
+    simp only [KnownTypes.contains, Identifiers.contains, KnownType.arity, hnm]
+    simp
+  have hnil : LMonoTys.knownInstances [] C.knownTypes = true := by
+    simp only [LMonoTys.knownInstances]
+  refine genLMonoTy_mem_rec (motive := fun ty => LMonoTy.knownInstance ty C.knownTypes = true)
+    ?bool ?int ?string ?real ?regex ?bitvec ?ftvar ?arrow ?map ?seq h
+  case bool => exact htcons "bool" [] hC.bool hnil
+  case int => exact htcons "int" [] hC.int hnil
+  case string => exact htcons "string" [] hC.string hnil
+  case real => exact htcons "real" [] hC.real hnil
+  case regex => exact htcons "regex" [] hC.regex hnil
+  case bitvec => intro w; simp only [LMonoTy.knownInstance]
+  case ftvar => intro name _; simp only [LMonoTy.knownInstance]
+  case arrow =>
+    intro τ₁ τ₂ _ _ ih₁ ih₂
+    refine htcons "arrow" [τ₁, τ₂] hC.arrow ?_
+    simp only [LMonoTys.knownInstances, ih₁, ih₂, if_true]
+  case map =>
+    intro τ₁ τ₂ _ _ ih₁ ih₂
+    refine htcons "Map" [τ₁, τ₂] hC.map ?_
+    simp only [LMonoTys.knownInstances, ih₁, ih₂, if_true]
+  case seq =>
+    intro τ _ ih
+    refine htcons "Sequence" [τ] hC.seq ?_
+    simp only [LMonoTys.knownInstances, ih, if_true]
+
+/-- `bool` is registered in every context that registers the built-in types. -/
+theorem knownInstance_bool {C : LContext CoreLParams} (hC : SimpleTyArities C) :
+    LMonoTy.knownInstance .bool C.knownTypes = true :=
+  genLMonoTy_mem_knownInstance (tvars := []) hC genLMonoTy_mem_bool
+
+/-- `int` is registered in every context that registers the built-in types. -/
+theorem knownInstance_int {C : LContext CoreLParams} (hC : SimpleTyArities C) :
+    LMonoTy.knownInstance .int C.knownTypes = true :=
+  genLMonoTy_mem_knownInstance (tvars := []) hC genLMonoTy_mem_int
+
+end StrataGenerators.Function
+
 -- ── How a generator can change the context ──────────────────────────
 --
--- Only two statement generators change `C`. `genFuncDeclStmt` calls `addFactoryFunction`, which leaves
--- `knownTypes` as it is. `genTypeDeclStmt` calls `addKnownTypeWithError`, which *adds* one name and
--- fails on a name that is already present. Both therefore keep each existing entry of the known types,
--- and that is all that `SimpleTyArities` and `WellKindedTy` read.
+-- Only one statement generator changes `C`. `genTypeDeclStmt` calls `addKnownTypeWithError`, which
+-- *adds* one name and fails on a name that is already present. It therefore keeps each existing entry
+-- of the known types, and that is all that `SimpleTyArities` and `WellKindedTy` read.
 
 /-- A successful `Identifiers.addWithError` inserts a *new* key only. Therefore each entry that is
     already present keeps its value. -/
@@ -5124,6 +5200,17 @@ theorem addKnownTypeWithError_mono {C C' : LContext CoreLParams} {k : KnownType}
     simp only [Except.ok.injEq] at h
     subst h
     exact Identifiers.addWithError_mono hadd n v hn
+
+/-- A declaration of a new type constructor keeps the function table. -/
+theorem addKnownTypeWithError_functions {C C' : LContext CoreLParams} {k : KnownType}
+    {f : Strata.Message} (h : C.addKnownTypeWithError k f = .ok C') :
+    C'.functions = C.functions := by
+  dsimp only [LContext.addKnownTypeWithError, bind, Except.instMonad, Except.bind] at h
+  split at h
+  · simp at h
+  · simp only [Except.ok.injEq] at h
+    subst h
+    rfl
 
 /-- A declaration of a function does not change the table of the known types. -/
 @[simp] theorem addFactoryFunction_knownTypes {C : LContext CoreLParams}
@@ -6857,7 +6944,7 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 
 /-- **The backward direction for the polymorphic case, at the level of the specification.**
 
-    This theorem derives `IsPolyApp` from the *typing judgement* for a full or partial application spine
+    This theorem derives `IsPolyApp` from the *typing judgment* for a full or partial application spine
     over a polymorphic operator. It takes one explicit side condition, `hEntry`, which says that the
     unification search of the generator gives the matching entry of `findPolymorphicOps`.
 
@@ -7065,7 +7152,7 @@ theorem schemeInstAt_freshening_disjoint
     of the unifier inside its own proof. It uses `extended_subst_prefix_of_determined` for the applied
     prefix, and `unifyTypes_matching_complete` with `extended_subst_guard2` for the suffix. Therefore
     nothing internal to the generator appears in this predicate, and a caller who reasons from the typing
-    judgement can discharge each part.
+    judgment can discharge each part.
 
     **The price is the determinacy of the split point.** A form that does not name `Su` must exclude the
     case of a *sample*. At a split point where a variable of the scheme is absent from the remaining
@@ -7125,7 +7212,7 @@ def SchemeInstAt (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 
 /-- **The backward direction with no `hEntry`.**
 
-    This theorem derives `IsPolyApp` from the typing judgement and a *witness at the level of the
+    This theorem derives `IsPolyApp` from the typing judgment and a *witness at the level of the
     specification* that the annotation is an instance of a scheme. It takes no hypothesis about membership
     in `findPolymorphicOps`. The proof *builds* that membership with `findPolymorphicOps_complete`, and it
     discharges the two guards with `unifyTypes_matching_complete` and with `extended_subst_guard2`. The
@@ -7245,7 +7332,7 @@ theorem genLExpr_complete (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 
 /-- **The completeness of the polymorphic case, at the level of the specification.**
 
-    This theorem restates `genLExpr_complete`. Its polymorphic case comes from the *typing judgement*
+    This theorem restates `genLExpr_complete`. Its polymorphic case comes from the *typing judgment*
     `HasTypeA'`, and not from the generator-internal `IsPolyApp`. The polymorphic case has three premises:
 
     - `hwt` says that the term is a well-typed spine over an `.op` node of `pctx`.
@@ -7341,7 +7428,7 @@ theorem genLExpr_complete_poly_specShaped
     The intended source of `SchemeInstAt` is an `OpsConsistentR F e` of the caller, whose `.op_in`
     constructor holds exactly this witness. `schemeInstAt_of_opsConsistentR` performs that step, and
     `genLExpr_complete_poly_opsConsistentR` is this theorem with the premise already discharged. Both are
-    in `HasTypeAGenOpsConsistent.lean`, where the `OpsConsistentR` judgement is available. -/
+    in `HasTypeAGenOpsConsistent.lean`, where the `OpsConsistentR` judgment is available. -/
 theorem genLExpr_complete_poly_fullySpecShaped
     (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
@@ -7557,7 +7644,7 @@ theorem allTypesSimple_mono (tvars : List TyIdentifier) (n : Nat) (bctx : BVarCt
   | boolConst => exact .boolConst
   | intConst => exact .intConst
   | strConst h => exact .strConst h
-  | realConst r => exact .realConst r
+  | rationalConst r => exact .rationalConst r
   | bitvecConst w bv => exact .bitvecConst w bv
   | bvar => exact .bvar
   | fvar => exact .fvar

@@ -64,7 +64,11 @@ open StrataGenerators.AdtLaws
     The thread also keeps the joined block legal. The checks for a duplicate in
     `addMutualBlock`, and the checks on a name in `genBlockFactory`, both need the names of the
     whole block to be different. `DatatypeGen` does not give that guarantee across two
-    datatypes, as `AdtLaws.blockAccepted` describes. -/
+    datatypes, as `AdtLaws.blockAccepted` describes.
+
+    Each draw uses `maxTyParams := 0`. `MutualADTWF.typeArgsAgree` requires all the datatypes
+    of a block to declare the same type parameters, and two independent draws agree on their
+    parameters only when both have none. -/
 def genIndependentBlock [Gen G] (k : Nat) (maxSize : Nat := 0) :
     G (MutualDatatype Unit) := do
   let rec go (n : Nat) (reserved : List String) (acc : MutualDatatype Unit) :
@@ -73,7 +77,8 @@ def genIndependentBlock [Gen G] (k : Nat) (maxSize : Nat := 0) :
     | 0 => pure acc
     | n + 1 =>
       let one ← DatatypeGen.genMutuallyRecursiveDatatypes (G := G)
-        (maxExtraDatatypes := 0) (maxSize := maxSize) (extraReserved := reserved)
+        (maxExtraDatatypes := 0) (maxTyParams := 0) (maxSize := maxSize)
+        (extraReserved := reserved)
       let names := blockNames one
       go n (names ++ reserved) (acc ++ one)
   go (k + 1) [] []
@@ -184,9 +189,9 @@ def unboundDerivedTyVars (block : MutualDatatype Unit) : List (String × List St
 
 /-- **The type of each derived function binds each type variable that it mentions.**
 
-    A defect breaks this claim on a block whose datatypes do not all declare the *same* type
-    parameters. `addMutualBlock` allows such a block, and an independent block almost always
-    has that shape. `elimFuncs` builds the case-function arguments of `d$Elim` from the
+    The claim fails on a block whose datatypes do not all declare the *same* type
+    parameters. `addMutualBlock` rejects such a block, but `genBlockFactory`, which this
+    property calls directly, does not. `elimFuncs` builds the case-function arguments of `d$Elim` from the
     constructors of *each* datatype in the block, but it sets
     `typeArgs := retTyVars ++ d.typeArgs`, which holds only the parameters of `d`. The
     parameters of each other datatype are then free. For `datatype Aa x { mkA(fa : x) }` and
@@ -201,20 +206,13 @@ def unboundDerivedTyVars (block : MutualDatatype Unit) : List (String × List St
 
     A comment in `elimFuncs` states the assumption next to
     `let typeArgs := block[0].typeArgs`, and it says that each datatype must have the same type
-    variables. Nothing enforces the assumption. `validateMutualBlock` checks only for a
-    duplicate datatype name, and `checkConstructorArgsWF` constrains an *occurrence* and not a
-    list of parameters.
-
-    The result is latent and not immediate. A program that calls such an eliminator still
-    typechecks, because a free variable unifies with any type. What the program loses is the
-    constraint that a case function has the correct argument type. A fix makes
-    `addMutualBlock` reject a block whose parameters differ, or it makes `elimFuncs` bind the
-    union of the parameters. -/
+    variables. `validateMutualBlock`, which `addMutualBlock` runs, enforces the assumption, so a
+    block that the checker accepts has the correct scope. -/
 def checkDerivedFuncsWellScoped (block : MutualDatatype Unit) : Bool :=
   (unboundDerivedTyVars block).isEmpty
 
 /-- Whether each datatype of the block declares the same type parameters. This is the condition
-    that `elimFuncs` assumes and that nothing checks. The suite reports it as the statistic that
+    that `elimFuncs` assumes and that `validateMutualBlock` checks. The suite reports it as the statistic that
     explains the verdict of `checkDerivedFuncsWellScoped`. -/
 def blockParamsUniform (block : MutualDatatype Unit) : Bool :=
   match block with
@@ -298,7 +296,7 @@ def checkIndependentBlockPrints (block : MutualDatatype Unit) : Bool :=
 -- smallest witness, so the build names the defect even on a run whose draws all have uniform
 -- type parameters.
 
-/-- Two independent datatypes with *different* type parameters. `addMutualBlock` accepts this
+/-- Two independent datatypes with *different* type parameters. `addMutualBlock` rejects this
     block, and `elimFuncs` gives its eliminators the wrong scope. -/
 def paramMismatchWitness : MutualDatatype Unit :=
   [ { name := "Aa", typeArgs := ["x"]
@@ -311,9 +309,9 @@ def paramMismatchWitness : MutualDatatype Unit :=
                    { name := ⟨"nilB", ()⟩, args := [], testerName := "Bb..isNilB" } ]
       constrs_ne := by decide } ]
 
--- The witness is the shape under test, and Strata accepts it.
+-- The witness is the shape under test, and Strata rejects it.
 #guard isIndependentBlock paramMismatchWitness
-#guard StrataGenerators.AdtLaws.blockAccepted paramMismatchWitness
+#guard !StrataGenerators.AdtLaws.blockAccepted paramMismatchWitness
 #guard !blockParamsUniform paramMismatchWitness
 
 -- Each eliminator leaves the parameter of the *other* datatype free.

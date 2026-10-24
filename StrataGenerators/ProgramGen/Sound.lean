@@ -1,29 +1,39 @@
 import StrataGenerators.ProgramGen
 import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.HasTypeAGen
+import StrataGenerators.HasTypeAGen.AnnotFacts
+import Strata.Languages.Core.WeakTypeSpec
+import Strata.DL.Lambda.LExprTypeEnvProps
+import Strata.Languages.Core.FactoryProps
+import Strata.Languages.Core.TypeCheckSound.Datatype
+import Strata.DL.Lambda.TypeFactoryProps
+import Strata.DL.Lambda.DatatypeFactoryWFProps
+import Strata.DL.Lambda.LTyTypeProps
 
 /-!
 # Soundness of the whole-program generator
 
-Every program `ProgramGen.genProgram` produces is well-typed with respect to
-`Core.TypeSpec.ProgramHasTypeA`, which is `ProgramHasType'` at the annotated `HasTypeA` specification.
+Every program `ProgramGen.genProgram` produces satisfies the weak program typing
+`Core.TypeSpec.ProgramHasTypeW` in `programContext` with no variable in scope.
 
 The proof is layered to mirror the generator:
 
 * **Bridge lemmas** turn a successful checker add into the exact premise a
-  `DeclHasType'` constructor asks for (`FactoryExtendedBy` from
-  `addFactoryFunctionWithError = .ok`; the trivial `type_con` success handling).
+  `DeclHasTypeW` constructor asks for (`FactoryExtendedBy` from
+  `addFactoryFunctionWithError = .ok`).
 * **The soundness of one declaration step.** The support of each `genDecl*` step holds a pair of a
-  declaration list and a state, and that list is well typed under `DeclsHasType'`, from the input state to the
-  output state.
-* **The fold** chains per-step soundness into `DeclsHasType'` over the whole
-  program, and the top-level theorem adds `getNames.Nodup`.
+  declaration list and a state, and that list is weakly typed from the context of the input state
+  to the context of the output state. The steps whose proofs need the function and procedure
+  generators are in `StrataGenerators.ProgramGen.SoundProgram`.
+* **The fold** chains per-step soundness over the whole program, and the top-level theorem adds
+  the distinctness of names.
 
 Everything is stated against `SetGen.Set` (the generator's support semantics),
 following the existing sub-generator proofs.
 -/
 
 open Lambda RandomChoice Core Core.TypeSpec Imperative SetGen
+open StrataGenerators.AnnotFacts
 open DatatypeGen
 open StrataGenerators.Procedure
 
@@ -79,18 +89,38 @@ theorem namesStep_of_prepend {s s' : GenState} {ds : List Decl}
 theorem namesStep_nil {s : GenState} : NamesStep s [] s :=
   namesStep_of_prepend (by simp [declNames]) (by simp [declNames]) (by simp [declNames])
 
-/-! ## Generic `DeclsHasType'` chaining -/
+/-! ## Declaration names the checker accepts -/
 
-/-- `DeclsHasType'` composes over list append: threading through the split point. -/
-theorem declsHasType_append {P : Program} {C C' C'' : LContext CoreLParams}
-    {Γ Γ' Γ'' : TContext Unit} {ds₁ ds₂ : List Decl}
-    (h₁ : DeclsHasTypeA P C Γ ds₁ C' Γ')
-    (h₂ : DeclsHasTypeA P C' Γ' ds₂ C'' Γ'') :
-    DeclsHasTypeA P C Γ (ds₁ ++ ds₂) C'' Γ'' := by
+/-- The fallback name, a run of `x` characters, uses no reserved prefix. -/
+theorem fallbackName_allowed (reserved : List String) :
+    isAllowedName (DatatypeGen.fallbackName reserved) = true := by
+  simp only [DatatypeGen.fallbackName, indexedFreshName]
+  rw [isAllowedName_eq_toList]
+  simp [reservedNamePrefixes, List.replicate_succ, List.isPrefixOf, Lambda.genTyPrefix,
+    skolemPrefix, Lambda.elimTyPrefix]
+
+/-- A name `genDeclName reserved` draws is absent from `reserved` and uses no reserved prefix. -/
+theorem genDeclName_fresh {reserved : List String} {nm : String}
+    (h : nm ∈ SetGen.support (genDeclName (G := SetGen.Set) reserved)) :
+    nm ∉ reserved ∧ isAllowedName nm = true := by
+  simp only [genDeclName, mem_support_bind_iff, mem_support_pure_iff] at h
+  obtain ⟨d, hd, rfl⟩ := h
+  split
+  · rename_i hallowed
+    exact ⟨DatatypeGen.genFreshName_fresh reserved d hd, hallowed⟩
+  · exact ⟨DatatypeGen.fallbackName_not_mem reserved, fallbackName_allowed reserved⟩
+
+/-! ## Chaining declaration-list typings -/
+
+/-- Weak declaration-list typings compose over list append, threading the context through the
+    split point. -/
+theorem declsHasTypeW_append {P : Program} {C C' C'' : LContext CoreLParams} {ts : TypeScopes}
+    {ds₁ ds₂ : List Decl}
+    (h₁ : DeclsHasTypeW P C ts ds₁ C') (h₂ : DeclsHasTypeW P C' ts ds₂ C'') :
+    DeclsHasTypeW P C ts (ds₁ ++ ds₂) C'' := by
   induction h₁ with
-  | nil => simpa using h₂
-  | cons _ _ _ _ _ _ _ _ hd _ ih =>
-    exact DeclsHasType'.cons _ _ _ _ _ _ _ _ hd (ih h₂)
+  | nil => exact h₂
+  | cons _ _ _ _ _ _ hd _ ih => exact DeclsHasTypeW.cons _ _ _ _ _ _ hd (ih h₂)
 
 /-! ## Bridge lemmas -/
 
@@ -104,14 +134,27 @@ theorem mem_push_iff (F : Factory CoreLParams) (fn : LFunc CoreLParams)
   simp only [Std.HashMap.mem_insert]
   constructor <;> intro hm <;> grind
 
-/-- A successful `addFactoryFunctionWithError C fn = .ok C'` witnesses
-    `FactoryExtendedBy C C' [fn]`: only the function factory changes, every old
-    name survives, `fn`'s name is present, and no other name appears. Proved from
-    `Factory.tryPush`'s success branch via `mem_push_iff`. -/
+/-- Looking up a name in a pushed factory returns the pushed function at its name and the old
+    entry elsewhere. -/
+theorem getElem?_push (F : Factory CoreLParams) (fn : LFunc CoreLParams)
+    (h : ¬ fn.name.name ∈ F) (name : String) :
+    (F.push fn h)[name]? = if name = fn.name.name then some fn else F[name]? := by
+  simp +instances only [Lambda.Factory.push, Lambda.Factory.instGetElem?, Lambda.Factory.get?]
+  grind
+
+/-- A name with a factory entry is a member of the factory. -/
+theorem mem_of_getElem?_eq_some {F : Factory CoreLParams} {name : String}
+    {g : LFunc CoreLParams} (h : F[name]? = some g) : name ∈ F := by
+  simp +instances only [Lambda.Factory.instGetElem?, Lambda.Factory.get?,
+    Lambda.Factory.instMem, Lambda.Factory.mem] at h ⊢
+  grind
+
+/-- A successful `addFactoryFunctionWithError C fn = .ok C'` makes `C'` the extension of `C` by
+    exactly `fn`: old entries are unchanged and `fn`'s name stores `fn` itself. -/
 theorem factoryExtendedBy_of_addFactory
     {C C' : LContext CoreLParams} {fn : LFunc CoreLParams}
     (h : C.addFactoryFunctionWithError fn = .ok C') :
-    FactoryExtendedBy C C' [fn] := by
+    FactoryExtendedBy (fun f g => g = f) C C' [fn] := by
   unfold LContext.addFactoryFunctionWithError at h
   -- `tryPush` unfolds to a `dite` on `fn.name.name ∈ C.functions`.
   unfold Lambda.Factory.tryPush at h
@@ -130,16 +173,30 @@ theorem factoryExtendedBy_of_addFactory
         preserves_old := ?_
         contains_new := ?_
         no_other := ?_ }
-    · intro nm hnm
-      exact (mem_push_iff C.functions fn hmem nm).mpr (Or.inr hnm)
+    · intro nm g hg
+      have hne : nm ≠ fn.name.name := by
+        rintro rfl
+        exact hmem (mem_of_getElem?_eq_some hg)
+      simp only [getElem?_push C.functions fn hmem nm, hne, if_false]
+      exact hg
     · intro f hf
       simp only [List.mem_singleton] at hf
       subst hf
-      exact (mem_push_iff C.functions f hmem _).mpr (Or.inl rfl)
+      exact ⟨f, by simp only [getElem?_push C.functions f hmem, if_true], rfl⟩
     · intro nm hnm
       rcases (mem_push_iff C.functions fn hmem nm).mp hnm with rfl | hmem'
       · right; simp
       · left; exact hmem'
+
+/-- A successful `addFactoryFunctionWithError` means the function's name was not yet in the
+    table: adding a name that is already present fails. -/
+theorem addFactory_name_fresh {C C' : LContext CoreLParams} {fn : LFunc CoreLParams}
+    (h : C.addFactoryFunctionWithError fn = .ok C') : fn.name.name ∉ C.functions := by
+  intro hmem
+  unfold LContext.addFactoryFunctionWithError Lambda.Factory.tryPush at h
+  rw [dif_pos hmem] at h
+  simp only [bind, Except.bind] at h
+  exact absurd h (by simp)
 
 /-- A successful `addFactoryFunctionWithError` changes only `functions`; the
     `knownTypes` and `datatypes` fields (all `ContextOk` mentions) are unchanged. -/
@@ -447,30 +504,41 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
       · exact hok.tyCon_external kc hkc
   · rw [hdt]; exact hok.arrow_external
 
-/-! ## Expression-typing bridge
+/-! ## Well-kinded operator types -/
 
-Under the annotated spec `instHasTypeA`, `exprTyped C Γ e mty` is definitionally
-`LExpr.HasTypeA [] e mty`, and it reads no context. Therefore a `bool`-typed expression
-from `genLExpr … [] [] depth .bool` discharges the `.ax` obligation, and any
-annotated expression from the generator discharges a `.distinct` element's
-`∃ mty, exprTyped …` obligation. -/
+/-- The curried function type built from well-kinded argument and result types is well kinded in a
+    context that registers `arrow` at arity 2. -/
+theorem wellKindedTy_mkArrow' {C : LContext CoreLParams} (harrow : C.knownTypes["arrow"]? = some 2)
+    {out : LMonoTy} (hout : C.WellKindedTy out) :
+    ∀ (ins : List LMonoTy), (∀ t ∈ ins, C.WellKindedTy t) →
+      C.WellKindedTy (LMonoTy.mkArrow' out ins)
+  | [], _ => by rw [LMonoTy.mkArrow'_nil]; exact hout
+  | m :: ms, hins => by
+    intro ref n hn
+    simp only [LMonoTy.mkArrow', LMonoTy.arrow, getTypeConsArities, List.flatMap_cons,
+      List.flatMap_nil, List.append_nil, List.mem_cons, List.mem_append, List.length_cons,
+      List.length_nil, Prod.mk.injEq] at hn
+    rcases hn with ⟨rfl, rfl⟩ | hm | hrest
+    · exact harrow
+    · exact hins m List.mem_cons_self ref n hm
+    · exact wellKindedTy_mkArrow' harrow hout ms (fun t ht => hins t (List.mem_cons_of_mem _ ht))
+        ref n hrest
 
-/-- The axiom expression generated by `genAxiom` is `bool`-typed under the
-    annotated spec, in any ambient `C`/`Γ`. -/
-theorem genAxiom_exprTyped {octx : OpCtx} {pctx : PolyOpCtx}
-    {reserved : List String} {depth : Nat}
-    {C : LContext CoreLParams} {Γ : TContext Unit}
-    {decl : Decl} {name : String}
-    (h : (decl, name) ∈ SetGen.support
-      (genAxiom (G := SetGen.Set) octx pctx reserved depth)) :
-    ∃ a, decl = .ax a .empty ∧
-      instHasTypeA.exprTyped C Γ a.e (instHasTypeA.embed .bool) := by
-  simp only [genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
-  obtain ⟨nm, _hnm, e, he, hdecl, hname⟩ := h
-  refine ⟨{ name := nm, e := e }, hdecl, ?_⟩
-  -- `instHasTypeA.exprTyped C Γ e (embed .bool) = HasTypeA' [] e .bool`
-  show LExpr.HasTypeA [] e .bool
-  exact genLExpr_sound [] octx pctx [] [] depth .bool _ e he
+/-- The operator entry of a declared monomorphic function has a well-kinded type when the function's
+    signature types are well kinded and `arrow` is registered at arity 2. -/
+theorem funcOpEntry_wellKinded {C : LContext CoreLParams} (harrow : C.knownTypes["arrow"]? = some 2)
+    {f : Function} {entry : String × LMonoTy} (hentry : funcOpEntry f = some entry)
+    (hsig : ∀ ty ∈ f.output :: f.inputs.values, C.WellKindedTy ty) : C.WellKindedTy entry.2 := by
+  unfold funcOpEntry at hentry
+  split at hentry
+  · simp only [Option.some.injEq] at hentry
+    subst hentry
+    refine wellKindedTy_mkArrow' harrow (hsig _ List.mem_cons_self) _ ?_
+    intro t ht
+    refine hsig t (List.mem_cons_of_mem _ ?_)
+    rw [ListMap.values_eq_map_snd]
+    exact ht
+  · exact absurd hentry (by simp)
 
 /-! ## `ContextOk` monotonicity in the reserved set
 
@@ -525,15 +593,6 @@ structure Inv (s : GenState) : Prop where
   /-- Every type name the context knows is reserved (needed for the alias/type-con
       name-clash guards). -/
   knownReserved : ∀ k ∈ s.C.knownTypes.keywords, k ∈ s.reserved
-  /-- No alias name of `Γ` is a base type, an applied constructor or `"arrow"`. Therefore
-      an alias-body reference (confined to those) never matches an alias name,
-      giving `aliasFree`. -/
-  aliasPoolDisjoint : ∀ a ∈ s.Γ.aliases,
-    a.name ∉ s.baseTypes ∧ a.name ∉ s.tyCons.map (·.1) ∧ a.name ≠ "arrow"
-  /-- Every alias name in `Γ` is reserved (it was added to `reserved` when the
-      alias was declared). Combined with a freshly drawn name being unreserved,
-      this keeps a new abstract type's name distinct from every alias name. -/
-  aliasNamesReserved : ∀ a ∈ s.Γ.aliases, a.name ∈ s.reserved
   /-- The referenceable base/applied pool is a superset of the default (the
       datatype generator uses the default pool; alias/distinct bodies use
       the growing one). Grown only by abstract types. -/
@@ -546,15 +605,12 @@ structure Inv (s : GenState) : Prop where
   baseReserved : ∀ x ∈ s.baseTypes, x ∈ s.reserved
   tyConReserved : ∀ x ∈ s.tyCons.map (·.1), x ∈ s.reserved
   arrowReserved : "arrow" ∈ s.reserved
-  /-- The type scope holds no binding of a *value*, and it holds aliases only. A top-level
-      declarations never bind expression variables, so `Γ.types` stays empty
-      throughout the fold. Needed to align a generated procedure body's context
-      with `procBodyContext Γ proc` (which pushes the body scope onto `Γ.types`). -/
+  /-- The type scope binds no variable: top-level declarations never bind expression variables,
+      so `Γ.types` stays empty throughout the fold, matching the empty variable scopes the program
+      is typed in. -/
   typesNil : s.Γ.types = []
-  /-- The context declares no rigid type variables (top-level declarations never
-      introduce any; only a procedure body checks under rigid vars, internally).
-      So `s.C.rigidTypeVars = [] ⊆ proc.header.typeArgs`, which discharges the
-      rigidvar side condition of `genProcedure_sound_ambient`. -/
+  /-- The context declares no rigid type variables: top-level declarations never
+      introduce any, and only a procedure body checks under rigid type variables. -/
   rigidNil : s.C.rigidTypeVars = []
   /-- No applied constructor in the threaded pool is named `"arrow"`. At the
       default pool this was the `decide`-able `defaultTyCons_ne_arrow`; with
@@ -582,6 +638,30 @@ structure Inv (s : GenState) : Prop where
       `tySymInhab_push` (see `storedRefsAbsent_of_inv`). -/
   storedRefsReserved : ∀ d ∈ s.C.datatypes.allDatatypes, ∀ c ∈ d.constrs,
     ∀ arg ∈ c.args, ∀ r ∈ getTypeRefs arg.2, r ∈ s.reserved
+  /-- Every datatype of `C` is registered in its known types at its number of type parameters.
+      A constructor argument of a new block may name an earlier datatype, at that arity. -/
+  datatypesKnown : s.C.DatatypesKnown
+  /-- Every operator type a generated expression can use is well kinded in `C`. -/
+  octxWK : ∀ p ∈ s.octx.ops, s.C.WellKindedTy p.2
+  /-- The in-out and out-only types of every callable procedure are well kinded in `C`; a call
+      declares and writes variables at instances of them. -/
+  sigsWK : ∀ sig ∈ s.procs, ∀ ty ∈ (sig.M ++ sig.O).values, s.C.WellKindedTy ty
+  /-- The operators and polymorphic schemes generated expressions draw on agree with the functions
+      of `C`, and `C` gives every function the type scheme of its signature. -/
+  exprCtx : ExprCtxOk s.C [] [] s.octx (s.pctx ++ s.derivedPctx)
+  /-- Every polymorphic scheme generated expressions draw on is closed. -/
+  polysClosed : ∀ nm bvs body, (nm, LTy.forAll bvs body) ∈ s.pctx ++ s.derivedPctx →
+    ∀ v ∈ LMonoTy.freeVars body, v ∈ bvs
+
+/-- Core's registered types record, for each name of the list they are built from, the arity that
+    list gives it. -/
+theorem coreKnownTypes_getElem? (k : String) (v : Nat)
+    (hmem : (k, v) ∈ (Core.KnownLTys.map (fun ty => ty.toKnownType!)).map
+      (fun x => (x.name, x.arity))) :
+    Core.KnownTypes[k]? = some v := by
+  have hdistinct : ((Core.KnownLTys.map (fun ty => ty.toKnownType!)).map
+      (fun x => (x.name, x.arity))).Pairwise (fun a b => (a.1 == b.1) = false) := by decide
+  exact Std.HashMap.getElem?_ofList_of_mem BEq.rfl hdistinct hmem
 
 /-- **The fold's invariant already pins the `SimpleTyArities` arities.** The threaded pool
     holds the default pool (`baseSupset` and `tyConsSupset`), and the arity fields of
@@ -593,17 +673,21 @@ theorem simpleTyArities_of_inv {s : GenState} (hinv : Inv s) : SimpleTyArities s
   have htc : ∀ kc ∈ DatatypeGen.defaultTyCons, s.C.knownTypes[kc.1]? = some kc.2 :=
     fun kc hkc => hinv.ctxOk.tyCon_arity kc (hinv.tyConsSupset hkc)
   -- Membership in the *derived* pool is a lookup of an arity in `Core.KnownTypes`, which
-  -- `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` give, and which `native_decide` settles.
+  -- `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` give.
+  have hbase : ∀ b, Core.KnownTypes[b]? = some 0 → s.C.knownTypes[b]? = some 0 :=
+    fun b hcore => hb b (DatatypeGen.mem_defaultBaseTypes_iff.mpr hcore)
   refine ⟨?_, ?_, ?_, ?_, ?_, hinv.ctxOk.arrow_arity, ?_, ?_⟩
-  · exact hb "bool" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "int" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "string" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "real" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "regex" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
+  · exact hbase "bool" (coreKnownTypes_getElem? _ _ (by decide))
+  · exact hbase "int" (coreKnownTypes_getElem? _ _ (by decide))
+  · exact hbase "string" (coreKnownTypes_getElem? _ _ (by decide))
+  · exact hbase "real" (coreKnownTypes_getElem? _ _ (by decide))
+  · exact hbase "regex" (coreKnownTypes_getElem? _ _ (by decide))
   · exact htc ("Map", 2) (DatatypeGen.mem_defaultTyCons_iff.mpr
-      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨by native_decide, by simp, by simp⟩, by simp⟩)
+      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr
+        ⟨coreKnownTypes_getElem? _ _ (by decide), by simp, by simp⟩, by simp⟩)
   · exact htc ("Sequence", 1) (DatatypeGen.mem_defaultTyCons_iff.mpr
-      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨by native_decide, by simp, by simp⟩, by simp⟩)
+      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr
+        ⟨coreKnownTypes_getElem? _ _ (by decide), by simp, by simp⟩, by simp⟩)
 
 /-! ## Reference confinement for `genNonRecursiveArgTy` -/
 
@@ -668,60 +752,74 @@ theorem wellKindedTy_of_genNonRecursiveArgTy {C : LContext CoreLParams}
   · exact hok.tyCon_arity (ref, n) htc
   · exact hok.arrow_arity
 
-/-! ## Alias well-formedness helpers -/
+/-! ## Synonym bodies -/
 
-/-- If every type-constructor name referenced anywhere in `ty` fails to match any
-    alias name in `aliases`, then `ty` is alias-free. Structural recursion over
-    `ty` mirroring `LMonoTy.aliasFree` / `getTypeRefs`. -/
-theorem aliasFree_of_refs_disjoint {aliases : List TypeAlias} :
-    ∀ (ty : LMonoTy),
-      (∀ r ∈ getTypeRefs ty, aliases.find? (fun a => a.name == r) = none) →
-      LMonoTy.aliasFree aliases ty := by
+/-- A type whose constructors are registered at their arities and whose type variables are all
+    admissible passes the resolved checker under that admissibility. -/
+theorem typeCheckCore_of_knownInstance {ks : KnownTypes} {adm : TyVarAdmissibility} :
+    ∀ (ty : LMonoTy), LMonoTy.knownInstance ty ks = true →
+      (∀ v ∈ LMonoTy.freeVars ty, adm v = true) → LMonoTy.typeCheckCore ty ks adm = true := by
   intro ty
   induction ty with
-  | ftvar _ => intro _; exact True.intro
-  | bitvec _ => intro _; exact True.intro
+  | ftvar v =>
+    intro _ hv
+    simpa [LMonoTy.typeCheckCore] using hv v (by simp [LMonoTy.freeVars])
+  | bitvec _ => intro _ _; simp [LMonoTy.typeCheckCore]
   | tcons name args ih =>
-    intro href
-    refine ⟨?_, ?_⟩
-    · -- head does not match any alias by name (⇒ by name ∧ length)
-      have hname : aliases.find? (fun a => a.name == name) = none :=
-        href name (by simp [getTypeRefs])
-      -- refine to the name-and-length predicate
-      rw [List.find?_eq_none] at hname ⊢
-      intro a ha
-      have hn := hname a ha
-      rw [Bool.not_eq_true] at hn ⊢
-      simp only [Bool.and_eq_false_iff]
-      exact Or.inl hn
-    · -- arguments are alias-free by the IH; each arg's refs ⊆ ty's refs
-      have hargs : ∀ arg ∈ args, LMonoTy.aliasFree aliases arg := by
-        intro arg harg
-        exact ih arg harg (fun r hr => href r (by
-          simp only [getTypeRefs, List.mem_cons, List.mem_flatMap]
-          exact Or.inr ⟨arg, harg, hr⟩))
-      -- assemble `LMonoTys.aliasFree`
-      clear href ih
-      induction args with
-      | nil => exact True.intro
-      | cons hd tl ihl =>
-        exact ⟨hargs hd (by simp), ihl (fun a ha => hargs a (by simp [ha]))⟩
+    intro hk hv
+    simp only [LMonoTy.knownInstance, Bool.and_eq_true] at hk
+    simp only [LMonoTy.typeCheckCore, Bool.and_eq_true]
+    refine ⟨hk.1, ?_⟩
+    have hkargs := hk.2
+    have hvs : ∀ v ∈ LMonoTys.freeVars args, adm v = true := by
+      intro v hva; exact hv v (by simpa only [LMonoTy.freeVars] using hva)
+    clear hv hk
+    induction args with
+    | nil => simp [LMonoTys.typeCheckCore]
+    | cons hd tl ihl =>
+      simp only [LMonoTys.knownInstances] at hkargs
+      split at hkargs
+      case isFalse => exact absurd hkargs (by simp)
+      rename_i hhd
+      rw [LMonoTys.freeVars_of_cons] at hvs
+      simp only [LMonoTys.typeCheckCore, Bool.and_eq_true]
+      exact ⟨ih hd (by simp) hhd (fun v hv => hvs v (List.mem_append_left _ hv)),
+        ihl (fun a ha => ih a (by simp [ha])) hkargs
+          (fun v hv => hvs v (List.mem_append_right _ hv))⟩
 
-/-- Every element of a generated `distinct` is an annotated `.op` node, hence
-    well-typed at its annotation. Therefore it discharges the obligation `∃ mty, exprTyped …`
-    of `DeclHasType'.distinct` in any `C`/`Γ`.
-
-    `HasTypeA.op` reads the type off the annotation, exactly as `HasTypeA.fvar` would;
-    the difference is invisible here and decisive for the checker, which can resolve
-    `.op` at a declared constant but cannot resolve a top-level `.fvar` at all. -/
-theorem distinctElems_typed {τ : LMonoTy} {names : List String}
-    {C : LContext CoreLParams} {Γ : TContext Unit} :
-    ∀ e ∈ distinctElems τ names,
-      ∃ mty, instHasTypeA.exprTyped C Γ e (instHasTypeA.embed mty) := by
+/-- Each element of a generated `distinct` is an operator annotated at `τ`. In a context where each
+    of the named constants is declared at `τ`, the element is weakly typed at `τ` with no variable
+    in scope. -/
+theorem distinctElems_typed {τ : LMonoTy} {names : List String} {C : LContext CoreLParams}
+    (hlook : ∀ c ∈ names, C.functions[c]? = some (constantFunc c τ).toLFunc) :
+    ∀ e ∈ distinctElems τ names, ExprHasTypeW C [] e τ := by
   intro e he
   simp only [distinctElems, List.mem_map] at he
-  obtain ⟨c, _hc, rfl⟩ := he
-  exact ⟨τ, LExpr.HasTypeA.op⟩
+  obtain ⟨c, hc, rfl⟩ := he
+  have hfind := hlook c hc
+  refine ⟨LExpr.HasTypeA.op, ?_, ?_, ?_, ?_⟩
+  · intro t ht
+    simp [LExpr.binderAnnotations] at ht
+  · intro x ann hx
+    simp [LExpr.freeVars] at hx
+  · intro o ty ho
+    simp only [LExpr.opAnnots, Option.toList_some, List.map_cons, List.map_nil,
+      List.mem_singleton, Prod.mk.injEq] at ho
+    obtain ⟨rfl, hty⟩ := ho
+    exact ⟨_, [], τ, hfind, rfl, [], hty.trans (LMonoTy.subst_nil τ).symm⟩
+  · intro o ho
+    simp only [LExpr.getOps, List.mem_singleton] at ho
+    subst ho
+    rw [hfind]
+    rfl
+
+/-- A ground element type leaves no type variable in the annotations of a `distinct`'s elements. -/
+theorem distinctElems_annots {τ : LMonoTy} {names : List String} (hτ : LMonoTy.freeVars τ = []) :
+    ∀ e ∈ distinctElems τ names, ∀ v ∈ annotTyVars e, v ∈ ([] : List TyIdentifier) := by
+  intro e he v hv
+  simp only [distinctElems, List.mem_map] at he
+  obtain ⟨c, _, rfl⟩ := he
+  simp [annotTyVars, exprAnnotTys, hτ] at hv
 
 /-- The element type a `genDistinctAssertion` draw produces is **ground**: it is drawn
     over `tyParams := []`, so `genArgTy_freeVars` (at the vacuous
@@ -757,122 +855,14 @@ theorem genDistinctAssertion_names {bt : BaseTys} {tc : TyCons}
   obtain ⟨nm, hnm, _τ', _hτ', k, _hk, cs, hcs, hnm_eq, _hτ_eq, hcs_eq⟩ := h
   subst hnm_eq
   subst hcs_eq
-  exact ⟨DatatypeGen.genFreshName_fresh _ _ hnm,
-         DatatypeGen.genFreshNames_fresh _ _ _ hcs,
-         DatatypeGen.genFreshNames_nodup _ _ _ hcs⟩
+  exact ⟨(genDeclName_fresh hnm).1,
+         fun x hx => DatatypeGen.genFreshNames_fresh _ _ _ hcs x (List.mem_filter.mp hx).1,
+         (DatatypeGen.genFreshNames_nodup _ _ _ hcs).filter _⟩
 
-/-! ## Per-declaration soundness: aliases
+/-! ## Per-declaration soundness: aliases, axioms and distinct
 
-The alias step leaves `C` unchanged and extends `Γ` with the generated alias. We
-show the emitted declaration is `DeclHasTypeA`, and that `Inv` is preserved. -/
-
-/-- Soundness of the alias step. For any `P`, the emitted declaration list is
-    well-typed from `s`'s context/scope to `s'`'s, and `Inv` is preserved. -/
-theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
-    (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclAlias (G := SetGen.Set) s b)) :
-    DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
-  simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff,
-    Prod.mk.injEq] at h
-  obtain ⟨pr, ⟨nm, hnm, ntp, _hntp, tyParams, _htp, body, hbody, hpr⟩, hds, hs'⟩ := h
-  -- `pr = (mkAliasDecl nm body, nm)`.
-  subst hpr
-  simp only at hds hs'
-  -- Name freshness: `nm ∉ s.reserved`.
-  have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
-  -- The built synonym.
-  let ts : TypeSynonym :=
-    { name := nm, typeArgs := (LMonoTy.freeVars body).dedup, type := body }
-  -- `mkAliasDecl nm body = .type (.syn ts) .empty`.
-  have hmk : mkAliasDecl nm body = .type (.syn ts) .empty := rfl
-  -- Establish the six `type_syn` premises.
-  have hNodup : ts.typeArgs.Nodup := (LMonoTy.freeVars body).nodup_dedup
-  have hclosed : ∀ v, v ∈ LMonoTy.freeVars ts.type → v ∈ ts.typeArgs := by
-    intro v hv; exact (List.mem_of_dedup _ _).mp hv
-  have hnophantom : ∀ v, v ∈ ts.typeArgs → v ∈ LMonoTy.freeVars ts.type := by
-    intro v hv; exact (List.mem_of_dedup _ _).mpr hv
-  have hname_clash : ¬ s.C.knownTypes.containsName ts.name := by
-    intro hc
-    have : ts.name ∈ s.C.knownTypes.keywords := by
-      simpa [KnownTypes.containsName, KnownTypes.keywords, Std.HashMap.mem_keys] using hc
-    exact hnm_fresh (hinv.knownReserved _ this)
-  have haliasFree : LMonoTy.aliasFree s.Γ.aliases ts.type := by
-    apply aliasFree_of_refs_disjoint
-    intro r hr
-    have hrefs := genNonRecursiveArgTy_refs (baseTypes := s.baseTypes) (tyCons := s.tyCons)
-      (tyParams := tyParams) (size := b.tySize) hbody r hr
-    rw [List.find?_eq_none]
-    intro a ha
-    rw [Bool.not_eq_true, beq_eq_false_iff_ne]
-    intro hcontra
-    subst hcontra
-    obtain ⟨hb1, hb2, hb3⟩ := hinv.aliasPoolDisjoint a ha
-    rcases hrefs with hbase | htc | harr
-    · exact hb1 hbase
-    · exact hb2 htc
-    · exact hb3 harr
-  have haliasEquiv : AliasEquiv s.Γ.aliases ts.type ts.type := AliasEquiv.refl
-  -- The extended type scope.
-  let Γ' : TContext Unit :=
-    { s.Γ with aliases := { typeArgs := ts.typeArgs, name := ts.name, type := ts.type } :: s.Γ.aliases }
-  have hdecl : DeclHasTypeA P s.C s.Γ (mkAliasDecl nm body) s.C Γ' := by
-    rw [hmk]
-    exact DeclHasType'.type_syn s.C s.Γ ts .empty ts.type hNodup hclosed hnophantom
-      hname_clash haliasFree haliasEquiv
-  -- The next state.
-  subst hds hs'
-  refine ⟨?_, ?_⟩
-  · -- `DeclsHasTypeA` for the singleton list.
-    exact DeclsHasType'.cons _ _ _ _ _ _ _ _ hdecl (DeclsHasType'.nil _ _)
-  · -- `Inv` preserved: `C`, pool unchanged; `reserved` grows; new alias respects
-    -- pool-disjointness (its name is fresh, so avoids the pool).
-    refine
-      { ctxOk := ?_
-        knownReserved := ?_
-        aliasPoolDisjoint := ?_
-        aliasNamesReserved := ?_
-        tyConsNeArrow := hinv.tyConsNeArrow
-        datatypesReserved := fun n hn => List.mem_cons_of_mem _ (hinv.datatypesReserved n hn)
-        dtPoolOk := hinv.dtPoolOk
-        dtConsReserved := fun x hx => List.mem_cons_of_mem _ (hinv.dtConsReserved x hx)
-        storedRefsReserved := fun d hd c hc arg harg r hr =>
-          List.mem_cons_of_mem _ (hinv.storedRefsReserved d hd c hc arg harg r hr)
-        baseSupset := hinv.baseSupset
-        tyConsSupset := hinv.tyConsSupset
-        baseReserved := ?_
-        tyConReserved := ?_
-        arrowReserved := ?_
-        typesNil := hinv.typesNil
-        rigidNil := hinv.rigidNil }
-    · -- `s'.C = s.C`, `s'.reserved = nm :: s.reserved` ⊇ `s.reserved`.
-      exact contextOk_reserved_mono hinv.ctxOk (fun x hx => List.mem_cons_of_mem _ hx)
-    · intro k hk; exact List.mem_cons_of_mem _ (hinv.knownReserved k hk)
-    · intro a ha
-      -- `a ∈ (new alias) :: s.Γ.aliases`; reduce the `match` on `mkAliasDecl`.
-      simp only [mkAliasDecl, List.mem_cons] at ha
-      rcases ha with rfl | ha
-      · -- the new alias: name `nm` is fresh, so avoids the pool (all reserved).
-        refine ⟨?_, ?_, ?_⟩
-        · intro hb; simp only at hb; exact hnm_fresh (hinv.baseReserved _ hb)
-        · intro hb; simp only at hb; exact hnm_fresh (hinv.tyConReserved _ hb)
-        · intro hb; simp only at hb; exact hnm_fresh (hb ▸ hinv.arrowReserved)
-      · exact hinv.aliasPoolDisjoint a ha
-    · -- alias names reserved: the new alias's name is `nm` (just added); old ones grow.
-      intro a ha
-      simp only [mkAliasDecl, List.mem_cons] at ha
-      rcases ha with rfl | ha
-      · simp only; exact List.mem_cons_self
-      · exact List.mem_cons_of_mem _ (hinv.aliasNamesReserved a ha)
-    · intro x hx; exact List.mem_cons_of_mem _ (hinv.baseReserved x hx)
-    · intro x hx; exact List.mem_cons_of_mem _ (hinv.tyConReserved x hx)
-    · exact List.mem_cons_of_mem _ hinv.arrowReserved
-
-/-! ## Per-declaration soundness: axioms and distinct
-
-Both leave `C`, `Γ`, and the type-constructor pool unchanged; only `reserved`
-grows. So
-`Inv` preservation is `contextOk_reserved_mono` plus monotonicity of the reserved
-facts, and the `DeclHasType'` derivation comes from the expression bridge. -/
+These steps leave the known types and the type-constructor pool unchanged, so `Inv` preservation
+is `contextOk_reserved_mono` plus monotonicity of the reserved facts. -/
 
 /-- A state whose only change from `s` is prepending `name` to `reserved`
     preserves `Inv`. -/
@@ -881,28 +871,31 @@ theorem inv_cons_reserved {s : GenState} (hinv : Inv s) (name : String) :
   refine
     { ctxOk := contextOk_reserved_mono hinv.ctxOk (fun x hx => List.mem_cons_of_mem _ hx)
       knownReserved := fun k hk => List.mem_cons_of_mem _ (hinv.knownReserved k hk)
-      aliasPoolDisjoint := hinv.aliasPoolDisjoint
-      aliasNamesReserved := fun a ha => List.mem_cons_of_mem _ (hinv.aliasNamesReserved a ha)
       tyConsNeArrow := hinv.tyConsNeArrow
       datatypesReserved := fun n hn => List.mem_cons_of_mem _ (hinv.datatypesReserved n hn)
       dtPoolOk := hinv.dtPoolOk
       dtConsReserved := fun x hx => List.mem_cons_of_mem _ (hinv.dtConsReserved x hx)
       storedRefsReserved := fun d hd c hc arg harg r hr =>
         List.mem_cons_of_mem _ (hinv.storedRefsReserved d hd c hc arg harg r hr)
+      datatypesKnown := hinv.datatypesKnown
       baseSupset := hinv.baseSupset
       tyConsSupset := hinv.tyConsSupset
       baseReserved := fun x hx => List.mem_cons_of_mem _ (hinv.baseReserved x hx)
       tyConReserved := fun x hx => List.mem_cons_of_mem _ (hinv.tyConReserved x hx)
       arrowReserved := List.mem_cons_of_mem _ hinv.arrowReserved
       typesNil := hinv.typesNil
-      rigidNil := hinv.rigidNil }
+      rigidNil := hinv.rigidNil
+      octxWK := hinv.octxWK
+      sigsWK := hinv.sigsWK
+      exprCtx := hinv.exprCtx
+      polysClosed := hinv.polysClosed }
 
-/-- A state whose only changes from `s` are prepending `name` to `reserved` and
-    `sig` to `procs` keeps `Inv`. No field of `Inv` names `procs`, because
-    `ProcSigCorresponds` constrains the context of the callable signatures at the top level, and the invariant
-    of the fold does not. Read `ProgramGen.ProcSigThread`. -/
+/-- A state whose only changes from `s` are prepending `name` to `reserved` and `sig` to `procs`
+    keeps `Inv`, provided the in-out and out-only types of `sig` are well kinded in `C`. The
+    agreement of the callable signatures with the finished program is not part of `Inv`. -/
 theorem inv_cons_reserved_procs {s : GenState} (hinv : Inv s) (name : String)
-    (sig : StrataGenerators.Stmt.ProcSig) :
+    (sig : StrataGenerators.Stmt.ProcSig)
+    (hsigWK : ∀ ty ∈ (sig.M ++ sig.O).values, s.C.WellKindedTy ty) :
     Inv { s with reserved := name :: s.reserved, procs := sig :: s.procs } := by
   -- Every `Inv` field reads only `C`/`Γ`/`baseTypes`/`tyCons`/`dtCons`/`reserved`,
   -- all of which agree with `{ s with reserved := name :: s.reserved }`.
@@ -910,8 +903,6 @@ theorem inv_cons_reserved_procs {s : GenState} (hinv : Inv s) (name : String)
   exact
     { ctxOk := h.ctxOk
       knownReserved := h.knownReserved
-      aliasPoolDisjoint := h.aliasPoolDisjoint
-      aliasNamesReserved := h.aliasNamesReserved
       baseSupset := h.baseSupset
       tyConsSupset := h.tyConsSupset
       baseReserved := h.baseReserved
@@ -923,7 +914,15 @@ theorem inv_cons_reserved_procs {s : GenState} (hinv : Inv s) (name : String)
       datatypesReserved := h.datatypesReserved
       dtPoolOk := h.dtPoolOk
       dtConsReserved := h.dtConsReserved
-      storedRefsReserved := h.storedRefsReserved }
+      storedRefsReserved := h.storedRefsReserved
+      datatypesKnown := h.datatypesKnown
+      octxWK := h.octxWK
+      sigsWK := fun g hg => by
+        rcases List.mem_cons.mp hg with rfl | hg
+        · exact hsigWK
+        · exact hinv.sigsWK g hg
+      exprCtx := h.exprCtx
+      polysClosed := h.polysClosed }
 
 /-- A state whose only change from `s` is prepending a *list* of names to
     `reserved` preserves `Inv`. The list version of `inv_cons_reserved`, needed by
@@ -936,56 +935,97 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
   refine
     { ctxOk := contextOk_reserved_mono hinv.ctxOk mono
       knownReserved := fun k hk => mono _ (hinv.knownReserved k hk)
-      aliasPoolDisjoint := hinv.aliasPoolDisjoint
-      aliasNamesReserved := fun a ha => mono _ (hinv.aliasNamesReserved a ha)
       tyConsNeArrow := hinv.tyConsNeArrow
       datatypesReserved := fun n hn => mono _ (hinv.datatypesReserved n hn)
       dtPoolOk := hinv.dtPoolOk
       dtConsReserved := fun x hx => mono _ (hinv.dtConsReserved x hx)
       storedRefsReserved := fun d hd c hc arg harg r hr =>
         mono _ (hinv.storedRefsReserved d hd c hc arg harg r hr)
+      datatypesKnown := hinv.datatypesKnown
       baseSupset := hinv.baseSupset
       tyConsSupset := hinv.tyConsSupset
       baseReserved := fun x hx => mono _ (hinv.baseReserved x hx)
       tyConReserved := fun x hx => mono _ (hinv.tyConReserved x hx)
       arrowReserved := mono _ hinv.arrowReserved
       typesNil := hinv.typesNil
-      rigidNil := hinv.rigidNil }
+      rigidNil := hinv.rigidNil
+      octxWK := hinv.octxWK
+      sigsWK := hinv.sigsWK
+      exprCtx := hinv.exprCtx
+      polysClosed := hinv.polysClosed }
 
-/-- **`Inv` is preserved by any change to the operator contexts.** No `Inv`
-    field names `octx`, `pctx` or `derivedPctx`. Under the annotated specification, an
-    `.op` node takes its type from its own annotation. Therefore an operator context constrains
-    which programs the generator *draws*, and never which programs are well typed. Each field of
-    `hinv` transfers verbatim and `{ hinv with }` copies them.
+/-- Soundness of the alias step: under any program `P`, the emitted declarations are weakly typed
+    from the context of `s` to that of `s'`, and `Inv` is preserved. A synonym's parameters are the
+    distinct free variables of its body, and the body is drawn over registered constructors. -/
+theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
+    (hinv : Inv s) {ds : List Decl} {s' : GenState}
+    (h : (ds, s') ∈ SetGen.support (genDeclAlias (G := SetGen.Set) s b)) :
+    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+  simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff] at h
+  obtain ⟨pr, ⟨nm, hnm, ntp, _, tyParams, _, body, hbody, hpr⟩, hmatch⟩ := h
+  subst hpr
+  simp only [mkAliasDecl] at hmatch
+  split at hmatch
+  case isFalse =>
+    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch
+    subst hds hs'
+    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+  simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+  obtain ⟨hds, hs'⟩ := hmatch
+  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
+  let syn : TypeSynonym :=
+    { name := nm, typeArgs := (LMonoTy.freeVars body).uniq, type := body }
+  have hmk : mkAliasDecl nm body = .type (.syn syn) .empty := rfl
+  have hNodup : syn.typeArgs.Nodup := (LMonoTy.freeVars body).nodup_uniq
+  have hclosed : ∀ v, v ∈ LMonoTy.freeVars syn.type → v ∈ syn.typeArgs := by
+    intro v hv; exact (List.mem_of_dedup _ _).mp hv
+  have hknown : LMonoTy.knownInstance body s.C.knownTypes = true :=
+    Lambda.knownInstance_of_wellKinded body _
+      (wellKindedTy_of_genNonRecursiveArgTy hinv.ctxOk hbody)
+  have hres : ResolvedTyHasType s.C (fun v => decide (v ∈ syn.typeArgs)) syn.type :=
+    LMonoTy.typeCheckCore_sound _ s.C _
+      (typeCheckCore_of_knownInstance _ hknown (fun v hv => decide_eq_true (hclosed v hv)))
+  have hoccurs : ∀ v ∈ syn.typeArgs, v ∈ LMonoTy.freeVars syn.type :=
+    fun v hv => (List.mem_of_dedup _ _).mpr hv
+  -- Every known type name is reserved and `nm` is not, so `nm` is not a known type.
+  have hnotKnown : ¬ s.C.knownTypes.containsName syn.name := by
+    intro hc
+    have hmem : nm ∈ s.C.knownTypes :=
+      (KnownTypes.containsName_eq_true_iff_mem _ _).mp hc
+    exact hnm_fresh (hinv.knownReserved nm (Std.HashMap.mem_keys.mpr hmem))
+  have hdecl : DeclHasTypeW P s.C [] (mkAliasDecl nm body) s.C := by
+    rw [hmk]
+    exact DeclHasTypeW.type_syn s.C [] syn .empty hNodup hnotKnown hoccurs hres
+  subst hds hs'
+  refine ⟨DeclsHasTypeW.cons _ _ _ _ _ _ hdecl (DeclsHasTypeW.nil _ _), ?_⟩
+  -- Only `reserved` (by `nm`) and the alias list change, and no `Inv` field reads the aliases.
+  have hgrow := inv_cons_reserved hinv nm
+  exact { hgrow with typesNil := hinv.typesNil }
 
-    This lemma is necessary, because two steps grow an operator context while the proof establishes the invariant
-    again. Those steps are the step for a datatype, which adds the derived functions of the block, and the step
-    for a function, which registers the declared function so that a later body can call it.
-    Compose with `inv_addFactory` / `inv_grow_reserved`, which cover the fields that
-    *do* move. -/
+/-- `Inv` survives replacing the operator contexts by ones whose monomorphic operators have
+    well-kinded types, that agree with the functions of `C`, and whose schemes are closed. -/
 theorem inv_setOpCtxs {s : GenState} (hinv : Inv s)
-    (octx : OpCtx) (pctx derivedPctx : PolyOpCtx) :
+    (octx : OpCtx) (pctx derivedPctx : PolyOpCtx) (hwk : ∀ p ∈ octx.ops, s.C.WellKindedTy p.2)
+    (hctx : ExprCtxOk s.C [] [] octx (pctx ++ derivedPctx))
+    (hclosed : ∀ nm bvs body, (nm, LTy.forAll bvs body) ∈ pctx ++ derivedPctx →
+      ∀ v ∈ LMonoTy.freeVars body, v ∈ bvs) :
     Inv { s with octx := octx, pctx := pctx, derivedPctx := derivedPctx } :=
-  { hinv with }
+  { hinv with octxWK := hwk, exprCtx := hctx, polysClosed := hclosed }
 
-/-- **`Inv` is preserved by a factory add alone.** A successful
-    `addFactoryFunctionWithError` touches only `C.functions`, and no `Inv` field
-    mentions the function factory (`knownTypes`, `datatypes`, `rigidTypeVars` and
-    everything from them stay the same, by `addFactory_fields` and
-    `addFactory_rigid`), so the invariant holds with `reserved` unchanged.
-
-    Compose with `inv_grow_reserved` to also account for the names the step
-    reserves. Shared by the function step and the `distinct` step's constants. -/
+/-- **`Inv` is preserved by a factory add alone**, with `reserved` unchanged, when the operators
+    and schemes of `s` agree with the grown function table. A successful
+    `addFactoryFunctionWithError` touches only `C.functions`, so the known types, the datatypes
+    and the rigid type variables stay the same. -/
 theorem inv_addFactory {s : GenState} (hinv : Inv s) {fn : LFunc CoreLParams}
     {C' : LContext CoreLParams}
-    (hadd : s.C.addFactoryFunctionWithError fn = .ok C') :
+    (hadd : s.C.addFactoryFunctionWithError fn = .ok C')
+    (hctx : ExprCtxOk C' [] [] s.octx (s.pctx ++ s.derivedPctx)) :
     Inv { s with C := C' } := by
   obtain ⟨hkt, hdt⟩ := addFactory_fields hadd
   refine
     { ctxOk := contextOk_addFactory hinv.ctxOk hadd
       knownReserved := fun k hk => hinv.knownReserved k (by rw [hkt] at hk; exact hk)
-      aliasPoolDisjoint := hinv.aliasPoolDisjoint
-      aliasNamesReserved := hinv.aliasNamesReserved
       baseSupset := hinv.baseSupset
       tyConsSupset := hinv.tyConsSupset
       baseReserved := hinv.baseReserved
@@ -1000,30 +1040,64 @@ theorem inv_addFactory {s : GenState} (hinv : Inv s) {fn : LFunc CoreLParams}
                     inhab := by rw [hdt]; exact hinv.dtPoolOk.inhab }
       dtConsReserved := hinv.dtConsReserved
       storedRefsReserved := fun d hd c hc arg harg r hr =>
-        hinv.storedRefsReserved d (by rw [hdt] at hd; exact hd) c hc arg harg r hr }
+        hinv.storedRefsReserved d (by rw [hdt] at hd; exact hd) c hc arg harg r hr
+      datatypesKnown := fun d hd => by
+        rw [hkt]
+        exact hinv.datatypesKnown d (by rw [hdt] at hd; exact hd)
+      octxWK := fun p hp => by
+        unfold LContext.WellKindedTy; rw [hkt]; exact hinv.octxWK p hp
+      sigsWK := fun sig hsig ty hty => by
+        unfold LContext.WellKindedTy; rw [hkt]; exact hinv.sigsWK sig hsig ty hty
+      exprCtx := hctx
+      polysClosed := hinv.polysClosed }
 
-/-- Soundness of the axiom step. -/
+/-! ## The axiom expression -/
+
+/-- An axiom drawn at a state of the fold is a boolean that is weakly typed in the context of that
+    state with no variable in scope, and its annotations mention no type variable. -/
+theorem genAxiom_exprTyped {s : GenState} (hinv : Inv s) {depth : Nat}
+    {decl : Decl} {name : String}
+    (h : (decl, name) ∈ SetGen.support
+      (genAxiom (G := SetGen.Set) s.octx s.pctx s.reserved depth)) :
+    ∃ a, decl = .ax a .empty ∧ ExprHasTypeW s.C [] a.e .bool ∧
+      ∀ v ∈ annotTyVars a.e, v ∈ ([] : List TyIdentifier) := by
+  simp only [genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
+  obtain ⟨nm, _, e, he, hdecl, _⟩ := h
+  have hops : ∀ p ∈ (opsOver [] s.octx).ops, p ∈ s.octx.ops ∧
+      ∀ v ∈ LMonoTy.freeVars p.2, v ∈ ([] : List TyIdentifier) :=
+    fun _ hp => mem_opsOver_iff.mp hp
+  have hctx : ExprCtxOk s.C [] [] (opsOver [] s.octx) s.pctx :=
+    hinv.exprCtx.restrict (fun _ hp => absurd hp List.not_mem_nil) (fun p hp => (hops p hp).1)
+      (fun _ hp => List.mem_append_left _ hp)
+  have hsc : ExprScopedCtx [] [] (opsOver [] s.octx) s.pctx :=
+    ⟨fun _ hp => absurd hp List.not_mem_nil, fun p hp => (hops p hp).2,
+      fun nm bvs body hmem => hinv.polysClosed nm bvs body (List.mem_append_left _ hmem)⟩
+  have hbool := (closureHyps_annotsOk [] hctx).bool
+  have hboolV := (closureHyps_annotTyVars hsc).bool
+  exact ⟨{ name := nm, e := e }, hdecl, genLExpr_exprHasTypeW hctx hbool he,
+    genLExpr_annotTyVars hsc hboolV he⟩
+
+/-- Soundness of the axiom step: the emitted axiom is weakly typed in the context of `s`, and only
+    `reserved` changes. -/
 theorem genDeclAxiom_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclAxiom (G := SetGen.Set) s b)) :
-    DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
+    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨pr, hpr, hds, hs'⟩ := h
-  -- `pr = (decl, name)` from `genAxiom`; extract the bool-typed body.
-  obtain ⟨a, hdecl_eq, htyped⟩ := genAxiom_exprTyped (C := s.C) (Γ := s.Γ) hpr
+  obtain ⟨a, hdecl_eq, htyped, hscoped⟩ := genAxiom_exprTyped hinv hpr
   subst hds hs'
   refine ⟨?_, inv_cons_reserved hinv _⟩
-  -- `ds = [pr.fst] = [.ax a .empty]`.
   rw [hdecl_eq]
-  exact DeclsHasType'.cons _ _ _ _ _ _ _ _
-    (DeclHasType'.ax s.C s.Γ a .empty htyped) (DeclsHasType'.nil _ _)
+  exact DeclsHasTypeW.cons _ _ _ _ _ _
+    (DeclHasTypeW.ax s.C [] a .empty htyped hscoped) (DeclsHasTypeW.nil _ _)
 
 /-! ### The constants a `distinct` ranges over
 
 The `distinct` step emits one 0-ary constant per element before the `distinct`
-itself. Each constant is an ordinary `.func` declaration, so its
-proof discharges each `DeclHasType'.func` premise as the step for a function does, and each step is much
-cheaper, because a constant has no body, no measure and no type argument. -/
+itself. Each constant is an ordinary `.func` declaration, so its proof discharges each
+`DeclHasTypeW.func` premise as the step for a function does, and each step is much cheaper, because
+a constant has no body, no measure and no type argument. -/
 
 /-- A generated constant is non-recursive: `constantFunc` leaves `isRecursive` at
     its `false` default. -/
@@ -1031,73 +1105,111 @@ theorem constantFunc_nonrec (c : String) (τ : LMonoTy) :
     ¬ (constantFunc c τ).isRecursive := by
   simp [constantFunc]
 
-/-- A generated constant is well-typed for *any* `C`/`Γ`, provided its type is
-    ground. `inputs`/`typeArgs` are empty (so the `Nodup` fields are trivial and the
-    signature is just `τ`), and `body`/`measure` are `none` (so the two expression
-    obligations are vacuous). Groundness is what `noUndeclaredVars` needs: a
-    constant declares no type arguments, so `freeVars τ ⊆ typeArgs = []`. -/
-theorem constantFunc_hasTypeA {C : LContext CoreLParams} {Γ : TContext Unit}
-    {c : String} {τ : LMonoTy} (hτ : LMonoTy.freeVars τ = [])
-    -- Upstream's `signatureWellKinded` field; the constant's only signature type is `τ`.
-    (hwk : C.WellKindedTy τ) :
-    FuncHasTypeA C Γ (constantFunc c τ) := by
+/-- A constant of a ground, well-kinded type `τ` is a weakly typed function in every context and
+    in all variable scopes: it has no formal, type parameter, body, measure, precondition or
+    axiom. -/
+theorem constantFunc_hasTypeW {C : LContext CoreLParams} {ts : TypeScopes}
+    {c : String} {τ : LMonoTy} (hτ : LMonoTy.freeVars τ = []) (hwk : C.WellKindedTy τ) :
+    FuncHasTypeW C ts (constantFunc c τ) := by
   refine
     { inputsNodup := by simp [constantFunc, ListMap.keys]
       typeArgsNodup := by simp [constantFunc]
       noUndeclaredVars := ?_
+      typeArgsInSignature := by intro ta hta; simp [constantFunc] at hta
       signatureWellKinded := ?_
       bodyTyped := by intro body hb; simp [constantFunc] at hb
-      measureTyped := by intro m hm _; simp [constantFunc] at hm }
+      measureOnlyRecursive := fun _ => rfl
+      measureTyped := by intro m hm; simp [constantFunc] at hm
+      preconditionsTyped := by intro p hp; simp [constantFunc] at hp
+      axiomsTyped := by intro ax hax; simp [constantFunc] at hax
+      annotsScoped := by intro e he; simp [constantFunc, Strata.DL.Util.Func.exprs] at he
+      constrNoBody := by intro h; simp [constantFunc] at h }
   · intro v hv
     simp only [constantFunc, ListMap.values, LMonoTy.mkArrow'_nil, hτ] at hv
     exact absurd hv (by simp)
-  · -- signatureWellKinded: `tyCompat` is equality here, and the only signature type is `τ`.
-    intro ty hty
-    refine ⟨ty, rfl, ?_⟩
-    simp only [constantFunc, ListMap.values, List.mem_singleton] at hty
+  · intro ty hty
+    simp only [constantFunc, ListMap.values, List.mem_cons, List.not_mem_nil, or_false] at hty
     rw [hty]; exact hwk
 
-/-- **The constants are well-typed and extend the context.** A successful
-    `addConstants` run yields a `DeclsHasTypeA` derivation from `C` to the grown
-    `C'`, leaving `Γ` alone. Induction on the name list, one `DeclHasType'.func` per
-    constant with `FactoryExtendedBy` from the gated add. -/
-theorem addConstants_sound (P : Program) {Γ : TContext Unit} {τ : LMonoTy}
-    (hτ : LMonoTy.freeVars τ = [])
- :
+/-- A successful `addConstants` run on `c :: cs` adds the constant `c` and then runs on `cs`. -/
+theorem addConstants_cons {τ : LMonoTy} {c : String} {cs : List String}
+    {C C' : LContext CoreLParams} {ds : List Decl}
+    (h : addConstants C τ (c :: cs) = some (C', ds)) :
+    ∃ C₁ ds', C.addFactoryFunctionWithError (constantFunc c τ).toLFunc = .ok C₁ ∧
+      addConstants C₁ τ cs = some (C', ds') ∧ ds = mkConstantDecl c τ :: ds' := by
+  simp only [addConstants] at h
+  cases hadd : C.addFactoryFunctionWithError (constantFunc c τ).toLFunc with
+  | error e => simp [hadd] at h
+  | ok C₁ =>
+    simp only [hadd] at h
+    cases hrest : addConstants C₁ τ cs with
+    | none => simp [hrest] at h
+    | some pr =>
+      obtain ⟨C₂, ds'⟩ := pr
+      simp only [hrest, Option.some.injEq, Prod.mk.injEq] at h
+      obtain ⟨rfl, rfl⟩ := h
+      exact ⟨C₁, ds', rfl, hrest, rfl⟩
+
+/-- A successful `addConstants` run keeps every function entry of the context it starts from. -/
+theorem addConstants_preserves {τ : LMonoTy} :
     ∀ (names : List String) (C C' : LContext CoreLParams) (ds : List Decl),
-      -- Upstream's `signatureWellKinded`: the constants all carry the same type `τ`, and
-      -- adding factory functions never touches `knownTypes`, so it survives the run.
+      addConstants C τ names = some (C', ds) →
+      ∀ (nm : String) (g : LFunc CoreLParams), C.functions[nm]? = some g →
+        C'.functions[nm]? = some g := by
+  intro names
+  induction names with
+  | nil =>
+    intro C C' ds h nm g hg
+    simp only [addConstants, Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨rfl, rfl⟩ := h
+    exact hg
+  | cons c cs ih =>
+    intro C C' ds h nm g hg
+    obtain ⟨C₁, ds', hadd, hrest, rfl⟩ := addConstants_cons h
+    exact ih C₁ C' ds' hrest nm g ((factoryExtendedBy_of_addFactory hadd).preserves_old nm g hg)
+
+/-- After a successful `addConstants` run, each of its names holds the constant declared at `τ`. -/
+theorem addConstants_lookup {τ : LMonoTy} :
+    ∀ (names : List String) (C C' : LContext CoreLParams) (ds : List Decl),
+      addConstants C τ names = some (C', ds) →
+      ∀ c ∈ names, C'.functions[c]? = some (constantFunc c τ).toLFunc := by
+  intro names
+  induction names with
+  | nil => intro C C' ds _ c hc; exact absurd hc List.not_mem_nil
+  | cons d ds ih =>
+    intro C C' es h c hc
+    obtain ⟨C₁, es', hadd, hrest, rfl⟩ := addConstants_cons h
+    rcases List.mem_cons.mp hc with rfl | hc
+    · obtain ⟨g, hg, rfl⟩ := (factoryExtendedBy_of_addFactory hadd).contains_new _
+        List.mem_cons_self
+      exact addConstants_preserves ds C₁ C' es' hrest _ _ hg
+    · exact ih C₁ C' es' hrest c hc
+
+/-- The constants are weakly typed and extend the context: a successful `addConstants` run is a
+    declaration-list typing from `C` to the grown `C'`, one function declaration per constant. -/
+theorem addConstants_sound (P : Program) {τ : LMonoTy} (hτ : LMonoTy.freeVars τ = []) :
+    ∀ (names : List String) (C C' : LContext CoreLParams) (ds : List Decl),
       C.WellKindedTy τ →
-      addConstants C τ names = some (C', ds) → DeclsHasTypeA P C Γ ds C' Γ := by
+      addConstants C τ names = some (C', ds) → DeclsHasTypeW P C [] ds C' := by
   intro names
   induction names with
   | nil =>
     intro C C' ds _ h
     simp only [addConstants, Option.some.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, rfl⟩ := h
-    exact DeclsHasType'.nil _ _
+    exact DeclsHasTypeW.nil _ _
   | cons c cs ih =>
     intro C C' ds hwk h
-    simp only [addConstants] at h
-    cases hadd : C.addFactoryFunctionWithError (constantFunc c τ).toLFunc with
-    | error e => simp [hadd] at h
-    | ok C₁ =>
-      simp only [hadd] at h
-      cases hrest : addConstants C₁ τ cs with
-      | none => simp [hrest] at h
-      | some pr =>
-        obtain ⟨C₂, ds'⟩ := pr
-        simp only [hrest, Option.some.injEq, Prod.mk.injEq] at h
-        obtain ⟨rfl, rfl⟩ := h
-        -- Adding a factory function leaves `knownTypes` alone, so `WellKindedTy` survives.
-        have hwk₁ : C₁.WellKindedTy τ := by
-          unfold LContext.WellKindedTy at hwk ⊢
-          rw [(addFactory_fields hadd).1]; exact hwk
-        exact DeclsHasType'.cons _ _ _ _ _ _ _ _
-          (DeclHasType'.func C C₁ Γ (constantFunc c τ) .empty
-            (constantFunc_nonrec c τ) (constantFunc_hasTypeA hτ hwk)
-            (factoryExtendedBy_of_addFactory hadd))
-          (ih C₁ C₂ ds' hwk₁ hrest)
+    obtain ⟨C₁, ds', hadd, hrest, rfl⟩ := addConstants_cons h
+    -- Adding a factory function leaves `knownTypes` alone, so `WellKindedTy` survives.
+    have hwk₁ : C₁.WellKindedTy τ := by
+      unfold LContext.WellKindedTy at hwk ⊢
+      rw [(addFactory_fields hadd).1]; exact hwk
+    exact DeclsHasTypeW.cons _ _ _ _ _ _
+      (DeclHasTypeW.func C C₁ [] (constantFunc c τ) .empty
+        (constantFunc_nonrec c τ) (addFactory_name_fresh hadd) (constantFunc_hasTypeW hτ hwk)
+        (factoryExtendedBy_of_addFactory hadd))
+      (ih C₁ C' ds' hwk₁ hrest)
 
 /-- **`Inv` survives the constant run.** Each add only grows the function factory
     (`inv_addFactory`), and `reserved` is untouched until the step's end. -/
@@ -1113,19 +1225,17 @@ theorem addConstants_inv {τ : LMonoTy} :
     exact hinv
   | cons c cs ih =>
     intro s C' ds hinv h
-    simp only [addConstants] at h
-    cases hadd : s.C.addFactoryFunctionWithError (constantFunc c τ).toLFunc with
-    | error e => simp [hadd] at h
-    | ok C₁ =>
-      simp only [hadd] at h
-      cases hrest : addConstants C₁ τ cs with
-      | none => simp [hrest] at h
-      | some pr =>
-        obtain ⟨C₂, ds'⟩ := pr
-        simp only [hrest, Option.some.injEq, Prod.mk.injEq] at h
-        obtain ⟨rfl, _⟩ := h
-        -- Add `c`, then recurse from the grown state (whose `.C` is `C₁`).
-        exact ih (s := { s with C := C₁ }) (inv_addFactory hinv hadd) hrest
+    obtain ⟨C₁, ds', hadd, hrest, rfl⟩ := addConstants_cons h
+    -- Add `c`, then recurse from the grown state (whose `.C` is `C₁`). A constant has the
+    -- type scheme of its signature.
+    have hty : ∀ f ∈ [(constantFunc c τ).toLFunc], f.type =
+        .ok (.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))) := by
+      intro f hf
+      rw [List.mem_singleton.mp hf]
+      rfl
+    exact ih (s := { s with C := C₁ })
+      (inv_addFactory hinv hadd (hinv.exprCtx.extend (factoryExtendedBy_of_addFactory hadd) hty))
+      hrest
 
 /-- The names a successful `addConstants` run declares are exactly its input
     names, in order. -/
@@ -1141,29 +1251,18 @@ theorem addConstants_declNames {τ : LMonoTy} :
     simp [declNames]
   | cons c cs ih =>
     intro C C' ds h
-    simp only [addConstants] at h
-    cases hadd : C.addFactoryFunctionWithError (constantFunc c τ).toLFunc with
-    | error e => simp [hadd] at h
-    | ok C₁ =>
-      simp only [hadd] at h
-      cases hrest : addConstants C₁ τ cs with
-      | none => simp [hrest] at h
-      | some pr =>
-        obtain ⟨C₂, ds'⟩ := pr
-        simp only [hrest, Option.some.injEq, Prod.mk.injEq] at h
-        obtain ⟨_, rfl⟩ := h
-        have hcons : declNames (mkConstantDecl c τ :: ds') = c :: declNames ds' := by
-          simp [declNames, mkConstantDecl, constantFunc, Decl.names, Decl.name]
-        rw [hcons, ih C₁ C₂ ds' hrest]
+    obtain ⟨C₁, ds', hadd, hrest, rfl⟩ := addConstants_cons h
+    have hcons : declNames (mkConstantDecl c τ :: ds') = c :: declNames ds' := by
+      simp [declNames, mkConstantDecl, constantFunc, Decl.names, Decl.name]
+    rw [hcons, ih C₁ C' ds' hrest]
 
-/-- Soundness of the distinct step: the emitted constants extend `C` and are
-    well-typed, and the `distinct` over them is well-typed by
-    `distinctElems_typed`. On a factory clash nothing is emitted and the state is
-    unchanged. -/
+/-- Soundness of the distinct step: the emitted constants are weakly typed and extend `C`, and the
+    `distinct` over them is weakly typed in the grown context. On a factory clash nothing is emitted
+    and the state is unchanged. -/
 theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclDistinct (G := SetGen.Set) s b)) :
-    DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
+    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, constNames⟩, hparts, hmatch⟩ := h
   have hτ : LMonoTy.freeVars τ = [] := genDistinctAssertion_ground hparts
@@ -1171,15 +1270,24 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
   have hτwk : s.C.WellKindedTy τ := by
     simp only [genDistinctAssertion, mem_support_bind_iff, mem_support_pure_iff,
       Prod.mk.injEq] at hparts
-    obtain ⟨_nm, _hnm, τ', hτ', _k, _hk, _cs, _hcs, _, hτ_eq, _⟩ := hparts
+    obtain ⟨_, _, τ', hτ', _, _, _, _, _, hτ_eq, _⟩ := hparts
     exact hτ_eq ▸ wellKindedTy_of_genNonRecursiveArgTy hinv.ctxOk hτ'
+  split at hmatch
+  case isFalse =>
+    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch
+    subst hds hs'
+    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+  rename_i hgate
+  simp only [Bool.and_eq_true, decide_eq_true_eq] at hgate
+  obtain ⟨hlen, _⟩ := hgate
   cases hadd : addConstants s.C τ constNames with
   | none =>
     rw [hadd] at hmatch
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasType'.nil _ _, hinv⟩
+    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
   | some pr =>
     obtain ⟨C', constDecls⟩ := pr
     rw [hadd] at hmatch
@@ -1187,97 +1295,37 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
     refine ⟨?_, ?_⟩
-    · -- constants (C → C'), then the `distinct` (C' → C').
-      refine declsHasType_append
+    · -- The constants take `C` to `C'`, then the `distinct` leaves `C'` unchanged.
+      refine declsHasTypeW_append
         (addConstants_sound P hτ constNames s.C C' constDecls hτwk hadd) ?_
-      exact DeclsHasType'.cons _ _ _ _ _ _ _ _
-        (DeclHasType'.distinct C' s.Γ ⟨nm, ()⟩ (distinctElems τ constNames) .empty
-          distinctElems_typed)
-        (DeclsHasType'.nil _ _)
+      have hlen' : 2 ≤ (distinctElems τ constNames).length := by
+        simpa [distinctElems] using hlen
+      exact DeclsHasTypeW.cons _ _ _ _ _ _
+        (DeclHasTypeW.distinct C' [] ⟨nm, ()⟩ (distinctElems τ constNames) .empty
+          hlen' ⟨τ, distinctElems_typed (addConstants_lookup constNames s.C C' constDecls hadd)⟩
+          (distinctElems_annots hτ))
+        (DeclsHasTypeW.nil _ _)
     · -- `C` grew by the constants' factory entries; `reserved` by their names plus `nm`.
-      have := inv_grow_reserved (s := { s with C := C' })
+      have hgrown := inv_grow_reserved (s := { s with C := C' })
         (addConstants_inv constNames hinv hadd) (constNames ++ [nm])
-      simpa using this
-
-/-! ## Per-declaration soundness: functions
-
-The function step generates a function via `genFunction` (sound for any `C`/`Γ`),
-renames it to a globally fresh name (rename preserves `FuncHasType'`, which does
-not constrain the name), and gates on `addFactoryFunctionWithError`. Support
-membership on the `.ok` branch gives `FactoryExtendedBy` (bridge lemma). -/
-
-/-- `FuncHasType'` (annotated) is invariant under renaming the function: no field
-    mentions the name. -/
-theorem funcHasTypeA_rename {C : LContext CoreLParams} {Γ : TContext Unit}
-    {func : Function} {nm : CoreLParams.Identifier}
-    (h : FuncHasTypeA C Γ func) : FuncHasTypeA C Γ { func with name := nm } :=
-  { inputsNodup := h.inputsNodup
-    typeArgsNodup := h.typeArgsNodup
-    noUndeclaredVars := h.noUndeclaredVars
-    signatureWellKinded := h.signatureWellKinded
-    bodyTyped := h.bodyTyped
-    measureTyped := h.measureTyped }
-
-theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
-    (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b)) :
-    DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
-  simp only [genDeclFunction, mem_support_bind_iff] at h
-  obtain ⟨func₀, hfunc₀, nm, hnm, hmatch⟩ := h
-  -- The renamed function.
-  let func : Function := { func₀ with name := ⟨nm, ()⟩ }
-  -- It is well-typed for any `C`/`Γ` (rename-invariance of `genFunction_sound`).
-  have hwt : FuncHasTypeA s.C s.Γ func :=
-    funcHasTypeA_rename
-      (StrataGenerators.Function.genFunction_sound [] s.octx b.funcDepth s.C s.Γ
-        s.derivedPctx (simpleTyArities_of_inv hinv) func₀ hfunc₀)
-  -- Non-recursive: `genFunction` leaves `isRecursive` at its `false` default.
-  have hnonrec : ¬ func.isRecursive := by
-    -- `func.isRecursive = func₀.isRecursive`; extract from `genFunction`'s support.
-    simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc₀
-    obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, hf₀⟩ := hfunc₀
-    show ¬ func₀.isRecursive
-    subst hf₀
-    simp
-  -- Case on the gate.
-  cases hadd : s.C.addFactoryFunctionWithError func.toLFunc with
-  | error e =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    obtain ⟨hds, hs'⟩ := hmatch
-    subst hds hs'
-    exact ⟨DeclsHasType'.nil _ _, hinv⟩
-  | ok C' =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    obtain ⟨hds, hs'⟩ := hmatch
-    subst hds hs'
-    have hext : FactoryExtendedBy s.C C' [func.toLFunc] := factoryExtendedBy_of_addFactory hadd
-    refine ⟨?_, ?_⟩
-    · -- `DeclHasType'.func` with the gated `FactoryExtendedBy`.
-      exact DeclsHasType'.cons _ _ _ _ _ _ _ _
-        (DeclHasType'.func s.C C' s.Γ func .empty hnonrec hwt hext)
-        (DeclsHasType'.nil _ _)
-    · -- `Inv` preserved: `functions` changed (`inv_addFactory`), one reserved name
-      -- (`inv_grow_reserved` at `[nm]`), and the operator contexts grew with the
-      -- function just declared, which no `Inv` field mentions (`inv_setOpCtxs`).
-      have := inv_grow_reserved (s := { s with C := C' }) (inv_addFactory hinv hadd) [nm]
-      simpa using inv_setOpCtxs this _ _ _
+      simpa using hgrown
 
 /-! ## Per-declaration soundness: abstract types
 
 The abstract-type step draws a fresh name, gates on `addKnownTypeWithError`, and
 (on success) grows the context's known types and the referenceable pool. -/
 
+/-- Soundness of the abstract-type step: on a successful add the emitted type constructor is a new
+    known type of `C`, and `Inv` holds at the grown pool. -/
 theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclAbstract (G := SetGen.Set) s b)) :
-    DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
+    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨pr, ⟨nm, hnm, ar, _har, hpr⟩, hmatch⟩ := h
   subst hpr
   -- Freshness of the drawn name.
-  have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
+  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
   simp only at hmatch
   -- Case on the gate.
   cases hadd : s.C.addKnownTypeWithError { name := nm, metadata := ar } default with
@@ -1286,32 +1334,32 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasType'.nil _ _, hinv⟩
+    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
   | ok C' =>
     rw [hadd] at hmatch
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
     refine ⟨?_, ?_⟩
-    · -- `DeclHasType'.type_con` with the gated `.ok`.
-      -- `mkAbstractTypeDecl nm ar = .type (.con {name:=nm, params := replicate ar "_"}) .empty`,
-      -- and `tc.numargs = (replicate ar "_").length = ar`.
-      refine DeclsHasType'.cons _ _ _ _ _ _ _ _ ?_ (DeclsHasType'.nil _ _)
+    · -- `mkAbstractTypeDecl nm ar` declares `{ name := nm, params := replicate ar "_" }`, whose
+      -- number of arguments is `ar`.
+      refine DeclsHasTypeW.cons _ _ _ _ _ _ ?_ (DeclsHasTypeW.nil _ _)
       have harw : ({ name := nm, params := List.replicate ar "_" } : TypeConstructor).numargs = ar := by
         simp [TypeConstructor.numargs]
-      have := DeclHasType'.type_con (τ := LMonoTy) (P := P) s.C C' s.Γ
+      have hcon := DeclHasTypeW.type_con (P := P) s.C C' []
         { name := nm, params := List.replicate ar "_" } .empty
-      rw [harw] at this
-      exact this hadd
+      rw [harw] at hcon
+      exact hcon hadd
     · -- `Inv` preserved via `contextOk_addKnownType`, growing the pool.
       obtain ⟨hkt, hdt⟩ := addKnownType_fields hadd
+      have hmono : ∀ (n : String) (v : Nat), s.C.knownTypes[n]? = some v →
+          C'.knownTypes[n]? = some v := fun n v hv => by
+        rw [hkt]; exact getElem?_insertIfNew_of_getElem? hv
       -- `s' = s.addAbstract nm ar C'`.
       simp only [GenState.addAbstract]
       refine
         { ctxOk := ?_
           knownReserved := ?_
-          aliasPoolDisjoint := ?_
-          aliasNamesReserved := ?_
           baseSupset := ?_
           tyConsSupset := ?_
           baseReserved := ?_
@@ -1323,7 +1371,13 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
           datatypesReserved := ?_
           dtPoolOk := ?_
           dtConsReserved := fun x hx => List.mem_cons_of_mem _ (hinv.dtConsReserved x hx)
-          storedRefsReserved := ?_ }
+          storedRefsReserved := ?_
+          datatypesKnown := fun d hd =>
+            hmono _ _ (hinv.datatypesKnown d (by rw [hdt] at hd; exact hd))
+          octxWK := fun p hp => wellKindedTy_mono hmono (hinv.octxWK p hp)
+          sigsWK := fun sig hsig ty hty => wellKindedTy_mono hmono (hinv.sigsWK sig hsig ty hty)
+          exprCtx := hinv.exprCtx.mono (addKnownTypeWithError_functions hadd) hmono
+          polysClosed := hinv.polysClosed }
       · -- `ContextOk C'` at the *grown* pool (interleaving direction (2)).
         -- Externality of the new entry: `nm` is fresh, and every datatype name of
         -- `C` is reserved, so `nm` is not one of them.
@@ -1339,29 +1393,6 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
         rcases mem_keys_insertIfNew_cases hk with rfl | hold
         · exact List.mem_cons_self
         · exact List.mem_cons_of_mem _ (hinv.knownReserved k hold)
-      · -- alias-pool disjointness: the pool grew by `nm`; existing aliases still
-        -- avoid it because `nm ∉ reserved` while every alias name *is* reserved.
-        intro a ha
-        obtain ⟨hb1, hb2, hb3⟩ := hinv.aliasPoolDisjoint a ha
-        have hane : a.name ≠ nm := fun heq => hnm_fresh (heq ▸ hinv.aliasNamesReserved a ha)
-        by_cases har0 : ar = 0
-        · subst har0
-          simp only [if_pos]
-          refine ⟨?_, hb2, hb3⟩
-          intro hmem
-          simp only [List.mem_cons] at hmem
-          rcases hmem with rfl | hmem
-          · exact hane rfl
-          · exact hb1 hmem
-        · simp only [if_neg har0]
-          refine ⟨hb1, ?_, hb3⟩
-          intro hmem
-          simp only [List.map_cons, List.mem_cons] at hmem
-          rcases hmem with heq | hmem
-          · exact hane heq
-          · exact hb2 hmem
-      · -- alias names still reserved (reserved only grew).
-        intro a ha; exact List.mem_cons_of_mem _ (hinv.aliasNamesReserved a ha)
       · -- baseSupset: default ⊆ (maybe nm ::) s.baseTypes.
         by_cases har0 : ar = 0
         · subst har0; simp only [if_pos]
@@ -1516,7 +1547,7 @@ theorem genDeclAxiom_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Ge
   subst hpreq
   simp only at hds hs'
   subst hds hs'
-  have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
+  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
   have hdn : declNames [mkAxiomDecl nm e] = [nm] := by
     simp [declNames, mkAxiomDecl, Decl.names, Decl.name]
   refine namesStep_of_prepend ?_ ?_ ?_
@@ -1537,6 +1568,12 @@ theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
   simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, cs⟩, hparts, hmatch⟩ := h
   obtain ⟨hnm_fresh, hcs_fresh, hcs_nodup⟩ := genDistinctAssertion_names hparts
+  split at hmatch
+  case isFalse =>
+    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch
+    subst hds hs'
+    exact namesStep_nil
   cases hadd : addConstants s.C τ cs with
   | none =>
     rw [hadd] at hmatch
@@ -1577,15 +1614,21 @@ theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 theorem genDeclAlias_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclAlias (G := SetGen.Set) s b)) :
     NamesStep s ds s' := by
-  simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff,
-    Prod.mk.injEq] at h
-  obtain ⟨pr, ⟨nm, hnm, k, _hk, tps, _htps, body, _hbody, hpreq⟩, hds, hs'⟩ := h
+  simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff] at h
+  obtain ⟨pr, ⟨nm, hnm, k, _hk, tps, _htps, body, _hbody, hpreq⟩, hmatch⟩ := h
   subst hpreq
-  simp only at hds hs'
+  simp only [mkAliasDecl] at hmatch
+  split at hmatch
+  case isFalse =>
+    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch; subst hds hs'; exact namesStep_nil
+  simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+  obtain ⟨hds, hs'⟩ := hmatch
   subst hds hs'
-  have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
-  have hdn : declNames [mkAliasDecl nm body] = [nm] := by
-    simp [declNames, mkAliasDecl, Decl.names, TypeDecl.names]
+  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
+  have hdn : declNames [Decl.type (TypeDecl.syn
+      { name := nm, typeArgs := body.freeVars.uniq, type := body }) MetaData.empty] = [nm] := by
+    simp [declNames, Decl.names, TypeDecl.names]
   refine namesStep_of_prepend ?_ ?_ ?_
   · rw [hdn]; rfl
   · rw [hdn]; intro x hx; simp only [List.mem_singleton] at hx; subst hx; exact hnm_fresh
@@ -1599,7 +1642,7 @@ theorem genDeclAbstract_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
   obtain ⟨pr, ⟨nm, hnm, ar, _har, hpreq⟩, hmatch⟩ := h
   subst hpreq
   simp only at hmatch
-  have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
+  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
   cases hadd : s.C.addKnownTypeWithError { name := nm, metadata := ar } default with
   | error e =>
     rw [hadd] at hmatch
@@ -1623,7 +1666,7 @@ theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
     NamesStep s ds s' := by
   simp only [genDeclFunction, mem_support_bind_iff] at h
   obtain ⟨func₀, _hfunc₀, nm, hnm, hmatch⟩ := h
-  have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
+  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
   let func : Function := { func₀ with name := ⟨nm, ()⟩ }
   cases hadd : s.C.addFactoryFunctionWithError func.toLFunc with
   | error e =>
@@ -1649,7 +1692,7 @@ theorem genDeclProcedure_names {s : GenState} {b : Bounds} {ds : List Decl} {s' 
   simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨proc₀, _hproc₀, nm, hnm, hds, hs'⟩ := h
   subst hds hs'
-  have hnm_fresh : nm ∉ s.reserved := DatatypeGen.genFreshName_fresh s.reserved nm hnm
+  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
   have hdn : declNames [.proc
       { proc₀ with header := { proc₀.header with name := ⟨nm, ()⟩ } } .empty] = [nm] := by
     simp [declNames, Decl.names, Decl.name]
@@ -1667,6 +1710,10 @@ theorem genDeclDatatype_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
   simp only [genDeclDatatype, mem_support_bind_iff] at h
   obtain ⟨block, hblock, hmatch⟩ := h
   obtain ⟨hNodup, hFresh⟩ := genDatatypeBlock_names hblock
+  split at hmatch
+  case isFalse =>
+    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch; subst hds hs'; exact namesStep_nil
   cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams s.C block with
   | error e =>
@@ -1786,6 +1833,231 @@ theorem genProgram_getNames_nodup {numDecls : Nat} {b : Bounds} {decls : List De
       exact hnotin (List.mem_map.mpr ⟨hd, hmem, rfl⟩)
   exact hkey _ hnames
 
+/-! ## The functions a datatype block adds -/
+
+/-- A well-formed function has distinct formals. -/
+theorem inputs_keys_nodup_of_wf {f : LFunc CoreLParams} (hwf : LFuncWF f) :
+    f.inputs.keys.Nodup := by
+  rw [ListMap.keys_eq_map_fst]
+  have hnames : ((f.inputs.map Prod.fst).map (fun x => x.name)).Nodup := by
+    rw [List.map_map]
+    exact hwf.arg_nodup
+  exact List.Pairwise.of_map _ (fun a b hab heq => hab (congrArg _ heq)) hnames
+
+/-- Pushing the functions of a list one at a time with `tryPush` keeps every entry of the starting
+    factory and stores each pushed function under its name, and every entry of the result is an
+    old entry or a pushed function. -/
+theorem foldlM_tryPush_lookup {i₁ : Inhabited CoreLParams.Metadata}
+    {i₂ : Std.ToFormat CoreLParams.IDMeta} :
+    ∀ (l : List (LFunc CoreLParams)) (F F' : Factory CoreLParams),
+      l.foldlM (fun F fn => @Lambda.Factory.tryPush CoreLParams i₁ i₂ F fn) F = .ok F' →
+      (∀ (nm : String) (g : LFunc CoreLParams), F[nm]? = some g → F'[nm]? = some g) ∧
+      (∀ fn ∈ l, F'[fn.name.name]? = some fn) ∧
+      (∀ (nm : String) (g : LFunc CoreLParams), F'[nm]? = some g → F[nm]? = some g ∨ g ∈ l)
+  | [], F, F', h => by
+    simp only [List.foldlM_nil, pure, Except.pure, Except.ok.injEq] at h
+    subst h
+    exact ⟨fun _ _ hg => hg, fun _ hfn => absurd hfn List.not_mem_nil, fun _ _ hg => Or.inl hg⟩
+  | fn :: rest, F, F', h => by
+    unfold Lambda.Factory.tryPush at h
+    by_cases hmem : fn.name.name ∈ F
+    · simp only [List.foldlM_cons, dif_pos hmem, bind, Except.bind] at h
+      exact absurd h (by simp)
+    · simp only [List.foldlM_cons, dif_neg hmem, bind, Except.bind] at h
+      obtain ⟨hold, hnew, hall⟩ := foldlM_tryPush_lookup rest _ F' h
+      refine ⟨?_, ?_, ?_⟩
+      · intro nm g hg
+        have hne : nm ≠ fn.name.name := by
+          rintro rfl
+          exact hmem (mem_of_getElem?_eq_some hg)
+        refine hold nm g ?_
+        rw [getElem?_push F fn hmem nm, if_neg hne]
+        exact hg
+      · intro f hf
+        rcases List.mem_cons.mp hf with rfl | hf
+        · refine hold _ _ ?_
+          rw [getElem?_push F f hmem, if_pos rfl]
+        · exact hnew f hf
+      · intro nm g hg
+        rcases hall nm g hg with hpush | hrest
+        · rw [getElem?_push F fn hmem nm] at hpush
+          split at hpush
+          · simp only [Option.some.injEq] at hpush
+            subst hpush
+            exact Or.inr List.mem_cons_self
+          · exact Or.inl hpush
+        · exact Or.inr (List.mem_cons_of_mem _ hrest)
+
+/-- What a successful `addMutualBlock` does to the functions of a context: it adds the factory `F`
+    of the block's derived functions, whose functions are well formed and have signature types
+    registered in the new context; it keeps every old entry and adds nothing else. -/
+structure BlockFunctionsAdded (C C' : LContext CoreLParams) (block : MutualDatatype Unit)
+    (F : Factory CoreLParams) : Prop where
+  derived : blockDerivedFactory block = some F
+  wf : ∀ f ∈ F.toArray, LFuncWF f
+  sigsKnown : ∀ f ∈ F.toArray, ∀ ty ∈ f.output :: f.inputs.values,
+    LMonoTy.knownInstance ty C'.knownTypes = true
+  preserves_old : ∀ (nm : String) (g : LFunc CoreLParams), C.functions[nm]? = some g →
+    C'.functions[nm]? = some g
+  contains_new : ∀ (nm : String) (g : LFunc CoreLParams), F[nm]? = some g →
+    C'.functions[nm]? = some g
+  no_other : ∀ (nm : String) (g : LFunc CoreLParams), C'.functions[nm]? = some g →
+    C.functions[nm]? = some g ∨ g ∈ F.toArray
+
+/-- A successful `addMutualBlock` of a well-formed block, in a context that registers `arrow`,
+    `bool` and each of its datatypes, adds exactly the block's derived functions. -/
+theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
+    {block : MutualDatatype Unit}
+    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      instToFormatIDMetaCoreLParams C block = .ok C')
+    (hwf : MutualADTWF C block) (hdk : C.DatatypesKnown)
+    (harrow : C.knownTypes["arrow"]? = some 2) (hbool : C.knownTypes["bool"]? = some 0) :
+    ∃ F, BlockFunctionsAdded C C' block F := by
+  have hext := @KnownTypesExtends.of_addMutualBlock CoreLParams instInhabitedPUnit
+    instInhabitedPUnit instToFormatIDMetaCoreLParams _ C C' block h
+  obtain ⟨-, ds, fgen, fs, ks, hds, hfgen, hfs, hks, rfl⟩ :=
+    @LContext.addMutualBlock_ok_inv CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      instToFormatIDMetaCoreLParams C _ block h
+  have hdec := TypeFactory_addMutualBlock_decompose _ _ block _ hds
+  have hblock : ∀ d ∈ block, ks[d.name]? = some d.typeArgs.length :=
+    knownTypes_foldlM_add_mem C.knownTypes ks block hks
+  -- A constructor argument names a known type, an earlier datatype or a datatype of the block,
+  -- each registered in the new table at the arity it is applied at.
+  have hargs : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args,
+      LMonoTy.knownInstance arg.2 ks = true := by
+    intro d hd c hc arg harg
+    refine knownInstance_of_wellKinded arg.2 ks ?_
+    intro ref n hn
+    rcases hwf.argsWellKinded d hd c hc arg harg ref n hn with hk | ⟨d', hd', rfl, rfl⟩ |
+        ⟨d', hd', rfl, rfl⟩
+    · exact hext _ _ hk
+    · exact hext _ _ (hdk d' hd')
+    · exact hblock d' hd'
+  simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
+  rw [← Array.foldlM_toList] at hfs
+  obtain ⟨hold, hnew, hall⟩ := foldlM_tryPush_lookup _ C.functions fs hfs
+  refine ⟨fgen,
+    { derived := ?_
+      wf := @genBlockFactory_wf CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+        instToFormatIDMetaCoreLParams block fgen hdec.1 hdec.2.2.1 hfgen
+      sigsKnown := genBlockFactory_sigsKnown block fgen (hext _ _ harrow) (hext _ _ hbool)
+        hblock hargs hfgen
+      preserves_old := hold
+      contains_new := ?_
+      no_other := ?_ }⟩
+  · unfold blockDerivedFactory
+    rw [hfgen]
+    rfl
+  · intro nm g hg
+    have hname := Lambda.Factory.nameOfGetElem? hg
+    subst hname
+    exact hnew g (Array.mem_toList_iff.mpr (Lambda.Factory.memToArrayOfGetElem? hg))
+  · intro nm g hg
+    rcases hall nm g hg with hg' | hg'
+    · exact Or.inl hg'
+    · exact Or.inr (Array.mem_toList_iff.mp hg')
+
+/-- The curried type of every derived function of a block is well kinded in the context the
+    block is added to, when that context registers `arrow`. -/
+theorem blockFunction_wellKinded {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
+    {F : Factory CoreLParams} (hb : BlockFunctionsAdded C C' block F)
+    (harrow : C'.knownTypes["arrow"]? = some 2) {fn : LFunc CoreLParams}
+    (hmem : fn ∈ F.toArray) :
+    C'.WellKindedTy (LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd)) := by
+  have hknown := hb.sigsKnown fn hmem
+  refine wellKindedTy_mkArrow' harrow
+    (LMonoTy.knownInstance_wellKinded _ _ (hknown _ List.mem_cons_self)) _ ?_
+  intro t ht
+  refine LMonoTy.knownInstance_wellKinded _ _ (hknown t (List.mem_cons_of_mem _ ?_))
+  rw [ListMap.values_eq_map_snd]
+  exact ht
+
+/-- Every monomorphic operator a block derives is the curried type of one of its derived
+    functions. -/
+theorem mem_adtDerivedOps {block : MutualDatatype Unit} {sel : DerivedOpFamilies}
+    {F : Factory CoreLParams} (hF : blockDerivedFactory block = some F)
+    {p : String × LMonoTy} (hp : p ∈ adtDerivedOps block sel) :
+    ∃ fn, F[p.1]? = some fn ∧ p.2 = LMonoTy.mkArrow' fn.output (fn.inputs.map Prod.snd) := by
+  unfold adtDerivedOps at hp
+  rw [hF] at hp
+  obtain ⟨nm, τ⟩ := p
+  exact factoryOps_mem_char F nm τ (List.mem_filter.mp hp).1
+
+/-- Every monomorphic operator a block derives has a well-kinded type in the context the block is
+    added to, when that context registers `arrow`. -/
+theorem adtDerivedOps_wellKinded {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
+    {F : Factory CoreLParams} (hb : BlockFunctionsAdded C C' block F)
+    (harrow : C'.knownTypes["arrow"]? = some 2) (sel : DerivedOpFamilies) :
+    ∀ p ∈ adtDerivedOps block sel, C'.WellKindedTy p.2 := by
+  intro p hp
+  obtain ⟨fn, hfn, heq⟩ := mem_adtDerivedOps hb.derived hp
+  rw [heq]
+  exact blockFunction_wellKinded hb harrow (Lambda.Factory.memToArrayOfGetElem? hfn)
+
+/-- After a datatype block is added, the operators of the earlier context together with the
+    block's derived operators agree with the new functions, as do the earlier schemes together
+    with the block's derived schemes. -/
+theorem exprCtxOk_addMutualBlock {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
+    {F : Factory CoreLParams} {octx : OpCtx} {pctx pctx' : PolyOpCtx} {sel : DerivedOpFamilies}
+    (hctx : ExprCtxOk C [] [] octx pctx) (hb : BlockFunctionsAdded C C' block F)
+    (hk : KnownTypesExtends C.knownTypes C'.knownTypes)
+    (hpctx : ∀ e ∈ pctx', e ∈ adtDerivedPolyOps block sel ∨ e ∈ pctx) :
+    ExprCtxOk C' [] [] (OpCtx.ofList (adtDerivedOps block sel ++ octx.ops)) pctx' := by
+  have harities := simpleTyArities_mono hctx.arities hk
+  refine
+    { arities := harities
+      sigs := ?_
+      fvars := fun _ hp => absurd hp List.not_mem_nil
+      ops := ?_
+      polys := ?_
+      polysKnown := ?_ }
+  · intro name f hf
+    rcases hb.no_other name f hf with hold | hnew
+    · exact hctx.sigs name f hold
+    · have hwf := hb.wf f hnew
+      exact type_eq_of_sigWF harities.arrow (inputs_keys_nodup_of_wf hwf) hwf.typeArgs_nodup
+        (hb.sigsKnown f hnew _ List.mem_cons_self)
+  · intro p hp
+    rw [OpCtx.ops_ofList] at hp
+    rcases List.mem_append.mp hp with hnew | hold
+    · obtain ⟨fn, hfn, heq⟩ := mem_adtDerivedOps hb.derived hnew
+      refine ⟨knownInstance_of_wellKinded _ _ (adtDerivedOps_wellKinded hb harities.arrow sel p
+        hnew), fn, hb.contains_new _ _ hfn, [], ?_⟩
+      rw [LMonoTy.subst_nil]
+      exact heq
+    · obtain ⟨hki, f, hf, σ, hσ⟩ := hctx.ops p hold
+      exact ⟨knownInstance_mono _ _ _ hk hki, f, hb.preserves_old _ _ hf, σ, hσ⟩
+  · intro name lty hmem
+    rcases hpctx _ hmem with hnew | hold
+    · obtain ⟨fn, hfn, heq⟩ :=
+        PCtxWF_factoryPolyOps F name lty (mem_adtDerivedPolyOps hb.derived hnew)
+      exact ⟨fn, hb.contains_new _ _ hfn, heq⟩
+    · obtain ⟨fn, hfn, heq⟩ := hctx.polys name lty hold
+      exact ⟨fn, hb.preserves_old _ _ hfn, heq⟩
+  · intro nm bvs body hmem
+    rcases hpctx _ hmem with hnew | hold
+    · obtain ⟨fn, hfn, heq⟩ :=
+        PCtxWF_factoryPolyOps F nm _ (mem_adtDerivedPolyOps hb.derived hnew)
+      simp only [LTy.forAll.injEq] at heq
+      obtain ⟨-, rfl⟩ := heq
+      exact knownInstance_of_wellKinded _ _
+        (blockFunction_wellKinded hb harities.arrow (Lambda.Factory.memToArrayOfGetElem? hfn))
+    · exact knownInstance_mono _ _ _ hk (hctx.polysKnown nm bvs body hold)
+
+/-- After a datatype block is added, every scheme drawn from the earlier closed schemes or from
+    the block's derived schemes is closed. -/
+theorem polysClosed_addMutualBlock {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
+    {F : Factory CoreLParams} {pctx pctx' : PolyOpCtx} {sel : DerivedOpFamilies}
+    (hb : BlockFunctionsAdded C C' block F)
+    (hclosed : ∀ nm bvs body, (nm, LTy.forAll bvs body) ∈ pctx →
+      ∀ v ∈ LMonoTy.freeVars body, v ∈ bvs)
+    (hpctx : ∀ e ∈ pctx', e ∈ adtDerivedPolyOps block sel ∨ e ∈ pctx) :
+    ∀ nm bvs body, (nm, LTy.forAll bvs body) ∈ pctx' → ∀ v ∈ LMonoTy.freeVars body, v ∈ bvs := by
+  intro nm bvs body hmem
+  rcases hpctx _ hmem with hnew | hold
+  · exact factoryPolyOps_closed ⟨hb.wf⟩ _ (mem_adtDerivedPolyOps hb.derived hnew)
+  · exact hclosed nm bvs body hold
+
 /-! ## The invariant holds initially -/
 
 /-- `Core.KnownTypes.keywords ⊆ initialReserved default default Core.KnownTypes.keywords`
@@ -1798,6 +2070,68 @@ theorem keywords_sub_initReserved :
   simp only [DatatypeGen.initialReserved, List.mem_cons, List.mem_append]
   exact Or.inr (Or.inr hx)
 
+/-- When a curried function type is well kinded, so is its result type. -/
+theorem wellKindedTy_of_mkArrow'_out {C : LContext CoreLParams} {out : LMonoTy} :
+    ∀ (ins : List LMonoTy), C.WellKindedTy (LMonoTy.mkArrow' out ins) → C.WellKindedTy out
+  | [], h => by rw [LMonoTy.mkArrow'_nil] at h; exact h
+  | m :: ms, h => by
+    refine wellKindedTy_of_mkArrow'_out ms ?_
+    intro ref n hn
+    refine h ref n ?_
+    simp only [LMonoTy.mkArrow', LMonoTy.arrow, getTypeConsArities, List.flatMap_cons,
+      List.flatMap_nil, List.append_nil, List.mem_cons, List.mem_append]
+    exact Or.inr (Or.inr hn)
+
+/-- `programContext` registers the built-in types at their arities. -/
+theorem simpleTyArities_programContext : SimpleTyArities programContext :=
+  ⟨coreKnownTypes_getElem? _ _ (by decide), coreKnownTypes_getElem? _ _ (by decide),
+    coreKnownTypes_getElem? _ _ (by decide), coreKnownTypes_getElem? _ _ (by decide),
+    coreKnownTypes_getElem? _ _ (by decide), coreKnownTypes_getElem? _ _ (by decide),
+    coreKnownTypes_getElem? _ _ (by decide), coreKnownTypes_getElem? _ _ (by decide)⟩
+
+/-- The curried type of every function of `Core.Factory` is well kinded in `programContext`. -/
+theorem coreFactory_wellKinded {f : LFunc CoreLParams} (hf : f ∈ Core.Factory.toArray) :
+    programContext.WellKindedTy (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd)) :=
+  Core.Factory_opTypes_wellKinded programContext rfl f hf
+
+/-- Every operator of `coreMonoOps` has a well-kinded type in `programContext`. -/
+theorem coreMonoOps_wellKinded : ∀ p ∈ coreMonoOps.ops, programContext.WellKindedTy p.2 := by
+  intro p hp
+  obtain ⟨nm, τ⟩ := p
+  obtain ⟨fn, hfn, rfl⟩ := factoryOps_mem_char Core.Factory nm τ hp
+  exact coreFactory_wellKinded (Lambda.Factory.memToArrayOfGetElem? hfn)
+
+/-- The operators and polymorphic schemes of `Core.Factory` that the initial state draws on agree
+    with the functions of `programContext`, and `programContext` gives each of its functions the
+    type scheme of its signature. -/
+theorem exprCtxOk_programContext :
+    ExprCtxOk programContext [] [] coreMonoOps corePolyOps where
+  arities := simpleTyArities_programContext
+  sigs := by
+    intro name f hf
+    have hmem : f ∈ Core.Factory.toArray := Lambda.Factory.memToArrayOfGetElem? hf
+    have hwf := Core.Factory_wf.lfuncs_wf f hmem
+    have hin : f.inputs.keys.Nodup := inputs_keys_nodup_of_wf hwf
+    have hout : LMonoTy.knownInstance f.output programContext.knownTypes = true :=
+      knownInstance_of_wellKinded _ _ (wellKindedTy_of_mkArrow'_out _ (coreFactory_wellKinded hmem))
+    exact type_eq_of_sigWF simpleTyArities_programContext.arrow hin hwf.typeArgs_nodup hout
+  fvars := fun _ hp => absurd hp List.not_mem_nil
+  ops := by
+    intro p hp
+    obtain ⟨nm, τ⟩ := p
+    obtain ⟨fn, hfn, rfl⟩ := factoryOps_mem_char Core.Factory nm τ hp
+    exact ⟨knownInstance_of_wellKinded _ _ (coreMonoOps_wellKinded _ hp), fn, hfn, [],
+      (LMonoTy.subst_nil _).symm⟩
+  polys := fun name lty hmem =>
+    PCtxWF_factoryPolyOps Core.Factory name lty (corePolyOps_subset_factoryPolyOps _ hmem)
+  polysKnown := by
+    intro nm bvs body hmem
+    have hfp := corePolyOps_subset_factoryPolyOps _ hmem
+    simp only [factoryPolyOps, List.mem_filterMap, Option.some.injEq, Prod.mk.injEq,
+      LTy.forAll.injEq] at hfp
+    obtain ⟨f, hf, -, -, rfl⟩ := hfp
+    exact knownInstance_of_wellKinded _ _ (coreFactory_wellKinded (Array.mem_def.mpr hf))
+
 /-- The initial fold state satisfies `Inv`. -/
 theorem inv_initState : Inv initState := by
   -- The seed reserved set.
@@ -1807,8 +2141,6 @@ theorem inv_initState : Inv initState := by
   refine
     { ctxOk := ?_
       knownReserved := ?_
-      aliasPoolDisjoint := ?_
-      aliasNamesReserved := ?_
       baseSupset := ?_
       tyConsSupset := ?_
       baseReserved := ?_
@@ -1821,18 +2153,23 @@ theorem inv_initState : Inv initState := by
       dtPoolOk := { known := by simp [initState], arity := by simp [initState],
                     inhab := by simp [initState] }
       dtConsReserved := by intro x hx; simp [initState] at hx
-      storedRefsReserved := ?_ }
-  · -- `ContextOk coreContext … initState.reserved` from `defaultContextOk`, monotone.
+      storedRefsReserved := ?_
+      datatypesKnown := by
+        intro d hd
+        simp [initState, programContext, DatatypeGen.coreContext, TypeFactory.allDatatypes] at hd
+      octxWK := coreMonoOps_wellKinded
+      sigsWK := by intro sig hsig; simp [initState] at hsig
+      exprCtx := ?_
+      polysClosed := ?_ }
+  · -- `ContextOk` reads the known types and datatypes only, where `programContext` and
+    -- `coreContext` agree.
     rw [hseed]
-    exact contextOk_reserved_mono DatatypeGen.defaultContextOk keywords_sub_initReserved
-  · -- `coreContext`'s known types are Core's keywords, all in the seed.
+    have hcore := contextOk_reserved_mono DatatypeGen.defaultContextOk keywords_sub_initReserved
+    exact { hcore with }
+  · -- The known types of `programContext` are Core's keywords, all in the seed.
     intro k hk
     rw [hseed]
-    -- `initState.C = coreContext`, `coreContext.knownTypes.keywords = Core.KnownTypes.keywords`.
     exact keywords_sub_initReserved hk
-  · -- No aliases initially.
-    intro a ha; simp [initState] at ha
-  · intro a ha; simp [initState] at ha
   · -- `initState.baseTypes = defaultBaseTypes`.
     exact fun x hx => hx
   · exact fun x hx => hx
@@ -1851,12 +2188,18 @@ theorem inv_initState : Inv initState := by
     simp [DatatypeGen.initialReserved]
   · -- `initState.tyCons = defaultTyCons`, none of which is `"arrow"` (`decide`).
     exact DatatypeGen.defaultTyCons_ne_arrow
-  · -- `coreContext` holds no datatypes, so this is vacuous.
+  · -- `programContext` holds no datatypes, so this is vacuous.
     intro n hn
-    simp [initState, DatatypeGen.coreContext, TypeFactory.allTypeNames,
+    simp [initState, programContext, DatatypeGen.coreContext, TypeFactory.allTypeNames,
       TypeFactory.allDatatypes] at hn
-  · -- `coreContext` holds no datatypes, so there are no stored references either.
+  · -- `programContext` holds no datatypes, so there are no stored references either.
     intro d hd
-    simp [initState, DatatypeGen.coreContext, TypeFactory.allDatatypes] at hd
+    simp [initState, programContext, DatatypeGen.coreContext, TypeFactory.allDatatypes] at hd
+
+  · simp only [initState, List.append_nil]
+    exact exprCtxOk_programContext
+  · intro nm bvs body hmem
+    simp only [initState, List.append_nil] at hmem
+    exact corePolyOps_closed _ hmem
 
 end ProgramGen

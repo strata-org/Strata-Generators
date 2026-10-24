@@ -34,7 +34,7 @@ Indices 5 to 8 name the function weight and the procedure weight, once per phase
 
 namespace ProgIdx
 def abstract : Nat := 0
-def alias : Nat := 1
+def «alias» : Nat := 1
 def «axiom» : Nat := 2
 def distinct : Nat := 3
 def datatype : Nat := 4
@@ -66,10 +66,7 @@ def progSites : Array Site :=
 /-- **Function-heavy** (`mono: …`). `MonomorphizeFunctions` specializes a polymorphic function at
 each type its callers instantiate. On a program that declares no polymorphic function the pass is the
 identity, and the properties about specialization hold for a reason that has nothing to do with the
-pass. This profile raises the function weight in both phases, and raises the datatype block a little.
-
-The procedure weight stays at its default. A procedure body is where a `funcDecl` statement declares
-a function, and two properties are about that statement. -/
+pass. This profile raises the function weight in both phases, and raises the datatype block a little. -/
 def progPolyHeavy : Tuning :=
   StrataGenerators.TuningProfiles.withWeights progDefault
     [(ProgIdx.datatype, 6), (ProgIdx.funcCallable, 20), (ProgIdx.funcFrontLoad, 20)]
@@ -94,7 +91,7 @@ def genDeclStepT [_root_.Gen G] (θ : Tuning) (s : GenState) (b : Bounds) (d : N
     else (θ.weight ProgIdx.funcFrontLoad d, θ.weight ProgIdx.procFrontLoad d)
   frequency
     [ (θ.weight ProgIdx.abstract d, fun () => genDeclAbstract s b)
-    , (θ.weight ProgIdx.alias d, fun () => genDeclAlias s b)
+    , (θ.weight ProgIdx.«alias» d, fun () => genDeclAlias s b)
     , (θ.weight ProgIdx.axiom d, fun () => genDeclAxiom s b)
     , (θ.weight ProgIdx.distinct d, fun () => genDeclDistinct s b)
     , (θ.weight ProgIdx.datatype d, fun () => genDeclDatatype s b)

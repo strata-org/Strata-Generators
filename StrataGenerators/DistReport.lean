@@ -135,7 +135,6 @@ structure StmtStats where
   loop : Nat := 0
   loop2 : Nat := 0
   exit : Nat := 0
-  funcDecl : Nat := 0
   typeDecl : Nat := 0
   call : Nat := 0
   invLoop : Nat := 0
@@ -159,7 +158,6 @@ def stmtRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
         loop := t.loop + (if nest ≥ 1 then 1 else 0)
         loop2 := t.loop2 + (if nest ≥ 2 then 1 else 0)
         exit := t.exit + (if countExitStmts ss != 0 then 1 else 0)
-        funcDecl := t.funcDecl + (if countFuncDeclStmts ss != 0 then 1 else 0)
         typeDecl := t.typeDecl + (if countTypeDeclStmts ss != 0 then 1 else 0)
         call := t.call + (if countStmtsByList isCallStmt ss != 0 then 1 else 0)
         invLoop := t.invLoop + (if hasInvLoopStmts ss then 1 else 0)
@@ -170,12 +168,12 @@ def stmtRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
         size := t.size + sizeStmts ss }
   let k := t.n - t.dropped
   pure [pct t.loop k, pct t.loop2 k, pct t.invLoop k, pct t.exit k,
-        pct t.funcDecl k, pct t.typeDecl k, pct t.call k,
+        pct t.typeDecl k, pct t.call k,
         pct t.loopElim k, pct t.anf k, pct t.kleene k,
         mean1 t.stmts k, mean1 t.size k, pct t.firstTry t.n, pct t.dropped t.n]
 
 def stmtHeaders : List String :=
-  ["loop", "loop²", "invLoop", "exit", "fnDecl", "tyDecl", "call",
+  ["loop", "loop²", "invLoop", "exit", "tyDecl", "call",
    "LpElim≠", "ANF≠id", "Kleene✓", "#stmts", "astSize", "1st-try", "dropped"]
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -240,7 +238,6 @@ structure ProcStats where
   dropped : Nat := 0
   firstTry : Nat := 0
   call : Nat := 0
-  funcDecl : Nat := 0
   loop : Nat := 0
   pe : Nat := 0
   peWF : Nat := 0
@@ -260,7 +257,6 @@ def procRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
         n := t.n + 1
         firstTry := t.firstTry + (if ok then 1 else 0)
         call := t.call + (if countStmtsByList isCallStmt bodies != 0 then 1 else 0)
-        funcDecl := t.funcDecl + (if countFuncDeclStmts bodies != 0 then 1 else 0)
         loop := t.loop + (if (bodies.map loopNesting).foldl max 0 ≥ 1 then 1 else 0)
         pe := t.pe + (if precondFires (mkProgram ps) then 1 else 0)
         peWF := t.peWF + (if precondEmitsWF (mkMixedProgram ps) then 1 else 0)
@@ -268,11 +264,11 @@ def procRow (θ : Tuning) (samples maxSize : Nat) : IO (List String) := do
         anf := t.anf + (if anfChanges ps then 1 else 0)
         bodyStmts := t.bodyStmts + bodies.length }
   let k := t.n - t.dropped
-  pure [pct t.call k, pct t.funcDecl k, pct t.loop k, pct t.pe k, pct t.peWF k,
+  pure [pct t.call k, pct t.loop k, pct t.pe k, pct t.peWF k,
         pct t.filt k, pct t.anf k, mean1 t.bodyStmts k, pct t.firstTry t.n, pct t.dropped t.n]
 
 def procHeaders : List String :=
-  ["call", "fnDecl", "loop", "PE fires", "PE $wf", "Filt cut", "ANF≠id", "#body", "1st-try",
+  ["call", "loop", "PE fires", "PE $wf", "Filt cut", "ANF≠id", "#body", "1st-try",
    "dropped"]
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -504,7 +500,6 @@ def stmtProfiles : List (String × Tuning) :=
   [ ("(default)", stmtDefault),
     ("stmtLoopHeavy", stmtLoopHeavy),
     ("stmtLoopWide", stmtLoopWide),
-    ("stmtFuncDeclHeavy", stmtFuncDeclHeavy),
     ("stmtMixed", stmtMixed) ]
 
 def procProfiles : List (String × Tuning) :=

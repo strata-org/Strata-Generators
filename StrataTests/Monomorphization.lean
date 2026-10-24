@@ -19,9 +19,7 @@ def monoProperties : List TestDecl :=
             fun gp => checkMonoFactoryMonomorphic gp.prog),
         ("mono: output of monomorphization typechecks", fun gp => checkMonoOutputTypechecks gp.prog),
         ("mono: monomorphization pass is idempotent", fun gp => checkMonoIdempotent gp.prog),
-        -- The `funcDecl` statement, and the form of that claim with no restriction.
-        ("mono: a statement-declared body's references are rewritten",
-            fun gp => checkMonoStmtFuncDeclRefsRewritten gp.prog),
+        -- A reference to a dropped polymorphic original, anywhere in the output.
         ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
         -- A type declaration changes only through the functions that it derives.
@@ -44,9 +42,9 @@ def monoProperties : List TestDecl :=
         ("mono: evaluation agrees before and after the pass",
             fun gp => checkMonoEvalAgreement gp.prog) ]
 
-/-- The three specialization properties, checked a second time under a distribution that makes a
+/-- The two specialization properties, checked a second time under a distribution that makes a
     polymorphic function common. `MonomorphizeFunctions` is the identity on a program that declares
-    none, and each of these three then holds for a reason that has nothing to do with the pass.
+    none, and each of these two then holds for a reason that has nothing to do with the pass.
     `progPolyHeavy` takes the rate of a program with one from 63% to 82%.
 
     `mono: a program with no polymorphic function is unchanged` is deliberately absent. It wants the
@@ -54,9 +52,7 @@ def monoProperties : List TestDecl :=
 @[strata_properties]
 def monoPolyHeavyProperties : List TestDecl :=
     (family GenProgram
-        [ ("mono: a statement-declared body's references are rewritten",
-            fun gp => checkMonoStmtFuncDeclRefsRewritten gp.prog),
-        ("mono: no reference to a dropped polymorphic original survives",
+        [ ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
         ("mono: every specialization's base name was polymorphic in the input",
             fun gp => checkMonoMangledBaseWasPolymorphic gp.prog) ]).flatMap

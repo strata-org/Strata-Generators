@@ -50,18 +50,18 @@ Each compound case, which is `.app`, `.ite`, `.abs`, `.eq` or `.quant`, is struc
 
 ## `OpsConsistentR` on the side of *completeness*
 
-The last section of this file uses the same judgement in the other direction. It discharges the
+The last section of this file uses the same judgment in the other direction. It discharges the
 `SchemeInstAt` predicate of `HasTypeAGen.lean`, which is the witness at the level of the specification
 that the completeness of the polymorphic case needs, from an `OpsConsistentR F e` of the caller. That
 step is `schemeInstAt_of_opsConsistentR`, and `genLExpr_complete_poly_opsConsistentR` packages the
-result. That theorem gives reachability from the two judgements alone, with no generator internal in its
+result. That theorem gives reachability from the two judgments alone, with no generator internal in its
 hypotheses.
 
 `OpsConsistentR` must be a *premise* there. The `.op` rule of `HasTypeA'` accepts each annotation that a
 node carries, so a well-typed term can carry an annotation that is not an instance of the scheme of the
-operator. The generator would never emit such a term, and `OpsConsistentR.op_in` is the judgement that
+operator. The generator would never emit such a term, and `OpsConsistentR.op_in` is the judgment that
 excludes it, and it gives the instantiating substitution. The two directions therefore stay symmetric:
-on the side of soundness, both judgements are theorems about a generated term, and on the side of
+on the side of soundness, both judgments are theorems about a generated term, and on the side of
 completeness, both are assumptions about the target term.
 
 ### A defect in `freshenBoundVars` that this section exposes
@@ -1729,13 +1729,13 @@ theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
 --
 -- `SchemeInstAt`, in `HasTypeAGen.lean`, is the witness at the level of the specification that
 -- `genLExpr_complete_poly_fullySpecShaped` needs. This section gives it from a `Lambda.OpsConsistentR F e` of
--- the caller. The `.op_in` constructor of that judgement holds exactly the missing part: the substitution
+-- the caller. The `.op_in` constructor of that judgment holds exactly the missing part: the substitution
 -- that sends the generic type of the operator to the annotation of the node.
 --
 -- `HasTypeA'` alone cannot give that witness. Its `.op` rule types an `.op` node at *each* annotation that
 -- the node carries. Therefore a well-typed term can carry an annotation that is not an instance of the
 -- scheme of the operator, and the generator would never emit such an annotation. `OpsConsistentR` is the
--- judgement that excludes it, so the side of completeness takes it as a premise. That is symmetric to
+-- judgment that excludes it, so the side of completeness takes it as a premise. That is symmetric to
 -- `HasTypeA'`, and on the side of soundness it is a *theorem*, which is
 -- `genLExpr_opsConsistentR_factory`.
 --
@@ -2170,11 +2170,11 @@ theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
     cases h' with
     | app hbase _ => exact hbase
 
-/-- **The completeness of the polymorphic case from the two judgements, with no generator internal.**
+/-- **The completeness of the polymorphic case from the two judgments, with no generator internal.**
 
     This is the statement at the level of the specification. A spine over a polymorphic operator is reachable
     from `HasTypeA'` *and* `OpsConsistentR`, together with decidable facts about the scheme. Those two
-    judgements are the same two that the direction of soundness establishes, in `genLExpr_sound` and in
+    judgments are the same two that the direction of soundness establishes, in `genLExpr_sound` and in
     `genLExpr_opsConsistentR_factory`. The hypotheses name no `findPolymorphicOps`, no `unifyTypes` and no
     `SchemeInstAt`, because `schemeInstAt_of_opsConsistentR` builds the witness inside the proof.
 
@@ -2182,7 +2182,7 @@ theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
     accepts each annotation that a node carries, so a well-typed term can carry an annotation that is not an
     instance of the scheme of the operator. The generator would never give such a term, and it is correctly
     not reachable. `OpsConsistentR` closes that gap, and it keeps the two directions symmetric. On the side of
-    soundness, both judgements are *theorems* about a generated term. On the side of completeness, both are
+    soundness, both judgments are *theorems* about a generated term. On the side of completeness, both are
     *assumptions* about the target term.
 
     The other premises are the bundle for the recursive completeness of each argument, as in each other

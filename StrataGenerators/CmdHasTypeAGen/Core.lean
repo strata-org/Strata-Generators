@@ -79,9 +79,10 @@ def maxNameLen (l : List (Identifier Unit × LMonoTy)) : Nat :=
   (l.map (fun p => p.1.name)).foldl (fun acc nm => max acc nm.length) 0
 
 /-- A fallback name that is always fresh. It is a string of `x` characters that is longer than each
-    name in the context. -/
-def fallbackFreshName (ctx : VarCtx) : String :=
-  String.ofList (List.replicate (ctx.names.foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
+    name in the context and each name in `avoid`. -/
+def fallbackFreshName (ctx : VarCtx) (avoid : List String := []) : String :=
+  String.ofList
+    (List.replicate ((ctx.names ++ avoid).foldl (fun acc nm => max acc nm.length) 0 + 1) 'x')
 
 /-- A *family* of names, one name for each index `i`. Each name is longer than `base`, and it is
     the string of `base + 1 + i` characters `x`. Two properties make this family useful where the
@@ -96,9 +97,10 @@ def fallbackFreshName (ctx : VarCtx) : String :=
 def indexedFreshName (base i : Nat) : String :=
   String.ofList (List.replicate (base + 1 + i) 'x')
 
-/-- Makes a fresh variable name that `ctx` does not hold. The generator draws a random name with
-    `genIdentName`, and it falls back to the argument from length when that name is already in the
-    context.
+/-- Makes a fresh variable name that `ctx` does not hold and that is not in `avoid`. The generator
+    draws a random name with `genIdentName`, and it falls back to the argument from length when that
+    name is already in the context or in `avoid`. A caller puts the names of the functions in scope
+    in `avoid`, because the typing rule of a declaration bans a variable named after a function.
 
     The support of `genIdentName` is exactly the set of legal bare Core identifiers that are not
     reserved keywords, as `mem_support_genIdentName_iff_isId` states. Each name that this generator
@@ -108,12 +110,12 @@ def indexedFreshName (base i : Nat) : String :=
     The code also applies `dodgeKeyword` to the fallback name. That name holds only the character
     `x`, so it is never a keyword and `dodgeKeyword` is the identity on it. The two branches
     therefore give a name that is not a keyword in the same way. -/
-def genFreshName [Gen G] (ctx : VarCtx) : G String := do
+def genFreshName [Gen G] (ctx : VarCtx) (avoid : List String := []) : G String := do
   let s ← genIdentName
-  if ctx.isFresh ⟨s, ()⟩ then
+  if ctx.isFresh ⟨s, ()⟩ && !avoid.contains s then
     pure s
   else
-    pure (dodgeKeyword (fallbackFreshName ctx))
+    pure (dodgeKeyword (fallbackFreshName ctx avoid))
 
 -- ── The argument from length, which each generator shares ───────────────
 
@@ -156,21 +158,28 @@ structure GenCmdResult where
   /-- The typing context after the command runs. -/
   outCtx : VarCtx
 
-/-- Makes `init x τ (det e)` with a fresh name and a well-typed expression. The initial value `e`
-    draws its free variables from the current scope, which is `ctx.toFVarCtx`, so it can refer to
-    each variable that is in scope. -/
+/-- Makes `init x τ (det e)` with a fresh name that is not in `avoid` and a well-typed expression.
+    The initial value `e` draws its free variables from the current scope, which is
+    `ctx.toFVarCtx`, so it can refer to each variable that is in scope.
+
+    The typing rule asks every binder annotation of `e` to be a registered type. A binder type can
+    come from the signature of an operator of `octx`, so the generator keeps `e` only when
+    `binderAnnotsGenerable` holds of it, and it emits `init x τ nondet` otherwise. -/
 def genInitDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (tyDepth depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
-  let name ← genFreshName ctx
+    (ctx : VarCtx) (tyDepth depth : Nat) (pctx : PolyOpCtx := []) (avoid : List String := []) :
+    G GenCmdResult := do
+  let name ← genFreshName ctx avoid
   let mty ← genLMonoTy tvars tyDepth
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth mty
   let xty : Lambda.LTy := .forAll [] mty
-  pure ⟨.init ⟨name, ()⟩ xty (.det e) default, ctx.insert ⟨name, ()⟩ mty⟩
+  pure ⟨if binderAnnotsGenerable e then .init ⟨name, ()⟩ xty (.det e) default
+      else .init ⟨name, ()⟩ xty .nondet default,
+    ctx.insert ⟨name, ()⟩ mty⟩
 
-/-- Makes `init x τ nondet` with a fresh name. -/
+/-- Makes `init x τ nondet` with a fresh name that is not in `avoid`. -/
 def genInitNondet [Gen G] (tvars : List TyIdentifier)
-    (ctx : VarCtx) (tyDepth : Nat) : G GenCmdResult := do
-  let name ← genFreshName ctx
+    (ctx : VarCtx) (tyDepth : Nat) (avoid : List String := []) : G GenCmdResult := do
+  let name ← genFreshName ctx avoid
   let mty ← genLMonoTy tvars tyDepth
   let xty : Lambda.LTy := .forAll [] mty
   pure ⟨.init ⟨name, ()⟩ xty .nondet default, ctx.insert ⟨name, ()⟩ mty⟩
@@ -178,13 +187,16 @@ def genInitNondet [Gen G] (tvars : List TyIdentifier)
 /-- Makes `set x (det e)`, where `x` is a *mutable* variable that the context holds. The key of
     such a variable is not in the list of immutable names `immutableVars`. The generator draws the
     target from `ctx.writable immutableVars`, so a `set` never assigns to an immutable name. The
-    output context is the whole of `ctx`. -/
+    output context is the whole of `ctx`. The generator keeps `e` only when
+    `binderAnnotsGenerable` holds of it, as in `genInitDet`, and it emits `set x nondet`
+    otherwise. -/
 def genSetDet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
     (h : (ctx.writable immutableVars).length > 0) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let (name, mty) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth mty
-  pure ⟨.set name (.det e) default, ctx⟩
+  pure ⟨if binderAnnotsGenerable e then .set name (.det e) default else .set name .nondet default,
+    ctx⟩
 
 /-- Makes `set x nondet`, where `x` is a *mutable* variable that the context holds. -/
 def genSetNondet [Gen G] (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
@@ -192,34 +204,43 @@ def genSetNondet [Gen G] (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
   let (name, _) ← elements (ctx.writable immutableVars) (by apply List.ne_nil_of_length_pos; assumption)
   pure ⟨.set name .nondet default, ctx⟩
 
+/-- `e` when each of its binder annotations is a type that `genLMonoTy` can make
+    (`binderAnnotsGenerable`), and the constant `true` otherwise. The generators for a check use it
+    to meet the typing rule's requirement that every binder annotation be a registered type. -/
+def generableOrTrue (e : LExpr') : LExpr' :=
+  if binderAnnotsGenerable e then e else .const () (.boolConst true)
+
 /-- Makes `assert l e` with a Boolean expression. The label `l` comes from `genIdentName`, so it is
     a legal Core identifier and not a keyword. The typing rule constrains only the expression.
 
     `genIdentName` gives the label, and not `String.arbitrary`. The support of `String.arbitrary`
     holds only an alphanumeric string, so it cannot reach the label that the parser makes for an
     `assert` with no label, such as `assert_0`, which `translateLabeledCheck` builds. It also holds
-    `""`, and the printer writes an empty label as the degenerate form `[||]`. -/
+    `""`, and the printer writes an empty label as the degenerate form `[||]`.
+
+    The generator keeps `e` only when `binderAnnotsGenerable` holds of it, as in `genInitDet`, and
+    it asserts `true` otherwise (`generableOrTrue`). -/
 def genAssertCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
-  pure ⟨.assert l e default, ctx⟩
+  pure ⟨.assert l (generableOrTrue e) default, ctx⟩
 
 /-- Makes `assume l e` with a Boolean expression. The label `l` comes from `genIdentName`, and the
-    typing rule ignores it, as for an `assert`. -/
+    typing rule ignores it, as for an `assert`. The expression is filtered as for an `assert`. -/
 def genAssumeCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
-  pure ⟨.assume l e default, ctx⟩
+  pure ⟨.assume l (generableOrTrue e) default, ctx⟩
 
 /-- Makes `cover l e` with a Boolean expression. The label `l` comes from `genIdentName`, and the
-    typing rule ignores it, as for an `assert`. -/
+    typing rule ignores it, as for an `assert`. The expression is filtered as for an `assert`. -/
 def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G GenCmdResult := do
   let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
-  pure ⟨.cover l e default, ctx⟩
+  pure ⟨.cover l (generableOrTrue e) default, ctx⟩
 
 -- ── The main generator for a command ───────────────────────────────────
 
@@ -235,6 +256,8 @@ def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     - `assume l e`, which is an assumption with a Boolean expression.
     - `cover l e`, which is a check for coverage with a Boolean expression.
 
+    No declared variable has a name in `avoid`; a caller lists there the functions in scope.
+
     The generator uses `frequency`, so the distribution over the kinds of command is more uniform.
     When the context is not empty, a `set` command gets a higher weight, because the structure of a
     sequence otherwise favours an `init`.
@@ -247,12 +270,12 @@ def genCoverCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 @[tunable]
 def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
-    (pctx : PolyOpCtx := []) : G GenCmdResult :=
+    (pctx : PolyOpCtx := []) (avoid : List String := []) : G GenCmdResult :=
   let tyDepth := depth
   if h : (ctx.writable immutableVars).length > 0 then
     frequency
-      [ (2, fun () => genInitDet octx tvars ctx tyDepth depth pctx),
-        (1, fun () => genInitNondet tvars ctx tyDepth),
+      [ (2, fun () => genInitDet octx tvars ctx tyDepth depth pctx avoid),
+        (1, fun () => genInitNondet tvars ctx tyDepth avoid),
         (3, fun () => genSetDet octx tvars immutableVars ctx depth h pctx),
         (2, fun () => genSetNondet immutableVars ctx h),
         (2, fun () => genAssertCmd octx tvars ctx depth pctx),
@@ -261,8 +284,8 @@ def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
       (by show 0 < 2+1+3+2+2+2+2; omega)
   else
     frequency
-      [ (3, fun () => genInitDet octx tvars ctx tyDepth depth pctx),
-        (1, fun () => genInitNondet tvars ctx tyDepth),
+      [ (3, fun () => genInitDet octx tvars ctx tyDepth depth pctx avoid),
+        (1, fun () => genInitNondet tvars ctx tyDepth avoid),
         (2, fun () => genAssertCmd octx tvars ctx depth pctx),
         (2, fun () => genAssumeCmd octx tvars ctx depth pctx),
         (2, fun () => genCoverCmd octx tvars ctx depth pctx) ]
@@ -271,12 +294,13 @@ def genCmd [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 -- ── The generator for a sequence of commands ────────────────────────────
 
 /-- `genCmds n` makes a sequence of `n` well-typed commands. It threads the context through the
-    sequence. -/
+    sequence. No declared variable has a name in `avoid`. -/
 def genCmds [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
-    Nat → G (List (Cmd Expression) × VarCtx)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
+    (avoid : List String := []) : G (List (Cmd Expression) × VarCtx) :=
+  match n with
   | 0 => pure ([], ctx)
   | n + 1 => do
-    let ⟨cmd, ctx'⟩ ← genCmd octx tvars immutableVars ctx depth
-    let (rest, ctx'') ← genCmds octx tvars immutableVars ctx' depth n
+    let ⟨cmd, ctx'⟩ ← genCmd octx tvars immutableVars ctx depth [] avoid
+    let (rest, ctx'') ← genCmds octx tvars immutableVars ctx' depth n avoid
     pure (cmd :: rest, ctx'')

@@ -1,88 +1,31 @@
 import StrataGenerators.HasTypeAGen
+import StrataGenerators.HasTypeAGen.AnnotFacts
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Dedup
 import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.Languages.Core.FunctionTypeSpec
+import Strata.Util.ListMapProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
-open StrataGenerators.Dedup
+open StrataGenerators.Dedup StrataGenerators.AnnotFacts
 
 /-!
 # The soundness and the completeness of `genFunction`
 
 `genFunction` makes a random Strata Core function, which is a `Function` and therefore an
-`LFunc CoreLParams`. This file proves that the generator is sound and complete against the
-typing relation `FuncHasTypeA`.
+`LFunc CoreLParams`. This file proves that every function it makes satisfies the weak typing
+`FuncHasTypeW` (`genFunction_sound`), and that its support holds every function of the shape it
+draws (`genFunction_complete`).
 
-## Why this file is simpler than the file for a command
-
-The annotated typing specification `instHasTypeA` that `FuncHasTypeA` uses *ignores* the
-ambient typing context:
-
-```
-instance instHasTypeA : ExprTypingSpec LMonoTy where
-  embed := id
-  exprTyped := fun _C _Γ e mty => LExpr.HasTypeA [] e mty
-```
-
-The two obligations `bodyTyped` and `measureTyped` therefore reduce *by definition* to
-`LExpr.HasTypeA [] body output` and to `LExpr.HasTypeA [] m .int`. Those are exactly the
-claims that `genLExpr … [] tvars [] depth τ` gives. No correspondence between a `VarCtx`
-and a `TContext` is necessary.
-
-## Contents
-
-- The lemmas about a free variable, which relate `allFtvarsIn` and `mkArrow'` to
-  `LMonoTy.freeVars`.
-- `genFunction_sound`: each generated function satisfies `FuncHasTypeA`.
-- `genFunction_complete`: the support of `genFunction` holds each well-typed function that
-  satisfies the side conditions about the reachability of its expressions.
+The body and the precondition are typed over `funcScopes ts func`, the ambient variable scopes
+with the formals pushed on top. The body draws its free variables from the ambient variables that
+no formal shadows, so they keep their ambient types; the precondition draws them from the formals.
+`genLExpr_exprHasTypeW` and `genLExpr_annotTyVars` give the typing and the scoping of both.
 -/
 
 namespace StrataGenerators.Function
 
 -- ── The lemmas about a free variable ─────────────────────────────────
-
-/-- If `v` is a free variable of the list of types `tys`, then some element of `tys` holds `v`.
-
-    Strata proves this claim as `Lambda.LMonoTys.freeVars_exists`. That theorem is in a module with
-    no `public section`, so only an `import all` reaches it, and this file is not a `module` and
-    cannot use such an import. The proof here is three lines from the public
-    `LMonoTys.freeVars_of_cons`, so this file has its own copy and Strata keeps its visibility. -/
-theorem freeVars_exists' {v : TyIdentifier} {tys : List LMonoTy}
-    (hv : v ∈ LMonoTys.freeVars tys)
-    : ∃ ty, ty ∈ tys ∧ v ∈ LMonoTy.freeVars ty := by
-  induction tys with
-  | nil => simp [LMonoTys.freeVars] at hv
-  | cons ty rest ih =>
-    simp only [LMonoTys.freeVars_of_cons, List.mem_append] at hv
-    cases hv with
-    | inl h => exact ⟨ty, .head _, h⟩
-    | inr h => obtain ⟨t, ht, hvt⟩ := ih h; exact ⟨t, .tail _ ht, hvt⟩
-
-/-- `allFtvarsIn tvars τ` says that each free type variable of `τ` comes from `tvars`. This theorem
-    states the same claim through `LMonoTy.freeVars`, which is the form that `noUndeclaredVars`
-    uses. -/
-theorem allFtvarsIn_freeVars {tvars : List TyIdentifier} {τ : LMonoTy}
-    (h : allFtvarsIn tvars τ) : ∀ v ∈ LMonoTy.freeVars τ, v ∈ tvars := by
-  induction τ with
-  | ftvar f =>
-    intro v hv
-    simp only [LMonoTy.freeVars, List.mem_singleton] at hv
-    subst hv
-    unfold allFtvarsIn at h
-    exact h
-  | bitvec n =>
-    intro v hv
-    simp [LMonoTy.freeVars] at hv
-  | tcons name args ih =>
-    intro v hv
-    simp only [LMonoTy.freeVars] at hv
-    -- `allFtvarsIn tvars (.tcons name args)` unfolds to one claim for each argument.
-    have hargs : ∀ a ∈ args, allFtvarsIn tvars a := by unfold allFtvarsIn at h; exact h
-    -- Reduce membership in `LMonoTys.freeVars` to an element that holds `v`.
-    obtain ⟨ty, hty_mem, hv_ty⟩ := freeVars_exists' hv
-    exact ih ty hty_mem (hargs ty hty_mem) v hv_ty
 
 set_option linter.unusedSimpArgs false in
 /-- A free variable of `mkArrow' out vals` is a free variable of `out`, or it is a free variable of
@@ -107,20 +50,20 @@ theorem freeVars_mkArrow' (out : LMonoTy) (vals : List LMonoTy) (v : TyIdentifie
 
 -- ── The support of the generators for a name, a type argument and an input ──
 
-/-- Each list in the support of `genTypeArgs` holds no duplicate, because `List.dedup` builds
+/-- Each list in the support of `genTypeArgs` holds no duplicate, because `List.uniq` builds
     it. -/
 theorem genTypeArgs_nodup (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact List.nodup_dedup names
+  exact List.nodup_uniq names
 
-/-- Each list in the support of `genIdents` holds no duplicate, because `List.dedup` builds it. -/
+/-- Each list in the support of `genIdents` holds no duplicate, because `List.uniq` builds it. -/
 theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) : l.Nodup := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
-  exact List.nodup_dedup _
+  exact List.nodup_uniq _
 
 -- ── A generated name is not a keyword and it holds no space ──────────
 -- The `IdentName` module holds these results. Each one follows from
@@ -175,7 +118,7 @@ theorem genInputs_support (tvars : List TyIdentifier) (depth : Nat)
   exact ⟨hkeys ▸ hnd, hvals⟩
 
 /-- `genIdentName` can reach the `name` of each key of a signature that `genInputs` gives. The keys
-    are the list of identifiers after `List.dedup`, their names come from `genNameList`, and
+    are the list of identifiers after `List.uniq`, their names come from `genNameList`, and
     `genNameList` takes each name from `genIdentName`. -/
 theorem genInputs_key_name_reachable (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap (Identifier Unit) LMonoTy)
@@ -205,95 +148,345 @@ theorem genInputs_key_no_space (tvars : List TyIdentifier) (depth : Nat)
     ' ' ∉ k.name.toList :=
   genIdentName_no_space k.name (genInputs_key_name_reachable tvars depth m hm k hk)
 
--- ── The soundness of the generator for an optional expression ────────
+-- ── The variable scopes of a function ─────────────────────────────────
 
-/-- With an empty context of polymorphic operators, `polyOpsForResult` is always empty. The side
-    condition `hSimplePolyOps` of `genLExpr_sound` is therefore vacuous. -/
-theorem polyOpsForResult_nil (τ : LMonoTy) (generableTys sampledTys : List LMonoTy) :
-    findPolymorphicOps [] τ generableTys sampledTys = [] := by
-  simp [findPolymorphicOps]
+/-- `HMap.ofList` finds the first binding of a key in the reversed list. -/
+theorem find?_ofList_eq_lookup_reverse {α β : Type} [BEq α] [LawfulBEq α] [Hashable α]
+    [LawfulHashable α] (l : List (α × β)) (x : α) :
+    Strata.Util.HMap.find? (Strata.Util.HMap.ofList l) x = l.reverse.lookup x := by
+  have h := Freshening.find?_ofList_reverse l.reverse x
+  rwa [List.reverse_reverse] at h
 
-/-- Soundness of `genOptExpr`: each `some e` that it gives is well-typed at `τ`, in the empty context
-    of bound variables. The case of a `none` is vacuous. -/
-theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
-    (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx)
-    (o : Option LExpr')
-    (ho : o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ pctx))
-    (e : LExpr') (heq : o = some e) :
-    HasTypeA' [] e τ := by
+/-- The keys of the formals scope of `funcScopes` are the formals. -/
+theorem funcScopes_scope_keys (func : Function) :
+    ((func.inputs.map (fun (id, mty) => (id, LTy.forAll [] mty))).reverse.map Prod.fst) =
+      func.inputs.keys.reverse := by
+  rw [List.map_reverse, List.map_map, ListMap.keys_eq_map_fst]
+  rfl
+
+/-- `funcScopes` declares every formal at its type. -/
+theorem funcScopes_find?_formal (ts : TypeScopes) (func : Function)
+    (hnd : func.inputs.keys.Nodup) {x : Identifier Unit} {τ : LMonoTy}
+    (hx : (x, τ) ∈ func.inputs.toList) :
+    (funcScopes ts func).find? x = some (.forAll [] τ) := by
+  unfold funcScopes
+  refine Strata.Util.HMaps.find?_push_of_some _ _ _ _ ?_
+  rw [find?_ofList_eq_lookup_reverse]
+  refine List.lookup_of_mem_nodup _ ?_ _ _ ?_
+  · rw [funcScopes_scope_keys]
+    exact List.pairwise_reverse.mpr (List.Pairwise.imp Ne.symm hnd)
+  · exact List.mem_reverse.mpr
+      (List.mem_map_of_mem (f := fun (id, mty) => (id, LTy.forAll [] mty)) hx)
+
+/-- `funcScopes` keeps the ambient declaration of a name that is not a formal. -/
+theorem funcScopes_find?_ambient (ts : TypeScopes) (func : Function) {x : Identifier Unit}
+    (hx : x ∉ func.inputs.keys) : (funcScopes ts func).find? x = ts.find? x := by
+  unfold funcScopes
+  refine Strata.Util.HMaps.find?_push_of_none _ _ _ ?_
+  rw [find?_ofList_eq_lookup_reverse]
+  cases hl : List.lookup x (func.inputs.map (fun (id, mty) => (id, LTy.forAll [] mty))).reverse with
+  | none => rfl
+  | some w =>
+    have hmem := List.mem_map_of_mem (f := Prod.fst) (Freshening.lookup_mem _ _ _ hl)
+    rw [funcScopes_scope_keys] at hmem
+    exact absurd (List.mem_reverse.mp hmem) hx
+
+-- ── The facts behind the fields of `FuncHasTypeW` ─────────────────────
+
+/-- The value of an entry of a signature is one of its values. -/
+theorem mem_values_of_mem_toList {α β : Type} {m : ListMap α β} {x : α} {τ : β}
+    (h : (x, τ) ∈ m.toList) : τ ∈ m.values := by
+  rw [ListMap.values_eq_map_snd]
+  exact List.mem_map_of_mem (f := Prod.snd) h
+
+/-- A drawn optional expression is drawn by `genLExpr`. -/
+theorem genOptExpr_mem {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdentifier} {depth : Nat}
+    {τ : LMonoTy} {pctx : PolyOpCtx} {e : LExpr'}
+    (ho : some e ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ pctx)) :
+    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ) := by
   simp only [genOptExpr,
     mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)] at ho
   rcases ho with hnone | ⟨e', he', ho⟩
-  · -- The `none` branch contradicts `o = some e`.
-    exact absurd (heq ▸ hnone) (by simp)
-  · -- In the `some e'` branch, `e'` is well-typed and `e'` equals `e`.
-    subst heq
-    have hee : e' = e := (Option.some.inj ho).symm
-    subst hee
-    exact genLExpr_sound fctx octx pctx tvars [] depth τ _ e' he'
+  · exact absurd hnone (by simp)
+  · rw [Option.some.inj ho]
+    exact he'
+
+/-- Filtering a signature keeps its keys distinct when they were distinct. -/
+theorem keys_filter_nodup {α β : Type} (q : α × β → Bool) (m : List (α × β))
+    (h : (ListMap.keys m).Nodup) : (ListMap.keys (m.filter q)).Nodup := by
+  rw [ListMap.keys_eq_map_fst] at h ⊢
+  exact List.Nodup.sublist (List.Sublist.map Prod.fst List.filter_sublist) h
+
+/-- Each key of a filtered signature is the key of an entry that passes the filter. -/
+theorem mem_keys_filter {α β : Type} (q : α × β → Bool) (m : List (α × β)) (x : α)
+    (hx : x ∈ ListMap.keys (m.filter q)) : ∃ y, (x, y) ∈ m ∧ q (x, y) = true := by
+  rw [ListMap.keys_eq_map_fst] at hx
+  obtain ⟨⟨a, b⟩, hab, rfl⟩ := List.mem_map.mp hx
+  obtain ⟨hmem, hq⟩ := List.mem_filter.mp hab
+  exact ⟨b, hmem, hq⟩
+
+/-- A free variable of the output or of an input type is a free variable of the signature. -/
+theorem mem_freeVars_mkArrow' (out : LMonoTy) (vals : List LMonoTy) (v : TyIdentifier)
+    (h : v ∈ LMonoTy.freeVars out ∨ ∃ t ∈ vals, v ∈ LMonoTy.freeVars t) :
+    v ∈ LMonoTy.freeVars (LMonoTy.mkArrow' out vals) := by
+  induction vals with
+  | nil =>
+    rw [LMonoTy.mkArrow'_nil]
+    rcases h with h | ⟨t, ht, _⟩
+    · exact h
+    · exact absurd ht List.not_mem_nil
+  | cons t rest ih =>
+    rw [LMonoTy.mkArrow'_cons]
+    simp only [LMonoTy.freeVars, LMonoTys.freeVars, List.append_nil, List.mem_append]
+    rcases h with h | ⟨t', ht', hvt'⟩
+    · exact Or.inr (ih (Or.inl h))
+    · rcases List.mem_cons.mp ht' with rfl | ht'
+      · exact Or.inl hvt'
+      · exact Or.inr (ih (Or.inr ⟨t', ht', hvt'⟩))
+
+/-- An expression whose binder annotations are all generable types has only known binder
+    annotations in each context that registers the built-in type constructors. -/
+theorem binderAnnotsKnown_of_generable {C : LContext CoreLParams} (hC : SimpleTyArities C)
+    (e : LExpr') (h : binderAnnotsGenerable e = true) : BinderAnnotsKnown C e := by
+  intro t ht
+  have hgen := List.all_eq_true.mp h t ht
+  exact genLMonoTy_mem_knownInstance hC ⟨_, inGenLMonoTySupport_sound _ _ t hgen⟩
+
+/-- Every clause `genPreconditions` makes is a weakly typed `bool` expression whose annotation
+    type variables are in `tvars`, when the formals and operators the clauses draw on agree with
+    `C` and `ts` (`ExprCtxOk`) and their types, and every scheme, range over `tvars`
+    (`ExprScopedCtx`). -/
+theorem genPreconditions_sound {C : LContext CoreLParams} {ts : TypeScopes} {octx : OpCtx}
+    {inputs : ListMap (Identifier Unit) LMonoTy} {tvars : List TyIdentifier} {depth : Nat}
+    {pctx : PolyOpCtx}
+    (hctx : ExprCtxOk C ts (inputsAsFVarCtx inputs) octx pctx)
+    (hsc : ExprScopedCtx tvars (inputsAsFVarCtx inputs) octx pctx)
+    {ps : List (Strata.DL.Util.FuncPrecondition LExpr' Unit)}
+    (hps : ps ∈ SetGen.support (genPreconditions (G := SetGen.Set) octx inputs tvars depth pctx)) :
+    ∀ p ∈ ps, ExprHasTypeW C ts p.expr .bool ∧ ∀ v ∈ annotTyVars p.expr, v ∈ tvars := by
+  have hA := closureHyps_annotsOk tvars hctx
+  have hB := closureHyps_annotTyVars hsc
+  have hdraw : ∀ τ e, LMonoTy.knownInstance τ C.knownTypes = true →
+      (∀ v ∈ LMonoTy.freeVars τ, v ∈ tvars) →
+      e ∈ SetGen.support
+        (genLExpr (G := SetGen.Set) (inputsAsFVarCtx inputs) octx pctx tvars [] depth τ) →
+      ExprHasTypeW C ts e τ ∧ ∀ v ∈ annotTyVars e, v ∈ tvars :=
+    fun τ e hk hv he => ⟨genLExpr_exprHasTypeW hctx hk he, genLExpr_annotTyVars hsc hv he⟩
+  intro p hp
+  simp only [genPreconditions, mem_support_map_iff] at hps
+  obtain ⟨o, ho, rfl⟩ := hps
+  simp only [genPrecondition, mem_support_optionGen_iff] at ho
+  rcases ho with rfl | ⟨q, hq, rfl⟩
+  · exact absurd hp List.not_mem_nil
+  have hpq : p = q := by
+    simp only [Option.toList_some, List.mem_singleton] at hp
+    exact hp
+  subst hpq
+  by_cases hne : inputs.toList ≠ []
+  · rw [dif_pos hne, mem_support_bind_iff] at hq
+    obtain ⟨e, he, hpe⟩ := hq
+    rw [mem_support_pure_iff] at hpe
+    subst hpe
+    rw [mem_support_frequency_iff] at he
+    obtain ⟨w, g, hmem, _, hg⟩ := he
+    simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hmem
+    rcases hmem with ⟨_, rfl⟩ | ⟨_, rfl⟩
+    · -- The clause `x == e'` that mentions the formal parameter `x : τ`.
+      rw [genInputMentioningPrecond, mem_support_bind_iff] at hg
+      obtain ⟨⟨x, τ⟩, hxτ, hrest⟩ := hg
+      rw [mem_support_bind_iff] at hrest
+      obtain ⟨e', he', heq⟩ := hrest
+      rw [mem_support_pure_iff] at heq
+      subst heq
+      rw [mem_support_elements_iff] at hxτ
+      have hfx : (x.name, τ) ∈ inputsAsFVarCtx inputs :=
+        List.mem_map_of_mem (f := fun (id, mty) => (id.name, mty)) hxτ
+      obtain ⟨htyped, hscoped⟩ := hdraw τ e' (hctx.fvars _ hfx).1 (hsc.fvars _ hfx) he'
+      exact ⟨⟨LExpr.HasTypeA.eq LExpr.HasTypeA.fvar htyped.1,
+          hA.eq _ _ (hA.fvar _ hfx) htyped.2⟩,
+        hB.eq _ _ (hB.fvar _ hfx) hscoped⟩
+    · exact hdraw .bool e hA.bool hB.bool hg
+  · rw [dif_neg hne, mem_support_bind_iff] at hq
+    obtain ⟨e, he, hpe⟩ := hq
+    rw [mem_support_pure_iff] at hpe
+    subst hpe
+    exact hdraw .bool e hA.bool hB.bool he
 
 -- ── The soundness of `genFunction` ───────────────────────────────────
 
-/-- **Soundness of `genFunction`.** Each function in the support of the generator is well-typed
-    against `FuncHasTypeA`, for *each* ambient context `Γ` and for *each* operator context. The
-    annotated specification ignores the ambient context, and `genLExpr_sound` needs no condition on
-    the operator context.
-
-    The one condition on `C` is `SimpleTyArities`, and the field `signatureWellKinded` needs it. That
-    field asks that each type in the signature be well-kinded in `C`. The generator builds only a
-    type that it can make, so it is enough that `C` registers the eight type constructors at their own
-    arities. The Core context of Strata does this, as `coreContextSimpleTyArities` states. -/
+/-- **Soundness of `genFunction`.** Every function the generator makes is weakly typed in
+    context `C` and variable scopes `ts`, when its contexts agree with them: the ambient variables,
+    operators and polymorphic schemes meet `ExprCtxOk`, and every scheme is closed, so that the
+    polymorphic rule writes only annotations over the type arguments. -/
 theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (pctx : PolyOpCtx)
-    (hC : SimpleTyArities C)
+    (C : LContext CoreLParams) (ts : TypeScopes) (pctx : PolyOpCtx) (avoid : String → Bool)
+    (hctx : ExprCtxOk C ts fctx octx pctx)
+    (hclosed : ∀ nm bvs body, (nm, LTy.forAll bvs body) ∈ pctx →
+      ∀ v ∈ LMonoTy.freeVars body, v ∈ bvs)
     (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth pctx)) :
-    FuncHasTypeA C Γ func := by
-  -- Show the parts that the generator made for each field.
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth pctx avoid)) :
+    FuncHasTypeW C ts func := by
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
-  -- The generator also makes the preconditions, but `FuncHasType'` has no field for them. The proof
-  -- therefore does not use the witness `_hpre` for their reachability.
-  obtain ⟨name, _hname, typeArgs, htypeArgs, inputs, hinputs,
-          output, houtput, body, hbody, measure, hmeasure,
-          preconditions, _hpre, rfl⟩ := hfunc
-  -- The facts about the generated type arguments and the generated inputs.
-  have htyNodup : typeArgs.Nodup := genTypeArgs_nodup depth typeArgs htypeArgs
-  obtain ⟨hkeysNodup, hvals⟩ := genInputs_support typeArgs depth inputs hinputs
-  have houtputFtv : allFtvarsIn typeArgs output :=
-    genLMonoTy_mem_ftvars houtput
-  -- Build the `FuncHasType'` structure.
-  refine ⟨hkeysNodup, htyNodup, ?_, ?_, ?_, ?_⟩
-  · -- noUndeclaredVars
-    intro v hv
-    rcases freeVars_mkArrow' output inputs.values v hv with hout | ⟨t, ht_mem, hvt⟩
-    · exact allFtvarsIn_freeVars houtputFtv v hout
-    · -- `t` is an input value, so the support of `genLMonoTy` holds it and `allFtvarsIn` follows.
-      have ht_supp := hvals t ht_mem
-      have ht_ftv : allFtvarsIn typeArgs t :=
-        genLMonoTy_mem_ftvars ht_supp
-      exact allFtvarsIn_freeVars ht_ftv v hvt
-  · -- signatureWellKinded. The generator can make each type of the signature, and the `tyCompat` of
-    -- `HasTypeA` is plain equality, so `ty' := ty` works.
+  obtain ⟨name, _, rawTypeArgs, hrawTypeArgs, rawInputs, hrawInputs,
+          output, houtput, body, hbody, preconditions, hpre, hfeq⟩ := hfunc
+  have hIn : func.inputs = rawInputs.filter (fun p => !avoid p.1.name) := by rw [hfeq]
+  have hOut : func.output = output := by rw [hfeq]
+  have hTA : func.typeArgs = (rawTypeArgs.filter isAllowedName).filter
+      (fun a =>
+        (LMonoTy.freeVars (LMonoTy.mkArrow' func.output func.inputs.values)).contains a) := by
+    rw [hfeq]
+  have hBody : func.body = body := by rw [hfeq]
+  have hPre : func.preconditions = preconditions := by rw [hfeq]
+  have hMeasure : func.measure = none := by rw [hfeq]
+  have hAxioms : func.axioms = [] := by rw [hfeq]
+  have hConstr : func.isConstr = false := by rw [hfeq]
+  rw [← hIn, ← hOut, ← hTA] at hbody hpre
+  -- The facts about the drawn type arguments and the drawn inputs.
+  have hrawNodup : rawTypeArgs.Nodup := genTypeArgs_nodup depth rawTypeArgs hrawTypeArgs
+  obtain ⟨hrawKeysNodup, hrawVals⟩ :=
+    genInputs_support (rawTypeArgs.filter isAllowedName) depth rawInputs hrawInputs
+  have hkeysNodup : func.inputs.keys.Nodup := by
+    rw [hIn]
+    exact keys_filter_nodup _ rawInputs hrawKeysNodup
+  have hsig : ∀ ty ∈ func.output :: func.inputs.values,
+      ∃ m, ty ∈ SetGen.support
+        (genLMonoTy (G := SetGen.Set) (rawTypeArgs.filter isAllowedName) m) := by
     intro ty hty
-    refine ⟨ty, rfl, genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hC ?_⟩
     rcases List.mem_cons.mp hty with rfl | hty
-    · exact ⟨_, houtput⟩
-    · exact ⟨_, hvals ty hty⟩
-  · -- bodyTyped
+    · rw [hOut]
+      exact ⟨_, houtput⟩
+    · rw [hIn] at hty
+      exact ⟨_, hrawVals ty (ListMap.mem_values_filter _ rawInputs ty hty)⟩
+  have hknown : ∀ ty ∈ func.output :: func.inputs.values,
+      LMonoTy.knownInstance ty C.knownTypes = true :=
+    fun ty hty => genLMonoTy_mem_knownInstance hctx.arities (hsig ty hty)
+  -- Every type variable of the signature is a type argument.
+  have hsigVars : ∀ ty ∈ func.output :: func.inputs.values, ∀ v ∈ LMonoTy.freeVars ty,
+      v ∈ func.typeArgs := by
+    intro ty hty v hv
+    obtain ⟨m, hm⟩ := hsig ty hty
+    rw [hTA]
+    refine List.mem_filter.mpr ⟨allFtvarsIn_freeVars (genLMonoTy_mem_ftvars hm) v hv, ?_⟩
+    refine List.contains_iff_mem.mpr (mem_freeVars_mkArrow' _ _ v ?_)
+    rcases List.mem_cons.mp hty with rfl | hty
+    · exact Or.inl hv
+    · exact Or.inr ⟨ty, hty, hv⟩
+  -- The contexts the body and the precondition are drawn from.
+  have hsubOps : ∀ p ∈ (opsOver func.typeArgs octx).ops, p ∈ octx.ops ∧
+      ∀ v ∈ LMonoTy.freeVars p.2, v ∈ func.typeArgs :=
+    fun _ hp => mem_opsOver_iff.mp hp
+  have hctxBody : ExprCtxOk C (funcScopes ts func)
+      (fctx.filter (fun p => !func.inputs.keys.contains ⟨p.1, ()⟩ &&
+        (LMonoTy.freeVars p.2).all func.typeArgs.contains))
+      (opsOver func.typeArgs octx) pctx := by
+    refine hctx.restrict ?_ (fun p hp => (hsubOps p hp).1) (fun _ hp => hp)
+    intro p hp
+    obtain ⟨hp, hkeep⟩ := List.mem_filter.mp hp
+    rw [Bool.and_eq_true] at hkeep
+    have hnot : (⟨p.1, ()⟩ : Identifier Unit) ∉ func.inputs.keys := by
+      intro hm
+      rw [List.contains_iff_mem.mpr hm] at hkeep
+      exact absurd hkeep.1 (by simp)
+    obtain ⟨hk, hfind⟩ := hctx.fvars p hp
+    exact ⟨hk, (funcScopes_find?_ambient ts func hnot).trans hfind⟩
+  have hscBody : ExprScopedCtx func.typeArgs
+      (fctx.filter (fun p => !func.inputs.keys.contains ⟨p.1, ()⟩ &&
+        (LMonoTy.freeVars p.2).all func.typeArgs.contains))
+      (opsOver func.typeArgs octx) pctx := by
+    refine ⟨?_, fun p hp => (hsubOps p hp).2, hclosed⟩
+    intro p hp v hv
+    obtain ⟨_, hkeep⟩ := List.mem_filter.mp hp
+    rw [Bool.and_eq_true] at hkeep
+    exact List.contains_iff_mem.mp (List.all_eq_true.mp hkeep.2 v hv)
+  have hformal : ∀ q ∈ inputsAsFVarCtx func.inputs,
+      ∃ x : Identifier Unit, (x, q.2) ∈ func.inputs.toList ∧ q.1 = x.name := by
+    intro q hq
+    obtain ⟨⟨x, τ⟩, hxτ, rfl⟩ := List.mem_map.mp hq
+    exact ⟨x, hxτ, rfl⟩
+  have hctxPre : ExprCtxOk C (funcScopes ts func) (inputsAsFVarCtx func.inputs)
+      (opsOver func.typeArgs octx) pctx := by
+    refine hctx.restrict ?_ (fun p hp => (hsubOps p hp).1) (fun _ hp => hp)
+    intro q hq
+    obtain ⟨x, hx, hname⟩ := hformal q hq
+    refine ⟨hknown q.2 (List.mem_cons_of_mem _ (mem_values_of_mem_toList hx)), ?_⟩
+    rw [hname]
+    exact funcScopes_find?_formal ts func hkeysNodup hx
+  have hscPre : ExprScopedCtx func.typeArgs (inputsAsFVarCtx func.inputs)
+      (opsOver func.typeArgs octx) pctx := by
+    refine ⟨?_, fun p hp => (hsubOps p hp).2, hclosed⟩
+    intro q hq
+    obtain ⟨x, hx, _⟩ := hformal q hq
+    exact hsigVars q.2 (List.mem_cons_of_mem _ (mem_values_of_mem_toList hx))
+  have hpreOk := genPreconditions_sound hctxPre hscPre hpre
+  have hbodyMem : ∀ b, func.body = some b → b ∈ SetGen.support (genLExpr (G := SetGen.Set)
+      (fctx.filter (fun p => !func.inputs.keys.contains ⟨p.1, ()⟩ &&
+        (LMonoTy.freeVars p.2).all func.typeArgs.contains))
+      (opsOver func.typeArgs octx) pctx func.typeArgs [] depth func.output) := by
     intro b hb
-    exact genOptExpr_sound fctx octx typeArgs depth output pctx body hbody b hb
-  · -- measureTyped
-    intro m hm _
-    exact genOptExpr_sound fctx octx typeArgs depth .int pctx measure hmeasure m hm
+    rw [hBody] at hb
+    rw [hb] at hbody
+    exact genOptExpr_mem hbody
+  refine ⟨?inputsNodup, ?typeArgsNodup, ?noUndeclaredVars, ?typeArgsInSignature,
+    ?signatureWellKinded, ?bodyTyped, ?measureOnlyRecursive, ?measureTyped, ?preconditionsTyped,
+    ?axiomsTyped, ?annotsScoped, ?constrNoBody⟩
+  case inputsNodup => exact hkeysNodup
+  case typeArgsNodup =>
+    rw [hTA]
+    exact List.Nodup.sublist List.filter_sublist (List.Nodup.sublist List.filter_sublist hrawNodup)
+  case noUndeclaredVars =>
+    intro v hv
+    rcases freeVars_mkArrow' _ _ v hv with hout | ⟨t, ht_mem, hvt⟩
+    · exact hsigVars _ List.mem_cons_self v hout
+    · exact hsigVars t (List.mem_cons_of_mem _ ht_mem) v hvt
+  case typeArgsInSignature =>
+    intro ta hta
+    rw [hTA] at hta
+    exact List.contains_iff_mem.mp (List.mem_filter.mp hta).2
+  case signatureWellKinded =>
+    intro ty hty
+    exact genLMonoTy_mem_wellKindedTy hctx.arities (hsig ty hty)
+  case bodyTyped =>
+    intro b hb
+    exact genLExpr_exprHasTypeW hctxBody (hknown _ List.mem_cons_self) (hbodyMem b hb)
+  case measureOnlyRecursive => exact fun _ => hMeasure
+  case measureTyped =>
+    intro m hm
+    rw [hMeasure] at hm
+    exact absurd hm (by simp)
+  case preconditionsTyped =>
+    intro p hp
+    rw [hPre] at hp
+    exact (hpreOk p hp).1
+  case axiomsTyped =>
+    intro ax hax
+    rw [hAxioms] at hax
+    exact absurd hax List.not_mem_nil
+  case annotsScoped =>
+    intro e he v hv
+    simp only [Strata.DL.Util.Func.exprs, hBody, hAxioms, hPre, hMeasure, List.append_nil,
+      Option.toList_none, List.mem_append, List.mem_map] at he
+    rcases he with ⟨he⟩ | ⟨p, hp, rfl⟩
+    · cases hb : body with
+      | none => rw [hb] at he; exact absurd he (by simp)
+      | some b =>
+        rw [hb, Option.toList_some, List.mem_singleton] at he
+        subst he
+        exact genLExpr_annotTyVars hscBody (hsigVars _ List.mem_cons_self)
+          (hbodyMem e (hBody.trans hb)) v hv
+    · exact (hpreOk p hp).2 v hv
+  case constrNoBody =>
+    intro h
+    rw [hConstr] at h
+    exact absurd h (by simp)
 
-/-- Soundness of `genFunction` at an empty operator context. This is a special case of
-    `genFunction_sound`, which needs no condition on `octx`. -/
+/-- Soundness of `genFunction` at an empty operator context and an empty polymorphic context. -/
 theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (hC : SimpleTyArities C)
-    (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx ∅ depth)) :
-    FuncHasTypeA C Γ func :=
-  genFunction_sound fctx ∅ depth C Γ [] hC func hfunc
+    (C : LContext CoreLParams) (ts : TypeScopes) (avoid : String → Bool)
+    (hctx : ExprCtxOk C ts fctx ∅ []) (func : Function)
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx ∅ depth [] avoid)) :
+    FuncHasTypeW C ts func :=
+  genFunction_sound fctx ∅ depth C ts [] avoid hctx (fun _ _ _ h => absurd h List.not_mem_nil)
+    func hfunc
 
 -- ── The lemmas for the completeness proof ────────────────────────────
 
@@ -350,7 +543,7 @@ theorem genIdents_complete (depth : Nat) (ids : List (Identifier Unit))
   simp only [genIdents, mem_support_map_iff]
   refine ⟨ids.map (·.name), hnames, ?_⟩
   -- The map back over the names gives `ids` again, because the metadata of an `Identifier Unit` is
-  -- `()`. `List.dedup` then leaves the list unchanged.
+  -- `()`. `List.uniq` then leaves the list unchanged.
   have hmapeq : (ids.map (·.name)).map (fun s => (⟨s, ()⟩ : Identifier Unit)) = ids := by
     clear hnames hnd
     induction ids with
@@ -546,104 +739,11 @@ theorem mem_support_genPrecondition_iff (octx : OpCtx)
       rw [mem_support_bind_iff]
       exact ⟨e', he', by rw [mem_support_pure_iff]⟩
 
--- ── The completeness of `genFunction` ────────────────────────────────
-
-/-- **Completeness of `genFunction`.** The support of `genFunction` holds each well-typed function
-    that meets two conditions. First, the fields that the generator does not vary hold their default
-    values. Second, the smaller generators can reach its name, its types, its body and its measure,
-    one part at a time.
-
-    The hypotheses about reachability follow `hExprComplete`, `hNameReach` and `hTyReach` of
-    `genCmd_complete`. They give exactly what the generator must be able to make, beyond good typing:
-    - `hNameReach`: `genIdentName` can reach the name of the function and each parameter name.
-    - `hTyArgsLen` and `hTyArgsReach`: the `typeArgs` list, which already holds no duplicate, is not
-      longer than `depth`, and `genIdentName` can reach each of its names.
-    - `hInputNamesLen` and `hInputNamesReach`: the same two conditions for the parameter names.
-    - `hInputTyReach` and `hOutputReach`: `genLMonoTy` can reach the output type and each input type.
-    - `hBodyReach` and `hMeasureReach`: `genLExpr` can reach the body and the measure, when the
-      function has them.
-    - `hPreLen` and `hPreReach`: the function has at most one `requires` clause, and `genLExpr` can
-      reach its expression at `.bool` **in the context of the formal parameters**, which is
-      `inputsAsFVarCtx func.inputs` and not `fctx`. A function whose precondition mentions an ambient
-      variable is therefore out of reach by design, and such a function also breaks
-      `FuncWF.precond_freevars`.
-
-    `mem_support_genNameList_iff` turns the conditions about `typeArgs` and about the input names into
-    concrete conditions: a bound on the length, and the reach of `genIdentName` for each name.
-
-    The annotated specification ignores the ambient context, so `bodyTyped` gives exactly
-    `HasTypeA [] body output`, and that is what the completeness of `genLExpr` needs. -/
-theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
-    (func : Function)
-    (hwt : FuncHasTypeA C Γ func)
-    -- The generator does not vary these fields, so each one must hold its default value.
-    (hConstr : func.isConstr = false)
-    (hRec : func.isRecursive = false)
-    (hAttr : func.attr = #[])
-    (hAxioms : func.axioms = [])
-    -- The generator does make the preconditions, but it makes at most one clause, because
-    -- `genPreconditions` emits an `Option.toList`. A longer list is therefore out of reach.
-    (hPreLen : func.preconditions.length ≤ 1)
-    -- The parts that the generator makes must be reachable.
-    (hNameReach : func.name.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
-    (hTyArgsLen : func.typeArgs.length ≤ depth)
-    (hTyArgsReach : ∀ s ∈ func.typeArgs, s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
-    (hInputNamesLen : (func.inputs.keys.map (·.name)).length ≤ depth)
-    (hInputNamesReach : ∀ s ∈ func.inputs.keys.map (·.name),
-      s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
-    (hInputTyReach : ∀ ty ∈ func.inputs.values,
-      ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
-    (hOutputReach : func.output ∈ SetGen.support (genLMonoTy (G := SetGen.Set) func.typeArgs depth))
-    (hBodyReach : ∀ b, func.body = some b →
-      b ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] func.typeArgs [] depth func.output))
-    (hMeasureReach : ∀ m, func.measure = some m →
-      m ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] func.typeArgs [] depth .int))
-    -- The generator makes a precondition over the *formal parameters*, which is
-    -- `inputsAsFVarCtx`, and not over `fctx`. See `genPrecondition` and
-    -- `FuncWF.precond_freevars`.
-    (hPreReach : ∀ p ∈ func.preconditions, p.expr ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) (inputsAsFVarCtx func.inputs) octx []
-        func.typeArgs [] depth .bool)) :
-    func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth) := by
-  simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff]
-  -- The witnesses are the parts of the function itself.
-  refine ⟨func.name.name, hNameReach,
-          func.typeArgs, ?_,
-          func.inputs, ?_,
-          func.output, hOutputReach,
-          func.body, ?_,
-          func.measure, ?_,
-          func.preconditions, ?_, ?_⟩
-  · -- `genTypeArgs` reaches the type arguments. They hold no duplicate, so `List.dedup` leaves
-    -- them unchanged.
-    exact genTypeArgs_complete depth func.typeArgs hwt.typeArgsNodup
-      (mem_support_genNameList_iff depth func.typeArgs |>.mpr ⟨hTyArgsLen, hTyArgsReach⟩)
-  · -- `genInputs` reaches the inputs.
-    exact genInputs_complete func.typeArgs depth func.inputs
-      hwt.inputsNodup
-      (mem_support_genNameList_iff depth _ |>.mpr ⟨hInputNamesLen, hInputNamesReach⟩)
-      hInputTyReach
-  · -- `genOptExpr` reaches the body.
-    exact genOptExpr_complete fctx octx func.typeArgs depth func.output func.body hBodyReach
-  · -- `genOptExpr` reaches the measure.
-    exact genOptExpr_complete fctx octx func.typeArgs depth .int func.measure hMeasureReach
-  · -- `genPreconditions` reaches the preconditions.
-    exact genPreconditions_complete octx func.inputs func.typeArgs depth
-      func.preconditions hPreLen hPreReach
-  · -- The record that the proof builds again equals `func`.
-    obtain ⟨fname, ftyArgs, fconstr, frec, finputs, foutput, fbody, fattr,
-            faxioms, fpre, fmeasure⟩ := func
-    obtain ⟨nm, nmeta⟩ := fname
-    simp only at hConstr hRec hAttr hAxioms ⊢
-    subst hConstr hRec hAttr hAxioms
-    rfl
-
 -- ── Function-level keyword-freedom ───────────────────────────────────
 
 /-- Every type-argument name produced by `genTypeArgs` is a non-keyword: the
     names come from `genNameList` (all non-keyword by `genNameList_not_keyword`),
-    and `List.dedup` only removes elements. -/
+    and `List.uniq` only removes elements. -/
 theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
     (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) :
     ∀ s ∈ l, isReservedKeyword s = false := by
@@ -654,14 +754,14 @@ theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
 
 /-- Every input-identifier name produced by `genIdents` is a non-keyword: each
     identifier `⟨s, ()⟩` comes from mapping over the `genNameList` names, and
-    `List.dedup` only removes elements. -/
+    `List.uniq` only removes elements. -/
 theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
     (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) :
     ∀ x ∈ l, isReservedKeyword x.name = false := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
   intro x hx
-  -- `x ∈ (names.map ⟨·,()⟩).dedup` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
+  -- `x ∈ (names.map ⟨·,()⟩).uniq` ⇒ `x ∈ names.map ⟨·,()⟩` ⇒ `x.name ∈ names`.
   have hx' : x ∈ names.map (fun s => (⟨s, ()⟩ : Identifier Unit)) :=
     (List.mem_of_dedup _ x).mpr hx
   obtain ⟨s, hs_mem, rfl⟩ := List.mem_map.mp hx'
@@ -673,21 +773,31 @@ theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
     condition on the body, on the measure or on a type of the function, and it is about the names at the position
     of an identifier only. -/
 theorem genFunction_names_not_keyword (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
+    (pctx : PolyOpCtx) (avoid : String → Bool)
     (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth)) :
+    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx octx depth pctx avoid)) :
     isReservedKeyword func.name.name = false ∧
     (∀ s ∈ func.typeArgs, isReservedKeyword s = false) ∧
     (∀ x ∈ func.inputs.keys, isReservedKeyword x.name = false) := by
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
   obtain ⟨name, hname, typeArgs, htypeArgs, inputs, hinputs,
-          output, _houtput, body, _hbody, measure, _hmeasure,
-          preconditions, _hpre, rfl⟩ := hfunc
-  refine ⟨genIdentName_not_keyword name hname, genTypeArgs_not_keyword depth typeArgs htypeArgs, ?_⟩
-  -- `inputs.keys = idents`, and each ident's name is non-keyword by `genIdents_not_keyword`.
-  simp only [genInputs, mem_support_bind_iff] at hinputs
-  obtain ⟨idents, hidents, hmap⟩ := hinputs
-  obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values typeArgs depth idents inputs hmap
-  rw [hkeys]
-  exact genIdents_not_keyword depth idents hidents
+          output, _, body, _, measure, _,
+          preconditions, _, rfl⟩ := hfunc
+  refine ⟨genIdentName_not_keyword name hname, ?_, ?_⟩
+  · -- The type arguments are a filter of a filter of the drawn names.
+    intro s hs
+    have hsRaw : s ∈ typeArgs := (List.mem_filter.mp (List.mem_filter.mp hs).1).1
+    exact genTypeArgs_not_keyword depth typeArgs htypeArgs s hsRaw
+  · -- The inputs are a filter of the drawn signature, whose keys are the drawn identifiers.
+    intro x hx
+    obtain ⟨y, hxy, _⟩ := mem_keys_filter _ inputs x hx
+    simp only [genInputs, mem_support_bind_iff] at hinputs
+    obtain ⟨idents, hidents, hmap⟩ := hinputs
+    obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values _ depth idents inputs hmap
+    have hxKey : x ∈ ListMap.keys inputs := by
+      rw [ListMap.keys_eq_map_fst]
+      exact List.mem_map_of_mem hxy
+    rw [hkeys] at hxKey
+    exact genIdents_not_keyword depth idents hidents x hxKey
 
 end StrataGenerators.Function

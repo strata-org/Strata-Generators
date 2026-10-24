@@ -1317,6 +1317,30 @@ theorem genFreshNames_length :
     obtain ⟨s, hs, rest, hrest, rfl⟩ := hnames
     simp [ih (s :: reserved) rest hrest]
 
+/-- `genParamPerms params n` always makes `n` lists, and each of them is a permutation of
+    `params`. -/
+theorem genParamPerms_support {params : List TyIdentifier} :
+    ∀ (n : Nat) (paramsList : List (List TyIdentifier)),
+      paramsList ∈ SetGen.support (genParamPerms (G := SetGen.Set) params n) →
+      paramsList.length = n ∧ ∀ ps ∈ paramsList, ps.Perm params := by
+  intro n
+  induction n with
+  | zero =>
+    intro paramsList hpl
+    simp only [genParamPerms, mem_support_pure_iff] at hpl
+    subst hpl
+    exact ⟨rfl, fun _ hps => absurd hps List.not_mem_nil⟩
+  | succ n ih =>
+    intro paramsList hpl
+    simp only [genParamPerms, mem_support_bind_iff, mem_support_pure_iff] at hpl
+    obtain ⟨p, _, rest, hrest, rfl⟩ := hpl
+    obtain ⟨hlen, hperm⟩ := ih rest hrest
+    refine ⟨by simp [hlen], ?_⟩
+    intro ps hps
+    rcases List.mem_cons.mp hps with rfl | hps'
+    · exact p.2.symm
+    · exact hperm ps hps'
+
 /-- `genParamsList reserved maxTyParams n` always makes a list of `n` parameter lists. -/
 theorem genParamsList_length :
     ∀ (n : Nat) (reserved : List String) (maxTyParams : Nat)
@@ -1324,17 +1348,10 @@ theorem genParamsList_length :
       paramsList ∈ SetGen.support
         (genParamsList (G := SetGen.Set) reserved maxTyParams n) →
       paramsList.length = n := by
-  intro n
-  induction n with
-  | zero =>
-    intro reserved maxTyParams paramsList hpl
-    simp only [genParamsList, mem_support_pure_iff] at hpl
-    subst hpl; rfl
-  | succ n ih =>
-    intro reserved maxTyParams paramsList hpl
-    simp only [genParamsList, mem_support_bind_iff, mem_support_pure_iff] at hpl
-    obtain ⟨numTyParams, _, params, _, rest, hrest, rfl⟩ := hpl
-    simp [ih reserved maxTyParams rest hrest]
+  intro n reserved maxTyParams paramsList hpl
+  simp only [genParamsList, mem_support_bind_iff] at hpl
+  obtain ⟨_, _, _, _, hperms⟩ := hpl
+  exact (genParamPerms_support n paramsList hperms).1
 
 /-- `genRanks` makes a list of exactly `n` ranks. -/
 theorem genRanks_length :
@@ -1391,6 +1408,30 @@ theorem genFreshNames_nodup :
     -- `s` is absent from the tail, because each name of the tail is absent from
     -- `s :: reserved`, and that list holds `s`.
     exact fun hmem => genFreshNames_fresh _ _ _ hrest s hmem (by simp)
+
+/-- The parameter lists from `genParamsList` are all permutations of one list of distinct
+    names, and `Core.isAllowedName` accepts each of those names. -/
+theorem genParamsList_common {reserved : List String} {maxTyParams n : Nat}
+    {paramsList : List (List TyIdentifier)}
+    (hpl : paramsList ∈ SetGen.support
+      (genParamsList (G := SetGen.Set) reserved maxTyParams n)) :
+    ∃ params : List TyIdentifier, params.Nodup ∧
+      (∀ p ∈ params, Core.isAllowedName p = true) ∧
+      ∀ ps ∈ paramsList, ps.Perm params := by
+  simp only [genParamsList, mem_support_bind_iff] at hpl
+  obtain ⟨numTyParams, _, rawParams, hraw, hperms⟩ := hpl
+  refine ⟨rawParams.filter Core.isAllowedName,
+    (genFreshNames_nodup numTyParams reserved rawParams hraw).filter _, ?_,
+    (genParamPerms_support n paramsList hperms).2⟩
+  intro p hp
+  exact (List.mem_filter.mp hp).2
+
+/-- Two lists without duplicates that hold the same members are permutations of each other. -/
+theorem perm_of_nodup_of_mem_iff {α : Type} [BEq α] [LawfulBEq α] {l₁ l₂ : List α}
+    (d₁ : l₁.Nodup) (d₂ : l₂.Nodup) (h : ∀ a, a ∈ l₁ ↔ a ∈ l₂) : l₁.Perm l₂ := by
+  rw [List.perm_iff_count]
+  intro a
+  simp only [d₁.count, d₂.count, h a]
 
 /-- Membership in `visibleRefs headers params`. A block reference `br` is visible exactly
     when it comes from a header whose parameters are a subset of `params`. It then has the
@@ -1887,6 +1928,46 @@ theorem genMutuallyRecursiveDatatypes_shape {baseTypes : List String} {tyCons : 
     obtain ⟨⟨hr, hhr, h1, h2⟩, _⟩ := hbshape d hd
     exact ⟨hr.1, hrhsub hr hhr, h1, h2⟩
   · intro d hd c hc arg harg; exact (hbshape d hd).2 c hc arg harg
+
+/-- The datatypes of a block from `genMutuallyRecursiveDatatypes` all declare permutations of
+    one list of distinct type parameters, and `Core.isAllowedName` accepts each of them. -/
+theorem genMutuallyRecursiveDatatypes_typeParams {baseTypes : List String}
+    {tyCons : List KnownTyCon}
+    {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
+    {extraReserved : List String} {block : MutualDatatype Unit}
+    (hb : block ∈ SetGen.support (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+            maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
+            maxSize extraReserved)) :
+    ∃ params : List TyIdentifier, params.Nodup ∧
+      (∀ p ∈ params, Core.isAllowedName p = true) ∧
+      ∀ d ∈ block, d.typeArgs.Perm params := by
+  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
+  obtain ⟨_, _, names, _, paramsList, hparams, ranks, _, hbodies⟩ := hb
+  let headers : List TypeConstructor :=
+    (names.zip paramsList).map (fun p => { name := p.1, params := p.2 })
+  have hrhsub : ∀ hr ∈ headers.zip ranks, hr.1 ∈ headers :=
+    fun hr hhr => (List.of_mem_zip hhr).1
+  have hbshape := genConstructorsForAllTypes_shape hrhsub (headers.zip ranks) block hrhsub hbodies
+  obtain ⟨params, hnodup, hallowed, hperm⟩ := genParamsList_common hparams
+  refine ⟨params, hnodup, hallowed, ?_⟩
+  intro d hd
+  obtain ⟨⟨hr, hhr, -, hparamsEq⟩, -⟩ := hbshape d hd
+  -- The header of `d` is a member of `headers`, therefore its parameters are one of the
+  -- drawn lists.
+  obtain ⟨pair, hpair, hpairEq⟩ := List.mem_map.mp (hrhsub hr hhr)
+  have hmemPL : hr.1.params ∈ paramsList := by
+    rw [← hpairEq]; exact (List.of_mem_zip hpair).2
+  rw [← hparamsEq]
+  exact hperm _ hmemPL
+
+/-- A name that `Core.isAllowedName` accepts starts with neither `Lambda.genTyPrefix` nor
+    `Lambda.elimTyPrefix`. -/
+theorem not_reserved_tyPrefix_of_isAllowedName {v : String} (h : Core.isAllowedName v = true) :
+    genTyPrefix.toList.isPrefixOf v.toList = false ∧
+      elimTyPrefix.toList.isPrefixOf v.toList = false := by
+  simp only [Core.isAllowedName_eq_toList, Core.reservedNamePrefixes, List.any_cons,
+    List.any_nil, Bool.or_false, Bool.not_eq_true', Bool.or_eq_false_iff] at h
+  exact ⟨h.1, h.2.2⟩
 
 /-- **The main theorem for soundness, which gives `argsWF`.** Each constructor argument type
     of a block from `genMutuallyRecursiveDatatypes` is well-formed for that block. This
@@ -2899,9 +2980,15 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
     · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp h
       exact Or.inr (Or.inl (Or.inr (List.mem_map.mpr ⟨kc, hsubTC kc hkc, rfl⟩)))
     · exact Or.inr (Or.inr h)
+  obtain ⟨params, hpnodup, hpallowed, hpperm⟩ := genMutuallyRecursiveDatatypes_typeParams hb
   refine
     { nonempty := hne
       namesNodup := by rw [hbnames]; exact hnodupH
+      typeArgsAgree := fun d hd d' hd' _ =>
+        (hpperm d hd).mem_iff.trans (hpperm d' hd').mem_iff.symm
+      typeArgsNodup := fun d hd => (hpperm d hd).nodup_iff.mpr hpnodup
+      typeArgsNotReserved := fun d hd v hv =>
+        not_reserved_tyPrefix_of_isAllowedName (hpallowed v ((hpperm d hd).mem_iff.mp hv))
       namesFresh := ?_
       namesNew := ?_
       argVarsScoped := genMutuallyRecursiveDatatypes_argVarsScoped hb
@@ -3083,6 +3170,9 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
   refine
     { nonempty := ?_
       namesNodup := (hnamesperm.nodup_iff).mp h.namesNodup
+      typeArgsAgree := fun d hd d' hd' => h.typeArgsAgree d (hmem hd) d' (hmem hd')
+      typeArgsNodup := fun d hd => h.typeArgsNodup d (hmem hd)
+      typeArgsNotReserved := fun d hd => h.typeArgsNotReserved d (hmem hd)
       namesFresh := fun d hd => h.namesFresh d (hmem hd)
       namesNew := fun d hd => h.namesNew d (hmem hd)
       argVarsScoped := fun d hd => h.argVarsScoped d (hmem hd)
@@ -4604,35 +4694,52 @@ theorem genConstructorsForAllTypes_complete {baseTypes : List String} {tyCons : 
 
 /-! ### Completeness of phase 1 and of the full generator -/
 
-/-- **Completeness of `genParamsList`.** The generator can make a target list of parameter lists
-    `paramsList` at the count `paramsList.length`, under three conditions. The length of each
-    inner list is not more than `maxTyParams`. Each inner list obeys `Nodup`. Each of its members
-    is an identifier that the generator can reach, and each member is absent from `reserved`.
-
-    Each `chooseNat` picks the length of one inner list, and `genFreshNames_complete` reaches that
-    list. The proof is an induction on `paramsList`. -/
-theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat} :
+/-- **Completeness of `genParamPerms`.** The generator can make each list of permutations of
+    `params`, at the count of that list. Each draw of `permutationOf` reaches its permutation,
+    which `permutationOf_complete` gives. -/
+theorem genParamPerms_complete {params : List TyIdentifier} :
     ∀ (paramsList : List (List TyIdentifier)),
-      (∀ params ∈ paramsList, params.length ≤ maxTyParams) →
-      (∀ params ∈ paramsList, params.Nodup) →
-      (∀ params ∈ paramsList, ∀ p ∈ params, p ∈ SetGen.support (genIdentName (G := SetGen.Set))) →
-      (∀ params ∈ paramsList, ∀ p ∈ params, p ∉ reserved) →
+      (∀ ps ∈ paramsList, ps.Perm params) →
       paramsList ∈ SetGen.support
-        (genParamsList (G := SetGen.Set) reserved maxTyParams paramsList.length) := by
+        (genParamPerms (G := SetGen.Set) params paramsList.length) := by
   intro paramsList
   induction paramsList with
   | nil =>
-    intro _ _ _ _
-    simp only [List.length_nil, genParamsList, mem_support_pure_iff]
-  | cons params rest ih =>
-    intro hlen hnodup hident hfresh
-    simp only [List.length_cons, genParamsList, mem_support_bind_iff, mem_support_pure_iff]
-    refine ⟨params.length, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, hlen params (by simp)⟩,
-      params, ?_, rest, ?_, rfl⟩
-    · exact genFreshNames_complete params reserved (hnodup params (by simp))
-        (fun p hp => hident params (by simp) p hp) (fun p hp => hfresh params (by simp) p hp)
-    · exact ih (fun p hp => hlen p (by simp [hp])) (fun p hp => hnodup p (by simp [hp]))
-        (fun p hp => hident p (by simp [hp])) (fun p hp => hfresh p (by simp [hp]))
+    intro _
+    simp only [List.length_nil, genParamPerms, mem_support_pure_iff]
+  | cons ps rest ih =>
+    intro hperm
+    simp only [List.length_cons, genParamPerms, mem_support_bind_iff, mem_support_pure_iff]
+    have hps : params.Perm ps := (hperm ps List.mem_cons_self).symm
+    refine ⟨⟨ps, hps⟩, permutationOf_complete params ps hps, rest, ?_, rfl⟩
+    exact ih (fun ps' hps' => hperm ps' (List.mem_cons_of_mem _ hps'))
+
+/-- **Completeness of `genParamsList`.** Take a list `params` of distinct names under the limit
+    `maxTyParams`, each an identifier that the generator can reach, absent from `reserved`, and
+    accepted by `Core.isAllowedName`. Then the generator can make each list of permutations of
+    `params`, at the count of that list.
+
+    The generator draws `params` itself through `genFreshNames_complete`, the filter by
+    `Core.isAllowedName` keeps all of it, and `genParamPerms_complete` reaches the
+    permutations. -/
+theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat}
+    {params : List TyIdentifier}
+    (hlen : params.length ≤ maxTyParams)
+    (hnodup : params.Nodup)
+    (hident : ∀ p ∈ params, p ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hfresh : ∀ p ∈ params, p ∉ reserved)
+    (hallowed : ∀ p ∈ params, Core.isAllowedName p = true) :
+    ∀ (paramsList : List (List TyIdentifier)),
+      (∀ ps ∈ paramsList, ps.Perm params) →
+      paramsList ∈ SetGen.support
+        (genParamsList (G := SetGen.Set) reserved maxTyParams paramsList.length) := by
+  intro paramsList hperm
+  simp only [genParamsList, mem_support_bind_iff]
+  have hfilter : params.filter Core.isAllowedName = params := List.filter_eq_self.mpr hallowed
+  refine ⟨params.length, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, hlen⟩, params,
+    genFreshNames_complete params reserved hnodup hident hfresh, ?_⟩
+  rw [hfilter]
+  exact genParamPerms_complete paramsList hperm
 
 /-- **Completeness of `genRanks`.** The generator can make a target list of ranks `ranks` at the
     count `ranks.length`, when each rank is not more than `maxRank`. Each `chooseNat` picks one
@@ -4694,8 +4801,10 @@ theorem blockHeaders_getElem (block : MutualDatatype Unit) (i : Nat)
       pairs, and they are absent from `initialReserved`. `MutualADTWF` gives `namesNodup`, and
       the name pool of the generator needs the other two facts.
     * the number of type parameters of each datatype is not more than `maxTyParams`, those
-      parameters are identifiers that the generator can reach, they are different in pairs, and
-      they are absent from the block names and from `initialReserved`;
+      parameters are identifiers that the generator can reach, they are different in pairs,
+      `Core.isAllowedName` accepts them, and they are absent from the block names and from
+      `initialReserved`;
+    * all the datatypes declare the same type parameters, up to order;
     * the caller gives a list `ranks`, one rank for each datatype, and each rank is not more than
       `block.length - 1`;
     * each datatype body divides, up to a permutation, into an inhabited constructor and the
@@ -4712,7 +4821,8 @@ theorem blockHeaders_getElem (block : MutualDatatype Unit) (i : Nat)
     names for each inhabited constructor.
 
     Phase 1 draws `numExtra := block.length - 1`, `names := block.map (·.name)` and
-    `paramsList := block.map (·.typeArgs)`. Phase 2 is
+    `paramsList := block.map (·.typeArgs)`, whose lists are permutations of the parameters of
+    the first datatype. Phase 2 is
     `genConstructorsForAllTypes_complete`. -/
 theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     {tyCons : List KnownTyCon}
@@ -4728,6 +4838,8 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
+    (hparamsAgree : ∀ d ∈ block, ∀ d' ∈ block, ∀ v, v ∈ d.typeArgs ↔ v ∈ d'.typeArgs)
+    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Core.isAllowedName p = true)
     (ranks : List Nat)
     (hrankslen : ranks.length = block.length)
     (hranksle : ∀ r ∈ ranks, r ≤ block.length - 1)
@@ -4778,13 +4890,16 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     -- under the limit, and the length of the list agrees with the length of `names`.
     have hnameslen : (block.map (·.name)).length = (block.map (·.typeArgs)).length := by simp
     rw [hnameslen]
-    exact genParamsList_complete _
-      (fun params hp => by obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsLen d hd)
-      (fun params hp => by obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsNodup d hd)
-      (fun params hp p hpp => by
-        obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsIdent d hd p hpp)
-      (fun params hp p hpp => by
-        obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsFresh d hd p hpp)
+    -- Every list of parameters is a permutation of the parameters of the first datatype `d₀`,
+    -- because the lists hold the same members and each has no duplicate.
+    have hd₀ : block.head hne ∈ block := List.head_mem hne
+    refine genParamsList_complete (params := (block.head hne).typeArgs)
+      (hparamsLen _ hd₀) (hparamsNodup _ hd₀) (hparamsIdent _ hd₀) (hparamsFresh _ hd₀)
+      (hparamsAllowed _ hd₀) _ ?_
+    intro ps hps
+    obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hps
+    exact perm_of_nodup_of_mem_iff (hparamsNodup d hd) (hparamsNodup _ hd₀)
+      (hparamsAgree d hd _ hd₀)
   -- Here `ranks` is the list of ranks that the caller gives, and the generator draws
   -- `names.length` ranks.
   refine ⟨ranks, ?_, ?_⟩
@@ -4849,6 +4964,7 @@ open Core Core.TypeSpec in
     is `hnew`. Each of its constructors obeys `hasDefaultTesterName`, and the block is under the
     limits on the datatypes, the parameters and the constructors. Its names and its parameters
     are identifiers that the generator can reach, and they are fresh against `initialReserved`.
+    `Core.isAllowedName` accepts its parameters.
 
     Then `genMutuallyRecursiveDatatypes` can make that block at some size `maxSize`. This proof
     **builds the rank itself**, through `rankExists`. The caller gives no order of the datatypes,
@@ -4869,10 +4985,10 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
     (hnamesIdent : ∀ d ∈ block, d.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hnamesFresh : ∀ d ∈ block, d.name ∉ initialReserved baseTypes tyCons extraReserved)
     (hparamsLen : ∀ d ∈ block, d.typeArgs.length ≤ maxTyParams)
-    (hparamsNodup : ∀ d ∈ block, d.typeArgs.Nodup)
     (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
+    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Core.isAllowedName p = true)
     (hctors_nf : ∀ d ∈ block, ∀ c ∈ d.constrs, hasDefaultTesterName c)
     (hctors_len : ∀ d ∈ block, ∀ c ∈ d.constrs, c.args.length ≤ maxArgs)
     (hnames_ident : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
@@ -5041,7 +5157,8 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
         exact ⟨S, cw, hcw, hcwl, hSw, hSf⟩)
   -- Apply the completeness with the ranks as a parameter, at `maxSize := N`.
   refine ⟨N, genMutuallyRecursiveDatatypes_complete hwf.nonempty hcount hnodup hnamesIdent
-    hnamesFresh hparamsLen hparamsNodup hparamsIdent hparamsFresh ranks hrankslen hranksle ?_⟩
+    hnamesFresh hparamsLen hwf.typeArgsNodup hparamsIdent hparamsFresh hwf.typeArgsAgree
+    hparamsAllowed ranks hrankslen hranksle ?_⟩
   intro i hi hi'
   have hd : (block[i]'hi) ∈ block := List.getElem_mem hi
   obtain ⟨cw, hcw, _hcwl, hNwit, hNfull⟩ := hN (block[i]'hi) hd

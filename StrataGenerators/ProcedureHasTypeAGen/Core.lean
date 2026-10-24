@@ -24,14 +24,15 @@ procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
 
 ## Design: in-out parameters via three disjoint signature blocks
 
-`ProcHasType'` has eight obligations (see `ProcHasType'`). The generator produces:
+The generator meets the obligations of `ProcHasType'` as follows:
 
 - The type arguments are a list of type-variable names that holds no duplicate, from `genTypeArgs`, exactly as
   in `genFunction`. That list discharges the field about distinct type arguments. `genLMonoTy typeArgs` draws
   each input type and each output type over those type arguments, so the field about an undeclared variable
   holds.
 - Three signature blocks whose keys are disjoint in pairs. `genInputs typeArgs` gives each of them with distinct
-  keys, and the filter `disjointInputs` makes them disjoint:
+  keys, `avoidFunctionNames` drops each parameter named after a function of `C`
+  (`formalsNotFunctions`), and the filter `disjointInputs` makes them disjoint:
   * The in-out block holds each parameter that has *both* roles.
   * The input-only block holds each parameter with the input role only, and the filter makes its keys disjoint
     from the keys of the in-out block.
@@ -43,9 +44,11 @@ procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
   `inputsNodup`/`outputsNodup` (each is an append of two disjoint `Nodup`-keyed
   blocks).
 - The preconditions and the postconditions are labelled expressions of the type `bool`, from `genChecks`.
-  **Both** obligations reduce, under the annotated specification, whose `exprTyped` reads no context, to
-  `HasTypeA [] c.expr bool`. That is exactly what `genLExpr … .bool` gives, so neither obligation depends on the
-  context of the inputs or of the body.
+  **Both** obligations reduce, under the annotated specification, whose `exprTyped` reads no type scope, to
+  `HasTypeA [] c.expr bool` together with every binder annotation of `c.expr` being registered.
+  `genLExpr … .bool` gives the first, and `generableOrTrue` gives the second, so neither obligation depends on
+  the context of the inputs or of the body. The annotation obligations hold trivially in the annotated
+  reading.
 - The body is a `structured` list of statements. Its length is not more than the given length, and its initial
   scope holds the inputs, the outputs and the old bindings of the in-out block. That scope follows the
   declarative `procBodyContext`, whose scope for a body holds the scope of the inputs, of the outputs and of
@@ -93,6 +96,12 @@ def disjointInputs (inputs : ListMap (Identifier Unit) LMonoTy)
 def oldVars (M : ListMap (Identifier Unit) LMonoTy) : ListMap (Identifier Unit) LMonoTy :=
   M.map (fun (id, ty) => (CoreIdent.mkOld id.name, ty))
 
+/-- The signature `sig` without the parameters named after a function of `C`. The procedure rule
+    bans a formal parameter with the name of a function in scope. -/
+def avoidFunctionNames (C : LContext CoreLParams) (sig : ListMap (Identifier Unit) LMonoTy) :
+    ListMap (Identifier Unit) LMonoTy :=
+  sig.filter (fun p => !(functionNames C).contains p.1.name)
+
 /-- Project a parameter signature to the expression-layer `FVarCtx` a contract
     clause reads its free variables from. Each entry of the signature becomes an entry of that context.
 
@@ -108,15 +117,17 @@ def sigFctx (sig : @LMonoTySignature Unit) : FVarCtx :=
     expression drawn from `genLExpr … .bool`. Labels come from `genNameList`; the
     `attr`/`md` fields are left at their defaults (`.Default` / `#[]`).
 
-    Every generated clause is a well-typed `bool` expression in the *empty* bvar
-    context, so it satisfies both `preconditionsTyped` and `postconditionsTyped`
-    under the annotated typing spec (which ignores the ambient context). -/
+    The typing rule asks every binder annotation of a clause to be a registered type, so a
+    clause is kept only when `binderAnnotsGenerable` holds of it, and it is `true` otherwise
+    (`generableOrTrue`). Every generated clause is then a well-typed `bool` expression in the
+    *empty* bvar context whose binder annotations are registered, so it satisfies both
+    `preconditionsTyped` and `postconditionsTyped` under the annotated typing spec. -/
 def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (pctx : PolyOpCtx := []) : G (ListMap CoreLabel Procedure.Check) := do
   let labels ← genNameList depth
   labels.mapM (fun l => do
     let e ← genLExpr fctx octx pctx tvars [] depth .bool
-    pure (l, ({ expr := e } : Procedure.Check)))
+    pure (l, ({ expr := generableOrTrue e } : Procedure.Check)))
 
 /-- Generate a well-typed `Procedure`.
 
@@ -126,6 +137,7 @@ def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
     - The inputs are a signature with distinct keys, whose types are over the type arguments, from
       `genInputs typeArgs size`. The filter `disjointInputs` makes its keys disjoint from the keys of the
       outputs, so this call gives no in-out parameter.
+    - No parameter is named after a function of `C`; `avoidFunctionNames` drops those.
     - The preconditions and the postconditions are labelled expressions of the type `bool` over the type
       arguments, from `genChecks`.
     - The body is a `structured` list of statements. Its length is not more than the given length, the generator
@@ -141,10 +153,10 @@ def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
       them, and an empty context gives a body with no call. The generated body is sound against each program for
       which `ProcSigCorresponds procs P` holds. Read `genProcedure_sound`.
 
-    `noFilter` / statement `MetaData` are at their defaults.
+    `lemmas` and the statement `MetaData` are at their defaults.
 
-    The body is generated under the *ambient* context `C` (its type parameters
-    marked rigid) rather than a hardcoded `LContext.default`, so a caller can thread
+    The body is generated under the *ambient* context `C` (with its type parameters
+    added to the rigid type variables) rather than a hardcoded `LContext.default`, so a caller can thread
     in the context under which the surrounding program is being checked; the ambient
     type-scope `Γ` is likewise threaded to the soundness statement (see
     `genProcedure_sound`). Passing `LContext.default` and `{}` recovers the old
@@ -159,11 +171,12 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
   -- Three mutually-disjoint signature blocks. `M` is the in-out block (parameters
   -- that appear in *both* `inputs` and `outputs`); `I` is input-only; `O` is
   -- output-only. Disjointness is forced by filtering each later block by the
-  -- keys already committed (`disjointInputs`), so all three share no key.
-  let inout ← genInputs typeArgs size
-  let rawInputOnly ← genInputs typeArgs size
+  -- keys already committed (`disjointInputs`), so all three share no key. No formal parameter
+  -- is named after a function of `C` (`avoidFunctionNames`).
+  let inout := avoidFunctionNames C (← genInputs typeArgs size)
+  let rawInputOnly := avoidFunctionNames C (← genInputs typeArgs size)
   let inputOnly := disjointInputs rawInputOnly inout
-  let rawOutputOnly ← genInputs typeArgs size
+  let rawOutputOnly := avoidFunctionNames C (← genInputs typeArgs size)
   let outputOnly := disjointInputs rawOutputOnly (inout ++ inputOnly)
   -- The shared in-out block `M` leads both signatures (`inputs = M ++ I`,
   -- `outputs = M ++ O`), so the shared parameters occupy the same leading
@@ -196,18 +209,17 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) procs []
     -- The procedure's type parameters are *rigid* inside its body: unification
     -- must not refine them (a caller may instantiate them at any type), so the
-    -- body is generated under a context marking `typeArgs` rigid. This matches
-    -- `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters
-    -- before checking the body, and pins a generated `init`'s stored type to its
-    -- annotation (see `genProcedure_complete` / the statement-level `hRigid`).
-    ({ C with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) pctx size len
+    -- body is generated under a context that adds `typeArgs` to the rigid type
+    -- variables, as the procedure rule (`ProcHasType'.bodyTyped`) checks it.
+    ({ C with rigidTypeVars := C.rigidTypeVars ++ typeArgs })
+    (inputs ++ outputs ++ oldVars inout) pctx size len
   pure {
     header := {
       name := ⟨name, ()⟩,
       typeArgs := typeArgs,
       inputs := inputs,
       outputs := outputs,
-      noFilter := false
+      lemmas := []
     },
     spec := {
       preconditions := preconditions,

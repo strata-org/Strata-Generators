@@ -31,8 +31,8 @@ The oracle finds an error in about half of the programs from the `Arbitrary GenP
 instance, which draws 2 to 5 declarations. The rate is higher at 6 declarations, because each
 declaration is another chance to reach a construct that the printer cannot write. Compare a
 run against the rate for the number of declarations that the run drew. The errors come from
-seven different sites: `lmonoTyToCoreType`, `lconstToExpr`, `handleUnaryOps`,
-`handleBitvecBinaryOps`, `lopToExpr`, `extractTriggerPatterns` and `funcDeclToStatement`.
+six different sites: `lmonoTyToCoreType`, `lconstToExpr`, `handleUnaryOps`,
+`handleBitvecBinaryOps`, `lopToExpr` and `extractTriggerPatterns`.
 
 Almost each program with an error also fails to parse again, so the round-trip property
 already reports those programs, but it cannot say why. The few programs that parse again are
@@ -132,7 +132,7 @@ def checkProgramPrintsWithoutError (prog : Program) : Bool :=
     them to report *which* constructs the printer cannot write, and not only the number of
     programs with an error. -/
 def programErrorLines (prog : Program) : List String :=
-  (strataErrorLines (Core.formatProgram prog).pretty).dedup
+  (strataErrorLines (Core.formatProgram prog).pretty).uniq
 
 -- ── The witnesses for the two gaps ────────────────────────────────────────
 -- These checks use a fixed input and not a generated one, on purpose. Both gaps are about a

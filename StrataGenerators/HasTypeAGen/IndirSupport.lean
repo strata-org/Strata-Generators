@@ -1,6 +1,7 @@
 import StrataGenerators.SetGen
 import StrataGenerators.HasTypeAGen.Core
 import Strata.DL.Lambda.LTyUnify
+import Mathlib.Data.List.Forall2
 
 /-!
 # The lemmas for the `Indir` and `IndirPoly` rules, over any argument generator

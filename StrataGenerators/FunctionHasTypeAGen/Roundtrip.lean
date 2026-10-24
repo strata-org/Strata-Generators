@@ -57,17 +57,8 @@ def formatFunc (func : Function) : String :=
 
 /-- Puts a list of statements into the body of a trivial procedure `p`, in a `Program` with one
     declaration, and prints it with `Core.formatProgram`. The result is the real concrete syntax of
-    Strata Core for the statements, so a `funcDecl`, a `block`, a `while` and each other statement
-    appear as the grammar gives them, and not in a form that this package invents.
-
-    One limit applies, and it shows a real limitation and not a defect of the output. The CST
-    formatter of Core cannot write a **`funcDecl` statement with no body**. The grammar rule
-    `funcDecl_statement` needs a body, so `funcDeclToStatement` writes a placeholder `body`
-    expression and it logs an internal error for a `funcDecl` whose declaration has no body. Such a
-    statement is exactly the counterexample to the completeness of the type checker, which is a
-    `funcDecl` with a measure and no body. Its printed form therefore shows a placeholder body. The
-    `[body=…]` tag on the counterexample, which the `Repr` instance of the harness writes, gives the
-    true shape. -/
+    Strata Core for the statements, so a `block`, a `while` and each other statement
+    appear as the grammar gives them, and not in a form that this package invents. -/
 def formatStmtsAsProgram (ss : List Statement) : String :=
   let proc : Core.Procedure :=
     { header := { name := ⟨"p", ()⟩, typeArgs := [], inputs := [], outputs := [] },
@@ -77,8 +68,8 @@ def formatStmtsAsProgram (ss : List Statement) : String :=
   (Core.formatProgram prog).pretty
 
 /-- Prints a list of statements with the formatter of Strata, and removes the `program Core;`
-    header. A report of a counterexample uses the result as a label. The output holds a `funcDecl`, a
-    `block`, a `while` and each other statement in the real concrete syntax of Core. -/
+    header. A report of a counterexample uses the result as a label. The output holds a `block`, a
+    `while` and each other statement in the real concrete syntax of Core. -/
 def formatStmts (ss : List Statement) : String :=
   let s := formatStmtsAsProgram ss
   if s.startsWith "program Core;\n\n" then

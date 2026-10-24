@@ -338,9 +338,10 @@ theorem genProcedureT_tuned_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
     `dite`, and the `set` branches *use* that `dite`'s proof, so the proof splits on the condition first.
     §1 does the same for `genPrecondition`. -/
 theorem genCmd_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx) :
-    genCmd.tuned (G := SetGen.Set) θ octx tvars immutableVars ctx depth pctx
-      = genCmd octx tvars immutableVars ctx depth pctx := by
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx)
+    (avoid : List String) :
+    genCmd.tuned (G := SetGen.Set) θ octx tvars immutableVars ctx depth pctx avoid
+      = genCmd octx tvars immutableVars ctx depth pctx avoid := by
   unfold genCmd genCmd.tuned
   by_cases h : (ctx.writable immutableVars).length > 0
   · simp only [dif_pos h]
@@ -355,10 +356,10 @@ theorem genCmd_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
 /-- At every `θ`, the tuned command *chain* is `genCmds`, for any chain length. Proved by induction on
     the length. -/
 theorem genCmdsT_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (depth : Nat) :
+    (immutableVars : List (Identifier Unit)) (depth : Nat) (avoid : List String) :
     ∀ (n : Nat) (ctx : VarCtx),
-      genCmdsT (G := SetGen.Set) θ octx tvars immutableVars ctx depth n
-        = genCmds octx tvars immutableVars ctx depth n := by
+      genCmdsT (G := SetGen.Set) θ octx tvars immutableVars ctx depth n avoid
+        = genCmds octx tvars immutableVars ctx depth n avoid := by
   intro n
   induction n with
   | zero => intro ctx; rfl
@@ -399,7 +400,9 @@ set_option maxHeartbeats 1000000 in
 
     The proof uses `refine congrFun (congrFun …)` rather than `apply`, because the equation compiler
     moved `bctx` and the target type into `Nat.brecOn`'s motive. `delta` therefore leaves them applied
-    outside the `brecOn`. -/
+    outside the `brecOn`. The shipping side's step function is its own constant `genLExprBase._f`, so
+    it is unfolded as well; otherwise a catch-all arm, whose target type stays abstract, cannot
+    reduce it. -/
 theorem genLExprBase_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) :
     genLExprBase.tuned (G := SetGen.Set) θ fctx octx pctx tvars bctx n τ
@@ -408,6 +411,7 @@ theorem genLExprBase_tuned_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pct
   refine congrFun (congrFun (SetGen.brecOn_congr ?heq n) bctx) τ
   case heq =>
     funext m below bctx' τ'
+    delta genLExprBase._f
     dsimp only
     split
     all_goals first

@@ -13,24 +13,23 @@ import Strata.Languages.Core.Verifier
 `ChangedFlagValid` says that the `Bool` means "this phase changed the program", which is
 `changed = true ↔ progOut ≠ progIn`.
 
-Four phases return the literal `true`, and they do so whether or not they changed anything.
-The property `proc: FilterProcedures changed flag is faithful` already pins
-`FilterProcedures`. This module covers the other three phases. More importantly, it states
-the contract **uniformly over a list of phases**, so it also covers a phase that someone
-adds later and no one must write a new property.
+Five phases return the literal `true`, and they do so whether or not they changed anything.
+This module states the contract **uniformly over a list of phases**, so it also covers a phase
+that someone adds later and no one must write a new property.
 
 | Phase | Flag |
 |---|---|
-| `FilterProcedures` | `return (true, filtered)` |
 | `RemoveIrrelevantAxioms` | `return (true, pruned)` |
 | `typeCheck` | `return (true, prog')` |
 | `symbolicEval` | `return (true, prog')` |
+| `nondetElim` | `return (true, { decls := decls })` |
+| `betaReduce` | `return (true, Core.BetaReduce.betaReduceProgram prog)` |
 
-Each *other* phase computes the flag correctly, and this is what makes these four phases
+Each *other* phase computes the flag correctly, and this is what makes these five phases
 look like an oversight and not a different convention. `CSE.runCSE` uses
 `changed || idx' > idx`. `loopElim`, `insertLoopInvariantAsserts`, `CallElim` and
 `ProcedureInlining` thread the flag through `runProgramUntil`, which collects `anyChanged`.
-`PrecondElim` and `TermCheck` each compute their own flag.
+`FilterProcedures`, `PrecondElim` and `TermCheck` each compute their own flag.
 
 ## How serious the defect is
 
@@ -79,12 +78,16 @@ structure NamedPhase where
     verification conditions, into the output of the harness on each trial. -/
 def phaseOptions : Core.VerifyOptions := Core.VerifyOptions.quiet
 
-/-- A list of target procedures. A value for `procs` is what makes `corePipelinePhases` hold
-    the two `FilterProcedures` phases. With `procs := none`, those two phases are absent and
-    the sweep misses the one site that a report already names. `"P0"` is the first procedure
-    name that `relabelProcs` gives, so on generated input this is a real target and not a name
-    that filters each procedure away. -/
+/-- A list of target procedures. A value for `proceduresToVerify` is what makes
+    `corePipelinePhases` hold the two `FilterProcedures` phases. With `none`, those two phases
+    are absent and the sweep misses the one site that a report already names. `"P0"` is the
+    first procedure name that `relabelProcs` gives, so on generated input this is a real target
+    and not a name that filters each procedure away. -/
 def phaseTargets : List String := ["P0"]
+
+/-- `phaseOptions` with `phaseTargets` as the procedures to verify. -/
+def phaseTargetOptions : Core.VerifyOptions :=
+  { phaseOptions with proceduresToVerify := some phaseTargets }
 
 /-- The phase of `corePipelinePhases` whose name is `name`, or `none`.
 
@@ -94,18 +97,20 @@ def phaseTargets : List String := ["P0"]
     package and not the code of Strata. If Strata renames or removes a phase, this function
     returns `none` and the suite skips the property, and it does not test another phase. -/
 def verifierPhase (name : String) : Option Core.PipelinePhase :=
-  (Core.corePipelinePhases (procs := some phaseTargets) (options := phaseOptions)).find?
+  (Core.corePipelinePhases (options := phaseTargetOptions)).find?
     (fun ph => ph.phase.name == name)
 
-/-- The phases that set `changed := true` without a test, as far as a name addresses them.
-    `FilterProcedures` needs a list of targets, and each check gives that list from the program
-    under test. -/
+/-- The phases that set `changed := true` without a test, as far as a name addresses them. -/
 def hardcodedPhases : List NamedPhase :=
   [ ⟨"RemoveIrrelevantAxioms", Core.irrelevantAxiomsPipelinePhase []⟩ ]
   ++ (match verifierPhase "typeCheck" with
       | some ph => [⟨"typeCheck", ph⟩] | none => [])
   ++ (match verifierPhase "symbolicEval" with
       | some ph => [⟨"symbolicEval", ph⟩] | none => [])
+  ++ (match verifierPhase "nondetElim" with
+      | some ph => [⟨"nondetElim", ph⟩] | none => [])
+  ++ (match verifierPhase "betaReduce" with
+      | some ph => [⟨"betaReduce", ph⟩] | none => [])
 
 /-- Each phase of the standard Core pipeline, for the uniform sweep. This list is what keeps
     the property correct in the future: the sweep covers a phase that someone adds to
@@ -120,7 +125,7 @@ def hardcodedPhases : List NamedPhase :=
     tests both configurations. Two labels can therefore be equal, and `violators` removes a
     duplicate for the report. -/
 def allCorePhases : List NamedPhase :=
-  (Core.corePipelinePhases (procs := some phaseTargets) (options := phaseOptions)).map
+  (Core.corePipelinePhases (options := phaseTargetOptions)).map
     (fun ph => ⟨ph.phase.name, ph⟩)
   ++ [⟨"RemoveIrrelevantAxioms", Core.irrelevantAxiomsPipelinePhase phaseTargets⟩]
 
@@ -183,7 +188,7 @@ def changedFlagValidGuarded (np : NamedPhase) (prog : Program) : Bool :=
     the diagnostic that names the phases both use this list. -/
 def violators (phases : List NamedPhase) (prog : Program) : List String :=
   (phases.filterMap fun np =>
-    if changedFlagValidGuarded np prog then none else some np.label).dedup
+    if changedFlagValidGuarded np prog then none else some np.label).uniq
 
 -- ── The report ────────────────────────────────────────────────────────────
 -- A sweep that fails says only *that* the flag of some phase is wrong. The functions below say
@@ -269,8 +274,8 @@ def filterNoOp : NoOpWitness :=
     nothing, so its flag must be `false`. The phase returns `(true, pruned)` for each input. -/
 def checkIrrelevantAxiomsNoOpFlag : Bool := irrelevantAxiomsNoOp.check
 
-/-- Pins the defect in `FilterProcedures`. With each procedure in the target set, the phase can
-    remove nothing, so its flag must be `false`. This check states the `proc:` property again on
+/-- Checks the flag of `FilterProcedures` on a no-op. With each procedure in the target set, the
+    phase can remove nothing, so its flag must be `false`. This check states the `proc:` property again on
     a witness that the module builds, so the uniform sweep is complete on its own. -/
 def checkFilterNoOpFlag : Bool := filterNoOp.check
 
@@ -279,12 +284,12 @@ def checkFilterNoOpFlag : Bool := filterNoOp.check
 /-- **`ChangedFlagValid` holds uniformly over each phase of the Core pipeline**, on a program
     that generated procedures build.
 
-    This property is the net around the future fix. It does not list the four known phases, and
+    This property is the net around the future fix. It does not list the known phases, and
     it quantifies over `corePipelinePhases`. It therefore finds a phase that someone adds later
     and that sets its flag without a test, and no one writes a new property.
 
-    `typeCheck` and `symbolicEval` are in the list, and both set the flag to `true` without a
-    test. `phaseChangedFlagDiagnostic` shows which phases cause a failure on a given program.
+    `typeCheck`, `symbolicEval`, `nondetElim` and `betaReduce` are in the list, and each sets the
+    flag to `true` without a test. `phaseChangedFlagDiagnostic` shows which phases cause a failure on a given program.
     That report is useful only when the set of such phases is exactly the known set. -/
 def checkAllPhasesChangedFlag (ps : List Procedure) : Bool :=
   (violators allCorePhases (mkProgram ps)).isEmpty
@@ -292,24 +297,15 @@ def checkAllPhasesChangedFlag (ps : List Procedure) : Bool :=
 /-- The phases with a *known* defect in the `changed` flag. The second half of the sweep below
     does not cover them.
 
-    The first four phases set the flag to `true` without a test, as the documentation of this
-    module says. `PrecondElim` is different, and a reader must not group it with the four. It
-    *computes* its flag, but it computes the flag wrongly in one branch. The `.funcDecl` case of
-    `transformStmt` inserts a `{name}$$wf` block for the obligations that it finds in the
-    **body** of a declared function, and it returns a flag that comes only from
-    `!decl.preconditions.isEmpty`. It therefore reports `changed = false` after it rewrote the
-    program. This is a false *negative*, and the other four phases give a false positive.
-
-    The property `proc: PrecondElim changed flag is faithful` pins that defect. A draw finds the
-    defect rarely, because it needs a declared function that has no precondition of its own and
-    whose body calls a partial function, such as `Int.SafeDiv`. This is the reason why the list
-    below names the phase, and does not leave it to chance. -/
+    These five phases set the flag to `true` without a test, as the documentation of this
+    module says. Each entry is the phase's `phase.name` in the pinned pipeline, and
+    `RemoveIrrelevantAxioms` is the label that `allCorePhases` gives it. -/
 def knownDefectivePhases : List String :=
-  [ -- These four phases set the flag to `true` without a test, which gives a false positive.
-    "FilterProcedures", "RemoveIrrelevantAxioms", "typeCheck", "symbolicEval",
-    -- This phase computes the flag, but it misses the `$$wf` insertion in the `.funcDecl` case,
-    -- which gives a false negative.
-    "PrecondElim" ]
+  [ "RemoveIrrelevantAxioms", "typeCheck", "symbolicEval",
+    -- Returns `true` after rewriting every body, also when no body holds a nondeterministic guard.
+    "nondetElim",
+    -- Returns `true` after beta-reducing the program, also when it holds no redex.
+    "betaReduce" ]
 
 /-- The phases that the second half of the sweep covers: each phase of the pipeline, without the
     phases that have a known defect. This list has a name, so that a report can sweep *exactly*
@@ -318,8 +314,9 @@ def honestPhases : List NamedPhase :=
   allCorePhases.filter (fun np => !knownDefectivePhases.contains np.label)
 
 /-- The second half of the sweep: each phase *except* the phases with a known defect must have a
-    correct flag. This property guards the phases that really compute the flag, which are
-    `CallElim`, `TermCheck`, `InsertLoopInvariantAsserts`, `LoopElim` and `CommonSubexprElim`.
+    correct flag. This property guards the phases that really compute the flag, such as
+    `FilterProcedures`, `CallElim`, `TermCheck`, `PrecondElim`, `InsertLoopInvariantAsserts`,
+    `LoopElim` and `CommonSubexprElim`.
 
     The two halves are separate properties. A new defect among these phases therefore appears as
     a separate property, and not as a change in the detail of another property. This works only

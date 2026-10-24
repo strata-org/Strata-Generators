@@ -55,7 +55,8 @@ The pass therefore runs on a draw directly. That fact matters, because `Program.
 part of the generated programs, for three reasons that the module docstring of `ProgramGen/Shrink` gives. A
 guard on that check for each property would therefore throw most of the signal away. Only a property whose
 *claim* needs a well-typed input carries the guard `!progTypeChecks p ||`, and those two properties are
-`checkMonoOutputTypechecks` and `checkMonoEvalAgreement`.
+`checkMonoOutputTypechecks` and `checkMonoEvalAgreement`. The first of them also runs the pass on the
+program that the typechecker elaborates, because its claim is about the pass's output in the pipeline.
 
 ## The seed factory is `Core.Factory`, as in the tests of Strata
 
@@ -97,23 +98,11 @@ polymorphic function together. The durable correction is outside this module: a 
 draws from the full polymorphic context, and not from the derived schemes only, would make a call to a
 declared polymorphic function an ordinary event.
 
-The two properties about a `funcDecl` statement are the exception, and a draw reaches them. `genFuncDeclStmt`
-draws a polymorphic `funcDecl` statement, which `checkMonoStmtFuncDeclsMonomorphic` scores.
-
 ## What each group of predicates claims
 
 * `checkMonoAllFuncsMonomorphic`, `checkMonoFactoryMonomorphic`, `checkMonoOutputTypechecks` and
   `checkMonoIdempotent` state the three claims of the tests of Strata over the generator, and they add
   idempotence, which those tests do not state.
-* `checkMonoStmtFuncDeclsMonomorphic` and `checkMonoStmtFuncDeclRefsRewritten` are about a `funcDecl`
-  *statement*. The field `allFuncsMonomorphic` reads the declarations of the program only, and both
-  traversals of the pass skip a `funcDecl` statement. `Command.mapExprM` gives such a statement back
-  through its final case, and `Statement.collectExprs` gives the empty list for it. Therefore the pass does
-  not see a polymorphic function that a block declares, and it neither seeds a specialization for a
-  block-local body that calls a polymorphic top-level function, nor renames that call, and it drops the
-  original as unreached. `genFuncDeclStmt` draws exactly that shape. Whether that behaviour is a defect or
-  a documented limit of the scope is a question for Strata, and `Expectation.knownFailure` is where the
-  answer belongs.
 * `checkMonoTypeDeclsUnchanged`, `checkMonoPolyDatatypesRemain` and `checkMonoDerivedOpsRewritten` state one
   asymmetry: the pass specializes the *derived functions* of a polymorphic datatype, and it does not
   specialize the *declaration* of that datatype. `processTopDecls` gives a `.type` declaration back through
@@ -248,33 +237,14 @@ def monoSeedFactoryWithDerived (p : Program) : Lambda.Factory CoreLParams :=
 
 /-! ## The references to an operator
 
-`ProgramGen.TestSupport.stmtOpNames` stops at a `funcDecl` statement and at the arguments of a `call`, on
-purpose. Both of those positions matter here. A `funcDecl` statement is the subject of
-`checkMonoStmtFuncDeclRefsRewritten`, and an `inArg` of a `call` is an expression that the pass *does*
-rewrite, because `Command.mapExprM` goes into it. A predicate that could not read those two positions would
-miss a whole class of reference. Therefore this section holds a deeper traversal, and it does not use that
+`ProgramGen.TestSupport.stmtOpNames` stops at the arguments of a `call`, on purpose. That position
+matters here: an `inArg` of a `call` is an expression that the pass *does* rewrite, because
+`Command.mapExprM` goes into it. A predicate that could not read that position would miss a whole class
+of reference. Therefore this section holds a deeper traversal, and it does not use that
 function. -/
 
-/-- Each expression of a syntactic function declaration, which is the node that a `funcDecl` statement holds.
-    This definition follows `expressionsFromFunction` of the pass, which is what the pass reads from a
-    *top-level* function. Therefore the two views of the expressions of a function cannot differ. -/
-def pureFuncExprs (d : Imperative.PureFunc Expression) : List Expression.Expr :=
-  d.body.toList ++ d.axioms ++ d.preconditions.map (·.expr) ++ d.measure.toList
-
-/-- Each function that a statement list declares through a `funcDecl` statement, at any depth. The field
-    `allFuncsMonomorphic` reads the declarations of the program, so it reads none of these functions. -/
-partial def funcDeclsOfStmts (ss : List Statement) :
-    List (Imperative.PureFunc Expression) :=
-  ss.flatMap fun s =>
-    match s with
-    | .funcDecl d _ => [d]
-    | .block _ b _ => funcDeclsOfStmts b
-    | .ite _ t e _ => funcDeclsOfStmts t ++ funcDeclsOfStmts e
-    | .loop _ _ _ b _ => funcDeclsOfStmts b
-    | _ => []
-
 /-- Every `.op` name of a statement list, at any depth, **including** inside a
-    `call`'s arguments and inside the declaration a `funcDecl` statement carries. -/
+    `call`'s arguments. -/
 partial def stmtOpNamesDeep (ss : List Statement) : List String :=
   ss.flatMap fun s =>
     match s with
@@ -297,7 +267,6 @@ partial def stmtOpNamesDeep (ss : List Statement) : List String :=
         ++ (m.map opNames).getD []
         ++ invs.flatMap (fun q => opNames q.2)
         ++ stmtOpNamesDeep b
-    | .funcDecl d _ => (pureFuncExprs d).flatMap opNames
     | _ => []
 
 /-- The statements of a procedure body, or `[]` for a `.cfg` body.
@@ -333,8 +302,8 @@ def aliveExprs (p : Program) : List Expression.Expr :=
     | .distinct _ es _ => es
     | _ => []
 
-/-- Each `.op` name of a program. The result covers each always-live declaration, the expressions of each
-    function, and the body of each function that a `funcDecl` statement declares. A claim about a reference
+/-- Each `.op` name of a program. The result covers each always-live declaration and the expressions of each
+    function. A claim about a reference
     that the pass did not rewrite needs that whole view, because such a reference can sit at any position. -/
 def allOpNames (p : Program) : List String :=
   (aliveExprs p).flatMap opNames
@@ -352,10 +321,6 @@ well-typed input. -/
 
 /-- **No top-level function declaration keeps its type parameters.** This is the main postcondition of the
     pass, and it is the reason that the encoder for SMT can assume a monomorphic input.
-
-    The scope is the declarations of the program only. This property does not cover a function that a
-    `funcDecl` *statement* declares, and `checkMonoStmtFuncDeclsMonomorphic` covers that case. The two are
-    separate properties, because the pass treats the two kinds of declaration differently.
 
     The claim is an equality of `polyProgramFuncNames p'` against the empty list, and it is not a bounded `∀`
     over the declarations. The two forms say the same thing, and only the equality prints the counterexample,
@@ -376,12 +341,17 @@ abbrev checkMonoFactoryMonomorphic (p : Program) : Prop :=
 
     The property carries a guard on the type check of the input, because a pass is responsible only for what
     it does to a well-typed input. That guard is an implication, and not a disjunction, and that form is what
-    lets a counterexample print with the guard already discharged. -/
+    lets a counterexample print with the guard already discharged.
+
+    The pass runs on the program that `Core.typeCheck` elaborates, as in the verification pipeline, where
+    the type-checking phase comes first. An unelaborated program can keep a type variable in a call's
+    annotation that only elaboration resolves. -/
 abbrev checkMonoOutputTypechecks (p : Program) : Prop :=
   progTypeChecks p = true →
-    ∀ r ∈ runMono p,
-      (Core.typeCheck Core.VerifyOptions.quiet r.1.2
-        (factory := r.2.factory)).toOption.isSome = true
+    ∀ q ∈ (Core.typeCheck Core.VerifyOptions.quiet p).toOption,
+      ∀ r ∈ runMono q,
+        (Core.typeCheck Core.VerifyOptions.quiet r.1.2
+          (factory := some r.2.factory)).toOption.isSome = true
 
 /-- **The pass is idempotent, and it reports so.** After one run, each function is monomorphic. Therefore the
     second run has nothing to specialize, it must give the same program, and it must report `changed = false`.
@@ -397,57 +367,8 @@ abbrev checkMonoOutputTypechecks (p : Program) : Prop :=
 abbrev checkMonoIdempotent (p : Program) : Prop :=
   (runMono p).bind runMonoAgain = (monoOut p).map (fun p' => (false, p'))
 
-/-! ## The `funcDecl` statement
-
-The field `allFuncsMonomorphic` reads the declarations of the program. A `funcDecl` *statement* holds an
-`Imperative.PureFunc` with its own type parameters, and both traversals of the pass skip it. The final case
-of `Command.mapExprM` gives a `.funcDecl` back unchanged, and `Statement.collectExprs` gives the empty list
-for it. Therefore a polymorphic function that a block declares keeps its type parameters, and a call from a
-block-local body to a polymorphic top-level function gets neither a specialization nor a new name, while the
-pass drops the original as unreached.
-
-`genFuncDeclStmt` draws the declaration from `genFunction`, whose type parameters come from `genTypeArgs`,
-and it threads the polymorphic context into the body. Therefore a draw can reach both shapes. Read a result
-with no counterexample from either property together with the axis of the Tyche panel for a `funcDecl`,
-which says whether the draw reached the shape at all. -/
-
-/-- Every function a program declares through a `funcDecl` statement, from any
-    procedure body. -/
-def programStmtFuncDecls (p : Program) : List (Imperative.PureFunc Expression) :=
-  p.decls.flatMap fun
-    | .proc q _ => funcDeclsOfStmts (structuredBody q)
-    | _ => []
-
-/-- The names of the *polymorphic* functions that a program declares through a `funcDecl` statement. This
-    definition is the form of `polyProgramFuncNames` for a statement, and it exists for the same reason: a
-    list of the names is what lets the property below print which function kept its type parameters. -/
-def polyStmtFuncDeclNames (p : Program) : List String :=
-  (programStmtFuncDecls p).filterMap fun d =>
-    if d.typeArgs.isEmpty then none else some d.name.name
-
-/-- **No function that a statement declares keeps its type parameters.** This property is the form of
-    `checkMonoAllFuncsMonomorphic` for a statement.
-
-    The property says nothing unless the draw holds a `funcDecl` statement whose declaration is
-    polymorphic. -/
-abbrev checkMonoStmtFuncDeclsMonomorphic (p : Program) : Prop :=
-  onOutput p [] polyStmtFuncDeclNames = []
-
-/-- **A statement-declared body's references are rewritten.** No expression of a
-    `funcDecl` statement in the output may still name a function whose
-    polymorphic original the pass dropped.
-
-    The property says nothing unless the draw holds a `funcDecl` whose body calls a polymorphic function. When
-    it does say something, a counterexample is a reference to a declaration that the pass removed, and it is
-    not a difference of appearance. -/
-abbrev checkMonoStmtFuncDeclRefsRewritten
-    (p : Program) (F : Lambda.Factory CoreLParams := Core.Factory) : Prop :=
-  onOutput p [] (fun p' =>
-    survivingPolyRefs (polyNames p F)
-      (((programStmtFuncDecls p').flatMap pureFuncExprs).flatMap opNames)) = []
-
-/-- **No reference to a dropped polymorphic original survives anywhere.** The
-    unrestricted form of the claim above, over every expression of the output.
+/-- **No reference to a dropped polymorphic original survives anywhere**, over every
+    expression of the output.
 
     This property is sharper than the one about the type check of the output in one direction, and weaker in
     another. It needs no well-typed input, and it reads the *name* only, and not the instantiation. A
@@ -467,7 +388,7 @@ factory, and the pass specializes each of them as it specializes each other one.
 This section states that asymmetry as a fact, and no property assumes it. It is also the one point where
 Lutze, Schuster and Brachthäuser, in *The Simple Essence of Monomorphization* (OOPSLA 2025), call Strata
 incomplete, and not merely different. Their section 2.2 treats a datatype with a type parameter as a kind of
-polymorphism of its own, with the constraints that the judgement for well-formedness raises, and it
+polymorphism of its own, with the constraints that the judgment for well-formedness raises, and it
 specializes a datatype at a ground instance into a declaration of its own. Strata keeps such a datatype
 declared with its type parameters, and it emits a specialized name for each derived operator against it. -/
 

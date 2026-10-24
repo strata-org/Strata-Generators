@@ -45,7 +45,7 @@ the delegation above sound, and it is what decides several obligations for free:
 Following the convention of the function shrinker
 (`FunctionHasTypeAGen.Shrink.shrinkFuncCandidates`, which is body-only), the
 **entire header is held fixed**: name, `typeArgs`, `inputs`, `outputs` and
-`noFilter`. A shrunk procedure therefore has exactly the original's type
+`lemmas`. A shrunk procedure therefore has exactly the original's type
 signature, and it therefore replaces the original one in each program that a property assembles. The obligation
 about the modified variables does not change either, and each name from `P0` up to `Pk` that a property reads
 stays the same.
@@ -236,7 +236,7 @@ section Guards
 /-- A minimal well-typed procedure: no formals, no contract, empty body. -/
 private def emptyProc : Procedure :=
   { header := { name := ⟨"P0", ()⟩, typeArgs := [], inputs := [], outputs := [],
-                noFilter := false }
+                lemmas := [] }
     spec := { preconditions := [], postconditions := [] }
     body := .structured [] }
 
@@ -288,33 +288,6 @@ private def specProc : Procedure :=
 
 -- THE HEADLINE INVARIANT: every candidate list is well-typed.
 #guard (shrinkProcsList [emptyProc, specProc]).all procsTypeCheck == true
-
-/-- A procedure whose body declares a function with a `decreases` clause but no body.
-
-    The typechecker accepts that shape, so this procedure is well typed. This definition stays as a pin for the
-    shape and for the invariant of the shrinker about well-typedness. -/
-private def measureNoBodyProc : Procedure :=
-  { emptyProc with
-    body := .structured [
-      .funcDecl { name := ⟨"g", ()⟩, typeArgs := [], inputs := [],
-                  output := (.forAll [] .int : LTy), body := none,
-                  measure := some (.const () (.intConst 0)),
-                  preconditions := [] } .empty ] }
-
--- The oracle *accepts* that shape, so this input is well typed, and each candidate of the shrinker is then well
--- typed for a trivial reason.
-#guard procTypeChecks measureNoBodyProc == true
-#guard procsTypeCheck [measureNoBodyProc] == true
--- The headline invariant still holds on this input, which is what the pin is for: the
--- `procsTypeCheck` filter covers the drop family as well as the reduce family, so no
--- candidate list can be ill-typed regardless of which shape the checker accepts.
-#guard (shrinkProcsList [measureNoBodyProc, specProc]).all procsTypeCheck == true
--- The procedure is well typed, so a candidate can *keep* it.
-#guard (shrinkProcsList [measureNoBodyProc, specProc]).any
-  (fun c => c.any (fun p => p.body == measureNoBodyProc.body)) == true
--- Dropping is still a legitimate reduction, so a singleton minimizes to the empty list
--- for a property that fails everywhere.
-#guard minimizeProcsWhile (fun _ => true) 100 [measureNoBodyProc] == []
 
 end Guards
 

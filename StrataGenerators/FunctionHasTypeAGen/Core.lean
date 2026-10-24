@@ -12,26 +12,24 @@ open Lambda RandomChoice Core Imperative ArbString Std
 # The core definitions of the generator for a well-typed Strata Core `Function`
 
 This file holds the definition of `genFunction`, which is a generator for a well-typed
-Strata Core function. Such a function is a `Function` and therefore an `LFunc CoreLParams`,
-and it satisfies the relation `FuncHasTypeA`.
+Strata Core function. Such a function is a `Function` and therefore an `LFunc CoreLParams`.
 
-The generator uses `genLExpr` to make a well-typed expression for the body of the function
-and for its measure of termination, which is optional. It uses `genLMonoTy` to make the input
-types and the output type.
+The generator uses `genLExpr` to make a well-typed expression for the optional body of the
+function and for its optional precondition. It uses `genLMonoTy` to make the input types and the
+output type.
 
-A generated `Function` is well-typed in the sense of `FuncHasTypeA` for four reasons:
-1. `List.dedup` builds its `typeArgs` and its `inputs.keys`, so both hold no duplicate.
-2. `genLMonoTy typeArgs` builds its input types and its output type, so each free type
-   variable of the signature comes from `typeArgs`. This is `noUndeclaredVars`.
-3. `genLExpr ... output` builds its body, when it has one, so the body has the declared
-   return type. The annotated typing specification `instHasTypeA` *ignores* the ambient
-   typing context, so `bodyTyped` reduces to `HasTypeA [] body output`.
-4. `genLExpr ... .int` builds its measure, when it has one, so the measure has the type
-   `int`.
+A generated `Function` satisfies the weak typing `FuncHasTypeW` for these reasons:
+1. `List.uniq` builds its `typeArgs` and its `inputs.keys`, so both hold no duplicate.
+2. The generator keeps only the type arguments that the signature mentions, and `genLMonoTy`
+   builds the signature over them, so the signature mentions exactly its type arguments.
+3. The body and the precondition are drawn by `genLExpr` at their declared types, from contexts
+   restricted to the type arguments: an ambient variable or an operator whose type mentions any
+   other type variable would put a type variable that is not a type argument into an annotation.
+   Ambient variables that a formal shadows are dropped too, so every free variable of the body
+   keeps its ambient type.
+4. The function is not recursive and has no measure.
 
-`FuncHasTypeA` says nothing about `preconditions`. The optional `requires` clause that
-`genFunction` also emits, through `genPreconditions`, is therefore invisible to the proof of
-soundness. The generator makes that clause over the *formal parameters only*, because the
+The optional `requires` clause ranges over the *formal parameters only*, because the
 `precond_freevars` field of `FuncWF` asks that the free variables of a precondition be among
 the names of the inputs. Such a clause is also what makes a generated function *partial*,
 and it therefore makes the path of `PrecondElim` that strips a precondition reachable from
@@ -199,15 +197,15 @@ def genNameList [Gen G] (depth : Nat) : G (List String) :=
   listOfMaxLength depth genIdentName
 
 /-- Makes a list of names for the type arguments. The names are *different* in pairs, because
-    `List.dedup` builds the list. -/
+    `List.uniq` builds the list. -/
 def genTypeArgs [Gen G] (depth : Nat) : G (List TyIdentifier) :=
-  List.dedup <$> genNameList depth
+  List.uniq <$> genNameList depth
 
 /-- Makes a list of identifiers for the inputs. The names are *different* in pairs, because
-    `List.dedup` builds the list. The identifiers are therefore also different, because the map from a
+    `List.uniq` builds the list. The identifiers are therefore also different, because the map from a
     name to `⟨·, ()⟩` is injective. -/
 def genIdents [Gen G] (depth : Nat) : G (List (Identifier Unit)) :=
-  (fun names => (names.map (fun s => (⟨s, ()⟩ : Identifier Unit))).dedup) <$> genNameList depth
+  (fun names => (names.map (fun s => (⟨s, ()⟩ : Identifier Unit))).uniq) <$> genNameList depth
 
 -- ── The generator for the signature of the inputs ───────────────────────
 
@@ -221,12 +219,11 @@ def genInputs [Gen G] (tvars : List TyIdentifier) (depth : Nat) :
     let ty ← genLMonoTy tvars depth
     pure (x, ty))
 
--- ── The generator for an optional body and an optional measure ──────────
+-- ── The generator for an optional body ──────────────────────────────────
 
 /-- Makes an optional well-typed expression of the type `τ`. The result is `none`, or it is `some e`
-    where `genLExpr` made `e` at the type `τ`, in the empty context of bound variables and with an
-    empty context of polymorphic operators. The bias is 3 to 1 toward `some`, so a body and a measure
-    are usually present. -/
+    where `genLExpr` made `e` at the type `τ`, in the empty context of bound variables. The bias is
+    3 to 1 toward `some`, so a body is usually present. -/
 def genOptExpr [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (τ : LMonoTy) (pctx : PolyOpCtx := []) : G (Option LExpr') :=
   biasedOptionGen (3 / 4) (genLExpr fctx octx pctx tvars [] depth τ)
@@ -301,46 +298,78 @@ def genPreconditions [Gen G] (octx : OpCtx) (inputs : ListMap (Identifier Unit) 
     G (List (Strata.DL.Util.FuncPrecondition LExpr' Unit)) :=
   (fun o => o.toList) <$> genPrecondition octx inputs tvars depth pctx
 
+-- ── The filters that keep a generated function well typed ──────────────
+
+/-- Whether each binder annotation of `e` is a type that `genLMonoTy` can make, which is a type
+    built from the built-in type constructors only. Such a type is known in each context that
+    registers the built-in types, which is what `BinderAnnotsKnown` asks of an expression.
+
+    `genLExpr` draws most binder types from `genLMonoTy`. A lambda takes its binder type from the
+    domain of an arrow it is asked to inhabit, and an operator of the context can ask for an arrow
+    over any type, so the check is not always true. -/
+def binderAnnotsGenerable (e : LExpr') : Bool :=
+  (LExpr.binderAnnotations e).all
+    (fun t => inGenLMonoTySupport (LMonoTy.freeVars t) (monoTyDepth t) t)
+
+/-- The operators of `octx` whose types mention only type variables of `tvars`. -/
+def opsOver (tvars : List TyIdentifier) (octx : OpCtx) : OpCtx :=
+  OpCtx.ofList (octx.ops.filter (fun p => (LMonoTy.freeVars p.2).all tvars.contains))
+
+/-- An operator is in `opsOver tvars octx` exactly when it is an operator of `octx` whose type
+    mentions only type variables of `tvars`. -/
+theorem mem_opsOver_iff {tvars : List TyIdentifier} {octx : OpCtx} {p : String × LMonoTy} :
+    p ∈ (opsOver tvars octx).ops ↔ p ∈ octx.ops ∧ ∀ v ∈ LMonoTy.freeVars p.2, v ∈ tvars := by
+  simp only [opsOver, OpCtx.ops_ofList, List.mem_filter, List.all_eq_true, List.contains_iff_mem]
+
 -- ── The main generator for a function ───────────────────────────────────
 
-/-- Makes a well-typed `Function`, which is an `LFunc CoreLParams`.
-
-    The function satisfies `FuncHasTypeA C Γ` for each ambient context `Γ`, as
+/-- Makes a well-typed `Function`, which is an `LFunc CoreLParams`. It satisfies `FuncHasTypeW`
+    in every context whose functions and variable scopes agree with the contexts it reads, as
     `genFunction_sound` states.
 
     The generator makes these parts:
-    - `typeArgs`: a list of names for the type variables, with no duplicate;
-    - `inputs`: a signature whose keys hold no duplicate, and whose types are over `typeArgs`;
-    - `output`: a type over `typeArgs`;
-    - `body`: an optional expression of the type `output`;
-    - `measure`: an optional expression of the type `int`;
+    - `typeArgs`: names for the type variables, with no duplicate. A drawn name that
+      `isAllowedName` rejects is dropped before the signature is drawn, and a name that the
+      signature does not mention is dropped after it;
+    - `inputs`: a signature whose keys hold no duplicate, whose types are over the type arguments,
+      and whose names `avoid` does not flag;
+    - `output`: a type over the type arguments;
+    - `body`: an optional expression of the type `output` over the ambient variables of `fctx`
+      that no formal shadows;
     - `preconditions`: at most one clause of the type `bool` over the *formal parameters*, which
-      `genPreconditions` makes. It gives a clause half of the time, and it favours a clause that
+      `genPreconditions` makes. It gives a clause half of the time, and it favors a clause that
       mentions a formal parameter.
 
-    `FuncHasType'` puts no condition on a precondition, because it has no field for one. A draw of a
-    precondition therefore cannot change `genFunction_sound`. A precondition matters later: a
-    function with a `preconditions` list that is not empty is *partial*. This is what makes the path
-    of `PrecondElim` that strips a precondition, and the property `preconditionsStripped`, reachable
-    from generated input, and not only from a reproducer that someone builds by hand.
+    The expressions draw only on the variables and operators whose types are over the type
+    arguments (`opsOver`), and on every scheme of `pctx`.
 
-    The fields that the typing specification does not constrain keep their default values. Those
-    fields are `isConstr`, `isRecursive`, `attr` and `axioms`. -/
+    A function with a `preconditions` list that is not empty is *partial*. This is what makes the
+    path of `PrecondElim` that strips a precondition, and the property `preconditionsStripped`,
+    reachable from generated input, and not only from a reproducer that someone builds by hand.
+
+    The fields that the generator does not vary keep their default values. Those fields are
+    `isConstr`, `isRecursive`, `attr`, `axioms` and `measure`: a non-recursive function has no
+    measure. -/
 def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
-    (pctx : PolyOpCtx := []) : G Function := do
+    (pctx : PolyOpCtx := []) (avoid : String → Bool := fun _ => false) : G Function := do
   let name ← genIdentName
-  let typeArgs ← genTypeArgs depth
-  let inputs ← genInputs typeArgs depth
-  let output ← genLMonoTy typeArgs depth
-  let body ← genOptExpr fctx octx typeArgs depth output pctx
-  let measure ← genOptExpr fctx octx typeArgs depth .int pctx
-  let preconditions ← genPreconditions octx inputs typeArgs depth pctx
+  let rawTypeArgs ← genTypeArgs depth
+  let sigTypeArgs := rawTypeArgs.filter isAllowedName
+  let rawInputs ← genInputs sigTypeArgs depth
+  let inputs : ListMap (Identifier Unit) LMonoTy := rawInputs.filter (fun p => !avoid p.1.name)
+  let output ← genLMonoTy sigTypeArgs depth
+  let typeArgs := sigTypeArgs.filter
+    (fun a => (LMonoTy.freeVars (LMonoTy.mkArrow' output inputs.values)).contains a)
+  let bodyFctx := fctx.filter (fun p =>
+    !inputs.keys.contains ⟨p.1, ()⟩ && (LMonoTy.freeVars p.2).all typeArgs.contains)
+  let exprOctx := opsOver typeArgs octx
+  let body ← genOptExpr bodyFctx exprOctx typeArgs depth output pctx
+  let preconditions ← genPreconditions exprOctx inputs typeArgs depth pctx
   pure {
     name := ⟨name, ()⟩,
     typeArgs := typeArgs,
     inputs := inputs,
     output := output,
     body := body,
-    measure := measure,
     preconditions := preconditions
   }

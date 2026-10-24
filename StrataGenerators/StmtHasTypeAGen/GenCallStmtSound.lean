@@ -1,5 +1,8 @@
 import StrataGenerators.CmdHasTypeAGen
+import StrataGenerators.StmtHasTypeAGen.CallDefs
 import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.WeakTypeSpec
+import Strata.Languages.Core.CallWFProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
 
@@ -8,148 +11,20 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
 
 This file collects the *context-independent* helper lemmas required to establish
 `genCallStmt` sound (the `.call` case of `genStmt_sound`, assembled in
-`StmtHasTypeAGen.lean`). None of them refers to `genStmt`/`genStmts`, so they can
-be developed and verified in isolation, without perturbing the (large) main
-statement-generator proof.
+`StmtHasTypeAGen.lean`). None of them refers to `genStmt`/`genStmts`.
 
-- `mkArgs` builds the argument list of a call. The two lemmas `getIn_mkArgs` and `getLhs_mkArgs` compute the
-  two projections of that list.
-- `call_recipe_inout_sound` discharges the seven premises of `CmdExtHasTypeA.call`.
-- `initChain`, `insertAll` and `initChain_types` describe the chain of `init … nondet` statements that brings
-  each necessary name into scope, at its declared type.
-- `StatementsHasTypeA_append` joins two judgements about a statement list.
+- `mkArgs` builds the argument list of a call. `getIn_mkArgs`, `getLhs_mkArgs`,
+  `inputArgs_mkArgs` and `resultArgs_mkArgs` compute its projections, and `argsMatch_mkArgs`
+  matches it with the callee's signature.
+- `call_recipe_inout_sound` discharges the premises of `CmdExtHasTypeW.call`.
+- `initChain`, `insertAll` and `initChain_types` describe the chain of `init … nondet` statements
+  that brings each necessary name into scope, at its declared type.
+- `StatementsHasTypeW_append` joins two judgments about a statement list.
 -/
 
 namespace StrataGenerators.Stmt
 
 open Core.TypeSpec
-
--- ── Procedure-signature context (call targets) ────────────────────────────
-
-/-- A callee's signature description, stored *directly* with the shared in-out
-    block leading both roles. This layout is not automatic for an arbitrary
-    `P`-procedure; it is what `genProcedure` emits and what a call site must
-    respect. `M` = in-out block, `I` = input-only block, `O` = output-only block,
-    so `inputs = M ++ I` and `outputs = M ++ O`.
-
-    The field `typeArgs` holds the **own** type parameters of the callee. A call site instantiates them with
-    a concrete substitution, which is the existential of the `CmdExtHasType'.call` rule. Therefore the types
-    that the caller must give for an argument and for a target are the *instantiated* blocks, such as
-    `substSig σ M`. This structure stores each declared block over its type parameters, with no instance, and
-    `substSig` applies the substitution when a proof needs it. An empty list of type parameters gives the
-    monomorphic case, where the substitution is empty and `substSig` is the identity. -/
-structure ProcSig where
-  /-- The callee's name (matched against `Program.Procedure.find?`). -/
-  pname : String
-  /-- The callee's own type parameters (empty for a monomorphic callee). -/
-  typeArgs : List TyIdentifier
-  /-- The in-out (mutable) parameter block. -/
-  M : @LMonoTySignature Unit
-  /-- The input-only parameter block. -/
-  I : @LMonoTySignature Unit
-  /-- The output-only parameter block. -/
-  O : @LMonoTySignature Unit
-
-/-- A procedure with an empty signature, so that `ProcSig` is `Inhabited`. `elements` and its lemma about the
-    inversion of a support need that instance inside `genCallStmt`. -/
-instance : Inhabited ProcSig := ⟨⟨"", [], [], [], []⟩⟩
-
-/-- Instantiate a parameter block's *types* by a substitution `σ`, leaving the
-    parameter *names* untouched. Used to turn a callee's declared (over-`typeArgs`)
-    block into the concrete block a call site must satisfy under the chosen
-    instantiation `σ`. The call rule substitutes with `[σ]` (a single-scope
-    substitution), so `substSig` does likewise. -/
-def substSig (σ : List (TyIdentifier × LMonoTy)) (block : @LMonoTySignature Unit) :
-    @LMonoTySignature Unit :=
-  block.map (fun p => (p.1, LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) p.2))
-
-/-- `substSig` preserves keys (it only rewrites types). -/
-@[simp] theorem substSig_keys (σ : List (TyIdentifier × LMonoTy))
-    (block : @LMonoTySignature Unit) : (substSig σ block).keys = block.keys := by
-  simp only [substSig, ListMap.keys_eq_map_fst, List.map_map, Function.comp_def]
-
-/-- `substSig` preserves length. -/
-@[simp] theorem substSig_length (σ : List (TyIdentifier × LMonoTy))
-    (block : @LMonoTySignature Unit) : (substSig σ block).length = block.length :=
-  List.length_map ..
-
-/-- The values of an instantiated block are the pointwise `subst [σ]` of the
-    declared values. -/
-theorem substSig_values (σ : List (TyIdentifier × LMonoTy))
-    (block : @LMonoTySignature Unit) :
-    (substSig σ block).values = block.values.map (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ])) := by
-  simp only [substSig, ListMap.values_eq_map_snd, List.map_map, Function.comp_def]
-
-/-- `substSig` distributes over block append. -/
-theorem substSig_append (σ : List (TyIdentifier × LMonoTy))
-    (a b : @LMonoTySignature Unit) :
-    substSig σ (a ++ b) = substSig σ a ++ substSig σ b :=
-  List.map_append ..
-
-/-- Pointwise key access commutes with `substSig` (keys are untouched). -/
-theorem substSig_keys_getElem (σ : List (TyIdentifier × LMonoTy))
-    (b : @LMonoTySignature Unit) (i : Nat) (h : i < (substSig σ b).keys.length)
-    (h' : i < b.keys.length) : (substSig σ b).keys[i]'h = b.keys[i]'h' := by
-  simp only [substSig_keys]
-
-/-- Pointwise value access commutes with `substSig` via `subst [σ]`. -/
-theorem substSig_values_getElem (σ : List (TyIdentifier × LMonoTy))
-    (b : @LMonoTySignature Unit) (i : Nat) (h : i < (substSig σ b).values.length)
-    (h' : i < b.values.length) :
-    (substSig σ b).values[i]'h = LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (b.values[i]'h') := by
-  simp only [substSig_values, List.getElem_map]
-
-/-- At the empty instantiation, `substSig` is the identity. A substitution with one empty scope fixes each
-    monotype, so both the name and the type of an entry stay the same. That fact makes the monomorphic path a
-    definitional special case of the polymorphic one. -/
-@[simp] theorem substSig_nil (block : @LMonoTySignature Unit) :
-    substSig [] block = block := by
-  simp only [substSig]
-  rw [show (fun p : Identifier Unit × LMonoTy =>
-        (p.1, LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) p.2)) = id from by
-    funext p
-    -- `ofScopes [[]]` is the single empty scope, and `subst` over it is the identity.
-    simp only [id_eq, Strata.Util.HMaps.ofScopes, List.map_cons, List.map_nil,
-      show Strata.Util.HMap.ofList ([] : List (TyIdentifier × LMonoTy))
-        = Strata.Util.HMap.empty from rfl, LMonoTy.subst_single_empty],
-    List.map_id]
-
-/-- The set of callable procedures, each with its signature (shared in-out block
-    leading both roles). -/
-abbrev ProcSigCtx := List ProcSig
-
-/-- The context describes each callable procedure of the program faithfully. Each entry names a procedure of
-    the program whose type parameters are the ones that the entry records, and whose declared signature
-    decomposes as the entry records, with the shared block at the front of the inputs and of the outputs. The
-    keys of the input-only block are also disjoint from the keys of the two written-to blocks. Those are
-    exactly the hypotheses that `call_mixed_body_sound` uses for the `.call` case, after the caller
-    instantiates each block by the substitution that it chose.
-
-    The callee can be **polymorphic**, which means that its list of type parameters is not empty. The call
-    site then chooses a concrete instantiation, and it gives each argument and each target at the instance of
-    the declared block. The condition about disjointness is stated over the *declared* keys, and `substSig`
-    keeps each key. Therefore that condition also holds for each instantiated block. -/
-def ProcSigCorresponds (procs : ProcSigCtx) (P : Program) : Prop :=
-  ∀ s ∈ procs, ∃ proc, Program.Procedure.find? P s.pname = some proc ∧
-    proc.header.typeArgs = s.typeArgs ∧
-    proc.header.inputs = s.M ++ s.I ∧
-    proc.header.outputs = s.M ++ s.O ∧
-    (∀ i (hi : i < s.I.keys.length), (s.M ++ s.O).keys.contains (s.I.keys[i]'hi) = false)
-
-/-- **The correspondence in the other direction, for completeness.** `ProcSigCorresponds` says that each
-    callee of the context resolves in the program, which is what *soundness* needs, because a generated call
-    must be well typed. This predicate says the reverse: the context *holds* each procedure of the program
-    whose signature admits the decomposition into the three blocks. That is what *completeness* needs, because
-    a well-typed call must be reachable. The entry also records the type parameters of the procedure, so that
-    a call site can instantiate them. -/
-def ProcSigComplete (procs : ProcSigCtx) (P : Program) : Prop :=
-  ∀ pname proc typeArgs M I O,
-    Program.Procedure.find? P pname = some proc →
-    proc.header.typeArgs = typeArgs →
-    proc.header.inputs = M ++ I →
-    proc.header.outputs = M ++ O →
-    (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) →
-    ∃ s ∈ procs, s.pname = pname ∧ s.typeArgs = typeArgs ∧ s.M = M ∧ s.I = I ∧ s.O = O
 
 -- ── filterMap helper lemmas ───────────────────────────────────────────────
 
@@ -259,21 +134,6 @@ theorem substSig_values_wellKinded {C : LContext CoreLParams}
     ty0 (hblock ty0 hty0)
 
 -- ── The call-argument recipe ──────────────────────────────────────────────
-
-/-- Merge two lists under a Boolean mask, and keep the relative order inside each
-    list. `true` takes the next element of `xs`, and `false` takes the next element
-    of `ys`. When the mask ends, or when the chosen list is empty, the rest of both
-    lists follows.
-
-    The mask reaches *exactly* the order-preserving interleavings of `xs` and `ys`:
-    `mergeBy_surjective` gives every one of them, `mergeBy_interleave` gives no more
-    than them, and `exists_mask_iff_interleave` is the two together. -/
-def mergeBy {α : Type} : List Bool → List α → List α → List α
-  | [], xs, ys => xs ++ ys
-  | true :: bs, x :: xs, ys => x :: mergeBy bs xs ys
-  | true :: bs, [], ys => mergeBy bs [] ys
-  | false :: bs, xs, y :: ys => y :: mergeBy bs xs ys
-  | false :: bs, xs, [] => mergeBy bs xs []
 
 /-- `Interleave xs ys zs` says that `zs` is an **interleaving that keeps the order** of `xs` and of `ys`. It
     holds each element of both lists, and it keeps the relative order inside `xs` and the relative order inside
@@ -399,37 +259,6 @@ theorem filterMap_mergeBy_right {α β : Type} (f : α → Option β) (bs : List
       | nil => rw [mergeBy, ih xs [] hx]
       | cons y ys => rw [mergeBy, List.filterMap_cons, List.filterMap_cons, ih xs ys hx]
 
-/-- Build the call arguments for a callee whose signature decomposes as
-    `inputs = M ++ I`, `outputs = M ++ O` (`M` = in-out, `I` = input-only,
-    `O` = output-only, the shared block `M` leading both). The in-out block leads
-    (as `inoutArg` nodes, so each is a
-    pass-by-reference variable named exactly `M.keys[i]`, as the call rule's in-out
-    premise requires). Then come the by-value inputs `exprs` (as `inArg` nodes) and
-    the output-only *targets* `T` (as `outArg` nodes), merged under the mask `mask`.
-    This layout makes the argument positions line up with the parameter positions
-    the callee declares. Read `getIn_mkArgs` and `getLhs_mkArgs`.
-
-    **Why `mask` exists.** The `call` rule constrains the input positions and the
-    write positions one at a time, through `CallArg.getInputExprs` and
-    `CallArg.getLhs`. Each of those drops the other kind of node, so the rule leaves
-    the relative order of an `inArg` and an `outArg` free. `mask` gives the
-    generator that same freedom, so a call such as `call p(out y, 1);` is now
-    reachable. The in-out block still has to lead: `M` heads both projections, so
-    an `inoutArg` after an `inArg` or after an `outArg` would break the positional
-    match.
-
-    `T` is a **separate** argument rather than the callee's own `O`, because the
-    Core spec does not constrain an out argument's *name*: any writable
-    variable of the declared type will do. `T` is therefore a caller-chosen list of
-    receiving variables, required only to be as long as `O` and to match it
-    *by position in its type*. Read `outTargets`, which is the choice of the generator, and the premise
-    `hTinΓ` of each soundness theorem below, which pairs the name of a target with the type that the callee
-    declares at that position. -/
-def mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
-    (mask : List Bool) : List (CallArg Expression) :=
-  M.map (fun p => CallArg.inoutArg p.1) ++
-    mergeBy mask (exprs.map CallArg.inArg) (T.map (fun p => CallArg.outArg p.1))
-
 -- **Which swaps the `call` rule can see.** `CmdExtHasType'.call` constrains the
 -- *projections* `getInputExprs` and `getLhs`, position by position. An `inArg`
 -- appears in the first projection only, and an `outArg` in the second only, so a
@@ -463,11 +292,12 @@ theorem getIn_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Exp
     (mask : List Bool) :
     CallArg.getInputExprs (mkArgs M T exprs mask)
       = M.map (fun p => LExpr.fvar () p.1 none) ++ exprs := by
-  rw [mkArgs, CallArg.getInputExprs, List.filterMap_append,
+  rw [mkArgs, CallArg.getInputExprs, Calls.getInputExprs, List.filterMap_append,
     filterMap_mergeBy_left _ mask _ _
       (by rintro a ha; simp only [List.mem_map] at ha; obtain ⟨p, _, rfl⟩ := ha; rfl)]
   simp only [List.filterMap_map, Function.comp_def, filterMap_some_comp,
     List.filterMap_some]
+  rfl
 
 /-- `getLhs (mkArgs M T exprs mask)` is the LHS (assignable) positions: the in-out
     keys followed by the out-argument target names. The by-value inputs contribute
@@ -522,37 +352,19 @@ theorem exists_mask_mkArgs_iff (M T : @LMonoTySignature Unit)
 
 -- ── The init-chain that brings the required names into scope ───────────────
 
-/-- The statement list `var x₁ : mty₁ := *; … ; var xₙ : mtyₙ := *` that
-    declares every `(x, mty) ∈ news` (nondeterministically, so no initializer
-    expression is required). -/
-def initChain (news : List (Identifier Unit × LMonoTy)) : List Statement :=
-  news.map (fun p => Statement.init p.1 (.forAll [] p.2) .nondet default)
+/-- The variable scopes after running `initChain news` from `ts`: each declared `(x, mty)` is
+    inserted as `x ↦ ∀[]. mty`. -/
+def insertAll (ts : TypeScopes) (news : List (Identifier Unit × LMonoTy)) : TypeScopes :=
+  news.foldl (fun ts p => ts.insert p.1 (.forAll [] p.2)) ts
 
-/-- The type-context after running `initChain news` on `Γ`: fold each declared
-    `(x, mty)` in as `x ↦ ∀[]. mty`. -/
-def insertAll (Γ : TContext Unit) (news : List (Identifier Unit × LMonoTy)) :
-    TContext Unit :=
-  news.foldl (fun Γ p => { Γ with types := Γ.types.insert p.1 (.forAll [] p.2) }) Γ
-
-/-- `insertAll` respects `TContext.Equiv`: inserting the same bindings into equivalent
-    contexts keeps them equivalent. Needed because a `TContext` scope is an opaque hash map,
-    so the generator-side and semantic-side scopes agree only up to `Equiv`. -/
-theorem insertAll_equiv (news : List (Identifier Unit × LMonoTy)) {Γ Γ' : TContext Unit}
-    (h : TContext.Equiv (T := CoreLParams) Γ Γ') :
-    TContext.Equiv (T := CoreLParams) (insertAll Γ news) (insertAll Γ' news) := by
-  induction news generalizing Γ Γ' with
+/-- `insertAll` respects `HMaps.Equiv`: inserting the same bindings into equivalent scopes keeps
+    them equivalent. -/
+theorem insertAll_equiv (news : List (Identifier Unit × LMonoTy)) {ts ts' : TypeScopes}
+    (h : Strata.Util.HMaps.Equiv ts ts') :
+    Strata.Util.HMaps.Equiv (insertAll ts news) (insertAll ts' news) := by
+  induction news generalizing ts ts' with
   | nil => exact h
-  | cons hd tl ih =>
-    refine ih ?_
-    exact ⟨Strata.Util.HMaps.insert_equiv h.1 hd.1 (.forAll [] hd.2), h.2⟩
-
-/-- The flat `VarCtx` analogue of `insertAll`: the *generator-side* scope after
-    running `initChain news` in the ambient scope. Because the chain is emitted
-    **inline** (not inside a block), these declarations genuinely escape into the
-    enclosing sequence. Therefore this definition, and not `ctx`, gives the output scope of the call.
-    `toTCtx_insertAllCtx` (in `StmtHasTypeAGen.lean`) relates it to `insertAll`. -/
-def insertAllCtx (ctx : VarCtx) (news : List (Identifier Unit × LMonoTy)) : VarCtx :=
-  news.foldl (fun ctx p => Map.insert ctx p.1 p.2) ctx
+  | cons hd tl ih => exact ih (Strata.Util.HMaps.insert_equiv h hd.1 (.forAll [] hd.2))
 
 /-- `insertAllCtx` peels one declaration off the front (it is a `foldl`). -/
 theorem insertAllCtx_cons (ctx : VarCtx) (hd : Identifier Unit × LMonoTy)
@@ -630,91 +442,67 @@ theorem mem_values_insertAllCtx (news : List (Identifier Unit × LMonoTy)) :
       · exact Or.inl (List.mem_cons_self ..)
       · exact Or.inr h''
 
-/-- Running `initChain news` from `Γ` (where each declared name is fresh at the
-    point it is declared, and every declared type is well-kinded in `C`) is well-typed
-    and yields `insertAll Γ news`.
-
-    `hwk` discharges the `WellKindedTy` premise of `CmdHasType'.init_nondet`. The caller
-    gets it from `SimpleTyArities`, because the generator makes all of the declared
-    types. -/
+/-- Running `initChain news` from `ts` is weakly typed and yields `insertAll ts news`, when each
+    declared name is fresh at the point it is declared and every declared type is well kinded in
+    `C`. These are the premises of `CmdHasTypeW.init_nondet`. -/
 theorem initChain_types {P : Program} {C : LContext CoreLParams} {L : List String}
     (news : List (Identifier Unit × LMonoTy))
-    (hwk : ∀ p ∈ news, C.WellKindedTy p.2) : ∀ (Γ : TContext Unit),
-    (∀ i (hi : i < news.length),
-      (insertAll Γ (news.take i)).types.find? (news[i].1) = none) →
-    StatementsHasTypeA P C Γ L (initChain news) C (insertAll Γ news) := by
+    (hwk : ∀ p ∈ news, C.WellKindedTy p.2) : ∀ (ts : TypeScopes),
+    (∀ i (hi : i < news.length), (insertAll ts (news.take i)).find? (news[i].1) = none) →
+    StatementsHasTypeW P C ts L (initChain news) C (insertAll ts news) := by
   induction news with
-  | nil => intro Γ _; exact StatementsHasType'.nil C Γ L Γ (tctxEquivRefl Γ)
+  | nil => intro ts _; exact .nil C ts L ts (Strata.Util.HMaps.Equiv.refl ts)
   | cons hd tl ih =>
-    intro Γ hfresh
-    -- head is fresh in Γ = insertAll Γ (take 0)
-    have hfresh0 : Γ.types.find? hd.1 = none := by
-      have := hfresh 0 (by simp)
-      simpa [insertAll, List.take] using this
-    -- the head statement types Γ → {Γ with x ↦ ∀[].mty}
-    have hhead : StatementHasTypeA P C Γ L
+    intro ts hfresh
+    have hfresh0 : ts.find? hd.1 = none := by
+      have h0 := hfresh 0 (by simp)
+      simpa [insertAll, List.take] using h0
+    have hhead : StatementHasTypeW P C ts L
         (Statement.init hd.1 (.forAll [] hd.2) .nondet default) C
-        { Γ with types := Γ.types.insert hd.1 (.forAll [] hd.2) } :=
-      StatementHasType'.cmd C Γ _ L _ _
-        (CmdExtHasType'.cmd Γ _ _
-          (CmdHasType'.init_nondet Γ hd.1 (.forAll [] hd.2) hd.2 [] default _ hfresh0 rfl
-            (rigidAnnotCompat_forAll_nil hd.2) (hwk hd List.mem_cons_self) (tctxEquivRefl _)))
-        (tctxEquivRefl _)
-    -- the tail types from the inserted context
-    have htail : StatementsHasTypeA P C
-        { Γ with types := Γ.types.insert hd.1 (.forAll [] hd.2) } L
-        (initChain tl) C (insertAll Γ (hd :: tl)) := by
-      have hins : insertAll Γ (hd :: tl)
-          = insertAll { Γ with types := Γ.types.insert hd.1 (.forAll [] hd.2) } tl := by
-        simp [insertAll]
-      rw [hins]
-      apply ih (fun p hp => hwk p (List.mem_cons_of_mem _ hp))
+        (ts.insert hd.1 (.forAll [] hd.2)) :=
+      .cmd C ts _ L _ _
+        (.cmd ts _ _ (.init_nondet ts hd.1 (.forAll [] hd.2) hd.2 default _ hfresh0 rfl
+          (hwk hd List.mem_cons_self) (Strata.Util.HMaps.Equiv.refl _)))
+        (Strata.Util.HMaps.Equiv.refl _)
+    have htail : StatementsHasTypeW P C (ts.insert hd.1 (.forAll [] hd.2)) L
+        (initChain tl) C (insertAll ts (hd :: tl)) := by
+      refine ih (fun p hp => hwk p (List.mem_cons_of_mem _ hp)) _ ?_
       intro i hi
-      have := hfresh (i + 1) (by simpa using Nat.succ_lt_succ hi)
-      simpa [insertAll, List.take] using this
-    exact StatementsHasType'.cons C C C Γ
-      { Γ with types := Γ.types.insert hd.1 (.forAll [] hd.2) }
-      (insertAll Γ (hd :: tl)) L _ _ hhead htail
+      have hi' := hfresh (i + 1) (by simpa using Nat.succ_lt_succ hi)
+      simpa [insertAll, List.take] using hi'
+    exact .cons C C C ts _ _ L _ _ hhead htail (fun _ _ _ h => nomatch h)
 
 -- ── `insertAll` lookup bookkeeping ────────────────────────────────────────
 
-/-- Looking up a name absent from `news` in `insertAll Γ news` falls through to
-    `Γ` (none of the inserted names is `x`). -/
+/-- Looking up a name absent from `news` in `insertAll ts news` falls through to `ts`. -/
 theorem insertAll_find_not_mem (news : List (Identifier Unit × LMonoTy)) :
-    ∀ (Γ : TContext Unit) (x : Identifier Unit),
-    x ∉ news.map Prod.fst →
-    (insertAll Γ news).types.find? x = Γ.types.find? x := by
+    ∀ (ts : TypeScopes) (x : Identifier Unit),
+    x ∉ news.map Prod.fst → (insertAll ts news).find? x = ts.find? x := by
   induction news with
-  | nil => intro Γ x _; rfl
+  | nil => intro ts x _; rfl
   | cons hd tl ih =>
-    intro Γ x hx
+    intro ts x hx
     simp only [List.map_cons, List.mem_cons, not_or] at hx
     obtain ⟨hne, hxtl⟩ := hx
-    have hins : insertAll Γ (hd :: tl)
-        = insertAll { Γ with types := Γ.types.insert hd.1 (.forAll [] hd.2) } tl := by
-      simp [insertAll]
-    rw [hins, ih _ x hxtl]
+    show (insertAll (ts.insert hd.1 (.forAll [] hd.2)) tl).find? x = ts.find? x
+    rw [ih _ x hxtl]
     exact Strata.Util.HMaps.find?_insert_ne _ x hd.1 _ hne
 
-/-- Looking up a member key of `news` in `insertAll Γ news` returns that member's
-    (wrapped) value, provided the keys are `Nodup` (so no later insert shadows an
-    earlier one). -/
+/-- Looking up a member key of `news` in `insertAll ts news` returns that member's (wrapped)
+    value, provided the keys are `Nodup` (so no later insert shadows an earlier one). -/
 theorem insertAll_find_mem (news : List (Identifier Unit × LMonoTy)) :
-    ∀ (Γ : TContext Unit) (x : Identifier Unit) (mty : LMonoTy),
+    ∀ (ts : TypeScopes) (x : Identifier Unit) (mty : LMonoTy),
     (news.map Prod.fst).Nodup → (x, mty) ∈ news →
-    (insertAll Γ news).types.find? x = some (.forAll [] mty) := by
+    (insertAll ts news).find? x = some (.forAll [] mty) := by
   induction news with
   | nil => intro _ _ _ _ hmem; exact absurd hmem (by simp)
   | cons hd tl ih =>
-    intro Γ x mty hnd hmem
+    intro ts x mty hnd hmem
     simp only [List.map_cons, List.nodup_cons] at hnd
     obtain ⟨hnotin, hndtl⟩ := hnd
-    have hins : insertAll Γ (hd :: tl)
-        = insertAll { Γ with types := Γ.types.insert hd.1 (.forAll [] hd.2) } tl := by
-      simp [insertAll]
-    rw [hins]
+    show (insertAll (ts.insert hd.1 (.forAll [] hd.2)) tl).find? x = some (.forAll [] mty)
     rcases List.mem_cons.mp hmem with heq | hmemtl
-    · -- x is the head key: the head is never overwritten by the (disjoint) tail.
+    · -- `x` is the head key: the head is never overwritten by the (disjoint) tail.
       have hx : x = hd.1 := (Prod.mk.injEq .. ▸ heq).1
       have hm : mty = hd.2 := (Prod.mk.injEq .. ▸ heq).2
       subst hx; subst hm
@@ -723,14 +511,12 @@ theorem insertAll_find_mem (news : List (Identifier Unit × LMonoTy)) :
     · exact ih _ x mty hndtl hmemtl
 
 /-- `Nodup` index lookup: the `i`-th key of `news` maps to the `i`-th value in
-    `insertAll Γ news`. -/
+    `insertAll ts news`. -/
 theorem insertAll_find_idx (news : List (Identifier Unit × LMonoTy))
-    (Γ : TContext Unit) (hnd : (news.map Prod.fst).Nodup)
+    (ts : TypeScopes) (hnd : (news.map Prod.fst).Nodup)
     (i : Nat) (hi : i < news.length) :
-    (insertAll Γ news).types.find? (news[i].1) = some (.forAll [] news[i].2) := by
-  refine insertAll_find_mem news Γ (news[i].1) (news[i].2) hnd ?_
-  have hmem : news[i] ∈ news := List.getElem_mem hi
-  exact hmem
+    (insertAll ts news).find? (news[i].1) = some (.forAll [] news[i].2) :=
+  insertAll_find_mem news ts (news[i].1) (news[i].2) hnd (List.getElem_mem hi)
 
 /-- In a `Nodup` list, the element at index `i` does not appear in the length-`i`
     prefix. -/
@@ -742,7 +528,7 @@ theorem nodup_getElem_not_mem_take {α} {l : List α} (hnd : l.Nodup)
   rw [List.length_take] at hj
   rw [List.getElem_take] at hval
   have hji : j < i := by omega
-  have : j = i := List.getElem?_inj (by omega) hnd (by
+  have : j = i := (List.getElem?_inj (by omega) hnd).mp (by
     rw [List.getElem?_eq_getElem (by omega), List.getElem?_eq_getElem hi, hval])
   omega
 
@@ -757,23 +543,160 @@ theorem keyval_mem {α β} (m : ListMap α β) (i : Nat)
   simp only [ListMap.keys_eq_map_fst, ListMap.values_eq_map_snd, List.getElem_map]
   rfl
 
--- ── The 7-premise call-typing obligation ─────────────────────────────────
+-- ── The call-typing obligation ───────────────────────────────────────────
+
+/-- A filter that keeps every element of `xs` and drops every element of `ys` sees
+    `mergeBy bs xs ys` as `xs`. -/
+theorem filter_mergeBy_left {α : Type} (p : α → Bool) (bs : List Bool) (xs ys : List α)
+    (hx : ∀ a ∈ xs, p a = true) (hy : ∀ a ∈ ys, p a = false) :
+    (mergeBy bs xs ys).filter p = xs := by
+  rw [← List.filterMap_eq_filter, filterMap_mergeBy_left _ bs xs ys ?_, List.filterMap_eq_filter]
+  · exact List.filter_eq_self.mpr hx
+  · intro a ha
+    simp [Option.guard, hy a ha]
+
+/-- A filter that drops every element of `xs` and keeps every element of `ys` sees
+    `mergeBy bs xs ys` as `ys`. -/
+theorem filter_mergeBy_right {α : Type} (p : α → Bool) (bs : List Bool) (xs ys : List α)
+    (hx : ∀ a ∈ xs, p a = false) (hy : ∀ a ∈ ys, p a = true) :
+    (mergeBy bs xs ys).filter p = ys := by
+  rw [← List.filterMap_eq_filter, filterMap_mergeBy_right _ bs xs ys ?_, List.filterMap_eq_filter]
+  · exact List.filter_eq_self.mpr hy
+  · intro a ha
+    simp [Option.guard, hx a ha]
+
+/-- The arguments of `mkArgs M T exprs mask` for the input formals, in order: the in-out block,
+    then the by-value inputs. -/
+theorem inputArgs_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (mask : List Bool) :
+    CallArg.inputArgs (mkArgs M T exprs mask) =
+      M.map (fun p => CallArg.inoutArg p.1) ++ exprs.map CallArg.inArg := by
+  rw [mkArgs, CallArg.inputArgs, List.filter_append, filter_mergeBy_left _ mask _ _ ?_ ?_]
+  · rw [List.filter_eq_self.mpr]
+    intro a ha
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp ha
+    rfl
+  · intro a ha
+    obtain ⟨e, _, rfl⟩ := List.mem_map.mp ha
+    rfl
+  · intro a ha
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp ha
+    rfl
+
+/-- The arguments of `mkArgs M T exprs mask` for the output formals, in order: the in-out block,
+    then the out targets. -/
+theorem resultArgs_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+    (mask : List Bool) :
+    CallArg.resultArgs (mkArgs M T exprs mask) =
+      M.map (fun p => CallArg.inoutArg p.1) ++ T.map (fun p => CallArg.outArg p.1) := by
+  rw [mkArgs, CallArg.resultArgs, List.filter_append, filter_mergeBy_right _ mask _ _ ?_ ?_]
+  · rw [List.filter_eq_self.mpr]
+    intro a ha
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp ha
+    rfl
+  · intro a ha
+    obtain ⟨e, _, rfl⟩ := List.mem_map.mp ha
+    rfl
+  · intro a ha
+    obtain ⟨p, _, rfl⟩ := List.mem_map.mp ha
+    rfl
+
+/-- A pair in the `zip` of the keys of a signature with the images of its keys under `f` is a key
+    paired with its own image. -/
+theorem mem_zip_keys_map {β γ : Type} (M : ListMap (Identifier Unit) β)
+    (f : Identifier Unit → γ) {k : Identifier Unit} {a : γ}
+    (h : (k, a) ∈ M.keys.zip (M.map (fun p => f p.1))) : k ∈ M.keys ∧ a = f k := by
+  rw [ListMap.keys_eq_map_fst] at h ⊢
+  induction M with
+  | nil => exact absurd h (by simp)
+  | cons q M ih =>
+    simp only [List.map_cons, List.zip_cons_cons, List.mem_cons, Prod.mk.injEq] at h
+    rcases h with ⟨rfl, rfl⟩ | h
+    · exact ⟨List.mem_cons_self, rfl⟩
+    · obtain ⟨hk, ha⟩ := ih h
+      exact ⟨List.mem_cons_of_mem _ hk, ha⟩
+
+/-- In `xs ++ ys`, the first position of a member of `xs` is its first position in `xs`. -/
+theorem idxOf?_append_of_mem {α : Type} [BEq α] [LawfulBEq α] {xs ys : List α} {a : α}
+    (h : a ∈ xs) : (xs ++ ys).idxOf? a = xs.idxOf? a := by
+  induction xs with
+  | nil => exact absurd h List.not_mem_nil
+  | cons x xs ih =>
+    rw [List.cons_append, List.idxOf?_cons, List.idxOf?_cons]
+    split
+    · rfl
+    · rename_i hne
+      have hmem : a ∈ xs := by
+        rcases List.mem_cons.mp h with rfl | hm
+        · exact absurd (beq_self_eq_true a) hne
+        · exact hm
+      rw [ih hmem]
+
+/-- **The arguments of `mkArgs` match the callee's signature.** Take a callee whose inputs are
+    `M ++ I` and whose outputs are `M ++ O`, where no input-only name is an in-out or output-only
+    name and no in-out name is an output-only name. With one by-value input for each input-only
+    parameter and one target for each output-only parameter, every in-out argument names the
+    result variable at its own output position, every input-only formal receives an `in`
+    argument, and every output-only formal receives an `out` argument. -/
+theorem argsMatch_mkArgs {proc : Procedure} (M I O T : @LMonoTySignature Unit)
+    (exprs : List Expression.Expr) (mask : List Bool)
+    (hInputs : proc.header.inputs = M ++ I) (hOutputs : proc.header.outputs = M ++ O)
+    (hExLen : exprs.length = I.length) (hTLen : T.length = O.length)
+    (hInotMO : ∀ k ∈ I.keys, k ∉ (M ++ O).keys) (hMnotO : ∀ k ∈ M.keys, k ∉ O.keys) :
+    WF.ArgsMatchSignature proc (mkArgs M T exprs mask) := by
+  have hkM : M.keys.length = (M.map (fun p => CallArg.inoutArg (P := Expression) p.1)).length := by
+    rw [List.length_map, ListMap.keys.length]
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · rw [getIn_mkArgs, hInputs, List.length_append, List.length_map, hExLen, lm_length_append]
+  · rw [getLhs_mkArgs, hOutputs, List.length_append, ListMap.keys.length, ListMap.keys.length,
+      hTLen, lm_length_append]
+  · rintro ⟨k, a⟩ hka
+    rw [hInputs, lm_keys_append, inputArgs_mkArgs, List.zip_append hkM] at hka
+    rw [hOutputs, lm_keys_append, getLhs_mkArgs]
+    rcases List.mem_append.mp hka with hM | hI
+    · obtain ⟨hk, rfl⟩ := mem_zip_keys_map M (fun x => CallArg.inoutArg (P := Expression) x) hM
+      obtain ⟨j, hj⟩ := Option.isSome_iff_exists.mp (List.isSome_idxOf?.mpr hk)
+      obtain ⟨hjlt, hjeq, _⟩ := List.idxOf?_eq_some_iff.mp hj
+      simp [WF.inputArgMatches, idxOf?_append_of_mem hk, hj, List.getElem?_append_left hjlt,
+        List.getElem?_eq_getElem hjlt, hjeq]
+    · obtain ⟨hk, ha⟩ := List.of_mem_zip hI
+      obtain ⟨e, _, rfl⟩ := List.mem_map.mp ha
+      have hnone : (M.keys ++ O.keys).idxOf? k = none := by
+        rw [List.idxOf?_eq_none_iff, ← lm_keys_append]
+        exact hInotMO k hk
+      simp only [WF.inputArgMatches, hnone]
+  · rintro ⟨k, a⟩ hka
+    rw [hOutputs, lm_keys_append, resultArgs_mkArgs, List.zip_append hkM] at hka
+    rw [hInputs, lm_keys_append]
+    rcases List.mem_append.mp hka with hM | hO
+    · obtain ⟨hk, rfl⟩ := mem_zip_keys_map M (fun x => CallArg.inoutArg (P := Expression) x) hM
+      simp only [WF.outputArgMatches]
+      exact List.contains_iff_mem.mpr (List.mem_append_left _ hk)
+    · obtain ⟨hk, ha⟩ := List.of_mem_zip hO
+      obtain ⟨t, _, rfl⟩ := List.mem_map.mp ha
+      have hnotin : k ∉ M.keys ++ I.keys := by
+        rw [List.mem_append, not_or]
+        refine ⟨fun hkM' => hMnotO k hkM' hk, fun hkI => hInotMO k hkI ?_⟩
+        rw [lm_keys_append]
+        exact List.mem_append_right _ hk
+      simp only [WF.outputArgMatches, Bool.not_eq_eq_eq_not, Bool.not_true]
+      exact Bool.eq_false_iff.mpr (fun hc => hnotin (List.contains_iff_mem.mp hc))
 
 /-- Soundness of the in-out call recipe (shared block `M` leading both roles).
-    Given a monomorphic callee
-    `proc` with `inputs = M ++ I`, `outputs = M ++ O` (M/I/O mutually key-disjoint),
-    out-argument targets `T` positionally as long as `O`, every `M` name and every
-    `T` name in scope at its declared type (`M.values[i]` resp. `O.values[i]`), and
-    by-value inputs `exprs` that are well-typed and not bare unannotated `fvar`s,
-    the call `CmdExt.call pname (mkArgs M T exprs mask) md` type-checks (leaving `Γ`
-    unchanged).
+    Given a callee `proc` with `inputs = M ++ I`, `outputs = M ++ O`, where no input-only name is
+    an in-out or output-only name and no in-out name is an output-only name, out-argument targets
+    `T` positionally as long as `O`, every `M` name and every `T` name in scope at its
+    instantiated declared type (`M.values[i]` resp. `O.values[i]`), by-value inputs `exprs` that
+    are weakly typed at the instantiated input types and are not bare unannotated `fvar`s, and
+    written-to names `M.keys ++ T.keys` that are distinct, the call
+    `CmdExt.call pname (mkArgs M T exprs mask) md` is weakly typed and keeps the scopes.
 
     Note the asymmetry between the two written-to blocks, which mirrors the spec:
     the in-out names are `M`'s own (the call rule pins them), whereas the out-only
     positions are filled by the *caller-chosen* `T` and are related to `O` only
     through their types (`hTinΓ`). -/
 theorem call_recipe_inout_sound
-    {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit}
+    {C : LContext CoreLParams} {P : Program} {ts : TypeScopes}
     {pname : String} {proc : Procedure} {md : MetaData Expression}
     (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
@@ -783,66 +706,64 @@ theorem call_recipe_inout_sound
     (hOutputs : proc.header.outputs = M ++ O)
     (hExLen : exprs.length = I.length)
     (hTLen : T.length = O.length)
-    -- The variables the call writes back through are bound in `Γ` at the *instantiated*
+    -- The variables the call writes back through are bound in `ts` at the *instantiated*
     -- formal type `subst [σ] (declared value)`, which is the type that the caller gave them at.
     (hMinΓ : ∀ i (hi : i < M.keys.length) (hj : i < M.values.length),
-      Γ.types.find? (M.keys[i]'hi) = some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (M.values[i]'hj))))
+      ts.find? (M.keys[i]'hi) =
+        some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (M.values[i]'hj))))
     (hTinΓ : ∀ i (hi : i < T.keys.length) (hj : i < O.values.length),
-      Γ.types.find? (T.keys[i]'hi) = some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (O.values[i]'hj))))
-    -- Each by-value input is typed at the *instantiated* formal input type.
+      ts.find? (T.keys[i]'hi) =
+        some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (O.values[i]'hj))))
+    -- Each by-value input is weakly typed at the *instantiated* formal input type.
     (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      LExpr.HasTypeA [] (exprs[i]'hi) (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (I.values[i]'hj)))
+      ExprHasTypeW C ts (exprs[i]'hi)
+        (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (I.values[i]'hj)))
     (hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none)
     (hIdisjOut : ∀ i (hi : i < I.keys.length),
-      (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false) :
-    CmdExtHasTypeA C P Γ (CmdExt.call pname (mkArgs M T exprs mask) md) Γ := by
+      (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
+    (hMnotO : ∀ k ∈ M.keys, k ∉ O.keys)
+    (hLhsNodup : (M.keys ++ T.keys).Nodup) :
+    CmdExtHasTypeW C P ts (CmdExt.call pname (mkArgs M T exprs mask) md) ts := by
   -- length facts
   have hkeysM : M.keys.length = M.length := ListMap.keys.length
   have hvalsM : M.values.length = M.length := lm_values_length M
-  have hkeysI : I.keys.length = I.length := ListMap.keys.length
   have hvalsI : I.values.length = I.length := lm_values_length I
-  have hkeysO : O.keys.length = O.length := ListMap.keys.length
   have hvalsO : O.values.length = O.length := lm_values_length O
   have hkeysT : T.keys.length = O.length := by rw [ListMap.keys.length, hTLen]
   have hgetIn := getIn_mkArgs M T exprs mask
   have hgetLhs := getLhs_mkArgs M T exprs mask
-  apply CmdExtHasType'.call Γ pname (mkArgs M T exprs mask) proc md σ Γ
-  case _ => -- (1) find?
-    exact hfind
-  case _ => -- (2) input arity
-    rw [hgetIn, hInputs]
-    show (List.map _ M ++ exprs).length = (M ++ I).length
-    rw [List.length_append, List.length_map, hExLen, lm_length_append]
-  case _ => -- (3) output arity
-    rw [hgetLhs, hOutputs]
-    show (M.keys ++ T.keys).length = (M ++ O).length
-    rw [List.length_append, hkeysM, hkeysT, lm_length_append]
-  case _ => -- (4) all LHS in Γ
+  have hInotMO : ∀ k ∈ I.keys, k ∉ (M ++ O).keys := by
+    intro k hk hmem
+    obtain ⟨i, hi, rfl⟩ := List.getElem_of_mem hk
+    have hc : (M ++ O).keys.contains (I.keys[i]'hi) = true := List.contains_iff_mem.mpr hmem
+    rw [hIdisjOut i hi] at hc
+    exact Bool.false_ne_true hc
+  have hwf : WF.WFcallProp P pname (mkArgs M T exprs mask) :=
+    WF.WFcallProp.of_argsMatch hfind
+      (argsMatch_mkArgs M I O T exprs mask hInputs hOutputs hExLen hTLen hInotMO hMnotO)
+      (by rw [hgetLhs]; exact hLhsNodup)
+  refine .call ts pname (mkArgs M T exprs mask) proc md σ ts hfind hwf ?_ ?_ ?_
+    (Strata.Util.HMaps.Equiv.refl ts)
+  · -- every written-to variable is in scope
     intro v hv
     rw [hgetLhs, List.mem_append] at hv
     rcases hv with hvM | hvT
-    · -- v ∈ M.keys
-      rw [List.mem_iff_getElem] at hvM
+    · rw [List.mem_iff_getElem] at hvM
       obtain ⟨i, hi, hveq⟩ := hvM
       have hj : i < M.values.length := by rw [hvalsM]; rw [hkeysM] at hi; exact hi
       rw [← hveq, hMinΓ i hi hj]
       rfl
-    · -- v ∈ T.keys: in scope at the *declared* type `O.values[i]`
-      rw [List.mem_iff_getElem] at hvT
+    · rw [List.mem_iff_getElem] at hvT
       obtain ⟨i, hi, hveq⟩ := hvT
       have hj : i < O.values.length := by rw [hvalsO]; rw [hkeysT] at hi; exact hi
       rw [← hveq, hTinΓ i hi hj]
       rfl
-  case _ => -- (5) input types
+  · -- input types
     intro i hi hj
-    -- Rewrite the input positions and the callee's input signature.
     simp only [hgetIn] at hi ⊢
     simp only [hInputs, lm_values_append] at hj ⊢
-    -- length of the mapped M block
     have hmaplen : (List.map (fun p => (LExpr.fvar () p.1 none : Expression.Expr)) M).length
         = M.length := List.length_map ..
-    -- pick the witness = the *instantiated* value at position i (AliasEquiv is refl).
-    refine ⟨LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) ((M.values ++ I.values)[i]'hj), AliasEquiv.refl, ?_⟩
     by_cases hlt : i < M.length
     · -- in-out block: the argument is the bare fvar `fvar () M[i].1 none`.
       have hidxM : i < M.values.length := by rw [hvalsM]; exact hlt
@@ -854,9 +775,8 @@ theorem call_recipe_inout_sound
       have hval : (M.values ++ I.values)[i]'hj = M.values[i]'hidxM :=
         List.getElem_append_left hidxM
       rw [harg, hval]
-      -- match reduces to the fvar branch
       exact hMinΓ i hidxK hidxM
-    · -- by-value input block: i ≥ M.length, so the argument is `exprs[i - M.length]`.
+    · -- by-value input block: `i ≥ M.length`, so the argument is `exprs[i - M.length]`.
       have hge : M.length ≤ i := Nat.le_of_not_lt hlt
       have hiex : i - M.length < exprs.length := by
         rw [List.length_append, hmaplen] at hi; omega
@@ -872,26 +792,22 @@ theorem call_recipe_inout_sound
         congr 1
         rw [hvalsM]
       rw [harg, hval]
-      -- the by-value argument is not a bare unannotated fvar, so the match takes
-      -- the `e` branch → `exprTyped C Γ e mty` = `HasTypeA [] e mty`.
+      -- The by-value argument is not a bare unannotated `fvar`, so the match takes its
+      -- expression branch.
       have hne := hExNoFvar (i - M.length) hiex
-      -- split on the expr's head; only the bare-fvar-none shape hits the fvar arm.
       have hExTyi := hExTy (i - M.length) hiex hjI
-      -- turn the match into the exprTyped obligation
       cases hcase : exprs[i - M.length]'hiex with
       | fvar m x ty =>
         cases ty with
         | none => exact absurd hcase (hne m x)
         | some t =>
-          simp only []
           rw [hcase] at hExTyi
           exact hExTyi
-      | _ => simp only []; rw [hcase] at hExTyi; exact hExTyi
-  case _ => -- (6) output types
+      | _ => rw [hcase] at hExTyi; exact hExTyi
+  · -- output types
     intro i hi hj
     simp only [hgetLhs] at hi ⊢
     simp only [hOutputs, lm_values_append] at hj ⊢
-    refine ⟨LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) ((M.values ++ O.values)[i]'hj), AliasEquiv.refl, ?_⟩
     by_cases hlt : i < M.length
     · -- in-out block
       have hidxK : i < M.keys.length := by rw [hkeysM]; exact hlt
@@ -918,48 +834,15 @@ theorem call_recipe_inout_sound
         rw [hvalsM]
       rw [hlhs, hval]
       exact hTinΓ (i - M.length) hidxKT hidxVO
-  case _ => -- (7) inout matching names
-    intro i hi hcontains
-    -- Rewrite the callee signature keys as `M.keys ++ {I,O}.keys`.
-    simp only [hInputs, lm_keys_append] at hi hcontains ⊢
-    simp only [hOutputs, lm_keys_append] at hcontains
-    by_cases hlt : i < M.length
-    · -- in-out block: the argument at position i is `fvar () M.keys[i] none`.
-      have hidxK : i < M.keys.length := by rw [hkeysM]; exact hlt
-      rw [hgetIn, List.getElem_append_left hidxK]
-      refine ⟨(), none, ?_⟩
-      -- position i lies in the mapped M block
-      have hmaplen : (List.map (fun p => (LExpr.fvar () p.1 none : Expression.Expr)) M).length
-          = M.length := List.length_map ..
-      rw [List.getElem?_append_left (by rw [hmaplen]; exact hlt)]
-      rw [List.getElem?_eq_getElem (by rw [hmaplen]; exact hlt)]
-      simp only [List.getElem_map, ListMap.keys_eq_map_fst]
-    · -- input-only block: `hIdisjOut` says its key is absent from `(M ++ O).keys`,
-      -- contradicting the `contains` hypothesis.
-      exfalso
-      have hge : M.length ≤ i := Nat.le_of_not_lt hlt
-      have hidxI : i - M.length < I.keys.length := by
-        rw [List.length_append, hkeysM] at hi; rw [hkeysI]; omega
-      rw [List.getElem_append_right (by rw [hkeysM]; exact hge)] at hcontains
-      have hdisj := hIdisjOut (i - M.length) hidxI
-      rw [lm_keys_append] at hdisj
-      -- align the index arithmetic between hcontains and hdisj
-      simp only [hkeysM] at hcontains
-      rw [hdisj] at hcontains
-      exact absurd hcontains (by simp)
-  case _ => -- (8) the output context, up to `TContext.Equiv`
-    exact tctxEquivRefl Γ
 
-/-- Discharge `call_recipe_inout_sound`'s `hTinΓ` from a *membership* fact about the
-    out-argument targets. That premise wants the target name at position `i` bound at
-    the type `O.values[i]` the callee declares; `hTVals` says the targets carry
-    exactly those types positionally, so binding each target at its **own** recorded
-    type suffices. This is the only place the `T`-vs-`O` type alignment is used. -/
-theorem outTargets_inΓ {Γ : TContext Unit} (O T : @LMonoTySignature Unit)
+/-- When out targets `T` carry, position by position, the types of the output signature `O`, and
+    the scopes bind every target at its own type, then the scopes bind the target at each position
+    `i` at the type `O` declares at `i`. -/
+theorem outTargets_inΓ {ts : TypeScopes} (O T : @LMonoTySignature Unit)
     (hTVals : T.values = O.values)
-    (hInScope : ∀ p ∈ T.toList, Γ.types.find? p.1 = some (.forAll [] p.2)) :
+    (hInScope : ∀ p ∈ T.toList, ts.find? p.1 = some (.forAll [] p.2)) :
     ∀ i (hi : i < T.keys.length) (hj : i < O.values.length),
-      Γ.types.find? (T.keys[i]'hi) = some (.forAll [] (O.values[i]'hj)) := by
+      ts.find? (T.keys[i]'hi) = some (.forAll [] (O.values[i]'hj)) := by
   intro i hi hj
   have hiv : i < T.values.length := by
     rw [lm_values_length]; rw [ListMap.keys.length] at hi; exact hi
@@ -974,248 +857,244 @@ theorem lm_length_eq_of_values_eq {O T : @LMonoTySignature Unit}
     (hTVals : T.values = O.values) : T.length = O.length := by
   rw [← lm_values_length T, ← lm_values_length O, hTVals]
 
--- ── Chaining and block-wrapping ───────────────────────────────────────────
-
--- ── The typing rules respect `TContext.Equiv` ────────────────────────
+-- ── The typing rules respect equivalent and larger scopes ─────────────
 --
--- Each typing rule of Strata constrains its *output* context up to `TContext.Equiv` only, because a stack of
--- scopes over a hash map reads no order of the insertions. Therefore a proof that joins two derivations also
--- needs each relation to respect that equivalence in its *input* context.
--- `StatementsHasTypeA_append` inverts a `nil` rule, which gives back a context that is only equivalent to the
--- context of the tail. At the annotated instantiation, that property is cheap. `exprTyped` reads no context,
--- and the compatibility of two types is a plain equality. Therefore a proof reads the context through
--- `types.find?` and through the aliases only, and `TContext.Equiv` keeps both of them.
+-- Each weak typing rule constrains its *output* scopes up to `HMaps.Equiv` only, because a stack
+-- of scopes over a hash map reads no order of the insertions. Therefore a proof that joins two
+-- derivations also needs each relation to respect that equivalence in its *input* scopes. A rule
+-- reads its input scopes through `find?` only, and so does the weak typing of an expression.
 
-/-- `TContext.Equiv` gives pointwise agreement of variable lookups. -/
-theorem tctxEquiv_find? {Γ Γ' : TContext Unit}
-    (h : TContext.Equiv (T := CoreLParams) Γ Γ') (x : Identifier Unit) :
-    Γ.types.find? x = Γ'.types.find? x :=
-  Strata.Util.HMaps.Equiv.find? h.1 x
+/-- A weakly typed expression stays weakly typed in larger variable scopes: scopes that bind every
+    name the original scopes bind, at the same type. Weak typing reads the scopes through `find?`
+    only. -/
+theorem exprHasTypeW_mono {C : LContext CoreLParams} {ts ts' : TypeScopes}
+    {e : Expression.Expr} {τ : LMonoTy} (h : ExprHasTypeW C ts e τ)
+    (hts : ∀ x v, ts.find? x = some v → ts'.find? x = some v) : ExprHasTypeW C ts' e τ :=
+  ⟨h.1, h.2.1, ⟨fun x ann hx => hts _ _ (h.2.2.fvarsDeclared x ann hx), h.2.2.opsInstantiate,
+    h.2.2.opsKnown⟩⟩
 
-/-- `TContext.Equiv` survives inserting the same binding on both sides. -/
-theorem tctxEquiv_insert {Γ Γ' : TContext Unit}
-    (h : TContext.Equiv (T := CoreLParams) Γ Γ') (x : Identifier Unit) (v : LTy) :
-    TContext.Equiv (T := CoreLParams)
-      { Γ with types := Γ.types.insert x v } { Γ' with types := Γ'.types.insert x v } :=
-  ⟨Strata.Util.HMaps.insert_equiv h.1 x v, h.2⟩
-
-/-- **`FuncHasTypeA` reads no type scope.** Each field either names no context, or it goes through
-    `exprTyped` or through the compatibility of two types, and neither of those reads a context at the
-    annotated instantiation. -/
-theorem funcHasTypeA_ctx_irrel {C : LContext CoreLParams} {Γ Γ₂ : TContext Unit}
-    {func : Function} (h : FuncHasTypeA C Γ func) : FuncHasTypeA C Γ₂ func :=
-  ⟨h.inputsNodup, h.typeArgsNodup, h.noUndeclaredVars, h.signatureWellKinded,
-   h.bodyTyped, h.measureTyped⟩
-
-/-- **`CmdHasTypeA` is congruent in its input context up to `TContext.Equiv`.** -/
-theorem cmdHasTypeA_equiv_congr {C : LContext CoreLParams} {Γ Γ₂ Δ : TContext Unit}
-    {c : Cmd Expression} (h : CmdHasTypeA C Γ c Δ)
-    (he : TContext.Equiv (T := CoreLParams) Γ₂ Γ) :
-    CmdHasTypeA C Γ₂ c Δ := by
+/-- A weakly typed command stays weakly typed, with the same output scopes, when its input scopes
+    are replaced by equivalent ones: scopes with the same lookup for every name. -/
+theorem cmdHasTypeW_equiv_congr {C : LContext CoreLParams} {ts ts₂ ts' : TypeScopes}
+    {c : Cmd Expression} (h : CmdHasTypeW C ts c ts')
+    (he : Strata.Util.HMaps.Equiv ts₂ ts) : CmdHasTypeW C ts₂ c ts' := by
+  have hf : ∀ x, ts₂.find? x = ts.find? x := fun x => Strata.Util.HMaps.Equiv.find? he x
+  have hm : ∀ x v, ts.find? x = some v → ts₂.find? x = some v := fun x _ hx => (hf x).trans hx
   cases h with
-  | init_det x xty e mty tys md Δ' hfresh hnovar hlen hrac hwk hexpr heq =>
-    exact CmdHasType'.init_det Γ₂ x xty e mty tys md _
-      ((tctxEquiv_find? he x).trans hfresh) hnovar hlen (by rw [he.2]; exact hrac) hwk hexpr
-      (heq.trans (tctxEquiv_insert he.symm x _))
-  | init_nondet x xty mty tys md Δ' hfresh hlen hrac hwk heq =>
-    exact CmdHasType'.init_nondet Γ₂ x xty mty tys md _
-      ((tctxEquiv_find? he x).trans hfresh) hlen (by rw [he.2]; exact hrac) hwk
-      (heq.trans (tctxEquiv_insert he.symm x _))
-  | set_det x mty e md Δ' hfind hexpr heq =>
-    exact CmdHasType'.set_det Γ₂ x mty e md _
-      ((tctxEquiv_find? he x).trans hfind) hexpr (heq.trans he.symm)
-  | set_nondet x mty md Δ' hfind heq =>
-    exact CmdHasType'.set_nondet Γ₂ x mty md _
-      ((tctxEquiv_find? he x).trans hfind) (heq.trans he.symm)
-  | assert l e md Δ' hexpr heq =>
-    exact CmdHasType'.assert Γ₂ l e md _ hexpr (heq.trans he.symm)
-  | assume l e md Δ' hexpr heq =>
-    exact CmdHasType'.assume Γ₂ l e md _ hexpr (heq.trans he.symm)
-  | cover l e md Δ' hexpr heq =>
-    exact CmdHasType'.cover Γ₂ l e md _ hexpr (heq.trans he.symm)
-
-/-- **`CmdExtHasTypeA` is congruent in its input context up to `TContext.Equiv`.** -/
-theorem cmdExtHasTypeA_equiv_congr {C : LContext CoreLParams} {P : Program}
-    {Γ Γ₂ Δ : TContext Unit} {c : Command} (h : CmdExtHasTypeA C P Γ c Δ)
-    (he : TContext.Equiv (T := CoreLParams) Γ₂ Γ) :
-    CmdExtHasTypeA C P Γ₂ c Δ := by
-  cases h with
-  | cmd Γ' c hc => exact CmdExtHasType'.cmd Γ₂ _ c (cmdHasTypeA_equiv_congr hc he)
-  | call pname callArgs proc md σ Δ' hfind hin hout hlhs hinTy houtTy hinout heq =>
-    refine CmdExtHasType'.call Γ₂ pname callArgs proc md σ _ hfind hin hout ?_ ?_ ?_ hinout
+  | init_det x _ _ _ _ _ hfind hfv hxty hwk hexpr heq =>
+    exact .init_det _ _ _ _ _ _ _ ((hf x).trans hfind) hfv hxty hwk (exprHasTypeW_mono hexpr hm)
+      (heq.trans (Strata.Util.HMaps.insert_equiv he.symm x _))
+  | init_nondet x _ _ _ _ hfind hxty hwk heq =>
+    exact .init_nondet _ _ _ _ _ _ ((hf x).trans hfind) hxty hwk
+      (heq.trans (Strata.Util.HMaps.insert_equiv he.symm x _))
+  | set_det x _ _ _ _ hfind hexpr heq =>
+    exact .set_det _ _ _ _ _ _ ((hf x).trans hfind) (exprHasTypeW_mono hexpr hm)
       (heq.trans he.symm)
-    · intro v hv; rw [tctxEquiv_find? he v]; exact hlhs v hv
+  | set_nondet x _ _ _ hfind heq =>
+    exact .set_nondet _ _ _ _ _ ((hf x).trans hfind) (heq.trans he.symm)
+  | assert _ _ _ _ hexpr heq =>
+    exact .assert _ _ _ _ _ (exprHasTypeW_mono hexpr hm) (heq.trans he.symm)
+  | assume _ _ _ _ hexpr heq =>
+    exact .assume _ _ _ _ _ (exprHasTypeW_mono hexpr hm) (heq.trans he.symm)
+  | cover _ _ _ _ hexpr heq =>
+    exact .cover _ _ _ _ _ (exprHasTypeW_mono hexpr hm) (heq.trans he.symm)
+
+/-- A weakly typed command or call stays weakly typed, with the same output scopes, when its input
+    scopes are replaced by equivalent ones: scopes with the same lookup for every name. -/
+theorem cmdExtHasTypeW_equiv_congr {C : LContext CoreLParams} {P : Program}
+    {ts ts₂ ts' : TypeScopes} {c : Command} (h : CmdExtHasTypeW C P ts c ts')
+    (he : Strata.Util.HMaps.Equiv ts₂ ts) : CmdExtHasTypeW C P ts₂ c ts' := by
+  have hf : ∀ x, ts₂.find? x = ts.find? x := fun x => Strata.Util.HMaps.Equiv.find? he x
+  have hm : ∀ x v, ts.find? x = some v → ts₂.find? x = some v := fun x _ hx => (hf x).trans hx
+  cases h with
+  | cmd c _ hc => exact .cmd ts₂ c _ (cmdHasTypeW_equiv_congr hc he)
+  | call pname callArgs proc md σ _ hfind hwf hlhs hargs hlhsTy heq =>
+    refine .call ts₂ pname callArgs proc md σ _ hfind hwf ?_ ?_ ?_ (heq.trans he.symm)
+    · intro v hv
+      rw [hf v]
+      exact hlhs v hv
     · intro i hi hj
-      obtain ⟨mty, halias, hty⟩ := hinTy i hi hj
-      refine ⟨mty, by rw [he.2]; exact halias, ?_⟩
-      -- The obligation for one argument matches on the shape of that argument. Only its branch for an `fvar`
-      -- with no annotation reads the context, through `types.find?`. Each other branch goes through
-      -- `exprTyped`, which reads no context at this instantiation.
-      first
-        | (simp only [tctxEquiv_find? he]; exact hty)
-        | exact hty
+      have hty := hargs i hi hj
+      cases hcase : (CallArg.getInputExprs callArgs)[i] with
+      | fvar m x ann =>
+        cases ann with
+        | none =>
+          rw [hcase] at hty
+          exact (hf x).trans hty
+        | some t =>
+          rw [hcase] at hty
+          exact exprHasTypeW_mono hty hm
+      | _ =>
+        rw [hcase] at hty
+        exact exprHasTypeW_mono hty hm
     · intro i hi hj
-      obtain ⟨mty, halias, hty⟩ := houtTy i hi hj
-      exact ⟨mty, by rw [he.2]; exact halias, (tctxEquiv_find? he _).trans hty⟩
+      exact (hf _).trans (hlhsTy i hi hj)
 
-/-- The form of `statementsHasTypeA_equiv_congr` that takes a fuel parameter.
+/-- The form of `statementsHasTypeW_equiv_congr` that takes a fuel parameter.
 
-    This lemma holds the case for one statement inside itself, and it is not a separate lemma of a mutual
-    recursion. The relation is a `Prop`, so the equation compiler cannot recurse on a derivation. Recursion on
-    the *syntax* covers both halves of the mutual definition in one function, because the body of a block, of a
-    branch or of a loop inside the head statement is strictly smaller than the list.
-
-    The recursion is on an explicit `Nat` fuel that bounds the size of the list, and not on that size directly.
-    Therefore each context stays a local variable that `cases` can substitute. As a fixed parameter of the
-    function, a context would instead pick up an equation, and each recursive application would then not type
-    check. -/
-private theorem statementsHasTypeA_equiv_congr_fuel {P : Program} : ∀ (n : Nat)
-    (ss : List Statement) {C C' : LContext CoreLParams} {Γ Γ₂ Δ : TContext Unit}
+    The relation is a `Prop`, so the equation compiler cannot recurse on a derivation. Recursion on
+    the *syntax* covers both halves of the mutual definition in one function, because the body of a
+    block, of a branch or of a loop inside the head statement is strictly smaller than the list.
+    The recursion is on an explicit `Nat` fuel that bounds the size of the list, so each context
+    stays a local variable that `cases` can substitute. -/
+private theorem statementsHasTypeW_equiv_congr_fuel {P : Program} : ∀ (n : Nat)
+    (ss : List Statement) {C C' : LContext CoreLParams} {ts ts₂ ts' : TypeScopes}
     {L : List String}, sizeOf ss ≤ n →
-    StatementsHasTypeA P C Γ L ss C' Δ →
-    TContext.Equiv (T := CoreLParams) Γ₂ Γ →
-    StatementsHasTypeA P C Γ₂ L ss C' Δ := by
+    StatementsHasTypeW P C ts L ss C' ts' →
+    Strata.Util.HMaps.Equiv ts₂ ts →
+    StatementsHasTypeW P C ts₂ L ss C' ts' := by
   intro n
   induction n with
   | zero =>
     -- `sizeOf` of a list is at least 1, so there is no fuel-0 case.
-    intro ss C C' Γ Γ₂ Δ L hfuel _ _
+    intro ss C C' ts ts₂ ts' L hfuel _ _
     cases ss <;> simp at hfuel
   | succ n ih =>
-    intro ss C C' Γ Γ₂ Δ L hfuel h he
+    intro ss C C' ts ts₂ ts' L hfuel h he
+    have hm : ∀ x v, ts.find? x = some v → ts₂.find? x = some v :=
+      fun x _ hx => (Strata.Util.HMaps.Equiv.find? he x).trans hx
     cases h with
-    | nil _ _ L _ heq => exact StatementsHasType'.nil C Γ₂ L _ (heq.trans he.symm)
-    | cons _ Ca _ _ Γa _ L s ss' hs hss =>
-      refine StatementsHasType'.cons C Ca _ Γ₂ Γa _ L s ss' ?_ hss
-      -- Only the head statement is retyped; the tail already starts from `Γa`.
+    | nil _ _ L _ heq => exact .nil C ts₂ L _ (heq.trans he.symm)
+    | cons _ Ca _ _ tsa _ L s ss' hs hss hsib =>
+      refine .cons C Ca _ ts₂ tsa _ L s ss' ?_ hss hsib
+      -- Only the head statement is retyped; the tail already starts from `tsa`.
       cases hs with
-      | cmd _ _ Γ' L c _ hc heq =>
-        exact StatementHasType'.cmd C Γ₂ Γ' L c _ (cmdExtHasTypeA_equiv_congr hc he) heq
-      | block _ _ C_body Γ_body L label body md _ hlab hbody heq =>
-        exact StatementHasType'.block C Γ₂ C_body Γ_body L label body md _ hlab
+      | cmd _ _ tsc L c _ hc heq =>
+        exact .cmd C ts₂ tsc L c _ (cmdExtHasTypeW_equiv_congr hc he) heq
+      | block _ _ C_body ts_body L label body md _ hfresh hbody heq =>
+        exact .block C ts₂ C_body ts_body L label body md _ hfresh
           (ih body (by simp at hfuel; omega) hbody he) (heq.trans he.symm)
-      | ite_det _ _ C_t Γ_t C_e Γ_e L cond thenb elseb md _ hcond hthen helse heq =>
-        exact StatementHasType'.ite_det C Γ₂ C_t Γ_t C_e Γ_e L cond thenb elseb md _ hcond
+      | ite_det _ _ C_t ts_t C_e ts_e L cond thenb elseb md _ hcond hthen helse heq =>
+        exact .ite_det C ts₂ C_t ts_t C_e ts_e L cond thenb elseb md _
+          (exprHasTypeW_mono hcond hm)
           (ih thenb (by simp at hfuel; omega) hthen he)
           (ih elseb (by simp at hfuel; omega) helse he) (heq.trans he.symm)
-      | ite_nondet _ _ C_t Γ_t C_e Γ_e L thenb elseb md _ hthen helse heq =>
-        exact StatementHasType'.ite_nondet C Γ₂ C_t Γ_t C_e Γ_e L thenb elseb md _
+      | ite_nondet _ _ C_t ts_t C_e ts_e L thenb elseb md _ hthen helse heq =>
+        exact .ite_nondet C ts₂ C_t ts_t C_e ts_e L thenb elseb md _
           (ih thenb (by simp at hfuel; omega) hthen he)
           (ih elseb (by simp at hfuel; omega) helse he) (heq.trans he.symm)
-      | loop _ _ C_body Γ_body L guard measure invariants body md _ hg hm hinv hbody heq =>
-        exact StatementHasType'.loop C Γ₂ C_body Γ_body L guard measure invariants body md _
-          hg hm hinv (ih body (by simp at hfuel; omega) hbody he) (heq.trans he.symm)
+      | loop _ _ C_body ts_body L guard measure invariants body md _ hg hmeas hinv hbody heq =>
+        exact .loop C ts₂ C_body ts_body L guard measure invariants body md _
+          (fun g hgd => exprHasTypeW_mono (hg g hgd) hm)
+          (fun m hmd => exprHasTypeW_mono (hmeas m hmd) hm)
+          (fun p hp => exprHasTypeW_mono (hinv p hp) hm)
+          (ih body (by simp at hfuel; omega) hbody he) (heq.trans he.symm)
       | exit _ _ L label md _ hlab heq =>
-        exact StatementHasType'.exit C Γ₂ L label md _ hlab (heq.trans he.symm)
-      | funcDecl _ _ L decl func md _ hrec hfunc heq =>
-        exact StatementHasType'.funcDecl C Γ₂ L decl func md _ hrec
-          (funcHasTypeA_ctx_irrel hfunc) (heq.trans he.symm)
-      | typeDecl _ C'' _ L tc md _ hadd heq =>
-        exact StatementHasType'.typeDecl C _ Γ₂ L tc md _ hadd (heq.trans he.symm)
+        exact .exit C ts₂ L label md _ hlab (heq.trans he.symm)
+      | typeDecl _ C'' _ L tc md _ hname hadd heq =>
+        exact .typeDecl C _ ts₂ L tc md _ hname hadd (heq.trans he.symm)
 
-/-- **`StatementsHasTypeA` is congruent in its input context up to `TContext.Equiv`.**
-    Instantiates `statementsHasTypeA_equiv_congr_fuel` at exactly `sizeOf ss`. -/
-theorem statementsHasTypeA_equiv_congr {P : Program} {ss : List Statement}
-    {C C' : LContext CoreLParams} {Γ Γ₂ Δ : TContext Unit} {L : List String}
-    (h : StatementsHasTypeA P C Γ L ss C' Δ)
-    (he : TContext.Equiv (T := CoreLParams) Γ₂ Γ) :
-    StatementsHasTypeA P C Γ₂ L ss C' Δ :=
-  statementsHasTypeA_equiv_congr_fuel (sizeOf ss) ss (Nat.le_refl _) h he
+/-- A weakly typed statement list stays weakly typed, with the same output context and scopes, when
+    its input scopes are replaced by equivalent ones: scopes with the same lookup for every name. -/
+theorem statementsHasTypeW_equiv_congr {P : Program} {ss : List Statement}
+    {C C' : LContext CoreLParams} {ts ts₂ ts' : TypeScopes} {L : List String}
+    (h : StatementsHasTypeW P C ts L ss C' ts')
+    (he : Strata.Util.HMaps.Equiv ts₂ ts) :
+    StatementsHasTypeW P C ts₂ L ss C' ts' :=
+  statementsHasTypeW_equiv_congr_fuel (sizeOf ss) ss (Nat.le_refl _) h he
 
-/-- Concatenating two well-typed statement lists (threading the mid context)
-    yields a well-typed statement list. -/
-theorem StatementsHasTypeA_append {P : Program} {L : List String}
+/-- Concatenating two weakly typed statement lists (threading the middle scopes) gives a weakly
+    typed statement list, when no block of the first list has the label of a block of the second. -/
+theorem StatementsHasTypeW_append {P : Program} {L : List String}
     {l1 : List Statement} :
-    ∀ {C Γ Γ' Γ'' : _} {C' C'' : _} {l2 : List Statement},
-    StatementsHasTypeA P C Γ L l1 C' Γ' →
-    StatementsHasTypeA P C' Γ' L l2 C'' Γ'' →
-    StatementsHasTypeA P C Γ L (l1 ++ l2) C'' Γ'' := by
+    ∀ {C : LContext CoreLParams} {ts ts' ts'' : TypeScopes} {C' C'' : LContext CoreLParams}
+      {l2 : List Statement},
+    StatementsHasTypeW P C ts L l1 C' ts' →
+    StatementsHasTypeW P C' ts' L l2 C'' ts'' →
+    (∀ label body md, Stmt.block label body md ∈ l1 →
+      ∀ body' md', Stmt.block label body' md' ∉ l2) →
+    StatementsHasTypeW P C ts L (l1 ++ l2) C'' ts'' := by
   induction l1 with
   | nil =>
-    intro C Γ Γ' Γ'' C' C'' l2 h1 h2
+    intro C ts ts' ts'' C' C'' l2 h1 h2 _
     cases h1 with
     | nil _ _ _ _ heq =>
-      -- The empty list's output context is only `Equiv` to its input, so the tail's
+      -- The empty list's output scopes are only `Equiv` to its input, so the tail's
       -- derivation has to be transported back along that equivalence.
-      simpa using statementsHasTypeA_equiv_congr h2 heq.symm
+      simpa using statementsHasTypeW_equiv_congr h2 heq.symm
   | cons hd tl ih =>
-    intro C Γ Γ' Γ'' C' C'' l2 h1 h2
+    intro C ts ts' ts'' C' C'' l2 h1 h2 hsep
     cases h1 with
-    | cons _ Ca _ _ Γa _ _ _ _ hs hss =>
-      exact StatementsHasType'.cons _ _ _ _ _ _ _ _ _ hs (ih hss h2)
+    | cons _ Ca _ _ tsa _ _ _ _ hs hss hsib =>
+      have hsep' : ∀ label body md, Stmt.block label body md ∈ tl →
+          ∀ body' md', Stmt.block label body' md' ∉ l2 :=
+        fun label body md hmem => hsep label body md (List.mem_cons_of_mem _ hmem)
+      refine .cons _ _ _ _ _ _ _ _ _ hs (ih hss h2 hsep') ?_
+      intro label body md heq body' md' hmem
+      rcases List.mem_append.mp hmem with htl | hl2
+      · exact hsib label body md heq body' md' htl
+      · subst heq
+        exact hsep label body md List.mem_cons_self body' md' hl2
 
-/-- The output context of a well-typed statement list moves along `TContext.Equiv`:
-    appending the empty list lets its `nil` rule absorb the equivalence. -/
-theorem StatementsHasTypeA_out_equiv {P : Program} {C C' : LContext CoreLParams}
-    {Γ Δ Δ' : TContext Unit} {L : List String} {ss : List Statement}
-    (h : StatementsHasTypeA P C Γ L ss C' Δ)
-    (he : TContext.Equiv (T := CoreLParams) Δ' Δ) :
-    StatementsHasTypeA P C Γ L ss C' Δ' := by
-  have hz := StatementsHasTypeA_append h (StatementsHasType'.nil C' Δ L Δ' he)
+/-- A weakly typed statement list stays weakly typed when its output scopes are replaced by
+    equivalent ones: scopes with the same lookup for every name. -/
+theorem StatementsHasTypeW_out_equiv {P : Program} {C C' : LContext CoreLParams}
+    {ts ts' ts'' : TypeScopes} {L : List String} {ss : List Statement}
+    (h : StatementsHasTypeW P C ts L ss C' ts')
+    (he : Strata.Util.HMaps.Equiv ts'' ts') :
+    StatementsHasTypeW P C ts L ss C' ts'' := by
+  have hz := StatementsHasTypeW_append h (.nil C' ts' L ts'' he)
+    (fun _ _ _ _ _ _ hmem => absurd hmem List.not_mem_nil)
   rwa [List.append_nil] at hz
 
-/-- A single well-typed statement is a well-typed statement list of length one.
-    Used throughout the generator's soundness proof: every `genStmt` branch but
-    `call` produces a singleton list, so its per-constructor `StatementHasTypeA` fact is
-    lifted through this. -/
-theorem StatementsHasTypeA_singleton {P : Program} {C C' : LContext CoreLParams}
-    {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
-    (h : StatementHasTypeA P C Γ L s C' Γ') :
-    StatementsHasTypeA P C Γ L [s] C' Γ' :=
-  StatementsHasType'.cons _ _ _ _ _ _ _ _ _ h (StatementsHasType'.nil _ _ _ _ (tctxEquivRefl _))
+/-- A single weakly typed statement is a weakly typed statement list of length one. Every
+    `genStmt` branch but `call` produces a singleton list. -/
+theorem StatementsHasTypeW_singleton {P : Program} {C C' : LContext CoreLParams}
+    {ts ts' : TypeScopes} {L : List String} {s : Statement}
+    (h : StatementHasTypeW P C ts L s C' ts') :
+    StatementsHasTypeW P C ts L [s] C' ts' :=
+  .cons _ _ _ _ _ _ _ _ _ h (.nil _ _ _ _ (Strata.Util.HMaps.Equiv.refl _))
+    (fun _ _ _ _ _ _ hmem => absurd hmem List.not_mem_nil)
 
 -- ── Reuse-or-init: the general case (block-free when nothing is missing) ──
 
-/-- The sub-list of `news` whose names are **not** yet bound in `Γ`: exactly the
-    names a call site must `init` before calling. Names already bound (at the
-    right type, which the premise `hReuse` of `call_mixed_body_sound` gives, stay as they are. -/
-def missingIn (Γ : TContext Unit) (news : List (Identifier Unit × LMonoTy)) :
+/-- The sub-list of `news` whose names are **not** yet bound in `ts`: exactly the names a call
+    site must `init` before calling. Names already bound (at the right type, which the premise
+    `hReuse` of `call_mixed_body_sound` gives) stay as they are. -/
+def missingIn (ts : TypeScopes) (news : List (Identifier Unit × LMonoTy)) :
     List (Identifier Unit × LMonoTy) :=
-  news.filter (fun p => (Γ.types.find? p.1).isNone)
+  news.filter (fun p => (ts.find? p.1).isNone)
 
-theorem missingIn_sublist (Γ : TContext Unit) (news : List (Identifier Unit × LMonoTy)) :
-    (missingIn Γ news).Sublist news := List.filter_sublist
+/-- The bindings that `missingIn` keeps form a sublist of the given bindings. -/
+theorem missingIn_sublist (ts : TypeScopes) (news : List (Identifier Unit × LMonoTy)) :
+    (missingIn ts news).Sublist news := List.filter_sublist
 
-/-- Every `missingIn` name is genuinely absent from `Γ`. -/
-theorem missingIn_find_none (Γ : TContext Unit) (news : List (Identifier Unit × LMonoTy))
-    {p : Identifier Unit × LMonoTy} (hp : p ∈ missingIn Γ news) :
-    Γ.types.find? p.1 = none := by
-  have := (List.mem_filter.mp hp).2
-  simpa [Option.isNone_iff_eq_none] using this
+/-- Every `missingIn` name is absent from `ts`. -/
+theorem missingIn_find_none (ts : TypeScopes) (news : List (Identifier Unit × LMonoTy))
+    {p : Identifier Unit × LMonoTy} (hp : p ∈ missingIn ts news) :
+    ts.find? p.1 = none := by
+  have hsel := (List.mem_filter.mp hp).2
+  simpa [Option.isNone_iff_eq_none] using hsel
 
-/-- `insertAll Γ (missingIn Γ news)` does not change a name that `Γ` already binds. The
+/-- `insertAll ts (missingIn ts news)` does not change a name that `ts` already binds. The
     chain only inserts names that were absent, so reused bindings survive. -/
-theorem insertAll_missing_preserves (Γ : TContext Unit)
+theorem insertAll_missing_preserves (ts : TypeScopes)
     (news : List (Identifier Unit × LMonoTy))
-    (x : Identifier Unit) (v : LTy) (hx : Γ.types.find? x = some v) :
-    (insertAll Γ (missingIn Γ news)).types.find? x = some v := by
-  have hnotin : x ∉ (missingIn Γ news).map Prod.fst := by
+    (x : Identifier Unit) (v : LTy) (hx : ts.find? x = some v) :
+    (insertAll ts (missingIn ts news)).find? x = some v := by
+  have hnotin : x ∉ (missingIn ts news).map Prod.fst := by
     intro hmem
     rw [List.mem_map] at hmem
     obtain ⟨p, hp, hpx⟩ := hmem
-    have := missingIn_find_none Γ news hp
-    rw [hpx, hx] at this
-    simp at this
-  rw [insertAll_find_not_mem (missingIn Γ news) Γ x hnotin]
+    have hnone := missingIn_find_none ts news hp
+    rw [hpx, hx] at hnone
+    exact absurd hnone (by simp)
+  rw [insertAll_find_not_mem (missingIn ts news) ts x hnotin]
   exact hx
 
 /-- **The general call case: reuse what is in scope, `init` only what is missing.**
 
-    `news := M ++ T` are the variables the call writes to: the callee's in-out
-    names `M` (which the call rule pins) and the caller-chosen out-argument targets
-    `T` (positionally type-aligned with the callee's out-only block `O`, `hTVals`).
-    Those already bound in `Γ` at exactly their recorded type (`hReuse`) are reused;
-    the rest (`missingIn Γ news`) are brought into scope by an `init … nondet`
-    chain. The emitted body is `initChain (missingIn Γ news) ++ [call …]`, well-typed
-    in `insertAll Γ (missingIn Γ news)`.
+    `news := M ++ T` are the variables the call writes to: the callee's in-out names `M` (which
+    the call rule pins) and the caller-chosen out-argument targets `T` (positionally type-aligned
+    with the callee's out-only block `O`, `hTVals`). Those already bound in `ts` at exactly their
+    recorded type (`hReuse`) are reused; the rest (`missingIn ts news`) are brought into scope by
+    an `init … nondet` chain. The emitted body is `initChain (missingIn ts news) ++ [call …]`,
+    weakly typed in `insertAll ts (missingIn ts news)`.
 
-    When `missingIn Γ news = []` the chain is empty, so the body degenerates to the
-    bare call, and the output scope is `Γ` itself. That is the common shape in real
-    Strata code. Because this one lemma covers both the all-reused and the
-    some-missing case uniformly, it is the *sole* soundness engine for the call
-    group; `genCallStmt` needs no `isEmpty` split. -/
+    When `missingIn ts news = []` the chain is empty, so the body is the bare call and the output
+    scopes are `ts` itself, which is the common shape in real Strata code. -/
 theorem call_mixed_body_sound
-    {C : LContext CoreLParams} {P : Program} {Γ : TContext Unit} {L : List String}
+    {C : LContext CoreLParams} {P : Program} {ts : TypeScopes} {L : List String}
     {pname : String} {proc : Procedure}
     (σ : List (TyIdentifier × LMonoTy))
     (M I O T : @LMonoTySignature Unit) (exprs : List Expression.Expr)
@@ -1226,62 +1105,70 @@ theorem call_mixed_body_sound
     (hExLen : exprs.length = I.length)
     -- The out targets are positionally type-aligned with the *instantiated* out block.
     (hTVals : T.values = (substSig σ O).values)
-    -- The by-value inputs are typed at the *instantiated* formal input types.
+    -- The by-value inputs are weakly typed at the *instantiated* formal input types.
     (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      LExpr.HasTypeA [] (exprs[i]'hi) (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (I.values[i]'hj)))
+      ExprHasTypeW C ts (exprs[i]'hi)
+        (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (I.values[i]'hj)))
     (hIdisjOut : ∀ i (hi : i < I.keys.length),
       (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
+    (hMnotO : ∀ k ∈ M.keys, k ∉ O.keys)
     -- The write-list is the *instantiated* in-out block followed by the targets.
     (hNodup : (substSig σ M ++ T).keys.Nodup)
     -- Each written-to name is *either* already bound at its recorded type, *or* absent.
     (hReuse : ∀ p ∈ (substSig σ M ++ T).toList,
-      Γ.types.find? p.1 = some (.forAll [] p.2) ∨ Γ.types.find? p.1 = none)
-    -- The type of each written-to name is well-kinded in `C`. That is the premise of the `init` rules that
-    -- `initChain_types` discharges.
+      ts.find? p.1 = some (.forAll [] p.2) ∨ ts.find? p.1 = none)
+    -- The type of each written-to name is well-kinded in `C`. That is the premise of the `init`
+    -- rule that `initChain_types` discharges.
     (hwk : ∀ p ∈ (substSig σ M ++ T).toList, C.WellKindedTy p.2) :
-    StatementsHasTypeA P C Γ L
-      (initChain (missingIn Γ (substSig σ M ++ T)) ++
+    StatementsHasTypeW P C ts L
+      (initChain (missingIn ts (substSig σ M ++ T)) ++
         [Statement.call pname (mkArgs M T exprs mask) default]) C
-      (insertAll Γ (missingIn Γ (substSig σ M ++ T))) := by
-  -- The instantiated list of the written-to names, written out, because this file uses no set type.
+      (insertAll ts (missingIn ts (substSig σ M ++ T))) := by
   have hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none := by
     intro i hi m x heq
     have hlen : i < I.values.length := by rw [lm_values_length, ← hExLen]; exact hi
-    have := hExTy i hi hlen
-    rw [heq] at this
-    cases this
+    have hty := (hExTy i hi hlen).1
+    rw [heq] at hty
+    cases hty
+  have hLhsNodup : (M.keys ++ T.keys).Nodup := by
+    rw [← substSig_keys σ M, ← lm_keys_append]; exact hNodup
   have hNodup' : ((substSig σ M ++ T).map Prod.fst).Nodup := by
     rw [← ListMap.keys_eq_map_fst]; exact hNodup
   -- The missing-only chain is Nodup (a sublist of a Nodup list).
-  have hmissNodup : ((missingIn Γ (substSig σ M ++ T)).map Prod.fst).Nodup :=
-    List.Nodup.sublist (List.Sublist.map _ (missingIn_sublist Γ (substSig σ M ++ T))) hNodup'
-  -- The chain is well-typed: each missing name is fresh at its declaration point.
-  have hchain : StatementsHasTypeA P C Γ L
-      (initChain (missingIn Γ (substSig σ M ++ T))) C (insertAll Γ (missingIn Γ (substSig σ M ++ T))) := by
-    apply initChain_types (missingIn Γ (substSig σ M ++ T))
-      (fun p hp => hwk p (missingIn_sublist Γ (substSig σ M ++ T) |>.mem hp)) Γ
+  have hmissNodup : ((missingIn ts (substSig σ M ++ T)).map Prod.fst).Nodup :=
+    List.Nodup.sublist (List.Sublist.map _ (missingIn_sublist ts (substSig σ M ++ T))) hNodup'
+  -- The chain is weakly typed: each missing name is fresh at its declaration point.
+  have hchain : StatementsHasTypeW P C ts L
+      (initChain (missingIn ts (substSig σ M ++ T))) C
+      (insertAll ts (missingIn ts (substSig σ M ++ T))) := by
+    apply initChain_types (missingIn ts (substSig σ M ++ T))
+      (fun p hp => hwk p (missingIn_sublist ts (substSig σ M ++ T) |>.mem hp)) ts
     intro i hi
-    rw [insertAll_find_not_mem ((missingIn Γ (substSig σ M ++ T)).take i) Γ _ ?_]
-    · exact missingIn_find_none Γ (substSig σ M ++ T) (List.getElem_mem hi)
+    rw [insertAll_find_not_mem ((missingIn ts (substSig σ M ++ T)).take i) ts _ ?_]
+    · exact missingIn_find_none ts (substSig σ M ++ T) (List.getElem_mem hi)
     · rw [List.map_take]
-      have hidx : i < ((missingIn Γ (substSig σ M ++ T)).map Prod.fst).length := by
+      have hidx : i < ((missingIn ts (substSig σ M ++ T)).map Prod.fst).length := by
         rw [List.length_map]; exact hi
-      have := nodup_getElem_not_mem_take hmissNodup i hidx
-      simpa [List.getElem_map] using this
-  -- Every written-to name is in scope at its recorded type in the chained context:
+      have hnot := nodup_getElem_not_mem_take hmissNodup i hidx
+      simpa [List.getElem_map] using hnot
+  -- The scopes after the chain extend the scopes before it.
+  have hext : ∀ x v, ts.find? x = some v →
+      (insertAll ts (missingIn ts (substSig σ M ++ T))).find? x = some v :=
+    fun x v hx => insertAll_missing_preserves ts (substSig σ M ++ T) x v hx
+  -- Every written-to name is in scope at its recorded type in the chained scopes:
   -- reused names survive `insertAll` (they were not inserted), init'ed names are
   -- inserted at exactly that type.
   have hInScope : ∀ p ∈ (substSig σ M ++ T).toList,
-      (insertAll Γ (missingIn Γ (substSig σ M ++ T))).types.find? p.1 = some (.forAll [] p.2) := by
+      (insertAll ts (missingIn ts (substSig σ M ++ T))).find? p.1 = some (.forAll [] p.2) := by
     intro p hp
     rcases hReuse p hp with hbound | habsent
-    · exact insertAll_missing_preserves Γ (substSig σ M ++ T) p.1 _ hbound
-    · refine insertAll_find_mem (missingIn Γ (substSig σ M ++ T)) Γ p.1 p.2 hmissNodup ?_
+    · exact hext p.1 _ hbound
+    · refine insertAll_find_mem (missingIn ts (substSig σ M ++ T)) ts p.1 p.2 hmissNodup ?_
       exact List.mem_filter.mpr ⟨hp, by simp [habsent]⟩
-  -- `hMinΓ`: the in-out names are bound at their *instantiated* types. The
-  -- instantiated block `substSig σ M` has keys `= M.keys` and values `= subst [σ] …`.
+  -- The in-out names are bound at their *instantiated* types. The instantiated block
+  -- `substSig σ M` has keys `= M.keys` and values `= subst [σ] …`.
   have hMinΓ : ∀ i (hi : i < M.keys.length) (hj : i < M.values.length),
-      (insertAll Γ (missingIn Γ (substSig σ M ++ T))).types.find? (M.keys[i]'hi)
+      (insertAll ts (missingIn ts (substSig σ M ++ T))).find? (M.keys[i]'hi)
         = some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (M.values[i]'hj))) := by
     intro i hi hj
     have hiK : i < (substSig σ M).keys.length := by rw [substSig_keys]; exact hi
@@ -1290,27 +1177,31 @@ theorem call_mixed_body_sound
     have hmem := List.mem_append_left T.toList (keyval_mem (substSig σ M) i hiK hiV)
     rw [substSig_keys_getElem σ M i hiK hi, substSig_values_getElem σ M i hiV hj] at hmem
     exact hInScope _ hmem
-  -- `hTinΓ`: the targets are bound at their own recorded type, which equals the
-  -- instantiated out type positionally (`hTVals`).
+  -- The targets are bound at their own recorded type, which equals the instantiated out type
+  -- positionally (`hTVals`).
   have hTinΓ : ∀ i (hi : i < T.keys.length) (hj : i < O.values.length),
-      (insertAll Γ (missingIn Γ (substSig σ M ++ T))).types.find? (T.keys[i]'hi)
+      (insertAll ts (missingIn ts (substSig σ M ++ T))).find? (T.keys[i]'hi)
         = some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (O.values[i]'hj))) := by
     intro i hi hj
     have hjOσ : i < (substSig σ O).values.length := by
       rw [lm_values_length, substSig_length, ← lm_values_length]; exact hj
     have h := outTargets_inΓ (substSig σ O) T hTVals
-      (Γ := insertAll Γ (missingIn Γ (substSig σ M ++ T)))
+      (ts := insertAll ts (missingIn ts (substSig σ M ++ T)))
       (fun p hp => hInScope _ (List.mem_append_right (substSig σ M).toList hp)) i hi hjOσ
     rwa [substSig_values_getElem σ O i hjOσ hj] at h
-  have hcall : StatementHasTypeA P C (insertAll Γ (missingIn Γ (substSig σ M ++ T))) L
+  have hcall : StatementHasTypeW P C (insertAll ts (missingIn ts (substSig σ M ++ T))) L
       (Statement.call pname (mkArgs M T exprs mask) default) C
-      (insertAll Γ (missingIn Γ (substSig σ M ++ T))) :=
-    StatementHasType'.cmd C _ _ L _ _
+      (insertAll ts (missingIn ts (substSig σ M ++ T))) :=
+    .cmd C _ _ L _ _
       (call_recipe_inout_sound σ M I O T exprs mask hfind hInputs hOutputs hExLen
         (by rw [← lm_values_length T, ← lm_values_length O, hTVals, substSig_values,
               List.length_map])
-        hMinΓ hTinΓ hExTy hExNoFvar hIdisjOut)
-      (tctxEquivRefl _)
-  exact StatementsHasTypeA_append hchain
-    (StatementsHasType'.cons _ _ _ _ _ _ _ _ _ hcall
-      (StatementsHasType'.nil C _ L _ (tctxEquivRefl _)))
+        hMinΓ hTinΓ (fun i hi hj => exprHasTypeW_mono (hExTy i hi hj) hext) hExNoFvar
+        hIdisjOut hMnotO hLhsNodup)
+      (Strata.Util.HMaps.Equiv.refl _)
+  -- The call is a command, so no block follows the `init` chain.
+  refine StatementsHasTypeW_append hchain (StatementsHasTypeW_singleton hcall) ?_
+  intro _ _ _ _ _ _ hmem
+  exact nomatch List.mem_singleton.mp hmem
+
+end StrataGenerators.Stmt

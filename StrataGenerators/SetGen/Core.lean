@@ -44,8 +44,10 @@ section operation_uses
   constructor
   · rintro ⟨n, ⟨hlo, hhi⟩, ha⟩
     by_cases h : n.down.val == 0
-    · left; simpa [h] using ha
-    · right; simpa [h] using ha
+    · have hxa : x a := by simpa [h] using ha
+      exact Or.inl hxa
+    · have hya : y a := by simpa [h] using ha
+      exact Or.inr hya
   · intro h
     cases h with
     | inl hx => exact ⟨⟨⟨0, Nat.zero_le _, Nat.zero_le _⟩⟩, ⟨Nat.zero_le _, Nat.zero_le _⟩, by simpa⟩

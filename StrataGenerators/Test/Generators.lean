@@ -63,7 +63,7 @@ private def exprKind : LExpr' → String
   | .const _ (.boolConst _) => "boolConst"
   | .const _ (.intConst _) => "intConst"
   | .const _ (.strConst _) => "strConst"
-  | .const _ (.realConst _) => "realConst"
+  | .const _ (.rationalConst _) => "realConst"
   | .const _ (.bitvecConst _ _) => "bitvecConst"
   | .quant _ _ _ _ _ _ => "quant"
 
@@ -120,9 +120,7 @@ def stmtsFeatures (ss : List Statement) : List (String × Tyche.Feature) :=
     ("ast_size", .ordinal (sizeStmts ss)),
     ("num_loops", .ordinal (countLoopsStmts ss)),
     ("num_exits", .ordinal (countExitStmts ss)),
-    ("num_funcDecls", .ordinal (countFuncDeclStmts ss)),
     ("num_typeDecls", .ordinal (countTypeDeclStmts ss)),
-    ("has_funcDecl", .nominal (if stmtsHaveFuncDecl ss then "yes" else "no")),
     ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")) ]
 
 open StrataGenerators.Procedure.TestSupport in
@@ -137,6 +135,7 @@ private def declKind : Core.Decl → String
   | .type (.syn _) _ => "type.syn"
   | .type (.data _) _ => "type.data"
   | .ax _ _ => "axiom"
+  | .lemma _ _ => "lemma"
   | .distinct _ _ _ => "distinct"
   | .proc _ _ => "proc"
   | .func _ _ => "func"
@@ -304,7 +303,7 @@ instance : TunableGen GenProcs where
         let sigs := acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
         pure (acc.1 ++ [proc], sigs))
       (([], []) : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx)
-    pure ⟨relabelProcs ps⟩
+    pure { procs := relabelProcs ps, funcs := ← genProcsFuncs size }
   sites := StrataGenerators.Stmt.genStmt._mutual.sites
 
 /-- Command sequences, with `genCmd`'s branch weights read from `θ`. `cmdSetHeavy`, `cmdInitHeavy`
@@ -312,6 +311,7 @@ instance : TunableGen GenProcs where
 instance : TunableGen GenCmdsWithCtx where
   genWith θ := retryGen 1000 <| do
     let (cmds, ctx') ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 4
+      (StrataGenerators.Stmt.functionNames cmdSeqCheckContext)
     pure ⟨cmds, [], ctx'⟩
   sites := genCmd.sites
 
@@ -321,8 +321,9 @@ instance : TunableGen GenCmdsWithCtx where
     an empty context reaches the other site. -/
 instance : TunableGen GenCmdWithCtx where
   genWith θ := retryGen 1000 <| do
-    let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 3
-    let ⟨cmd, ctx'⟩ ← genCmd.tuned (G := Plausible.Gen) θ coreMonoOps [] [] baseCtx 2 []
+    let avoid := StrataGenerators.Stmt.functionNames cmdSeqCheckContext
+    let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 3 avoid
+    let ⟨cmd, ctx'⟩ ← genCmd.tuned (G := Plausible.Gen) θ coreMonoOps [] [] baseCtx 2 [] avoid
     pure ⟨cmd, baseCtx, ctx'⟩
   sites := genCmd.sites
 
@@ -402,8 +403,8 @@ example : TunableGen.genWith (α := GenProgram) progDefault = Arbitrary.arbitrar
 
 /-! The arity that a hand-built tuning must match. `TestDecl.withTuning` checks a `θ` against it, so a
 tuning meant for another generator becomes a red line that names both numbers. -/
-example : TunableGen.arity GenStmts = 14 := rfl
-example : TunableGen.arity GenProcs = 14 := rfl
+example : TunableGen.arity GenStmts = 12 := rfl
+example : TunableGen.arity GenProcs = 12 := rfl
 example : TunableGen.arity GenCmdsWithCtx = 12 := rfl
 example : TunableGen.arity GenCmdWithCtx = 12 := rfl
 example : TunableGen.arity TypedExpr = 84 := rfl

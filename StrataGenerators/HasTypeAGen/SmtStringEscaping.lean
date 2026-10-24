@@ -7,17 +7,12 @@ open Strata.SMT StrataGenerators.PrimitiveGens
 /-!
 # The SMT-LIB escape function for a string literal
 
-This file holds a property-based test for a defect in the escape function. A Core
-string literal that contains a non-ASCII codepoint goes into the SMT-LIB query as
-**raw UTF-8 bytes**, and not as a `\u{...}` escape. cvc5 rejects such a query
-outright, with `Parse Error: Non-printable character in string literal`. z3
-accepts the query, but it reads each byte as a separate character. Thus
-`str.len "é"` is `2` for z3, and the interpreted `Str.Length` of Strata, which is
-`Int.ofNat s.length` and counts *codepoints*, gives `1`.
-
-The property states the full claim, so it pins a true defect and it hides none. The four
-`proc:` properties use the same convention. A correction to the escape function needs no
-change to this file, and that is what makes the file a net around the fix.
+This file holds a property-based test that the escape function writes every non-ASCII
+codepoint of a Core string literal as a `\u{...}` escape. If a non-ASCII codepoint instead
+goes into the SMT-LIB query as **raw UTF-8 bytes**, cvc5 rejects the query outright, with
+`Parse Error: Non-printable character in string literal`. z3 accepts the query, but it reads
+each byte as a separate character. Thus `str.len "é"` is `2` for z3, and the interpreted
+`Str.Length` of Strata, which is `Int.ofNat s.length` and counts *codepoints*, gives `1`.
 
 ## Why the test has this shape
 
@@ -78,41 +73,30 @@ def offendingCodepoints (s : String) : List Nat :=
 
 -- ── Machine-checked reproducers ───────────────────────────────────────
 --
--- These pin the *specific* cases of the defect, independently of what the random
--- generator draws. `#guard` makes the build fail, so each case is an `example`
--- with `decide` on the value that the code gives now, which is the incorrect one.
--- Each example records the current behaviour, and each example itself breaks after
--- a correction. Then it shows that this file needs an update together with the
--- property.
+-- These pin specific codepoints, independently of what the random generator draws.
+-- Each example checks the output of the serializer on one input.
 
 /-- The escape function is correct on ASCII. This is the path that works, and the
     example keeps it, so that a regression in it is also caught. -/
 example : escapedIsPrintableAscii "abc" = true := by native_decide
 
 /-- The escape function is correct on an ASCII control character, which it gives
-    as `\u{0}`. This is why a test with a control character does not find the
-    defect: `useXHex` covers that range. -/
+    as `\u{0}`. -/
 example : escapedIsPrintableAscii "\x00" = true := by native_decide
 
-/-- U+00AD, the soft hyphen, gets an escape. It is the one special case of
-    `useXHex` above `0xA1`. -/
+/-- U+00AD, the soft hyphen, gets an escape. -/
 example : escapedIsPrintableAscii "­" = true := by native_decide
 
-/-- **The Latin-1 case.** U+00E9, which is `é`, goes out raw. `useXHex` is false
-    for each codepoint of U+00A1 or more, so the escape function stops exactly
-    here. -/
-example : escapedIsPrintableAscii "é" = false := by native_decide
+/-- **The Latin-1 case.** U+00E9, which is `é`, gets an escape. -/
+example : escapedIsPrintableAscii "é" = true := by native_decide
 
-/-- **The astral-plane case.** U+1D54A, which is `𝕊`, goes out raw as 4 UTF-8
-    bytes. On this input, z3 reports `str.len = 4`. -/
-example : escapedIsPrintableAscii "𝕊" = false := by native_decide
+/-- **The astral-plane case.** U+1D54A, which is `𝕊`, gets one escape and does not go
+    out as 4 raw UTF-8 bytes. -/
+example : escapedIsPrintableAscii "𝕊" = true := by native_decide
 
-/-- The `useXHex` boundary is off by one codepoint. U+00A0 gets an escape, and
-    U+00A1 does not. This is the sharpest statement of the root cause: the guard is
-    a predicate for *8-bit* printability, and the escape function uses it for full
-    Unicode. -/
+/-- Both sides of the boundary of 8-bit printability, U+00A0 and U+00A1, get an escape. -/
 example : escapedIsPrintableAscii " " = true := by native_decide
-example : escapedIsPrintableAscii "¡" = false := by native_decide
+example : escapedIsPrintableAscii "¡" = true := by native_decide
 
 -- ── The property ──────────────────────────────────────────────────────
 

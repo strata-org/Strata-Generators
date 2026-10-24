@@ -99,7 +99,7 @@ def exprKind : LExpr' → String
   | .const _ (.boolConst _) => "boolConst"
   | .const _ (.intConst _) => "intConst"
   | .const _ (.strConst _) => "strConst"
-  | .const _ (.realConst _) => "realConst"
+  | .const _ (.rationalConst _) => "realConst"
   | .const _ (.bitvecConst _ _) => "bitvecConst"
   | .quant _ _ _ _ _ _ => "quant"
 
@@ -336,8 +336,9 @@ private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCt
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
   let numCmds ← IO.rand 0 8
-  let (_, baseCtx) ← genCmds (G := IO) coreMonoOps tvars [] [] d numCmds
-  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] baseCtx d
+  let avoid := StrataGenerators.Stmt.functionNames cmdSeqCheckContext
+  let (_, baseCtx) ← genCmds (G := IO) coreMonoOps tvars [] [] d numCmds avoid
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] baseCtx d [] avoid
   return (cmd, baseCtx, ctx', d)
 
 -- ── The four command properties that give one verdict ────────────────
@@ -730,20 +731,14 @@ private def stmtListFeatures (ss : List Statement) (genSize : Nat) :
     ("ast_size", .ordinal (sizeStmts ss)),
     ("num_loops", .ordinal (countLoopsStmts ss)),
     ("num_exits", .ordinal (countExitStmts ss)),
-    ("num_funcDecls", .ordinal (countFuncDeclStmts ss)),
     ("num_typeDecls", .ordinal (countTypeDeclStmts ss)),
-    ("has_funcDecl", .nominal (if stmtsHaveFuncDecl ss then "yes" else "no")),
     ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")),
     ("generator_size", .ordinal genSize) ]
 
 /-- Render a statement list for a Tyche panel with the formatter of Strata, which gives real Core concrete
-    syntax. The function appends a summary of the form `funcDecl[body=…, measure=…]`, because the formatter
-    cannot write a `funcDecl` statement with no body, and it puts a dummy body there instead. That shape is
-    exactly the counterexample to completeness. -/
+    syntax. -/
 def stmtRepr (ss : List Statement) : String :=
-  let shapes := funcDeclShapesList ss
-  let suffix := if shapes.isEmpty then "" else s!"\n-- {" ".intercalate shapes}"
-  formatStmts ss ++ suffix
+  formatStmts ss
 
 /-- Generate one well-typed statement list at `IO`, for the Tyche panels. The function draws the nesting and the
     length from one size, as `TestScaffold.genStmtsG` does, so the panel shows the shapes that the property
@@ -945,6 +940,7 @@ private def programFeatures (p : Core.Program) (genSize : Nat) :
     | .type (.syn _) _ => "type.syn"
     | .type (.data _) _ => "type.data"
     | .ax _ _ => "axiom"
+    | .lemma _ _ => "lemma"
     | .distinct _ _ _ => "distinct"
     | .proc _ _ => "proc"
     | .func _ _ => "func"

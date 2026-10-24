@@ -134,6 +134,7 @@ def sizeTypeDecl : TypeDecl → Nat
 def sizeDecl : Decl → Nat
   | .type t _ => sizeTypeDecl t
   | .ax a _ => a.e.sizeOf
+  | .lemma l _ => l.e.sizeOf
   | .distinct _ es _ => (es.map (·.sizeOf)).sum
   | .proc p _ => sizeProc p
   | .func f _ => sizeFunc f
@@ -185,7 +186,7 @@ private def setConstrs (d : LDatatype Unit) (cs : List (LConstr Unit)) :
 def shrinkTypeDecl : TypeDecl → List TypeDecl
   | .con tc => (fun ps => .con { tc with params := ps }) <$> dropEach tc.params
   | .syn ts =>
-    (fun τ => .syn { ts with type := τ, typeArgs := (LMonoTy.freeVars τ).dedup })
+    (fun τ => .syn { ts with type := τ, typeArgs := (LMonoTy.freeVars τ).uniq })
       <$> shrinkTy ts.type
   | .data block =>
     -- Drop one datatype (only when at least two remain, so the block stays non-empty).
@@ -208,15 +209,8 @@ def shrinkTypeDecl : TypeDecl → List TypeDecl
 /-- Whether each free variable of each `requires` clause of `f` is a formal parameter of `f`, which is to say
     that the function has no precondition that names a variable outside its own parameters.
 
-    **Nothing in Strata enforces this.** `Function.typeCheck` never inspects
-    `preconditions` at all: its `freeVarChecks` guard covers the body and the measure
-    only (`FunctionType.lean`), and no other line of the file mentions the field.
-    So `function f0() : bool requires y == 0 { true }`, where `y` is declared
-    nowhere, type checks, and so does a clause whose type is not `bool`. `WFFunctionProp` is an empty
-    structure, so `WF.lean` does not rule it out either. The consequence reaches
-    further than the declaration: `PrecondElim` lifts such a clause into an `assume`
-    statement, where the statement typechecker *does* free-var check, so the pass
-    turns an accepted program into a rejected one.
+    The checker rejects such a clause: `function f0() : bool requires y == 0 { true }`, where `y` is declared
+    nowhere, does not type check.
 
     Such a program is easy to build. The reduction of `shrinkFunc` that drops an input removes the formal
     parameter that a clause names, and `genFunction` emits a clause over the formal parameters on about half of
@@ -247,7 +241,7 @@ def shrinkDistinctExprs (es : List Expression.Expr) : List (List Expression.Expr
     contents:
 
     * `.type` → `shrinkTypeDecl` (above);
-    * `.ax` → `shrinkLExpr` on the axiom's expression;
+    * `.ax` and `.lemma` → `shrinkLExpr` on the proposition;
     * `.distinct` → `shrinkDistinctExprs`;
     * `.proc` → `shrinkProcCandidates` (drop the body, drop/reduce a contract
       clause, or reduce the body with `shrinkStmtsList`, and it holds the header fixed);
@@ -276,6 +270,7 @@ def shrinkDistinctExprs (es : List Expression.Expr) : List (List Expression.Expr
 def shrinkDecl : Decl → List Decl
   | .type t md => (.type · md) <$> shrinkTypeDecl t
   | .ax a md => (fun e => .ax { a with e := e } md) <$> shrinkLExpr a.e
+  | .lemma l md => (fun e => .lemma { l with e := e } md) <$> shrinkLExpr l.e
   | .distinct n es md => (.distinct n · md) <$> shrinkDistinctExprs es
   | .proc p md => (.proc · md) <$> shrinkProcCandidates p
   | .func f md => (.func · md) <$> (shrinkFunc f).filter funcWellFormed
@@ -288,16 +283,16 @@ def shrinkDecl : Decl → List Decl
 -- ── Classifying an unshrinkable counterexample ────────────────────────────
 -- When the oracle rejects the *input* program, no candidate can pass the filter
 -- and the counterexample is reported unshrunk. These predicates let a harness say
--- which of the three known rejection causes it hit, instead of leaving the
--- reader to guess from an unreduced program. Each was validated against the
--- typechecker over 100 generated programs: every rejection matched at least one,
--- and no accepted program matched any.
+-- which known rejection cause it hit, instead of leaving the reader to guess from
+-- an unreduced program. Three causes are read off a declaration. Two more,
+-- `measure-non-recursive` and `open-instance`, are read off the checker's message, so `declHasGap` and
+-- `cutGaps` do not use them.
 --
 -- The `distinct-fvar` class is not *reachable* from `genProgram`:
 -- `genDistinctAssertion` emits `.op` nodes at constants the step also declares,
 -- never bare `.fvar`s. The predicate is kept because it classifies
 -- hand-written and shrunk-from-elsewhere programs correctly, and because
--- `declHasGap`/`cutGaps` treat all three classes uniformly; the `#guard`s below
+-- `declHasGap`/`cutGaps` treat all three declaration classes uniformly; the `#guard`s below
 -- exercise it on a hand-built declaration.
 
 mutual
@@ -333,17 +328,11 @@ end
     combination. -/
 def funcMeasureNoBody (f : Function) : Bool := f.measure.isSome && f.body.isNone
 
-/-- Whether a declaration carries a measure-without-body function, at top level or
-    as an inline `funcDecl` anywhere in a procedure body. -/
+/-- Whether a declaration carries a measure-without-body function. -/
 def declMeasureNoBody : Decl → Bool
   | .func f _ => funcMeasureNoBody f
   | .recFuncBlock fs _ => fs.any funcMeasureNoBody
-  | .proc pr _ => (stmtsFuncDecls (bodyStmts pr.body)).any funcDeclMeasureNoBody
   | _ => false
-where
-  /-- The same shape on an inline `funcDecl`'s declaration. -/
-  funcDeclMeasureNoBody (d : Imperative.PureFunc Expression) : Bool :=
-    d.measure.isSome && d.body.isNone
 
 /-- Whether a declaration is a `distinct` that names a free variable, which is a global that the program does
     not declare. -/
@@ -391,6 +380,28 @@ def hasMeasureNoBody (p : Program) : Bool := p.decls.any declMeasureNoBody
 def hasUnknownOp (p : Program) : Bool :=
   p.decls.any (declUnknownOp (programFuncNames p))
 
+/-- Whether `Program.typeCheck` rejects `p` because a non-recursive function has a `decreases`
+    clause, and no function of `p` has a measure without a body. The specification allows a
+    measure on any function, and the checker allows one only on a recursive function. A function
+    with a measure and no body is not recursive either, so the checker gives the same message for
+    it; that case is reported as `measure-no-body` instead. -/
+def hasNonRecursiveMeasureRejection (p : Program) : Bool :=
+  !hasMeasureNoBody p &&
+    match progTypeCheckError p with
+    | some msg =>
+      (msg.splitOn "a decreases expression is only allowed on a recursive function").length > 1
+    | none => false
+
+/-- Whether `Program.typeCheck` rejects `p` because a function, an axiom or a `distinct`
+    declaration is typed at a generated type variable that nothing declares: a polymorphic
+    instance whose type nothing fixes, such as `Sequence.empty` with no annotation. The
+    specification accepts such an open instance, and the checker refuses it. The cause is read
+    off the checker's message, as `hasNonRecursiveMeasureRejection` is. -/
+def hasOpenInstanceRejection (p : Program) : Bool :=
+  match progTypeCheckError p with
+  | some msg => (msg.splitOn openInstanceRejectionMsg).length > 1
+  | none => false
+
 /-- The known rejection causes present in `p`, as short tags, most common first
     (`[]` when none is). A harness reporting an unshrunk counterexample can print
     these to say *why* the oracle refused every candidate; an empty list on a
@@ -398,6 +409,8 @@ def hasUnknownOp (p : Program) : Bool :=
 def programRejectionCause (p : Program) : List String :=
   (if hasUndeclaredDistinctFvar p then ["distinct-fvar"] else [])
     ++ (if hasMeasureNoBody p then ["measure-no-body"] else [])
+    ++ (if hasNonRecursiveMeasureRejection p then ["measure-non-recursive"] else [])
+    ++ (if hasOpenInstanceRejection p then ["open-instance"] else [])
     ++ (if hasUnknownOp p then ["unknown-op"] else [])
 
 /-- A one-line annotation explaining a program's typechecker status, or `""` when it
@@ -405,7 +418,7 @@ def programRejectionCause (p : Program) : List String :=
 
     * accepted → `""`;
     * rejected, cause known → the gap tags, which is all a reader needs since the
-      three gaps are documented;
+      gaps are documented;
     * rejected, cause **unknown** → the verbatim diagnostic. This is the interesting
       case: it means `genProgram` produced a spec-well-typed program the algorithm
       rejects for a *new* reason, and it is exactly when the reader needs the
@@ -425,19 +438,18 @@ def programStatusNote (p : Program) : String :=
 
 /-- **Whole-program typechecker completeness.** `genProgram` is proven sound (its
     output satisfies `ProgramHasTypeA`), so the algorithmic `Program.typeCheck`
-    should accept every generated program. This states that unweakened, so each of
-    the three gaps of the module docstring, each of which is a true disagreement between the specification and
-    the algorithm, is reported and not hidden. This property is the form at the level of a program of
+    should accept every generated program. This states that unweakened, so each known gap, each of which is
+    a true disagreement between the specification and the algorithm, is reported and not hidden. This property is the form at the level of a program of
     analogue of `checkTypeCheckerComplete` (statements) and
     `checkFunctionTypeCheckerComplete` (functions). -/
 abbrev checkProgramTypeCheckerComplete (p : Program) : Bool := progTypeChecks p
 
 /-- **Characterization of the rejection causes.** "Every rejection of a generated
-    program is attributable to a known gap": accepts, OR bears one of the three
+    program is attributable to a known gap": accepts, OR bears one of the known
     causes. This property pins the list of the causes as complete. A counterexample means that `genProgram`
     gave a program that the specification accepts and that the algorithm rejects for some *other* reason, which
     is a defect in completeness of a new kind. This property is the form at the level of a program of
-    of `rejectionImpliesFuncDecl` and `funcRejectionImpliesMeasureNoBody`. -/
+    `funcRejectionImpliesMeasureNoBody`. -/
 def checkProgramRejectionIsKnownGap (p : Program) : Bool :=
   progTypeChecks p || !(programRejectionCause p).isEmpty
 
@@ -497,9 +509,13 @@ def checkProgramStripMetaPreservesTyping (p : Program) : Bool :=
     declaration leaves a program `resolve` must re-infer from scratch; since the
     annotations were derivable in the first place, the erased program should still
     check. The program-level analogue of the expression-level resolve-after-erase
-    property (`checkResolveAfterErase`). -/
+    property (`checkResolveAfterErase`).
+
+    Erasure can turn an annotated polymorphic instance into an open one, which the checker
+    refuses although the specification accepts it, so an `open-instance` rejection of the erased
+    program is that known gap and not a counterexample. -/
 def checkProgramEraseTypesPreservesTyping (p : Program) : Bool :=
-  !progTypeChecks p || progTypeChecks p.eraseTypes
+  !progTypeChecks p || progTypeChecks p.eraseTypes || hasOpenInstanceRejection p.eraseTypes
 
 -- ── Program-level shrinker ────────────────────────────────────────────────
 
@@ -518,8 +534,8 @@ def checkProgramEraseTypesPreservesTyping (p : Program) : Bool :=
     Filtering the drop family too may look redundant, but removing a declaration
     genuinely *can* break the survivors: a later declaration may reference the
     dropped one, and a dropped procedure may still be called. It matters for a
-    second reason as well: on ill-typed input, which does occur (the three
-    rejection causes in the module doc), a family that drops a declaration with no filter would emit a smaller
+    second reason as well: on ill-typed input, which does occur (the known
+    rejection causes), a family that drops a declaration with no filter would emit a smaller
     program that is *not* well typed, and it would break the contract of the shrinker. With the filter, the
     guarantee holds always: each program that this shrinker gives type checks, at each input.
 
@@ -611,7 +627,7 @@ private def synDecl : Decl :=
 /-- A minimal well-typed procedure: no formals, no contract, empty body. -/
 private def procDecl : Decl :=
   .proc { header := { name := ⟨"P0", ()⟩, typeArgs := [], inputs := [], outputs := [],
-                      noFilter := false }
+                      lemmas := [] }
           spec := { preconditions := [], postconditions := [] }
           body := .structured [] } .empty
 
@@ -730,11 +746,9 @@ private def argDT : LDatatype Unit :=
   (fun | .data [d] => d.constrs.any (fun c => c.args.length == 1) | _ => false) == true
 
 -- ── `requires` clauses: reduced, and never stranded ───────────────────────
--- `Function.typeCheck` reads no `preconditions` field, so it neither type checks such a clause nor checks its
--- free variables. Therefore a removal of the input that a `requires` clause names gives a program that type
--- checks and that names a variable which nothing declares. The *only*
--- thing preventing that is `funcWellFormed`'s precondition conditions. These guards
--- pin both directions: the clause is reducible, and never stranded.
+-- A removal of the input that a `requires` clause names gives a clause that names a variable which nothing
+-- declares. The checker rejects that program, and `funcWellFormed`'s precondition conditions keep the
+-- shrinker from proposing it. These guards pin both directions: the clause is reducible, and never stranded.
 
 /-- The function `function f0(y : int) : bool requires y == 0 { true }`. Its precondition names the formal
     parameter, which is the shape that `genFunction` gives. -/
@@ -747,8 +761,8 @@ private def precondFunc : Function :=
     declares. -/
 private def precondFuncDangling : Function := { precondFunc with inputs := [] }
 
--- The oracle accepts that form, so the filter is necessary.
-#guard progTypeChecks (prog [.func precondFuncDangling .empty]) == true
+-- The checker rejects that form: a precondition may name no variable outside the formals.
+#guard progTypeChecks (prog [.func precondFuncDangling .empty]) == false
 -- `funcWellFormed` is what rejects it (its precondition-scoping condition).
 #guard funcWellFormed precondFunc == true
 #guard funcWellFormed precondFuncDangling == false
@@ -809,11 +823,12 @@ private def nestedPrecondFunc : Function :=
               && f.typeArgs == precondFunc.typeArgs) == true
 #guard (shrinkFuncWellFormed precondFunc).all funcWellFormed == true
 
--- The same reduction for a *measure*. A removal of the inputs leaves the variable of the measure with no
--- declaration. The typechecker accepts that shape, so this reduction needs no filter.
+-- The checker rejects a `decreases` clause on a function that is not recursive, so a non-recursive
+-- function with a measure is rejected whatever its inputs.
 private def measureFunc : Function :=
   { precondFunc with preconditions := [], measure := some (.fvar () ⟨"y", ()⟩ (some .int)) }
-#guard progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == true
+#guard progTypeChecks (prog [.func measureFunc .empty]) == false
+#guard progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == false
 
 -- A `recFuncBlock` never shrinks to the empty block (the spec forbids it).
 private def recBlock : Decl :=
@@ -841,6 +856,20 @@ private def measureNoBodyDecl : Decl :=
   .func { name := ⟨"f1", ()⟩, typeArgs := [], inputs := [], output := .bool,
           body := none, measure := some (.const () (.intConst 0)) } .empty
 
+/-- A non-recursive function with a body and the measure `0`. The specification accepts it, and
+    the checker rejects a measure on a function that does not call itself. -/
+private def measureNonRecDecl : Decl :=
+  .func { name := ⟨"f2", ()⟩, typeArgs := [], inputs := [], output := .bool,
+          body := some trueExpr, measure := some (.const () (.intConst 0)) } .empty
+
+/-- An axiom that compares `Sequence.length Sequence.empty` with `0`, with no annotation on either
+    operator. Nothing fixes the element type of the empty sequence, so the checker types it at a
+    generated type variable and rejects the axiom. -/
+private def openInstanceDecl : Decl :=
+  .ax { name := "a2",
+        e := .eq () (.app () (.op () ⟨"Sequence.length", ()⟩ none) (.op () ⟨"Sequence.empty", ()⟩ none))
+               (.const () (.intConst 0)) } .empty
+
 /-- An axiom applying `id`, a name `Core.Factory` does not define.
 
     A person wrote this declaration, and the generator cannot give this shape. Both operator vocabularies come
@@ -866,25 +895,28 @@ private def opDistinctDecls : List Decl :=
 -- which is why `genDeclDistinct` emits the two together or not at all.
 #guard progTypeChecks (prog [opDistinctDecls[2]!]) == false
 
--- The checker rejects a `distinct` declaration with a free variable, and it rejects an unknown operator, so
--- each case below has real content. The checker **accepts** a function with a measure and no body, so the tag
--- for that shape classifies a shape that the checker does not refuse. `programStatusNote` reads the classifier
--- for a *rejected* program only, so it says nothing about such a program.
+-- The checker rejects a `distinct` declaration with a free variable, an unknown operator, and a
+-- non-recursive function with a measure (here one with no body), so each case below has real content.
 #guard progTypeChecks (prog [fvarDistinctDecl]) == false
-#guard progTypeChecks (prog [measureNoBodyDecl]) == true
+#guard progTypeChecks (prog [measureNoBodyDecl]) == false
 #guard progTypeChecks (prog [unknownOpDecl]) == false
 -- ...and each is classified, with no false positive on the accepted mixed program.
 #guard programRejectionCause (prog [fvarDistinctDecl]) == ["distinct-fvar"]
 #guard programRejectionCause (prog [measureNoBodyDecl]) == ["measure-no-body"]
 #guard programRejectionCause (prog [unknownOpDecl]) == ["unknown-op"]
+#guard progTypeChecks (prog [measureNonRecDecl]) == false
+#guard programRejectionCause (prog [measureNonRecDecl]) == ["measure-non-recursive"]
+#guard progTypeChecks (prog [openInstanceDecl]) == false
+#guard programRejectionCause (prog [openInstanceDecl]) == ["open-instance"]
 #guard programRejectionCause mixed == []
 #guard programRejectionCause Program.init == []
 
 -- The shared status note: silent on an accepted program, tagged on a known gap.
 #guard programStatusNote mixed == ""
 #guard programStatusNote Program.init == ""
--- A function with a measure and no body type checks, so the note says nothing about it.
-#guard programStatusNote (prog [measureNoBodyDecl]) == ""
+-- A function with a measure and no body is rejected, and the note tags it.
+#guard programStatusNote (prog [measureNoBodyDecl]) ==
+  "\n  -- typechecker-rejected, known gap(s): measure-no-body"
 -- Two gaps at once are both reported.
 #guard programStatusNote (prog [fvarDistinctDecl, measureNoBodyDecl]) ==
   "\n  -- typechecker-rejected, known gap(s): distinct-fvar measure-no-body"
@@ -914,9 +946,9 @@ private def opDistinctDecls : List Decl :=
 private def illTyped : Program := prog [fvarDistinctDecl, measureNoBodyDecl, axDecl]
 #guard progTypeChecks illTyped == false
 #guard (shrinkProgram illTyped).all progTypeChecks == true
--- Only the still-rejected `distinct-fvar` declaration has to go; `measureNoBodyDecl`
--- typechecks on `main`, so a candidate may legitimately keep it.
+-- Both rejected declarations have to go, so no candidate keeps either.
 #guard (shrinkProgram illTyped).all (fun c => !(c.decls.contains fvarDistinctDecl)) == true
+#guard (shrinkProgram illTyped).all (fun c => !(c.decls.contains measureNoBodyDecl)) == true
 -- THE `cutGaps` REGRESSION: two *independent* gaps. No single drop can fix this
 -- (dropping either leaves the other), so with only the one-at-a-time families the
 -- candidate list would be empty and the minimizer would stall on the input. The

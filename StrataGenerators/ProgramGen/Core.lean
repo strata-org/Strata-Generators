@@ -3,8 +3,8 @@ import Basalt.IO
 import Basalt.Combinators
 import StrataGenerators.DatatypeGen
 import StrataGenerators.DatatypeGenProofs
-import StrataGenerators.FunctionHasTypeAGen
-import StrataGenerators.ProcedureHasTypeAGen
+import StrataGenerators.FunctionHasTypeAGen.Core
+import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.Defs
 import Strata.Languages.Core.ProgramTypeSpec
 
@@ -96,7 +96,7 @@ def mkAbstractTypeDecl (name : String) (arity : Nat) : Decl :=
     free variables of the body and the type arguments are the same set, so the alias has no parameter that its
     body does not name. Read `DeclHasType'.type_syn`. -/
 def mkAliasDecl (name : String) (body : LMonoTy) : Decl :=
-  .type (.syn { name := name, typeArgs := (LMonoTy.freeVars body).dedup, type := body }) .empty
+  .type (.syn { name := name, typeArgs := (LMonoTy.freeVars body).uniq, type := body }) .empty
 
 /-- An axiom declaration `axiom name : e;`. `e` is expected to be a `bool`. -/
 def mkAxiomDecl (name : String) (e : PExpr) : Decl :=
@@ -151,6 +151,16 @@ def genNonRecursiveArgTy [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
     (tyParams : List TyIdentifier) (size : Nat) : G LMonoTy :=
   genArgTy baseTypes tyCons [] tyParams false size
 
+/-! ## Declaration names -/
+
+/-- Draw a declaration name that is absent from `reserved` and that the checker accepts as a user
+    name (`isAllowedName`: it uses no prefix reserved for names the checker generates). A drawn
+    name with a reserved prefix is replaced by `fallbackName reserved`, a run of `x` characters that
+    is also absent from `reserved`. -/
+def genDeclName [Gen G] (reserved : List String) : G String := do
+  let s ← DatatypeGen.genFreshName reserved
+  pure (if isAllowedName s then s else DatatypeGen.fallbackName reserved)
+
 /-! ## Abstract-type generation -/
 
 /-- Generate an abstract type declaration with a fresh name (drawn against
@@ -158,7 +168,7 @@ def genNonRecursiveArgTy [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
     name, and its arity (the caller uses the arity to extend the pool). -/
 def genAbstractType [Gen G] (reserved : List String) (maxArity : Nat) :
     G (Decl × String × Nat) := do
-  let name ← DatatypeGen.genFreshName reserved
+  let name ← genDeclName reserved
   let arity ← chooseNat 0 maxArity (by omega)
   pure (mkAbstractTypeDecl name arity, name, arity)
 
@@ -171,7 +181,7 @@ def genAbstractType [Gen G] (reserved : List String) (maxArity : Nat) :
     construction even though the drawn parameters may not all appear in the body. -/
 def genAlias [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
     (reserved : List String) (maxTyParams size : Nat) : G (Decl × String) := do
-  let name ← DatatypeGen.genFreshName reserved
+  let name ← genDeclName reserved
   let numTyParams ← chooseNat 0 maxTyParams (by omega)
   let tyParams ← DatatypeGen.genFreshNames reserved numTyParams
   let body ← genNonRecursiveArgTy baseTypes tyCons tyParams size
@@ -179,14 +189,13 @@ def genAlias [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
 
 /-! ## Axiom generation -/
 
-/-- Generate an axiom declaration: a fresh name and a `bool`-typed expression.
-    The expression is generated in an *empty* local context (`bctx = []`,
-    `fctx = []`) at type `.bool`, which is exactly what `genLExpr_sound` proves
-    well-typed and what `DeclHasType'.ax` (under the annotated spec) requires. -/
+/-- Generate an axiom declaration: a fresh name and a `bool`-typed expression with no free
+    variable. An axiom has no type parameter, so the expression draws only on the ground operators
+    (`opsOver`) and on every scheme of `pctx`. -/
 def genAxiom [Gen G] (octx : OpCtx) (pctx : PolyOpCtx)
     (reserved : List String) (depth : Nat) : G (Decl × String) := do
-  let name ← DatatypeGen.genFreshName reserved
-  let e ← genLExpr [] octx pctx [] [] depth .bool
+  let name ← genDeclName reserved
+  let e ← genLExpr [] (opsOver [] octx) pctx [] [] depth .bool
   pure (mkAxiomDecl name e, name)
 
 /-! ## Distinct generation
@@ -218,22 +227,25 @@ def distinctElems (τ : LMonoTy) (names : List String) : List PExpr :=
   names.map (fun c => (.op () ⟨c, ()⟩ (some τ) : PExpr))
 
 /-- Draw the ingredients of a `distinct` declaration: a fresh declaration name, a
-    ground element type `τ`, and `numVars` fresh constant names.
+    ground element type `τ`, and at least two fresh constant names, of which those the checker accepts as
+    user names (`isAllowedName`) are kept.
 
     The generator draws each name of a constant against the name of the declaration and the reserved set.
     Therefore those names differ from each other *and* from the name of the declaration. Each of them becomes a
     declaration name of the program, so each of them must differ from each other name of the program.
+    `DeclHasType'.distinct` asks for at least two elements, and `genDeclDistinct` skips a draw whose kept names
+    are fewer.
 
     Turning these parts into declarations needs the ambient `LContext` (each
     constant is added with the checker's own `addFactoryFunctionWithError`), so it
     happens in `genDeclDistinct`. -/
 def genDistinctAssertion [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
     (reserved : List String) (maxVars size : Nat) : G (String × LMonoTy × List String) := do
-  let name ← DatatypeGen.genFreshName reserved
+  let name ← genDeclName reserved
   let τ ← genNonRecursiveArgTy baseTypes tyCons [] size
-  let numVars ← chooseNat 0 maxVars (by omega)
+  let numVars ← chooseNat 2 (max 2 maxVars) (by omega)
   let constNames ← DatatypeGen.genFreshNames (name :: reserved) numVars
-  pure (name, τ, constNames)
+  pure (name, τ, constNames.filter isAllowedName)
 
 /-! ## Operator vocabulary derived from a datatype block
 

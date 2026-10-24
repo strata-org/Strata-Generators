@@ -373,6 +373,8 @@ procedure P ()                        // ← the obligation program
 ```
 Note that we only have `assert [a]`, and `assert [b]` is missing.
 
+- `StructuredToUnstructured` can produce a CFG with a block that is unreachable from the entry. Minimal counterexample: `procedure G () { J8: { } }`, a procedure whose body is one empty labeled block. The CFG has the blocks `[J8, end$_0]` and its entry is `end$_0`, so no path from the entry reaches `J8` (property `s2u: every block is reachable from the entry`).
+
 - The datatype `bitvec 0` is legal in Core and illegal in SMT-LIB: cvc5 emits the error `Parse Error: Illegal bitvector size: 0` and z3 emits the error `bit-vector size must be greater than zero`
 
 - **(FIXED)** Naming collisions for auto-derived ADT functions in Core: An ADT field named `f!` (which is legal, since `!` is a valid identifier character) collides with the name of the automatically derived unsafe field accessor for another field `f`

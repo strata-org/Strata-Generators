@@ -98,7 +98,6 @@ theorem support_oneOf
     support (oneOf gs hne) = {a | ∃ g ∈ gs, a ∈ g ()} := by
   simp only [oneOf]
   ext a
-  dsimp only [Set.mem_setOf_eq]
   constructor
   . intro h
     obtain ⟨ ⟨i, ⟨hi_gt, hi_lt⟩⟩, h_idx, ha ⟩ := h
@@ -217,7 +216,6 @@ theorem support_elements
     support (elements xs hne : Set α) = {a | a ∈ xs} := by
   simp only [elements, support_bind, support_map, support_choose]
   ext a
-  dsimp only [Set.mem_setOf_eq]
   constructor
   · intro h
     obtain ⟨⟨i, ⟨hi_gt, hi_lt⟩⟩, h_idx, ha⟩ := h
@@ -405,9 +403,9 @@ theorem mem_support_coin_iff {r : Rat} {b : Bool} (h0 : 0 < r) (h1 : r < 1) :
   · rintro _
     cases b
     · -- `false`: reachable via the maximal index `r.den - 1` (where `r.num ≤ idx`)
-      refine ⟨⟨⟨r.den - 1, ?_, ?_⟩⟩, ⟨?_, ?_⟩, Or.inr ⟨?_, rfl⟩⟩ <;> dsimp only <;> omega
+      refine ⟨⟨⟨r.den - 1, ?_, ?_⟩⟩, ⟨?_, ?_⟩, Or.inr ⟨?_, rfl⟩⟩ <;> (try dsimp only) <;> omega
     · -- `true`: reachable via the minimal index `0` (where `idx < r.num`)
-      refine ⟨⟨⟨0, ?_, ?_⟩⟩, ⟨?_, ?_⟩, Or.inl ⟨?_, rfl⟩⟩ <;> dsimp only <;> omega
+      refine ⟨⟨⟨0, ?_, ?_⟩⟩, ⟨?_, ?_⟩, Or.inl ⟨?_, rfl⟩⟩ <;> (try dsimp only) <;> omega
 
 /-- The support of `biasedOptionGen r g`. The generator can give `none` through the `false` branch of
     the coin, and this needs `r < 1`. It can give `some x` exactly when `x` is in the support of `g`,

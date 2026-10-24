@@ -4,7 +4,6 @@ import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
 import StrataGenerators.ProcedureHasTypeAGen.TestSupport
 import StrataGenerators.ProgramGen.UnprovenTransforms
-import StrataGenerators.ProgramGen.LiftFuncDecls
 import StrataGenerators.AdtLaws
 import StrataGenerators.AliasResolution
 import StrataGenerators.MutualBlockShape
@@ -254,8 +253,9 @@ instance : Shrinkable GenCmdWithCtx where
 def genCmdWithCtxG [Gen G] (ctxSize : Nat) : G GenCmdWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
-  let (_, baseCtx) ← genCmds (G := G) coreMonoOps tvars [] [] depth ctxSize
-  let ⟨cmd, ctx'⟩ ← genCmd (G := G) coreMonoOps tvars [] baseCtx depth
+  let avoid := StrataGenerators.Stmt.functionNames cmdSeqCheckContext
+  let (_, baseCtx) ← genCmds (G := G) coreMonoOps tvars [] [] depth ctxSize avoid
+  let ⟨cmd, ctx'⟩ ← genCmd (G := G) coreMonoOps tvars [] baseCtx depth [] avoid
   pure ⟨cmd, baseCtx, ctx'⟩
 
 instance : Arbitrary GenCmdWithCtx where
@@ -286,6 +286,7 @@ def genCmdsWithCtxG [Gen G] (n : Nat) : G GenCmdsWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
   let (cmds, ctx') ← genCmds (G := G) coreMonoOps tvars [] [] depth n
+    (StrataGenerators.Stmt.functionNames cmdSeqCheckContext)
   pure ⟨cmds, [], ctx'⟩
 
 instance : Arbitrary GenCmdsWithCtx where
@@ -326,7 +327,8 @@ instance : Shrinkable GenFunction where
     property can read the matching type map. The depth grows with the size parameter of the harness, as it
     does in `genCmdWithCtxG`. -/
 def genFunctionG [Gen G] (fctx : FVarCtx) (depth : Nat) : G GenFunction := do
-  let func ← genFunction (G := G) fctx coreMonoOps depth
+  let func ← genFunction (G := G) fctx coreMonoOps depth []
+    (fun s => (StrataGenerators.Stmt.functionNames funcCheckContext).contains s)
   pure ⟨func, fctx⟩
 
 instance : Arbitrary GenFunction where
@@ -361,7 +363,8 @@ instance : Shrinkable ClosedGenFunction where
   shrink gf := (shrinkFuncWellFormed gf.func).map fun f' => { gf with func := f' }
 
 def genClosedFunctionG [Gen G] (depth : Nat) : G ClosedGenFunction := do
-  let func ← genFunction (G := G) [] coreMonoOps depth
+  let func ← genFunction (G := G) [] coreMonoOps depth []
+    (fun s => (StrataGenerators.Stmt.functionNames funcCheckContext).contains s)
   pure ⟨func⟩
 
 instance : Arbitrary ClosedGenFunction where
@@ -448,14 +451,8 @@ structure GenStmts where
   stmts : List Statement
 
 instance : Repr GenStmts where
-  -- The rendering uses the formatter of Strata, which gives real Core concrete syntax. It appends a summary
-  -- of each `funcDecl` shape, because the formatter cannot write a `funcDecl` statement with no body, and it
-  -- puts a dummy body there instead. A `funcDecl` with a measure and no body is exactly the counterexample
-  -- to the completeness of the typechecker, so the summary records the true shape.
-  reprPrec gs _ :=
-    let shapes := funcDeclShapesList gs.stmts
-    let suffix := if shapes.isEmpty then "" else s!"\n  -- {" ".intercalate shapes}"
-    formatStmts gs.stmts ++ suffix
+  -- The rendering uses the formatter of Strata, which gives real Core concrete syntax.
+  reprPrec gs _ := formatStmts gs.stmts
 
 -- This instance shrinks the statement list structurally. It can drop a statement, replace one statement by
 -- a smaller one, or put the body of a compound statement in place of that statement. It keeps only a
@@ -525,15 +522,18 @@ open StrataGenerators.Procedure.TestSupport
 /-- A generated list of well-typed procedures, for an assembly into a program. The wrapper renames each
     procedure to `P0`, `P1` and so on, so that no two names collide. The generator draws each name on its
     own, so two procedures could otherwise share a name, and a check that reads a name would then give the
-    wrong answer. -/
+    wrong answer. `funcs` holds top-level functions, named `F0`, `F1` and so on, which the PrecondElim
+    properties place in front of the procedures through `mkMixedProgram`. -/
 structure GenProcs where
   procs : List Core.Procedure
+  funcs : List Core.Function := []
 
 instance : Repr GenProcs where
   -- The rendering uses the formatter of Strata, which gives real Core concrete syntax. Therefore a
   -- counterexample shows exactly the program that the pass received.
   reprPrec gp _ :=
-    let prog : Core.Program := { decls := gp.procs.map (Core.Decl.proc · .empty) }
+    let prog : Core.Program :=
+      { decls := gp.funcs.map (Core.Decl.func · .empty) ++ gp.procs.map (Core.Decl.proc · .empty) }
     (Core.formatProgram prog).pretty
 
 -- This instance uses the shared shrinker `shrinkProcsList`. That shrinker can drop a whole procedure, and
@@ -543,7 +543,20 @@ instance : Repr GenProcs where
 -- *well-typed* program. That condition matters, because each of these properties has content on well-typed
 -- input only. The shrinker holds each header fixed, so each procedure keeps its signature.
 instance : Shrinkable GenProcs where
-  shrink gp := (shrinkProcsList gp.procs).map (⟨·⟩)
+  shrink gp := (if gp.funcs.isEmpty then [] else [{ gp with funcs := [] }]) ++
+    (shrinkProcsList gp.procs).map ({ gp with procs := · })
+
+/-- Up to two top-level functions `F0`, `F1` over the partial operators, so a precondition can call
+    one and PrecondElim emits a `$$wf` procedure for it. No formal is named after a function of the
+    factory, a measure is dropped since the checker allows one only on a recursive function, and a
+    function the checker rejects is left out. -/
+def genProcsFuncs [Gen G] (depth : Nat) : G (List Core.Function) := do
+  let nFuncs ← chooseNat 0 2
+  let fs ← (List.range nFuncs).mapM fun i => do
+    let f ← genFunction (G := G) [] corePartialOps depth []
+      (fun x => (StrataGenerators.Stmt.functionNames stmtCheckContext).contains x)
+    pure { f with name := ⟨s!"F{i}", ()⟩, measure := none }
+  pure (fs.filter checkFunctionTypeChecks)
 
 -- The nesting `size` of one procedure stays at 2 or below, the length of a body at 3 or below, and the
 -- number of the procedures between 2 and 4. The properties about a transform need no large program. As in
@@ -575,7 +588,7 @@ def genProcsG [Gen G] (n size len : Nat)
       let sigs := acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
       pure (acc.1 ++ [proc], sigs))
     (([], []) : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx)
-  pure ⟨relabelProcs ps⟩
+  pure { procs := relabelProcs ps, funcs := ← genProcsFuncs size }
 
 instance : Arbitrary GenProcs where
   arbitrary := retryGen 8000 (Plausible.Gen.sized fun s =>
@@ -600,12 +613,12 @@ instance : Generable GenProcs where
 --
 -- Most of the suite quantifies over this type. That includes the whole-program checks and the checks about a
 -- call to a derived function in `StrataTests/Program.lean`, the properties about a transform with no proof in
--- `StrataTests/Transforms.lean`, the properties about the lifting of a lambda in `StrataTests/Lift.lean`, the
+-- `StrataTests/Transforms.lean`, the
 -- properties about an alias in `StrataTests/Alias.lean`, and the property about the coverage of the printer in
 -- `StrataTests/Printer.lean`. That last property needs a whole `Program`, because the constructs that the
 -- printer cannot write are spread across a type declaration, which can hold a bitvector width in a signature,
--- an expression, which can hold an operator between a bitvector and an integer, and a statement, which can be
--- a `funcDecl` with no body. `genProgram` reaches each of the three.
+-- and an expression, which can hold an operator between a bitvector and an integer. `genProgram` reaches
+-- both.
 --
 -- This generator is also the only place where a call to a derived function of a datatype is visible from end
 -- to end. A block of datatypes extends the vocabulary of the operators, and each *later* function and
@@ -1066,7 +1079,7 @@ def printerErrorDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat × Nat) :=
     let lines := StrataGenerators.PrinterCoverage.strataErrorLines s
     if !lines.isEmpty then
       withErrors := withErrors + 1
-      for line in lines.dedup do
+      for line in lines.uniq do
         tally := match tally.find? (·.1 == line) with
           | some _ => tally.map (fun (m, c) => if m == line then (m, c + 1) else (m, c))
           | none => (line, 1) :: tally

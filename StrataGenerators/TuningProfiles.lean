@@ -58,23 +58,21 @@ are the names a profile is written in. An `example` in this module pins each blo
 reorders a branch in the generator, the build breaks rather than the profile silently moving to the
 wrong branch. -/
 
-/-! Flat indices of `genStmt`'s two sites. The `size = 0` leaf list holds 0 to 4, and the
-`size + 1` list holds 5 to 13. -/
+/-! Flat indices of `genStmt`'s two sites. The `size = 0` leaf list holds 0 to 3, and the
+`size + 1` list holds 4 to 11. -/
 namespace StmtIdx
 def cmd0      : Nat := 0
 def exit0     : Nat := 1
-def funcDecl0 : Nat := 2
-def typeDecl0 : Nat := 3
-def call0     : Nat := 4
-def cmd       : Nat := 5
-def exit      : Nat := 6
-def funcDecl  : Nat := 7
-def typeDecl  : Nat := 8
-def call      : Nat := 9
-def block     : Nat := 10
-def iteDet    : Nat := 11
-def iteNondet : Nat := 12
-def loop      : Nat := 13
+def typeDecl0 : Nat := 2
+def call0     : Nat := 3
+def cmd       : Nat := 4
+def exit      : Nat := 5
+def typeDecl  : Nat := 6
+def call      : Nat := 7
+def block     : Nat := 8
+def iteDet    : Nat := 9
+def iteNondet : Nat := 10
+def loop      : Nat := 11
 end StmtIdx
 
 /-! Flat indices of `genCmd`'s two sites. The writable-context list holds 0 to 6, and it is the only
@@ -166,7 +164,7 @@ end ExprIdx
 
 /-! ### Statements -/
 
-/-- The shipping statement distribution. The leaves stand at 4 to 1 to 1 to 1 to 1, and `block`,
+/-- The shipping statement distribution. The leaves stand at 4 to 1 to 1 to 1, and `block`,
 `ite`, `ite-nondet` and `loop` stand at 2 to 2 to 1 to 2. -/
 def stmtDefault : Tuning := genStmt._mutual.defaults
 
@@ -186,38 +184,31 @@ about a loop's *contents* rather than its nesting. -/
 def stmtLoopWide : Tuning :=
   withWeights stmtDefault [(StmtIdx.loop, 16), (StmtIdx.cmd, 12), (StmtIdx.cmd0, 12)]
 
-/-- **`funcDecl`-heavy** (`stmt: typechecker accepts generated statements`). The honest gap between
-the spec and the algorithm is a `funcDecl` statement, so this profile makes the counterexample the
-common case. It is also the profile for the declared-function paths of PrecondElim. -/
-def stmtFuncDeclHeavy : Tuning :=
-  withWeights stmtDefault [(StmtIdx.funcDecl, 12), (StmtIdx.funcDecl0, 12)]
-
 /-- **Call-heavy** (`proc: FilterProcedures …`, and every call-graph field). A `call` needs a callee,
 so this profile bites only when the generator has a non-empty `ProcSigCtx`. The procedure-list
 harness is the one that supplies one. -/
 def stmtCallHeavy : Tuning :=
   withWeights stmtDefault [(StmtIdx.call, 12), (StmtIdx.call0, 12)]
 
-/-- **Everything at once** for the statement suite. Loops are common, and the three leaves that
-Kleene does not support and `call` are all well represented. One run then exercises the `LoopElim`,
+/-- **Everything at once** for the statement suite. Loops are common, and `exit`, which Kleene
+does not support, and `call` are both well represented. One run then exercises the `LoopElim`,
 `DetToKleene` and typechecker properties together. The price is that it is optimal for none of
 them. -/
 def stmtMixed : Tuning :=
   withWeights stmtDefault
-    [(StmtIdx.loop, 8), (StmtIdx.funcDecl, 3), (StmtIdx.exit, 6), (StmtIdx.call, 3),
+    [(StmtIdx.loop, 8), (StmtIdx.exit, 6), (StmtIdx.call, 3),
      (StmtIdx.block, 4),
-     (StmtIdx.funcDecl0, 3), (StmtIdx.exit0, 6), (StmtIdx.call0, 3)]
+     (StmtIdx.exit0, 6), (StmtIdx.call0, 3)]
 
 /-! ### Procedures: the same statement knobs, aimed at the three transform passes -/
 
 /-- **FilterProcedures.** Call-graph edges are the whole point, so `call` dominates. -/
 def procCallHeavy : Tuning := stmtCallHeavy
 
-/-- **PrecondElim.** A `funcDecl` carries a precondition into the program, and a `call` creates the
-call site to assert at. This profile raises both. -/
+/-- **PrecondElim.** A `call` creates the call site at which the pass asserts the callee's
+precondition, so this profile raises `call`. -/
 def procPrecondHeavy : Tuning :=
-  withWeights stmtDefault
-    [(StmtIdx.funcDecl, 10), (StmtIdx.call, 6), (StmtIdx.funcDecl0, 10), (StmtIdx.call0, 6)]
+  withWeights stmtDefault [(StmtIdx.call, 6), (StmtIdx.call0, 6)]
 
 /-! **There is deliberately no ANFEncoder profile**, and the reason is about the pass rather than
 about the weights. `Core.ANFEncoder` eliminates common subexpressions. It does not flatten
@@ -400,12 +391,13 @@ def genProgramStmtsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List T
 no `frequency` site of its own, so this module writes the tuned chain out rather than let the
 attribute emit it. -/
 def genCmdsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
-    Nat → G (List (Cmd Expression) × VarCtx)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
+    (avoid : List String := []) : G (List (Cmd Expression) × VarCtx) :=
+  match n with
   | 0 => pure ([], ctx)
   | n + 1 => do
-    let ⟨cmd, ctx'⟩ ← genCmd.tuned θ octx tvars immutableVars ctx depth []
-    let (rest, ctx'') ← genCmdsT θ octx tvars immutableVars ctx' depth n
+    let ⟨cmd, ctx'⟩ ← genCmd.tuned θ octx tvars immutableVars ctx depth [] avoid
+    let (rest, ctx'') ← genCmdsT θ octx tvars immutableVars ctx' depth n avoid
     pure (cmd :: rest, ctx'')
 
 /-- `genProcedure` with the statement weights of its *body* read from `θ`. The body is
@@ -416,10 +408,10 @@ def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCt
     (pctx : PolyOpCtx := []) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
-  let inout ← genInputs typeArgs size
-  let rawInputOnly ← genInputs typeArgs size
+  let inout := StrataGenerators.Procedure.avoidFunctionNames C (← genInputs typeArgs size)
+  let rawInputOnly := StrataGenerators.Procedure.avoidFunctionNames C (← genInputs typeArgs size)
   let inputOnly := StrataGenerators.Procedure.disjointInputs rawInputOnly inout
-  let rawOutputOnly ← genInputs typeArgs size
+  let rawOutputOnly := StrataGenerators.Procedure.avoidFunctionNames C (← genInputs typeArgs size)
   let outputOnly :=
     StrataGenerators.Procedure.disjointInputs rawOutputOnly (inout ++ inputOnly)
   let inputs := inout ++ inputOnly
@@ -434,12 +426,12 @@ def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCt
       octx typeArgs size pctx
   let (body, _, _) ← genStmtChainT θ octx typeArgs
     (ListMap.keys inputs ++ ListMap.keys (StrataGenerators.Procedure.oldVars inout)) procs []
-    ({ C with rigidTypeVars := typeArgs })
+    ({ C with rigidTypeVars := C.rigidTypeVars ++ typeArgs })
     (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) pctx size len
   pure {
     header := {
       name := ⟨name, ()⟩, typeArgs := typeArgs, inputs := inputs, outputs := outputs,
-      noFilter := false
+      lemmas := []
     },
     spec := { preconditions := preconditions, postconditions := postconditions },
     body := .structured body
@@ -524,9 +516,9 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 
 /-- At the shipping weights, the tuned command chain is `genCmds`, for any chain length. -/
 @[simp] theorem genCmdsT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth n : Nat) :
-    genCmdsT (G := G) cmdDefault octx tvars immutableVars ctx depth n
-      = genCmds octx tvars immutableVars ctx depth n := by
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth n : Nat) (avoid : List String) :
+    genCmdsT (G := G) cmdDefault octx tvars immutableVars ctx depth n avoid
+      = genCmds octx tvars immutableVars ctx depth n avoid := by
   induction n generalizing ctx with
   | zero => rfl
   | succ n ih =>
@@ -573,8 +565,8 @@ offset changes and one of these examples fails. Without them, every profile woul
 the wrong branch. -/
 
 example : genStmt._mutual.sites.size = 2 := rfl
-example : (genStmt._mutual.sites[0]!.offset, genStmt._mutual.sites[0]!.arity) = (0, 5) := rfl
-example : (genStmt._mutual.sites[1]!.offset, genStmt._mutual.sites[1]!.arity) = (5, 9) := rfl
+example : (genStmt._mutual.sites[0]!.offset, genStmt._mutual.sites[0]!.arity) = (0, 4) := rfl
+example : (genStmt._mutual.sites[1]!.offset, genStmt._mutual.sites[1]!.arity) = (4, 8) := rfl
 example : genStmt._mutual.defaults = genStmt.defaults := rfl
 example : (genCmd.sites[0]!.offset, genCmd.sites[0]!.arity) = (0, 7) := rfl
 example : (genCmd.sites[1]!.offset, genCmd.sites[1]!.arity) = (7, 5) := rfl

@@ -54,23 +54,15 @@ def loopElimPreservesTyping : TestDecl :=
 /-- `LoopElim` eliminates every loop. The claim is vacuously true on a loop-free program, so the
     loop-heavy row is the row that carries it.
 
-    **Both rows fail, and the weights are not the mechanism.** `Core.removeLoop` throws on a loop that
-    still carries an invariant or a measure. `loopElimStmts` returns the input unchanged when the pass
-    throws, so such a loop survives and the count is not zero.
-    This is machine-checked with no generator involved:
-    `checkLoopElimZeroLoops [.loop .nondet none [("i", .const () (.boolConst true))] [] .empty]`
-    is `false`, and the same loop without the invariant gives `true`.
-
-    An invariant-bearing loop appears in 16% of samples at the source weights and in 56–58%
-    under `stmtLoopHeavy`. That is why the loop-heavy row fails faster rather than differently.
-    The claim as stated really reads "unless the pass throws". The fix belongs upstream, or in
-    the property, and this property pins the defect either way. -/
+    `Core.removeLoop` throws on a loop that still carries an invariant or a measure, so the check
+    runs `InsertLoopInvariantAsserts` first, as the verification pipeline does. A loop survives
+    only when a pass throws, which leaves the input unchanged. -/
 @[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]
 def loopElimZeroLoops : TestDecl :=
   .property "stmt: LoopElim eliminates all loops"
     fun (gs : GenStmts) => checkLoopElimZeroLoops gs.stmts
 
-/-- `StmtToKleeneStmt` is defined exactly when the block holds no `exit`, no `funcDecl` and
+/-- `StmtToKleeneStmt` is defined exactly when the block holds no `exit` and
     no `typeDecl`. It is also not defined when the block holds a loop that has an invariant.
     The panel gives the verdict on definedness *and* the reason for it, so this property keeps
     a panel of its own. -/

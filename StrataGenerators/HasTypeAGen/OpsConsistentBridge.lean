@@ -25,6 +25,13 @@ here:
 * `Factory.memNameGetElem`, which exports `Factory.mem_name_eq_getElem` of Strata again. That
   theorem is in a module whose declarations are not `public` under the module system of
   Strata, so a plain import cannot name it.
+
+The statement generators use `Factory.memIffMemNames`, an export of `Factory.mem_iff_mem_names`
+for the same reason, to list the function names of a context, and the annotation facts use
+`Factory.memOfGetElem?`, an export of `Factory.getElem?_some_implies_mem`. The facts about the
+initial program context use `Factory.memToArrayOfGetElem?`, an export of
+`Factory.getElem?_is_some_implies_mem`, and `Factory.nameOfGetElem?`, an export of
+`Factory.getElem?_name`.
 -/
 
 namespace Lambda
@@ -42,6 +49,30 @@ public theorem Factory.memNameGetElem {F : @Factory T} {fn : LFunc T} {s : Strin
     (hmem : fn ∈ F.toArray) (hname : fn.name.name = s) :
     ∃ (hs : s ∈ F), F[s]'hs = fn :=
   Factory.mem_name_eq_getElem hmem hname
+
+/-- A public export of `Factory.mem_iff_mem_names`. `F` holds `s` exactly when some function of
+    `F.toArray` has the name `s`. -/
+public theorem Factory.memIffMemNames (F : @Factory T) (s : String) :
+    s ∈ F ↔ s ∈ F.toArray.map (·.name.name) :=
+  Factory.mem_iff_mem_names F s
+
+/-- A public export of `Factory.getElem?_some_implies_mem`: a successful lookup in `F` names a
+    member of `F`. -/
+public theorem Factory.memOfGetElem? {F : @Factory T} {s : String} {fn : LFunc T}
+    (h : F[s]? = some fn) : s ∈ F :=
+  Factory.getElem?_some_implies_mem h
+
+/-- A public export of `Factory.getElem?_is_some_implies_mem`: the function a successful lookup in
+    `F` returns is stored in `F.toArray`. -/
+public theorem Factory.memToArrayOfGetElem? {F : @Factory T} {s : String} {fn : LFunc T}
+    (h : F[s]? = some fn) : fn ∈ F.toArray :=
+  Factory.getElem?_is_some_implies_mem h
+
+/-- A public export of `Factory.getElem?_name`: the function a successful lookup in `F` returns
+    has the name looked up. -/
+public theorem Factory.nameOfGetElem? {F : @Factory T} {s : String} {fn : LFunc T}
+    (h : F[s]? = some fn) : fn.name.name = s :=
+  Factory.getElem?_name h
 
 /-- Membership and a total lookup give the partial lookup. If `F` holds `s` and `F[s]` is `fn`, then
     `F[s]?` is `some fn`. -/

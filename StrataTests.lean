@@ -16,7 +16,6 @@ import StrataTests.Diagnostics
 import StrataTests.Example
 import StrataTests.Expr
 import StrataTests.Function
-import StrataTests.Lift
 import StrataTests.Monomorphization
 import StrataTests.Mutual
 import StrataTests.Phase

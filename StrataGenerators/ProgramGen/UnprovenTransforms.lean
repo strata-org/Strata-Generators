@@ -246,7 +246,7 @@ def stmtAssertLabels (s : Statement) : List String :=
   | .block _ b _ => stmtsAssertLabels b
   | .ite _ t e _ => stmtsAssertLabels t ++ stmtsAssertLabels e
   | .loop _ _ _ b _ => stmtsAssertLabels b
-  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+  | .exit _ _ | .typeDecl _ _ => []
 
 /-- Each `assert` label of a statement list, at any depth. -/
 def stmtsAssertLabels (ss : List Statement) : List String :=
@@ -264,7 +264,7 @@ def stmtAssumeLabels (s : Statement) : List String :=
   | .block _ b _ => stmtsAssumeLabels b
   | .ite _ t e _ => stmtsAssumeLabels t ++ stmtsAssumeLabels e
   | .loop _ _ _ b _ => stmtsAssumeLabels b
-  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+  | .exit _ _ | .typeDecl _ _ => []
 
 /-- Each `assume` label of a statement list, at any depth. -/
 def stmtsAssumeLabels (ss : List Statement) : List String :=
@@ -283,7 +283,7 @@ def stmtLoopShapes (s : Statement) :
   | .loop g m inv b _ => (g, m, inv) :: stmtsLoopShapes b
   | .block _ b _ => stmtsLoopShapes b
   | .ite _ t e _ => stmtsLoopShapes t ++ stmtsLoopShapes e
-  | .cmd _ | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+  | .cmd _ | .exit _ _ | .typeDecl _ _ => []
 
 /-- Each `loop` of a statement list, at any depth. -/
 def stmtsLoopShapes (ss : List Statement) :
@@ -323,7 +323,7 @@ def stmtBlockLabels (s : Statement) : List String :=
   | .block l b _ => l :: stmtsBlockLabels b
   | .ite _ t e _ => stmtsBlockLabels t ++ stmtsBlockLabels e
   | .loop _ _ _ b _ => stmtsBlockLabels b
-  | .cmd _ | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+  | .cmd _ | .exit _ _ | .typeDecl _ _ => []
 
 /-- Only the `.block` labels of a statement list, at any depth. -/
 def stmtsBlockLabels (ss : List Statement) : List String :=
@@ -429,7 +429,7 @@ def checkAxiomsRemovedNotSeedReachable (p : Program) : Bool :=
     let kept := programAxiomNames out
     let cg := p.toFunctionCG
     let closure := ((axiomSeedFunctions p).flatMap fun f =>
-      f :: cg.getCalleesClosure f ++ cg.getCallersClosure f).dedup
+      f :: cg.getCalleesClosure f ++ cg.getCallersClosure f).uniq
     p.decls.all fun d =>
       match d with
       | .ax a _ =>
@@ -542,7 +542,7 @@ where
            | .condGoto _ lt lf _ => [lt, lf]
            | .finish _ => [])
         | none => []).filter fun t => !seen.contains t
-      if next.isEmpty then seen else go fuel (seen ++ next.dedup)
+      if next.isEmpty then seen else go fuel (seen ++ next.uniq)
 
 /-- The number of `.finish` blocks of a CFG. -/
 def cfgFinishCount (c : Core.DetCFG) : Nat :=
@@ -554,16 +554,15 @@ def cfgCmdCount (c : Core.DetCFG) : Nat := (c.blocks.map fun (_, b) => b.cmds.le
 mutual
 /-- The count of the commands of a statement that the pass can reach.
 
-    Two constructors count as nothing, and each for a reason the pass states:
-    a `funcDecl` and a `typeDecl`, because `stmtsToBlocks` drops both ("Not yet
-    supported, so just continue with `rest`"). -/
+    A `typeDecl` counts as nothing, for a reason the pass states: `stmtsToBlocks`
+    drops it ("Not yet supported, so just continue with `rest`"). -/
 def stmtCmdCount (s : Statement) : Nat :=
   match s with
   | .cmd _ => 1
   | .block _ b _ => stmtsCmdCount b
   | .ite _ t e _ => stmtsCmdCount t + stmtsCmdCount e
   | .loop _ _ _ b _ => stmtsCmdCount b
-  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => 0
+  | .exit _ _ | .typeDecl _ _ => 0
 
 /-- The count of the commands of a statement list that the pass can reach.
 
@@ -642,8 +641,8 @@ def checkS2uAllReachable (p : Program) : Bool :=
     count means the pass dropped a command of the source program.
 
     The source count excludes exactly what the pass openly does not carry, so the
-    claim never blames it for a documented omission: a `funcDecl` and a `typeDecl`
-    statement count as zero, and a statement after an `.exit` in the same list
+    claim never blames it for a documented omission: a `typeDecl`
+    statement counts as zero, and a statement after an `.exit` in the same list
     counts as zero, because an `.exit` is unconditional and the pass skips the
     remainder. Anything else the pass drops is a real loss and the property reports
     it. -/
@@ -680,7 +679,8 @@ each loop. What no property covers is whether the verification conditions
 `InsertLoopInvariantAsserts.lean` states its output shape exactly (its docstring
 enumerates VC1 to VC4), so the oracle is unusually sharp: per invariant the pass
 must emit 1 entry `assert`, 1 entry `assume`, 1 mid `assume`, 1 maintain
-`assert` and 1 exit `assume`, and a measure adds exactly 3 more. -/
+`assert` and 1 exit `assume`, and a measure adds exactly 3 more: the `init` of its
+snapshot and 2 `assert`s. -/
 
 /-- The phase that materializes the verification conditions of a loop. -/
 def loopInvPhase : Core.PipelinePhase := Core.insertLoopInvariantAssertsPipelinePhase
@@ -696,10 +696,8 @@ def programMeasureLoopCount (p : Program) : Nat :=
     ((stmtsLoopShapes ss).filter fun (_, m, _) => m.isSome).length).sum
 
 /-- Whether the program holds a nondeterministic loop that carries a measure.
-    `insertInvariantAsserts` rejects such a loop with a diagnostic
-    (`InsertLoopInvariantAsserts.lean`), so a property about the pass's output
-    is vacuous on such a program and `checkLoopNondetMeasureThrows` states the
-    rejection itself. -/
+    `insertInvariantAsserts` accepts such a loop, and `checkLoopNondetMeasureAccepted`
+    states what it emits for one. -/
 def hasNondetMeasureLoop (p : Program) : Bool :=
   (programBodies p).any fun ss =>
     (stmtsLoopShapes ss).any fun (g, m, _) =>
@@ -717,19 +715,15 @@ def countPrefixed (pfx : String) (ls : List String) : Nat :=
       maintain, and `2 * m` for the measure (the lower bound and the decrease), so
       `2 * n + 2 * m`;
     * an `assume` with the `insertLoopInvAssume_` prefix: `n` at entry, `n` at
-      mid, `n` at exit, `m` for the measure, and one negated guard per
-      deterministic loop that carries an invariant or a measure.
+      mid, `n` at exit, and one negated guard per deterministic loop that carries
+      an invariant or a measure. The measure adds no `assume`.
 
     The negated guard makes the `assume` count depend on the guard kind, which the
     count of invariants alone does not fix, so the property states the `assert`
-    count exactly and bounds the `assume` count below by `3 * n + m`. The `assert`
+    count exactly and bounds the `assume` count below by `3 * n`. The `assert`
     side is the one that carries each verification condition, so an exact claim
-    there is what the property needs to be sharp.
-
-    Vacuous when a nondeterministic loop carries a measure, since the pass then
-    throws. -/
+    there is what the property needs to be sharp. -/
 def checkLoopVcAssertCount (p : Program) : Bool :=
-  hasNondetMeasureLoop p ||
     (match runPhase loopInvPhase p with
      | some (_, out) =>
        let n := programInvariantCount p
@@ -738,7 +732,7 @@ def checkLoopVcAssertCount (p : Program) : Bool :=
          countPrefixed Core.insertLoopInvAssertPrefix (stmtsAssertLabels ss)).sum
        let assumes := ((programBodies out).map fun ss =>
          countPrefixed Core.insertLoopInvAssumePrefix (stmtsAssumeLabels ss)).sum
-       asserts == 2 * n + 2 * m && 3 * n + m ≤ assumes
+       asserts == 2 * n + 2 * m && 3 * n ≤ assumes
      | none => true)
 
 /-- **Each loop is bare after the pass.** The pass moves the invariants and the
@@ -747,7 +741,6 @@ def checkLoopVcAssertCount (p : Program) : Bool :=
     *throws* on a loop that still does, so a failure here is not cosmetic: it
     blocks the rest of the pipeline. -/
 def checkLoopBareAfterPass (p : Program) : Bool :=
-  hasNondetMeasureLoop p ||
     (match runPhase loopInvPhase p with
      | some (_, out) =>
        (programBodies out).all fun ss =>
@@ -762,7 +755,6 @@ def checkLoopBareAfterPass (p : Program) : Bool :=
     The comparison is full structural equality on `Program`, which the derived
     `DecidableEq` supplies. -/
 def checkLoopVcIdempotent (p : Program) : Bool :=
-  hasNondetMeasureLoop p ||
     (match runPhase loopInvPhase p with
      | some (_, out) =>
        (match runPhase loopInvPhase out with
@@ -781,7 +773,6 @@ def checkLoopVcIdempotent (p : Program) : Bool :=
     `numAssertAssumes` through `exit_assumes.length`, so both sides here count the
     same set and the claim is an equality. -/
 def checkLoopVcStatFaithful (p : Program) : Bool :=
-  hasNondetMeasureLoop p ||
     (match runPhaseSt loopInvPhase p with
      | some ((_, out), st) =>
        let inserted := ((programBodies out).map fun ss =>
@@ -800,7 +791,6 @@ def checkLoopVcStatFaithful (p : Program) : Bool :=
     order (`transformPipelinePhases` puts `insertLoopInvariantAssertsPipelinePhase`
     immediately before `loopElimPipelinePhase`). -/
 def checkLoopVcSurvivesElim (p : Program) : Bool :=
-  hasNondetMeasureLoop p ||
     (match runPhase loopInvPhase p with
      | some (_, mid) =>
        (match runPhase Core.loopElimPipelinePhase mid with
@@ -811,24 +801,29 @@ def checkLoopVcSurvivesElim (p : Program) : Bool :=
         | none => true)
      | none => true)
 
-/-- **A nondeterministic loop that carries a measure is rejected.** A `while *`
-    loop iterates an arbitrary number of times, so no measure can show that it
-    terminates, and the pass throws rather than dropping the measure silently
-    (`InsertLoopInvariantAsserts.lean`). The generator can draw exactly this
-    shape: `genCondOrNondet` gives `.nondet` about 20 percent of the time and
-    `genOptMeasure` gives a measure about 75 percent of the time.
-
-    Stated as a biconditional, so it catches both a missed rejection and a
-    spurious one. -/
-def checkLoopNondetMeasureThrows (p : Program) : Bool :=
-  (runPhase loopInvPhase p).isNone == hasNondetMeasureLoop p
+/-- **A nondeterministic loop that carries a measure is accepted.** A measure that
+    decreases across the body and stays non-negative bounds the iterations however a
+    `while *` guard decides to continue, so the pass treats such a loop like a
+    deterministic one (`InsertLoopInvariantAsserts.lean`): on a program that holds one,
+    it succeeds and emits a lower-bound `assert` and a decrease `assert` for every loop
+    that carries a measure. The generator can draw exactly this shape: `genCondOrNondet`
+    gives `.nondet` about 20 percent of the time and `genOptMeasure` gives a measure
+    about 75 percent of the time. -/
+def checkLoopNondetMeasureAccepted (p : Program) : Bool :=
+  !hasNondetMeasureLoop p ||
+    (match runPhase loopInvPhase p with
+     | some (_, out) =>
+       let m := programMeasureLoopCount p
+       let labels := ((programBodies out).map stmtsAssertLabels).flatten
+       countPrefixed s!"{Core.insertLoopInvAssertPrefix}measure_lb_" labels == m &&
+         countPrefixed s!"{Core.insertLoopInvAssertPrefix}measure_decrease_" labels == m
+     | none => false)
 
 /-- **`LoopElim` mints distinct block labels.**
 
     Run on the output of `InsertLoopInvariantAsserts`, because `LoopElim` throws on
     a loop that still carries an invariant or a measure. -/
 def checkLoopBlockLabelsNodup (p : Program) : Bool :=
-  hasNondetMeasureLoop p ||
     (match runPhase loopInvPhase p with
      | some (_, mid) =>
        (match runPhase Core.loopElimPipelinePhase mid with
@@ -846,7 +841,6 @@ def checkLoopBlockLabelsNodup (p : Program) : Bool :=
     `stmt: LoopElim eliminates all loops` covers, so this one pins the counter
     against the input count instead. -/
 def checkLoopElimStatFaithful (p : Program) : Bool :=
-  hasNondetMeasureLoop p ||
     (match runPhase loopInvPhase p with
      | some (_, mid) =>
        (match runPhaseSt Core.loopElimPipelinePhase mid with
@@ -869,7 +863,7 @@ happily, and Kleene has no measure, so the obligation to show that the loop
 terminates vanishes.
 
 The repository's existing property `stmt: DetToKleene defined iff supported` is
-stated over `hasKleeneUnsupported`, which counts `exit`, `funcDecl`, `typeDecl` and
+stated over `hasKleeneUnsupported`, which counts `exit`, `typeDecl` and
 a procedure `call`. That last case is vacuous at the statement level and is *not*
 vacuous here: a generated program emits calls, and `kleeneStmts` returns `none` on
 one, so without it a draw whose body holds a call is scored as a failure of the
@@ -896,7 +890,7 @@ def hasMeasureOnlyLoop (ss : List Statement) : Bool :=
     source program carried is gone, with no rejection and no diagnostic.
 
     The property states the current behaviour: on such a body, and with no
-    construct the transform openly rejects (`exit`, `funcDecl`, `typeDecl`), the
+    construct the transform openly rejects (`exit`, `typeDecl`), the
     transform returns `some`. It is a characterization rather than a bug oracle: it
     pins the fact that a measure does not make the transform undefined, so a future
     change that starts rejecting a measure-carrying loop (which is one of the two
@@ -1346,8 +1340,8 @@ def programLabelsNodup (p : Program) : Bool :=
     artefact as a defect of Strata. Under the guard, the property is a real claim about the pass.
 
     The generator rarely reaches the shape, because few draws hold two calls or more. The `#guard`s at
-    the end of this file pin each of the two causes separately, so neither one depends on a lucky
-    draw. -/
+    the end of this file pin a callee inlined at two call sites, with and without a local variable, so
+    neither shape depends on a lucky draw. -/
 def checkInlineProcLabelsNodup (p : Program) : Bool :=
   !programLabelsNodup p ||
     (match runPhase inlinePhase p with
@@ -1501,7 +1495,7 @@ def checkInlineProcSymbolicAgreement (p : Program) : Bool :=
 
 /-! ## `NondetElim` and `LoopInitHoist`: the postconditions with no proof
 
-Both files prove syntactic *preservation* lemmas (`noFuncDecl`,
+Both files prove syntactic *preservation* lemmas (such as
 `noMeasureLoops`), but neither proves its own headline postcondition. Each
 postcondition is stated in the module doc of the pass and is decidable, so each
 one becomes a property directly.
@@ -1531,7 +1525,7 @@ def stmtHasNondetGuard (s : Stmt Expression (Cmd Expression)) : Bool :=
   | .ite g t e _ => guardIsNondet g || stmtsHaveNondetGuard t || stmtsHaveNondetGuard e
   | .loop g _ _ b _ => guardIsNondet g || stmtsHaveNondetGuard b
   | .block _ b _ => stmtsHaveNondetGuard b
-  | .cmd _ | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => false
+  | .cmd _ | .exit _ _ | .typeDecl _ _ => false
 
 /-- Whether a statement list holds a nondeterministic guard, at any depth. -/
 def stmtsHaveNondetGuard (ss : List (Stmt Expression (Cmd Expression))) : Bool :=
@@ -1551,7 +1545,7 @@ def cmdStmtInitNames (s : Stmt Expression (Cmd Expression)) : List String :=
   | .block _ b _ => cmdStmtsInitNames b
   | .ite _ t e _ => cmdStmtsInitNames t ++ cmdStmtsInitNames e
   | .loop _ _ _ b _ => cmdStmtsInitNames b
-  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+  | .exit _ _ | .typeDecl _ _ => []
 
 /-- Each `init` name of a `Cmd`-shaped statement list, at any depth. -/
 def cmdStmtsInitNames (ss : List (Stmt Expression (Cmd Expression))) : List String :=
@@ -1563,7 +1557,7 @@ end
 /-- **`NondetElim` leaves no nondeterministic guard.** "After the pass, no `.ite`
     or `.loop` carries a `.nondet` guard" is the module doc of `NondetElim`, and
     the file proves no such theorem: its 19 theorems are all preservation lemmas
-    about other predicates (`noFuncDecl`, `noMeasureLoops`, and the projections of
+    about other predicates (`noMeasureLoops`, and the projections of
     the pass's own step function). The postcondition is decidable, so it becomes
     this property. -/
 def checkNondetElimNoNondetGuard (p : Program) : Bool :=
@@ -1729,7 +1723,6 @@ def bareLoopsStmt (s : Statement) : Statement :=
   | .ite g t e md => .ite g (bareLoopsStmts t) (bareLoopsStmts e) md
   | .cmd c => .cmd c
   | .exit l md => .exit l md
-  | .funcDecl d md => .funcDecl d md
   | .typeDecl t md => .typeDecl t md
 /-- List analogue of `bareLoopsStmt`. -/
 def bareLoopsStmts (ss : List Statement) : List Statement :=
@@ -1803,17 +1796,14 @@ def labelsRetained (before after : List String) : Bool :=
     annotations cleared, which is what makes it loop-eliminable without running
     the pass under test. Both sides then go through `LoopElim` and the evaluator.
 
-    Vacuous when the input does not typecheck, when a nondeterministic loop
-    carries a measure (the pass throws, which `checkLoopNondetMeasureThrows`
-    states), or when the baseline itself does not reach the evaluator, because there is then nothing to
-    compare against. An output of the pass that *stops* reaching the evaluator is a failure, and not a
-    skip.
+    Vacuous when the input does not typecheck, or when the baseline itself does not reach the
+    evaluator, because there is then nothing to compare against. An output of the pass that *stops*
+    reaching the evaluator is a failure, and not a skip.
 
-    The two guards cost little coverage, and few generated programs hold an invariant or a measure for
-    the pass to insert. That small subset is
-    what the `#guard`s at the end of this file are for. Passes on every draw. -/
+    Few generated programs hold an invariant or a measure for the pass to insert. That small subset is
+    what the `#guard`s at the end of this file are for. -/
 def checkLoopVcSymbolicNoLoss (p : Program) : Bool :=
-  !progTypeChecks p || hasNondetMeasureLoop p ||
+  !progTypeChecks p ||
     (match elimObligationLabels (bareLoopsProgram p) with
      | none => true   -- no baseline: no claim to make
      | some before =>
@@ -1836,13 +1826,9 @@ def checkLoopVcSymbolicNoLoss (p : Program) : Bool :=
 
     The property states containment, for uniformity with the other two properties of this section.
 
-    The property says nothing when the input does not type check, and when it holds a nondeterministic
-    loop that carries a measure. That second guard does real work here, and it is not symmetric.
-    `insertInvariantAsserts` throws on such a loop, and `NondetElim` makes each guard deterministic.
-    Therefore the early rewrite would *remove* the rejection. The side after the pass would then run
-    where the side before it threw, and there would be no baseline for the comparison. -/
+    The property says nothing when the input does not type check. -/
 def checkNondetElimSymbolicNoLoss (p : Program) : Bool :=
-  !progTypeChecks p || hasNondetMeasureLoop p ||
+  !progTypeChecks p ||
     (match vcElimObligationLabels p with
      | none => true   -- no baseline: no claim to make
      | some before =>
@@ -1868,7 +1854,7 @@ def checkNondetElimSymbolicNoLoss (p : Program) : Bool :=
     declaration inside that loop. A run can therefore score this property with no real input throughout.
     The `#guard`s below are where the preservation of the obligations of this pass is pinned. -/
 def checkHoistSymbolicNoLoss (p : Program) : Bool :=
-  !progTypeChecks p || hasNondetMeasureLoop p ||
+  !progTypeChecks p ||
     !((cmdShapedBodies p).all uniqueInitsB) ||
     (match vcElimObligationLabels p with
      | none => true   -- no baseline: no claim to make
@@ -1893,7 +1879,7 @@ section Guards
 /-- A procedure with the given name and structured body, and no parameter. -/
 private def guardProc (name : String) (ss : List Statement) : Procedure :=
   { header := { name := ⟨name, ()⟩, typeArgs := [], inputs := [], outputs := [],
-                noFilter := false }
+                lemmas := [] }
     spec := { preconditions := [], postconditions := [] }
     body := .structured ss }
 
@@ -1918,13 +1904,10 @@ private def guardAssert (l : String) : Statement := Statement.assert l trueLit .
 -- "CFG bodies not yet supported" and emits an empty body.
 #guard !checkS2uCfgPrintable (guardProg [guardAssert "a"])
 
--- The same `.cfg` body does not *typecheck* either, which is the sharper half of
--- the same gap: `Program.typeCheck` rejects it with "CFG procedures not supported
--- yet" while accepting the structured original. Since `corePipelinePhases` appends
--- a typecheck phase after the transform phases, a program that went through
--- `StructuredToUnstructured` can be neither printed nor re-checked.
+-- The same `.cfg` body typechecks: `Program.typeCheck` accepts a CFG body whose
+-- local declarations are fresh, as it accepts the structured original.
 #guard progTypeChecks (guardProg [guardAssert "a"])
-#guard !progTypeChecks
+#guard progTypeChecks
   { decls := [.proc { guardProc "P" [] with
                       body := .cfg (bodyCfg [guardAssert "a"]) } .empty] }
 
@@ -1974,9 +1957,9 @@ private def intBinOpTy : LMonoTy := .tcons "arrow" [.int, .tcons "arrow" [.int, 
 private def cseDup : Expression.Expr :=
   .app () (.app () (.op () ⟨"Int.Add", ()⟩ (some intBinOpTy)) (intLit 3)) (intLit 4)
 
-/-- The same subexpression with the operator **unannotated**. `LExpr.typeOf` reads
-    an annotation rather than inferring one, so it gives `none` here, and CSE falls
-    back to a polymorphic annotation the typechecker forbids. -/
+/-- The same subexpression with the operator **unannotated**. CSE extracts only a
+    subexpression that `LExpr.typeCheck` types from its annotations, so it leaves
+    this one in place. -/
 private def cseDupBare : Expression.Expr :=
   .app () (.app () (.op () ⟨"Int.Add", ()⟩ none) (intLit 3)) (intLit 4)
 
@@ -2036,16 +2019,15 @@ private def cseBareBody : List Statement :=
   [ Statement.init ⟨"a", ()⟩ (.forAll [] .int) (.det cseDupBare) .empty,
     Statement.init ⟨"b", ()⟩ (.forAll [] .int) (.det cseDupBare) .empty ]
 
--- **A polymorphic annotation on the output of the pass.** With no annotation on the operator,
--- `dup.typeOf` gives `none`, and the pass emits `var $__cse.0 : α := 3 + 4;`. The typechecker accepts
--- both the input and that output.
+-- An unannotated duplicate is not extracted, so the output carries no `$__cse` variable.
 #guard progTypeChecks (guardProg cseBareBody)
+#guard (runPhase Core.commonSubexprElimPhase (guardProg cseBareBody)).any (!·.1)
 #guard checkCseOutputTypechecks (guardProg cseBareBody)
 
-/-- `Int.Add(7, 8)`, a second subexpression to duplicate, so CSE mints two names
-    and the order claim has something to order. -/
+/-- `Int.Add(7, 8)`, a second annotated subexpression to duplicate, so CSE mints
+    two names and the order claim has something to order. -/
 private def cseDup2 : Expression.Expr :=
-  .app () (.app () (.op () ⟨"Int.Add", ()⟩ none) (intLit 7)) (intLit 8)
+  .app () (.app () (.op () ⟨"Int.Add", ()⟩ (some intBinOpTy)) (intLit 7)) (intLit 8)
 
 /-- A body with two distinct duplicated subexpressions, so CSE mints `$__cse.0`
     and `$__cse.1`. With one minted name the order claim is trivially true, so this
@@ -2067,7 +2049,7 @@ private def cseTwoExtractionsBody : List Statement :=
 #guard checkCseFreshNamesFresh (guardProg cseTwoExtractionsBody)
 
 -- **A real collision.** On a body that already declares `$__cse.0`, the pass
--- declares it a second time: the output holds `var $__cse.0 : α := 3 + 4;`
+-- declares it a second time: the output holds `var $__cse.0 : int := 3 + 4;`
 -- immediately followed by the body's own `var $__cse.0 : int := 9;`. The two
 -- references the pass inserted then resolve to the second declaration, which holds
 -- `9` rather than the extracted `3 + 4`, so the rewrite changes the meaning of the
@@ -2084,9 +2066,8 @@ private def cseTwoExtractionsBody : List Statement :=
     and two calls to one procedure not at all, so this pins the dimension
     deterministically.
 
-    The local variable matters: it makes `var_map` non-empty, which is what lets
-    `renameAllLocalNames` reach its label-renaming step at all (see cause 2 in
-    `checkInlineProcLabelsNodup`). So this program isolates cause 1. -/
+    The local variable makes `var_map` non-empty, so the program covers the
+    renaming of both variables and labels. -/
 private def twoCallSitesProgram : Program :=
   { decls :=
       [ .proc (guardProc "Callee"
@@ -2096,10 +2077,8 @@ private def twoCallSitesProgram : Program :=
           [ .cmd (.call "Callee" [] .empty),
             .cmd (.call "Callee" [] .empty) ]) .empty ] }
 
-/-- The same two call sites, but with a callee that declares no variable. This
-    isolates cause 2: `var_map` is empty, so the fold that carries the label
-    renaming never runs, and the callee's `assert` label is copied verbatim at
-    both call sites. -/
+/-- The same two call sites, but with a callee that declares no variable, so
+    `var_map` is empty and only labels are renamed. -/
 private def twoCallSitesNoVarProgram : Program :=
   { decls :=
       [ .proc (guardProc "Callee" [guardAssert "inner"]) .empty,
@@ -2112,20 +2091,13 @@ private def twoCallSitesNoVarProgram : Program :=
 #guard programLabelsNodup twoCallSitesProgram
 #guard programLabelsNodup twoCallSitesNoVarProgram
 
--- **Cause 1: the constant wrapper label.** With the callee's own labels correctly
--- freshened to `Callee_inner_1` and `Callee_inner_3`, the two wrapper blocks are
--- both labeled `Callee$inlined`, because that label is a string concatenation and
--- not a counter draw.
-#guard !checkInlineProcLabelsNodup twoCallSitesProgram
-
--- **Cause 2: the unreached renaming.** With an empty `var_map`, neither the
--- wrapper label nor the callee's `assert` label is freshened, so the caller body
--- holds `Callee$inlined` two times *and* `inner` two times.
-#guard !checkInlineProcLabelsNodup twoCallSitesNoVarProgram
+-- Each call site prefixes the wrapper label and the callee's labels with its own
+-- `$__inline<N>`, so the caller holds `$__inline1_inner` and `$__inline2_inner`.
+#guard checkInlineProcLabelsNodup twoCallSitesProgram
+#guard checkInlineProcLabelsNodup twoCallSitesNoVarProgram
 
 -- The callee's one `assert` rides along into the caller two times, so the total
--- count grows rather than shrinking. This holds under both causes: a duplicated
--- label is still a present obligation.
+-- count grows rather than shrinking.
 #guard checkInlineProcAssertsNotLost twoCallSitesProgram
 #guard checkInlineProcAssertsNotLost twoCallSitesNoVarProgram
 
@@ -2148,7 +2120,7 @@ private def geZeroX : Expression.Expr :=
     below, which differ only in the callee's body. -/
 private def callerPassing (arg : Expression.Expr) : Decl :=
   .proc { header := { name := ⟨"Caller", ()⟩, typeArgs := [], inputs := [],
-                      outputs := [], noFilter := false }
+                      outputs := [], lemmas := [] }
           spec := { preconditions := [], postconditions := [] }
           body := .structured
             [ Statement.init ⟨"y", ()⟩ (.forAll [] .int) (.det arg) .empty,
@@ -2175,7 +2147,7 @@ private def preconditionEmptyBodyProgram : Program :=
   { decls :=
       [ .proc { header := { name := ⟨"Callee", ()⟩, typeArgs := [],
                             inputs := [(⟨"x", ()⟩, .int)], outputs := [],
-                            noFilter := false }
+                            lemmas := [] }
                 spec := { preconditions := [("pre", { expr := geZeroX })],
                           postconditions := [] }
                 body := .structured [] } .empty,
@@ -2189,7 +2161,7 @@ private def preconditionCallProgram : Program :=
   { decls :=
       [ .proc { header := { name := ⟨"Callee", ()⟩, typeArgs := [],
                             inputs := [(⟨"x", ()⟩, .int)], outputs := [],
-                            noFilter := false }
+                            lemmas := [] }
                 spec := { preconditions := [("pre", { expr := geZeroX })],
                           postconditions := [] }
                 body := .structured [guardAssert "inner"] } .empty,
@@ -2202,7 +2174,7 @@ private def preconditionSatisfiedProgram : Program :=
   { decls :=
       [ .proc { header := { name := ⟨"Callee", ()⟩, typeArgs := [],
                             inputs := [(⟨"x", ()⟩, .int)], outputs := [],
-                            noFilter := false }
+                            lemmas := [] }
                 spec := { preconditions := [("pre", { expr := geZeroX })],
                           postconditions := [] }
                 body := .structured [] } .empty,
@@ -2265,7 +2237,7 @@ private def generatedRequiresWitness : Program :=
                             outputs := [(⟨"xB", ()⟩, .string), (⟨"sRw", ()⟩, .real),
                                         (⟨"w", ()⟩, .real), (⟨"u", ()⟩, .int),
                                         (⟨"h", ()⟩, .real)],
-                            noFilter := false }
+                            lemmas := [] }
                 spec := { preconditions := [("y_", { expr := preExpr })],
                           postconditions := [] }
                 body := .structured [] } .empty,
@@ -2274,7 +2246,7 @@ private def generatedRequiresWitness : Program :=
                                        (⟨"p", ()⟩, .regex), (⟨"DN", ()⟩, .bool)],
                             outputs := [(⟨"o", ()⟩, .tcons "Sequence" [.real]),
                                         (⟨"E", ()⟩, .int)],
-                            noFilter := false }
+                            lemmas := [] }
                 spec := { preconditions := [], postconditions := [] }
                 body := .structured
                   [ Statement.init ⟨"xB", ()⟩ (.forAll [] .string) .nondet .empty,
@@ -2338,28 +2310,24 @@ private def generatedRequiresWitness : Program :=
 private def oldT : Expression.Expr := .fvar () ⟨"old T", ()⟩ (some .bool)
 
 /-- A callee with one inout parameter `T` whose body asserts `old T`, called once
-    by a caller that declares `T`. This is the shape that shows `old` escaping the
-    renaming: `T` is renamed and `old T` is not. -/
+    by a caller that declares `T`, so inlining must rename both `T` and `old T`. -/
 private def oldExprProgram : Program :=
   { decls :=
       [ .proc { header := { name := ⟨"Callee", ()⟩, typeArgs := [],
                             inputs := [(⟨"T", ()⟩, .bool)],
-                            outputs := [(⟨"T", ()⟩, .bool)], noFilter := false }
+                            outputs := [(⟨"T", ()⟩, .bool)], lemmas := [] }
                 spec := { preconditions := [], postconditions := [] }
                 body := .structured [Statement.assert "inner" oldT .empty] } .empty,
         .proc { header := { name := ⟨"Caller", ()⟩, typeArgs := [], inputs := [],
-                            outputs := [], noFilter := false }
+                            outputs := [], lemmas := [] }
                 spec := { preconditions := [], postconditions := [] }
                 body := .structured
                   [ Statement.init ⟨"T", ()⟩ (.forAll [] .bool) (.det trueLit) .empty,
                     .cmd (.call "Callee" [.inoutArg ⟨"T", ()⟩] .empty) ] } .empty ] }
 
--- **`old` escapes the renaming.** The input typechecks and the output does not:
--- the spliced body renames `T` to `Callee_T_1` but copies `old T` verbatim, so the
--- caller holds a free variable that no parameter of the caller backs. The checker's
--- own message is "No free variables are allowed here! Free Variables: [old T]".
+-- Inlining binds `old T` to a fresh `$__inline1$old_T`, so input and output both typecheck.
 #guard progTypeChecks oldExprProgram
-#guard !checkInlineProcTypechecks oldExprProgram
+#guard checkInlineProcTypechecks oldExprProgram
 
 /-- A program whose one function has a body, so `FunctionInlining` can fire.
     `Core.Factory` holds no function body at all (0 of 310 entries), so without a
@@ -2510,11 +2478,11 @@ private def twoInvariantLoop : Statement :=
 #guard checkLoopVcSurvivesElim (guardProg [twoInvariantLoop])
 #guard checkLoopElimStatFaithful (guardProg [twoInvariantLoop])
 
--- A nondeterministic loop that carries a measure is rejected with a diagnostic,
--- and not silently stripped.
-#guard checkLoopNondetMeasureThrows
+-- A nondeterministic loop that carries a measure is accepted, and the pass adds its
+-- lower-bound and decrease asserts.
+#guard checkLoopNondetMeasureAccepted
   (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])
-#guard (runPhase loopInvPhase (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])).isNone
+#guard (runPhase loopInvPhase (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])).isSome
 
 -- ── The axiom relevance oracle ────────────────────────────────────────────
 
@@ -2693,7 +2661,7 @@ private def hoistObligationBody : List Statement :=
 private def ensuresFalseProg (ss : List Statement) : Program :=
   { decls := [.proc
       { header := { name := ⟨"P", ()⟩, typeArgs := [], inputs := [],
-                    outputs := [(⟨"r", ()⟩, .int)], noFilter := false }
+                    outputs := [(⟨"r", ()⟩, .int)], lemmas := [] }
         spec := { preconditions := [],
                   postconditions := [("post", { expr := .const () (.boolConst false) })] }
         body := .structured ss } .empty] }
@@ -2716,9 +2684,8 @@ private def emptyNdIte : Statement := .ite .nondet [] [] .empty
     == some ["post"]
 #guard checkNondetElimSymbolicNoLoss (ensuresFalseProg [emptyNdIte, emptyNdIte])
 
--- All three are vacuous on a program with a nondeterministic measure-carrying
--- loop, since `InsertLoopInvariantAsserts` throws on it and neither side reaches
--- the evaluator. Pinned so the guard is not silently doing nothing.
+-- All three hold on a program with a nondeterministic loop that carries a measure,
+-- which `InsertLoopInvariantAsserts` accepts.
 private def nondetMeasureProg : Program :=
   guardProg [.loop .nondet (some (intLit 3)) [] [guardAssert "a"] .empty]
 

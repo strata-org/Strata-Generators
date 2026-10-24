@@ -44,7 +44,7 @@ Three upstream predicates look close to the side conditions, but none of them
 discharges one:
 
 * `Imperative.Stmt.stripMetaData` erases the metadata of a `block`, an `ite`, a
-  `loop`, an `exit`, a `funcDecl` and a `typeDecl`. It leaves a `.cmd` node
+  `loop`, an `exit` and a `typeDecl`. It leaves a `.cmd` node
   untouched. The gap of `metadata_gap` is at a `.cmd` node, so this function
   cannot close it.
 * `Core.WF.WFcallProp.lhsWF` gives the `Nodup` fact that `CallOk` needs for the
@@ -86,21 +86,22 @@ theorem initChain_append_call_singleton {L : List (Identifier Unit × LMonoTy)}
 /-- **Inversion at a `.cmd` group.** `genStmt` reaches a one-statement group
     `[.cmd ce]` in exactly two ways. Either `genCmd` produced an imperative
     command, or `genCallStmt` produced a call whose argument list is a `mkArgs`
-    recipe. The other seven branches produce a `block`, an `ite`, a `loop`, an
-    `exit`, a `funcDecl` or a `typeDecl`, so they cannot produce a `.cmd`. -/
+    recipe. The other six branches produce a `block`, an `ite`, a `loop`, an
+    `exit` or a `typeDecl`, so they cannot produce a `.cmd`. -/
 theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
     (ce : Command)
     (h : (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [])) ∨
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n []
+          (functionNames C))) ∨
     (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
           (StrataGenerators.Stmt.mkArgs s.M
             (outTargets immutableVars ctx
-              (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
+              (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C))
             exprs mask) default) := by
   have hcall : ∀ (d : Nat),
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
@@ -110,7 +111,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
         ce = CmdExt.call s.pname
           (StrataGenerators.Stmt.mkArgs s.M
             (outTargets immutableVars ctx
-              (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
+              (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C))
             exprs mask) default) := by
     intro d hmem
     cases procs with
@@ -119,18 +120,23 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       simp only [genCallStmt, mem_support_bind_iff] at hmem
       obtain ⟨s, hs, σvals, _, hmem⟩ := hmem
       split at hmem
-      · simp only [mem_support_bind_iff, mem_support_pure_iff] at hmem
-        obtain ⟨exprs, _, mask, _, heq⟩ := hmem
-        simp only [GenStmtResult.mk.injEq] at heq
-        have := initChain_append_call_singleton heq.1
-        exact ⟨s, σvals, exprs, mask, (mem_support_elements_iff (by simp)).mp hs, by
-          simpa only [Statement.call, Stmt.cmd.injEq] using this⟩
+      · simp only [mem_support_bind_iff] at hmem
+        obtain ⟨exprs, _, hmem⟩ := hmem
+        split at hmem
+        · simp only [mem_support_bind_iff, mem_support_pure_iff] at hmem
+          obtain ⟨mask, _, heq⟩ := hmem
+          simp only [GenStmtResult.mk.injEq] at heq
+          have hcall := initChain_append_call_singleton heq.1
+          exact ⟨s, σvals, exprs, mask, (mem_support_elements_iff (by simp)).mp hs, by
+            simpa only [Statement.call, Stmt.cmd.injEq] using hcall⟩
+        · exact ((SetGen.bot_mem_iff _).mp hmem).elim
       · exact ((SetGen.bot_mem_iff _).mp hmem).elim
   have hcmdstmt : ∀ (d : Nat),
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
         SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d []) →
       (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx d [])) := by
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx d []
+          (functionNames C))) := by
     intro d hmem
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hmem
     obtain ⟨r, hr, heq⟩ := hmem
@@ -147,13 +153,6 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
         GenStmtResult.mk.injEq, List.cons.injEq, reduceCtorEq, false_and,
         and_false, exists_false] at hmem
-  have hfunc : ∀ (d : Nat),
-      (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genFuncDeclStmt (G := SetGen.Set) octx C ctx d []) → False := by
-    intro d hmem
-    simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff,
-      GenStmtResult.mk.injEq, List.cons.injEq, reduceCtorEq, false_and,
-      and_false, exists_false] at hmem
   have htype : ∀ (d : Nat),
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
         SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d) → False := by
@@ -169,13 +168,12 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     rw [genStmt, mem_support_frequency_iff] at h
     obtain ⟨w, g, hg, hw, hmem⟩ := h
     simp only [List.mem_cons, Prod.mk.injEq] at hg
-    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | hg
+    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | hg
     · exact Or.inl (hcmdstmt 0 hmem)
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact Or.inl (hcmdstmt 0 hmem)
       | cons hd tl => exact (hexit hmem).elim
-    · exact (hfunc 0 hmem).elim
     · exact (htype 0 hmem).elim
     · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
@@ -186,14 +184,13 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     rw [genStmt, mem_support_frequency_iff] at h
     obtain ⟨w, g, hg, hw, hmem⟩ := h
     simp only [List.mem_cons, Prod.mk.injEq] at hg
-    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ |
+    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ |
       ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | hg
     · exact Or.inl (hcmdstmt (m+1) hmem)
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil => exact Or.inl (hcmdstmt (m+1) hmem)
       | cons hd tl => exact (hexit hmem).elim
-    · exact (hfunc (m+1) hmem).elim
     · exact (htype (m+1) hmem).elim
     · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
@@ -218,17 +215,22 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     the label from `genIdentName`. -/
 theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx' : VarCtx)
     (n : Nat) (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
+    {avoid : List String}
     (h : (⟨.assert l e md, ctx'⟩ : GenCmdResult) ∈
-      SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [])) :
+      SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [] avoid)) :
     md = default ∧ l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
-  rw [genCmd_support_iff] at h
+  rw [genCmd_support_iff octx tvars immutableVars ctx n _ [] avoid] at h
   rcases h with h | h | ⟨_, h⟩ | ⟨_, h⟩ | h | h | h
   · simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
+      GenCmdResult.mk.injEq] at h
+    obtain ⟨_, _, _, _, _, _, heq, _⟩ := h
+    split at heq <;> cases heq
   · simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff,
       GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
   · simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
+      GenCmdResult.mk.injEq] at h
+    obtain ⟨_, _, _, _, heq, _⟩ := h
+    split at heq <;> cases heq
   · simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
       GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
   · simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff,
@@ -242,13 +244,14 @@ theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx'
 
 -- ── Well-typedness of an `assert` ────────────────────────────────────────
 
-/-- An `assert` with a `bool` expression is well-typed at every label and at
-    every metadata value. The `assert` rule constrains only the expression. -/
+/-- An `assert` with a `bool` expression whose binder annotations are registered types is
+    well-typed at every label and at every metadata value. The `assert` rule constrains only the
+    expression. -/
 theorem assert_wt (P : Program) (C : LContext CoreLParams) (Γ : TContext Unit) (L : List String)
     (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
-    (he : LExpr.HasTypeA [] e (.bool)) :
+    (he : LExpr.HasTypeA [] e (.bool)) (hknown : BinderAnnotsKnown C e) :
     StatementHasTypeA P C Γ L (Statement.assert l e md) C Γ :=
-  .cmd _ _ _ _ _ _ (.cmd _ _ _ (.assert _ _ _ _ _ he (TContext.Equiv.refl _)))
+  .cmd _ _ _ _ _ _ (.cmd _ _ _ (.assert _ _ _ _ _ ⟨he, hknown⟩ trivial (TContext.Equiv.refl _)))
     (TContext.Equiv.refl _)
 
 -- ── Gap 1: the metadata clause of `InGenShape` ───────────────────────────
@@ -390,10 +393,12 @@ def otherTargetCall : Statement :=
   Statement.call "p"
     [CallArg.inArg (LExpr.const () (.intConst 1)), CallArg.outArg ⟨"z", ()⟩] default
 
-/-- With `r : int` in scope, the generator's out target for `procP` is `r`. -/
-theorem outTargets_sigP :
-    outTargets [] callerCtx (StrataGenerators.Stmt.substSig [] sigP.O)
+/-- With `r : int` in scope, the generator's out target for `procP` is `r`, whatever names it
+    avoids. -/
+theorem outTargets_sigP (avoid : List String) :
+    outTargets [] callerCtx (StrataGenerators.Stmt.substSig [] sigP.O) avoid
       = [(⟨"r", ()⟩, (.int : LMonoTy))] := by
+  rw [outTargets_eq_of_reused [] callerCtx _ avoid (by decide)]
   decide
 
 /-- **Gap 3: the out-target name choice.** The `call` rule constrains an `out`
@@ -445,7 +450,7 @@ theorem outTarget_gap (labels : List String)
 theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
     StatementHasTypeA progP C (procToTCtx callerCtx) L otherTargetCall C
       (procToTCtx callerCtx) := by
-  refine .cmd _ _ _ _ _ _ (.call _ "p" _ procP _ [] _ (by decide) ?_ ?_ ?_ ?_ ?_ ?_
+  refine .cmd _ _ _ _ _ _ (.call _ "p" _ procP _ [] _ (by decide) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
     (TContext.Equiv.refl _)) (TContext.Equiv.refl _)
   · decide
   · decide
@@ -455,9 +460,10 @@ theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
     subst hv
     rw [procToTCtx_find]
     decide
+  · decide
   · intro i hi hj
-    have hi' : i < 1 := by simpa only [CallArg.getInputExprs, List.filterMap_cons,
-      List.filterMap_nil, List.length_cons, List.length_nil] using hi
+    have hi' : i < 1 := by simpa only [CallArg.getInputExprs, Calls.getInputExprs,
+      List.filterMap_cons, List.filterMap_nil, List.length_cons, List.length_nil] using hi
     have : i = 0 := by omega
     subst this
     refine ⟨.int, ?_, ?_⟩
@@ -466,7 +472,10 @@ theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
         show Strata.Util.HMaps.ofScopes [([] : List (TyIdentifier × LMonoTy))]
           = [Strata.Util.HMap.empty] from rfl, LMonoTy.subst_single_empty]
       exact .refl
-    · exact .const
+    · refine ⟨.const, ?_⟩
+      intro t ht
+      simp [CallArg.getInputExprs, Calls.getInputExprs, LExpr.binderAnnotations] at ht
+  · intro _ _; trivial
   · intro i hi hj
     have hi' : i < 1 := by simpa only [CallArg.getLhs, List.filterMap_cons,
       List.filterMap_nil, List.length_cons, List.length_nil] using hi
@@ -544,100 +553,5 @@ theorem toFVarCtx_nil : VarCtx.toFVarCtx [] = [] := rfl
 theorem hExprC_unsatisfiable :
     ¬ (∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d) := by
   intro h; exact not_GenLExprComplete 0 (h 0 [])
-
--- ── The `funcDecl` rule is broken upstream ──────────────────────────────────
-
-/-! ### `StatementHasType'.funcDecl` never checks the function it declares
-
-```
-| funcDecl : ∀ C Γ L decl func md Δ,
-    ¬ decl.isRecursive →
-    FuncHasType' τ C Γ func →
-    TContext.Equiv Δ Γ →
-    StatementHasType' τ P C Γ L (.funcDecl decl md) (C.addFactoryFunction func.toLFunc) Δ
-```
-
-The declaration occurs in one premise only, which says that it is not recursive. The function that the rule
-*type checks*, and that goes into the output context, is a separate function. The docstring of the rule says
-that the resulting function goes into the context, and it means the function that the declaration gives. No
-premise connects the two. The algorithmic checker in `Core.StatementType` does connect them:
-
-```
-let (decl', func, Env) ← PureFunc.typeCheck C Env decl   -- func := ofPureFunc decl, checked
-let C := C.addFactoryFunction func.toLFunc
-```
-
-Two consequences, both witnessed below by `funcDecl_illTyped_accepted`:
-
-1. **The specification accepts a local declaration that is ill typed.** No premise checks the declaration.
-   Therefore `function f (x : int) : bool { x };` is well formed under the rule, and the type of its body is
-   `int` against a declared result type of `bool`. The real checker rejects it.
-2. **The rule puts no condition on the output context.** It adds *each* well-typed function, and the one here
-   does not even carry the declared name. `FuncHasType'` is a structure of six fields, and it constrains no
-   name, no attribute, no axiom, the recursion of the function and the number of its preconditions.
-   `genFunction_complete` needs each of those conditions. Therefore the function that the rule adds can also be
-   a function that `genFunction` never gives. That fact is what blocks a completeness theorem with no side
-   condition at a `funcDecl` node, and it is why the `.funcDecl` clause of `SpecComplete.ExprOk` is `False`.
-
-The fix is to add the premise the algorithm already computes,
-`Function.ofPureFunc decl = .ok func` (or the `tyCompat`-style agreement, if
-`Function.typeCheck` annotates a signature field). Then `func` is determined by
-`decl`, its reachability follows from the declaration's, and the clause can go. -/
-
-/-- The declaration `function f (x : int) : bool { x };`. The type of its body is `int`, and its declared result
-    type is `bool`. Therefore this declaration is not well typed. -/
-def illTypedDecl : Imperative.PureFunc Expression :=
-  { name := ⟨"f", ()⟩, typeArgs := [], isConstr := false, isRecursive := false,
-    inputs := [(⟨"x", ()⟩, (.forAll [] .int : LTy))], output := (.forAll [] .bool : LTy),
-    body := some (LExpr.fvar () ⟨"x", ()⟩ (some .int)),
-    attr := #[], axioms := [], preconditions := [], measure := none }
-
-/-- A trivial well-typed function, whose name is not even the declared one. -/
-def unrelatedFunc : Function :=
-  { name := ⟨"g", ()⟩, typeArgs := [], inputs := [], output := .bool }
-
-/-- `unrelatedFunc` is well typed in each context that holds the type `bool`. `FuncHasType'` asks for distinct
-    inputs, distinct type arguments, no undeclared type variable, and a well-kinded signature. Its two fields
-    about a typed body and a typed measure hold with no content here, because this function has neither. -/
-theorem unrelatedFunc_wt (C : LContext CoreLParams) (Γ : TContext Unit)
-    (hbool : C.WellKindedTy .bool) :
-    FuncHasTypeA C Γ unrelatedFunc := by
-  refine { inputsNodup := ?_, typeArgsNodup := ?_, noUndeclaredVars := ?_,
-           signatureWellKinded := ?_, bodyTyped := ?_, measureTyped := ?_ }
-  · show (ListMap.keys ([] : @LMonoTySignature Unit)).Nodup
-    simp [ListMap.keys]
-  · show ([] : List TyIdentifier).Nodup
-    simp
-  · intro v hv
-    revert hv
-    simp [unrelatedFunc, ListMap.values, LMonoTys.freeVars, LMonoTy.bool, LMonoTy.freeVars]
-  · intro ty hty
-    simp only [unrelatedFunc, ListMap.values, List.mem_cons, List.not_mem_nil, or_false] at hty
-    subst hty
-    exact ⟨.bool, (congrArg (LMonoTy.tcons "bool") ∘ fun a => a) rfl, hbool⟩
-  · simp [unrelatedFunc]
-  · simp [unrelatedFunc]
-
-/-- **The counterexample.** The spec accepts a `funcDecl` of an *ill-typed*
-    declaration, and puts an *unrelated* function into the output context:
-
-    ```
-    program Core;
-
-    procedure caller ()
-    {
-      function f (x : int) : bool { x };
-    };
-    ```
-
-    Under this rule that statement is well-formed, and after it the context holds a
-    function called `g`. Both halves are wrong, and each on its own is enough to
-    force the spec change described above. -/
-theorem funcDecl_illTyped_accepted (P : Program) (C : LContext CoreLParams)
-    (Γ : TContext Unit) (L : List String) (hbool : C.WellKindedTy .bool) :
-    StatementHasTypeA P C Γ L (.funcDecl illTypedDecl default)
-      (C.addFactoryFunction unrelatedFunc.toLFunc) Γ :=
-  StatementHasType'.funcDecl C Γ L illTypedDecl unrelatedFunc default Γ
-    (by simp [illTypedDecl]) (unrelatedFunc_wt C Γ hbool) (tctxEquivRefl _)
 
 end StrataGenerators.Stmt.SpecComplete.Gaps

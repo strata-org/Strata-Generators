@@ -119,19 +119,6 @@ def mapFuncTys (f : LMonoTy → LMonoTy) (fn : Core.Function) : Core.Function :=
     preconditions := fn.preconditions.map (fun p => { p with expr := mapExprTys f p.expr })
     measure := fn.measure.map (mapExprTys f) }
 
-/-- `mapTy` over a function declaration inside a statement. This function is separate from
-    `mapFuncTys`, because a `Stmt.funcDecl` holds a `PureFunc Expression`, and the types in
-    its signature are `Expression.Ty`, which is `LTy` and not `LMonoTy`. -/
-def mapPureFuncTys (f : LMonoTy → LMonoTy) (fn : PureFunc Expression) :
-    PureFunc Expression :=
-  { fn with
-    inputs := fn.inputs.map (fun (n, τ) => (n, mapLTy f τ))
-    output := mapLTy f fn.output
-    body := fn.body.map (mapExprTys f)
-    axioms := fn.axioms.map (mapExprTys f)
-    preconditions := fn.preconditions.map (fun p => { p with expr := mapExprTys f p.expr })
-    measure := fn.measure.map (mapExprTys f) }
-
 /-- `mapTy` over a datatype block. It rewrites the type of each field of each
     constructor. -/
 def mapBlockTys (f : LMonoTy → LMonoTy) (block : MutualDatatype Unit) :
@@ -177,7 +164,6 @@ def mapStmtTys (f : LMonoTy → LMonoTy) : Statement → Statement
           (inv.map (fun (l, e) => (l, mapExprTys f e)))
           (mapStmtsTys f b) md
   | .exit l md => .exit l md
-  | .funcDecl d md => .funcDecl (mapPureFuncTys f d) md
   | .typeDecl tc md => .typeDecl tc md
 
 /-- `mapStmtTys` over a list of statements. -/
@@ -213,6 +199,7 @@ def mapDeclTys (f : LMonoTy → LMonoTy) : Decl → Decl
   | .type (.syn ts) md => .type (.syn { ts with type := mapTy f ts.type }) md
   | .type (.data block) md => .type (.data (mapBlockTys f block)) md
   | .ax a md => .ax { a with e := mapExprTys f a.e } md
+  | .lemma l md => .lemma { l with e := mapExprTys f l.e } md
   | .distinct n es md => .distinct n (es.map (mapExprTys f)) md
   | .proc p md => .proc (mapProcTys f p) md
   | .func fn md => .func (mapFuncTys f fn) md
