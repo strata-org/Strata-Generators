@@ -161,6 +161,12 @@ def genDeclName [Gen G] (reserved : List String) : G String := do
   let s ← DatatypeGen.genFreshName reserved
   pure (if isAllowedName s then s else DatatypeGen.fallbackName reserved)
 
+/-- Draw a type declaration name as `genDeclName` does, replacing a local type name
+    (`isLocalTypeName`) by `fallbackName reserved`. -/
+def genDeclTypeName [Gen G] (reserved : List String) : G String := do
+  let s ← genDeclName reserved
+  pure (if StrataGenerators.Stmt.isLocalTypeName s then DatatypeGen.fallbackName reserved else s)
+
 /-! ## Abstract-type generation -/
 
 /-- Generate an abstract type declaration with a fresh name (drawn against
@@ -168,7 +174,7 @@ def genDeclName [Gen G] (reserved : List String) : G String := do
     name, and its arity (the caller uses the arity to extend the pool). -/
 def genAbstractType [Gen G] (reserved : List String) (maxArity : Nat) :
     G (Decl × String × Nat) := do
-  let name ← genDeclName reserved
+  let name ← genDeclTypeName reserved
   let arity ← chooseNat 0 maxArity (by omega)
   pure (mkAbstractTypeDecl name arity, name, arity)
 
@@ -181,7 +187,7 @@ def genAbstractType [Gen G] (reserved : List String) (maxArity : Nat) :
     construction even though the drawn parameters may not all appear in the body. -/
 def genAlias [Gen G] (baseTypes : BaseTys) (tyCons : TyCons)
     (reserved : List String) (maxTyParams size : Nat) : G (Decl × String) := do
-  let name ← genDeclName reserved
+  let name ← genDeclTypeName reserved
   let numTyParams ← chooseNat 0 maxTyParams (by omega)
   let tyParams ← DatatypeGen.genFreshNames reserved numTyParams
   let body ← genNonRecursiveArgTy baseTypes tyCons tyParams size

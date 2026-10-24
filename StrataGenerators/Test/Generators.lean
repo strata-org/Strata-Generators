@@ -142,10 +142,10 @@ private def declKind : Core.Decl → String
   | .recFuncBlock _ _ => "recFuncBlock"
 
 /-- The Tyche axes for a generated program: the number of declarations, the size, the kinds of
-    declaration that occur, and the documented gap of the type checker that the program holds.
+    declaration that occur, and the expected causes of a type-checker rejection.
     The last axis is what makes a panel for completeness readable. -/
 def programFeatures (p : Core.Program) : List (String × Tyche.Feature) :=
-  let causes := programRejectionCause p
+  let causes := expectedRejectionCauses p
   [ ("num_decls", .ordinal p.decls.length),
     ("program_size", .ordinal (sizeProgram p)),
     ("decl_kinds", .nominal (" ".intercalate (p.decls.map declKind).eraseDups)),

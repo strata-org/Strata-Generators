@@ -9,7 +9,7 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 `spec_complete` in `StmtHasTypeAGenComplete.lean` carries three side conditions:
 `InGenShape`, `AlphabetOk` and `CallOk`. This file shows that you cannot remove
 them. For each of the three, it gives a statement that is well-typed under
-`StatementHasTypeA` but is not in the support of `genStmt`. Therefore no
+`StatementHasTypeW` but is not in the support of `genStmt`. Therefore no
 completeness theorem holds for `genStmt` without a side condition of this kind.
 
 ## The three gaps
@@ -94,8 +94,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     (h : (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n []
-          (functionNames C))) ∨
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [])) ∨
     (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
@@ -135,8 +134,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
         SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d []) →
       (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx d []
-          (functionNames C))) := by
+        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx d [])) := by
     intro d hmem
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hmem
     obtain ⟨r, hr, heq⟩ := hmem
@@ -244,15 +242,14 @@ theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx'
 
 -- ── Well-typedness of an `assert` ────────────────────────────────────────
 
-/-- An `assert` with a `bool` expression whose binder annotations are registered types is
-    well-typed at every label and at every metadata value. The `assert` rule constrains only the
-    expression. -/
-theorem assert_wt (P : Program) (C : LContext CoreLParams) (Γ : TContext Unit) (L : List String)
+/-- An `assert` of a weakly typed `bool` expression is weakly typed at every label and at every
+    metadata value. -/
+theorem assert_wt (P : Program) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
     (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
-    (he : LExpr.HasTypeA [] e (.bool)) (hknown : BinderAnnotsKnown C e) :
-    StatementHasTypeA P C Γ L (Statement.assert l e md) C Γ :=
-  .cmd _ _ _ _ _ _ (.cmd _ _ _ (.assert _ _ _ _ _ ⟨he, hknown⟩ trivial (TContext.Equiv.refl _)))
-    (TContext.Equiv.refl _)
+    (he : ExprHasTypeW C ts e .bool) :
+    StatementHasTypeW P C ts L (Statement.assert l e md) C ts :=
+  .cmd _ _ _ _ _ _ (.cmd _ _ _ (.assert _ _ _ _ _ he (Strata.Util.HMaps.Equiv.refl _)))
+    (Strata.Util.HMaps.Equiv.refl _)
 
 -- ── Gap 1: the metadata clause of `InGenShape` ───────────────────────────
 
@@ -443,68 +440,66 @@ theorem outTarget_gap (labels : List String)
     rw [StrataGenerators.Stmt.getLhs_mkArgs, outTargets_sigP] at hlhs
     exact absurd hlhs (by decide)
 
-/-- **`otherTargetCall` is well-typed.** The type instantiation is empty. The one
-    input position holds the literal `1` at type `int`. The one write position holds
-    `z`, which the scope binds at type `int`. The input parameter `x` is not an
-    output parameter, so the in-out premise is vacuous. -/
+/-- **`otherTargetCall` is weakly typed.** The type instantiation is empty. The one input
+    position holds the literal `1` at type `int`. The one write position holds `z`, which the
+    scope binds at type `int`. -/
 theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
-    StatementHasTypeA progP C (procToTCtx callerCtx) L otherTargetCall C
-      (procToTCtx callerCtx) := by
-  refine .cmd _ _ _ _ _ _ (.call _ "p" _ procP _ [] _ (by decide) ?_ ?_ ?_ ?_ ?_ ?_ ?_ ?_
-    (TContext.Equiv.refl _)) (TContext.Equiv.refl _)
-  · decide
-  · decide
+    StatementHasTypeW progP C (procToTCtx callerCtx).types L otherTargetCall C
+      (procToTCtx callerCtx).types := by
+  have hfind : Program.Procedure.find? progP "p" = some procP := by decide
+  refine .cmd _ _ _ _ _ _ (.call _ "p" _ procP _ [] _ hfind ?_ ?_ ?_ ?_
+    (Strata.Util.HMaps.Equiv.refl _)) (Strata.Util.HMaps.Equiv.refl _)
+  · refine ⟨by rw [hfind]; rfl, ?_, by decide, ?_⟩
+    · intro proc hproc
+      rw [hfind] at hproc
+      cases hproc
+      exact ⟨by decide, by decide, by decide, by decide⟩
+    · simp only [CallArg.getInputExprs, Calls.getInputExprs, List.filterMap_cons,
+        List.filterMap_nil, Forall]
+      exact ⟨⟩
   · intro v hv
     simp only [CallArg.getLhs, List.filterMap_cons, List.filterMap_nil,
       List.mem_singleton] at hv
     subst hv
     rw [procToTCtx_find]
     decide
-  · decide
   · intro i hi hj
     have hi' : i < 1 := by simpa only [CallArg.getInputExprs, Calls.getInputExprs,
       List.filterMap_cons, List.filterMap_nil, List.length_cons, List.length_nil] using hi
-    have : i = 0 := by omega
-    subst this
-    refine ⟨.int, ?_, ?_⟩
-    · show AliasEquiv _ _ (LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) _)
-      rw [show (ListMap.values procP.header.inputs)[0] = (.int : LMonoTy) from rfl,
-        show Strata.Util.HMaps.ofScopes [([] : List (TyIdentifier × LMonoTy))]
-          = [Strata.Util.HMap.empty] from rfl, LMonoTy.subst_single_empty]
-      exact .refl
-    · refine ⟨.const, ?_⟩
-      intro t ht
-      simp [CallArg.getInputExprs, Calls.getInputExprs, LExpr.binderAnnotations] at ht
-  · intro _ _; trivial
+    have hzero : i = 0 := by omega
+    subst hzero
+    have hval : ∀ h : 0 < (ListMap.values procP.header.inputs).length,
+        (ListMap.values procP.header.inputs)[0]'h = .int := fun _ => rfl
+    show ExprHasTypeW C _ (LExpr.const () (.intConst 1))
+      (LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) (ListMap.values procP.header.inputs)[0])
+    rw [hval, Lambda.subst_ofScopes_nilScope]
+    refine ⟨.const, ?_, ⟨?_, ?_, ?_⟩⟩
+    · intro t ht
+      simp [LExpr.binderAnnotations] at ht
+    · intro x ann hx
+      simp [LExpr.freeVars] at hx
+    · intro o ty ho
+      simp [LExpr.opAnnots] at ho
+    · intro o ho
+      simp [LExpr.getOps] at ho
   · intro i hi hj
     have hi' : i < 1 := by simpa only [CallArg.getLhs, List.filterMap_cons,
       List.filterMap_nil, List.length_cons, List.length_nil] using hi
-    have : i = 0 := by omega
-    subst this
-    refine ⟨.int, ?_, ?_⟩
-    · show AliasEquiv _ _ (LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) _)
-      rw [show (ListMap.values procP.header.outputs)[0] = (.int : LMonoTy) from rfl,
-        show Strata.Util.HMaps.ofScopes [([] : List (TyIdentifier × LMonoTy))]
-          = [Strata.Util.HMap.empty] from rfl, LMonoTy.subst_single_empty]
-      exact .refl
-    · simp only [CallArg.getLhs, List.filterMap_cons, List.filterMap_nil,
-        List.getElem_cons_zero]
-      rw [procToTCtx_find]
-      decide
-  · intro i hi hcontains
-    have hi' : i < 1 := by simpa only [ListMap.keys, procP,
-      List.length_cons, List.length_nil] using hi
-    have : i = 0 := by omega
-    subst this
-    simp only [ListMap.keys, procP, List.getElem_cons_zero] at hcontains
-    exact absurd hcontains (by decide)
+    have hzero : i = 0 := by omega
+    subst hzero
+    rw [show (ListMap.values procP.header.outputs)[0] = (.int : LMonoTy) from rfl,
+      Lambda.subst_ofScopes_nilScope]
+    simp only [CallArg.getLhs, List.filterMap_cons, List.filterMap_nil,
+      List.getElem_cons_zero]
+    rw [procToTCtx_find]
+    decide
 
 /-- **The full counterexample for `CallOk`.** `otherTargetCall` is well-typed, and
     `genStmt` cannot reach it at any size. -/
 theorem otherTargetCall_gap (labels : List String)
     (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
-    StatementHasTypeA progP C (procToTCtx callerCtx) labels otherTargetCall C
-        (procToTCtx callerCtx) ∧
+    StatementHasTypeW progP C (procToTCtx callerCtx).types labels otherTargetCall C
+        (procToTCtx callerCtx).types ∧
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
       SetGen.support (genStmt (G := SetGen.Set) octx tvars [] [sigP] labels C callerCtx [] n) :=
   ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩

@@ -1316,10 +1316,10 @@ procedure `0` to `i - 1`. -/
 def inlinePhase : Core.PipelinePhase := Core.procedureInliningPipelinePhase {}
 
 /-- The number of `call` commands of a statement list, at any depth. Reuses
-    Strata's own `extractCallsFromStatements`, which is what the call graph is
+    Strata's own `Statements.callSites`, which is what the call graph is
     built from, so the count here and the graph cannot disagree. -/
 def bodyCallCount (ss : List Statement) : Nat :=
-  (Core.extractCallsFromStatements ss).length
+  (Core.Statements.callSites ss).length
 
 /-- Whether each label of each procedure body of a program is distinct. The
     guard for the property below: the input must have distinct labels before the

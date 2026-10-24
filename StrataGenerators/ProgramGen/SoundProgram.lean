@@ -247,7 +247,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     well-kinded callee signatures all read only the known types of `C`. -/
 theorem wellKindedAmbient_of_inv {s : GenState} (hinv : Inv s) (rv : List TyIdentifier) :
     WellKindedAmbient s.octx s.procs { s.C with rigidTypeVars := rv } :=
-  { arities := simpleTyArities_of_inv hinv
+  { arities := { simpleTyArities_of_inv hinv with }
     octxWK := hinv.octxWK
     sigsWK := hinv.sigsWK }
 
@@ -272,6 +272,7 @@ theorem procHasTypeW_rename {P : Program} {C : LContext CoreLParams} {ts : TypeS
     in `C`. -/
 theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b)) :
     DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
@@ -284,7 +285,7 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     hinv.exprCtx.restrict (fun _ hp => absurd hp List.not_mem_nil) (fun _ hp => hp)
       (fun _ hp => List.mem_append_right _ hp)
   have hpt : ProcHasTypeW P s.C [] proc₀ :=
-    genProcedure_sound_ambient P s.octx s.procs hProcs b.procSize b.procLen s.C s.Γ
+    genProcedure_sound_ambient P s.octx s.procs hProcs hLocalTypes b.procSize b.procLen s.C s.Γ
       (wellKindedAmbient_of_inv hinv) s.derivedPctx hops proc₀ hproc₀
   have hpt' : ProcHasTypeW P s.C []
       { proc₀ with header := { proc₀.header with name := ⟨nm, ()⟩ } } :=
@@ -348,7 +349,7 @@ theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
   -- Non-recursive: `genFunction` leaves `isRecursive` at its `false` default.
   have hnonrec : ¬ func.isRecursive := by
     simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc₀
-    obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, hf₀⟩ := hfunc₀
+    obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, hf₀⟩ := hfunc₀
     show ¬ func₀.isRecursive
     subst hf₀
     simp
@@ -478,6 +479,7 @@ theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
     weakly typed from the context of `s` to that of `s'`, and `Inv` is preserved. -/
 theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
     DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
@@ -493,17 +495,19 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
   · exact genDeclDistinct_sound P hinv hmem
   · exact genDeclDatatype_sound P hinv hmem
   · exact genDeclFunction_sound P hinv hmem
-  · exact genDeclProcedure_sound P hinv hProcs hmem
+  · exact genDeclProcedure_sound P hinv hProcs hLocalTypes hmem
 
 /-! ## The declaration fold -/
 
 /-- Soundness of the declaration fold: the emitted declaration list is weakly typed from the context
     of the initial state to that of the final state, for any enclosing program `P` whose procedures
-    the final callable signatures describe, and `Inv` is preserved throughout. -/
+    the final callable signatures describe and with no local type name among its type names, and
+    `Inv` is preserved throughout. -/
 theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n))
-    (hProcs : ProcSigCorresponds s'.procs P) :
+    (hProcs : ProcSigCorresponds s'.procs P)
+    (hLocalTypes : ∀ d ∈ programNamesOfKind P .type, ¬ isLocalTypeName d.name) :
     DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
   induction n generalizing s ds s' with
   | zero =>
@@ -523,7 +527,8 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
       genDeclStep_procs_mono hstep
     obtain ⟨hstep_sound, hinv₁⟩ :=
       genDeclStep_sound P hinv
-        (ProcSigCorresponds.mono hProcs (fun sig hsig => hsub₁ sig (hsub₀ sig hsig))) hstep
+        (ProcSigCorresponds.mono hProcs (fun sig hsig => hsub₁ sig (hsub₀ sig hsig)))
+        hLocalTypes hstep
     obtain ⟨hrest_sound, hinv₂⟩ := ih hinv₁ hrest hProcs
     exact ⟨declsHasTypeW_append hstep_sound hrest_sound, hinv₂⟩
 
@@ -560,6 +565,7 @@ theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
   have hProcs : ProcSigCorresponds sf.procs { decls := decls } :=
     procSigCorresponds_of_emitted hem (genProgram_getNames_nodup hfold)
   obtain ⟨hsound, _⟩ := genDeclsFold_sound { decls := decls } numDecls inv_initState hfold hProcs
+    (genDeclsFold_typeNames numDecls hfold)
   exact ⟨sf.C, hsound⟩
 
 end ProgramGen

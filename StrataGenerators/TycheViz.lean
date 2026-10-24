@@ -491,12 +491,11 @@ def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckS
 
 -- ── The completeness of the typechecker ──────────────────────────────
 --
--- This panel is the dual of the panel for soundness above. `genFunction` has a proof of soundness, so
--- `Function.typeCheck` must accept each generated function. It does not accept each one: the
--- specification permits a measure with no body, and the algorithm rejects such a function. Therefore a
--- function that the typechecker rejects counts as a counterexample here, and the feature
--- `measure_no_body` shows the cause. The panel uses the predicates over the full Core factory from the
--- shared module for a statement, so no operator fails to resolve for a false reason. The representation
+-- This panel is the dual of the panel for soundness above. `Function.typeCheck` must accept each
+-- generated function, except one it may reject by `checkerRejectionExpected`; any other rejection
+-- counts as a counterexample here (`checkFunctionTypeCheckerComplete`). The panel uses the
+-- predicates over the full Core factory from the shared module for a statement, so no operator
+-- fails to resolve for a false reason. The representation
 -- names the body and the measure, because the printer omits an absent body and an absent measure.
 open StrataGenerators.Stmt.TestSupport in
 structure FunctionTypeCheckCompleteResult where
@@ -507,15 +506,13 @@ structure FunctionTypeCheckCompleteResult where
 open StrataGenerators.Stmt.TestSupport in
 instance : Tyche.TycheSample FunctionTypeCheckCompleteResult where
   toSample r :=
-    -- A sample satisfies the property when the typechecker accepts the function, which the
-    -- specification already accepts. A rejection is a counterexample, and it is a true gap in
-    -- completeness.
+    -- A sample satisfies the property when the typechecker accepts the function or rejects it
+    -- for an expected reason.
     let measNoBody := funcMeasureWithoutBody r.func
     { representation := s!"[body={r.func.body.isSome}, measure={r.func.measure.isSome}]\n{formatFunc r.func}"
       status := if r.accepted then .passed else .failed
       features := [
-        ("typecheck_accepted", .nominal (if r.accepted then "yes" else "no")),
-        -- The known gap: the typechecker rejects a function that has a measure and no body.
+        ("typecheck_accepted", .nominal (if checkFunctionTypeChecks r.func then "yes" else "no")),
         ("measure_no_body", .nominal (if measNoBody then "yes" else "no")),
         ("func_shape", .nominal (funcShape r.func)),
         ("has_body", .nominal (if r.func.body.isSome then "yes" else "no")),
@@ -527,8 +524,8 @@ instance : Tyche.TycheSample FunctionTypeCheckCompleteResult where
       ] }
 
 open StrataGenerators.Stmt.TestSupport in
-/-- Generate a closed function, and record whether `Function.typeCheck` accepts it in the full context of
-    Strata Core. -/
+/-- Generate a closed function, and record whether `checkFunctionTypeCheckerComplete` holds for
+    it. -/
 def genAndCheckFunctionTypeCheckComplete (depth : Nat := 0) : IO FunctionTypeCheckCompleteResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreMonoOps d
@@ -923,16 +920,16 @@ def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
 -- derived `program:` panel. The copy here supports the panel for the printer below, whose verdict is an
 -- `IO` computation and which no code can therefore derive.
 --
--- For the panel about the acceptance of a program by the typechecker, the typechecker rejects a large part
--- of the draws, for one of three known causes. The feature `rejection_cause` below separates those three
--- causes, so the panel does not show one undifferentiated block. The shrinker cannot minimize such a
--- rejection, because its oracle is the checker under test. Therefore the feature `num_decls` of a rejected
--- sample gives the size of the draw, and not a smaller size.
+-- For the panel about the acceptance of a program by the typechecker, the feature `rejection_cause`
+-- below gives the expected cause of a rejection, if any (`expectedRejectionCauses`), so the panel
+-- does not show one undifferentiated block. The shrinker cannot minimize such a rejection, because
+-- its oracle is the checker under test. Therefore the feature `num_decls` of a rejected sample
+-- gives the size of the draw, and not a smaller size.
 
 open StrataGenerators.Program.TestSupport in
 /-- The structural features of a generated program. They are the number of the declarations, the reducible
-    size, the kinds of the declarations that the program holds, and the known gap that the program holds,
-    if it holds one. That last feature separates the samples of the panel for completeness. -/
+    size, the kinds of the declarations that the program holds, and the expected causes of a checker
+    rejection. That last feature separates the samples of the panel for completeness. -/
 private def programFeatures (p : Core.Program) (genSize : Nat) :
     List (String × Tyche.Feature) :=
   let kind : Core.Decl → String
@@ -945,7 +942,7 @@ private def programFeatures (p : Core.Program) (genSize : Nat) :
     | .proc _ _ => "proc"
     | .func _ _ => "func"
     | .recFuncBlock _ _ => "recFuncBlock"
-  let causes := programRejectionCause p
+  let causes := expectedRejectionCauses p
   [ ("num_decls", .ordinal p.decls.length),
     ("program_size", .ordinal (sizeProgram p)),
     ("decl_kinds", .nominal (" ".intercalate (p.decls.map kind).eraseDups)),

@@ -2,6 +2,7 @@ import StrataGenerators.StmtHasTypeAGen.Core
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import Strata.Languages.Core.StatementType
+import Strata.Languages.Core.WeakTypeSpec
 import Strata.Languages.Core.Factory
 import Strata.Transform.LoopElim
 import Strata.Transform.InsertLoopInvariantAsserts
@@ -303,6 +304,140 @@ def kleeneStmts (ss : List Statement) : Option (KleeneStmt Expression (Cmd Expre
   let ss' ← toCmdStmts ss
   BlockToKleeneStmt (P := Expression) ss'
 
+-- ── Rejections the weak specification allows ────────────────────────────
+
+/-- A name that a statement binds. -/
+inductive BoundName where
+  | var (name : String)
+  | label (name : String)
+  | localType (tc : TypeConstructor)
+
+/-- The written names of a bound name; a local type contributes its parameters too. -/
+def BoundName.names : BoundName → List String
+  | .var n | .label n => [n]
+  | .localType tc => tc.name :: tc.params
+
+mutual
+/-- The names a statement binds at any depth: local variables, labels and local types. -/
+def stmtBoundNames : Statement → List BoundName
+  | .cmd (.cmd (.init x _ _ _)) => [.var x.name]
+  | .cmd (.cmd (.assert l _ _)) | .cmd (.cmd (.assume l _ _)) | .cmd (.cmd (.cover l _ _)) =>
+    [.label l]
+  | .cmd _ => []
+  | .block l b _ => .label l :: stmtsBoundNames b
+  | .ite _ t e _ => stmtsBoundNames t ++ stmtsBoundNames e
+  | .loop _ _ invs b _ => invs.map (fun inv => .label inv.1) ++ stmtsBoundNames b
+  | .exit _ _ => []
+  | .typeDecl tc _ => [.localType tc]
+
+/-- The names a statement list binds at any depth. -/
+def stmtsBoundNames : List Statement → List BoundName
+  | [] => []
+  | s :: rest => stmtBoundNames s ++ stmtsBoundNames rest
+end
+
+/-- The names a procedure body binds; a control-flow-graph body is not inspected. -/
+def procBoundNames (p : Procedure) : List BoundName :=
+  match p.body with
+  | .structured ss => stmtsBoundNames ss
+  | .cfg _ => []
+
+/-- The formals of a declaration and the local variables of its body. -/
+def declVarNames : Decl → List String
+  | .func f _ => f.inputs.keys.map (·.name)
+  | .recFuncBlock fs _ => fs.flatMap (·.inputs.keys.map (·.name))
+  | .proc p _ =>
+    (p.header.inputs.keys ++ p.header.outputs.keys).map (·.name) ++
+      (procBoundNames p).filterMap fun | .var n => some n | _ => none
+  | _ => []
+
+/-- The functions a declaration adds to the context: its own, or a datatype block's derived ones. -/
+def declFuncNames : Decl → List String
+  | .func f _ => [f.name.name]
+  | .recFuncBlock fs _ => fs.map (·.name.name)
+  | .type (.data block) _ => Core.MutualDatatype.generatedFuncNames block
+  | _ => []
+
+/-- Every name a declaration declares or binds. -/
+def declBoundNames (d : Decl) : List String :=
+  let typeParams : List String := match d with
+    | .type (.con tc) _ => tc.params
+    | .type (.syn ts) _ => ts.typeArgs
+    | .type (.data block) _ => block.flatMap (·.typeArgs)
+    | .func f _ => f.typeArgs
+    | .recFuncBlock fs _ => fs.flatMap (·.typeArgs)
+    | .proc p _ => p.header.typeArgs
+    | .lemma l _ => l.typeArgs
+    | _ => []
+  let bodyNames := match d with
+    | .proc p _ => (procBoundNames p).flatMap BoundName.names
+    | _ => []
+  d.names.map (·.name) ++ typeParams ++ declVarNames d ++ bodyNames ++ declFuncNames d
+
+/-- Whether a variable of a declaration is named like a function of `stmtCheckContext`, of an
+    earlier declaration of `P`, or of its own recursive block. -/
+def hasVarFunctionClash (P : Program) : Bool :=
+  go [] P.decls
+where
+  go (fns : List String) : List Decl → Bool
+    | [] => false
+    | d :: rest =>
+      let inScope := match d with
+        | .recFuncBlock .. => declFuncNames d ++ fns
+        | _ => fns
+      (declVarNames d).any (fun x => decide (x ∈ stmtCheckContext.functions) || inScope.contains x)
+        || go (declFuncNames d ++ fns) rest
+
+/-- Whether two declarations of `P` of different kinds share a name. -/
+def hasDeclKindClash (P : Program) : Bool :=
+  P.decls.any fun d => P.decls.any fun e =>
+    Core.TypeSpec.declNameKind d != Core.TypeSpec.declNameKind e && d.names.any e.names.contains
+
+/-- Whether a local type of `P` is named like a declaration of `P` that is not a type. -/
+def hasLocalTypeClash (P : Program) : Bool :=
+  let others := (P.decls.filter (Core.TypeSpec.declNameKind · != .type)).flatMap
+    fun d => d.names.map (·.name)
+  P.decls.any fun
+    | .proc p _ =>
+      (procBoundNames p).any fun | .localType tc => others.contains tc.name | _ => false
+    | _ => false
+
+/-- Whether a type that a function writes, in its signature or in an annotation, names a reserved
+    type constructor. -/
+def funcWritesReservedType (f : Function) : Bool :=
+  !allExprsTys (mtyAllTyConsNames isAllowedName) f.exprs
+    || !(f.output :: f.inputs.values).all (mtyAllTyConsNames isAllowedName)
+
+/-- Whether a type written in a declaration names a reserved type constructor: in an annotation,
+    a signature, a constructor argument or a synonym body. -/
+def declWritesReservedType : Decl → Bool
+  | .proc p _ =>
+    !Procedure.allTys (mtyAllTyConsNames isAllowedName) p
+      || !Statement.procedureSignatureTypesAllowed p
+  | .func f _ => funcWritesReservedType f
+  | .recFuncBlock fs _ => fs.any funcWritesReservedType
+  | .ax a _ => !allExprTys (mtyAllTyConsNames isAllowedName) a.e
+  | .lemma l _ => !allExprTys (mtyAllTyConsNames isAllowedName) l.e
+  | .distinct _ es _ => !allExprsTys (mtyAllTyConsNames isAllowedName) es
+  | .type (.syn ts) _ => !mtyAllTyConsNames isAllowedName ts.type
+  | .type (.data block) _ =>
+    !block.all (·.constrs.all (·.args.all (mtyAllTyConsNames isAllowedName ·.2)))
+  | .type (.con _) _ => false
+
+/-- The reasons the checker may reject `P` that the weak specification allows, as tags: a reserved
+    name (one `Core.isAllowedName` refuses) or a clash between names of different kinds. -/
+def expectedRejectionCauses (P : Program) : List String :=
+  (if P.decls.any (fun d => (declBoundNames d).any (!Core.isAllowedName ·)
+      || declWritesReservedType d) then
+    ["reserved-name"] else [])
+    ++ (if hasDeclKindClash P then ["decl-kind-clash"] else [])
+    ++ (if hasVarFunctionClash P then ["var-function-clash"] else [])
+    ++ (if hasLocalTypeClash P then ["local-type-clash"] else [])
+
+/-- Whether a checker rejection of `P` is expected: `P` has a reserved name or a clash between
+    names of different kinds. Every other rejection of a generated program is a failure. -/
+def checkerRejectionExpected (P : Program) : Bool := !(expectedRejectionCauses P).isEmpty
+
 -- ── The six `Bool` check predicates ──────────────────────────────────────
 
 /-- A dummy enclosing procedure. The typechecker consults its `op : Option
@@ -321,12 +456,12 @@ def checkTypeChecks (ss : List Statement) : Bool :=
   | .ok _ => true
   | .error _ => false
 
-/-- **The completeness of the typechecker.** The generator has a proof of *soundness*: each statement list that
-    it gives satisfies `StatementsHasTypeA`. Therefore the algorithmic typechecker must accept each of them.
-    That algorithm has a proof of *soundness*, and it has no proof of *completeness*. A rejection is therefore a
-    true gap in the completeness of the algorithm against the declarative specification. This predicate states
-    that claim and does not weaken it. -/
-abbrev checkTypeCheckerComplete (ss : List Statement) : Bool := checkTypeChecks ss
+/-- **The completeness of the typechecker.** The checker accepts every generated statement list,
+    except one it may reject by `checkerRejectionExpected`, read on the list as the body of
+    `dummyProc`. -/
+def checkTypeCheckerComplete (ss : List Statement) : Bool :=
+  checkTypeChecks ss ||
+    checkerRejectionExpected { decls := [.proc { dummyProc with body := .structured ss } .empty] }
 
 /-- **LoopElim preserves typeability.** A preservation property is
     inherently conditional: a transform can only be blamed for *breaking* an
@@ -406,51 +541,16 @@ def checkFunctionTypeChecks (func : Function) : Bool :=
 def funcMeasureWithoutBody (func : Function) : Bool :=
   func.measure.isSome && func.body.isNone
 
-/-- **The completeness of the typechecker for a function.** `genFunction` is sound, because its output
-    satisfies `FuncHasType'`. Therefore the algorithm must accept each generated function. This predicate states
-    that claim and does not weaken it, so it reports the gap about a measure with no body, which is a true
-    disagreement between the specification and the algorithm, with a smallest witness. -/
-abbrev checkFunctionTypeCheckerComplete (func : Function) : Bool := checkFunctionTypeChecks func
+/-- **The completeness of the typechecker for a function.** The checker accepts every generated
+    function, except one it may reject by `checkerRejectionExpected`. -/
+def checkFunctionTypeCheckerComplete (func : Function) : Bool :=
+  checkFunctionTypeChecks func || checkerRejectionExpected { decls := [.func func .empty] }
 
 /-- The part of the checker's message for a function, an axiom or a `distinct` declaration that is
     typed at a generated type variable that nothing declares, which is an open polymorphic
-    instance. The specification accepts such an instance, so this is a known gap. -/
+    instance. The specification accepts such an instance and the checker refuses it. -/
 def openInstanceRejectionMsg : String :=
   "typed at a generated type variable that is not declared"
-
-/-- Whether `Function.typeCheck` rejects `func` because it is typed at a generated type variable
-    that nothing declares. -/
-def funcOpenInstance (func : Function) : Bool :=
-  match Function.typeCheck stmtCheckContext TEnv.default func with
-  | .ok _ => false
-  | .error e => ((toString e).splitOn openInstanceRejectionMsg).length > 1
-
-/-- Whether `Function.typeCheck` rejects `func` because it has a `decreases` clause and is not
-    recursive. The specification allows a measure on any function, and the checker allows one
-    only on a recursive function, so this is a second known gap. The cause is read off the
-    checker's message, as the `measure-non-recursive` tag of `programRejectionCause` is. -/
-def funcMeasureNonRecursive (func : Function) : Bool :=
-  match Function.typeCheck stmtCheckContext TEnv.default func with
-  | .ok _ => false
-  | .error e =>
-    ((toString e).splitOn "a decreases expression is only allowed on a recursive function").length > 1
-
-/-- **The completeness of the typechecker for a function, up to its known gaps.** The algorithm
-    accepts each generated function, except one that it rejects with the message of a known gap:
-    a measure on a function that is not recursive (which covers a measure with no body), or an
-    open polymorphic instance. -/
-def checkFunctionTypeCheckerCompleteUpToGaps (func : Function) : Bool :=
-  checkFunctionTypeChecks func || funcMeasureNonRecursive func || funcOpenInstance func
-
-/-- **Characterization of the function-completeness gaps.** Each function that the algorithm
-    rejects has a known cause: a measure and no body, a measure on a function that is not
-    recursive, or an open polymorphic instance (a type variable that nothing declares). A
-    counterexample means that `genFunction` gave a function that the specification accepts and
-    that the algorithm rejects for some *other* reason, which is a gap in completeness of a new
-    kind. -/
-def funcRejectionImpliesMeasureNoBody (func : Function) : Bool :=
-  checkFunctionTypeChecks func || funcMeasureWithoutBody func || funcMeasureNonRecursive func
-    || funcOpenInstance func
 
 -- ── Structural statement shrinker ─────────────────────────────────────────
 --

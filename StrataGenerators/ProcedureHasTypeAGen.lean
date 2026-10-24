@@ -144,6 +144,11 @@ theorem find?_ofList_perm_of_functional {α β} [BEq α] [LawfulBEq α] [Hashabl
       hmem1 w (List.mem_reverse.mp (Freshening.lookup_mem _ _ _ hw))
     exact congrArg some (hfun k v1 w hv1 hvw)
 
+/-- Mapping over an appended `ListMap` maps each part. -/
+theorem listMap_map_append {α β γ : Type} (f : α × β → γ) (l₁ l₂ : ListMap α β) :
+    List.map f (l₁ ++ l₂) = List.map f l₁ ++ List.map f l₂ :=
+  List.map_append
+
 /-- **Context alignment (in-out), Γ-parameterized.** For the three-block layout (shared
     block `M` leading both signatures) over an ambient type-scope `Γ` with `Γ.types = []`,
     the declarative body context `procBodyContext Γ proc` agrees with the single-scope
@@ -207,8 +212,9 @@ theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
                 (fun p => (p.1, LTy.forAll [] p.2))
             ++ (M ++ O).map (fun p => (p.1, LTy.forAll [] p.2))
             ++ (M ++ I).map (fun p => (p.1, LTy.forAll [] p.2)))] from by
-    simp only [procBodyContext, procBodyScopes, hΓtypes, Strata.Util.HMaps.push,
-      getInoutParams_inout name tyArgs M I O hI hM, List.map_map, Function.comp_def]]
+    simp only [procBodyContext, procBodyScopes, hΓtypes, Strata.Util.HMaps.push, formalsScope,
+      getInoutParams_inout name tyArgs M I O hI hM, listMap_map_append, List.map_append,
+      List.map_map, Function.comp_def]]
   rw [show (procToTCtxΓ Γ
         (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))).types
       = [Strata.Util.HMap.ofList
@@ -659,7 +665,8 @@ theorem genProcedure_outputs_nodup {octx : OpCtx} {procs : ProcSigCtx} {C : LCon
 set_option maxHeartbeats 800000 in
 /-- **Soundness of `genProcedure`.** Every procedure in the generator's support is weakly typed
     (`ProcHasTypeW`) in context `C` with no enclosing variable scope, for any program `P` whose
-    callable procedures the call-target context `procs` describes (`ProcSigCorresponds`). This
+    callable procedures the call-target context `procs` describes (`ProcSigCorresponds`) and
+    whose type names are not local type names (`isLocalTypeName`). This
     holds when the operators and schemes the expressions draw on agree with `C` (`ExprCtxOk`), and
     the operator types and the written-to blocks of the callees are well kinded in `C` at every
     list of rigid type variables (`WellKindedAmbient`).
@@ -667,8 +674,9 @@ set_option maxHeartbeats 800000 in
     The body is typed from the generator's seed of inputs, outputs and `old` bindings, whose
     scope agrees with the procedure's body scopes on every lookup. -/
 theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
-    (hProcs : ProcSigCorresponds procs P) (size len : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
+    (hProcs : ProcSigCorresponds procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
+    (size len : Nat) (C : LContext CoreLParams) (Γ : TContext Unit)
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (pctx : PolyOpCtx) (hops : StrataGenerators.AnnotFacts.ExprCtxOk C [] [] octx pctx)
@@ -812,7 +820,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       body C' (procToTCtx ctx').types :=
     genStmtChain_sound P (procStmtEnv octx typeArgs pctx)
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
-      hProcs []
+      hProcs hLocalTypes []
       { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
@@ -898,11 +906,13 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
 
 /-- **Soundness of `genProcedure` at the ambient context.** Every procedure that `genProcedure`
     makes in a context `C` is weakly typed (`ProcHasTypeW`) at that same `C` with no enclosing
-    variable scope, when every callable procedure resolves in `P`, the operator types and the
-    callee signature types are well kinded in `C`, and the operators and schemes agree with `C`. -/
+    variable scope, when every callable procedure resolves in `P`, no type name of `P` is a local
+    type name, the operator types and the callee signature types are well kinded in `C`, and the
+    operators and schemes agree with `C`. -/
 theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
-    (hProcs : ProcSigCorresponds procs P) (size len : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit)
+    (hProcs : ProcSigCorresponds procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
+    (size len : Nat) (C : LContext CoreLParams) (Γ : TContext Unit)
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (pctx : PolyOpCtx) (hops : StrataGenerators.AnnotFacts.ExprCtxOk C [] [] octx pctx)
@@ -910,7 +920,7 @@ theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSig
     (hproc : proc ∈ SetGen.support
       (genProcedure (G := SetGen.Set) octx procs C Γ size len pctx)) :
     ProcHasTypeW P C [] proc :=
-  genProcedure_sound P octx procs hProcs size len C Γ hWK pctx hops proc hproc
+  genProcedure_sound P octx procs hProcs hLocalTypes size len C Γ hWK pctx hops proc hproc
 
 -- ── Completeness ─────────────────────────────────────────────────────────
 

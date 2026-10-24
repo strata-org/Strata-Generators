@@ -4,6 +4,7 @@ import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.DL.Lambda.DatatypeWF
 import Strata.Languages.Core.DatatypeTypeSpec
 import Strata.Languages.Core.Factory
+import Strata.Languages.Core.FactoryProps
 
 open Lambda RandomChoice ArbNat ArbChar ArbString SetGen
 
@@ -1182,12 +1183,11 @@ theorem defaultBaseTypes_arity : ∀ b ∈ defaultBaseTypes, Core.KnownTypes[b]?
   fun _ hb => mem_defaultBaseTypes_iff.mp hb
 
 /-- `Sequence` at **2** arguments is not in the default vocabulary, because `Core.KnownTypes`
-    registers it at arity `1`. This is the counterexample behind
-    `not_complete_without_arity`; `native_decide` is only for the one arity lookup. -/
+    registers it at arity `1`. -/
 theorem seq_two_not_mem_defaultTyCons : ("Sequence", 2) ∉ defaultTyCons := by
   intro h
   have h1 := defaultTyCons_arity _ h
-  have h2 : Core.KnownTypes["Sequence"]? = some 1 := by native_decide
+  have h2 : Core.KnownTypes["Sequence"]? = some 1 := by rw [Core.knownTypes_getElem?]; rfl
   rw [h2] at h1
   exact absurd h1 (by simp)
 
@@ -3052,12 +3052,7 @@ no datatypes. It then shows that the generator is sound against that context.
 
 This section gives `Core.KnownTypes.keywords` for `extraReserved`. That list is the pool of
 names that the caller must forbid. Therefore a block name cannot be the same as a symbol that
-Core already knows.
-
-`Core.KnownTypes.keywords` is a `HashMap`, and the kernel does not reduce its entries.
-Therefore `native_decide` gives the concrete facts about membership in it. That tactic adds
-the axiom `Lean.ofReduceBool` to this corollary alone. The abstract theorem
-`genMutuallyRecursiveDatatypes_MutualADTWF` stays clean in its axioms. -/
+Core already knows. -/
 
 /-- The reference context of Strata Core. Its known types are `Core.KnownTypes`, and it holds
     no datatype from a user. -/
@@ -3090,13 +3085,15 @@ theorem defaultContextOk :
     rw [defaultTyCons_arity kc hkc]; rfl
   · -- `"arrow"` is a known primitive of `coreContext`. This one *is* a fact about the
     -- particular contents of `Core.KnownTypes`, because `genArgTy` hardcodes the name.
-    show "arrow" ∈ Core.KnownTypes.keywords; native_decide
+    refine Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_)
+    show Core.KnownTypes["arrow"]?.isSome = true
+    rw [Core.knownTypes_getElem?]; rfl
   · -- Each default base type is registered at arity 0, by construction of the list.
     exact defaultBaseTypes_arity
   · -- Each default type constructor is registered at its own arity, by construction.
     exact defaultTyCons_arity
   · -- `"arrow"` is registered at arity 2.
-    show Core.KnownTypes["arrow"]? = some 2; native_decide
+    show Core.KnownTypes["arrow"]? = some 2; rw [Core.knownTypes_getElem?]; rfl
   · -- Each known type of `coreContext` is a member of the extra reserved list, with no
     -- change.
     intro k hk
@@ -3119,11 +3116,7 @@ theorem defaultContextOk :
     is the context that Core programs use.
 
     `decide` discharges the one side condition, which is `defaultTyCons_ne_arrow`.
-    `defaultContextOk` discharges the eight fields of `ContextOk`.
-
-    This corollary uses `native_decide` for membership in `Core.KnownTypes.keywords`.
-    Therefore it depends on `Lean.ofReduceBool`, together with the standard axioms. The
-    abstract theorem `genMutuallyRecursiveDatatypes_MutualADTWF` does not depend on it. -/
+    `defaultContextOk` discharges the eight fields of `ContextOk`. -/
 theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {block : MutualDatatype Unit}
@@ -3378,8 +3371,8 @@ end InhabRank
 
 Completeness holds against `MutualADTWF` plus premises that are all about the *context* and
 the *names the generator uses*, and one residual side condition on the type itself:
-`BitvecWidthOnly`. Read `genArgTy_complete_of_MutualADTWF`. Completeness against `MutualADTWF` alone is
-false. Read `not_complete_without_arity`. -/
+`BitvecWidthOnly`. Read `genArgTy_complete_of_MutualADTWF`. Completeness against `MutualADTWF`
+alone is false. -/
 
 section Completeness
 
@@ -3492,12 +3485,12 @@ structure VocabOk (C : LContext Core.CoreLParams) (baseTypes : List String)
 /-- **The default vocabulary satisfies `VocabOk` in `coreContext`.** The fields `base` and `tyCon` hold
     by construction, because the two lists *are* `Core.KnownTypes` split by arity, and
     `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` read them back. Only the arity of `arrow`
-    needs a lookup by `native_decide`, because `genArgTy` holds that name as a literal. -/
+    needs a concrete lookup, because `genArgTy` holds that name as a literal. -/
 theorem defaultVocabOk : VocabOk coreContext defaultBaseTypes defaultTyCons where
   base := fun _ h => mem_defaultBaseTypes_iff.mpr h
   tyCon := fun k n h hn harrow hbv =>
     mem_defaultTyCons_iff.mpr ⟨mem_coreAppliedTyCons_iff.mpr ⟨h, hn, harrow⟩, hbv⟩
-  arrow := by show Core.KnownTypes["arrow"]? = some 2; native_decide
+  arrow := by show Core.KnownTypes["arrow"]? = some 2; rw [Core.knownTypes_getElem?]; rfl
   noStoredDatatypes := by simp [coreContext, TypeFactory.allDatatypes]
 
 /-- The head of a non-block application is registered in `C.knownTypes` at its argument
@@ -3958,7 +3951,7 @@ example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") 
     ¬ ArgsWellKinded coreContext [d] (.tcons "Sequence" [.ftvar a, .ftvar a]) := by
   intro h
   have h1 : coreContext.knownTypes["Sequence"]? = some 1 := by
-    show Core.KnownTypes["Sequence"]? = some 1; native_decide
+    show Core.KnownTypes["Sequence"]? = some 1; rw [Core.knownTypes_getElem?]; rfl
   rcases h.head with hk | ⟨d', hd', _⟩ | ⟨d', hd', hname, _⟩
   · -- `argsWellKinded` would need `Sequence` registered at arity 2; it is registered at 1.
     rw [h1] at hk; simp at hk
@@ -4035,7 +4028,7 @@ theorem not_complete_without_bitvecWidthOnly (d : LDatatype Unit)
     obtain ⟨rfl, rfl⟩ := hmem
     refine Or.inl ?_
     show Core.KnownTypes["bitvec"]? = some 1
-    native_decide
+    rw [Core.knownTypes_getElem?]; rfl
   · -- `BitvecWidthOnly` fails immediately: its `tcons` case needs `k ≠ "bitvec"`.
     unfold BitvecWidthOnly
     exact fun h => h.1 rfl

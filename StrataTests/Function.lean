@@ -42,28 +42,14 @@ def fnBodyPreservation : TestDecl :=
     (fun (gf : ClosedGenFunction) => checkFunctionBodyPreservation gf.func)).withPanel
     genAndCheckFunctionBodyPreservation
 
-/-- Completeness of the type checker for a function, which is the dual of its soundness.
-    `genFunction` is sound, because its output satisfies `FuncHasType'`. Therefore
-    `Function.typeCheck` must accept each generated function.
-
-    It does not accept all of them. The specification allows a measure on any function and an
-    open polymorphic instance, and the algorithm rejects a measure on a function that is not
-    recursive and an instance whose type nothing fixes. This property treats a rejection with
-    either message as a known gap, and fails on any other rejection. Its panel records the
-    plain verdict of the checker. -/
+/-- Completeness of the type checker for a function: `Function.typeCheck` accepts each
+    generated function, except one with a reserved name or a parameter named like a function
+    (`checkerRejectionExpected`). Any other rejection is a failure. -/
 @[strata_property]
 def fnTypeCheckComplete : TestDecl :=
   (TestDecl.property "function: typeCheck accepts generated functions (completeness)"
-    (fun (gf : ClosedGenFunction) => checkFunctionTypeCheckerCompleteUpToGaps gf.func)).withPanel
+    (fun (gf : ClosedGenFunction) => checkFunctionTypeCheckerComplete gf.func)).withPanel
     genAndCheckFunctionTypeCheckComplete
-
-/-- Each function that `Function.typeCheck` rejects has a known cause: a measure with no body
-    or no recursive call, or an open polymorphic instance. This property pins the known gaps in
-    completeness, and it finds a new cause if one appears. -/
-@[strata_property]
-def fnRejectionOnlyMeasure : TestDecl :=
-  .property "function: typeCheck rejections are only the known gaps"
-     (fun (gf : ClosedGenFunction) => funcRejectionImpliesMeasureNoBody gf.func)
 
 /-- The sequence of pretty-print, parse and pretty-print again is a fixed point.
 

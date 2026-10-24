@@ -2200,7 +2200,7 @@ theorem genLExpr_complete_poly_opsConsistentR
     (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
     (hops : Lambda.OpsConsistentR F (mkApps (.op () ⟨name, ()⟩ (some annot)) args))
     (sampledTys : List LMonoTy)
-    (hLen : sampledTys.length = maxNumArgs)
+    (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧

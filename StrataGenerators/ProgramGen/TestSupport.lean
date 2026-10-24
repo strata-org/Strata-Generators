@@ -7,28 +7,16 @@ open Lambda Core Imperative
 # Shared check predicates for the whole-program generator
 
 `ProgramGen.genProgram`, in `StrataGenerators.ProgramGen`, gives a random well-typed Strata Core `Program`, and
-`ProgramGen/Sound.lean` proves it sound against `Core.TypeSpec.ProgramHasTypeA`.
+`ProgramGen/Sound.lean` proves it sound against `Core.TypeSpec.ProgramHasTypeW`.
 
 This module holds the `check*` predicates that no harness owns, by the convention of each other `*.TestSupport`
 module. Each of them gives a `Bool`, so each driver and each Tyche panel share one verdict.
 
 ## Why the oracle here is not `Core.Program.typeCheck`
 
-The claim that each generated program passes the program typechecker of Strata is **false**, for three reasons
-that no part of this generator causes:
-
-* A function with a `decreases` clause and no body. `genFunction` draws the body and the measure independently,
-  so a function with no body can carry a measure. That is the known gap in the completeness of the typechecker
-  for a function, and a property of the suite for a function pins it.
-* A free variable that no context binds. `genDistinct` emits a fresh *variable*, which the declarative
-  specification accepts, because it asks only that some type exists for the expression, and an annotated free
-  variable gives one. The algorithmic checker resolves that variable against a context that binds no such name.
-* An operator that the checker cannot resolve. A vocabulary of the polymorphic operators that a person writes
-  can name a scheme that `Core.Factory` does not hold, and the checker cannot resolve such a name, although the
-  annotated specification takes the type from the annotation of the node.
-
-A property that asserts the claim would therefore report a failure that says nothing about this generator. The
-properties below are the ones that hold of the generator, together with the statistic about the coverage.
+The checker may reject a generated program that the weak specification accepts: one with a reserved
+name or a clash between names of different kinds (`checkerRejectionExpected`). The properties below
+hold of every generated program.
 -/
 
 namespace ProgramGen.TestSupport
@@ -119,18 +107,20 @@ def checkNamesNodup (P : Program) : Bool :=
     counterexample would mean that the generator emitted a block that the checker rejects, and therefore that the
     gate let a block through.
 
-    The replay starts from `coreContext` (the fold's own starting point, see
-    `initState`) and must also thread the program's **abstract type**
-    declarations, because a later block may reference one: `genDeclDatatype` draws
-    its block over the *threaded* vocabulary, which a declaration of an abstract type extends. A replay of the
-    blocks alone therefore fails for a false reason on exactly such a program. -/
+    The replay starts from `programContext` (`initState.C`) and threads every declaration that
+    grows the context as the fold does: an abstract type, which a later block may reference,
+    and a function or constant, whose name a later block's derived functions must avoid. -/
 def checkDatatypeBlocksAccepted (P : Program) : Bool :=
-  go DatatypeGen.coreContext P.decls
+  go ProgramGen.programContext P.decls
 where
   go (C : LContext CoreLParams) : List Decl → Bool
     | [] => true
     | .type (.con tc) _ :: rest =>
       match C.addKnownTypeWithError { name := tc.name, metadata := tc.numargs } default with
+      | .ok C' => go C' rest
+      | .error _ => false
+    | .func f _ :: rest =>
+      match C.addFactoryFunctionWithError f.toLFunc with
       | .ok C' => go C' rest
       | .error _ => false
     | .type (.data block) _ :: rest =>

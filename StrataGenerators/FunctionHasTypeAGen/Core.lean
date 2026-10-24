@@ -328,9 +328,8 @@ theorem mem_opsOver_iff {tvars : List TyIdentifier} {octx : OpCtx} {p : String �
     `genFunction_sound` states.
 
     The generator makes these parts:
-    - `typeArgs`: names for the type variables, with no duplicate. A drawn name that
-      `isAllowedName` rejects is dropped before the signature is drawn, and a name that the
-      signature does not mention is dropped after it;
+    - `typeArgs`: names for the type variables, with no duplicate. A name that the signature
+      does not mention is dropped after the signature is drawn;
     - `inputs`: a signature whose keys hold no duplicate, whose types are over the type arguments,
       and whose names `avoid` does not flag;
     - `output`: a type over the type arguments;
@@ -338,7 +337,8 @@ theorem mem_opsOver_iff {tvars : List TyIdentifier} {octx : OpCtx} {p : String �
       that no formal shadows;
     - `preconditions`: at most one clause of the type `bool` over the *formal parameters*, which
       `genPreconditions` makes. It gives a clause half of the time, and it favors a clause that
-      mentions a formal parameter.
+      mentions a formal parameter;
+    - `lemmas`: a list of names.
 
     The expressions draw only on the variables and operators whose types are over the type
     arguments (`opsOver`), and on every scheme of `pctx`.
@@ -353,8 +353,7 @@ theorem mem_opsOver_iff {tvars : List TyIdentifier} {octx : OpCtx} {p : String �
 def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) (avoid : String → Bool := fun _ => false) : G Function := do
   let name ← genIdentName
-  let rawTypeArgs ← genTypeArgs depth
-  let sigTypeArgs := rawTypeArgs.filter isAllowedName
+  let sigTypeArgs ← genTypeArgs depth
   let rawInputs ← genInputs sigTypeArgs depth
   let inputs : ListMap (Identifier Unit) LMonoTy := rawInputs.filter (fun p => !avoid p.1.name)
   let output ← genLMonoTy sigTypeArgs depth
@@ -365,11 +364,13 @@ def genFunction [Gen G] (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
   let exprOctx := opsOver typeArgs octx
   let body ← genOptExpr bodyFctx exprOctx typeArgs depth output pctx
   let preconditions ← genPreconditions exprOctx inputs typeArgs depth pctx
+  let lemmas ← genNameList depth
   pure {
     name := ⟨name, ()⟩,
     typeArgs := typeArgs,
     inputs := inputs,
     output := output,
     body := body,
-    preconditions := preconditions
+    preconditions := preconditions,
+    lemmas := lemmas
   }

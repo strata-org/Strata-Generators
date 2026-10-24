@@ -28,13 +28,6 @@ open Core.TypeSpec
 
 -- ── filterMap helper lemmas ───────────────────────────────────────────────
 
-/-- `filterMap` of a constantly-`none` function is empty. -/
-theorem filterMap_const_none {α β} (l : List α) :
-    List.filterMap (fun _ => (none : Option β)) l = [] := by
-  induction l with
-  | nil => rfl
-  | cons hd tl ih => simp [ih]
-
 /-- `filterMap` of `some ∘ f` is `map f`. -/
 theorem filterMap_some_comp {α β} (f : α → β) (l : List α) :
     List.filterMap (fun x => some (f x)) l = l.map f := by
@@ -372,19 +365,6 @@ theorem insertAllCtx_cons (ctx : VarCtx) (hd : Identifier Unit × LMonoTy)
     insertAllCtx ctx (hd :: tl) = insertAllCtx (Map.insert ctx hd.1 hd.2) tl := by
   simp [insertAllCtx]
 
-/-- Looking up a name absent from `news` in `insertAllCtx ctx news` falls through
-    to `ctx`. This lemma is the form of `insertAll_find_not_mem` for a flat context. -/
-theorem insertAllCtx_find_not_mem (news : List (Identifier Unit × LMonoTy)) :
-    ∀ (ctx : VarCtx) (x : Identifier Unit),
-    x ∉ news.map Prod.fst → Map.find? (insertAllCtx ctx news) x = Map.find? ctx x := by
-  induction news with
-  | nil => intro ctx x _; rfl
-  | cons hd tl ih =>
-    intro ctx x hx
-    simp only [List.map_cons, List.mem_cons, not_or] at hx
-    rw [insertAllCtx_cons, ih _ x hx.2]
-    exact Map.find?_insert_ne ctx x hd.1 _ hx.1
-
 /-- Declaring a `Nodup` list of names, each absent from `ctx`, preserves
     functionality: every insert is of a key fresh at the point it happens (fresh in
     `ctx` by hypothesis, and each earlier insert uses a different key. This
@@ -470,7 +450,7 @@ theorem initChain_types {P : Program} {C : LContext CoreLParams} {L : List Strin
       intro i hi
       have hi' := hfresh (i + 1) (by simpa using Nat.succ_lt_succ hi)
       simpa [insertAll, List.take] using hi'
-    exact .cons C C C ts _ _ L _ _ hhead htail (fun _ _ _ h => nomatch h)
+    exact .cons C C C ts _ _ L _ _ hhead htail
 
 -- ── `insertAll` lookup bookkeeping ────────────────────────────────────────
 
@@ -509,14 +489,6 @@ theorem insertAll_find_mem (news : List (Identifier Unit × LMonoTy)) :
       rw [insertAll_find_not_mem tl _ hd.1 hnotin]
       exact Strata.Util.HMaps.find?_insert_self _ hd.1 _
     · exact ih _ x mty hndtl hmemtl
-
-/-- `Nodup` index lookup: the `i`-th key of `news` maps to the `i`-th value in
-    `insertAll ts news`. -/
-theorem insertAll_find_idx (news : List (Identifier Unit × LMonoTy))
-    (ts : TypeScopes) (hnd : (news.map Prod.fst).Nodup)
-    (i : Nat) (hi : i < news.length) :
-    (insertAll ts news).find? (news[i].1) = some (.forAll [] news[i].2) :=
-  insertAll_find_mem news ts (news[i].1) (news[i].2) hnd (List.getElem_mem hi)
 
 /-- In a `Nodup` list, the element at index `i` does not appear in the length-`i`
     prefix. -/
@@ -851,12 +823,6 @@ theorem outTargets_inΓ {ts : TypeScopes} (O T : @LMonoTySignature Unit)
   rw [← hval]
   exact hInScope _ (keyval_mem T i hi hiv)
 
-/-- Positionally type-aligned out-argument targets have the same length as the
-    callee's out-only block. -/
-theorem lm_length_eq_of_values_eq {O T : @LMonoTySignature Unit}
-    (hTVals : T.values = O.values) : T.length = O.length := by
-  rw [← lm_values_length T, ← lm_values_length O, hTVals]
-
 -- ── The typing rules respect equivalent and larger scopes ─────────────
 --
 -- Each weak typing rule constrains its *output* scopes up to `HMaps.Equiv` only, because a stack
@@ -955,8 +921,8 @@ private theorem statementsHasTypeW_equiv_congr_fuel {P : Program} : ∀ (n : Nat
       fun x _ hx => (Strata.Util.HMaps.Equiv.find? he x).trans hx
     cases h with
     | nil _ _ L _ heq => exact .nil C ts₂ L _ (heq.trans he.symm)
-    | cons _ Ca _ _ tsa _ L s ss' hs hss hsib =>
-      refine .cons C Ca _ ts₂ tsa _ L s ss' ?_ hss hsib
+    | cons _ Ca _ _ tsa _ L s ss' hs hss =>
+      refine .cons C Ca _ ts₂ tsa _ L s ss' ?_ hss
       -- Only the head statement is retyped; the tail already starts from `tsa`.
       cases hs with
       | cmd _ _ tsc L c _ hc heq =>
@@ -994,37 +960,27 @@ theorem statementsHasTypeW_equiv_congr {P : Program} {ss : List Statement}
   statementsHasTypeW_equiv_congr_fuel (sizeOf ss) ss (Nat.le_refl _) h he
 
 /-- Concatenating two weakly typed statement lists (threading the middle scopes) gives a weakly
-    typed statement list, when no block of the first list has the label of a block of the second. -/
+    typed statement list. -/
 theorem StatementsHasTypeW_append {P : Program} {L : List String}
     {l1 : List Statement} :
     ∀ {C : LContext CoreLParams} {ts ts' ts'' : TypeScopes} {C' C'' : LContext CoreLParams}
       {l2 : List Statement},
     StatementsHasTypeW P C ts L l1 C' ts' →
     StatementsHasTypeW P C' ts' L l2 C'' ts'' →
-    (∀ label body md, Stmt.block label body md ∈ l1 →
-      ∀ body' md', Stmt.block label body' md' ∉ l2) →
     StatementsHasTypeW P C ts L (l1 ++ l2) C'' ts'' := by
   induction l1 with
   | nil =>
-    intro C ts ts' ts'' C' C'' l2 h1 h2 _
+    intro C ts ts' ts'' C' C'' l2 h1 h2
     cases h1 with
     | nil _ _ _ _ heq =>
       -- The empty list's output scopes are only `Equiv` to its input, so the tail's
       -- derivation has to be transported back along that equivalence.
       simpa using statementsHasTypeW_equiv_congr h2 heq.symm
   | cons hd tl ih =>
-    intro C ts ts' ts'' C' C'' l2 h1 h2 hsep
+    intro C ts ts' ts'' C' C'' l2 h1 h2
     cases h1 with
-    | cons _ Ca _ _ tsa _ _ _ _ hs hss hsib =>
-      have hsep' : ∀ label body md, Stmt.block label body md ∈ tl →
-          ∀ body' md', Stmt.block label body' md' ∉ l2 :=
-        fun label body md hmem => hsep label body md (List.mem_cons_of_mem _ hmem)
-      refine .cons _ _ _ _ _ _ _ _ _ hs (ih hss h2 hsep') ?_
-      intro label body md heq body' md' hmem
-      rcases List.mem_append.mp hmem with htl | hl2
-      · exact hsib label body md heq body' md' htl
-      · subst heq
-        exact hsep label body md List.mem_cons_self body' md' hl2
+    | cons _ Ca _ _ tsa _ _ _ _ hs hss =>
+      exact .cons _ _ _ _ _ _ _ _ _ hs (ih hss h2)
 
 /-- A weakly typed statement list stays weakly typed when its output scopes are replaced by
     equivalent ones: scopes with the same lookup for every name. -/
@@ -1034,7 +990,6 @@ theorem StatementsHasTypeW_out_equiv {P : Program} {C C' : LContext CoreLParams}
     (he : Strata.Util.HMaps.Equiv ts'' ts') :
     StatementsHasTypeW P C ts L ss C' ts'' := by
   have hz := StatementsHasTypeW_append h (.nil C' ts' L ts'' he)
-    (fun _ _ _ _ _ _ hmem => absurd hmem List.not_mem_nil)
   rwa [List.append_nil] at hz
 
 /-- A single weakly typed statement is a weakly typed statement list of length one. Every
@@ -1044,7 +999,6 @@ theorem StatementsHasTypeW_singleton {P : Program} {C C' : LContext CoreLParams}
     (h : StatementHasTypeW P C ts L s C' ts') :
     StatementsHasTypeW P C ts L [s] C' ts' :=
   .cons _ _ _ _ _ _ _ _ _ h (.nil _ _ _ _ (Strata.Util.HMaps.Equiv.refl _))
-    (fun _ _ _ _ _ _ hmem => absurd hmem List.not_mem_nil)
 
 -- ── Reuse-or-init: the general case (block-free when nothing is missing) ──
 
@@ -1199,9 +1153,6 @@ theorem call_mixed_body_sound
         hMinΓ hTinΓ (fun i hi hj => exprHasTypeW_mono (hExTy i hi hj) hext) hExNoFvar
         hIdisjOut hMnotO hLhsNodup)
       (Strata.Util.HMaps.Equiv.refl _)
-  -- The call is a command, so no block follows the `init` chain.
-  refine StatementsHasTypeW_append hchain (StatementsHasTypeW_singleton hcall) ?_
-  intro _ _ _ _ _ _ hmem
-  exact nomatch List.mem_singleton.mp hmem
+  exact StatementsHasTypeW_append hchain (StatementsHasTypeW_singleton hcall)
 
 end StrataGenerators.Stmt

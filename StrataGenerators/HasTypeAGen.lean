@@ -6772,12 +6772,7 @@ private theorem single_sample_mem (generableTys : List LMonoTy) (σ : LMonoTy)
 set_option linter.unusedVariables false in
 /-- Each element of the sampling step in `genIndirPoly` is a member of `generableTys` when that list is
     not empty, and a base type from `pickBaseType` when it is empty. Therefore a valid list of sampled
-    types is in the support of the sampling step.
-
-    The statement holds for an arbitrary number `k` of samples, and not for the literal 3. The generator
-    draws `maxNumArgs` samples, and `maxNumArgs` is a parameter. A fixed `k := 3` would therefore
-    specialize each statement below it to the largest arity of the current factory. The proof is by
-    induction on `k`. -/
+    types is in the support of the sampling step. -/
 private theorem sampledTys_mem_support (generableTys : List LMonoTy)
     (k : Nat) (sampledTys : List LMonoTy)
     (hLen : sampledTys.length = k)
@@ -6811,7 +6806,7 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
     (bctx : BVarCtx) (depth : Nat) (τ : LMonoTy)
     (maxNumArgs : Nat)
     (sampledTys : List LMonoTy)
-    (hSampledLen : sampledTys.length = maxNumArgs)
+    (hSampledLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hSampledValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
@@ -6919,10 +6914,8 @@ def IsPolyApp (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (maxNumArgs : Nat) (e : LExpr') : Prop :=
   ∃ (sampledTys : List LMonoTy) (name : String)
     (concreteArgTys : List LMonoTy) (args : List LExpr'),
-    -- One sample for each possible type variable, which is `maxNumArgs` samples. That is the number that
-    -- `genIndirPoly` draws. The number is not the literal 3, because 3 is only the largest arity of the
-    -- current factory, and `maxNumArgs` is a parameter of the generator.
-    sampledTys.length = maxNumArgs ∧
+    -- The number of samples that `genIndirPoly` draws.
+    sampledTys.length = max maxNumArgs (maxBinders pctx) ∧
     (∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
@@ -6973,7 +6966,7 @@ theorem isPolyApp_of_hasType (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     -- The side condition about unification. The search of the generator over the split points finds this
     -- operator at the argument types that the typing derivation gives.
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
-    (hLen : sampledTys.length = maxNumArgs)
+    (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
@@ -7235,7 +7228,7 @@ theorem isPolyApp_of_hasType_specShaped
     (name : String) (annot : LMonoTy) (args : List LExpr')
     (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
-    (hLen : sampledTys.length = maxNumArgs)
+    (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
@@ -7368,7 +7361,7 @@ theorem genLExpr_complete_poly_specShaped
     (name : String) (annot : LMonoTy) (args : List LExpr')
     (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
-    (hLen : sampledTys.length = maxNumArgs)
+    (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
@@ -7436,7 +7429,7 @@ theorem genLExpr_complete_poly_fullySpecShaped
     (name : String) (annot : LMonoTy) (args : List LExpr')
     (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
     (sampledTys : List LMonoTy) (concreteArgTys : List LMonoTy)
-    (hLen : sampledTys.length = maxNumArgs)
+    (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
@@ -7492,7 +7485,7 @@ theorem genLExprBase_complete_polyApp (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (n : Nat)
     (sampledTys : List LMonoTy)
-    (hSampledLen : sampledTys.length = 3)
+    (hSampledLen : sampledTys.length = max 3 (maxBinders pctx))
     (hSampledValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧

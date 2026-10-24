@@ -71,6 +71,7 @@ Second, 5 of the 7 per-declaration obligations are discharged.
 
 open Lambda RandomChoice Core Imperative SetGen
 open DatatypeGen
+open StrataGenerators.Stmt (isLocalTypeName)
 
 namespace ProgramGen
 
@@ -137,25 +138,30 @@ theorem genDeclName_complete {reserved : List String} {nm : String}
   simp only [genDeclName, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨nm, hnm, by rw [if_pos hallowed]⟩
 
-/-! ## Representative per-step reachability: axioms
+/-- Every name `genFreshName` reaches that uses no reserved prefix and is not a local type name
+    is a name `genDeclTypeName` reaches. -/
+theorem genDeclTypeName_complete {reserved : List String} {nm : String}
+    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) reserved))
+    (hallowed : isAllowedName nm = true) (hnotLocal : isLocalTypeName nm = false) :
+    nm ∈ SetGen.support (genDeclTypeName (G := SetGen.Set) reserved) := by
+  simp only [genDeclTypeName, mem_support_bind_iff, mem_support_pure_iff]
+  exact ⟨nm, genDeclName_complete hnm hallowed, by
+    simp only [hnotLocal, Bool.false_eq_true, if_false]⟩
 
-For each concrete Bool expression `e` reachable by `genLExpr` at the axiom depth whose binder
-annotations are generable, and each fresh name reachable by `genFreshName` that uses no reserved
-prefix, the axiom step emits `[.ax {name, e} .empty]`. This is the shape a caller composes with
-`genLExpr_complete` (for `e`) and the name-reachability side condition. -/
+/-! ## Representative per-step reachability: axioms -/
 
+/-- The axiom step reaches every axiom whose name `genFreshName` reaches with no reserved prefix
+    and whose body `genLExpr` reaches at `bool` over the operators with ground types. -/
 theorem genDeclAxiom_complete {s : GenState} {b : Bounds} {nm : String} {e : PExpr}
     (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
     (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) [] s.octx s.pctx [] [] b.exprDepth .bool))
-    (hgen : binderAnnotsGenerable e = true) :
+      (genLExpr (G := SetGen.Set) [] (opsOver [] s.octx) s.pctx [] [] b.exprDepth .bool)) :
     (([mkAxiomDecl nm e]),
         { s with reserved := nm :: s.reserved }) ∈
       SetGen.support (genDeclAxiom (G := SetGen.Set) s b) := by
   simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq]
-  refine ⟨(mkAxiomDecl nm e, nm), ⟨nm, genDeclName_complete hnm hnmAllowed, e, he, ?_⟩, rfl, rfl⟩
-  rw [generableOrTrue_of_generable hgen]
+  exact ⟨(mkAxiomDecl nm e, nm), ⟨nm, genDeclName_complete hnm hnmAllowed, e, he, rfl⟩, rfl, rfl⟩
 
 /-! ## Reachability of `genNonRecursiveArgTy`
 
@@ -259,21 +265,22 @@ clash. But the generator has both branches, so the support lemma must show which
 branch it is about. -/
 
 /-- **Reachability of the abstract-type step, on the branch that emits.** The
-    caller supplies a name that `genFreshName` can reach, an arity not more than
-    `b.maxTyConArity`, and the `.ok` result that shows the name does not clash in
-    `s.C`. Then the step emits `[mkAbstractTypeDecl nm ar]` and goes to the state
+    caller supplies a name that `genFreshName` can reach and that is not a local type name, an
+    arity not more than `b.maxTyConArity`, and the `.ok` result that shows the name does not
+    clash in `s.C`. Then the step emits `[mkAbstractTypeDecl nm ar]` and goes to the state
     `s.addAbstract nm ar C'`. -/
 theorem genDeclAbstract_complete {s : GenState} {b : Bounds} {nm : String} {ar : Nat}
     {C' : LContext CoreLParams}
     (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
+    (hnmNotLocal : isLocalTypeName nm = false)
     (har : ar ≤ b.maxTyConArity)
     (hC : s.C.addKnownTypeWithError { name := nm, metadata := ar } default = .ok C') :
     (([mkAbstractTypeDecl nm ar]), s.addAbstract nm ar C') ∈
       SetGen.support (genDeclAbstract (G := SetGen.Set) s b) := by
   simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff]
   refine ⟨(mkAbstractTypeDecl nm ar, nm, ar),
-    ⟨nm, genDeclName_complete hnm hnmAllowed, ar, ?_, rfl⟩, ?_⟩
+    ⟨nm, genDeclTypeName_complete hnm hnmAllowed hnmNotLocal, ar, ?_, rfl⟩, ?_⟩
   · exact mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, har⟩
   · -- Take the `.ok` branch of the `match` using `hC`.
     rw [hC]
@@ -307,11 +314,12 @@ makes this selection. -/
     `tyParams`. That length must not be more than `b.maxAliasTyParams`. And
     `genNonRecursiveArgTy` must reach `body` over the type constructors in scope and
     `tyParams`. The alias name, its type arguments and the constructor names of its body must
-    use no reserved prefix. -/
+    use no reserved prefix, and the alias name is not a local type name. -/
 theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
     {tyParams : List TyIdentifier} {body : LMonoTy}
     (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
+    (hnmNotLocal : isLocalTypeName nm = false)
     (hlen : tyParams.length ≤ b.maxAliasTyParams)
     (hparams : tyParams ∈ SetGen.support
       (DatatypeGen.genFreshNames (G := SetGen.Set) s.reserved tyParams.length))
@@ -327,7 +335,7 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
           reserved := nm :: s.reserved }) ∈
       SetGen.support (genDeclAlias (G := SetGen.Set) s b) := by
   simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff]
-  refine ⟨(mkAliasDecl nm body, nm), ⟨nm, genDeclName_complete hnm hnmAllowed,
+  refine ⟨(mkAliasDecl nm body, nm), ⟨nm, genDeclTypeName_complete hnm hnmAllowed hnmNotLocal,
             tyParams.length, ?_, tyParams, hparams, body, hbody, rfl⟩, ?_⟩
   · exact mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, hlen⟩
   · -- `genDeclAlias` matches on `mkAliasDecl nm body`, which is syntactically a
@@ -344,6 +352,7 @@ theorem genDeclAlias_complete_of_body {s : GenState} {b : Bounds} {nm : String}
     {body : LMonoTy}
     (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
+    (hnmNotLocal : isLocalTypeName nm = false)
     (hlen : (LMonoTy.freeVars body).uniq.length ≤ b.maxAliasTyParams)
     (hparams : (LMonoTy.freeVars body).uniq ∈ SetGen.support
       (DatatypeGen.genFreshNames (G := SetGen.Set) s.reserved
@@ -360,7 +369,7 @@ theorem genDeclAlias_complete_of_body {s : GenState} {b : Bounds} {nm : String}
                      :: s.Γ.aliases }
           reserved := nm :: s.reserved }) ∈
       SetGen.support (genDeclAlias (G := SetGen.Set) s b) :=
-  genDeclAlias_complete hnm hnmAllowed hlen hparams hbody hallowed
+  genDeclAlias_complete hnm hnmAllowed hnmNotLocal hlen hparams hbody hallowed
 
 /-! ## Per-step reachability: `distinct`
 
@@ -382,8 +391,8 @@ hypothesis `hadd`, just as the abstract-type step takes an `.ok` result. Fresh
 names do not clash, so this is no true restriction. -/
 
 /-- **Reachability of the `distinct` step, on the branch that emits.** The caller
-    supplies a fresh name, a reachable monotype `τ` whose constructor names use no reserved prefix, a
-    reachable list of at least two constant names whose length is not more than
+    supplies a fresh name, a reachable monotype `τ` whose constructor names use no reserved
+    prefix, a reachable list of at least two constant names whose length is not more than
     `max 2 b.maxDistinctVars`, none of which uses a reserved prefix, and the `some` result
     of `addConstants`. Then the step emits the constant declarations followed by the
     `distinct` declaration over those names, each element annotated at `τ`.
@@ -435,9 +444,9 @@ Two lemmas, in the same relation as `genDeclAlias_complete` to
 a hypothesis. The second one discharges that hypothesis from `MutualADTWF` alone, through
 `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, and the size in its conclusion is then existential. -/
 
-/-- **Reachability of the datatype step**, given a reachable block and the `.ok`
-    branch of the gate. The state grows in six fields: `C` by the block, `reserved`
-    and `dtCons` by the names of the block, and the three operator contexts by the
+/-- **Reachability of the datatype step**, given a reachable block whose names are not local type
+    names and the `.ok` branch of the gate. The state grows in six fields: `C` by the block,
+    `reserved` and `dtCons` by the names of the block, and the three operator contexts by the
     block's derived functions. Each datatype enters `dtCons` at its own arity, which
     is `typeArgs.length`. -/
 theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
@@ -447,6 +456,7 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
         s.baseTypes (s.tyCons ++ s.dtCons) b.maxExtraDatatypes b.maxTyParams
         b.maxExtraBaseConstrs b.maxRecConstrs b.maxArgs b.maxDatatypeSize s.reserved))
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
+    (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
     (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams s.C block = .ok C') :
     (([.type (.data block) .empty]),
@@ -461,7 +471,10 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
   simp only [genDeclDatatype, mem_support_bind_iff]
   refine ⟨block, hblock, ?_⟩
   -- Take the branch of the name gate that continues, then the `.ok` branch using `hC`.
-  rw [if_pos (List.all_eq_true.mpr hnamesAllowed), hC]
+  have hgate : ∀ d ∈ block, (isAllowedName d.name && !isLocalTypeName d.name) = true := by
+    intro d hd
+    simp only [hnamesAllowed d hd, hnamesNotLocal d hd, Bool.not_false, Bool.and_self]
+  rw [if_pos (List.all_eq_true.mpr hgate), hC]
   exact mem_support_pure_iff.mpr rfl
 
 open Core.TypeSpec DatatypeGen in
@@ -495,6 +508,7 @@ theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
         ++ initialReserved s.baseTypes (s.tyCons ++ s.dtCons) s.reserved)
     (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, isAllowedName p = true)
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
+    (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
     (hctors_nf : ∀ d ∈ block, ∀ c ∈ d.constrs, hasDefaultTesterName c)
     (hctors_len : ∀ d ∈ block, ∀ c ∈ d.constrs, c.args.length ≤ b.maxArgs)
     (hnames_ident : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
@@ -526,7 +540,7 @@ theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
     hparamsFresh hparamsAllowed hctors_nf hctors_len hnames_ident hnames_nd hnames_fresh hreclen
     hvocab hbv
   exact ⟨sz, genDeclDatatype_complete (b := { b with maxDatatypeSize := sz }) hblock
-    hnamesAllowed hC⟩
+    hnamesAllowed hnamesNotLocal hC⟩
 
 /-! ## Program assembly
 
@@ -564,12 +578,14 @@ example (b : Bounds) (nm : String) (ar : Nat) (C' : LContext Core.CoreLParams)
     (hnm : nm ∈ SetGen.support
       (DatatypeGen.genFreshName (G := SetGen.Set) initState.reserved))
     (hnmAllowed : isAllowedName nm = true)
+    (hnmNotLocal : isLocalTypeName nm = false)
     (har : ar ≤ b.maxTyConArity)
     (hC : initState.C.addKnownTypeWithError { name := nm, metadata := ar } default = .ok C') :
     (Core.Program.mk (decls := [mkAbstractTypeDecl nm ar])) ∈
       SetGen.support (genProgram (G := SetGen.Set) 1 b) := by
   refine genProgram_complete_of_fold (sf := initState.addAbstract nm ar C') ?_
-  have hstep := genDeclAbstract_complete (s := initState) (b := b) hnm hnmAllowed har hC
+  have hstep :=
+    genDeclAbstract_complete (s := initState) (b := b) hnm hnmAllowed hnmNotLocal har hC
   have hdispatch := genDeclStep_complete_of_mem (s := initState) (b := b)
     (ds := [mkAbstractTypeDecl nm ar]) (Or.inl hstep)
   have hfold := genDeclsFold_cons_complete (n := 0) hdispatch
@@ -591,11 +607,13 @@ example (b : Bounds) (block : MutualDatatype Unit) (C' : LContext Core.CoreLPara
         b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
         b.maxArgs b.maxDatatypeSize initState.reserved))
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
+    (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
     (hC : @LContext.addMutualBlock Core.CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams initState.C block = .ok C') :
     (Core.Program.mk (decls := [.type (.data block) .empty])) ∈
       SetGen.support (genProgram (G := SetGen.Set) 1 b) := by
-  have hstep := genDeclDatatype_complete (s := initState) (b := b) hblock hnamesAllowed hC
+  have hstep := genDeclDatatype_complete (s := initState) (b := b) hblock hnamesAllowed
+    hnamesNotLocal hC
   have hdispatch := genDeclStep_complete_of_mem (s := initState) (b := b)
     (ds := [.type (.data block) .empty])
     (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hstep)))))

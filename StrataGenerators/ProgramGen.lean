@@ -272,7 +272,7 @@ def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     every type name `C` knows), so the block's names avoid both `C`'s existing
     types (→ `MutualADTWF`) and every other declaration's name (→
     `getNames.Nodup`). A block with a datatype name that the checker does not accept as a user
-    name (`isAllowedName`) emits nothing. -/
+    name (`isAllowedName`) or that is a local type name (`isLocalTypeName`) emits nothing. -/
 def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   -- The pool of the applied constructors is the external pool *and* the pool of the datatypes that an earlier
   -- declaration gives. The generator draws such a datatype exactly as it draws each other applied constructor,
@@ -286,7 +286,7 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   -- spec's `DeclHasType'.type_data` fixes), rather than the shadowing `ToFormat
   -- Unit` instances the sub-generators bring into scope, so a gated `= .ok C'`
   -- matches the spec constructor with no instance-diamond bridge in the proof.
-  if block.all (fun d => isAllowedName d.name) then
+  if block.all (fun d => isAllowedName d.name && !StrataGenerators.Stmt.isLocalTypeName d.name) then
   match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams s.C block with
   | .ok C' =>

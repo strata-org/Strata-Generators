@@ -110,6 +110,38 @@ theorem genDeclName_fresh {reserved : List String} {nm : String}
     exact ⟨DatatypeGen.genFreshName_fresh reserved d hd, hallowed⟩
   · exact ⟨DatatypeGen.fallbackName_not_mem reserved, fallbackName_allowed reserved⟩
 
+/-- The fallback name, a run of `x` characters, is not a local type name. -/
+theorem fallbackName_not_local (reserved : List String) :
+    StrataGenerators.Stmt.isLocalTypeName (DatatypeGen.fallbackName reserved) = false := by
+  rw [Bool.eq_false_iff]
+  intro hlocal
+  simp only [StrataGenerators.Stmt.isLocalTypeName, DatatypeGen.fallbackName, indexedFreshName,
+    String.startsWith_string_iff, String.toList_ofList] at hlocal
+  have hl : 'l' ∈ StrataGenerators.Stmt.localTypePrefix.toList := by decide +kernel
+  exact absurd (List.mem_replicate.mp (hlocal.subset hl)).2 (by decide)
+
+/-- A name `genDeclTypeName reserved` draws is absent from `reserved` and uses no reserved
+    prefix. -/
+theorem genDeclTypeName_fresh {reserved : List String} {nm : String}
+    (h : nm ∈ SetGen.support (genDeclTypeName (G := SetGen.Set) reserved)) :
+    nm ∉ reserved ∧ isAllowedName nm = true := by
+  simp only [genDeclTypeName, mem_support_bind_iff, mem_support_pure_iff] at h
+  obtain ⟨d, hd, rfl⟩ := h
+  split
+  · exact ⟨DatatypeGen.fallbackName_not_mem reserved, fallbackName_allowed reserved⟩
+  · exact genDeclName_fresh hd
+
+/-- A name `genDeclTypeName reserved` draws is not a local type name. -/
+theorem genDeclTypeName_not_local {reserved : List String} {nm : String}
+    (h : nm ∈ SetGen.support (genDeclTypeName (G := SetGen.Set) reserved)) :
+    StrataGenerators.Stmt.isLocalTypeName nm = false := by
+  simp only [genDeclTypeName, mem_support_bind_iff, mem_support_pure_iff] at h
+  obtain ⟨d, _, rfl⟩ := h
+  split
+  · exact fallbackName_not_local reserved
+  · rename_i hlocal
+    exact Bool.eq_false_iff.mpr hlocal
+
 /-! ## Chaining declaration-list typings -/
 
 /-- Weak declaration-list typings compose over list append, threading the context through the
@@ -973,7 +1005,7 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
   simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
   obtain ⟨hds, hs'⟩ := hmatch
-  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
+  have hnm_fresh : nm ∉ s.reserved := (genDeclTypeName_fresh hnm).1
   let syn : TypeSynonym :=
     { name := nm, typeArgs := (LMonoTy.freeVars body).uniq, type := body }
   have hmk : mkAliasDecl nm body = .type (.syn syn) .empty := rfl
@@ -1325,7 +1357,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
   obtain ⟨pr, ⟨nm, hnm, ar, _har, hpr⟩, hmatch⟩ := h
   subst hpr
   -- Freshness of the drawn name.
-  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
+  have hnm_fresh : nm ∉ s.reserved := (genDeclTypeName_fresh hnm).1
   simp only at hmatch
   -- Case on the gate.
   cases hadd : s.C.addKnownTypeWithError { name := nm, metadata := ar } default with
@@ -1625,7 +1657,7 @@ theorem genDeclAlias_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Ge
   simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
   obtain ⟨hds, hs'⟩ := hmatch
   subst hds hs'
-  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
+  have hnm_fresh : nm ∉ s.reserved := (genDeclTypeName_fresh hnm).1
   have hdn : declNames [Decl.type (TypeDecl.syn
       { name := nm, typeArgs := body.freeVars.uniq, type := body }) MetaData.empty] = [nm] := by
     simp [declNames, Decl.names, TypeDecl.names]
@@ -1642,7 +1674,7 @@ theorem genDeclAbstract_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
   obtain ⟨pr, ⟨nm, hnm, ar, _har, hpreq⟩, hmatch⟩ := h
   subst hpreq
   simp only at hmatch
-  have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
+  have hnm_fresh : nm ∉ s.reserved := (genDeclTypeName_fresh hnm).1
   cases hadd : s.C.addKnownTypeWithError { name := nm, metadata := ar } default with
   | error e =>
     rw [hadd] at hmatch
@@ -1808,6 +1840,163 @@ theorem genDeclsFold_names (n : Nat) {s : GenState} {b : Bounds} {ds : List Decl
       -- disjoint: an emitted-by-step-1 name is reserved in `s₁`, so `rest` avoids it.
       intro x hx1 y hy2 hxy; subst hxy
       exact hn₂.fresh x hy2 (hn₁.emitted_reserved x hx1)
+
+/-! ## Program-level type names are not local type names -/
+
+/-- No type name that the declarations `ds` declare is a local type name. -/
+def TypeNamesNotLocal (ds : List Decl) : Prop :=
+  ∀ x ∈ programNamesOfKind { decls := ds } .type, ¬ StrataGenerators.Stmt.isLocalTypeName x.name
+
+/-- Declarations none of which is a type declaration declare no type name. -/
+theorem typeNamesNotLocal_of_kind {ds : List Decl} (h : ∀ d ∈ ds, declNameKind d ≠ .type) :
+    TypeNamesNotLocal ds := by
+  intro x hx
+  simp only [programNamesOfKind, List.mem_flatMap, List.mem_filter, beq_iff_eq] at hx
+  obtain ⟨d, ⟨hd, hkind⟩, _⟩ := hx
+  exact absurd hkind (h d hd)
+
+/-- `TypeNamesNotLocal` holds of an append when it holds of both parts. -/
+theorem typeNamesNotLocal_append {ds₁ ds₂ : List Decl}
+    (h₁ : TypeNamesNotLocal ds₁) (h₂ : TypeNamesNotLocal ds₂) :
+    TypeNamesNotLocal (ds₁ ++ ds₂) := by
+  intro x hx
+  simp only [programNamesOfKind, List.filter_append, List.flatMap_append, List.mem_append] at hx
+  rcases hx with hx | hx
+  · exact h₁ x hx
+  · exact h₂ x hx
+
+/-- A type declaration none of whose names is a local type name declares no local type name. -/
+theorem typeNamesNotLocal_type {t : TypeDecl} {md : MetaData Expression}
+    (h : ∀ x ∈ t.names, StrataGenerators.Stmt.isLocalTypeName x.name = false) :
+    TypeNamesNotLocal [.type t md] := by
+  intro x hx
+  simp only [programNamesOfKind, declNameKind, Decl.kind, List.filter_cons, List.filter_nil,
+    beq_self_eq_true, if_true, List.flatMap_cons, List.flatMap_nil, List.append_nil,
+    Decl.names] at hx
+  exact Bool.eq_false_iff.mp (h x hx)
+
+/-- No declaration that `addConstants` emits is a type declaration. -/
+theorem addConstants_kind {τ : LMonoTy} :
+    ∀ (names : List String) (C C' : LContext CoreLParams) (ds : List Decl),
+      addConstants C τ names = some (C', ds) → ∀ d ∈ ds, declNameKind d ≠ .type := by
+  intro names
+  induction names with
+  | nil =>
+    intro C C' ds h
+    simp only [addConstants, Option.some.injEq, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h
+    simp
+  | cons c cs ih =>
+    intro C C' ds h
+    obtain ⟨C₁, ds', _, hrest, rfl⟩ := addConstants_cons h
+    intro d hd
+    rcases List.mem_cons.mp hd with rfl | hd'
+    · simp [declNameKind, mkConstantDecl, Decl.kind]
+    · exact ih C₁ C' ds' hrest d hd'
+
+/-- No type name that a declaration step emits is a local type name. -/
+theorem genDeclStep_typeNames {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
+    (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
+    TypeNamesNotLocal ds := by
+  simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
+    or_false, Prod.mk.injEq] at h
+  obtain ⟨w, g, hg, _, hmem⟩ := h
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+  · -- abstract type
+    simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff] at hmem
+    obtain ⟨pr, ⟨nm, hnm, ar, _, rfl⟩, hmatch⟩ := hmem
+    simp only at hmatch
+    split at hmatch <;> simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch <;>
+      obtain ⟨rfl, _⟩ := hmatch
+    · refine typeNamesNotLocal_type ?_
+      simpa [mkAbstractTypeDecl, TypeDecl.names] using genDeclTypeName_not_local hnm
+    · exact typeNamesNotLocal_of_kind (by simp)
+  · -- alias
+    simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff] at hmem
+    obtain ⟨pr, ⟨nm, hnm, k, _, tps, _, body, _, rfl⟩, hmatch⟩ := hmem
+    simp only [mkAliasDecl] at hmatch
+    split at hmatch <;> simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch <;>
+      obtain ⟨rfl, _⟩ := hmatch
+    · refine typeNamesNotLocal_type ?_
+      simpa [TypeDecl.names] using genDeclTypeName_not_local hnm
+    · exact typeNamesNotLocal_of_kind (by simp)
+  · -- axiom
+    simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff,
+      Prod.mk.injEq] at hmem
+    obtain ⟨pr, ⟨nm, _, e, _, rfl⟩, rfl, _⟩ := hmem
+    exact typeNamesNotLocal_of_kind (by simp [declNameKind, mkAxiomDecl, Decl.kind])
+  · -- distinct
+    simp only [genDeclDistinct, mem_support_bind_iff] at hmem
+    obtain ⟨⟨nm, τ, cs⟩, _, hmatch⟩ := hmem
+    split at hmatch
+    · cases hadd : addConstants s.C τ cs with
+      | none =>
+        rw [hadd] at hmatch
+        simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+        obtain ⟨rfl, _⟩ := hmatch
+        exact typeNamesNotLocal_of_kind (by simp)
+      | some pr =>
+        obtain ⟨C', constDecls⟩ := pr
+        rw [hadd] at hmatch
+        simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+        obtain ⟨rfl, _⟩ := hmatch
+        refine typeNamesNotLocal_append
+          (typeNamesNotLocal_of_kind (addConstants_kind cs s.C C' constDecls hadd)) ?_
+        exact typeNamesNotLocal_of_kind (by simp [declNameKind, mkDistinctDecl, Decl.kind])
+    · simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+      obtain ⟨rfl, _⟩ := hmatch
+      exact typeNamesNotLocal_of_kind (by simp)
+  · -- datatype block
+    simp only [genDeclDatatype, mem_support_bind_iff] at hmem
+    obtain ⟨block, _, hmatch⟩ := hmem
+    split at hmatch
+    · rename_i hgate
+      cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+          instToFormatIDMetaCoreLParams s.C block with
+      | error e =>
+        rw [hadd] at hmatch
+        simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+        obtain ⟨rfl, _⟩ := hmatch
+        exact typeNamesNotLocal_of_kind (by simp)
+      | ok C' =>
+        rw [hadd] at hmatch
+        simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+        obtain ⟨rfl, _⟩ := hmatch
+        refine typeNamesNotLocal_type ?_
+        intro x hx
+        simp only [TypeDecl.names, List.mem_map] at hx
+        obtain ⟨d, hd, rfl⟩ := hx
+        simp only [List.all_eq_true, Bool.and_eq_true, Bool.not_eq_true'] at hgate
+        exact (hgate d hd).2
+    · simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+      obtain ⟨rfl, _⟩ := hmatch
+      exact typeNamesNotLocal_of_kind (by simp)
+  · -- function
+    simp only [genDeclFunction, mem_support_bind_iff] at hmem
+    obtain ⟨func₀, _, nm, _, hmatch⟩ := hmem
+    split at hmatch <;> simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch <;>
+      obtain ⟨rfl, _⟩ := hmatch
+    · exact typeNamesNotLocal_of_kind (by simp [declNameKind, Decl.kind])
+    · exact typeNamesNotLocal_of_kind (by simp)
+  · -- procedure
+    simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff,
+      Prod.mk.injEq] at hmem
+    obtain ⟨proc₀, _, nm, _, rfl, _⟩ := hmem
+    exact typeNamesNotLocal_of_kind (by simp [declNameKind, Decl.kind])
+
+/-- No type name that the declaration fold emits is a local type name. -/
+theorem genDeclsFold_typeNames (n : Nat) {s : GenState} {b : Bounds} {ds : List Decl}
+    {s' : GenState} (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n)) :
+    TypeNamesNotLocal ds := by
+  induction n generalizing s ds s' with
+  | zero =>
+    simp only [genDeclsFold, mem_support_pure_iff, Prod.mk.injEq] at h
+    obtain ⟨rfl, _⟩ := h
+    exact typeNamesNotLocal_of_kind (by simp)
+  | succ n ih =>
+    simp only [genDeclsFold, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
+    obtain ⟨⟨ds₁, s₁⟩, hstep, ⟨rest, s₂⟩, hrest, rfl, _⟩ := h
+    exact typeNamesNotLocal_append (genDeclStep_typeNames hstep) (ih hrest)
 
 /-- `getNames.Nodup` from the fold's `declNames`-Nodup: an `Identifier Unit` list
     is `Nodup` iff its `.name` projection is (the metadata is `Unit`, always

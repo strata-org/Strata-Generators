@@ -348,9 +348,7 @@ structure ClosedGenFunction where
 
 instance : Repr ClosedGenFunction where
   reprPrec gf _ :=
-    -- Name the body and the measure. The printer omits an absent body and an absent measure, and that
-    -- difference is exactly what the gap in completeness depends on. That gap is a function with a measure
-    -- and no body, so a counterexample must show the difference.
+    -- Name the body and the measure, which the printer omits when absent.
     let tag := s!"[body={gf.func.body.isSome}, measure={gf.func.measure.isSome}]"
     s!"{tag}\n{formatFunc gf.func}"
 
@@ -636,18 +634,18 @@ instance : Repr GenProgram where
   -- The rendering uses the formatter of Strata, which gives real Core concrete syntax, so a counterexample
   -- shows exactly the program under test. It then appends the shared `programStatusNote`. That note matters,
   -- because the shrinker cannot minimize a program that the typechecker rejects. The oracle of the shrinker
-  -- *is* that typechecker. Therefore the note names the gap that caused the rejection, and a reader does not
-  -- have to find it in a program of the full size. The note gives the message of the checker itself when the
-  -- rejection matches no known gap. The renderer of the Tyche panel uses the same function, so the two views
-  -- agree.
+  -- *is* that typechecker. Therefore the note names the expected cause of the rejection, or gives
+  -- the checker's message for an unexpected one. The renderer of the Tyche panel uses the same
+  -- function, so the two views agree.
   reprPrec gp _ :=
     (Core.formatProgram gp.prog).pretty ++ programStatusNote gp.prog
 
--- This instance uses the whole-program shrinker `shrinkProgram`. That shrinker can drop a declaration, keep a
--- prefix of the declarations, remove each declaration that holds a known gap at one time, or reduce one
--- declaration in place, through the shrinker for a procedure, a function, a statement or an expression.
--- `Program.typeCheck` of Strata checks each candidate, so a reported counterexample is always a well-typed
--- program. The shrinker keeps the order of the declarations, and it renames nothing.
+-- This instance uses the whole-program shrinker `shrinkProgram`. That shrinker can drop a
+-- declaration, keep a prefix of the declarations, remove every declaration that `declHasGap` flags
+-- at once, or reduce one declaration in place, through the shrinker for a procedure, a function, a
+-- statement or an expression. `Program.typeCheck` of Strata checks each candidate, so a reported
+-- counterexample is always a well-typed program. The shrinker keeps the order of the declarations,
+-- and it renames nothing.
 instance : Shrinkable GenProgram where
   shrink gp := (shrinkProgram gp.prog).map (⟨·⟩)
 
@@ -678,11 +676,11 @@ instance : Generable GenProgram where
 
 -- ── The diagnostic for the whole-program shrinker ────────────────────
 --
--- No whole-program property shows how well the *shrinker* works. The one property that reliably reports a
--- counterexample does so on a program that holds a known gap, and no shrinker with this oracle can minimize
--- such a program. The one property whose counterexample does shrink reports one rarely, so most runs never
--- see it. On a run that reaches neither, nothing exercises the `Shrinkable GenProgram` instance, and a
--- change to it would stay invisible.
+-- No whole-program property shows how well the *shrinker* works. The one property that reliably
+-- reports a counterexample does so on a program that the checker rejects, and no shrinker with this
+-- oracle can minimize such a program. The one property whose counterexample does shrink reports one
+-- rarely, so most runs never see it. On a run that reaches neither, nothing exercises the
+-- `Shrinkable GenProgram` instance, and a change to it would stay invisible.
 --
 -- This diagnostic closes that hole. It minimizes each sampled program against a property that always fails,
 -- and it reports how far the shrinker reduced the program, together with the two invariants that matter. It
@@ -1054,9 +1052,10 @@ def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
     *constructs* that cause a message, over a whole sample, and a view of one counterexample cannot give
     that.
 
-    The whole-program shrinker does minimize the witness of the gated property, and only when the draw type
-    checks, because its filter for a candidate is `Program.typeCheck`. On a draw that holds a known gap, the
-    harness reports the witness at its full size, and these counts are then the only guide to the cause.
+    The whole-program shrinker does minimize the witness of the gated property, and only when the
+    draw type checks, because its filter for a candidate is `Program.typeCheck`. On a draw that the
+    checker rejects, the harness reports the witness at its full size, and these counts are then the
+    only guide to the cause.
 
     The result is the number of the programs for which the printer wrote a message, the number of the
     programs that the action drew, and the number that the parser reads although the printer wrote a

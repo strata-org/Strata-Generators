@@ -121,14 +121,23 @@ def genFreshLabel [Gen G] (labels : List String) : G String := do
     support-inversion lemma `mem_support_elements_iff` when sampling `bound`. -/
 instance : Inhabited Boundedness := ⟨.Infinite⟩
 
-/-- Generate a random `TypeConstructor`: a name and a list of (up to `depth`)
-    parameter names, all produced by `genIdentName` so each is a non-empty,
-    non-keyword identifier (constructor and type-parameter names both appear in
-    identifier position). The `bound` field is sampled over both `Boundedness`
-    values: it is typing-irrelevant (the `typeDecl` rule's `addKnownTypeWithError`
+/-- The prefix the generator gives every type that a `typeDecl` statement declares. -/
+def localTypePrefix : String := "local_"
+
+def isLocalTypeName (n : String) : Bool := n.startsWith localTypePrefix
+
+/-- Draw a local type name: a `genIdentName` identifier, prefixed with `localTypePrefix` unless it
+    already starts with it. -/
+def genLocalTypeName [Gen G] : G String := do
+  let s ← genIdentName
+  pure (if isLocalTypeName s then s else localTypePrefix ++ s)
+
+/-- Generate a random `TypeConstructor`: a local type name (`genLocalTypeName`) and a list of (up
+    to `depth`) parameter names drawn by `genIdentName`. The `bound` field is sampled over both
+    `Boundedness` values: it is typing-irrelevant (the `typeDecl` rule's `addKnownTypeWithError`
     keys only off `name`/`numargs`), so either choice is well-typed. -/
 def genTypeConstructor [Gen G] (depth : Nat) : G TypeConstructor := do
-  let name ← genIdentName
+  let name ← genLocalTypeName
   let params ← listOfMaxLength depth genIdentName
   let bound ← elements [Boundedness.Infinite, Boundedness.Finite] (by simp)
   pure { bound := bound, name := name, params := params }
@@ -186,13 +195,13 @@ def genInvariants [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 def functionNames (C : LContext CoreLParams) : List String :=
   (C.functions.toArray.map (·.name.name)).toList
 
-/-- Generate a `cmd` statement by delegating to `genCmd`, which declares no variable named after a
-    function of `C`. The imperative command is wrapped as `CmdExt.cmd`; `C` is unchanged. -/
+/-- Generate a `cmd` statement by delegating to `genCmd`. The imperative command is wrapped as
+    `CmdExt.cmd`; `C` is unchanged. -/
 def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenStmtResult := do
-  let r ← genCmd octx tvars immutableVars ctx depth pctx (functionNames C)
+  let r ← genCmd octx tvars immutableVars ctx depth pctx
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement that targets a block around it. The typing rule

@@ -269,16 +269,43 @@ theorem genExitStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     exact StatementsHasTypeW_singleton
       (.exit C _ (hd :: tl) l default _ hl (Strata.Util.HMaps.Equiv.refl _))
 
-/-- Soundness of `genTypeDeclStmt` (at any depth `d`). The `.ok` branch discharges
-    `typeDecl`; the `.error` (name-clash) branch is the empty generator (support
-    `∅`), so there is nothing to prove. -/
+/-- A name that starts with `localTypePrefix` is a local type name. -/
+theorem isLocalTypeName_prefix_append (s : String) :
+    isLocalTypeName (localTypePrefix ++ s) = true := by
+  simp only [isLocalTypeName, String.startsWith_string_iff, String.toList_append]
+  exact List.prefix_append _ _
+
+/-- Every name `genLocalTypeName` draws is a local type name. -/
+theorem genLocalTypeName_isLocal {s : String}
+    (hs : s ∈ SetGen.support (genLocalTypeName (G := SetGen.Set))) :
+    isLocalTypeName s = true := by
+  simp only [genLocalTypeName, mem_support_bind_iff, mem_support_pure_iff] at hs
+  obtain ⟨d, _, rfl⟩ := hs
+  split
+  · assumption
+  · exact isLocalTypeName_prefix_append d
+
+/-- The name of every type constructor `genTypeConstructor` draws is a local type name. -/
+theorem genTypeConstructor_isLocal {depth : Nat} {tc : TypeConstructor}
+    (htc : tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth)) :
+    isLocalTypeName tc.name = true := by
+  simp only [genTypeConstructor, mem_support_bind_iff, mem_support_pure_iff] at htc
+  obtain ⟨name, hname, _, _, _, _, rfl⟩ := htc
+  exact genLocalTypeName_isLocal hname
+
+/-- Soundness of `genTypeDeclStmt`, for a program `P` with no local type name among its type
+    names. The declared name is a local type name, so it differs from every type name of `P`. -/
 theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     (C : LContext CoreLParams) (ctx : VarCtx) (d : Nat) (r : GenStmtResult)
     (hr : r ∈ SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d)) :
     StatementsHasTypeW P C (env.toTCtx ctx).types labels r.stmts r.outC
       (env.toTCtx r.outCtx).types := by
   simp only [genTypeDeclStmt, mem_support_bind_iff] at hr
-  obtain ⟨tc, _, hr⟩ := hr
+  obtain ⟨tc, htc, hr⟩ := hr
+  have hfresh : ∀ n ∈ programNamesOfKind P .type, n.name ≠ tc.name := by
+    intro n hn heq
+    exact hLocalTypes n hn (heq ▸ genTypeConstructor_isLocal htc)
   -- Branch on the same `addKnownTypeWithError` the generator computed.
   split at hr
   · -- `.ok C'`: the split hypothesis is exactly the `typeDecl` premise.
@@ -286,9 +313,8 @@ theorem genTypeDeclStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pc
     simp only [mem_support_pure_iff] at hr
     subst hr
     exact StatementsHasTypeW_singleton
-      (.typeDecl C C' _ labels tc default _ heq (Strata.Util.HMaps.Equiv.refl _))
+      (.typeDecl C C' _ labels tc default _ hfresh heq (Strata.Util.HMaps.Equiv.refl _))
   · -- `.error`: the empty generator `default`, whose support is `∅`.
-    rename_i heq
     simp only [SetGen.support, SetGen.bot_mem_iff] at hr
 
 -- ── Fresh-label freshness (for the `block` premise) ──────────────────────
@@ -1191,17 +1217,19 @@ theorem genStmt_outC_functions
 mutual
 
 /-- **Soundness of `genStmt`.** Every statement list in the generator's support is weakly typed
-    (`StatementsHasTypeW`, for any program `P` whose callees `procs` describes), from the variable
-    scopes of `env.toTCtx ctx` to those of `env.toTCtx r.outCtx`, with the generator's output
-    ambient context `r.outC`. This holds when the operators and schemes agree with `C`
-    (`ExprCtxOk`), the scope is functional, and the types of the scope, the operators and the
-    written-to blocks of the callees are well kinded in `C` (`WellKindedOk`).
+    (`StatementsHasTypeW`, for any program `P` whose callees `procs` describes and whose type
+    names are not local type names), from the variable scopes of `env.toTCtx ctx` to those of
+    `env.toTCtx r.outCtx`, with the generator's output ambient context `r.outC`. This holds when
+    the operators and schemes agree with `C` (`ExprCtxOk`), the scope is functional, and the types
+    of the scope, the operators and the written-to blocks of the callees are well kinded in `C`
+    (`WellKindedOk`).
 
     Proved by well-founded recursion on the `size` budget, together with `genStmtChain_sound`. -/
 theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (hProcs : ProcSigCorresponds procs P) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx)
+    (hProcs : ProcSigCorresponds procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx)
     (hWK : WellKindedOk octx procs C ctx)
     (hops : ExprCtxOk C [] [] octx pctx)
     (n : Nat) (hFun : Map.Functional ctx)
@@ -1221,7 +1249,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       cases labels with
       | nil => exact genCmdStmt_sound P env C hops ctx 0 hFun r hr
       | cons hd tl => exact genExitStmt_sound P env C ctx r hr
-    · exact genTypeDeclStmt_sound P env C ctx 0 r hr
+    · exact genTypeDeclStmt_sound P env hLocalTypes C ctx 0 r hr
     · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact genCmdStmt_sound P env C hops ctx 0 hFun r hr
@@ -1236,7 +1264,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       cases labels with
       | nil => exact genCmdStmt_sound P env C hops ctx (size + 1) hFun r hr
       | cons hd tl => exact genExitStmt_sound P env C ctx r hr
-    · exact genTypeDeclStmt_sound P env C ctx (size + 1) r hr
+    · exact genTypeDeclStmt_sound P env hLocalTypes C ctx (size + 1) r hr
     · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
       cases procs with
       | nil => exact genCmdStmt_sound P env C hops ctx (size + 1) hFun r hr
@@ -1244,18 +1272,18 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     · -- block
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨label, hlabel, ⟨⟨len, _⟩⟩, _, triple, htriple, rfl⟩ := hr
-      have ih := genStmtChain_sound P env immutableVars procs hProcs (label :: labels) C ctx hWK
-        hops size len hFun triple htriple
+      have ih := genStmtChain_sound P env immutableVars procs hProcs hLocalTypes (label :: labels) C
+        ctx hWK hops size len hFun triple htriple
       exact StatementsHasTypeW_singleton
         (.block C _ triple.2.1 _ labels label triple.1 default _
           (genFreshLabel_not_mem labels label hlabel) ih (Strata.Util.HMaps.Equiv.refl _))
     · -- ite_det
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨cond, hcond, ⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hops size
-        tlen hFun tt htt
-      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hops size
-        elen hFun et het
+      have iht := genStmtChain_sound P env immutableVars procs hProcs hLocalTypes labels C ctx hWK
+        hops size tlen hFun tt htt
+      have ihe := genStmtChain_sound P env immutableVars procs hProcs hLocalTypes labels C ctx hWK
+        hops size elen hFun et het
       exact StatementsHasTypeW_singleton
         (.ite_det C _ tt.2.1 _ et.2.1 _ labels (generableOrTrue cond) tt.1 et.1 default _
           (generableOrTrue_exprHasTypeW
@@ -1264,10 +1292,10 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     · -- ite_nondet
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨⟨⟨tlen, _⟩⟩, _, ⟨⟨elen, _⟩⟩, _, tt, htt, et, het, rfl⟩ := hr
-      have iht := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hops size
-        tlen hFun tt htt
-      have ihe := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hops size
-        elen hFun et het
+      have iht := genStmtChain_sound P env immutableVars procs hProcs hLocalTypes labels C ctx hWK
+        hops size tlen hFun tt htt
+      have ihe := genStmtChain_sound P env immutableVars procs hProcs hLocalTypes labels C ctx hWK
+        hops size elen hFun et het
       exact StatementsHasTypeW_singleton
         (.ite_nondet C _ tt.2.1 _ et.2.1 _ labels tt.1 et.1 default _ iht ihe
           (Strata.Util.HMaps.Equiv.refl _))
@@ -1275,8 +1303,8 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
       obtain ⟨guard, hguard, measure, hmeasure, invs, hinvs, ⟨⟨blen, _⟩⟩, _, body, hbody, rfl⟩ :=
         hr
-      have ih := genStmtChain_sound P env immutableVars procs hProcs labels C ctx hWK hops size
-        blen hFun body hbody
+      have ih := genStmtChain_sound P env immutableVars procs hProcs hLocalTypes labels C ctx hWK
+        hops size blen hFun body hbody
       exact StatementsHasTypeW_singleton
         (.loop C _ body.2.1 _ labels guard measure invs body.1 default _
           (genCondOrNondet_det_sound env (size + 1) ctx guard hops hFun hWK.ctxWK hguard)
@@ -1287,13 +1315,15 @@ termination_by (n, 0, 0)
 
 /-- **Soundness of `genStmtChain`.** Every statement sequence in the generator's support is
     weakly typed (`StatementsHasTypeW`) between the input scopes and the generator's threaded
-    output contexts, when every callable procedure resolves in `P`, the operator, callee and scope
-    types are well kinded in `C`, the operators and schemes agree with `C`, and the scope is
-    functional. Proved by well-founded recursion on the remaining length `len`. -/
+    output contexts, when every callable procedure resolves in `P`, no type name of `P` is a local
+    type name, the operator, callee and scope types are well kinded in `C`, the operators and
+    schemes agree with `C`, and the scope is functional. Proved by well-founded recursion on the
+    remaining length `len`. -/
 theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (hProcs : ProcSigCorresponds procs P) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx)
+    (hProcs : ProcSigCorresponds procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx)
     (hWK : WellKindedOk octx procs C ctx)
     (hops : ExprCtxOk C [] [] octx pctx)
     (size len : Nat) (hFun : Map.Functional ctx)
@@ -1310,12 +1340,13 @@ theorem genStmtChain_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
   | succ len =>
     simp only [genStmtChain, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨rhead, hhead, rtail, htail, rfl⟩ := hr
-    have hh := genStmt_sound P env immutableVars procs hProcs labels C ctx hWK hops size hFun
-      rhead hhead
+    have hh := genStmt_sound P env immutableVars procs hProcs hLocalTypes labels C ctx hWK hops size
+      hFun rhead hhead
     have hFun' : Map.Functional rhead.outCtx :=
       genStmt_outCtx_functional octx pctx tvars immutableVars procs labels C ctx size hFun
         rhead hhead
-    have ht := genStmtChain_sound P env immutableVars procs hProcs labels rhead.outC rhead.outCtx
+    have ht := genStmtChain_sound P env immutableVars procs hProcs hLocalTypes labels rhead.outC
+      rhead.outCtx
       (wellKindedOk_preserved octx pctx tvars immutableVars procs labels C ctx size hWK
         rhead hhead)
       (hops.mono
@@ -1569,34 +1600,44 @@ theorem genInvariants_complete (depth : Nat) (ctx : VarCtx) (invs : List (String
   refine ⟨hlen, fun p hp => ?_⟩
   exact genInvariant_complete depth ctx p (hinvs p hp).1 (hinvs p hp).2 (hgen p hp)
 
-/-- The completeness of `genTypeConstructor`. A type constructor is reachable when its name and each of its
-    parameter names is a reachable identifier of `genIdentName`, which means that the name is not empty and is
-    not a keyword, and when the length of its parameter list is not more than the depth. The `bound` field
-    needs no side condition, because the generator draws over both values of `Boundedness`. -/
+/-- Every local type name that `genIdentName` can draw is reachable by `genLocalTypeName`. -/
+theorem genLocalTypeName_complete {s : String}
+    (hs : s ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hlocal : isLocalTypeName s = true) :
+    s ∈ SetGen.support (genLocalTypeName (G := SetGen.Set)) := by
+  simp only [genLocalTypeName, mem_support_bind_iff, mem_support_pure_iff]
+  exact ⟨s, hs, by simp only [hlocal, if_true]⟩
+
+/-- The completeness of `genTypeConstructor`. A type constructor is reachable when its name is a
+    local type name, its name and each of its parameter names is a reachable identifier of
+    `genIdentName`, and its parameter list is no longer than the depth. -/
 theorem genTypeConstructor_complete (depth : Nat) (tc : TypeConstructor)
+    (hlocal : isLocalTypeName tc.name = true)
     (hname : tc.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
     (hlen : tc.params.length ≤ depth)
     (hparams : ∀ s ∈ tc.params, s ∈ SetGen.support (genIdentName (G := SetGen.Set))) :
     tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth) := by
   simp only [genTypeConstructor, mem_support_bind_iff, mem_support_pure_iff,
              mem_support_listOfMaxLength_iff]
-  refine ⟨tc.name, hname, tc.params, ⟨hlen, hparams⟩, tc.bound, ?_, ?_⟩
+  refine ⟨tc.name, genLocalTypeName_complete hname hlocal, tc.params, ⟨hlen, hparams⟩, tc.bound,
+    ?_, ?_⟩
   · -- both `Boundedness` values are in the sampled list
     rw [mem_support_elements_iff]; cases tc.bound <;> simp
   · obtain ⟨bound, name, params⟩ := tc; rfl
 
 /-- `genTypeConstructor_complete`, and `mem_support_genIdentName_iff` discharges both of its
     hypotheses on name reachability from syntax. Only decidable conditions remain: the name of the
-    constructor and each parameter name is a bare Core identifier and is not a reserved
-    keyword. -/
+    constructor is a local type name, and it and each parameter name is a bare Core identifier and
+    is not a reserved keyword. -/
 theorem genTypeConstructor_complete_of_syntactic (depth : Nat) (tc : TypeConstructor)
+    (hlocal : isLocalTypeName tc.name = true)
     (hnameSyn : StrataGenerators.Function.IsGenIdentName tc.name)
     (hnameKw : isReservedKeyword tc.name = false)
     (hlen : tc.params.length ≤ depth)
     (hparams : ∀ s ∈ tc.params,
       StrataGenerators.Function.IsGenIdentName s ∧ isReservedKeyword s = false) :
     tc ∈ SetGen.support (genTypeConstructor (G := SetGen.Set) depth) :=
-  genTypeConstructor_complete depth tc
+  genTypeConstructor_complete depth tc hlocal
     (StrataGenerators.Function.mem_support_genIdentName_of_syntactic hnameSyn hnameKw) hlen
     (fun s hs => StrataGenerators.Function.mem_support_genIdentName_of_syntactic
       (hparams s hs).1 (hparams s hs).2)

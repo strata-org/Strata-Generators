@@ -328,10 +328,10 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     FuncHasTypeW C ts func := by
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
   obtain ⟨name, _, rawTypeArgs, hrawTypeArgs, rawInputs, hrawInputs,
-          output, houtput, body, hbody, preconditions, hpre, hfeq⟩ := hfunc
+          output, houtput, body, hbody, preconditions, hpre, _, _, hfeq⟩ := hfunc
   have hIn : func.inputs = rawInputs.filter (fun p => !avoid p.1.name) := by rw [hfeq]
   have hOut : func.output = output := by rw [hfeq]
-  have hTA : func.typeArgs = (rawTypeArgs.filter isAllowedName).filter
+  have hTA : func.typeArgs = rawTypeArgs.filter
       (fun a =>
         (LMonoTy.freeVars (LMonoTy.mkArrow' func.output func.inputs.values)).contains a) := by
     rw [hfeq]
@@ -344,13 +344,13 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
   -- The facts about the drawn type arguments and the drawn inputs.
   have hrawNodup : rawTypeArgs.Nodup := genTypeArgs_nodup depth rawTypeArgs hrawTypeArgs
   obtain ⟨hrawKeysNodup, hrawVals⟩ :=
-    genInputs_support (rawTypeArgs.filter isAllowedName) depth rawInputs hrawInputs
+    genInputs_support rawTypeArgs depth rawInputs hrawInputs
   have hkeysNodup : func.inputs.keys.Nodup := by
     rw [hIn]
     exact keys_filter_nodup _ rawInputs hrawKeysNodup
   have hsig : ∀ ty ∈ func.output :: func.inputs.values,
       ∃ m, ty ∈ SetGen.support
-        (genLMonoTy (G := SetGen.Set) (rawTypeArgs.filter isAllowedName) m) := by
+        (genLMonoTy (G := SetGen.Set) rawTypeArgs m) := by
     intro ty hty
     rcases List.mem_cons.mp hty with rfl | hty
     · rw [hOut]
@@ -432,7 +432,7 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
   case inputsNodup => exact hkeysNodup
   case typeArgsNodup =>
     rw [hTA]
-    exact List.Nodup.sublist List.filter_sublist (List.Nodup.sublist List.filter_sublist hrawNodup)
+    exact List.Nodup.sublist List.filter_sublist hrawNodup
   case noUndeclaredVars =>
     intro v hv
     rcases freeVars_mkArrow' _ _ v hv with hout | ⟨t, ht_mem, hvt⟩
@@ -781,12 +781,11 @@ theorem genFunction_names_not_keyword (fctx : FVarCtx) (octx : OpCtx) (depth : N
     (∀ x ∈ func.inputs.keys, isReservedKeyword x.name = false) := by
   simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc
   obtain ⟨name, hname, typeArgs, htypeArgs, inputs, hinputs,
-          output, _, body, _, measure, _,
-          preconditions, _, rfl⟩ := hfunc
+          output, _, body, _, preconditions, _, _, _, rfl⟩ := hfunc
   refine ⟨genIdentName_not_keyword name hname, ?_, ?_⟩
-  · -- The type arguments are a filter of a filter of the drawn names.
+  · -- The type arguments are a filter of the drawn names.
     intro s hs
-    have hsRaw : s ∈ typeArgs := (List.mem_filter.mp (List.mem_filter.mp hs).1).1
+    have hsRaw : s ∈ typeArgs := (List.mem_filter.mp hs).1
     exact genTypeArgs_not_keyword depth typeArgs htypeArgs s hsRaw
   · -- The inputs are a filter of the drawn signature, whose keys are the drawn identifiers.
     intro x hx
