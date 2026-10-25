@@ -133,7 +133,7 @@ variable (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIden
 
 local notation "Gb" bctx:max n:max τ:max => genLExprBase (G := SPMF) fctx octx pctx tvars bctx n τ
 
-theorem genIndir_cf (bctx : BVarCtx) (σ : LMonoTy) (g : LMonoTy → SPMF LExpr') (h) (b : Nat)
+theorem genIndir_cf (σ : LMonoTy) (g : LMonoTy → SPMF LExpr') (h) (b : Nat)
     (hK : opCtxArity octx ≤ 3)
     (hg : ∀ σ', IsSoundFor (g σ') (fun a => (cf a).card ≤ b)) :
     IsSoundFor (genIndir (G := SPMF) octx σ g h) (fun e => (cf e).card ≤ 1 + 3 * b) := by
@@ -271,7 +271,7 @@ theorem base_two_cf (hK : opCtxArity octx ≤ 3) (bctx : BVarCtx) (τ : LMonoTy)
       (genLExprBase (G := SPMF) fctx octx pctx tvars bctx m) h)
       (fun e => m = 1 → (cf e).card ≤ 4) := by
     intro m σ h e he hm; subst hm
-    exact genIndir_cf octx bctx σ _ h 1 hK (base_one_cf fctx octx pctx tvars bctx) e he
+    exact genIndir_cf octx σ _ h 1 hK (base_one_cf fctx octx pctx tvars bctx) e he
   have hP : ∀ m bc σ, IsSoundFor (genIndirPolyCore (G := SPMF) fctx octx pctx bc σ
       (genLExprBase (G := SPMF) fctx octx pctx tvars bc m) (Gb bc m σ) 3)
       (fun e => m = 1 → (cf e).card ≤ 4) := by
@@ -285,7 +285,7 @@ theorem base_two_cf (hK : opCtxArity octx ≤ 3) (bctx : BVarCtx) (τ : LMonoTy)
     (genGenerableTy_true fctx octx tvars _ _).obs, (genLMonoTy_true tvars _).obs,
     natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs,
     (pickBVar_cf _ _ _).obs, (pickFVar_cf _ _ _).obs, (pickOp_cf _ _ _).obs]
-  all_goals (clear hz hI hP; try simp only [eq_self_iff_true, true_implies, forall_const] at *)
+  all_goals (clear hz hI hP; try simp only [forall_const] at *)
   all_goals (try omega)
   all_goals (try (rw [‹cf _ = ∅›]; simp))
   all_goals (try (rw [cf_of_isLeaf (Or.inl rfl)]; simp))
@@ -302,7 +302,6 @@ noncomputable def lexprArg (bctx : BVarCtx) (k : Nat) : Nat → LMonoTy → SPMF
   | 0 => genLExprBase (G := SPMF) fctx octx pctx tvars bctx 0
   | n + 1 => fun σ => genLExpr (G := SPMF) fctx octx pctx tvars bctx n σ k id
 
-set_option linter.deprecated false in
 /-- Every draw of `genLExpr` comes from the base generator at the same size, from the `Indir`
 rule over `lexprArg`, or from the `IndirPoly` rule over `lexprArg` with the base generator as
 fallback. -/
@@ -323,13 +322,13 @@ theorem genLExpr_cases (bctx : BVarCtx) (d : Nat) (τ : LMonoTy) (k : Nat) (e : 
       obtain ⟨w, g, hp, -, he⟩ := he
       rcases hp with ⟨-, rfl⟩ | ⟨-, rfl⟩
       · exact Or.inl he
-      · simp only [RandomChoice.pick, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+      · simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
           or_false] at he
         obtain ⟨g, hg, he⟩ := he
         rcases hg with rfl | rfl
         · exact Or.inr (Or.inl ⟨h, he⟩)
         · dsimp only at he; exact Or.inr (Or.inr he)
-    · simp only [RandomChoice.pick, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+    · simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
         or_false] at he
       obtain ⟨g, hg, he⟩ := he
       rcases hg with rfl | rfl
@@ -369,7 +368,7 @@ theorem lexpr_two_cf (hK : opCtxArity octx ≤ 3) (bctx : BVarCtx) (τ : LMonoTy
   intro e he
   rcases genLExpr_cases fctx octx pctx tvars bctx 2 τ k e he with h | ⟨h, h'⟩ | h
   · exact base_two_cf fctx octx pctx tvars hK bctx τ e h
-  · exact genIndir_cf octx bctx τ _ h 1 hK
+  · exact genIndir_cf octx τ _ h 1 hK
       (fun σ => lexpr_one_cf fctx octx pctx tvars bctx σ k) e h'
   · rcases genIndirPolyCore_cf fctx octx pctx bctx τ _ _ k hk 1 _
       (fun σ => lexpr_one_cf fctx octx pctx tvars bctx σ k)

@@ -487,7 +487,7 @@ theorem genInputs_length (tv : List TyIdentifier) (d : Nat) (m : ListMap (Identi
   simp only [genIdents, mem_support_map_iff] at hidents
   obtain ⟨names, hnames, rfl⟩ := hidents
   have hl := ((mem_support_listOfMaxLength_iff).mp (by simpa [genNameList] using hnames)).1
-  have : m.length = m.keys.length := by simp [ListMap.keys]
+  have : m.length = m.keys.length := by simp
   rw [this, hkeys]
   exact le_trans (uniq_length_le _) (by simpa using hl)
 
@@ -502,7 +502,6 @@ theorem genFunction_arity (fctx : FVarCtx) (octx : OpCtx) (d : Nat) (pctx : Poly
   simp only [funcCurriedTy, decomposeArrow_mkArrow', List.length_map]
   have h1 := genInputs_length _ _ _ hinputs
   have h2 := le_trans (decomposeArrow_length_le output) (genLMonoTy_mem_depth houtput)
-  simp only [ListMap] at h1
   omega
 
 /-- A selection that admits no derived datatype function into the operator vocabulary. -/
@@ -597,7 +596,6 @@ theorem genDeclStep_arity (s : GenState) (b : Bounds) (hb : ArityOk b) (hd : b.e
        · obtain ⟨f, md', rfl⟩ := addConstants_isFunc _ _ _ _ _ heq d hd; cases h
        · simp only [List.mem_singleton] at hd; subst hd; simp [mkDistinctDecl] at h)
     | (rw [hnil, List.nil_append]; exact hs)
-    | (simp [NoCoveringAxiom]; done)
     | (have h2 := ‹(decomposeArrow (funcCurriedTy _)).1.length ≤ 2 * b.funcDepth›
        unfold funcOpEntry
        split

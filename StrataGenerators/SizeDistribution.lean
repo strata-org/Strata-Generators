@@ -197,9 +197,8 @@ theorem prob_pickOp_univ (octx : OpCtx) (τ : LMonoTy) (hv) :
     prob (pickOp (G := SPMF) octx τ hv) Set.univ = 1 := by
   unfold pickOp; exact prob_elements_of_forall _ fun _ _ => trivial
 
-set_option linter.deprecated false in
 theorem prob_genBoolConst : prob (genBoolConst (G := SPMF)) (IsForm .const) = 1 := by
-  simp only [genBoolConst, RandomChoice.pick, prob_oneOf, List.map_cons, List.map_nil,
+  simp only [genBoolConst, prob_oneOf, List.map_cons, List.map_nil,
     prob_pure_of_mem (show LExpr.boolConst () true ∈ IsForm .const from rfl),
     prob_pure_of_mem (show LExpr.boolConst () false ∈ IsForm .const from rfl)]
   norm_num; exact ENNReal.div_self (by norm_num) (by norm_num)
@@ -216,7 +215,6 @@ theorem prob_pickBaseType_bool : 1 / 6 ≤ prob (pickBaseType (G := SPMF)) {LMon
   · simp only [List.forall₂_cons, List.Forall₂.nil, and_true, zero_le, and_true]
     exact (prob_pure_of_mem (Set.mem_singleton _)).ge
 
-set_option linter.deprecated false in
 /-- `genLMonoTy` draws `bool` with probability at least `1/12`, at every depth. -/
 theorem prob_genLMonoTy_bool (tvars : List TyIdentifier) (n : Nat) :
     1 / 12 ≤ prob (genLMonoTy (G := SPMF) tvars n) {LMonoTy.bool} := by
@@ -947,7 +945,6 @@ theorem closed_coverage_threshold (tvars : List TyIdentifier) :
 
 -- ── `genLExpr`: the root-weighted wrapper ───────────────────────────
 
-set_option linter.deprecated false in
 /-- `genLExpr` keeps `genLExprBase` as a branch of weight at least `1/10` (the `1`-of-`10` base
 branch when a monomorphic candidate exists, the `1`-of-`2` `pick` otherwise), so every lower bound on
 `genLExprBase` transfers at a factor of `1/10`, in every context and for every `retryCont`. -/
@@ -963,7 +960,6 @@ theorem prob_genLExpr_ge (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) (k : Nat)
     simp only [List.getElem_cons_zero, List.length_cons, List.length_nil]
     exact mul_le_mul' (by ennr) le_rfl
 
-set_option linter.deprecated false in
 /-- Without a factory of positive arity and without polymorphic operators, `genLExpr`'s support is
 inside `genLExprBase`'s: the `Indir` branch is guarded off and `IndirPoly` falls back to the base
 generator at the same size and type. -/
@@ -973,7 +969,7 @@ theorem genLExpr_support_sub (hops : ∀ σ, findOpsInCtx octx σ = []) (bctx : 
     e ∈ SPMF.support (genLExprBase (G := SPMF) fctx octx [] tvars bctx n τ) := by
   unfold genLExpr at he; dsimp only at he
   rw [dif_neg (by rw [hops τ]; simp)] at he
-  simp only [RandomChoice.pick, mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
+  simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
     or_false] at he
   obtain ⟨g, hg, he⟩ := he
   rcases hg with rfl | rfl
