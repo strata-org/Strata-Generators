@@ -3,7 +3,8 @@ import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProcedureHasTypeAGen
 import StrataGenerators.ProgramGen.ProcSigThread
 import Strata.Languages.Core.DatatypeTypeProps
-import Strata.Languages.Core.WeakTypeSpec
+import Strata.Languages.Core.TypingSpec
+import Strata.Languages.Core.ProgramTypeProps
 
 /-!
 # Whole-program soundness
@@ -12,14 +13,15 @@ Combines the per-declaration soundness lemmas (`StrataGenerators.ProgramGen.Soun
 and the `ContextOk`-preservation lemmas (`StrataGenerators.ProgramGen.ContextOkPreserve`)
 into:
 
-* `genDeclDatatype_sound`, `genDeclFunction_sound` and `genDeclProcedure_sound` cover the steps
-  whose proofs need the datatype, function and procedure generators.
-* `genDeclStep_sound` covers the dispatch over the seven steps.
-* `genDeclsFold_sound` covers the fold over the declarations, and it gives `DeclsHasTypeW` for the
+* `genDeclDatatype_sound`, `genDeclFunction_sound`, `genDeclProcedure_sound` and
+  `genDeclRecFuncBlock_sound` cover the steps whose proofs need the datatype, function and
+  procedure generators.
+* `genDeclStep_sound` covers the dispatch over the eight steps.
+* `genDeclsFold_sound` covers the fold over the declarations, and it gives `DeclsWellTyped` for the
   whole emitted list, at *each* enclosing program.
 * `genProgram_sound` is the top-level theorem. Each generated program satisfies
-  `ProgramHasTypeW programContext [] P`: its names are distinct within each kind of declaration and
-  its declarations are weakly typed.
+  `ProgramWellTyped programContext [] P`: its names are distinct within each kind of declaration and
+  its declarations are well-typed.
 -/
 
 open Lambda RandomChoice Core Core.TypeSpec Imperative SetGen
@@ -46,7 +48,7 @@ theorem addMutualBlock_rigid {C C' : LContext CoreLParams} {block : MutualDataty
 theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclDatatype (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclDatatype, mem_support_bind_iff] at h
   obtain ⟨block, hblock, hmatch⟩ := h
   -- Well-formedness of the block (consumes `ContextOk` from `Inv`).
@@ -59,7 +61,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
   -- Case on the gate (spec-native `addMutualBlock` instances, matching the generator).
   cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams s.C block with
@@ -68,7 +70,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
   | ok C' =>
     rw [hadd] at hmatch
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
@@ -77,9 +79,9 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     refine ⟨?_, ?_⟩
     · -- The generator pins the spec's `addMutualBlock` instances, so `hadd` matches the
       -- constructor directly.
-      exact DeclsHasTypeW.cons _ _ _ _ _ _
-        (DeclHasTypeW.type_data s.C C' [] block .empty hwf hadd)
-        (DeclsHasTypeW.nil _ _)
+      exact DeclsWellTyped.cons _ _ _ _ _ _
+        (DeclWellTyped.type_data s.C C' [] block .empty hwf hadd)
+        (DeclsWellTyped.nil _ _)
     · -- `Inv` preserved.
       -- Grown reserved set is `block.map (·.name) ++ s.reserved`.
       -- Block names avoid `initialReserved` over the *combined* pool; the
@@ -251,11 +253,11 @@ theorem wellKindedAmbient_of_inv {s : GenState} (hinv : Inv s) (rv : List TyIden
     octxWK := hinv.octxWK
     sigsWK := hinv.sigsWK }
 
-/-- Weak procedure typing does not read the procedure's name, so renaming the procedure keeps it. -/
-theorem procHasTypeW_rename {P : Program} {C : LContext CoreLParams} {ts : TypeScopes}
+/-- Procedure well-typedness does not read the procedure's name, so renaming keeps it. -/
+theorem procWellTyped_rename {P : Program} {C : LContext CoreLParams} {ts : TypeScopes}
     {proc : Procedure} {nm : CoreIdent}
-    (h : ProcHasTypeW P C ts proc) :
-    ProcHasTypeW P C ts { proc with header := { proc.header with name := nm } } :=
+    (h : ProcWellTyped P C ts proc) :
+    ProcWellTyped P C ts { proc with header := { proc.header with name := nm } } :=
   { inputsNodup := h.inputsNodup
     outputsNodup := h.outputsNodup
     typeArgsNodup := h.typeArgsNodup
@@ -267,7 +269,7 @@ theorem procHasTypeW_rename {P : Program} {C : LContext CoreLParams} {ts : TypeS
     bodyTyped := h.bodyTyped }
 
 /-- Soundness of the procedure step. The body is generated under the context and scope of the fold,
-    so the procedure is weakly typed in `C`; renaming it keeps that. `C` is unchanged, and `Inv`
+    so the procedure is well-typed in `C`; renaming it keeps that. `C` is unchanged, and `Inv`
     survives: `reserved` grows, and the new callable signature writes types that are well kinded
     in `C`. -/
 theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
@@ -275,7 +277,7 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨proc₀, hproc₀, nm, _, hds, hs'⟩ := h
   subst hds hs'
@@ -284,12 +286,12 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
   have hops : ExprCtxOk s.C [] [] s.octx s.derivedPctx :=
     hinv.exprCtx.restrict (fun _ hp => absurd hp List.not_mem_nil) (fun _ hp => hp)
       (fun _ hp => List.mem_append_right _ hp)
-  have hpt : ProcHasTypeW P s.C [] proc₀ :=
+  have hpt : ProcWellTyped P s.C [] proc₀ :=
     genProcedure_sound_ambient P s.octx s.procs hProcs hLocalTypes b.procSize b.procLen s.C s.Γ
       (wellKindedAmbient_of_inv hinv) s.derivedPctx hops proc₀ hproc₀
-  have hpt' : ProcHasTypeW P s.C []
+  have hpt' : ProcWellTyped P s.C []
       { proc₀ with header := { proc₀.header with name := ⟨nm, ()⟩ } } :=
-    procHasTypeW_rename hpt
+    procWellTyped_rename hpt
   -- The registered signature's written-to blocks are the outputs.
   obtain ⟨M, I, O, hcp, _, hdO, _, houts, _⟩ := genProcedure_commonPrefix_decomp hproc₀
   have hout : ∀ ty ∈ (M ++ O).values, ty ∈ proc₀.header.outputs.values := by
@@ -298,22 +300,246 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     exact hty
   have hsigWK : ∀ ty ∈ (M ++ O).values, s.C.WellKindedTy ty :=
     fun ty hty => hpt.signatureWellKinded ty (List.mem_append_right _ (hout ty hty))
-  refine ⟨DeclsHasTypeW.cons _ _ _ _ _ _
-      (DeclHasTypeW.proc s.C [] _ .empty hpt') (DeclsHasTypeW.nil _ _), ?_⟩
+  refine ⟨DeclsWellTyped.cons _ _ _ _ _ _
+      (DeclWellTyped.proc s.C [] _ .empty hpt') (DeclsWellTyped.nil _ _), ?_⟩
   refine inv_cons_reserved_procs hinv _ _ ?_
   simp only [hcp, hdO]
   exact hsigWK
 
+/-! ## Registering declared functions -/
+
+/-- `Inv` survives registering a function that the context accepts and whose signature meets the
+    signature conditions. -/
+theorem inv_registerFunc {s : GenState} (hinv : Inv s) {func : Function}
+    {C' : LContext CoreLParams} (hadd : s.C.addFactoryFunctionWithError func.toLFunc = .ok C')
+    (hsig : StrataGenerators.Function.FuncSigOk s.C func) : Inv (s.registerFunc C' func) := by
+  have hext : FactoryExtendedBy (fun f g => g = f) s.C C' [func.toLFunc] :=
+    factoryExtendedBy_of_addFactory hadd
+  have hkt : C'.knownTypes = s.C.knownTypes := (addFactory_fields hadd).1
+  have hsigWK : ∀ ty ∈ func.output :: func.inputs.values, C'.WellKindedTy ty := by
+    intro ty hty
+    unfold LContext.WellKindedTy
+    rw [hkt]
+    exact hsig.signatureWellKinded ty hty
+  have harrow : C'.knownTypes["arrow"]? = some 2 := by rw [hkt]; exact hinv.ctxOk.arrow_arity
+  have hcurWK : C'.WellKindedTy (funcCurriedTy func) :=
+    wellKindedTy_mkArrow' harrow (hsigWK _ List.mem_cons_self) _ (fun t ht =>
+      hsigWK t (List.mem_cons_of_mem _ (by rw [ListMap.values_eq_map_snd]; exact ht)))
+  have hcurK : LMonoTy.knownInstance (funcCurriedTy func) C'.knownTypes = true :=
+    Lambda.knownInstance_of_wellKinded _ _ hcurWK
+  have hfuncTy : func.toLFunc.type = .ok (.forAll func.toLFunc.typeArgs
+      (LMonoTy.mkArrow' func.toLFunc.output (func.toLFunc.inputs.map Prod.snd))) :=
+    type_eq_of_sigWF harrow hsig.inputsNodup hsig.typeArgsNodup
+      (Lambda.knownInstance_of_wellKinded _ _ (hsigWK _ List.mem_cons_self))
+  have hctx' : ExprCtxOk C' [] [] s.octx (s.pctx ++ s.derivedPctx) :=
+    hinv.exprCtx.extend hext (fun f hf => by rw [List.mem_singleton.mp hf]; exact hfuncTy)
+  have hmemFunc : C'.functions[func.name.name]? = some func.toLFunc := by
+    obtain ⟨g, hg, hgf⟩ := hext.contains_new func.toLFunc List.mem_cons_self
+    rw [hgf] at hg
+    exact hg
+  have hclosedFunc : ∀ v ∈ LMonoTy.freeVars (funcCurriedTy func), v ∈ func.typeArgs := by
+    intro v hv
+    unfold funcCurriedTy at hv
+    rw [← ListMap.values_eq_map_snd] at hv
+    rcases StrataGenerators.Function.freeVars_mkArrow' _ _ v hv with hout | ⟨t, ht, hvt⟩
+    · exact hsig.sigVars _ List.mem_cons_self v hout
+    · exact hsig.sigVars t (List.mem_cons_of_mem _ ht) v hvt
+  have hgrown := inv_addFactory hinv hadd hctx'
+  refine inv_setOpCtxs hgrown _ _ _ ?_ ?_ ?_
+  · intro p hp
+    split at hp
+    · rename_i entry hentry
+      simp only [OpCtx.ops_ofList, List.mem_append, List.mem_replicate] at hp
+      rcases hp with hold | ⟨_, rfl⟩
+      · exact hgrown.octxWK p hold
+      · exact funcOpEntry_wellKinded harrow hentry hsigWK
+    · exact hgrown.octxWK p hp
+  · refine
+      { arities := hctx'.arities
+        sigs := hctx'.sigs
+        fvars := hctx'.fvars
+        ops := ?_
+        polys := ?_
+        polysKnown := ?_ }
+    · intro p hp
+      split at hp
+      · rename_i entry hentry
+        simp only [OpCtx.ops_ofList, List.mem_append, List.mem_replicate] at hp
+        rcases hp with hold | ⟨_, rfl⟩
+        · exact hctx'.ops p hold
+        · unfold funcOpEntry at hentry
+          split at hentry
+          · rw [Option.some.injEq] at hentry
+            rw [← hentry]
+            exact ⟨hcurK, func.toLFunc, hmemFunc, [], (LMonoTy.subst_nil _).symm⟩
+          · exact absurd hentry (by simp)
+      · exact hctx'.ops p hp
+    · intro name lty hmem
+      split at hmem
+      · rename_i entry hentry
+        rw [List.append_assoc, List.mem_append, List.mem_append, List.mem_replicate] at hmem
+        rcases hmem with hold | ⟨_, rfl⟩ | hold
+        · exact hctx'.polys name lty (List.mem_append_left _ hold)
+        · unfold funcPolyOpEntry at hentry
+          split at hentry
+          · exact absurd hentry (by simp)
+          · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hentry)
+            exact ⟨func.toLFunc, hmemFunc, rfl⟩
+        · exact hctx'.polys name lty (List.mem_append_right _ hold)
+      · exact hctx'.polys name lty hmem
+    · intro nm' bvs body hmem
+      split at hmem
+      · rename_i entry hentry
+        rw [List.append_assoc, List.mem_append, List.mem_append, List.mem_replicate] at hmem
+        rcases hmem with hold | ⟨_, heq⟩ | hold
+        · exact hctx'.polysKnown nm' bvs body (List.mem_append_left _ hold)
+        · unfold funcPolyOpEntry at hentry
+          split at hentry
+          · exact absurd hentry (by simp)
+          · rw [← Option.some.inj hentry, Prod.mk.injEq, LTy.forAll.injEq] at heq
+            rw [heq.2.2]
+            exact hcurK
+        · exact hctx'.polysKnown nm' bvs body (List.mem_append_right _ hold)
+      · exact hctx'.polysKnown nm' bvs body hmem
+  · intro nm' bvs body hmem
+    split at hmem
+    · rename_i entry hentry
+      rw [List.append_assoc, List.mem_append, List.mem_append, List.mem_replicate] at hmem
+      rcases hmem with hold | ⟨_, heq⟩ | hold
+      · exact hinv.polysClosed nm' bvs body (List.mem_append_left _ hold)
+      · unfold funcPolyOpEntry at hentry
+        split at hentry
+        · exact absurd hentry (by simp)
+        · rw [← Option.some.inj hentry, Prod.mk.injEq, LTy.forAll.injEq] at heq
+          rw [heq.2.1, heq.2.2]
+          exact hclosedFunc
+      · exact hinv.polysClosed nm' bvs body (List.mem_append_right _ hold)
+    · exact hinv.polysClosed nm' bvs body hmem
+
+/-- Registering, in order, functions that the context accepts and whose signatures meet the
+    signature conditions keeps `Inv` and extends the context by exactly those functions, none of
+    which it declared before. -/
+theorem registerFuncs_sound {s s' : GenState} (hinv : Inv s) {fs : List Function}
+    (h : s.registerFuncs fs = some s')
+    (hsig : ∀ f ∈ fs, StrataGenerators.Function.FuncSigOk s.C f) :
+    Inv s' ∧ FactoryExtendedBy (fun f g => g = f) s.C s'.C (fs.map (·.toLFunc)) ∧
+      ∀ f ∈ fs, f.name.name ∉ s.C.functions := by
+  induction fs generalizing s with
+  | nil =>
+    simp only [GenState.registerFuncs, Option.some.injEq] at h
+    subst h
+    refine ⟨hinv, ⟨rfl, rfl, rfl, rfl, fun _ _ hg => hg, ?_, fun _ hn => Or.inl hn⟩, ?_⟩
+    · intro f hf
+      exact absurd hf List.not_mem_nil
+    · intro f hf
+      exact absurd hf List.not_mem_nil
+  | cons f fs ih =>
+    simp only [GenState.registerFuncs] at h
+    split at h
+    · rename_i C₁ hadd
+      have hinv₁ := inv_registerFunc hinv hadd (hsig f List.mem_cons_self)
+      have hkt : C₁.knownTypes = s.C.knownTypes := (addFactory_fields hadd).1
+      have hsig₁ : ∀ g ∈ fs, StrataGenerators.Function.FuncSigOk (s.registerFunc C₁ f).C g :=
+        fun g hg => (hsig g (List.mem_cons_of_mem _ hg)).congr hkt rfl rfl rfl
+      obtain ⟨hinv', hext', hfresh'⟩ := ih hinv₁ h hsig₁
+      have hext₁ := factoryExtendedBy_of_addFactory hadd
+      refine ⟨hinv', factoryExtendedBy_append s.C C₁ s'.C _ _ hext₁ hext', ?_⟩
+      intro g hg hmem
+      rcases List.mem_cons.mp hg with rfl | hg
+      · exact addFactory_name_fresh hadd hmem
+      · obtain ⟨g', hg'⟩ := exists_getElem?_of_mem hmem
+        exact hfresh' g hg (mem_of_getElem?_eq_some (hext₁.preserves_old _ _ hg'))
+    · exact absurd h (by simp)
+
 /-! ## Per-declaration soundness: functions
 
-The function step generates a function via `genFunction`, renames it to a globally fresh name
-(weak function typing does not read the name), and gates on `addFactoryFunctionWithError`. Support
-membership on the `.ok` branch gives `FactoryExtendedBy`. -/
+The function step generates a function via `genFunction`, renames it to a globally fresh name,
+makes it non-recursive with no measure, and gates on `addFactoryFunctionWithError`.
+Support membership on the `.ok` branch gives `FactoryExtendedBy`. -/
 
-/-- Weak function typing does not read the function's name, so renaming the function keeps it. -/
-theorem funcHasTypeW_rename {C : LContext CoreLParams} {ts : TypeScopes}
+/-- Function well-typedness survives renaming the function and making it non-recursive with no
+    measure. -/
+theorem funcWellTyped_rename_nonrec {C : LContext CoreLParams} {ts : TypeScopes}
     {func : Function} {nm : CoreLParams.Identifier}
-    (h : FuncHasTypeW C ts func) : FuncHasTypeW C ts { func with name := nm } :=
+    (h : FuncWellTyped C ts func) :
+    FuncWellTyped C ts { func with name := nm, isRecursive := false, measure := none } :=
+  { inputsNodup := h.inputsNodup
+    typeArgsNodup := h.typeArgsNodup
+    noUndeclaredVars := h.noUndeclaredVars
+    typeArgsInSignature := h.typeArgsInSignature
+    signatureWellKinded := h.signatureWellKinded
+    bodyTyped := h.bodyTyped
+    measureOnlyRecursive := fun _ => rfl
+    measureTyped := fun _ hm => absurd hm (by simp)
+    preconditionsTyped := h.preconditionsTyped
+    axiomsTyped := h.axiomsTyped
+    annotsScoped := by
+      intro e he
+      refine h.annotsScoped e ?_
+      simp only [Strata.DL.Util.Func.exprs, List.mem_append, Option.toList_none,
+        List.not_mem_nil, or_false] at he ⊢
+      exact Or.inl he
+    constrNoBody := h.constrNoBody }
+
+/-- Every datatype of the fold's datatype pool is declared in the context and registered among its
+    known types with its arity. -/
+theorem dtCons_registered {s : GenState} (hinv : Inv s) :
+    ∀ kc ∈ s.dtCons, (s.C.datatypes.getType kc.1).isSome ∧ s.C.knownTypes[kc.1]? = some kc.2 := by
+  intro kc hkc
+  obtain ⟨d, hd, hname, hlen⟩ := hinv.dtPoolOk.arity kc hkc
+  refine ⟨?_, ?_⟩
+  · simp only [Lambda.TypeFactory.getType]
+    exact List.find?_isSome.mpr ⟨d, hd, beq_iff_eq.mpr hname⟩
+  · rw [← hname, ← hlen]
+    exact hinv.datatypesKnown d hd
+
+/-- Soundness of the function step: a function the context accepts is non-recursive, well-typed
+    in `C`, and added to `C`; `Inv` holds after it, with the function's operator entry well kinded
+    and agreeing with its declaration in the grown context. -/
+theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
+    (hinv : Inv s) {ds : List Decl} {s' : GenState}
+    (h : (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b)) :
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
+  simp only [genDeclFunction, mem_support_bind_iff] at h
+  obtain ⟨func₀, hfunc₀, nm, _, hmatch⟩ := h
+  let func : Function := { func₀ with name := ⟨nm, ()⟩, isRecursive := false, measure := none }
+  have hctx₀ : ExprCtxOk s.C [] [] s.octx s.derivedPctx :=
+    hinv.exprCtx.restrict (fun _ hp => absurd hp List.not_mem_nil) (fun _ hp => hp)
+      (fun _ hp => List.mem_append_right _ hp)
+  have hwt : FuncWellTyped s.C [] func :=
+    funcWellTyped_rename_nonrec
+      (StrataGenerators.Function.genFunction_sound [] s.octx b.funcDepth s.C [] s.derivedPctx _
+        s.dtCons hctx₀
+        (fun nm' bvs body hmem => hinv.polysClosed nm' bvs body (List.mem_append_right _ hmem))
+        (dtCons_registered hinv) func₀ hfunc₀)
+  have hnonrec : ¬ func.isRecursive := Bool.false_ne_true
+  split at hmatch
+  · rename_i s₁ hreg
+    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch
+    subst hds hs'
+    have hsig : ∀ f ∈ [func], StrataGenerators.Function.FuncSigOk s.C f :=
+      fun f hf =>
+        List.mem_singleton.mp hf ▸ StrataGenerators.Function.FuncSigOk.of_funcWellTyped hwt
+    obtain ⟨hinv₁, hext, hfresh⟩ := registerFuncs_sound hinv hreg hsig
+    refine ⟨DeclsWellTyped.cons _ _ _ _ _ _
+        (DeclWellTyped.func s.C s₁.C [] func .empty hnonrec (hfresh func List.mem_cons_self) hwt
+          hext)
+        (DeclsWellTyped.nil _ _), ?_⟩
+    have hres₁ : s₁.reserved = s.reserved := (registerFuncs_fields hreg).1
+    have hgrow := inv_grow_reserved hinv₁ [nm]
+    rw [hres₁] at hgrow
+    exact hgrow
+  · simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch
+    subst hds hs'
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
+
+/-! ## Per-declaration soundness: recursive function blocks -/
+
+/-- Dropping `inline` attributes keeps a function well typed. -/
+theorem funcWellTyped_dropInline {C : LContext CoreLParams} {ts : TypeScopes} {f : Function}
+    (h : FuncWellTyped C ts f) : FuncWellTyped C ts (dropInline f) :=
   { inputsNodup := h.inputsNodup
     typeArgsNodup := h.typeArgsNodup
     noUndeclaredVars := h.noUndeclaredVars
@@ -327,168 +553,112 @@ theorem funcHasTypeW_rename {C : LContext CoreLParams} {ts : TypeScopes}
     annotsScoped := h.annotsScoped
     constrNoBody := h.constrNoBody }
 
-/-- Soundness of the function step: a function the context accepts is non-recursive, weakly typed
-    in `C`, and added to `C`; `Inv` holds after it, with the function's operator entry well kinded
-    and agreeing with its declaration in the grown context. -/
-theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
+/-- A function without its `inline` attributes carries none. -/
+theorem dropInline_attr {f : Function} : ∀ a ∈ (dropInline f).attr, a ≠ .inline := by
+  intro a ha
+  simp only [dropInline, Array.mem_filter, decide_eq_true_eq] at ha
+  exact ha.2
+
+/-- Soundness of the recursive-function-block step: a block the context accepts is a non-empty
+    list of recursive, non-inline functions, each well-typed against the context extended by the
+    stubs of all of them, and the block is added to the context; `Inv` holds after it. -/
+theorem genDeclRecFuncBlock_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
-  simp only [genDeclFunction, mem_support_bind_iff] at h
-  obtain ⟨func₀, hfunc₀, nm, _, hmatch⟩ := h
-  let func : Function := { func₀ with name := ⟨nm, ()⟩ }
-  have hctx₀ : ExprCtxOk s.C [] [] s.octx s.derivedPctx :=
-    hinv.exprCtx.restrict (fun _ hp => absurd hp List.not_mem_nil) (fun _ hp => hp)
-      (fun _ hp => List.mem_append_right _ hp)
-  have hwt : FuncHasTypeW s.C [] func :=
-    funcHasTypeW_rename
-      (StrataGenerators.Function.genFunction_sound [] s.octx b.funcDepth s.C [] s.derivedPctx _
-        hctx₀
-        (fun nm' bvs body hmem => hinv.polysClosed nm' bvs body (List.mem_append_right _ hmem))
-        func₀ hfunc₀)
-  -- Non-recursive: `genFunction` leaves `isRecursive` at its `false` default.
-  have hnonrec : ¬ func.isRecursive := by
-    simp only [genFunction, mem_support_bind_iff, mem_support_pure_iff] at hfunc₀
-    obtain ⟨_, _, _, _, _, _, _, _, _, _, _, _, _, _, hf₀⟩ := hfunc₀
-    show ¬ func₀.isRecursive
-    subst hf₀
-    simp
-  cases hadd : s.C.addFactoryFunctionWithError func.toLFunc with
-  | error e =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    obtain ⟨hds, hs'⟩ := hmatch
-    subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
-  | ok C' =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    obtain ⟨hds, hs'⟩ := hmatch
-    subst hds hs'
-    have hext : FactoryExtendedBy (fun f g => g = f) s.C C' [func.toLFunc] :=
-      factoryExtendedBy_of_addFactory hadd
-    refine ⟨DeclsHasTypeW.cons _ _ _ _ _ _
-        (DeclHasTypeW.func s.C C' [] func .empty hnonrec (addFactory_name_fresh hadd) hwt hext)
-        (DeclsHasTypeW.nil _ _), ?_⟩
-    -- `functions` changed (`inv_addFactory`), one name is reserved, and the operator contexts may
-    -- gain the function's entry, whose type is well kinded by the function's signature and is the
-    -- signature of the function `C'` declares under its name.
-    have hkt : C'.knownTypes = s.C.knownTypes := (addFactory_fields hadd).1
-    have hsigWK : ∀ ty ∈ func.output :: func.inputs.values, C'.WellKindedTy ty := by
-      intro ty hty
-      unfold LContext.WellKindedTy
-      rw [hkt]
-      exact hwt.signatureWellKinded ty hty
-    have harrow : C'.knownTypes["arrow"]? = some 2 := by rw [hkt]; exact hinv.ctxOk.arrow_arity
-    have hcurWK : C'.WellKindedTy (funcCurriedTy func) :=
-      wellKindedTy_mkArrow' harrow (hsigWK _ List.mem_cons_self) _ (fun t ht =>
-        hsigWK t (List.mem_cons_of_mem _ (by rw [ListMap.values_eq_map_snd]; exact ht)))
-    have hcurK : LMonoTy.knownInstance (funcCurriedTy func) C'.knownTypes = true :=
-      Lambda.knownInstance_of_wellKinded _ _ hcurWK
-    have hfuncTy : func.toLFunc.type = .ok (.forAll func.toLFunc.typeArgs
-        (LMonoTy.mkArrow' func.toLFunc.output (func.toLFunc.inputs.map Prod.snd))) :=
-      type_eq_of_sigWF harrow hwt.inputsNodup hwt.typeArgsNodup
-        (Lambda.knownInstance_of_wellKinded _ _ (hsigWK _ List.mem_cons_self))
-    have hctx' : ExprCtxOk C' [] [] s.octx (s.pctx ++ s.derivedPctx) :=
-      hinv.exprCtx.extend hext (fun f hf => by rw [List.mem_singleton.mp hf]; exact hfuncTy)
-    have hmemFunc : C'.functions[func.name.name]? = some func.toLFunc := by
-      obtain ⟨g, hg, hgf⟩ := hext.contains_new func.toLFunc List.mem_cons_self
-      rw [hgf] at hg
-      exact hg
-    have hclosedFunc : ∀ v ∈ LMonoTy.freeVars (funcCurriedTy func), v ∈ func.typeArgs := by
-      intro v hv
-      refine hwt.noUndeclaredVars v ?_
-      unfold funcCurriedTy at hv
-      rw [← ListMap.values_eq_map_snd] at hv
-      exact hv
-    have hgrown := inv_grow_reserved (s := { s with C := C' }) (inv_addFactory hinv hadd hctx') [nm]
-    refine inv_setOpCtxs hgrown _ _ _ ?_ ?_ ?_
-    · intro p hp
-      split at hp
-      · rename_i entry hentry
-        simp only [OpCtx.ops_ofList, List.mem_append, List.mem_replicate] at hp
-        rcases hp with hold | ⟨_, rfl⟩
-        · exact hgrown.octxWK p hold
-        · exact funcOpEntry_wellKinded harrow hentry hsigWK
-      · exact hgrown.octxWK p hp
-    · refine
-        { arities := hctx'.arities
-          sigs := hctx'.sigs
-          fvars := hctx'.fvars
-          ops := ?_
-          polys := ?_
-          polysKnown := ?_ }
-      · intro p hp
-        split at hp
-        · rename_i entry hentry
-          simp only [OpCtx.ops_ofList, List.mem_append, List.mem_replicate] at hp
-          rcases hp with hold | ⟨_, rfl⟩
-          · exact hctx'.ops p hold
-          · unfold funcOpEntry at hentry
-            split at hentry
-            · rw [Option.some.injEq] at hentry
-              rw [← hentry]
-              exact ⟨hcurK, func.toLFunc, hmemFunc, [], (LMonoTy.subst_nil _).symm⟩
-            · exact absurd hentry (by simp)
-        · exact hctx'.ops p hp
-      · intro name lty hmem
-        split at hmem
-        · rename_i entry hentry
-          rw [List.append_assoc, List.mem_append, List.mem_append, List.mem_replicate] at hmem
-          rcases hmem with hold | ⟨_, rfl⟩ | hold
-          · exact hctx'.polys name lty (List.mem_append_left _ hold)
-          · unfold funcPolyOpEntry at hentry
-            split at hentry
-            · exact absurd hentry (by simp)
-            · obtain ⟨rfl, rfl⟩ := Prod.mk.inj (Option.some.inj hentry)
-              exact ⟨func.toLFunc, hmemFunc, rfl⟩
-          · exact hctx'.polys name lty (List.mem_append_right _ hold)
-        · exact hctx'.polys name lty hmem
-      · intro nm' bvs body hmem
-        split at hmem
-        · rename_i entry hentry
-          rw [List.append_assoc, List.mem_append, List.mem_append, List.mem_replicate] at hmem
-          rcases hmem with hold | ⟨_, heq⟩ | hold
-          · exact hctx'.polysKnown nm' bvs body (List.mem_append_left _ hold)
-          · unfold funcPolyOpEntry at hentry
-            split at hentry
-            · exact absurd hentry (by simp)
-            · rw [← Option.some.inj hentry, Prod.mk.injEq, LTy.forAll.injEq] at heq
-              rw [heq.2.2]
-              exact hcurK
-          · exact hctx'.polysKnown nm' bvs body (List.mem_append_right _ hold)
-        · exact hctx'.polysKnown nm' bvs body hmem
-    · intro nm' bvs body hmem
-      split at hmem
-      · rename_i entry hentry
-        rw [List.append_assoc, List.mem_append, List.mem_append, List.mem_replicate] at hmem
-        rcases hmem with hold | ⟨_, heq⟩ | hold
-        · exact hinv.polysClosed nm' bvs body (List.mem_append_left _ hold)
-        · unfold funcPolyOpEntry at hentry
-          split at hentry
-          · exact absurd hentry (by simp)
-          · rw [← Option.some.inj hentry, Prod.mk.injEq, LTy.forAll.injEq] at heq
-            rw [heq.2.1, heq.2.2]
-            exact hclosedFunc
-        · exact hinv.polysClosed nm' bvs body (List.mem_append_right _ hold)
-      · exact hinv.polysClosed nm' bvs body hmem
+    (h : (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
+  rcases genDeclRecFuncBlock_support h with ⟨rfl, rfl⟩ |
+    ⟨k, names, stubs, sStub, drawn, s₁, hk, hnames, hstubs, hstub, hdrawn, hreg, rfl, rfl⟩
+  · exact ⟨DeclsWellTyped.nil _ _, hinv⟩
+  obtain ⟨hlen, _, _⟩ := genDeclNames_spec hnames
+  -- Each stub is drawn by `genFuncSig`, so it meets the signature conditions and has no other part.
+  have hstubOk : ∀ st ∈ stubs, StrataGenerators.Function.FuncSigOk s.C st ∧
+      st.toLFunc = (funcStub st).toLFunc := by
+    intro st hst
+    obtain ⟨nm, _, hmem⟩ := forall₂_mem_left hstubs st hst
+    exact ⟨StrataGenerators.Function.genFuncSig_sound (simpleTyArities_of_inv hinv) nm _ _
+        (fun kc hkc => (dtCons_registered hinv kc hkc).2) hmem,
+      congrArg (·.toLFunc) (StrataGenerators.Function.genFuncSig_stub hmem).2⟩
+  obtain ⟨hinvStub, hextStub, _⟩ :=
+    registerFuncs_sound hinv hstub (fun st hst => (hstubOk st hst).1)
+  obtain ⟨_, _, hderStub, _, hpolyStub⟩ := registerFuncs_fields hstub
+  -- The bodies draw on the stubs' operators and on the stubs' and the derived schemes.
+  have hpoolMem : ∀ p ∈ stubs.filterMap funcPolyOpEntry ++ s.derivedPctx,
+      p ∈ sStub.pctx ++ sStub.derivedPctx := by
+    intro p hp
+    rcases List.mem_append.mp hp with hp | hp
+    · obtain ⟨st, hst, hent⟩ := List.mem_filterMap.mp hp
+      exact List.mem_append_left _ (hpolyStub st hst p hent)
+    · rw [hderStub]
+      exact List.mem_append_right _ hp
+  have hctxB : ExprCtxOk sStub.C [] [] sStub.octx
+      (stubs.filterMap funcPolyOpEntry ++ s.derivedPctx) :=
+    hinvStub.exprCtx.restrict (fun _ hp => absurd hp List.not_mem_nil) (fun _ hp => hp) hpoolMem
+  have hdtsStub : ∀ kc ∈ s.dtCons, (sStub.C.datatypes.getType kc.1).isSome :=
+    fun kc hkc => hextStub.datatypes_eq ▸ (dtCons_registered hinv kc hkc).1
+  have hmember : ∀ f ∈ drawn.map dropInline,
+      FuncWellTyped sStub.C [] f ∧ StrataGenerators.Function.FuncSigOk s.C f ∧
+        f.isRecursive = true := by
+    intro f hf
+    obtain ⟨f₀, hf₀, rfl⟩ := List.mem_map.mp hf
+    obtain ⟨st, hst, hparts⟩ := forall₂_mem_left hdrawn f₀ hf₀
+    obtain ⟨_, hta, hin, hout, hrec⟩ := StrataGenerators.Function.genFuncParts_shape hparts
+    have hsigSt := (hstubOk st hst).1
+    have hwt := StrataGenerators.Function.genFuncParts_sound _ [] sStub.octx b.funcDepth sStub.C []
+      _ s.dtCons hctxB (fun nm bvs body hmem => hinvStub.polysClosed nm bvs body (hpoolMem _ hmem))
+      hdtsStub st (hsigSt.congr hextStub.knownTypes_eq rfl rfl rfl) f₀ hparts
+    rw [mem_support_pure_iff] at hrec
+    exact ⟨funcWellTyped_dropInline hwt, hsigSt.congr rfl hta hin hout, hrec⟩
+  obtain ⟨hinv₁, hext₁, hfresh₁⟩ :=
+    registerFuncs_sound hinv hreg (fun f hf => (hmember f hf).2.1)
+  -- The registered stubs are the stubs of the members.
+  have hstubsEq : stubs.map (·.toLFunc) =
+      (drawn.map dropInline).map (fun f => (funcStub f).toLFunc) := by
+    rw [List.map_congr_left (fun st hst => (hstubOk st hst).2), List.map_map]
+    refine (map_eq_map_of_forall₂ hdrawn ?_).symm
+    intro f₀ st hparts
+    obtain ⟨hname, hta, hin, hout, _⟩ := StrataGenerators.Function.genFuncParts_shape hparts
+    show (funcStub f₀).toLFunc = (funcStub st).toLFunc
+    simp only [funcStub, hname, hta, hin, hout]
+  have hextStub' : FactoryExtendedBy (fun f g => g = f) s.C sStub.C
+      ((drawn.map dropInline).map (fun f => (funcStub f).toLFunc)) := by
+    rw [← hstubsEq]
+    exact hextStub
+  have hne : drawn.map dropInline ≠ [] := by
+    intro hnil
+    have hl : (drawn.map dropInline).length = k := by
+      rw [List.length_map, hdrawn.length_eq, hstubs.length_eq, hlen]
+    rw [hnil, List.length_nil] at hl
+    omega
+  have hnoInline : ∀ f ∈ drawn.map dropInline, ∀ a ∈ f.attr, a ≠ .inline := by
+    intro f hf
+    obtain ⟨f₀, _, rfl⟩ := List.mem_map.mp hf
+    exact dropInline_attr
+  have hdecl : DeclWellTyped P s.C [] (.recFuncBlock (drawn.map dropInline) .empty) s₁.C :=
+    DeclWellTyped.recFuncBlock s.C sStub.C s₁.C [] _ .empty _ _ hne hfresh₁ hnoInline rfl rfl
+      hextStub' hext₁ (fun f hf => (hmember f hf).1) (fun f hf => (hmember f hf).2.2)
+  refine ⟨DeclsWellTyped.cons _ _ _ _ _ _ hdecl (DeclsWellTyped.nil _ _), ?_⟩
+  have hres₁ : s₁.reserved = s.reserved := (registerFuncs_fields hreg).1
+  have hgrow := inv_grow_reserved hinv₁ names
+  rw [hres₁] at hgrow
+  exact hgrow
 
 /-! ## The declaration-step dispatch -/
 
 /-- Soundness of one declaration step: whichever kind the step selects, the emitted declarations are
-    weakly typed from the context of `s` to that of `s'`, and `Inv` is preserved. -/
+    well-typed from the context of `s` to that of `s'`, and `Inv` is preserved. -/
 theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
     (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so each branch equation pins both components.
   simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _, hmem⟩ := h
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ |
+    ⟨_, rfl⟩
   · exact genDeclAbstract_sound P hinv hmem
   · exact genDeclAlias_sound P hinv hmem
   · exact genDeclAxiom_sound P hinv hmem
@@ -496,10 +666,11 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
   · exact genDeclDatatype_sound P hinv hmem
   · exact genDeclFunction_sound P hinv hmem
   · exact genDeclProcedure_sound P hinv hProcs hLocalTypes hmem
+  · exact genDeclRecFuncBlock_sound P hinv hmem
 
 /-! ## The declaration fold -/
 
-/-- Soundness of the declaration fold: the emitted declaration list is weakly typed from the context
+/-- Soundness of the declaration fold: the emitted declaration list is well-typed from the context
     of the initial state to that of the final state, for any enclosing program `P` whose procedures
     the final callable signatures describe and with no local type name among its type names, and
     `Inv` is preserved throughout. -/
@@ -508,13 +679,13 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n))
     (hProcs : ProcSigCorresponds s'.procs P)
     (hLocalTypes : ∀ d ∈ programNamesOfKind P .type, ¬ isLocalTypeName d.name) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   induction n generalizing s ds s' with
   | zero =>
     simp only [genDeclsFold, mem_support_pure_iff, Prod.mk.injEq] at h
     obtain ⟨hds, hs'⟩ := h
     subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
   | succ n ih =>
     simp only [genDeclsFold, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
     obtain ⟨⟨ds₁, s₁⟩, hstep, ⟨rest, s₂⟩, hrest, hds, hs'⟩ := h
@@ -530,7 +701,7 @@ theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
         (ProcSigCorresponds.mono hProcs (fun sig hsig => hsub₁ sig (hsub₀ sig hsig)))
         hLocalTypes hstep
     obtain ⟨hrest_sound, hinv₂⟩ := ih hinv₁ hrest hProcs
-    exact ⟨declsHasTypeW_append hstep_sound hrest_sound, hinv₂⟩
+    exact ⟨declsWellTyped_append hstep_sound hrest_sound, hinv₂⟩
 
 /-! ## Top-level soundness -/
 
@@ -541,15 +712,15 @@ theorem programNamesOfKind_nodup {P : Program} (h : P.getNames.Nodup) (k : DeclK
   rw [hnames] at h
   exact (List.filter_sublist.flatMap _).nodup h
 
-/-- Every program `genProgram` produces is weakly typed in `programContext` with no variable in
+/-- Every program `genProgram` produces is well-typed in `programContext` with no variable in
     scope.
 
     * Its names are distinct within each kind of declaration. The generator draws each declaration
       name fresh against a threaded reserved set, so all of its names are distinct.
-    * Its declarations are weakly typed, which the fold gives. -/
+    * Its declarations are well-typed, which the fold gives. -/
 theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
     (h : P ∈ SetGen.support (genProgram (G := SetGen.Set) numDecls b)) :
-    ProgramHasTypeW programContext [] P := by
+    ProgramWellTyped programContext [] P := by
   simp only [genProgram, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨⟨decls, sf⟩, hfold, hP⟩ := h
   subst hP

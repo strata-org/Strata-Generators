@@ -9,7 +9,7 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 `spec_complete` in `StmtHasTypeAGenComplete.lean` carries three side conditions:
 `InGenShape`, `AlphabetOk` and `CallOk`. This file shows that you cannot remove
 them. For each of the three, it gives a statement that is well-typed under
-`StatementHasTypeW` but is not in the support of `genStmt`. Therefore no
+`StatementWellTyped` but is not in the support of `genStmt`. Therefore no
 completeness theorem holds for `genStmt` without a side condition of this kind.
 
 ## The three gaps
@@ -94,7 +94,8 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     (h : (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
       SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [])) ∨
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [] [] C.knownTypes)) ∨
     (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
@@ -134,7 +135,8 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
         SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d []) →
       (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx d [])) := by
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx d [] [] C.knownTypes)) := by
     intro d hmem
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hmem
     obtain ⟨r, hr, heq⟩ := hmem
@@ -213,11 +215,11 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     the label from `genIdentName`. -/
 theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx' : VarCtx)
     (n : Nat) (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
-    {avoid : List String}
+    {avoid : List String} {kt : Lambda.KnownTypes}
     (h : (⟨.assert l e md, ctx'⟩ : GenCmdResult) ∈
-      SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [] avoid)) :
+      SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [] avoid kt)) :
     md = default ∧ l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx n _ [] avoid] at h
+  rw [genCmd_support_iff octx tvars immutableVars ctx n _ [] avoid kt] at h
   rcases h with h | h | ⟨_, h⟩ | ⟨_, h⟩ | h | h | h
   · simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff,
       GenCmdResult.mk.injEq] at h
@@ -242,12 +244,12 @@ theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx'
 
 -- ── Well-typedness of an `assert` ────────────────────────────────────────
 
-/-- An `assert` of a weakly typed `bool` expression is weakly typed at every label and at every
+/-- An `assert` of a well-typed `bool` expression is well-typed at every label and at every
     metadata value. -/
 theorem assert_wt (P : Program) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
     (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
-    (he : ExprHasTypeW C ts e .bool) :
-    StatementHasTypeW P C ts L (Statement.assert l e md) C ts :=
+    (he : ExprWellTyped C ts e .bool) :
+    StatementWellTyped P C ts L (Statement.assert l e md) C ts :=
   .cmd _ _ _ _ _ _ (.cmd _ _ _ (.assert _ _ _ _ _ he (Strata.Util.HMaps.Equiv.refl _)))
     (Strata.Util.HMaps.Equiv.refl _)
 
@@ -440,11 +442,11 @@ theorem outTarget_gap (labels : List String)
     rw [StrataGenerators.Stmt.getLhs_mkArgs, outTargets_sigP] at hlhs
     exact absurd hlhs (by decide)
 
-/-- **`otherTargetCall` is weakly typed.** The type instantiation is empty. The one input
+/-- **`otherTargetCall` is well-typed.** The type instantiation is empty. The one input
     position holds the literal `1` at type `int`. The one write position holds `z`, which the
     scope binds at type `int`. -/
 theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
-    StatementHasTypeW progP C (procToTCtx callerCtx).types L otherTargetCall C
+    StatementWellTyped progP C (procToTCtx callerCtx).types L otherTargetCall C
       (procToTCtx callerCtx).types := by
   have hfind : Program.Procedure.find? progP "p" = some procP := by decide
   refine .cmd _ _ _ _ _ _ (.call _ "p" _ procP _ [] _ hfind ?_ ?_ ?_ ?_
@@ -470,7 +472,7 @@ theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
     subst hzero
     have hval : ∀ h : 0 < (ListMap.values procP.header.inputs).length,
         (ListMap.values procP.header.inputs)[0]'h = .int := fun _ => rfl
-    show ExprHasTypeW C _ (LExpr.const () (.intConst 1))
+    show ExprWellTyped C _ (LExpr.const () (.intConst 1))
       (LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) (ListMap.values procP.header.inputs)[0])
     rw [hval, Lambda.subst_ofScopes_nilScope]
     refine ⟨.const, ?_, ⟨?_, ?_, ?_⟩⟩
@@ -498,7 +500,7 @@ theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
     `genStmt` cannot reach it at any size. -/
 theorem otherTargetCall_gap (labels : List String)
     (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
-    StatementHasTypeW progP C (procToTCtx callerCtx).types labels otherTargetCall C
+    StatementWellTyped progP C (procToTCtx callerCtx).types labels otherTargetCall C
         (procToTCtx callerCtx).types ∧
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
       SetGen.support (genStmt (G := SetGen.Set) octx tvars [] [sigP] labels C callerCtx [] n) :=

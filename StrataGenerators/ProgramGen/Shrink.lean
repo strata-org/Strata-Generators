@@ -213,8 +213,8 @@ def shrinkTypeDecl : TypeDecl → List TypeDecl
     nowhere, does not type check.
 
     Such a program is easy to build. The reduction of `shrinkFunc` that drops an input removes the formal
-    parameter that a clause names, and `genFunction` emits a clause over the formal parameters on about half of
-    its draws. The shrinkers therefore refuse such a candidate.
+    parameter that a clause names, and `genFunction` often emits a clause that names a formal
+    parameter. The shrinkers therefore refuse such a candidate.
     This condition, together with the "each clause is Boolean" half, is enforced by
     `funcWellFormed`, the single filter every function-shrinking family runs.
 
@@ -263,10 +263,7 @@ def shrinkDistinctExprs (es : List Expression.Expr) : List (List Expression.Expr
       one with `shrinkFunc` (same filter).
 
     Candidates are raw; the whole-program filter in `shrinkProgramDecls` removes
-    the ill-typed ones. `genProgram` never emits `.recFuncBlock`, so that family
-    is exercised by the `#guard`s below only. It is there so that the shrinker is total
-    on hand-written and future-generated programs rather than silently refusing to
-    reduce a declaration kind. -/
+    the ill-typed ones. -/
 def shrinkDecl : Decl → List Decl
   | .type t md => (.type · md) <$> shrinkTypeDecl t
   | .ax a md => (fun e => .ax { a with e := e } md) <$> shrinkLExpr a.e
@@ -447,9 +444,9 @@ def checkProgramStripMetaPreservesTyping (p : Program) : Bool :=
     check. The program-level analogue of the expression-level resolve-after-erase
     property (`checkResolveAfterErase`).
 
-    Erasure can turn an annotated polymorphic instance into an open one, which the checker
-    refuses although the specification accepts it, so an `open-instance` rejection of the erased
-    program is not a counterexample. -/
+    A rejection of the erased program caused by an open polymorphic instance is excused:
+    erasing `Sequence.length(Sequence.empty<int>()) == 0` leaves no annotation that fixes the
+    element type. -/
 def checkProgramEraseTypesPreservesTyping (p : Program) : Bool :=
   !progTypeChecks p || progTypeChecks p.eraseTypes || hasOpenInstanceRejection p.eraseTypes
 

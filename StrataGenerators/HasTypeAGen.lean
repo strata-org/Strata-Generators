@@ -4965,28 +4965,6 @@ theorem foldr_arrow_inj_of_length_eq (as bs : List LMonoTy) (τ : LMonoTy)
       simp only [List.length_cons, Nat.add_right_cancel_iff] at hlen
       rw [ih bs hlen htl]
 
-/-- Membership in `List.mapM f l` at `SetGen.Set`. The list `args` is in the support if and only if each
-    of its elements is in the support of `f` at the input at the same position. -/
-private theorem mem_mapM_iff (f : LMonoTy → SetGen.Set LExpr')
-    (argTys : List LMonoTy) (args : List LExpr') :
-    args ∈ (List.mapM (m := SetGen.Set) f argTys) ↔
-    List.Forall₂ (fun arg σ => arg ∈ f σ) args argTys := by
-  induction argTys generalizing args with
-  | nil =>
-    simp only [List.mapM_nil, SetGen.Set.mem_pure]
-    constructor
-    · rintro rfl; exact .nil
-    · intro h; cases h; rfl
-  | cons σ rest ih =>
-    simp only [List.mapM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
-    constructor
-    · rintro ⟨x, hx, tl, htl, rfl⟩
-      exact .cons hx ((ih _).mp htl)
-    · intro h
-      match args, h with
-      | _ :: _, .cons harg htail =>
-        exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
-
 /-- If `findOpsInCtx octx τ` holds `(name, argTys)`, then `octx.ops` holds
     `(name, argTys.foldr arrow τ)`, and `argTys` has one element or more. -/
 private theorem findOpsInCtx_mem {octx : OpCtx} {τ : LMonoTy}
@@ -5416,7 +5394,7 @@ theorem genIndir_sound (octx : OpCtx) (bctx : BVarCtx) (τ : LMonoTy)
   rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
   have hbase : HasTypeA' bctx (.op () ⟨entry.1, ()⟩ _)
       (entry.2.foldr (fun σ acc => LMonoTy.arrow σ acc) τ) := .op
-  have hforall₂ := (mem_mapM_iff genArg entry.2 args).mp hargs
+  have hforall₂ := (mem_support_mapM_iff genArg entry.2 args).mp hargs
   have hargs_typed : List.Forall₂ (HasTypeA' bctx) args entry.2 := by
     suffices hsuff : ∀ (tys : List LMonoTy) (es : List LExpr'),
         List.Forall₂ (fun arg σ => arg ∈ (genArg σ)) es tys →
@@ -6843,7 +6821,7 @@ theorem genIndirPoly_complete (fctx : FVarCtx) (octx : OpCtx)
     rw [← mem_support_iff, mem_support_elements_iff]
     exact hEntry
   · -- args ∈ concreteArgTys.mapM genArg
-    exact (mem_mapM_iff genArg concreteArgTys args).mpr hArgs
+    exact (mem_support_mapM_iff genArg concreteArgTys args).mpr hArgs
   · -- The expression equals mkApps ...
     rfl
 
@@ -7517,7 +7495,7 @@ theorem genLExprBase_complete_polyApp (fctx : FVarCtx) (octx : OpCtx)
     refine ⟨List.length_pos_of_mem hEntry, (name, concreteArgTys), ?_, args, ?_, rfl⟩
     · rw [← mem_support_iff, mem_support_elements_iff]; exact hEntry
     · rw [← mem_support_iff]
-      exact (StrataGenerators.IndirSupport.mem_mapM_iff' _ concreteArgTys args).mpr hArgs
+      exact (mem_support_mapM_iff _ concreteArgTys args).mpr hArgs
   -- Second, that branch is the last entry of the `frequency` list of `genLExprBase` at the `bool` target
   -- and the depth `n + 1`, with the weight 4. The witness must *name* the generator, because the
   -- membership goal alone does not determine a metavariable there.

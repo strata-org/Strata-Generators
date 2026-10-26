@@ -1,8 +1,9 @@
 import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.RecFuncBlockSupport
 import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.HasTypeAGen
 import StrataGenerators.HasTypeAGen.AnnotFacts
-import Strata.Languages.Core.WeakTypeSpec
+import Strata.Languages.Core.TypingSpec
 import Strata.DL.Lambda.LExprTypeEnvProps
 import Strata.Languages.Core.FactoryProps
 import Strata.Languages.Core.TypeCheckSound.Datatype
@@ -13,16 +14,16 @@ import Strata.DL.Lambda.LTyTypeProps
 /-!
 # Soundness of the whole-program generator
 
-Every program `ProgramGen.genProgram` produces satisfies the weak program typing
-`Core.TypeSpec.ProgramHasTypeW` in `programContext` with no variable in scope.
+Every program `ProgramGen.genProgram` produces satisfies the typing spec
+`Core.TypeSpec.ProgramWellTyped` in `programContext` with no variable in scope.
 
 The proof is layered to mirror the generator:
 
 * **Bridge lemmas** turn a successful checker add into the exact premise a
-  `DeclHasTypeW` constructor asks for (`FactoryExtendedBy` from
+  `DeclWellTyped` constructor asks for (`FactoryExtendedBy` from
   `addFactoryFunctionWithError = .ok`).
 * **The soundness of one declaration step.** The support of each `genDecl*` step holds a pair of a
-  declaration list and a state, and that list is weakly typed from the context of the input state
+  declaration list and a state, and that list is well-typed from the context of the input state
   to the context of the output state. The steps whose proofs need the function and procedure
   generators are in `StrataGenerators.ProgramGen.SoundProgram`.
 * **The fold** chains per-step soundness over the whole program, and the top-level theorem adds
@@ -110,6 +111,28 @@ theorem genDeclName_fresh {reserved : List String} {nm : String}
     exact ⟨DatatypeGen.genFreshName_fresh reserved d hd, hallowed⟩
   · exact ⟨DatatypeGen.fallbackName_not_mem reserved, fallbackName_allowed reserved⟩
 
+/-- `genDeclNames reserved k` draws `k` distinct names, each absent from `reserved`. -/
+theorem genDeclNames_spec {reserved : List String} {k : Nat} {names : List String}
+    (h : names ∈ SetGen.support (genDeclNames (G := SetGen.Set) reserved k)) :
+    names.length = k ∧ names.Nodup ∧ ∀ n ∈ names, n ∉ reserved := by
+  induction k generalizing reserved names with
+  | zero =>
+    simp only [genDeclNames, mem_support_pure_iff] at h
+    subst h
+    exact ⟨rfl, List.nodup_nil, fun _ hn => absurd hn List.not_mem_nil⟩
+  | succ k ih =>
+    simp only [genDeclNames, mem_support_bind_iff, mem_support_pure_iff] at h
+    obtain ⟨nm, hnm, rest, hrest, rfl⟩ := h
+    obtain ⟨hlen, hnodup, hfresh⟩ := ih hrest
+    have hnmFresh : nm ∉ reserved := (genDeclName_fresh hnm).1
+    refine ⟨by rw [List.length_cons, hlen], List.nodup_cons.mpr ⟨?_, hnodup⟩, ?_⟩
+    · intro hmem
+      exact hfresh nm hmem List.mem_cons_self
+    · intro n hn
+      rcases List.mem_cons.mp hn with rfl | hn
+      · exact hnmFresh
+      · exact fun hr => hfresh n hn (List.mem_cons_of_mem _ hr)
+
 /-- The fallback name, a run of `x` characters, is not a local type name. -/
 theorem fallbackName_not_local (reserved : List String) :
     StrataGenerators.Stmt.isLocalTypeName (DatatypeGen.fallbackName reserved) = false := by
@@ -144,15 +167,15 @@ theorem genDeclTypeName_not_local {reserved : List String} {nm : String}
 
 /-! ## Chaining declaration-list typings -/
 
-/-- Weak declaration-list typings compose over list append, threading the context through the
+/-- Declaration-list well-typedness composes over list append, threading the context through the
     split point. -/
-theorem declsHasTypeW_append {P : Program} {C C' C'' : LContext CoreLParams} {ts : TypeScopes}
+theorem declsWellTyped_append {P : Program} {C C' C'' : LContext CoreLParams} {ts : TypeScopes}
     {ds₁ ds₂ : List Decl}
-    (h₁ : DeclsHasTypeW P C ts ds₁ C') (h₂ : DeclsHasTypeW P C' ts ds₂ C'') :
-    DeclsHasTypeW P C ts (ds₁ ++ ds₂) C'' := by
+    (h₁ : DeclsWellTyped P C ts ds₁ C') (h₂ : DeclsWellTyped P C' ts ds₂ C'') :
+    DeclsWellTyped P C ts (ds₁ ++ ds₂) C'' := by
   induction h₁ with
   | nil => exact h₂
-  | cons _ _ _ _ _ _ hd _ ih => exact DeclsHasTypeW.cons _ _ _ _ _ _ hd (ih h₂)
+  | cons _ _ _ _ _ _ hd _ ih => exact DeclsWellTyped.cons _ _ _ _ _ _ hd (ih h₂)
 
 /-! ## Bridge lemmas -/
 
@@ -180,6 +203,18 @@ theorem mem_of_getElem?_eq_some {F : Factory CoreLParams} {name : String}
   simp +instances only [Lambda.Factory.instGetElem?, Lambda.Factory.get?,
     Lambda.Factory.instMem, Lambda.Factory.mem] at h ⊢
   grind
+
+/-- A member of a factory has an entry. -/
+theorem exists_getElem?_of_mem {F : Factory CoreLParams} {name : String} (h : name ∈ F) :
+    ∃ g, F[name]? = some g := by
+  simp +instances only [Lambda.Factory.instGetElem?, Lambda.Factory.get?,
+    Lambda.Factory.instMem, Lambda.Factory.mem] at h ⊢
+  split
+  · rename_i hnone
+    have hsome := Std.HashMap.mem_iff_isSome_getElem?.mp h
+    rw [hnone] at hsome
+    exact absurd hsome Bool.false_ne_true
+  · exact ⟨_, rfl⟩
 
 /-- A successful `addFactoryFunctionWithError C fn = .ok C'` makes `C'` the extension of `C` by
     exactly `fn`: old entries are unchanged and `fn`'s name stores `fn` itself. -/
@@ -820,11 +855,11 @@ theorem typeCheckCore_of_knownInstance {ks : KnownTypes} {adm : TyVarAdmissibili
           (fun v hv => hvs v (List.mem_append_right _ hv))⟩
 
 /-- Each element of a generated `distinct` is an operator annotated at `τ`. In a context where each
-    of the named constants is declared at `τ`, the element is weakly typed at `τ` with no variable
+    of the named constants is declared at `τ`, the element is well-typed at `τ` with no variable
     in scope. -/
 theorem distinctElems_typed {τ : LMonoTy} {names : List String} {C : LContext CoreLParams}
     (hlook : ∀ c ∈ names, C.functions[c]? = some (constantFunc c τ).toLFunc) :
-    ∀ e ∈ distinctElems τ names, ExprHasTypeW C [] e τ := by
+    ∀ e ∈ distinctElems τ names, ExprWellTyped C [] e τ := by
   intro e he
   simp only [distinctElems, List.mem_map] at he
   obtain ⟨c, hc, rfl⟩ := he
@@ -986,13 +1021,13 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
       exprCtx := hinv.exprCtx
       polysClosed := hinv.polysClosed }
 
-/-- Soundness of the alias step: under any program `P`, the emitted declarations are weakly typed
+/-- Soundness of the alias step: under any program `P`, the emitted declarations are well-typed
     from the context of `s` to that of `s'`, and `Inv` is preserved. A synonym's parameters are the
     distinct free variables of its body, and the body is drawn over registered constructors. -/
 theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclAlias (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨pr, ⟨nm, hnm, ntp, _, tyParams, _, body, hbody, hpr⟩, hmatch⟩ := h
   subst hpr
@@ -1002,7 +1037,7 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
   simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
   obtain ⟨hds, hs'⟩ := hmatch
   have hnm_fresh : nm ∉ s.reserved := (genDeclTypeName_fresh hnm).1
@@ -1026,11 +1061,11 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     have hmem : nm ∈ s.C.knownTypes :=
       (KnownTypes.containsName_eq_true_iff_mem _ _).mp hc
     exact hnm_fresh (hinv.knownReserved nm (Std.HashMap.mem_keys.mpr hmem))
-  have hdecl : DeclHasTypeW P s.C [] (mkAliasDecl nm body) s.C := by
+  have hdecl : DeclWellTyped P s.C [] (mkAliasDecl nm body) s.C := by
     rw [hmk]
-    exact DeclHasTypeW.type_syn s.C [] syn .empty hNodup hnotKnown hoccurs hres
+    exact DeclWellTyped.type_syn s.C [] syn .empty hNodup hnotKnown hoccurs hres
   subst hds hs'
-  refine ⟨DeclsHasTypeW.cons _ _ _ _ _ _ hdecl (DeclsHasTypeW.nil _ _), ?_⟩
+  refine ⟨DeclsWellTyped.cons _ _ _ _ _ _ hdecl (DeclsWellTyped.nil _ _), ?_⟩
   -- Only `reserved` (by `nm`) and the alias list change, and no `Inv` field reads the aliases.
   have hgrow := inv_cons_reserved hinv nm
   exact { hgrow with typesNil := hinv.typesNil }
@@ -1085,13 +1120,13 @@ theorem inv_addFactory {s : GenState} (hinv : Inv s) {fn : LFunc CoreLParams}
 
 /-! ## The axiom expression -/
 
-/-- An axiom drawn at a state of the fold is a boolean that is weakly typed in the context of that
+/-- An axiom drawn at a state of the fold is a boolean that is well-typed in the context of that
     state with no variable in scope, and its annotations mention no type variable. -/
 theorem genAxiom_exprTyped {s : GenState} (hinv : Inv s) {depth : Nat}
     {decl : Decl} {name : String}
     (h : (decl, name) ∈ SetGen.support
       (genAxiom (G := SetGen.Set) s.octx s.pctx s.reserved depth)) :
-    ∃ a, decl = .ax a .empty ∧ ExprHasTypeW s.C [] a.e .bool ∧
+    ∃ a, decl = .ax a .empty ∧ ExprWellTyped s.C [] a.e .bool ∧
       ∀ v ∈ annotTyVars a.e, v ∈ ([] : List TyIdentifier) := by
   simp only [genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨nm, _, e, he, hdecl, _⟩ := h
@@ -1106,29 +1141,29 @@ theorem genAxiom_exprTyped {s : GenState} (hinv : Inv s) {depth : Nat}
       fun nm bvs body hmem => hinv.polysClosed nm bvs body (List.mem_append_left _ hmem)⟩
   have hbool := (closureHyps_annotsOk [] hctx).bool
   have hboolV := (closureHyps_annotTyVars hsc).bool
-  exact ⟨{ name := nm, e := e }, hdecl, genLExpr_exprHasTypeW hctx hbool he,
+  exact ⟨{ name := nm, e := e }, hdecl, genLExpr_exprWellTyped hctx hbool he,
     genLExpr_annotTyVars hsc hboolV he⟩
 
-/-- Soundness of the axiom step: the emitted axiom is weakly typed in the context of `s`, and only
+/-- Soundness of the axiom step: the emitted axiom is well-typed in the context of `s`, and only
     `reserved` changes. -/
 theorem genDeclAxiom_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclAxiom (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨pr, hpr, hds, hs'⟩ := h
   obtain ⟨a, hdecl_eq, htyped, hscoped⟩ := genAxiom_exprTyped hinv hpr
   subst hds hs'
   refine ⟨?_, inv_cons_reserved hinv _⟩
   rw [hdecl_eq]
-  exact DeclsHasTypeW.cons _ _ _ _ _ _
-    (DeclHasTypeW.ax s.C [] a .empty htyped hscoped) (DeclsHasTypeW.nil _ _)
+  exact DeclsWellTyped.cons _ _ _ _ _ _
+    (DeclWellTyped.ax s.C [] a .empty htyped hscoped) (DeclsWellTyped.nil _ _)
 
 /-! ### The constants a `distinct` ranges over
 
 The `distinct` step emits one 0-ary constant per element before the `distinct`
 itself. Each constant is an ordinary `.func` declaration, so its proof discharges each
-`DeclHasTypeW.func` premise as the step for a function does, and each step is much cheaper, because
+`DeclWellTyped.func` premise as the step for a function does, and each step is much cheaper, because
 a constant has no body, no measure and no type argument. -/
 
 /-- A generated constant is non-recursive: `constantFunc` leaves `isRecursive` at
@@ -1137,12 +1172,12 @@ theorem constantFunc_nonrec (c : String) (τ : LMonoTy) :
     ¬ (constantFunc c τ).isRecursive := by
   simp [constantFunc]
 
-/-- A constant of a ground, well-kinded type `τ` is a weakly typed function in every context and
+/-- A constant of a ground, well-kinded type `τ` is a well-typed function in every context and
     in all variable scopes: it has no formal, type parameter, body, measure, precondition or
     axiom. -/
-theorem constantFunc_hasTypeW {C : LContext CoreLParams} {ts : TypeScopes}
+theorem constantFunc_wellTyped {C : LContext CoreLParams} {ts : TypeScopes}
     {c : String} {τ : LMonoTy} (hτ : LMonoTy.freeVars τ = []) (hwk : C.WellKindedTy τ) :
-    FuncHasTypeW C ts (constantFunc c τ) := by
+    FuncWellTyped C ts (constantFunc c τ) := by
   refine
     { inputsNodup := by simp [constantFunc, ListMap.keys]
       typeArgsNodup := by simp [constantFunc]
@@ -1217,19 +1252,19 @@ theorem addConstants_lookup {τ : LMonoTy} :
       exact addConstants_preserves ds C₁ C' es' hrest _ _ hg
     · exact ih C₁ C' es' hrest c hc
 
-/-- The constants are weakly typed and extend the context: a successful `addConstants` run is a
+/-- The constants are well-typed and extend the context: a successful `addConstants` run is a
     declaration-list typing from `C` to the grown `C'`, one function declaration per constant. -/
 theorem addConstants_sound (P : Program) {τ : LMonoTy} (hτ : LMonoTy.freeVars τ = []) :
     ∀ (names : List String) (C C' : LContext CoreLParams) (ds : List Decl),
       C.WellKindedTy τ →
-      addConstants C τ names = some (C', ds) → DeclsHasTypeW P C [] ds C' := by
+      addConstants C τ names = some (C', ds) → DeclsWellTyped P C [] ds C' := by
   intro names
   induction names with
   | nil =>
     intro C C' ds _ h
     simp only [addConstants, Option.some.injEq, Prod.mk.injEq] at h
     obtain ⟨rfl, rfl⟩ := h
-    exact DeclsHasTypeW.nil _ _
+    exact DeclsWellTyped.nil _ _
   | cons c cs ih =>
     intro C C' ds hwk h
     obtain ⟨C₁, ds', hadd, hrest, rfl⟩ := addConstants_cons h
@@ -1237,9 +1272,9 @@ theorem addConstants_sound (P : Program) {τ : LMonoTy} (hτ : LMonoTy.freeVars 
     have hwk₁ : C₁.WellKindedTy τ := by
       unfold LContext.WellKindedTy at hwk ⊢
       rw [(addFactory_fields hadd).1]; exact hwk
-    exact DeclsHasTypeW.cons _ _ _ _ _ _
-      (DeclHasTypeW.func C C₁ [] (constantFunc c τ) .empty
-        (constantFunc_nonrec c τ) (addFactory_name_fresh hadd) (constantFunc_hasTypeW hτ hwk)
+    exact DeclsWellTyped.cons _ _ _ _ _ _
+      (DeclWellTyped.func C C₁ [] (constantFunc c τ) .empty
+        (constantFunc_nonrec c τ) (addFactory_name_fresh hadd) (constantFunc_wellTyped hτ hwk)
         (factoryExtendedBy_of_addFactory hadd))
       (ih C₁ C' ds' hwk₁ hrest)
 
@@ -1288,13 +1323,13 @@ theorem addConstants_declNames {τ : LMonoTy} :
       simp [declNames, mkConstantDecl, constantFunc, Decl.names, Decl.name]
     rw [hcons, ih C₁ C' ds' hrest]
 
-/-- Soundness of the distinct step: the emitted constants are weakly typed and extend `C`, and the
-    `distinct` over them is weakly typed in the grown context. On a factory clash nothing is emitted
+/-- Soundness of the distinct step: the emitted constants are well-typed and extend `C`, and the
+    `distinct` over them is well-typed in the grown context. On a factory clash nothing is emitted
     and the state is unchanged. -/
 theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclDistinct (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, constNames⟩, hparts, hmatch⟩ := h
   have hτ : LMonoTy.freeVars τ = [] := genDistinctAssertion_ground hparts
@@ -1309,7 +1344,7 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
   rename_i hgate
   simp only [Bool.and_eq_true, decide_eq_true_eq] at hgate
   obtain ⟨hlen, _⟩ := hgate
@@ -1319,7 +1354,7 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
   | some pr =>
     obtain ⟨C', constDecls⟩ := pr
     rw [hadd] at hmatch
@@ -1328,15 +1363,15 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     subst hds hs'
     refine ⟨?_, ?_⟩
     · -- The constants take `C` to `C'`, then the `distinct` leaves `C'` unchanged.
-      refine declsHasTypeW_append
+      refine declsWellTyped_append
         (addConstants_sound P hτ constNames s.C C' constDecls hτwk hadd) ?_
       have hlen' : 2 ≤ (distinctElems τ constNames).length := by
         simpa [distinctElems] using hlen
-      exact DeclsHasTypeW.cons _ _ _ _ _ _
-        (DeclHasTypeW.distinct C' [] ⟨nm, ()⟩ (distinctElems τ constNames) .empty
+      exact DeclsWellTyped.cons _ _ _ _ _ _
+        (DeclWellTyped.distinct C' [] ⟨nm, ()⟩ (distinctElems τ constNames) .empty
           hlen' ⟨τ, distinctElems_typed (addConstants_lookup constNames s.C C' constDecls hadd)⟩
           (distinctElems_annots hτ))
-        (DeclsHasTypeW.nil _ _)
+        (DeclsWellTyped.nil _ _)
     · -- `C` grew by the constants' factory entries; `reserved` by their names plus `nm`.
       have hgrown := inv_grow_reserved (s := { s with C := C' })
         (addConstants_inv constNames hinv hadd) (constNames ++ [nm])
@@ -1352,7 +1387,7 @@ The abstract-type step draws a fresh name, gates on `addKnownTypeWithError`, and
 theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclAbstract (G := SetGen.Set) s b)) :
-    DeclsHasTypeW P s.C [] ds s'.C ∧ Inv s' := by
+    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨pr, ⟨nm, hnm, ar, _har, hpr⟩, hmatch⟩ := h
   subst hpr
@@ -1366,7 +1401,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch
     subst hds hs'
-    exact ⟨DeclsHasTypeW.nil _ _, hinv⟩
+    exact ⟨DeclsWellTyped.nil _ _, hinv⟩
   | ok C' =>
     rw [hadd] at hmatch
     simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
@@ -1375,10 +1410,10 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     refine ⟨?_, ?_⟩
     · -- `mkAbstractTypeDecl nm ar` declares `{ name := nm, params := replicate ar "_" }`, whose
       -- number of arguments is `ar`.
-      refine DeclsHasTypeW.cons _ _ _ _ _ _ ?_ (DeclsHasTypeW.nil _ _)
+      refine DeclsWellTyped.cons _ _ _ _ _ _ ?_ (DeclsWellTyped.nil _ _)
       have harw : ({ name := nm, params := List.replicate ar "_" } : TypeConstructor).numargs = ar := by
         simp [TypeConstructor.numargs]
-      have hcon := DeclHasTypeW.type_con (P := P) s.C C' []
+      have hcon := DeclWellTyped.type_con (P := P) s.C C' []
         { name := nm, params := List.replicate ar "_" } .empty
       rw [harw] at hcon
       exact hcon hadd
@@ -1697,17 +1732,11 @@ theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
     (h : (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclFunction, mem_support_bind_iff] at h
-  obtain ⟨func₀, _hfunc₀, nm, hnm, hmatch⟩ := h
+  obtain ⟨func₀, _, nm, hnm, hmatch⟩ := h
   have hnm_fresh : nm ∉ s.reserved := (genDeclName_fresh hnm).1
-  let func : Function := { func₀ with name := ⟨nm, ()⟩ }
-  cases hadd : s.C.addFactoryFunctionWithError func.toLFunc with
-  | error e =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    obtain ⟨hds, hs'⟩ := hmatch; subst hds hs'; exact namesStep_nil
-  | ok C' =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+  let func : Function := { func₀ with name := ⟨nm, ()⟩, isRecursive := false, measure := none }
+  split at hmatch
+  · simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
     obtain ⟨hds, hs'⟩ := hmatch; subst hds hs'
     have hdn : declNames [.func func .empty] = [nm] := by
       simp [declNames, Decl.names, Decl.name, func]
@@ -1715,6 +1744,8 @@ theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
     · rw [hdn]; rfl
     · rw [hdn]; intro x hx; simp only [List.mem_singleton] at hx; subst hx; exact hnm_fresh
     · rw [hdn]; simp
+  · simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+    obtain ⟨hds, hs'⟩ := hmatch; subst hds hs'; exact namesStep_nil
 
 /-- Procedure step: emits `[.proc proc]` with the fresh name `nm` (added to
     reserved); never gated (procedures leave `C`/`Γ` unchanged). -/
@@ -1772,7 +1803,29 @@ theorem genDeclDatatype_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
         exact Or.inr (Or.inr hmem))
     · rw [hdn]; exact hNodup
 
-/-- Name tracking for one declaration step (six-way dispatch). -/
+/-- Recursive-function-block step: emits nothing, or one block whose members carry fresh,
+    distinct names, all of which become reserved. -/
+theorem genDeclRecFuncBlock_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
+    (h : (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
+    NamesStep s ds s' := by
+  rcases genDeclRecFuncBlock_support h with ⟨rfl, rfl⟩ |
+    ⟨k, names, stubs, sStub, drawn, s₁, _, hnames, hstubs, _, hdrawn, hreg, rfl, rfl⟩
+  · exact namesStep_nil
+  · obtain ⟨_, hnodup, hfresh⟩ := genDeclNames_spec hnames
+    have hdn : declNames [.recFuncBlock (drawn.map dropInline) .empty] = names := by
+      simp only [declNames, List.flatMap_cons, List.flatMap_nil, List.append_nil, Decl.names,
+        List.map_map]
+      have hmembers := recFuncBlock_member_names hstubs hdrawn
+      rw [List.map_map] at hmembers
+      exact hmembers
+    refine namesStep_of_prepend ?_ ?_ ?_
+    · rw [hdn]
+    · rw [hdn]
+      exact hfresh
+    · rw [hdn]
+      exact hnodup
+
+/-- Name tracking for one declaration step (eight-way dispatch). -/
 theorem genDeclStep_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
     NamesStep s ds s' := by
@@ -1781,7 +1834,8 @@ theorem genDeclStep_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Gen
   simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _hw, hmem⟩ := h
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ |
+    ⟨_, rfl⟩
   · exact genDeclAbstract_names hmem
   · exact genDeclAlias_names hmem
   · exact genDeclAxiom_names hmem
@@ -1789,6 +1843,7 @@ theorem genDeclStep_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Gen
   · exact genDeclDatatype_names hmem
   · exact genDeclFunction_names hmem
   · exact genDeclProcedure_names hmem
+  · exact genDeclRecFuncBlock_names hmem
 
 /-- Name tracking for the whole fold: the emitted declaration names are pairwise
     distinct and disjoint from the initial reserved set; `reserved` grows by
@@ -1901,7 +1956,8 @@ theorem genDeclStep_typeNames {s : GenState} {b : Bounds} {ds : List Decl} {s' :
   simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _, hmem⟩ := h
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ |
+    ⟨_, rfl⟩
   · -- abstract type
     simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff] at hmem
     obtain ⟨pr, ⟨nm, hnm, ar, _, rfl⟩, hmatch⟩ := hmem
@@ -1983,6 +2039,11 @@ theorem genDeclStep_typeNames {s : GenState} {b : Bounds} {ds : List Decl} {s' :
       Prod.mk.injEq] at hmem
     obtain ⟨proc₀, _, nm, _, rfl, _⟩ := hmem
     exact typeNamesNotLocal_of_kind (by simp [declNameKind, Decl.kind])
+  · -- recursive function block
+    rcases genDeclRecFuncBlock_support hmem with ⟨rfl, _⟩ | ⟨_, _, _, _, _, _, _, _, _, _, _, _,
+      rfl, _⟩
+    · exact typeNamesNotLocal_of_kind (by simp)
+    · exact typeNamesNotLocal_of_kind (by simp [declNameKind])
 
 /-- No type name that the declaration fold emits is a local type name. -/
 theorem genDeclsFold_typeNames (n : Nat) {s : GenState} {b : Bounds} {ds : List Decl}

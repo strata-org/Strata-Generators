@@ -11,7 +11,7 @@ expression families. The program family lives here instead. `ProgramGen` imports
 function and procedure proof files, and those files import Mathlib. `TuningProfiles` must stay
 Mathlib-free, because Strata's transform passes import it.
 
-`genDeclStep` chooses the kind of the next declaration. Its seven branches decide how many
+`genDeclStep` chooses the kind of the next declaration. Its eight branches decide how many
 polymorphic functions and polymorphic datatypes a program declares. This module exposes those
 branches and adds `progPolyHeavy`, the profile for the `mono:` family.
 
@@ -30,7 +30,8 @@ open ProgramGen
 
 `Tuning.weight` addresses a branch by its index into `Tuning.schedules`, and these are the names a
 profile is written in. Indices 0 to 4 name the five declaration kinds that carry a literal weight.
-Indices 5 to 8 name the function weight and the procedure weight, once per phase. -/
+Indices 5 to 8 name the function weight and the procedure weight, once per phase. Index 9 names the
+recursive function block. -/
 
 namespace ProgIdx
 def abstract : Nat := 0
@@ -46,22 +47,24 @@ def procCallable : Nat := 6
 def funcFrontLoad : Nat := 7
 /-- The procedure weight in the same phase. -/
 def procFrontLoad : Nat := 8
+def recFuncBlock : Nat := 9
 end ProgIdx
 
 /-- The shipping declaration-kind distribution: 1 each for an abstract type, an alias, an axiom and
-a `distinct` assertion, 3 for a datatype block, and 3 : 4 for a function against a procedure once a
-function is callable, 6 : 1 before that. -/
+a `distinct` assertion, 3 for a datatype block, 3 : 4 for a function against a procedure once a
+function is callable, 6 : 1 before that, and 1 for a recursive function block. -/
 def progDefault : Tuning :=
-  { schedules := #[(1, 0), (1, 0), (1, 0), (1, 0), (3, 0), (3, 0), (4, 0), (6, 0), (1, 0)] }
+  { schedules :=
+      #[(1, 0), (1, 0), (1, 0), (1, 0), (3, 0), (3, 0), (4, 0), (6, 0), (1, 0), (1, 0)] }
 
 /-- The one site that a program tuning addresses. `TestDecl.withTuning` checks the length of a `θ`
 against it.
 
-The site holds nine weights, and `genDeclStepT` offers seven branches, because the function and the
-procedure each carry one weight per phase. Nine is the number that a hand-built tuning must match, and
-that is what this table is for. -/
+The site holds ten weights, and `genDeclStepT` offers eight branches, because the function and the
+procedure each carry one weight per phase. Ten is the number that a hand-built tuning must match,
+and that is what this table is for. -/
 def progSites : Array Site :=
-  #[⟨`genDeclStepT.site0, 0, 9, #[0, 0, 0, 0, 0, 0, 0, 0, 0]⟩]
+  #[⟨`genDeclStepT.site0, 0, 10, #[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]⟩]
 
 /-- **Function-heavy** (`mono: …`). `MonomorphizeFunctions` specializes a polymorphic function at
 each type its callers instantiate. On a program that declares no polymorphic function the pass is the
@@ -78,7 +81,7 @@ measured trade against the function rate. -/
 def progDatatypeHeavy : Tuning :=
   StrataGenerators.TuningProfiles.withWeights progDefault [(ProgIdx.datatype, 12)]
 
-/-- `genDeclStep` with the seven declaration-kind weights read from `θ`. `d` is the number of
+/-- `genDeclStep` with the eight declaration-kind weights read from `θ`. `d` is the number of
 declaration steps that remain, so a schedule can taper a kind as the program fills up.
 
 One `if` chooses the pair of function and procedure weights, as `genDeclStep` chooses it. Two separate
@@ -96,7 +99,8 @@ def genDeclStepT [_root_.Gen G] (θ : Tuning) (s : GenState) (b : Bounds) (d : N
     , (θ.weight ProgIdx.distinct d, fun () => genDeclDistinct s b)
     , (θ.weight ProgIdx.datatype d, fun () => genDeclDatatype s b)
     , (wFunc, fun () => genDeclFunction s b)
-    , (wProc, fun () => genDeclProcedure s b) ]
+    , (wProc, fun () => genDeclProcedure s b)
+    , (θ.weight ProgIdx.recFuncBlock d, fun () => genDeclRecFuncBlock s b) ]
     (by
       have := Tuning.weight_pos θ ProgIdx.abstract d
       simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
@@ -117,7 +121,7 @@ def genProgramT [_root_.Gen G] (θ : Tuning) (numDecls : Nat := 6) (b : Bounds :
   let (decls, _) ← genDeclsFoldT θ initState b numDecls
   pure { decls := decls }
 
--- Each `rfl` below reduces nine `Array.getD` reads against a literal schedule.
+-- Each `rfl` below reduces ten `Array.getD` reads against a literal schedule.
 set_option maxRecDepth 4000
 
 /-- At `progDefault` every weight reads back as the literal the shipping generator writes, so the
@@ -145,7 +149,7 @@ steps. -/
 /-! The index table names the branch that each profile moves. The examples below pin the two facts a
 reader needs: the table has one entry per branch, and each profile moves the branch it names. -/
 
-example : progDefault.schedules.size = 9 := rfl
+example : progDefault.schedules.size = 10 := rfl
 example : (progSites.foldl (fun n s => n + s.arity) 0) = progDefault.schedules.size := rfl
 example : progPolyHeavy.schedules[ProgIdx.datatype]! = (6, 0) := rfl
 example : progPolyHeavy.schedules[ProgIdx.procCallable]! = (4, 0) := rfl

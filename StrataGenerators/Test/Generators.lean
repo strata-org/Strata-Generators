@@ -324,6 +324,7 @@ instance : TunableGen GenCmdWithCtx where
     let avoid := StrataGenerators.Stmt.functionNames cmdSeqCheckContext
     let (_, baseCtx) ← genCmdsT (G := Plausible.Gen) θ coreMonoOps [] [] [] 2 3 avoid
     let ⟨cmd, ctx'⟩ ← genCmd.tuned (G := Plausible.Gen) θ coreMonoOps [] [] baseCtx 2 [] avoid
+      Core.KnownTypes
     pure ⟨cmd, baseCtx, ctx'⟩
   sites := genCmd.sites
 
@@ -410,7 +411,7 @@ example : TunableGen.arity GenCmdWithCtx = 12 := rfl
 example : TunableGen.arity TypedExpr = 84 := rfl
 example : TunableGen.arity ClosedTypedExpr = 84 := rfl
 example : TunableGen.arity ResolveTypedExpr = 84 := rfl
-example : TunableGen.arity GenProgram = 9 := rfl
+example : TunableGen.arity GenProgram = 10 := rfl
 
 end Tunable
 

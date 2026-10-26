@@ -165,8 +165,8 @@ partial def shrinkTy : LMonoTy → List LMonoTy
     is therefore the only thing that stops a reduction from leaving a clause without its variable.
     The removal of an input that a clause mentions, which `dropInput` below offers, leaves
     `requires y == 0` with no `y` in the signature. A reduction of the expression of a clause can
-    also make the expression not Boolean. `genFunction` emits a clause over the formal parameters on
-    about half of its draws, so both cases occur and neither is only theoretical.
+    also make the expression not Boolean. `genFunction` often emits a clause that names a formal
+    parameter, so both cases occur and neither is only theoretical.
 
     `StrataGenerators.Program.TestSupport.funcPreconditionsScoped` also states condition 4 on its
     own, and its documentation gives the full analysis of the gap. Both conditions are here, so each

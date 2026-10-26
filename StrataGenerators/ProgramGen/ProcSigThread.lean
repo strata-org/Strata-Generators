@@ -1,4 +1,5 @@
 import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.RecFuncBlockSupport
 import StrataGenerators.StmtHasTypeAGen
 import StrataGenerators.ProcedureHasTypeAGen
 
@@ -149,10 +150,10 @@ theorem genProcedure_sig_decomp {octx : OpCtx} {pctx : PolyOpCtx} {procs : ProcS
       (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) ∧
       (M ++ O).keys.Nodup := by
   have hnd := genProcedure_outputs_nodup hp
-  simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hp
+  simp only [genProcedure, genProcedureWith, mem_support_bind_iff, mem_support_pure_iff] at hp
   obtain ⟨name, _, typeArgs, _, M, _, rawInputOnly, _,
           rawOutputOnly, _, pre, _, post, _,
-          ⟨body, C', ctx'⟩, _, rfl⟩ := hp
+          ⟨body, C', ctx'⟩, _, _, _, rfl⟩ := hp
   generalize avoidFunctionNames C M = M at hnd
   generalize avoidFunctionNames C rawInputOnly = rawInputOnly at hnd
   generalize avoidFunctionNames C rawOutputOnly = rawOutputOnly at hnd
@@ -292,7 +293,8 @@ theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
   simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _hw, hmem⟩ := h
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ |
+    ⟨_, rfl⟩
   -- Abstract: gated; both branches copy `procs`.
   · simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff,
       mem_support_pure_iff] at hmem
@@ -332,15 +334,22 @@ theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
   · simp only [genDeclFunction, mem_support_bind_iff] at hmem
     obtain ⟨func₀, _, nm, _, hmatch⟩ := hmem
     split at hmatch
-    all_goals (
+    · rename_i s₁ hreg
       simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-      obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
+      obtain ⟨_, hs'⟩ := hmatch; subst hs'
+      rw [(registerFuncs_fields hreg).2.1]
+      exact fun _ h => h
+    · simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+      obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h
   -- Procedure: `procs` gains one entry at the front.
   · simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff,
       Prod.mk.injEq] at hmem
     obtain ⟨proc₀, _, nm, _, _, hs'⟩ := hmem
     subst hs'
     exact fun sig hsig => List.mem_cons_of_mem _ hsig
+  -- Recursive function block: `procs` copied.
+  · rw [genDeclRecFuncBlock_procs hmem]
+    exact fun _ h => h
 
 /-- The whole fold never drops a registered signature. -/
 theorem genDeclsFold_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
@@ -471,7 +480,8 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
   simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
   obtain ⟨w, g, hg, _hw, hmem⟩ := h
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
+  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ |
+    ⟨_, rfl⟩
   · left
     simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff,
       mem_support_pure_iff] at hmem
@@ -506,8 +516,12 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
     simp only [genDeclFunction, mem_support_bind_iff] at hmem
     obtain ⟨func₀, _, nm, _, hmatch⟩ := hmem
     split at hmatch
-    all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-               obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
+    · rename_i s₁ hreg
+      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+      obtain ⟨_, hs'⟩ := hmatch; subst hs'
+      exact (registerFuncs_fields hreg).2.1
+    · simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
+      obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl
   · right
     simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff,
       Prod.mk.injEq] at hmem
@@ -527,6 +541,8 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
       rw [hcp, hdI, hdO]; exact hdisj
     · show List.Nodup _
       rw [hcp, hdO]; exact hnd
+  · left
+    exact genDeclRecFuncBlock_procs hmem
 
 /-- The whole fold preserves `ProcsEmitted`, relative to the declarations emitted
     so far. Membership survives the append a later step performs. -/

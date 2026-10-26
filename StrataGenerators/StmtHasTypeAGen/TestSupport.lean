@@ -2,7 +2,7 @@ import StrataGenerators.StmtHasTypeAGen.Core
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import Strata.Languages.Core.StatementType
-import Strata.Languages.Core.WeakTypeSpec
+import Strata.Languages.Core.TypingSpec
 import Strata.Languages.Core.Factory
 import Strata.Transform.LoopElim
 import Strata.Transform.InsertLoopInvariantAsserts
@@ -304,7 +304,7 @@ def kleeneStmts (ss : List Statement) : Option (KleeneStmt Expression (Cmd Expre
   let ss' ← toCmdStmts ss
   BlockToKleeneStmt (P := Expression) ss'
 
--- ── Rejections the weak specification allows ────────────────────────────
+-- ── Rejections the typing spec allows ───────────────────────────────────
 
 /-- A name that a statement binds. -/
 inductive BoundName where
@@ -424,7 +424,7 @@ def declWritesReservedType : Decl → Bool
     !block.all (·.constrs.all (·.args.all (mtyAllTyConsNames isAllowedName ·.2)))
   | .type (.con _) _ => false
 
-/-- The reasons the checker may reject `P` that the weak specification allows, as tags: a reserved
+/-- The reasons the checker may reject `P` that the typing spec allows, as tags: a reserved
     name (one `Core.isAllowedName` refuses) or a clash between names of different kinds. -/
 def expectedRejectionCauses (P : Program) : List String :=
   (if P.decls.any (fun d => (declBoundNames d).any (!Core.isAllowedName ·)

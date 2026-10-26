@@ -149,42 +149,35 @@ def genTypeConstructor [Gen G] (depth : Nat) : G TypeConstructor := do
     *deterministic* guard, at the weights 1 and 4. Therefore a generated `ite` and a generated `loop` more often
     carry a real boolean condition, and not a `*`. Both branches keep a positive weight, so the support does not
     change, and each statement of soundness and of completeness therefore does not change either. Read
-    `genCondOrNondet_det_sound` and `genCondOrNondet_complete`.
-
-    The typing rules ask every binder annotation of a condition to be a registered type, so a
-    condition is filtered through `generableOrTrue`, as for an `assert`. -/
+    `genCondOrNondet_det_sound` and `genCondOrNondet_complete`. -/
 def genCondOrNondet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (ExprOrNondet Expression) :=
   frequency
     [ (1, fun () => pure .nondet),
-      (4, fun () => (fun e => ExprOrNondet.det (generableOrTrue e)) <$>
-        genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool) ]
+      (4, fun () => ExprOrNondet.det <$> genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool) ]
     (by simp)
 
 /-- Generate an optional loop measure: either `none`, or `some m` for an
     integer expression `m`. Biased to produce a measure 75% of the time (weights
     `1` for `none` versus `3` for `some`), so generated loops usually carry a
-    measure. A measure is kept only when `binderAnnotsGenerable` holds of it, since the typing rule
-    asks every binder annotation of it to be a registered type. -/
+    measure. -/
 def genOptMeasure [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (Option Expression.Expr) :=
-  (fun m => m.filter binderAnnotsGenerable) <$>
-    biasedOptionGen (3 / 4) (genLExpr ctx.toFVarCtx octx pctx tvars [] depth .int)
+  biasedOptionGen (3 / 4) (genLExpr ctx.toFVarCtx octx pctx tvars [] depth .int)
 
 /-- Generate a single loop invariant: a label (a non-empty, non-keyword
     identifier via `genIdentName`, since an invariant label appears in identifier
-    position) paired with a boolean expression, filtered through `generableOrTrue`. -/
+    position) paired with a boolean expression. -/
 def genInvariant [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (String × Expression.Expr) := do
   let l ← genIdentName
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
-  pure (l, generableOrTrue e)
+  pure (l, e)
 
 /-- Generate a list of (up to `depth`) loop invariants, each a
     `(label, boolean expression)` pair. -/
 def genInvariants [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
-    G (List (String × Expression.Expr)) :=
+    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (List (String × Expression.Expr)) :=
   listOfMaxLength depth (genInvariant octx tvars ctx depth pctx)
 
 -- ── Non-nesting (leaf) statement sub-generators ──────────────────────────
@@ -201,7 +194,7 @@ def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenStmtResult := do
-  let r ← genCmd octx tvars immutableVars ctx depth pctx
+  let r ← genCmd octx tvars immutableVars ctx depth pctx [] C.knownTypes
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement that targets a block around it. The typing rule
@@ -331,8 +324,8 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
        the type declared there) are drawn from `genLExpr`, and the argument list is
        assembled by `mkArgs`: `inout` args for `s.M`, `in` args for `exprs`, `out`
        args for `outTargets`. The call rule asks every binder annotation of an input to be a
-       registered type, so the generator keeps the call only when each input passes
-       `binderAnnotsGenerable`.
+       known type, so the generator keeps the call only when each input passes
+       `binderAnnotsKnownIn C.knownTypes`.
 
     The emitted shape is uniform. It holds the `init` statements for the missing names only, then the `call`, and
     the generator splices that group **inline** into the statement sequence around it, with no block and no
@@ -413,9 +406,8 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
       -- and assemble the call. The `mkArgs` in-out/out names come from key-position
       -- only, and `substSig` preserves keys, so passing `s.M` is the same as `Mσ`.
       let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx pctx tvars [] depth τ)
-      -- The typing rule asks every binder annotation of an input to be a registered type, so the
-      -- call is kept only when each input passes `binderAnnotsGenerable`, as in `genInitDet`.
-      if exprs.all binderAnnotsGenerable = true then do
+      -- The call rule asks every binder annotation of an input to be a known type.
+      if exprs.all (binderAnnotsKnownIn C.knownTypes) = true then do
         -- Step 6: sample how the by-value inputs and the out targets interleave. The
         -- call rule reads the input positions and the write positions through two
         -- projections that each drop the other kind of node, so their relative order
@@ -537,7 +529,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size tlen
           let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size elen
-          pure ⟨[Stmt.ite (.det (generableOrTrue cond)) thenb elseb default], C, ctx⟩),
+          pure ⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩),
         (1, fun () => do
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 (size + 1) (Nat.zero_le _)

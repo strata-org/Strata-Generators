@@ -1,7 +1,7 @@
 import StrataGenerators.CmdHasTypeAGen
 import StrataGenerators.StmtHasTypeAGen.CallDefs
 import Strata.Languages.Core.StatementTypeSpec
-import Strata.Languages.Core.WeakTypeSpec
+import Strata.Languages.Core.TypingSpec
 import Strata.Languages.Core.CallWFProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
@@ -16,10 +16,10 @@ This file collects the *context-independent* helper lemmas required to establish
 - `mkArgs` builds the argument list of a call. `getIn_mkArgs`, `getLhs_mkArgs`,
   `inputArgs_mkArgs` and `resultArgs_mkArgs` compute its projections, and `argsMatch_mkArgs`
   matches it with the callee's signature.
-- `call_recipe_inout_sound` discharges the premises of `CmdExtHasTypeW.call`.
+- `call_recipe_inout_sound` discharges the premises of `CmdExtWellTyped.call`.
 - `initChain`, `insertAll` and `initChain_types` describe the chain of `init … nondet` statements
   that brings each necessary name into scope, at its declared type.
-- `StatementsHasTypeW_append` joins two judgments about a statement list.
+- `StatementsWellTyped_append` joins two judgments about a statement list.
 -/
 
 namespace StrataGenerators.Stmt
@@ -59,31 +59,7 @@ theorem lm_length_append {α β} (a b : ListMap α β) :
 theorem lm_values_length {α β} (m : ListMap α β) : m.values.length = m.length := by
   simp only [ListMap.values_eq_map_snd, List.length_map]
 
--- ── mapM support inversion (public) ───────────────────────────────────────
-
-/-- Membership in `List.mapM f l` on `SetGen.Set`: `args` is in the support iff
-    each element is pointwise in the support of `f` at the corresponding input.
-    A public re-statement of the private lemma in `HasTypeAGen.lean`, generic in
-    the element/index types. -/
-theorem mem_support_mapM_iff {α β} (f : α → SetGen.Set β)
-    (inputs : List α) (outs : List β) :
-    outs ∈ SetGen.support (List.mapM (m := SetGen.Set) f inputs) ↔
-    List.Forall₂ (fun out σ => out ∈ SetGen.support (f σ)) outs inputs := by
-  induction inputs generalizing outs with
-  | nil =>
-    simp only [List.mapM_nil, mem_support_pure_iff]
-    constructor
-    · rintro rfl; exact .nil
-    · intro h; cases h; rfl
-  | cons σ rest ih =>
-    simp only [List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff]
-    constructor
-    · rintro ⟨x, hx, tl, htl, rfl⟩
-      exact .cons hx ((ih _).mp htl)
-    · intro h
-      match outs, h with
-      | _ :: _, .cons harg htail =>
-        exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
+-- ── Forall₂ and substitution lemmas ───────────────────────────────────────
 
 /-- Membership on the left of a `List.Forall₂`: every element of the first list is related
     to some element of the second. (Lean core has no `List.Forall₂.mem_left`.) -/
@@ -422,14 +398,14 @@ theorem mem_values_insertAllCtx (news : List (Identifier Unit × LMonoTy)) :
       · exact Or.inl (List.mem_cons_self ..)
       · exact Or.inr h''
 
-/-- Running `initChain news` from `ts` is weakly typed and yields `insertAll ts news`, when each
+/-- Running `initChain news` from `ts` is well-typed and yields `insertAll ts news`, when each
     declared name is fresh at the point it is declared and every declared type is well kinded in
-    `C`. These are the premises of `CmdHasTypeW.init_nondet`. -/
+    `C`. These are the premises of `CmdWellTyped.init_nondet`. -/
 theorem initChain_types {P : Program} {C : LContext CoreLParams} {L : List String}
     (news : List (Identifier Unit × LMonoTy))
     (hwk : ∀ p ∈ news, C.WellKindedTy p.2) : ∀ (ts : TypeScopes),
     (∀ i (hi : i < news.length), (insertAll ts (news.take i)).find? (news[i].1) = none) →
-    StatementsHasTypeW P C ts L (initChain news) C (insertAll ts news) := by
+    StatementsWellTyped P C ts L (initChain news) C (insertAll ts news) := by
   induction news with
   | nil => intro ts _; exact .nil C ts L ts (Strata.Util.HMaps.Equiv.refl ts)
   | cons hd tl ih =>
@@ -437,14 +413,14 @@ theorem initChain_types {P : Program} {C : LContext CoreLParams} {L : List Strin
     have hfresh0 : ts.find? hd.1 = none := by
       have h0 := hfresh 0 (by simp)
       simpa [insertAll, List.take] using h0
-    have hhead : StatementHasTypeW P C ts L
+    have hhead : StatementWellTyped P C ts L
         (Statement.init hd.1 (.forAll [] hd.2) .nondet default) C
         (ts.insert hd.1 (.forAll [] hd.2)) :=
       .cmd C ts _ L _ _
         (.cmd ts _ _ (.init_nondet ts hd.1 (.forAll [] hd.2) hd.2 default _ hfresh0 rfl
           (hwk hd List.mem_cons_self) (Strata.Util.HMaps.Equiv.refl _)))
         (Strata.Util.HMaps.Equiv.refl _)
-    have htail : StatementsHasTypeW P C (ts.insert hd.1 (.forAll [] hd.2)) L
+    have htail : StatementsWellTyped P C (ts.insert hd.1 (.forAll [] hd.2)) L
         (initChain tl) C (insertAll ts (hd :: tl)) := by
       refine ih (fun p hp => hwk p (List.mem_cons_of_mem _ hp)) _ ?_
       intro i hi
@@ -659,9 +635,9 @@ theorem argsMatch_mkArgs {proc : Procedure} (M I O T : @LMonoTySignature Unit)
     an in-out or output-only name and no in-out name is an output-only name, out-argument targets
     `T` positionally as long as `O`, every `M` name and every `T` name in scope at its
     instantiated declared type (`M.values[i]` resp. `O.values[i]`), by-value inputs `exprs` that
-    are weakly typed at the instantiated input types and are not bare unannotated `fvar`s, and
+    are well-typed at the instantiated input types and are not bare unannotated `fvar`s, and
     written-to names `M.keys ++ T.keys` that are distinct, the call
-    `CmdExt.call pname (mkArgs M T exprs mask) md` is weakly typed and keeps the scopes.
+    `CmdExt.call pname (mkArgs M T exprs mask) md` is well-typed and keeps the scopes.
 
     Note the asymmetry between the two written-to blocks, which mirrors the spec:
     the in-out names are `M`'s own (the call rule pins them), whereas the out-only
@@ -686,16 +662,16 @@ theorem call_recipe_inout_sound
     (hTinΓ : ∀ i (hi : i < T.keys.length) (hj : i < O.values.length),
       ts.find? (T.keys[i]'hi) =
         some (.forAll [] (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (O.values[i]'hj))))
-    -- Each by-value input is weakly typed at the *instantiated* formal input type.
+    -- Each by-value input is well-typed at the *instantiated* formal input type.
     (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      ExprHasTypeW C ts (exprs[i]'hi)
+      ExprWellTyped C ts (exprs[i]'hi)
         (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (I.values[i]'hj)))
     (hExNoFvar : ∀ i (hi : i < exprs.length) m x, (exprs[i]'hi) ≠ LExpr.fvar m x none)
     (hIdisjOut : ∀ i (hi : i < I.keys.length),
       (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
     (hMnotO : ∀ k ∈ M.keys, k ∉ O.keys)
     (hLhsNodup : (M.keys ++ T.keys).Nodup) :
-    CmdExtHasTypeW C P ts (CmdExt.call pname (mkArgs M T exprs mask) md) ts := by
+    CmdExtWellTyped C P ts (CmdExt.call pname (mkArgs M T exprs mask) md) ts := by
   -- length facts
   have hkeysM : M.keys.length = M.length := ListMap.keys.length
   have hvalsM : M.values.length = M.length := lm_values_length M
@@ -825,55 +801,55 @@ theorem outTargets_inΓ {ts : TypeScopes} (O T : @LMonoTySignature Unit)
 
 -- ── The typing rules respect equivalent and larger scopes ─────────────
 --
--- Each weak typing rule constrains its *output* scopes up to `HMaps.Equiv` only, because a stack
+-- Each typing-spec rule constrains its *output* scopes up to `HMaps.Equiv` only, because a stack
 -- of scopes over a hash map reads no order of the insertions. Therefore a proof that joins two
 -- derivations also needs each relation to respect that equivalence in its *input* scopes. A rule
--- reads its input scopes through `find?` only, and so does the weak typing of an expression.
+-- reads its input scopes through `find?` only, and so does expression well-typedness.
 
-/-- A weakly typed expression stays weakly typed in larger variable scopes: scopes that bind every
-    name the original scopes bind, at the same type. Weak typing reads the scopes through `find?`
+/-- A well-typed expression stays well-typed in larger variable scopes: scopes that bind every
+    name the original scopes bind, at the same type. Well-typedness reads the scopes through `find?`
     only. -/
-theorem exprHasTypeW_mono {C : LContext CoreLParams} {ts ts' : TypeScopes}
-    {e : Expression.Expr} {τ : LMonoTy} (h : ExprHasTypeW C ts e τ)
-    (hts : ∀ x v, ts.find? x = some v → ts'.find? x = some v) : ExprHasTypeW C ts' e τ :=
+theorem exprWellTyped_mono {C : LContext CoreLParams} {ts ts' : TypeScopes}
+    {e : Expression.Expr} {τ : LMonoTy} (h : ExprWellTyped C ts e τ)
+    (hts : ∀ x v, ts.find? x = some v → ts'.find? x = some v) : ExprWellTyped C ts' e τ :=
   ⟨h.1, h.2.1, ⟨fun x ann hx => hts _ _ (h.2.2.fvarsDeclared x ann hx), h.2.2.opsInstantiate,
     h.2.2.opsKnown⟩⟩
 
-/-- A weakly typed command stays weakly typed, with the same output scopes, when its input scopes
+/-- A well-typed command stays well-typed, with the same output scopes, when its input scopes
     are replaced by equivalent ones: scopes with the same lookup for every name. -/
-theorem cmdHasTypeW_equiv_congr {C : LContext CoreLParams} {ts ts₂ ts' : TypeScopes}
-    {c : Cmd Expression} (h : CmdHasTypeW C ts c ts')
-    (he : Strata.Util.HMaps.Equiv ts₂ ts) : CmdHasTypeW C ts₂ c ts' := by
+theorem cmdWellTyped_equiv_congr {C : LContext CoreLParams} {ts ts₂ ts' : TypeScopes}
+    {c : Cmd Expression} (h : CmdWellTyped C ts c ts')
+    (he : Strata.Util.HMaps.Equiv ts₂ ts) : CmdWellTyped C ts₂ c ts' := by
   have hf : ∀ x, ts₂.find? x = ts.find? x := fun x => Strata.Util.HMaps.Equiv.find? he x
   have hm : ∀ x v, ts.find? x = some v → ts₂.find? x = some v := fun x _ hx => (hf x).trans hx
   cases h with
   | init_det x _ _ _ _ _ hfind hfv hxty hwk hexpr heq =>
-    exact .init_det _ _ _ _ _ _ _ ((hf x).trans hfind) hfv hxty hwk (exprHasTypeW_mono hexpr hm)
+    exact .init_det _ _ _ _ _ _ _ ((hf x).trans hfind) hfv hxty hwk (exprWellTyped_mono hexpr hm)
       (heq.trans (Strata.Util.HMaps.insert_equiv he.symm x _))
   | init_nondet x _ _ _ _ hfind hxty hwk heq =>
     exact .init_nondet _ _ _ _ _ _ ((hf x).trans hfind) hxty hwk
       (heq.trans (Strata.Util.HMaps.insert_equiv he.symm x _))
   | set_det x _ _ _ _ hfind hexpr heq =>
-    exact .set_det _ _ _ _ _ _ ((hf x).trans hfind) (exprHasTypeW_mono hexpr hm)
+    exact .set_det _ _ _ _ _ _ ((hf x).trans hfind) (exprWellTyped_mono hexpr hm)
       (heq.trans he.symm)
   | set_nondet x _ _ _ hfind heq =>
     exact .set_nondet _ _ _ _ _ ((hf x).trans hfind) (heq.trans he.symm)
   | assert _ _ _ _ hexpr heq =>
-    exact .assert _ _ _ _ _ (exprHasTypeW_mono hexpr hm) (heq.trans he.symm)
+    exact .assert _ _ _ _ _ (exprWellTyped_mono hexpr hm) (heq.trans he.symm)
   | assume _ _ _ _ hexpr heq =>
-    exact .assume _ _ _ _ _ (exprHasTypeW_mono hexpr hm) (heq.trans he.symm)
+    exact .assume _ _ _ _ _ (exprWellTyped_mono hexpr hm) (heq.trans he.symm)
   | cover _ _ _ _ hexpr heq =>
-    exact .cover _ _ _ _ _ (exprHasTypeW_mono hexpr hm) (heq.trans he.symm)
+    exact .cover _ _ _ _ _ (exprWellTyped_mono hexpr hm) (heq.trans he.symm)
 
-/-- A weakly typed command or call stays weakly typed, with the same output scopes, when its input
+/-- A well-typed command or call stays well-typed, with the same output scopes, when its input
     scopes are replaced by equivalent ones: scopes with the same lookup for every name. -/
-theorem cmdExtHasTypeW_equiv_congr {C : LContext CoreLParams} {P : Program}
-    {ts ts₂ ts' : TypeScopes} {c : Command} (h : CmdExtHasTypeW C P ts c ts')
-    (he : Strata.Util.HMaps.Equiv ts₂ ts) : CmdExtHasTypeW C P ts₂ c ts' := by
+theorem cmdExtWellTyped_equiv_congr {C : LContext CoreLParams} {P : Program}
+    {ts ts₂ ts' : TypeScopes} {c : Command} (h : CmdExtWellTyped C P ts c ts')
+    (he : Strata.Util.HMaps.Equiv ts₂ ts) : CmdExtWellTyped C P ts₂ c ts' := by
   have hf : ∀ x, ts₂.find? x = ts.find? x := fun x => Strata.Util.HMaps.Equiv.find? he x
   have hm : ∀ x v, ts.find? x = some v → ts₂.find? x = some v := fun x _ hx => (hf x).trans hx
   cases h with
-  | cmd c _ hc => exact .cmd ts₂ c _ (cmdHasTypeW_equiv_congr hc he)
+  | cmd c _ hc => exact .cmd ts₂ c _ (cmdWellTyped_equiv_congr hc he)
   | call pname callArgs proc md σ _ hfind hwf hlhs hargs hlhsTy heq =>
     refine .call ts₂ pname callArgs proc md σ _ hfind hwf ?_ ?_ ?_ (heq.trans he.symm)
     · intro v hv
@@ -889,26 +865,26 @@ theorem cmdExtHasTypeW_equiv_congr {C : LContext CoreLParams} {P : Program}
           exact (hf x).trans hty
         | some t =>
           rw [hcase] at hty
-          exact exprHasTypeW_mono hty hm
+          exact exprWellTyped_mono hty hm
       | _ =>
         rw [hcase] at hty
-        exact exprHasTypeW_mono hty hm
+        exact exprWellTyped_mono hty hm
     · intro i hi hj
       exact (hf _).trans (hlhsTy i hi hj)
 
-/-- The form of `statementsHasTypeW_equiv_congr` that takes a fuel parameter.
+/-- The form of `statementsWellTyped_equiv_congr` that takes a fuel parameter.
 
     The relation is a `Prop`, so the equation compiler cannot recurse on a derivation. Recursion on
     the *syntax* covers both halves of the mutual definition in one function, because the body of a
     block, of a branch or of a loop inside the head statement is strictly smaller than the list.
     The recursion is on an explicit `Nat` fuel that bounds the size of the list, so each context
     stays a local variable that `cases` can substitute. -/
-private theorem statementsHasTypeW_equiv_congr_fuel {P : Program} : ∀ (n : Nat)
+private theorem statementsWellTyped_equiv_congr_fuel {P : Program} : ∀ (n : Nat)
     (ss : List Statement) {C C' : LContext CoreLParams} {ts ts₂ ts' : TypeScopes}
     {L : List String}, sizeOf ss ≤ n →
-    StatementsHasTypeW P C ts L ss C' ts' →
+    StatementsWellTyped P C ts L ss C' ts' →
     Strata.Util.HMaps.Equiv ts₂ ts →
-    StatementsHasTypeW P C ts₂ L ss C' ts' := by
+    StatementsWellTyped P C ts₂ L ss C' ts' := by
   intro n
   induction n with
   | zero =>
@@ -926,13 +902,13 @@ private theorem statementsHasTypeW_equiv_congr_fuel {P : Program} : ∀ (n : Nat
       -- Only the head statement is retyped; the tail already starts from `tsa`.
       cases hs with
       | cmd _ _ tsc L c _ hc heq =>
-        exact .cmd C ts₂ tsc L c _ (cmdExtHasTypeW_equiv_congr hc he) heq
+        exact .cmd C ts₂ tsc L c _ (cmdExtWellTyped_equiv_congr hc he) heq
       | block _ _ C_body ts_body L label body md _ hfresh hbody heq =>
         exact .block C ts₂ C_body ts_body L label body md _ hfresh
           (ih body (by simp at hfuel; omega) hbody he) (heq.trans he.symm)
       | ite_det _ _ C_t ts_t C_e ts_e L cond thenb elseb md _ hcond hthen helse heq =>
         exact .ite_det C ts₂ C_t ts_t C_e ts_e L cond thenb elseb md _
-          (exprHasTypeW_mono hcond hm)
+          (exprWellTyped_mono hcond hm)
           (ih thenb (by simp at hfuel; omega) hthen he)
           (ih elseb (by simp at hfuel; omega) helse he) (heq.trans he.symm)
       | ite_nondet _ _ C_t ts_t C_e ts_e L thenb elseb md _ hthen helse heq =>
@@ -941,33 +917,33 @@ private theorem statementsHasTypeW_equiv_congr_fuel {P : Program} : ∀ (n : Nat
           (ih elseb (by simp at hfuel; omega) helse he) (heq.trans he.symm)
       | loop _ _ C_body ts_body L guard measure invariants body md _ hg hmeas hinv hbody heq =>
         exact .loop C ts₂ C_body ts_body L guard measure invariants body md _
-          (fun g hgd => exprHasTypeW_mono (hg g hgd) hm)
-          (fun m hmd => exprHasTypeW_mono (hmeas m hmd) hm)
-          (fun p hp => exprHasTypeW_mono (hinv p hp) hm)
+          (fun g hgd => exprWellTyped_mono (hg g hgd) hm)
+          (fun m hmd => exprWellTyped_mono (hmeas m hmd) hm)
+          (fun p hp => exprWellTyped_mono (hinv p hp) hm)
           (ih body (by simp at hfuel; omega) hbody he) (heq.trans he.symm)
       | exit _ _ L label md _ hlab heq =>
         exact .exit C ts₂ L label md _ hlab (heq.trans he.symm)
       | typeDecl _ C'' _ L tc md _ hname hadd heq =>
         exact .typeDecl C _ ts₂ L tc md _ hname hadd (heq.trans he.symm)
 
-/-- A weakly typed statement list stays weakly typed, with the same output context and scopes, when
+/-- A well-typed statement list stays well-typed, with the same output context and scopes, when
     its input scopes are replaced by equivalent ones: scopes with the same lookup for every name. -/
-theorem statementsHasTypeW_equiv_congr {P : Program} {ss : List Statement}
+theorem statementsWellTyped_equiv_congr {P : Program} {ss : List Statement}
     {C C' : LContext CoreLParams} {ts ts₂ ts' : TypeScopes} {L : List String}
-    (h : StatementsHasTypeW P C ts L ss C' ts')
+    (h : StatementsWellTyped P C ts L ss C' ts')
     (he : Strata.Util.HMaps.Equiv ts₂ ts) :
-    StatementsHasTypeW P C ts₂ L ss C' ts' :=
-  statementsHasTypeW_equiv_congr_fuel (sizeOf ss) ss (Nat.le_refl _) h he
+    StatementsWellTyped P C ts₂ L ss C' ts' :=
+  statementsWellTyped_equiv_congr_fuel (sizeOf ss) ss (Nat.le_refl _) h he
 
-/-- Concatenating two weakly typed statement lists (threading the middle scopes) gives a weakly
-    typed statement list. -/
-theorem StatementsHasTypeW_append {P : Program} {L : List String}
+/-- Concatenating two well-typed statement lists (threading the middle scopes) gives a well-typed
+    statement list. -/
+theorem StatementsWellTyped_append {P : Program} {L : List String}
     {l1 : List Statement} :
     ∀ {C : LContext CoreLParams} {ts ts' ts'' : TypeScopes} {C' C'' : LContext CoreLParams}
       {l2 : List Statement},
-    StatementsHasTypeW P C ts L l1 C' ts' →
-    StatementsHasTypeW P C' ts' L l2 C'' ts'' →
-    StatementsHasTypeW P C ts L (l1 ++ l2) C'' ts'' := by
+    StatementsWellTyped P C ts L l1 C' ts' →
+    StatementsWellTyped P C' ts' L l2 C'' ts'' →
+    StatementsWellTyped P C ts L (l1 ++ l2) C'' ts'' := by
   induction l1 with
   | nil =>
     intro C ts ts' ts'' C' C'' l2 h1 h2
@@ -975,29 +951,29 @@ theorem StatementsHasTypeW_append {P : Program} {L : List String}
     | nil _ _ _ _ heq =>
       -- The empty list's output scopes are only `Equiv` to its input, so the tail's
       -- derivation has to be transported back along that equivalence.
-      simpa using statementsHasTypeW_equiv_congr h2 heq.symm
+      simpa using statementsWellTyped_equiv_congr h2 heq.symm
   | cons hd tl ih =>
     intro C ts ts' ts'' C' C'' l2 h1 h2
     cases h1 with
     | cons _ Ca _ _ tsa _ _ _ _ hs hss =>
       exact .cons _ _ _ _ _ _ _ _ _ hs (ih hss h2)
 
-/-- A weakly typed statement list stays weakly typed when its output scopes are replaced by
+/-- A well-typed statement list stays well-typed when its output scopes are replaced by
     equivalent ones: scopes with the same lookup for every name. -/
-theorem StatementsHasTypeW_out_equiv {P : Program} {C C' : LContext CoreLParams}
+theorem StatementsWellTyped_out_equiv {P : Program} {C C' : LContext CoreLParams}
     {ts ts' ts'' : TypeScopes} {L : List String} {ss : List Statement}
-    (h : StatementsHasTypeW P C ts L ss C' ts')
+    (h : StatementsWellTyped P C ts L ss C' ts')
     (he : Strata.Util.HMaps.Equiv ts'' ts') :
-    StatementsHasTypeW P C ts L ss C' ts'' := by
-  have hz := StatementsHasTypeW_append h (.nil C' ts' L ts'' he)
+    StatementsWellTyped P C ts L ss C' ts'' := by
+  have hz := StatementsWellTyped_append h (.nil C' ts' L ts'' he)
   rwa [List.append_nil] at hz
 
-/-- A single weakly typed statement is a weakly typed statement list of length one. Every
+/-- A single well-typed statement is a well-typed statement list of length one. Every
     `genStmt` branch but `call` produces a singleton list. -/
-theorem StatementsHasTypeW_singleton {P : Program} {C C' : LContext CoreLParams}
+theorem StatementsWellTyped_singleton {P : Program} {C C' : LContext CoreLParams}
     {ts ts' : TypeScopes} {L : List String} {s : Statement}
-    (h : StatementHasTypeW P C ts L s C' ts') :
-    StatementsHasTypeW P C ts L [s] C' ts' :=
+    (h : StatementWellTyped P C ts L s C' ts') :
+    StatementsWellTyped P C ts L [s] C' ts' :=
   .cons _ _ _ _ _ _ _ _ _ h (.nil _ _ _ _ (Strata.Util.HMaps.Equiv.refl _))
 
 -- ── Reuse-or-init: the general case (block-free when nothing is missing) ──
@@ -1043,7 +1019,7 @@ theorem insertAll_missing_preserves (ts : TypeScopes)
     with the callee's out-only block `O`, `hTVals`). Those already bound in `ts` at exactly their
     recorded type (`hReuse`) are reused; the rest (`missingIn ts news`) are brought into scope by
     an `init … nondet` chain. The emitted body is `initChain (missingIn ts news) ++ [call …]`,
-    weakly typed in `insertAll ts (missingIn ts news)`.
+    well-typed in `insertAll ts (missingIn ts news)`.
 
     When `missingIn ts news = []` the chain is empty, so the body is the bare call and the output
     scopes are `ts` itself, which is the common shape in real Strata code. -/
@@ -1059,9 +1035,9 @@ theorem call_mixed_body_sound
     (hExLen : exprs.length = I.length)
     -- The out targets are positionally type-aligned with the *instantiated* out block.
     (hTVals : T.values = (substSig σ O).values)
-    -- The by-value inputs are weakly typed at the *instantiated* formal input types.
+    -- The by-value inputs are well-typed at the *instantiated* formal input types.
     (hExTy : ∀ i (hi : i < exprs.length) (hj : i < I.values.length),
-      ExprHasTypeW C ts (exprs[i]'hi)
+      ExprWellTyped C ts (exprs[i]'hi)
         (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (I.values[i]'hj)))
     (hIdisjOut : ∀ i (hi : i < I.keys.length),
       (M ++ O).keys.contains (I.keys[i]'(by simpa using hi)) = false)
@@ -1074,7 +1050,7 @@ theorem call_mixed_body_sound
     -- The type of each written-to name is well-kinded in `C`. That is the premise of the `init`
     -- rule that `initChain_types` discharges.
     (hwk : ∀ p ∈ (substSig σ M ++ T).toList, C.WellKindedTy p.2) :
-    StatementsHasTypeW P C ts L
+    StatementsWellTyped P C ts L
       (initChain (missingIn ts (substSig σ M ++ T)) ++
         [Statement.call pname (mkArgs M T exprs mask) default]) C
       (insertAll ts (missingIn ts (substSig σ M ++ T))) := by
@@ -1091,8 +1067,8 @@ theorem call_mixed_body_sound
   -- The missing-only chain is Nodup (a sublist of a Nodup list).
   have hmissNodup : ((missingIn ts (substSig σ M ++ T)).map Prod.fst).Nodup :=
     List.Nodup.sublist (List.Sublist.map _ (missingIn_sublist ts (substSig σ M ++ T))) hNodup'
-  -- The chain is weakly typed: each missing name is fresh at its declaration point.
-  have hchain : StatementsHasTypeW P C ts L
+  -- The chain is well-typed: each missing name is fresh at its declaration point.
+  have hchain : StatementsWellTyped P C ts L
       (initChain (missingIn ts (substSig σ M ++ T))) C
       (insertAll ts (missingIn ts (substSig σ M ++ T))) := by
     apply initChain_types (missingIn ts (substSig σ M ++ T))
@@ -1143,16 +1119,16 @@ theorem call_mixed_body_sound
       (ts := insertAll ts (missingIn ts (substSig σ M ++ T)))
       (fun p hp => hInScope _ (List.mem_append_right (substSig σ M).toList hp)) i hi hjOσ
     rwa [substSig_values_getElem σ O i hjOσ hj] at h
-  have hcall : StatementHasTypeW P C (insertAll ts (missingIn ts (substSig σ M ++ T))) L
+  have hcall : StatementWellTyped P C (insertAll ts (missingIn ts (substSig σ M ++ T))) L
       (Statement.call pname (mkArgs M T exprs mask) default) C
       (insertAll ts (missingIn ts (substSig σ M ++ T))) :=
     .cmd C _ _ L _ _
       (call_recipe_inout_sound σ M I O T exprs mask hfind hInputs hOutputs hExLen
         (by rw [← lm_values_length T, ← lm_values_length O, hTVals, substSig_values,
               List.length_map])
-        hMinΓ hTinΓ (fun i hi hj => exprHasTypeW_mono (hExTy i hi hj) hext) hExNoFvar
+        hMinΓ hTinΓ (fun i hi hj => exprWellTyped_mono (hExTy i hi hj) hext) hExNoFvar
         hIdisjOut hMnotO hLhsNodup)
       (Strata.Util.HMaps.Equiv.refl _)
-  exact StatementsHasTypeW_append hchain (StatementsHasTypeW_singleton hcall)
+  exact StatementsWellTyped_append hchain (StatementsWellTyped_singleton hcall)
 
 end StrataGenerators.Stmt

@@ -32,34 +32,36 @@ a depth.
 
 open Lambda RandomChoice SetGen
 
-namespace StrataGenerators.IndirSupport
+namespace SetGen
 
--- ── The shared lemmas about an application spine ─────────────────────
-
-/-- Membership in the support of `List.mapM f l` at `SetGen.Set`. The support holds `args` exactly
-    when each element of `args` is in the support of `f` at the matching input.
-
-    The main proof file holds the same statement as a `private mem_mapM_iff`. This module has its own
-    copy, so that it can come before that file. -/
-theorem mem_mapM_iff' (f : LMonoTy → SetGen.Set LExpr')
-    (argTys : List LMonoTy) (args : List LExpr') :
-    args ∈ (List.mapM (m := SetGen.Set) f argTys) ↔
-    List.Forall₂ (fun arg σ => arg ∈ f σ) args argTys := by
-  induction argTys generalizing args with
+/-- A list is in the support of `mapM f l` exactly when it pairs each element of `l` with a value
+    in the support of `f` at that element. -/
+theorem mem_support_mapM_iff {α β : Type} (f : α → SetGen.Set β) (l : List α) (r : List β) :
+    r ∈ SetGen.support (List.mapM (m := SetGen.Set) f l) ↔
+      List.Forall₂ (fun b a => b ∈ SetGen.support (f a)) r l := by
+  induction l generalizing r with
   | nil =>
-    simp only [List.mapM_nil, SetGen.Set.mem_pure]
+    simp only [List.mapM_nil, mem_support_pure_iff]
     constructor
-    · rintro rfl; exact .nil
-    · intro h; cases h; rfl
-  | cons σ rest ih =>
-    simp only [List.mapM_cons, SetGen.Set.mem_bind, SetGen.Set.mem_pure]
+    · rintro rfl
+      exact .nil
+    · intro h
+      cases h
+      rfl
+  | cons a rest ih =>
+    simp only [List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff]
     constructor
     · rintro ⟨x, hx, tl, htl, rfl⟩
       exact .cons hx ((ih _).mp htl)
     · intro h
-      match args, h with
-      | _ :: _, .cons harg htail =>
-        exact ⟨_, harg, _, (ih _).mpr htail, rfl⟩
+      match r, h with
+      | _ :: _, .cons hb htail => exact ⟨_, hb, _, (ih _).mpr htail, rfl⟩
+
+end SetGen
+
+namespace StrataGenerators.IndirSupport
+
+-- ── The shared lemmas about an application spine ─────────────────────
 
 /-- The form of `mapM_forall` for a `genArg` whose guarantee holds *only for some argument types*.
     If `genArg σ` gives only terms that satisfy `P` when `Q σ` holds, and each type in `argTys`
@@ -124,7 +126,8 @@ theorem genIndir_shape (octx : OpCtx) (τ : LMonoTy)
   simp only [mem_support_iff, SetGen.Set.mem_bind, SetGen.Set.mem_pure] at he
   obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
   rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
-  exact ⟨entry.1, entry.2, args, hentry_mem, (mem_mapM_iff' genArg entry.2 args).mp hargs, rfl⟩
+  exact ⟨entry.1, entry.2, args, hentry_mem, (mem_support_mapM_iff genArg entry.2 args).mp hargs,
+    rfl⟩
 
 /-- The shape of each term that `genIndirPolyCore` can emit. Such a term is a spine over a candidate
     from `findPolymorphicOps`, or it comes from the `fallback` of the caller. -/
@@ -150,7 +153,7 @@ theorem genIndirPolyCore_shape (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx
   · obtain ⟨entry, hentry_mem, args, hargs, rfl⟩ := he
     rw [← mem_support_iff, mem_support_elements_iff] at hentry_mem
     exact Or.inl ⟨sampledTys, entry.1, entry.2, args, hentry_mem,
-      (mem_mapM_iff' genArg entry.2 args).mp hargs, rfl⟩
+      (mem_support_mapM_iff genArg entry.2 args).mp hargs, rfl⟩
   · exact Or.inr he
 
 -- ── The typing of a spine ───────────────────────────────────────────
@@ -235,7 +238,7 @@ theorem genIndir_getVars_subset (octx : OpCtx) (τ : LMonoTy)
     LExpr.LExpr.getVars e ⊆ keys := by
   obtain ⟨name, argTys, args, _, hargs, rfl⟩ := genIndir_shape octx τ genArg h e he
   refine mkApps_getVars_subset _ args keys (by simp only [LExpr.LExpr.getVars]; exact List.nil_subset _) ?_
-  exact mapM_forall genArg hArg argTys args ((mem_mapM_iff' genArg argTys args).mpr hargs)
+  exact mapM_forall genArg hArg argTys args ((mem_support_mapM_iff genArg argTys args).mpr hargs)
 
 /-- The same claim for the `IndirPoly` rule. The hypothesis `hFallback` bounds the free variables of
     the fallback. -/
@@ -254,7 +257,7 @@ theorem genIndirPolyCore_getVars_subset (fctx : FVarCtx) (octx : OpCtx) (pctx : 
   · refine mkApps_getVars_subset _ args keys
       (by simp only [LExpr.LExpr.getVars]; exact List.nil_subset _) ?_
     exact mapM_forall genArg hArg concreteArgTys args
-      ((mem_mapM_iff' genArg concreteArgTys args).mpr hargs)
+      ((mem_support_mapM_iff genArg concreteArgTys args).mpr hargs)
   · exact hFallback e hfb
 
 end StrataGenerators.IndirSupport

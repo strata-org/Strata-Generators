@@ -17,16 +17,12 @@ rational `RandomChoice.coin`. A coin is not a `frequency` site, and `@[tunable]`
 `frequency`, so the attribute cannot expose that split.
 
 `weightedOptionGen` has the same support and splits on two `Nat` weights instead. Reach for it when
-the *presence* of an optional clause is the knob you want. A function precondition is one such
-clause, and `PrecondElim` is the pass that acts on it.
+the *presence* of an optional clause is the knob you want.
 
 A tuning can address the split only if the tagged generator writes the split out in its own body.
 `@[tunable]` collects the `frequency` calls in that body, and it inlines only that declaration's own
 compiler-generated auxiliaries. This combinator takes its weights as variables rather than as
 literals, so the attribute rejects the combinator itself.
-`TuningPrototypes.genPreconditionW` writes the two-branch `frequency` inline. It then records by
-`rfl` that the result is this combinator at weights 1 to 1, so the support lemma below still
-describes it.
 
 Both weights must be positive for the support to match `optionGen`'s. `Tuning.weight` clamps every
 weight to 1 or more, so a tuned generator that wraps this stays total for every runtime `θ`.

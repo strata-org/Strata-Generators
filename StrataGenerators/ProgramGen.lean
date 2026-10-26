@@ -17,7 +17,7 @@ together into a `Program` generator, threading the real ambient context
 (`LContext CoreLParams`), type scope (`TContext Unit`), reserved-name set, and
 pool of referenceable type constructors across a declaration fold.
 
-Soundness (every generated program is `ProgramHasTypeW programContext [] P`) and
+Soundness (every generated program is `ProgramWellTyped programContext [] P`) and
 completeness live in `StrataGenerators.ProgramGen.Sound` /
 `StrataGenerators.ProgramGen.Complete`.
 -/
@@ -60,12 +60,12 @@ structure GenState where
       * Each **step for a datatype** adds the derived functions of the block that the step declares, at their
         ground types. Those functions are the constructors, the testers, and the safe and unsafe accessors of a
         field, which `adtDerivedOps` gives.
-      * each **monomorphic function declaration** (`genDeclFunction`), so a body
-        generated later may call a function the program declares. Without it a
+      * each **monomorphic function declaration** (`genDeclFunction`, `genDeclRecFuncBlock`), so
+        a body generated later may call a function the program declares. Without it a
         program declared functions none of its own bodies could name, and
         `FunctionInlining` ran as the identity on every draw.
 
-      The weak expression typing checks every operator annotation against the function of `C` of its
+      Expression well-typedness checks every operator annotation against the function of `C` of its
       name, so every operator here has a registered, well-kinded type that instantiates that
       function's signature (`Inv.octxWK`, `Inv.exprCtx`). -/
   octx : OpCtx
@@ -139,6 +139,9 @@ structure Bounds where
   exprDepth : Nat := 3
   /-- Depth budget for function bodies. -/
   funcDepth : Nat := 3
+  /-- Max number of functions in a block of mutually recursive functions. A block has at least
+      one, whatever this bound. -/
+  maxRecFuncs : Nat := 2
   /-- Max number of elements (hence declared constants) in a `distinct`
       assertion. A `distinct` draws at least two, whatever this bound. -/
   maxDistinctVars : Nat := 3
@@ -396,7 +399,31 @@ def funcPolyOpEntry (f : Function) : Option (String × LTy) :=
   if f.typeArgs.isEmpty then none
   else some (f.name.name, .forAll f.typeArgs (funcCurriedTy f))
 
-/-- Generate a function that is not recursive, and rename it to a fresh name, so that the names of the program
+/-- Replace the context by `C'`, which declares `func`, and register the operator entry of `func`
+    `declaredFuncWeight` times: in `octx` for a monomorphic function, in `pctx` for a polymorphic
+    one. -/
+def GenState.registerFunc (s : GenState) (C' : LContext CoreLParams) (func : Function) :
+    GenState :=
+  { s with
+    C := C'
+    octx := match funcOpEntry func with
+      | some entry => OpCtx.ofList (s.octx.ops ++ List.replicate declaredFuncWeight entry)
+      | none => s.octx
+    pctx := match funcPolyOpEntry func with
+      | some entry => s.pctx ++ List.replicate declaredFuncWeight entry
+      | none => s.pctx }
+
+/-- Add the functions of `fs` in order through `addFactoryFunctionWithError`, registering each
+    (`GenState.registerFunc`); `none` when an add fails. -/
+def GenState.registerFuncs (s : GenState) : List Function → Option GenState
+  | [] => some s
+  | f :: fs =>
+    match s.C.addFactoryFunctionWithError f.toLFunc with
+    | .ok C' => (s.registerFunc C' f).registerFuncs fs
+    | .error _ => none
+
+/-- Generate a function, make it non-recursive with no measure, as a function declaration must be,
+    and rename it to a fresh name, so that the names of the program
     stay distinct and no change to `FuncHasType'` is necessary, because that specification puts no condition on
     a name. When `addFactoryFunctionWithError` accepts the function, emit it, grow the factory of the context,
     and register it in the vocabulary of the operators.
@@ -409,33 +436,47 @@ def funcPolyOpEntry (f : Function) : Option (String × LTy) :=
     `Factory.callOfLFunc`) ran as the identity. See the `FunctionInlining` notes in
     `StrataGenerators/ProgramGen/UnprovenTransforms.lean`.
 
-    The registered entry is the signature of the function that `C'` declares under that
-    name, which is what `Inv.exprCtx` asks of every operator and scheme.
+    The registered entry is the signature of the function that the grown context declares under
+    that name.
 
     Registration goes to `octx` for a monomorphic function and to `pctx` for a
     polymorphic one, so **every** declared function becomes callable rather than only
     the monomorphic minority (measured: 44 of 158 declared functions are
-    monomorphic, so the `pctx` half covers the other 114). Both are registered only
-    on the `.ok` branch: a function the context rejects is not emitted, so recording
-    it would offer a call target the program does not declare. -/
+    monomorphic, so the `pctx` half covers the other 114). -/
 def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   -- No formal is named after a function of `s.C`.
   let func₀ ← genFunction [] s.octx b.funcDepth s.derivedPctx
-    (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x)
+    (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons
   let name ← genDeclName s.reserved
-  let func := { func₀ with name := ⟨name, ()⟩ }
-  match s.C.addFactoryFunctionWithError func.toLFunc with
-  | .ok C' =>
-    let octx' := match funcOpEntry func with
-      | some entry => OpCtx.ofList (s.octx.ops ++ List.replicate declaredFuncWeight entry)
-      | none => s.octx
-    let pctx' := match funcPolyOpEntry func with
-      | some entry => s.pctx ++ List.replicate declaredFuncWeight entry
-      | none => s.pctx
-    pure ([.func func .empty],
-          { s with C := C', reserved := name :: s.reserved,
-                   octx := octx', pctx := pctx' })
-  | .error _ => pure ([], s)
+  let func := { func₀ with name := ⟨name, ()⟩, isRecursive := false, measure := none }
+  match s.registerFuncs [func] with
+  | some s' => pure ([.func func .empty], { s' with reserved := name :: s.reserved })
+  | none => pure ([], s)
+
+/-- `f` without its `inline` attributes, which a member of a recursive block may not carry. -/
+def dropInline (f : Function) : Function :=
+  { f with attr := f.attr.filter (fun a => decide (a ≠ .inline)) }
+
+/-- Generate a block of between one and `maxRecFuncs` mutually recursive functions. Each member has
+    a fresh name and a signature whose formals are named after no function of `s.C` and no member.
+    The signatures alone (the stubs) are added to the context first, and each member's parts are
+    drawn against that context and the stubs' operator entries, so a body may call any member.
+    The members are recursive, carry no `inline` attribute, and are added and registered. A failed
+    add emits nothing. -/
+def genDeclRecFuncBlock [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
+  let k ← chooseNat 1 (max 1 b.maxRecFuncs) (Nat.le_max_left 1 _)
+  let names ← genDeclNames s.reserved k
+  let avoid := fun x => (StrataGenerators.Stmt.functionNames s.C).contains x || names.contains x
+  let stubs ← names.mapM (fun nm => genFuncSig nm b.funcDepth avoid s.dtCons)
+  match s.registerFuncs stubs with
+  | none => pure ([], s)
+  | some sStub =>
+    let pctx := stubs.filterMap funcPolyOpEntry ++ s.derivedPctx
+    let drawn ← stubs.mapM (genFuncParts (pure true) [] sStub.octx b.funcDepth pctx s.dtCons)
+    let funcs := drawn.map dropInline
+    match s.registerFuncs funcs with
+    | none => pure ([], s)
+    | some s' => pure ([.recFuncBlock funcs .empty], { s' with reserved := names ++ s.reserved })
 
 /-- Generate a procedure and rename it to a globally fresh name (the program's
     names stay distinct without touching `ProcHasType'`, which does not constrain
@@ -473,13 +514,14 @@ def hasCallableFunc (s : GenState) : Bool :=
   s.octx.ops.length + s.pctx.length >
     initState.octx.ops.length + initState.pctx.length
 
-/-- The declaration-kind selector: pick one of the seven declaration kinds and run
+/-- The declaration-kind selector: pick one of the eight declaration kinds and run
     its step generator. Every kind here is covered by `genProgram_sound`.
 
     **Weights.** Procedures, functions and datatype blocks carry the interesting
     structure (bodies, calls, constructor arguments), so they are weighted up;
     abstract types, aliases, axioms and `distinct` are cheap one-liners and are
-    weighted down. The procedure weight matters most for *inter-procedure calls*:
+    weighted down, and so is a recursive function block. The procedure weight matters most for
+    *inter-procedure calls*:
     a call needs at least two procedure declarations (the first runs with
     `procs = []`), so the odds of a call scale roughly with the square of this
     weight's share.
@@ -510,10 +552,10 @@ def genDeclStep [Gen G] (s : GenState) (b : Bounds) : G StepResult :=
     , (1, fun () => genDeclDistinct s b)
     , (3, fun () => genDeclDatatype s b)
     , (wFunc, fun () => genDeclFunction s b)
-    , (wProc, fun () => genDeclProcedure s b) ]
+    , (wProc, fun () => genDeclProcedure s b)
+    , (1, fun () => genDeclRecFuncBlock s b) ]
   frequency gs (by
-    -- The four fixed entries of the weight 1, and the weight of the datatype step, already make the sum
-    -- positive. Therefore this obligation holds in each phase, and the proof needs no split on the `if`.
+    -- The fixed weights alone make the sum positive, so the proof needs no split on the `if`.
     simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
     omega)
 

@@ -86,14 +86,14 @@ theorem mem_writable_keys_iff (ctx : VarCtx) (immutableVars : List (Identifier U
 theorem genCmd_mutableVars
     (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) {avoid : List String}
-    (r : GenCmdResult)
+    {kt : Lambda.KnownTypes} (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid kt)) :
     (∀ v ∈ HasVarsImp.modifiedVars (P := Expression) r.cmd,
       v ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
       k ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid] at hr
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid kt] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
   · -- init_det, or init_nondet when the initializer is filtered out: modified [],
     -- defined [name], outCtx = ctx.insert

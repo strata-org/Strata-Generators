@@ -1,4 +1,5 @@
 import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.RecFuncBlockSupport
 
 /-!
 # Completeness of the whole-program generator (fold inversion)
@@ -18,23 +19,24 @@ reachability with no new program-level obligation.
 This file proves that composition, plus the per-step reachability lemmas that a
 caller composes with it.
 
-## Status: 5 of the 7 declaration kinds
+## Status: 6 of the 8 declaration kinds
 
 This file has per-step reachability lemmas for **axioms, abstract types, aliases,
-`distinct` and datatype blocks** (the `genDecl*_complete` theorems below). Two
-kinds have no lemma: functions and procedures. What the remaining two need is
-catalogued in the repo's issue tracker, along with the other blockers
-(`genIdentName` has no two-directional support lemma, `recFuncBlock` is not
-generated, and `genLExpr` is itself incomplete). The `ArityOk` blocker is
+`distinct`, datatype blocks and recursive function blocks** (the `genDecl*_complete`
+theorems below). Two kinds have no lemma: functions and procedures. What the remaining
+two need is catalogued in the repo's issue tracker, along with the other blockers
+(`genIdentName` has no two-directional support lemma, and `genLExpr` is itself
+incomplete). The `ArityOk` blocker is
 **gone**: upstream's `argsWellKinded` plus a vocabulary derived from
 `Core.KnownTypes` discharged it.
 
-Four of the five lemmas have a useful property: their generators never call
+The lemmas for four of the six kinds have a useful property: their generators never call
 `genLExpr`, so they do not depend on the completeness of the expression generator
-at all. The `distinct` step does contain expressions, but `genDistinct` builds them
-each of them directly, as an annotated `.fvar` node, and a datatype block holds types only. The lemma for an
-axiom is the exception, because it takes a hypothesis about the reachability of the body by `genLExpr`, and the
-caller discharges that hypothesis from `genLExpr_complete`.
+at all. The `distinct` step does contain expressions, but `genDistinct` builds each of them
+directly, as an annotated `.fvar` node, and a datatype block holds types only. The lemmas for an
+axiom and for a recursive function block are the exceptions: they take a hypothesis that the
+axiom body, or each member's parts, are reachable, and the caller discharges it from the
+completeness of the expression generator.
 
 `genNonRecursiveArgTy_complete` is a support lemma. It gives
 `genArgTy_complete_of_wf` at the empty block, which is what an alias body and the
@@ -51,22 +53,20 @@ dispatch, the fold and the assembly of a program, for an abstract-type step and 
 a datatype step. The result is a reachable whole program, so the interface of these
 lemmas holds up in use.
 
-Three items block a tighter result:
+Two items block a tighter result:
 
 * `BitvecWidthOnly` is a hypothesis of each lemma that generates a type. It is the
   one residual condition of the arity discipline, because `Core.KnownTypes`
   registers `bitvec` at the arity 1, and no argument position of an `LMonoTy` can hold a width. These lemmas need
   no separate predicate about an arity, because `VocabOk` and the field `argsWellKinded` of the specification
   give the whole discipline of the arities.
-* The generator does not emit `recFuncBlock`, so the eighth constructor of
-  `DeclHasType'` is unreachable by construction.
 * `genLExpr` is incomplete.
 
 **Do not read this module as a proof of completeness.** There is no whole-program
 completeness theorem, and a tight theorem is not possible while `genLExpr` is
 incomplete. This file proves two things. First, program reachability *reduces to*
 per-declaration reachability, and this adds no obligation at the program level.
-Second, 5 of the 7 per-declaration obligations are discharged.
+Second, 6 of the 8 per-declaration obligations are discharged.
 -/
 
 open Lambda RandomChoice Core Imperative SetGen
@@ -88,7 +88,7 @@ theorem genDeclsFold_cons_complete {s s₁ s₂ : GenState} {b : Bounds} {n : Na
   exact ⟨(ds₁, s₁), hstep, (rest, s₂), hrest, rfl, rfl⟩
 
 /-- **Reachability of a step kind implies reachability through the dispatch.** If
-    `(ds, s')` is reachable by *any* of the seven declaration generators, it is
+    `(ds, s')` is reachable by *any* of the eight declaration generators, it is
     reachable by `genDeclStep`.
 
     The statement names **no weight of the dispatch**. A weight does not affect reachability, because
@@ -104,19 +104,20 @@ theorem genDeclStep_complete_of_mem {s s' : GenState} {b : Bounds} {ds : List De
       (ds, s') ∈ SetGen.support (genDeclDistinct (G := SetGen.Set) s b) ∨
       (ds, s') ∈ SetGen.support (genDeclDatatype (G := SetGen.Set) s b) ∨
       (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b)) :
+      (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b) ∨
+      (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
     (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b) := by
   simp only [genDeclStep, mem_support_frequency_iff]
   -- One branch per kind, each naming its generator and that generator's weight.
   -- The weights appear *only here*, never in the statement, so re-tuning the
-  -- dispatch touches at most these seven witnesses and no downstream user.
+  -- dispatch touches at most these eight witnesses and no downstream user.
   --
-  -- The last two are `wFunc`/`wProc`, which `genDeclStep` picks by phase
+  -- The sixth and seventh are `wFunc`/`wProc`, which `genDeclStep` picks by phase
   -- (`(3, 4)` once a function is callable, `(6, 1)` before), so their witness is
   -- the projection of that `if` rather than a literal. `split` takes the
   -- positivity goal to one per phase, which is the whole content of "reachability
   -- does not depend on the weights": both phases keep every entry positive.
-  rcases hmem with h | h | h | h | h | h | h
+  rcases hmem with h | h | h | h | h | h | h | h
   · exact ⟨1, fun () => genDeclAbstract s b, by simp, by omega, h⟩
   · exact ⟨1, fun () => genDeclAlias s b, by simp, by omega, h⟩
   · exact ⟨1, fun () => genDeclAxiom s b, by simp, by omega, h⟩
@@ -126,6 +127,7 @@ theorem genDeclStep_complete_of_mem {s s' : GenState} {b : Bounds} {ds : List De
            fun () => genDeclFunction s b, by simp, by split <;> decide, h⟩
   · exact ⟨(if hasCallableFunc s then (3, 4) else (6, 1)).snd,
            fun () => genDeclProcedure s b, by simp, by split <;> decide, h⟩
+  · exact ⟨1, fun () => genDeclRecFuncBlock s b, by simp, by omega, h⟩
 
 /-! ## Declaration names -/
 
@@ -148,6 +150,24 @@ theorem genDeclTypeName_complete {reserved : List String} {nm : String}
   exact ⟨nm, genDeclName_complete hnm hallowed, by
     simp only [hnotLocal, Bool.false_eq_true, if_false]⟩
 
+/-- The name lists that `genDeclNames reserved` reaches in order: each name is one that
+    `genFreshName` reaches against `reserved` and the names before it, with no reserved prefix. -/
+def DeclNamesReach : List String → List String → Prop
+  | _, [] => True
+  | reserved, nm :: rest =>
+    nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) reserved) ∧
+      isAllowedName nm = true ∧ DeclNamesReach (nm :: reserved) rest
+
+/-- `genDeclNames` reaches every name list that `DeclNamesReach` describes, at its length. -/
+theorem genDeclNames_complete : ∀ {reserved names : List String},
+    DeclNamesReach reserved names →
+      names ∈ SetGen.support (genDeclNames (G := SetGen.Set) reserved names.length)
+  | _, [], _ => by
+    simp only [List.length_nil, genDeclNames, mem_support_pure_iff]
+  | _, nm :: _, ⟨hnm, hallowed, hrest⟩ => by
+    simp only [List.length_cons, genDeclNames, mem_support_bind_iff, mem_support_pure_iff]
+    exact ⟨nm, genDeclName_complete hnm hallowed, _, genDeclNames_complete hrest, rfl⟩
+
 /-! ## Representative per-step reachability: axioms -/
 
 /-- The axiom step reaches every axiom whose name `genFreshName` reaches with no reserved prefix
@@ -162,6 +182,63 @@ theorem genDeclAxiom_complete {s : GenState} {b : Bounds} {nm : String} {e : PEx
       SetGen.support (genDeclAxiom (G := SetGen.Set) s b) := by
   simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq]
   exact ⟨(mkAxiomDecl nm e, nm), ⟨nm, genDeclName_complete hnm hnmAllowed, e, he, rfl⟩, rfl, rfl⟩
+
+/-! ## Per-step reachability: recursive function blocks -/
+
+/-- Dropping `inline` attributes leaves a function with none unchanged. -/
+theorem dropInline_of_noInline {f : Function} (h : ∀ a ∈ f.attr, a ≠ .inline) :
+    dropInline f = f := by
+  have hattr : f.attr.filter (fun a => decide (a ≠ .inline)) = f.attr := by
+    apply Array.toList_inj.mp
+    rw [Array.toList_filter]
+    refine List.filter_eq_self.mpr ?_
+    intro a ha
+    exact decide_eq_true (h a (Array.mem_toList_iff.mp ha))
+  unfold dropInline
+  rw [hattr]
+
+/-- The recursive-function-block step reaches a block of non-inline members whose names
+    `genDeclNames` reaches, whose stubs `genFuncSig` reaches with formals named after no function
+    of the context and no member, whose stubs and members the context accepts, and whose parts
+    `genFuncParts` reaches against the stubs' context and schemes. -/
+theorem genDeclRecFuncBlock_complete {s : GenState} {b : Bounds} {names : List String}
+    {funcs : List Function} {sStub s₁ : GenState}
+    (hlen : 1 ≤ names.length) (hlenMax : names.length ≤ max 1 b.maxRecFuncs)
+    (hnames : DeclNamesReach s.reserved names)
+    (hfnames : funcs.map (fun f => f.name.name) = names)
+    (hsigs : ∀ f ∈ funcs, funcStub f ∈ SetGen.support (genFuncSig (G := SetGen.Set)
+      f.name.name b.funcDepth
+      (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x || names.contains x)
+      s.dtCons))
+    (hstub : s.registerFuncs (funcs.map funcStub) = some sStub)
+    (hparts : ∀ f ∈ funcs, f ∈ SetGen.support (genFuncParts (G := SetGen.Set) (pure true) []
+      sStub.octx b.funcDepth ((funcs.map funcStub).filterMap funcPolyOpEntry ++ s.derivedPctx)
+      s.dtCons (funcStub f)))
+    (hnoInline : ∀ f ∈ funcs, ∀ a ∈ f.attr, a ≠ .inline)
+    (hreg : s.registerFuncs funcs = some s₁) :
+    ([.recFuncBlock funcs .empty], { s₁ with reserved := names ++ s.reserved }) ∈
+      SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b) := by
+  have hdrop : funcs.map dropInline = funcs := by
+    rw [List.map_congr_left (fun f hf => dropInline_of_noInline (hnoInline f hf)), List.map_id']
+  have hsigs₂ : List.Forall₂ (fun st nm => st ∈ SetGen.support
+      (genFuncSig (G := SetGen.Set) nm b.funcDepth
+        (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x || names.contains x)
+        s.dtCons)) (funcs.map funcStub) names := by
+    subst hfnames
+    exact List.forall₂_map_left_iff.mpr
+      (List.forall₂_map_right_iff.mpr (List.forall₂_same.mpr hsigs))
+  have hparts₂ : List.Forall₂ (fun f st => f ∈ SetGen.support
+      (genFuncParts (G := SetGen.Set) (pure true) [] sStub.octx b.funcDepth
+        ((funcs.map funcStub).filterMap funcPolyOpEntry ++ s.derivedPctx) s.dtCons st))
+      funcs (funcs.map funcStub) :=
+    List.forall₂_map_right_iff.mpr (List.forall₂_same.mpr hparts)
+  simp only [genDeclRecFuncBlock, mem_support_bind_iff]
+  refine ⟨names.length, DatatypeGen.mem_support_chooseNat_iff.mpr ⟨hlen, hlenMax⟩, names,
+    genDeclNames_complete hnames, funcs.map funcStub, (mem_support_mapM_iff _ _ _).mpr hsigs₂, ?_⟩
+  rw [hstub]
+  simp only [mem_support_bind_iff]
+  refine ⟨funcs, (mem_support_mapM_iff _ _ _).mpr hparts₂, ?_⟩
+  rw [hdrop, hreg, mem_support_pure_iff]
 
 /-! ## Reachability of `genNonRecursiveArgTy`
 

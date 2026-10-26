@@ -161,6 +161,15 @@ def genDeclName [Gen G] (reserved : List String) : G String := do
   let s ← DatatypeGen.genFreshName reserved
   pure (if isAllowedName s then s else DatatypeGen.fallbackName reserved)
 
+/-- Draw `k` declaration names as `genDeclName` does, each absent from `reserved` and from the
+    names drawn before it. -/
+def genDeclNames [Gen G] (reserved : List String) : Nat → G (List String)
+  | 0 => pure []
+  | k + 1 => do
+    let nm ← genDeclName reserved
+    let rest ← genDeclNames (nm :: reserved) k
+    pure (nm :: rest)
+
 /-- Draw a type declaration name as `genDeclName` does, replacing a local type name
     (`isLocalTypeName`) by `fallbackName reserved`. -/
 def genDeclTypeName [Gen G] (reserved : List String) : G String := do

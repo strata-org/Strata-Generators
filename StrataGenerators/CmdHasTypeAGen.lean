@@ -2,10 +2,10 @@ import StrataGenerators.SetGen
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen
 import Strata.DL.Lambda.LExprTypeSpecProps
-import Strata.Languages.Core.WeakTypeSpec
+import Strata.Languages.Core.TypingSpec
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
-open StrataGenerators.AnnotFacts (ExprCtxOk ScopesCtxOk genLExpr_exprHasTypeW
+open StrataGenerators.AnnotFacts (ExprCtxOk ScopesCtxOk genLExpr_exprWellTyped
   genLExpr_scopesAnnotAgree annotsOk_of_empty)
 
 /-!
@@ -13,21 +13,21 @@ open StrataGenerators.AnnotFacts (ExprCtxOk ScopesCtxOk genLExpr_exprHasTypeW
 
 A random generator on the `SetGen` interpretation of Basalt, for a well-typed imperative
 command of Strata. Such a command is a `Cmd Expression`. Every command it draws satisfies the
-weak typing relation `CmdHasTypeW`.
+typing spec `CmdWellTyped`.
 
 ## Contents
 
 - The support of the generator: `genCmd_support_iff`
-- Soundness: `genCmd_sound`, against `CmdHasTypeW`
+- Soundness: `genCmd_sound`, against `CmdWellTyped`
 - Completeness: `genCmd_complete`, against `CmdHasTypeA`
 
 ## The approach
 
 The generator works with a flat `VarCtx`, which is a list of pairs of a name and a type.
-The theorem for soundness is compositional. It takes the weak typing of a drawn expression,
-which `genLExpr_exprHasTypeW` gives when the operators agree with the context, and it takes the
+The theorem for soundness is compositional. It takes the well-typedness of a drawn expression,
+which `genLExpr_exprWellTyped` gives when the operators agree with the context, and it takes the
 freshness properties of `genFreshName`. It then concludes that each generated command
-satisfies `CmdHasTypeW`.
+satisfies `CmdWellTyped`.
 -/
 
 -- ── The correspondence between a `VarCtx` and a `TContext` ───────────
@@ -293,7 +293,7 @@ theorem Map.functional_append {α β : Type} [DecidableEq α]
   · exact (hagree x v₂ v₁ p₂ p₁).symm
   · exact h₂ x v₁ v₂ p₁ p₂
 
--- ── Weak typing of the parts of a command ─────────────────────────────
+-- ── Well-typedness of the parts of a command ──────────────────────────
 
 /-- The free variables that `genLExpr` reads from a scope `ctx` meet the context conditions at the
     variable scopes of a context `Γ` that agrees with `ctx`, when the operators and schemes meet
@@ -328,37 +328,43 @@ theorem scopesCtxOk_of_corresponds {C : LContext CoreLParams} {ts : TypeScopes} 
   obtain ⟨q, hq, rfl⟩ := hp
   exact hCorr.1 q.1 q.2 (Map.find?_of_mem_of_functional ctx q.1 q.2 hFun hq)
 
-/-- An expression that `genLExpr` draws from the scope `ctx` and whose binder annotations are all
-    generable types is weakly typed at its type in the variable scopes of a context `Γ` that agrees
-    with `ctx`, when the operators and schemes agree with `C` and the scope is functional. -/
-theorem genLExpr_exprHasTypeW_of_generable {C : LContext CoreLParams} {ts : TypeScopes}
+/-- `binderAnnotsKnownIn C.knownTypes` decides `BinderAnnotsKnown C`. -/
+theorem binderAnnotsKnownIn_iff {C : LContext CoreLParams} {e : LExpr'} :
+    binderAnnotsKnownIn C.knownTypes e = true ↔ BinderAnnotsKnown C e := by
+  simp only [binderAnnotsKnownIn, List.all_eq_true, BinderAnnotsKnown]
+
+/-- An expression that `genLExpr` draws from the scope `ctx` and whose binder annotations are
+    known instances in `C` is well-typed at its type in the variable scopes of a context `Γ` that
+    agrees with `ctx`, when the operators and schemes agree with `C` and the scope is functional. -/
+theorem genLExpr_exprWellTyped_of_known {C : LContext CoreLParams} {ts : TypeScopes}
     {octx : OpCtx} {pctx : PolyOpCtx} (hops : ExprCtxOk C ts [] octx pctx) {ctx : VarCtx}
     {Γ : TContext Unit} (hCorr : VarCtxCorresponds ctx Γ) (hFun : Map.Functional ctx)
     {tvars : List TyIdentifier} {depth : Nat} {τ : LMonoTy} {e : LExpr'}
     (he : e ∈ SetGen.support
       (genLExpr (G := SetGen.Set) ctx.toFVarCtx octx pctx tvars [] depth τ))
-    (hgen : binderAnnotsGenerable e = true) : ExprHasTypeW C Γ.types e τ :=
+    (hknown : binderAnnotsKnownIn C.knownTypes e = true) : ExprWellTyped C Γ.types e τ :=
   ⟨genLExpr_sound ctx.toFVarCtx octx pctx tvars [] depth τ _ e he,
-    StrataGenerators.Function.binderAnnotsKnown_of_generable hops.arities e hgen,
+    binderAnnotsKnownIn_iff.mp hknown,
     genLExpr_scopesAnnotAgree (scopesCtxOk_of_corresponds hops hCorr hFun) he⟩
 
-/-- The expression that `generableOrTrue` keeps from a `bool` expression that is weakly typed when
-    its binder annotations are generable is weakly typed at `bool`: it is that expression or the
-    constant `true`. -/
-theorem generableOrTrue_exprHasTypeW {C : LContext CoreLParams} {ts : TypeScopes} {e : LExpr'}
-    (he : binderAnnotsGenerable e = true → ExprHasTypeW C ts e .bool) :
-    ExprHasTypeW C ts (generableOrTrue e) .bool := by
-  unfold generableOrTrue
+/-- The expression that `knownOrTrue kt` keeps from a `bool` expression that is well-typed when
+    its binder annotations are known instances of `kt` is well-typed at `bool`: it is that
+    expression or the constant `true`. -/
+theorem knownOrTrue_exprWellTyped {C : LContext CoreLParams} {ts : TypeScopes}
+    {kt : Lambda.KnownTypes} {e : LExpr'}
+    (he : binderAnnotsKnownIn kt e = true → ExprWellTyped C ts e .bool) :
+    ExprWellTyped C ts (knownOrTrue kt e) .bool := by
+  unfold knownOrTrue
   split
-  · rename_i hgen
-    exact he hgen
+  · rename_i hknown
+    exact he hknown
   · exact ⟨LExpr.HasTypeA.const, annotsOk_of_empty rfl rfl rfl rfl⟩
 
-/-- A weakly typed command stays weakly typed when its output scopes are replaced by equivalent
+/-- A well-typed command stays well-typed when its output scopes are replaced by equivalent
     ones: scopes with the same lookup for every name. -/
-theorem StrataGenerators.cmdHasTypeW_out_equiv {C : LContext CoreLParams} {ts ts₁ ts₂ : TypeScopes}
-    {c : Cmd Expression} (h : CmdHasTypeW C ts c ts₁) (he : Strata.Util.HMaps.Equiv ts₂ ts₁) :
-    CmdHasTypeW C ts c ts₂ := by
+theorem StrataGenerators.cmdWellTyped_out_equiv {C : LContext CoreLParams} {ts ts₁ ts₂ : TypeScopes}
+    {c : Cmd Expression} (h : CmdWellTyped C ts c ts₁) (he : Strata.Util.HMaps.Equiv ts₂ ts₁) :
+    CmdWellTyped C ts c ts₂ := by
   cases h with
   | init_det _ _ _ _ _ _ hfind hfv hxty hwk hexpr heq =>
     exact .init_det _ _ _ _ _ _ _ hfind hfv hxty hwk hexpr (he.trans heq)
@@ -384,15 +390,17 @@ def cmdOutScopes (ts : TypeScopes) : Cmd Expression → TypeScopes
 theorem genCmd_support_iff
     (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
-    (r : GenCmdResult) (pctx : PolyOpCtx := []) (avoid : List String := []) :
-    r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid) ↔
-    (r ∈ SetGen.support (genInitDet (G := SetGen.Set) octx tvars ctx depth depth pctx avoid) ∨
+    (r : GenCmdResult) (pctx : PolyOpCtx := []) (avoid : List String := [])
+    (kt : Lambda.KnownTypes := Core.KnownTypes) :
+    r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid kt) ↔
+    (r ∈ SetGen.support (genInitDet (G := SetGen.Set) octx tvars ctx depth depth pctx avoid kt) ∨
      r ∈ SetGen.support (genInitNondet (G := SetGen.Set) tvars ctx depth avoid) ∨
-     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetDet (G := SetGen.Set) octx tvars immutableVars ctx depth h pctx)) ∨
+     (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support
+       (genSetDet (G := SetGen.Set) octx tvars immutableVars ctx depth h pctx kt)) ∨
      (∃ h : (ctx.writable immutableVars).length > 0, r ∈ SetGen.support (genSetNondet (G := SetGen.Set) immutableVars ctx h)) ∨
-     r ∈ SetGen.support (genAssertCmd (G := SetGen.Set) octx tvars ctx depth pctx) ∨
-     r ∈ SetGen.support (genAssumeCmd (G := SetGen.Set) octx tvars ctx depth pctx) ∨
-     r ∈ SetGen.support (genCoverCmd (G := SetGen.Set) octx tvars ctx depth pctx)) := by
+     r ∈ SetGen.support (genAssertCmd (G := SetGen.Set) octx tvars ctx depth pctx kt) ∨
+     r ∈ SetGen.support (genAssumeCmd (G := SetGen.Set) octx tvars ctx depth pctx kt) ∨
+     r ∈ SetGen.support (genCoverCmd (G := SetGen.Set) octx tvars ctx depth pctx kt)) := by
   simp only [genCmd, mem_support_dite_iff]
   constructor
   · intro hr
@@ -627,7 +635,7 @@ def FreshNamesDisjointFromExprs (fctx : FVarCtx) (octx : OpCtx)
       (⟨name, ()⟩ : Identifier Unit) ∉ HasFvars.getFvars (P := Expression) e
 
 /-- **Soundness of `genCmd` at the scopes of a context.** Every command that `genCmd` draws from a
-    scope `ctx` is weakly typed from the variable scopes of a context `Γ` that agrees with `ctx` to
+    scope `ctx` is well-typed from the variable scopes of a context `Γ` that agrees with `ctx` to
     those scopes with the declared variable added, if the command is an `init`. This holds when the
     operators and schemes agree with `C` (`ExprCtxOk`), the scope is functional, and no fresh name
     is a free variable of a drawn expression. -/
@@ -641,9 +649,9 @@ theorem genCmd_sound_scopes
     (hDisjoint : FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth pctx)
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
-    CmdHasTypeW C Γ.types r.cmd (cmdOutScopes Γ.types r.cmd) := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid] at hr
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid C.knownTypes)) :
+    CmdWellTyped C Γ.types r.cmd (cmdOutScopes Γ.types r.cmd) := by
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid C.knownTypes] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
   · -- init_det, or init_nondet when the initializer is filtered out.
     simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
@@ -653,9 +661,9 @@ theorem genCmd_sound_scopes
     have hwkm := wellKindedTy_of_genLMonoTy hops.arities tvars depth mty hmty
     dsimp only
     split
-    · rename_i hgen
+    · rename_i hknown
       exact .init_det _ _ _ e mty default _ hfreshΓ (hDisjoint name hfreshCtx mty e he) rfl hwkm
-        (genLExpr_exprHasTypeW_of_generable hops hCorr hFun he hgen)
+        (genLExpr_exprWellTyped_of_known hops hCorr hFun he hknown)
         (Strata.Util.HMaps.Equiv.refl _)
     · exact .init_nondet _ _ _ mty default _ hfreshΓ rfl hwkm (Strata.Util.HMaps.Equiv.refl _)
   · -- init_nondet
@@ -673,9 +681,9 @@ theorem genCmd_sound_scopes
     have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
     dsimp only
     split
-    · rename_i hgen
+    · rename_i hknown
       exact .set_det _ _ _ e default _ hfind
-        (genLExpr_exprHasTypeW_of_generable hops hCorr hFun he hgen)
+        (genLExpr_exprWellTyped_of_known hops hCorr hFun he hknown)
         (Strata.Util.HMaps.Equiv.refl _)
     · exact .set_nondet _ _ _ default _ hfind (Strata.Util.HMaps.Equiv.refl _)
   · -- set_nondet
@@ -690,23 +698,23 @@ theorem genCmd_sound_scopes
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _, e, he, rfl⟩ := hr
     exact .assert _ _ _ default _
-      (generableOrTrue_exprHasTypeW (genLExpr_exprHasTypeW_of_generable hops hCorr hFun he))
+      (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun he))
       (Strata.Util.HMaps.Equiv.refl _)
   · -- assume
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _, e, he, rfl⟩ := hr
     exact .assume _ _ _ default _
-      (generableOrTrue_exprHasTypeW (genLExpr_exprHasTypeW_of_generable hops hCorr hFun he))
+      (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun he))
       (Strata.Util.HMaps.Equiv.refl _)
   · -- cover
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨l, _, e, he, rfl⟩ := hr
     exact .cover _ _ _ default _
-      (generableOrTrue_exprHasTypeW (genLExpr_exprHasTypeW_of_generable hops hCorr hFun he))
+      (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun he))
       (Strata.Util.HMaps.Equiv.refl _)
 
-/-- **Soundness of `genCmd`**: every command that `genCmd` draws from a scope `ctx` is weakly
-    typed from the variable scopes of a context `Γ` that agrees with `ctx`, when the operators and
+/-- **Soundness of `genCmd`**: every command that `genCmd` draws from a scope `ctx` is well-typed
+    from the variable scopes of a context `Γ` that agrees with `ctx`, when the operators and
     schemes agree with `C`, the scope is functional, and no fresh name is a free variable of a
     drawn expression. -/
 theorem genCmd_sound
@@ -719,8 +727,8 @@ theorem genCmd_sound
     (hDisjoint : FreshNamesDisjointFromExprs ctx.toFVarCtx octx tvars ctx depth pctx)
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
-    ∃ ts', CmdHasTypeW C Γ.types r.cmd ts' :=
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid C.knownTypes)) :
+    ∃ ts', CmdWellTyped C Γ.types r.cmd ts' :=
   ⟨_, genCmd_sound_scopes octx tvars immutableVars ctx depth C Γ hops hCorr hFun hDisjoint r hr⟩
 
 -- ── The completeness of `genCmd` ─────────────────────────────────────
@@ -734,10 +742,10 @@ def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
   ∀ τ e, LExpr.HasTypeA (T := LExprParams') [] e τ →
     e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx [] tvars [] depth τ)
 
-/-- `generableOrTrue` keeps an expression whose binder annotations are all generable. -/
-theorem generableOrTrue_of_generable {e : LExpr'} (hgen : binderAnnotsGenerable e = true) :
-    generableOrTrue e = e := by
-  simp only [generableOrTrue, hgen, if_true]
+/-- `knownOrTrue` keeps an expression whose binder annotations are known. -/
+theorem knownOrTrue_of_known {kt : Lambda.KnownTypes} {e : LExpr'}
+    (hknown : binderAnnotsKnownIn kt e = true) : knownOrTrue kt e = e := by
+  simp only [knownOrTrue, hknown, if_true]
 
 /-- Completeness of `genCmd` against `CmdHasTypeA`: if a command is well-typed and the smaller
     generators can reach each of its parts, then the support of `genCmd` holds it.
@@ -745,8 +753,6 @@ theorem generableOrTrue_of_generable {e : LExpr'} (hgen : binderAnnotsGenerable 
     The proof inverts the derivation of `CmdHasTypeA`. The hypotheses give what the generator needs
     beyond good typing:
     - `hExprComplete`: the support of `genLExpr` holds each well-typed expression.
-    - `hGenerable`: each binder annotation of an expression the command reads is a type that
-      `genLMonoTy` can make, so the filter of the generator keeps the expression.
     - `hNameReach`: the generator can reach the name of the target of an `init`.
     - `hTyReach`: the support of `genLMonoTy` holds the type of the target of an `init`.
     - `hVarInCtx`: `ctx` holds the target of a `set` command.
@@ -772,7 +778,6 @@ theorem genCmd_complete
     (cmd : Cmd Expression)
     (hwt : CmdHasTypeA C Γ cmd Γ')
     (hExprComplete : GenLExprComplete ctx.toFVarCtx octx tvars depth)
-    (hGenerable : ∀ e ∈ cmdReadExprs cmd, binderAnnotsGenerable e = true)
     (hNameReach : ∀ x : Identifier Unit,
       (∃ xty eOrNd md, cmd = .init x xty eOrNd md) →
       x.name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx avoid))
@@ -782,111 +787,142 @@ theorem genCmd_complete
       Γ.types.find? x = some (.forAll [] mty) →
       List.Mem (x, mty) (ctx.writable immutableVars)) :
     ∃ r : GenCmdResult,
-      r ∈ SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) ∧
+      r ∈ SetGen.support
+        (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) ∧
       CmdHasTypeA C Γ r.cmd Γ' := by
   cases hwt with
   | init_det x xty e mty mty₀ md Δ hfresh hnotFn hallowed hnovar _ _ hwk hexpr _ hequiv =>
     have hname := hNameReach x ⟨xty, .det e, md, rfl⟩
     have hmty := hTyReach mty
     have he := hExprComplete mty e hexpr.1
-    have hgen : binderAnnotsGenerable e = true := hGenerable e (by simp [cmdReadExprs])
+    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
+    have hdraw : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
+        GenCmdResult) ∈ SetGen.support
+          (genInitDet (G := SetGen.Set) octx tvars ctx depth depth [] avoid C.knownTypes) := by
+      simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
+      refine ⟨x.name, hname, mty, hmty, e, he, ?_⟩
+      rw [if_pos hgen]
     have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
         GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid).mpr (Or.inl (by
-        simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
-        refine ⟨x.name, hname, mty, hmty, e, he, ?_⟩
-        rw [if_pos hgen]))
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
+      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
+        (Or.inl hdraw)
     exact ⟨_, hinSupport, CmdHasType'.init_det Γ x (.forAll [] mty) e mty mty default _ hfresh
       hnotFn hallowed hnovar rfl rfl hwk hexpr trivial hequiv⟩
   | init_nondet x xty mty mty₀ md Δ hfresh hnotFn hallowed _ _ hwk hequiv =>
     have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
     have hmty := hTyReach mty
+    have hdraw : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
+        GenCmdResult) ∈ SetGen.support (genInitNondet (G := SetGen.Set) tvars ctx depth avoid) := by
+      simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
+      exact ⟨x.name, hname, mty, hmty, rfl⟩
     have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
         GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid).mpr (Or.inr (Or.inl (by
-        simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
-        exact ⟨x.name, hname, mty, hmty, rfl⟩)))
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
+      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
+        (Or.inr (Or.inl hdraw))
     exact ⟨_, hinSupport, CmdHasType'.init_nondet Γ x (.forAll [] mty) mty mty default _ hfresh
       hnotFn hallowed rfl rfl hwk hequiv⟩
   | set_det x mty e md Δ hfind hexpr _ hequiv =>
     have hentry := hVarInCtx x mty hfind
     have he := hExprComplete mty e hexpr.1
-    have hgen : binderAnnotsGenerable e = true := hGenerable e (by simp [cmdReadExprs])
+    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
+    have hpos : (ctx.writable immutableVars).length > 0 := List.length_pos_of_mem hentry
+    have hdraw : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈ SetGen.support
+        (genSetDet (G := SetGen.Set) octx tvars immutableVars ctx depth hpos [] C.knownTypes) := by
+      simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
+                 mem_support_elements_iff]
+      refine ⟨(x, mty), hentry, e, he, ?_⟩
+      rw [if_pos hgen]
     have hinSupport : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid).mpr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry, by
-        simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-                   mem_support_elements_iff]
-        refine ⟨(x, mty), hentry, e, he, ?_⟩
-        rw [if_pos hgen]⟩)))
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
+      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
+        (Or.inr (Or.inr (Or.inl ⟨hpos, hdraw⟩)))
     exact ⟨_, hinSupport, CmdHasType'.set_det Γ x mty e default _ hfind hexpr trivial hequiv⟩
   | set_nondet x mty md Δ hfind hequiv =>
     have hentry := hVarInCtx x mty hfind
+    have hpos : (ctx.writable immutableVars).length > 0 := List.length_pos_of_mem hentry
+    have hdraw : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈ SetGen.support
+        (genSetNondet (G := SetGen.Set) immutableVars ctx hpos) := by
+      simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
+                 mem_support_elements_iff]
+      exact ⟨(x, mty), hentry, rfl⟩
     have hinSupport : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid).mpr (Or.inr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hentry,
-        by
-          simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
-                     mem_support_elements_iff]
-          exact ⟨(x, mty), hentry, rfl⟩⟩))))
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
+      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
+        (Or.inr (Or.inr (Or.inr (Or.inl ⟨hpos, hdraw⟩))))
     exact ⟨_, hinSupport, CmdHasType'.set_nondet Γ x mty default _ hfind hequiv⟩
   | assert l e md Δ _ hexpr _ hequiv =>
     have he := hExprComplete .bool e hexpr.1
-    have hgen : binderAnnotsGenerable e = true := hGenerable e (by simp [cmdReadExprs])
+    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
     -- `"l"` is a legal identifier and not a keyword, so the support of `genIdentName` holds it.
     have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
       StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
         (by decide +kernel) (by decide +kernel)
     have hlAllowed : isAllowedName "l" = true := by decide +kernel
+    have hdraw : (⟨.assert "l" e default, ctx⟩ : GenCmdResult) ∈ SetGen.support
+        (genAssertCmd (G := SetGen.Set) octx tvars ctx depth [] C.knownTypes) := by
+      simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
+      refine ⟨"l", hlblL, e, he, ?_⟩
+      rw [knownOrTrue_of_known hgen]
     have hinSupport : (⟨.assert "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
-        simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
-        refine ⟨"l", hlblL, e, he, ?_⟩
-        rw [generableOrTrue_of_generable hgen]))))))
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
+      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hdraw)))))
     exact ⟨_, hinSupport, CmdHasType'.assert Γ "l" e default _ hlAllowed hexpr trivial hequiv⟩
   | assume l e md Δ _ hexpr _ hequiv =>
     have he := hExprComplete .bool e hexpr.1
-    have hgen : binderAnnotsGenerable e = true := hGenerable e (by simp [cmdReadExprs])
+    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
     have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
       StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
         (by decide +kernel) (by decide +kernel)
     have hlAllowed : isAllowedName "l" = true := by decide +kernel
+    have hdraw : (⟨.assume "l" e default, ctx⟩ : GenCmdResult) ∈ SetGen.support
+        (genAssumeCmd (G := SetGen.Set) octx tvars ctx depth [] C.knownTypes) := by
+      simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
+      refine ⟨"l", hlblL, e, he, ?_⟩
+      rw [knownOrTrue_of_known hgen]
     have hinSupport : (⟨.assume "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl (by
-        simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
-        refine ⟨"l", hlblL, e, he, ?_⟩
-        rw [generableOrTrue_of_generable hgen])))))))
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
+      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hdraw))))))
     exact ⟨_, hinSupport, CmdHasType'.assume Γ "l" e default _ hlAllowed hexpr trivial hequiv⟩
   | cover l e md Δ _ hexpr _ hequiv =>
     have he := hExprComplete .bool e hexpr.1
-    have hgen : binderAnnotsGenerable e = true := hGenerable e (by simp [cmdReadExprs])
+    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
     have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
       StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
         (by decide +kernel) (by decide +kernel)
     have hlAllowed : isAllowedName "l" = true := by decide +kernel
+    have hdraw : (⟨.cover "l" e default, ctx⟩ : GenCmdResult) ∈ SetGen.support
+        (genCoverCmd (G := SetGen.Set) octx tvars ctx depth [] C.knownTypes) := by
+      simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
+      refine ⟨"l", hlblL, e, he, ?_⟩
+      rw [knownOrTrue_of_known hgen]
     have hinSupport : (⟨.cover "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid).mpr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (by
-        simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
-        refine ⟨"l", hlblL, e, he, ?_⟩
-        rw [generableOrTrue_of_generable hgen])))))))
+        SetGen.support
+          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
+      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
+        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hdraw))))))
     exact ⟨_, hinSupport, CmdHasType'.cover Γ "l" e default _ hlAllowed hexpr trivial hequiv⟩
 
 -- ── The typing of a sequence of commands, as a chain ────────────────
 
-/-- Weak typing of a sequence of commands: each command is typed from one variable scope to the
+/-- Well-typedness of a sequence of commands: each command is typed from one variable scope to the
     next, so the commands form a chain `ts₀ → ts₁ → ... → tsₙ`. -/
-inductive CmdsHasTypeW (C : LContext CoreLParams) :
+inductive CmdsWellTyped (C : LContext CoreLParams) :
     TypeScopes → List (Cmd Expression) → TypeScopes → Prop where
-  | nil : ∀ ts, CmdsHasTypeW C ts [] ts
+  | nil : ∀ ts, CmdsWellTyped C ts [] ts
   | cons : ∀ ts ts' ts'' cmd cmds,
-      CmdHasTypeW C ts cmd ts' →
-      CmdsHasTypeW C ts' cmds ts'' →
-      CmdsHasTypeW C ts (cmd :: cmds) ts''
+      CmdWellTyped C ts cmd ts' →
+      CmdsWellTyped C ts' cmds ts'' →
+      CmdsWellTyped C ts (cmd :: cmds) ts''
 
 /-- The facts about the scopes that a proof of `genCmd_sound` needs at *each* context that a draw
     of a sequence can reach. The structure holds three parts:
@@ -923,13 +959,13 @@ structure GenCmdSoundEnv (octx : OpCtx) (tvars : List TyIdentifier)
 theorem genCmd_outCtx_cases
     (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
-    {pctx : PolyOpCtx} {avoid : List String} (r : GenCmdResult)
+    {pctx : PolyOpCtx} {avoid : List String} {kt : Lambda.KnownTypes} (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid kt)) :
     (r.outCtx = ctx ∧ ∀ ts, cmdOutScopes ts r.cmd = ts) ∨
     ∃ x mty, r.outCtx = ctx.insert x mty ∧
       ∀ ts, cmdOutScopes ts r.cmd = ts.insert x (.forAll [] mty) := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid] at hr
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid kt] at hr
   rcases hr with hr | (hr | (⟨_, hr⟩ | (⟨_, hr⟩ | (hr | (hr | hr)))))
   · simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨name, _, mty, _, e, _, rfl⟩ := hr
@@ -960,7 +996,7 @@ theorem genCmd_outCtx_cases
     exact Or.inl ⟨rfl, fun _ => rfl⟩
 
 /-- Soundness of `genCmd` through a `GenCmdSoundEnv`: each command in the support of the generator
-    is weakly typed from the variable scopes of `env.toTCtx ctx` to those of
+    is well-typed from the variable scopes of `env.toTCtx ctx` to those of
     `env.toTCtx r.outCtx`, when the operators and schemes agree with `C` and the scope is
     functional. -/
 theorem genCmd_sound_env
@@ -972,9 +1008,9 @@ theorem genCmd_sound_env
     (hFun : Map.Functional ctx)
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
-    CmdHasTypeW C (env.toTCtx ctx).types r.cmd (env.toTCtx r.outCtx).types := by
-  refine StrataGenerators.cmdHasTypeW_out_equiv
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid C.knownTypes)) :
+    CmdWellTyped C (env.toTCtx ctx).types r.cmd (env.toTCtx r.outCtx).types := by
+  refine StrataGenerators.cmdWellTyped_out_equiv
     (genCmd_sound_scopes octx tvars immutableVars ctx depth C (env.toTCtx ctx) hops
       (env.corr ctx) hFun (env.freshDisjoint ctx) r hr) ?_
   rcases genCmd_outCtx_cases octx tvars immutableVars ctx depth r hr with
@@ -992,11 +1028,11 @@ theorem genCmd_outCtx_functional
     (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) {avoid : List String}
     (hFun : Map.Functional ctx)
-    (r : GenCmdResult)
+    {kt : Lambda.KnownTypes} (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid kt)) :
     Map.Functional r.outCtx := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid] at hr
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid kt] at hr
   rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
   · -- init_det. The output context is `ctx.insert ⟨name, ()⟩ mty`, and `name` is fresh in `ctx`.
     simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
@@ -1038,12 +1074,12 @@ theorem genCmd_outCtx_wellKinded
     (immutableVars : List (Identifier Unit)) {C : LContext CoreLParams}
     (hC : SimpleTyArities C) (ctx : VarCtx) (depth : Nat)
     (hctx : ∀ ty ∈ ctx.values, C.WellKindedTy ty)
-    (r : GenCmdResult)
+    {kt : Lambda.KnownTypes} (r : GenCmdResult)
     {avoid : List String}
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid)) :
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth pctx avoid kt)) :
     ∀ ty ∈ r.outCtx.values, C.WellKindedTy ty := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid] at hr
+  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid kt] at hr
   rcases hr with hr | (hr | (⟨_, hr⟩ | (⟨_, hr⟩ | (hr | (hr | hr)))))
   · -- init_det. The scope gains `mty`, which comes from `genLMonoTy`.
     simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
@@ -1074,7 +1110,7 @@ theorem genCmd_outCtx_wellKinded
     obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
 
 /-- Soundness of `genCmds`: each sequence of commands in the support of the generator satisfies the
-    chain relation `CmdsHasTypeW`, when the operators agree with `C` and the scope is functional.
+    chain relation `CmdsWellTyped`, when the operators agree with `C` and the scope is functional.
     Proved by induction on the fuel `n`; the scope stays functional along the chain. -/
 theorem genCmds_sound
     (octx : OpCtx) (tvars : List TyIdentifier)
@@ -1085,15 +1121,15 @@ theorem genCmds_sound
     (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
     (hr : result ∈ SetGen.support
-      (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n avoid)) :
-    CmdsHasTypeW C (env.toTCtx ctx).types result.1 (env.toTCtx result.2).types := by
+      (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n avoid C.knownTypes)) :
+    CmdsWellTyped C (env.toTCtx ctx).types result.1 (env.toTCtx result.2).types := by
   induction n generalizing ctx result with
   | zero =>
-    simp only [genCmds, mem_support_pure_iff] at hr
+    simp only [genCmds, genCmdsWith, mem_support_pure_iff] at hr
     subst hr
-    exact CmdsHasTypeW.nil _
+    exact CmdsWellTyped.nil _
   | succ n ih =>
-    simp only [genCmds, mem_support_bind_iff] at hr
+    simp only [genCmds, genCmdsWith, mem_support_bind_iff] at hr
     obtain ⟨⟨cmd, ctx'⟩, hcmd, rest_hr⟩ := hr
     dsimp only [GenCmdResult.outCtx, GenCmdResult.cmd] at rest_hr
     obtain ⟨⟨cmds, ctx''⟩, hcmds, hpure⟩ := rest_hr
@@ -1105,7 +1141,7 @@ theorem genCmds_sound
       ⟨cmd, ctx'⟩ hcmd
     have hFun' : Map.Functional ctx' :=
       genCmd_outCtx_functional octx [] tvars immutableVars ctx depth hFun ⟨cmd, ctx'⟩ hcmd
-    exact CmdsHasTypeW.cons _ _ _ cmd cmds htyCmd (ih ctx' hFun' (cmds, ctx'') hcmds)
+    exact CmdsWellTyped.cons _ _ _ cmd cmds htyCmd (ih ctx' hFun' (cmds, ctx'') hcmds)
 
 -- ── A quick check that the generator runs ─────────────────────────────
 

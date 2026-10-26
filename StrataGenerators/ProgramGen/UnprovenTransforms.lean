@@ -80,9 +80,10 @@ module filters nothing in silence.
 
 `FunctionInlining` reads the body of a function from a `Lambda.Factory`, and `Core.Factory` holds **no**
 function body. Therefore a property that runs the pass against `Core.Factory` alone can inline nothing,
-and it says nothing about the pass. `programFactory` therefore pushes each function that the *program*
-declares into `Core.Factory`. `Core.Verifier` does the same in production. A generated function has a
-body about half of the time, so each property about inlining has real input.
+and it says nothing about the pass. `programFactory` therefore pushes each non-recursive function
+that the *program* declares into `Core.Factory`, as the `FunctionInlining` pipeline phase does. A
+generated function has a body about half of the time, so each property about inlining has real
+input.
 
 ## Coverage
 
@@ -171,15 +172,15 @@ def declNames (p : Program) : List String :=
 /-- Whether a list holds no duplicate. -/
 def nodup [BEq α] (xs : List α) : Bool := xs.eraseDups.length == xs.length
 
-/-- `Core.Factory` with each function that the program declares pushed in.
+/-- `Core.Factory` with each non-recursive function that the program declares pushed in, as the
+    `FunctionInlining` pipeline phase builds it.
 
     `Core.Factory` holds no function body, so a pass that reads a body out of the
     factory (`FunctionInlining`, through `Factory.callOfLFunc`) can do nothing
-    with `Core.Factory` alone. `Core.Verifier` seeds the factory from the program
-    for the same reason. `pushIfNew` keeps the first entry under a name, so a
+    with `Core.Factory` alone. A name already in the factory keeps its entry, so a
     program name that shadows a builtin cannot displace the builtin. -/
 def programFactory (p : Program) : Lambda.Factory CoreLParams :=
-  (programFuncs p).foldl (fun F f => F.pushIfNew f.toLFunc) Core.Factory
+  Core.FunctionInlining.withProgramFuncs Core.Factory p
 
 /-- The `(changed, output)` pair of a phase run on a program whose transform
     state also carries the program's own functions in the factory.
@@ -1030,8 +1031,8 @@ which makes it the pass that is easiest to test well. It relies on
 `LFunc.computeTypeSubst` for polymorphic instantiation.
 
 The factory matters. `Core.Factory` holds **no** function body, so the pass over `Core.Factory` alone is
-the identity. `programFactory` therefore pushes each function that the program declares, and
-`Core.Verifier` does the same in production.
+the identity. `programFactory` therefore pushes each non-recursive function that the program
+declares, as the `FunctionInlining` pipeline phase does.
 
 Four parts of the generator must work together, or a property about this pass reaches the pass on almost
 no draw:
@@ -1209,18 +1210,17 @@ evaluator is permitted to unfold exactly the set the transform unfolds. Then the
 claim is a real one: **the transform and the evaluator's own unfolding path reach the
 same term.** -/
 
-/-- The program's functions pushed into `Core.Factory` and marked `.inline`, so
+/-- The program's non-recursive functions pushed into `Core.Factory` and marked `.inline`, so
     `LExprEval.eval` will unfold precisely the functions `inlineFuncDefs` unfolds.
 
     Only the *attribute* differs from `programFactory`; the body, signature and type
     parameters are untouched, so this changes what the evaluator is willing to do and
     not what any function means. -/
 def inlineEvalFactory (p : Program) : Lambda.Factory CoreLParams :=
-  (programFuncs p).foldl
-    (fun F f =>
-      let lf := f.toLFunc
-      F.pushIfNew { lf with attr := lf.attr.push .inline })
-    Core.Factory
+  Core.FunctionInlining.withProgramFuncs Core.Factory
+    { p with decls := p.decls.map fun
+        | .func f md => .func { f with attr := f.attr.push .inline } md
+        | d => d }
 
 /-- Evaluate `e` over `F` with the standard fuel, in an empty store. Mirrors
     `HasTypeAGen.TestSupport.eval`, which is fixed to `Core.Factory` and so cannot

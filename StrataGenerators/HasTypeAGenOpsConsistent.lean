@@ -577,7 +577,7 @@ theorem genIndir_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
   obtain ⟨nm, argTys, args, hmem, hargs, rfl⟩ :=
     genIndir_shape (factoryOps F) τ genArg h e he
   exact mkApps_opsConsistentR F _ args (indir_op_opsConsistentR F τ nm argTys hmem)
-    (mapM_forall genArg hArg argTys args ((mem_mapM_iff' genArg argTys args).mpr hargs))
+    (mapM_forall genArg hArg argTys args ((mem_support_mapM_iff genArg argTys args).mpr hargs))
 
 open StrataGenerators.IndirSupport in
 /-- Each term of the polymorphic IndirPoly rule satisfies `OpsConsistentR`, under the condition
@@ -597,7 +597,7 @@ theorem genIndirPolyCore_opsConsistentR (F : @Factory LExprParams') (fctx : FVar
     ⟨sampled, nm, concreteArgTys, args, hmem, hargs, rfl⟩ | hfb
   · exact mkApps_opsConsistentR F _ args (hPoly sampled nm concreteArgTys hmem)
       (mapM_forall genArg hArg concreteArgTys args
-        ((mem_mapM_iff' genArg concreteArgTys args).mpr hargs))
+        ((mem_support_mapM_iff genArg concreteArgTys args).mpr hargs))
   · exact hFallback e hfb
 
 set_option maxHeartbeats 3200000 in

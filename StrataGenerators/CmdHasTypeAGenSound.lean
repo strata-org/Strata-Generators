@@ -69,7 +69,7 @@ theorem freshNamesDisjointFromExprs_nil (octx : OpCtx) (tvars : List TyIdentifie
   simp only [HasFvars.getFvars, hnil, List.not_mem_nil, not_false_eq_true]
 
 /-- Soundness of `genCmd` with no hypothesis about freshness: each command in the support of the
-    generator is weakly typed from the variable scopes of a context `Γ` that agrees with `ctx`,
+    generator is well-typed from the variable scopes of a context `Γ` that agrees with `ctx`,
     under the remaining conditions of `genCmd_sound`. This theorem discharges the hypothesis about a
     fresh name with `freshNamesDisjointFromExprs_toFVarCtx`. -/
 theorem genCmd_sound_nil
@@ -81,8 +81,8 @@ theorem genCmd_sound_nil
     (hFun : Map.Functional ctx)
     (r : GenCmdResult)
     (hr : r ∈ SetGen.support
-      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid)) :
-    ∃ ts', CmdHasTypeW C Γ.types r.cmd ts' :=
+      (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes)) :
+    ∃ ts', CmdWellTyped C Γ.types r.cmd ts' :=
   genCmd_sound octx tvars immutableVars ctx depth C Γ hops hCorr hFun
     (freshNamesDisjointFromExprs_toFVarCtx octx tvars ctx depth) r hr
 
@@ -103,7 +103,7 @@ def genCmdSoundEnv_nil
   toTCtx_insert := toTCtx_insert
 
 /-- Soundness of `genCmds` with no hypothesis about freshness. Each generated sequence of commands
-    satisfies the chain relation `CmdsHasTypeW`, when the operators agree with `C` and the scope is
+    satisfies the chain relation `CmdsWellTyped`, when the operators agree with `C` and the scope is
     functional. -/
 theorem genCmds_sound_nil
     (octx : OpCtx) (tvars : List TyIdentifier)
@@ -114,6 +114,6 @@ theorem genCmds_sound_nil
     (hFun : Map.Functional ctx)
     (result : List (Cmd Expression) × VarCtx)
     (hr : result ∈ SetGen.support
-      (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n avoid)) :
-    CmdsHasTypeW C (env.toTCtx ctx).types result.1 (env.toTCtx result.2).types :=
+      (genCmds (G := SetGen.Set) octx tvars immutableVars ctx depth n avoid C.knownTypes)) :
+    CmdsWellTyped C (env.toTCtx ctx).types result.1 (env.toTCtx result.2).types :=
   genCmds_sound octx tvars immutableVars ctx depth n C env hops hFun result hr

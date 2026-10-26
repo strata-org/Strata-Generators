@@ -25,23 +25,15 @@ every tuning of it. `StrataGenerators.TuningProfiles` holds the weights themselv
 which family of properties, and the measurements behind them. This file is the guarantee that no choice
 made there can cost coverage.
 
-* **§1 `PrecondElim`, knob 1: the shape of a precondition, with no edit to the source.**
+* **§1 `PrecondElim`: the shape of a precondition, with no edit to the source.**
   `StrataGenerators.TuningProfiles` tags `genPrecondition` rather than its definition site does. The
   attribute rewrites the elaborated body, so a tag need not sit at the definition site. The site it
   finds is `genPrecondition`'s existing 3 to 1 split between a clause that mentions an input and a
   plain `.bool` draw, and `genPrecondition.tuned θ` moves that ratio at run time.
 
-* **§2 `PrecondElim`, knob 2: whether a precondition is present at all.**
-  A rational `coin` in `optionGen` decides that split. A coin is not a `frequency`, so `@[tunable]`
-  cannot see it. `genPreconditionW` reworks the split into the two-branch `frequency` of
-  `SetGen.weightedOptionGen`, written inline so that the attribute sees it. A proof shows that the
-  rework has the support the shipping `genPrecondition` has, so the conversion changes only the
-  distribution. The same rework would expose the body and measure coins of `genFunction`, which is what
-  the `function:` family needs. This file does not do it.
-
-* **§3 `LoopElim`: the real statement generator.** `StrataGenerators.Stmt.genStmt` carries the tag at
-  its definition site, and `genStmt_mutual_tuned_eq` proves θ-invariance for the *whole mutual block*.
-  So `loop` is flat index 13 of a real knob rather than of a mirror. Two changes in
+* **§2 `LoopElim`: the real statement generator.** `StrataGenerators.Stmt.genStmt` carries the
+  tag at its definition site, and `genStmt_mutual_tuned_eq` proves θ-invariance for the *whole
+  mutual block*. So `loop` is flat index 13 of a real knob rather than of a mirror. Two changes in
   `StmtHasTypeAGen/Core.lean` made the tag possible:
 
   1. The branch list of the `frequency` was a `let`-bound variable, and it is now written inline. The
@@ -54,7 +46,7 @@ made there can cost coverage.
      already in the union. Both forms are throw-free, since `frequency` skips a zero-weight branch. They
      differ in one way: `cmd` now absorbs the share of a pruned branch, where the old list renormalised.
 
-* **§4 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` carry the same θ-invariance guarantee.
+* **§3 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` carry the same θ-invariance guarantee.
   `genLExprBase` has 84 branch weights across eleven per-type sites. The three cover one recursion form
   each: no recursion, `Nat.brecOn`, and `Nat.brecOn` under a wide match.
 -/
@@ -64,11 +56,11 @@ namespace TuningPrototypes
 open Strata.DL.Util (FuncPrecondition)
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 1. PrecondElim, knob 1: tuning the shipping generator in place
+-- 1. PrecondElim: tuning the shipping generator in place
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-! `genPrecondition` already contains a `frequency`. Inside the `some` clause it prefers a
-precondition that mentions an input over a plain `.bool` draw, at 3 to 1.
+/-! `genPrecondition` already contains a `frequency`. It prefers a precondition that mentions an
+input over a plain `.bool` draw, at 3 to 1.
 `StrataGenerators.TuningProfiles` tags it from a different module, with no edit to its source, and that
 makes the ratio a runtime knob. -/
 
@@ -95,9 +87,9 @@ def precondInputHeavy : Tuning := ⟨#[(10, 0), (1, 0)]⟩
     all, so it closes by reflexivity. -/
 theorem genPrecondition_tuned_eq (θ : Tuning) (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat)
-    (pctx : PolyOpCtx) :
-    genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx
-      = genPrecondition octx inputs tvars depth pctx := by
+    (pctx : PolyOpCtx) (ambient : FVarCtx) :
+    genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx ambient
+      = genPrecondition octx inputs tvars depth pctx ambient := by
   unfold genPrecondition genPrecondition.tuned
   by_cases hne : inputs.toList ≠ []
   · simp only [dif_pos hne]
@@ -108,145 +100,25 @@ theorem genPrecondition_tuned_eq (θ : Tuning) (octx : OpCtx)
 /-- The support characterization proved for the shipping generator therefore holds of every tuning of
     it, after one `rw` and with no reproof. -/
 example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx) :
-    SetGen.support (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx)
-      = SetGen.support (genPrecondition (G := SetGen.Set) octx inputs tvars depth pctx) := by
+    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx) (ambient : FVarCtx) :
+    SetGen.support
+        (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx ambient)
+      = SetGen.support
+        (genPrecondition (G := SetGen.Set) octx inputs tvars depth pctx ambient) := by
   rw [genPrecondition_tuned_eq]
 
 /-- And any soundness-and-completeness fact transfers without knowing what the predicate is. -/
 example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx)
-    (P : Option (FuncPrecondition LExpr' Unit) → Prop)
+    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx) (ambient : FVarCtx)
+    (P : FuncPrecondition LExpr' Unit → Prop)
     (h : SetGen.IsSoundAndComplete
-      (genPrecondition (G := SetGen.Set) octx inputs tvars depth pctx) P) :
+      (genPrecondition (G := SetGen.Set) octx inputs tvars depth pctx ambient) P) :
     SetGen.IsSoundAndComplete
-      (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx) P :=
+      (genPrecondition.tuned (G := SetGen.Set) θ octx inputs tvars depth pctx ambient) P :=
   SetGen.IsSoundAndComplete.of_support_eq (by rw [genPrecondition_tuned_eq]) h
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 2. PrecondElim, knob 2: tuning whether a precondition is present
--- ══════════════════════════════════════════════════════════════════════════
-
-/-- The body of `genPrecondition`'s `some` clause. It prefers a clause that mentions an input over a
-    plain `.bool` draw, at 3 to 1, in the free-variable context `inputsAsFVarCtx inputs`.
-
-    It sits in its own definition so that the tunable split below has exactly *one* site, the choice
-    between `some` and `none`. Otherwise that split would also capture this inner `frequency`, which is
-    knob 1's concern. `@[tunable]` inlines only the tagged declaration's own auxiliaries, so it does not
-    collect a `frequency` from a separate definition like this one. -/
-def genPrecondClause [Gen G] (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    G (FuncPrecondition LExpr' Unit) := do
-  let e ←
-    if hne : inputs.toList ≠ [] then
-      frequency
-        [ (3, fun () => genInputMentioningPrecond octx inputs tvars depth hne),
-          (1, fun () => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool) ]
-        (by show 0 < 3 + 1; omega)
-    else
-      genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool
-  pure { expr := e, md := () }
-
-/-- `genPrecondition` with the `some` and `none` split made tunable.
-
-    The body is `FunctionHasTypeAGen.Core.genPrecondition`'s body, with one change: a two-branch
-    `frequency` replaces the outer `optionGen`, whose `coin` fixes the split at one half. That
-    `frequency` is a tunable site, and it has the shape of `SetGen.weightedOptionGen`. So
-    `genPreconditionW.tuned θ` biases how often a function carries a `requires` clause, and that is the
-    knob `PrecondElim` needs turned up.
-
-    The split is written out rather than delegated to `SetGen.weightedOptionGen`, because `@[tunable]`
-    collects the `frequency` calls in the tagged definition's own body. The combinator takes its weights
-    as variables rather than as literals, so it is not tunable itself. `genPreconditionW_eq_weighted`
-    below records that the two are nonetheless the same term.
-
-    The definition has a binder named `depth`, so the site reads its weights at that depth. A schedule
-    with a nonzero growth coefficient can therefore make a precondition rarer in a deeper expression
-    budget. `SetGen.Set` cannot see that, and that is the guarantee rather than a limitation: no
-    schedule changes what is reachable. -/
-@[tunable]
-def genPreconditionW [Gen G] (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    G (Option (FuncPrecondition LExpr' Unit)) :=
-  frequency [
-    (1, fun _ => do let p ← genPrecondClause octx inputs tvars depth; pure (some p)),
-    (1, fun _ => pure none)
-  ] (by simp)
-
-/-- One tunable site of arity 2, with no recursive call. -/
-example : genPreconditionW.sites = #[⟨`TuningPrototypes.genPreconditionW.site0, 0, 2, #[0, 0]⟩] := rfl
-
-example : genPreconditionW.defaults = ⟨#[(1, 0), (1, 0)]⟩ := rfl
-
-/-- The inline split is `SetGen.weightedOptionGen`'s split at weights 1 to 1. They are the same term, so
-    the support lemma for the combinator describes `genPreconditionW`'s support directly. -/
-theorem genPreconditionW_eq_weighted [Gen G] (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    genPreconditionW (G := G) octx inputs tvars depth
-      = SetGen.weightedOptionGen 1 1 (genPrecondClause octx inputs tvars depth) := rfl
-
-/-- Two `Tuning`s for the presence site. The first is the default 1 to 1. The second aims at
-    `PrecondElim` and makes a precondition present about four times as often as absent. Both keep the
-    full support. -/
-def presenceDefault : Tuning := genPreconditionW.defaults
-def presenceHeavy : Tuning := ⟨#[(4, 0), (1, 0)]⟩
-
-/-- The tunable rework reaches the same values as the shipping `genPrecondition`. Every soundness and
-    completeness result about the shipping generator therefore transfers to the rework. This is the
-    theorem that certifies the conversion: only the distribution changes.
-
-    The proof reduces both sides to the same disjunction over what `genPrecondClause` reaches. The
-    shipping `genPrecondition` is *definitionally* `optionGen (genPrecondClause …)`, because its
-    `optionGen` payload is the `do` block above. So the `frequency` split here and the `coin` split
-    there reach the same values. -/
-theorem genPreconditionW_support_eq (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    SetGen.support (genPreconditionW (G := SetGen.Set) octx inputs tvars depth) =
-      SetGen.support (genPrecondition (G := SetGen.Set) octx inputs tvars depth) := by
-  have hrhs : genPrecondition (G := SetGen.Set) octx inputs tvars depth
-      = optionGen (genPrecondClause octx inputs tvars depth) := rfl
-  ext o
-  rw [hrhs, SetGen.mem_support_optionGen_iff]
-  simp only [genPreconditionW, SetGen.mem_support_frequency_iff]
-  constructor
-  · rintro ⟨w, g, hmem, _, hg⟩
-    rcases List.mem_cons.mp hmem with heq | hmem'
-    · obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ heq
-      simp only [SetGen.mem_support_bind_iff, SetGen.mem_support_pure_iff] at hg
-      obtain ⟨p, hp, rfl⟩ := hg
-      exact Or.inr ⟨p, hp, rfl⟩
-    · rcases List.mem_cons.mp hmem' with heq | hnil
-      · obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ heq
-        simp only [SetGen.mem_support_pure_iff] at hg
-        exact Or.inl hg
-      · simp at hnil
-  · rintro (rfl | ⟨p, hp, rfl⟩)
-    · refine ⟨1, _, List.mem_cons_of_mem _ List.mem_cons_self, by omega, ?_⟩
-      simp only [SetGen.mem_support_pure_iff]
-    · refine ⟨1, _, List.mem_cons_self, by omega, ?_⟩
-      simp only [SetGen.mem_support_bind_iff, SetGen.mem_support_pure_iff]
-      exact ⟨p, hp, rfl⟩
-
-/-- Boosting the precondition rate is behavior-preserving for *any* `θ`, so soundness/completeness of
-    the function generator is unaffected: only the frequency of `requires` clauses changes. -/
-theorem genPreconditionW_tuned_eq (θ : Tuning) (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    genPreconditionW.tuned (G := SetGen.Set) θ octx inputs tvars depth
-      = genPreconditionW octx inputs tvars depth := by
-  unfold genPreconditionW genPreconditionW.tuned
-  apply SetGen.frequency_congr_weights
-  · rfl
-  all_goals simp [Tuning.weight_pos]
-
-/-- Chaining the two: every tuning of the reworked generator has the shipping generator's support. -/
-example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) :
-    SetGen.support (genPreconditionW.tuned (G := SetGen.Set) θ octx inputs tvars depth) =
-      SetGen.support (genPrecondition (G := SetGen.Set) octx inputs tvars depth) := by
-  rw [genPreconditionW_tuned_eq, genPreconditionW_support_eq]
-
--- ══════════════════════════════════════════════════════════════════════════
--- 3. LoopElim: the real statement generator
+-- 2. LoopElim: the real statement generator
 -- ══════════════════════════════════════════════════════════════════════════
 
 /-! `StrataGenerators.Stmt.genStmt` carries the tag at its definition site, and
@@ -326,11 +198,10 @@ theorem genProcedureT_tuned_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx) :
     genProcedureT (G := SetGen.Set) θ octx procs C Γ size len pctx
       = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx := by
-  unfold genProcedureT StrataGenerators.Procedure.genProcedure
-  simp only [genStmtChain_tuned_eq]
+  simp only [genProcedureT, StrataGenerators.Procedure.genProcedure, genStmtChain_tuned_eq]
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 4. The command, type and expression generators
+-- 3. The command, type and expression generators
 -- ══════════════════════════════════════════════════════════════════════════
 
 /-- At every `θ`, the tuned command generator is `genCmd`. `genCmd` is not recursive, so this uses the
@@ -339,9 +210,9 @@ theorem genProcedureT_tuned_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
     §1 does the same for `genPrecondition`. -/
 theorem genCmd_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx)
-    (avoid : List String) :
-    genCmd.tuned (G := SetGen.Set) θ octx tvars immutableVars ctx depth pctx avoid
-      = genCmd octx tvars immutableVars ctx depth pctx avoid := by
+    (avoid : List String) (kt : Lambda.KnownTypes) :
+    genCmd.tuned (G := SetGen.Set) θ octx tvars immutableVars ctx depth pctx avoid kt
+      = genCmd octx tvars immutableVars ctx depth pctx avoid kt := by
   unfold genCmd genCmd.tuned
   by_cases h : (ctx.writable immutableVars).length > 0
   · simp only [dif_pos h]
@@ -353,17 +224,15 @@ theorem genCmd_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     · rfl
     all_goals simp [Tuning.weight_pos]
 
-/-- At every `θ`, the tuned command *chain* is `genCmds`, for any chain length. Proved by induction on
-    the length. -/
+/-- At every `θ`, the tuned command *chain* is `genCmds`, for any chain length. -/
 theorem genCmdsT_tuned_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (depth : Nat) (avoid : List String) :
+    (immutableVars : List (Identifier Unit)) (depth : Nat) (avoid : List String)
+    (kt : Lambda.KnownTypes) :
     ∀ (n : Nat) (ctx : VarCtx),
-      genCmdsT (G := SetGen.Set) θ octx tvars immutableVars ctx depth n avoid
-        = genCmds octx tvars immutableVars ctx depth n avoid := by
-  intro n
-  induction n with
-  | zero => intro ctx; rfl
-  | succ n ih => intro ctx; simp only [genCmdsT, genCmds, genCmd_tuned_eq, ih]
+      genCmdsT (G := SetGen.Set) θ octx tvars immutableVars ctx depth n avoid kt
+        = genCmds octx tvars immutableVars ctx depth n avoid kt := by
+  intro n ctx
+  simp only [genCmdsT, genCmds, genCmd_tuned_eq]
 
 /-- At every `θ`, the tuned type generator is `genLMonoTy`. Both of its sites are the same 9 to 1 split
     between a base type and a compound type, once with type variables in scope and once without.

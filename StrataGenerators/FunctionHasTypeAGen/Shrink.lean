@@ -30,8 +30,8 @@ independent.
     The shrinker reduces a precondition, although it is careful in each other part, because a
     `requires` clause is not in the type signature. The promise of this family is that a smaller
     function is still usable in place of the original at the same *type*, and the removal of a clause
-    keeps that promise. The reduction also matters for reach: `genFunction` gives a clause on about
-    half of its draws, so this instance can reduce a counterexample that rests on a clause only when
+    keeps that promise. The reduction also matters for reach: `genFunction` often gives a clause,
+    so this instance can reduce a counterexample that rests on a clause only when
     the clause can go. The removal comes before the reduction, so the shrinker tries the larger
     reduction first.
 

@@ -1,13 +1,13 @@
 import StrataGenerators.HasTypeAGenOpsConsistent
-import Strata.Languages.Core.WeakTypeSpec
+import Strata.Languages.Core.TypingSpec
 import Strata.DL.Lambda.LExprTypeSpecProps
 
 /-!
 # The annotations of a generated expression
 
 `genLExpr` writes three kinds of annotation into a term: the binder annotation of an abstraction
-or a quantifier, the annotation of a free variable, and the annotation of an operator. The weak
-typing specification asks that every binder annotation be a registered type, that every free
+or a quantifier, the annotation of a free variable, and the annotation of an operator. The typing
+specification asks that every binder annotation be a registered type, that every free
 variable and operator annotation agree with the variable scopes and the function table, and, for
 the expressions of a function, an axiom or a lemma, that every annotation type variable be a type
 parameter. This file proves these facts of every generated expression from conditions on the
@@ -495,7 +495,7 @@ theorem genIndirPolyCore_cases {fctx : FVarCtx} {octx : OpCtx} {pctx : PolyOpCtx
     rw [mem_support_pure_iff] at he
     rw [mem_support_elements_iff] at hentry
     exact Or.inl ⟨sampled, entry.1, entry.2, args, hlen, hsam, hentry,
-      (mem_mapM_iff' genArg entry.2 args).mp hargs, he⟩
+      (mem_support_mapM_iff genArg entry.2 args).mp hargs, he⟩
   · exact Or.inr he
 
 /-- Every term the polymorphic rule draws satisfies `P` when the argument generator `g` and the
@@ -1007,7 +1007,7 @@ theorem findPolymorphicOps_args_vars {tvars : List TyIdentifier} {pctx : PolyOpC
 
 /-! ## Binder and agreement conditions -/
 
-/-- The binder and agreement conditions of the weak expression typing: the binder annotations of
+/-- The binder and agreement conditions of expression well-typedness: the binder annotations of
     `e` are registered in `C`, and its free-variable and operator annotations agree with the
     variable scopes `ts` and the function table of `C`. -/
 def AnnotsOk (C : LContext CoreLParams) (ts : TypeScopes) (e : LExpr') : Prop :=
@@ -1262,14 +1262,14 @@ theorem closureHyps_annotsOk {C : LContext CoreLParams} {ts : TypeScopes} {fctx 
       (by simp [LExpr.binderAnnotations]) (by simp [LExpr.freeVars])
       (by simp [LExpr.opAnnots]) (by simp [LExpr.getOps])
 
-/-- **Every expression `genLExpr` draws at a registered type is weakly typed** in context `C` and
+/-- **Every expression `genLExpr` draws at a registered type is well-typed** in context `C` and
     variable scopes `ts`, when the contexts it reads agree with `C` and `ts` (`ExprCtxOk`). -/
-theorem genLExpr_exprHasTypeW {C : LContext CoreLParams} {ts : TypeScopes} {fctx : FVarCtx}
+theorem genLExpr_exprWellTyped {C : LContext CoreLParams} {ts : TypeScopes} {fctx : FVarCtx}
     {octx : OpCtx} {pctx : PolyOpCtx} {tvars : List TyIdentifier}
     (hctx : ExprCtxOk C ts fctx octx pctx) {depth : Nat} {τ : LMonoTy}
     (hτ : LMonoTy.knownInstance τ C.knownTypes = true) {e : LExpr'}
     (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ)) :
-    ExprHasTypeW C ts e τ := by
+    ExprWellTyped C ts e τ := by
   have hok := genLExpr_closed (closureHyps_annotsOk tvars hctx) depth []
     τ (fun _ ht => absurd ht List.not_mem_nil) hτ e he
   exact ⟨genLExpr_sound fctx octx pctx tvars [] depth τ _ e he, hok.1, hok.2⟩

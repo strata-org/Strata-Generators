@@ -7,14 +7,14 @@ open Lambda Core Imperative
 # Shared check predicates for the whole-program generator
 
 `ProgramGen.genProgram`, in `StrataGenerators.ProgramGen`, gives a random well-typed Strata Core `Program`, and
-`ProgramGen/Sound.lean` proves it sound against `Core.TypeSpec.ProgramHasTypeW`.
+`ProgramGen/Sound.lean` proves it sound against `Core.TypeSpec.ProgramWellTyped`.
 
 This module holds the `check*` predicates that no harness owns, by the convention of each other `*.TestSupport`
 module. Each of them gives a `Bool`, so each driver and each Tyche panel share one verdict.
 
 ## Why the oracle here is not `Core.Program.typeCheck`
 
-The checker may reject a generated program that the weak specification accepts: one with a reserved
+The checker may reject a generated program that the typing spec accepts: one with a reserved
 name or a clash between names of different kinds (`checkerRejectionExpected`). The properties below
 hold of every generated program.
 -/
