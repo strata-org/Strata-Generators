@@ -29,9 +29,9 @@ per-declaration size knobs. This module proves size results about the *program* 
   can exceed arity three is not settled here; excluding them is sufficient, not shown necessary.
 
 `prob_genProgram_ge` is the transfer lemma: an event that the first declaration step reaches with
-probability `c` is reached by the program with probability `c · (1/28)^m`. The `(1/28)^m` factor
-is a lower bound on the mass of the other `m` steps (each at least the abstract-type step), not an
-estimate. Every positive bound here is a single-witness product and far from tight; the zero sides
+probability `c` is reached by a program of `m + 1` declarations with probability
+`c · stepMass ^ m`. The `stepMass ^ m` factor is a lower bound on the mass of the other `m` steps
+(each at least the abstract-type step), not an estimate. Every positive bound here is a single-witness product and far from tight; the zero sides
 are exact.
 -/
 
@@ -42,13 +42,15 @@ open ProgramGen StrataGenerators.Procedure
 namespace StrataGenerators.SizeDistributionProgram
 
 theorem prob_dtFreshName_univ (reserved : List String) :
-    1 / 2 ≤ prob (DatatypeGen.genFreshName (G := SPMF) reserved) Set.univ := by
+    nameMass ≤ prob (DatatypeGen.genFreshName (G := SPMF) reserved) Set.univ := by
+  rw [nameMass]
   unfold DatatypeGen.genFreshName
   refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge prob_genIdentName_univ fun s => ?_)
   split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
 
 theorem prob_genDeclAbstract_univ (s : GenState) (b : Bounds) :
-    1 / 2 ≤ prob (genDeclAbstract (G := SPMF) s b) Set.univ := by
+    nameMass ≤ prob (genDeclAbstract (G := SPMF) s b) Set.univ := by
+  rw [nameMass]
   unfold genDeclAbstract genAbstractType
   refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge ?_ fun x => ?_)
   · refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (prob_dtFreshName_univ _)
@@ -61,7 +63,8 @@ theorem prob_genDeclAbstract_univ (s : GenState) (b : Bounds) :
     split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
 
 theorem prob_genDeclStep_ge (s : GenState) (b : Bounds) (E : Set StepResult) :
-    1 / 14 * prob (genDeclAbstract (G := SPMF) s b) E ≤ prob (genDeclStep (G := SPMF) s b) E := by
+    stepShare * prob (genDeclAbstract (G := SPMF) s b) E ≤ prob (genDeclStep (G := SPMF) s b) E := by
+  rw [stepShare]
   unfold genDeclStep
   by_cases hc : hasCallableFunc s = true <;>
     simp only [hc, ite_true, ite_false, Bool.false_eq_true]
@@ -71,7 +74,8 @@ theorem prob_genDeclStep_ge (s : GenState) (b : Bounds) (E : Set StepResult) :
     exact mul_le_mul' (le_of_eq (by norm_num)) le_rfl
 
 theorem prob_genDeclStep_axiom_ge (s : GenState) (b : Bounds) (E : Set StepResult) :
-    1 / 14 * prob (genDeclAxiom (G := SPMF) s b) E ≤ prob (genDeclStep (G := SPMF) s b) E := by
+    stepShare * prob (genDeclAxiom (G := SPMF) s b) E ≤ prob (genDeclStep (G := SPMF) s b) E := by
+  rw [stepShare]
   unfold genDeclStep
   by_cases hc : hasCallableFunc s = true <;>
     simp only [hc, ite_true, ite_false, Bool.false_eq_true]
@@ -82,7 +86,8 @@ theorem prob_genDeclStep_axiom_ge (s : GenState) (b : Bounds) (E : Set StepResul
     exact mul_le_mul' (le_of_eq (by norm_num)) le_rfl
 
 theorem prob_genDeclStep_proc_ge (s : GenState) (b : Bounds) (E : Set StepResult) :
-    1 / 14 * prob (genDeclProcedure (G := SPMF) s b) E ≤ prob (genDeclStep (G := SPMF) s b) E := by
+    stepShare * prob (genDeclProcedure (G := SPMF) s b) E ≤ prob (genDeclStep (G := SPMF) s b) E := by
+  rw [stepShare]
   unfold genDeclStep
   by_cases hc : hasCallableFunc s = true <;>
     simp only [hc, ite_true, ite_false, Bool.false_eq_true]
@@ -93,7 +98,8 @@ theorem prob_genDeclStep_proc_ge (s : GenState) (b : Bounds) (E : Set StepResult
     exact mul_le_mul' (by ennr) le_rfl
 
 theorem prob_genDeclsFold_univ (b : Bounds) :
-    ∀ (m : Nat) (s : GenState), (1 / 28 : ℝ≥0∞) ^ m ≤ prob (genDeclsFold (G := SPMF) s b m) Set.univ := by
+    ∀ (m : Nat) (s : GenState), stepMass ^ m ≤ prob (genDeclsFold (G := SPMF) s b m) Set.univ := by
+  rw [stepMass]
   intro m
   induction m with
   | zero => intro s; rw [genDeclsFold, pow_zero]; exact (prob_pure_of_mem (Set.mem_univ _)).ge
@@ -103,6 +109,7 @@ theorem prob_genDeclsFold_univ (b : Bounds) :
     refine prob_bind_univ_ge ?_ fun x => ?_
     · refine le_trans ?_ (prob_genDeclStep_ge s b Set.univ)
       refine le_trans ?_ (mul_le_mul' le_rfl (prob_genDeclAbstract_univ s b))
+      rw [stepShare, nameMass]
       ennr
     · obtain ⟨ds, s'⟩ := x
       refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (ih s') fun y => ?_)
@@ -115,8 +122,9 @@ theorem prob_genDeclsFold_univ (b : Bounds) :
 def HasCoveringAxiom (ds : List Decl) : Prop := ∃ d ∈ ds, ∃ a md, d = .ax a md ∧ Covers a.e
 
 theorem prob_genDeclAxiom_covers (s : GenState) (b : Bounds) (hd : 3 ≤ b.exprDepth) :
-    1 / 2 * (1 / 10 * coverBound) ≤
+    nameMass * (baseShare * coverBound) ≤
       prob (genDeclAxiom (G := SPMF) s b) {r | HasCoveringAxiom r.1} := by
+  rw [nameMass]
   obtain ⟨n, hn⟩ := Nat.exists_eq_add_of_le' hd
   unfold genDeclAxiom genAxiom
   rw [LawfulMonad.bind_assoc]
@@ -135,7 +143,7 @@ probability at least `coverBound / 280 · (1/28)^(numDecls - 1)`. The first fact
 declaration being such an axiom; the second is a lower bound on the mass of the remaining
 declaration steps (each at least the abstract-type step, `1/14 · 1/2`). -/
 theorem prob_genProgram_covering_axiom (m : Nat) (b : Bounds) (hd : 3 ≤ b.exprDepth) :
-    1 / 14 * (1 / 2 * (1 / 10 * coverBound)) * (1 / 28) ^ m ≤
+    stepShare * (nameMass * (baseShare * coverBound)) * stepMass ^ m ≤
       prob (genProgram (G := SPMF) (m + 1) b) {P | HasCoveringAxiom P.decls} := by
   unfold genProgram
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' ?_ le_rfl)
@@ -214,8 +222,9 @@ theorem prob_genProcedure_top_ge (P : Statement → Prop) (octx : OpCtx) (procs 
     (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx)
     (B : ℝ≥0∞)
     (hB : ∀ imm C' ctx, B ≤ prob (genStmt (G := SPMF) octx [] imm procs [] C' ctx pctx size) (Top P)) :
-    1 / 2 * ((1 / ((size : ℝ≥0∞) + 1)) ^ 6 * (B * stmtMassBound size ^ len))
+    nameMass * ((1 / ((size : ℝ≥0∞) + 1)) ^ 6 * (B * stmtMassBound size ^ len))
       ≤ prob (genProcedure (G := SPMF) octx procs C Γ size (len + 1) pctx) {p | ProcTop P p} := by
+  rw [nameMass]
   set c : ℝ≥0∞ := 1 / ((size : ℝ≥0∞) + 1)
   have hre : c ^ 6 * (B * stmtMassBound size ^ len) =
       c * (c * (c * (c * (c * (c * (B * stmtMassBound size ^ len)))))) := by ring
@@ -246,7 +255,7 @@ with probability at least `c` is reached by a program of `m + 1` declarations wi
 least `c · (1/28)^m`; the second factor pays for the mass of the other `m` steps. -/
 theorem prob_genProgram_ge (Q : Decl → Prop) (m : Nat) (b : Bounds) (c : ℝ≥0∞)
     (hstep : c ≤ prob (genDeclStep (G := SPMF) initState b) {r | ∃ d ∈ r.1, Q d}) :
-    c * (1 / 28) ^ m ≤ prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, Q d} := by
+    c * stepMass ^ m ≤ prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, Q d} := by
   unfold genProgram
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' ?_ le_rfl)
     (prob_bind_ge {t : List Decl × GenState | ∃ d ∈ t.1, Q d} (d := 1) fun t ht => ?_))
@@ -281,26 +290,22 @@ theorem prob_genDeclProcedure_ge (P : Statement → Prop) (s : GenState) (b : Bo
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, hp⟩
 
-/-- The `loop` lower bound of `prob_genStmt_loop_ge`, at size `n + 1`. -/
-noncomputable def loopBound (n : Nat) : ℝ≥0∞ :=
-  2 / 17 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))))
-
 /-- The bound for a procedure of size `size` and `len + 1` statements whose first statement has
 probability at least `B`, with its fresh name. -/
 noncomputable def procBound (size len : Nat) (B : ℝ≥0∞) : ℝ≥0∞ :=
-  1 / 2 * ((1 / ((size : ℝ≥0∞) + 1)) ^ 6 * (B * stmtMassBound size ^ len)) * (1 / 2)
+  nameMass * ((1 / ((size : ℝ≥0∞) + 1)) ^ 6 * (B * stmtMassBound size ^ len)) * nameMass
 
 /-- **Whole programs, procedure bodies with loops.** With `procSize ≥ 1` and `procLen ≥ 1`, a
 program of `m + 1` declarations holds a procedure whose body has a top-level `loop` with
 probability at least `1/14 · procBound · (1/28)^m`. -/
 theorem prob_genProgram_proc_loop (m n len : Nat) (b : Bounds) (hs : b.procSize = n + 1)
     (hl : b.procLen = len + 1) :
-    1 / 14 * procBound (n + 1) len (loopBound n) * (1 / 28) ^ m ≤
+    stepShare * procBound (n + 1) len (loopAtSize n) * stepMass ^ m ≤
       prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, IsProcWith IsLoop d} := by
   refine prob_genProgram_ge _ m b _ ?_
   refine le_trans ?_ (prob_genDeclStep_proc_ge initState b _)
   refine mul_le_mul' le_rfl ?_
-  have h := prob_genDeclProcedure_ge IsLoop initState b len hl (loopBound n) (by
+  have h := prob_genDeclProcedure_ge IsLoop initState b len hl (loopAtSize n) (by
     intro imm C' ctx; rw [hs]
     exact prob_genStmt_loop_ge _ [] _ imm _ [] C' ctx n)
   rw [hs] at h
@@ -311,8 +316,7 @@ theorem prob_genProgram_proc_loop (m n len : Nat) (b : Bounds) (hs : b.procSize 
 expression that covers all seven forms with probability at least `1/14 · procBound · (1/28)^m`. -/
 theorem prob_genProgram_proc_covers (m n len : Nat) (b : Bounds) (hs : b.procSize = n + 3)
     (hl : b.procLen = len + 1) :
-    1 / 14 * procBound (n + 3) len (4 / 17 * (1 / 7 * (1 / 2 * (1 / 10 * coverBound))))
-        * (1 / 28) ^ m ≤
+    stepShare * procBound (n + 3) len cmdCoverAtStmt * stepMass ^ m ≤
       prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, IsProcWith IsCoveringCmd d} := by
   refine prob_genProgram_ge _ m b _ ?_
   refine le_trans ?_ (prob_genDeclStep_proc_ge initState b _)
@@ -419,7 +423,7 @@ theorem genProgram_nesting_threshold (b : Bounds) :
     (b.procSize = 0 → ∀ numDecls,
       prob (genProgram (G := SPMF) numDecls b) {P | ∃ d ∈ P.decls, IsProcWith IsNesting d} = 0) ∧
     (∀ m n len, b.procSize = n + 1 → b.procLen = len + 1 →
-      1 / 14 * procBound (n + 1) len (loopBound n) * (1 / 28) ^ m ≤
+      stepShare * procBound (n + 1) len (loopAtSize n) * stepMass ^ m ≤
         prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, IsProcWith IsNesting d}) := by
   refine ⟨fun hs numDecls => ?_, fun m n len hs hl => ?_⟩
   · refine (prob_eq_zero_iff _ _).mpr fun P hP hn => ?_
@@ -644,7 +648,7 @@ theorem genProgram_axiom_coverage_threshold (b : Bounds) :
     (ArityOk b → b.exprDepth ≤ 2 → ∀ numDecls,
       prob (genProgram (G := SPMF) numDecls b) {P | HasCoveringAxiom P.decls} = 0) ∧
     (3 ≤ b.exprDepth → ∀ m,
-      1 / 14 * (1 / 2 * (1 / 10 * coverBound)) * (1 / 28) ^ m ≤
+      stepShare * (nameMass * (baseShare * coverBound)) * stepMass ^ m ≤
         prob (genProgram (G := SPMF) (m + 1) b) {P | HasCoveringAxiom P.decls}) := by
   refine ⟨fun hb hd numDecls => ?_, fun hd m => prob_genProgram_covering_axiom m b hd⟩
   refine (prob_eq_zero_iff _ _).mpr fun P hP hc => ?_

@@ -9,11 +9,12 @@ Continues `StrataGenerators.SizeDistribution` (expressions) one level up.
 **Commands** (`genCmd`). The size is the expression size of the command's expression.
 `genCmd_coverage_threshold`: for a factory with no operator of positive arity, a command never
 carries an expression covering all seven forms below size `3`; from size `3` on it does with
-probability at least `coverBound / 140` (`prob_genCmd_covers`, which holds for every factory).
+probability at least `cmdCoverBound` (`prob_genCmd_covers`, which holds for every factory).
 
 **Statements** (`genStmt`). `genStmt_nesting_threshold`: at size `0` the top level never holds a
 `block`, `ite` or `loop`, in every context; at size `n + 1` it holds each of them with positive
-probability: `ite ≥ 1/(17 (n+2)²)`, `block ≥ 1/(17 (n+2))`, `loop ≥ 1/(170 (n+2)²)`. Each witness
+probability, each a closed form in the size: `iteAtSize n = 1/(17 (n+2)²)`,
+`blockAtSize n = 1/(17 (n+2))`, `loopAtSize n = 1/(170 (n+2)²)`. Each witness
 is the empty form of the statement (empty branches, empty body, nondeterministic guard), so it
 needs no sub-draw to succeed. The bounds fall with the size only because each body length is
 uniform on `[0, size]`, and the witness takes it to be `0`. `prob_genStmt_covers` lifts the
@@ -49,7 +50,8 @@ theorem prob_bind_univ_ge {α β} {x : SPMF α} {f : α → SPMF β} {c d : ℝ�
     c * d ≤ prob (x >>= f) Set.univ :=
   le_trans (mul_le_mul' hx le_rfl) (prob_bind_ge Set.univ fun a _ => hf a)
 
-theorem prob_genIdentName_univ : 1 / 2 ≤ prob (genIdentName (G := SPMF)) Set.univ := by
+theorem prob_genIdentName_univ : nameMass ≤ prob (genIdentName (G := SPMF)) Set.univ := by
+  rw [nameMass]
   unfold genIdentName genStartChar
   refine le_trans (le_of_eq (one_mul _).symm) (prob_bind_univ_ge
     (prob_elements_of_forall _ fun _ _ => trivial).ge fun x => ?_)
@@ -73,8 +75,9 @@ def CmdCovers (c : Cmd Expression) : Prop := ∃ e ∈ cmdExprs c, Covers e
 variable (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx)
 
 theorem prob_genAssertCmd_covers (ctx : VarCtx) (n : Nat) :
-    1 / 2 * (1 / 10 * coverBound) ≤
+    nameMass * (baseShare * coverBound) ≤
       prob (genAssertCmd (G := SPMF) octx tvars ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
+  rw [nameMass]
   unfold genAssertCmd
   refine le_trans (mul_le_mul' prob_genIdentName_univ le_rfl) (prob_bind_ge Set.univ fun l _ => ?_)
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
@@ -83,11 +86,16 @@ theorem prob_genAssertCmd_covers (ctx : VarCtx) (n : Nat) :
   refine (prob_pure_of_mem ?_).ge
   exact ⟨e, List.mem_singleton_self _, he⟩
 
+/-- The lower bound on a command carrying a covering expression: the `1`-of-`7` weight of the
+`assert` kind, the mass of its label draw, and the covering-expression bound through `genLExpr`. -/
+noncomputable def cmdCoverBound : ℝ≥0∞ := 1 / 7 * (nameMass * (baseShare * coverBound))
+
 /-- **From expression size `3` on, a command carries a covering expression** with probability at
-least `coverBound / 140`, in every variable context. -/
+least `cmdCoverBound`, in every variable context. -/
 theorem prob_genCmd_covers (imm : List (Identifier Unit)) (ctx : VarCtx) (n : Nat) :
-    1 / 7 * (1 / 2 * (1 / 10 * coverBound)) ≤
+    cmdCoverBound ≤
       prob (genCmd (G := SPMF) octx tvars imm ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
+  rw [cmdCoverBound, nameMass]
   have ha := prob_genAssertCmd_covers octx tvars pctx ctx n
   unfold genCmd; dsimp only; split
   · refine le_trans ?_ (prob_frequency_ge _ _ 4 (by simp) _)
@@ -232,14 +240,72 @@ theorem genStmtChain_zero (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx size 0 = Pure.pure ([], C, ctx) := by
   rw [genStmtChain]
 
-/-- **From size 1 on, the top level is an `ite` with probability at least `1/(17 (size+1)²)`.** The
+/-- The lower bound on a top-level `ite` at size `n + 1`: `1 / (17 (n+2)²)`. The `17` is the total
+branch weight of `genStmt`; each `(n+2)` is the chance that one of the two branch lengths, uniform
+on `[0, n+1]`, comes out `0`. -/
+noncomputable def iteAtSize (n : Nat) : ℝ≥0∞ := 1 / (17 * ((n : ℝ≥0∞) + 2) ^ 2)
+
+/-- The lower bound on a top-level `block` at size `n + 1`: `1 / (17 (n+2))`. One body length, and
+the `2`-of-`17` branch weight against the `1/2` mass of the fresh label. -/
+noncomputable def blockAtSize (n : Nat) : ℝ≥0∞ := 1 / (17 * ((n : ℝ≥0∞) + 2))
+
+/-- The lower bound on a top-level `loop` at size `n + 1`: `1 / (170 (n+2)²)`. The extra `10`
+over `iteAtSize` is the guard (`1/5`) and the measure (`1/4`) against the `2`-of-`17` weight. -/
+noncomputable def loopAtSize (n : Nat) : ℝ≥0∞ := 1 / (170 * ((n : ℝ≥0∞) + 2) ^ 2)
+
+theorem cast_add_two_ne_zero (n : Nat) : ((n : ℝ≥0∞) + 2) ≠ 0 := by
+  intro h; rw [add_eq_zero] at h; simp at h
+
+theorem cast_add_two_ne_top (n : Nat) : ((n : ℝ≥0∞) + 2) ≠ ⊤ := by
+  simp [ENNReal.add_eq_top]
+
+/-- Discharge `≠ 0` / `≠ ⊤` for a product of numerals and `(n : ℝ≥0∞) + 2`. -/
+macro "fin_ne" : tactic => `(tactic| first | finiteness | positivity | norm_num)
+
+/-- The closed form, unfolded into the nested-product shape the branch-by-branch proof builds. -/
+theorem iteAtSize_eq (n : Nat) :
+    iteAtSize n = 1 / 17 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2))) := by
+  rw [iteAtSize,
+    div_mul_div 1 1 ((n : ℝ≥0∞) + 2) (cast_add_two_ne_zero n) (cast_add_two_ne_top n),
+    div_mul_div 1 (1 * 1) (((n : ℝ≥0∞) + 2) * ((n : ℝ≥0∞) + 2)) (by fin_ne) (by fin_ne)]
+  frac_eq
+
+theorem blockAtSize_eq (n : Nat) :
+    blockAtSize n = 2 / 17 * (1 / 2 * (1 / ((n : ℝ≥0∞) + 2))) := by
+  rw [blockAtSize,
+    div_mul_div 1 1 ((n : ℝ≥0∞) + 2) (b := 2) (by fin_ne) (by fin_ne),
+    div_mul_div 2 (1 * 1) ((2 : ℝ≥0∞) * ((n : ℝ≥0∞) + 2)) (b := 17) (by fin_ne) (by fin_ne)]
+  frac_eq
+
+theorem loopAtSize_eq (n : Nat) :
+    loopAtSize n = 2 / 17 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2))))) := by
+  rw [loopAtSize,
+    div_mul_div 1 1 ((n : ℝ≥0∞) + 2) (cast_add_two_ne_zero n) (cast_add_two_ne_top n),
+    div_mul_div 1 (1 * 1) (((n : ℝ≥0∞) + 2) * ((n : ℝ≥0∞) + 2)) (b := 4) (by fin_ne) (by fin_ne),
+    div_mul_div 1 (1 * (1 * 1)) ((4 : ℝ≥0∞) * (((n : ℝ≥0∞) + 2) * ((n : ℝ≥0∞) + 2))) (b := 5)
+      (by fin_ne) (by fin_ne),
+    div_mul_div 2 (1 * (1 * (1 * 1)))
+      ((5 : ℝ≥0∞) * ((4 : ℝ≥0∞) * (((n : ℝ≥0∞) + 2) * ((n : ℝ≥0∞) + 2)))) (b := 17)
+      (by fin_ne) (by fin_ne)]
+  frac_eq
+
+theorem iteAtSize_pos (n : Nat) : 0 < iteAtSize n := by
+  rw [iteAtSize, ENNReal.div_pos_iff]; exact ⟨by norm_num, by finiteness⟩
+
+theorem blockAtSize_pos (n : Nat) : 0 < blockAtSize n := by
+  rw [blockAtSize, ENNReal.div_pos_iff]; exact ⟨by norm_num, by finiteness⟩
+
+theorem loopAtSize_pos (n : Nat) : 0 < loopAtSize n := by
+  rw [loopAtSize, ENNReal.div_pos_iff]; exact ⟨by norm_num, by finiteness⟩
+
+/-- **From size 1 on, the top level is an `ite` with probability at least `iteAtSize size`.** The
 witness is the nondeterministic `ite` with two empty branches, which needs no sub-draw to succeed;
 each branch length is uniform on `[0, size]`, which is where the size-dependence comes from. -/
 theorem prob_genStmt_ite_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
-    1 / 17 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))
+    iteAtSize n
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsIte) := by
-  rw [genStmt]
+  rw [iteAtSize_eq, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 7 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
     List.sum_cons, List.sum_nil]
@@ -259,7 +325,8 @@ theorem prob_genStmt_ite_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
   exact ⟨_, List.mem_singleton_self _, trivial⟩
 
 theorem prob_genFreshLabel_univ (labels : List String) :
-    1 / 2 ≤ prob (genFreshLabel (G := SPMF) labels) Set.univ := by
+    nameMass ≤ prob (genFreshLabel (G := SPMF) labels) Set.univ := by
+  rw [nameMass]
   unfold genFreshLabel
   refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge prob_genIdentName_univ fun s => ?_)
   split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
@@ -304,13 +371,13 @@ theorem prob_genInvariants_univ (ctx : VarCtx) (d : Nat) :
     1 / ((d : ℝ≥0∞) + 1) ≤ prob (genInvariants (G := SPMF) octx tvars ctx d pctx) Set.univ := by
   unfold genInvariants; exact prob_listOfMaxLength_univ _ _
 
-/-- **From size 1 on, the top level is a `block` with probability at least
-`1/(17 (size+1))`**: an empty block, under a label from `genFreshLabel`. -/
+/-- **From size 1 on, the top level is a `block` with probability at least `blockAtSize size`**:
+an empty block, under a label from `genFreshLabel`. -/
 theorem prob_genStmt_block_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
-    2 / 17 * (1 / 2 * (1 / ((n : ℝ≥0∞) + 2)))
+    blockAtSize n
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsBlock) := by
-  rw [genStmt]
+  rw [blockAtSize_eq, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 5 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
     List.sum_cons, List.sum_nil]
@@ -328,13 +395,13 @@ theorem prob_genStmt_block_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, trivial⟩
 
-/-- **From size 1 on, the top level is a `loop` with probability at least
-`1/(170 (size+1)²)`**: a nondeterministic guard, no measure, no invariant, an empty body. -/
+/-- **From size 1 on, the top level is a `loop` with probability at least `loopAtSize size`**:
+a nondeterministic guard, no measure, no invariant, an empty body. -/
 theorem prob_genStmt_loop_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
-    2 / 17 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))))
+    loopAtSize n
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsLoop) := by
-  rw [genStmt]
+  rw [loopAtSize_eq, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 8 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
     List.sum_cons, List.sum_nil]
@@ -363,14 +430,18 @@ def IsCoveringCmd : Statement → Prop
   | .cmd (.cmd c) => CmdCovers c
   | _ => False
 
+/-- The lower bound on a command that carries a covering expression: the `1`-of-`7` command kind
+and the `4`-of-`17` statement branch, against the covering-expression bound. -/
+noncomputable def cmdCoverAtStmt : ℝ≥0∞ := 4 / 17 * cmdCoverBound
+
 /-- **From size 3 on, a statement draw carries a covering expression** with probability at least
-`4/17` of the command bound, in every context. -/
+`cmdCoverAtStmt`, in every context. -/
 theorem prob_genStmt_covers (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
-    4 / 17 * (1 / 7 * (1 / 2 * (1 / 10 * coverBound)))
+    cmdCoverAtStmt
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 3))
           (Top IsCoveringCmd) := by
-  rw [genStmt]
+  rw [cmdCoverAtStmt, cmdCoverBound, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
   simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
   refine mul_le_mul' (le_of_eq (by norm_num)) ?_
@@ -384,7 +455,8 @@ theorem prob_genStmt_covers (imm : List (Identifier Unit)) (procs : ProcSigCtx)
 -- ── Masses, for threading through sequences ─────────────────────────
 
 theorem prob_genFreshName_univ (ctx : VarCtx) :
-    1 / 2 ≤ prob (_root_.genFreshName (G := SPMF) ctx) Set.univ := by
+    nameMass ≤ prob (_root_.genFreshName (G := SPMF) ctx) Set.univ := by
+  rw [nameMass]
   unfold _root_.genFreshName
   refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge prob_genIdentName_univ fun s => ?_)
   split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
@@ -412,7 +484,7 @@ theorem prob_genCmd_univ (imm : List (Identifier Unit)) (ctx : VarCtx) (d : Nat)
 the empty nondeterministic `ite`. -/
 noncomputable def stmtMassBound : Nat → ℝ≥0∞
   | 0 => 4 / 10 * (1 / 14 * (1 / 2 * (1 / 12)))
-  | n + 1 => 1 / 17 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))
+  | n + 1 => iteAtSize n
 
 theorem prob_genStmt_univ (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) :
@@ -496,17 +568,19 @@ theorem genStmt_nesting_threshold (imm : List (Identifier Unit)) (procs : ProcSi
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) :
     prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx 0) (Top IsNesting) = 0 ∧
     ∀ n : Nat,
-      1 / 17 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))
-        ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsIte) ∧
-      2 / 17 * (1 / 2 * (1 / ((n : ℝ≥0∞) + 2)))
-        ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsBlock) ∧
-      2 / 17 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((n : ℝ≥0∞) + 2)))))
-        ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsLoop) :=
+      (iteAtSize n
+          ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsIte) ∧
+        blockAtSize n
+          ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsBlock) ∧
+        loopAtSize n
+          ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1)) (Top IsLoop))
+      ∧ 0 < iteAtSize n ∧ 0 < blockAtSize n ∧ 0 < loopAtSize n :=
   ⟨(prob_eq_zero_iff _ _).mpr fun r hr hn =>
       genStmt_zero_flat octx tvars pctx imm procs labels C ctx r hr hn,
-   fun n => ⟨prob_genStmt_ite_ge octx tvars pctx imm procs labels C ctx n,
+   fun n => ⟨⟨prob_genStmt_ite_ge octx tvars pctx imm procs labels C ctx n,
      prob_genStmt_block_ge octx tvars pctx imm procs labels C ctx n,
-     prob_genStmt_loop_ge octx tvars pctx imm procs labels C ctx n⟩⟩
+     prob_genStmt_loop_ge octx tvars pctx imm procs labels C ctx n⟩,
+     iteAtSize_pos n, blockAtSize_pos n, loopAtSize_pos n⟩⟩
 
 /-- **The command threshold.** For a factory with no operator of positive arity, a command never
 carries a covering expression below expression size `3`; from size `3` on it does with
@@ -514,7 +588,7 @@ probability at least `coverBound / 140`, and that lower bound holds for every fa
 theorem genCmd_coverage_threshold (hops : ∀ σ, findOpsInCtx octx σ = [])
     (imm : List (Identifier Unit)) (ctx : VarCtx) :
     (∀ n ≤ 2, prob (genCmd (G := SPMF) octx tvars imm ctx n []) {r | CmdCovers r.cmd} = 0) ∧
-    (∀ n, 1 / 7 * (1 / 2 * (1 / 10 * coverBound)) ≤
+    (∀ n, cmdCoverBound ≤
       prob (genCmd (G := SPMF) octx tvars imm ctx (n + 3) []) {r | CmdCovers r.cmd}) :=
   ⟨fun n hn => (prob_eq_zero_iff _ _).mpr fun r hr hc =>
       genCmd_not_covers octx tvars hops imm ctx n hn r hr hc,

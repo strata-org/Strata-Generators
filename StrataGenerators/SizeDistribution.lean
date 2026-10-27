@@ -17,19 +17,20 @@ size parameter:
 
 ## Results, for the `bool` target
 
-| size | root form      | statement                                       | where |
-|------|----------------|-------------------------------------------------|-------|
-| 0    | any compound   | probability `0` (any type, any context)         | `prob_compound_size_zero` |
-| any  | constant       | `≥ 1/24 ≈ 4.2e-2`                               | `prob_const_ge` |
-| ≥ 1  | `ite`          | `≥ 343/165888 ≈ 2.1e-3`                         | `prob_ite_ge` |
-| ≥ 1  | `eq`           | `≥ 49/829440 ≈ 5.9e-5`                          | `prob_eq_ge` |
-| ≥ 1  | `∀`            | `≥ 49/99532800 ≈ 4.9e-7`                        | `prob_forall_ge` |
-| 1    | application    | probability `0` (closed setting)                | `prob_closed_app_size_one` |
-| ≥ 2  | application    | `≥ 7/1244160 ≈ 5.6e-6`                          | `prob_app_ge` |
+| size | root form      | bound                                   | where |
+|------|----------------|-----------------------------------------|-------|
+| 0    | any compound   | probability `0` (any type, any context) | `prob_compound_size_zero` |
+| 1    | application    | probability `0` (closed setting)        | `prob_closed_app_size_one` |
+| `n + rootFormSize F` | `F` | `≥ rootFormBound F > 0`            | `prob_rootForm_ge` |
+
+`rootForms` is the five forms covered: a constant (`rootFormSize = 0`), `ite`, `eq` and a
+quantifier (`1`), and an application (`2`). `rootFormBound` ranges from `1/24` for a constant down
+to `≈ 4.9e-7` for a quantifier. The bound does not depend on the size, so these say "from this size
+on, at a rate that never decays"; below the offset some of the same probabilities are exactly `0`.
 
 Every lower bound holds in **every** context — any free variables, any factory, any binders — which
-is why the constants are small: they are what survives the worst case of each type draw (`1/120`,
-`prob_genGenerableTy_bool`) and of each sub-draw's mass (`7/24`, `mass_bool_ge`).
+is why the constants are small: they are what survives the worst case of each type draw
+(`prob_genGenerableTy_bool`) and of each sub-draw's mass (`mass_bool_ge`).
 
 So the application form is the one that needs the most size: `app` needs a function-typed subterm,
 and at size 0 in the closed setting there is none (`closed_zero_arrow_empty`). For the root form
@@ -60,7 +61,15 @@ without a factory of positive arity its support is inside `genLExprBase`'s
 (`genLExpr_support_sub`). So every result above transfers: the lower bounds at a factor of `1/10`
 in every context, the zero sides under the same factory hypothesis.
 `genClosedLExpr_coverage_threshold` is the closed top-level generator's coverage threshold with
-**no hypotheses**: probability `0` below size `3`, at least `coverBound / 120` from size `3` on.
+**no hypotheses**: probability `0` below size `3`, at least `1/12 · baseShare · coverBound` from
+size `3` on.
+
+## Height as a function of `n`
+
+`prob_height_ge`: at every size `n`, in every context, a `bool` draw has height at least `n` with
+probability at least `(7/24) · (49/6912)ⁿ`. `prob_height_eq`: without a factory of positive arity,
+where `height_le` makes `n` the largest possible height, a draw has height exactly `n` with at
+least this probability, so maximal-depth terms are rare but always possible.
 
 Commands, statements, procedures and whole programs are in
 `StrataGenerators.SizeDistributionStmt` and `StrataGenerators.SizeDistributionProgram`.
@@ -85,6 +94,43 @@ macro "ennr" : tactic => `(tactic| (
     ENNReal.toReal_one, ENNReal.toReal_natCast, ENNReal.toReal_pow, ENNReal.toReal_add,
     Nat.cast_add, Nat.cast_ofNat, Nat.cast_one]
   norm_num))
+
+/-- `a/b · c/d = ac/bd` for a finite non-zero `b`. The statement-level bounds are products of one
+branch-weight share and one or two uniform body-length shares; this is what collects such a product
+into a single closed-form fraction in the size. -/
+theorem div_mul_div (a c d : ℝ≥0∞) {b : ℝ≥0∞} (hb : b ≠ 0) (hb' : b ≠ ⊤) :
+    a / b * (c / d) = a * c / (b * d) := by
+  rw [div_eq_mul_inv, div_eq_mul_inv, div_eq_mul_inv, ENNReal.mul_inv (Or.inl hb) (Or.inl hb')]
+  ring
+
+/-- Finish a closed-form identity between two fractions built from numerals and
+`(n : ℝ≥0∞) + k`. -/
+macro "frac_eq" : tactic => `(tactic|
+  (rw [ENNReal.div_eq_div_iff (by first | finiteness | positivity | norm_num)
+      (by first | finiteness | positivity | norm_num)
+      (by first | finiteness | positivity | norm_num)
+      (by first | finiteness | positivity | norm_num)]
+   ring))
+
+/-! ### The recurring structural shares
+
+Four quantities appear in bound after bound. Naming them keeps the headline statements readable and
+records what each factor pays for. -/
+
+/-- The weight `genLExpr` keeps for `genLExprBase`: `1` of `10` when a monomorphic factory candidate
+exists, `1` of `2` otherwise. -/
+noncomputable def baseShare : ℝ≥0∞ := 1 / 10
+
+/-- A lower bound on the mass of one identifier draw (`genIdentName`, `genFreshName`,
+`genFreshLabel`): its terminating branch. The generators are `partial_fixpoint`, so this is all the
+mass that is proved. -/
+noncomputable def nameMass : ℝ≥0∞ := 1 / 2
+
+/-- One declaration kind's weight share in `genDeclStep`. -/
+noncomputable def stepShare : ℝ≥0∞ := 1 / 14
+
+/-- A lower bound on the mass of one declaration step, through the abstract-type kind. -/
+noncomputable def stepMass : ℝ≥0∞ := 1 / 28
 
 theorem prob_frequency_ge {α} (gs : List (Nat × (Unit → SPMF α))) (h : 0 < (gs.map Prod.fst).sum)
     (i : Nat) (hi : i < gs.length) (E : Set α) :
@@ -401,19 +447,6 @@ theorem bool_forall_ge (n : Nat) (bctx : BVarCtx) (Eb : Set LExpr') :
       LMonoTy.bool) Set.univ := mass_bool_ge fctx octx pctx tvars n _
   show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) (.tcons "bool" [])) _
   arm 4, le_trans (mul_le_mul' hT (mul_le_mul' hT (mul_le_mul' hm le_rfl))) hq
-
-theorem bool_exists_ge (n : Nat) (bctx : BVarCtx) (Eb : Set LExpr') :
-    2 / 24 * (1 / 120 * (1 / 120 * (7 / 24 * prob (Gb (LMonoTy.bool :: bctx) n LMonoTy.bool) Eb)))
-      ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (QuantOf .exist LMonoTy.bool Eb) := by
-  have hT := prob_genGenerableTy_bool fctx octx tvars bctx n
-  have hq := prob_genQuant .exist (genGenerableTy (G := SPMF) fctx octx tvars bctx n)
-    (fun τ' => genLExprBase (G := SPMF) fctx octx pctx tvars (τ' :: bctx) n)
-    (fun τ' => genLExprBase (G := SPMF) fctx octx pctx tvars (τ' :: bctx) n LMonoTy.bool)
-    LMonoTy.bool LMonoTy.bool Eb
-  have hm : 7 / 24 ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars (LMonoTy.bool :: bctx) n
-      LMonoTy.bool) Set.univ := mass_bool_ge fctx octx pctx tvars n _
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) (.tcons "bool" [])) _
-  arm 5, le_trans (mul_le_mul' hT (mul_le_mul' hT (mul_le_mul' hm le_rfl))) hq
 
 theorem bool_app_ge (n : Nat) (bctx : BVarCtx) (Ef Ea : Set LExpr') :
     1 / 24 * (1 / 120 * (prob (Gb bctx n LMonoTy.bool) Ea *
@@ -856,70 +889,98 @@ theorem prob_closed_app_size_one (tvars : List TyIdentifier) :
     prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] 1 LMonoTy.bool) (IsForm .app) = 0 :=
   (prob_eq_zero_iff _ _).mpr fun e he hn => closed_one_not_app tvars e he hn
 
-noncomputable def constBound : ℝ≥0∞ := 1 / 24
-noncomputable def iteBound : ℝ≥0∞ := 2 / 24 * (7 / 24 * (7 / 24 * (7 / 24)))
-noncomputable def eqBound : ℝ≥0∞ := 2 / 24 * (1 / 120 * (7 / 24 * (7 / 24)))
-noncomputable def quantBound : ℝ≥0∞ := 2 / 24 * (1 / 120 * (1 / 120 * (7 / 24 * (7 / 24))))
-noncomputable def appBound : ℝ≥0∞ := 1 / 24 * (1 / 120 * (7 / 24 * (4 / 21 * (7 / 24))))
+/-- The five root forms a `bool` draw is proved to reach, with, for each, the least size at which
+it is reachable (`rootFormSize`) and a size-independent lower bound on its probability from that
+size on (`rootFormBound`). A constant needs no size; `ite`, `eq` and a quantifier need one level;
+an application needs two, because its function position needs a lambda, which needs a level of its
+own. -/
+def rootForms : Finset Form := {.const, .ite, .eq, .quant, .app}
+
+def rootFormSize : Form → Nat
+  | .app => 2
+  | .ite | .eq | .quant => 1
+  | _ => 0
+
+noncomputable def rootFormBound : Form → ℝ≥0∞
+  | .const => 1 / 24
+  | .ite => 2 / 24 * (7 / 24 * (7 / 24 * (7 / 24)))
+  | .eq => 2 / 24 * (1 / 120 * (7 / 24 * (7 / 24)))
+  | .quant => 2 / 24 * (1 / 120 * (1 / 120 * (7 / 24 * (7 / 24))))
+  | .app => 1 / 24 * (1 / 120 * (7 / 24 * (4 / 21 * (7 / 24))))
+  | _ => 0
 
 theorem prob_const_ge (n : Nat) (bctx : BVarCtx) :
-    constBound ≤ prob (Gb bctx n LMonoTy.bool) (IsForm .const) :=
+    rootFormBound .const ≤ prob (Gb bctx n LMonoTy.bool) (IsForm .const) :=
   bool_const_ge fctx octx pctx tvars n bctx
 
 theorem prob_ite_ge (n : Nat) (bctx : BVarCtx) :
-    iteBound ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (IsForm .ite) := by
+    rootFormBound .ite ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (IsForm .ite) := by
   have hm := mass_bool_ge fctx octx pctx tvars n bctx
   refine le_trans ?_ (le_trans (bool_ite_ge fctx octx pctx tvars n bctx Set.univ Set.univ Set.univ)
     (prob_mono ?_))
-  · unfold iteBound; gcongr <;> exact hm
+  · simp only [rootFormBound]; gcongr <;> exact hm
   · rintro _ ⟨_, _, _, rfl, -⟩; rfl
 
 theorem prob_eq_ge (n : Nat) (bctx : BVarCtx) :
-    eqBound ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (IsForm .eq) := by
+    rootFormBound .eq ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (IsForm .eq) := by
   have hm := mass_bool_ge fctx octx pctx tvars n bctx
   refine le_trans ?_ (le_trans (bool_eq_ge fctx octx pctx tvars n bctx Set.univ Set.univ)
     (prob_mono ?_))
-  · unfold eqBound; gcongr <;> exact hm
+  · simp only [rootFormBound]; gcongr <;> exact hm
   · rintro _ ⟨_, _, rfl, -⟩; rfl
 
 theorem prob_forall_ge (n : Nat) (bctx : BVarCtx) :
-    quantBound ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (IsForm .quant) := by
+    rootFormBound .quant ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (IsForm .quant) := by
   have hm := mass_bool_ge fctx octx pctx tvars n (LMonoTy.bool :: bctx)
   refine le_trans ?_ (le_trans (bool_forall_ge fctx octx pctx tvars n bctx Set.univ)
     (prob_mono ?_))
-  · unfold quantBound; gcongr; exact hm
+  · simp only [rootFormBound]; gcongr; exact hm
   · rintro _ ⟨_, _, rfl, -⟩; rfl
 
 theorem prob_app_ge (n : Nat) (bctx : BVarCtx) :
-    appBound ≤ prob (Gb bctx (n + 2) LMonoTy.bool) (IsForm .app) := by
+    rootFormBound .app ≤ prob (Gb bctx (n + 2) LMonoTy.bool) (IsForm .app) := by
   have hm := mass_bool_ge fctx octx pctx tvars (n + 1) bctx
   have hm' := mass_bool_ge fctx octx pctx tvars n (LMonoTy.bool :: bctx)
   have hf := arrow_abs_ge fctx octx pctx tvars n bctx LMonoTy.bool LMonoTy.bool Set.univ
   refine le_trans ?_ (le_trans (bool_app_ge fctx octx pctx tvars (n + 1) bctx
     (AbsOf LMonoTy.bool Set.univ) Set.univ) (prob_mono ?_))
-  · unfold appBound
+  · simp only [rootFormBound]
     gcongr
     · exact hm
     · refine le_trans ?_ hf; gcongr; exact hm'
   · rintro _ ⟨_, _, rfl, -⟩; rfl
 
-theorem bounds_pos : 0 < constBound ∧ 0 < iteBound ∧ 0 < eqBound ∧ 0 < quantBound ∧ 0 < appBound := by
-  unfold constBound iteBound eqBound quantBound appBound
-  simp only [ENNReal.mul_pos_iff, ENNReal.div_pos_iff]
-  norm_num
+theorem rootFormBound_pos (F : Form) (hF : F ∈ rootForms) : 0 < rootFormBound F := by
+  fin_cases hF <;>
+    (simp only [rootFormBound, ENNReal.mul_pos_iff, ENNReal.div_pos_iff]; norm_num)
 
-/-- **The root-form threshold, closed setting.** With no free variables, no factory and no
+/-- **Every root form, as a function of the size.** For each of the five forms `F`, at every size
+`n`, in every context, a `bool` draw at size `n + rootFormSize F` has `F` at its root with
+probability at least `rootFormBound F > 0` — a bound that does not shrink as the size grows. The
+offset `rootFormSize F` is the threshold: below it some of these probabilities are `0`
+(`prob_compound_size_zero`, `prob_closed_app_size_one`). -/
+theorem prob_rootForm_ge (F : Form) (hF : F ∈ rootForms) (n : Nat) (bctx : BVarCtx) :
+    rootFormBound F ≤ prob (Gb bctx (n + rootFormSize F) LMonoTy.bool) (IsForm F) := by
+  fin_cases hF
+  · exact prob_const_ge fctx octx pctx tvars n bctx
+  · exact prob_ite_ge fctx octx pctx tvars n bctx
+  · exact prob_eq_ge fctx octx pctx tvars n bctx
+  · exact prob_forall_ge fctx octx pctx tvars n bctx
+  · exact prob_app_ge fctx octx pctx tvars n bctx
+
+/-- **The root-form threshold, closed setting.** A user-facing bundle; nothing in this package
+builds on it. With no free variables, no factory and no
 binders, size `0` gives only leaves, size `1` never an application, and every size `≥ 2` an
 application with probability at least `appBound > 0` (and so every `bool` root form with a positive,
 size-independent lower bound). -/
 theorem closed_root_threshold (tvars : List TyIdentifier) :
     prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] 0 LMonoTy.bool) {e | ¬ IsLeaf e} = 0 ∧
     prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] 1 LMonoTy.bool) (IsForm .app) = 0 ∧
-    (∀ n, appBound ≤ prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] (n + 2) LMonoTy.bool)
-      (IsForm .app)) ∧
-    0 < appBound :=
+    (∀ F ∈ rootForms, ∀ n,
+      rootFormBound F ≤ prob (genLExprBase (G := SPMF) [] ∅ [] tvars []
+        (n + rootFormSize F) LMonoTy.bool) (IsForm F) ∧ 0 < rootFormBound F) :=
   ⟨prob_compound_size_zero [] ∅ [] tvars [] _, prob_closed_app_size_one tvars,
-   fun n => prob_app_ge [] ∅ [] tvars n [], bounds_pos.2.2.2.2⟩
+   fun F hF n => ⟨prob_rootForm_ge [] ∅ [] tvars F hF n [], rootFormBound_pos F hF⟩⟩
 
 /-- **The coverage threshold.** For a factory with no operator of positive arity and no
 polymorphic operators, a draw at `bool` covers all seven forms with probability `0` below size `3`,
@@ -935,7 +996,8 @@ theorem coverage_threshold (hops : ∀ σ, findOpsInCtx octx σ = []) (bctx : BV
   obtain ⟨m, rfl⟩ := Nat.exists_eq_add_of_le' hn
   exact prob_covers_ge fctx octx [] tvars m bctx
 
-/-- The closed instance of `coverage_threshold`. -/
+/-- The closed instance of `coverage_threshold`. A user-facing bundle; nothing in this package
+builds on it. -/
 theorem closed_coverage_threshold (tvars : List TyIdentifier) :
     (∀ n ≤ 2, prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] n LMonoTy.bool) {e | Covers e} = 0) ∧
     (∀ n ≥ 3, coverBound ≤ prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] n LMonoTy.bool)
@@ -950,8 +1012,9 @@ branch when a monomorphic candidate exists, the `1`-of-`2` `pick` otherwise), so
 `genLExprBase` transfers at a factor of `1/10`, in every context and for every `retryCont`. -/
 theorem prob_genLExpr_ge (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) (k : Nat)
     (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr')) (E : Set LExpr') :
-    1 / 10 * prob (Gb bctx n τ) E ≤
+    baseShare * prob (Gb bctx n τ) E ≤
       prob (genLExpr (G := SPMF) fctx octx pctx tvars bctx n τ k rc) E := by
+  rw [baseShare]
   unfold genLExpr; dsimp only; split
   · refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
     simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
@@ -990,7 +1053,7 @@ theorem prob_genLExpr_covers_eq_zero (hops : ∀ σ, findOpsInCtx octx σ = []) 
 
 theorem prob_genLExpr_covers_ge (n : Nat) (bctx : BVarCtx) (k : Nat)
     (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr')) :
-    1 / 10 * coverBound ≤
+    baseShare * coverBound ≤
       prob (genLExpr (G := SPMF) fctx octx pctx tvars bctx (n + 3) LMonoTy.bool k rc)
         {e | Covers e} :=
   le_trans (mul_le_mul' le_rfl (prob_covers_ge fctx octx pctx tvars n bctx))
@@ -1003,7 +1066,7 @@ draw lands on `bool` with probability at least `1/12`, and `genLExpr` keeps the 
 weight at least `1/10`. -/
 theorem genClosedLExpr_coverage_threshold (tvars : List TyIdentifier) (k : Nat) :
     (∀ n ≤ 2, prob (genClosedLExpr (G := SPMF) tvars n k) {e | Covers e} = 0) ∧
-    (∀ n ≥ 3, 1 / 12 * (1 / 10 * coverBound) ≤
+    (∀ n ≥ 3, 1 / 12 * (baseShare * coverBound) ≤
       prob (genClosedLExpr (G := SPMF) tvars n k) {e | Covers e}) := by
   refine ⟨fun n hn => ?_, fun n hn => ?_⟩
   · unfold genClosedLExpr
@@ -1013,9 +1076,75 @@ theorem genClosedLExpr_coverage_threshold (tvars : List TyIdentifier) (k : Nat) 
     simp [expect]
   · obtain ⟨m, rfl⟩ := Nat.exists_eq_add_of_le' hn
     unfold genClosedLExpr
-    refine le_trans ?_ (prob_bind_ge {LMonoTy.bool} (d := 1 / 10 * coverBound) fun τ hτ => ?_)
+    refine le_trans ?_ (prob_bind_ge {LMonoTy.bool} (d := baseShare * coverBound) fun τ hτ => ?_)
     · gcongr; exact prob_genLMonoTy_bool tvars _
     · rw [Set.mem_singleton_iff.mp hτ]
       exact prob_genLExpr_covers_ge [] ∅ [] tvars m [] k id
+
+-- ── Closed forms in `n`: deep terms are rare but possible ───────────────
+
+theorem prob_mono_support {α} {p : SPMF α} {E F : Set α} (h : ∀ a ∈ p.support, a ∈ E → a ∈ F) :
+    prob p E ≤ prob p F := by
+  unfold prob
+  refine expect_mono_support fun a ha => ?_
+  by_cases hE : a ∈ E
+  · simp [Set.indicator, hE, h a ha hE]
+  · simp [Set.indicator, hE]
+
+/-- The lower bound on reaching height `n` at size `n`: `(7/24) · (49/6912)ⁿ`. `7/24` is the mass
+of the innermost draw; each of the `n` levels costs the `ite` weight `2/24` and the masses `7/24`
+of the two branches it does not descend into, and `2/24 · (7/24)² = 49/6912`. -/
+noncomputable def heightAtSize (n : Nat) : ℝ≥0∞ := 7 / 24 * (49 / 6912) ^ n
+
+theorem heightAtSize_eq (n : Nat) :
+    heightAtSize n = 7 / 24 * (2 / 24 * (7 / 24 * (7 / 24))) ^ n := by
+  have hbase : (49 / 6912 : ℝ≥0∞) = 2 / 24 * (7 / 24 * (7 / 24)) := by
+    rw [div_mul_div 7 7 24 (b := 24) (by norm_num) (by norm_num),
+      div_mul_div 2 (7 * 7) ((24 : ℝ≥0∞) * 24) (b := 24) (by norm_num) (by norm_num)]
+    frac_eq
+  rw [heightAtSize, hbase]
+
+theorem heightAtSize_pos (n : Nat) : 0 < heightAtSize n := by
+  rw [heightAtSize]
+  refine ENNReal.mul_pos (by norm_num) (pow_ne_zero n ?_)
+  rw [← pos_iff_ne_zero, ENNReal.div_pos_iff]
+  exact ⟨by norm_num, by norm_num⟩
+
+/-- **A term of height `n` at size `n`, with probability at least `heightAtSize n`.** At every
+size `n`, in every context, a `bool` draw has height at least `n` with at least this probability.
+The witness is a chain of `ite`s through the condition. -/
+theorem prob_height_ge (n : Nat) (bctx : BVarCtx) :
+    heightAtSize n ≤ prob (Gb bctx n LMonoTy.bool) {e | n ≤ height e} := by
+  rw [heightAtSize_eq]
+  induction n with
+  | zero =>
+    have h := mass_bool_ge fctx octx pctx tvars 0 bctx
+    simpa [Set.setOf_true] using h
+  | succ n ih =>
+    have hm := mass_bool_ge fctx octx pctx tvars n bctx
+    refine le_trans ?_ (le_trans (bool_ite_ge fctx octx pctx tvars n bctx
+      {x | n ≤ height x} Set.univ Set.univ) (prob_mono ?_))
+    · generalize hq : (2 / 24 * (7 / 24 * (7 / 24)) : ℝ≥0∞) = q
+      have hre : 7 / 24 * q ^ (n + 1) = 2 / 24 * ((7 / 24 * q ^ n) * (7 / 24 * (7 / 24))) := by
+        rw [← hq]; ring
+      rw [hre]
+      rw [hq] at ih
+      gcongr <;> exact hm
+    · rintro _ ⟨c, t, f, rfl, hc, -, -⟩
+      simp only [Set.mem_setOf_eq, height] at hc ⊢
+      omega
+
+/-- **The height distribution's top atom, closed form.** Without a factory of positive arity,
+the height of a size-`n` draw is at most `n`, and it is exactly `n` with probability at least
+`heightAtSize n = (7/24) · (49/6912)ⁿ`: maximal-depth terms are exponentially rare in `n` under
+this bound, and never impossible. -/
+theorem prob_height_eq (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (bctx : BVarCtx) :
+    heightAtSize n
+        ≤ prob (genLExprBase (G := SPMF) fctx octx [] tvars bctx n LMonoTy.bool)
+          {e | height e = n}
+      ∧ 0 < heightAtSize n :=
+  ⟨le_trans (prob_height_ge fctx octx [] tvars n bctx) (prob_mono_support fun e he h => by
+    have := height_le fctx octx tvars hops n bctx _ e he
+    simp only [Set.mem_setOf_eq] at h ⊢; omega), heightAtSize_pos n⟩
 
 end StrataGenerators.SizeDistribution
