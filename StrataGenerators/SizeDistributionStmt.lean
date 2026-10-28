@@ -90,22 +90,54 @@ theorem prob_genAssertCmd_covers (ctx : VarCtx) (n : Nat) :
 `assert` kind, the mass of its label draw, and the covering-expression bound through `genLExpr`. -/
 noncomputable def cmdCoverBound : ℝ≥0∞ := 1 / 7 * (nameMass * (baseShare * coverBound))
 
+/-- The share of the `assert` kind in `genCmd.tuned θ` at depth `d`. `genCmd` has two `frequency`
+sites: with a writable variable in scope it offers seven kinds (flat offset `0`, `assert` is
+branch `4`); without one it offers five (offset `7`, `assert` is branch `2`). -/
+noncomputable def assertShare (θ : Tuning) (imm : List (Identifier Unit)) (ctx : VarCtx)
+    (d : Nat) : ℝ≥0∞ :=
+  if (ctx.writable imm).length > 0 then share θ 0 7 4 d else share θ 7 5 2 d
+
+theorem assertShare_pos (θ : Tuning) (imm : List (Identifier Unit)) (ctx : VarCtx) (d : Nat) :
+    0 < assertShare θ imm ctx d := by
+  unfold assertShare; split
+  · exact share_pos θ 0 7 4 d (by omega)
+  · exact share_pos θ 7 5 2 d (by omega)
+
+/-- **A command carries a covering expression, for every tuning of `genCmd`.** From expression
+size `3` on, with probability at least the `assert` share of `θ` times the covering-expression
+bound. -/
+theorem prob_genCmd_covers_tuned (θ : Tuning) (imm : List (Identifier Unit)) (ctx : VarCtx)
+    (n : Nat) :
+    assertShare θ imm ctx (n + 3) * (nameMass * (baseShare * coverBound)) ≤
+      prob (genCmd.tuned (G := SPMF) θ octx tvars imm ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
+  have ha := prob_genAssertCmd_covers octx tvars pctx ctx n
+  unfold genCmd.tuned assertShare; dsimp only; split
+  · refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) 4 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil]
+    refine mul_le_mul' (le_of_eq ?_) ha
+    simp [share, List.range_succ]
+  · refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) 2 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil]
+    refine mul_le_mul' (le_of_eq ?_) ha
+    simp [share, List.range_succ]
+
 /-- **From expression size `3` on, a command carries a covering expression** with probability at
-least `cmdCoverBound`, in every variable context. -/
+least `cmdCoverBound`, in every variable context. The case `θ = genCmd.defaults` of
+`prob_genCmd_covers_tuned`: the `assert` share is `2/14` or `2/10`, and both are at least `1/7`. -/
 theorem prob_genCmd_covers (imm : List (Identifier Unit)) (ctx : VarCtx) (n : Nat) :
     cmdCoverBound ≤
       prob (genCmd (G := SPMF) octx tvars imm ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
-  rw [cmdCoverBound, nameMass]
-  have ha := prob_genAssertCmd_covers octx tvars pctx ctx n
-  unfold genCmd; dsimp only; split
-  · refine le_trans ?_ (prob_frequency_ge _ _ 4 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
-      List.sum_cons, List.sum_nil]
-    exact mul_le_mul' (by ennr) ha
-  · refine le_trans ?_ (prob_frequency_ge _ _ 2 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
-      List.sum_cons, List.sum_nil]
-    exact mul_le_mul' (by ennr) ha
+  rw [← genCmd.tuned_defaults (G := SPMF) octx tvars imm ctx (n + 3) pctx, cmdCoverBound]
+  refine le_trans ?_ (prob_genCmd_covers_tuned octx tvars pctx genCmd.defaults imm ctx n)
+  refine mul_le_mul' ?_ le_rfl
+  unfold assertShare; split
+  · apply le_of_eq; simp [share, List.range_succ, Tuning.weight, genCmd.defaults]
+    rw [inv_eq_one_div, ENNReal.div_eq_div_iff (by norm_num) (by norm_num) (by norm_num)
+      (by norm_num)]
+    norm_num
+  · simp [share, List.range_succ, Tuning.weight, genCmd.defaults]; ennr
 
 theorem genLExpr_not_covers (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (hn : n ≤ 2)
     (fc : FVarCtx) (bc : BVarCtx) (τ : LMonoTy) (k : Nat)

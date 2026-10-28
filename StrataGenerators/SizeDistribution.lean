@@ -389,31 +389,173 @@ theorem bool_leaf_univ (bctx : BVarCtx) :
   · exact (prob_pickOp_univ _ _ _).ge
   · exact prob_genBoolConst_univ.ge
 
-/-- The mass of the `bool` arm is at least `7/24` at every depth and in every context. -/
-theorem mass_bool_ge (n : Nat) (bctx : BVarCtx) :
-    7 / 24 ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n (.tcons "bool" [])) Set.univ := by
+-- ── The arm bounds, in terms of the weights ─────────────────────────
+
+/-! ### Bounds stated with the tuning weights
+
+`genLExprBase` is `@[tunable (depth := n)]`, so `genLExprBase.tuned θ` reads each branch weight from
+a `Tuning` value `θ` instead of a literal. The weight of branch `i` at a site whose schedules start
+at flat index `off` is `θ.weight (off + i) d` at remaining depth `d`. Every lower bound below is a
+statement about `genLExprBase.tuned θ` for an arbitrary `θ`, with the branch shares in place of the
+literal fractions. The literal versions further down are corollaries at `θ = genLExprBase.defaults`,
+through `genLExprBase.tuned_defaults`, which holds by `rfl`.
+
+No hypothesis on `θ` is needed. `Tuning.weight` is `max a 1 + d · b`, so every weight is at least
+`1` (`Tuning.weight_pos`), every site's total is positive, and every share is positive.
+
+Two sites matter here: the `bool` arm at depth `n + 1` (flat offset `8`, `11` branches) and the
+arrow arm at depth `n + 1` (offset `0`, `8` branches). The depth-`0` arms are uniform `oneOf`s with
+no weights. -/
+
+/-- The share of branch `i` at a `frequency` site with `k` branches whose schedules start at flat
+index `off` of `θ`, at depth `d`: `w_{off+i}(d) / Σ_{j<k} w_{off+j}(d)`. -/
+noncomputable def share (θ : Tuning) (off k i d : Nat) : ℝ≥0∞ :=
+  (θ.weight (off + i) d : ℝ≥0∞) / (((List.range k).map (fun j => θ.weight (off + j) d)).sum : ℕ)
+
+/-- The share of branch `i` of the `bool` arm at depth `d + 1`. Branches: `0` constant, `1`
+application, `2` `ite`, `3` `eq`, `4` `∀`, `5` `∃`, `6` bound variable, `7` free variable, `8`
+operator, `9` `Indir`, `10` `IndirPoly`. -/
+noncomputable abbrev boolShare (θ : Tuning) (i d : Nat) : ℝ≥0∞ := share θ 8 11 i d
+
+/-- The share of branch `i` of the arrow arm at depth `d + 1`. Branch `0` is the lambda. -/
+noncomputable abbrev arrowShare (θ : Tuning) (i d : Nat) : ℝ≥0∞ := share θ 0 8 i d
+
+/-- A lower bound on the mass of a `bool` draw at depth `n`: `1` at depth `0`, where every branch
+is a leaf, and the four leaf shares (constant, bound variable, free variable, operator) above. -/
+noncomputable def massT (θ : Tuning) : Nat → ℝ≥0∞
+  | 0 => 1
+  | n + 1 => boolShare θ 0 n + boolShare θ 6 n + boolShare θ 7 n + boolShare θ 8 n
+
+/-- A lower bound on a root constant at depth `n`: one branch of four at depth `0`, the constant
+share above. -/
+noncomputable def constT (θ : Tuning) : Nat → ℝ≥0∞
+  | 0 => 1 / 4
+  | n + 1 => boolShare θ 0 n
+
+/-- A lower bound on a root bound variable at depth `n`, in a context that holds a `bool`
+binder. -/
+noncomputable def bvarT (θ : Tuning) : Nat → ℝ≥0∞
+  | 0 => 1 / 4
+  | n + 1 => boolShare θ 6 n
+
+theorem massT_bool_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
+    massT θ n ≤ prob (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx n (.tcons "bool" []))
+      Set.univ := by
   obtain ⟨h1, h2, h3⟩ := bool_leaf_univ fctx octx bctx
   cases n with
   | zero =>
-    rw [genLExprBase]
-    refine le_trans ?_ (prob_oneOf_ge_of_forall₂ _ _ _ [1, 1, 1, 1] ?_)
-    · ennr
+    refine le_trans ?_ (prob_oneOf_ge_of_forall₂ _ (by simp) _ [1, 1, 1, 1] ?_)
+    · simp only [massT, List.sum_cons, List.sum_nil, List.length_cons, List.length_nil]; ennr
     · simp only [List.forall₂_cons, List.Forall₂.nil, and_true]
       exact ⟨prob_genBoolConst_univ.ge, h1, h2, h3⟩
   | succ n =>
-    rw [genLExprBase]
-    refine le_trans ?_ (prob_frequency_ge_of_forall₂ _ _ _ [1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0] ?_)
-    · ennr
+    refine le_trans (le_of_eq ?_) (prob_frequency_ge_of_forall₂ _ (Tuning.sum_map_fst_pos _ _ _ _ _)
+      _ [1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0] ?_)
+    · simp only [massT, boolShare, share, ← ENNReal.add_div, List.zipWith_cons_cons,
+        List.zipWith_nil_right, List.sum_cons, List.sum_nil, List.map_cons, List.map_nil, mul_one,
+        mul_zero, add_zero, zero_add]
+      simp [List.range_succ, add_assoc]
     · simp only [List.forall₂_cons, List.Forall₂.nil, and_true, zero_le, true_and]
       exact ⟨prob_genBoolConst_univ.ge, h1, h2, h3⟩
 
-/-- Peel branch `i` of the `frequency` at the head of an unfolded arm and close with `t`. -/
-macro "arm " i:num ", " t:term : tactic => `(tactic| (
-  rw [genLExprBase]
-  refine le_trans ?_ (prob_frequency_ge _ _ $i (by simp) _)
+/-- Peel branch `i` of a tuned `frequency` site and close with `t`, reading the branch's share. -/
+macro "armT " i:num ", " t:term : tactic => `(tactic| (
+  refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) $i (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
     List.sum_cons, List.sum_nil]
-  exact mul_le_mul' (le_of_eq (by norm_num)) $t))
+  refine mul_le_mul' (le_of_eq ?_) $t
+  simp [share, List.range_succ]))
+
+local notation "Gt" θ:max bctx:max n:max τ:max =>
+  genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx n τ
+
+theorem boolT_ite_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) (Ec Et Ee : Set LExpr') :
+    boolShare θ 2 n * (prob (Gt θ bctx n LMonoTy.bool) Ec * (prob (Gt θ bctx n LMonoTy.bool) Et *
+      prob (Gt θ bctx n LMonoTy.bool) Ee))
+      ≤ prob (Gt θ bctx (n + 1) LMonoTy.bool) (IteOf Ec Et Ee) := by
+  armT 2, prob_genIte _ _ _ _ _ _
+
+theorem boolT_eq_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) (E₁ E₂ : Set LExpr') :
+    boolShare θ 3 n * (1 / 120 * (prob (Gt θ bctx n LMonoTy.bool) E₁ *
+      prob (Gt θ bctx n LMonoTy.bool) E₂))
+      ≤ prob (Gt θ bctx (n + 1) LMonoTy.bool) (EqOf E₁ E₂) := by
+  armT 3, le_trans (mul_le_mul' (prob_genGenerableTy_bool fctx octx tvars bctx n) le_rfl)
+    (prob_genEq _ _ LMonoTy.bool _ _)
+
+theorem boolT_forall_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) (Eb : Set LExpr') :
+    boolShare θ 4 n * (1 / 120 * (1 / 120 * (massT θ n *
+      prob (Gt θ (LMonoTy.bool :: bctx) n LMonoTy.bool) Eb)))
+      ≤ prob (Gt θ bctx (n + 1) LMonoTy.bool) (QuantOf .all LMonoTy.bool Eb) := by
+  have hT := prob_genGenerableTy_bool fctx octx tvars bctx n
+  have hq := prob_genQuant .all (genGenerableTy (G := SPMF) fctx octx tvars bctx n)
+    (fun τ' => genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars (τ' :: bctx) n)
+    (fun τ' => genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars (τ' :: bctx) n LMonoTy.bool)
+    LMonoTy.bool LMonoTy.bool Eb
+  have hm : massT θ n ≤ prob (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars
+      (LMonoTy.bool :: bctx) n LMonoTy.bool) Set.univ := massT_bool_ge fctx octx pctx tvars θ n _
+  armT 4, le_trans (mul_le_mul' hT (mul_le_mul' hT (mul_le_mul' hm le_rfl))) hq
+
+theorem boolT_app_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) (Ef Ea : Set LExpr') :
+    boolShare θ 1 n * (1 / 120 * (prob (Gt θ bctx n LMonoTy.bool) Ea *
+      prob (Gt θ bctx n (LMonoTy.arrow LMonoTy.bool LMonoTy.bool)) Ef))
+      ≤ prob (Gt θ bctx (n + 1) LMonoTy.bool) (AppOf Ef Ea) := by
+  armT 1, le_trans (mul_le_mul' (prob_genAppArgTy_bool fctx octx tvars bctx n _) le_rfl)
+    (prob_genApp _ _ _ LMonoTy.bool _ _)
+
+theorem arrowT_abs_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) (τ₁ τ₂ : LMonoTy) (Eb : Set LExpr') :
+    arrowShare θ 0 n * prob (Gt θ (τ₁ :: bctx) n τ₂) Eb
+      ≤ prob (Gt θ bctx (n + 1) (LMonoTy.arrow τ₁ τ₂)) (AbsOf τ₁ Eb) := by
+  armT 0, prob_genAbs _ _ _
+
+theorem boolT_const_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
+    constT θ n ≤ prob (Gt θ bctx n LMonoTy.bool) (IsForm .const) := by
+  cases n with
+  | zero =>
+    refine le_trans ?_ (prob_oneOf_ge _ (by simp) 0 (by simp) _)
+    simp only [List.getElem_cons_zero, List.length_cons, List.length_nil, prob_genBoolConst, constT]
+    ennr
+  | succ n =>
+    refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) 0 (by simp) _)
+    simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
+      prob_genBoolConst, mul_one, constT]
+    apply le_of_eq
+    simp [share, List.range_succ]
+
+theorem boolT_bvar_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx)
+    (hb : (bvarsOfType bctx LMonoTy.bool).length > 0) :
+    bvarT θ n ≤ prob (Gt θ bctx n LMonoTy.bool) (IsForm .bvar) := by
+  cases n with
+  | zero =>
+    refine le_trans ?_ (prob_oneOf_ge _ (by simp) 1 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.length_cons, List.length_nil]
+    rw [dif_pos hb, prob_pickBVar]
+    simp only [bvarT]; ennr
+  | succ n =>
+    refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) 6 (by simp) _)
+    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
+      List.sum_cons, List.sum_nil]
+    rw [dif_pos hb, prob_pickBVar, mul_one]
+    apply le_of_eq
+    simp [bvarT, share, List.range_succ]
+
+-- ── The literal bounds, as corollaries at the default weights ───────
+
+/-- Evaluate a share at the default weights of `genLExprBase`. -/
+macro "share_defaults" : tactic => `(tactic|
+  simp [share, List.range_succ, Tuning.weight, genLExprBase.defaults])
+
+/-- The mass of the `bool` arm is at least `7/24` at every depth and in every context. -/
+theorem mass_bool_ge (n : Nat) (bctx : BVarCtx) :
+    7 / 24 ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n (.tcons "bool" [])) Set.univ := by
+  rw [← genLExprBase.tuned_defaults]
+  refine le_trans ?_ (massT_bool_ge fctx octx pctx tvars genLExprBase.defaults n bctx)
+  cases n with
+  | zero => simp only [massT]; ennr
+  | succ n =>
+    have : massT genLExprBase.defaults (n + 1) = 7 / 24 := by
+      simp only [massT, boolShare]; share_defaults
+      rw [inv_eq_one_div, ← ENNReal.add_div, ← ENNReal.add_div, ← ENNReal.add_div]; norm_num
+    rw [this]
 
 local notation "Gb" bctx:max n:max τ:max => genLExprBase (G := SPMF) fctx octx pctx tvars bctx n τ
 
@@ -421,80 +563,68 @@ theorem bool_ite_ge (n : Nat) (bctx : BVarCtx) (Ec Et Ee : Set LExpr') :
     2 / 24 * (prob (Gb bctx n LMonoTy.bool) Ec * (prob (Gb bctx n LMonoTy.bool) Et *
       prob (Gb bctx n LMonoTy.bool) Ee))
       ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (IteOf Ec Et Ee) := by
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) (.tcons "bool" [])) _
-  rw [genLExprBase]
-  refine le_trans ?_ (prob_frequency_ge _ _ 2 (by simp) _)
-  simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
-    List.sum_cons, List.sum_nil]
-  exact mul_le_mul' (le_of_eq (by norm_num)) (prob_genIte _ _ _ _ _ _)
+  have h := boolT_ite_ge fctx octx pctx tvars genLExprBase.defaults n bctx Ec Et Ee
+  rw [show boolShare genLExprBase.defaults 2 n = 2 / 24 by share_defaults] at h
+  simpa only [genLExprBase.tuned_defaults] using h
 
 theorem bool_eq_ge (n : Nat) (bctx : BVarCtx) (E₁ E₂ : Set LExpr') :
     2 / 24 * (1 / 120 * (prob (Gb bctx n LMonoTy.bool) E₁ * prob (Gb bctx n LMonoTy.bool) E₂))
       ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (EqOf E₁ E₂) := by
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) (.tcons "bool" [])) _
-  arm 3, le_trans (mul_le_mul' (prob_genGenerableTy_bool fctx octx tvars bctx n) le_rfl)
-    (prob_genEq _ _ LMonoTy.bool _ _)
+  have h := boolT_eq_ge fctx octx pctx tvars genLExprBase.defaults n bctx E₁ E₂
+  rw [show boolShare genLExprBase.defaults 3 n = 2 / 24 by share_defaults] at h
+  simpa only [genLExprBase.tuned_defaults] using h
 
 theorem bool_forall_ge (n : Nat) (bctx : BVarCtx) (Eb : Set LExpr') :
     2 / 24 * (1 / 120 * (1 / 120 * (7 / 24 * prob (Gb (LMonoTy.bool :: bctx) n LMonoTy.bool) Eb)))
       ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (QuantOf .all LMonoTy.bool Eb) := by
-  have hT := prob_genGenerableTy_bool fctx octx tvars bctx n
-  have hq := prob_genQuant .all (genGenerableTy (G := SPMF) fctx octx tvars bctx n)
-    (fun τ' => genLExprBase (G := SPMF) fctx octx pctx tvars (τ' :: bctx) n)
-    (fun τ' => genLExprBase (G := SPMF) fctx octx pctx tvars (τ' :: bctx) n LMonoTy.bool)
-    LMonoTy.bool LMonoTy.bool Eb
-  have hm : 7 / 24 ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars (LMonoTy.bool :: bctx) n
-      LMonoTy.bool) Set.univ := mass_bool_ge fctx octx pctx tvars n _
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) (.tcons "bool" [])) _
-  arm 4, le_trans (mul_le_mul' hT (mul_le_mul' hT (mul_le_mul' hm le_rfl))) hq
+  have h := boolT_forall_ge fctx octx pctx tvars genLExprBase.defaults n bctx Eb
+  rw [show boolShare genLExprBase.defaults 4 n = 2 / 24 by share_defaults] at h
+  simp only [genLExprBase.tuned_defaults] at h
+  refine le_trans ?_ h
+  gcongr
+  cases n with
+  | zero => simp only [massT]; ennr
+  | succ n =>
+    apply le_of_eq
+    simp only [massT, boolShare]; share_defaults
+    rw [inv_eq_one_div, ← ENNReal.add_div, ← ENNReal.add_div, ← ENNReal.add_div]; norm_num
 
 theorem bool_app_ge (n : Nat) (bctx : BVarCtx) (Ef Ea : Set LExpr') :
     1 / 24 * (1 / 120 * (prob (Gb bctx n LMonoTy.bool) Ea *
       prob (Gb bctx n (LMonoTy.arrow LMonoTy.bool LMonoTy.bool)) Ef))
       ≤ prob (Gb bctx (n + 1) LMonoTy.bool) (AppOf Ef Ea) := by
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) (.tcons "bool" [])) _
-  arm 1, le_trans (mul_le_mul' (prob_genAppArgTy_bool fctx octx tvars bctx n _) le_rfl)
-    (prob_genApp _ _ _ LMonoTy.bool _ _)
+  have h := boolT_app_ge fctx octx pctx tvars genLExprBase.defaults n bctx Ef Ea
+  rw [show boolShare genLExprBase.defaults 1 n = 1 / 24 by share_defaults] at h
+  simpa only [genLExprBase.tuned_defaults] using h
 
 theorem arrow_abs_ge (n : Nat) (bctx : BVarCtx) (τ₁ τ₂ : LMonoTy) (Eb : Set LExpr') :
     4 / 21 * prob (Gb (τ₁ :: bctx) n τ₂) Eb
       ≤ prob (Gb bctx (n + 1) (LMonoTy.arrow τ₁ τ₂)) (AbsOf τ₁ Eb) := by
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx (n + 1) (.tcons "arrow" [τ₁, τ₂])) _
-  arm 0, prob_genAbs _ _ _
+  have h := arrowT_abs_ge fctx octx pctx tvars genLExprBase.defaults n bctx τ₁ τ₂ Eb
+  rw [show arrowShare genLExprBase.defaults 0 n = 4 / 21 by share_defaults] at h
+  simpa only [genLExprBase.tuned_defaults] using h
 
 theorem bool_const_ge (n : Nat) (bctx : BVarCtx) :
     1 / 24 ≤ prob (Gb bctx n LMonoTy.bool) (IsForm .const) := by
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n (.tcons "bool" [])) _
+  have h := boolT_const_ge fctx octx pctx tvars genLExprBase.defaults n bctx
+  simp only [genLExprBase.tuned_defaults] at h
+  refine le_trans ?_ h
   cases n with
-  | zero =>
-    rw [genLExprBase]
-    refine le_trans ?_ (prob_oneOf_ge _ _ 0 (by simp) _)
-    simp only [List.getElem_cons_zero, List.length_cons, List.length_nil, prob_genBoolConst]
-    ennr
-  | succ n =>
-    rw [genLExprBase]
-    refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
-    simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil,
-      prob_genBoolConst]
-    ennr
+  | zero => simp only [constT]; ennr
+  | succ n => apply le_of_eq; simp only [constT, boolShare]; share_defaults
 
 theorem bool_bvar_ge (n : Nat) (bctx : BVarCtx) (hb : (bvarsOfType bctx LMonoTy.bool).length > 0) :
     1 / 12 ≤ prob (Gb bctx n LMonoTy.bool) (IsForm .bvar) := by
-  show _ ≤ prob (genLExprBase (G := SPMF) fctx octx pctx tvars bctx n (.tcons "bool" [])) _
+  have h := boolT_bvar_ge fctx octx pctx tvars genLExprBase.defaults n bctx hb
+  simp only [genLExprBase.tuned_defaults] at h
+  refine le_trans ?_ h
   cases n with
-  | zero =>
-    rw [genLExprBase]
-    refine le_trans ?_ (prob_oneOf_ge _ _ 1 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.length_cons, List.length_nil]
-    rw [dif_pos hb, prob_pickBVar]
-    ennr
+  | zero => simp only [bvarT]; ennr
   | succ n =>
-    rw [genLExprBase]
-    refine le_trans ?_ (prob_frequency_ge _ _ 6 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
-      List.sum_cons, List.sum_nil]
-    rw [dif_pos hb, prob_pickBVar]
-    ennr
+    apply le_of_eq; simp only [bvarT, boolShare]; share_defaults
+    rw [inv_eq_one_div, ENNReal.div_eq_div_iff (by norm_num) (by norm_num) (by norm_num)
+      (by norm_num)]
+    norm_num
 
 -- ── Size 0: leaves only ─────────────────────────────────────────────
 
@@ -1146,5 +1276,205 @@ theorem prob_height_eq (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (bct
   ⟨le_trans (prob_height_ge fctx octx [] tvars n bctx) (prob_mono_support fun e he h => by
     have := height_le fctx octx tvars hops n bctx _ e he
     simp only [Set.mem_setOf_eq] at h ⊢; omega), heightAtSize_pos n⟩
+
+-- ── Headline bounds in terms of the weights ─────────────────────────
+
+/-! ### The headline bounds, for every tuning
+
+The bounds below hold for `genLExprBase.tuned θ` at every `θ`. Each is a product of branch shares
+of `θ` and of `massT θ`. At `θ = genLExprBase.defaults` they give back the literal bounds above, so
+those are the special case at the shipping weights. -/
+
+theorem share_pos (θ : Tuning) (off k i d : Nat) (_hik : i < k) : 0 < share θ off k i d := by
+  rw [share, ENNReal.div_pos_iff]
+  refine ⟨by exact_mod_cast (Tuning.weight_pos θ _ d).ne', by finiteness⟩
+
+theorem massT_pos (θ : Tuning) (n : Nat) : 0 < massT θ n := by
+  cases n with
+  | zero => simp [massT]
+  | succ n =>
+    simp only [massT]
+    exact lt_of_lt_of_le (share_pos θ 8 11 0 n (by omega)) (by
+      refine le_trans ?_ le_self_add; refine le_trans ?_ le_self_add; exact le_self_add)
+
+/-- The lower bound on root form `F` at depth `n + rootFormSize F`, for the weights `θ`. -/
+noncomputable def rootFormBoundT (θ : Tuning) : Form → Nat → ℝ≥0∞
+  | .const, n => constT θ n
+  | .ite, n => boolShare θ 2 n * (massT θ n * (massT θ n * massT θ n))
+  | .eq, n => boolShare θ 3 n * (1 / 120 * (massT θ n * massT θ n))
+  | .quant, n => boolShare θ 4 n * (1 / 120 * (1 / 120 * (massT θ n * massT θ n)))
+  | .app, n => boolShare θ 1 (n + 1) * (1 / 120 * (massT θ (n + 1) * (arrowShare θ 0 n * massT θ n)))
+  | _, _ => 0
+
+/-- **Every root form, for every tuning.** For each of the five forms `F`, at every size `n`, in
+every context, and for every weights `θ`, a `bool` draw of `genLExprBase.tuned θ` at size
+`n + rootFormSize F` has `F` at its root with probability at least `rootFormBoundT θ F n`. -/
+theorem prob_rootForm_ge_tuned (θ : Tuning) (F : Form) (hF : F ∈ rootForms) (n : Nat)
+    (bctx : BVarCtx) :
+    rootFormBoundT θ F n ≤ prob (Gt θ bctx (n + rootFormSize F) LMonoTy.bool) (IsForm F) := by
+  have hm := massT_bool_ge fctx octx pctx tvars θ n bctx
+  fin_cases hF
+  · exact boolT_const_ge fctx octx pctx tvars θ n bctx
+  · refine le_trans ?_ (le_trans (boolT_ite_ge fctx octx pctx tvars θ n bctx Set.univ Set.univ
+      Set.univ) (prob_mono ?_))
+    · simp only [rootFormBoundT]; gcongr <;> exact hm
+    · rintro _ ⟨_, _, _, rfl, -⟩; rfl
+  · refine le_trans ?_ (le_trans (boolT_eq_ge fctx octx pctx tvars θ n bctx Set.univ Set.univ)
+      (prob_mono ?_))
+    · simp only [rootFormBoundT]; gcongr <;> exact hm
+    · rintro _ ⟨_, _, rfl, -⟩; rfl
+  · have hm' := massT_bool_ge fctx octx pctx tvars θ n (LMonoTy.bool :: bctx)
+    refine le_trans ?_ (le_trans (boolT_forall_ge fctx octx pctx tvars θ n bctx Set.univ)
+      (prob_mono ?_))
+    · simp only [rootFormBoundT]; gcongr; exact hm'
+    · rintro _ ⟨_, _, rfl, -⟩; rfl
+  · have hm1 := massT_bool_ge fctx octx pctx tvars θ (n + 1) bctx
+    have hm' := massT_bool_ge fctx octx pctx tvars θ n (LMonoTy.bool :: bctx)
+    have hf := arrowT_abs_ge fctx octx pctx tvars θ n bctx LMonoTy.bool LMonoTy.bool Set.univ
+    refine le_trans ?_ (le_trans (boolT_app_ge fctx octx pctx tvars θ (n + 1) bctx
+      (AbsOf LMonoTy.bool Set.univ) Set.univ) (prob_mono ?_))
+    · simp only [rootFormBoundT]
+      gcongr
+      · exact hm1
+      · refine le_trans ?_ hf; gcongr; exact hm'
+    · rintro _ ⟨_, _, rfl, -⟩; rfl
+
+theorem mul_pos' {a b : ℝ≥0∞} (ha : 0 < a) (hb : 0 < b) : 0 < a * b :=
+  ENNReal.mul_pos ha.ne' hb.ne'
+
+theorem rootFormBoundT_pos (θ : Tuning) (F : Form) (hF : F ∈ rootForms) (n : Nat) :
+    0 < rootFormBoundT θ F n := by
+  have hm := massT_pos θ
+  have hb := fun i d (h : i < 11) => share_pos θ 8 11 i d h
+  have ha := share_pos θ 0 8 0 n (by omega)
+  have hc : (0 : ℝ≥0∞) < 1 / 120 := by rw [ENNReal.div_pos_iff]; exact ⟨by norm_num, by norm_num⟩
+  fin_cases hF <;> simp only [rootFormBoundT]
+  · cases n with
+    | zero => simp [constT]
+    | succ n => exact hb 0 n (by omega)
+  · exact mul_pos' (hb 2 n (by omega)) (mul_pos' (hm n) (mul_pos' (hm n) (hm n)))
+  · exact mul_pos' (hb 3 n (by omega)) (mul_pos' hc (mul_pos' (hm n) (hm n)))
+  · exact mul_pos' (hb 4 n (by omega)) (mul_pos' hc (mul_pos' hc (mul_pos' (hm n) (hm n))))
+  · exact mul_pos' (hb 1 (n + 1) (by omega)) (mul_pos' hc (mul_pos' (hm (n + 1)) (mul_pos' ha (hm n))))
+
+/-- The lower bound on reaching height `n` at size `n`, for the weights `θ`: each level costs the
+`ite` share at that depth and the masses of the two branches it does not descend into. -/
+noncomputable def heightT (θ : Tuning) : Nat → ℝ≥0∞
+  | 0 => 1
+  | n + 1 => boolShare θ 2 n * (heightT θ n * (massT θ n * massT θ n))
+
+/-- **Height, for every tuning.** -/
+theorem prob_height_ge_tuned (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
+    heightT θ n ≤ prob (Gt θ bctx n LMonoTy.bool) {e | n ≤ height e} := by
+  induction n with
+  | zero =>
+    have h := massT_bool_ge fctx octx pctx tvars θ 0 bctx
+    simpa [Set.setOf_true, heightT, massT] using h
+  | succ n ih =>
+    have hm := massT_bool_ge fctx octx pctx tvars θ n bctx
+    refine le_trans ?_ (le_trans (boolT_ite_ge fctx octx pctx tvars θ n bctx
+      {x | n ≤ height x} Set.univ Set.univ) (prob_mono ?_))
+    · simp only [heightT]; gcongr <;> exact hm
+    · rintro _ ⟨c, t, f, rfl, hc, -, -⟩
+      simp only [Set.mem_setOf_eq, height] at hc ⊢
+      omega
+
+theorem heightT_pos (θ : Tuning) : ∀ n, 0 < heightT θ n
+  | 0 => by simp [heightT]
+  | n + 1 => mul_pos' (share_pos θ 8 11 2 n (by omega))
+      (mul_pos' (heightT_pos θ n) (mul_pos' (massT_pos θ n) (massT_pos θ n)))
+
+/-- The lower bound on covering the seven forms at size `n + 3`, for the weights `θ`. It is the
+probability of the witness `ite (eq _ _) (app (λ:bool. #0) c) (∀:bool. _)`, factor by factor. -/
+noncomputable def coverBoundT (θ : Tuning) (n : Nat) : ℝ≥0∞ :=
+  boolShare θ 2 (n + 2) *
+    ((boolShare θ 3 (n + 1) * (1 / 120 * (massT θ (n + 1) * massT θ (n + 1)))) *
+      ((boolShare θ 1 (n + 1) * (1 / 120 * (constT θ (n + 1) * (arrowShare θ 0 n * bvarT θ n)))) *
+        (boolShare θ 4 (n + 1) * (1 / 120 * (1 / 120 * (massT θ (n + 1) * massT θ (n + 1)))))))
+
+/-- **Coverage, for every tuning.** -/
+theorem prob_covers_ge_tuned (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
+    coverBoundT θ n ≤ prob (Gt θ bctx (n + 3) LMonoTy.bool) {e | Covers e} := by
+  have hsub : IteOf (EqOf Set.univ Set.univ)
+      (AppOf (AbsOf LMonoTy.bool (IsForm .bvar)) (IsForm .const))
+      (QuantOf .all LMonoTy.bool Set.univ) ⊆ {e | Covers e} := by
+    rintro x ⟨c, t, e, rfl, ⟨a, b, rfl, -, -⟩, ⟨f, a', rfl, ⟨body, rfl, hbody⟩, ha'⟩,
+      ⟨tr, b', rfl, -⟩⟩
+    have h1 := rootForm_mem_formsOf body
+    have h2 := rootForm_mem_formsOf a'
+    simp only [IsForm, Set.mem_setOf_eq] at hbody ha'
+    rw [hbody] at h1; rw [ha'] at h2
+    intro F hF
+    simp only [stlcForms, Finset.mem_insert, Finset.mem_singleton] at hF
+    simp only [formsOf, Finset.mem_insert, Finset.mem_union]
+    rcases hF with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp_all
+  refine le_trans ?_ (prob_mono hsub)
+  refine le_trans ?_ (boolT_ite_ge fctx octx pctx tvars θ (n + 2) bctx _ _ _)
+  have hc := boolT_eq_ge fctx octx pctx tvars θ (n + 1) bctx Set.univ Set.univ
+  have hm := massT_bool_ge fctx octx pctx tvars θ (n + 1) bctx
+  have ht := boolT_app_ge fctx octx pctx tvars θ (n + 1) bctx
+    (AbsOf LMonoTy.bool (IsForm .bvar)) (IsForm .const)
+  have hk := boolT_const_ge fctx octx pctx tvars θ (n + 1) bctx
+  have hf := arrowT_abs_ge fctx octx pctx tvars θ n bctx LMonoTy.bool LMonoTy.bool (IsForm .bvar)
+  have hv := boolT_bvar_ge fctx octx pctx tvars θ n (LMonoTy.bool :: bctx)
+    (bvarsOfType_cons_self _ _)
+  have he := boolT_forall_ge fctx octx pctx tvars θ (n + 1) bctx Set.univ
+  have hm' := massT_bool_ge fctx octx pctx tvars θ (n + 1) (LMonoTy.bool :: bctx)
+  unfold coverBoundT
+  refine mul_le_mul' le_rfl (mul_le_mul' ?_ (mul_le_mul' ?_ ?_))
+  · refine le_trans ?_ hc
+    gcongr <;> exact hm
+  · refine le_trans ?_ ht
+    gcongr
+    refine le_trans ?_ hf
+    gcongr
+  · refine le_trans ?_ he
+    gcongr
+    exact hm'
+
+theorem coverBoundT_pos (θ : Tuning) (n : Nat) : 0 < coverBoundT θ n := by
+  have hm := massT_pos θ
+  have hb := fun i d (h : i < 11) => share_pos θ 8 11 i d h
+  have ha := share_pos θ 0 8 0 n (by omega)
+  have hc : (0 : ℝ≥0∞) < 1 / 120 := by rw [ENNReal.div_pos_iff]; exact ⟨by norm_num, by norm_num⟩
+  have hk : 0 < constT θ (n + 1) := hb 0 n (by omega)
+  have hv : 0 < bvarT θ n := by
+    cases n with
+    | zero => simp [bvarT]
+    | succ n => exact hb 6 n (by omega)
+  unfold coverBoundT
+  exact mul_pos' (hb 2 _ (by omega))
+    (mul_pos' (mul_pos' (hb 3 _ (by omega)) (mul_pos' hc (mul_pos' (hm _) (hm _))))
+      (mul_pos' (mul_pos' (hb 1 _ (by omega)) (mul_pos' hc (mul_pos' hk (mul_pos' ha hv))))
+        (mul_pos' (hb 4 _ (by omega)) (mul_pos' hc (mul_pos' hc (mul_pos' (hm _) (hm _)))))))
+
+/-! ### How a growing schedule shrinks a share
+
+Each weight is an affine schedule in the depth, `w(d) = max a 1 + d · b`. If branch `i` of a site
+has a constant schedule and some sibling `j` has a slope `b > 0`, the share of `i` falls like
+`1 / d`. A constant weight profile keeps every share fixed; a profile that grows one branch with the
+depth starves the others at large sizes. -/
+
+theorem share_le_of_sibling (θ : Tuning) (off k i j d : Nat) (hj : j < k) :
+    share θ off k i d ≤ (θ.weight (off + i) d : ℝ≥0∞) / (θ.weight (off + j) d : ℝ≥0∞) := by
+  rw [share]
+  refine ENNReal.div_le_div_left ?_ _
+  have hmem : θ.weight (off + j) d ∈ (List.range k).map (fun j => θ.weight (off + j) d) :=
+    List.mem_map.mpr ⟨j, List.mem_range.mpr hj, rfl⟩
+  exact_mod_cast List.le_sum_of_mem hmem
+
+/-- **The `1/d` decay.** If branch `i` has a schedule `(a, 0)` and a sibling `j` has a slope `b`,
+the share of `i` at depth `d` is at most `max a 1 / (d · b)`. -/
+theorem share_le_inv_depth (θ : Tuning) (off k i j d : Nat) (hj : j < k)
+    (hi : (θ.schedules.getD (off + i) (1, 0)).2 = 0) :
+    share θ off k i d ≤ ((max (θ.schedules.getD (off + i) (1, 0)).1 1 : ℕ) : ℝ≥0∞)
+      / ((d * (θ.schedules.getD (off + j) (1, 0)).2 : ℕ) : ℝ≥0∞) := by
+  refine le_trans (share_le_of_sibling θ off k i j d hj) ?_
+  have hwi : θ.weight (off + i) d = max (θ.schedules.getD (off + i) (1, 0)).1 1 := by
+    simp only [Tuning.weight]; rw [hi, mul_zero, add_zero]
+  have hwj : d * (θ.schedules.getD (off + j) (1, 0)).2 ≤ θ.weight (off + j) d := by
+    simp only [Tuning.weight]; omega
+  rw [hwi]
+  exact ENNReal.div_le_div_left (by exact_mod_cast hwj) _
 
 end StrataGenerators.SizeDistribution
