@@ -272,10 +272,10 @@ needed, and the difference between them is the whole story of how tuning compose
     `size = 0` list and the `size + 1` list; the `PSum.inr` member, `genStmtChain`, has no site of its
     own. -/
 theorem genStmt_mutual_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx) :
+    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx) (maxStmtSeqLen : Nat) :
     ∀ x, SuppEq x
-      (genStmt._mutual.tuned (G := SPMF) θ octx tvars immutableVars procs pctx x)
-      (genStmt._mutual (G := SPMF) octx tvars immutableVars procs pctx x) := by
+      (genStmt._mutual.tuned (G := SPMF) θ octx tvars immutableVars procs pctx maxStmtSeqLen x)
+      (genStmt._mutual (G := SPMF) octx tvars immutableVars procs pctx maxStmtSeqLen x) := by
   delta StrataGenerators.Stmt.genStmt._mutual StrataGenerators.Stmt.genStmt._mutual.tuned
   apply StrataGenerators.wellFounded_fix_rel
   intro x g g' hgg'
@@ -310,10 +310,12 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
     block's fact off one projection. -/
 theorem genStmt_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size : Nat) :
-    SPMF.support (genStmtT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size)
-      = SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size) :=
-  genStmt_mutual_tuned_support_eq θ octx tvars immutableVars procs pctx
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size maxStmtSeqLen : Nat) :
+    SPMF.support
+        (genStmtT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size maxStmtSeqLen)
+      = SPMF.support
+        (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size maxStmtSeqLen) :=
+  genStmt_mutual_tuned_support_eq θ octx tvars immutableVars procs pctx maxStmtSeqLen
     (.inl ⟨labels, C, ctx, size⟩)
 
 /-- At every `θ`, the tuned statement chain reaches what `genStmtChain` reaches. This is the generator
@@ -321,19 +323,21 @@ theorem genStmt_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyId
 theorem genStmtChain_tuned_support_eq (θ : Tuning) (octx : OpCtx)
     (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx)
-    (size len : Nat) :
+    (size len maxStmtSeqLen : Nat) :
     SPMF.support
-        (genStmtChainT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size len)
+        (genStmtChainT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size len
+          maxStmtSeqLen)
       = SPMF.support
-        (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size len) :=
-  genStmt_mutual_tuned_support_eq θ octx tvars immutableVars procs pctx
+        (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size len
+          maxStmtSeqLen) :=
+  genStmt_mutual_tuned_support_eq θ octx tvars immutableVars procs pctx maxStmtSeqLen
     (.inr ⟨labels, C, ctx, size, len⟩)
 
 /-- At every `θ`, the tuned statement-list generator reaches what `genProgramStmts` reaches. -/
 theorem genProgramStmtsT_tuned_support_eq (θ : Tuning) (octx : OpCtx)
-    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
-    SPMF.support (genProgramStmtsT (G := SPMF) θ octx tvars size len pctx)
-      = SPMF.support (genProgramStmts (G := SPMF) octx tvars size len pctx) :=
+    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) (maxStmtSeqLen : Nat) :
+    SPMF.support (genProgramStmtsT (G := SPMF) θ octx tvars size len pctx maxStmtSeqLen)
+      = SPMF.support (genProgramStmts (G := SPMF) octx tvars size len pctx maxStmtSeqLen) :=
   genStmtChain_tuned_support_eq ..
 
 /-- At every `θ`, the tuned procedure generator is `genProcedure`. `genProcedureT` differs from the
@@ -341,10 +345,12 @@ theorem genProgramStmtsT_tuned_support_eq (θ : Tuning) (octx : OpCtx)
     the whole proof. This is why the `proc:` profiles, which aim at the three transform passes, have no
     consequence for the soundness and completeness of `genProcedure`. -/
 theorem genProcedureT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx) :
-    SPMF.support (genProcedureT (G := SPMF) θ octx procs C Γ size len pctx)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx)
+    (maxStmtSeqLen : Nat) :
+    SPMF.support (genProcedureT (G := SPMF) θ octx procs C Γ size len pctx maxStmtSeqLen)
       = SPMF.support
-        (StrataGenerators.Procedure.genProcedure (G := SPMF) octx procs C Γ size len pctx) := by
+        (StrataGenerators.Procedure.genProcedure (G := SPMF) octx procs C Γ size len pctx
+          maxStmtSeqLen) := by
   unfold genProcedureT StrataGenerators.Procedure.genProcedure
   -- The two `do` blocks agree draw for draw except for the statement-chain call, so descend through
   -- the binds and use the block's fact at the one that differs.

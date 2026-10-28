@@ -26,7 +26,8 @@ an inductive relation:
   generated *name* is in the support of `genIdentName`, which holds exactly the legal bare identifiers of
   Core that are not a reserved keyword. That condition covers the label of an `assert`, of an `assume` and
   of a `cover`, the label of a block and of an invariant, the variable of an `init`, and the name of a type
-  constructor with its parameters. Each generated *list* is inside the budget for a size at its depth. The
+  constructor with its parameters. Each nested body is at most `maxStmtSeqLen` long, and each other
+  generated *list* is inside the budget for a size at its depth. The
   type of an `init` is in the support of `genLMonoTy`, and the declaration of a `funcDecl` is in the support
   of `genDecl`.
 * **`CallOk`** holds the shape of a call. A `.cmd (.call …)` statement is reachable only when its argument
@@ -117,6 +118,7 @@ clause is work, and no longer blocked upstream.
 
 namespace StrataGenerators.Stmt.SpecComplete
 variable {octx : OpCtx} {tvars : List TyIdentifier}
+variable {maxStmtSeqLen : Nat}
 
 -- ── bridge lemmas ──
 theorem procToTCtx_find_rev (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy)
@@ -266,8 +268,9 @@ end
 
 mutual
 /-- The identifier-alphabet + size kernel, recursively over the tree, at size `n`.
-    Names lie in their generator's support, and each generated list is within the
-    budget available at its nesting depth.
+    Names lie in their generator's support. Each nested body (of a `block`, of a `loop` and of each arm
+    of an `ite`) is at most `maxStmtSeqLen` long, because `genStmt` draws each body length from
+    `[0, maxStmtSeqLen]`. Each other generated list is within the budget available at its nesting depth.
 
     Each clause about a *name* is one condition: membership in the support of `genIdentName`, which holds
     exactly the legal bare identifiers of Core that are not a reserved keyword, and which
@@ -279,7 +282,7 @@ mutual
 
     The clause for an `init` needs no separate condition about a keyword, because
     `genIdentName`'s support already excludes every keyword. -/
-def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
+def AlphabetOk (tvars : List TyIdentifier) (maxStmtSeqLen : Nat) : Nat → Statement → Prop
   | n, .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)) =>
       x.name ∈ SPMF.support (genIdentName (G := SPMF)) ∧
       mty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n)
@@ -295,15 +298,15 @@ def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
   | 0, .block .. => False
   | (n+1), .block label body _ =>
       label ∈ SPMF.support (genIdentName (G := SPMF)) ∧
-      body.length ≤ n + 1 ∧ AlphabetOkList tvars n body
+      body.length ≤ maxStmtSeqLen ∧ AlphabetOkList tvars maxStmtSeqLen n body
   | 0, .ite .. => False
   | (n+1), .ite _ t e _ =>
-      t.length ≤ n + 1 ∧ e.length ≤ n + 1 ∧
-      AlphabetOkList tvars n t ∧ AlphabetOkList tvars n e
+      t.length ≤ maxStmtSeqLen ∧ e.length ≤ maxStmtSeqLen ∧
+      AlphabetOkList tvars maxStmtSeqLen n t ∧ AlphabetOkList tvars maxStmtSeqLen n e
   | 0, .loop .. => False
   | (n+1), .loop _ _ invs body _ =>
       invs.length ≤ n + 1 ∧ (∀ p ∈ invs, p.1 ∈ SPMF.support (genIdentName (G := SPMF))) ∧
-      body.length ≤ n + 1 ∧ AlphabetOkList tvars n body
+      body.length ≤ maxStmtSeqLen ∧ AlphabetOkList tvars maxStmtSeqLen n body
   | _, .exit _ _ => True
   | n, .funcDecl decl _ => decl ∈ SPMF.support (genDecl (G := SPMF) octx n)
   | n, .typeDecl tc _ =>
@@ -311,9 +314,9 @@ def AlphabetOk (tvars : List TyIdentifier) : Nat → Statement → Prop
       (∀ s ∈ tc.params, s ∈ SPMF.support (genIdentName (G := SPMF)))
 
 /-- `AlphabetOk` lifted to a statement list at size `n`. -/
-def AlphabetOkList (tvars : List TyIdentifier) : Nat → List Statement → Prop
+def AlphabetOkList (tvars : List TyIdentifier) (maxStmtSeqLen : Nat) : Nat → List Statement → Prop
   | _, [] => True
-  | n, s :: ss => AlphabetOk tvars n s ∧ AlphabetOkList tvars n ss
+  | n, s :: ss => AlphabetOk tvars maxStmtSeqLen n s ∧ AlphabetOkList tvars maxStmtSeqLen n ss
 end
 
 -- ── Scope threading for the call recipe ─────────────────────────────────────
@@ -512,9 +515,9 @@ theorem exprOk_assert_true (n : Nat) :
 
 mutual
 /-- A size at which `genStmt` can reach `s` (given the alphabet/shape conditions):
-    large enough to bound this node's own generated lists and, one smaller, its
-    nested bodies. This is the `∃ n` witness discharged at the top level, so the
-    theorem carries no explicit `≤ n` budget premise. -/
+    large enough to bound this node's own size-indexed lists and, one smaller, its
+    nested bodies. The length of a nested body is not in this witness: `maxStmtSeqLen` bounds it,
+    and not the size. -/
 def stmtDepth : Statement → Nat
   | .cmd _ => 0
   | .block _ body _ => stmtListDepth body + 1
@@ -524,10 +527,10 @@ def stmtDepth : Statement → Nat
   | .funcDecl _ _ => 0
   | .typeDecl tc _ => tc.params.length
 
-/-- The size witness for a chain: bounds both the list length and each element. -/
+/-- The size witness for a chain: bounds each element. -/
 def stmtListDepth : List Statement → Nat
   | [] => 0
-  | s :: ss => max (max (stmtDepth s) (stmtListDepth ss)) ((s :: ss).length)
+  | s :: ss => max (stmtDepth s) (stmtListDepth ss)
 end
 
 -- ── Command-statement completeness ──────────────────────────────────────────
@@ -544,18 +547,18 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     (hRigid : C.rigidTypeVars = tvars)
     (hwt : CmdHasTypeA C (procToTCtx ctx) c Γ')
     (hshape : InGenShape (.cmd (CmdExt.cmd c)))
-    (hok : AlphabetOk (octx := octx) tvars n (.cmd (CmdExt.cmd c)))
+    (hok : AlphabetOk (octx := octx) tvars maxStmtSeqLen n (.cmd (CmdExt.cmd c)))
     (hExprC : CmdExprOk (octx := octx) (tvars := tvars) ctx n c) :
     ∃ ctx', TContext.Equiv (T := CoreLParams) (procToTCtx ctx') Γ' ∧
       ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
       (⟨[Stmt.cmd (CmdExt.cmd c)], C, ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n maxStmtSeqLen) := by
   -- Reduce the goal to membership in `genCmd`'s support via the `genCmdStmt` wrapper
   -- and the `genCmdStmt_mem` lifting into `genStmt`.
   have hlift : ∀ (r : GenCmdResult),
       r ∈ SPMF.support (genCmd (G := SPMF) octx tvars [] ctx n) →
       (⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩ : GenStmtResult) ∈
-        SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n maxStmtSeqLen) := by
     intro r hr
     refine genCmdStmt_mem procs C ctx n _ ?_
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff]
@@ -694,21 +697,21 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     :
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars →
       TContext.Equiv (T := CoreLParams) Γ (procToTCtx ctx) →
-      InGenShape s → AlphabetOk (octx := octx) tvars n s → CallOk (octx := octx) (tvars := tvars) procs ctx n s →
+      InGenShape s → AlphabetOk (octx := octx) tvars maxStmtSeqLen n s → CallOk (octx := octx) (tvars := tvars) procs ctx n s →
       ExprOk (octx := octx) (tvars := tvars) ctx n s →
       ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
         ctx' = stepCtx ctx s ∧
         (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
-          SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n) := by
+          SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n maxStmtSeqLen) := by
   induction h using StatementHasType'.rec (motive_2 := fun C Γ L ss C' Γ' _ =>
     ∀ (ctx : VarCtx) (n : Nat), C.rigidTypeVars = tvars →
       TContext.Equiv (T := CoreLParams) Γ (procToTCtx ctx) →
-      InGenShapeList ss → AlphabetOkList (octx := octx) tvars n ss → CallOkList (octx := octx) (tvars := tvars) procs ctx n ss →
+      InGenShapeList ss → AlphabetOkList (octx := octx) tvars maxStmtSeqLen n ss → CallOkList (octx := octx) (tvars := tvars) procs ctx n ss →
       ExprOkList (octx := octx) (tvars := tvars) ctx n ss →
       ∃ ctx', TContext.Equiv (T := CoreLParams) Γ' (procToTCtx ctx') ∧
         ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-          SPMF.support (genStmtChain (G := SPMF) octx tvars [] procs L C ctx [] n ss.length)) with
+          SPMF.support (genStmtChain (G := SPMF) octx tvars [] procs L C ctx [] n ss.length maxStmtSeqLen)) with
   | cmd C Γ Γ2 L c Δ hc hequiv =>
     intro ctx n hRig hΓ hnf hok hcall hexpr
     cases cmdExtHasTypeA_equiv_congr hc hΓ.symm with

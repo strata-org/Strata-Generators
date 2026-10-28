@@ -67,6 +67,7 @@ break it. Each clause of `AlphabetOk` about a name is in the same position.
 namespace StrataGenerators.Stmt.SpecComplete.Gaps
 
 variable {octx : OpCtx} {tvars : List TyIdentifier}
+variable {maxStmtSeqLen : Nat}
 
 -- ── Shape of a call group ────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
     (ce : Command)
     (h : (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n)) :
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
         SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx n [])) ∨
     (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
@@ -279,7 +280,7 @@ theorem metadata_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCt
     (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
     (hmd : md ≠ default) :
     (⟨[Statement.assert l e md], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
@@ -317,7 +318,7 @@ theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (l : String) (e : Expression.Expr)
     (hl : l ∉ SPMF.support (genIdentName (G := SPMF))) :
     (⟨[Statement.assert l e default], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
@@ -422,7 +423,7 @@ theorem outTargets_sigP :
 theorem outTarget_gap (labels : List String)
     (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv [] [sigP] labels C C' callerCtx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, hs, hce⟩
@@ -497,7 +498,7 @@ theorem otherTargetCall_gap (labels : List String)
     StatementHasTypeA progP C (procToTCtx callerCtx) labels otherTargetCall C
         (procToTCtx callerCtx) ∧
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n) :=
+      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) :=
   ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
 -- ── `spec_complete`'s old environment hypotheses were unsatisfiable ──────────

@@ -377,24 +377,27 @@ claims to wrap. -/
 statement nested inside a `block`, an `ite` or a `loop` body is therefore tuned as well. -/
 def genStmtT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat) :
-    G GenStmtResult :=
-  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx (PSum.inl ⟨labels, C, ctx, size⟩)
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat)
+    (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G GenStmtResult :=
+  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx maxStmtSeqLen
+    (PSum.inl ⟨labels, C, ctx, size⟩)
 
 /-- `genStmtChain` with every branch weight read from `θ`. -/
 def genStmtChainT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size len : Nat) :
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size len : Nat)
+    (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx
+  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx maxStmtSeqLen
     (PSum.inr ⟨labels, C, ctx, size, len⟩)
 
 /-- `genProgramStmts` with every branch weight read from `θ`. This is the entry point that the
 statement family's harness draws from. -/
 def genProgramStmtsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (size len : Nat) (pctx : PolyOpCtx := []) :
+    (size len : Nat) (pctx : PolyOpCtx := [])
+    (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmtChainT θ octx tvars [] [] [] (LContext.default) [] pctx size len
+  genStmtChainT θ octx tvars [] [] [] (LContext.default) [] pctx size len maxStmtSeqLen
 
 /-- `genCmds` with every branch weight read from `θ`. `genCmds` is a plain fold over `genCmd` and has
 no `frequency` site of its own, so this module writes the tuned chain out rather than let the
@@ -413,7 +416,7 @@ def genCmdsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentif
 difference. -/
 def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
-    (pctx : PolyOpCtx := []) : G Procedure := do
+    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   let inout ← genInputs typeArgs size
@@ -435,7 +438,7 @@ def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCt
   let (body, _, _) ← genStmtChainT θ octx typeArgs
     (ListMap.keys inputs ++ ListMap.keys (StrataGenerators.Procedure.oldVars inout)) procs []
     ({ C with rigidTypeVars := typeArgs })
-    (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) pctx size len
+    (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) pctx size len maxStmtSeqLen
   pure {
     header := {
       name := ⟨name, ()⟩, typeArgs := typeArgs, inputs := inputs, outputs := outputs,
@@ -505,22 +508,23 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 /-- At the shipping weights, the tuned statement generator is `genStmt`. -/
 @[simp] theorem genStmtT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size : Nat) :
-    genStmtT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size
-      = genStmt octx tvars immutableVars procs labels C ctx pctx size := rfl
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size maxStmtSeqLen : Nat) :
+    genStmtT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size maxStmtSeqLen
+      = genStmt octx tvars immutableVars procs labels C ctx pctx size maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned statement-chain generator is `genStmtChain`. -/
 @[simp] theorem genStmtChainT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size len : Nat) :
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size len maxStmtSeqLen : Nat) :
     genStmtChainT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size len
-      = genStmtChain octx tvars immutableVars procs labels C ctx pctx size len := rfl
+        maxStmtSeqLen
+      = genStmtChain octx tvars immutableVars procs labels C ctx pctx size len maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned statement-list generator is `genProgramStmts`. -/
 @[simp] theorem genProgramStmtsT_defaults [_root_.Gen G] (octx : OpCtx)
-    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
-    genProgramStmtsT (G := G) stmtDefault octx tvars size len pctx
-      = genProgramStmts octx tvars size len pctx := rfl
+    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) (maxStmtSeqLen : Nat) :
+    genProgramStmtsT (G := G) stmtDefault octx tvars size len pctx maxStmtSeqLen
+      = genProgramStmts octx tvars size len pctx maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned command chain is `genCmds`, for any chain length. -/
 @[simp] theorem genCmdsT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
@@ -535,9 +539,10 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 
 /-- At the shipping weights, the tuned procedure generator is `genProcedure`. -/
 @[simp] theorem genProcedureT_defaults [_root_.Gen G] (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx) :
-    genProcedureT (G := G) stmtDefault octx procs C Γ size len pctx
-      = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx := rfl
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx)
+    (maxStmtSeqLen : Nat) :
+    genProcedureT (G := G) stmtDefault octx procs C Γ size len pctx maxStmtSeqLen
+      = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned base expression generator is `genLExprBase`, as a *function*
 of the target type. `@[tunable]` states its own version at full application, and `genLExprT` needs
