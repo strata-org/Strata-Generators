@@ -690,7 +690,38 @@ theorem loopDepthL_ge_of_mem {s : Statement} {ss : List Statement} (h : s ∈ ss
     · simp only [loopDepthL]; omega
     · have := ih h; simp only [loopDepthL]; omega
 
-/-- The rare-event bound: `1 / (170ᵐ · ((m+1)!)²)`. -/
+/-- The lower bound for a loop nest of depth `m` at size `m`: `1 / (170ᵐ · ((m+1)!)²)`.
+
+The bound is the probability of one path through `genStmt`. On this path, the draw makes a
+sequence of `m` loops. The body of each loop contains only the next loop. The last loop has an
+empty body.
+
+At size `k + 1`, one loop of the sequence needs these five choices:
+
+| Choice | Probability | Source |
+|---|---|---|
+| The `loop` branch | `2/17` | The `loop` branch has the weight 2. The total weight is 17. |
+| A nondeterministic guard | `1/5` | In `genCondOrNondet`, `nondet` has the weight 1 of 5. |
+| No measure | `1/4` | `genOptMeasure` is `biasedOptionGen (3/4)`. |
+| An empty list of invariants | `1/(k+2)` | `listOfMaxLength (k+1)` selects a length from `0` to `k+1`, each with equal probability. |
+| A body with one statement | `1/(k+2)` | The body length is from `0` to `k+1`, each with equal probability. |
+
+The product of the five probabilities is `(2/17) · (1/5) · (1/4) · 1/(k+2)² = 1 / (170 · (k+2)²)`.
+No choice on the path can fail, so the bound has no factor for a failed draw. The last loop needs
+the body length `0`, and this length also has the probability `1/(k+2)`, with `k = 0`.
+
+The product over all levels, from `k = 0` to `k = m - 1`, is `1 / (170ᵐ · ((m+1)!)²)`. The
+factorial occurs because `2 · 3 · … · (m+1) = (m+1)!`.
+
+Three theorems make the proof:
+
+* `prob_genStmt_loop_body_ge` gives the bound for one level.
+* `deepBound_succ_le` shows that `deepBound (n + 1)` is not more than the factor for one level,
+  multiplied by `deepBound n`.
+* `genStmt_prob_loopDepth_ge` does the induction on the depth.
+
+The bound is small because it uses only one path. It does not include longer bodies, invariants,
+deterministic guards, or a deep loop at a different position in the body. -/
 noncomputable def deepBound (m : Nat) : ℝ≥0∞ :=
   ENNReal.ofReal (1 / (170 ^ m * ((m + 1).factorial : ℝ) ^ 2))
 
