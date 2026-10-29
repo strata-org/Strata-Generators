@@ -13,8 +13,16 @@ points that the suite and the `dist-report` executable draw from.
 
 This module holds `Tuning` values and generator plumbing, and no proofs. It is therefore Mathlib-free,
 and a Strata transform pass can import it. `StrataGenerators.TuningPrototypes` holds the
-θ-invariance theorems, one per generator. Each says that every `θ` denotes the same `SPMF`, so
-no profile can invalidate a soundness or a completeness result.
+θ-invariance theorems, one per generator. Each says that every `θ` reaches the same programs *at
+the same body-length cap*, so no choice of weights can invalidate a soundness or a completeness
+result.
+
+The cap is the one exception. The tuned statement entry points take the cap
+`maxStmtSeqLenFor θ` by default, and a profile with heavy nesting gets a cap below
+`defaultMaxStmtSeqLen`. Such a profile does not reach a nested body that is longer than its cap.
+Soundness holds at every cap. Completeness for nested bodies longer than `maxStmtSeqLenFor θ`
+holds only under a profile whose cap is long enough, for example `stmtDefault`. The `example`s at the
+end of this module pin the cap of each profile.
 
 -/
 
@@ -183,21 +191,25 @@ and its expected nesting stays bounded in `size`. At the shipping weights it is
 `defaultMaxStmtSeqLen`. -/
 def maxStmtSeqLenFor (θ : Tuning) : Nat :=
   let w := fun i => θ.weight i 0
-  let total := w 5 + w 6 + w 7 + w 8 + w 9 + w 10 + w 11 + w 12 + w 13
-  let bodies := w 10 + 2 * w 11 + 2 * w 12 + w 13
+  let total := w StmtIdx.cmd + w StmtIdx.exit + w StmtIdx.funcDecl + w StmtIdx.typeDecl +
+    w StmtIdx.call + w StmtIdx.block + w StmtIdx.iteDet + w StmtIdx.iteNondet + w StmtIdx.loop
+  let bodies := w StmtIdx.block + 2 * w StmtIdx.iteDet + 2 * w StmtIdx.iteNondet + w StmtIdx.loop
   min defaultMaxStmtSeqLen ((2 * total - 1) / bodies)
 
-/-- **Loop-heavy** (`stmt: LoopElim …`). `loop` outweighs the sum of the rest, so a loop is the modal
-statement at every nesting level. A loop inside a loop then becomes common rather than incidental,
-and that is where a loop-elimination pass is most likely to be wrong. `cmd` keeps its default weight,
-so a loop *body* still holds commands to eliminate around.
+/-- **Loop-heavy** (`stmt: LoopElim …`). `loop` (24) outweighs the sum of the rest (21), so a loop
+is the modal statement at every nesting level. A loop inside a loop then becomes common rather than
+incidental, and that is where a loop-elimination pass is most likely to be wrong.
+
+`cmd` goes up from 6 to 12 at `size + 1` for two reasons. A loop *body* still holds commands to
+eliminate around. And the profile keeps the body-length cap `3`: with `cmd` at its default weight,
+`maxStmtSeqLenFor` would give cap `2`, and a loop body would hold at most two statements.
 
 Nesting is what the weight really buys, and it saturates. Above 24, another 16 points of weight buy
 two points of nesting and cost two points of generation cost. These numbers were measured when each
-body length was uniform on `[0, size + 1]`, before `maxStmtSeqLen` capped it, and they were not
-measured again. -/
+body length was uniform on `[0, size + 1]`, before `maxStmtSeqLen` capped it, and with the old
+weights. They were not measured again. -/
 def stmtLoopHeavy : Tuning :=
-  withWeights stmtDefault [(StmtIdx.loop, 24)]
+  withWeights stmtDefault [(StmtIdx.loop, 24), (StmtIdx.cmd, 12)]
 
 /-- **Loop-heavy but shallower.** As `stmtLoopHeavy`, but it raises the leaf `cmd` branch as well, so
 a loop body is more often a straight-line block than another loop. Use it when the pass under test is
@@ -625,11 +637,12 @@ set_option maxRecDepth 8000
 
 example : stmtLoopHeavy.schedules[StmtIdx.loop]! = (24, 0) := rfl
 example : stmtLoopHeavy.schedules[StmtIdx.block]! = (1, 0) := rfl
+example : stmtLoopHeavy.schedules[StmtIdx.cmd]! = (12, 0) := rfl
 
 /-! The body-length cap of each statement profile. The shipping weights keep the default cap, and
 the loop-heavy profiles get a shorter one. -/
 example : maxStmtSeqLenFor stmtDefault = defaultMaxStmtSeqLen := by decide
-example : maxStmtSeqLenFor stmtLoopHeavy = 2 := by decide
+example : maxStmtSeqLenFor stmtLoopHeavy = 3 := by decide
 example : maxStmtSeqLenFor stmtLoopWide = 3 := by decide
 example : maxStmtSeqLenFor stmtMixed = 4 := by decide
 example : maxStmtSeqLenFor stmtFuncDeclHeavy = 5 := by decide

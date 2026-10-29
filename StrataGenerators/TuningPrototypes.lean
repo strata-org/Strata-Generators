@@ -19,8 +19,10 @@ open StrataGenerators.TuningProfiles
 
 This file makes every generator that the test suite draws from tunable, and proves one theorem per
 generator that the conversion preserves behaviour. At `SPMF` the tuned generator is **equal** to
-the untuned one for every `θ`, so every soundness and completeness result about the original applies to
-every tuning of it. `StrataGenerators.TuningProfiles` holds the weights themselves, which `θ` to use for
+the untuned one for every `θ` at the same body-length cap, so every soundness and completeness result
+about the original applies to every tuning of it at that cap. The tuned statement entry points take
+the cap `TuningProfiles.maxStmtSeqLenFor θ` by default, which is shorter than the default cap for a
+profile with heavy nesting. Such a profile does not reach the longer nested bodies. `StrataGenerators.TuningProfiles` holds the weights themselves, which `θ` to use for
 which family of properties, and the measurements behind them. This file is the guarantee that no choice
 made there can cost coverage.
 

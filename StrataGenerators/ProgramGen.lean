@@ -156,7 +156,12 @@ structure Bounds where
   /-- Max body statement count for a generated procedure. -/
   procLen : Nat := 3
   /-- Max length of a nested statement body (of a `block`, a `loop` or an `ite` arm) inside a
-      procedure body. Read `StrataGenerators.Stmt.defaultMaxStmtSeqLen`. -/
+      procedure body. Read `StrataGenerators.Stmt.defaultMaxStmtSeqLen`.
+
+      CAUTION: at the shipping weights, a value above `5` makes one statement draw produce more than
+      one statement draw one level down, on average. Then no theorem bounds the expected nesting,
+      and the expected size of a procedure body can grow exponentially in `procSize`. The value is
+      not checked. -/
   maxStmtSeqLen : Nat := StrataGenerators.Stmt.defaultMaxStmtSeqLen
   /-- Which families of a datatype's auto-generated functions later declarations
       may call: constructors, testers, and safe/unsafe field accessors by default;

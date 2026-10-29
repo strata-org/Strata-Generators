@@ -534,9 +534,11 @@ mutual
     loop-transformation test wants turned up.
 
     The weights are *constant* rather than indexed by `size`, because no `depth` binder is in scope
-    and each site therefore reads its schedule at depth 0. This recursion cannot run away, unlike an
-    expression generator's: the nesting branches exist only at `size + 1`, and they generate their
-    bodies at `size`. A decaying schedule has nothing to protect against.
+    and each site therefore reads its schedule at depth 0. The nesting depth cannot run away: the
+    nesting branches exist only at `size + 1`, and they generate their bodies at `size`. The *number*
+    of statements can still grow exponentially in `size`, if one statement draw makes one or more
+    statement draws one level down on average. That number depends on the weights and on
+    `maxStmtSeqLen`. Read `defaultMaxStmtSeqLen` and `TuningProfiles.maxStmtSeqLenFor`.
     `StrataGenerators.TuningProfiles` holds the profiles that the suite uses.
 
     **Why `exit` and `call` fall back to a command.** An `exit` needs an enclosing block label, and a
