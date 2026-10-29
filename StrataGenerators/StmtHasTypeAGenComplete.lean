@@ -26,8 +26,8 @@ an inductive relation:
   generated *name* is in the support of `genIdentName`, which holds exactly the legal bare identifiers of
   Core that are not a reserved keyword. That condition covers the label of an `assert`, of an `assume` and
   of a `cover`, the label of a block and of an invariant, the variable of an `init`, and the name of a type
-  constructor with its parameters. Each nested body is at most `maxStmtSeqLen` long, so a statement
-  with a longer nested body is outside the support at every size. Each other
+  constructor with its parameters. Each nested body and each invariant list of a loop is at most
+  `maxStmtSeqLen` long, so a statement with a longer one is outside the support at every size. Each other
   generated *list* is inside the budget for a size at its depth. The
   type of an `init` is in the support of `genLMonoTy`, and the declaration of a `funcDecl` is in the support
   of `genDecl`.
@@ -270,8 +270,9 @@ end
 mutual
 /-- The identifier-alphabet + size kernel, recursively over the tree, at size `n`.
     Names lie in their generator's support. Each nested body (of a `block`, of a `loop` and of each arm
-    of an `ite`) is at most `maxStmtSeqLen` long, because `genStmt` draws each body length from
-    `[0, maxStmtSeqLen]`. Each other generated list is within the budget available at its nesting depth.
+    of an `ite`) and each invariant list of a `loop` is at most `maxStmtSeqLen` long, because `genStmt`
+    draws each of these lengths from `[0, maxStmtSeqLen]`. Each other generated list is within the
+    budget available at its nesting depth.
 
     Each clause about a *name* is one condition: membership in the support of `genIdentName`, which holds
     exactly the legal bare identifiers of Core that are not a reserved keyword, and which
@@ -306,7 +307,7 @@ def AlphabetOk (tvars : List TyIdentifier) (maxStmtSeqLen : Nat) : Nat → State
       AlphabetOkList tvars maxStmtSeqLen n t ∧ AlphabetOkList tvars maxStmtSeqLen n e
   | 0, .loop .. => False
   | (n+1), .loop _ _ invs body _ =>
-      invs.length ≤ n + 1 ∧ (∀ p ∈ invs, p.1 ∈ SPMF.support (genIdentName (G := SPMF))) ∧
+      invs.length ≤ maxStmtSeqLen ∧ (∀ p ∈ invs, p.1 ∈ SPMF.support (genIdentName (G := SPMF))) ∧
       body.length ≤ maxStmtSeqLen ∧ AlphabetOkList tvars maxStmtSeqLen n body
   | _, .exit _ _ => True
   | n, .funcDecl decl _ => decl ∈ SPMF.support (genDecl (G := SPMF) octx n)
@@ -796,7 +797,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
       refine loop_mem procs C ctx mm guard measure invs body Cb ctxb body.length hblen ?_ ?_ ?_ hbodymem
       · exact genCondOrNondet_complete (mm+1) ctx guard hexpr.1
       · exact genOptMeasure_complete (mm+1) ctx measure hexpr.2.1
-      · exact genInvariants_complete (mm+1) ctx invs hinvlen
+      · exact genInvariants_complete _ (mm+1) ctx invs hinvlen
           (fun p hp => ⟨hinvname p hp, hexpr.2.2.1 p hp⟩)
   | nil C Γ L Δ hequiv =>
     rename_i ctx n hRig hΓ _ _ _ _

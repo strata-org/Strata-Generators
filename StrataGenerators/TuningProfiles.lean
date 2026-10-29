@@ -211,9 +211,10 @@ weights. They were not measured again. -/
 def stmtLoopHeavy : Tuning :=
   withWeights stmtDefault [(StmtIdx.loop, 24), (StmtIdx.cmd, 12)]
 
-/-- **Loop-heavy but shallower.** As `stmtLoopHeavy`, but it raises the leaf `cmd` branch as well, so
-a loop body is more often a straight-line block than another loop. Use it when the pass under test is
-about a loop's *contents* rather than its nesting. -/
+/-- **Loop-heavy but shallower.** `loop` is lighter than in `stmtLoopHeavy` (16 against 24), and the
+leaf `cmd` branch is raised at both sites (12 at `size + 1`, as in `stmtLoopHeavy`, and 12 at
+`size = 0`). A loop body is therefore more often a straight-line block than another loop. Use it
+when the pass under test is about a loop's *contents* rather than its nesting. -/
 def stmtLoopWide : Tuning :=
   withWeights stmtDefault [(StmtIdx.loop, 16), (StmtIdx.cmd, 12), (StmtIdx.cmd0, 12)]
 

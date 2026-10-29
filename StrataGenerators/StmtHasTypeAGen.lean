@@ -796,9 +796,9 @@ theorem genOptMeasure_some_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Na
 
 /-- Every invariant produced by `genInvariants` (at depth `d`) carries a boolean
     expression. -/
-theorem genInvariants_sound (env : GenStmtSoundEnv octx tvars pctx) (d : Nat) (ctx : VarCtx)
+theorem genInvariants_sound (env : GenStmtSoundEnv octx tvars pctx) (m d : Nat) (ctx : VarCtx)
     (invs : List (String × Expression.Expr))
-    (hinv : invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx d pctx))
+    (hinv : invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx m d pctx))
     (p : String × Expression.Expr) (hp : p ∈ invs) :
     HasTypeA' [] p.2 .bool := by
   simp only [genInvariants, mem_support_listOfMaxLength_iff] at hinv
@@ -1131,7 +1131,7 @@ theorem genStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       · intro m hm
         exact genOptMeasure_some_sound env (size + 1) ctx measure hmeasure m hm
       · intro p hp
-        exact genInvariants_sound env (size + 1) ctx invs hinvs p hp
+        exact genInvariants_sound env _ (size + 1) ctx invs hinvs p hp
 termination_by (n, 0, 0)
 
 /-- **Soundness of `genStmtChain`.** Every statement sequence in the generator's
@@ -1324,7 +1324,7 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
     (blen : Nat) (hblen : blen ≤ maxStmtSeqLen)
     (hguard : guard ∈ SPMF.support (genCondOrNondet (G := SPMF) octx tvars ctx (size + 1)))
     (hmeasure : measure ∈ SPMF.support (genOptMeasure (G := SPMF) octx tvars ctx (size + 1)))
-    (hinvs : invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx (size + 1)))
+    (hinvs : invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx maxStmtSeqLen (size + 1)))
     (hbody : (body, C_body, Γ_body) ∈
       SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size blen maxStmtSeqLen)) :
     (⟨[Stmt.loop guard measure invs body default], C, ctx⟩ : GenStmtResult) ∈
@@ -1404,12 +1404,12 @@ theorem genInvariant_complete (depth : Nat) (ctx : VarCtx) (p : String × Expres
   exact ⟨p.1, hlabel, p.2, hexpr, rfl⟩
 
 /-- The completeness of `genInvariants`. A list of the invariants is reachable when its length is not more than
-    the depth, and each of its elements is reachable by `genInvariant`. -/
-theorem genInvariants_complete (depth : Nat) (ctx : VarCtx) (invs : List (String × Expression.Expr))
-    (hlen : invs.length ≤ depth)
+    `maxLen`, and each of its elements is reachable by `genInvariant`. -/
+theorem genInvariants_complete (maxLen depth : Nat) (ctx : VarCtx)
+    (invs : List (String × Expression.Expr)) (hlen : invs.length ≤ maxLen)
     (hinvs : ∀ p ∈ invs, p.1 ∈ SPMF.support (genIdentName (G := SPMF)) ∧
       p.2 ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
-    invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx depth) := by
+    invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx maxLen depth) := by
   simp only [genInvariants, mem_support_listOfMaxLength_iff]
   refine ⟨hlen, fun p hp => ?_⟩
   exact genInvariant_complete depth ctx p (hinvs p hp).1 (hinvs p hp).2

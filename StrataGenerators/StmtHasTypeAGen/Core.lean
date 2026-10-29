@@ -237,12 +237,13 @@ def genInvariant [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   let e ← genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool
   pure (l, e)
 
-/-- Generate a list of (up to `depth`) loop invariants, each a
-    `(label, boolean expression)` pair. -/
+/-- Generate a list of up to `maxLen` loop invariants, each a `(label, boolean expression)` pair
+    whose expression has size `depth`. `genStmt` passes `maxStmtSeqLen` as `maxLen`, so the length
+    of the list does not grow with the size, as for a nested body. -/
 def genInvariants [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
+    (ctx : VarCtx) (maxLen depth : Nat) (pctx : PolyOpCtx := []) :
     G (List (String × Expression.Expr)) :=
-  listOfMaxLength depth (genInvariant octx tvars ctx depth pctx)
+  listOfMaxLength maxLen (genInvariant octx tvars ctx depth pctx)
 
 -- ── Non-nesting (leaf) statement sub-generators ──────────────────────────
 
@@ -480,7 +481,8 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 -- ── Main mutually-recursive statement / statement-list generators ─────────
 
 /-- The default maximum length of a nested body (the body of a `block`, of a `loop`, or of one arm of
-    an `ite`). `genStmt` draws each body length uniformly from `[0, maxStmtSeqLen]`.
+    an `ite`) and of the invariant list of a `loop`. `genStmt` draws each of these lengths uniformly
+    from `[0, maxStmtSeqLen]`.
 
     The cap does not depend on `size`. When the cap was `size + 1`, the proved bound on the expected
     number of loops grew like `n!`. With a fixed cap, one statement draw makes
@@ -492,12 +494,13 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     heavier nesting gets a smaller cap from `TuningProfiles.maxStmtSeqLenFor`.
     Read `StrataGenerators.SizeDistributionLoops`.
 
-    This is an upper bound on the nested statements only. The expressions, the invariant lists and
-    the other lists that a statement holds still grow with `size`. No theorem shows that the expected
-    count is unbounded when the number is `1` or more.
+    This is an upper bound on the nested statements only. The expressions and the other lists that a
+    statement holds (for example the type parameters of a `typeDecl`) still grow with `size`. No
+    theorem shows that the expected count is unbounded when the number is `1` or more.
 
-    The cap also limits completeness: a nested body that is longer than `maxStmtSeqLen` is outside the
-    support of `genStmt` at every size. Read `SpecComplete.AlphabetOk`. -/
+    The cap also limits completeness: a nested body or an invariant list that is longer than
+    `maxStmtSeqLen` is outside the support of `genStmt` at every size. Read
+    `SpecComplete.AlphabetOk`. -/
 def defaultMaxStmtSeqLen : Nat := 5
 
 mutual
@@ -620,7 +623,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
         (1, fun () => do
           let guard ← genCondOrNondet octx tvars ctx (size + 1) pctx
           let measure ← genOptMeasure octx tvars ctx (size + 1) pctx
-          let invariants ← genInvariants octx tvars ctx (size + 1) pctx
+          let invariants ← genInvariants octx tvars ctx maxStmtSeqLen (size + 1) pctx
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (body, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size blen maxStmtSeqLen
           pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]

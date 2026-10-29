@@ -18,7 +18,8 @@ Write `w₀, …, w₈` for the weights of the `size + 1` site of `genStmt` (`cm
 `typeDecl`, `call`, `block`, deterministic `ite`, nondeterministic `ite`, `loop`) and `W` for their
 sum. Two quantities control every bound:
 
-* `loopShare θ = w₈ / W`, the probability that one statement draw at size `n + 1` is a `loop`.
+* `loopShare θ = w₈ / W`, the share of the weight that the `loop` branch holds at size `n + 1`.
+  The probability of a `loop` is at most this, because a sub-draw of the branch can fail.
 * `expectedChildStmts maxStmtSeqLen θ = (w₅ + 2 w₆ + 2 w₇ + w₈) / W · maxStmtSeqLen / 2`, the
   expected number of statement draws one level down that one statement draw makes. The numerator
   counts the bodies that each branch opens (an `ite` opens two), and `maxStmtSeqLen / 2` is the mean
@@ -34,11 +35,10 @@ solution of `B 0 = 0`, `B (n + 1) = share + r · B n`, with `r = expectedChildSt
 E[#loops] ≤ loopShare θ · (1 + r + r² + … + r^{n-1})
 ```
 
-and so (`genStmtT_expect_numLoops_le_geom`, `genStmtT_expect_count_le_linear`)
+and so (`genStmtT_expect_numLoops_le_geom`)
 
 ```
 E[#loops] ≤ loopShare θ / (1 − r)        (every n; finite exactly when r < 1)
-E[#loops] ≤ loopShare θ · n              (when r ≤ 1)
 ```
 
 The same holds for the number of `block`, `ite` and `loop` statements together, with the share
@@ -54,16 +54,27 @@ tuning profile `θ` has its own `r`, and the geometric bound is finite only if t
 
 **Every profile, at its own cap.** The tuned entry points use the cap `maxStmtSeqLenFor θ` by
 default: the largest cap, at most `5`, with `r < 1` (`expectedChildStmts_maxStmtSeqLenFor_lt_one`).
-So `genStmtT_expect_numNesting_finite` gives a finite bound on the expected nesting of every
-profile, at every size.
+So `genStmtT_expect_numNesting_finite` gives a finite bound on the expected nesting of one
+statement draw for every profile, at every size.
+
+**Chains.** A chain of `len` statement groups, which is what `genProgramStmtsT` and the test
+harness draw, holds at most `len` times the bound for one group (`genStmtChainT_expect_count_le_geom`,
+`genProgramStmtsT_expect_numNesting_le`, `genProgramStmtsT_expect_numLoops_le`). The harness grows
+`len` with the Plausible size, so the expected count per harness draw grows linearly in `len`.
 
 All the bounds are upper bounds on the count of `block`, `ite` and `loop` statements. They say
-nothing about the size of the expressions and of the invariant lists, which still grow with `n`.
+nothing about the size of the expressions, which still grows with `n`. The length of an invariant
+list, like the length of a nested body, is at most `maxStmtSeqLen`.
 
 ## Loop depth
 
 `genStmt_depth`: no draw of size `n` nests loops more than `n` deep. A nest of exactly that depth is
-a rare event, bracketed on both sides (`genStmtT_prob_loopDepth_ge`, `genStmtT_prob_loopDepth_le`).
+a rare event, bracketed on both sides (`genStmtT_prob_loopDepth_ge`, `genStmtT_prob_loopDepth_le`),
+with `k = maxStmtSeqLen ≥ 1` on the left. Both sides are geometric in `m`:
+
+```
+(loopShare θ / (20 (k+1)²))ᵐ  ≤  P(loop depth ≥ m at size m)  ≤  loopShare θ · (loopShare θ · k/2)^{m-1}
+```
 
 **Why mostly upper bounds.** A leaf generator can fail, so sub-draws have mass `< 1` and nothing
 here computes those masses exactly. Upper bounds need only `mass ≤ 1`. The lower bounds take
@@ -142,7 +153,7 @@ theorem genStmtT_succ [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List 
         (θ.weight 13 0, fun () => do
           let guard ← genCondOrNondet octx tvars ctx (size + 1) pctx
           let measure ← genOptMeasure octx tvars ctx (size + 1) pctx
-          let invariants ← genInvariants octx tvars ctx (size + 1) pctx
+          let invariants ← genInvariants octx tvars ctx maxStmtSeqLen (size + 1) pctx
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (body, _, _) ← genStmtChainT θ octx tvars immutableVars procs labels C ctx pctx size
             blen maxStmtSeqLen
@@ -326,12 +337,13 @@ noncomputable def nestShare (c : NestCost) (θ : Tuning) : ℝ≥0∞ :=
   ((c.block : ℝ≥0∞) * stmtWeight θ 5 + (c.ite : ℝ≥0∞) * stmtWeight θ 6 +
     (c.ite : ℝ≥0∞) * stmtWeight θ 7 + (c.loop : ℝ≥0∞) * stmtWeight θ 8) / stmtTotalWeight θ
 
-/-- **The loop share.** The probability that one statement draw at size `n + 1` takes the `loop`
-branch: `w₈ / W`. -/
+/-- **The loop share.** The share of the weight that the `loop` branch holds at size `n + 1`:
+`w₈ / W`. It is the probability that `frequency` selects the branch. The probability that the draw
+is a `loop` is at most this, because a sub-draw of the branch can fail. -/
 noncomputable def loopShare (θ : Tuning) : ℝ≥0∞ := stmtWeight θ 8 / stmtTotalWeight θ
 
-/-- The probability that one statement draw at size `n + 1` takes a nested branch (`block`, `ite`
-or `loop`): `(w₅ + w₆ + w₇ + w₈) / W`. -/
+/-- The share of the weight that the nested branches (`block`, `ite` and `loop`) hold at size
+`n + 1`: `(w₅ + w₆ + w₇ + w₈) / W`. -/
 noncomputable def nestingShare (θ : Tuning) : ℝ≥0∞ :=
   (stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7 + stmtWeight θ 8) / stmtTotalWeight θ
 
@@ -607,7 +619,7 @@ theorem loop_branch_le :
     expect (do
       let guard ← genCondOrNondet (G := SPMF) octx tvars ctx (size + 1) pctx
       let measure ← genOptMeasure (G := SPMF) octx tvars ctx (size + 1) pctx
-      let invariants ← genInvariants (G := SPMF) octx tvars ctx (size + 1) pctx
+      let invariants ← genInvariants (G := SPMF) octx tvars ctx maxStmtSeqLen (size + 1) pctx
       let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
       let (body, _, _) ← genStmtChainT (G := SPMF) θ octx tvars immutableVars procs labels
         C ctx pctx size blen maxStmtSeqLen
@@ -696,12 +708,6 @@ theorem geom_le_inv (r : ℝ≥0∞) (n : Nat) : ∑ i ∈ Finset.range n, r ^ i
   rw [← ENNReal.tsum_geometric]
   exact ENNReal.sum_le_tsum _
 
-/-- If `r ≤ 1`, the geometric sum is at most `n`. -/
-theorem geom_le_n {r : ℝ≥0∞} (hr : r ≤ 1) (n : Nat) : ∑ i ∈ Finset.range n, r ^ i ≤ n := by
-  calc ∑ i ∈ Finset.range n, r ^ i ≤ ∑ _i ∈ Finset.range n, (1 : ℝ≥0∞) :=
-        Finset.sum_le_sum fun i _ => pow_le_one₀ (zero_le _) hr
-    _ = n := by simp
-
 /-- **The expected count, uniformly in the size**: at most `share / (1 − r)`. This is finite exactly
 when `r = expectedChildStmts maxStmtSeqLen θ < 1`. -/
 theorem genStmtT_expect_count_le_geom (c : NestCost) (θ : Tuning) (octx : OpCtx)
@@ -713,17 +719,6 @@ theorem genStmtT_expect_count_le_geom (c : NestCost) (θ : Tuning) (octx : OpCtx
       ≤ nestShare c θ * (1 - expectedChildStmts maxStmtSeqLen θ)⁻¹ :=
   le_trans (genStmtT_expect_count_le c θ octx tvars immutableVars procs pctx maxStmtSeqLen size
     labels C ctx) (by rw [countBound_eq]; gcongr; exact geom_le_inv _ _)
-
-/-- **The expected count, linear in the size** when `r ≤ 1`: at most `share · n`. -/
-theorem genStmtT_expect_count_le_linear (c : NestCost) (θ : Tuning) (octx : OpCtx)
-    (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (pctx : PolyOpCtx) (maxStmtSeqLen size : Nat) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (hr : expectedChildStmts maxStmtSeqLen θ ≤ 1) :
-    expect (genStmtT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size
-        maxStmtSeqLen) (count c)
-      ≤ nestShare c θ * size :=
-  le_trans (genStmtT_expect_count_le c θ octx tvars immutableVars procs pctx maxStmtSeqLen size
-    labels C ctx) (by rw [countBound_eq]; gcongr; exact geom_le_n hr _)
 
 /-- **The expected number of loops**, in terms of `loopShare θ` and
 `r = expectedChildStmts maxStmtSeqLen θ`: at most `loopShare θ · (1 + r + … + r^{n-1})`, and so at
@@ -783,11 +778,11 @@ theorem stmtTotalWeight_default : stmtTotalWeight stmtDefault = 16 := by
   obtain ⟨h0, h1, h2, h3, h4, h5, h6, h7, h8⟩ := stmtWeight_default
   rw [stmtTotalWeight, h0, h1, h2, h3, h4, h5, h6, h7, h8]; norm_num
 
-/-- At the shipping weights, a statement draw at size `n + 1` is a `loop` with probability `1/16`. -/
+/-- At the shipping weights, the `loop` branch holds `1/16` of the weight at size `n + 1`. -/
 theorem loopShare_default : loopShare stmtDefault = 1 / 16 := by
   rw [loopShare, stmtTotalWeight_default, stmtWeight_default.2.2.2.2.2.2.2.2]
 
-/-- At the shipping weights, a statement draw at size `n + 1` is nested with probability `1/4`. -/
+/-- At the shipping weights, the nested branches hold `1/4` of the weight at size `n + 1`. -/
 theorem nestingShare_default : nestingShare stmtDefault = 1 / 4 := by
   obtain ⟨-, -, -, -, -, h5, h6, h7, h8⟩ := stmtWeight_default
   rw [nestingShare, stmtTotalWeight_default, h5, h6, h7, h8,
@@ -872,8 +867,9 @@ theorem expectedChildStmts_maxStmtSeqLenFor_lt_one (θ : Tuning) :
 
 /-- **Every tuning profile, at its own cap, has a bounded expected nesting**: the tuned statement
 generator at `maxStmtSeqLenFor θ` has at most `nestingShare θ / (1 − r)` nested statements on
-average, at every size, and this bound is finite. This covers every profile that the harness draws
-from, because the tuned entry points use `maxStmtSeqLenFor θ` by default. -/
+average, at every size, and this bound is finite. This is about one statement draw. The harness
+draws a chain of `len` statement groups; `genProgramStmtsT_expect_numNesting_le` states the bound
+for a chain. -/
 theorem genStmtT_expect_numNesting_finite (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx) (size : Nat)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) :
@@ -892,6 +888,44 @@ theorem genStmtT_expect_numNesting_finite (θ : Tuning) (octx : OpCtx) (tvars : 
             (stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7 + stmtWeight θ 8) := le_add_self
       _ = _ := by ring
   · exact ENNReal.inv_ne_top.mpr (tsub_pos_of_lt (expectedChildStmts_maxStmtSeqLenFor_lt_one θ)).ne'
+
+-- ── Chains ───────────────────────────────────────────────────────────────
+
+/-- **A chain of `len` groups**, uniformly in the size: at most `len · share / (1 − r)`. -/
+theorem genStmtChainT_expect_count_le_geom (c : NestCost) (θ : Tuning) (octx : OpCtx)
+    (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
+    (pctx : PolyOpCtx) (maxStmtSeqLen size len : Nat) (labels : List String)
+    (C : LContext CoreLParams) (ctx : VarCtx) :
+    expect (genStmtChainT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size len
+        maxStmtSeqLen) (countChain c)
+      ≤ (len : ℝ≥0∞) * (nestShare c θ * (1 - expectedChildStmts maxStmtSeqLen θ)⁻¹) :=
+  genStmtChainT_expect_le c θ octx tvars immutableVars procs pctx size maxStmtSeqLen _ labels
+    (fun C ctx => genStmtT_expect_count_le_geom c θ octx tvars immutableVars procs pctx
+      maxStmtSeqLen size labels C ctx) len C ctx
+
+/-- **The statement lists that the harness draws**, at the profile's own cap: at most
+`len · nestingShare θ / (1 − r)` nested statements on average, at every size. -/
+theorem genProgramStmtsT_expect_numNesting_le (θ : Tuning) (octx : OpCtx)
+    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
+    expect (genProgramStmtsT (G := SPMF) θ octx tvars size len pctx) (countChain nestingCost)
+      ≤ (len : ℝ≥0∞) *
+          (nestingShare θ * (1 - expectedChildStmts (maxStmtSeqLenFor θ) θ)⁻¹) := by
+  have h := genStmtChainT_expect_count_le_geom nestingCost θ octx tvars [] [] pctx
+    (maxStmtSeqLenFor θ) size len [] LContext.default []
+  rwa [nestShare_nestingCost] at h
+
+/-- **The statement lists that the harness draws**, at the profile's own cap: at most
+`len · loopShare θ / (1 − r)` loops on average, at every size. At the shipping weights this is at
+most `len`. -/
+theorem genProgramStmtsT_expect_numLoops_le (θ : Tuning) (octx : OpCtx)
+    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
+    expect (genProgramStmtsT (G := SPMF) θ octx tvars size len pctx) (countChain loopCost)
+      ≤ (len : ℝ≥0∞) *
+          (loopShare θ * (1 - expectedChildStmts (maxStmtSeqLenFor θ) θ)⁻¹) := by
+  have h := genStmtChainT_expect_count_le_geom loopCost θ octx tvars [] [] pctx
+    (maxStmtSeqLenFor θ) size len [] LContext.default []
+  rwa [nestShare_loopCost] at h
+
 
 -- ── Loop depth ───────────────────────────────────────────────────────────
 
@@ -996,7 +1030,7 @@ theorem genStmt_depth (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpC
       (hch _ _ _ _).obs, (sound_true' (genFreshLabel _)).obs,
       (sound_true' (genLExpr _ _ _ _ _ _ _ _ _)).obs,
       (sound_true' (genCondOrNondet _ _ _ _ _)).obs, (sound_true' (genOptMeasure _ _ _ _ _)).obs,
-      (sound_true' (genInvariants _ _ _ _ _)).obs]
+      (sound_true' (genInvariants _ _ _ _ _ _)).obs]
     all_goals (first | omega | (simp only [loopDepthL, loopDepth] at *; omega))
 
 /-- The loop depth bound for the tuned generator, through the θ-invariance of its support. -/
@@ -1229,11 +1263,12 @@ theorem loop_share_eq (θ : Tuning) :
   rw [stmtTotal_cast]; rfl
 
 /-- One `loop` with an empty body at size `n + 1`: the `loop` branch, a nondeterministic guard
-(`1/5`), no measure (`1/4`), an empty invariant list (`1/(n+2)`) and an empty body (`1/(k+1)`). -/
+(`1/5`), no measure (`1/4`), an empty invariant list (`1/(k+1)`) and an empty body (`1/(k+1)`). -/
 theorem prob_genStmtT_loop_ge (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (pctx : PolyOpCtx) (imm : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (n maxStmtSeqLen : Nat) :
-    loopShare θ * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((maxStmtSeqLen : ℝ≥0∞) + 1)))))
+    loopShare θ * (1 / 5 * (1 / 4 * (1 / ((maxStmtSeqLen : ℝ≥0∞) + 1) *
+      (1 / ((maxStmtSeqLen : ℝ≥0∞) + 1)))))
       ≤ prob (genStmtT (G := SPMF) θ octx tvars imm procs labels C ctx pctx (n + 1) maxStmtSeqLen)
           (Top IsLoop) := by
   rw [genStmtT_succ]
@@ -1243,9 +1278,7 @@ theorem prob_genStmtT_loop_ge (θ : Tuning) (octx : OpCtx) (tvars : List TyIdent
   rw [loop_share_eq]
   refine mul_le_mul' le_rfl ?_
   have hc := prob_choose_zero maxStmtSeqLen (Nat.zero_le _)
-  have hi := prob_genInvariants_univ octx tvars pctx ctx (n + 1)
-  push_cast at hi
-  rw [show (n : ℝ≥0∞) + 1 + 1 = n + 2 by ring] at hi
+  have hi := prob_genInvariants_univ octx tvars pctx ctx maxStmtSeqLen (n + 1)
   refine le_trans (mul_le_mul' (prob_genCondOrNondet_univ octx tvars pctx ctx _) le_rfl)
     (prob_bind_ge Set.univ fun _ _ => ?_)
   refine le_trans (mul_le_mul' (prob_genOptMeasure_univ octx tvars pctx ctx _) le_rfl)
@@ -1268,7 +1301,7 @@ theorem prob_genStmtT_loop_body_ge (θ : Tuning) (octx : OpCtx) (tvars : List Ty
     (P : Statement → Prop) (B : ℝ≥0∞)
     (hB : B ≤ prob (genStmtT (G := SPMF) θ octx tvars imm procs labels C ctx pctx n maxStmtSeqLen)
       (Top P)) :
-    loopShare θ * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) *
+    loopShare θ * (1 / 5 * (1 / 4 * (1 / ((maxStmtSeqLen : ℝ≥0∞) + 1) *
         (1 / ((maxStmtSeqLen : ℝ≥0∞) + 1) * B))))
       ≤ prob (genStmtT (G := SPMF) θ octx tvars imm procs labels C ctx pctx (n + 1) maxStmtSeqLen)
           (Top fun s => ∃ g m i body md, s = .loop g m i body md ∧ ∃ st ∈ body, P st) := by
@@ -1279,9 +1312,7 @@ theorem prob_genStmtT_loop_body_ge (θ : Tuning) (octx : OpCtx) (tvars : List Ty
   rw [loop_share_eq]
   refine mul_le_mul' le_rfl ?_
   have hc := prob_choose_val maxStmtSeqLen 1 hk (Nat.zero_le _)
-  have hi := prob_genInvariants_univ octx tvars pctx ctx (n + 1)
-  push_cast at hi
-  rw [show (n : ℝ≥0∞) + 1 + 1 = n + 2 by ring] at hi
+  have hi := prob_genInvariants_univ octx tvars pctx ctx maxStmtSeqLen (n + 1)
   refine le_trans (mul_le_mul' (prob_genCondOrNondet_univ octx tvars pctx ctx _) le_rfl)
     (prob_bind_ge Set.univ fun _ _ => ?_)
   refine le_trans (mul_le_mul' (prob_genOptMeasure_univ octx tvars pctx ctx _) le_rfl)
@@ -1297,38 +1328,32 @@ theorem prob_genStmtT_loop_body_ge (θ : Tuning) (octx : OpCtx) (tvars : List Ty
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, _, _, _, _, _, rfl, ht⟩
 
-/-- The lower bound for a loop nest of depth `m` at size `m`, as a product over the levels. The
-level at size `j + 1` costs `loopShare θ · 1/5 · 1/4 · 1/(j+2) · 1/(k+1)`: the `loop` branch, a
-nondeterministic guard, no measure, an empty invariant list and a body of length `1` (of length
-`0` at the innermost level). `deepLower_eq` gives the closed form. -/
+/-- The lower bound for a loop nest of depth `m` at size `m`, as a product over the levels. Each
+level costs `loopShare θ · 1/5 · 1/4 · 1/(k+1) · 1/(k+1)`: the `loop` branch, a nondeterministic
+guard, no measure, an empty invariant list and a body of length `1` (of length `0` at the innermost
+level). `deepLower_eq` gives the closed form. -/
 noncomputable def deepLower (θ : Tuning) (maxStmtSeqLen : Nat) : Nat → ℝ≥0∞
   | 0 => 1
-  | m + 1 => loopShare θ * (1 / 5 * (1 / 4 * (1 / ((m : ℝ≥0∞) + 2) *
+  | m + 1 => loopShare θ * (1 / 5 * (1 / 4 * (1 / ((maxStmtSeqLen : ℝ≥0∞) + 1) *
       (1 / ((maxStmtSeqLen : ℝ≥0∞) + 1) * deepLower θ maxStmtSeqLen m))))
 
-/-- **The closed form of the lower bound**: `(loopShare θ / (20 (k+1)))ᵐ / (m+1)!`. -/
+/-- **The closed form of the lower bound**: `(loopShare θ / (20 (k+1)²))ᵐ`, geometric in `m`. -/
 theorem deepLower_eq (θ : Tuning) (maxStmtSeqLen m : Nat) :
     deepLower θ maxStmtSeqLen m
-      = (loopShare θ / (20 * ((maxStmtSeqLen : ℝ≥0∞) + 1))) ^ m / ((m + 1).factorial : ℝ≥0∞) := by
+      = (loopShare θ / (20 * ((maxStmtSeqLen : ℝ≥0∞) + 1) ^ 2)) ^ m := by
   induction m with
   | zero => simp [deepLower]
   | succ m ih =>
-    rw [deepLower, ih, Nat.factorial_succ (m + 1)]
-    have hk0 : ((maxStmtSeqLen : ℝ≥0∞) + 1) ≠ 0 := by positivity
-    have hf0 : (((m + 1).factorial : ℕ) : ℝ≥0∞) ≠ 0 := by positivity
-    have hm0 : ((m : ℝ≥0∞) + 2) ≠ 0 := by positivity
-    push_cast
+    rw [deepLower, ih]
     simp only [div_eq_mul_inv, one_mul]
-    rw [ENNReal.mul_inv (Or.inl (by norm_num)) (Or.inl (by norm_num)),
-      ENNReal.mul_inv (Or.inl (by positivity)) (Or.inl (by finiteness)),
-      show (m : ℝ≥0∞) + 1 + 1 = m + 2 by ring]
+    rw [ENNReal.mul_inv (Or.inl (by norm_num)) (Or.inl (by norm_num)), ENNReal.inv_pow]
     have h20 : (20 : ℝ≥0∞)⁻¹ = 5⁻¹ * 4⁻¹ := by
       rw [← ENNReal.mul_inv (Or.inl (by norm_num)) (Or.inl (by norm_num))]; norm_num
-    rw [h20, mul_pow, mul_pow, mul_pow]
+    rw [h20]
     ring
 
 /-- **Loops nested `m + 1` deep are possible at size `m + 1`**, for every `θ` and every cap
-`k ≥ 1`: with probability at least `deepLower θ k (m + 1) = (loopShare θ / (20 (k+1)))^{m+1} / (m+2)!`,
+`k ≥ 1`: with probability at least `deepLower θ k (m + 1) = (loopShare θ / (20 (k+1)²))^{m+1}`,
 in every context. -/
 theorem genStmtT_prob_loopDepth_ge (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (pctx : PolyOpCtx) (imm : List (Identifier Unit)) (procs : ProcSigCtx) (maxStmtSeqLen : Nat)
@@ -1379,19 +1404,19 @@ theorem genStmt_prob_loopDepth_le (octx : OpCtx) (tvars : List TyIdentifier) (pc
   ring
 
 /-- **At the shipping weights, loops nested `m + 1` deep at size `m + 1` are possible** for every
-cap `k ≥ 1`: probability at least `(1 / (320 (k+1)))^{m+1} / (m+2)!`. -/
+cap `k ≥ 1`: probability at least `(1 / (320 (k+1)²))^{m+1}`. -/
 theorem genStmt_prob_loopDepth_ge (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx)
     (imm : List (Identifier Unit)) (procs : ProcSigCtx) (maxStmtSeqLen : Nat)
     (hk : 1 ≤ maxStmtSeqLen) (m : Nat) (labels : List String) (C : LContext CoreLParams)
     (ctx : VarCtx) :
-    (1 / (320 * ((maxStmtSeqLen : ℝ≥0∞) + 1))) ^ (m + 1) / ((m + 2).factorial : ℝ≥0∞)
+    (1 / (320 * ((maxStmtSeqLen : ℝ≥0∞) + 1) ^ 2)) ^ (m + 1)
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (m + 1) maxStmtSeqLen)
           (Top fun s => m + 1 ≤ loopDepth s) := by
   have h := genStmtT_prob_loopDepth_ge stmtDefault octx tvars pctx imm procs maxStmtSeqLen hk m
     labels C ctx
   rw [genStmtT_defaults, deepLower_eq, loopShare_default] at h
   refine le_trans (le_of_eq ?_) h
-  congr 2
+  congr 1
   simp only [div_eq_mul_inv, one_mul]
   rw [ENNReal.mul_inv (Or.inl (by norm_num)) (Or.inl (by norm_num)),
     ENNReal.mul_inv (Or.inl (by norm_num)) (Or.inl (by norm_num)),

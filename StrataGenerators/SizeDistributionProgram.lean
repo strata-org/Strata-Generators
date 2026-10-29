@@ -303,12 +303,12 @@ program of `m + 1` declarations holds a procedure whose body has a top-level `lo
 probability at least `1/14 · procBound · (1/28)^m`. -/
 theorem prob_genProgram_proc_loop (m n len : Nat) (b : Bounds) (hs : b.procSize = n + 1)
     (hl : b.procLen = len + 1) :
-    stepShare * procBound (n + 1) len b.maxStmtSeqLen (loopAtSize n b.maxStmtSeqLen) * stepMass ^ m ≤
+    stepShare * procBound (n + 1) len b.maxStmtSeqLen (loopAtSize b.maxStmtSeqLen) * stepMass ^ m ≤
       prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, IsProcWith IsLoop d} := by
   refine prob_genProgram_ge _ m b _ ?_
   refine le_trans ?_ (prob_genDeclStep_proc_ge initState b _)
   refine mul_le_mul' le_rfl ?_
-  have h := prob_genDeclProcedure_ge IsLoop initState b len hl (loopAtSize n b.maxStmtSeqLen) (by
+  have h := prob_genDeclProcedure_ge IsLoop initState b len hl (loopAtSize b.maxStmtSeqLen) (by
     intro imm C' ctx; rw [hs]
     exact prob_genStmt_loop_ge _ [] _ imm _ [] C' ctx n _)
   rw [hs] at h
@@ -426,7 +426,7 @@ theorem genProgram_nesting_threshold (b : Bounds) :
     (b.procSize = 0 → ∀ numDecls,
       prob (genProgram (G := SPMF) numDecls b) {P | ∃ d ∈ P.decls, IsProcWith IsNesting d} = 0) ∧
     (∀ m n len, b.procSize = n + 1 → b.procLen = len + 1 →
-      stepShare * procBound (n + 1) len b.maxStmtSeqLen (loopAtSize n b.maxStmtSeqLen) *
+      stepShare * procBound (n + 1) len b.maxStmtSeqLen (loopAtSize b.maxStmtSeqLen) *
           stepMass ^ m ≤
         prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, IsProcWith IsNesting d}) := by
   refine ⟨fun hs numDecls => ?_, fun m n len hs hl => ?_⟩
