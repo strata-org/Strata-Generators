@@ -166,9 +166,26 @@ end ExprIdx
 
 /-! ### Statements -/
 
-/-- The shipping statement distribution. The leaves stand at 4 to 1 to 1 to 1 to 1, and `block`,
-`ite`, `ite-nondet` and `loop` stand at 2 to 2 to 1 to 2. -/
+/-- The shipping statement distribution. At `size + 1` the leaves stand at 6 to 1 to 1 to 1 to 3, and
+`block`, `ite`, `ite-nondet` and `loop` stand at 1 each. The `size = 0` leaves stand at 4 to 1 to 1 to
+1 to 3. -/
 def stmtDefault : Tuning := genStmt._mutual.defaults
+
+/-- **The body-length cap for a statement profile.** The largest cap, at most
+`defaultMaxStmtSeqLen`, at which one statement draw makes fewer than one statement draw one level
+down on average. With `W` the total weight of the `size + 1` site and
+`B = w_block + 2 w_ite + 2 w_iteNondet + w_loop` the bodies that one draw opens, the expected
+number of child statements is `B / W · cap / 2`, and it is less than `1` exactly when
+`B · cap < 2 W`. `SizeDistributionLoops.expectedChildStmts_maxStmtSeqLenFor_lt_one` proves it.
+
+The tuned entry points use this cap by default, so a profile with heavy nesting gets a shorter cap
+and its expected nesting stays bounded in `size`. At the shipping weights it is
+`defaultMaxStmtSeqLen`. -/
+def maxStmtSeqLenFor (θ : Tuning) : Nat :=
+  let w := fun i => θ.weight i 0
+  let total := w 5 + w 6 + w 7 + w 8 + w 9 + w 10 + w 11 + w 12 + w 13
+  let bodies := w 10 + 2 * w 11 + 2 * w 12 + w 13
+  min defaultMaxStmtSeqLen ((2 * total - 1) / bodies)
 
 /-- **Loop-heavy** (`stmt: LoopElim …`). `loop` outweighs the sum of the rest, so a loop is the modal
 statement at every nesting level. A loop inside a loop then becomes common rather than incidental,
@@ -176,7 +193,9 @@ and that is where a loop-elimination pass is most likely to be wrong. `cmd` keep
 so a loop *body* still holds commands to eliminate around.
 
 Nesting is what the weight really buys, and it saturates. Above 24, another 16 points of weight buy
-two points of nesting and cost two points of generation cost. -/
+two points of nesting and cost two points of generation cost. These numbers were measured when each
+body length was uniform on `[0, size + 1]`, before `maxStmtSeqLen` capped it, and they were not
+measured again. -/
 def stmtLoopHeavy : Tuning :=
   withWeights stmtDefault [(StmtIdx.loop, 24)]
 
@@ -235,7 +254,8 @@ independent choices makes two of them equal. Two things do move the rate, and bo
   `stmtLoopHeavy` rather than anything `cmd`-shaped, because a `loop` carries a guard, a measure and
   an invariant list, while a command carries one expression. Measured, the pass changed the program on
   1% of samples at the defaults and on 3% under `stmtLoopHeavy`. A `cmd`-heavy and `block`-heavy
-  variant gave 0–1%, which is why no such profile is here.
+  variant gave 0–1%, which is why no such profile is here. These rates were measured before
+  `maxStmtSeqLen` capped the body lengths, and they were not measured again.
 * **A degenerate expression distribution**, which raises the chance of a collision directly. That is
   a `genLExprBase` knob, and `genStmt` reaches `genLExprBase` by name, so no tuning here reaches it.
   It would also trade away the breadth that the `expr:` properties need.
@@ -378,7 +398,7 @@ statement nested inside a `block`, an `ite` or a `loop` body is therefore tuned 
 def genStmtT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat)
-    (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G GenStmtResult :=
+    (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) : G GenStmtResult :=
   genStmt._mutual.tuned θ octx tvars immutableVars procs pctx maxStmtSeqLen
     (PSum.inl ⟨labels, C, ctx, size⟩)
 
@@ -386,7 +406,7 @@ def genStmtT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentif
 def genStmtChainT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
     (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size len : Nat)
-    (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) :
+    (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
   genStmt._mutual.tuned θ octx tvars immutableVars procs pctx maxStmtSeqLen
     (PSum.inr ⟨labels, C, ctx, size, len⟩)
@@ -395,7 +415,7 @@ def genStmtChainT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyId
 statement family's harness draws from. -/
 def genProgramStmtsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (size len : Nat) (pctx : PolyOpCtx := [])
-    (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) :
+    (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
   genStmtChainT θ octx tvars [] [] [] (LContext.default) [] pctx size len maxStmtSeqLen
 
@@ -416,7 +436,7 @@ def genCmdsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentif
 difference. -/
 def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
-    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G Procedure := do
+    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   let inout ← genInputs typeArgs size
@@ -604,7 +624,17 @@ fold over 84 schedule entries, which is why the recursion depth goes up here. -/
 set_option maxRecDepth 8000
 
 example : stmtLoopHeavy.schedules[StmtIdx.loop]! = (24, 0) := rfl
-example : stmtLoopHeavy.schedules[StmtIdx.block]! = (2, 0) := rfl
+example : stmtLoopHeavy.schedules[StmtIdx.block]! = (1, 0) := rfl
+
+/-! The body-length cap of each statement profile. The shipping weights keep the default cap, and
+the loop-heavy profiles get a shorter one. -/
+example : maxStmtSeqLenFor stmtDefault = defaultMaxStmtSeqLen := by decide
+example : maxStmtSeqLenFor stmtLoopHeavy = 2 := by decide
+example : maxStmtSeqLenFor stmtLoopWide = 3 := by decide
+example : maxStmtSeqLenFor stmtMixed = 4 := by decide
+example : maxStmtSeqLenFor stmtFuncDeclHeavy = 5 := by decide
+example : maxStmtSeqLenFor stmtCallHeavy = 5 := by decide
+example : maxStmtSeqLenFor procPrecondHeavy = 5 := by decide
 example : stmtCallHeavy.schedules[StmtIdx.call]! = (12, 0) := rfl
 example : exprQuantHeavy.schedules[ExprIdx.boolAll]! = (8, 0) := rfl
 example : exprQuantHeavy.schedules[ExprIdx.boolEq]! = (8, 0) := rfl

@@ -14,8 +14,8 @@ probability at least `cmdCoverBound` (`prob_genCmd_covers`, which holds for ever
 **Statements** (`genStmt`). `genStmt_nesting_threshold`: at size `0` the top level never holds a
 `block`, `ite` or `loop`, in every context; at size `n + 1` it holds each of them with positive
 probability, each a closed form in the size `n` and the body-length cap `k = maxStmtSeqLen`:
-`iteAtSize k = 1/(17 (k+1)²)`, `blockAtSize k = 1/(17 (k+1))`,
-`loopAtSize n k = 1/(170 (n+2) (k+1))`. Each witness is the empty form of the statement (empty
+`iteAtSize k = 1/(16 (k+1)²)`, `blockAtSize k = 1/(32 (k+1))`,
+`loopAtSize n k = 1/(320 (n+2) (k+1))`. Each witness is the empty form of the statement (empty
 branches, empty body, nondeterministic guard), so it needs no sub-draw to succeed. Each body length
 is uniform on `[0, k]`, and the witness takes it to be `0`, which gives each `1/(k+1)`. Only the
 `loop` bound falls with the size, because its invariant list has a length uniform on `[0, n+1]`.
@@ -276,19 +276,19 @@ theorem genStmtChain_zero (imm : List (Identifier Unit)) (procs : ProcSigCtx)
   rw [genStmtChain]
 
 /-- The lower bound on a top-level `ite` at every size `n + 1`, with body-length cap `k`:
-`1 / (17 (k+1)²)`. The `17` is the total branch weight of `genStmt`; each `(k+1)` is the chance that
+`1 / (16 (k+1)²)`. The `16` is the total branch weight of `genStmt`; each `(k+1)` is the chance that
 one of the two branch lengths, uniform on `[0, k]`, comes out `0`. -/
-noncomputable def iteAtSize (k : Nat) : ℝ≥0∞ := 1 / (17 * ((k : ℝ≥0∞) + 1) ^ 2)
+noncomputable def iteAtSize (k : Nat) : ℝ≥0∞ := 1 / (16 * ((k : ℝ≥0∞) + 1) ^ 2)
 
 /-- The lower bound on a top-level `block` at every size `n + 1`, with body-length cap `k`:
-`1 / (17 (k+1))`. One body length, and the `2`-of-`17` branch weight against the `1/2` mass of the
+`1 / (32 (k+1))`. One body length, and the `1`-of-`16` branch weight against the `1/2` mass of the
 fresh label. -/
-noncomputable def blockAtSize (k : Nat) : ℝ≥0∞ := 1 / (17 * ((k : ℝ≥0∞) + 1))
+noncomputable def blockAtSize (k : Nat) : ℝ≥0∞ := 1 / (32 * ((k : ℝ≥0∞) + 1))
 
 /-- The lower bound on a top-level `loop` at size `n + 1`, with body-length cap `k`:
-`1 / (170 (n+2) (k+1))`. The `10` is the guard (`1/5`) and the measure (`1/4`) against the
-`2`-of-`17` weight; `(n+2)` is the empty invariant list, `(k+1)` the empty body. -/
-noncomputable def loopAtSize (n k : Nat) : ℝ≥0∞ := 1 / (170 * (((n : ℝ≥0∞) + 2) * ((k : ℝ≥0∞) + 1)))
+`1 / (320 (n+2) (k+1))`. The `20` is the guard (`1/5`) and the measure (`1/4`), next to the
+`1`-of-`16` weight; `(n+2)` is the empty invariant list, `(k+1)` the empty body. -/
+noncomputable def loopAtSize (n k : Nat) : ℝ≥0∞ := 1 / (320 * (((n : ℝ≥0∞) + 2) * ((k : ℝ≥0∞) + 1)))
 
 theorem cast_add_one_ne_zero (k : Nat) : ((k : ℝ≥0∞) + 1) ≠ 0 := by
   intro h; rw [add_eq_zero] at h; simp at h
@@ -307,28 +307,28 @@ macro "fin_ne" : tactic => `(tactic| first | finiteness | positivity | norm_num)
 
 /-- The closed form, unfolded into the nested-product shape the branch-by-branch proof builds. -/
 theorem iteAtSize_eq (k : Nat) :
-    iteAtSize k = 1 / 17 * (1 / ((k : ℝ≥0∞) + 1) * (1 / ((k : ℝ≥0∞) + 1))) := by
+    iteAtSize k = 1 / 16 * (1 / ((k : ℝ≥0∞) + 1) * (1 / ((k : ℝ≥0∞) + 1))) := by
   rw [iteAtSize,
     div_mul_div 1 1 ((k : ℝ≥0∞) + 1) (cast_add_one_ne_zero k) (cast_add_one_ne_top k),
     div_mul_div 1 (1 * 1) (((k : ℝ≥0∞) + 1) * ((k : ℝ≥0∞) + 1)) (by fin_ne) (by fin_ne)]
   frac_eq
 
 theorem blockAtSize_eq (k : Nat) :
-    blockAtSize k = 2 / 17 * (1 / 2 * (1 / ((k : ℝ≥0∞) + 1))) := by
+    blockAtSize k = 1 / 16 * (1 / 2 * (1 / ((k : ℝ≥0∞) + 1))) := by
   rw [blockAtSize,
     div_mul_div 1 1 ((k : ℝ≥0∞) + 1) (b := 2) (by fin_ne) (by fin_ne),
-    div_mul_div 2 (1 * 1) ((2 : ℝ≥0∞) * ((k : ℝ≥0∞) + 1)) (b := 17) (by fin_ne) (by fin_ne)]
+    div_mul_div 1 (1 * 1) ((2 : ℝ≥0∞) * ((k : ℝ≥0∞) + 1)) (b := 16) (by fin_ne) (by fin_ne)]
   frac_eq
 
 theorem loopAtSize_eq (n k : Nat) :
-    loopAtSize n k = 2 / 17 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((k : ℝ≥0∞) + 1))))) := by
+    loopAtSize n k = 1 / 16 * (1 / 5 * (1 / 4 * (1 / ((n : ℝ≥0∞) + 2) * (1 / ((k : ℝ≥0∞) + 1))))) := by
   rw [loopAtSize,
     div_mul_div 1 1 ((k : ℝ≥0∞) + 1) (cast_add_two_ne_zero n) (cast_add_two_ne_top n),
     div_mul_div 1 (1 * 1) (((n : ℝ≥0∞) + 2) * ((k : ℝ≥0∞) + 1)) (b := 4) (by fin_ne) (by fin_ne),
     div_mul_div 1 (1 * (1 * 1)) ((4 : ℝ≥0∞) * (((n : ℝ≥0∞) + 2) * ((k : ℝ≥0∞) + 1))) (b := 5)
       (by fin_ne) (by fin_ne),
-    div_mul_div 2 (1 * (1 * (1 * 1)))
-      ((5 : ℝ≥0∞) * ((4 : ℝ≥0∞) * (((n : ℝ≥0∞) + 2) * ((k : ℝ≥0∞) + 1)))) (b := 17)
+    div_mul_div 1 (1 * (1 * (1 * 1)))
+      ((5 : ℝ≥0∞) * ((4 : ℝ≥0∞) * (((n : ℝ≥0∞) + 2) * ((k : ℝ≥0∞) + 1)))) (b := 16)
       (by fin_ne) (by fin_ne)]
   frac_eq
 
@@ -468,8 +468,8 @@ def IsCoveringCmd : Statement → Prop
   | _ => False
 
 /-- The lower bound on a command that carries a covering expression: the `1`-of-`7` command kind
-and the `4`-of-`17` statement branch, against the covering-expression bound. -/
-noncomputable def cmdCoverAtStmt : ℝ≥0∞ := 4 / 17 * cmdCoverBound
+and the `6`-of-`16` statement branch, against the covering-expression bound. -/
+noncomputable def cmdCoverAtStmt : ℝ≥0∞ := 6 / 16 * cmdCoverBound
 
 /-- **From size 3 on, a statement draw carries a covering expression** with probability at least
 `cmdCoverAtStmt`, in every context. -/
@@ -541,20 +541,20 @@ theorem prob_genStmt_univ (imm : List (Identifier Unit)) (procs : ProcSigCtx)
       (prob_mono (Set.subset_univ _))
 
 theorem prob_genStmtChain_univ (imm : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (size k : Nat) :
-    ∀ (len : Nat) (C : LContext CoreLParams) (ctx : VarCtx),
+    (labels : List String) (size : Nat) :
+    ∀ (len k : Nat) (C : LContext CoreLParams) (ctx : VarCtx),
       stmtMassBound k size ^ len ≤
         prob (genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx size len k)
           Set.univ := by
   intro len
   induction len with
-  | zero => intro C ctx; rw [genStmtChain_zero, pow_zero]; exact (prob_pure_of_mem (Set.mem_univ _)).ge
+  | zero => intro k C ctx; rw [genStmtChain_zero, pow_zero]; exact (prob_pure_of_mem (Set.mem_univ _)).ge
   | succ len ih =>
-    intro C ctx
+    intro k C ctx
     rw [genStmtChain, pow_succ, mul_comm]
     refine prob_bind_univ_ge (prob_genStmt_univ octx tvars pctx imm procs labels C ctx size k)
       fun r => ?_
-    refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (ih _ _) fun _ => ?_)
+    refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (ih _ _ _) fun _ => ?_)
     exact (prob_pure_of_mem (Set.mem_univ _)).ge
 
 /-- The event that a statement chain holds, at its top level, a statement satisfying `P`. -/
@@ -573,7 +573,7 @@ theorem prob_genStmtChain_top_ge (P : Statement → Prop) (imm : List (Identifie
   rw [genStmtChain]
   refine prob_bind_ge (Top P) fun r hr => ?_
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
-    (prob_genStmtChain_univ octx tvars pctx imm procs labels size k len _ _) le_rfl)
+    (prob_genStmtChain_univ octx tvars pctx imm procs labels size len k _ _) le_rfl)
     (prob_bind_ge Set.univ fun t _ => ?_))
   refine (prob_pure_of_mem ?_).ge
   obtain ⟨s, hs, hP⟩ := hr
@@ -581,25 +581,25 @@ theorem prob_genStmtChain_top_ge (P : Statement → Prop) (imm : List (Identifie
 
 /-- **A size-0 chain has no nesting statement at its top level.** -/
 theorem genStmtChain_zero_flat (imm : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (k : Nat) :
-    ∀ (len : Nat) (C : LContext CoreLParams) (ctx : VarCtx),
+    (labels : List String) :
+    ∀ (len k : Nat) (C : LContext CoreLParams) (ctx : VarCtx),
       IsSoundFor (genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx 0 len k)
         (fun t => ∀ s ∈ t.1, ¬ IsNesting s) := by
   intro len
   induction len with
   | zero =>
-    intro C ctx t ht
+    intro k C ctx t ht
     rw [genStmtChain_zero, mem_support_pure_iff] at ht
     subst ht; simp
   | succ len ih =>
-    intro C ctx t ht
+    intro k C ctx t ht
     rw [genStmtChain] at ht
     simp only [mem_support_bind_iff, mem_support_pure_iff] at ht
     obtain ⟨r, hr, ⟨rest, C'', ctx''⟩, hrest, rfl⟩ := ht
     intro s hs
     rcases List.mem_append.mp hs with hs | hs
     · exact fun hn => genStmt_zero_flat octx tvars pctx imm procs labels C ctx k r hr ⟨s, hs, hn⟩
-    · exact ih _ _ _ hrest s hs
+    · exact ih _ _ _ _ hrest s hs
 
 /-- **The statement threshold.** At size `0` a statement draw never has a `block`, `ite` or
 `loop` at its top level; at every size `n + 1` it has each of them with positive probability, for

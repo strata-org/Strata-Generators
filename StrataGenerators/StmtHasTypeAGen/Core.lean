@@ -482,12 +482,23 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 /-- The default maximum length of a nested body (the body of a `block`, of a `loop`, or of one arm of
     an `ite`). `genStmt` draws each body length uniformly from `[0, maxStmtSeqLen]`.
 
-    The cap does not depend on `size`. If it did, the expected number of statements would grow like
-    `n!`. With a fixed cap, a nested statement opens `expectedChildStmts maxStmtSeqLen θ` statements
-    one level down, on average. At the shipping weights this is `5 · maxStmtSeqLen / 17`, and the
-    expected size of a draw stays bounded in `size` exactly when it is less than 1, that is when
-    `maxStmtSeqLen ≤ 3`. Read `StrataGenerators.SizeDistributionLoops`. -/
-def defaultMaxStmtSeqLen : Nat := 3
+    The cap does not depend on `size`. When the cap was `size + 1`, the proved bound on the expected
+    number of loops grew like `n!`. With a fixed cap, one statement draw makes
+    `expectedChildStmts maxStmtSeqLen θ` statement draws one level down, on average. If this is less
+    than `1`, the expected number of nested statements (`block`, `ite` and `loop`) has an upper bound
+    that does not depend on `size`. At the shipping weights this number is `3 · maxStmtSeqLen / 16`,
+    which is less than `1` when `maxStmtSeqLen ≤ 5`. The shipping weights keep the nesting branches
+    light (`1` each, against `6` for `cmd`) so that the default cap can be `5`. A tuning profile with
+    heavier nesting gets a smaller cap from `TuningProfiles.maxStmtSeqLenFor`.
+    Read `StrataGenerators.SizeDistributionLoops`.
+
+    This is an upper bound on the nested statements only. The expressions, the invariant lists and
+    the other lists that a statement holds still grow with `size`. No theorem shows that the expected
+    count is unbounded when the number is `1` or more.
+
+    The cap also limits completeness: a nested body that is longer than `maxStmtSeqLen` is outside the
+    support of `genStmt` at every size. Read `SpecComplete.AlphabetOk`. -/
+def defaultMaxStmtSeqLen : Nat := 5
 
 mutual
 
@@ -572,7 +583,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     -- As in the `size = 0` case, `exit` and `call` defer to `genCmdStmt` when their own
     -- support is provably empty, which happens with no enclosing label and with no callee.
     frequency
-      [ (4, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
+      [ (6, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
         (1, fun () =>
           if labels.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
           else genExitStmt labels C ctx),
@@ -581,7 +592,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
         (3, fun () =>
           if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
           else genCallStmt octx tvars immutableVars procs C ctx (size + 1) pctx),
-        (2, fun () => do
+        (1, fun () => do
           -- The block's `label` must not shadow an enclosing one (`label ∉ L`,
           -- the new-spec `block` premise), so it is drawn fresh from `labels`.
           let label ← genFreshLabel labels
@@ -591,7 +602,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
           -- generated at the smaller `size` (guaranteeing termination).
           let (body, _, _) ← genStmtChain octx tvars immutableVars procs (label :: labels) C ctx pctx size len maxStmtSeqLen
           pure ⟨[Stmt.block label body default], C, ctx⟩),
-        (2, fun () => do
+        (1, fun () => do
           let cond ← genLExpr ctx.toFVarCtx octx pctx tvars [] (size + 1) .bool
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
@@ -604,14 +615,14 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
           let (thenb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size tlen maxStmtSeqLen
           let (elseb, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size elen maxStmtSeqLen
           pure ⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩),
-        (2, fun () => do
+        (1, fun () => do
           let guard ← genCondOrNondet octx tvars ctx (size + 1) pctx
           let measure ← genOptMeasure octx tvars ctx (size + 1) pctx
           let invariants ← genInvariants octx tvars ctx (size + 1) pctx
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (body, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size blen maxStmtSeqLen
           pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]
-      (by show 0 < 4+1+1+1+3+2+2+1+2; omega)
+      (by show 0 < 6+1+1+1+3+1+1+1+1; omega)
 termination_by (size, 0, 0)
 
 /-- Generate a chain of up to `len` well-typed statement *groups*, threading both

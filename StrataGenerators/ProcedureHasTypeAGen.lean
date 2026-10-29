@@ -1182,7 +1182,7 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { C with rigidTypeVars := proc.header.typeArgs }
         (M ++ I ++ (M ++ O) ++ oldVars M) [] size len maxStmtSeqLen)) :
-    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len [] maxStmtSeqLen) := by
+    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len (maxStmtSeqLen := maxStmtSeqLen)) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM

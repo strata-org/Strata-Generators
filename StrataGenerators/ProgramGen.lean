@@ -442,7 +442,7 @@ def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     procedure (see `commonPrefix` in `ProgramGen.Core`). -/
 def genDeclProcedure [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let proc₀ ← genProcedure s.octx s.procs s.C s.Γ b.procSize b.procLen s.derivedPctx
-    b.maxStmtSeqLen
+    (maxStmtSeqLen := b.maxStmtSeqLen)
   let name ← DatatypeGen.genFreshName s.reserved
   let proc := { proc₀ with header := { proc₀.header with name := ⟨name, ()⟩ } }
   let M := commonPrefix proc.header.inputs proc.header.outputs

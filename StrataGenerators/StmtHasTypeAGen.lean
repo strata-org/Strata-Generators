@@ -1190,7 +1190,7 @@ theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
     exact ⟨4, _, .head _, by omega, hr⟩
   | succ size =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
-    exact ⟨4, _, .head _, by omega, hr⟩
+    exact ⟨6, _, .head _, by omega, hr⟩
 
 /-- A `genExitStmt` result is reachable by `genStmt … n` at *every* size `n`. -/
 theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
@@ -1269,7 +1269,7 @@ theorem block_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx)
     (⟨[Stmt.block label body default], C, ctx⟩ : GenStmtResult) ∈
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1) maxStmtSeqLen) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
-  refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
+  refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨label, hlabel, ⟨⟨len, Nat.zero_le _, hlen⟩⟩, trivial,
     (body, C_body, Γ_body), hbody, rfl⟩
@@ -1289,7 +1289,7 @@ theorem ite_det_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCt
     (⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1) maxStmtSeqLen) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
-  refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, ?_⟩
+  refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨cond, hcond, ⟨⟨tlen, Nat.zero_le _, htlen⟩⟩, trivial,
     ⟨⟨elen, Nat.zero_le _, helen⟩⟩, trivial,
@@ -1330,7 +1330,7 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
     (⟨[Stmt.loop guard measure invs body default], C, ctx⟩ : GenStmtResult) ∈
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1) maxStmtSeqLen) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
-  refine ⟨2, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))))), by omega, ?_⟩
+  refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
   exact ⟨guard, hguard, measure, hmeasure, invs, hinvs,
     ⟨⟨blen, Nat.zero_le _, hblen⟩⟩, trivial,

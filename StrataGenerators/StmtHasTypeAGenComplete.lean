@@ -26,7 +26,8 @@ an inductive relation:
   generated *name* is in the support of `genIdentName`, which holds exactly the legal bare identifiers of
   Core that are not a reserved keyword. That condition covers the label of an `assert`, of an `assume` and
   of a `cover`, the label of a block and of an invariant, the variable of an `init`, and the name of a type
-  constructor with its parameters. Each nested body is at most `maxStmtSeqLen` long, and each other
+  constructor with its parameters. Each nested body is at most `maxStmtSeqLen` long, so a statement
+  with a longer nested body is outside the support at every size. Each other
   generated *list* is inside the budget for a size at its depth. The
   type of an `init` is in the support of `genLMonoTy`, and the declaration of a `funcDecl` is in the support
   of `genDecl`.
@@ -510,28 +511,6 @@ theorem exprOk_assert_true (n : Nat) :
       (LExpr.const () (LConst.boolConst true)) LMonoTy.bool).mpr rfl)
     (by simp [emptyNames]) (by simp [allVarsInCtx]) AllTypesSimple.boolConst
     (by simp [termDepth])
-
--- ── Structural size witness ─────────────────────────────────────────────────
-
-mutual
-/-- A size at which `genStmt` can reach `s` (given the alphabet/shape conditions):
-    large enough to bound this node's own size-indexed lists and, one smaller, its
-    nested bodies. The length of a nested body is not in this witness: `maxStmtSeqLen` bounds it,
-    and not the size. -/
-def stmtDepth : Statement → Nat
-  | .cmd _ => 0
-  | .block _ body _ => stmtListDepth body + 1
-  | .ite _ t e _ => max (stmtListDepth t) (stmtListDepth e) + 1
-  | .loop _ _ invs body _ => max invs.length (stmtListDepth body) + 1
-  | .exit _ _ => 0
-  | .funcDecl _ _ => 0
-  | .typeDecl tc _ => tc.params.length
-
-/-- The size witness for a chain: bounds each element. -/
-def stmtListDepth : List Statement → Nat
-  | [] => 0
-  | s :: ss => max (stmtDepth s) (stmtListDepth ss)
-end
 
 -- ── Command-statement completeness ──────────────────────────────────────────
 
