@@ -19,7 +19,6 @@ typing spec `CmdWellTyped`.
 
 - The support of the generator: `genCmd_support_iff`
 - Soundness: `genCmd_sound`, against `CmdWellTyped`
-- Completeness: `genCmd_complete`, against `CmdHasTypeA`
 
 ## The approach
 
@@ -69,10 +68,10 @@ theorem Map.find?_of_mem_of_nodup {α β : Type} [DecidableEq α]
   | nil => cases hmem
   | cons hd rest ih =>
     obtain ⟨a, b⟩ := hd
-    rw [Map.keys_eq_map_fst] at hnodup
+    rw [Map.keys_eq_map_fst (m := (a, b) :: rest)] at hnodup
     simp only [List.map_cons, List.nodup_cons] at hnodup
     obtain ⟨hnotin, hrest⟩ := hnodup
-    simp only [Map.find?]
+    show (if a = x then some b else Map.find? rest x) = some v
     cases hmem with
     | head => simp
     | tail _ hmem' =>
@@ -80,8 +79,8 @@ theorem Map.find?_of_mem_of_nodup {α β : Type} [DecidableEq α]
       have hxkey : x ∈ rest.map Prod.fst :=
         List.mem_map.mpr ⟨(x, v), hmem', rfl⟩
       have hne : a ≠ x := fun h => hnotin (h ▸ hxkey)
-      simp only [if_neg hne]
-      exact ih (by rw [Map.keys_eq_map_fst]; exact hrest) hmem'
+      simp only [hne, if_false]
+      exact ih (by rw [Map.keys_eq_map_fst (m := rest)]; exact hrest) hmem'
 
 /-- `Map.insert` keeps the list of keys free of a duplicate. An insertion replaces a binding that
     exists, and the keys then do not change, or it adds a key that is fresh, and the keys then
@@ -94,32 +93,28 @@ theorem Map.insert_keys_nodup {α β : Type} [DecidableEq α]
   | nil => simp [Map.insert, Map.keys]
   | cons hd rest ih =>
     obtain ⟨a, b⟩ := hd
-    rw [Map.keys_eq_map_fst] at hnodup
+    rw [Map.keys_eq_map_fst (m := (a, b) :: rest)] at hnodup
     simp only [List.map_cons, List.nodup_cons] at hnodup
     obtain ⟨hnotin, hrest⟩ := hnodup
-    have hrest' : (Map.keys rest).Nodup := by rw [Map.keys_eq_map_fst]; exact hrest
-    simp only [Map.insert]
-    split
+    have hrest' : (Map.keys rest).Nodup := by rw [Map.keys_eq_map_fst (m := rest)]; exact hrest
+    by_cases hax : a = x
     · -- The key is at the head, therefore the keys do not change.
-      rename_i hax; subst hax
-      rw [Map.keys_eq_map_fst]
+      rw [Map.insert_cons_of_eq hax]
+      subst hax
+      rw [Map.keys_eq_map_fst (m := (a, v) :: rest)]
       simp only [List.map_cons, List.nodup_cons]
       exact ⟨hnotin, hrest⟩
     · -- Recurse. The head key `a` stays, and it is fresh for the result of the recursion.
-      rename_i hax
-      rw [Map.keys_eq_map_fst]
-      simp only [List.map_cons, List.nodup_cons]
-      refine ⟨?_, by rw [← Map.keys_eq_map_fst]; exact ih hrest'⟩
+      rw [Map.insert_cons_of_ne hax]
+      refine List.nodup_cons.mpr ⟨?_, ih hrest'⟩
       -- The keys of `insert rest x v` are a subset of `x :: keys rest`. However, `a ≠ x` holds
       -- and `a` is not a key of `rest`.
       intro hmem
-      have hsub := Map.insert_keys rest (key := x) (val := v)
-      rw [← Map.keys_eq_map_fst] at hmem
-      have hin := hsub hmem
+      have hin := Map.insert_keys rest (key := x) (val := v) hmem
       simp only [List.mem_cons] at hin
       rcases hin with h | h
       · exact hax h
-      · exact hnotin (by rw [← Map.keys_eq_map_fst]; exact h)
+      · exact hnotin (by rw [← Map.keys_eq_map_fst (m := rest)]; exact h)
 
 -- ── A functional context, which is a weaker condition than no duplicate ──
 
@@ -210,14 +205,14 @@ theorem Map.mem_insert {α β : Type} [DecidableEq α]
     | tail _ h => cases h
   | cons hd rest ih =>
     obtain ⟨a, b⟩ := hd
-    simp only [Map.insert] at hmem
-    split at hmem
+    by_cases hax : a = x
     · -- The insertion replaces the head, which gives `(x, v) :: rest`.
-      rename_i hax; subst hax
+      rw [Map.insert_cons_of_eq hax] at hmem
       cases hmem with
       | head => exact Or.inr rfl
       | tail _ h => exact Or.inl (List.Mem.tail _ h)
     · -- The insertion keeps the head, so recurse.
+      rw [Map.insert_cons_of_ne hax] at hmem
       cases hmem with
       | head => exact Or.inl (List.Mem.head _)
       | tail _ h =>
@@ -305,8 +300,7 @@ theorem exprCtxOk_of_corresponds {C : LContext CoreLParams} {ts : TypeScopes} {o
     ExprCtxOk C Γ.types ctx.toFVarCtx octx pctx := by
   refine hops.restrict ?_ (fun _ hp => hp) (fun _ hp => hp)
   intro p hp
-  simp only [VarCtx.toFVarCtx, List.mem_map] at hp
-  obtain ⟨q, hq, rfl⟩ := hp
+  obtain ⟨q, hq, rfl⟩ := List.mem_map.mp hp
   have hval : q.2 ∈ ctx.values := by
     rw [Map.values_eq_map_snd]
     exact List.mem_map_of_mem hq
@@ -324,8 +318,7 @@ theorem scopesCtxOk_of_corresponds {C : LContext CoreLParams} {ts : TypeScopes} 
     ScopesCtxOk C Γ.types ctx.toFVarCtx octx pctx := by
   refine ⟨hops.sigs, ?_, fun p hp => (hops.ops p hp).2, hops.polys⟩
   intro p hp
-  simp only [VarCtx.toFVarCtx, List.mem_map] at hp
-  obtain ⟨q, hq, rfl⟩ := hp
+  obtain ⟨q, hq, rfl⟩ := List.mem_map.mp hp
   exact hCorr.1 q.1 q.2 (Map.find?_of_mem_of_functional ctx q.1 q.2 hFun hq)
 
 /-- `binderAnnotsKnownIn C.knownTypes` decides `BinderAnnotsKnown C`. -/
@@ -731,12 +724,10 @@ theorem genCmd_sound
     ∃ ts', CmdWellTyped C Γ.types r.cmd ts' :=
   ⟨_, genCmd_sound_scopes octx tvars immutableVars ctx depth C Γ hops hCorr hFun hDisjoint r hr⟩
 
--- ── The completeness of `genCmd` ─────────────────────────────────────
+-- ── Facts for the completeness of commands ──
 
-/-- The predicate that says that `genLExpr` is complete at a type `τ`: the support of the generator
-    holds each well-typed expression that satisfies the side conditions of the generator.
-    `genLExprBase_complete` proves this claim, and its proof needs Mathlib. This module takes the
-    claim as a hypothesis. -/
+/-- The predicate that says that `genLExpr` is complete at every type: the support of the
+    generator holds each expression that `HasTypeA` accepts in the empty context. -/
 def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) : Prop :=
   ∀ τ e, LExpr.HasTypeA (T := LExprParams') [] e τ →
@@ -746,171 +737,6 @@ def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
 theorem knownOrTrue_of_known {kt : Lambda.KnownTypes} {e : LExpr'}
     (hknown : binderAnnotsKnownIn kt e = true) : knownOrTrue kt e = e := by
   simp only [knownOrTrue, hknown, if_true]
-
-/-- Completeness of `genCmd` against `CmdHasTypeA`: if a command is well-typed and the smaller
-    generators can reach each of its parts, then the support of `genCmd` holds it.
-
-    The proof inverts the derivation of `CmdHasTypeA`. The hypotheses give what the generator needs
-    beyond good typing:
-    - `hExprComplete`: the support of `genLExpr` holds each well-typed expression.
-    - `hNameReach`: the generator can reach the name of the target of an `init`.
-    - `hTyReach`: the support of `genLMonoTy` holds the type of the target of an `init`.
-    - `hVarInCtx`: `ctx` holds the target of a `set` command.
-
-    The generator writes the stored monotype as the declared type of an `init`.
-
-    The generator fixes each label to `"l"` and each piece of metadata to `default`. The conclusion
-    says that the generator gives a command with the same *expression* and the same *variable*, and
-    its label and metadata can differ. Any label in the support of `genIdentName` also works.
-
-    **This theorem is vacuous.** The hypothesis `hExprComplete : GenLExprComplete …` has no
-    witness, and `SpecComplete.Gaps.not_GenLExprComplete` proves it false at *each* depth. A free
-    variable with an annotation is well-typed against the empty context, and the generator cannot
-    reach it when the scope is empty. `spec_complete` takes no hypothesis of this shape. It uses
-    `SpecComplete.ExprOk`, which threads the scope and the size, and which claims reachability for
-    one expression at a time. A fix for this theorem is the same change: replace `hExprComplete`
-    with a condition for one command, as `SpecComplete.CmdExprOk` does. `spec_complete` does
-    **not** call this theorem. It inverts the derivation of `CmdHasTypeA` itself. -/
-theorem genCmd_complete
-    (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (avoid : List String)
-    (C : LContext CoreLParams) (Γ Γ' : TContext Unit)
-    (cmd : Cmd Expression)
-    (hwt : CmdHasTypeA C Γ cmd Γ')
-    (hExprComplete : GenLExprComplete ctx.toFVarCtx octx tvars depth)
-    (hNameReach : ∀ x : Identifier Unit,
-      (∃ xty eOrNd md, cmd = .init x xty eOrNd md) →
-      x.name ∈ SetGen.support (genFreshName (G := SetGen.Set) ctx avoid))
-    (hTyReach : ∀ (mty : LMonoTy),
-      mty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth))
-    (hVarInCtx : ∀ (x : Identifier Unit) (mty : LMonoTy),
-      Γ.types.find? x = some (.forAll [] mty) →
-      List.Mem (x, mty) (ctx.writable immutableVars)) :
-    ∃ r : GenCmdResult,
-      r ∈ SetGen.support
-        (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) ∧
-      CmdHasTypeA C Γ r.cmd Γ' := by
-  cases hwt with
-  | init_det x xty e mty mty₀ md Δ hfresh hnotFn hallowed hnovar _ _ hwk hexpr _ hequiv =>
-    have hname := hNameReach x ⟨xty, .det e, md, rfl⟩
-    have hmty := hTyReach mty
-    have he := hExprComplete mty e hexpr.1
-    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
-    have hdraw : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
-        GenCmdResult) ∈ SetGen.support
-          (genInitDet (G := SetGen.Set) octx tvars ctx depth depth [] avoid C.knownTypes) := by
-      simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
-      refine ⟨x.name, hname, mty, hmty, e, he, ?_⟩
-      rw [if_pos hgen]
-    have hinSupport : (⟨.init x (.forAll [] mty) (.det e) default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
-        GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
-        (Or.inl hdraw)
-    exact ⟨_, hinSupport, CmdHasType'.init_det Γ x (.forAll [] mty) e mty mty default _ hfresh
-      hnotFn hallowed hnovar rfl rfl hwk hexpr trivial hequiv⟩
-  | init_nondet x xty mty mty₀ md Δ hfresh hnotFn hallowed _ _ hwk hequiv =>
-    have hname := hNameReach x ⟨xty, .nondet, md, rfl⟩
-    have hmty := hTyReach mty
-    have hdraw : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
-        GenCmdResult) ∈ SetGen.support (genInitNondet (G := SetGen.Set) tvars ctx depth avoid) := by
-      simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
-      exact ⟨x.name, hname, mty, hmty, rfl⟩
-    have hinSupport : (⟨.init x (.forAll [] mty) .nondet default, ctx.insert ⟨x.name, ()⟩ mty⟩ :
-        GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
-        (Or.inr (Or.inl hdraw))
-    exact ⟨_, hinSupport, CmdHasType'.init_nondet Γ x (.forAll [] mty) mty mty default _ hfresh
-      hnotFn hallowed rfl rfl hwk hequiv⟩
-  | set_det x mty e md Δ hfind hexpr _ hequiv =>
-    have hentry := hVarInCtx x mty hfind
-    have he := hExprComplete mty e hexpr.1
-    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
-    have hpos : (ctx.writable immutableVars).length > 0 := List.length_pos_of_mem hentry
-    have hdraw : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈ SetGen.support
-        (genSetDet (G := SetGen.Set) octx tvars immutableVars ctx depth hpos [] C.knownTypes) := by
-      simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-                 mem_support_elements_iff]
-      refine ⟨(x, mty), hentry, e, he, ?_⟩
-      rw [if_pos hgen]
-    have hinSupport : (⟨.set x (.det e) default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
-        (Or.inr (Or.inr (Or.inl ⟨hpos, hdraw⟩)))
-    exact ⟨_, hinSupport, CmdHasType'.set_det Γ x mty e default _ hfind hexpr trivial hequiv⟩
-  | set_nondet x mty md Δ hfind hequiv =>
-    have hentry := hVarInCtx x mty hfind
-    have hpos : (ctx.writable immutableVars).length > 0 := List.length_pos_of_mem hentry
-    have hdraw : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈ SetGen.support
-        (genSetNondet (G := SetGen.Set) immutableVars ctx hpos) := by
-      simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
-                 mem_support_elements_iff]
-      exact ⟨(x, mty), hentry, rfl⟩
-    have hinSupport : (⟨.set x .nondet default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
-        (Or.inr (Or.inr (Or.inr (Or.inl ⟨hpos, hdraw⟩))))
-    exact ⟨_, hinSupport, CmdHasType'.set_nondet Γ x mty default _ hfind hequiv⟩
-  | assert l e md Δ _ hexpr _ hequiv =>
-    have he := hExprComplete .bool e hexpr.1
-    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
-    -- `"l"` is a legal identifier and not a keyword, so the support of `genIdentName` holds it.
-    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
-      StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
-        (by decide +kernel) (by decide +kernel)
-    have hlAllowed : isAllowedName "l" = true := by decide +kernel
-    have hdraw : (⟨.assert "l" e default, ctx⟩ : GenCmdResult) ∈ SetGen.support
-        (genAssertCmd (G := SetGen.Set) octx tvars ctx depth [] C.knownTypes) := by
-      simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
-      refine ⟨"l", hlblL, e, he, ?_⟩
-      rw [knownOrTrue_of_known hgen]
-    have hinSupport : (⟨.assert "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
-        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hdraw)))))
-    exact ⟨_, hinSupport, CmdHasType'.assert Γ "l" e default _ hlAllowed hexpr trivial hequiv⟩
-  | assume l e md Δ _ hexpr _ hequiv =>
-    have he := hExprComplete .bool e hexpr.1
-    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
-    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
-      StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
-        (by decide +kernel) (by decide +kernel)
-    have hlAllowed : isAllowedName "l" = true := by decide +kernel
-    have hdraw : (⟨.assume "l" e default, ctx⟩ : GenCmdResult) ∈ SetGen.support
-        (genAssumeCmd (G := SetGen.Set) octx tvars ctx depth [] C.knownTypes) := by
-      simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
-      refine ⟨"l", hlblL, e, he, ?_⟩
-      rw [knownOrTrue_of_known hgen]
-    have hinSupport : (⟨.assume "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
-        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl hdraw))))))
-    exact ⟨_, hinSupport, CmdHasType'.assume Γ "l" e default _ hlAllowed hexpr trivial hequiv⟩
-  | cover l e md Δ _ hexpr _ hequiv =>
-    have he := hExprComplete .bool e hexpr.1
-    have hgen : binderAnnotsKnownIn C.knownTypes e = true := binderAnnotsKnownIn_iff.mpr hexpr.2.1
-    have hlblL : "l" ∈ SetGen.support (genIdentName (G := SetGen.Set)) :=
-      StrataGenerators.Function.mem_support_genIdentName_of_syntactic'
-        (by decide +kernel) (by decide +kernel)
-    have hlAllowed : isAllowedName "l" = true := by decide +kernel
-    have hdraw : (⟨.cover "l" e default, ctx⟩ : GenCmdResult) ∈ SetGen.support
-        (genCoverCmd (G := SetGen.Set) octx tvars ctx depth [] C.knownTypes) := by
-      simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
-      refine ⟨"l", hlblL, e, he, ?_⟩
-      rw [knownOrTrue_of_known hgen]
-    have hinSupport : (⟨.cover "l" e default, ctx⟩ : GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx depth [] avoid C.knownTypes) :=
-      (genCmd_support_iff octx tvars immutableVars ctx depth _ [] avoid C.knownTypes).mpr
-        (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr hdraw))))))
-    exact ⟨_, hinSupport, CmdHasType'.cover Γ "l" e default _ hlAllowed hexpr trivial hequiv⟩
 
 -- ── The typing of a sequence of commands, as a chain ────────────────
 

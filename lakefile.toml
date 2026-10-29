@@ -11,13 +11,13 @@ path = "/workplace/cohenjo/strata-gen-pin/Strata"
 
 [[require]]
 name = "StrataDDM"
-path = "/workplace/cohenjo/strata-gen-pin/StrataDDM"
+path = "/workplace/cohenjo/strata-gen-pin/StrataDDM-4.34"
 
-# The plausible revision that Strata, LSpec and mathlib v4.31.0 all use.
+# The plausible revision that Strata, LSpec and mathlib v4.34.0 all use.
 [[require]]
 name = "plausible"
 git = "https://github.com/leanprover-community/plausible"
-rev = "63045536fe95024e6c18fc7b48e03f506701c5bc"
+rev = "118aa17ee84656b8bd727fef7c458ee8c833385c"
 
 [[require]]
 name = "basalt"
@@ -26,14 +26,14 @@ path = "/workplace/cohenjo/strata-gen-pin/basalt"
 [[require]]
 name = "LSpec"
 git = "https://github.com/argumentcomputer/LSpec"
-rev = "fb195bc"
+rev = "369c09df268d7077dfea04a136abbd168351a6b4"
 
-# basalt pins mathlib v4.29.1; this require selects the release for Lean 4.31.0. It is
+# basalt pins mathlib v4.29.1; this require selects the release for Lean 4.34.0. It is
 # last so that mathlib's own pins of its dependencies take precedence over basalt's.
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
-rev = "v4.31.0"
+rev = "v4.34.0"
 
 [[lean_lib]]
 name = "StrataGenerators"

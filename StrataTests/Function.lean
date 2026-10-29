@@ -14,9 +14,10 @@ open StrataGenerators.Test
 open StrataGenerators.Stmt.TestSupport
 
 /-- Each free variable in the body and in the measure of a generated function has an
-    annotation that agrees with the type map of the context that the generator used. This
-    holds because `pickFVar` always emits an `fvar` node with the annotation `some τ`, where
-    `τ` is the type that the variable has in the context. -/
+    annotation that agrees with the type of the formal of that name, or else with the type map
+    of the context that the generator used. This holds because `pickFVar` always emits an
+    `fvar` node with the annotation `some τ`, where `τ` is the type that the variable has in
+    the context. -/
 @[strata_property]
 def fnFvarsAnnotated : TestDecl :=
   (TestDecl.property "function: fvars annotated by context type map"

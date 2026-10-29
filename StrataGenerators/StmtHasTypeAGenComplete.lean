@@ -501,8 +501,8 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     refine hlift ⟨.set x (.det e) default, ctx⟩ ?_
     rw [genCmd_support_iff octx tvars [] ctx n _ [] [] C.knownTypes]
     refine Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩))
-    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff]
-    exact ⟨(x, mty), hmem, e, hE mty (hctxFind x mty hfind),
+    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff]
+    exact ⟨(x, mty), (mem_support_elements_iff _).mpr hmem, e, hE mty (hctxFind x mty hfind),
       by rw [if_pos (binderAnnotsKnownIn_iff.mpr hexpr.2.1)]⟩
   | set_nondet x mty md _ hfind hequiv =>
     have hmdc : md = default := hshape
@@ -512,8 +512,8 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     refine hlift ⟨.set x .nondet default, ctx⟩ ?_
     rw [genCmd_support_iff octx tvars [] ctx n _ [] [] C.knownTypes]
     refine Or.inr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩)))
-    simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff]
-    exact ⟨(x, mty), hmem, rfl⟩
+    simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff]
+    exact ⟨(x, mty), (mem_support_elements_iff _).mpr hmem, rfl⟩
   | assert l e md _ hexpr hequiv =>
     have hmdc : md = default := hshape
     subst hmdc
@@ -587,7 +587,9 @@ theorem callInputs_binderAnnotsKnown {C : LContext CoreLParams} {P : Program} {t
   intro e he
   obtain ⟨i, hi, rfl⟩ := List.mem_iff_getElem.mp he
   have hj : i < proc.header.inputs.values.length := by
-    rw [ListMap.values_eq_map_snd, List.length_map, ← (hwf.argsMatch hfind).inputCount]
+    rw [ListMap.values_eq_map_snd,
+      show (proc.header.inputs.map Prod.snd).length = proc.header.inputs.length from
+        List.length_map .., ← (hwf.argsMatch hfind).inputCount]
     exact hi
   have hty := hin i hi hj
   cases hcase : (CallArg.getInputExprs callArgs)[i] with

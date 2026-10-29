@@ -1960,15 +1960,6 @@ theorem genMutuallyRecursiveDatatypes_typeParams {baseTypes : List String}
   rw [← hparamsEq]
   exact hperm _ hmemPL
 
-/-- A name that `Core.isAllowedName` accepts starts with neither `Lambda.genTyPrefix` nor
-    `Lambda.elimTyPrefix`. -/
-theorem not_reserved_tyPrefix_of_isAllowedName {v : String} (h : Core.isAllowedName v = true) :
-    genTyPrefix.toList.isPrefixOf v.toList = false ∧
-      elimTyPrefix.toList.isPrefixOf v.toList = false := by
-  simp only [Core.isAllowedName_eq_toList, Core.reservedNamePrefixes, List.any_cons,
-    List.any_nil, Bool.or_false, Bool.not_eq_true', Bool.or_eq_false_iff] at h
-  exact ⟨h.1, h.2.2⟩
-
 /-- **The main theorem for soundness, which gives `argsWF`.** Each constructor argument type
     of a block from `genMutuallyRecursiveDatatypes` is well-formed for that block. This
     statement is exactly the field `argsWF` of `Core.TypeSpec.MutualADTWF`.
@@ -2390,18 +2381,34 @@ theorem find?_name_eq_none {block : MutualDatatype Unit} {name : String}
     simp only [List.find?_cons, beq_eq_false_iff_ne.mpr (fun h => hne0 h.symm)]
     exact ih hne'
 
+/-- `allDatatypes_push` for an arbitrary factory. -/
+theorem allDatatypes_push' {F : @TypeFactory Unit} {block : MutualDatatype Unit} :
+    TypeFactory.allDatatypes (F.push block) = F.allDatatypes ++ block := by
+  unfold TypeFactory.allDatatypes
+  rw [Array.toList_push (xs := F)]
+  simp
+
 /-- A push of `block` adds its datatypes to the end of the flat list of datatypes. -/
 theorem allDatatypes_push {C : LContext CoreLParams} {block : MutualDatatype Unit} :
     TypeFactory.allDatatypes (C.datatypes.push block) =
-      C.datatypes.allDatatypes ++ block := by
-  simp [TypeFactory.allDatatypes, Array.toList_push, List.flatten_append]
+      C.datatypes.allDatatypes ++ block :=
+  allDatatypes_push'
 
-/-- `allDatatypes_push` for an arbitrary factory (not just one that is some
-    context's `datatypes` field). Used by `tySymInhab_push`, which is stated over a
-    bare `TypeFactory`. -/
-theorem allDatatypes_push' {F : @TypeFactory Unit} {block : MutualDatatype Unit} :
-    TypeFactory.allDatatypes (F.push block) = F.allDatatypes ++ block := by
-  simp [TypeFactory.allDatatypes, Array.toList_push, List.flatten_append]
+/-- Looking a name up in a factory with `block` pushed searches the datatypes of the factory and
+    then those of `block`. -/
+theorem getType_push_eq {F : @TypeFactory Unit} {block : MutualDatatype Unit} {name : String} :
+    TypeFactory.getType (F.push block) name =
+      (F.allDatatypes ++ block).find? (fun d => d.name == name) := by
+  show (TypeFactory.allDatatypes (F.push block)).find? (fun d => d.name == name) = _
+  rw [allDatatypes_push']
+
+/-- The type names of a factory with `block` pushed are those of the factory, then the names of
+    `block`. -/
+theorem allTypeNames_push {F : @TypeFactory Unit} {block : MutualDatatype Unit} :
+    TypeFactory.allTypeNames (F.push block) = F.allTypeNames ++ block.map (·.name) := by
+  show (TypeFactory.allDatatypes (F.push block)).map (·.name) = _
+  rw [allDatatypes_push', List.map_append]
+  rfl
 
 /-- `getType` on a factory with `block` added. A push of `block` makes the name of each member
     resolve to that member. This result needs two conditions. The name must not already
@@ -2414,7 +2421,7 @@ theorem getType_push_self {C : LContext CoreLParams} {block : MutualDatatype Uni
   have hnone : C.datatypes.allDatatypes.find? (fun d' => d'.name == d.name) = none := hnew
   -- `find?` passes over the first part, which holds no such name, and it then matches `d`
   -- in the block at the end.
-  rw [TypeFactory.getType, allDatatypes_push, List.find?_append, hnone, Option.none_or,
+  rw [getType_push_eq, List.find?_append, hnone, Option.none_or,
       find?_name_eq_of_mem hnodup hd]
 
 /-- `getType` on the longer factory, for a name that is absent from the block. The result
@@ -2425,7 +2432,7 @@ theorem getType_push_other {C : LContext CoreLParams} {block : MutualDatatype Un
     TypeFactory.getType (C.datatypes.push block) name = none := by
   have hnone : C.datatypes.allDatatypes.find? (fun d' => d'.name == name) = none := hext
   -- The first part gives no result, by `hext`. No block datatype matches, by `hne`.
-  rw [TypeFactory.getType, allDatatypes_push, List.find?_append, hnone, Option.none_or,
+  rw [getType_push_eq, List.find?_append, hnone, Option.none_or,
       find?_name_eq_none hne]
 
 /-! ### Transporting inhabitance of an *existing* datatype across a block push
@@ -2471,10 +2478,10 @@ theorem tySymInhab_push {adts : @TypeFactory Unit} {block : MutualDatatype Unit}
       TypeFactory.getType (adts.push block) n = adts.getType n := by
     intro n hn
     rcases hsome : adts.getType n with _ | d
-    · rw [TypeFactory.getType, allDatatypes_push', List.find?_append,
+    · rw [getType_push_eq, List.find?_append,
         (show adts.allDatatypes.find? (fun d' => d'.name == n) = none from hsome),
         Option.none_or, find?_name_eq_none hn]
-    · rw [TypeFactory.getType, allDatatypes_push', List.find?_append,
+    · rw [getType_push_eq, List.find?_append,
         (show adts.allDatatypes.find? (fun d' => d'.name == n) = some d from hsome),
         Option.some_or]
   refine TySymInhab.rec
@@ -2752,8 +2759,8 @@ theorem getType_push_perm {C : LContext CoreLParams} {block block' : MutualDatat
   · -- `name` resolves in both blocks, and it resolves to the one datatype with that name.
     obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hmem
     have hd' : d ∈ block' := (hperm.mem_iff).mp hd
-    rw [TypeFactory.getType, allDatatypes_push, List.find?_append,
-        TypeFactory.getType, allDatatypes_push, List.find?_append]
+    rw [getType_push_eq, List.find?_append,
+        getType_push_eq, List.find?_append]
     -- Both blocks match `d`. The first part, which comes from `C.datatypes`, is the same for
     -- both.
     rcases hpre : (C.datatypes.allDatatypes.find? (fun d' => d'.name == d.name)) with _ | dd
@@ -2762,8 +2769,8 @@ theorem getType_push_perm {C : LContext CoreLParams} {block block' : MutualDatat
     · rw [hpre, Option.some_or, Option.some_or]
   · -- `name` resolves in no block. Therefore both sides reduce to the first part.
     have hmem' : name ∉ block'.map (·.name) := fun h => hmem ((hperm.map (·.name)).mem_iff.mpr h)
-    rw [TypeFactory.getType, allDatatypes_push, List.find?_append,
-        TypeFactory.getType, allDatatypes_push, List.find?_append,
+    rw [getType_push_eq, List.find?_append,
+        getType_push_eq, List.find?_append,
         find?_name_eq_none hmem, find?_name_eq_none hmem']
 
 /-- **Inhabitance holds for two factories that agree on `getType`.** The three relations
@@ -2987,8 +2994,7 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
       typeArgsAgree := fun d hd d' hd' _ =>
         (hpperm d hd).mem_iff.trans (hpperm d' hd').mem_iff.symm
       typeArgsNodup := fun d hd => (hpperm d hd).nodup_iff.mpr hpnodup
-      typeArgsNotReserved := fun d hd v hv =>
-        not_reserved_tyPrefix_of_isAllowedName (hpallowed v ((hpperm d hd).mem_iff.mp hv))
+      typeArgsNotReserved := fun d hd v hv => hpallowed v ((hpperm d hd).mem_iff.mp hv)
       namesFresh := ?_
       namesNew := ?_
       argVarsScoped := genMutuallyRecursiveDatatypes_argVarsScoped hb

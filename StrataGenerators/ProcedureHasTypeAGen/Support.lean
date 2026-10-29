@@ -7,10 +7,10 @@ open StrataGenerators.Stmt
 /-!
 # A concrete `GenStmtSoundEnv` for the procedure generator
 
-`genProcedure` gives a structured body through `genStmtChain`, from a scope that holds the *output* parameters of
-the procedure. The soundness proofs of the statement generator need a `GenStmtSoundEnv` instance, which is a
-bundle that gives a semantic `TContext` for each flat `VarCtx`, together with the correspondence
-`VarCtxCorresponds` and the obligations at the level of an expression.
+`genProcedure` gives a structured body through `genStmtChain`, from a scope that holds the inputs, the
+outputs and the `old` bindings of the procedure. The soundness proofs of the statement generator need a
+`GenStmtSoundEnv` instance, which is a bundle that gives a semantic `TContext` for each flat `VarCtx`,
+together with the correspondence `VarCtxCorresponds` and the obligations at the level of an expression.
 
 This file builds one concrete such environment, `procStmtEnv`, at an empty context of the free variables. The
 construction is possible because `VarCtxCorresponds` is stated in terms of `Map.find?`, and not in terms of a
@@ -20,11 +20,7 @@ raw membership in a list. With the form over `find?`, the natural reading of one
 
 satisfies the correspondence *unconditionally*, via `Map.find?_fmap`.
 
-The single scope is exactly the shape `procBodyContext` produces for a procedure
-with empty `typeArgs` / `inputs` / in-out params (its body scope is then just the
-output parameters pushed as one new scope onto the empty ambient `Γ`), which is
-what lets `genProcedure_sound` line up the body's `StatementsHasTypeA` with the
-declarative `ProcBodyHasType'.structured` obligation.
+The single scope has the shape of `procBodyScopes []`: one new scope over an empty stack.
 -/
 
 namespace StrataGenerators.Procedure
@@ -37,8 +33,12 @@ theorem Map.fmap_insert [DecidableEq α] (m : Map α β) (x : α) (v : β) (f : 
   | nil => rfl
   | cons p m ih =>
     obtain ⟨a, b⟩ := p
-    simp only [Map.insert, Map.fmap, List.map]
-    split <;> simp_all [Map.fmap]
+    by_cases hax : a = x
+    · rw [Map.insert_cons_of_eq hax]
+      exact (Map.insert_cons_of_eq (b := f b) (m := Map.fmap f m) hax).symm
+    · rw [Map.insert_cons_of_ne hax]
+      refine Eq.trans ?_ (Map.insert_cons_of_ne (b := f b) (m := Map.fmap f m) hax).symm
+      exact congrArg ((a, f b) :: ·) ih
 
 /-- Strata's first-match `Map.find?` is `List.lookup`. Bridges the flat `VarCtx` lookup to
     `Freshening.find?_ofList_reverse`, which speaks about `List.lookup`. -/
@@ -69,8 +69,9 @@ def procToTCtx (ctx : VarCtx) : TContext Unit :=
 theorem procToTCtx_find (ctx : VarCtx) (x : Identifier Unit) :
     (procToTCtx ctx).types.find? x = (Map.find? ctx x).map (fun mty => (LTy.forAll [] mty)) := by
   show Strata.Util.HMaps.find? [_] x = _
-  rw [Strata.Util.HMaps.find?_single_scope, Freshening.find?_ofList_reverse,
-    ← Map.find?_eq_lookup, Map.find?_fmap]
+  rw [Strata.Util.HMaps.find?_single_scope,
+    Freshening.find?_ofList_reverse (ctx.fmap (fun mty => (LTy.forAll [] mty))) x,
+    ← Map.find?_eq_lookup (ctx.fmap (fun mty => (LTy.forAll [] mty))) x, Map.find?_fmap]
 
 /-- The correspondence between a flat context and a `TContext` holds for `procToTCtx` at *each* flat context, and
     it needs no hypothesis, because `VarCtxCorresponds` is stated over `find?`. -/
@@ -108,7 +109,8 @@ private theorem procToTCtx_scope_find (ctx : VarCtx) (k : Identifier Unit) :
     Strata.Util.HMap.find?
         (Strata.Util.HMap.ofList (ctx.fmap (fun mty => (LTy.forAll [] mty))).reverse) k
       = (Map.find? ctx k).map (fun mty => (LTy.forAll [] mty)) := by
-  rw [Freshening.find?_ofList_reverse, ← Map.find?_eq_lookup, Map.find?_fmap]
+  rw [Freshening.find?_ofList_reverse (ctx.fmap (fun mty => (LTy.forAll [] mty))) k,
+    ← Map.find?_eq_lookup (ctx.fmap (fun mty => (LTy.forAll [] mty))) k, Map.find?_fmap]
 
 /-- `procToTCtx` commutes with `VarCtx.insert`, up to `TContext.Equiv`. That is the obligation about an `init`
     command in each environment for the soundness proofs. Only that equivalence is available, and only it is
@@ -152,15 +154,5 @@ def procStmtEnv (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx := 
 @[simp] theorem procStmtEnv_toTCtx (octx : OpCtx) (tvars : List TyIdentifier)
     (pctx : PolyOpCtx) :
     (procStmtEnv octx tvars pctx).toTCtx = procToTCtx := rfl
-
--- ── The flat context under the aliases of an ambient context ──────────────
-
-/-- The `Γ`-parameterized single-scope `TContext` for a flat `VarCtx`: one new
-    scope in which every variable is bound to its declared monotype as a trivial
-    polytype, *carrying the ambient `Γ`'s alias list*. This aligns with the
-    declarative `procBodyContext Γ proc`, which pushes the body scope onto
-    `Γ.types` and preserves `Γ.aliases`; when `Γ.types = []` the two agree. -/
-def procToTCtxΓ (Γ : TContext Unit) (ctx : VarCtx) : TContext Unit :=
-  { types := (procToTCtx ctx).types, aliases := Γ.aliases }
 
 end StrataGenerators.Procedure

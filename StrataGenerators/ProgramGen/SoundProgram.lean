@@ -2,9 +2,7 @@ import StrataGenerators.ProgramGen.Sound
 import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProcedureHasTypeAGen
 import StrataGenerators.ProgramGen.ProcSigThread
-import Strata.Languages.Core.DatatypeTypeProps
 import Strata.Languages.Core.TypingSpec
-import Strata.Languages.Core.ProgramTypeProps
 
 /-!
 # Whole-program soundness
@@ -113,7 +111,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
       have hmono : ∀ (n : String) (v : Nat), s.C.knownTypes[n]? = some v →
           C'.knownTypes[n]? = some v := fun _ _ hv => addMutualBlock_knownTypes_getElem? hadd hv
       have harities := simpleTyArities_of_inv hinv
-      obtain ⟨F, hb⟩ := blockFunctionsAdded_of_addMutualBlock hadd hwf hinv.datatypesKnown
+      obtain ⟨F, hb⟩ := blockFunctionsAdded_of_addMutualBlock hadd hinv.datatypesKnown
         harities.arrow harities.bool
       -- The schemes after the step are the block's derived schemes and the earlier ones.
       have hpctx : ∀ e ∈ (adtDerivedPolyOps block b.derivedFamilies ++ s.pctx) ++
@@ -157,11 +155,9 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
       · -- datatypesReserved: the datatype names of `C'` are the old ones plus the
         -- block's names, and the reserved set grew by exactly the block's names.
         intro n hn
-        rw [addMutualBlock_datatypes hadd, TypeFactory.allTypeNames, allDatatypes_push,
-          List.map_append, List.mem_append] at hn
+        rw [addMutualBlock_datatypes hadd, allTypeNames_push, List.mem_append] at hn
         rcases hn with hold | hblk
-        · exact List.mem_append_right _ (hinv.datatypesReserved n
-            (by rw [TypeFactory.allTypeNames]; exact hold))
+        · exact List.mem_append_right _ (hinv.datatypesReserved n hold)
         · exact List.mem_append_left _ hblk
       · -- **dtPoolOk at the grown pool (direction (4)).** The new pool is this
         -- block's datatypes followed by the old pool.
@@ -176,7 +172,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
           storedRefsAbsent_of_inv hinv hfresh_res
         refine { known := ?_, arity := ?_, inhab := ?_ }
         · intro kc hkc
-          rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
+          rw [hdt, allTypeNames_push]
           rcases List.mem_append.mp hkc with hnew | hold
           · -- A new pool entry's name is a block name.
             obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
@@ -260,6 +256,7 @@ theorem procWellTyped_rename {P : Program} {C : LContext CoreLParams} {ts : Type
     ProcWellTyped P C ts { proc with header := { proc.header with name := nm } } :=
   { inputsNodup := h.inputsNodup
     outputsNodup := h.outputsNodup
+    oldNamesFresh := h.oldNamesFresh
     typeArgsNodup := h.typeArgsNodup
     noUndeclaredVars := h.noUndeclaredVars
     signatureWellKinded := h.signatureWellKinded

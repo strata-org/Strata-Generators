@@ -131,8 +131,7 @@ theorem genInputs_key_name_reachable (genTy : SetGen.Set LMonoTy) (depth : Nat)
   obtain ⟨names, hnames, rfl⟩ := hidents
   rw [← List.mem_of_dedup] at hk
   obtain ⟨s, hs, rfl⟩ := List.mem_map.mp hk
-  rw [genNameList, mem_support_listOfMaxLength_iff] at hnames
-  exact hnames.2 s hs
+  exact (mem_support_listOfMaxLength_iff.mp hnames).2 s hs
 
 /-- Each key of a signature that `genInputs` gives holds no space, so the characters of its `name`
     hold no `' '`. The proof joins `genInputs_key_name_reachable` and `genIdentName_no_space`. This
@@ -159,8 +158,12 @@ theorem find?_ofList_eq_lookup_reverse {α β : Type} [BEq α] [LawfulBEq α] [H
 theorem funcScopes_scope_keys (func : Function) :
     ((func.inputs.map (fun (id, mty) => (id, LTy.forAll [] mty))).reverse.map Prod.fst) =
       func.inputs.keys.reverse := by
-  rw [List.map_reverse, List.map_map, ListMap.keys_eq_map_fst]
-  rfl
+  rw [List.map_reverse]
+  congr 1
+  generalize func.inputs = m
+  induction m with
+  | nil => rfl
+  | cons hd tl ih => obtain ⟨k, v⟩ := hd; exact congrArg (k :: ·) ih
 
 /-- `funcScopes` declares every formal at its type. -/
 theorem funcScopes_find?_formal (ts : TypeScopes) (func : Function)
@@ -212,13 +215,14 @@ theorem genOptExpr_mem {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdentifie
 /-- Filtering a signature keeps its keys distinct when they were distinct. -/
 theorem keys_filter_nodup {α β : Type} (q : α × β → Bool) (m : List (α × β))
     (h : (ListMap.keys m).Nodup) : (ListMap.keys (m.filter q)).Nodup := by
-  rw [ListMap.keys_eq_map_fst] at h ⊢
+  rw [ListMap.keys_eq_map_fst (m := m)] at h
+  rw [ListMap.keys_eq_map_fst (m := m.filter q)]
   exact List.Nodup.sublist (List.Sublist.map Prod.fst List.filter_sublist) h
 
 /-- Each key of a filtered signature is the key of an entry that passes the filter. -/
 theorem mem_keys_filter {α β : Type} (q : α × β → Bool) (m : List (α × β)) (x : α)
     (hx : x ∈ ListMap.keys (m.filter q)) : ∃ y, (x, y) ∈ m ∧ q (x, y) = true := by
-  rw [ListMap.keys_eq_map_fst] at hx
+  rw [ListMap.keys_eq_map_fst (m := m.filter q)] at hx
   obtain ⟨⟨a, b⟩, hab, rfl⟩ := List.mem_map.mp hx
   obtain ⟨hmem, hq⟩ := List.mem_filter.mp hab
   exact ⟨b, hmem, hq⟩
@@ -334,7 +338,7 @@ theorem find?_of_mem_nodup {m : ListMap (Identifier Unit) LMonoTy} {x : Identifi
     · have hyx : y ≠ x := by
         rintro rfl
         refine hnd.1 ?_
-        rw [ListMap.keys_eq_map_fst]
+        rw [ListMap.keys_eq_map_fst (m := rest)]
         exact List.mem_map_of_mem (f := Prod.fst) hrest
       simp only [ListMap.find?, hyx, if_false]
       exact ih hnd.2 hrest

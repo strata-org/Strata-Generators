@@ -71,12 +71,15 @@ namespace StrataGenerators.Procedure
 theorem mem_writable_keys_iff (ctx : VarCtx) (immutableVars : List (Identifier Unit))
     (k : Identifier Unit) :
     k ∈ Map.keys (ctx.writable immutableVars) ↔ k ∈ Map.keys ctx ∧ (!immutableVars.contains k) = true := by
-  simp only [VarCtx.writable, Map.keys_eq_map_fst, List.mem_map, List.mem_filter]
+  rw [Map.keys_eq_map_fst (ctx.writable immutableVars), Map.keys_eq_map_fst ctx]
   constructor
-  · rintro ⟨p, ⟨hp_mem, hp_pred⟩, rfl⟩
-    exact ⟨⟨p, hp_mem, rfl⟩, hp_pred⟩
-  · rintro ⟨⟨p, hp_mem, rfl⟩, hpred⟩
-    exact ⟨p, ⟨hp_mem, hpred⟩, rfl⟩
+  · intro h
+    obtain ⟨p, hp, rfl⟩ := List.mem_map.mp h
+    obtain ⟨hp_mem, hp_pred⟩ := List.mem_filter.mp hp
+    exact ⟨List.mem_map_of_mem hp_mem, hp_pred⟩
+  · rintro ⟨h, hpred⟩
+    obtain ⟨p, hp_mem, rfl⟩ := List.mem_map.mp h
+    exact List.mem_map_of_mem (List.mem_filter.mpr ⟨hp_mem, hpred⟩)
 
 /-- **Per-command modification-rights invariant.** For any command in `genCmd`'s
     support, every modified variable is a *mutable* key of the input context
@@ -135,9 +138,7 @@ theorem genCmd_mutableVars
       intro v hv
       simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.mem_singleton] at hv
       rw [hv]; apply List.mem_append_left
-      show name ∈ Map.keys (ctx.writable immutableVars)
-      rw [VarCtx.writable, Map.keys_eq_map_fst]
-      exact List.mem_map.mpr ⟨(name, mty), hmem, rfl⟩
+      exact Map.mem_keys_of_mem (ctx.writable immutableVars) name mty hmem
   · -- set_nondet
     simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
                mem_support_elements_iff] at hr
@@ -146,9 +147,7 @@ theorem genCmd_mutableVars
     intro v hv
     simp only [HasVarsImp.modifiedVars, Cmd.modifiedVars, List.mem_singleton] at hv
     rw [hv]; apply List.mem_append_left
-    show name ∈ Map.keys (ctx.writable immutableVars)
-    rw [VarCtx.writable, Map.keys_eq_map_fst]
-    exact List.mem_map.mpr ⟨(name, mty), hmem, rfl⟩
+    exact Map.mem_keys_of_mem (ctx.writable immutableVars) name mty hmem
   · -- assert (label sampled via `genIdentName`)
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
     obtain ⟨_, _, _, _, rfl⟩ := hr
@@ -306,10 +305,14 @@ theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
 theorem mem_keys_append_exists (M T : @LMonoTySignature Unit) (v : Identifier Unit)
     (hv : v ∈ M.keys ++ T.keys) :
     ∃ q : Identifier Unit × LMonoTy, q ∈ List.append M T ∧ q.1 = v := by
-  -- `keys` is a `map` of the first projection, so the append of the two lists of the keys is one `map` over the
-  -- append of the two signatures. `List.mem_map` then closes the goal.
-  rw [ListMap.keys_eq_map_fst, ListMap.keys_eq_map_fst, ← List.map_append] at hv
-  exact List.mem_map.mp hv
+  -- A key of either block is the first component of one of that block's entries.
+  rcases List.mem_append.mp hv with h | h
+  · rw [ListMap.keys_eq_map_fst M] at h
+    obtain ⟨q, hq, rfl⟩ := List.mem_map.mp h
+    exact ⟨q, List.mem_append_left _ hq, rfl⟩
+  · rw [ListMap.keys_eq_map_fst T] at h
+    obtain ⟨q, hq, rfl⟩ := List.mem_map.mp h
+    exact ⟨q, List.mem_append_right _ hq, rfl⟩
 
 /-- **The invariant about the rights to modify a variable, for one call statement.** The emitted group is the
     inline chain of the `init` statements followed by the `call`, as a statement *list*, and the generator splices

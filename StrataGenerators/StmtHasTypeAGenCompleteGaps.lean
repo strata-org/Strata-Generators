@@ -398,7 +398,7 @@ theorem outTargets_sigP (avoid : List String) :
     outTargets [] callerCtx (StrataGenerators.Stmt.substSig [] sigP.O) avoid
       = [(⟨"r", ()⟩, (.int : LMonoTy))] := by
   rw [outTargets_eq_of_reused [] callerCtx _ avoid (by decide)]
-  decide
+  rfl
 
 /-- **Gap 3: the out-target name choice.** The `call` rule constrains an `out`
     argument's existence, its type and its writability. It says nothing about its
@@ -470,11 +470,9 @@ theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
       List.filterMap_cons, List.filterMap_nil, List.length_cons, List.length_nil] using hi
     have hzero : i = 0 := by omega
     subst hzero
-    have hval : ∀ h : 0 < (ListMap.values procP.header.inputs).length,
-        (ListMap.values procP.header.inputs)[0]'h = .int := fun _ => rfl
     show ExprWellTyped C _ (LExpr.const () (.intConst 1))
-      (LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) (ListMap.values procP.header.inputs)[0])
-    rw [hval, Lambda.subst_ofScopes_nilScope]
+      (LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) .int)
+    rw [Lambda.subst_ofScopes_nilScope]
     refine ⟨.const, ?_, ⟨?_, ?_, ?_⟩⟩
     · intro t ht
       simp [LExpr.binderAnnotations] at ht

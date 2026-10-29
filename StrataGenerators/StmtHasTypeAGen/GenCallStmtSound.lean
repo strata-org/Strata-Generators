@@ -57,7 +57,8 @@ theorem lm_length_append {α β} (a b : ListMap α β) :
 /-- The values list has the same length as the map. -/
 @[simp]
 theorem lm_values_length {α β} (m : ListMap α β) : m.values.length = m.length := by
-  simp only [ListMap.values_eq_map_snd, List.length_map]
+  rw [ListMap.values_eq_map_snd]
+  exact List.length_map ..
 
 -- ── Forall₂ and substitution lemmas ───────────────────────────────────────
 
@@ -263,10 +264,12 @@ theorem getIn_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Exp
       = M.map (fun p => LExpr.fvar () p.1 none) ++ exprs := by
   rw [mkArgs, CallArg.getInputExprs, Calls.getInputExprs, List.filterMap_append,
     filterMap_mergeBy_left _ mask _ _
-      (by rintro a ha; simp only [List.mem_map] at ha; obtain ⟨p, _, rfl⟩ := ha; rfl)]
-  simp only [List.filterMap_map, Function.comp_def, filterMap_some_comp,
-    List.filterMap_some]
-  rfl
+      (by rintro a ha; obtain ⟨p, _, rfl⟩ := List.mem_map.mp ha; rfl)]
+  congr 1
+  · induction M with
+    | nil => rfl
+    | cons hd tl ih => exact congrArg (LExpr.fvar () hd.1 none :: ·) ih
+  · simp only [List.filterMap_map, Function.comp_def, List.filterMap_some]
 
 /-- `getLhs (mkArgs M T exprs mask)` is the LHS (assignable) positions: the in-out
     keys followed by the out-argument target names. The by-value inputs contribute
@@ -276,9 +279,14 @@ theorem getLhs_mkArgs (M T : @LMonoTySignature Unit) (exprs : List Expression.Ex
     CallArg.getLhs (mkArgs M T exprs mask) = M.keys ++ T.keys := by
   rw [mkArgs, CallArg.getLhs, List.filterMap_append,
     filterMap_mergeBy_right _ mask _ _
-      (by rintro a ha; simp only [List.mem_map] at ha; obtain ⟨e, _, rfl⟩ := ha; rfl)]
-  simp only [List.filterMap_map, Function.comp_def, filterMap_some_comp,
-    ListMap.keys_eq_map_fst]
+      (by rintro a ha; obtain ⟨e, _, rfl⟩ := List.mem_map.mp ha; rfl)]
+  congr 1
+  · induction M with
+    | nil => rfl
+    | cons hd tl ih => obtain ⟨k, v⟩ := hd; exact congrArg (k :: ·) ih
+  · induction T with
+    | nil => rfl
+    | cons hd tl ih => obtain ⟨k, v⟩ := hd; exact congrArg (k :: ·) ih
 
 /-- **Every argument order the `call` rule leaves free is reachable.** Fix a callee
     block `M`/`T` and by-value inputs `exprs`. For *any* order-preserving
@@ -485,11 +493,11 @@ theorem keyval_mem {α β} (m : ListMap α β) (i : Nat)
     (hi : i < m.keys.length) (hj : i < m.values.length) :
     (m.keys[i], m.values[i]) ∈ m.toList := by
   have hidx : i < m.toList.length := by
-    rw [ListMap.keys_eq_map_fst, List.length_map] at hi; exact hi
+    rw [ListMap.keys.length] at hi; exact hi
   rw [List.mem_iff_getElem]
   refine ⟨i, hidx, ?_⟩
-  simp only [ListMap.keys_eq_map_fst, ListMap.values_eq_map_snd, List.getElem_map]
-  rfl
+  simp only [ListMap.keys_eq_map_fst, ListMap.values_eq_map_snd]
+  exact Prod.ext (List.getElem_map ..).symm (List.getElem_map ..).symm
 
 -- ── The call-typing obligation ───────────────────────────────────────────
 
@@ -593,9 +601,12 @@ theorem argsMatch_mkArgs {proc : Procedure} (M I O T : @LMonoTySignature Unit)
     (hInotMO : ∀ k ∈ I.keys, k ∉ (M ++ O).keys) (hMnotO : ∀ k ∈ M.keys, k ∉ O.keys) :
     WF.ArgsMatchSignature proc (mkArgs M T exprs mask) := by
   have hkM : M.keys.length = (M.map (fun p => CallArg.inoutArg (P := Expression) p.1)).length := by
-    rw [List.length_map, ListMap.keys.length]
+    rw [ListMap.keys.length]
+    exact (List.length_map ..).symm
+  have hfvM : (M.map (fun p => (LExpr.fvar () p.1 none : Expression.Expr))).length = M.length :=
+    List.length_map ..
   refine ⟨?_, ?_, ?_, ?_⟩
-  · rw [getIn_mkArgs, hInputs, List.length_append, List.length_map, hExLen, lm_length_append]
+  · rw [getIn_mkArgs, hInputs, List.length_append, hfvM, hExLen, lm_length_append]
   · rw [getLhs_mkArgs, hOutputs, List.length_append, ListMap.keys.length, ListMap.keys.length,
       hTLen, lm_length_append]
   · rintro ⟨k, a⟩ hka
@@ -718,8 +729,9 @@ theorem call_recipe_inout_sound
       have hidxK : i < M.keys.length := by rw [hkeysM]; exact hlt
       have harg : (List.map (fun p => LExpr.fvar () p.1 none) M ++ exprs)[i]
           = LExpr.fvar () (M.keys[i]'hidxK) none := by
-        simp only [List.getElem_append_left (by rw [hmaplen]; exact hlt), List.getElem_map,
-          ListMap.keys_eq_map_fst]
+        simp only [List.getElem_append_left (by rw [hmaplen]; exact hlt), ListMap.keys_eq_map_fst]
+        exact (List.getElem_map _).trans
+          (congrArg (fun x => (LExpr.fvar () x none : Expression.Expr)) (List.getElem_map _).symm)
       have hval : (M.values ++ I.values)[i]'hj = M.values[i]'hidxM :=
         List.getElem_append_left hidxM
       rw [harg, hval]

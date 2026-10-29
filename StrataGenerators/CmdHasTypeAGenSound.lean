@@ -42,8 +42,8 @@ theorem freshNamesDisjointFromExprs_toFVarCtx (octx : OpCtx) (tvars : List TyIde
     exact hsub this
   -- Unfold `ctx.toFVarCtx` to `ctx.map (fun q => (q.1.name, q.2))`, and take the scope entry `q`
   -- of `ctx` that gave the variable. The key of that entry is `⟨name, ()⟩`.
-  simp only [VarCtx.toFVarCtx, List.map_map, List.mem_map, Function.comp_def] at hmem'
-  obtain ⟨q, hq, hqeq⟩ := hmem'
+  obtain ⟨p, hp, hqeq⟩ := List.mem_map.mp hmem'
+  obtain ⟨q, hq, rfl⟩ := List.mem_map.mp hp
   -- `⟨q.1.name, ()⟩` equals `⟨name, ()⟩`, and the metadata is `Unit`. Therefore
   -- `q.1 = ⟨name, ()⟩`, and `ctx` holds `(⟨name, ()⟩, q.2)`, which is `q`.
   have hqfst : q.1 = (⟨name, ()⟩ : Identifier Unit) := by

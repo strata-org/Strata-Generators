@@ -24,13 +24,10 @@ completeness proof takes that membership as a hypothesis, and `spec_complete` ca
 
 ## The context-alignment lemma
 
-The one genuinely procedure-specific fact is `procBodyContext_default`: with
-empty inputs, empty type-arguments, and no in-out parameters, the declarative
-body context `procBodyContext Γ proc` (a single new scope binding inputs ++
-outputs and the old bindings, becomes `procToTCtx proc.header.outputs`. That is exactly the context that
-`genStmtChain_sound` gives when it starts from the output parameters. That fact is what makes the
-`StatementsHasTypeA` of the generated body agree *definitionally* with the
-`ProcBodyHasType'.structured` obligation.
+The one procedure-specific fact is `procBodyScopes_inout`: the body scopes of a generated
+procedure (one new scope binding the inputs, the outputs and the `old` bindings of the in-out
+block) agree on every lookup with the single scope the body generator starts from. That lets the
+typing of the generated body discharge the procedure rule's body obligation.
 -/
 
 namespace StrataGenerators.Procedure
@@ -40,33 +37,25 @@ namespace StrataGenerators.Procedure
     is needed to move between the statement generator (which threads `Map.keys`)
     and the procedure typing spec (which uses `proc.header.outputs.keys`, i.e.
     `ListMap.keys`). -/
-theorem Map_keys_eq_ListMap_keys {α β} (m : List (α × β)) :
+theorem Map_keys_eq_ListMap_keys {α β} (m : ListMap α β) :
     Map.keys m = ListMap.keys m := by
   induction m with
   | nil => rfl
-  | cons p m ih => obtain ⟨a, b⟩ := p; simp only [Map.keys, ListMap.keys, ih]
+  | cons p m ih => obtain ⟨a, b⟩ := p; exact congrArg (a :: ·) ih
 
-/-- `ListMap.keys` distributes over the append of two `ListMap` values, and that append is `List.append`. The
-    `++` of a `ListMap` is not *syntactically* `List.append`, so `List.map_append` does not apply directly. The
-    proof therefore goes through the bridge lemma about `Map.keys`. -/
+/-- `ListMap.keys` distributes over the append of two `ListMap` values. -/
 theorem ListMap_keys_append (a b : ListMap (Identifier Unit) LMonoTy) :
     ListMap.keys (a ++ b) = ListMap.keys a ++ ListMap.keys b := by
-  rw [← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys]
-  exact Map.keys_append a b
+  induction a with
+  | nil => rfl
+  | cons p a ih => obtain ⟨k, v⟩ := p; exact congrArg (k :: ·) ih
 
 /-- `Map.values` and `ListMap.values` are the same traversal of the same list. -/
-theorem Map_values_eq_ListMap_values {α β} (m : List (α × β)) :
+theorem Map_values_eq_ListMap_values {α β} (m : ListMap α β) :
     Map.values m = ListMap.values m := by
   induction m with
   | nil => rfl
-  | cons p m ih => obtain ⟨a, b⟩ := p; simp only [Map.values, ListMap.values, ih]
-
-/-- `ListMap.values` distributes over the `ListMap` append. -/
-theorem ListMap_values_append (a b : ListMap (Identifier Unit) LMonoTy) :
-    (a ++ b).values = a.values ++ b.values := by
-  show ListMap.values (List.append a b) = _
-  rw [ListMap.values_eq_map_snd, ListMap.values_eq_map_snd, ListMap.values_eq_map_snd]
-  simp [List.map_append]
+  | cons p m ih => obtain ⟨a, b⟩ := p; exact congrArg (b :: ·) ih
 
 /-- **In-out parameters.** For the three-block layout `inputs = M ++ I`,
     `outputs = M ++ O` (the shared block `M` leading both) with the three blocks
@@ -149,44 +138,32 @@ theorem listMap_map_append {α β γ : Type} (f : α × β → γ) (l₁ l₂ : 
     List.map f (l₁ ++ l₂) = List.map f l₁ ++ List.map f l₂ :=
   List.map_append
 
-/-- **Context alignment (in-out), Γ-parameterized.** For the three-block layout (shared
-    block `M` leading both signatures) over an ambient type-scope `Γ` with `Γ.types = []`,
-    the declarative body context `procBodyContext Γ proc` agrees with the single-scope
-    `procToTCtxΓ Γ (inputs ++ outputs ++ oldVars M)`.
-
-    Agreement is `TContext.Equiv`, not equality: `procBodyContext` builds its scope as
-    `HMap.ofList (old ++ outputs ++ inputs)`, and `procToTCtxΓ` builds
-    `HMap.ofList ((inputs ++ outputs ++ old).reverse)`. Those hold the same bindings in a different order.
-    Therefore a *lookup* in one gives the same value as a lookup in the other, because the seed is functional,
-    and the two hash-map values differ. The hypothesis `hfun` gives that functionality, and `seed_functional`
-    gives it at a call site. -/
-theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
-    (name : String) (tyArgs : List TyIdentifier) {lemmas : List String}
+/-- **Context alignment (in-out).** Take a procedure whose inputs are `M ++ I` and whose outputs
+    are `M ++ O`, where the keys of `M` are output keys and no key of `I` is, so that `M` is its
+    in-out block. Over an empty ambient stack, its body scopes agree on every lookup with the
+    single scope `procToTCtx` builds from `inputs ++ outputs ++ old M`, when that list binds each
+    key to one type. -/
+theorem procBodyScopes_inout (name : String) (tyArgs : List TyIdentifier) {lemmas : List String}
     (M I O : List ((Identifier Unit) × LMonoTy))
     (hI : ∀ p ∈ I, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = false)
     (hM : ∀ p ∈ M, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = true)
     (hfun : Map.Functional
       (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))))
     (pre post : ListMap CoreLabel Procedure.Check) (body : Procedure.Body) :
-    TContext.Equiv (T := CoreLParams)
-      (procBodyContext Γ
+    Strata.Util.HMaps.Equiv
+      (procBodyScopes []
         { header := { name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I,
                       outputs := M ++ O, lemmas := lemmas },
           spec := { preconditions := pre, postconditions := post },
           body := body })
-      (procToTCtxΓ Γ (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))) := by
-  -- Write the two scopes out. The specification builds `old ++ outputs ++ inputs`, and the generator builds the
-  -- reverse of `inputs ++ outputs ++ old`. This file uses no set type, so each block appears in full.
+      (procToTCtx
+        (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))).types := by
   have hperm :
       (((M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
           (fun p => (p.1, LTy.forAll [] p.2))).reverse).Perm
-      ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
-            (fun p => (p.1, LTy.forAll [] p.2))
-        ++ (M ++ O).map (fun p => (p.1, LTy.forAll [] p.2))
-        ++ (M ++ I).map (fun p => (p.1, LTy.forAll [] p.2))) := by
-    refine (List.reverse_perm _).trans ?_
-    simp only [List.map_append, List.map_map, Function.comp_def]
-    exact perm_append_rotate _ _ _
+      ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)) ++ (M ++ O) ++ (M ++ I)).map
+          (fun q => (q.1, LTy.forAll [] q.2))) :=
+    (List.reverse_perm _).trans ((perm_append_rotate _ _ _).map _)
   have hfun' : ∀ (k : Identifier Unit) (v1 v2 : LTy),
       (k, v1) ∈ (((M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
           (fun p => (p.1, LTy.forAll [] p.2))).reverse) →
@@ -201,44 +178,18 @@ theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     obtain ⟨hk2, hv2⟩ := hpe2
     rw [← hv1, ← hv2,
       hfun k p1.2 p2.2 (by rw [← hk1]; exact hp1) (by rw [← hk2]; exact hp2)]
-  refine ⟨?_, rfl⟩
-  rw [show (procBodyContext Γ
+  rw [show procBodyScopes []
         { header := { name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I,
                       outputs := M ++ O, lemmas := lemmas },
           spec := { preconditions := pre, postconditions := post },
-          body := body }).types
+          body := body }
       = [Strata.Util.HMap.ofList
-          ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
-                (fun p => (p.1, LTy.forAll [] p.2))
-            ++ (M ++ O).map (fun p => (p.1, LTy.forAll [] p.2))
-            ++ (M ++ I).map (fun p => (p.1, LTy.forAll [] p.2)))] from by
-    simp only [procBodyContext, procBodyScopes, hΓtypes, Strata.Util.HMaps.push, formalsScope,
-      getInoutParams_inout name tyArgs M I O hI hM, listMap_map_append, List.map_append,
-      List.map_map, Function.comp_def]]
-  rw [show (procToTCtxΓ Γ
-        (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))).types
-      = [Strata.Util.HMap.ofList
-          (((M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
-            (fun p => (p.1, LTy.forAll [] p.2))).reverse)] from rfl]
+          ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)) ++ (M ++ O) ++ (M ++ I)).map
+            (fun q => (q.1, LTy.forAll [] q.2)))] from by
+    simp only [procBodyScopes, Strata.Util.HMaps.push, formalsScope,
+      getInoutParams_inout name tyArgs M I O hI hM]
+    rfl]
   exact ⟨fun k => (find?_ofList_perm_of_functional hperm hfun' k).symm, True.intro⟩
-
-/-- **Context alignment (in-out).** The `default`-ambient special case of
-    `procBodyContext_inoutΓ` (`default.types = []`). -/
-theorem procBodyContext_inout (name : String) (tyArgs : List TyIdentifier) {lemmas : List String}
-    (M I O : List ((Identifier Unit) × LMonoTy))
-    (hI : ∀ p ∈ I, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = false)
-    (hM : ∀ p ∈ M, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = true)
-    (hfun : Map.Functional
-      (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))))
-    (pre post : ListMap CoreLabel Procedure.Check) (body : Procedure.Body) :
-    TContext.Equiv (T := CoreLParams)
-      (procBodyContext (default)
-        { header := { name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I,
-                      outputs := M ++ O, lemmas := lemmas },
-          spec := { preconditions := pre, postconditions := post },
-          body := body })
-      (procToTCtx (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))) :=
-  procBodyContext_inoutΓ default rfl name tyArgs M I O hI hM hfun pre post body
 
 -- ── Facts about `disjointInputs` ──────────────────────────────────────────
 
@@ -248,21 +199,19 @@ theorem procBodyContext_inout (name : String) (tyArgs : List TyIdentifier) {lemm
     alignment needs (`getInoutParams = []`). -/
 theorem disjointInputs_disjoint (ins outs : ListMap (Identifier Unit) LMonoTy) :
     ((disjointInputs ins outs).filter fun p => (ListMap.keys outs).contains p.1) = [] := by
-  rw [List.filter_eq_nil_iff]
-  intro p hp
-  simp only [disjointInputs, List.mem_filter] at hp
-  simpa only [Bool.not_eq_true', Bool.not_eq_false, Bool.not_eq_true] using hp.2
+  refine List.filter_eq_nil_iff.mpr fun p hp => ?_
+  have hp2 := (List.mem_filter.mp hp).2
+  simpa only [Bool.not_eq_true', Bool.not_eq_false, Bool.not_eq_true] using hp2
 
 /-- A surviving key of `disjointInputs ins outs` is never an output key. -/
 theorem disjointInputs_key_not_output (ins outs : ListMap (Identifier Unit) LMonoTy)
     (k : Identifier Unit) (hk : k ∈ ListMap.keys (disjointInputs ins outs)) :
     k ∉ ListMap.keys outs := by
-  rw [ListMap.keys_eq_map_fst, List.mem_map] at hk
-  obtain ⟨p, hp_mem, rfl⟩ := hk
-  simp only [disjointInputs, List.mem_filter] at hp_mem
-  have := hp_mem.2
-  rw [Bool.not_eq_true', ← Bool.not_eq_true, List.contains_iff_mem] at this
-  exact this
+  rw [ListMap.keys_eq_map_fst (disjointInputs ins outs)] at hk
+  obtain ⟨p, hp_mem, rfl⟩ := List.mem_map.mp hk
+  have hp2 := (List.mem_filter.mp hp_mem).2
+  rw [Bool.not_eq_true', ← Bool.not_eq_true, List.contains_iff_mem] at hp2
+  exact hp2
 
 /-- **Idempotence of `disjointInputs`.** When `X`'s keys are already disjoint from
     `Y`'s, filtering `X` by `Y`-key membership removes nothing: `disjointInputs X Y
@@ -366,16 +315,20 @@ theorem oldVars_values (M : ListMap (Identifier Unit) LMonoTy) :
     rw [show ListMap.values (List.map (fun x => (CoreIdent.mkOld x.fst.name, x.snd)) M)
           = ListMap.values M from ih]
 
+/-- The name `CoreIdent.mkOld s` contains a space. -/
+theorem mkOld_name_space (s : String) : ' ' ∈ (CoreIdent.mkOld s).name.toList := by
+  simp only [CoreIdent.mkOld, CoreIdent.oldStr, String.toList_append]
+  exact List.mem_append_left _ (by decide)
+
 /-- Every key of `oldVars M` contains a space (`CoreIdent.mkOld` prefixes
     `"old "`). This is the fact that keeps `oldVars M` key-disjoint from the
     space-free generated parameter names of `M`/`I`/`O`. -/
 theorem oldVars_key_space (M : ListMap (Identifier Unit) LMonoTy)
     (k : Identifier Unit) (hk : k ∈ Map.keys (oldVars M)) : ' ' ∈ k.name.toList := by
-  simp only [oldVars, Map.keys_eq_map_fst, List.map_map, List.mem_map, Function.comp] at hk
-  obtain ⟨p, _, rfl⟩ := hk
-  -- `p.fst = (fun (id, ty) => (mkOld id.name, ty)) q).fst = mkOld q.1.name`
-  simp only [CoreIdent.mkOld, CoreIdent.oldStr, String.toList_append]
-  exact List.mem_append_left _ (by decide)
+  rw [Map.keys_eq_map_fst (oldVars M)] at hk
+  obtain ⟨q, hq, rfl⟩ := List.mem_map.mp hk
+  obtain ⟨p, _, rfl⟩ := List.mem_map.mp hq
+  exact mkOld_name_space _
 
 /-- The keys of `oldVars M` are `Nodup` whenever `M`'s keys are: `CoreIdent.mkOld`
     composed with `.name` is injective (a `Unit`-tagged identifier is determined by
@@ -383,14 +336,17 @@ theorem oldVars_key_space (M : ListMap (Identifier Unit) LMonoTy)
     key list preserves `Nodup`. -/
 theorem oldVars_keys_nodup (M : ListMap (Identifier Unit) LMonoTy)
     (hM : (Map.keys M).Nodup) : (Map.keys (oldVars M)).Nodup := by
-  rw [oldVars, Map.keys_eq_map_fst, List.map_map]
-  rw [Map.keys_eq_map_fst] at hM
+  rw [Map.keys_eq_map_fst (oldVars M)]
+  rw [Map.keys_eq_map_fst M] at hM
   -- `(oldVars M).keys = M.map (fun p => mkOld p.1.name)`, which factors through
   -- `M.keys = M.map Prod.fst` by an injective post-map.
-  have hcomp : (Prod.fst ∘ fun (p : (Identifier Unit) × LMonoTy) => (CoreIdent.mkOld p.1.name, p.2))
-      = (fun id : Identifier Unit => CoreIdent.mkOld id.name) ∘ Prod.fst := by
-    funext p; rfl
-  rw [hcomp, ← List.map_map]
+  have hmap : ∀ L : List ((Identifier Unit) × LMonoTy), List.map Prod.fst (oldVars L) =
+      (List.map Prod.fst L).map (fun id : Identifier Unit => CoreIdent.mkOld id.name) := by
+    intro L
+    induction L with
+    | nil => rfl
+    | cons p L ih => obtain ⟨a, b⟩ := p; exact congrArg (CoreIdent.mkOld a.name :: ·) ih
+  rw [hmap M]
   apply hM.map
   intro a b hab
   apply mt _ hab
@@ -628,13 +584,12 @@ theorem procToTCtx_find_eq_ofList (sig : ListMap (Identifier Unit) LMonoTy)
   rw [Strata.Util.HMaps.find?_single_scope, Strata.Util.HMaps.find?_single_scope]
   refine find?_ofList_perm_of_functional (List.reverse_perm _) ?_ k
   intro x v1 v2 h1 h2
-  rw [List.mem_reverse] at h1 h2
-  obtain ⟨p1, hp1, hpe1⟩ := List.mem_map.mp h1
-  obtain ⟨p2, hp2, hpe2⟩ := List.mem_map.mp h2
+  obtain ⟨⟨a1, t1⟩, hp1, hpe1⟩ := List.mem_map.mp (List.mem_reverse.mp h1)
+  obtain ⟨⟨a2, t2⟩, hp2, hpe2⟩ := List.mem_map.mp (List.mem_reverse.mp h2)
   simp only [Prod.mk.injEq] at hpe1 hpe2
-  obtain ⟨hk1, hv1⟩ := hpe1
-  obtain ⟨hk2, hv2⟩ := hpe2
-  rw [← hv1, ← hv2, hfun x p1.2 p2.2 (by rw [← hk1]; exact hp1) (by rw [← hk2]; exact hp2)]
+  obtain ⟨rfl, rfl⟩ := hpe1
+  obtain ⟨rfl, rfl⟩ := hpe2
+  rw [hfun a2 t1 t2 hp1 hp2]
 
 /-- The outputs of a procedure that `genProcedure` draws have distinct names: the in-out block and
     the output-only block each have distinct names, and the output-only block avoids the in-out
@@ -748,7 +703,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))
       hMKeysNodup' hInNodup' hOutNodup' hI_notMO hO_notMI hMs hIs hOs
   -- `contains`-forms of the block-membership facts (`getInoutParams = M`,
-  -- `procBodyContext` alignment): every `M`-key is a `(M ++ O)`-key; no `I`-key is.
+  -- body-scope alignment): every `M`-key is a `(M ++ O)`-key; no `I`-key is.
   have hIc : ∀ p, List.Mem p (disjointInputs rawInputOnly M) →
       ((ListMap.keys (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))).contains
         (Prod.fst p)) = false := by
@@ -773,11 +728,11 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) typeArgs size) := by
     intro ty hty
     rcases hty with h | h
-    · rw [ListMap_values_append, List.mem_append] at h
+    · rw [ListMap.values_append, List.mem_append] at h
       rcases h with h | h
       · exact hMVals ty h
       · exact hRawInVals ty (disjointInputs_values_mem rawInputOnly M ty h)
-    · rw [ListMap_values_append, List.mem_append] at h
+    · rw [ListMap.values_append, List.mem_append] at h
       rcases h with h | h
       · exact hMVals ty h
       · exact hRawOutVals ty
@@ -789,12 +744,12 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) typeArgs size) := by
     intro ty hty
     refine key ty ?_
-    rw [Map_values_eq_ListMap_values, ListMap_values_append, ListMap_values_append,
+    rw [Map_values_eq_ListMap_values, ListMap.values_append, ListMap.values_append,
       oldVars_values, List.mem_append, List.mem_append] at hty
     rcases hty with (hMI | hMO) | hM
     · exact Or.inl hMI
     · exact Or.inr hMO
-    · exact Or.inl (by rw [ListMap_values_append, List.mem_append]; exact Or.inl hM)
+    · exact Or.inl (by rw [ListMap.values_append, List.mem_append]; exact Or.inl hM)
   have hseedTyWK : ∀ ty ∈ Map.values
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M),
@@ -829,7 +784,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len (body, C', ctx') hbody
   -- The body scopes of the procedure agree with the scope of the seed on every lookup.
-  have heq := procBodyContext_inout name typeArgs (lemmas := lemmas) M
+  have heq := procBodyScopes_inout name typeArgs (lemmas := lemmas) M
     (disjointInputs rawInputOnly M)
     (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) hIc hMc hseedFun
     pre post (.structured body)
@@ -845,9 +800,23 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     exact exprWellTyped_mono
       (genLExpr_exprWellTyped (exprCtxOk_of_corresponds hops (procToTCtx_corr ctx) hfun hwk)
         (knownInstance_bool hops.arities) he) hts
+  -- No formal key holds a space, and the saved starting value of an in-out parameter `g` is
+  -- named `"old " ++ g`, which does.
+  have hOldFresh : ∀ g : Identifier Unit, CoreIdent.mkOld g.name ∉
+      ListMap.keys (M ++ disjointInputs rawInputOnly M) ++
+        ListMap.keys (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) := by
+    intro g hmem
+    have hspace := mkOld_name_space g.name
+    rcases List.mem_append.mp hmem with h | h <;> rw [ListMap_keys_append] at h <;>
+      rcases List.mem_append.mp h with h' | h'
+    · exact hMs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
+    · exact hIs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
+    · exact hMs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
+    · exact hOs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
   refine {
     inputsNodup := hInputsNodup,
     outputsNodup := hOutputsNodup,
+    oldNamesFresh := fun g _ => hOldFresh g,
     typeArgsNodup := htyNodup,
     noUndeclaredVars := ?_,
     signatureWellKinded := ?_,
@@ -897,8 +866,8 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       exact hx
   · -- postconditions: drawn over the seed, whose scope agrees with the body scopes.
     exact hcheck _ _ post hseedFun hseedTyWK
-      (fun x _ hx => (Strata.Util.HMaps.Equiv.find? heq.1 x).trans hx) hpost
-  · exact .structured body C' _ (statementsWellTyped_equiv_congr hbodyTyped heq.1)
+      (fun x _ hx => (Strata.Util.HMaps.Equiv.find? heq x).trans hx) hpost
+  · exact .structured body C' _ (statementsWellTyped_equiv_congr hbodyTyped heq)
 
 /-- **Soundness of `genProcedure` at the ambient context.** Every procedure that `genProcedure`
     makes in a context `C` is well-typed (`ProcWellTyped`) at that same `C` with no enclosing

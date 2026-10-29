@@ -51,7 +51,10 @@ def VarCtx.toFVarCtx (ctx : VarCtx) : FVarCtx :=
 /-- The names of `ctx.toFVarCtx` are the names of `ctx`. -/
 @[simp] theorem VarCtx.toFVarCtx_names (ctx : VarCtx) :
     ctx.toFVarCtx.map Prod.fst = ctx.names := by
-  simp only [VarCtx.toFVarCtx, VarCtx.names, List.map_map, Function.comp_def]
+  unfold VarCtx.toFVarCtx VarCtx.names
+  induction ctx with
+  | nil => rfl
+  | cons hd tl ih => exact congrArg (hd.1.name :: ·) ih
 
 /-- Looks up a variable identifier in the context. -/
 def VarCtx.find? (ctx : VarCtx) (x : Identifier Unit) : Option LMonoTy :=

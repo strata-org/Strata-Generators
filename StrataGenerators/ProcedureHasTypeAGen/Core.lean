@@ -50,14 +50,13 @@ The generator meets the obligations of `ProcHasType'` as follows:
   the body. The annotation obligations hold trivially in the annotated
   reading.
 - The body is a `structured` list of statements. Its length is not more than the given length, and its initial
-  scope holds the inputs, the outputs and the old bindings of the in-out block. That scope follows the
-  declarative `procBodyContext`, whose scope for a body holds the scope of the inputs, of the outputs and of
-  oldScope`) and with `inputs.keys ++ (oldVars M).keys` as the immutable names.
+  scope holds the inputs, the outputs and the old bindings of the in-out block, as the declarative
+  `procBodyScopes` does, with `inputs.keys ++ (oldVars M).keys` as the immutable names.
   The body may therefore freely *read* the inputs and the `old` bindings but can
   only *assign* to the output-only names `O` (`set` targets are drawn from the
   mutable sub-context, which excludes the immutable inputs and `old` bindings).
-  This discharges `bodyTyped` (via `procBodyContext_inout`, which identifies the
-  body context with `procToTCtx (inputs ++ outputs ++ oldVars M)`) and `modRights`
+  This discharges `bodyTyped` (via `procBodyScopes_inout`, which identifies the
+  body scopes with `procToTCtx (inputs ++ outputs ++ oldVars M)`) and `modRights`
   (via `genStmtChain_mutableVars`, whose write-target tracking is over the mutable
   keys, i.e. exactly the output-only keys `O ⊆ outputs.keys`).
 
@@ -87,7 +86,7 @@ def disjointInputs (inputs : ListMap (Identifier Unit) LMonoTy)
 
 /-- The `old`-scope variable context for an in-out block `M`: each in-out
     parameter `(g, ty)` contributes an entry `(old g, ty)`. This is the value-level
-    counterpart of the declarative `procBodyContext`'s `oldScope` (which further
+    counterpart of the `old` bindings of the declarative `procBodyScopes` (which further
     wraps each type as a trivial polytype); seeding the body's `VarCtx` with these
     bindings lets the body *read* the entry value `old g` of each in-out
     parameter, exactly as a postcondition may. `CoreIdent.mkOld` prefixes the
@@ -151,12 +150,12 @@ def genProcedureWith [Gen G]
   -- The contract clauses may *read* parameters, so each is generated at the
   -- free-variable context the declarative spec types it in (`ProcedureTypeSpec`):
   --   * preconditions see the **inputs** only (`procInputContext`);
-  --   * postconditions see **inputs ++ outputs ++ old(inout)** (`procBodyContext`).
+  --   * postconditions see **inputs ++ outputs ++ old(inout)** (`procBodyScopes`).
   let preconditions ← genChecks (sigFctx inputs) octx typeArgs size pctx
   let postconditions ←
     genChecks (sigFctx (inputs ++ outputs ++ oldVars inout)) octx typeArgs size pctx
   -- The scope of the body starts with the inputs, the outputs, and the old binding of each entry
-  -- of the in-out block. That scope follows the declarative `procBodyContext`. The inputs *and*
+  -- of the in-out block. That scope follows the declarative `procBodyScopes`. The inputs *and*
   -- each old binding are immutable, so the writable keys are the output-only names, which are
   -- exactly the outputs the body is entitled to assign.
   let (body, _, _) ← chain typeArgs

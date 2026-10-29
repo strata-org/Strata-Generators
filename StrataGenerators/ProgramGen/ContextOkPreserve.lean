@@ -334,13 +334,13 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     rcases hctx.base_known b hb with hk | hd
     · exact Or.inl ((hkt b).mpr (Or.inr hk))
     · exact Or.inr (by
-        rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
+        rw [hdt, allTypeNames_push]
         exact List.mem_append_left _ hd)
   · intro kc hkc
     rcases hctx.tyCon_known kc hkc with hk | hd
     · exact Or.inl ((hkt kc.1).mpr (Or.inr hk))
     · exact Or.inr (by
-        rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
+        rw [hdt, allTypeNames_push]
         exact List.mem_append_left _ hd)
   · exact (hkt "arrow").mpr (Or.inr hctx.arrow_known)
   · intro b hb
@@ -353,10 +353,9 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     · exact hblk_res key hblk
     · exact hres_mono key (hctx.knownTypes_reserved key hold)
   · intro nm hnm
-    rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append, List.mem_append] at hnm
+    rw [hdt, allTypeNames_push, List.mem_append] at hnm
     rcases hnm with hold | hblk
-    · exact hres_mono nm (hctx.datatypes_reserved nm (by
-        rw [TypeFactory.allTypeNames]; exact hold))
+    · exact hres_mono nm (hctx.datatypes_reserved nm hold)
     · exact hblk_res nm hblk
   · intro b hb
     rw [hdt]

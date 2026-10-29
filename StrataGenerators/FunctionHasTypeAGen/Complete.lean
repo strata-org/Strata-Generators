@@ -30,6 +30,7 @@ theorem genFuncAttr_complete (depth : Nat) (a : Strata.DL.Util.FuncAttr)
   | evalIfConstr i => exact ⟨i, hidx i rfl, by simp⟩
   | evalIfValue i => exact ⟨i, hidx i rfl, by simp⟩
   | inlineIfAllValues => exact ⟨0, hzero, by simp⟩
+  | shortCircuit => exact ⟨0, hzero, by simp⟩
 
 /-- **Completeness of `genFuncSig`.** It reaches the signature of each function whose type
     arguments are distinct reachable names that all occur in the signature, whose formals have

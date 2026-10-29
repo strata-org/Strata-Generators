@@ -98,7 +98,8 @@ theorem fallbackName_allowed (reserved : List String) :
   simp only [DatatypeGen.fallbackName, indexedFreshName]
   rw [isAllowedName_eq_toList]
   simp [reservedNamePrefixes, List.replicate_succ, List.isPrefixOf, Lambda.genTyPrefix,
-    skolemPrefix, Lambda.elimTyPrefix]
+    skolemPrefix, Lambda.elimTyPrefix, CallElim.freshTyVarPrefix,
+    ProcedureInlining.inlineTyVarPrefix]
 
 /-- A name `genDeclName reserved` draws is absent from `reserved` and uses no reserved prefix. -/
 theorem genDeclName_fresh {reserved : List String} {nm : String}
@@ -215,6 +216,31 @@ theorem exists_getElem?_of_mem {F : Factory CoreLParams} {name : String} (h : na
     rw [hnone] at hsome
     exact absurd hsome Bool.false_ne_true
   · exact ⟨_, rfl⟩
+
+/-- Factory extension composes: extending `C` by `xs` to `C1` and then `C1` by `ys` to `C2`
+    extends `C` by `xs ++ ys` to `C2`. -/
+theorem factoryExtendedBy_append {agrees : LFunc CoreLParams → LFunc CoreLParams → Prop}
+    (C C1 C2 : LContext CoreLParams) (xs ys : List (LFunc CoreLParams))
+    (h1 : FactoryExtendedBy agrees C C1 xs) (h2 : FactoryExtendedBy agrees C1 C2 ys) :
+    FactoryExtendedBy agrees C C2 (xs ++ ys) := by
+  refine { knownTypes_eq := ?_, datatypes_eq := ?_, idents_eq := ?_, rigidTypeVars_eq := ?_,
+           preserves_old := ?_, contains_new := ?_, no_other := ?_ }
+  · rw [h2.knownTypes_eq, h1.knownTypes_eq]
+  · rw [h2.datatypes_eq, h1.datatypes_eq]
+  · rw [h2.idents_eq, h1.idents_eq]
+  · rw [h2.rigidTypeVars_eq, h1.rigidTypeVars_eq]
+  · intro nm g h; exact h2.preserves_old nm g (h1.preserves_old nm g h)
+  · intro f hf
+    rcases List.mem_append.mp hf with hx | hy
+    · obtain ⟨g, hg, hagree⟩ := h1.contains_new f hx
+      exact ⟨g, h2.preserves_old _ g hg, hagree⟩
+    · exact h2.contains_new f hy
+  · intro nm h
+    rcases h2.no_other nm h with h1c | hys
+    · rcases h1.no_other nm h1c with hC | hxs
+      · exact Or.inl hC
+      · exact Or.inr (by rw [List.map_append]; exact List.mem_append.mpr (Or.inl hxs))
+    · exact Or.inr (by rw [List.map_append]; exact List.mem_append.mpr (Or.inr hys))
 
 /-- A successful `addFactoryFunctionWithError C fn = .ok C'` makes `C'` the extension of `C` by
     exactly `fn`: old entries are unchanged and `fn`'s name stores `fn` itself. -/
@@ -819,40 +845,7 @@ theorem wellKindedTy_of_genNonRecursiveArgTy {C : LContext CoreLParams}
   · exact hok.tyCon_arity (ref, n) htc
   · exact hok.arrow_arity
 
-/-! ## Synonym bodies -/
-
-/-- A type whose constructors are registered at their arities and whose type variables are all
-    admissible passes the resolved checker under that admissibility. -/
-theorem typeCheckCore_of_knownInstance {ks : KnownTypes} {adm : TyVarAdmissibility} :
-    ∀ (ty : LMonoTy), LMonoTy.knownInstance ty ks = true →
-      (∀ v ∈ LMonoTy.freeVars ty, adm v = true) → LMonoTy.typeCheckCore ty ks adm = true := by
-  intro ty
-  induction ty with
-  | ftvar v =>
-    intro _ hv
-    simpa [LMonoTy.typeCheckCore] using hv v (by simp [LMonoTy.freeVars])
-  | bitvec _ => intro _ _; simp [LMonoTy.typeCheckCore]
-  | tcons name args ih =>
-    intro hk hv
-    simp only [LMonoTy.knownInstance, Bool.and_eq_true] at hk
-    simp only [LMonoTy.typeCheckCore, Bool.and_eq_true]
-    refine ⟨hk.1, ?_⟩
-    have hkargs := hk.2
-    have hvs : ∀ v ∈ LMonoTys.freeVars args, adm v = true := by
-      intro v hva; exact hv v (by simpa only [LMonoTy.freeVars] using hva)
-    clear hv hk
-    induction args with
-    | nil => simp [LMonoTys.typeCheckCore]
-    | cons hd tl ihl =>
-      simp only [LMonoTys.knownInstances] at hkargs
-      split at hkargs
-      case isFalse => exact absurd hkargs (by simp)
-      rename_i hhd
-      rw [LMonoTys.freeVars_of_cons] at hvs
-      simp only [LMonoTys.typeCheckCore, Bool.and_eq_true]
-      exact ⟨ih hd (by simp) hhd (fun v hv => hvs v (List.mem_append_left _ hv)),
-        ihl (fun a ha => ih a (by simp [ha])) hkargs
-          (fun v hv => hvs v (List.mem_append_right _ hv))⟩
+/-! ## The elements of a generated `distinct` -/
 
 /-- Each element of a generated `distinct` is an operator annotated at `τ`. In a context where each
     of the named constants is declared at `τ`, the element is well-typed at `τ` with no variable
@@ -1050,9 +1043,8 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
   have hknown : LMonoTy.knownInstance body s.C.knownTypes = true :=
     Lambda.knownInstance_of_wellKinded body _
       (wellKindedTy_of_genNonRecursiveArgTy hinv.ctxOk hbody)
-  have hres : ResolvedTyHasType s.C (fun v => decide (v ∈ syn.typeArgs)) syn.type :=
-    LMonoTy.typeCheckCore_sound _ s.C _
-      (typeCheckCore_of_knownInstance _ hknown (fun v hv => decide_eq_true (hclosed v hv)))
+  have hres : ResolvedTyHasType s.C TyVarAdmissibility.all syn.type :=
+    ResolvedTyHasType.of_knownInstance hknown
   have hoccurs : ∀ v ∈ syn.typeArgs, v ∈ LMonoTy.freeVars syn.type :=
     fun v hv => (List.mem_of_dedup _ _).mpr hv
   -- Every known type name is reserved and `nm` is not, so `nm` is not a known type.
@@ -1063,7 +1055,7 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     exact hnm_fresh (hinv.knownReserved nm (Std.HashMap.mem_keys.mpr hmem))
   have hdecl : DeclWellTyped P s.C [] (mkAliasDecl nm body) s.C := by
     rw [hmk]
-    exact DeclWellTyped.type_syn s.C [] syn .empty hNodup hnotKnown hoccurs hres
+    exact DeclWellTyped.type_syn s.C [] syn .empty ⟨hclosed, hNodup, hoccurs⟩ hnotKnown hres
   subst hds hs'
   refine ⟨DeclsWellTyped.cons _ _ _ _ _ _ hdecl (DeclsWellTyped.nil _ _), ?_⟩
   -- Only `reserved` (by `nm`) and the alias list change, and no `Inv` field reads the aliases.
@@ -2089,9 +2081,8 @@ theorem genProgram_getNames_nodup {numDecls : Nat} {b : Bounds} {decls : List De
 theorem inputs_keys_nodup_of_wf {f : LFunc CoreLParams} (hwf : LFuncWF f) :
     f.inputs.keys.Nodup := by
   rw [ListMap.keys_eq_map_fst]
-  have hnames : ((f.inputs.map Prod.fst).map (fun x => x.name)).Nodup := by
-    rw [List.map_map]
-    exact hwf.arg_nodup
+  have hnames : ((f.inputs.map Prod.fst).map (fun x => x.name)).Nodup :=
+    (congrArg List.Nodup (List.map_map ..)).mpr hwf.arg_nodup
   exact List.Pairwise.of_map _ (fun a b hab heq => hab (congrArg _ heq)) hnames
 
 /-- Pushing the functions of a list one at a time with `tryPush` keeps every entry of the starting
@@ -2138,6 +2129,73 @@ theorem foldlM_tryPush_lookup {i₁ : Inhabited CoreLParams.Metadata}
           · exact Or.inl hpush
         · exact Or.inr (List.mem_cons_of_mem _ hrest)
 
+/-- Pushing functions one at a time with `tryPush` succeeds from a factory `G` when it succeeds
+    from a factory `F` that stores every name `G` stores. -/
+theorem foldlM_tryPush_ok_of_names_sub {i₁ : Inhabited CoreLParams.Metadata}
+    {i₂ : Std.ToFormat CoreLParams.IDMeta} :
+    ∀ (l : List (LFunc CoreLParams)) (F G F' : Factory CoreLParams),
+      (∀ name, name ∈ G → name ∈ F) →
+      l.foldlM (fun F fn => @Lambda.Factory.tryPush CoreLParams i₁ i₂ F fn) F = .ok F' →
+      ∃ G', l.foldlM (fun F fn => @Lambda.Factory.tryPush CoreLParams i₁ i₂ F fn) G = .ok G'
+  | [], _, G, _, _, _ => ⟨G, rfl⟩
+  | fn :: rest, F, G, F', hsub, h => by
+    unfold Lambda.Factory.tryPush at h ⊢
+    by_cases hmem : fn.name.name ∈ F
+    · simp only [List.foldlM_cons, dite_eq_left hmem, bind, Except.bind] at h
+      exact absurd h (by simp)
+    · have hmemG : fn.name.name ∉ G := fun hg => hmem (hsub _ hg)
+      simp only [List.foldlM_cons, dite_eq_right hmem, bind, Except.bind] at h
+      simp only [List.foldlM_cons, dite_eq_right hmemG, bind, Except.bind]
+      refine foldlM_tryPush_ok_of_names_sub rest _ _ F' ?_ h
+      intro name hname
+      rcases (mem_push_iff G fn hmemG name).mp hname with heq | hold
+      · exact (mem_push_iff F fn hmem name).mpr (Or.inl heq)
+      · exact (mem_push_iff F fn hmem name).mpr (Or.inr (hsub name hold))
+
+/-- After a datatype block is added, every input and output type of a function the block generates
+    is a registered instance of the new known types, when the starting context registers `arrow`,
+    `bool` and its datatypes. -/
+theorem genBlockFactory_sigsKnown_of_addMutualBlock {C C' : LContext CoreLParams}
+    {block : MutualDatatype Unit}
+    (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      instToFormatIDMetaCoreLParams C block = .ok C')
+    (hdk : C.DatatypesKnown)
+    (harrow : C.knownTypes["arrow"]? = some 2) (hbool : C.knownTypes["bool"]? = some 0) :
+    ∀ (fgen : Factory CoreLParams),
+      @genBlockFactory CoreLParams instInhabitedPUnit instInhabitedPUnit
+        instToFormatIDMetaCoreLParams _ block = .ok fgen →
+      ∀ f ∈ fgen.toArray, ∀ ty ∈ f.output :: f.inputs.values,
+        LMonoTy.knownInstance ty C'.knownTypes = true := by
+  intro fgen hfgen
+  have h' := h
+  obtain ⟨-, ds, fgen', fs, ks, hds, hfgen', hfs, hks, rfl⟩ :=
+    @LContext.addMutualBlock_ok_inv CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      instToFormatIDMetaCoreLParams C _ block h
+  obtain rfl : fgen = fgen' := Except.ok.inj (hfgen.symm.trans hfgen')
+  simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
+  rw [← Array.foldlM_toList] at hfs
+  obtain ⟨fs₀, hfs₀⟩ := foldlM_tryPush_ok_of_names_sub _ C.functions Lambda.Factory.default fs
+    (fun name hname => absurd hname (Lambda.Factory.default_empty name)) hfs
+  -- The same registration with an empty function table.
+  have h₀ : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+      instToFormatIDMetaCoreLParams { C with functions := Lambda.Factory.default } block =
+      .ok { C with datatypes := ds, functions := fs₀, knownTypes := ks } := by
+    simp only [LContext.addMutualBlock, bind, Except.bind] at h' ⊢
+    split at h'
+    · exact absurd h' (by simp)
+    · rename_i hloop
+      rw [hloop]
+      simp only [hds, hfgen, Lambda.Factory.addFactory, Lambda.Factory.tryAddAll]
+      rw [← Array.foldlM_toList, hfs₀]
+      simp only [hks]
+  have hsig₀ : FactorySigsKnown C.knownTypes (Lambda.Factory.default : Factory CoreLParams) :=
+    ⟨harrow, fun f hf => absurd hf (by simp [Lambda.Factory.default])⟩
+  have hk₀ := FactorySigsKnown.addMutualBlock (C := { C with functions := Lambda.Factory.default })
+    hsig₀ hbool hdk h₀
+  obtain ⟨-, hnew, -⟩ := foldlM_tryPush_lookup _ _ fs₀ hfs₀
+  intro f hf
+  exact hk₀.2 f (Lambda.Factory.memToArrayOfGetElem? (hnew f (Array.mem_toList_iff.mpr hf)))
+
 /-- What a successful `addMutualBlock` does to the functions of a context: it adds the factory `F`
     of the block's derived functions, whose functions are well formed and have signature types
     registered in the new context; it keeps every old entry and adds nothing else. -/
@@ -2154,35 +2212,20 @@ structure BlockFunctionsAdded (C C' : LContext CoreLParams) (block : MutualDatat
   no_other : ∀ (nm : String) (g : LFunc CoreLParams), C'.functions[nm]? = some g →
     C.functions[nm]? = some g ∨ g ∈ F.toArray
 
-/-- A successful `addMutualBlock` of a well-formed block, in a context that registers `arrow`,
+/-- A successful `addMutualBlock`, in a context that registers `arrow`,
     `bool` and each of its datatypes, adds exactly the block's derived functions. -/
 theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
     {block : MutualDatatype Unit}
     (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams C block = .ok C')
-    (hwf : MutualADTWF C block) (hdk : C.DatatypesKnown)
+    (hdk : C.DatatypesKnown)
     (harrow : C.knownTypes["arrow"]? = some 2) (hbool : C.knownTypes["bool"]? = some 0) :
     ∃ F, BlockFunctionsAdded C C' block F := by
-  have hext := @KnownTypesExtends.of_addMutualBlock CoreLParams instInhabitedPUnit
-    instInhabitedPUnit instToFormatIDMetaCoreLParams _ C C' block h
+  have hsigs := genBlockFactory_sigsKnown_of_addMutualBlock h hdk harrow hbool
   obtain ⟨-, ds, fgen, fs, ks, hds, hfgen, hfs, hks, rfl⟩ :=
     @LContext.addMutualBlock_ok_inv CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams C _ block h
   have hdec := TypeFactory_addMutualBlock_decompose _ _ block _ hds
-  have hblock : ∀ d ∈ block, ks[d.name]? = some d.typeArgs.length :=
-    knownTypes_foldlM_add_mem C.knownTypes ks block hks
-  -- A constructor argument names a known type, an earlier datatype or a datatype of the block,
-  -- each registered in the new table at the arity it is applied at.
-  have hargs : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args,
-      LMonoTy.knownInstance arg.2 ks = true := by
-    intro d hd c hc arg harg
-    refine knownInstance_of_wellKinded arg.2 ks ?_
-    intro ref n hn
-    rcases hwf.argsWellKinded d hd c hc arg harg ref n hn with hk | ⟨d', hd', rfl, rfl⟩ |
-        ⟨d', hd', rfl, rfl⟩
-    · exact hext _ _ hk
-    · exact hext _ _ (hdk d' hd')
-    · exact hblock d' hd'
   simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
   rw [← Array.foldlM_toList] at hfs
   obtain ⟨hold, hnew, hall⟩ := foldlM_tryPush_lookup _ C.functions fs hfs
@@ -2190,8 +2233,7 @@ theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
     { derived := ?_
       wf := @genBlockFactory_wf CoreLParams _ instInhabitedPUnit instInhabitedPUnit
         instToFormatIDMetaCoreLParams block fgen hdec.1 hdec.2.2.1 hfgen
-      sigsKnown := genBlockFactory_sigsKnown block fgen (hext _ _ harrow) (hext _ _ hbool)
-        hblock hargs hfgen
+      sigsKnown := hsigs fgen hfgen
       preserves_old := hold
       contains_new := ?_
       no_other := ?_ }⟩

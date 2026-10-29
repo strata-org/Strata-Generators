@@ -362,6 +362,13 @@ theorem outTarget_snd (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (b
     (outTarget immutableVars ctx base q i).2 = q.2 := by
   simp only [outTarget]; split <;> rfl
 
+/-- The values of a signature built by mapping a list are the second components of the images. -/
+theorem listMap_values_map {α β γ : Type} (L : List γ) (f : γ → α × β) :
+    ListMap.values (L.map f : ListMap α β) = L.map (fun x => (f x).2) := by
+  induction L with
+  | nil => rfl
+  | cons x xs ih => exact congrArg ((f x).2 :: ·) ih
+
 /-- **The out targets are positionally type-aligned with the callee's out block.**
     This is the `hTVals` premise every call-soundness lemma takes, and the only
     relation
@@ -370,13 +377,10 @@ theorem outTarget_snd (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (b
 theorem outTargets_values (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (O : @LMonoTySignature Unit) (avoid : List String) :
     (outTargets immutableVars ctx O avoid).values = O.values := by
-  simp only [outTargets, ListMap.values_eq_map_snd, List.map_map]
-  rw [show (Prod.snd ∘ fun p : (Identifier Unit × LMonoTy) × Nat =>
-        outTarget immutableVars ctx (maxNameLen ctx + maxStrLen avoid) p.1 p.2)
-        = Prod.snd ∘ Prod.fst
-      from by funext p; exact outTarget_snd ..,
-    ← List.map_map, List.zipIdx_map_fst]
-  rfl
+  refine (listMap_values_map _ _).trans ?_
+  rw [ListMap.values_eq_map_snd (m := O)]
+  refine (List.map_congr_left fun p _ => outTarget_snd ..).trans ?_
+  exact (List.map_map ..).symm.trans (congrArg (List.map Prod.snd) (List.zipIdx_map_fst ..))
 
 /-- One receiving variable per out-only parameter. -/
 theorem outTargets_length (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
@@ -393,10 +397,8 @@ theorem outTargets_length (immutableVars : List (Identifier Unit)) (ctx : VarCtx
 theorem outTargets_all_usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (O : @LMonoTySignature Unit) (avoid : List String) :
     (outTargets immutableVars ctx O avoid).all (usableName immutableVars ctx) = true := by
-  rw [List.all_eq_true]
-  intro p hp
-  simp only [outTargets, List.mem_map] at hp
-  obtain ⟨q, _, rfl⟩ := hp
+  refine List.all_eq_true.mpr fun p hp => ?_
+  obtain ⟨q, _, rfl⟩ := List.mem_map.mp hp
   simp only [outTarget]
   split
   · rename_i h; simp [usableName, h]
@@ -496,7 +498,7 @@ theorem genCallStmt_outCtx {procs : ProcSigCtx}
         refine insertAllCtx_functional _ ctx hFun ?_ ?_
         · -- keys of a `filter` of a `Nodup`-keyed list are `Nodup`
           refine List.Nodup.sublist (List.Sublist.map _ List.filter_sublist) ?_
-          rw [← ListMap.keys_eq_map_fst]; exact hNodup
+          exact (congrArg List.Nodup (ListMap.keys_eq_map_fst _)).mp hNodup
         · -- every selected name passed `needsInit`, i.e. is absent from `ctx`
           intro p hp
           have hsel := (List.mem_filter.mp hp).2

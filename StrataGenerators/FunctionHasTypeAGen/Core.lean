@@ -361,8 +361,8 @@ def attrParamIdx : Strata.DL.Util.FuncAttr → Option Nat
 /-- Makes one function attribute whose parameter index, if any, is at most `depth`. -/
 def genFuncAttr [Gen G] (depth : Nat) : G Strata.DL.Util.FuncAttr := do
   let i ← elements (List.range (depth + 1)) (by simp)
-  elements [.inline, .inlineIfConstr i, .evalIfConstr i, .evalIfValue i, .inlineIfAllValues]
-    (by simp)
+  elements [.inline, .inlineIfConstr i, .evalIfConstr i, .evalIfValue i, .inlineIfAllValues,
+    .shortCircuit] (by simp)
 
 -- ── The filters that keep a generated function well typed ──────────────
 

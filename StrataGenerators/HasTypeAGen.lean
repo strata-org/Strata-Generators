@@ -5212,29 +5212,8 @@ theorem Map.values_eq_map_snd {α β : Type} (m : Map α β) : m.values = m.map 
 
 /-- An `insert` adds the new value only to the values of a map. -/
 theorem mem_values_insert {α β : Type} [DecidableEq α] (m : Map α β) (a : α) (b : β) {v : β}
-    (h : v ∈ (Map.insert m a b).values) : v = b ∨ v ∈ m.values := by
-  induction m with
-  | nil =>
-    simp only [Map.insert, Map.values_eq_map_snd, List.map_cons, List.map_nil,
-      List.mem_singleton] at h
-    exact Or.inl h
-  | cons p m ih =>
-    obtain ⟨k, w⟩ := p
-    rw [Map.values_eq_map_snd] at h ⊢
-    simp only [Map.insert] at h
-    split at h
-    · simp only [List.map_cons, List.mem_cons] at h
-      rcases h with rfl | h
-      · exact Or.inl rfl
-      · exact Or.inr (List.mem_cons_of_mem _ h)
-    · simp only [List.map_cons, List.mem_cons] at h
-      rcases h with rfl | h
-      · exact Or.inr (List.mem_cons_self ..)
-      · rw [← Map.values_eq_map_snd] at h
-        rcases ih h with rfl | h'
-        · exact Or.inl rfl
-        · rw [Map.values_eq_map_snd] at h'
-          exact Or.inr (List.mem_cons_of_mem _ h')
+    (h : v ∈ (Map.insert m a b).values) : v = b ∨ v ∈ m.values :=
+  List.mem_cons.mp (Map.insert_values m h)
 
 -- ── The same closure results, for `LContext.WellKindedTy` ───────────
 --

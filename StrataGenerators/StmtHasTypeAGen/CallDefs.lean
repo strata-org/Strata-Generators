@@ -55,7 +55,9 @@ def substSig (σ : List (TyIdentifier × LMonoTy)) (block : @LMonoTySignature Un
 /-- `substSig` preserves keys (it only rewrites types). -/
 @[simp] theorem substSig_keys (σ : List (TyIdentifier × LMonoTy))
     (block : @LMonoTySignature Unit) : (substSig σ block).keys = block.keys := by
-  simp only [substSig, ListMap.keys_eq_map_fst, List.map_map, Function.comp_def]
+  induction block with
+  | nil => rfl
+  | cons hd tl ih => obtain ⟨k, v⟩ := hd; exact congrArg (k :: ·) ih
 
 /-- `substSig` preserves length. -/
 @[simp] theorem substSig_length (σ : List (TyIdentifier × LMonoTy))
@@ -68,7 +70,11 @@ theorem substSig_values (σ : List (TyIdentifier × LMonoTy))
     (block : @LMonoTySignature Unit) :
     (substSig σ block).values =
       block.values.map (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ])) := by
-  simp only [substSig, ListMap.values_eq_map_snd, List.map_map, Function.comp_def]
+  induction block with
+  | nil => rfl
+  | cons hd tl ih =>
+    obtain ⟨k, v⟩ := hd
+    exact congrArg (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) v :: ·) ih
 
 /-- `substSig` distributes over block append. -/
 theorem substSig_append (σ : List (TyIdentifier × LMonoTy))
@@ -102,8 +108,8 @@ theorem substSig_values_getElem (σ : List (TyIdentifier × LMonoTy))
     -- `ofScopes [[]]` is the single empty scope, and `subst` over it is the identity.
     simp only [id_eq, Strata.Util.HMaps.ofScopes, List.map_cons, List.map_nil,
       show Strata.Util.HMap.ofList ([] : List (TyIdentifier × LMonoTy))
-        = Strata.Util.HMap.empty from rfl, LMonoTy.subst_single_empty],
-    List.map_id]
+        = Strata.Util.HMap.empty from rfl, LMonoTy.subst_single_empty]]
+  exact List.map_id block
 
 /-- The set of callable procedures, each with its signature (shared in-out block
     leading both roles). -/

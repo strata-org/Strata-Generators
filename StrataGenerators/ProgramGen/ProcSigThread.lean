@@ -405,8 +405,8 @@ theorem commonPrefix_eq_nil_of_disjoint {A B : List (Identifier Unit × LMonoTy)
       intro heq
       -- `a = b` would put `a.1` in both key lists.
       refine h a.1 ?_ ?_
-      · rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨a, List.mem_cons_self, rfl⟩
-      · rw [ListMap.keys_eq_map_fst]
+      · rw [ListMap.keys_eq_map_fst (a :: as)]; exact List.mem_map.mpr ⟨a, List.mem_cons_self, rfl⟩
+      · rw [ListMap.keys_eq_map_fst (b :: bs)]
         exact List.mem_map.mpr ⟨b, List.mem_cons_self, by rw [heq]⟩
 
 /-- **`ProgramGen.commonPrefix` is exact on a decomposed signature pair.** -/
