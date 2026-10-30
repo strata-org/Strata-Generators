@@ -98,8 +98,9 @@ theorem fallbackName_allowed (reserved : List String) :
   simp only [DatatypeGen.fallbackName, indexedFreshName]
   rw [isAllowedName_eq_toList]
   simp [reservedNamePrefixes, List.replicate_succ, List.isPrefixOf, Lambda.genTyPrefix,
-    skolemPrefix, Lambda.elimTyPrefix, CallElim.freshTyVarPrefix,
-    ProcedureInlining.inlineTyVarPrefix]
+    skolemPrefix, Lambda.elimTyPrefix, CallElim.callSiteTypePrefix,
+    ProcedureInlining.inlineSiteTypePrefix, Lambda.precondTyVarPrefix, TermCheck.termTyVarPrefix,
+    Lambda.callTyVarPrefix]
 
 /-- A name `genDeclName reserved` draws is absent from `reserved` and uses no reserved prefix. -/
 theorem genDeclName_fresh {reserved : List String} {nm : String}
