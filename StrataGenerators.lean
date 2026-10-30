@@ -19,3 +19,5 @@ import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
+-- Coverage probabilities for factory operators in generated expressions.
+import StrataGenerators.Expectations
