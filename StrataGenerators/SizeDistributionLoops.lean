@@ -838,6 +838,21 @@ theorem genStmt_expect_numNesting_le (octx : OpCtx) (tvars : List TyIdentifier)
   refine le_trans h ?_
   ennr
 
+/-- **Markov's inequality at the shipping weights and the default cap**: a draw has at least `t`
+loops with probability at most `1/t`, at every size. For example, at least `4` loops with
+probability at most `1/4`. -/
+theorem genStmt_prob_numLoops_ge_default (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx) (size : Nat)
+    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (t : ℝ≥0∞) (ht0 : t ≠ 0)
+    (htt : t ≠ ⊤) :
+    prob (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size)
+        {r | t ≤ count loopCost r} ≤ 1 / t := by
+  have h := genStmtT_prob_numLoops_ge stmtDefault octx tvars immutableVars procs pctx
+    defaultMaxStmtSeqLen size labels C ctx t ht0 htt
+  rw [genStmtT_defaults, loopShare_default, inv_one_sub_expectedChildStmts_default] at h
+  refine le_trans h (ENNReal.div_le_div_right ?_ _)
+  ennr
+
 -- ── Every profile, at its own cap ────────────────────────────────────────
 
 /-- **The per-profile cap keeps every profile subcritical.** At `maxStmtSeqLenFor θ`, one statement
