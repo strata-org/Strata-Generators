@@ -18,7 +18,9 @@ generated statements`, which the suite already tests.
 
 `dist-report` measures a loop in 23–26% of statement lists at the source weights, and in
 80–82% under `stmtLoopHeavy`. A loop inside a loop goes from 0–2% to 27–28%, and that is
-where a loop-elimination pass is most likely to be wrong. So those two properties are
+where a loop-elimination pass is most likely to be wrong. These rates were measured before
+`maxStmtSeqLen` capped the body lengths, and with the old weights; they were not measured again.
+So those two properties are
 registered under both weightings, through `@[strata_property (tunings := …)]`. Each row has
 its own verdict and its own Tyche panel. The `[default]` row is exactly the property as
 written, because `genWith defaults` is the type's `Arbitrary` instance.
@@ -62,7 +64,8 @@ def loopElimPreservesTyping : TestDecl :=
     is `false`, and the same loop without the invariant gives `true`.
 
     An invariant-bearing loop appears in 16% of samples at the source weights and in 56–58%
-    under `stmtLoopHeavy`. That is why the loop-heavy row fails faster rather than differently.
+    under `stmtLoopHeavy` (measured before the body-length cap and with the old weights). That is
+    why the loop-heavy row fails faster rather than differently.
     The claim as stated really reads "unless the pass throws". The fix belongs upstream, or in
     the property, and this property pins the defect either way. -/
 @[strata_property (tunings := [("default", stmtDefault), ("loop-heavy", stmtLoopHeavy)])]

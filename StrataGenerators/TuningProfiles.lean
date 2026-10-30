@@ -13,8 +13,16 @@ points that the suite and the `dist-report` executable draw from.
 
 This module holds `Tuning` values and generator plumbing, and no proofs. It is therefore Mathlib-free,
 and a Strata transform pass can import it. `StrataGenerators.TuningPrototypes` holds the
-θ-invariance theorems, one per generator. Each says that every `θ` denotes the same `SPMF`, so
-no profile can invalidate a soundness or a completeness result.
+θ-invariance theorems, one per generator. Each says that every `θ` reaches the same programs *at
+the same body-length cap*, so no choice of weights can invalidate a soundness or a completeness
+result.
+
+The cap is the one exception. The tuned statement entry points take the cap
+`maxStmtSeqLenFor θ` by default, and a profile with heavy nesting gets a cap below
+`defaultMaxStmtSeqLen`. Such a profile does not reach a nested body that is longer than its cap.
+Soundness holds at every cap. Completeness for nested bodies longer than `maxStmtSeqLenFor θ`
+holds only under a profile whose cap is long enough, for example `stmtDefault`. The `example`s at the
+end of this module pin the cap of each profile.
 
 -/
 
@@ -166,23 +174,47 @@ end ExprIdx
 
 /-! ### Statements -/
 
-/-- The shipping statement distribution. The leaves stand at 4 to 1 to 1 to 1 to 1, and `block`,
-`ite`, `ite-nondet` and `loop` stand at 2 to 2 to 1 to 2. -/
+/-- The shipping statement distribution. At `size + 1` the leaves stand at 6 to 1 to 1 to 1 to 3, and
+`block`, `ite`, `ite-nondet` and `loop` stand at 1 each. The `size = 0` leaves stand at 4 to 1 to 1 to
+1 to 3. -/
 def stmtDefault : Tuning := genStmt._mutual.defaults
 
-/-- **Loop-heavy** (`stmt: LoopElim …`). `loop` outweighs the sum of the rest, so a loop is the modal
-statement at every nesting level. A loop inside a loop then becomes common rather than incidental,
-and that is where a loop-elimination pass is most likely to be wrong. `cmd` keeps its default weight,
-so a loop *body* still holds commands to eliminate around.
+/-- **The body-length cap for a statement profile.** The largest cap, at most
+`defaultMaxStmtSeqLen`, at which one statement draw makes fewer than one statement draw one level
+down on average. With `W` the total weight of the `size + 1` site and
+`B = w_block + 2 w_ite + 2 w_iteNondet + w_loop` the bodies that one draw opens, the expected
+number of child statements is `B / W · cap / 2`, and it is less than `1` exactly when
+`B · cap < 2 W`. `SizeDistributionLoops.expectedChildStmts_maxStmtSeqLenFor_lt_one` proves it.
+
+The tuned entry points use this cap by default, so a profile with heavy nesting gets a shorter cap
+and its expected nesting stays bounded in `size`. At the shipping weights it is
+`defaultMaxStmtSeqLen`. -/
+def maxStmtSeqLenFor (θ : Tuning) : Nat :=
+  let w := fun i => θ.weight i 0
+  let total := w StmtIdx.cmd + w StmtIdx.exit + w StmtIdx.funcDecl + w StmtIdx.typeDecl +
+    w StmtIdx.call + w StmtIdx.block + w StmtIdx.iteDet + w StmtIdx.iteNondet + w StmtIdx.loop
+  let bodies := w StmtIdx.block + 2 * w StmtIdx.iteDet + 2 * w StmtIdx.iteNondet + w StmtIdx.loop
+  min defaultMaxStmtSeqLen ((2 * total - 1) / bodies)
+
+/-- **Loop-heavy** (`stmt: LoopElim …`). `loop` (24) outweighs the sum of the rest (21), so a loop
+is the modal statement at every nesting level. A loop inside a loop then becomes common rather than
+incidental, and that is where a loop-elimination pass is most likely to be wrong.
+
+`cmd` goes up from 6 to 12 at `size + 1` for two reasons. A loop *body* still holds commands to
+eliminate around. And the profile keeps the body-length cap `3`: with `cmd` at its default weight,
+`maxStmtSeqLenFor` would give cap `2`, and a loop body would hold at most two statements.
 
 Nesting is what the weight really buys, and it saturates. Above 24, another 16 points of weight buy
-two points of nesting and cost two points of generation cost. -/
+two points of nesting and cost two points of generation cost. These numbers were measured when each
+body length was uniform on `[0, size + 1]`, before `maxStmtSeqLen` capped it, and with the old
+weights. They were not measured again. -/
 def stmtLoopHeavy : Tuning :=
-  withWeights stmtDefault [(StmtIdx.loop, 24)]
+  withWeights stmtDefault [(StmtIdx.loop, 24), (StmtIdx.cmd, 12)]
 
-/-- **Loop-heavy but shallower.** As `stmtLoopHeavy`, but it raises the leaf `cmd` branch as well, so
-a loop body is more often a straight-line block than another loop. Use it when the pass under test is
-about a loop's *contents* rather than its nesting. -/
+/-- **Loop-heavy but shallower.** `loop` is lighter than in `stmtLoopHeavy` (16 against 24), and the
+leaf `cmd` branch is raised at both sites (12 at `size + 1`, as in `stmtLoopHeavy`, and 12 at
+`size = 0`). A loop body is therefore more often a straight-line block than another loop. Use it
+when the pass under test is about a loop's *contents* rather than its nesting. -/
 def stmtLoopWide : Tuning :=
   withWeights stmtDefault [(StmtIdx.loop, 16), (StmtIdx.cmd, 12), (StmtIdx.cmd0, 12)]
 
@@ -235,7 +267,8 @@ independent choices makes two of them equal. Two things do move the rate, and bo
   `stmtLoopHeavy` rather than anything `cmd`-shaped, because a `loop` carries a guard, a measure and
   an invariant list, while a command carries one expression. Measured, the pass changed the program on
   1% of samples at the defaults and on 3% under `stmtLoopHeavy`. A `cmd`-heavy and `block`-heavy
-  variant gave 0–1%, which is why no such profile is here.
+  variant gave 0–1%, which is why no such profile is here. These rates were measured before
+  `maxStmtSeqLen` capped the body lengths, and they were not measured again.
 * **A degenerate expression distribution**, which raises the chance of a collision directly. That is
   a `genLExprBase` knob, and `genStmt` reaches `genLExprBase` by name, so no tuning here reaches it.
   It would also trade away the breadth that the `expr:` properties need.
@@ -377,24 +410,27 @@ claims to wrap. -/
 statement nested inside a `block`, an `ite` or a `loop` body is therefore tuned as well. -/
 def genStmtT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat) :
-    G GenStmtResult :=
-  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx (PSum.inl ⟨labels, C, ctx, size⟩)
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size : Nat)
+    (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) : G GenStmtResult :=
+  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx maxStmtSeqLen
+    (PSum.inl ⟨labels, C, ctx, size⟩)
 
 /-- `genStmtChain` with every branch weight read from `θ`. -/
 def genStmtChainT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size len : Nat) :
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx := []) (size len : Nat)
+    (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx
+  genStmt._mutual.tuned θ octx tvars immutableVars procs pctx maxStmtSeqLen
     (PSum.inr ⟨labels, C, ctx, size, len⟩)
 
 /-- `genProgramStmts` with every branch weight read from `θ`. This is the entry point that the
 statement family's harness draws from. -/
 def genProgramStmtsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (size len : Nat) (pctx : PolyOpCtx := []) :
+    (size len : Nat) (pctx : PolyOpCtx := [])
+    (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) :
     G (List Statement × LContext CoreLParams × VarCtx) :=
-  genStmtChainT θ octx tvars [] [] [] (LContext.default) [] pctx size len
+  genStmtChainT θ octx tvars [] [] [] (LContext.default) [] pctx size len maxStmtSeqLen
 
 /-- `genCmds` with every branch weight read from `θ`. `genCmds` is a plain fold over `genCmd` and has
 no `frequency` site of its own, so this module writes the tuned chain out rather than let the
@@ -413,7 +449,7 @@ def genCmdsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentif
 difference. -/
 def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
-    (pctx : PolyOpCtx := []) : G Procedure := do
+    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   let inout ← genInputs typeArgs size
@@ -435,7 +471,7 @@ def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCt
   let (body, _, _) ← genStmtChainT θ octx typeArgs
     (ListMap.keys inputs ++ ListMap.keys (StrataGenerators.Procedure.oldVars inout)) procs []
     ({ C with rigidTypeVars := typeArgs })
-    (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) pctx size len
+    (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) pctx size len maxStmtSeqLen
   pure {
     header := {
       name := ⟨name, ()⟩, typeArgs := typeArgs, inputs := inputs, outputs := outputs,
@@ -505,22 +541,23 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 /-- At the shipping weights, the tuned statement generator is `genStmt`. -/
 @[simp] theorem genStmtT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size : Nat) :
-    genStmtT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size
-      = genStmt octx tvars immutableVars procs labels C ctx pctx size := rfl
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size maxStmtSeqLen : Nat) :
+    genStmtT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size maxStmtSeqLen
+      = genStmt octx tvars immutableVars procs labels C ctx pctx size maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned statement-chain generator is `genStmtChain`. -/
 @[simp] theorem genStmtChainT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size len : Nat) :
+    (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size len maxStmtSeqLen : Nat) :
     genStmtChainT (G := G) stmtDefault octx tvars immutableVars procs labels C ctx pctx size len
-      = genStmtChain octx tvars immutableVars procs labels C ctx pctx size len := rfl
+        maxStmtSeqLen
+      = genStmtChain octx tvars immutableVars procs labels C ctx pctx size len maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned statement-list generator is `genProgramStmts`. -/
 @[simp] theorem genProgramStmtsT_defaults [_root_.Gen G] (octx : OpCtx)
-    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
-    genProgramStmtsT (G := G) stmtDefault octx tvars size len pctx
-      = genProgramStmts octx tvars size len pctx := rfl
+    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) (maxStmtSeqLen : Nat) :
+    genProgramStmtsT (G := G) stmtDefault octx tvars size len pctx maxStmtSeqLen
+      = genProgramStmts octx tvars size len pctx maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned command chain is `genCmds`, for any chain length. -/
 @[simp] theorem genCmdsT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
@@ -535,9 +572,10 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 
 /-- At the shipping weights, the tuned procedure generator is `genProcedure`. -/
 @[simp] theorem genProcedureT_defaults [_root_.Gen G] (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx) :
-    genProcedureT (G := G) stmtDefault octx procs C Γ size len pctx
-      = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx := rfl
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx)
+    (maxStmtSeqLen : Nat) :
+    genProcedureT (G := G) stmtDefault octx procs C Γ size len pctx maxStmtSeqLen
+      = StrataGenerators.Procedure.genProcedure octx procs C Γ size len pctx maxStmtSeqLen := rfl
 
 /-- At the shipping weights, the tuned base expression generator is `genLExprBase`, as a *function*
 of the target type. `@[tunable]` states its own version at full application, and `genLExprT` needs
@@ -599,7 +637,18 @@ fold over 84 schedule entries, which is why the recursion depth goes up here. -/
 set_option maxRecDepth 8000
 
 example : stmtLoopHeavy.schedules[StmtIdx.loop]! = (24, 0) := rfl
-example : stmtLoopHeavy.schedules[StmtIdx.block]! = (2, 0) := rfl
+example : stmtLoopHeavy.schedules[StmtIdx.block]! = (1, 0) := rfl
+example : stmtLoopHeavy.schedules[StmtIdx.cmd]! = (12, 0) := rfl
+
+/-! The body-length cap of each statement profile. The shipping weights keep the default cap, and
+the loop-heavy profiles get a shorter one. -/
+example : maxStmtSeqLenFor stmtDefault = defaultMaxStmtSeqLen := by decide
+example : maxStmtSeqLenFor stmtLoopHeavy = 3 := by decide
+example : maxStmtSeqLenFor stmtLoopWide = 3 := by decide
+example : maxStmtSeqLenFor stmtMixed = 4 := by decide
+example : maxStmtSeqLenFor stmtFuncDeclHeavy = 5 := by decide
+example : maxStmtSeqLenFor stmtCallHeavy = 5 := by decide
+example : maxStmtSeqLenFor procPrecondHeavy = 5 := by decide
 example : stmtCallHeavy.schedules[StmtIdx.call]! = (12, 0) := rfl
 example : exprQuantHeavy.schedules[ExprIdx.boolAll]! = (8, 0) := rfl
 example : exprQuantHeavy.schedules[ExprIdx.boolEq]! = (8, 0) := rfl
