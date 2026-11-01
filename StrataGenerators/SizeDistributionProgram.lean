@@ -222,7 +222,7 @@ theorem prob_genProcedure_top_ge (P : Statement → Prop) (octx : OpCtx) (procs 
     (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx)
     (k : Nat) (B : ℝ≥0∞)
     (hB : ∀ imm C' ctx,
-      B ≤ prob (genStmt (G := SPMF) octx [] imm procs [] C' ctx pctx size k) (Top P)) :
+      B ≤ prob (genStmt (G := SPMF) octx [] imm procs [] C' ctx pctx size k) (TopLevelEvent P)) :
     nameMass * ((1 / ((size : ℝ≥0∞) + 1)) ^ 6 * (B * stmtMassBound k size ^ len))
       ≤ prob (genProcedure (G := SPMF) octx procs C Γ size (len + 1) pctx k)
           {p | ProcTop P p} := by
@@ -245,7 +245,7 @@ theorem prob_genProcedure_top_ge (P : Statement → Prop) (octx : OpCtx) (procs 
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
     (le_trans (mul_le_mul' (hB _ _ _) le_rfl)
       (prob_genStmtChain_top_ge octx [] pctx P _ procs [] _ _ size len k)) le_rfl)
-    (prob_bind_ge (TopChain P) fun t ht => ?_))
+    (prob_bind_ge (TopLevelEventChain P) fun t ht => ?_))
   obtain ⟨body, _, _⟩ := t
   refine (prob_pure_of_mem ?_).ge
   exact ⟨body, rfl, ht⟩
@@ -280,7 +280,7 @@ def IsProcWith (P : Statement → Prop) : Decl → Prop
 theorem prob_genDeclProcedure_ge (P : Statement → Prop) (s : GenState) (b : Bounds) (len : Nat)
     (hlen : b.procLen = len + 1) (B : ℝ≥0∞)
     (hB : ∀ imm C' ctx, B ≤ prob (genStmt (G := SPMF) s.octx [] imm s.procs [] C' ctx s.derivedPctx
-      b.procSize b.maxStmtSeqLen) (Top P)) :
+      b.procSize b.maxStmtSeqLen) (TopLevelEvent P)) :
     1 / 2 * ((1 / ((b.procSize : ℝ≥0∞) + 1)) ^ 6 *
         (B * stmtMassBound b.maxStmtSeqLen b.procSize ^ len)) * (1 / 2)
       ≤ prob (genDeclProcedure (G := SPMF) s b) {r | ∃ d ∈ r.1, IsProcWith P d} := by

@@ -258,7 +258,7 @@ def IsLoop : Statement → Prop
   | _ => False
 
 /-- The event that the top level of a draw holds a statement satisfying `P`. -/
-def Top (P : Statement → Prop) : Set GenStmtResult := {r | ∃ s ∈ r.stmts, P s}
+def TopLevelEvent (P : Statement → Prop) : Set GenStmtResult := {r | ∃ s ∈ r.stmts, P s}
 
 theorem prob_choose_zero (m : Nat) (h : 0 ≤ m) :
     1 / ((m : ℝ≥0∞) + 1) ≤
@@ -348,7 +348,8 @@ each branch length is uniform on `[0, k]`. The bound does not depend on the size
 theorem prob_genStmt_ite_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n k : Nat) :
     iteAtSize k
-      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k) (Top IsIte) := by
+      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
+          (TopLevelEvent IsIte) := by
   rw [iteAtSize_eq, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 7 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
@@ -418,7 +419,8 @@ an empty block, under a label from `genFreshLabel`. -/
 theorem prob_genStmt_block_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n k : Nat) :
     blockAtSize k
-      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k) (Top IsBlock) := by
+      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
+          (TopLevelEvent IsBlock) := by
   rw [blockAtSize_eq, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 5 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
@@ -440,7 +442,8 @@ a nondeterministic guard, no measure, no invariant, an empty body. -/
 theorem prob_genStmt_loop_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n k : Nat) :
     loopAtSize k
-      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k) (Top IsLoop) := by
+      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
+          (TopLevelEvent IsLoop) := by
   rw [loopAtSize_eq, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 8 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
@@ -476,7 +479,7 @@ theorem prob_genStmt_covers (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n k : Nat) :
     cmdCoverAtStmt
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 3) k)
-          (Top IsCoveringCmd) := by
+          (TopLevelEvent IsCoveringCmd) := by
   rw [cmdCoverAtStmt, cmdCoverBound, genStmt]
   refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
   simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
@@ -557,7 +560,8 @@ theorem prob_genStmtChain_univ (imm : List (Identifier Unit)) (procs : ProcSigCt
     exact (prob_pure_of_mem (Set.mem_univ _)).ge
 
 /-- The event that a statement chain holds, at its top level, a statement satisfying `P`. -/
-def TopChain (P : Statement → Prop) : Set (List Statement × LContext CoreLParams × VarCtx) :=
+def TopLevelEventChain (P : Statement → Prop) :
+    Set (List Statement × LContext CoreLParams × VarCtx) :=
   {t | ∃ s ∈ t.1, P s}
 
 /-- A chain of length `len + 1` inherits a top-level event from its first statement, at the cost
@@ -565,12 +569,12 @@ of the mass of the remaining `len` statements. -/
 theorem prob_genStmtChain_top_ge (P : Statement → Prop) (imm : List (Identifier Unit))
     (procs : ProcSigCtx) (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx)
     (size len k : Nat) :
-    prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx size k) (Top P) *
+    prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx size k) (TopLevelEvent P) *
         stmtMassBound k size ^ len ≤
       prob (genStmtChain (G := SPMF) octx tvars imm procs labels C ctx pctx size (len + 1) k)
-        (TopChain P) := by
+        (TopLevelEventChain P) := by
   rw [genStmtChain]
-  refine prob_bind_ge (Top P) fun r hr => ?_
+  refine prob_bind_ge (TopLevelEvent P) fun r hr => ?_
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
     (prob_genStmtChain_univ octx tvars pctx imm procs labels size len k _ _) le_rfl)
     (prob_bind_ge Set.univ fun t _ => ?_))
@@ -605,16 +609,18 @@ theorem genStmtChain_zero_flat (imm : List (Identifier Unit)) (procs : ProcSigCt
 every body-length cap `k`. -/
 theorem genStmt_nesting_threshold (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (k : Nat) :
-    prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx 0 k) (Top IsNesting) = 0 ∧
+    prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx 0 k)
+        (TopLevelEvent IsNesting) = 0 ∧
     ∀ n : Nat,
       (iteAtSize k
-          ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k) (Top IsIte) ∧
+          ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
+              (TopLevelEvent IsIte) ∧
         blockAtSize k
           ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
-              (Top IsBlock) ∧
+              (TopLevelEvent IsBlock) ∧
         loopAtSize k
           ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
-              (Top IsLoop))
+              (TopLevelEvent IsLoop))
       ∧ 0 < iteAtSize k ∧ 0 < blockAtSize k ∧ 0 < loopAtSize k :=
   ⟨(prob_eq_zero_iff _ _).mpr fun r hr hn =>
       genStmt_zero_flat octx tvars pctx imm procs labels C ctx k r hr hn,
