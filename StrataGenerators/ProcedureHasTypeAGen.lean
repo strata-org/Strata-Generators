@@ -33,6 +33,8 @@ outputs and the old bindings, becomes `procToTCtx proc.header.outputs`. That is 
 
 namespace StrataGenerators.Procedure
 
+variable {maxStmtSeqLen : Nat}
+
 /-- `Map.keys` and `ListMap.keys` are word-for-word identical definitions on the
     same underlying `List (α × β)`, but they are *distinct constants*, so a bridge
     is needed to move between the statement generator (which threads `Map.keys`)
@@ -814,7 +816,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (proc : Procedure) (pctx : PolyOpCtx := [])
     (hproc : proc ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen)) :
     ProcHasTypeA P { C with rigidTypeVars := proc.header.typeArgs } Γ proc := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hproc
   obtain ⟨name, _hname, typeArgs, htypeArgs, M, hM, rawInputOnly, hrawInputOnly,
@@ -1059,7 +1061,7 @@ theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSig
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
     (proc : Procedure) (pctx : PolyOpCtx := [])
     (hproc : proc ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx))
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen))
     (hCrigid : C.rigidTypeVars ⊆ proc.header.typeArgs) :
     ProcHasTypeA P C Γ proc := by
   have hbase :=
@@ -1179,8 +1181,8 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
       (genStmtChain (G := SPMF) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { C with rigidTypeVars := proc.header.typeArgs }
-        (M ++ I ++ (M ++ O) ++ oldVars M) [] size len)) :
-    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len) := by
+        (M ++ I ++ (M ++ O) ++ oldVars M) [] size len maxStmtSeqLen)) :
+    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len (maxStmtSeqLen := maxStmtSeqLen)) := by
   simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM

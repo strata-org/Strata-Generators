@@ -150,7 +150,7 @@ def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
     See `genProcedure_sound` for the well-typedness guarantee. -/
 def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
-    (pctx : PolyOpCtx := []) : G Procedure := do
+    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   -- Three mutually-disjoint signature blocks. `M` is the in-out block (parameters
@@ -198,6 +198,7 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     -- before checking the body, and pins a generated `init`'s stored type to its
     -- annotation (see `genProcedure_complete` / the statement-level `hRigid`).
     ({ C with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) pctx size len
+    maxStmtSeqLen
   pure {
     header := {
       name := ⟨name, ()⟩,

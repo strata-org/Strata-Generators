@@ -38,6 +38,8 @@ open StrataGenerators.Procedure StrataGenerators.Stmt
 
 namespace ProgramGen
 
+variable {maxStmtSeqLen : Nat}
+
 /-! ## `find?` under append -/
 
 /-- **The scan distributes over append.** `Program.find?.go` walks the list in
@@ -142,7 +144,7 @@ def procSigOf (p : Procedure) (M I O : @LMonoTySignature Unit) :
 theorem genProcedure_sig_decomp {octx : OpCtx} {pctx : PolyOpCtx} {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
     (hp : p ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen)) :
     ∃ M I O : @LMonoTySignature Unit,
       p.header.inputs = M ++ I ∧ p.header.outputs = M ++ O ∧
       (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) := by
@@ -422,7 +424,7 @@ theorem genProcedure_commonPrefix_decomp {octx : OpCtx} {pctx : PolyOpCtx}
     {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
     (hp : p ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen)) :
     ∃ M I O : @LMonoTySignature Unit,
       ProgramGen.commonPrefix p.header.inputs p.header.outputs = M ∧
       p.header.inputs.drop M.length = I ∧

@@ -155,6 +155,13 @@ structure Bounds where
   procSize : Nat := 3
   /-- Max body statement count for a generated procedure. -/
   procLen : Nat := 3
+  /-- Max length of a nested statement body (of a `block`, a `loop` or an `ite` arm) inside a
+      procedure body. Read `StrataGenerators.Stmt.defaultMaxStmtSeqLen`.
+
+      CAUTION: at the shipping weights, a value above `5` makes one statement draw produce more than
+      one statement draw one level down, on average. Then no theorem bounds the expected nesting.
+      The value is not checked. -/
+  maxStmtSeqLen : Nat := StrataGenerators.Stmt.defaultMaxStmtSeqLen
   /-- Which families of a datatype's auto-generated functions later declarations
       may call: constructors, testers, and safe/unsafe field accessors by default;
       eliminators excluded (see `DerivedOpFamilies`). -/
@@ -439,6 +446,7 @@ def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     procedure (see `commonPrefix` in `ProgramGen.Core`). -/
 def genDeclProcedure [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let proc₀ ← genProcedure s.octx s.procs s.C s.Γ b.procSize b.procLen s.derivedPctx
+    (maxStmtSeqLen := b.maxStmtSeqLen)
   let name ← DatatypeGen.genFreshName s.reserved
   let proc := { proc₀ with header := { proc₀.header with name := ⟨name, ()⟩ } }
   let M := commonPrefix proc.header.inputs proc.header.outputs
