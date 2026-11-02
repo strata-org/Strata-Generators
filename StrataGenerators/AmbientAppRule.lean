@@ -23,9 +23,9 @@ Results, for every type generator `genTy`, fuel `n`, and context `Γ`:
   factor bounded below independently of `genTy` and `n`.
 * `default_lt_palka`: so Pałka et al.'s rule is strictly more frequent whenever
   `Pr(genTy = String) · Pr(genTy = Int) < palkaFloor sig`.
-* `default_vs_palka_separation`: with `genTy := genTyUniform numBv` (uniform over `Int`, `String`
-  and `numBv` bitvector types), the default rule's probability drops below any `ε > 0` for
-  large enough `numBv`, while Pałka et al.'s stays `≥ palkaFloor sig`; hence from some `N` on,
+* `default_vs_palka_separation`: with `genTy := genTyUniform numBaseTypes` (uniform over
+  `numBaseTypes` base types), the default rule's probability drops below any `ε > 0` for large
+  enough `numBaseTypes`, while Pałka et al.'s stays `≥ palkaFloor sig`; hence from some `N` on,
   Pałka et al.'s is strictly more frequent.
 -/
 
@@ -38,7 +38,8 @@ open SPMF (prob expect mass)
 
 inductive Ty where
   | int | str | bool
-  /-- A family of further base types, standing in for Strata's bitvector widths. -/
+  /-- A family of further base types, standing in for Strata's bitvector widths; they let the
+  number of base types grow without bound. -/
   | bv (w : Nat)
   | arrow (a b : Ty)
   deriving DecidableEq, Repr
@@ -492,60 +493,67 @@ theorem default_lt_palka (genTy : SPMF Ty) (n : Nat) (Γ : List Ty) {take : Fn}
     _ ≤ prob (genExprP genTy sig (n + 1) Γ .str) (CallOf take) :=
         genExprP_prob_takeCall_ge genTy sig n Γ hmem ht
 
-/-- `Int`, `String`, and `numBv` bitvector types `bv 0, …, bv (numBv - 1)`. -/
-def baseTys (numBv : Nat) : List Ty := .int :: .str :: (List.range numBv).map Ty.bv
+/-- `numBaseTypes` base types: `Int`, `String`, and the bitvector types
+`bv 0, …, bv (numBaseTypes - 3)` (just `Int` and `String` when `numBaseTypes ≤ 2`). -/
+def baseTys (numBaseTypes : Nat) : List Ty :=
+  .int :: .str :: (List.range (numBaseTypes - 2)).map Ty.bv
 
-/-- A type generator uniform over the `numBv + 2` types of `baseTys numBv`. -/
-def genTyUniform [Gen G] (numBv : Nat) : G Ty := elements (baseTys numBv) (by simp [baseTys])
+/-- A type generator uniform over the base types of `baseTys numBaseTypes`. -/
+def genTyUniform [Gen G] (numBaseTypes : Nat) : G Ty :=
+  elements (baseTys numBaseTypes) (by simp [baseTys])
 
-theorem genTyUniform_prob_base (numBv : Nat) {τ : Ty} (hτ : τ = .int ∨ τ = .str) :
-    prob (genTyUniform numBv : SPMF Ty) {τ} = ((numBv + 2 : ℕ) : ℝ≥0∞)⁻¹ := by
+/-- With `numBaseTypes ≥ 2` base types, `genTyUniform` picks `Int` (or `String`) with
+probability `1 / numBaseTypes`. -/
+theorem genTyUniform_prob_base {numBaseTypes : Nat} (h2 : 2 ≤ numBaseTypes) {τ : Ty}
+    (hτ : τ = .int ∨ τ = .str) :
+    prob (genTyUniform numBaseTypes : SPMF Ty) {τ} = (numBaseTypes : ℝ≥0∞)⁻¹ := by
+  obtain ⟨m, rfl⟩ : ∃ m, numBaseTypes = m + 2 := ⟨numBaseTypes - 2, by omega⟩
   unfold SPMF.prob genTyUniform
   rw [SPMF.expect_elements]
-  have h0 : (List.map (Pi.single τ 1 ∘ Ty.bv : Nat → ℝ≥0∞) (List.range numBv)).sum = 0 :=
+  have h0 : (List.map (Pi.single τ 1 ∘ Ty.bv : Nat → ℝ≥0∞) (List.range m)).sum = 0 :=
     List.sum_eq_zero fun x hx => by
       obtain ⟨w, -, rfl⟩ := List.mem_map.1 hx
       rcases hτ with rfl | rfl <;> simp
   rcases hτ with rfl | rfl <;> simp [baseTys, h0] <;> rw [add_assoc] <;> norm_num
 
-/-- **Separation.** As the type generator spreads over more base types (`numBv → ∞`):
+/-- **Separation.** As the number of base types grows (`numBaseTypes → ∞`):
 1. the default rule's probability of calling `take` drops below any `ε > 0` for all large
-   enough `numBv` (i.e. it tends to `0`);
-2. Pałka et al.'s stays at least `palkaFloor sig` for every `numBv`;
+   enough `numBaseTypes` (i.e. it tends to `0`);
+2. Pałka et al.'s stays at least `palkaFloor sig` for every `numBaseTypes`;
 3. hence, from some `N` on, Pałka et al.'s rule is strictly more frequent. -/
 theorem default_vs_palka_separation (n : Nat) (Γ : List Ty) {take : Fn}
     (hmem : take ∈ sig) (ht : take.ty = takeTy) :
-    (∀ ε : ℝ≥0∞, 0 < ε → ∃ N, ∀ numBv ≥ N,
-        prob (genExpr (genTyUniform numBv) sig n Γ .str) (CallOf take) < ε)
-      ∧ (∀ numBv, palkaFloor sig ≤
-          prob (genExprP (genTyUniform numBv) sig (n + 1) Γ .str) (CallOf take))
-      ∧ ∃ N, ∀ numBv ≥ N,
-          prob (genExpr (genTyUniform numBv) sig (n + 1) Γ .str) (CallOf take)
-            < prob (genExprP (genTyUniform numBv) sig (n + 1) Γ .str) (CallOf take) := by
-  -- Under `genTyUniform numBv`, the default rule's probability is at most `numBv⁻¹`.
-  have hbound : ∀ m numBv,
-      prob (genExpr (genTyUniform numBv) sig m Γ .str) (CallOf take) ≤ (numBv : ℝ≥0∞)⁻¹ := by
-    intro m numBv
-    calc prob (genExpr (genTyUniform numBv) sig m Γ .str) (CallOf take)
-        ≤ prob (genTyUniform numBv) {.str} * prob (genTyUniform numBv) {.int} :=
+    (∀ ε : ℝ≥0∞, 0 < ε → ∃ N, ∀ numBaseTypes ≥ N,
+        prob (genExpr (genTyUniform numBaseTypes) sig n Γ .str) (CallOf take) < ε)
+      ∧ (∀ numBaseTypes, palkaFloor sig ≤
+          prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take))
+      ∧ ∃ N, ∀ numBaseTypes ≥ N,
+          prob (genExpr (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take)
+            < prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take) := by
+  -- With `k ≥ 2` base types, the default rule's probability is at most `k⁻¹ · k⁻¹ ≤ k⁻¹`.
+  have hbound : ∀ m k, 2 ≤ k →
+      prob (genExpr (genTyUniform k) sig m Γ .str) (CallOf take) ≤ (k : ℝ≥0∞)⁻¹ := by
+    intro m k hk
+    calc prob (genExpr (genTyUniform k) sig m Γ .str) (CallOf take)
+        ≤ prob (genTyUniform k) {.str} * prob (genTyUniform k) {.int} :=
           genExpr_prob_takeCall_le _ sig m Γ ht
-      _ = ((numBv + 2 : ℕ) : ℝ≥0∞)⁻¹ * ((numBv + 2 : ℕ) : ℝ≥0∞)⁻¹ := by
-          rw [genTyUniform_prob_base numBv (.inr rfl), genTyUniform_prob_base numBv (.inl rfl)]
-      _ ≤ ((numBv + 2 : ℕ) : ℝ≥0∞)⁻¹ * 1 := by
-          gcongr; exact ENNReal.inv_le_one.2 (by push_cast; exact le_add_left (by norm_num))
-      _ ≤ (numBv : ℝ≥0∞)⁻¹ := by rw [mul_one]; gcongr; omega
-  -- (1): pick `N` with `N⁻¹ < ε`; for `numBv ≥ N`, `Pr ≤ numBv⁻¹ ≤ N⁻¹ < ε`.
-  have hsmall : ∀ m (ε : ℝ≥0∞), 0 < ε → ∃ N, ∀ numBv ≥ N,
-      prob (genExpr (genTyUniform numBv) sig m Γ .str) (CallOf take) < ε := by
+      _ = (k : ℝ≥0∞)⁻¹ * (k : ℝ≥0∞)⁻¹ := by
+          rw [genTyUniform_prob_base hk (.inr rfl), genTyUniform_prob_base hk (.inl rfl)]
+      _ ≤ (k : ℝ≥0∞)⁻¹ * 1 := by
+          gcongr; exact ENNReal.inv_le_one.2 (by exact_mod_cast (by omega : 1 ≤ k))
+      _ = (k : ℝ≥0∞)⁻¹ := mul_one _
+  -- (1): pick `N₀` with `N₀⁻¹ < ε`; for `k ≥ max N₀ 2`, `Pr ≤ k⁻¹ ≤ N₀⁻¹ < ε`.
+  have hsmall : ∀ m (ε : ℝ≥0∞), 0 < ε → ∃ N, ∀ k ≥ N,
+      prob (genExpr (genTyUniform k) sig m Γ .str) (CallOf take) < ε := by
     intro m ε hε
-    obtain ⟨N, hN⟩ := ENNReal.exists_inv_nat_lt hε.ne'
-    exact ⟨N, fun numBv h => (hbound m numBv).trans_lt
-      ((ENNReal.inv_le_inv.2 (by exact_mod_cast h)).trans_lt hN)⟩
+    obtain ⟨N₀, hN₀⟩ := ENNReal.exists_inv_nat_lt hε.ne'
+    refine ⟨max N₀ 2, fun k hk => (hbound m k (by omega)).trans_lt ?_⟩
+    exact (ENNReal.inv_le_inv.2 (by exact_mod_cast (by omega : N₀ ≤ k))).trans_lt hN₀
   -- (2) is the lower bound.
-  have hfloor := fun numBv => genExprP_prob_takeCall_ge (genTyUniform numBv) sig n Γ hmem ht
+  have hfloor := fun k => genExprP_prob_takeCall_ge (genTyUniform k) sig n Γ hmem ht
   -- (3): apply (1) at fuel `n + 1` with `ε := palkaFloor sig`, which is positive.
   obtain ⟨N, hN⟩ := hsmall (n + 1) _ (palkaFloor_pos sig)
-  exact ⟨hsmall n, hfloor, N, fun numBv h => (hN numBv h).trans_le (hfloor numBv)⟩
+  exact ⟨hsmall n, hfloor, N, fun k hk => (hN k hk).trans_le (hfloor k)⟩
 
 end compare
 
