@@ -24,9 +24,9 @@ Results, for every type generator `genTy`, fuel `n`, and context `Γ`:
 * `default_lt_palka`: so Pałka et al.'s rule is strictly more frequent whenever
   `Pr(genTy = String) · Pr(genTy = Int) < palkaFloor sig`.
 * `default_vs_palka_separation`: with `genTy := genTyUniform numBv` (uniform over `Int`, `String`
-  and `numBv` bitvector types), the default rule's probability tends to `0` as `numBv → ∞`,
-  while Pałka et al.'s stays `≥ palkaFloor sig`; hence eventually Pałka et al.'s is strictly more
-  frequent.
+  and `numBv` bitvector types), the default rule's probability drops below any `ε > 0` for
+  large enough `numBv`, while Pałka et al.'s stays `≥ palkaFloor sig`; hence from some `N` on,
+  Pałka et al.'s is strictly more frequent.
 -/
 
 namespace StrataGenerators.AmbientApp
@@ -509,24 +509,23 @@ theorem genTyUniform_prob_base (numBv : Nat) {τ : Ty} (hτ : τ = .int ∨ τ =
   rcases hτ with rfl | rfl <;> simp [baseTys, h0] <;> rw [add_assoc] <;> norm_num
 
 /-- **Separation.** As the type generator spreads over more base types (`numBv → ∞`):
-1. the default rule's probability of calling `take` tends to `0`;
-2. Pałka et al.'s stays at least `palkaFloor sig`;
-3. hence, for all large enough `numBv`, Pałka et al.'s rule is strictly more frequent. -/
+1. the default rule's probability of calling `take` drops below any `ε > 0` for all large
+   enough `numBv` (i.e. it tends to `0`);
+2. Pałka et al.'s stays at least `palkaFloor sig` for every `numBv`;
+3. hence, from some `N` on, Pałka et al.'s rule is strictly more frequent. -/
 theorem default_vs_palka_separation (n : Nat) (Γ : List Ty) {take : Fn}
     (hmem : take ∈ sig) (ht : take.ty = takeTy) :
-    Filter.Tendsto (fun numBv => prob (genExpr (genTyUniform numBv) sig n Γ .str) (CallOf take))
-        Filter.atTop (nhds 0)
+    (∀ ε : ℝ≥0∞, 0 < ε → ∃ N, ∀ numBv ≥ N,
+        prob (genExpr (genTyUniform numBv) sig n Γ .str) (CallOf take) < ε)
       ∧ (∀ numBv, palkaFloor sig ≤
           prob (genExprP (genTyUniform numBv) sig (n + 1) Γ .str) (CallOf take))
-      ∧ ∀ᶠ numBv in Filter.atTop,
+      ∧ ∃ N, ∀ numBv ≥ N,
           prob (genExpr (genTyUniform numBv) sig (n + 1) Γ .str) (CallOf take)
             < prob (genExprP (genTyUniform numBv) sig (n + 1) Γ .str) (CallOf take) := by
-  -- (1) Squeeze: `Pr ≤ (numBv+2)⁻¹ · (numBv+2)⁻¹ ≤ numBv⁻¹ → 0`.
-  have hlim : ∀ m, Filter.Tendsto
-      (fun numBv => prob (genExpr (genTyUniform numBv) sig m Γ .str) (CallOf take))
-      Filter.atTop (nhds 0) := fun m => by
-    refine tendsto_of_tendsto_of_tendsto_of_le_of_le tendsto_const_nhds
-      ENNReal.tendsto_inv_nat_nhds_zero (fun _ => zero_le _) fun numBv => ?_
+  -- Under `genTyUniform numBv`, the default rule's probability is at most `numBv⁻¹`.
+  have hbound : ∀ m numBv,
+      prob (genExpr (genTyUniform numBv) sig m Γ .str) (CallOf take) ≤ (numBv : ℝ≥0∞)⁻¹ := by
+    intro m numBv
     calc prob (genExpr (genTyUniform numBv) sig m Γ .str) (CallOf take)
         ≤ prob (genTyUniform numBv) {.str} * prob (genTyUniform numBv) {.int} :=
           genExpr_prob_takeCall_le _ sig m Γ ht
@@ -535,11 +534,18 @@ theorem default_vs_palka_separation (n : Nat) (Γ : List Ty) {take : Fn}
       _ ≤ ((numBv + 2 : ℕ) : ℝ≥0∞)⁻¹ * 1 := by
           gcongr; exact ENNReal.inv_le_one.2 (by push_cast; exact le_add_left (by norm_num))
       _ ≤ (numBv : ℝ≥0∞)⁻¹ := by rw [mul_one]; gcongr; omega
-  -- (2) is the lower bound; (3) follows from (1) at fuel `n + 1` and `palkaFloor sig > 0`.
+  -- (1): pick `N` with `N⁻¹ < ε`; for `numBv ≥ N`, `Pr ≤ numBv⁻¹ ≤ N⁻¹ < ε`.
+  have hsmall : ∀ m (ε : ℝ≥0∞), 0 < ε → ∃ N, ∀ numBv ≥ N,
+      prob (genExpr (genTyUniform numBv) sig m Γ .str) (CallOf take) < ε := by
+    intro m ε hε
+    obtain ⟨N, hN⟩ := ENNReal.exists_inv_nat_lt hε.ne'
+    exact ⟨N, fun numBv h => (hbound m numBv).trans_lt
+      ((ENNReal.inv_le_inv.2 (by exact_mod_cast h)).trans_lt hN)⟩
+  -- (2) is the lower bound.
   have hfloor := fun numBv => genExprP_prob_takeCall_ge (genTyUniform numBv) sig n Γ hmem ht
-  refine ⟨hlim n, hfloor, ?_⟩
-  filter_upwards [(hlim (n + 1)).eventually (gt_mem_nhds (palkaFloor_pos sig))] with numBv h
-  exact h.trans_le (hfloor numBv)
+  -- (3): apply (1) at fuel `n + 1` with `ε := palkaFloor sig`, which is positive.
+  obtain ⟨N, hN⟩ := hsmall (n + 1) _ (palkaFloor_pos sig)
+  exact ⟨hsmall n, hfloor, N, fun numBv h => (hN numBv h).trans_le (hfloor numBv)⟩
 
 end compare
 
