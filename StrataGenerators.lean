@@ -19,3 +19,7 @@ import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
+-- Default STLC application rule vs. Pałka et al.'s ambient-function rule: an upper bound
+-- `Pr(genTy = String) * Pr(genTy = Int)` on producing a `String.take` call vs. a constant
+-- lower bound.
+import StrataGenerators.AmbientAppRule
