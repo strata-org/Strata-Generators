@@ -1,9 +1,10 @@
 -- The whole-program shrinker (and, through it, the program-level typechecker
 -- oracle `progTypeChecks` plus the statement / procedure / function shrinkers) is
 -- the base every property here builds on. The `Strata.Transform.*` imports are the
--- eight passes under test. `ASTtoCST` supplies `Core.formatProgram`, whose error
--- banner is the printer oracle for a `.cfg` body.
+-- eight passes under test. `PrinterCoverage` supplies the printer oracle for a
+-- `.cfg` body.
 import StrataGenerators.ProgramGen.Shrink
+import StrataGenerators.PrinterCoverage
 import Strata.Transform.IrrelevantAxioms
 import Strata.Transform.StructuredToUnstructured
 import Strata.Transform.InsertLoopInvariantAsserts
@@ -12,15 +13,11 @@ import Strata.Transform.FunctionInlining
 import Strata.Transform.ProcedureInlining
 import Strata.Transform.NondetElim
 import Strata.Transform.LoopInitHoist
-import Strata.Languages.Core.DDMTransform.ASTtoCST
 -- `toCoreProofObligationProgram`, the executable symbolic evaluator, which is the
 -- differential oracle for the two inlining eval-agreement properties below.
 import Strata.Languages.Core.Verifier
 
 open Lambda Core Imperative
--- `Core.formatProgram` lives in the `Strata` namespace (`ASTtoCST.lean`), so both
--- of these are needed to name it unqualified.
-open Strata Strata.CoreDDM
 -- `progTypeChecks` (the whole-program typechecker oracle), `sizeProgram`, and the
 -- program shrinker come from the program test support.
 open StrataGenerators.Program.TestSupport
@@ -650,9 +647,9 @@ def checkS2uAllReachable (p : Program) : Bool :=
 def checkS2uCmdCountGrows (p : Program) : Bool :=
   (programBodies p).all fun ss => stmtsCmdCount ss ≤ cfgCmdCount (bodyCfg ss)
 
-/-- **A `.cfg` body prints.** The oracle is the formatter's own error banner,
-    which `Core.formatProgram` appends when the conversion collected an error, so
-    the property needs no access to the private error array.
+/-- **A `.cfg` body prints.** The oracle is `PrinterCoverage.printsWithoutError`,
+    the check that the other printer properties share: the print logs no
+    conversion error apart from the known gaps in the printer.
 
     `StructuredToUnstructured` is the only pass in the tree that makes a `.cfg`
     body, so nothing else produces the constructor and no other property can reach
@@ -669,7 +666,7 @@ def checkS2uCfgPrintable (p : Program) : Bool :=
           | .structured ss => .proc { q with body := .cfg (bodyCfg ss) } md
           | .cfg _ => .proc q md
         | other => other }
-  (toString (Core.formatProgram cfgProg)).splitOn "Errors encountered" |>.length == 1
+  StrataGenerators.PrinterCoverage.printsWithoutError cfgProg
 
 /-! ## `LoopElim` and `InsertLoopInvariantAsserts`: the accounting of the
 verification conditions

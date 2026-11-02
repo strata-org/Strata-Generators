@@ -362,8 +362,10 @@ def intFieldWitness : MutualDatatype Unit :=
 
 -- The gap appears at `Triggers` and it does not appear at `int`. There is one datatype, so the
 -- gap is not about `mutual`.
-#guard !StrataGenerators.PrinterCoverage.printsWithoutError
-  { decls := [.type (.data triggersFieldWitness) .empty] }
+-- `printsWithoutError` drops the known gaps, so this check reads the error messages directly.
+#guard (StrataGenerators.PrinterCoverage.errorMessages
+    ((Core.formatProgram { decls := [.type (.data triggersFieldWitness) .empty] }).pretty.splitOn
+      "\n")).any fun (_, msg) => StrataGenerators.PrinterCoverage.isKnownGapError msg
 #guard StrataGenerators.PrinterCoverage.printsWithoutError
   { decls := [.type (.data intFieldWitness) .empty] }
 
