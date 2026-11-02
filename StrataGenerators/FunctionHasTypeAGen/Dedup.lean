@@ -14,7 +14,7 @@ namespace StrataGenerators.Dedup
 
 /-- A list that holds no duplicate is a fixed point of `List.uniq`. Proved by induction on the
     list. -/
-theorem dedup_eq_self {α} [DecidableEq α] (l : List α) (h : l.Nodup) :
+theorem uniq_eq_self {α} [DecidableEq α] (l : List α) (h : l.Nodup) :
     l.uniq = l := by
   induction l with
   | nil => simp [List.uniq]

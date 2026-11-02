@@ -4,7 +4,7 @@ import Strata.Languages.Core.StatementTypeSpec
 import Strata.Languages.Core.TypingSpec
 import Strata.Languages.Core.CallWFProps
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen
+open Lambda LExpr RandomChoice Core Imperative TypeSpec
 
 /-!
 # Soundness of the procedure-call statement generator

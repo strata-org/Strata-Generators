@@ -12,8 +12,8 @@ weights to use. It names one `Tuning` per job the test suite has to do, and it h
 points that the suite and the `dist-report` executable draw from.
 
 This module holds `Tuning` values and generator plumbing, and no proofs. It is therefore Mathlib-free,
-and a Strata transform pass can import it. `StrataGenerators.SetGen.TuningPrototypes` holds the
-θ-invariance theorems, one per generator. Each says that every `θ` denotes the same `SetGen.Set`, so
+and a Strata transform pass can import it. `StrataGenerators.TuningPrototypes` holds the
+θ-invariance theorems, one per generator. Each says that every `θ` denotes the same `SPMF`, so
 no profile can invalidate a soundness or a completeness result.
 
 -/
@@ -29,7 +29,7 @@ attribute [tunable] StrataGenerators.Stmt.genStmt._mutual
 /-! Two more generators need no change to their source, because their `frequency` lists are already
 literal. `genLMonoTy` splits a base type against a compound type, and so decides how often a
 generated type is an `arrow`, a `Map` or a `Sequence`. `genPrecondition` splits the shape of a
-`requires` clause, and `SetGen.TuningPrototypes` covers that one at length.
+`requires` clause, and `StrataGenerators.TuningPrototypes` covers that one at length.
 
 `genGenerableTy`, `genAppArgTy` and `genLExpr` are tunable as written too. They split 9 to 1 between
 a context-derived and a blind type draw, and 1 to 9 between the base rules and an operator
@@ -438,14 +438,14 @@ def genLExprT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
     frequency
       [ (1, fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ),
         (9, fun () =>
-        pick
-          (fun () => genIndir octx τ genArg h)
-          (fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg)) ]
+        oneOf
+          [ fun () => genIndir octx τ genArg h,
+            fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg ]) ]
       (by simp)
   else
-    pick
-      (fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ)
-      (fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg)
+    oneOf
+      [ fun () => genLExprBase.tuned θ fctx octx pctx tvars bctx depth τ,
+        fun () => genIndirPolyT θ fctx octx pctx tvars bctx depth τ maxNumArgs genArg ]
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- The plumbing is the shipping generator
@@ -454,8 +454,8 @@ def genLExprT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
 /-! At `θ = defaults` each wrapper is the shipping generator *definitionally*, and the kernel checks
 each `Eq.refl`. `genLExprT` restates a generator body rather than delegate to one, and these
 theorems are what keep it from drifting.
-`SetGen.TuningPrototypes` states the same facts at `SetGen.Set`, for every `θ` rather than for the
-defaults alone. -/
+`StrataGenerators.TuningPrototypes` states the same facts at the level of supports, for every `θ`
+rather than for the defaults alone. -/
 
 /-! Well-founded recursion makes `genStmt` and `genStmtChain` irreducible. Unseal them, so that the
 theorems below can see each one as a projection of the shared auxiliary that carries the tuning. -/

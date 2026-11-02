@@ -29,11 +29,11 @@ The proof is layered to mirror the generator:
 * **The fold** chains per-step soundness over the whole program, and the top-level theorem adds
   the distinctness of names.
 
-Everything is stated against `SetGen.Set` (the generator's support semantics),
+Everything is stated against `SPMF` (the generator's support semantics),
 following the existing sub-generator proofs.
 -/
 
-open Lambda RandomChoice Core Core.TypeSpec Imperative SetGen
+open Lambda RandomChoice Core Core.TypeSpec Imperative
 open StrataGenerators.AnnotFacts
 open DatatypeGen
 open StrataGenerators.Procedure
@@ -104,7 +104,7 @@ theorem fallbackName_allowed (reserved : List String) :
 
 /-- A name `genDeclName reserved` draws is absent from `reserved` and uses no reserved prefix. -/
 theorem genDeclName_fresh {reserved : List String} {nm : String}
-    (h : nm ∈ SetGen.support (genDeclName (G := SetGen.Set) reserved)) :
+    (h : nm ∈ SPMF.support (genDeclName (G := SPMF) reserved)) :
     nm ∉ reserved ∧ isAllowedName nm = true := by
   simp only [genDeclName, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨d, hd, rfl⟩ := h
@@ -115,7 +115,7 @@ theorem genDeclName_fresh {reserved : List String} {nm : String}
 
 /-- `genDeclNames reserved k` draws `k` distinct names, each absent from `reserved`. -/
 theorem genDeclNames_spec {reserved : List String} {k : Nat} {names : List String}
-    (h : names ∈ SetGen.support (genDeclNames (G := SetGen.Set) reserved k)) :
+    (h : names ∈ SPMF.support (genDeclNames (G := SPMF) reserved k)) :
     names.length = k ∧ names.Nodup ∧ ∀ n ∈ names, n ∉ reserved := by
   induction k generalizing reserved names with
   | zero =>
@@ -148,7 +148,7 @@ theorem fallbackName_not_local (reserved : List String) :
 /-- A name `genDeclTypeName reserved` draws is absent from `reserved` and uses no reserved
     prefix. -/
 theorem genDeclTypeName_fresh {reserved : List String} {nm : String}
-    (h : nm ∈ SetGen.support (genDeclTypeName (G := SetGen.Set) reserved)) :
+    (h : nm ∈ SPMF.support (genDeclTypeName (G := SPMF) reserved)) :
     nm ∉ reserved ∧ isAllowedName nm = true := by
   simp only [genDeclTypeName, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨d, hd, rfl⟩ := h
@@ -158,7 +158,7 @@ theorem genDeclTypeName_fresh {reserved : List String} {nm : String}
 
 /-- A name `genDeclTypeName reserved` draws is not a local type name. -/
 theorem genDeclTypeName_not_local {reserved : List String} {nm : String}
-    (h : nm ∈ SetGen.support (genDeclTypeName (G := SetGen.Set) reserved)) :
+    (h : nm ∈ SPMF.support (genDeclTypeName (G := SPMF) reserved)) :
     StrataGenerators.Stmt.isLocalTypeName nm = false := by
   simp only [genDeclTypeName, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨d, _, rfl⟩ := h
@@ -795,7 +795,7 @@ theorem blockRefsWF_empty (tyParams : List TyIdentifier) :
     `genArgTy_refs` at `block := []`, `blockRefs := []`. -/
 theorem genNonRecursiveArgTy_refs {baseTypes : BaseTys} {tyCons : TyCons}
     {tyParams : List TyIdentifier} {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) baseTypes tyCons tyParams size)) :
+    (h : ty ∈ SPMF.support (genNonRecursiveArgTy (G := SPMF) baseTypes tyCons tyParams size)) :
     ∀ r ∈ getTypeRefs ty,
       r ∈ baseTypes ∨ r ∈ tyCons.map (·.1) ∨ r = "arrow" := by
   intro r hr
@@ -806,7 +806,7 @@ theorem genNonRecursiveArgTy_refs {baseTypes : BaseTys} {tyCons : TyCons}
     `genArgTy_freeVars` at `blockRefs := []`, `tyParams := []`. -/
 theorem genNonRecursiveArgTy_ground {baseTypes : BaseTys} {tyCons : TyCons}
     {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) baseTypes tyCons [] size)) :
+    (h : ty ∈ SPMF.support (genNonRecursiveArgTy (G := SPMF) baseTypes tyCons [] size)) :
     LMonoTy.freeVars ty = [] := by
   refine List.eq_nil_iff_forall_not_mem.mpr (fun v hv => ?_)
   have := DatatypeGen.genArgTy_freeVars (block := []) (blockRefsWF_empty []) size h v hv
@@ -818,7 +818,7 @@ theorem genNonRecursiveArgTy_ground {baseTypes : BaseTys} {tyCons : TyCons}
     unreachable). -/
 theorem genNonRecursiveArgTy_arities {baseTypes : BaseTys} {tyCons : TyCons}
     {tyParams : List TyIdentifier} {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) baseTypes tyCons tyParams size)) :
+    (h : ty ∈ SPMF.support (genNonRecursiveArgTy (G := SPMF) baseTypes tyCons tyParams size)) :
     ∀ ref n, (ref, n) ∈ getTypeConsArities ty →
       (ref ∈ baseTypes ∧ n = 0) ∨ (ref, n) ∈ tyCons ∨ (ref = "arrow" ∧ n = 2) := by
   intro ref n hn
@@ -838,7 +838,7 @@ theorem wellKindedTy_of_genNonRecursiveArgTy {C : LContext CoreLParams}
     {bt : BaseTys} {tc : TyCons} {R : List String}
     (hok : DatatypeGen.ContextOk C bt tc R)
     {tyParams : List TyIdentifier} {size : Nat} {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genNonRecursiveArgTy (G := SetGen.Set) bt tc tyParams size)) :
+    (h : ty ∈ SPMF.support (genNonRecursiveArgTy (G := SPMF) bt tc tyParams size)) :
     C.WellKindedTy ty := by
   intro ref n hn
   rcases genNonRecursiveArgTy_arities h ref n hn with ⟨hb, rfl⟩ | htc | ⟨rfl, rfl⟩
@@ -891,8 +891,8 @@ theorem distinctElems_annots {τ : LMonoTy} {names : List String} (hτ : LMonoTy
 theorem genDistinctAssertion_ground {bt : BaseTys} {tc : TyCons}
     {reserved : List String} {maxVars size : Nat}
     {name : String} {τ : LMonoTy} {constNames : List String}
-    (h : (name, τ, constNames) ∈ SetGen.support
-      (genDistinctAssertion (G := SetGen.Set) bt tc reserved maxVars size)) :
+    (h : (name, τ, constNames) ∈ SPMF.support
+      (genDistinctAssertion (G := SPMF) bt tc reserved maxVars size)) :
     LMonoTy.freeVars τ = [] := by
   simp only [genDistinctAssertion, mem_support_bind_iff, mem_support_pure_iff,
     Prod.mk.injEq] at h
@@ -908,8 +908,8 @@ theorem genDistinctAssertion_ground {bt : BaseTys} {tc : TyCons}
 theorem genDistinctAssertion_names {bt : BaseTys} {tc : TyCons}
     {reserved : List String} {maxVars size : Nat}
     {name : String} {τ : LMonoTy} {constNames : List String}
-    (h : (name, τ, constNames) ∈ SetGen.support
-      (genDistinctAssertion (G := SetGen.Set) bt tc reserved maxVars size)) :
+    (h : (name, τ, constNames) ∈ SPMF.support
+      (genDistinctAssertion (G := SPMF) bt tc reserved maxVars size)) :
     name ∉ reserved ∧ (∀ x ∈ constNames, x ∉ name :: reserved) ∧ constNames.Nodup := by
   simp only [genDistinctAssertion, mem_support_bind_iff, mem_support_pure_iff,
     Prod.mk.injEq] at h
@@ -1020,7 +1020,7 @@ theorem inv_grow_reserved {s : GenState} (hinv : Inv s) (extra : List String) :
     distinct free variables of its body, and the body is drawn over registered constructors. -/
 theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclAlias (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclAlias (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨pr, ⟨nm, hnm, ntp, _, tyParams, _, body, hbody, hpr⟩, hmatch⟩ := h
@@ -1117,8 +1117,8 @@ theorem inv_addFactory {s : GenState} (hinv : Inv s) {fn : LFunc CoreLParams}
     state with no variable in scope, and its annotations mention no type variable. -/
 theorem genAxiom_exprTyped {s : GenState} (hinv : Inv s) {depth : Nat}
     {decl : Decl} {name : String}
-    (h : (decl, name) ∈ SetGen.support
-      (genAxiom (G := SetGen.Set) s.octx s.pctx s.reserved depth)) :
+    (h : (decl, name) ∈ SPMF.support
+      (genAxiom (G := SPMF) s.octx s.pctx s.reserved depth)) :
     ∃ a, decl = .ax a .empty ∧ ExprWellTyped s.C [] a.e .bool ∧
       ∀ v ∈ annotTyVars a.e, v ∈ ([] : List TyIdentifier) := by
   simp only [genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
@@ -1141,7 +1141,7 @@ theorem genAxiom_exprTyped {s : GenState} (hinv : Inv s) {depth : Nat}
     `reserved` changes. -/
 theorem genDeclAxiom_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclAxiom (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclAxiom (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨pr, hpr, hds, hs'⟩ := h
@@ -1321,7 +1321,7 @@ theorem addConstants_declNames {τ : LMonoTy} :
     and the state is unchanged. -/
 theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclDistinct (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclDistinct (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, constNames⟩, hparts, hmatch⟩ := h
@@ -1379,7 +1379,7 @@ The abstract-type step draws a fresh name, gates on `addKnownTypeWithError`, and
     known type of `C`, and `Inv` holds at the grown pool. -/
 theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclAbstract (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclAbstract (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨pr, ⟨nm, hnm, ar, _har, hpr⟩, hmatch⟩ := h
@@ -1526,8 +1526,8 @@ datatypes in the order of their ranks and it shuffles nothing. -/
 theorem genDatatypeBlock_names {baseTypes : BaseTys} {tyCons : TyCons}
     {mExtra mTyP mBase mRec mArgs mSize : Nat} {extraReserved : List String}
     {block : MutualDatatype Unit}
-    (hblock : block ∈ SetGen.support
-      (genMutuallyRecursiveDatatypes (G := SetGen.Set) baseTypes tyCons
+    (hblock : block ∈ SPMF.support
+      (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
         mExtra mTyP mBase mRec mArgs mSize extraReserved)) :
     (block.map (·.name)).Nodup ∧
     (∀ d ∈ block, d.name ∉ DatatypeGen.initialReserved baseTypes tyCons extraReserved) := by
@@ -1569,8 +1569,8 @@ theorem tyCons_append_split {s : GenState} :
 
 theorem genDatatypeBlock_MutualADTWF {s : GenState} {b : Bounds}
     (hinv : Inv s) {block : MutualDatatype Unit}
-    (hblock : block ∈ SetGen.support
-      (genMutuallyRecursiveDatatypes (G := SetGen.Set) s.baseTypes
+    (hblock : block ∈ SPMF.support
+      (genMutuallyRecursiveDatatypes (G := SPMF) s.baseTypes
         (s.tyCons ++ s.dtCons) b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs
         b.maxRecConstrs b.maxArgs b.maxDatatypeSize s.reserved)) :
     MutualADTWF s.C block := by
@@ -1600,7 +1600,7 @@ theorem genDatatypeBlock_MutualADTWF {s : GenState} {b : Bounds}
 
 /-- Axiom step: emits `[.ax {name := nm} ..]`, adds `nm`. -/
 theorem genDeclAxiom_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclAxiom (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclAxiom (G := SPMF) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨pr, ⟨nm, hnm, e, _he, hpreq⟩, hds, hs'⟩ := h
@@ -1623,7 +1623,7 @@ theorem genDeclAxiom_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Ge
     s.reserved`. Therefore each of them is fresh, they are different in pairs, and each differs from `nm`. On a
     factory clash nothing is emitted (`namesStep_nil`). -/
 theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclDistinct (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclDistinct (G := SPMF) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclDistinct, mem_support_bind_iff] at h
   obtain ⟨⟨nm, τ, cs⟩, hparts, hmatch⟩ := h
@@ -1672,7 +1672,7 @@ theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 
 /-- Alias step: emits `[.type (.syn ts) ..]`, adds `nm`. -/
 theorem genDeclAlias_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclAlias (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclAlias (G := SPMF) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨pr, ⟨nm, hnm, k, _hk, tps, _htps, body, _hbody, hpreq⟩, hmatch⟩ := h
@@ -1696,7 +1696,7 @@ theorem genDeclAlias_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Ge
 
 /-- Abstract-type step: emits `[.type (.con ..)]` (adds `nm`) or nothing. -/
 theorem genDeclAbstract_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclAbstract (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclAbstract (G := SPMF) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨pr, ⟨nm, hnm, ar, _har, hpreq⟩, hmatch⟩ := h
@@ -1722,7 +1722,7 @@ theorem genDeclAbstract_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 
 /-- Function step: emits `[.func func]` (adds fresh `nm`) or nothing. -/
 theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclFunction (G := SPMF) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclFunction, mem_support_bind_iff] at h
   obtain ⟨func₀, _, nm, hnm, hmatch⟩ := h
@@ -1743,7 +1743,7 @@ theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 /-- Procedure step: emits `[.proc proc]` with the fresh name `nm` (added to
     reserved); never gated (procedures leave `C`/`Γ` unchanged). -/
 theorem genDeclProcedure_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclProcedure (G := SPMF) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨proc₀, _hproc₀, nm, hnm, hds, hs'⟩ := h
@@ -1761,7 +1761,7 @@ theorem genDeclProcedure_names {s : GenState} {b : Bounds} {ds : List Decl} {s' 
     nothing. Freshness and `Nodup` of the block's names come from
     `genDatatypeBlock_names`. -/
 theorem genDeclDatatype_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclDatatype (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     NamesStep s ds s' := by
   simp only [genDeclDatatype, mem_support_bind_iff] at h
   obtain ⟨block, hblock, hmatch⟩ := h
@@ -1799,7 +1799,7 @@ theorem genDeclDatatype_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 /-- Recursive-function-block step: emits nothing, or one block whose members carry fresh,
     distinct names, all of which become reserved. -/
 theorem genDeclRecFuncBlock_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclRecFuncBlock (G := SPMF) s b)) :
     NamesStep s ds s' := by
   rcases genDeclRecFuncBlock_support h with ⟨rfl, rfl⟩ |
     ⟨k, names, stubs, sStub, drawn, s₁, _, hnames, hstubs, _, hdrawn, hreg, rfl, rfl⟩
@@ -1820,7 +1820,7 @@ theorem genDeclRecFuncBlock_names {s : GenState} {b : Bounds} {ds : List Decl} {
 
 /-- Name tracking for one declaration step (eight-way dispatch). -/
 theorem genDeclStep_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
     NamesStep s ds s' := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so each branch equation pins both components.
@@ -1844,7 +1844,7 @@ theorem genDeclStep_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Gen
     step's names are fresh against the *grown* reserved set (which contains the
     earlier names), so the concatenation stays `Nodup`. -/
 theorem genDeclsFold_names (n : Nat) {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n)) :
     NamesStep s ds s' := by
   induction n generalizing s ds s' with
   | zero =>
@@ -1944,7 +1944,7 @@ theorem addConstants_kind {τ : LMonoTy} :
 
 /-- No type name that a declaration step emits is a local type name. -/
 theorem genDeclStep_typeNames {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
     TypeNamesNotLocal ds := by
   simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
     or_false, Prod.mk.injEq] at h
@@ -2040,7 +2040,7 @@ theorem genDeclStep_typeNames {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 
 /-- No type name that the declaration fold emits is a local type name. -/
 theorem genDeclsFold_typeNames (n : Nat) {s : GenState} {b : Bounds} {ds : List Decl}
-    {s' : GenState} (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n)) :
+    {s' : GenState} (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n)) :
     TypeNamesNotLocal ds := by
   induction n generalizing s ds s' with
   | zero =>
@@ -2057,7 +2057,7 @@ theorem genDeclsFold_typeNames (n : Nat) {s : GenState} {b : Bounds} {ds : List 
     equal), and `Program.getNames P = P.decls.flatMap Decl.names`. -/
 theorem genProgram_getNames_nodup {numDecls : Nat} {b : Bounds} {decls : List Decl}
     {sf : GenState}
-    (h : (decls, sf) ∈ SetGen.support (genDeclsFold (G := SetGen.Set) initState b numDecls)) :
+    (h : (decls, sf) ∈ SPMF.support (genDeclsFold (G := SPMF) initState b numDecls)) :
     (Program.mk (decls := decls)).getNames.Nodup := by
   have hnames := (genDeclsFold_names numDecls h).nodup
   -- `declNames decls = (getNames).map (·.name)` is `Nodup`; lift to the identifiers.

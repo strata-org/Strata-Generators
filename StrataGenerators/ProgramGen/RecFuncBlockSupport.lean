@@ -8,7 +8,7 @@ What `genDeclRecFuncBlock` emits, and the fields of the fold state that
 `GenState.registerFuncs` leaves unchanged.
 -/
 
-open Lambda RandomChoice Core Core.TypeSpec SetGen
+open Lambda RandomChoice Core Core.TypeSpec
 
 namespace ProgramGen
 
@@ -59,16 +59,16 @@ theorem registerFuncs_fields {s s' : GenState} {fs : List Function}
     drawn against `sStub` and the stubs' schemes, and the members (without `inline`) registered
     as `s₁`, whose reserved names grow by the members' names. -/
 theorem genDeclRecFuncBlock_support {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclRecFuncBlock (G := SPMF) s b)) :
     (ds = [] ∧ s' = s) ∨
     ∃ (k : Nat) (names : List String) (stubs : List Function) (sStub : GenState)
       (drawn : List Function) (s₁ : GenState),
-      1 ≤ k ∧ names ∈ SetGen.support (genDeclNames (G := SetGen.Set) s.reserved k) ∧
-      List.Forall₂ (fun st nm => st ∈ SetGen.support (genFuncSig (G := SetGen.Set) nm b.funcDepth
+      1 ≤ k ∧ names ∈ SPMF.support (genDeclNames (G := SPMF) s.reserved k) ∧
+      List.Forall₂ (fun st nm => st ∈ SPMF.support (genFuncSig (G := SPMF) nm b.funcDepth
         (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x || names.contains x)
         s.dtCons)) stubs names ∧
       s.registerFuncs stubs = some sStub ∧
-      List.Forall₂ (fun f st => f ∈ SetGen.support (genFuncParts (G := SetGen.Set) (pure true) []
+      List.Forall₂ (fun f st => f ∈ SPMF.support (genFuncParts (G := SPMF) (pure true) []
         sStub.octx b.funcDepth (stubs.filterMap funcPolyOpEntry ++ s.derivedPctx) s.dtCons st))
         drawn stubs ∧
       s.registerFuncs (drawn.map dropInline) = some s₁ ∧
@@ -77,7 +77,7 @@ theorem genDeclRecFuncBlock_support {s : GenState} {b : Bounds} {ds : List Decl}
   simp only [genDeclRecFuncBlock, mem_support_bind_iff] at h
   obtain ⟨k, hk, names, hnames, stubs, hstubs, hmatch⟩ := h
   rw [mem_support_mapM_iff] at hstubs
-  rw [DatatypeGen.mem_support_chooseNat_iff] at hk
+  rw [mem_support_chooseNat_iff] at hk
   cases hstub : s.registerFuncs stubs with
   | none =>
     rw [hstub] at hmatch
@@ -101,12 +101,12 @@ theorem genDeclRecFuncBlock_support {s : GenState} {b : Bounds} {ds : List Decl}
 
 /-- The members of a drawn block carry the drawn names, in order. -/
 theorem recFuncBlock_member_names {depth : Nat} {avoid : String → Bool}
-    {genRecursive : SetGen.Set Bool} {octx : OpCtx} {pctx : PolyOpCtx}
+    {genRecursive : SPMF Bool} {octx : OpCtx} {pctx : PolyOpCtx}
     {dts : List (String × Nat)} {names : List String} {stubs drawn : List Function}
-    (hstubs : List.Forall₂ (fun st nm => st ∈ SetGen.support
-      (genFuncSig (G := SetGen.Set) nm depth avoid dts)) stubs names)
-    (hdrawn : List.Forall₂ (fun f st => f ∈ SetGen.support
-      (genFuncParts (G := SetGen.Set) genRecursive [] octx depth pctx dts st)) drawn stubs) :
+    (hstubs : List.Forall₂ (fun st nm => st ∈ SPMF.support
+      (genFuncSig (G := SPMF) nm depth avoid dts)) stubs names)
+    (hdrawn : List.Forall₂ (fun f st => f ∈ SPMF.support
+      (genFuncParts (G := SPMF) genRecursive [] octx depth pctx dts st)) drawn stubs) :
     (drawn.map dropInline).map (fun f => f.name.name) = names := by
   have hd : drawn.map (fun f => f.name.name) = stubs.map (fun f => f.name.name) := by
     refine map_eq_map_of_forall₂ hdrawn ?_
@@ -124,7 +124,7 @@ theorem recFuncBlock_member_names {depth : Nat} {avoid : String → Bool}
 
 /-- A recursive-function-block step leaves the callable procedures unchanged. -/
 theorem genDeclRecFuncBlock_procs {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclRecFuncBlock (G := SPMF) s b)) :
     s'.procs = s.procs := by
   rcases genDeclRecFuncBlock_support h with ⟨_, rfl⟩ | ⟨_, _, _, _, _, s₁, _, _, _, _, _, hreg,
     _, rfl⟩

@@ -1,0 +1,10 @@
+# Build products of scripts/build.sh — regenerated locally, never committed.
+strata-fuzz
+strata-cov
+obj/
+obj-cov/
+corpus.*
+scripts/env.sh
+artifacts/*.log
+*.swp
+*.swo

@@ -2023,6 +2023,11 @@ private def cseBareBody : List Statement :=
 #guard progTypeChecks (guardProg cseBareBody)
 #guard (runPhase Core.commonSubexprElimPhase (guardProg cseBareBody)).any (!·.1)
 #guard checkCseOutputTypechecks (guardProg cseBareBody)
+#guard (match runPhase Core.commonSubexprElimPhase (guardProg cseBareBody) with
+        | some (_, out) =>
+          ((programBodies out).map bodyInitNames).flatten.all
+            (fun n => !n.startsWith Core.CSE.cseVarPrefix)
+        | none => false)
 
 /-- `Int.Add(7, 8)`, a second annotated subexpression to duplicate, so CSE mints
     two names and the order claim has something to order. -/
@@ -2483,6 +2488,7 @@ private def twoInvariantLoop : Statement :=
 #guard checkLoopNondetMeasureAccepted
   (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])
 #guard (runPhase loopInvPhase (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])).isSome
+#guard checkLoopVcAssertCount (guardProg [.loop .nondet (some (intLit 3)) [] [] .empty])
 
 -- ── The axiom relevance oracle ────────────────────────────────────────────
 

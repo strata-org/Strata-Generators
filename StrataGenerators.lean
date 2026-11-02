@@ -4,7 +4,7 @@ import StrataGenerators.HasTypeAGen
 -- The `retryCont` parameter of `genLExpr` does not change the set of terms that the
 -- generator can produce.
 import StrataGenerators.RetryGenSupport
--- The bridge between `SetGen.Set` and `Plausible.Gen`. A generator that runs can
+-- The bridge between `SPMF` and `Plausible.Gen`. A generator that runs can
 -- produce only terms in its `Set` support, and a retry keeps this property. The
 -- converse is not proved.
 import StrataGenerators.ExecRefinement

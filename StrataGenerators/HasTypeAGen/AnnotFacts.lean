@@ -21,15 +21,15 @@ second part uses it twice: with `T` the registered types, for registered binder 
 table), and with `T` the types over `tvars`, for the scoping fact.
 -/
 
-open Lambda RandomChoice SetGen StrataGenerators.IndirSupport
+open Lambda RandomChoice StrataGenerators.IndirSupport
 
 namespace StrataGenerators.AnnotFacts
 
 /-! ## Closure of a generator under a property -/
 
 /-- Every element of the support of `s` satisfies `P`. -/
-def Closed {α : Type} (P : α → Prop) (s : SetGen.Set α) : Prop :=
-  ∀ a ∈ SetGen.support s, P a
+def Closed {α : Type} (P : α → Prop) (s : SPMF α) : Prop :=
+  ∀ a ∈ SPMF.support s, P a
 
 section Combinators
 
@@ -43,20 +43,20 @@ theorem closed_pure {a : α} (h : P a) : Closed P (pure a) := by
   exact h
 
 /-- A bind draws only terms satisfying `P` when every continuation it can reach does. -/
-theorem closed_bind {x : SetGen.Set β} {f : β → SetGen.Set α}
-    (h : ∀ b ∈ SetGen.support x, Closed P (f b)) : Closed P (x >>= f) := by
+theorem closed_bind {x : SPMF β} {f : β → SPMF α}
+    (h : ∀ b ∈ SPMF.support x, Closed P (f b)) : Closed P (x >>= f) := by
   intro a ha
   rw [mem_support_bind_iff] at ha
   obtain ⟨b, hb, hab⟩ := ha
   exact h b hb a hab
 
 /-- The empty generator draws nothing. -/
-theorem closed_default : Closed P (default : SetGen.Set α) := by
+theorem closed_default : Closed P (default : SPMF α) := by
   intro a ha
-  exact ((bot_mem_iff a).mp ha).elim
+  exact ((mem_support_bot_iff a).mp ha).elim
 
 /-- A dependent conditional draws only terms satisfying `P` when both branches do. -/
-theorem closed_dite {c : Prop} [Decidable c] {t : c → SetGen.Set α} {e : ¬c → SetGen.Set α}
+theorem closed_dite {c : Prop} [Decidable c] {t : c → SPMF α} {e : ¬c → SPMF α}
     (ht : ∀ h, Closed P (t h)) (he : ∀ h, Closed P (e h)) : Closed P (dite c t e) := by
   intro a ha
   rw [mem_support_dite_iff] at ha
@@ -65,16 +65,16 @@ theorem closed_dite {c : Prop} [Decidable c] {t : c → SetGen.Set α} {e : ¬c 
   · exact he h a hmem
 
 /-- A choice between two generators draws only terms satisfying `P` when both do. -/
-theorem closed_pick {x y : SetGen.Set α} (hx : Closed P x) (hy : Closed P y) :
-    Closed P (pick (fun () => x) (fun () => y)) := by
+theorem closed_oneOf_pair {x y : SPMF α} (hx : Closed P x) (hy : Closed P y) :
+    Closed P (oneOf [fun () => x, fun () => y]) := by
   intro a ha
-  rw [mem_support_pick_iff] at ha
+  rw [mem_support_oneOf_pair_iff] at ha
   rcases ha with hmem | hmem
   · exact hx a hmem
   · exact hy a hmem
 
 /-- Every generator of a list satisfies `P`. -/
-def AllClosed (P : α → Prop) (gs : List (Unit → SetGen.Set α)) : Prop :=
+def AllClosed (P : α → Prop) (gs : List (Unit → SPMF α)) : Prop :=
   ∀ g ∈ gs, Closed P (g ())
 
 /-- No generator of the empty list draws a term. -/
@@ -83,7 +83,7 @@ theorem allClosed_nil : AllClosed P [] := by
   exact absurd hg List.not_mem_nil
 
 /-- A list of generators is closed under `P` when its head and its tail are. -/
-theorem allClosed_cons {g : Unit → SetGen.Set α} {gs : List (Unit → SetGen.Set α)}
+theorem allClosed_cons {g : Unit → SPMF α} {gs : List (Unit → SPMF α)}
     (hg : Closed P (g ())) (hgs : AllClosed P gs) : AllClosed P (g :: gs) := by
   intro g' hg'
   rcases List.mem_cons.mp hg' with rfl | hmem
@@ -91,7 +91,7 @@ theorem allClosed_cons {g : Unit → SetGen.Set α} {gs : List (Unit → SetGen.
   · exact hgs g' hmem
 
 /-- A uniform choice among generators draws only terms satisfying `P` when each of them does. -/
-theorem closed_oneOf {gs : List (Unit → SetGen.Set α)} (hne : gs ≠ [])
+theorem closed_oneOf {gs : List (Unit → SPMF α)} (hne : gs ≠ [])
     (h : AllClosed P gs) : Closed P (oneOf gs hne) := by
   intro a ha
   rw [mem_support_oneOf_iff] at ha
@@ -99,7 +99,7 @@ theorem closed_oneOf {gs : List (Unit → SetGen.Set α)} (hne : gs ≠ [])
   exact h g hg a hmem
 
 /-- Every generator of a weighted list satisfies `P`. -/
-def AllClosedW (P : α → Prop) (gs : List (Nat × (Unit → SetGen.Set α))) : Prop :=
+def AllClosedW (P : α → Prop) (gs : List (Nat × (Unit → SPMF α))) : Prop :=
   ∀ p ∈ gs, Closed P (p.2 ())
 
 /-- No generator of the empty weighted list draws a term. -/
@@ -108,8 +108,8 @@ theorem allClosedW_nil : AllClosedW P [] := by
   exact absurd hp List.not_mem_nil
 
 /-- A weighted list of generators is closed under `P` when its head and its tail are. -/
-theorem allClosedW_cons {w : Nat} {g : Unit → SetGen.Set α}
-    {gs : List (Nat × (Unit → SetGen.Set α))}
+theorem allClosedW_cons {w : Nat} {g : Unit → SPMF α}
+    {gs : List (Nat × (Unit → SPMF α))}
     (hg : Closed P (g ())) (hgs : AllClosedW P gs) : AllClosedW P ((w, g) :: gs) := by
   intro p hp
   rcases List.mem_cons.mp hp with rfl | hmem
@@ -117,7 +117,7 @@ theorem allClosedW_cons {w : Nat} {g : Unit → SetGen.Set α}
   · exact hgs p hmem
 
 /-- A weighted choice among generators draws only terms satisfying `P` when each of them does. -/
-theorem closed_frequency {gs : List (Nat × (Unit → SetGen.Set α))}
+theorem closed_frequency {gs : List (Nat × (Unit → SPMF α))}
     (hpos : 0 < List.sum (List.map Prod.fst gs)) (h : AllClosedW P gs) :
     Closed P (frequency gs hpos) := by
   intro a ha
@@ -145,7 +145,7 @@ structure ClosureHyps (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (T : LMonoTy → Prop) (P : LExpr' → Prop) : Prop where
   arrow : ∀ a b, T (.arrow a b) ↔ T a ∧ T b
   bool : T .bool
-  genTy : ∀ n t, t ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars n) → T t
+  genTy : ∀ n t, t ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) → T t
   fctxTy : ∀ p ∈ fctx, T p.2
   octxTy : ∀ p ∈ octx.ops, T p.2
   polyArgs : ∀ τ gen sampled name cats, T τ → (∀ t ∈ gen, T t) → (∀ t ∈ sampled, T t) →
@@ -168,7 +168,7 @@ structure ClosureHyps (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
 /-- `g` draws only terms satisfying `P`, at every type satisfying `T` and in every binder context
     whose types satisfy `T`. -/
 def GenClosed (T : LMonoTy → Prop) (P : LExpr' → Prop)
-    (g : BVarCtx → LMonoTy → SetGen.Set LExpr') : Prop :=
+    (g : BVarCtx → LMonoTy → SPMF LExpr') : Prop :=
   ∀ bctx τ, (∀ t ∈ bctx, T t) → T τ → Closed P (g bctx τ)
 
 section Closure
@@ -190,11 +190,11 @@ theorem ClosureHyps.foldr_arrow (H : ClosureHyps fctx octx pctx tvars T P) :
 
 /-- Every base type `pickBaseType` draws is a type `genLMonoTy` draws at depth 0. -/
 theorem pickBaseType_mem_genLMonoTy (tvars : List TyIdentifier) {t : LMonoTy}
-    (ht : t ∈ SetGen.support (pickBaseType (G := SetGen.Set))) :
-    t ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars 0) := by
+    (ht : t ∈ SPMF.support (pickBaseType (G := SPMF))) :
+    t ∈ SPMF.support (genLMonoTy (G := SPMF) tvars 0) := by
   rw [genLMonoTy]
   split
-  · rw [mem_support_pick_iff]
+  · rw [mem_support_oneOf_pair_iff]
     exact Or.inl ht
   · exact ht
 
@@ -269,33 +269,33 @@ theorem ClosureHyps.generable (H : ClosureHyps fctx octx pctx tvars T P) {bctx :
 
 /-- A boolean constant is a leaf satisfying `P`. -/
 theorem closed_genBoolConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genBoolConst (G := SetGen.Set)) :=
-  closed_pick (closed_pure (H.const _)) (closed_pure (H.const _))
+    Closed P (genBoolConst (G := SPMF)) :=
+  closed_oneOf_pair (closed_pure (H.const _)) (closed_pure (H.const _))
 
 /-- An integer constant is a leaf satisfying `P`. -/
 theorem closed_genIntConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genIntConst (G := SetGen.Set)) :=
-  closed_pick (closed_bind fun _ _ => closed_pure (H.const _))
+    Closed P (genIntConst (G := SPMF)) :=
+  closed_oneOf_pair (closed_bind fun _ _ => closed_pure (H.const _))
     (closed_bind fun _ _ => closed_pure (H.const _))
 
 /-- A string constant is a leaf satisfying `P`. -/
 theorem closed_genStrConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genStrConst (G := SetGen.Set)) :=
+    Closed P (genStrConst (G := SPMF)) :=
   closed_bind fun _ _ => closed_pure (H.const _)
 
 /-- A rational constant is a leaf satisfying `P`. -/
 theorem closed_genRealConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genRealConst (G := SetGen.Set)) :=
+    Closed P (genRealConst (G := SPMF)) :=
   closed_bind fun _ _ => closed_pure (H.const _)
 
 /-- A bitvector constant is a leaf satisfying `P`. -/
 theorem closed_genBitvecConst (H : ClosureHyps fctx octx pctx tvars T P) (w : Nat) :
-    Closed P (genBitvecConst (G := SetGen.Set) w) :=
+    Closed P (genBitvecConst (G := SPMF) w) :=
   closed_bind fun _ _ => closed_pure (H.const _)
 
 /-- A bound variable drawn from the binder context satisfies `P`. -/
 theorem closed_pickBVar (H : ClosureHyps fctx octx pctx tvars T P) (bctx : BVarCtx)
-    (τ : LMonoTy) : ∀ hv, Closed P (pickBVar (G := SetGen.Set) bctx τ hv) := by
+    (τ : LMonoTy) : ∀ hv, Closed P (pickBVar (G := SPMF) bctx τ hv) := by
   intro hv
   unfold pickBVar
   refine closed_elements _ ?_
@@ -305,7 +305,7 @@ theorem closed_pickBVar (H : ClosureHyps fctx octx pctx tvars T P) (bctx : BVarC
 
 /-- A free variable drawn from `fctx` satisfies `P`. -/
 theorem closed_pickFVar (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy) :
-    ∀ hf, Closed P (pickFVar (G := SetGen.Set) fctx τ hf) := by
+    ∀ hf, Closed P (pickFVar (G := SPMF) fctx τ hf) := by
   intro hf
   unfold pickFVar
   refine closed_elements _ ?_
@@ -315,7 +315,7 @@ theorem closed_pickFVar (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy
 
 /-- An operator drawn from `octx` at its type satisfies `P`. -/
 theorem closed_pickOp (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy) :
-    ∀ ho, Closed P (pickOp (G := SetGen.Set) octx τ ho) := by
+    ∀ ho, Closed P (pickOp (G := SPMF) octx τ ho) := by
   intro ho
   unfold pickOp
   refine closed_elements _ ?_
@@ -325,19 +325,19 @@ theorem closed_pickOp (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy) 
 
 /-- A bound variable of type `τ` if there is one, and a draw from `k` otherwise. -/
 theorem closed_leafB (H : ClosureHyps fctx octx pctx tvars T P) (bctx : BVarCtx) (τ : LMonoTy)
-    {k : SetGen.Set LExpr'} (hk : Closed P k) :
+    {k : SPMF LExpr'} (hk : Closed P k) :
     Closed P (if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv else k) :=
   closed_dite (closed_pickBVar H bctx τ) (fun _ => hk)
 
 /-- A free variable of type `τ` if there is one, and a draw from `k` otherwise. -/
 theorem closed_leafF (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy)
-    {k : SetGen.Set LExpr'} (hk : Closed P k) :
+    {k : SPMF LExpr'} (hk : Closed P k) :
     Closed P (if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf else k) :=
   closed_dite (closed_pickFVar H τ) (fun _ => hk)
 
 /-- An operator of type `τ` if there is one, and a draw from `k` otherwise. -/
 theorem closed_leafO (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy)
-    {k : SetGen.Set LExpr'} (hk : Closed P k) :
+    {k : SPMF LExpr'} (hk : Closed P k) :
     Closed P (if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho else k) :=
   closed_dite (closed_pickOp H τ) (fun _ => hk)
 
@@ -356,13 +356,13 @@ theorem ClosureHyps.mkApps (H : ClosureHyps fctx octx pctx tvars T P) :
     exact ih (.app () base a) (H.app base a hbase (hargs a List.mem_cons_self))
       (fun x hx => hargs x (List.mem_cons_of_mem a hx))
 
-variable {g : BVarCtx → LMonoTy → SetGen.Set LExpr'}
+variable {g : BVarCtx → LMonoTy → SPMF LExpr'}
 
 /-- An application at a type satisfying `T` draws its argument type from `genLMonoTy`, so both
     sides are drawn at types satisfying `T`. -/
 theorem closed_genApp (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
     {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (n : Nat) {τ : LMonoTy} (hτ : T τ) :
-    Closed P (genApp (genAppArgTy (G := SetGen.Set) fctx octx tvars bctx n τ) (g bctx) τ) := by
+    Closed P (genApp (genAppArgTy (G := SPMF) fctx octx tvars bctx n τ) (g bctx) τ) := by
   refine closed_bind fun τ' hτ' => ?_
   have hT' : T τ' := H.genTy n τ' ((genAppArgTy_support fctx octx tvars bctx n τ τ').mp hτ')
   refine closed_bind fun arg harg => closed_bind fun fn hfn => closed_pure ?_
@@ -381,7 +381,7 @@ theorem closed_genIte (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed
 /-- An equality draws both sides at a type from `genLMonoTy`. -/
 theorem closed_genEq (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
     {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (n : Nat) :
-    Closed P (genEq (genGenerableTy (G := SetGen.Set) fctx octx tvars bctx n) (g bctx)) := by
+    Closed P (genEq (genGenerableTy (G := SPMF) fctx octx tvars bctx n) (g bctx)) := by
   refine closed_bind fun τ' hτ' => ?_
   have hT' : T τ' := H.genTy n τ' ((genGenerableTy_support fctx octx tvars bctx n τ').mp hτ')
   exact closed_bind fun a ha => closed_bind fun b hb' =>
@@ -391,7 +391,7 @@ theorem closed_genEq (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed 
     the extended binder context. -/
 theorem closed_genQuant (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
     {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (n : Nat) (k : QuantifierKind) :
-    Closed P (genQuant k (genGenerableTy (G := SetGen.Set) fctx octx tvars bctx n)
+    Closed P (genQuant k (genGenerableTy (G := SPMF) fctx octx tvars bctx n)
       (fun τ' => g (τ' :: bctx)) (fun τ' => g (τ' :: bctx) .bool)) := by
   refine closed_bind fun τ' hτ' => closed_bind fun τtr hτtr => ?_
   have hT' : T τ' := H.genTy n τ' ((genGenerableTy_support fctx octx tvars bctx n τ').mp hτ')
@@ -433,10 +433,10 @@ theorem closed_indirOrRec (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenCl
 
 /-- A list drawn by `mapM` over `List.replicate m ()` has length `m`, and each element is drawn
     by the mapped generator. -/
-theorem mem_mapM_replicate {γ : Type} {f : Unit → SetGen.Set γ} :
+theorem mem_mapM_replicate {γ : Type} {f : Unit → SPMF γ} :
     ∀ (m : Nat) (l : List γ),
-      l ∈ SetGen.support (List.mapM (m := SetGen.Set) f (List.replicate m ())) →
-        l.length = m ∧ ∀ x ∈ l, x ∈ SetGen.support (f ()) := by
+      l ∈ SPMF.support (List.mapM (m := SPMF) f (List.replicate m ())) →
+        l.length = m ∧ ∀ x ∈ l, x ∈ SPMF.support (f ()) := by
   intro m
   induction m with
   | zero =>
@@ -460,26 +460,26 @@ theorem mem_mapM_replicate {γ : Type} {f : Unit → SetGen.Set γ} :
     `max maxNumArgs (maxBinders pctx)` of them, each a generable type of the context or a base
     type. -/
 theorem genIndirPolyCore_cases {fctx : FVarCtx} {octx : OpCtx} {pctx : PolyOpCtx}
-    {bctx : BVarCtx} {τ : LMonoTy} {genArg : LMonoTy → SetGen.Set LExpr'}
-    {fallback : SetGen.Set LExpr'} {maxNumArgs : Nat} {e : LExpr'}
-    (he : e ∈ SetGen.support
-      (genIndirPolyCore (G := SetGen.Set) fctx octx pctx bctx τ genArg fallback maxNumArgs)) :
+    {bctx : BVarCtx} {τ : LMonoTy} {genArg : LMonoTy → SPMF LExpr'}
+    {fallback : SPMF LExpr'} {maxNumArgs : Nat} {e : LExpr'}
+    (he : e ∈ SPMF.support
+      (genIndirPolyCore (G := SPMF) fctx octx pctx bctx τ genArg fallback maxNumArgs)) :
     (∃ (sampled : List LMonoTy) (name : String) (cats : List LMonoTy) (args : List LExpr'),
        sampled.length = max maxNumArgs (maxBinders pctx) ∧
        (∀ t ∈ sampled, t ∈ generableTypesFromCtx bctx fctx octx ∨
-          t ∈ SetGen.support (pickBaseType (G := SetGen.Set))) ∧
+          t ∈ SPMF.support (pickBaseType (G := SPMF))) ∧
        (name, cats) ∈ findPolymorphicOps pctx τ
          (generableTypesFromCtx bctx fctx octx) sampled maxNumArgs ∧
-       List.Forall₂ (fun arg σ => arg ∈ SetGen.support (genArg σ)) args cats ∧
+       List.Forall₂ (fun arg σ => arg ∈ SPMF.support (genArg σ)) args cats ∧
        e = mkApps (.op () ⟨name, ()⟩
          (some (cats.foldr (fun σ acc => LMonoTy.arrow σ acc) τ))) args)
-    ∨ e ∈ SetGen.support fallback := by
+    ∨ e ∈ SPMF.support fallback := by
   unfold genIndirPolyCore at he
   rw [mem_support_bind_iff] at he
   obtain ⟨sampled, hsampled, he⟩ := he
   obtain ⟨hlen, hmem⟩ := mem_mapM_replicate (max maxNumArgs (maxBinders pctx)) sampled hsampled
   have hsam : ∀ t ∈ sampled, t ∈ generableTypesFromCtx bctx fctx octx ∨
-      t ∈ SetGen.support (pickBaseType (G := SetGen.Set)) := by
+      t ∈ SPMF.support (pickBaseType (G := SPMF)) := by
     intro t ht
     have htm := hmem t ht
     rw [mem_support_dite_iff] at htm
@@ -503,7 +503,7 @@ theorem genIndirPolyCore_cases {fctx : FVarCtx} {octx : OpCtx} {pctx : PolyOpCtx
     to arguments that `g` draws at the instantiated argument types. -/
 theorem closed_poly (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
     {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) {τ : LMonoTy} (hτ : T τ)
-    {fallback : SetGen.Set LExpr'} (hfb : Closed P fallback) :
+    {fallback : SPMF LExpr'} (hfb : Closed P fallback) :
     Closed P (genIndirPolyCore fctx octx pctx bctx τ (g bctx) fallback) := by
   intro e he
   rcases genIndirPolyCore_cases he with
@@ -526,8 +526,8 @@ theorem closed_poly (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T
 theorem closed_genLExprBase_level (H : ClosureHyps fctx octx pctx tvars T P) (depth : Nat)
     {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (τ : LMonoTy) :
     (∀ n, depth = n + 1 →
-      GenClosed T P (fun b t => genLExprBase (G := SetGen.Set) fctx octx pctx tvars b n t)) →
-    T τ → Closed P (genLExprBase (G := SetGen.Set) fctx octx pctx tvars bctx depth τ) := by
+      GenClosed T P (fun b t => genLExprBase (G := SPMF) fctx octx pctx tvars b n t)) →
+    T τ → Closed P (genLExprBase (G := SPMF) fctx octx pctx tvars bctx depth τ) := by
   rw [genLExprBase.eq_def]
   split
   case h_1 τ₁ τ₂ =>
@@ -671,7 +671,7 @@ theorem closed_genLExprBase_level (H : ClosureHyps fctx octx pctx tvars T P) (de
 /-- Every term `genLExprBase` draws satisfies `P`, at every depth. -/
 theorem genLExprBase_closed (H : ClosureHyps fctx octx pctx tvars T P) :
     ∀ depth, GenClosed T P
-      (fun b t => genLExprBase (G := SetGen.Set) fctx octx pctx tvars b depth t) := by
+      (fun b t => genLExprBase (G := SPMF) fctx octx pctx tvars b depth t) := by
   intro depth
   induction depth with
   | zero =>
@@ -688,7 +688,7 @@ theorem genLExprBase_closed (H : ClosureHyps fctx octx pctx tvars T P) :
     `ClosureHyps` hold. -/
 theorem genLExpr_closed (H : ClosureHyps fctx octx pctx tvars T P) :
     ∀ depth, GenClosed T P
-      (fun b t => genLExpr (G := SetGen.Set) fctx octx pctx tvars b depth t) := by
+      (fun b t => genLExpr (G := SPMF) fctx octx pctx tvars b depth t) := by
   intro depth
   induction depth with
   | zero =>
@@ -697,18 +697,18 @@ theorem genLExpr_closed (H : ClosureHyps fctx octx pctx tvars T P) :
     unfold genLExpr
     exact closed_dite
       (fun hi => closed_frequency _ (allClosedW_cons (hbase bctx τ hb hτ) <|
-        allClosedW_cons (closed_pick (closed_genIndir H hbase hb hi)
+        allClosedW_cons (closed_oneOf_pair (closed_genIndir H hbase hb hi)
           (closed_poly H hbase hb hτ (hbase bctx τ hb hτ))) allClosedW_nil))
-      (fun _ => closed_pick (hbase bctx τ hb hτ) (closed_poly H hbase hb hτ (hbase bctx τ hb hτ)))
+      (fun _ => closed_oneOf_pair (hbase bctx τ hb hτ) (closed_poly H hbase hb hτ (hbase bctx τ hb hτ)))
   | succ n ih =>
     intro bctx τ hb hτ
     have hbase := genLExprBase_closed H (n + 1)
     unfold genLExpr
     exact closed_dite
       (fun hi => closed_frequency _ (allClosedW_cons (hbase bctx τ hb hτ) <|
-        allClosedW_cons (closed_pick (closed_genIndir H ih hb hi)
+        allClosedW_cons (closed_oneOf_pair (closed_genIndir H ih hb hi)
           (closed_poly H ih hb hτ (hbase bctx τ hb hτ))) allClosedW_nil))
-      (fun _ => closed_pick (hbase bctx τ hb hτ) (closed_poly H ih hb hτ (hbase bctx τ hb hτ)))
+      (fun _ => closed_oneOf_pair (hbase bctx τ hb hτ) (closed_poly H ih hb hτ (hbase bctx τ hb hτ)))
 
 end Closure
 
@@ -1268,7 +1268,7 @@ theorem genLExpr_exprWellTyped {C : LContext CoreLParams} {ts : TypeScopes} {fct
     {octx : OpCtx} {pctx : PolyOpCtx} {tvars : List TyIdentifier}
     (hctx : ExprCtxOk C ts fctx octx pctx) {depth : Nat} {τ : LMonoTy}
     (hτ : LMonoTy.knownInstance τ C.knownTypes = true) {e : LExpr'}
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ)) :
+    (he : e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ)) :
     ExprWellTyped C ts e τ := by
   have hok := genLExpr_closed (closureHyps_annotsOk tvars hctx) depth []
     τ (fun _ ht => absurd ht List.not_mem_nil) hτ e he
@@ -1343,7 +1343,7 @@ theorem closureHyps_scopes {C : LContext CoreLParams} {ts : TypeScopes} {fctx : 
 theorem genLExpr_scopesAnnotAgree {C : LContext CoreLParams} {ts : TypeScopes} {fctx : FVarCtx}
     {octx : OpCtx} {pctx : PolyOpCtx} {tvars : List TyIdentifier}
     (hctx : ScopesCtxOk C ts fctx octx pctx) {depth : Nat} {τ : LMonoTy} {e : LExpr'}
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ)) :
+    (he : e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ)) :
     ScopesAnnotAgree C ts e :=
   genLExpr_closed (closureHyps_scopes tvars hctx) depth [] τ (fun _ _ => trivial) trivial e he
 
@@ -1442,7 +1442,7 @@ theorem closureHyps_annotTyVars {tvars : List TyIdentifier} {fctx : FVarCtx} {oc
 theorem genLExpr_annotTyVars {tvars : List TyIdentifier} {fctx : FVarCtx} {octx : OpCtx}
     {pctx : PolyOpCtx} (hsc : ExprScopedCtx tvars fctx octx pctx) {depth : Nat} {τ : LMonoTy}
     (hτ : ∀ v ∈ LMonoTy.freeVars τ, v ∈ tvars) {e : LExpr'}
-    (he : e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ)) :
+    (he : e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ)) :
     ∀ v ∈ annotTyVars e, v ∈ tvars :=
   genLExpr_closed (closureHyps_annotTyVars hsc) depth [] τ
     (fun _ ht => absurd ht List.not_mem_nil) hτ e he

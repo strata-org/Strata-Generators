@@ -6,7 +6,7 @@ import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.Languages.Core.FunctionTypeSpec
 import Strata.Util.ListMapProps
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
+open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Dedup StrataGenerators.AnnotFacts
 
 /-!
@@ -53,14 +53,14 @@ theorem freeVars_mkArrow' (out : LMonoTy) (vals : List LMonoTy) (v : TyIdentifie
 /-- Each list in the support of `genTypeArgs` holds no duplicate, because `List.uniq` builds
     it. -/
 theorem genTypeArgs_nodup (depth : Nat) (l : List TyIdentifier)
-    (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) : l.Nodup := by
+    (hl : l ∈ SPMF.support (genTypeArgs (G := SPMF) depth)) : l.Nodup := by
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
   exact List.nodup_uniq names
 
 /-- Each list in the support of `genIdents` holds no duplicate, because `List.uniq` builds it. -/
 theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
-    (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) : l.Nodup := by
+    (hl : l ∈ SPMF.support (genIdents (G := SPMF) depth)) : l.Nodup := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, _, rfl⟩ := hl
   exact List.nodup_uniq _
@@ -76,24 +76,27 @@ theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
 set_option linter.unusedSimpArgs false in
 /-- The `mapM` inside `genInputs` gives a `ListMap` whose keys are the list of input identifiers and
     each of whose values is in the support of `genTy`. -/
-theorem mapM_genInputs_keys_values (genTy : SetGen.Set LMonoTy)
+theorem mapM_genInputs_keys_values (genTy : SPMF LMonoTy)
     (idents : List (Identifier Unit)) (m : ListMap (Identifier Unit) LMonoTy)
-    (hm : m ∈ SetGen.support
-      (idents.mapM (m := SetGen.Set) (fun x => do
+    (hm : m ∈ SPMF.support
+      (idents.mapM (m := SPMF) (fun x => do
         let ty ← genTy
         pure (x, ty)))) :
-    m.keys = idents ∧ ∀ ty ∈ m.values, ty ∈ SetGen.support genTy := by
+    m.keys = idents ∧ ∀ ty ∈ m.values, ty ∈ SPMF.support genTy := by
   induction idents generalizing m with
   | nil =>
     simp only [List.mapM_nil] at hm
-    subst hm
+    obtain rfl : m = [] := mem_support_pure_iff.mp hm
     exact ⟨rfl, by intro ty hty; simp [ListMap.values] at hty⟩
   | cons x xs ih =>
-    simp only [List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff] at hm
-    obtain ⟨pair, hpair, rest, hrest, rfl⟩ := hm
-    -- The support of `genLMonoTy >>= fun ty => pure (x, ty)` holds `pair`. The `bind` and the
-    -- `pure` of `Set` unfold by definition, so the proof takes `pair` apart at once.
-    obtain ⟨ty, hty, rfl⟩ := hpair
+    -- The support lemmas apply as terms: the generator returns a `ListMap` and `mapM` a `List`, so
+    -- `simp` and `rw` do not match them syntactically.
+    simp only [List.mapM_cons] at hm
+    obtain ⟨pair, hpair, hm⟩ := mem_support_bind_iff.mp hm
+    obtain ⟨rest, hrest, hm⟩ := mem_support_bind_iff.mp hm
+    obtain rfl := mem_support_pure_iff.mp hm
+    obtain ⟨ty, hty, hpair⟩ := mem_support_bind_iff.mp hpair
+    obtain rfl := mem_support_pure_iff.mp hpair
     obtain ⟨hkeys_rest, hvals_rest⟩ := ih rest hrest
     refine ⟨?_, ?_⟩
     · simp only [ListMap.keys, hkeys_rest]
@@ -105,12 +108,12 @@ theorem mapM_genInputs_keys_values (genTy : SetGen.Set LMonoTy)
 
 /-- What membership in the support of `genInputs genTy depth` gives. The keys of the `ListMap` are
     a list of identifiers with no duplicate, and each value is in the support of `genTy`. -/
-theorem genInputs_support (genTy : SetGen.Set LMonoTy) (depth : Nat)
+theorem genInputs_support (genTy : SPMF LMonoTy) (depth : Nat)
     (m : ListMap (Identifier Unit) LMonoTy)
-    (hm : m ∈ SetGen.support (genInputs (G := SetGen.Set) genTy depth)) :
-    m.keys.Nodup ∧ ∀ ty ∈ m.values, ty ∈ SetGen.support genTy := by
-  simp only [genInputs, mem_support_bind_iff] at hm
-  obtain ⟨idents, hidents, hm⟩ := hm
+    (hm : m ∈ SPMF.support (genInputs (G := SPMF) genTy depth)) :
+    m.keys.Nodup ∧ ∀ ty ∈ m.values, ty ∈ SPMF.support genTy := by
+  unfold genInputs at hm
+  obtain ⟨idents, hidents, hm⟩ := mem_support_bind_iff.mp hm
   have hnd := genIdents_nodup depth idents hidents
   obtain ⟨hkeys, hvals⟩ := mapM_genInputs_keys_values genTy idents m hm
   exact ⟨hkeys ▸ hnd, hvals⟩
@@ -118,13 +121,13 @@ theorem genInputs_support (genTy : SetGen.Set LMonoTy) (depth : Nat)
 /-- `genIdentName` can reach the `name` of each key of a signature that `genInputs` gives. The keys
     are the list of identifiers after `List.uniq`, their names come from `genNameList`, and
     `genNameList` takes each name from `genIdentName`. -/
-theorem genInputs_key_name_reachable (genTy : SetGen.Set LMonoTy) (depth : Nat)
+theorem genInputs_key_name_reachable (genTy : SPMF LMonoTy) (depth : Nat)
     (m : ListMap (Identifier Unit) LMonoTy)
-    (hm : m ∈ SetGen.support (genInputs (G := SetGen.Set) genTy depth))
+    (hm : m ∈ SPMF.support (genInputs (G := SPMF) genTy depth))
     (k : Identifier Unit) (hk : k ∈ m.keys) :
-    k.name ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
-  simp only [genInputs, mem_support_bind_iff] at hm
-  obtain ⟨idents, hidents, hmapM⟩ := hm
+    k.name ∈ SPMF.support (genIdentName (G := SPMF)) := by
+  unfold genInputs at hm
+  obtain ⟨idents, hidents, hmapM⟩ := mem_support_bind_iff.mp hm
   obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values genTy idents m hmapM
   rw [hkeys] at hk
   simp only [genIdents, mem_support_map_iff] at hidents
@@ -138,9 +141,9 @@ theorem genInputs_key_name_reachable (genTy : SetGen.Set LMonoTy) (depth : Nat)
     fact separates a generated parameter name from a key that `CoreIdent.mkOld` makes, because such a
     key starts with `"old "`. It therefore keeps the first context of a procedure body
     `Functional`. -/
-theorem genInputs_key_no_space (genTy : SetGen.Set LMonoTy) (depth : Nat)
+theorem genInputs_key_no_space (genTy : SPMF LMonoTy) (depth : Nat)
     (m : ListMap (Identifier Unit) LMonoTy)
-    (hm : m ∈ SetGen.support (genInputs (G := SetGen.Set) genTy depth))
+    (hm : m ∈ SPMF.support (genInputs (G := SPMF) genTy depth))
     (k : Identifier Unit) (hk : k ∈ m.keys) :
     ' ' ∉ k.name.toList :=
   genIdentName_no_space k.name (genInputs_key_name_reachable genTy depth m hm k hk)
@@ -203,8 +206,8 @@ theorem mem_values_of_mem_toList {α β : Type} {m : ListMap α β} {x : α} {τ
 /-- A drawn optional expression is drawn by `genLExpr`. -/
 theorem genOptExpr_mem {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdentifier} {depth : Nat}
     {τ : LMonoTy} {pctx : PolyOpCtx} {e : LExpr'}
-    (ho : some e ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ pctx)) :
-    e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ) := by
+    (ho : some e ∈ SPMF.support (genOptExpr (G := SPMF) fctx octx tvars depth τ pctx)) :
+    e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ) := by
   simp only [genOptExpr,
     mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)] at ho
   rcases ho with hnone | ⟨e', he', ho⟩
@@ -265,14 +268,14 @@ theorem genPreconditions_sound {C : LContext CoreLParams} {ts : TypeScopes} {oct
     (hctx : ExprCtxOk C ts (inputsAsFVarCtx inputs ++ ambient) octx pctx)
     (hsc : ExprScopedCtx tvars (inputsAsFVarCtx inputs ++ ambient) octx pctx)
     {ps : List (Strata.DL.Util.FuncPrecondition LExpr' Unit)}
-    (hps : ps ∈ SetGen.support
-      (genPreconditions (G := SetGen.Set) octx inputs tvars depth pctx ambient)) :
+    (hps : ps ∈ SPMF.support
+      (genPreconditions (G := SPMF) octx inputs tvars depth pctx ambient)) :
     ∀ p ∈ ps, ExprWellTyped C ts p.expr .bool ∧ ∀ v ∈ annotTyVars p.expr, v ∈ tvars := by
   have hA := closureHyps_annotsOk tvars hctx
   have hB := closureHyps_annotTyVars hsc
   have hdraw : ∀ τ e, LMonoTy.knownInstance τ C.knownTypes = true →
       (∀ v ∈ LMonoTy.freeVars τ, v ∈ tvars) →
-      e ∈ SetGen.support (genLExpr (G := SetGen.Set) (inputsAsFVarCtx inputs ++ ambient) octx pctx
+      e ∈ SPMF.support (genLExpr (G := SPMF) (inputsAsFVarCtx inputs ++ ambient) octx pctx
         tvars [] depth τ) →
       ExprWellTyped C ts e τ ∧ ∀ v ∈ annotTyVars e, v ∈ tvars :=
     fun τ e hk hv he => ⟨genLExpr_exprWellTyped hctx hk he, genLExpr_annotTyVars hsc hv he⟩
@@ -362,10 +365,10 @@ theorem mem_datatypeFormals {dts : List (String × Nat)} {inputs : ListMap (Iden
     it at `int`. -/
 theorem genIntMeasure_mem {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdentifier}
     {depth : Nat} {pctx : PolyOpCtx} {inputs : ListMap (Identifier Unit) LMonoTy} {m : LExpr'}
-    (h : some m ∈ SetGen.support
-      (genIntMeasure (G := SetGen.Set) fctx octx tvars depth pctx inputs)) :
+    (h : some m ∈ SPMF.support
+      (genIntMeasure (G := SPMF) fctx octx tvars depth pctx inputs)) :
     measureOnFormal inputs m = true ∧
-      m ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .int) := by
+      m ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .int) := by
   rw [genIntMeasure, mem_support_map_iff] at h
   obtain ⟨o, ho, hfo⟩ := h
   cases o with
@@ -381,10 +384,10 @@ theorem genIntMeasure_mem {fctx : FVarCtx} {octx : OpCtx} {tvars : List TyIdenti
 theorem genMeasure_mem {dts : List (String × Nat)} {fctx : FVarCtx} {octx : OpCtx}
     {tvars : List TyIdentifier} {depth : Nat} {pctx : PolyOpCtx}
     {inputs : ListMap (Identifier Unit) LMonoTy} {m : LExpr'}
-    (h : some m ∈ SetGen.support
-      (genMeasure (G := SetGen.Set) dts fctx octx tvars depth pctx inputs)) :
+    (h : some m ∈ SPMF.support
+      (genMeasure (G := SPMF) dts fctx octx tvars depth pctx inputs)) :
     (measureOnFormal inputs m = true ∧
-      m ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth .int)) ∨
+      m ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .int)) ∨
       ∃ p ∈ datatypeFormals dts inputs, m = .fvar () p.1 (some p.2) := by
   unfold genMeasure at h
   split at h
@@ -438,7 +441,7 @@ theorem FuncSigOk.of_funcWellTyped {C : LContext CoreLParams} {ts : TypeScopes} 
 /-- A function that `genFuncSig` draws is named `name` and has only a signature. -/
 theorem genFuncSig_stub {name : String} {depth : Nat} {avoid : String → Bool}
     {dts : List (String × Nat)} {sig : Function}
-    (hsig : sig ∈ SetGen.support (genFuncSig (G := SetGen.Set) name depth avoid dts)) :
+    (hsig : sig ∈ SPMF.support (genFuncSig (G := SPMF) name depth avoid dts)) :
     sig.name = ⟨name, ()⟩ ∧ sig = funcStub sig := by
   simp only [genFuncSig, mem_support_bind_iff, mem_support_pure_iff] at hsig
   obtain ⟨_, _, _, _, _, _, rfl⟩ := hsig
@@ -446,12 +449,12 @@ theorem genFuncSig_stub {name : String} {depth : Nat} {avoid : String → Bool}
 
 /-- A function that `genFuncParts` draws keeps the name and signature of `sig`, and its recursion
     flag is one that `genRecursive` draws. -/
-theorem genFuncParts_shape {genRecursive : SetGen.Set Bool} {fctx : FVarCtx} {octx : OpCtx}
+theorem genFuncParts_shape {genRecursive : SPMF Bool} {fctx : FVarCtx} {octx : OpCtx}
     {depth : Nat} {pctx : PolyOpCtx} {dts : List (String × Nat)} {sig func : Function}
-    (hfunc : func ∈ SetGen.support
-      (genFuncParts (G := SetGen.Set) genRecursive fctx octx depth pctx dts sig)) :
+    (hfunc : func ∈ SPMF.support
+      (genFuncParts (G := SPMF) genRecursive fctx octx depth pctx dts sig)) :
     func.name = sig.name ∧ func.typeArgs = sig.typeArgs ∧ func.inputs = sig.inputs ∧
-      func.output = sig.output ∧ func.isRecursive ∈ SetGen.support genRecursive := by
+      func.output = sig.output ∧ func.isRecursive ∈ SPMF.support genRecursive := by
   simp only [genFuncParts, mem_support_bind_iff, mem_support_pure_iff] at hfunc
   obtain ⟨_, _, _, _, _, _, _, _, isRecursive, hrec, _, _, _, _, _, _, rfl⟩ := hfunc
   exact ⟨rfl, rfl, rfl, rfl, hrec⟩
@@ -461,7 +464,7 @@ theorem genFuncParts_shape {genRecursive : SetGen.Set Bool} {fctx : FVarCtx} {oc
 theorem genInputTy_sound {C : LContext CoreLParams} (harities : SimpleTyArities C)
     {dts : List (String × Nat)} (hdts : ∀ kc ∈ dts, C.knownTypes[kc.1]? = some kc.2)
     {tvars : List TyIdentifier} {depth : Nat} {ty : LMonoTy}
-    (hty : ty ∈ SetGen.support (genInputTy (G := SetGen.Set) dts tvars depth)) :
+    (hty : ty ∈ SPMF.support (genInputTy (G := SPMF) dts tvars depth)) :
     allFtvarsIn tvars ty ∧ C.WellKindedTy ty := by
   unfold genInputTy at hty
   split at hty
@@ -489,10 +492,10 @@ theorem genInputTy_sound {C : LContext CoreLParams} (harities : SimpleTyArities 
     every datatype of `dts` applied to as many such types as its arity. -/
 theorem genInputTy_complete {dts : List (String × Nat)} {tvars : List TyIdentifier} {depth : Nat}
     {ty : LMonoTy}
-    (h : ty ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth) ∨
+    (h : ty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth) ∨
       ∃ kc ∈ dts, ∃ args : List LMonoTy, ty = .tcons kc.1 args ∧ args.length = kc.2 ∧
-        ∀ a ∈ args, a ∈ SetGen.support (genLMonoTy (G := SetGen.Set) tvars depth)) :
-    ty ∈ SetGen.support (genInputTy (G := SetGen.Set) dts tvars depth) := by
+        ∀ a ∈ args, a ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth)) :
+    ty ∈ SPMF.support (genInputTy (G := SPMF) dts tvars depth) := by
   unfold genInputTy
   split
   · rename_i hne
@@ -512,7 +515,7 @@ theorem genInputTy_complete {dts : List (String × Nat)} {tvars : List TyIdentif
 theorem genFuncSig_sound {C : LContext CoreLParams} (harities : SimpleTyArities C)
     (name : String) (depth : Nat) (avoid : String → Bool) {dts : List (String × Nat)}
     (hdts : ∀ kc ∈ dts, C.knownTypes[kc.1]? = some kc.2) {sig : Function}
-    (hsig : sig ∈ SetGen.support (genFuncSig (G := SetGen.Set) name depth avoid dts)) :
+    (hsig : sig ∈ SPMF.support (genFuncSig (G := SPMF) name depth avoid dts)) :
     FuncSigOk C sig := by
   simp only [genFuncSig, mem_support_bind_iff, mem_support_pure_iff] at hsig
   obtain ⟨rawTypeArgs, hrawTypeArgs, rawInputs, hrawInputs, output, houtput, rfl⟩ := hsig
@@ -539,7 +542,7 @@ theorem genFuncSig_sound {C : LContext CoreLParams} (harities : SimpleTyArities 
     function the generator makes is well-typed in context `C` and variable scopes `ts` when its
     contexts agree with them (`ExprCtxOk`, closed schemes) and `C` declares each datatype of
     `dts`. -/
-theorem genFuncParts_sound (genRecursive : SetGen.Set Bool) (fctx : FVarCtx) (octx : OpCtx)
+theorem genFuncParts_sound (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx : OpCtx)
     (depth : Nat) (C : LContext CoreLParams) (ts : TypeScopes) (pctx : PolyOpCtx)
     (dts : List (String × Nat))
     (hctx : ExprCtxOk C ts fctx octx pctx)
@@ -547,8 +550,8 @@ theorem genFuncParts_sound (genRecursive : SetGen.Set Bool) (fctx : FVarCtx) (oc
       ∀ v ∈ LMonoTy.freeVars body, v ∈ bvs)
     (hdts : ∀ kc ∈ dts, (C.datatypes.getType kc.1).isSome)
     (sig : Function) (hsig : FuncSigOk C sig) (func : Function)
-    (hfunc : func ∈ SetGen.support
-      (genFuncParts (G := SetGen.Set) genRecursive fctx octx depth pctx dts sig)) :
+    (hfunc : func ∈ SPMF.support
+      (genFuncParts (G := SPMF) genRecursive fctx octx depth pctx dts sig)) :
     FuncWellTyped C ts func := by
   simp only [genFuncParts, mem_support_bind_iff, mem_support_pure_iff] at hfunc
   obtain ⟨isConstr, _, body, hbody, preconditions, hpre, axioms, haxioms, isRecursive, _,
@@ -614,7 +617,7 @@ theorem genFuncParts_sound (genRecursive : SetGen.Set Bool) (fctx : FVarCtx) (oc
       exact List.contains_iff_mem.mp (List.all_eq_true.mp hkeep.2 v hv)
   have hdraw : ∀ τ e, LMonoTy.knownInstance τ C.knownTypes = true →
       (∀ v ∈ LMonoTy.freeVars τ, v ∈ func.typeArgs) →
-      e ∈ SetGen.support (genLExpr (G := SetGen.Set) (funcFctx fctx func.inputs func.typeArgs)
+      e ∈ SPMF.support (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
         (opsOver func.typeArgs octx) pctx func.typeArgs [] depth τ) →
       ExprWellTyped C (funcScopes ts func) e τ ∧ ∀ v ∈ annotTyVars e, v ∈ func.typeArgs :=
     fun τ e hk hv he => ⟨genLExpr_exprWellTyped hctxE hk he, genLExpr_annotTyVars hscE hv he⟩
@@ -624,7 +627,7 @@ theorem genFuncParts_sound (genRecursive : SetGen.Set Bool) (fctx : FVarCtx) (oc
     fun v hv => by simp [LMonoTy.freeVars, LMonoTys.freeVars] at hv
   have hpreOk := genPreconditions_sound (ambient := ambientFctx fctx func.inputs func.typeArgs)
     hctxE hscE hpre
-  have hbodyMem : ∀ b, func.body = some b → b ∈ SetGen.support (genLExpr (G := SetGen.Set)
+  have hbodyMem : ∀ b, func.body = some b → b ∈ SPMF.support (genLExpr (G := SPMF)
       (funcFctx fctx func.inputs func.typeArgs) (opsOver func.typeArgs octx) pctx func.typeArgs []
       depth func.output) := by
     intro b hb
@@ -634,14 +637,14 @@ theorem genFuncParts_sound (genRecursive : SetGen.Set Bool) (fctx : FVarCtx) (oc
     · rw [mem_support_pure_iff] at hbody
       exact absurd hbody (by simp)
     · exact genOptExpr_mem hbody
-  have haxMem : ∀ ax ∈ func.axioms, ax ∈ SetGen.support (genLExpr (G := SetGen.Set)
+  have haxMem : ∀ ax ∈ func.axioms, ax ∈ SPMF.support (genLExpr (G := SPMF)
       (funcFctx fctx func.inputs func.typeArgs) (opsOver func.typeArgs octx) pctx func.typeArgs []
       depth .bool) := by
     intro ax hax
     rw [hAx] at hax
     exact (mem_support_listOfMaxLength_iff.mp haxioms).2 ax hax
   have hmeasMem : ∀ m, func.measure = some m →
-      (measureOnFormal func.inputs m = true ∧ m ∈ SetGen.support (genLExpr (G := SetGen.Set)
+      (measureOnFormal func.inputs m = true ∧ m ∈ SPMF.support (genLExpr (G := SPMF)
         (funcFctx fctx func.inputs func.typeArgs) (opsOver func.typeArgs octx) pctx func.typeArgs []
         depth .int)) ∨ ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar () p.1 (some p.2) := by
     intro m hm
@@ -728,8 +731,8 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
       ∀ v ∈ LMonoTy.freeVars body, v ∈ bvs)
     (hdts : ∀ kc ∈ dts, (C.datatypes.getType kc.1).isSome ∧ C.knownTypes[kc.1]? = some kc.2)
     (func : Function)
-    (hfunc : func ∈ SetGen.support
-      (genFunction (G := SetGen.Set) fctx octx depth pctx avoid dts)) :
+    (hfunc : func ∈ SPMF.support
+      (genFunction (G := SPMF) fctx octx depth pctx avoid dts)) :
     FuncWellTyped C ts func := by
   simp only [genFunction, mem_support_bind_iff] at hfunc
   obtain ⟨name, _, sig, hsig, hparts⟩ := hfunc
@@ -742,7 +745,7 @@ theorem genFunction_sound (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
 theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
     (C : LContext CoreLParams) (ts : TypeScopes) (avoid : String → Bool)
     (hctx : ExprCtxOk C ts fctx ∅ []) (func : Function)
-    (hfunc : func ∈ SetGen.support (genFunction (G := SetGen.Set) fctx ∅ depth [] avoid)) :
+    (hfunc : func ∈ SPMF.support (genFunction (G := SPMF) fctx ∅ depth [] avoid)) :
     FuncWellTyped C ts func :=
   genFunction_sound fctx ∅ depth C ts [] avoid [] hctx (fun _ _ _ h => absurd h List.not_mem_nil)
     (fun _ h => absurd h List.not_mem_nil) func hfunc
@@ -757,14 +760,14 @@ theorem genFunction_sound_nil (fctx : FVarCtx) (depth : Nat)
     `mem_support_genIdentName_iff` gives the support of `genIdentName` in both directions, so the
     condition for one name is also concrete. -/
 theorem mem_support_genNameList_iff (depth : Nat) (l : List String) :
-    l ∈ SetGen.support (genNameList (G := SetGen.Set) depth) ↔
-      l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+    l ∈ SPMF.support (genNameList (G := SPMF) depth) ↔
+      l.length ≤ depth ∧ ∀ s ∈ l, s ∈ SPMF.support (genIdentName (G := SPMF)) := by
   simp only [genNameList, mem_support_listOfMaxLength_iff]
 
 /-- No name in a list that `genNameList` gives is a keyword. The proof carries
     `genIdentName_not_keyword` through the support of `genNameList`, which holds for each element. -/
 theorem genNameList_not_keyword (depth : Nat) (l : List String)
-    (hl : l ∈ SetGen.support (genNameList (G := SetGen.Set) depth)) :
+    (hl : l ∈ SPMF.support (genNameList (G := SPMF) depth)) :
     ∀ s ∈ l, isReservedKeyword s = false := fun s hs =>
   genIdentName_not_keyword s ((mem_support_genNameList_iff depth l |>.mp hl).2 s hs)
 
@@ -772,31 +775,34 @@ set_option linter.unusedSimpArgs false in
 /-- The converse of `mapM_genInputs_keys_values`. Take a `ListMap` such that `genTy` can reach
     each of its values. The support of the `mapM` inside `genInputs`, over the keys of that map,
     then holds the map. -/
-theorem mapM_genInputs_complete (genTy : SetGen.Set LMonoTy)
+theorem mapM_genInputs_complete (genTy : SPMF LMonoTy)
     (m : ListMap (Identifier Unit) LMonoTy)
-    (hvals : ∀ ty ∈ m.values, ty ∈ SetGen.support genTy) :
-    m ∈ SetGen.support
-      (m.keys.mapM (m := SetGen.Set) (fun x => do
+    (hvals : ∀ ty ∈ m.values, ty ∈ SPMF.support genTy) :
+    m ∈ SPMF.support
+      (m.keys.mapM (m := SPMF) (fun x => do
         let ty ← genTy
         pure (x, ty))) := by
   induction m with
   | nil =>
-    show [] ∈ SetGen.support (pure [] : SetGen.Set _)
+    show [] ∈ SPMF.support (pure [] : SPMF _)
     rw [mem_support_pure_iff]
   | cons p rest ih =>
     obtain ⟨x, ty⟩ := p
-    simp only [ListMap.keys, List.mapM_cons, mem_support_bind_iff]
-    have hty : ty ∈ SetGen.support genTy := hvals ty (by simp [ListMap.values])
-    have hrest : ∀ ty' ∈ ListMap.values rest, ty' ∈ SetGen.support genTy := by
+    have hty : ty ∈ SPMF.support genTy := hvals ty (by simp [ListMap.values])
+    have hrest : ∀ ty' ∈ ListMap.values rest, ty' ∈ SPMF.support genTy := by
       intro ty' hty'; exact hvals ty' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hty')
-    refine ⟨(x, ty), ⟨ty, hty, rfl⟩, rest, ih hrest, rfl⟩
+    have hkeys : ListMap.keys ((x, ty) :: rest) = x :: ListMap.keys rest := rfl
+    rw [hkeys, List.mapM_cons]
+    exact mem_support_bind_iff.mpr ⟨(x, ty),
+      mem_support_bind_iff.mpr ⟨ty, hty, mem_support_pure_iff.mpr rfl⟩,
+      mem_support_bind_iff.mpr ⟨rest, ih hrest, mem_support_pure_iff.mpr rfl⟩⟩
 
 /-- `genIdents depth` can reach a list of identifiers `ids` that holds no duplicate, if
     `genNameList depth` can reach the list of names `ids.map (·.name)`. -/
 theorem genIdents_complete (depth : Nat) (ids : List (Identifier Unit))
     (hnd : ids.Nodup)
-    (hnames : ids.map (·.name) ∈ SetGen.support (genNameList (G := SetGen.Set) depth)) :
-    ids ∈ SetGen.support (genIdents (G := SetGen.Set) depth) := by
+    (hnames : ids.map (·.name) ∈ SPMF.support (genNameList (G := SPMF) depth)) :
+    ids ∈ SPMF.support (genIdents (G := SPMF) depth) := by
   simp only [genIdents, mem_support_map_iff]
   refine ⟨ids.map (·.name), hnames, ?_⟩
   -- The map back over the names gives `ids` again, because the metadata of an `Identifier Unit` is
@@ -808,36 +814,37 @@ theorem genIdents_complete (depth : Nat) (ids : List (Identifier Unit))
     | cons a as ih =>
       simp only [List.map_cons, List.cons.injEq]
       refine ⟨?_, ih⟩; obtain ⟨n, u⟩ := a; trivial
-  rw [hmapeq, dedup_eq_self ids hnd]
+  rw [hmapeq, uniq_eq_self ids hnd]
 
 /-- `genTypeArgs depth` can reach a list of type arguments `l` that holds no duplicate, if
     `genNameList depth` can reach `l`. -/
 theorem genTypeArgs_complete (depth : Nat) (l : List TyIdentifier)
     (hnd : l.Nodup)
-    (hnames : l ∈ SetGen.support (genNameList (G := SetGen.Set) depth)) :
-    l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth) := by
+    (hnames : l ∈ SPMF.support (genNameList (G := SPMF) depth)) :
+    l ∈ SPMF.support (genTypeArgs (G := SPMF) depth) := by
   simp only [genTypeArgs, mem_support_map_iff]
-  exact ⟨l, hnames, (dedup_eq_self l hnd).symm⟩
+  exact ⟨l, hnames, (uniq_eq_self l hnd).symm⟩
 
 /-- Completeness of `genInputs`. The support of `genInputs genTy depth` holds a `ListMap` when
     three conditions hold: the keys of the map hold no duplicate; `genTy` can reach each value; and
     `genNameList depth` can reach the names of the keys. -/
-theorem genInputs_complete (genTy : SetGen.Set LMonoTy) (depth : Nat)
+theorem genInputs_complete (genTy : SPMF LMonoTy) (depth : Nat)
     (m : ListMap (Identifier Unit) LMonoTy)
     (hnd : m.keys.Nodup)
-    (hnames : m.keys.map (·.name) ∈ SetGen.support (genNameList (G := SetGen.Set) depth))
-    (hvals : ∀ ty ∈ m.values, ty ∈ SetGen.support genTy) :
-    m ∈ SetGen.support (genInputs (G := SetGen.Set) genTy depth) := by
-  simp only [genInputs, mem_support_bind_iff]
-  exact ⟨m.keys, genIdents_complete depth m.keys hnd hnames, mapM_genInputs_complete genTy m hvals⟩
+    (hnames : m.keys.map (·.name) ∈ SPMF.support (genNameList (G := SPMF) depth))
+    (hvals : ∀ ty ∈ m.values, ty ∈ SPMF.support genTy) :
+    m ∈ SPMF.support (genInputs (G := SPMF) genTy depth) := by
+  unfold genInputs
+  exact mem_support_bind_iff.mpr
+    ⟨m.keys, genIdents_complete depth m.keys hnd hnames, mapM_genInputs_complete genTy m hvals⟩
 
 /-- Completeness of `genOptExpr`. The generator can always reach `none`. It can reach `some e` when
     `genLExpr` can reach `e`. -/
 theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (τ : LMonoTy) (o : Option LExpr') {pctx : PolyOpCtx}
     (ho : ∀ e, o = some e →
-      e ∈ SetGen.support (genLExpr (G := SetGen.Set) fctx octx pctx tvars [] depth τ)) :
-    o ∈ SetGen.support (genOptExpr (G := SetGen.Set) fctx octx tvars depth τ pctx) := by
+      e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ)) :
+    o ∈ SPMF.support (genOptExpr (G := SPMF) fctx octx tvars depth τ pctx) := by
   simp only [genOptExpr,
     mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)]
   cases o with
@@ -851,8 +858,8 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
 /-- A clause whose expression a generator reaches is in the support of the clause builder over
     that generator. -/
 theorem mem_support_precondClause {p : Strata.DL.Util.FuncPrecondition LExpr' Unit}
-    {g : SetGen.Set LExpr'} (hg : p.expr ∈ SetGen.support g) :
-    p ∈ SetGen.support (do let y ← g; pure ({ expr := y, md := () } :
+    {g : SPMF LExpr'} (hg : p.expr ∈ SPMF.support g) :
+    p ∈ SPMF.support (do let y ← g; pure ({ expr := y, md := () } :
       Strata.DL.Util.FuncPrecondition LExpr' Unit)) := by
   simp only [mem_support_bind_iff, mem_support_pure_iff]
   refine ⟨p.expr, hg, ?_⟩
@@ -866,10 +873,10 @@ theorem genPreconditions_complete (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
     (depth : Nat) (ambient : FVarCtx) (ps : List (Strata.DL.Util.FuncPrecondition LExpr' Unit))
     {pctx : PolyOpCtx} (hlen : ps.length ≤ maxFuncClauses)
-    (hreach : ∀ p ∈ ps, p.expr ∈ SetGen.support (genLExpr (G := SetGen.Set)
+    (hreach : ∀ p ∈ ps, p.expr ∈ SPMF.support (genLExpr (G := SPMF)
       (inputsAsFVarCtx inputs ++ ambient) octx pctx tvars [] depth .bool)) :
-    ps ∈ SetGen.support
-      (genPreconditions (G := SetGen.Set) octx inputs tvars depth pctx ambient) := by
+    ps ∈ SPMF.support
+      (genPreconditions (G := SPMF) octx inputs tvars depth pctx ambient) := by
   rw [genPreconditions, mem_support_listOfMaxLength_iff]
   refine ⟨hlen, fun p hp => ?_⟩
   rw [genPrecondition]
@@ -887,13 +894,13 @@ theorem genPreconditions_complete (octx : OpCtx)
 theorem mem_support_genPrecondition_iff (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier)
     (depth : Nat) (ambient : FVarCtx) (p : Strata.DL.Util.FuncPrecondition LExpr' Unit) :
-    p ∈ SetGen.support (genPrecondition (G := SetGen.Set) octx inputs tvars depth [] ambient)
+    p ∈ SPMF.support (genPrecondition (G := SPMF) octx inputs tvars depth [] ambient)
       ↔ ∃ e,
-          (e ∈ SetGen.support (genLExpr (G := SetGen.Set)
+          (e ∈ SPMF.support (genLExpr (G := SPMF)
              (inputsAsFVarCtx inputs ++ ambient) octx [] tvars [] depth .bool)
            ∨ (∃ (x : Identifier Unit) (τ : LMonoTy) (e' : LExpr'),
              (x, τ) ∈ inputs.toList ∧
-             e' ∈ SetGen.support (genLExpr (G := SetGen.Set)
+             e' ∈ SPMF.support (genLExpr (G := SPMF)
                (inputsAsFVarCtx inputs ++ ambient) octx [] tvars [] depth τ) ∧
              e = .eq () (.fvar () x (some τ)) e'))
           ∧ p = { expr := e, md := () } := by
@@ -948,7 +955,7 @@ theorem mem_support_genPrecondition_iff (octx : OpCtx)
     names come from `genNameList` (all non-keyword by `genNameList_not_keyword`),
     and `List.uniq` only removes elements. -/
 theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
-    (hl : l ∈ SetGen.support (genTypeArgs (G := SetGen.Set) depth)) :
+    (hl : l ∈ SPMF.support (genTypeArgs (G := SPMF) depth)) :
     ∀ s ∈ l, isReservedKeyword s = false := by
   simp only [genTypeArgs, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
@@ -959,7 +966,7 @@ theorem genTypeArgs_not_keyword (depth : Nat) (l : List TyIdentifier)
     identifier `⟨s, ()⟩` comes from mapping over the `genNameList` names, and
     `List.uniq` only removes elements. -/
 theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
-    (hl : l ∈ SetGen.support (genIdents (G := SetGen.Set) depth)) :
+    (hl : l ∈ SPMF.support (genIdents (G := SPMF) depth)) :
     ∀ x ∈ l, isReservedKeyword x.name = false := by
   simp only [genIdents, mem_support_map_iff] at hl
   obtain ⟨names, hnames, rfl⟩ := hl
@@ -978,8 +985,8 @@ theorem genIdents_not_keyword (depth : Nat) (l : List (Identifier Unit))
 theorem genFunction_names_not_keyword (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (pctx : PolyOpCtx) (avoid : String → Bool) (dts : List (String × Nat))
     (func : Function)
-    (hfunc : func ∈ SetGen.support
-      (genFunction (G := SetGen.Set) fctx octx depth pctx avoid dts)) :
+    (hfunc : func ∈ SPMF.support
+      (genFunction (G := SPMF) fctx octx depth pctx avoid dts)) :
     isReservedKeyword func.name.name = false ∧
     (∀ s ∈ func.typeArgs, isReservedKeyword s = false) ∧
     (∀ x ∈ func.inputs.keys, isReservedKeyword x.name = false) := by
@@ -995,8 +1002,8 @@ theorem genFunction_names_not_keyword (fctx : FVarCtx) (octx : OpCtx) (depth : N
   · -- The inputs are a filter of the drawn signature, whose keys are the drawn identifiers.
     intro x hx
     obtain ⟨y, hxy, _⟩ := mem_keys_filter _ inputs x hx
-    simp only [genInputs, mem_support_bind_iff] at hinputs
-    obtain ⟨idents, hidents, hmap⟩ := hinputs
+    unfold genInputs at hinputs
+    obtain ⟨idents, hidents, hmap⟩ := mem_support_bind_iff.mp hinputs
     obtain ⟨hkeys, _⟩ := mapM_genInputs_keys_values _ idents inputs hmap
     have hxKey : x ∈ ListMap.keys inputs := by
       rw [ListMap.keys_eq_map_fst]

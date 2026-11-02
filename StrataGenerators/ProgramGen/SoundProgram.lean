@@ -22,7 +22,7 @@ into:
   its declarations are well-typed.
 -/
 
-open Lambda RandomChoice Core Core.TypeSpec Imperative SetGen
+open Lambda RandomChoice Core Core.TypeSpec Imperative
 open DatatypeGen
 open StrataGenerators.Procedure StrataGenerators.Stmt StrataGenerators.AnnotFacts
 
@@ -45,7 +45,7 @@ theorem addMutualBlock_rigid {C C' : LContext CoreLParams} {block : MutualDataty
     added to `C`, and `Inv` holds after it. -/
 theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclDatatype (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclDatatype, mem_support_bind_iff] at h
   obtain ⟨block, hblock, hmatch⟩ := h
@@ -273,7 +273,7 @@ theorem genDeclProcedure_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
     (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclProcedure (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
   obtain ⟨proc₀, hproc₀, nm, _, hds, hs'⟩ := h
@@ -495,7 +495,7 @@ theorem dtCons_registered {s : GenState} (hinv : Inv s) :
     and agreeing with its declaration in the grown context. -/
 theorem genDeclFunction_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclFunction (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   simp only [genDeclFunction, mem_support_bind_iff] at h
   obtain ⟨func₀, hfunc₀, nm, _, hmatch⟩ := h
@@ -561,7 +561,7 @@ theorem dropInline_attr {f : Function} : ∀ a ∈ (dropInline f).attr, a ≠ .i
     stubs of all of them, and the block is added to the context; `Inv` holds after it. -/
 theorem genDeclRecFuncBlock_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclRecFuncBlock (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   rcases genDeclRecFuncBlock_support h with ⟨rfl, rfl⟩ |
     ⟨k, names, stubs, sStub, drawn, s₁, hk, hnames, hstubs, hstub, hdrawn, hreg, rfl, rfl⟩
@@ -647,7 +647,7 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) (hProcs : ProcSigCorresponds s.procs P)
     (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
     {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b)) :
+    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
   -- `genDeclStep` is a weighted `frequency`; support inversion yields a
   -- `(weight, generator)` pair, so each branch equation pins both components.
@@ -673,7 +673,7 @@ theorem genDeclStep_sound (P : Program) {s : GenState} {b : Bounds}
     `Inv` is preserved throughout. -/
 theorem genDeclsFold_sound (P : Program) (n : Nat) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
-    (h : (ds, s') ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b n))
+    (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n))
     (hProcs : ProcSigCorresponds s'.procs P)
     (hLocalTypes : ∀ d ∈ programNamesOfKind P .type, ¬ isLocalTypeName d.name) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
@@ -716,7 +716,7 @@ theorem programNamesOfKind_nodup {P : Program} (h : P.getNames.Nodup) (k : DeclK
       name fresh against a threaded reserved set, so all of its names are distinct.
     * Its declarations are well-typed, which the fold gives. -/
 theorem genProgram_sound {numDecls : Nat} {b : Bounds} {P : Program}
-    (h : P ∈ SetGen.support (genProgram (G := SetGen.Set) numDecls b)) :
+    (h : P ∈ SPMF.support (genProgram (G := SPMF) numDecls b)) :
     ProgramWellTyped programContext [] P := by
   simp only [genProgram, mem_support_bind_iff, mem_support_pure_iff] at h
   obtain ⟨⟨decls, sf⟩, hfold, hP⟩ := h

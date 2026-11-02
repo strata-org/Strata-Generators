@@ -1,6 +1,6 @@
 import StrataGenerators.StmtHasTypeAGenComplete
 
-open Lambda LExpr RandomChoice Core Imperative TypeSpec SetGen ArbString
+open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
@@ -92,10 +92,10 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
     (ce : Command)
     (h : (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n)) :
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [] [] C.knownTypes)) ∨
+        SPMF.support
+          (genCmd (G := SPMF) octx tvars immutableVars ctx n [] [] C.knownTypes)) ∨
     (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
@@ -105,7 +105,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
             exprs mask) default) := by
   have hcall : ∀ (d : Nat),
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genCallStmt (G := SetGen.Set) octx tvars immutableVars procs C ctx d []) →
+        SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d []) →
       (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
         s ∈ procs ∧
         ce = CmdExt.call s.pname
@@ -115,7 +115,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
             exprs mask) default) := by
     intro d hmem
     cases procs with
-    | nil => exact ((SetGen.bot_mem_iff _).mp hmem).elim
+    | nil => exact ((SPMF.mem_support_bot_iff _).mp hmem).elim
     | cons p0 ps =>
       simp only [genCallStmt, mem_support_bind_iff] at hmem
       obtain ⟨s, hs, σvals, _, hmem⟩ := hmem
@@ -129,14 +129,14 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
           have hcall := initChain_append_call_singleton heq.1
           exact ⟨s, σvals, exprs, mask, (mem_support_elements_iff (by simp)).mp hs, by
             simpa only [Statement.call, Stmt.cmd.injEq] using hcall⟩
-        · exact ((SetGen.bot_mem_iff _).mp hmem).elim
-      · exact ((SetGen.bot_mem_iff _).mp hmem).elim
+        · exact ((SPMF.mem_support_bot_iff _).mp hmem).elim
+      · exact ((SPMF.mem_support_bot_iff _).mp hmem).elim
   have hcmdstmt : ∀ (d : Nat),
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genCmdStmt (G := SetGen.Set) octx tvars immutableVars C ctx d []) →
+        SPMF.support (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx d []) →
       (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SetGen.support
-          (genCmd (G := SetGen.Set) octx tvars immutableVars ctx d [] [] C.knownTypes)) := by
+        SPMF.support
+          (genCmd (G := SPMF) octx tvars immutableVars ctx d [] [] C.knownTypes)) := by
     intro d hmem
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hmem
     obtain ⟨r, hr, heq⟩ := hmem
@@ -145,24 +145,24 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     exact ⟨r.cmd, rfl, hr⟩
   have hexit :
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genExitStmt (G := SetGen.Set) labels C ctx) → False := by
+        SPMF.support (genExitStmt (G := SPMF) labels C ctx) → False := by
     intro hmem
     cases labels with
-    | nil => exact (SetGen.bot_mem_iff _).mp hmem
+    | nil => exact (SPMF.mem_support_bot_iff _).mp hmem
     | cons hd tl =>
       simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
         GenStmtResult.mk.injEq, List.cons.injEq, reduceCtorEq, false_and,
         and_false, exists_false] at hmem
   have htype : ∀ (d : Nat),
       (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SetGen.support (genTypeDeclStmt (G := SetGen.Set) C ctx d) → False := by
+        SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d) → False := by
     intro d hmem
     simp only [genTypeDeclStmt, mem_support_bind_iff] at hmem
     obtain ⟨tc, _, hmem⟩ := hmem
     split at hmem
     · simp only [mem_support_pure_iff, GenStmtResult.mk.injEq, List.cons.injEq,
         reduceCtorEq, false_and] at hmem
-    · exact (SetGen.bot_mem_iff _).mp hmem
+    · exact (SPMF.mem_support_bot_iff _).mp hmem
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff] at h
@@ -217,8 +217,8 @@ theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx'
     (n : Nat) (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
     {avoid : List String} {kt : Lambda.KnownTypes}
     (h : (⟨.assert l e md, ctx'⟩ : GenCmdResult) ∈
-      SetGen.support (genCmd (G := SetGen.Set) octx tvars immutableVars ctx n [] avoid kt)) :
-    md = default ∧ l ∈ SetGen.support (genIdentName (G := SetGen.Set)) := by
+      SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx n [] avoid kt)) :
+    md = default ∧ l ∈ SPMF.support (genIdentName (G := SPMF)) := by
   rw [genCmd_support_iff octx tvars immutableVars ctx n _ [] avoid kt] at h
   rcases h with h | h | ⟨_, h⟩ | ⟨_, h⟩ | h | h | h
   · simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff,
@@ -281,7 +281,7 @@ theorem metadata_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCt
     (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
     (hmd : md ≠ default) :
     (⟨[Statement.assert l e md], C', ctx'⟩ : GenStmtResult) ∉
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
@@ -317,9 +317,9 @@ example : (#[mdKey] : Imperative.MetaData Expression) ≠ default := by decide
 theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
     (l : String) (e : Expression.Expr)
-    (hl : l ∉ SetGen.support (genIdentName (G := SetGen.Set))) :
+    (hl : l ∉ SPMF.support (genIdentName (G := SPMF))) :
     (⟨[Statement.assert l e default], C', ctx'⟩ : GenStmtResult) ∉
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars immutableVars procs labels C ctx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
@@ -330,7 +330,7 @@ theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
 /-- The empty label is not a legal identifier, so `label_gap` applies to it. An
     identifier needs a first character. -/
 theorem emptyLabel_not_reachable :
-    "" ∉ SetGen.support (genIdentName (G := SetGen.Set)) := by
+    "" ∉ SPMF.support (genIdentName (G := SPMF)) := by
   rw [StrataGenerators.Function.mem_support_genIdentName_iff]
   rintro ⟨⟨c, cs, hsplit, _, _⟩, _⟩
   exact absurd hsplit (by simp)
@@ -426,7 +426,7 @@ theorem outTargets_sigP (avoid : List String) :
 theorem outTarget_gap (labels : List String)
     (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars [] [sigP] labels C callerCtx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n) := by
   intro h
   rcases mem_genStmt_cmd_inv [] [sigP] labels C C' callerCtx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, hs, hce⟩
@@ -501,7 +501,7 @@ theorem otherTargetCall_gap (labels : List String)
     StatementWellTyped progP C (procToTCtx callerCtx).types labels otherTargetCall C
         (procToTCtx callerCtx).types ∧
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SetGen.support (genStmt (G := SetGen.Set) octx tvars [] [sigP] labels C callerCtx [] n) :=
+      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n) :=
   ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
 -- ── `spec_complete`'s old environment hypotheses were unsatisfiable ──────────

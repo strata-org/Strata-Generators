@@ -69,7 +69,7 @@ per-declaration reachability, and this adds no obligation at the program level.
 Second, 6 of the 8 per-declaration obligations are discharged.
 -/
 
-open Lambda RandomChoice Core Imperative SetGen
+open Lambda RandomChoice Core Imperative
 open DatatypeGen
 open StrataGenerators.Stmt (isLocalTypeName)
 
@@ -81,9 +81,9 @@ namespace ProgramGen
     tail gives a reachable `n+1`-step fold. -/
 theorem genDeclsFold_cons_complete {s s₁ s₂ : GenState} {b : Bounds} {n : Nat}
     {ds₁ rest : List Decl}
-    (hstep : (ds₁, s₁) ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b))
-    (hrest : (rest, s₂) ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s₁ b n)) :
-    (ds₁ ++ rest, s₂) ∈ SetGen.support (genDeclsFold (G := SetGen.Set) s b (n + 1)) := by
+    (hstep : (ds₁, s₁) ∈ SPMF.support (genDeclStep (G := SPMF) s b))
+    (hrest : (rest, s₂) ∈ SPMF.support (genDeclsFold (G := SPMF) s₁ b n)) :
+    (ds₁ ++ rest, s₂) ∈ SPMF.support (genDeclsFold (G := SPMF) s b (n + 1)) := by
   simp only [genDeclsFold, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq]
   exact ⟨(ds₁, s₁), hstep, (rest, s₂), hrest, rfl, rfl⟩
 
@@ -98,15 +98,15 @@ theorem genDeclsFold_cons_complete {s s₁ s₂ : GenState} {b : Bounds} {n : Na
     proof instead, one `exact` per branch. -/
 theorem genDeclStep_complete_of_mem {s s' : GenState} {b : Bounds} {ds : List Decl}
     (hmem :
-      (ds, s') ∈ SetGen.support (genDeclAbstract (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclAlias (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclAxiom (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclDistinct (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclDatatype (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclFunction (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclProcedure (G := SetGen.Set) s b) ∨
-      (ds, s') ∈ SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b)) :
-    (ds, s') ∈ SetGen.support (genDeclStep (G := SetGen.Set) s b) := by
+      (ds, s') ∈ SPMF.support (genDeclAbstract (G := SPMF) s b) ∨
+      (ds, s') ∈ SPMF.support (genDeclAlias (G := SPMF) s b) ∨
+      (ds, s') ∈ SPMF.support (genDeclAxiom (G := SPMF) s b) ∨
+      (ds, s') ∈ SPMF.support (genDeclDistinct (G := SPMF) s b) ∨
+      (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b) ∨
+      (ds, s') ∈ SPMF.support (genDeclFunction (G := SPMF) s b) ∨
+      (ds, s') ∈ SPMF.support (genDeclProcedure (G := SPMF) s b) ∨
+      (ds, s') ∈ SPMF.support (genDeclRecFuncBlock (G := SPMF) s b)) :
+    (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b) := by
   simp only [genDeclStep, mem_support_frequency_iff]
   -- One branch per kind, each naming its generator and that generator's weight.
   -- The weights appear *only here*, never in the statement, so re-tuning the
@@ -134,18 +134,18 @@ theorem genDeclStep_complete_of_mem {s s' : GenState} {b : Bounds} {ds : List De
 /-- Every name `genFreshName` reaches that uses no reserved prefix is a name `genDeclName`
     reaches. -/
 theorem genDeclName_complete {reserved : List String} {nm : String}
-    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) reserved))
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) reserved))
     (hallowed : isAllowedName nm = true) :
-    nm ∈ SetGen.support (genDeclName (G := SetGen.Set) reserved) := by
+    nm ∈ SPMF.support (genDeclName (G := SPMF) reserved) := by
   simp only [genDeclName, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨nm, hnm, by rw [if_pos hallowed]⟩
 
 /-- Every name `genFreshName` reaches that uses no reserved prefix and is not a local type name
     is a name `genDeclTypeName` reaches. -/
 theorem genDeclTypeName_complete {reserved : List String} {nm : String}
-    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) reserved))
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) reserved))
     (hallowed : isAllowedName nm = true) (hnotLocal : isLocalTypeName nm = false) :
-    nm ∈ SetGen.support (genDeclTypeName (G := SetGen.Set) reserved) := by
+    nm ∈ SPMF.support (genDeclTypeName (G := SPMF) reserved) := by
   simp only [genDeclTypeName, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨nm, genDeclName_complete hnm hallowed, by
     simp only [hnotLocal, Bool.false_eq_true, if_false]⟩
@@ -155,13 +155,13 @@ theorem genDeclTypeName_complete {reserved : List String} {nm : String}
 def DeclNamesReach : List String → List String → Prop
   | _, [] => True
   | reserved, nm :: rest =>
-    nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) reserved) ∧
+    nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) reserved) ∧
       isAllowedName nm = true ∧ DeclNamesReach (nm :: reserved) rest
 
 /-- `genDeclNames` reaches every name list that `DeclNamesReach` describes, at its length. -/
 theorem genDeclNames_complete : ∀ {reserved names : List String},
     DeclNamesReach reserved names →
-      names ∈ SetGen.support (genDeclNames (G := SetGen.Set) reserved names.length)
+      names ∈ SPMF.support (genDeclNames (G := SPMF) reserved names.length)
   | _, [], _ => by
     simp only [List.length_nil, genDeclNames, mem_support_pure_iff]
   | _, nm :: _, ⟨hnm, hallowed, hrest⟩ => by
@@ -173,13 +173,13 @@ theorem genDeclNames_complete : ∀ {reserved names : List String},
 /-- The axiom step reaches every axiom whose name `genFreshName` reaches with no reserved prefix
     and whose body `genLExpr` reaches at `bool` over the operators with ground types. -/
 theorem genDeclAxiom_complete {s : GenState} {b : Bounds} {nm : String} {e : PExpr}
-    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
-    (he : e ∈ SetGen.support
-      (genLExpr (G := SetGen.Set) [] (opsOver [] s.octx) s.pctx [] [] b.exprDepth .bool)) :
+    (he : e ∈ SPMF.support
+      (genLExpr (G := SPMF) [] (opsOver [] s.octx) s.pctx [] [] b.exprDepth .bool)) :
     (([mkAxiomDecl nm e]),
         { s with reserved := nm :: s.reserved }) ∈
-      SetGen.support (genDeclAxiom (G := SetGen.Set) s b) := by
+      SPMF.support (genDeclAxiom (G := SPMF) s b) := by
   simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq]
   exact ⟨(mkAxiomDecl nm e, nm), ⟨nm, genDeclName_complete hnm hnmAllowed, e, he, rfl⟩, rfl, rfl⟩
 
@@ -206,34 +206,34 @@ theorem genDeclRecFuncBlock_complete {s : GenState} {b : Bounds} {names : List S
     (hlen : 1 ≤ names.length) (hlenMax : names.length ≤ max 1 b.maxRecFuncs)
     (hnames : DeclNamesReach s.reserved names)
     (hfnames : funcs.map (fun f => f.name.name) = names)
-    (hsigs : ∀ f ∈ funcs, funcStub f ∈ SetGen.support (genFuncSig (G := SetGen.Set)
+    (hsigs : ∀ f ∈ funcs, funcStub f ∈ SPMF.support (genFuncSig (G := SPMF)
       f.name.name b.funcDepth
       (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x || names.contains x)
       s.dtCons))
     (hstub : s.registerFuncs (funcs.map funcStub) = some sStub)
-    (hparts : ∀ f ∈ funcs, f ∈ SetGen.support (genFuncParts (G := SetGen.Set) (pure true) []
+    (hparts : ∀ f ∈ funcs, f ∈ SPMF.support (genFuncParts (G := SPMF) (pure true) []
       sStub.octx b.funcDepth ((funcs.map funcStub).filterMap funcPolyOpEntry ++ s.derivedPctx)
       s.dtCons (funcStub f)))
     (hnoInline : ∀ f ∈ funcs, ∀ a ∈ f.attr, a ≠ .inline)
     (hreg : s.registerFuncs funcs = some s₁) :
     ([.recFuncBlock funcs .empty], { s₁ with reserved := names ++ s.reserved }) ∈
-      SetGen.support (genDeclRecFuncBlock (G := SetGen.Set) s b) := by
+      SPMF.support (genDeclRecFuncBlock (G := SPMF) s b) := by
   have hdrop : funcs.map dropInline = funcs := by
     rw [List.map_congr_left (fun f hf => dropInline_of_noInline (hnoInline f hf)), List.map_id']
-  have hsigs₂ : List.Forall₂ (fun st nm => st ∈ SetGen.support
-      (genFuncSig (G := SetGen.Set) nm b.funcDepth
+  have hsigs₂ : List.Forall₂ (fun st nm => st ∈ SPMF.support
+      (genFuncSig (G := SPMF) nm b.funcDepth
         (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x || names.contains x)
         s.dtCons)) (funcs.map funcStub) names := by
     subst hfnames
     exact List.forall₂_map_left_iff.mpr
       (List.forall₂_map_right_iff.mpr (List.forall₂_same.mpr hsigs))
-  have hparts₂ : List.Forall₂ (fun f st => f ∈ SetGen.support
-      (genFuncParts (G := SetGen.Set) (pure true) [] sStub.octx b.funcDepth
+  have hparts₂ : List.Forall₂ (fun f st => f ∈ SPMF.support
+      (genFuncParts (G := SPMF) (pure true) [] sStub.octx b.funcDepth
         ((funcs.map funcStub).filterMap funcPolyOpEntry ++ s.derivedPctx) s.dtCons st))
       funcs (funcs.map funcStub) :=
     List.forall₂_map_right_iff.mpr (List.forall₂_same.mpr hparts)
   simp only [genDeclRecFuncBlock, mem_support_bind_iff]
-  refine ⟨names.length, DatatypeGen.mem_support_chooseNat_iff.mpr ⟨hlen, hlenMax⟩, names,
+  refine ⟨names.length, mem_support_chooseNat_iff.mpr ⟨hlen, hlenMax⟩, names,
     genDeclNames_complete hnames, funcs.map funcStub, (mem_support_mapM_iff _ _ _).mpr hsigs₂, ?_⟩
   rw [hstub]
   simp only [mem_support_bind_iff]
@@ -318,8 +318,8 @@ theorem genNonRecursiveArgTy_complete {baseTypes : BaseTys} {tyCons : TyCons}
     (hfv : ∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams)
     (hwk : ArgsWellKinded C [] ty)
     (hbv : BitvecWidthOnly ty) :
-    ∃ size, ty ∈ SetGen.support
-      (genNonRecursiveArgTy (G := SetGen.Set) baseTypes tyCons tyParams size) := by
+    ∃ size, ty ∈ SPMF.support
+      (genNonRecursiveArgTy (G := SPMF) baseTypes tyCons tyParams size) := by
   unfold genNonRecursiveArgTy
   refine genArgTy_complete_of_wf (block := []) (blockRefs := []) ?_ hvocab ?_ ty
     (constrArgWF_nil ty) hfv hwk hbv false (fun _ => fun d hd => absurd hd (by simp))
@@ -348,13 +348,13 @@ branch it is about. -/
     `s.addAbstract nm ar C'`. -/
 theorem genDeclAbstract_complete {s : GenState} {b : Bounds} {nm : String} {ar : Nat}
     {C' : LContext CoreLParams}
-    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
     (hnmNotLocal : isLocalTypeName nm = false)
     (har : ar ≤ b.maxTyConArity)
     (hC : s.C.addKnownTypeWithError { name := nm, metadata := ar } default = .ok C') :
     (([mkAbstractTypeDecl nm ar]), s.addAbstract nm ar C') ∈
-      SetGen.support (genDeclAbstract (G := SetGen.Set) s b) := by
+      SPMF.support (genDeclAbstract (G := SPMF) s b) := by
   simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff]
   refine ⟨(mkAbstractTypeDecl nm ar, nm, ar),
     ⟨nm, genDeclTypeName_complete hnm hnmAllowed hnmNotLocal, ar, ?_, rfl⟩, ?_⟩
@@ -394,14 +394,14 @@ makes this selection. -/
     use no reserved prefix, and the alias name is not a local type name. -/
 theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
     {tyParams : List TyIdentifier} {body : LMonoTy}
-    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
     (hnmNotLocal : isLocalTypeName nm = false)
     (hlen : tyParams.length ≤ b.maxAliasTyParams)
-    (hparams : tyParams ∈ SetGen.support
-      (DatatypeGen.genFreshNames (G := SetGen.Set) s.reserved tyParams.length))
-    (hbody : body ∈ SetGen.support
-      (genNonRecursiveArgTy (G := SetGen.Set) s.baseTypes s.tyCons tyParams b.tySize))
+    (hparams : tyParams ∈ SPMF.support
+      (DatatypeGen.genFreshNames (G := SPMF) s.reserved tyParams.length))
+    (hbody : body ∈ SPMF.support
+      (genNonRecursiveArgTy (G := SPMF) s.baseTypes s.tyCons tyParams b.tySize))
     (hallowed : aliasNamesAllowed
       { name := nm, typeArgs := (LMonoTy.freeVars body).uniq, type := body } = true) :
     (([mkAliasDecl nm body]),
@@ -410,7 +410,7 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
                    { typeArgs := (LMonoTy.freeVars body).uniq, name := nm, type := body }
                      :: s.Γ.aliases }
           reserved := nm :: s.reserved }) ∈
-      SetGen.support (genDeclAlias (G := SetGen.Set) s b) := by
+      SPMF.support (genDeclAlias (G := SPMF) s b) := by
   simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff]
   refine ⟨(mkAliasDecl nm body, nm), ⟨nm, genDeclTypeName_complete hnm hnmAllowed hnmNotLocal,
             tyParams.length, ?_, tyParams, hparams, body, hbody, rfl⟩, ?_⟩
@@ -427,15 +427,15 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
     reachable body and the bound on the count of parameters. -/
 theorem genDeclAlias_complete_of_body {s : GenState} {b : Bounds} {nm : String}
     {body : LMonoTy}
-    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
     (hnmNotLocal : isLocalTypeName nm = false)
     (hlen : (LMonoTy.freeVars body).uniq.length ≤ b.maxAliasTyParams)
-    (hparams : (LMonoTy.freeVars body).uniq ∈ SetGen.support
-      (DatatypeGen.genFreshNames (G := SetGen.Set) s.reserved
+    (hparams : (LMonoTy.freeVars body).uniq ∈ SPMF.support
+      (DatatypeGen.genFreshNames (G := SPMF) s.reserved
         (LMonoTy.freeVars body).uniq.length))
-    (hbody : body ∈ SetGen.support
-      (genNonRecursiveArgTy (G := SetGen.Set) s.baseTypes s.tyCons
+    (hbody : body ∈ SPMF.support
+      (genNonRecursiveArgTy (G := SPMF) s.baseTypes s.tyCons
         (LMonoTy.freeVars body).uniq b.tySize))
     (hallowed : aliasNamesAllowed
       { name := nm, typeArgs := (LMonoTy.freeVars body).uniq, type := body } = true) :
@@ -445,7 +445,7 @@ theorem genDeclAlias_complete_of_body {s : GenState} {b : Bounds} {nm : String}
                    { typeArgs := (LMonoTy.freeVars body).uniq, name := nm, type := body }
                      :: s.Γ.aliases }
           reserved := nm :: s.reserved }) ∈
-      SetGen.support (genDeclAlias (G := SetGen.Set) s b) :=
+      SPMF.support (genDeclAlias (G := SPMF) s b) :=
   genDeclAlias_complete hnm hnmAllowed hnmNotLocal hlen hparams hbody hallowed
 
 /-! ## Per-step reachability: `distinct`
@@ -480,26 +480,25 @@ names do not clash, so this is no true restriction. -/
 theorem genDeclDistinct_complete {s : GenState} {b : Bounds} {nm : String}
     {τ : LMonoTy} {constNames : List String} {C' : LContext CoreLParams}
     {constDecls : List Decl}
-    (hnm : nm ∈ SetGen.support (DatatypeGen.genFreshName (G := SetGen.Set) s.reserved))
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
-    (hτ : τ ∈ SetGen.support
-      (genNonRecursiveArgTy (G := SetGen.Set) s.baseTypes s.tyCons [] b.tySize))
+    (hτ : τ ∈ SPMF.support
+      (genNonRecursiveArgTy (G := SPMF) s.baseTypes s.tyCons [] b.tySize))
     (hτAllowed : mtyAllTyConsNames isAllowedName τ = true)
     (hlen2 : 2 ≤ constNames.length)
     (hlen : constNames.length ≤ max 2 b.maxDistinctVars)
-    (hconsts : constNames ∈ SetGen.support
-      (DatatypeGen.genFreshNames (G := SetGen.Set) (nm :: s.reserved) constNames.length))
+    (hconsts : constNames ∈ SPMF.support
+      (DatatypeGen.genFreshNames (G := SPMF) (nm :: s.reserved) constNames.length))
     (hconstsAllowed : ∀ c ∈ constNames, isAllowedName c = true)
     (hadd : addConstants s.C τ constNames = some (C', constDecls)) :
     ((constDecls ++ [mkDistinctDecl nm (distinctElems τ constNames)]),
         { s with C := C', reserved := constNames ++ nm :: s.reserved }) ∈
-      SetGen.support (genDeclDistinct (G := SetGen.Set) s b) := by
-  simp only [genDeclDistinct, genDistinctAssertion, mem_support_bind_iff]
+      SPMF.support (genDeclDistinct (G := SPMF) s b) := by
+  simp only [mem_support_pure_iff, genDeclDistinct, genDistinctAssertion, mem_support_bind_iff]
   refine ⟨(nm, τ, constNames),
           ⟨nm, genDeclName_complete hnm hnmAllowed, τ, hτ, constNames.length,
            mem_support_chooseNat_iff.mpr ⟨hlen2, hlen⟩, constNames, hconsts, ?_⟩, ?_⟩
   · rw [List.filter_eq_self.mpr hconstsAllowed]
-    exact mem_support_pure_iff.mpr rfl
   -- Take the branches of the gate and of the `match` that emit, using `hadd`.
   rw [if_pos (by simp [hlen2, hτAllowed]), hadd]
   exact mem_support_pure_iff.mpr rfl
@@ -528,8 +527,8 @@ a hypothesis. The second one discharges that hypothesis from `MutualADTWF` alone
     is `typeArgs.length`. -/
 theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
     {block : MutualDatatype Unit} {C' : LContext CoreLParams}
-    (hblock : block ∈ SetGen.support
-      (DatatypeGen.genMutuallyRecursiveDatatypes (G := SetGen.Set)
+    (hblock : block ∈ SPMF.support
+      (DatatypeGen.genMutuallyRecursiveDatatypes (G := SPMF)
         s.baseTypes (s.tyCons ++ s.dtCons) b.maxExtraDatatypes b.maxTyParams
         b.maxExtraBaseConstrs b.maxRecConstrs b.maxArgs b.maxDatatypeSize s.reserved))
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
@@ -544,7 +543,7 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
                  pctx := adtDerivedPolyOps block b.derivedFamilies ++ s.pctx
                  derivedPctx :=
                    adtDerivedPolyOps block b.derivedFamilies ++ s.derivedPctx }) ∈
-      SetGen.support (genDeclDatatype (G := SetGen.Set) s b) := by
+      SPMF.support (genDeclDatatype (G := SPMF) s b) := by
   simp only [genDeclDatatype, mem_support_bind_iff]
   refine ⟨block, hblock, ?_⟩
   -- Take the branch of the name gate that continues, then the `.ok` branch using `hC`.
@@ -574,12 +573,12 @@ theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
     (hwf : MutualADTWF s.C block)
     (hnew : ∀ d ∈ block, s.C.datatypes.getType d.name = none)
     (hcount : block.length ≤ b.maxExtraDatatypes + 1)
-    (hnamesIdent : ∀ d ∈ block, d.name ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+    (hnamesIdent : ∀ d ∈ block, d.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnamesFresh : ∀ d ∈ block,
       d.name ∉ initialReserved s.baseTypes (s.tyCons ++ s.dtCons) s.reserved)
     (hparamsLen : ∀ d ∈ block, d.typeArgs.length ≤ b.maxTyParams)
     (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
-      p ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+      p ∈ SPMF.support (genIdentName (G := SPMF)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name)
         ++ initialReserved s.baseTypes (s.tyCons ++ s.dtCons) s.reserved)
@@ -589,7 +588,7 @@ theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
     (hctors_nf : ∀ d ∈ block, ∀ c ∈ d.constrs, hasDefaultTesterName c)
     (hctors_len : ∀ d ∈ block, ∀ c ∈ d.constrs, c.args.length ≤ b.maxArgs)
     (hnames_ident : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
-      nm' ∈ SetGen.support (genIdentName (G := SetGen.Set)))
+      nm' ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnames_nd : ∀ d ∈ block, (ctorsNames d.constrs).Nodup)
     (hnames_fresh : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
       nm' ∉ d.typeArgs ++ (block.map (·.name)
@@ -607,8 +606,8 @@ theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
                  pctx := adtDerivedPolyOps block b.derivedFamilies ++ s.pctx
                  derivedPctx :=
                    adtDerivedPolyOps block b.derivedFamilies ++ s.derivedPctx }) ∈
-      SetGen.support
-        (genDeclDatatype (G := SetGen.Set) s { b with maxDatatypeSize := sz }) := by
+      SPMF.support
+        (genDeclDatatype (G := SPMF) s { b with maxDatatypeSize := sz }) := by
   obtain ⟨sz, hblock⟩ := genMutuallyRecursiveDatatypes_complete_of_MutualADTWF
     (maxExtraDatatypes := b.maxExtraDatatypes) (maxTyParams := b.maxTyParams)
     (maxExtraBaseConstrs := b.maxExtraBaseConstrs) (maxRecConstrs := b.maxRecConstrs)
@@ -626,8 +625,8 @@ reachable fold trace gives a reachable program. -/
 
 theorem genProgram_complete_of_fold {numDecls : Nat} {b : Bounds} {decls : List Decl}
     {sf : GenState}
-    (h : (decls, sf) ∈ SetGen.support (genDeclsFold (G := SetGen.Set) initState b numDecls)) :
-    (Program.mk (decls := decls)) ∈ SetGen.support (genProgram (G := SetGen.Set) numDecls b) := by
+    (h : (decls, sf) ∈ SPMF.support (genDeclsFold (G := SPMF) initState b numDecls)) :
+    (Program.mk (decls := decls)) ∈ SPMF.support (genProgram (G := SPMF) numDecls b) := by
   simp only [genProgram, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨(decls, sf), h, rfl⟩
 
@@ -652,14 +651,14 @@ fact about a declaration to the support of `genProgram`. They remain narrow, bec
 each has a single declaration. -/
 
 example (b : Bounds) (nm : String) (ar : Nat) (C' : LContext Core.CoreLParams)
-    (hnm : nm ∈ SetGen.support
-      (DatatypeGen.genFreshName (G := SetGen.Set) initState.reserved))
+    (hnm : nm ∈ SPMF.support
+      (DatatypeGen.genFreshName (G := SPMF) initState.reserved))
     (hnmAllowed : isAllowedName nm = true)
     (hnmNotLocal : isLocalTypeName nm = false)
     (har : ar ≤ b.maxTyConArity)
     (hC : initState.C.addKnownTypeWithError { name := nm, metadata := ar } default = .ok C') :
     (Core.Program.mk (decls := [mkAbstractTypeDecl nm ar])) ∈
-      SetGen.support (genProgram (G := SetGen.Set) 1 b) := by
+      SPMF.support (genProgram (G := SPMF) 1 b) := by
   refine genProgram_complete_of_fold (sf := initState.addAbstract nm ar C') ?_
   have hstep :=
     genDeclAbstract_complete (s := initState) (b := b) hnm hnmAllowed hnmNotLocal har hC
@@ -667,7 +666,7 @@ example (b : Bounds) (nm : String) (ar : Nat) (C' : LContext Core.CoreLParams)
     (ds := [mkAbstractTypeDecl nm ar]) (Or.inl hstep)
   have hfold := genDeclsFold_cons_complete (n := 0) hdispatch
     (show ([], initState.addAbstract nm ar C') ∈
-      SetGen.support (genDeclsFold (G := SetGen.Set) (initState.addAbstract nm ar C') b 0) from by
+      SPMF.support (genDeclsFold (G := SPMF) (initState.addAbstract nm ar C') b 0) from by
       simp [genDeclsFold])
   simpa using hfold
 
@@ -678,8 +677,8 @@ example (b : Bounds) (nm : String) (ar : Nat) (C' : LContext Core.CoreLParams)
     the state which `genDeclDatatype_complete` names is exactly the state the fold
     threads onward. -/
 example (b : Bounds) (block : MutualDatatype Unit) (C' : LContext Core.CoreLParams)
-    (hblock : block ∈ SetGen.support
-      (DatatypeGen.genMutuallyRecursiveDatatypes (G := SetGen.Set)
+    (hblock : block ∈ SPMF.support
+      (DatatypeGen.genMutuallyRecursiveDatatypes (G := SPMF)
         initState.baseTypes (initState.tyCons ++ initState.dtCons)
         b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
         b.maxArgs b.maxDatatypeSize initState.reserved))
@@ -688,7 +687,7 @@ example (b : Bounds) (block : MutualDatatype Unit) (C' : LContext Core.CoreLPara
     (hC : @LContext.addMutualBlock Core.CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams initState.C block = .ok C') :
     (Core.Program.mk (decls := [.type (.data block) .empty])) ∈
-      SetGen.support (genProgram (G := SetGen.Set) 1 b) := by
+      SPMF.support (genProgram (G := SPMF) 1 b) := by
   have hstep := genDeclDatatype_complete (s := initState) (b := b) hblock hnamesAllowed
     hnamesNotLocal hC
   have hdispatch := genDeclStep_complete_of_mem (s := initState) (b := b)

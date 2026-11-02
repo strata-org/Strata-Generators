@@ -19,17 +19,21 @@ name = "plausible"
 git = "https://github.com/leanprover-community/plausible"
 rev = "118aa17ee84656b8bd727fef7c458ee8c833385c"
 
+# A basalt revision on Lean 4.34.0 with the `SPMF`, `Basalt.PBT` and `Basalt.Fuzz` APIs. Later
+# 4.34 revisions compile the `Basalt` library with sanitizer coverage, which breaks linking the
+# test executables.
 [[require]]
 name = "basalt"
-path = "/workplace/cohenjo/strata-gen-pin/basalt"
+git = "https://github.com/hgoldstein95/basalt"
+rev = "08f06f180c8517f9429fbd9ce5ac0a7e5c51dd21"
 
 [[require]]
 name = "LSpec"
 git = "https://github.com/argumentcomputer/LSpec"
 rev = "369c09df268d7077dfea04a136abbd168351a6b4"
 
-# basalt pins mathlib v4.29.1; this require selects the release for Lean 4.34.0. It is
-# last so that mathlib's own pins of its dependencies take precedence over basalt's.
+# The mathlib release for Lean 4.34.0. It is last so that mathlib's own pins of its
+# dependencies take precedence over basalt's.
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
@@ -38,6 +42,13 @@ rev = "v4.34.0"
 [[lean_lib]]
 name = "StrataGenerators"
 globs = ["StrataGenerators.*"]
+
+# FuzzGen experiment (branch `fuzz/experiment`): the Mathlib-free root of the opt-in `strata-fuzz`
+# executable. `fuzz-experiment/scripts/build.sh` elaborates and links it against libFuzzer; the
+# default `lake build` only elaborates it. Mirrors basalt's `BasaltFuzzMain` target.
+[[lean_lib]]
+name = "StrataFuzzMain"
+globs = ["StrataFuzzMain", "StrataFuzz.+"]
 
 # The property files. Globbed, so a new file under `StrataTests/` is compiled without
 # a configuration change. A default target, so a plain `lake build` — which is all CI
