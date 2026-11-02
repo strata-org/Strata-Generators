@@ -18,6 +18,11 @@ of a target type:
 at most `Pr(genTy = String) * Pr(genTy = Int)`, for every fuel, context, and type generator.
 `genExprP_prob_takeCall_ge`: with Pałka et al.'s rule it is produced with probability at least
 `1 / (64 * |sig|)`, a constant independent of the fuel, the context and `genTy`.
+`default_lt_palka` combines the two: Pałka et al.'s rule is strictly more frequent whenever
+`Pr(genTy = String) * Pr(genTy = Int) < 1 / (64 * |sig|)`. `default_vs_palka_separation`
+instantiates `genTy` with `genTyK k`, uniform over `k + 2` base types: the default rule's
+probability tends to `0` as `k` grows, while Pałka et al.'s rule is strictly more frequent from
+`k = 8 * |sig|` on.
 -/
 
 namespace StrataGenerators.AmbientApp
@@ -28,6 +33,8 @@ open scoped ENNReal
 
 inductive Ty where
   | int | str | bool
+  /-- A family of further base types, standing in for Strata's bitvector widths. -/
+  | bv (w : Nat)
   | arrow (a b : Ty)
   deriving DecidableEq, Repr
 
@@ -49,6 +56,7 @@ structure Fn where
 
 inductive Expr where
   | intLit | strLit | boolLit
+  | bvLit (w : Nat)
   | var (i : Nat)
   | const (f : Fn)
   | app (f x : Expr)
@@ -67,6 +75,7 @@ def lits : Ty → List Expr
   | .int => [.intLit]
   | .str => [.strLit]
   | .bool => [.boolLit]
+  | .bv w => [.bvLit w]
   | .arrow _ _ => []
 
 def vars (Γ : List Ty) (τ : Ty) : List Expr :=
@@ -356,5 +365,77 @@ theorem genExprP_prob_takeCall_ge (n : Nat) (Γ : List Ty) {take : Fn} (hmem : t
     (hbranch.trans (le_add_left (le_add_left (le_add_left le_rfl)))) _
 
 end palka
+
+/-! ## Comparing the two rules -/
+
+section compare
+
+variable (sig : List Fn)
+
+/-- **Option 1: the conditional comparison.** Whenever `genTy` puts little enough mass on
+`String` and `Int`, Pałka et al.'s rule calls `take` strictly more often than the default rule,
+at the same fuel. -/
+theorem default_lt_palka (genTy : SPMF Ty) (n : Nat) (Γ : List Ty) {take : Fn}
+    (hmem : take ∈ sig) (ht : take.ty = takeTy)
+    (hsmall : SPMF.prob genTy {.str} * SPMF.prob genTy {.int} < 1 / (64 * sig.length)) :
+    SPMF.prob (genExpr genTy sig (n + 1) Γ .str) (CallOf take)
+      < SPMF.prob (genExprP genTy sig (n + 1) Γ .str) (CallOf take) :=
+  ((genExpr_prob_takeCall_le genTy sig (n + 1) Γ ht).trans_lt hsmall).trans_le
+    (genExprP_prob_takeCall_ge genTy sig n Γ hmem ht)
+
+/-- The base types `Int`, `String`, `bv 0`, …, `bv (k-1)`. -/
+def baseTys (k : Nat) : List Ty := .int :: .str :: (List.range k).map Ty.bv
+
+/-- A type generator uniform over `k + 2` base types. -/
+def genTyK [Gen G] (k : Nat) : G Ty := elements (baseTys k) (by simp [baseTys])
+
+theorem genTyK_prob_base (k : Nat) {τ : Ty} (hτ : τ = .int ∨ τ = .str) :
+    SPMF.prob (genTyK k : SPMF Ty) {τ} = 1 / (k + 2) := by
+  unfold SPMF.prob genTyK
+  rw [SPMF.expect_elements]
+  have h0 : (List.map (Pi.single τ 1 ∘ Ty.bv : Nat → ℝ≥0∞) (List.range k)).sum = 0 :=
+    List.sum_eq_zero fun x hx => by
+      obtain ⟨w, -, rfl⟩ := List.mem_map.1 hx
+      rcases hτ with rfl | rfl <;> simp
+  rcases hτ with rfl | rfl <;> simp [baseTys, h0] <;> rw [add_assoc] <;> norm_num
+
+/-- Under `genTyK k`, the default rule calls `take` with probability at most `1/(k+2)²`. -/
+theorem genExpr_genTyK_prob_takeCall_le (k n : Nat) (Γ : List Ty) {take : Fn}
+    (ht : take.ty = takeTy) :
+    SPMF.prob (genExpr (genTyK k) sig n Γ .str) (CallOf take) ≤ 1 / ((k + 2) ^ 2) := by
+  refine (genExpr_prob_takeCall_le _ sig n Γ ht).trans (le_of_eq ?_)
+  rw [genTyK_prob_base k (.inr rfl), genTyK_prob_base k (.inl rfl), sq,
+    ← ENNReal.mul_div_mul_comm (by simp) (by simp), one_mul]
+
+/-- **Option 2: the separation.** As the type generator spreads over more base types, the
+default rule's probability of calling `take` tends to `0`, while Pałka et al.'s stays above
+`1/(64·|sig|)`; from `k = 8·|sig|` on, Pałka et al.'s rule is strictly more frequent. -/
+theorem default_vs_palka_separation (n : Nat) (Γ : List Ty) {take : Fn}
+    (hmem : take ∈ sig) (ht : take.ty = takeTy) :
+    Filter.Tendsto (fun k => SPMF.prob (genExpr (genTyK k) sig n Γ .str) (CallOf take))
+        Filter.atTop (nhds 0)
+      ∧ (∀ k, 1 / (64 * sig.length) ≤
+          SPMF.prob (genExprP (genTyK k) sig (n + 1) Γ .str) (CallOf take))
+      ∧ ∀ k, 8 * sig.length ≤ k →
+          SPMF.prob (genExpr (genTyK k) sig (n + 1) Γ .str) (CallOf take)
+            < SPMF.prob (genExprP (genTyK k) sig (n + 1) Γ .str) (CallOf take) := by
+  refine ⟨?_, fun k => genExprP_prob_takeCall_ge _ sig n Γ hmem ht, fun k hk => ?_⟩
+  · refine tendsto_of_tendsto_of_tendsto_of_le_of_le tendsto_const_nhds
+      ENNReal.tendsto_inv_nat_nhds_zero (fun _ => zero_le _) fun k => ?_
+    refine (genExpr_genTyK_prob_takeCall_le sig k n Γ ht).trans ?_
+    rw [one_div]
+    refine ENNReal.inv_le_inv.2 ?_
+    calc (k : ℝ≥0∞) ≤ (k + 2 : ℝ≥0∞) := le_self_add
+      _ ≤ (k + 2) * (k + 2) := le_mul_of_one_le_right' (le_add_left (by norm_num))
+      _ = (k + 2) ^ 2 := (sq _).symm
+  · refine default_lt_palka sig _ n Γ hmem ht ?_
+    have hL : 1 ≤ sig.length := List.length_pos_of_mem hmem
+    rw [genTyK_prob_base k (.inr rfl), genTyK_prob_base k (.inl rfl),
+      ← ENNReal.mul_div_mul_comm (by simp) (by simp), one_mul, one_div, one_div,
+      ENNReal.inv_lt_inv]
+    have : 64 * sig.length < (k + 2) * (k + 2) := by nlinarith
+    exact_mod_cast this
+
+end compare
 
 end StrataGenerators.AmbientApp
