@@ -6,14 +6,10 @@ import Basalt.Walk.Sound
 # How the size parameter shapes the distribution of `genLExprBase`
 
 The support proofs in this package say which expressions `genLExprBase … size τ` *can* produce. This
-module reads the same generator as a measure (`SPMF.prob`) and answers two questions about the
-size parameter:
-
-1. **For a given size, what does the distribution look like?** Which root forms (constant, variable,
-   `ite`, `eq`, quantifier, application, …) have probability zero, and which have a guaranteed
-   positive share?
-2. **What is the threshold for a good size?** The least size at which a single draw can exhibit every
-   form of the simply-typed fragment, and a guaranteed probability that it does.
+module reads the same generator as a measure (`SPMF.prob`) and answers: **for a given size, what
+does the distribution look like?** Which root forms (constant, variable, `ite`, `eq`, quantifier,
+application, …) have probability zero, and which have a guaranteed positive share? And how tall
+are the terms?
 
 ## Results, for the `bool` target
 
@@ -36,33 +32,6 @@ So the application form is the one that needs the most size: `app` needs a funct
 and at size 0 in the closed setting there is none (`closed_zero_arrow_empty`). For the root form
 alone, **size 2 is the threshold**: below it some form has probability `0`, from it every form has a
 positive, size-independent lower bound.
-
-## Coverage of the whole fragment
-
-`Covers e` says every one of the seven forms `const, bvar, abs, quant, app, ite, eq` occurs
-*somewhere* in `e`. Then:
-
-* `prob_covers_eq_zero`: at size `≤ 2` the probability is **exactly `0`**, at every type and in
-  every context whose factory has no operator of positive arity. The proof is a counting argument:
-  without the `Indir` rules the size bounds the height (`height_le`), and a term of height `≤ 2` has
-  at most four compound nodes (`card_compoundOf_le_four`), one short of the five compound forms.
-* `prob_covers_ge`: at every size `≥ 3` the probability is **at least `coverBound > 0`**, in every
-  context, witnessed by the shape `ite (eq _ _) (app (λ:bool. #0) c) (∀:bool. _)`.
-
-So **size 3 is the sharp coverage threshold**: it is the least size at which the generator can
-exhibit the whole fragment in one draw, and from there on it does so with a probability bounded away
-from `0` uniformly in the size. The bound itself, `coverBound ≈ 5.6e-19`, is a single-witness
-product and is very far from tight; the zero side of the threshold is exact.
-
-## `genLExpr` and `genClosedLExpr`
-
-`genLExpr` keeps `genLExprBase` as a branch of weight at least `1/10` (`prob_genLExpr_ge`), and
-without a factory of positive arity its support is inside `genLExprBase`'s
-(`genLExpr_support_sub`). So every result above transfers: the lower bounds at a factor of `1/10`
-in every context, the zero sides under the same factory hypothesis.
-`genClosedLExpr_coverage_threshold` is the closed top-level generator's coverage threshold with
-**no hypotheses**: probability `0` below size `3`, at least `1/12 · baseShare · coverBound` from
-size `3` on.
 
 ## Height as a function of `n`
 
@@ -117,9 +86,6 @@ macro "frac_eq" : tactic => `(tactic|
 Four quantities appear in bound after bound. Naming them keeps the headline statements readable and
 records what each factor pays for. -/
 
-/-- The weight `genLExpr` keeps for `genLExprBase`: `1` of `10` when a monomorphic factory candidate
-exists, `1` of `2` otherwise. -/
-noncomputable def baseShare : ℝ≥0∞ := 1 / 10
 
 /-- A lower bound on the mass of one identifier draw (`genIdentName`, `genFreshName`,
 `genFreshLabel`): its terminating branch. The generators are `partial_fixpoint`, so this is all the
@@ -225,11 +191,6 @@ def rootForm : LExpr' → Form
 
 def IsForm (F : Form) : Set LExpr' := {e | rootForm e = F}
 
-theorem prob_pickBVar (bctx : BVarCtx) (τ : LMonoTy) (hv) :
-    prob (pickBVar (G := SPMF) bctx τ hv) (IsForm .bvar) = 1 := by
-  unfold pickBVar
-  refine prob_elements_of_forall _ fun x hx => ?_
-  obtain ⟨i, -, rfl⟩ := List.mem_map.mp hx; rfl
 
 theorem prob_pickBVar_univ (bctx : BVarCtx) (τ : LMonoTy) (hv) :
     prob (pickBVar (G := SPMF) bctx τ hv) Set.univ = 1 := by
@@ -432,11 +393,6 @@ noncomputable def constT (θ : Tuning) : Nat → ℝ≥0∞
   | 0 => 1 / 4
   | n + 1 => boolShare θ 0 n
 
-/-- A lower bound on a root bound variable at depth `n`, in a context that holds a `bool`
-binder. -/
-noncomputable def bvarT (θ : Tuning) : Nat → ℝ≥0∞
-  | 0 => 1 / 4
-  | n + 1 => boolShare θ 6 n
 
 theorem massT_bool_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
     massT θ n ≤ prob (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx n (.tcons "bool" []))
@@ -521,22 +477,6 @@ theorem boolT_const_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
     apply le_of_eq
     simp [share, List.range_succ]
 
-theorem boolT_bvar_ge (θ : Tuning) (n : Nat) (bctx : BVarCtx)
-    (hb : (bvarsOfType bctx LMonoTy.bool).length > 0) :
-    bvarT θ n ≤ prob (Gt θ bctx n LMonoTy.bool) (IsForm .bvar) := by
-  cases n with
-  | zero =>
-    refine le_trans ?_ (prob_oneOf_ge _ (by simp) 1 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.length_cons, List.length_nil]
-    rw [dif_pos hb, prob_pickBVar]
-    simp only [bvarT]; ennr
-  | succ n =>
-    refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) 6 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
-      List.sum_cons, List.sum_nil]
-    rw [dif_pos hb, prob_pickBVar, mul_one]
-    apply le_of_eq
-    simp [bvarT, share, List.range_succ]
 
 -- ── The literal bounds, as corollaries at the default weights ───────
 
@@ -613,18 +553,6 @@ theorem bool_const_ge (n : Nat) (bctx : BVarCtx) :
   | zero => simp only [constT]; ennr
   | succ n => apply le_of_eq; simp only [constT, boolShare]; share_defaults
 
-theorem bool_bvar_ge (n : Nat) (bctx : BVarCtx) (hb : (bvarsOfType bctx LMonoTy.bool).length > 0) :
-    1 / 12 ≤ prob (Gb bctx n LMonoTy.bool) (IsForm .bvar) := by
-  have h := boolT_bvar_ge fctx octx pctx tvars genLExprBase.defaults n bctx hb
-  simp only [genLExprBase.tuned_defaults] at h
-  refine le_trans ?_ h
-  cases n with
-  | zero => simp only [bvarT]; ennr
-  | succ n =>
-    apply le_of_eq; simp only [bvarT, boolShare]; share_defaults
-    rw [inv_eq_one_div, ENNReal.div_eq_div_iff (by norm_num) (by norm_num) (by norm_num)
-      (by norm_num)]
-    norm_num
 
 -- ── Size 0: leaves only ─────────────────────────────────────────────
 
@@ -751,206 +679,6 @@ theorem height_le (hops : ∀ σ, findOpsInCtx octx σ = []) :
       natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs,
       (pickBVar_height _ _ _).obs, (pickFVar_height _ _ _).obs, (pickOp_height _ _ _).obs]
     all_goals (first | omega | (simp only [height] at *; omega) | (simp_all only [height]; try omega))
-
--- ── Forms occurring anywhere in a term ──────────────────────────────
-
-/-- Every form that occurs in an expression, at any node. -/
-def formsOf : LExpr' → Finset Form
-  | .abs _ _ _ b => insert .abs (formsOf b)
-  | .quant _ _ _ _ tr b => insert .quant (formsOf tr ∪ formsOf b)
-  | .app _ f a => insert .app (formsOf f ∪ formsOf a)
-  | .ite _ c t e => insert .ite (formsOf c ∪ (formsOf t ∪ formsOf e))
-  | .eq _ a b => insert .eq (formsOf a ∪ formsOf b)
-  | e => {rootForm e}
-
-theorem rootForm_mem_formsOf (e : LExpr') : rootForm e ∈ formsOf e := by
-  cases e <;> simp [formsOf, rootForm]
-
-/-- The five compound forms. -/
-def compoundForms : Finset Form := {.abs, .quant, .app, .ite, .eq}
-
-/-- The seven forms of the simply-typed fragment that a closed `bool` term can exhibit: constants,
-bound variables, and the five compound forms. -/
-def stlcForms : Finset Form := {.const, .bvar, .abs, .quant, .app, .ite, .eq}
-
-/-- A term **covers** the simply-typed fragment when every one of `stlcForms` occurs in it. -/
-def Covers (e : LExpr') : Prop := stlcForms ⊆ formsOf e
-
-def compoundOf (e : LExpr') : Finset Form := (formsOf e).filter (· ∈ compoundForms)
-
-theorem compoundOf_of_height_zero {e : LExpr'} (h : height e = 0) : compoundOf e = ∅ := by
-  cases e <;> simp_all [height, compoundOf, formsOf, rootForm, compoundForms]
-
-theorem card_compoundOf_le_one {e : LExpr'} (h : height e ≤ 1) : (compoundOf e).card ≤ 1 := by
-  cases e with
-  | abs _ _ _ b =>
-    have hb : height b = 0 := by simp [height] at h; omega
-    have := compoundOf_of_height_zero hb
-    simp only [compoundOf, formsOf, Finset.filter_insert] at this ⊢
-    rw [this]; simp [compoundForms]
-  | quant _ _ _ _ tr b =>
-    have h1 : height tr = 0 := by simp [height] at h; omega
-    have h2 : height b = 0 := by simp [height] at h; omega
-    have e1 := compoundOf_of_height_zero h1; have e2 := compoundOf_of_height_zero h2
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at e1 e2 ⊢
-    rw [e1, e2]; simp [compoundForms]
-  | app _ f a =>
-    have h1 : height f = 0 := by simp [height] at h; omega
-    have h2 : height a = 0 := by simp [height] at h; omega
-    have e1 := compoundOf_of_height_zero h1; have e2 := compoundOf_of_height_zero h2
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at e1 e2 ⊢
-    rw [e1, e2]; simp [compoundForms]
-  | ite _ c t e =>
-    have h1 : height c = 0 := by simp [height] at h; omega
-    have h2 : height t = 0 := by simp [height] at h; omega
-    have h3 : height e = 0 := by simp [height] at h; omega
-    have e1 := compoundOf_of_height_zero h1; have e2 := compoundOf_of_height_zero h2
-    have e3 := compoundOf_of_height_zero h3
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at e1 e2 e3 ⊢
-    rw [e1, e2, e3]; simp [compoundForms]
-  | eq _ a b =>
-    have h1 : height a = 0 := by simp [height] at h; omega
-    have h2 : height b = 0 := by simp [height] at h; omega
-    have e1 := compoundOf_of_height_zero h1; have e2 := compoundOf_of_height_zero h2
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at e1 e2 ⊢
-    rw [e1, e2]; simp [compoundForms]
-  | _ => exact le_trans (Finset.card_filter_le _ _) (by simp [formsOf])
-
-theorem card_insert_union_le (F : Form) (s t : Finset Form) :
-    (insert F (s ∪ t)).card ≤ 1 + s.card + t.card := by
-  have := Finset.card_insert_le F (s ∪ t)
-  have := Finset.card_union_le s t
-  omega
-
-/-- A term of height at most `2` has at most four compound nodes, so it shows at most four of the
-five compound forms. -/
-theorem card_compoundOf_le_four {e : LExpr'} (h : height e ≤ 2) : (compoundOf e).card ≤ 4 := by
-  cases e with
-  | abs _ _ _ b =>
-    have := card_compoundOf_le_one (e := b) (by simp [height] at h; omega)
-    simp only [compoundOf, formsOf, Finset.filter_insert] at this ⊢
-    split <;> (try have := Finset.card_insert_le Form.abs ((formsOf b).filter (· ∈ compoundForms))) <;> omega
-  | quant _ _ _ _ tr b =>
-    have h1 := card_compoundOf_le_one (e := tr) (by simp [height] at h; omega)
-    have h2 := card_compoundOf_le_one (e := b) (by simp [height] at h; omega)
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at h1 h2 ⊢
-    split
-    · have := card_insert_union_le .quant ((formsOf tr).filter (· ∈ compoundForms))
-        ((formsOf b).filter (· ∈ compoundForms)); omega
-    · have := Finset.card_union_le ((formsOf tr).filter (· ∈ compoundForms))
-        ((formsOf b).filter (· ∈ compoundForms)); omega
-  | app _ f a =>
-    have h1 := card_compoundOf_le_one (e := f) (by simp [height] at h; omega)
-    have h2 := card_compoundOf_le_one (e := a) (by simp [height] at h; omega)
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at h1 h2 ⊢
-    split
-    · have := card_insert_union_le .app ((formsOf f).filter (· ∈ compoundForms))
-        ((formsOf a).filter (· ∈ compoundForms)); omega
-    · have := Finset.card_union_le ((formsOf f).filter (· ∈ compoundForms))
-        ((formsOf a).filter (· ∈ compoundForms)); omega
-  | ite _ c t e =>
-    have h1 := card_compoundOf_le_one (e := c) (by simp [height] at h; omega)
-    have h2 := card_compoundOf_le_one (e := t) (by simp [height] at h; omega)
-    have h3 := card_compoundOf_le_one (e := e) (by simp [height] at h; omega)
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at h1 h2 h3 ⊢
-    have h4 := Finset.card_union_le ((formsOf t).filter (· ∈ compoundForms))
-        ((formsOf e).filter (· ∈ compoundForms))
-    split
-    · have := card_insert_union_le .ite ((formsOf c).filter (· ∈ compoundForms))
-        ((formsOf t).filter (· ∈ compoundForms) ∪ (formsOf e).filter (· ∈ compoundForms)); omega
-    · have := Finset.card_union_le ((formsOf c).filter (· ∈ compoundForms))
-        ((formsOf t).filter (· ∈ compoundForms) ∪ (formsOf e).filter (· ∈ compoundForms)); omega
-  | eq _ a b =>
-    have h1 := card_compoundOf_le_one (e := a) (by simp [height] at h; omega)
-    have h2 := card_compoundOf_le_one (e := b) (by simp [height] at h; omega)
-    simp only [compoundOf, formsOf, Finset.filter_insert, Finset.filter_union] at h1 h2 ⊢
-    split
-    · have := card_insert_union_le .eq ((formsOf a).filter (· ∈ compoundForms))
-        ((formsOf b).filter (· ∈ compoundForms)); omega
-    · have := Finset.card_union_le ((formsOf a).filter (· ∈ compoundForms))
-        ((formsOf b).filter (· ∈ compoundForms)); omega
-  | _ => exact le_trans (Finset.card_filter_le _ _) (by simp [formsOf])
-
-/-- **No term of height `≤ 2` covers the fragment.** It would need all five compound forms. -/
-theorem not_covers_of_height_le_two {e : LExpr'} (h : height e ≤ 2) : ¬ Covers e := by
-  intro hc
-  have hsub : compoundForms ⊆ compoundOf e := by
-    intro F hF
-    refine Finset.mem_filter.mpr ⟨hc ?_, hF⟩
-    simp only [compoundForms, Finset.mem_insert, Finset.mem_singleton] at hF
-    simp only [stlcForms, Finset.mem_insert, Finset.mem_singleton]
-    tauto
-  have := Finset.card_le_card hsub
-  have h5 : compoundForms.card = 5 := by decide
-  have := card_compoundOf_le_four h
-  omega
-
--- ── The coverage threshold ──────────────────────────────────────────
-
-/-- **Below size 3, no draw covers the fragment** — at any target type, in any binder context, for
-any free-variable context, provided the factory contributes no operator of positive arity. -/
-theorem prob_covers_eq_zero (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (hn : n ≤ 2)
-    (bctx : BVarCtx) (τ : LMonoTy) :
-    prob (genLExprBase (G := SPMF) fctx octx [] tvars bctx n τ) {e | Covers e} = 0 :=
-  (prob_eq_zero_iff _ _).mpr fun e he hc =>
-    not_covers_of_height_le_two (le_trans (height_le fctx octx tvars hops n bctx τ e he) hn) hc
-
-theorem bvarsOfType_cons_self (τ : LMonoTy) (bctx : BVarCtx) :
-    (bvarsOfType (τ :: bctx) τ).length > 0 := by
-  simp [bvarsOfType, bvarsOfType.go]
-
-/-- The lower bound on the coverage probability at every size `≥ 3`. It is the probability of one
-witness shape, `ite (eq _ _) (app (λ:bool. #0) c) (∀:bool. _)`, which shows all seven forms. -/
-noncomputable def coverBound : ℝ≥0∞ :=
-  2 / 24 * ((2 / 24 * (1 / 120 * (7 / 24 * (7 / 24)))) *
-    ((1 / 24 * (1 / 120 * (1 / 24 * (4 / 21 * (1 / 12))))) *
-     (2 / 24 * (1 / 120 * (1 / 120 * (7 / 24 * (7 / 24)))))))
-
-theorem coverBound_pos : 0 < coverBound := by
-  unfold coverBound
-  simp only [ENNReal.mul_pos_iff, ENNReal.div_pos_iff]
-  norm_num
-
-/-- **From size 3 on, a draw covers the fragment with probability at least `coverBound`**, at the
-`bool` type, in every context: free variables, factory and binders are all arbitrary. -/
-theorem prob_covers_ge (n : Nat) (bctx : BVarCtx) :
-    coverBound ≤ prob (Gb bctx (n + 3) LMonoTy.bool) {e | Covers e} := by
-  have hsub : IteOf (EqOf Set.univ Set.univ)
-      (AppOf (AbsOf LMonoTy.bool (IsForm .bvar)) (IsForm .const))
-      (QuantOf .all LMonoTy.bool Set.univ) ⊆ {e | Covers e} := by
-    rintro x ⟨c, t, e, rfl, ⟨a, b, rfl, -, -⟩, ⟨f, a', rfl, ⟨body, rfl, hbody⟩, ha'⟩,
-      ⟨tr, b', rfl, -⟩⟩
-    have h1 := rootForm_mem_formsOf body
-    have h2 := rootForm_mem_formsOf a'
-    simp only [IsForm, Set.mem_setOf_eq] at hbody ha'
-    rw [hbody] at h1; rw [ha'] at h2
-    intro F hF
-    simp only [stlcForms, Finset.mem_insert, Finset.mem_singleton] at hF
-    simp only [formsOf, Finset.mem_insert, Finset.mem_union]
-    rcases hF with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp_all
-  refine le_trans ?_ (prob_mono hsub)
-  refine le_trans ?_ (bool_ite_ge fctx octx pctx tvars (n + 2) bctx _ _ _)
-  have hc := bool_eq_ge fctx octx pctx tvars (n + 1) bctx Set.univ Set.univ
-  have hm := mass_bool_ge fctx octx pctx tvars (n + 1) bctx
-  have ht := bool_app_ge fctx octx pctx tvars (n + 1) bctx
-    (AbsOf LMonoTy.bool (IsForm .bvar)) (IsForm .const)
-  have hk := bool_const_ge fctx octx pctx tvars (n + 1) bctx
-  have hf := arrow_abs_ge fctx octx pctx tvars n bctx LMonoTy.bool LMonoTy.bool (IsForm .bvar)
-  have hv := bool_bvar_ge fctx octx pctx tvars n (LMonoTy.bool :: bctx)
-    (bvarsOfType_cons_self _ _)
-  have he := bool_forall_ge fctx octx pctx tvars (n + 1) bctx Set.univ
-  have hm' := mass_bool_ge fctx octx pctx tvars (n + 1) (LMonoTy.bool :: bctx)
-  unfold coverBound
-  refine mul_le_mul' le_rfl (mul_le_mul' ?_ (mul_le_mul' ?_ ?_))
-  · refine le_trans ?_ hc
-    gcongr <;> exact hm
-  · refine le_trans ?_ ht
-    gcongr
-    refine le_trans ?_ hf
-    gcongr
-  · refine le_trans ?_ he
-    gcongr
-    exact hm'
 
 -- ── The application threshold ───────────────────────────────────────
 
@@ -1112,104 +840,9 @@ theorem closed_root_threshold (tvars : List TyIdentifier) :
   ⟨prob_compound_size_zero [] ∅ [] tvars [] _, prob_closed_app_size_one tvars,
    fun F hF n => ⟨prob_rootForm_ge [] ∅ [] tvars F hF n [], rootFormBound_pos F hF⟩⟩
 
-/-- **The coverage threshold.** For a factory with no operator of positive arity and no
-polymorphic operators, a draw at `bool` covers all seven forms with probability `0` below size `3`,
-and with probability at least `coverBound > 0` at every size from `3` on. -/
-theorem coverage_threshold (hops : ∀ σ, findOpsInCtx octx σ = []) (bctx : BVarCtx) :
-    (∀ n ≤ 2, prob (genLExprBase (G := SPMF) fctx octx [] tvars bctx n LMonoTy.bool)
-      {e | Covers e} = 0) ∧
-    (∀ n ≥ 3, coverBound ≤ prob (genLExprBase (G := SPMF) fctx octx [] tvars bctx n LMonoTy.bool)
-      {e | Covers e}) ∧
-    0 < coverBound := by
-  refine ⟨fun n hn => prob_covers_eq_zero fctx octx tvars hops n hn bctx _, fun n hn => ?_,
-    coverBound_pos⟩
-  obtain ⟨m, rfl⟩ := Nat.exists_eq_add_of_le' hn
-  exact prob_covers_ge fctx octx [] tvars m bctx
-
-/-- The closed instance of `coverage_threshold`. A user-facing bundle; nothing in this package
-builds on it. -/
-theorem closed_coverage_threshold (tvars : List TyIdentifier) :
-    (∀ n ≤ 2, prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] n LMonoTy.bool) {e | Covers e} = 0) ∧
-    (∀ n ≥ 3, coverBound ≤ prob (genLExprBase (G := SPMF) [] ∅ [] tvars [] n LMonoTy.bool)
-      {e | Covers e}) :=
-  let h := coverage_threshold [] ∅ tvars findOpsInCtx_empty []
-  ⟨h.1, h.2.1⟩
 
 -- ── `genLExpr`: the root-weighted wrapper ───────────────────────────
 
-/-- `genLExpr` keeps `genLExprBase` as a branch of weight at least `1/10` (the `1`-of-`10` base
-branch when a monomorphic candidate exists, the `1`-of-`2` `pick` otherwise), so every lower bound on
-`genLExprBase` transfers at a factor of `1/10`, in every context and for every `retryCont`. -/
-theorem prob_genLExpr_ge (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) (k : Nat)
-    (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr')) (E : Set LExpr') :
-    baseShare * prob (Gb bctx n τ) E ≤
-      prob (genLExpr (G := SPMF) fctx octx pctx tvars bctx n τ k rc) E := by
-  rw [baseShare]
-  unfold genLExpr; dsimp only; split
-  · refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
-    simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
-    exact mul_le_mul' (le_of_eq (by norm_num)) le_rfl
-  · refine le_trans ?_ (prob_oneOf_ge _ _ 0 (by simp) _)
-    simp only [List.getElem_cons_zero, List.length_cons, List.length_nil]
-    exact mul_le_mul' (by ennr) le_rfl
-
-/-- Without a factory of positive arity and without polymorphic operators, `genLExpr`'s support is
-inside `genLExprBase`'s: the `Indir` branch is guarded off and `IndirPoly` falls back to the base
-generator at the same size and type. -/
-theorem genLExpr_support_sub (hops : ∀ σ, findOpsInCtx octx σ = []) (bctx : BVarCtx) (n : Nat)
-    (τ : LMonoTy) (k : Nat) (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr'))
-    (e : LExpr') (he : e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars bctx n τ k rc)) :
-    e ∈ SPMF.support (genLExprBase (G := SPMF) fctx octx [] tvars bctx n τ) := by
-  unfold genLExpr at he; dsimp only at he
-  rw [dif_neg (by rw [hops τ]; simp)] at he
-  simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil,
-    or_false] at he
-  obtain ⟨g, hg, he⟩ := he
-  rcases hg with rfl | rfl
-  · exact he
-  · rcases StrataGenerators.IndirSupport.genIndirPolyCore_shape _ _ _ _ _ _ _ _ e he with
-      ⟨_, _, _, _, hmem, _⟩ | hfb
-    · simp [findPolymorphicOps] at hmem
-    · exact hfb
-
-theorem prob_genLExpr_covers_eq_zero (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (hn : n ≤ 2)
-    (bctx : BVarCtx) (τ : LMonoTy) (k : Nat)
-    (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr')) :
-    prob (genLExpr (G := SPMF) fctx octx [] tvars bctx n τ k rc) {e | Covers e} = 0 :=
-  (prob_eq_zero_iff _ _).mpr fun e he hc =>
-    not_covers_of_height_le_two
-      (le_trans (height_le fctx octx tvars hops n bctx τ e
-        (genLExpr_support_sub fctx octx tvars hops bctx n τ k rc e he)) hn) hc
-
-theorem prob_genLExpr_covers_ge (n : Nat) (bctx : BVarCtx) (k : Nat)
-    (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr')) :
-    baseShare * coverBound ≤
-      prob (genLExpr (G := SPMF) fctx octx pctx tvars bctx (n + 3) LMonoTy.bool k rc)
-        {e | Covers e} :=
-  le_trans (mul_le_mul' le_rfl (prob_covers_ge fctx octx pctx tvars n bctx))
-    (prob_genLExpr_ge fctx octx pctx tvars bctx _ _ k rc _)
-
-/-- **The coverage threshold for `genClosedLExpr`, with no hypotheses.** The closed top-level
-generator draws its target type, then a closed term of it. Below size `3` no draw covers the seven
-forms; from size `3` on, a draw covers them with probability at least `coverBound / 120`: the type
-draw lands on `bool` with probability at least `1/12`, and `genLExpr` keeps the base generator at
-weight at least `1/10`. -/
-theorem genClosedLExpr_coverage_threshold (tvars : List TyIdentifier) (k : Nat) :
-    (∀ n ≤ 2, prob (genClosedLExpr (G := SPMF) tvars n k) {e | Covers e} = 0) ∧
-    (∀ n ≥ 3, 1 / 12 * (baseShare * coverBound) ≤
-      prob (genClosedLExpr (G := SPMF) tvars n k) {e | Covers e}) := by
-  refine ⟨fun n hn => ?_, fun n hn => ?_⟩
-  · unfold genClosedLExpr
-    rw [prob_bind]
-    refine le_antisymm (le_trans (expect_mono fun τ => le_of_eq
-      (prob_genLExpr_covers_eq_zero [] ∅ tvars findOpsInCtx_empty n hn [] τ k id)) ?_) (zero_le _)
-    simp [expect]
-  · obtain ⟨m, rfl⟩ := Nat.exists_eq_add_of_le' hn
-    unfold genClosedLExpr
-    refine le_trans ?_ (prob_bind_ge {LMonoTy.bool} (d := baseShare * coverBound) fun τ hτ => ?_)
-    · gcongr; exact prob_genLMonoTy_bool tvars _
-    · rw [Set.mem_singleton_iff.mp hτ]
-      exact prob_genLExpr_covers_ge [] ∅ [] tvars m [] k id
 
 -- ── Closed forms in `n`: deep terms are rare but possible ───────────────
 
@@ -1384,76 +1017,6 @@ theorem heightT_pos (θ : Tuning) : ∀ n, 0 < heightT θ n
   | n + 1 => mul_pos' (share_pos θ 8 11 2 n (by omega))
       (mul_pos' (heightT_pos θ n) (mul_pos' (massT_pos θ n) (massT_pos θ n)))
 
-/-- The lower bound on covering the seven forms at size `n + 3`, for the weights `θ`. It is the
-probability of the witness `ite (eq _ _) (app (λ:bool. #0) c) (∀:bool. _)`, factor by factor. -/
-noncomputable def coverBoundT (θ : Tuning) (n : Nat) : ℝ≥0∞ :=
-  boolShare θ 2 (n + 2) *
-    ((boolShare θ 3 (n + 1) * (1 / 120 * (massT θ (n + 1) * massT θ (n + 1)))) *
-      ((boolShare θ 1 (n + 1) * (1 / 120 * (constT θ (n + 1) * (arrowShare θ 0 n * bvarT θ n)))) *
-        (boolShare θ 4 (n + 1) * (1 / 120 * (1 / 120 * (massT θ (n + 1) * massT θ (n + 1)))))))
-
-/-- **Coverage, for every tuning.** -/
-theorem prob_covers_ge_tuned (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
-    coverBoundT θ n ≤ prob (Gt θ bctx (n + 3) LMonoTy.bool) {e | Covers e} := by
-  have hsub : IteOf (EqOf Set.univ Set.univ)
-      (AppOf (AbsOf LMonoTy.bool (IsForm .bvar)) (IsForm .const))
-      (QuantOf .all LMonoTy.bool Set.univ) ⊆ {e | Covers e} := by
-    rintro x ⟨c, t, e, rfl, ⟨a, b, rfl, -, -⟩, ⟨f, a', rfl, ⟨body, rfl, hbody⟩, ha'⟩,
-      ⟨tr, b', rfl, -⟩⟩
-    have h1 := rootForm_mem_formsOf body
-    have h2 := rootForm_mem_formsOf a'
-    simp only [IsForm, Set.mem_setOf_eq] at hbody ha'
-    rw [hbody] at h1; rw [ha'] at h2
-    intro F hF
-    simp only [stlcForms, Finset.mem_insert, Finset.mem_singleton] at hF
-    simp only [formsOf, Finset.mem_insert, Finset.mem_union]
-    rcases hF with rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> simp_all
-  refine le_trans ?_ (prob_mono hsub)
-  refine le_trans ?_ (boolT_ite_ge fctx octx pctx tvars θ (n + 2) bctx _ _ _)
-  have hc := boolT_eq_ge fctx octx pctx tvars θ (n + 1) bctx Set.univ Set.univ
-  have hm := massT_bool_ge fctx octx pctx tvars θ (n + 1) bctx
-  have ht := boolT_app_ge fctx octx pctx tvars θ (n + 1) bctx
-    (AbsOf LMonoTy.bool (IsForm .bvar)) (IsForm .const)
-  have hk := boolT_const_ge fctx octx pctx tvars θ (n + 1) bctx
-  have hf := arrowT_abs_ge fctx octx pctx tvars θ n bctx LMonoTy.bool LMonoTy.bool (IsForm .bvar)
-  have hv := boolT_bvar_ge fctx octx pctx tvars θ n (LMonoTy.bool :: bctx)
-    (bvarsOfType_cons_self _ _)
-  have he := boolT_forall_ge fctx octx pctx tvars θ (n + 1) bctx Set.univ
-  have hm' := massT_bool_ge fctx octx pctx tvars θ (n + 1) (LMonoTy.bool :: bctx)
-  unfold coverBoundT
-  refine mul_le_mul' le_rfl (mul_le_mul' ?_ (mul_le_mul' ?_ ?_))
-  · refine le_trans ?_ hc
-    gcongr <;> exact hm
-  · refine le_trans ?_ ht
-    gcongr
-    refine le_trans ?_ hf
-    gcongr
-  · refine le_trans ?_ he
-    gcongr
-    exact hm'
-
-theorem coverBoundT_pos (θ : Tuning) (n : Nat) : 0 < coverBoundT θ n := by
-  have hm := massT_pos θ
-  have hb := fun i d (h : i < 11) => share_pos θ 8 11 i d h
-  have ha := share_pos θ 0 8 0 n (by omega)
-  have hc : (0 : ℝ≥0∞) < 1 / 120 := by rw [ENNReal.div_pos_iff]; exact ⟨by norm_num, by norm_num⟩
-  have hk : 0 < constT θ (n + 1) := hb 0 n (by omega)
-  have hv : 0 < bvarT θ n := by
-    cases n with
-    | zero => simp [bvarT]
-    | succ n => exact hb 6 n (by omega)
-  unfold coverBoundT
-  exact mul_pos' (hb 2 _ (by omega))
-    (mul_pos' (mul_pos' (hb 3 _ (by omega)) (mul_pos' hc (mul_pos' (hm _) (hm _))))
-      (mul_pos' (mul_pos' (hb 1 _ (by omega)) (mul_pos' hc (mul_pos' hk (mul_pos' ha hv))))
-        (mul_pos' (hb 4 _ (by omega)) (mul_pos' hc (mul_pos' hc (mul_pos' (hm _) (hm _)))))))
-
-/-! ### How a growing schedule shrinks a share
-
-Each weight is an affine schedule in the depth, `w(d) = max a 1 + d · b`. If branch `i` of a site
-has a constant schedule and some sibling `j` has a slope `b > 0`, the share of `i` falls like
-`1 / d`. A constant weight profile keeps every share fixed; a profile that grows one branch with the
-depth starves the others at large sizes. -/
 
 theorem share_le_of_sibling (θ : Tuning) (off k i j d : Nat) (hj : j < k) :
     share θ off k i d ≤ (θ.weight (off + i) d : ℝ≥0∞) / (θ.weight (off + j) d : ℝ≥0∞) := by

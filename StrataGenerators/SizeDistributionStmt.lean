@@ -6,11 +6,6 @@ import StrataGenerators.StmtHasTypeAGen
 
 Continues `StrataGenerators.SizeDistribution` (expressions) one level up.
 
-**Commands** (`genCmd`). The size is the expression size of the command's expression.
-`genCmd_coverage_threshold`: for a factory with no operator of positive arity, a command never
-carries an expression covering all seven forms below size `3`; from size `3` on it does with
-probability at least `cmdCoverBound` (`prob_genCmd_covers`, which holds for every factory).
-
 **Statements** (`genStmt`). `genStmt_nesting_threshold`: at size `0` the top level never holds a
 `block`, `ite` or `loop`, in every context; at size `n + 1` it holds each of them with positive
 probability, each a closed form in the size `n` and the body-length cap `k = maxStmtSeqLen`:
@@ -20,7 +15,6 @@ branches, empty body, nondeterministic guard), so it needs no sub-draw to succee
 is uniform on `[0, k]`, and the witness takes it to be `0`, which gives each `1/(k+1)`. A `loop`'s
 invariant list has a length uniform on `[0, k]` as well, so none of the three bounds depends on the
 size.
-`prob_genStmt_covers` lifts the command coverage bound to statements from size `3` on.
 
 **Sequences.** `stmtMassBound` bounds the mass of one statement at each size, and
 `prob_genStmtChain_top_ge` turns an event on the first statement of a chain into an event on the
@@ -62,108 +56,9 @@ theorem prob_genIdentName_univ : nameMass ≤ prob (genIdentName (G := SPMF)) Se
 
 -- ── Commands ────────────────────────────────────────────────────────
 
-/-- The expressions a command carries. -/
-def cmdExprs : Cmd Expression → List LExpr'
-  | .init _ _ (.det e) _ => [e]
-  | .set _ (.det e) _ => [e]
-  | .assert _ e _ => [e]
-  | .assume _ e _ => [e]
-  | .cover _ e _ => [e]
-  | _ => []
-
-/-- A command covers the fragment when one of its expressions does. -/
-def CmdCovers (c : Cmd Expression) : Prop := ∃ e ∈ cmdExprs c, Covers e
 
 variable (octx : OpCtx) (tvars : List TyIdentifier) (pctx : PolyOpCtx)
 
-theorem prob_genAssertCmd_covers (ctx : VarCtx) (n : Nat) :
-    nameMass * (baseShare * coverBound) ≤
-      prob (genAssertCmd (G := SPMF) octx tvars ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
-  rw [nameMass]
-  unfold genAssertCmd
-  refine le_trans (mul_le_mul' prob_genIdentName_univ le_rfl) (prob_bind_ge Set.univ fun l _ => ?_)
-  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
-    (prob_genLExpr_covers_ge _ octx pctx tvars n [] 3 id) le_rfl)
-    (prob_bind_ge {e | Covers e} fun e he => ?_))
-  refine (prob_pure_of_mem ?_).ge
-  exact ⟨e, List.mem_singleton_self _, he⟩
-
-/-- The lower bound on a command carrying a covering expression: the `1`-of-`7` weight of the
-`assert` kind, the mass of its label draw, and the covering-expression bound through `genLExpr`. -/
-noncomputable def cmdCoverBound : ℝ≥0∞ := 1 / 7 * (nameMass * (baseShare * coverBound))
-
-/-- The share of the `assert` kind in `genCmd.tuned θ` at depth `d`. `genCmd` has two `frequency`
-sites: with a writable variable in scope it offers seven kinds (flat offset `0`, `assert` is
-branch `4`); without one it offers five (offset `7`, `assert` is branch `2`). -/
-noncomputable def assertShare (θ : Tuning) (imm : List (Identifier Unit)) (ctx : VarCtx)
-    (d : Nat) : ℝ≥0∞ :=
-  if (ctx.writable imm).length > 0 then share θ 0 7 4 d else share θ 7 5 2 d
-
-theorem assertShare_pos (θ : Tuning) (imm : List (Identifier Unit)) (ctx : VarCtx) (d : Nat) :
-    0 < assertShare θ imm ctx d := by
-  unfold assertShare; split
-  · exact share_pos θ 0 7 4 d (by omega)
-  · exact share_pos θ 7 5 2 d (by omega)
-
-/-- **A command carries a covering expression, for every tuning of `genCmd`.** From expression
-size `3` on, with probability at least the `assert` share of `θ` times the covering-expression
-bound. -/
-theorem prob_genCmd_covers_tuned (θ : Tuning) (imm : List (Identifier Unit)) (ctx : VarCtx)
-    (n : Nat) :
-    assertShare θ imm ctx (n + 3) * (nameMass * (baseShare * coverBound)) ≤
-      prob (genCmd.tuned (G := SPMF) θ octx tvars imm ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
-  have ha := prob_genAssertCmd_covers octx tvars pctx ctx n
-  unfold genCmd.tuned assertShare; dsimp only; split
-  · refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) 4 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
-      List.sum_cons, List.sum_nil]
-    refine mul_le_mul' (le_of_eq ?_) ha
-    simp [share, List.range_succ]
-  · refine le_trans ?_ (prob_frequency_ge _ (Tuning.sum_map_fst_pos _ _ _ _ _) 2 (by simp) _)
-    simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
-      List.sum_cons, List.sum_nil]
-    refine mul_le_mul' (le_of_eq ?_) ha
-    simp [share, List.range_succ]
-
-/-- **From expression size `3` on, a command carries a covering expression** with probability at
-least `cmdCoverBound`, in every variable context. The case `θ = genCmd.defaults` of
-`prob_genCmd_covers_tuned`: the `assert` share is `2/14` or `2/10`, and both are at least `1/7`. -/
-theorem prob_genCmd_covers (imm : List (Identifier Unit)) (ctx : VarCtx) (n : Nat) :
-    cmdCoverBound ≤
-      prob (genCmd (G := SPMF) octx tvars imm ctx (n + 3) pctx) {r | CmdCovers r.cmd} := by
-  rw [← genCmd.tuned_defaults (G := SPMF) octx tvars imm ctx (n + 3) pctx, cmdCoverBound]
-  refine le_trans ?_ (prob_genCmd_covers_tuned octx tvars pctx genCmd.defaults imm ctx n)
-  refine mul_le_mul' ?_ le_rfl
-  unfold assertShare; split
-  · apply le_of_eq; simp [share, List.range_succ, Tuning.weight, genCmd.defaults]
-    rw [inv_eq_one_div, ENNReal.div_eq_div_iff (by norm_num) (by norm_num) (by norm_num)
-      (by norm_num)]
-    norm_num
-  · simp [share, List.range_succ, Tuning.weight, genCmd.defaults]; ennr
-
-theorem genLExpr_not_covers (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (hn : n ≤ 2)
-    (fc : FVarCtx) (bc : BVarCtx) (τ : LMonoTy) (k : Nat)
-    (rc : (LMonoTy → SPMF LExpr') → (LMonoTy → SPMF LExpr')) :
-    IsSoundFor (genLExpr (G := SPMF) fc octx [] tvars bc n τ k rc) (fun e => ¬ Covers e) :=
-  fun e he => ((prob_eq_zero_iff _ _).mp
-    (prob_genLExpr_covers_eq_zero fc octx tvars hops n hn bc τ k rc)) e he
-
-theorem genFreshName_true (ctx : VarCtx) :
-    IsSoundFor (_root_.genFreshName (G := SPMF) ctx) (fun _ => True) := fun _ _ => trivial
-theorem genIdentName_true : IsSoundFor (genIdentName (G := SPMF)) (fun _ => True) :=
-  fun _ _ => trivial
-
-/-- **Below expression size `3`, no command carries a covering expression**, for a factory with no
-operator of positive arity and no polymorphic operator. -/
-theorem genCmd_not_covers (hops : ∀ σ, findOpsInCtx octx σ = []) (imm : List (Identifier Unit))
-    (ctx : VarCtx) (n : Nat) (hn : n ≤ 2) :
-    IsSoundFor (genCmd (G := SPMF) octx tvars imm ctx n []) (fun r => ¬ CmdCovers r.cmd) := by
-  have hL := genLExpr_not_covers octx tvars hops n hn
-  rw [IsSoundFor.iff_obs]
-  unfold genCmd genInitDet genInitNondet genSetDet genSetNondet genAssertCmd genAssumeCmd genCoverCmd
-  walk [(hL _ _ _ _ _).obs, (genFreshName_true _).obs, (genLMonoTy_true tvars _).obs,
-    genIdentName_true.obs]
-  all_goals simp_all [CmdCovers, cmdExprs]
 
 -- ── Statements: which root forms each size produces ─────────────────
 
@@ -464,32 +359,6 @@ theorem prob_genStmt_loop_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, trivial⟩
 
-/-- A top-level statement is a command that carries a covering expression. -/
-def IsCoveringCmd : Statement → Prop
-  | .cmd (.cmd c) => CmdCovers c
-  | _ => False
-
-/-- The lower bound on a command that carries a covering expression: the `1`-of-`7` command kind
-and the `6`-of-`16` statement branch, against the covering-expression bound. -/
-noncomputable def cmdCoverAtStmt : ℝ≥0∞ := 6 / 16 * cmdCoverBound
-
-/-- **From size 3 on, a statement draw carries a covering expression** with probability at least
-`cmdCoverAtStmt`, in every context. -/
-theorem prob_genStmt_covers (imm : List (Identifier Unit)) (procs : ProcSigCtx)
-    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (n k : Nat) :
-    cmdCoverAtStmt
-      ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 3) k)
-          (TopLevelEvent IsCoveringCmd) := by
-  rw [cmdCoverAtStmt, cmdCoverBound, genStmt]
-  refine le_trans ?_ (prob_frequency_ge _ _ 0 (by simp) _)
-  simp only [List.getElem_cons_zero, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
-  refine mul_le_mul' (le_of_eq (by norm_num)) ?_
-  unfold genCmdStmt
-  refine le_trans (le_of_eq (mul_one _).symm) (le_trans
-    (mul_le_mul' (prob_genCmd_covers octx tvars pctx imm ctx n) le_rfl)
-    (prob_bind_ge _ fun r hr => ?_))
-  refine (prob_pure_of_mem ?_).ge
-  exact ⟨_, List.mem_singleton_self _, hr⟩
 
 -- ── Masses, for threading through sequences ─────────────────────────
 
@@ -629,16 +498,5 @@ theorem genStmt_nesting_threshold (imm : List (Identifier Unit)) (procs : ProcSi
      prob_genStmt_loop_ge octx tvars pctx imm procs labels C ctx n k⟩,
      iteAtSize_pos k, blockAtSize_pos k, loopAtSize_pos k⟩⟩
 
-/-- **The command threshold.** For a factory with no operator of positive arity, a command never
-carries a covering expression below expression size `3`; from size `3` on it does with
-probability at least `coverBound / 140`, and that lower bound holds for every factory. -/
-theorem genCmd_coverage_threshold (hops : ∀ σ, findOpsInCtx octx σ = [])
-    (imm : List (Identifier Unit)) (ctx : VarCtx) :
-    (∀ n ≤ 2, prob (genCmd (G := SPMF) octx tvars imm ctx n []) {r | CmdCovers r.cmd} = 0) ∧
-    (∀ n, cmdCoverBound ≤
-      prob (genCmd (G := SPMF) octx tvars imm ctx (n + 3) []) {r | CmdCovers r.cmd}) :=
-  ⟨fun n hn => (prob_eq_zero_iff _ _).mpr fun r hr hc =>
-      genCmd_not_covers octx tvars hops imm ctx n hn r hr hc,
-   fun n => prob_genCmd_covers octx tvars [] imm ctx n⟩
 
 end StrataGenerators.SizeDistributionStmt

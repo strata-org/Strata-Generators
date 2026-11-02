@@ -23,6 +23,5 @@ import StrataGenerators.PrinterCoverage
 -- forms each size can produce, and the size threshold for covering every form in one draw.
 import StrataGenerators.SizeDistribution
 import StrataGenerators.SizeDistributionStmt
-import StrataGenerators.SizeDistributionFactory
 import StrataGenerators.SizeDistributionLoops
 import StrataGenerators.SizeDistributionProgram
