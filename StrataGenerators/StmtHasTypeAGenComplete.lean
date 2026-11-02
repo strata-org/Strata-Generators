@@ -7,9 +7,10 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 # The completeness of `genStmt` and `genStmtChain`, indexed by `StatementWellTyped`
 
 `spec_complete` proves that each well-typed statement is in the support of `genStmt`. The declarative
-relation `StatementWellTyped`, in `Strata.Languages.Core.TypingSpec`, decides which statements are
-well typed. The proof needs **no** helper relation that follows the shape of the generator. It runs by
-induction on the *typing derivation* itself, through the two mutually recursive theorems
+relation `StatementWellTyped`, in `Strata.Languages.Core.Typing.Spec.TypingSpec`, decides
+which statements are well typed. The proof needs **no** helper relation that follows the shape
+of the generator. It runs by induction on the *typing derivation* itself, through the two
+mutually recursive theorems
 `genStmt_spec_complete` and `genStmtChain_spec_complete`.
 
 ## The side conditions

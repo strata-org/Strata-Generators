@@ -1,4 +1,4 @@
-import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 
 open Lambda Core Imperative

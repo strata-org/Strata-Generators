@@ -2,8 +2,8 @@ import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.ProcedureHasTypeAGen.Support
 import StrataGenerators.ProcedureHasTypeAGen.MutableVars
 import StrataGenerators.CmdHasTypeAGenSound
-import Strata.Languages.Core.ProcedureTypeSpec
-import Strata.Languages.Core.TypingSpec
+import Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec
+import Strata.Languages.Core.Typing.Spec.TypingSpec
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec
 open StrataGenerators.Stmt StrataGenerators.Function
@@ -14,7 +14,7 @@ open StrataGenerators.AnnotFacts (genLExpr_exprWellTyped)
 
 `genProcedure` (in `ProcedureHasTypeAGen/Core.lean`) generates well-typed Strata
 Core procedures. This file proves it **sound** and **complete** with respect to
-the `ProcHasTypeA` typing relation of `Strata.Languages.Core.ProcedureTypeSpec`.
+the `ProcHasTypeA` typing relation of `Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec`.
 
 The proof is *compositional*: it reuses `genInputs_support`/`genInputs_complete`
 for the output signature, exactly as the generator of a function uses them for its inputs. It also uses

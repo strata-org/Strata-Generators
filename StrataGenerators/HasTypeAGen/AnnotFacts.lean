@@ -1,5 +1,5 @@
 import StrataGenerators.HasTypeAGenOpsConsistent
-import Strata.Languages.Core.TypingSpec
+import Strata.Languages.Core.Typing.Spec.TypingSpec
 import Strata.DL.Lambda.LExprTypeSpecProps
 
 /-!

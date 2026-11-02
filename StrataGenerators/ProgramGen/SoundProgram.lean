@@ -2,7 +2,7 @@ import StrataGenerators.ProgramGen.Sound
 import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProcedureHasTypeAGen
 import StrataGenerators.ProgramGen.ProcSigThread
-import Strata.Languages.Core.TypingSpec
+import Strata.Languages.Core.Typing.Spec.TypingSpec
 
 /-!
 # Whole-program soundness

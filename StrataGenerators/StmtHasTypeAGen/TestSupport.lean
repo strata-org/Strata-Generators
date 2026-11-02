@@ -2,7 +2,7 @@ import StrataGenerators.StmtHasTypeAGen.Core
 import StrataGenerators.CmdHasTypeAGen.TestSupport
 import StrataGenerators.FunctionHasTypeAGen.TestSupport
 import Strata.Languages.Core.StatementType
-import Strata.Languages.Core.TypingSpec
+import Strata.Languages.Core.Typing.Spec.TypingSpec
 import Strata.Languages.Core.Factory
 import Strata.Transform.LoopElim
 import Strata.Transform.InsertLoopInvariantAsserts

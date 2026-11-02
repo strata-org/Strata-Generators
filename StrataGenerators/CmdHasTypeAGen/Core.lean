@@ -3,7 +3,7 @@ import Basalt.IO
 import Basalt.Combinators
 import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
-import Strata.Languages.Core.CmdTypeSpec
+import Strata.Languages.Core.Typing.Spec.CmdTypeSpec
 import StrataGenerators.HasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
 

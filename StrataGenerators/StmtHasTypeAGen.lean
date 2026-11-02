@@ -13,8 +13,9 @@ open StrataGenerators.AnnotFacts (ExprCtxOk genLExpr_exprWellTyped)
 
 `genStmt` / `genStmtChain` (in `StmtHasTypeAGen/Core.lean`) generate random Strata
 Core statements. This file proves them **sound** with respect to the typing relations
-`StatementWellTyped` / `StatementsWellTyped` of `Strata.Languages.Core.TypingSpec`, and gives
-the membership lemmas that the completeness proofs use.
+`StatementWellTyped` / `StatementsWellTyped` of
+`Strata.Languages.Core.Typing.Spec.TypingSpec`, and gives the membership lemmas that the
+completeness proofs use.
 
 ## Compositional structure
 

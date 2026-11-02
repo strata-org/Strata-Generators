@@ -226,7 +226,7 @@ silence. -/
 
     **Never call this function on a program that holds a loop.** Read the note of this section. -/
 def symbolicObligations (p : Program) : Option Program :=
-  match runPhase Core.nondetElimPipelinePhase p with
+  match runPhase Core.NondetElim.nondetElimPipelinePhase p with
   | none => none
   | some (_, q) =>
     match Core.toCoreProofObligationProgram Core.VerifyOptions.quiet q with
@@ -1574,7 +1574,7 @@ def checkNondetElimFreshNames (p : Program) : Bool :=
   (cmdShapedBodies p).all fun ss =>
     let inputNames := cmdStmtsInitNames ss
     let minted := (cmdStmtsInitNames (Imperative.Block.nondetElim ss)).filter fun n =>
-      n.startsWith Imperative.ndelimItePrefix || n.startsWith Imperative.ndelimLoopPrefix
+      n.startsWith Imperative.NondetElim.prefixIte || n.startsWith Imperative.NondetElim.prefixLoop
     nodup minted && minted.all fun n => !inputNames.contains n
 
 /-- **`LoopInitHoist` leaves no `init` in a loop body.** "The output satisfies

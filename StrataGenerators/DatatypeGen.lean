@@ -19,7 +19,7 @@ data type definitions in Strata Core. The generator uses Basalt `Gen`.
 The generator makes a `MutualDatatype Unit`. That type is a `List (LDatatype Unit)`,
 and it holds the contents of one `mutual … end` block. The block obeys the argument
 half of `Core.TypeSpec.MutualADTWF`. That half is the `argsWF`, `refsKnown` and
-`argVarsScoped` fields from `Strata.Languages.Core.DatatypeTypeSpec`.
+`argVarsScoped` fields from `Strata.Languages.Core.Typing.Spec.DatatypeTypeSpec`.
 
 A **block datatype** is a datatype that this `mutual … end` block declares. The datatypes
 of one block can refer to each other, therefore they are mutually recursive. This module

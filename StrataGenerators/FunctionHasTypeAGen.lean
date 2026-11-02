@@ -3,7 +3,7 @@ import StrataGenerators.HasTypeAGen.AnnotFacts
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Dedup
 import StrataGenerators.FunctionHasTypeAGen.IdentName
-import Strata.Languages.Core.FunctionTypeSpec
+import Strata.Languages.Core.Typing.Spec.FunctionTypeSpec
 import Strata.Util.ListMapProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString

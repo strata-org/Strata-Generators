@@ -4,7 +4,7 @@ import Basalt.Combinators
 import StrataGenerators.BasaltCompat.Defs
 import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
-import Strata.Languages.Core.StatementTypeSpec
+import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.StmtHasTypeAGen.CallDefs
@@ -18,7 +18,7 @@ This file contains the canonical definition of `genStmt` / `genStmtChain`, mutua
 recursive generators of well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
 `StatementHasTypeA` / `StatementsHasTypeA` relations of
-`Strata.Languages.Core.StatementTypeSpec`.
+`Strata.Languages.Core.Typing.Spec.StatementTypeSpec`.
 
 ## Reuse of existing generators
 

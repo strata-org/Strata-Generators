@@ -17,7 +17,7 @@ open StrataGenerators.Stmt
 
 This file defines `genProcedure`, a generator of well-typed Strata Core
 procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
-`Strata.Languages.Core.ProcedureTypeSpec`.
+`Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec`.
 
 ## Design: in-out parameters via three disjoint signature blocks
 

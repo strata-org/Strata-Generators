@@ -264,7 +264,7 @@ theorem initChain_definedVars (news : List (Identifier Unit × LMonoTy)) :
     Block.definedVars (P := Expression) (StrataGenerators.Stmt.initChain news) false
       = news.map Prod.fst := by
   simp only [block_definedVars_eq_flatMap, StrataGenerators.Stmt.initChain, List.flatMap_map,
-    Stmt.definedVars, HasVarsImp.definedVars, Command.definedVars, Cmd.definedVars]
+    Stmt.definedVars, HasVarsImp.definedVars]
   exact (List.map_eq_flatMap ..).symm
 
 /-- The *group* of a generated procedure call, which is the inline chain of the `init` statements followed by the
@@ -281,7 +281,7 @@ theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
       = M.keys ++ T.keys := by
   rw [block_modifiedVars_append, initChain_modifiedVars]
   simp only [List.nil_append, Block.modifiedVars, Stmt.modifiedVars, HasVarsImp.modifiedVars,
-    Command.modifiedVars, StrataGenerators.Stmt.getLhs_mkArgs, List.append_nil]
+    CmdExt.modifiedVars, StrataGenerators.Stmt.getLhs_mkArgs, List.append_nil]
 
 /-- The generated procedure-call group defines exactly the `init`ed names
     the names of the missing entries. The chain at the front declares each of them, and the `call` defines
@@ -295,7 +295,7 @@ theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
         [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default]) false
       = missing.map Prod.fst := by
   rw [block_definedVars_append, initChain_definedVars]
-  simp only [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, Command.definedVars,
+  simp only [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, CmdExt.definedVars,
     List.append_nil]
 
 /-- A required name `v ∈ M.keys ++ T.keys` is a key of `M ++ T`, the variables the
@@ -453,7 +453,7 @@ theorem genStmt_mutableVars
       have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
-        Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+        Stmt.definedVars, CmdExt.modifiedVars, CmdExt.definedVars] using h
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
@@ -464,7 +464,7 @@ theorem genStmt_mutableVars
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
-          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+          Stmt.definedVars, CmdExt.modifiedVars, CmdExt.definedVars] using h
       | cons hd tl =>
         replace hr : r ∈ SPMF.support (genExitStmt (G := SPMF) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff] at hr
@@ -493,7 +493,7 @@ theorem genStmt_mutableVars
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx 0 rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
-          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+          Stmt.definedVars, CmdExt.modifiedVars, CmdExt.definedVars] using h
       | cons hd tl =>
         replace hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars
           immutableVars (hd :: tl) C ctx 0 pctx) := hr
@@ -509,7 +509,7 @@ theorem genStmt_mutableVars
       have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
       simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
         HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
-        Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+        Stmt.definedVars, CmdExt.modifiedVars, CmdExt.definedVars] using h
     · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
       cases labels with
       | nil =>
@@ -520,7 +520,7 @@ theorem genStmt_mutableVars
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
-          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+          Stmt.definedVars, CmdExt.modifiedVars, CmdExt.definedVars] using h
       | cons hd tl =>
         replace hr : r ∈ SPMF.support (genExitStmt (G := SPMF) (hd :: tl) C ctx) := hr
         simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff] at hr
@@ -549,7 +549,7 @@ theorem genStmt_mutableVars
         have h := genCmd_mutableVars octx pctx tvars immutableVars ctx (size+1) rc hrc
         simpa only [block_modifiedVars_singleton, block_definedVars_singleton,
           HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars,
-          Stmt.definedVars, Command.modifiedVars, Command.definedVars] using h
+          Stmt.definedVars, CmdExt.modifiedVars, CmdExt.definedVars] using h
       | cons hd tl =>
         replace hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars
           immutableVars (hd :: tl) C ctx (size+1) pctx) := hr

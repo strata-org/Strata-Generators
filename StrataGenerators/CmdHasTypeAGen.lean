@@ -2,7 +2,7 @@ import StrataGenerators.GenSupport
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen
 import Strata.DL.Lambda.LExprTypeSpecProps
-import Strata.Languages.Core.TypingSpec
+import Strata.Languages.Core.Typing.Spec.TypingSpec
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.AnnotFacts (ExprCtxOk ScopesCtxOk genLExpr_exprWellTyped

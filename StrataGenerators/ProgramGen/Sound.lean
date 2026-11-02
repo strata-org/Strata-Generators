@@ -3,10 +3,10 @@ import StrataGenerators.ProgramGen.RecFuncBlockSupport
 import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.HasTypeAGen
 import StrataGenerators.HasTypeAGen.AnnotFacts
-import Strata.Languages.Core.TypingSpec
+import Strata.Languages.Core.Typing.Spec.TypingSpec
 import Strata.DL.Lambda.LExprTypeEnvProps
 import Strata.Languages.Core.FactoryProps
-import Strata.Languages.Core.TypeCheckSound.Datatype
+import Strata.Languages.Core.Typing.Props.FactoryRegistrationProps
 import Strata.DL.Lambda.TypeFactoryProps
 import Strata.DL.Lambda.DatatypeFactoryWFProps
 import Strata.DL.Lambda.LTyTypeProps
@@ -92,15 +92,23 @@ theorem namesStep_nil {s : GenState} : NamesStep s [] s :=
 
 /-! ## Declaration names the checker accepts -/
 
+/-- A name that does not start with `$` is allowed, because every reserved name prefix starts
+    with `$`. -/
+theorem isAllowedName_of_not_startsWith_dollar {n : String}
+    (h : ¬ ['$'].isPrefixOf n.toList = true) : isAllowedName n = true := by
+  have hdollar : ∀ p ∈ reservedNamePrefixes, ['$'].isPrefixOf p.toList = true := by decide
+  rw [isAllowedName_eq_toList]
+  simp only [Bool.not_eq_eq_eq_not, Bool.not_true, List.any_eq_false]
+  intro p hp hpre
+  apply h
+  rw [List.isPrefixOf_iff_prefix] at hpre ⊢
+  exact List.IsPrefix.trans ((List.isPrefixOf_iff_prefix).mp (hdollar p hp)) hpre
+
 /-- The fallback name, a run of `x` characters, uses no reserved prefix. -/
 theorem fallbackName_allowed (reserved : List String) :
     isAllowedName (DatatypeGen.fallbackName reserved) = true := by
-  simp only [DatatypeGen.fallbackName, indexedFreshName]
-  rw [isAllowedName_eq_toList]
-  simp [reservedNamePrefixes, List.replicate_succ, List.isPrefixOf, Lambda.genTyPrefix,
-    skolemPrefix, Lambda.elimTyPrefix, CallElim.callSiteTypePrefix,
-    ProcedureInlining.inlineSiteTypePrefix, Lambda.precondTyVarPrefix, TermCheck.termTyVarPrefix,
-    Lambda.callTyVarPrefix]
+  apply isAllowedName_of_not_startsWith_dollar
+  simp [DatatypeGen.fallbackName, indexedFreshName, List.replicate_succ, List.isPrefixOf]
 
 /-- A name `genDeclName reserved` draws is absent from `reserved` and uses no reserved prefix. -/
 theorem genDeclName_fresh {reserved : List String} {nm : String}
