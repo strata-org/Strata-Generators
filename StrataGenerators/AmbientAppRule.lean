@@ -24,7 +24,8 @@ Results, for every type generator `genTy`, fuel `n`, and context `Γ`:
 * `default_lt_palka`: so Pałka et al.'s rule is strictly more frequent whenever
   `Pr(genTy = String) · Pr(genTy = Int) < palkaFloor sig`.
 * `default_vs_palka_separation`: with `genTy := genTyUniform numBaseTypes` (uniform over
-  `numBaseTypes` base types), the default rule's probability drops below any `ε > 0` for large
+  `numBaseTypes` base types), the default rule's probability is at most `1 / numBaseTypes²`
+  (`genExpr_genTyUniform_prob_takeCall_le`), so it drops below any `ε > 0` for large
   enough `numBaseTypes`, while Pałka et al.'s stays `≥ palkaFloor sig`; hence from some `N` on,
   Pałka et al.'s is strictly more frequent.
 -/
@@ -516,6 +517,21 @@ theorem genTyUniform_prob_base {numBaseTypes : Nat} (h2 : 2 ≤ numBaseTypes) {�
       rcases hτ with rfl | rfl <;> simp
   rcases hτ with rfl | rfl <;> simp [baseTys, h0] <;> rw [add_assoc] <;> norm_num
 
+/-- **The default rule with `k` uniformly drawn base types.** With `k ≥ 2` base types, the
+STLC application rule produces a call to `take` with probability at most `1 / k²`: it must
+guess `String` (probability `1/k`) and then `Int` (probability `1/k`). -/
+theorem genExpr_genTyUniform_prob_takeCall_le (n : Nat) (Γ : List Ty) {take : Fn}
+    (ht : take.ty = takeTy) {k : Nat} (hk : 2 ≤ k) :
+    prob (genExpr (genTyUniform k) sig n Γ .str) (CallOf take) ≤ 1 / (k : ℝ≥0∞) ^ 2 :=
+  calc prob (genExpr (genTyUniform k) sig n Γ .str) (CallOf take)
+      ≤ prob (genTyUniform k) {.str} * prob (genTyUniform k) {.int} :=
+        genExpr_prob_takeCall_le _ sig n Γ ht
+    _ = (k : ℝ≥0∞)⁻¹ * (k : ℝ≥0∞)⁻¹ := by
+        rw [genTyUniform_prob_base hk (.inr rfl), genTyUniform_prob_base hk (.inl rfl)]
+    _ = 1 / (k : ℝ≥0∞) ^ 2 := by
+        rw [one_div, sq, ENNReal.mul_inv (Or.inr (ENNReal.natCast_ne_top _))
+          (Or.inl (ENNReal.natCast_ne_top _))]
+
 /-- **Separation.** As the number of base types grows (`numBaseTypes → ∞`):
 1. the default rule's probability of calling `take` drops below any `ε > 0` for all large
    enough `numBaseTypes` (i.e. it tends to `0`);
@@ -530,18 +546,16 @@ theorem default_vs_palka_separation (n : Nat) (Γ : List Ty) {take : Fn}
       ∧ ∃ N, ∀ numBaseTypes ≥ N,
           prob (genExpr (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take)
             < prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take) := by
-  -- With `k ≥ 2` base types, the default rule's probability is at most `k⁻¹ · k⁻¹ ≤ k⁻¹`.
+  -- With `k ≥ 2` base types, the default rule's probability is at most `1/k² ≤ 1/k`.
   have hbound : ∀ m k, 2 ≤ k →
       prob (genExpr (genTyUniform k) sig m Γ .str) (CallOf take) ≤ (k : ℝ≥0∞)⁻¹ := by
     intro m k hk
     calc prob (genExpr (genTyUniform k) sig m Γ .str) (CallOf take)
-        ≤ prob (genTyUniform k) {.str} * prob (genTyUniform k) {.int} :=
-          genExpr_prob_takeCall_le _ sig m Γ ht
-      _ = (k : ℝ≥0∞)⁻¹ * (k : ℝ≥0∞)⁻¹ := by
-          rw [genTyUniform_prob_base hk (.inr rfl), genTyUniform_prob_base hk (.inl rfl)]
-      _ ≤ (k : ℝ≥0∞)⁻¹ * 1 := by
-          gcongr; exact ENNReal.inv_le_one.2 (by exact_mod_cast (by omega : 1 ≤ k))
-      _ = (k : ℝ≥0∞)⁻¹ := mul_one _
+        ≤ 1 / (k : ℝ≥0∞) ^ 2 := genExpr_genTyUniform_prob_takeCall_le sig m Γ ht hk
+      _ ≤ 1 / (k : ℝ≥0∞) := by
+          gcongr
+          exact_mod_cast (Nat.le_self_pow (by norm_num) k)
+      _ = (k : ℝ≥0∞)⁻¹ := one_div _
   -- (1): pick `N₀` with `N₀⁻¹ < ε`; for `k ≥ max N₀ 2`, `Pr ≤ k⁻¹ ≤ N₀⁻¹ < ε`.
   have hsmall : ∀ m (ε : ℝ≥0∞), 0 < ε → ∃ N, ∀ k ≥ N,
       prob (genExpr (genTyUniform k) sig m Γ .str) (CallOf take) < ε := by
