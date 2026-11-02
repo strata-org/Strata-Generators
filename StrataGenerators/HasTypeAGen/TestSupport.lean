@@ -155,15 +155,17 @@ def checkFvarsPreserved (expr : LExpr') : Bool :=
 
 -- ── Resolve-after-erasure property (shared by both harnesses) ─────────────
 
-/-- Known types covering all base types the generator can produce. Required for
-    `LExpr.resolve` to reconstruct arrow/Map/Seq aliases after erasure. -/
+/-- Known types covering every type constructor that the generator can produce.
+    `LExpr.resolve` rejects a type whose constructor is not registered here. -/
 def resolveKnownTypes : Lambda.KnownTypes :=
   open Lambda.LTy.Syntax in
   Lambda.makeKnownTypes ([t[∀a b. %a → %b],
     t[bool], t[int], t[string], t[real], t[regex],
+    t[Triggers], t[TriggerGroup],
     t[∀n. bitvec n],
     t[∀a b. Map %a %b],
-    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
+    t[∀a. Sequence %a],
+    t[∀a. Set %a]].map (fun k => k.toKnownType!))
 
 /-- `LContext` with `coreFactory` and each known type that the generator needs. -/
 def resolveLContext : Lambda.LContext LExprParams' :=
