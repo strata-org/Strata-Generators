@@ -2,16 +2,23 @@ import StrataGenerators.PalkaAblation.Gen
 import Basalt
 
 /-!
-# Factory calls with and without Pałka et al.'s rules: the bounds
+# Factory calls with and without the Indir/IndirPoly rules: the bounds
+
+**What is ablated.** Only the two branches that apply a factory operator to arguments read off its
+signature (Indir and IndirPoly, Pałka et al.'s rules). The ablated generator keeps the rest,
+including `genAppArgTy` and `genGenerableTy`, which draw argument types from the context's
+generable types (also after Pałka et al.). The upper bound `off_call_le` is used with the guess
+probability bounded by `1`, so it does not depend on how `genAppArgTy` guesses: it holds for any
+argument-type generator, including a blind one.
 
 The event `OpCall name k`: the root of the term is the operator `name` applied to exactly `k`
 arguments. For every operator context:
 
-* **Pałka et al.'s rules on (`genLExprBase`).** `on_call_ge`: if `(name, as)` is an Indir
+* **Indir/IndirPoly on (`genLExprBase`).** `on_call_ge`: if `(name, as)` is an Indir
   candidate at `r`, then at every depth `n + 1` the full call is made with probability at least
   `4/24 · |candidates at r|⁻¹ · ∏ massFloor aᵢ`. `massFloor` is a per-type lower bound on the
   generator's mass, proven at every depth (`mass_bool`, `mass_int`, …).
-* **Pałka et al.'s rules off (`genLExprBaseW … 0 0`).** `off_call_le`: if `name` is an operator
+* **Indir/IndirPoly off (`genLExprBaseW … 0 0`).** `off_call_le`: if `name` is an operator
   only at its type `a₁ → ⋯ → aₘ → r`, then at every depth the full call is made with probability
   at most `offChain`, which is `1/3 · pickShare` for the innermost bare operator, times one
   application-branch share (`appShare`) and one argument-type guess (`γ`) per argument. It is
@@ -420,7 +427,7 @@ theorem obs_le_iSup {α : Type} (g : SPMF α) (p : α → ℝ≥0∞) :
 section ablated
 variable (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
 
-/-- The ablated generator: `genLExprBase` without Pałka et al.'s two rules. -/
+/-- The ablated generator: `genLExprBase` without its Indir and IndirPoly branches. -/
 noncomputable abbrev genOff (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) : SPMF LExpr' :=
   genLExprBaseW (G := SPMF) fctx octx pctx tvars 0 0 bctx n τ
 

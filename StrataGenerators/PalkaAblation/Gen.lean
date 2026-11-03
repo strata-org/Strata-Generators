@@ -8,8 +8,9 @@ import StrataGenerators.HasTypeAGen.Core
 `genLExprBaseW_eq` proves that `wI = wP = 4` *is* `genLExprBase`, so the copy cannot drift from
 the shipping generator: a change to one alone breaks that theorem.
 
-The **ablation** is `wI = wP = 0`: the same generator with Pałka et al.'s rules removed at every
-depth and every type. (`@[tunable]` cannot express this ablation, since `Tuning.weight` is always
+The **ablation** is `wI = wP = 0`: the same generator with its Indir and IndirPoly branches (Pałka
+et al.'s rules for applying a factory operator) removed at every depth and every type. Everything
+else stays, including `genAppArgTy`'s context-directed argument-type guess. (`@[tunable]` cannot express this ablation, since `Tuning.weight` is always
 at least `1`.)
 -/
 

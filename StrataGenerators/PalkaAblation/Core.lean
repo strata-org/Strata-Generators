@@ -7,7 +7,8 @@ import Mathlib.Data.NNReal.Basic
 # The ablation over Strata Core's factory
 
 `Bounds.lean` bounds, for an arbitrary operator context, how often `genLExprBase` makes a full
-call of an operator with and without Pałka et al.'s rules. Here the context is `coreMonoOps`
+call of an operator with and without its Indir and IndirPoly branches (Pałka et al.'s rules for
+applying a factory operator; `genAppArgTy`'s context-directed type guess is kept). Here the context is `coreMonoOps`
 (every function of `Core.Factory`), and the two bounds are compared, function by function, by
 computation.
 
@@ -21,7 +22,7 @@ at no other type.
 
 * `core_ablation`: for every call that passes (`separatedCalls`), at every depth `n + 1` and in
   every context, **`genLExprBase` makes the call strictly more often than the same generator
-  without Pałka et al.'s rules.**
+  without its Indir and IndirPoly branches.**
 * `separatedCalls_length`: 240 calls pass: all 4 monomorphic three-argument functions and 236 of
   the 259 monomorphic two-argument ones. The bounds cannot decide the rest, which does not show
   that Pałka et al.'s rule loses there:
@@ -36,8 +37,12 @@ at no other type.
   the ablated generator makes the call with probability `0` and `genLExpr` with positive
   probability.
 
-`native_decide` evaluates the checks. It adds no axiom beyond those `Core.Factory` already depends
-on (its `name_nodup` field is proved by `native_decide`).
+**Axioms.** `core_ablation` and `core_genLExpr_below_arity` use no `native_decide`: membership in
+`separatedCalls` / `belowArityCalls` is a hypothesis, discharged by the check's own definition. They
+depend only on the standard axioms and on the `native_decide` axioms that `Core.Factory` already
+carries (its `name_nodup` field). Only the three counting theorems (`coreCalls_length`,
+`separatedCalls_length`, `belowArityCalls_length`) use `native_decide` themselves; each use adds its
+own auxiliary axiom of the same kind (trust in the compiled evaluator).
 -/
 
 namespace StrataGenerators.PalkaAblation
@@ -90,6 +95,9 @@ def massFloorQ (octx : OpCtx) : LMonoTy → ℚ≥0
   | .tcons "regex" [] => if (opsOfType octx .regex).length > 0 then 4 / 17 else 0
   | _ => 0
 
+-- `norm_num` is needed in some of the seven cases and not others; the linter reports it per case.
+set_option linter.unusedTactic false in
+set_option linter.unreachableTactic false in
 theorem massFloor_eq (octx : OpCtx) (τ : LMonoTy) : massFloor octx τ = qe (massFloorQ octx τ) := by
   unfold massFloor massFloorQ
   split
@@ -181,7 +189,7 @@ theorem pickShare_eq (octx : OpCtx) (name : String) (σ : LMonoTy)
 
 /-- **The ablation, over Core's factory.** For every call that `check` separates, at every depth
 `n + 1` and in every context, `genLExprBase` makes it strictly more often than the same generator
-without Pałka et al.'s rules (`genLExprBaseW … 0 0`, which `genLExprBaseW_eq` pins to
+without its Indir and IndirPoly branches (`genLExprBaseW … 0 0`, which `genLExprBaseW_eq` pins to
 `genLExprBase` at weights `4 4`). -/
 theorem core_ablation (fctx : FVarCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) (n : Nat) {c : Call} (hc : c ∈ separatedCalls) :
@@ -246,9 +254,8 @@ theorem massFloor_pos {octx : OpCtx} {a : LMonoTy} (h : 0 < massFloorQ octx a) :
   rw [massFloor_eq]
   exact ENNReal.coe_pos.2 (by exact_mod_cast h)
 
-/-- **Below its arity, only Pałka et al.'s rules make the call.** For a call with `m ≥ 2`
-arguments and every depth `d < m`, the ablated generator never makes it, while `genLExpr` (and
-`genLExprBase` at depth `d ≥ 1`, via `core_ablation`'s bound) makes it with positive probability. -/
+/-- **Below its arity, only the Indir rules make the call.** For a call with `m ≥ 2`
+arguments and every depth `d < m`, the ablated generator never makes it, while `genLExpr` makes it with positive probability. -/
 theorem core_genLExpr_below_arity (fctx : FVarCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     (bctx : BVarCtx) {c : Call} (hc : c ∈ belowArityCalls) {d : Nat} (hd : d < c.2.1.length) :
     prob (genLExprBaseW (G := SPMF) fctx coreMonoOps pctx tvars 0 0 bctx d c.2.2)

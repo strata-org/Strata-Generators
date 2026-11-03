@@ -22,14 +22,18 @@ monomorphic Core factory function `f` of arity `m ≥ 1`:
 `substr_separation` is the instance for the three-argument `Str.Substr : String → Int → Int →
 String`.
 
-**Scope.** The generators are still the toy `genExpr`/`genExprP`, not `genLExprBase`/`genLExpr`:
-those already contain the Indir rules (Pałka et al.'s) at every depth, so Strata has no STLC-only
-generator to compare against. Polymorphic factory functions (IndirPoly) are excluded, as the toy
+**Scope.** The generators are still the toy `genExpr`/`genExprP`, not `genLExprBase`/`genLExpr`.
+The comparison on the real generator, with its Indir rules ablated, is in `PalkaAblation/`. Polymorphic factory functions (IndirPoly) are excluded, as the toy
 has no type variables.
 
-**Axioms.** `coreSig_args_base` is checked with `native_decide`. This adds no axiom beyond those
-`Core.Factory` already depends on: its own `name_nodup` field is proved by `native_decide`, so
-every statement that mentions the factory already depends on `Lean.ofReduceBool`.
+**Idealization.** Every Core type other than an arrow is a toy base type with a literal leaf
+(`Ty.other`), so a toy argument draw at, e.g., `regex` or `Map int bool` always succeeds. Strata
+has no literals for those types; the lower bound on Pałka et al.'s rule relies on this.
+
+**Axioms.** `coreSig_args_base` and `substrFn_mem` are checked with `native_decide`, and each use
+adds its own auxiliary axiom (trust in the compiled evaluator). That is the same kind of trust every
+statement about the factory already carries: `Core.Factory`'s `name_nodup` field is itself proved
+by `native_decide`.
 -/
 
 namespace StrataGenerators.AmbientApp

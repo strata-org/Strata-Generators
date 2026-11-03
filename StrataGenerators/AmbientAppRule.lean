@@ -54,7 +54,7 @@ inductive Ty where
   number of base types grow without bound. -/
   | bv (w : Nat)
   /-- Any other Strata Core type (`real`, `regex`, `Map int bool`, …), kept opaque: a base type
-  with a literal. -/
+  with a literal. This is an idealization: Strata has no literals for `regex` or `Map` types. -/
   | other (t : Lambda.LMonoTy)
   | arrow (a b : Ty)
   deriving DecidableEq, Repr
