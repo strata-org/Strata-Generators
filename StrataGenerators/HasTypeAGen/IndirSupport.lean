@@ -94,18 +94,9 @@ theorem mapM_forall {P : LExpr' → Prop}
     (hArg : ∀ σ a, a ∈ SPMF.support (genArg σ) → P a)
     (argTys : List LMonoTy) (args : List LExpr')
     (hargs : args ∈ SPMF.support (List.mapM (m := SPMF) genArg argTys)) :
-    ∀ a ∈ args, P a := by
-  induction argTys generalizing args with
-  | nil =>
-    simp only [List.mapM_nil, SPMF.mem_support_pure_iff] at hargs
-    subst hargs; intro a ha; simp at ha
-  | cons σ rest ih =>
-    simp only [List.mapM_cons, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at hargs
-    obtain ⟨x, hx, tl, htl, rfl⟩ := hargs
-    intro a ha
-    rcases List.mem_cons.mp ha with rfl | hrest
-    · exact hArg σ a hx
-    · exact ih tl htl a hrest
+    ∀ a ∈ args, P a :=
+  forall₂_forall_of_cond (Q := fun _ => True) (fun σ _ => hArg σ) (fun _ _ => trivial)
+    ((mem_support_mapM_iff genArg argTys args).mp hargs)
 
 /-- The **shape** of each term that the `Indir` rule can emit. Such a term is an application spine
     `mkApps (.op … ) args`, and each of its arguments comes from `genArg`.

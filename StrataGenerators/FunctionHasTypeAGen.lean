@@ -73,7 +73,6 @@ theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
 -- `genIdentName_no_space`, the `dodgeKeyword` lemmas, `append_underscore_not_keyword` and
 -- `no_keyword_ends_underscore`. Each one is in the namespace `StrataGenerators.Function`.
 
-set_option linter.unusedSimpArgs false in
 /-- The `mapM` inside `genInputs` gives a `ListMap` whose keys are the list of input identifiers and
     each of whose values is in the support of `genTy`. -/
 theorem mapM_genInputs_keys_values (genTy : SPMF LMonoTy)
@@ -85,26 +84,14 @@ theorem mapM_genInputs_keys_values (genTy : SPMF LMonoTy)
     m.keys = idents ∧ ∀ ty ∈ m.values, ty ∈ SPMF.support genTy := by
   induction idents generalizing m with
   | nil =>
-    simp only [List.mapM_nil] at hm
-    obtain rfl : m = [] := mem_support_pure_iff.mp hm
-    exact ⟨rfl, by intro ty hty; simp [ListMap.values] at hty⟩
+    obtain rfl := SPMF.mem_support_pure_iff.mp hm
+    exact ⟨rfl, nofun⟩
   | cons x xs ih =>
-    -- The support lemmas apply as terms: the generator returns a `ListMap` and `mapM` a `List`, so
-    -- `simp` and `rw` do not match them syntactically.
-    simp only [List.mapM_cons] at hm
-    obtain ⟨pair, hpair, hm⟩ := mem_support_bind_iff.mp hm
-    obtain ⟨rest, hrest, hm⟩ := mem_support_bind_iff.mp hm
-    obtain rfl := mem_support_pure_iff.mp hm
-    obtain ⟨ty, hty, hpair⟩ := mem_support_bind_iff.mp hpair
-    obtain rfl := mem_support_pure_iff.mp hpair
-    obtain ⟨hkeys_rest, hvals_rest⟩ := ih rest hrest
-    refine ⟨?_, ?_⟩
-    · simp only [ListMap.keys, hkeys_rest]
-    · intro v hv
-      simp only [ListMap.values, List.mem_cons] at hv
-      rcases hv with rfl | hv
-      · exact hty
-      · exact hvals_rest v hv
+    revert m; show IsSoundFor _ _
+    refine IsSoundFor.iff_obs.mpr ?_
+    rw [List.mapM_cons]
+    walk [IsSoundFor.obs ih, IsSoundFor.obs (g := genTy) fun _ h => h]
+    all_goals aesop (add norm simp [ListMap.keys, ListMap.values])
 
 /-- What membership in the support of `genInputs genTy depth` gives. The keys of the `ListMap` are
     a list of identifiers with no duplicate, and each value is in the support of `genTy`. -/
@@ -771,7 +758,6 @@ theorem genNameList_not_keyword (depth : Nat) (l : List String)
     ∀ s ∈ l, isReservedKeyword s = false := fun s hs =>
   genIdentName_not_keyword s ((mem_support_genNameList_iff depth l |>.mp hl).2 s hs)
 
-set_option linter.unusedSimpArgs false in
 /-- The converse of `mapM_genInputs_keys_values`. Take a `ListMap` such that `genTy` can reach
     each of its values. The support of the `mapM` inside `genInputs`, over the keys of that map,
     then holds the map. -/
@@ -783,19 +769,11 @@ theorem mapM_genInputs_complete (genTy : SPMF LMonoTy)
         let ty ← genTy
         pure (x, ty))) := by
   induction m with
-  | nil =>
-    show [] ∈ SPMF.support (pure [] : SPMF _)
-    rw [mem_support_pure_iff]
+  | nil => exact SPMF.mem_support_pure_iff.mpr rfl
   | cons p rest ih =>
-    obtain ⟨x, ty⟩ := p
-    have hty : ty ∈ SPMF.support genTy := hvals ty (by simp [ListMap.values])
-    have hrest : ∀ ty' ∈ ListMap.values rest, ty' ∈ SPMF.support genTy := by
-      intro ty' hty'; exact hvals ty' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hty')
-    have hkeys : ListMap.keys ((x, ty) :: rest) = x :: ListMap.keys rest := rfl
-    rw [hkeys, List.mapM_cons]
-    exact mem_support_bind_iff.mpr ⟨(x, ty),
-      mem_support_bind_iff.mpr ⟨ty, hty, mem_support_pure_iff.mpr rfl⟩,
-      mem_support_bind_iff.mpr ⟨rest, ih hrest, mem_support_pure_iff.mpr rfl⟩⟩
+    simp only [ListMap.values, List.mem_cons, forall_eq_or_imp] at hvals
+    rw [ListMap.keys, List.mapM_cons]; refine SPMF.mem_support_iff_may.mpr ?_; walk
+    exact ⟨_, hvals.1, _, ih hvals.2, rfl⟩
 
 /-- `genIdents depth` can reach a list of identifiers `ids` that holds no duplicate, if
     `genNameList depth` can reach the list of names `ids.map (·.name)`. -/
@@ -845,15 +823,8 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     (ho : ∀ e, o = some e →
       e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ)) :
     o ∈ SPMF.support (genOptExpr (G := SPMF) fctx octx tvars depth τ pctx) := by
-  simp only [genOptExpr,
-    mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)]
-  cases o with
-  | none =>
-    -- The generator can always reach `none`.
-    exact Or.inl rfl
-  | some e =>
-    -- The generator can reach `some e`, because `genLExpr` can reach `e`.
-    exact Or.inr ⟨e, ho e rfl, rfl⟩
+  rw [SPMF.mem_support_iff_may, genOptExpr]; walk
+  cases o <;> simp_all
 
 /-- A clause whose expression a generator reaches is in the support of the clause builder over
     that generator. -/

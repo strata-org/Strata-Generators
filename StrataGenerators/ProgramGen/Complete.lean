@@ -1,5 +1,6 @@
 import StrataGenerators.ProgramGen
 import StrataGenerators.ProgramGen.RecFuncBlockSupport
+import Basalt.Walk.Complete
 
 /-!
 # Completeness of the whole-program generator (fold inversion)
@@ -74,6 +75,10 @@ open DatatypeGen
 open StrataGenerators.Stmt (isLocalTypeName)
 
 namespace ProgramGen
+
+/-- A value in a draw's support, as the walk's completeness fact for that draw. -/
+theorem mem_law {α : Type} {g : SPMF α} {a : α} (h : a ∈ SPMF.support g) :
+    IsCompleteFor g (· = a) := fun _ e => e ▸ h
 
 /-! ## Fold inversion -/
 
@@ -355,13 +360,9 @@ theorem genDeclAbstract_complete {s : GenState} {b : Bounds} {nm : String} {ar :
     (hC : s.C.addKnownTypeWithError { name := nm, metadata := ar } default = .ok C') :
     (([mkAbstractTypeDecl nm ar]), s.addAbstract nm ar C') ∈
       SPMF.support (genDeclAbstract (G := SPMF) s b) := by
-  simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff, mem_support_pure_iff]
-  refine ⟨(mkAbstractTypeDecl nm ar, nm, ar),
-    ⟨nm, genDeclTypeName_complete hnm hnmAllowed hnmNotLocal, ar, ?_, rfl⟩, ?_⟩
-  · exact mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, har⟩
-  · -- Take the `.ok` branch of the `match` using `hC`.
-    rw [hC]
-    exact mem_support_pure_iff.mpr rfl
+  rw [SPMF.mem_support_iff_may]; unfold genDeclAbstract genAbstractType
+  walk [(mem_law (genDeclTypeName_complete hnm hnmAllowed hnmNotLocal)).obs]
+  exact ⟨_, rfl, ar, ⟨Nat.zero_le _, har⟩, by rw [hC]⟩
 
 /-! ## Per-step reachability: type aliases
 
@@ -411,15 +412,10 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
                      :: s.Γ.aliases }
           reserved := nm :: s.reserved }) ∈
       SPMF.support (genDeclAlias (G := SPMF) s b) := by
-  simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff]
-  refine ⟨(mkAliasDecl nm body, nm), ⟨nm, genDeclTypeName_complete hnm hnmAllowed hnmNotLocal,
-            tyParams.length, ?_, tyParams, hparams, body, hbody, rfl⟩, ?_⟩
-  · exact mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, hlen⟩
-  · -- `genDeclAlias` matches on `mkAliasDecl nm body`, which is syntactically a
-    -- `.type (.syn …)`, so the match reduces to the gate, which `hallowed` passes.
-    simp only [mkAliasDecl]
-    rw [if_pos hallowed]
-    exact mem_support_pure_iff.mpr rfl
+  rw [SPMF.mem_support_iff_may]
+  simp only [genDeclAlias, genAlias, mkAliasDecl, bind_assoc, pure_bind]
+  walk [(mem_law (genDeclTypeName_complete hnm hnmAllowed hnmNotLocal)).obs]
+  exact ⟨_, rfl, _, ⟨Nat.zero_le _, hlen⟩, _, hparams, _, hbody, by rw [if_pos hallowed]⟩
 
 /-- **Reachability of the alias step at the usual list of parameters.** This is
     `genDeclAlias_complete` with `tyParams := (LMonoTy.freeVars body).uniq`, which
@@ -494,14 +490,13 @@ theorem genDeclDistinct_complete {s : GenState} {b : Bounds} {nm : String}
     ((constDecls ++ [mkDistinctDecl nm (distinctElems τ constNames)]),
         { s with C := C', reserved := constNames ++ nm :: s.reserved }) ∈
       SPMF.support (genDeclDistinct (G := SPMF) s b) := by
-  simp only [mem_support_pure_iff, genDeclDistinct, genDistinctAssertion, mem_support_bind_iff]
-  refine ⟨(nm, τ, constNames),
-          ⟨nm, genDeclName_complete hnm hnmAllowed, τ, hτ, constNames.length,
-           mem_support_chooseNat_iff.mpr ⟨hlen2, hlen⟩, constNames, hconsts, ?_⟩, ?_⟩
-  · rw [List.filter_eq_self.mpr hconstsAllowed]
-  -- Take the branches of the gate and of the `match` that emit, using `hadd`.
-  rw [if_pos (by simp [hlen2, hτAllowed]), hadd]
-  exact mem_support_pure_iff.mpr rfl
+  rw [SPMF.mem_support_iff_may]; unfold genDeclDistinct genDistinctAssertion
+  walk [(mem_law (genDeclName_complete hnm hnmAllowed)).obs, (mem_law hτ).obs]
+  have hgate : (decide (2 ≤ (constNames.filter isAllowedName).length) &&
+      mtyAllTyConsNames isAllowedName τ) = true := by
+    simp [List.filter_eq_self.mpr hconstsAllowed, hlen2, hτAllowed]
+  exact ⟨_, rfl, _, rfl, _, ⟨hlen2, hlen⟩, _, hconsts, by
+    rw [if_pos hgate, List.filter_eq_self.mpr hconstsAllowed, hadd]⟩
 
 /-! ## Per-step reachability: datatype blocks
 
@@ -544,14 +539,11 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
                  derivedPctx :=
                    adtDerivedPolyOps block b.derivedFamilies ++ s.derivedPctx }) ∈
       SPMF.support (genDeclDatatype (G := SPMF) s b) := by
-  simp only [genDeclDatatype, mem_support_bind_iff]
-  refine ⟨block, hblock, ?_⟩
-  -- Take the branch of the name gate that continues, then the `.ok` branch using `hC`.
   have hgate : ∀ d ∈ block, (isAllowedName d.name && !isLocalTypeName d.name) = true := by
     intro d hd
     simp only [hnamesAllowed d hd, hnamesNotLocal d hd, Bool.not_false, Bool.and_self]
-  rw [if_pos (List.all_eq_true.mpr hgate), hC]
-  exact mem_support_pure_iff.mpr rfl
+  rw [SPMF.mem_support_iff_may]; unfold genDeclDatatype; walk [(mem_law hblock).obs]
+  exact ⟨_, rfl, by rw [if_pos (List.all_eq_true.mpr hgate), hC]⟩
 
 open Core.TypeSpec DatatypeGen in
 /-- **The step for a datatype is reachable from `MutualADTWF` alone.** This theorem is

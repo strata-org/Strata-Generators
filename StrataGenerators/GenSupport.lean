@@ -18,7 +18,7 @@ speak about `SPMF.support`, the set of values whose mass is not zero. Basalt own
 `mem_support_*_iff` lemmas, `Basalt/Laws.lean` has `IsSoundAndComplete`, and
 `Basalt/Tactic/Support.lean` has `support_simp`, the packaged `simp only` set for support inversion.
 
-This file holds four things Basalt does not.
+This file holds five things Basalt does not.
 
 1. `SPMF.mem_support_bot_iff`, so that a `simp` set can discharge the branch of a generator that
    produces nothing.
@@ -30,6 +30,8 @@ This file holds four things Basalt does not.
 4. `wellFounded_fix_rel`, which lifts a relation between two step functions to a relation between
    their fixpoints. It carries a per-site fact up to a whole recursive generator, and it is not
    specific to any interpretation.
+5. `isSoundFor_self_support` and `true_law`, the two trivial soundness facts that `walk` takes for
+   a draw whose own law a proof does not need.
 
 Two facts about `SPMF` shape every proof here. Membership goes through `SPMF.support`, never through
 the generator itself; and a reweighting preserves the support but not the generator, so the tuning
@@ -80,6 +82,15 @@ export SPMF (support support_bind mem_support_bind_iff support_pure mem_support_
   mem_support_coin_iff support_biasedOptionGen mem_support_biasedOptionGen_iff support_optionGen
   mem_support_optionGen_iff mem_support_bot_iff mem_support_csup bind_congr_support bot_bind
   support_frequency_reweight support_frequency_congr_weights)
+
+/-- The trivial law of a generator: each value in its support is in its support. A `walk` over a
+    generator built from smaller ones takes this as the fact for each smaller one, and leaves the
+    membership in context for the caller. -/
+theorem isSoundFor_self_support {α} (g : SPMF α) : IsSoundFor g (· ∈ SPMF.support g) := fun _ h => h
+
+/-- Every generator is sound for the trivial postcondition. `walk` takes this as the fact for a
+    draw that constrains nothing the proof needs. -/
+theorem true_law {α : Type} (g : SPMF α) : IsSoundFor g (fun _ => True) := fun _ _ => trivial
 
 namespace StrataGenerators
 

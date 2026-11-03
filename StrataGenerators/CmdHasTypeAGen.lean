@@ -627,6 +627,15 @@ def FreshNamesDisjointFromExprs (fctx : FVarCtx) (octx : OpCtx)
     ∀ τ e, e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth τ) →
       (⟨name, ()⟩ : Identifier Unit) ∉ HasFvars.getFvars (P := Expression) e
 
+/-- Unfolds `genCmd` and its smaller generators and walks a soundness goal over them. One goal is
+    left per branch, with the membership of each draw in context. -/
+macro "walk_genCmd" : tactic => `(tactic| (
+  rw [IsSoundFor.iff_obs]
+  unfold genCmd genInitDet genInitNondet genSetDet genSetNondet genAssertCmd genAssumeCmd genCoverCmd
+  dsimp only
+  walk [(isSoundFor_self_support (genFreshName _ _)).obs, (isSoundFor_self_support (genLMonoTy _ _)).obs,
+    (isSoundFor_self_support (genLExpr _ _ _ _ _ _ _)).obs, (isSoundFor_self_support genIdentName).obs]))
+
 /-- **Soundness of `genCmd` at the scopes of a context.** Every command that `genCmd` draws from a
     scope `ctx` is well-typed from the variable scopes of a context `Γ` that agrees with `ctx` to
     those scopes with the declared variable added, if the command is an `init`. This holds when the
@@ -644,67 +653,29 @@ theorem genCmd_sound_scopes
     (hr : r ∈ SPMF.support
       (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx avoid C.knownTypes)) :
     CmdWellTyped C Γ.types r.cmd (cmdOutScopes Γ.types r.cmd) := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid C.knownTypes] at hr
-  rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
-  · -- init_det, or init_nondet when the initializer is filtered out.
-    simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, hname, mty, hmty, e, he, rfl⟩ := hr
-    have hfreshCtx := genFreshName_produces_fresh ctx name hname
-    have hfreshΓ := hCorr.2 ⟨name, ()⟩ hfreshCtx
-    have hwkm := wellKindedTy_of_genLMonoTy hops.arities tvars depth mty hmty
-    dsimp only
-    split
-    · rename_i hknown
-      exact .init_det _ _ _ e mty default _ hfreshΓ (hDisjoint name hfreshCtx mty e he) rfl hwkm
-        (genLExpr_exprWellTyped_of_known hops hCorr hFun he hknown)
+  revert r; show IsSoundFor _ _; walk_genCmd
+  all_goals try split
+  all_goals first
+    | exact .init_det _ _ _ _ _ default _ (hCorr.2 _ (genFreshName_produces_fresh ctx _ ‹_›))
+        (hDisjoint _ (genFreshName_produces_fresh ctx _ ‹_›) _ _ ‹_›) rfl
+        (wellKindedTy_of_genLMonoTy hops.arities tvars depth _ ‹_›)
+        (genLExpr_exprWellTyped_of_known hops hCorr hFun ‹_› ‹_›) (Strata.Util.HMaps.Equiv.refl _)
+    | exact .init_nondet _ _ _ _ default _ (hCorr.2 _ (genFreshName_produces_fresh ctx _ ‹_›)) rfl
+        (wellKindedTy_of_genLMonoTy hops.arities tvars depth _ ‹_›) (Strata.Util.HMaps.Equiv.refl _)
+    | exact .set_det _ _ _ _ default _ (hCorr.1 _ _ (Map.find?_of_mem_of_functional ctx _ _ hFun
+        (List.mem_filter.mp ‹_›).1)) (genLExpr_exprWellTyped_of_known hops hCorr hFun ‹_› ‹_›)
         (Strata.Util.HMaps.Equiv.refl _)
-    · exact .init_nondet _ _ _ mty default _ hfreshΓ rfl hwkm (Strata.Util.HMaps.Equiv.refl _)
-  · -- init_nondet
-    simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, hname, mty, hmty, rfl⟩ := hr
-    have hfreshΓ := hCorr.2 ⟨name, ()⟩ (genFreshName_produces_fresh ctx name hname)
-    exact .init_nondet _ _ _ mty default _ hfreshΓ rfl
-      (wellKindedTy_of_genLMonoTy hops.arities tvars depth mty hmty)
-      (Strata.Util.HMaps.Equiv.refl _)
-  · -- set_det, or set_nondet when the expression is filtered out.
-    simp only [genSetDet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
-               mem_support_elements_iff] at hr
-    obtain ⟨⟨name, mty⟩, hmem, e, he, rfl⟩ := hr
-    have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
-    have hfind := hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx)
-    dsimp only
-    split
-    · rename_i hknown
-      exact .set_det _ _ _ e default _ hfind
-        (genLExpr_exprWellTyped_of_known hops hCorr hFun he hknown)
+    | exact .set_nondet _ _ _ default _ (hCorr.1 _ _ (Map.find?_of_mem_of_functional ctx _ _ hFun
+        (List.mem_filter.mp ‹_›).1)) (Strata.Util.HMaps.Equiv.refl _)
+    | exact .assert _ _ _ default _
+        (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun ‹_›))
         (Strata.Util.HMaps.Equiv.refl _)
-    · exact .set_nondet _ _ _ default _ hfind (Strata.Util.HMaps.Equiv.refl _)
-  · -- set_nondet
-    simp only [genSetNondet, VarCtx.writable, mem_support_bind_iff, mem_support_pure_iff,
-               mem_support_elements_iff] at hr
-    obtain ⟨⟨name, mty⟩, hmem, rfl⟩ := hr
-    have hmemCtx : List.Mem (name, mty) ctx := (List.mem_filter.mp hmem).1
-    exact .set_nondet _ _ _ default _
-      (hCorr.1 name mty (Map.find?_of_mem_of_functional ctx name mty hFun hmemCtx))
-      (Strata.Util.HMaps.Equiv.refl _)
-  · -- assert. `genIdentName` draws the label, and the typing rule ignores it.
-    simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨l, _, e, he, rfl⟩ := hr
-    exact .assert _ _ _ default _
-      (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun he))
-      (Strata.Util.HMaps.Equiv.refl _)
-  · -- assume
-    simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨l, _, e, he, rfl⟩ := hr
-    exact .assume _ _ _ default _
-      (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun he))
-      (Strata.Util.HMaps.Equiv.refl _)
-  · -- cover
-    simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨l, _, e, he, rfl⟩ := hr
-    exact .cover _ _ _ default _
-      (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun he))
-      (Strata.Util.HMaps.Equiv.refl _)
+    | exact .assume _ _ _ default _
+        (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun ‹_›))
+        (Strata.Util.HMaps.Equiv.refl _)
+    | exact .cover _ _ _ default _
+        (knownOrTrue_exprWellTyped (genLExpr_exprWellTyped_of_known hops hCorr hFun ‹_›))
+        (Strata.Util.HMaps.Equiv.refl _)
 
 /-- **Soundness of `genCmd`**: every command that `genCmd` draws from a scope `ctx` is well-typed
     from the variable scopes of a context `Γ` that agrees with `ctx`, when the operators and
@@ -858,37 +829,12 @@ theorem genCmd_outCtx_functional
     (hr : r ∈ SPMF.support
       (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx avoid kt)) :
     Map.Functional r.outCtx := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid kt] at hr
-  rcases hr with hr | (hr | (⟨hlen, hr⟩ | (⟨hlen, hr⟩ | (hr | (hr | hr)))))
-  · -- init_det. The output context is `ctx.insert ⟨name, ()⟩ mty`, and `name` is fresh in `ctx`.
-    simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, hname, mty, _, e, _, rfl⟩ := hr
-    have hfresh := genFreshName_produces_fresh ctx name hname
-    simp only [VarCtx.isFresh, VarCtx.find?, Option.isNone_iff_eq_none] at hfresh
-    exact Map.insert_functional_of_fresh ctx ⟨name, ()⟩ mty hFun hfresh
-  · -- init_nondet
-    simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, hname, mty, _, rfl⟩ := hr
-    have hfresh := genFreshName_produces_fresh ctx name hname
-    simp only [VarCtx.isFresh, VarCtx.find?, Option.isNone_iff_eq_none] at hfresh
-    exact Map.insert_functional_of_fresh ctx ⟨name, ()⟩ mty hFun hfresh
-  · -- set_det. The output context is `ctx`.
-    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-               mem_support_elements_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
-  · -- set_nondet
-    simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
-               mem_support_elements_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr; exact hFun
-  · -- assert
-    simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
-  · -- assume
-    simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
-  · -- cover
-    simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hFun
+  revert r; show IsSoundFor _ _; walk_genCmd
+  all_goals first
+    | exact hFun
+    | (have hfresh := genFreshName_produces_fresh ctx _ ‹_›
+       simp only [VarCtx.isFresh, VarCtx.find?, Option.isNone_iff_eq_none] at hfresh
+       exact Map.insert_functional_of_fresh ctx _ _ hFun hfresh)
 
 /-- **`genCmd` keeps each type in the scope well-kinded in `C`.** The two `init` commands are the
     only commands that change the scope. The type that such a command stores comes from
@@ -905,35 +851,11 @@ theorem genCmd_outCtx_wellKinded
     (hr : r ∈ SPMF.support
       (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx avoid kt)) :
     ∀ ty ∈ r.outCtx.values, C.WellKindedTy ty := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid kt] at hr
-  rcases hr with hr | (hr | (⟨_, hr⟩ | (⟨_, hr⟩ | (hr | (hr | hr)))))
-  · -- init_det. The scope gains `mty`, which comes from `genLMonoTy`.
-    simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, _, mty, hmty, _, _, rfl⟩ := hr
-    intro ty hty
-    rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
-    · exact genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
-    · exact hctx ty hty'
-  · -- init_nondet. The same argument applies.
-    simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, _, mty, hmty, rfl⟩ := hr
-    intro ty hty
-    rcases mem_values_insert ctx ⟨name, ()⟩ mty hty with rfl | hty'
-    · exact genLMonoTy_mem_wellKindedTy hC ⟨_, hmty⟩
-    · exact hctx ty hty'
-  · -- A `set`, an `assert`, an `assume` and a `cover` do not change the scope.
-    simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-      mem_support_elements_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
-  · simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
-      mem_support_elements_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr; exact hctx
-  · simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
-  · simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
-  · simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr; exact hctx
+  revert r; show IsSoundFor _ _; walk_genCmd
+  all_goals first
+    | exact hctx _ ‹_›
+    | (rcases mem_values_insert ctx _ _ ‹_› with rfl | hty
+       exacts [genLMonoTy_mem_wellKindedTy hC ⟨_, ‹_›⟩, hctx _ hty])
 
 /-- Soundness of `genCmds`: each sequence of commands in the support of the generator satisfies the
     chain relation `CmdsWellTyped`, when the operators agree with `C` and the scope is functional.
@@ -950,22 +872,13 @@ theorem genCmds_sound
       (genCmds (G := SPMF) octx tvars immutableVars ctx depth n avoid C.knownTypes)) :
     CmdsWellTyped C (env.toTCtx ctx).types result.1 (env.toTCtx result.2).types := by
   induction n generalizing ctx result with
-  | zero =>
-    simp only [genCmds, genCmdsWith, mem_support_pure_iff] at hr
-    subst hr
-    exact CmdsWellTyped.nil _
+  | zero => simp only [genCmds, genCmdsWith, mem_support_pure_iff] at hr; subst hr; exact .nil _
   | succ n ih =>
-    simp only [genCmds, genCmdsWith, mem_support_bind_iff] at hr
-    obtain ⟨⟨cmd, ctx'⟩, hcmd, rest_hr⟩ := hr
-    dsimp only [GenCmdResult.outCtx, GenCmdResult.cmd] at rest_hr
-    obtain ⟨⟨cmds, ctx''⟩, hcmds, hpure⟩ := rest_hr
-    have heq : result = (cmd :: cmds, ctx'') := mem_support_pure_iff.mp hpure
-    subst heq
-    have htyCmd := genCmd_sound_env octx tvars immutableVars ctx depth C [] env hops hFun
-      ⟨cmd, ctx'⟩ hcmd
-    have hFun' : Map.Functional ctx' :=
-      genCmd_outCtx_functional octx [] tvars immutableVars ctx depth hFun ⟨cmd, ctx'⟩ hcmd
-    exact CmdsWellTyped.cons _ _ _ cmd cmds htyCmd (ih ctx' hFun' (cmds, ctx'') hcmds)
+    revert result; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genCmds, genCmdsWith]
+    walk [(isSoundFor_self_support (genCmd _ _ _ _ _ _ _ _)).obs,
+      (isSoundFor_self_support (genCmdsWith _ _ n)).obs]
+    exact .cons _ _ _ _ _ (genCmd_sound_env octx tvars immutableVars ctx depth C [] env hops hFun _ ‹_›)
+      (ih _ (genCmd_outCtx_functional octx [] tvars immutableVars ctx depth hFun _ ‹_›) _ ‹_›)
 
 -- ── A quick check that the generator runs ─────────────────────────────
 
