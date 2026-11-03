@@ -479,18 +479,14 @@ theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyId
       (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
   induction labels generalizing m with
   | nil =>
-    simp only [ListMap, List.mapM_nil, mem_support_pure_iff] at hm
-    subst hm
-    intro c hc; simp only [ListMap.values, List.not_mem_nil] at hc
+    obtain rfl := SPMF.mem_support_pure_iff.mp hm
+    exact nofun
   | cons l ls ih =>
-    simp only [ListMap, List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff] at hm
-    obtain ⟨pair, hpair, rest, hrest, rfl⟩ := hm
-    obtain ⟨e, he, rfl⟩ := hpair
-    intro c hc
-    simp only [ListMap.values, List.mem_cons] at hc
-    rcases hc with rfl | hc
-    · exact he
-    · exact ih rest hrest c (by simpa only [ListMap.values] using hc)
+    revert m; show IsSoundFor _ _
+    rw [IsSoundFor.iff_obs, List.mapM_cons]
+    walk [IsSoundFor.obs ih,
+      IsSoundFor.obs (g := genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) fun _ h => h]
+    aesop (add norm simp ListMap.values)
 
 /-- Membership in `genChecks octx tvars depth`: every clause's `expr` is a `bool`
     expression reachable by `genLExpr`. -/
@@ -516,31 +512,14 @@ theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List Ty
         let e ← genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check)))) := by
   induction m with
-  | nil =>
-    show [] ∈ SPMF.support (pure [] : SPMF _)
-    rw [mem_support_pure_iff]
+  | nil => exact SPMF.mem_support_pure_iff.mpr rfl
   | cons p rest ih =>
-    obtain ⟨l, c⟩ := p
-    simp only [ListMap, ListMap.keys, List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff]
-    have hc_mem : c ∈ ListMap.values ((l, c) :: rest) := by simp [ListMap.values]
-    have hce := hvals c hc_mem
-    have hrest : ∀ c' ∈ ListMap.values rest,
-        c'.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool) := by
-      intro c' hc'; exact hvals c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
-    have hrest_attr : ∀ c' ∈ ListMap.values rest, c'.attr = .Default := by
-      intro c' hc'; exact hattr c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
-    have hrest_md : ∀ c' ∈ ListMap.values rest, c'.md = #[] := by
-      intro c' hc'; exact hmd c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
-    -- The head check `{ expr := c.expr }` (which `pure` produces) equals `c`, since
-    -- `c`'s `attr`/`md` are at defaults.
-    have hc_eq : ({ expr := c.expr } : Procedure.Check) = c := by
-      have ha := hattr _ hc_mem
-      have hmm := hmd _ hc_mem
-      cases c with
-      | mk e a md => subst ha; subst hmm; rfl
-    -- Witness the actual head pair `(l, c)`; its membership in the generator's
-    -- head step holds because `pure` produces `(l, { expr := c.expr }) = (l, c)`.
-    exact ⟨(l, c), ⟨c.expr, hce, by rw [hc_eq]⟩, rest, ih hrest_attr hrest_md hrest, rfl⟩
+    -- The head check is `{ expr := c.expr }`, which is `c` because its `attr`/`md` are at defaults.
+    obtain ⟨l, ⟨e, a, md⟩⟩ := p
+    simp only [ListMap.values, List.mem_cons, forall_eq_or_imp] at hattr hmd hvals
+    obtain ⟨rfl, hattr⟩ := hattr; obtain ⟨rfl, hmd⟩ := hmd
+    rw [ListMap.keys, List.mapM_cons]; refine SPMF.mem_support_iff_may.mpr ?_; walk
+    exact ⟨_, hvals.1, _, ih hattr hmd hvals.2, rfl⟩
 
 /-- Completeness of `genChecks`: a check `ListMap` whose labels' names are
     reachable by `genNameList`, whose clauses are all default-`attr`/empty-`md`,
