@@ -9,7 +9,7 @@ import Strata.Languages.Core.FactoryProps
 import Strata.Languages.Core.Typing.Props.FactoryRegistrationProps
 import Strata.DL.Lambda.TypeFactoryProps
 import Strata.DL.Lambda.DatatypeFactoryWFProps
-import Strata.DL.Lambda.LTyTypeProps
+import Strata.DL.Lambda.LTyWFProps
 
 /-!
 # Soundness of the whole-program generator
@@ -1061,8 +1061,8 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
   have hknown : LMonoTy.knownInstance body s.C.knownTypes = true :=
     Lambda.knownInstance_of_wellKinded body _
       (wellKindedTy_of_genNonRecursiveArgTy hinv.ctxOk hbody)
-  have hres : ResolvedTyHasType s.C TyVarAdmissibility.all syn.type :=
-    ResolvedTyHasType.of_knownInstance hknown
+  have hres : ResolvedTyWF s.C TyVarAdmissibility.all syn.type :=
+    ResolvedTyWF.of_knownInstance hknown
   -- Every known type name is reserved and `nm` is not, so `nm` is not a known type.
   have hnotKnown : ¬ s.C.knownTypes.containsName syn.name := by
     intro hc
