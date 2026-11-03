@@ -23,3 +23,4 @@ import StrataGenerators.PrinterCoverage
 -- `Pr(genTy = String) * Pr(genTy = Int)` on producing a `String.take` call vs. a constant
 -- lower bound.
 import StrataGenerators.AmbientAppRule
+import StrataGenerators.AmbientAppRuleCore

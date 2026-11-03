@@ -1,34 +1,44 @@
 import Basalt.Combinators
 import Basalt.SPMF.Expect.Obs
 import Basalt.SPMF.Support
+import Basalt.Walk.Expect
+import Basalt.Walk.Mass
+import Strata.DL.Lambda.LTy
 
 /-!
 # Ambient function applications: the default STLC rule vs. Pałka et al.'s rule
 
-A small STLC with base types `Int`, `String`, `Bool`, `bv w` and *ambient* functions (constants
-of a fixed signature `sig`, e.g. `String.take : String → Int → String`). Two fuel-indexed
-generators for terms of a target type, each a uniform `frequency` over named rules:
+A small STLC with base types `Int`, `String`, `Bool`, `bv w`, any further (opaque) Strata Core
+type, and *ambient* functions (constants of a fixed signature `sig`, e.g.
+`String.take : String → Int → String`). Two fuel-indexed generators for terms of a target type,
+each a uniform `frequency` over named rules:
 
 * `genExpr`  = leaf | `lamRule` | `appRule`: the rules read off the STLC typing rules.
   `appRule` guesses the argument type with `genTy` (paper, Fig. `genApp`).
 * `genExprP` = leaf | `lamRule` | `appRule` | `palkaRule`: adds Pałka et al.'s rule, which picks
   an ambient function returning the target type and reads the argument types off its signature.
 
-Results, for every two-argument ambient function `f : a → b → r` in `sig`, type generator
-`genTy`, fuel `n`, and context `Γ` (`String.take : String → Int → String` is the running
-example, `take_separation`):
+Results, for every ambient function `f : a₁ → ⋯ → aₘ → r` in `sig` (of *any* arity `m`; its
+argument types are `f.ty.args = [a₁, …, aₘ]` and its result type `f.ty.res = r`), type
+generator `genTy`, fuel `n`, and context `Γ`:
 
-* `genExpr_prob_call_le`: Pr[`genExpr` makes a call `f x y`] ≤ `Pr(genTy = a) · Pr(genTy = b)`.
-* `genExprP_prob_call_ge`: if `a`, `b`, `r` are base types, `palkaFloor sig` ≤
-  Pr[`genExprP` makes a call `f x y`], where `palkaFloor sig` = Pr(pick `palkaRule`) ·
-  Pr(pick `f`) · Pr(both arguments succeed), independent of `genTy` and `n`.
+* `genExpr_prob_call_le`: Pr[`genExpr` makes a full call `f x₁ ⋯ xₘ`]
+  ≤ `Pr(genTy = a₁) ⋯ Pr(genTy = aₘ)`: each of the `m` nested application rules must guess its
+  argument type.
+* `genExprP_prob_call_ge`: if every `aᵢ` is a base type, `palkaFloor sig m` ≤
+  Pr[`genExprP` makes a full call `f x₁ ⋯ xₘ`], where `palkaFloor sig m` = Pr(pick
+  `palkaRule`) · Pr(pick `f`) · Pr(all `m` arguments succeed), independent of `genTy` and `n`.
 * `default_lt_palka`: so Pałka et al.'s rule is strictly more frequent whenever
-  `Pr(genTy = a) · Pr(genTy = b) < palkaFloor sig`.
+  `Pr(genTy = a₁) ⋯ Pr(genTy = aₘ) < palkaFloor sig m`.
 * With `genTy := genTyUniform k` (uniform over `k` base types):
-  `genExpr_genTyUniform_prob_call_le` bounds the default rule by `1 / k²`;
-  `palka_ratio_ge` shows Pałka et al.'s rule is at least `k² · palkaFloor sig` times as frequent;
-  `default_vs_palka_separation` shows the default rule's probability tends to `0` while Pałka
-  et al.'s stays `≥ palkaFloor sig`, so from some `N` on Pałka et al.'s is strictly more frequent.
+  `genExpr_genTyUniform_prob_call_le` bounds the default rule by `1 / kᵐ`;
+  `palka_ratio_ge` shows Pałka et al.'s rule is at least `kᵐ · palkaFloor sig m` times as
+  frequent; for `m ≥ 1`, `default_vs_palka_separation` shows the default rule's probability tends
+  to `0` while Pałka et al.'s stays `≥ palkaFloor sig m`, so from some `N` on Pałka et al.'s is
+  strictly more frequent.
+
+`String.take : String → Int → String` is the running example (`take_separation`);
+`AmbientAppRuleCore.lean` instantiates `sig` with the monomorphic functions of `Core.Factory`.
 -/
 
 namespace StrataGenerators.AmbientApp
@@ -43,6 +53,9 @@ inductive Ty where
   /-- A family of further base types, standing in for Strata's bitvector widths; they let the
   number of base types grow without bound. -/
   | bv (w : Nat)
+  /-- Any other Strata Core type (`real`, `regex`, `Map int bool`, …), kept opaque: a base type
+  with a literal. -/
+  | other (t : Lambda.LMonoTy)
   | arrow (a b : Ty)
   deriving DecidableEq, Repr
 
@@ -76,6 +89,7 @@ structure Fn where
 inductive Expr where
   | intLit | strLit | boolLit
   | bvLit (w : Nat)
+  | otherLit (t : Lambda.LMonoTy)
   | var (i : Nat)
   | const (f : Fn)
   | app (f x : Expr)
@@ -85,11 +99,15 @@ inductive Expr where
 /-- `String.take : String → Int → String`. -/
 def takeTy : Ty := .arrow .str (.arrow .int .str)
 
-/-- The event "the root of the term is a full call `f a b` of the ambient function `f`". -/
-def CallOf (f : Fn) : Set Expr := {e | ∃ a b, e = .app (.app (.const f) a) b}
+/-- The event "the root of the term is the ambient function `f` applied to exactly `k`
+arguments": `f` itself for `k = 0`, and an application `g x` with `g` such a term for `k - 1`
+otherwise. -/
+def CallN (f : Fn) : Nat → Set Expr
+  | 0 => {.const f}
+  | k + 1 => {e | ∃ g x, e = .app g x ∧ g ∈ CallN f k}
 
-/-- The event "the root of the term is a partial call `f a`". -/
-def PartialCallOf (f : Fn) : Set Expr := {e | ∃ a, e = .app (.const f) a}
+/-- The event "the root of the term is a full call `f x₁ ⋯ xₘ`", `m = f.ty.args.length`. -/
+def CallOf (f : Fn) : Set Expr := CallN f f.ty.args.length
 
 /-! ## Generators -/
 
@@ -98,6 +116,7 @@ def lits : Ty → List Expr
   | .str => [.strLit]
   | .bool => [.boolLit]
   | .bv w => [.bvLit w]
+  | .other t => [.otherLit t]
   | .arrow _ _ => []
 
 theorem Ty.IsBase.lits_ne_nil {τ : Ty} (h : τ.IsBase) : lits τ ≠ [] := by
@@ -185,20 +204,6 @@ theorem prob_bind_le_prob {x : SPMF α} {g : α → SPMF β} {E : Set β} (F : S
     exact (SPMF.prob_le_mass _ _).trans (SPMF.mass_le_one _)
   · simp [h a ha]
 
-/-- Two draws, then a `pure` that always lands in `E`: the probability is the product of the
-two masses (the chance that both draws succeed). -/
-theorem prob_bind_bind_pure_of_mem {x : SPMF α} {y : SPMF α} {mk : α → α → β} {E : Set β}
-    (h : ∀ a b, mk a b ∈ E) :
-    prob (x >>= fun a => y >>= fun b => pure (mk a b)) E = mass x * mass y := by
-  classical
-  have hy : ∀ a, prob (y >>= fun b => pure (mk a b)) E = mass y := by
-    intro a
-    rw [SPMF.prob_bind]
-    simp only [SPMF.prob_pure, h, if_true]
-    exact SPMF.expect_one y
-  rw [SPMF.prob_bind]
-  simp only [hy, SPMF.expect_const]
-
 /-- `E[if x = a then c else 0] = c · Pr(x = a)`. -/
 theorem expect_ite_singleton [DecidableEq α] (p : SPMF α) (a : α) (c : ℝ≥0∞) :
     expect p (fun x => if x = a then c else 0) = c * prob p {a} := by
@@ -206,31 +211,34 @@ theorem expect_ite_singleton [DecidableEq α] (p : SPMF α) (a : α) (c : ℝ≥
     funext x; split <;> simp
   rw [this, SPMF.expect_mul_left, SPMF.expect_ite_eq, SPMF.prob_singleton]
 
-/-- A uniform choice among three branches averages their probabilities. -/
-theorem prob_frequency3 (a b c : Unit → SPMF α) (h) (E : Set α) :
-    prob (frequency [(1, a), (1, b), (1, c)] h) E
-      = (prob (a ()) E + prob (b ()) E + prob (c ()) E) / 3 := by
-  rw [SPMF.prob_frequency]
-  simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, Nat.cast_one, one_mul,
-    add_zero, add_assoc]
-  norm_num
+/-! `walk` works on statements about the expectation observation `SPMF.expectObs`. A
+probability is the expectation of an indicator, so a bound on a `prob` is a bound on the
+observation, and the facts that close the leaves of a walk are bounds on `prob` restated so. -/
 
-/-- A uniform choice among four branches averages their probabilities. -/
-theorem prob_frequency4 (a b c d : Unit → SPMF α) (h) (E : Set α) :
-    prob (frequency [(1, a), (1, b), (1, c), (1, d)] h) E
-      = (prob (a ()) E + prob (b ()) E + prob (c ()) E + prob (d ()) E) / 4 := by
-  rw [SPMF.prob_frequency]
-  simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, Nat.cast_one, one_mul,
-    add_zero, add_assoc]
-  norm_num
+theorem prob_eq_obs (p : SPMF α) (E : Set α) :
+    prob p E = SPMF.expectObs.spec p (E.indicator 1) := rfl
 
-theorem mass_eq_prob_univ (p : SPMF α) : mass p = prob p Set.univ := by
-  unfold SPMF.prob
-  rw [Set.indicator_univ]
-  exact (SPMF.expect_one p).symm
+theorem obs_le_of_prob_le {p : SPMF α} {E : Set α} {B : ℝ≥0∞} (h : prob p E ≤ B) :
+    SPMF.expectObs.spec p (E.indicator 1) ≤ B := h
+
+theorem le_obs_of_le_prob {p : SPMF α} {E : Set α} {B : ℝ≥0∞} (h : B ≤ prob p E) :
+    B ≤ SPMF.expectObs.spec p (E.indicator 1) := h
+
+/-- The trivial lower bound, for the branches a walk need not count. -/
+theorem zero_le_obs (p : SPMF α) (φ : α → ℝ≥0∞) : 0 ≤ SPMF.expectObs.spec p φ := zero_le _
 
 theorem div_three_le (x : ℝ≥0∞) : x / 3 ≤ x :=
   ENNReal.div_le_of_le_mul (le_mul_of_one_le_right' (by norm_num))
+
+/-- A product of `|l|` factors, each at least `c`, is at least `c ^ |l|`. -/
+theorem pow_le_prod_map {l : List β} {g : β → ℝ≥0∞} {c : ℝ≥0∞} (h : ∀ a ∈ l, c ≤ g a) :
+    c ^ l.length ≤ (l.map g).prod := by
+  simpa using List.pow_card_le_prod (l.map g) c (by simpa using h)
+
+/-- A product of `|l|` factors, each at most `c`, is at most `c ^ |l|`. -/
+theorem prod_map_le_pow {l : List β} {g : β → ℝ≥0∞} {c : ℝ≥0∞} (h : ∀ a ∈ l, g a ≤ c) :
+    (l.map g).prod ≤ c ^ l.length := by
+  simpa using List.prod_le_pow_card (l.map g) c (by simpa using h)
 
 end plumbing
 
@@ -308,24 +316,33 @@ theorem prob_appRule_le (genTy : SPMF Ty) (gen : Ty → SPMF Expr) (τ : Ty) {E 
   rintro _ ⟨x, -, rfl⟩ hmem
   exact hf (hF f x hmem)
 
-/-- **Pałka et al.'s rule, bounded below.** For an ambient function `f : a → b → r` in `sig`
-with `r` a base type, the rule (at target `r`) calls `f` with probability at least
-`Pr(pick f) · Pr(gen a succeeds) · Pr(gen b succeeds)`. -/
-theorem prob_palkaRule_call_ge (gen : Ty → SPMF Expr) {f : Fn} {a b r : Ty} (hmem : f ∈ sig)
-    (hf : f.ty = .arrow a (.arrow b r)) (hr : r.IsBase) :
-    ((candidates sig r).length : ℝ≥0∞)⁻¹ * (mass (gen a) * mass (gen b))
-      ≤ prob (palkaRule sig gen Γ r) (CallOf f) := by
-  have hc : f ∈ candidates sig r := by simp [candidates, hmem, hf, Ty.res, hr.res]
-  have hne : candidates sig r ≠ [] := List.ne_nil_of_mem hc
-  -- Once `f` is picked, the call is made iff both argument draws succeed.
-  have hcall : prob (do
-      let args ← f.ty.args.mapM gen
-      return args.foldl .app (.const f)) (CallOf f) = mass (gen a) * mass (gen b) := by
-    rw [hf]
-    simp only [Ty.args, hr.args, List.mapM_cons, List.mapM_nil, bind_assoc, pure_bind,
-      List.foldl_cons, List.foldl_nil]
-    exact prob_bind_bind_pure_of_mem (mk := fun x y => Expr.app (.app (.const f) x) y)
-      fun x y => ⟨x, y, rfl⟩
+/-- **Drawing the arguments of a call.** Starting from a call `g` of `f` with `k` arguments,
+drawing one argument per type in `l` and applying `g` to them all gives a call with `k + |l|`
+arguments exactly when every draw succeeds: the probability is the product of the draws'
+masses. -/
+theorem prob_mapM_foldl_app (gen : Ty → SPMF Expr) (f : Fn) :
+    ∀ (l : List Ty) (g : Expr) (k : Nat), g ∈ CallN f k →
+      prob (do let xs ← l.mapM gen; return xs.foldl .app g) (CallN f (k + l.length))
+        = (l.map fun a => mass (gen a)).prod
+  | [], g, k, hg => by classical simp [SPMF.prob_pure, hg]
+  | a :: l, g, k, hg => by
+    have ih := fun x => prob_mapM_foldl_app gen f l (.app g x) (k + 1) ⟨g, x, rfl, hg⟩
+    simp only [List.mapM_cons, bind_assoc, pure_bind, List.foldl_cons, List.length_cons,
+      List.map_cons, List.prod_cons, show k + (l.length + 1) = k + 1 + l.length by omega]
+    rw [SPMF.prob_bind]
+    simp only [ih, SPMF.expect_const]
+
+/-- **Pałka et al.'s rule, bounded below.** For an ambient function `f ∈ sig`, the rule (at
+`f`'s result type) makes a full call of `f` with probability at least
+`Pr(pick f) · Pr(gen a₁ succeeds) ⋯ Pr(gen aₘ succeeds)`. -/
+theorem prob_palkaRule_call_ge (gen : Ty → SPMF Expr) {f : Fn} (hmem : f ∈ sig) :
+    ((candidates sig f.ty.res).length : ℝ≥0∞)⁻¹ * (f.ty.args.map fun a => mass (gen a)).prod
+      ≤ prob (palkaRule sig gen Γ f.ty.res) (CallOf f) := by
+  have hc : f ∈ candidates sig f.ty.res := by simp [candidates, hmem]
+  have hne : candidates sig f.ty.res ≠ [] := List.ne_nil_of_mem hc
+  -- Once `f` is picked, the call is made iff every argument draw succeeds.
+  have hcall := prob_mapM_foldl_app gen f f.ty.args (.const f) 0 rfl
+  rw [Nat.zero_add] at hcall
   -- `elements` averages over the candidates; keep only the `f` summand.
   unfold palkaRule
   rw [dif_pos hne, SPMF.prob_bind]
@@ -337,9 +354,7 @@ theorem prob_palkaRule_call_ge (gen : Ty → SPMF Expr) {f : Fn} {a b r : Ty} (h
 
 end rules
 
-/-! ## The default rule: an upper bound
-
-Throughout, `f : a → b → r` is a two-argument ambient function. -/
+/-! ## The default rule: an upper bound -/
 
 section default
 
@@ -363,70 +378,87 @@ theorem genExpr_prob_const_le (n : Nat) (Γ : List Ty) (τ : Ty) (c : Fn) :
       cases τ <;> first
         | exact hleaf
         | exact prob_eq_zero_of_support (by simp [lamRule]; intros; subst_vars; simp)
+    -- No branch produces `c`: the walk averages three zeros.
     unfold genExpr
-    rw [prob_frequency3, hleaf, hlam, prob_appRule_eq_zero genTy _ τ (by simp)]
+    rw [prob_eq_obs]
+    walk [obs_le_of_prob_le hleaf.le, obs_le_of_prob_le hlam.le,
+      obs_le_of_prob_le (prob_appRule_eq_zero genTy (genExpr genTy sig n Γ) τ
+        (E := {.const c}) (by simp)).le]
     simp
 
-/-- **The inner application.** A partial call `f x` at type `τ' → r` requires the inner
-`appRule` to guess `a`, and is only well typed if `τ' = b`. -/
-theorem genExpr_prob_partialCall_le (n : Nat) (Γ : List Ty) (τ' : Ty) {f : Fn} {a b r : Ty}
-    (hf : f.ty = .arrow a (.arrow b r)) :
-    prob (genExpr genTy sig n Γ (.arrow τ' r)) (PartialCallOf f)
-      ≤ if τ' = b then prob genTy {a} else 0 := by
-  have hApp : ∀ e ∈ PartialCallOf f, ∃ g x, e = .app g x := fun _ ⟨x, h⟩ => ⟨_, x, h⟩
-  cases n with
-  | zero =>
-    unfold genExpr; rw [prob_genLeaf_app_eq_zero sig Γ hApp]; exact zero_le _
-  | succ n =>
-    calc prob (genExpr genTy sig (n + 1) Γ (.arrow τ' r)) (PartialCallOf f)
-        -- The leaf and `λ` branches never produce an application.
-        = prob (appRule genTy (genExpr genTy sig n Γ) (.arrow τ' r)) (PartialCallOf f) / 3 := by
-          unfold genExpr
-          rw [prob_frequency3, prob_genLeaf_app_eq_zero sig Γ hApp,
-            prob_lamRule_app_eq_zero sig Γ _ _ hApp, zero_add, zero_add]
-      _ ≤ prob (appRule genTy (genExpr genTy sig n Γ) (.arrow τ' r)) (PartialCallOf f) :=
-          div_three_le _
-      -- `f x` needs the function part to be the constant `f`, of type `σ → τ' → r` for the
-      -- guessed argument type `σ`.
-      _ ≤ expect genTy (fun σ => if f.ty = .arrow σ (.arrow τ' r) then 1 else 0) :=
-          prob_appRule_le genTy _ _ {.const f} (by rintro g x ⟨y, h⟩; cases h; rfl) _
-            fun σ => genExpr_prob_const_le genTy sig n Γ _ f
-      -- That type is `f.ty = a → b → r` iff `σ = a` and `τ' = b`.
-      _ = if τ' = b then prob genTy {a} else 0 := by
-          by_cases hτ : τ' = b
-          · subst hτ
-            simp only [hf, Ty.arrow.injEq, and_true, if_true]
-            simp_rw [eq_comm (a := a)]
-            rw [expect_ite_singleton, one_mul]
-          · simp [hf, hτ, Ne.symm hτ, SPMF.expect_const]
+/-- The bound on a call of a function of type `t` with `k` arguments, at target type `τ`.
+With no argument, the constant must have type `τ` exactly. With `k + 1`, the outermost
+application rule guesses the last argument's type `σ`, and the remaining call is one with `k`
+arguments at type `σ → τ`. -/
+noncomputable def callBound (t : Ty) : Nat → Ty → ℝ≥0∞
+  | 0, τ => if t = τ then 1 else 0
+  | k + 1, τ => expect genTy fun σ => callBound t k (.arrow σ τ)
 
-/-- **The default rule rarely calls a two-argument function.** For every type generator, fuel,
-and context, `genExpr` produces a full call `f x y` of `f : a → b → r` (at type `r`) with
-probability at most `Pr(genTy = a) · Pr(genTy = b)`: both application rules must guess an
-argument type. -/
-theorem genExpr_prob_call_le (n : Nat) (Γ : List Ty) {f : Fn} {a b r : Ty}
-    (hf : f.ty = .arrow a (.arrow b r)) :
-    prob (genExpr genTy sig n Γ r) (CallOf f) ≤ prob genTy {a} * prob genTy {b} := by
-  have hApp : ∀ e ∈ CallOf f, ∃ g x, e = .app g x := fun _ ⟨x, y, h⟩ => ⟨_, y, h⟩
-  cases n with
+/-- **Each application rule, bounded.** `genExpr` makes a call of `f` with `k` arguments at type
+`τ` with probability at most `callBound genTy f.ty k τ`. The induction is on `k`: one
+application rule per argument. -/
+theorem genExpr_prob_callN_le (f : Fn) (k : Nat) :
+    ∀ n Γ τ, prob (genExpr genTy sig n Γ τ) (CallN f k) ≤ callBound genTy f.ty k τ := by
+  induction k with
+  | zero => exact fun n Γ τ => genExpr_prob_const_le genTy sig n Γ τ f
+  | succ k ih =>
+    intro n Γ τ
+    have hApp : ∀ e ∈ CallN f (k + 1), ∃ g x, e = .app g x :=
+      fun _ ⟨g, x, h, _⟩ => ⟨g, x, h⟩
+    cases n with
+    | zero =>
+      unfold genExpr; rw [prob_genLeaf_app_eq_zero sig Γ hApp]; exact zero_le _
+    | succ n =>
+      -- The application rule: `g x` is a call with `k + 1` arguments iff `g` is one with `k`,
+      -- which at the guessed type `σ → τ` is bounded by the induction hypothesis.
+      have happ : prob (appRule genTy (genExpr genTy sig n Γ) τ) (CallN f (k + 1))
+          ≤ callBound genTy f.ty (k + 1) τ :=
+        prob_appRule_le genTy _ _ (CallN f k) (by rintro _ _ ⟨_, _, h, hg⟩; cases h; exact hg)
+          _ fun σ => ih n Γ (.arrow σ τ)
+      -- The leaf and `λ` branches never produce an application, so the walk leaves
+      -- `(0 + 0 + B) / 3 ≤ B`.
+      unfold genExpr
+      rw [prob_eq_obs]
+      walk [obs_le_of_prob_le (prob_genLeaf_app_eq_zero sig Γ hApp).le,
+        obs_le_of_prob_le (prob_lamRule_app_eq_zero sig Γ (genExpr genTy sig n) τ hApp).le,
+        obs_le_of_prob_le happ]
+      simpa using div_three_le _
+
+/-- Peeling the first argument type `a` off the function type costs a factor `Pr(genTy = a)`:
+the innermost application rule must guess `a`. -/
+theorem callBound_arrow (a t : Ty) (k : Nat) :
+    ∀ τ, callBound genTy (.arrow a t) (k + 1) τ = prob genTy {a} * callBound genTy t k τ := by
+  induction k with
   | zero =>
-    unfold genExpr; rw [prob_genLeaf_app_eq_zero sig Γ hApp]; exact zero_le _
-  | succ n =>
-    calc prob (genExpr genTy sig (n + 1) Γ r) (CallOf f)
-        -- The leaf and `λ` branches never produce an application.
-        = prob (appRule genTy (genExpr genTy sig n Γ) r) (CallOf f) / 3 := by
-          unfold genExpr
-          rw [prob_frequency3, prob_genLeaf_app_eq_zero sig Γ hApp,
-            prob_lamRule_app_eq_zero sig Γ _ _ hApp, zero_add, zero_add]
-      _ ≤ prob (appRule genTy (genExpr genTy sig n Γ) r) (CallOf f) := div_three_le _
-      -- `f x y` needs the function part to be a partial call `f x`, at the guessed type
-      -- `τ' → r` ...
-      _ ≤ expect genTy (fun τ' => if τ' = b then prob genTy {a} else 0) :=
-          prob_appRule_le genTy _ _ (PartialCallOf f)
-            (by rintro g y ⟨x, z, h⟩; cases h; exact ⟨x, rfl⟩) _
-            fun τ' => genExpr_prob_partialCall_le genTy sig n Γ τ' hf
-      -- ... and the guess must be `b`.
-      _ = prob genTy {a} * prob genTy {b} := expect_ite_singleton _ _ _
+    intro τ
+    simp only [callBound, Ty.arrow.injEq]
+    by_cases hτ : t = τ
+    · subst hτ
+      simp only [and_true, if_true, mul_one]
+      simp_rw [eq_comm (a := a)]
+      rw [expect_ite_singleton, one_mul]
+    · simp [hτ, SPMF.expect_const]
+  | succ k ih =>
+    intro τ
+    rw [callBound, callBound]
+    simp only [ih, SPMF.expect_mul_left]
+
+/-- For a full call, `callBound` is the product of the argument types' probabilities. -/
+theorem callBound_full : ∀ t : Ty,
+    callBound genTy t t.args.length t.res = (t.args.map fun a => prob genTy {a}).prod
+  | .arrow a b => by
+    simp only [Ty.args, Ty.res, List.length_cons, callBound_arrow, callBound_full b,
+      List.map_cons, List.prod_cons]
+  | .int | .str | .bool | .bv _ | .other _ => by simp [Ty.args, Ty.res, callBound]
+
+/-- **The default rule rarely calls an `m`-argument function.** For every type generator, fuel,
+and context, `genExpr` produces a full call `f x₁ ⋯ xₘ` of `f : a₁ → ⋯ → aₘ → r` (at type `r`)
+with probability at most `Pr(genTy = a₁) ⋯ Pr(genTy = aₘ)`: each of the `m` application rules
+must guess an argument type. -/
+theorem genExpr_prob_call_le (n : Nat) (Γ : List Ty) (f : Fn) :
+    prob (genExpr genTy sig n Γ f.ty.res) (CallOf f)
+      ≤ (f.ty.args.map fun a => prob genTy {a}).prod :=
+  (genExpr_prob_callN_le genTy sig f _ n Γ _).trans_eq (callBound_full genTy f.ty)
 
 end default
 
@@ -439,14 +471,16 @@ variable (genTy : SPMF Ty) (sig : List Fn)
 /-- Each of `genExprP`'s four branches is taken with probability `1/4`. -/
 noncomputable def branchShare : ℝ≥0∞ := 1 / 4
 
-/-- The lower bound for Pałka et al.'s rule, as a product of the three things that must happen:
+/-- The lower bound for Pałka et al.'s rule on an `m`-argument function, as a product of the
+three things that must happen:
 * `branchShare`: `genExprP` picks `palkaRule`;
 * `|sig|⁻¹`: `palkaRule` picks the function (among at most `|sig|` candidates);
-* `branchShare²`: both argument draws succeed (each does, at least through its leaf branch). -/
-noncomputable def palkaFloor (sig : List Fn) : ℝ≥0∞ :=
-  branchShare * (sig.length : ℝ≥0∞)⁻¹ * (branchShare * branchShare)
+* `branchShare ^ m`: all `m` argument draws succeed (each does, at least through its leaf
+  branch). -/
+noncomputable def palkaFloor (sig : List Fn) (m : Nat) : ℝ≥0∞ :=
+  branchShare * (sig.length : ℝ≥0∞)⁻¹ * branchShare ^ m
 
-theorem palkaFloor_pos : 0 < palkaFloor sig := by
+theorem palkaFloor_pos (m : Nat) : 0 < palkaFloor sig m := by
   simp [palkaFloor, branchShare, pos_iff_ne_zero]
 
 /-- At a base type, `genExprP` succeeds with probability at least `branchShare` at every fuel:
@@ -457,46 +491,45 @@ theorem genExprP_mass_ge (n : Nat) (Γ : List Ty) {τ : Ty} (hτ : τ.IsBase) :
   | zero =>
     unfold genExprP; rw [mass_genLeaf sig Γ hτ.lits_ne_nil, branchShare]; norm_num
   | succ n =>
-    rw [mass_eq_prob_univ]
+    have hleaf : 1 ≤ SPMF.expectObs.spec (genLeaf sig Γ τ : SPMF Expr) fun _ => 1 := by
+      rw [← SPMF.mass_eq_obs, mass_genLeaf sig Γ hτ.lits_ne_nil]
+    -- Keep the leaf branch, drop the other three: the walk leaves `1/4 ≤ (1 + 0 + 0 + 0) / 4`.
     unfold genExprP
-    rw [prob_frequency4, ← mass_eq_prob_univ, mass_genLeaf sig Γ hτ.lits_ne_nil, branchShare,
-      add_assoc, add_assoc]
-    -- Keep the leaf branch, drop the other three.
-    exact ENNReal.div_le_div_right le_self_add _
+    rw [SPMF.mass_eq_obs]
+    walk [hleaf, zero_le_obs (lamRule sig (genExprP genTy sig n) Γ τ) fun _ => 1,
+      zero_le_obs (appRule genTy (genExprP genTy sig n Γ) τ) fun _ => 1,
+      zero_le_obs (palkaRule sig (genExprP genTy sig n Γ) Γ τ) fun _ => 1]
+    simp [branchShare]
 
-/-- **Pałka et al.'s rule, exact shape of the bound.** At fuel `n + 1`, a call to
-`f : a → b → r` is made with probability at least
-`Pr(pick palkaRule) · Pr(pick f) · Pr(a argument succeeds) · Pr(b argument succeeds)`. -/
-theorem genExprP_prob_call_ge_shape (n : Nat) (Γ : List Ty) {f : Fn} {a b r : Ty}
-    (hmem : f ∈ sig) (hf : f.ty = .arrow a (.arrow b r)) (hr : r.IsBase) :
-    branchShare * ((candidates sig r).length : ℝ≥0∞)⁻¹
-        * (mass (genExprP genTy sig n Γ a) * mass (genExprP genTy sig n Γ b))
-      ≤ prob (genExprP genTy sig (n + 1) Γ r) (CallOf f) := by
-  calc branchShare * ((candidates sig r).length : ℝ≥0∞)⁻¹
-          * (mass (genExprP genTy sig n Γ a) * mass (genExprP genTy sig n Γ b))
-      ≤ branchShare * prob (palkaRule sig (genExprP genTy sig n Γ) Γ r) (CallOf f) := by
-        rw [mul_assoc]
-        gcongr
-        exact prob_palkaRule_call_ge sig Γ _ hmem hf hr
-    -- `branchShare * p = p / 4`, and `palkaRule` is one of the four averaged branches.
-    _ ≤ prob (genExprP genTy sig (n + 1) Γ r) (CallOf f) := by
-        unfold genExprP
-        rw [prob_frequency4, branchShare, mul_comm, ← div_eq_mul_one_div]
-        exact ENNReal.div_le_div_right le_add_self _
+/-- **Pałka et al.'s rule, exact shape of the bound.** At fuel `n + 1`, a full call of
+`f : a₁ → ⋯ → aₘ → r` is made with probability at least
+`Pr(pick palkaRule) · Pr(pick f) · Pr(a₁ argument succeeds) ⋯ Pr(aₘ argument succeeds)`. -/
+theorem genExprP_prob_call_ge_shape (n : Nat) (Γ : List Ty) {f : Fn} (hmem : f ∈ sig) :
+    branchShare * ((candidates sig f.ty.res).length : ℝ≥0∞)⁻¹
+        * (f.ty.args.map fun a => mass (genExprP genTy sig n Γ a)).prod
+      ≤ prob (genExprP genTy sig (n + 1) Γ f.ty.res) (CallOf f) := by
+  -- Only the `palkaRule` branch is counted; the walk leaves
+  -- `branchShare · P ≤ (0 + 0 + 0 + P) / 4` for `P` the bound of `prob_palkaRule_call_ge`.
+  conv_rhs => unfold genExprP
+  rw [prob_eq_obs]
+  walk [zero_le_obs (genLeaf sig Γ f.ty.res) ((CallOf f).indicator 1),
+    zero_le_obs (lamRule sig (genExprP genTy sig n) Γ f.ty.res) ((CallOf f).indicator 1),
+    zero_le_obs (appRule genTy (genExprP genTy sig n Γ) f.ty.res) ((CallOf f).indicator 1),
+    le_obs_of_le_prob (prob_palkaRule_call_ge sig Γ (genExprP genTy sig n Γ) hmem)]
+  simp [branchShare, div_eq_mul_inv, mul_comm, mul_assoc]
 
-/-- **Pałka et al.'s rule calls a two-argument function with constant probability.** For every
-type generator, fuel `n + 1`, and context, if `f : a → b → r` is in `sig` and `a`, `b`, `r` are
-base types, then `genExprP` produces a full call `f x y` with probability at least
-`palkaFloor sig`, which does not mention `genTy` or `n`. -/
-theorem genExprP_prob_call_ge (n : Nat) (Γ : List Ty) {f : Fn} {a b r : Ty} (hmem : f ∈ sig)
-    (hf : f.ty = .arrow a (.arrow b r)) (ha : a.IsBase) (hb : b.IsBase) (hr : r.IsBase) :
-    palkaFloor sig ≤ prob (genExprP genTy sig (n + 1) Γ r) (CallOf f) := by
-  refine le_trans ?_ (genExprP_prob_call_ge_shape genTy sig n Γ hmem hf hr)
+/-- **Pałka et al.'s rule calls an `m`-argument function with constant probability.** For every
+type generator, fuel `n + 1`, and context, if `f : a₁ → ⋯ → aₘ → r` is in `sig` and every `aᵢ`
+is a base type, then `genExprP` produces a full call `f x₁ ⋯ xₘ` with probability at least
+`palkaFloor sig m`, which does not mention `genTy` or `n`. -/
+theorem genExprP_prob_call_ge (n : Nat) (Γ : List Ty) {f : Fn} (hmem : f ∈ sig)
+    (hargs : ∀ a ∈ f.ty.args, a.IsBase) :
+    palkaFloor sig f.ty.args.length ≤ prob (genExprP genTy sig (n + 1) Γ f.ty.res) (CallOf f) := by
+  refine le_trans ?_ (genExprP_prob_call_ge_shape genTy sig n Γ hmem)
   unfold palkaFloor
   gcongr
   · exact List.length_filter_le _ _
-  · exact genExprP_mass_ge genTy sig n Γ ha
-  · exact genExprP_mass_ge genTy sig n Γ hb
+  · exact pow_le_prod_map fun a ha => genExprP_mass_ge genTy sig n Γ (hargs a ha)
 
 end palka
 
@@ -507,19 +540,18 @@ section compare
 variable (sig : List Fn)
 
 /-- **Conditional comparison.** Whenever `genTy` puts little enough mass on the argument types
-`a` and `b`, Pałka et al.'s rule calls `f : a → b → r` strictly more often than the default
-rule, at the same fuel. -/
-theorem default_lt_palka (genTy : SPMF Ty) (n : Nat) (Γ : List Ty) {f : Fn} {a b r : Ty}
-    (hmem : f ∈ sig) (hf : f.ty = .arrow a (.arrow b r))
-    (ha : a.IsBase) (hb : b.IsBase) (hr : r.IsBase)
-    (hsmall : prob genTy {a} * prob genTy {b} < palkaFloor sig) :
-    prob (genExpr genTy sig (n + 1) Γ r) (CallOf f)
-      < prob (genExprP genTy sig (n + 1) Γ r) (CallOf f) :=
-  calc prob (genExpr genTy sig (n + 1) Γ r) (CallOf f)
-      ≤ prob genTy {a} * prob genTy {b} := genExpr_prob_call_le genTy sig _ Γ hf
-    _ < palkaFloor sig := hsmall
-    _ ≤ prob (genExprP genTy sig (n + 1) Γ r) (CallOf f) :=
-        genExprP_prob_call_ge genTy sig n Γ hmem hf ha hb hr
+`a₁, …, aₘ`, Pałka et al.'s rule calls `f : a₁ → ⋯ → aₘ → r` strictly more often than the
+default rule, at the same fuel. -/
+theorem default_lt_palka (genTy : SPMF Ty) (n : Nat) (Γ : List Ty) {f : Fn} (hmem : f ∈ sig)
+    (hargs : ∀ a ∈ f.ty.args, a.IsBase)
+    (hsmall : (f.ty.args.map fun a => prob genTy {a}).prod < palkaFloor sig f.ty.args.length) :
+    prob (genExpr genTy sig (n + 1) Γ f.ty.res) (CallOf f)
+      < prob (genExprP genTy sig (n + 1) Γ f.ty.res) (CallOf f) :=
+  calc prob (genExpr genTy sig (n + 1) Γ f.ty.res) (CallOf f)
+      ≤ (f.ty.args.map fun a => prob genTy {a}).prod := genExpr_prob_call_le genTy sig _ Γ f
+    _ < palkaFloor sig f.ty.args.length := hsmall
+    _ ≤ prob (genExprP genTy sig (n + 1) Γ f.ty.res) (CallOf f) :=
+        genExprP_prob_call_ge genTy sig n Γ hmem hargs
 
 /-- `numBaseTypes` base types: `Int`, `String`, and the bitvector types
 `bv 0, …, bv (numBaseTypes - 3)` (just `Int` and `String` when `numBaseTypes ≤ 2`). -/
@@ -566,77 +598,80 @@ theorem genTyUniform_prob_le {numBaseTypes : Nat} (h2 : 2 ≤ numBaseTypes) (τ 
     _ = _ := one_mul _
 
 /-- **The default rule with `k` uniformly drawn base types.** With `k ≥ 2` base types, the
-STLC application rule produces a call to `f : a → b → r` with probability at most `1 / k²`: it
-must guess `a` (probability `≤ 1/k`) and then `b` (probability `≤ 1/k`). -/
-theorem genExpr_genTyUniform_prob_call_le (n : Nat) (Γ : List Ty) {f : Fn} {a b r : Ty}
-    (hf : f.ty = .arrow a (.arrow b r)) {k : Nat} (hk : 2 ≤ k) :
-    prob (genExpr (genTyUniform k) sig n Γ r) (CallOf f) ≤ 1 / (k : ℝ≥0∞) ^ 2 :=
-  calc prob (genExpr (genTyUniform k) sig n Γ r) (CallOf f)
-      ≤ prob (genTyUniform k) {a} * prob (genTyUniform k) {b} :=
-        genExpr_prob_call_le _ sig n Γ hf
-    _ ≤ (k : ℝ≥0∞)⁻¹ * (k : ℝ≥0∞)⁻¹ := by
-        gcongr <;> exact genTyUniform_prob_le hk _
-    _ = 1 / (k : ℝ≥0∞) ^ 2 := by
-        rw [one_div, sq, ENNReal.mul_inv (Or.inr (ENNReal.natCast_ne_top _))
-          (Or.inl (ENNReal.natCast_ne_top _))]
+STLC application rule produces a full call of `f : a₁ → ⋯ → aₘ → r` with probability at most
+`1 / kᵐ`: it must guess each of the `m` argument types (probability `≤ 1/k` each). -/
+theorem genExpr_genTyUniform_prob_call_le (n : Nat) (Γ : List Ty) (f : Fn) {k : Nat}
+    (hk : 2 ≤ k) :
+    prob (genExpr (genTyUniform k) sig n Γ f.ty.res) (CallOf f)
+      ≤ 1 / (k : ℝ≥0∞) ^ f.ty.args.length :=
+  calc prob (genExpr (genTyUniform k) sig n Γ f.ty.res) (CallOf f)
+      ≤ (f.ty.args.map fun a => prob (genTyUniform k) {a}).prod :=
+        genExpr_prob_call_le _ sig n Γ f
+    _ ≤ (k : ℝ≥0∞)⁻¹ ^ f.ty.args.length :=
+        prod_map_le_pow fun a _ => genTyUniform_prob_le hk a
+    _ = 1 / (k : ℝ≥0∞) ^ f.ty.args.length := by rw [one_div, ENNReal.inv_pow]
 
 /-- **Ratio.** With `k ≥ 2` uniformly drawn base types, Pałka et al.'s rule calls
-`f : a → b → r` at least `k² · palkaFloor sig` times as often as the STLC application rule
-(stated multiplicatively, so that no probability is divided by). -/
-theorem palka_ratio_ge (n : Nat) (Γ : List Ty) {f : Fn} {a b r : Ty} (hmem : f ∈ sig)
-    (hf : f.ty = .arrow a (.arrow b r)) (ha : a.IsBase) (hb : b.IsBase) (hr : r.IsBase)
-    {k : Nat} (hk : 2 ≤ k) :
-    (k : ℝ≥0∞) ^ 2 * palkaFloor sig * prob (genExpr (genTyUniform k) sig (n + 1) Γ r) (CallOf f)
-      ≤ prob (genExprP (genTyUniform k) sig (n + 1) Γ r) (CallOf f) := by
-  have hk0 : ((k : ℝ≥0∞) ^ 2) ≠ 0 := pow_ne_zero _ (by exact_mod_cast (by omega : k ≠ 0))
-  have hkT : ((k : ℝ≥0∞) ^ 2) ≠ ⊤ := ENNReal.pow_ne_top (ENNReal.natCast_ne_top _)
-  calc (k : ℝ≥0∞) ^ 2 * palkaFloor sig * prob (genExpr (genTyUniform k) sig (n + 1) Γ r) (CallOf f)
-      = palkaFloor sig * ((k : ℝ≥0∞) ^ 2 * prob (genExpr (genTyUniform k) sig (n + 1) Γ r)
-          (CallOf f)) := by ring
-    -- `k² · Pr_STLC ≤ k² · (1/k²) = 1`.
-    _ ≤ palkaFloor sig * ((k : ℝ≥0∞) ^ 2 * (1 / (k : ℝ≥0∞) ^ 2)) := by
-        gcongr; exact genExpr_genTyUniform_prob_call_le sig _ Γ hf hk
-    _ = palkaFloor sig := by rw [one_div, ENNReal.mul_inv_cancel hk0 hkT, mul_one]
-    _ ≤ prob (genExprP (genTyUniform k) sig (n + 1) Γ r) (CallOf f) :=
-        genExprP_prob_call_ge _ sig n Γ hmem hf ha hb hr
+`f : a₁ → ⋯ → aₘ → r` at least `kᵐ · palkaFloor sig m` times as often as the STLC application
+rule (stated multiplicatively, so that no probability is divided by). -/
+theorem palka_ratio_ge (n : Nat) (Γ : List Ty) {f : Fn} (hmem : f ∈ sig)
+    (hargs : ∀ a ∈ f.ty.args, a.IsBase) {k : Nat} (hk : 2 ≤ k) :
+    (k : ℝ≥0∞) ^ f.ty.args.length * palkaFloor sig f.ty.args.length
+        * prob (genExpr (genTyUniform k) sig (n + 1) Γ f.ty.res) (CallOf f)
+      ≤ prob (genExprP (genTyUniform k) sig (n + 1) Γ f.ty.res) (CallOf f) := by
+  set m := f.ty.args.length
+  have hk0 : ((k : ℝ≥0∞) ^ m) ≠ 0 := pow_ne_zero _ (by exact_mod_cast (by omega : k ≠ 0))
+  have hkT : ((k : ℝ≥0∞) ^ m) ≠ ⊤ := ENNReal.pow_ne_top (ENNReal.natCast_ne_top _)
+  calc (k : ℝ≥0∞) ^ m * palkaFloor sig m
+          * prob (genExpr (genTyUniform k) sig (n + 1) Γ f.ty.res) (CallOf f)
+      = palkaFloor sig m * ((k : ℝ≥0∞) ^ m
+          * prob (genExpr (genTyUniform k) sig (n + 1) Γ f.ty.res) (CallOf f)) := by ring
+    -- `kᵐ · Pr_STLC ≤ kᵐ · (1/kᵐ) = 1`.
+    _ ≤ palkaFloor sig m * ((k : ℝ≥0∞) ^ m * (1 / (k : ℝ≥0∞) ^ m)) := by
+        gcongr; exact genExpr_genTyUniform_prob_call_le sig _ Γ f hk
+    _ = palkaFloor sig m := by rw [one_div, ENNReal.mul_inv_cancel hk0 hkT, mul_one]
+    _ ≤ prob (genExprP (genTyUniform k) sig (n + 1) Γ f.ty.res) (CallOf f) :=
+        genExprP_prob_call_ge _ sig n Γ hmem hargs
 
-/-- **Separation.** As the number of base types grows (`numBaseTypes → ∞`), for a
-two-argument ambient function `f : a → b → r` over base types:
+/-- **Separation.** As the number of base types grows (`numBaseTypes → ∞`), for an ambient
+function `f : a₁ → ⋯ → aₘ → r` with `m ≥ 1` base-typed arguments:
 1. the default rule's probability of calling `f` drops below any `ε > 0` for all large enough
    `numBaseTypes` (i.e. it tends to `0`);
-2. Pałka et al.'s stays at least `palkaFloor sig` for every `numBaseTypes`;
-3. hence, from some `N` on, Pałka et al.'s rule is strictly more frequent. -/
-theorem default_vs_palka_separation (n : Nat) (Γ : List Ty) {f : Fn} {a b r : Ty}
-    (hmem : f ∈ sig) (hf : f.ty = .arrow a (.arrow b r))
-    (ha : a.IsBase) (hb : b.IsBase) (hr : r.IsBase) :
+2. Pałka et al.'s stays at least `palkaFloor sig m` for every `numBaseTypes`;
+3. hence, from some `N` on, Pałka et al.'s rule is strictly more frequent.
+
+(For `m = 0` the "call" is the constant `f` itself, a leaf, and there is nothing to separate.) -/
+theorem default_vs_palka_separation (n : Nat) (Γ : List Ty) {f : Fn} (hmem : f ∈ sig)
+    (harity : f.ty.args ≠ []) (hargs : ∀ a ∈ f.ty.args, a.IsBase) :
     (∀ ε : ℝ≥0∞, 0 < ε → ∃ N, ∀ numBaseTypes ≥ N,
-        prob (genExpr (genTyUniform numBaseTypes) sig n Γ r) (CallOf f) < ε)
-      ∧ (∀ numBaseTypes, palkaFloor sig ≤
-          prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ r) (CallOf f))
+        prob (genExpr (genTyUniform numBaseTypes) sig n Γ f.ty.res) (CallOf f) < ε)
+      ∧ (∀ numBaseTypes, palkaFloor sig f.ty.args.length ≤
+          prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ f.ty.res) (CallOf f))
       ∧ ∃ N, ∀ numBaseTypes ≥ N,
-          prob (genExpr (genTyUniform numBaseTypes) sig (n + 1) Γ r) (CallOf f)
-            < prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ r) (CallOf f) := by
-  -- With `k ≥ 2` base types, the default rule's probability is at most `1/k² ≤ 1/k`.
-  have hbound : ∀ m k, 2 ≤ k →
-      prob (genExpr (genTyUniform k) sig m Γ r) (CallOf f) ≤ (k : ℝ≥0∞)⁻¹ := by
-    intro m k hk
-    calc prob (genExpr (genTyUniform k) sig m Γ r) (CallOf f)
-        ≤ 1 / (k : ℝ≥0∞) ^ 2 := genExpr_genTyUniform_prob_call_le sig m Γ hf hk
+          prob (genExpr (genTyUniform numBaseTypes) sig (n + 1) Γ f.ty.res) (CallOf f)
+            < prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ f.ty.res) (CallOf f) := by
+  have hm : f.ty.args.length ≠ 0 := by simpa using harity
+  -- With `k ≥ 2` base types, the default rule's probability is at most `1/kᵐ ≤ 1/k`.
+  have hbound : ∀ j k, 2 ≤ k →
+      prob (genExpr (genTyUniform k) sig j Γ f.ty.res) (CallOf f) ≤ (k : ℝ≥0∞)⁻¹ := by
+    intro j k hk
+    calc prob (genExpr (genTyUniform k) sig j Γ f.ty.res) (CallOf f)
+        ≤ 1 / (k : ℝ≥0∞) ^ f.ty.args.length := genExpr_genTyUniform_prob_call_le sig j Γ f hk
       _ ≤ 1 / (k : ℝ≥0∞) := by
           gcongr
-          exact_mod_cast (Nat.le_self_pow (by norm_num) k)
+          exact_mod_cast Nat.le_self_pow hm k
       _ = (k : ℝ≥0∞)⁻¹ := one_div _
   -- (1): pick `N₀` with `N₀⁻¹ < ε`; for `k ≥ max N₀ 2`, `Pr ≤ k⁻¹ ≤ N₀⁻¹ < ε`.
-  have hsmall : ∀ m (ε : ℝ≥0∞), 0 < ε → ∃ N, ∀ k ≥ N,
-      prob (genExpr (genTyUniform k) sig m Γ r) (CallOf f) < ε := by
-    intro m ε hε
+  have hsmall : ∀ j (ε : ℝ≥0∞), 0 < ε → ∃ N, ∀ k ≥ N,
+      prob (genExpr (genTyUniform k) sig j Γ f.ty.res) (CallOf f) < ε := by
+    intro j ε hε
     obtain ⟨N₀, hN₀⟩ := ENNReal.exists_inv_nat_lt hε.ne'
-    refine ⟨max N₀ 2, fun k hk => (hbound m k (by omega)).trans_lt ?_⟩
+    refine ⟨max N₀ 2, fun k hk => (hbound j k (by omega)).trans_lt ?_⟩
     exact (ENNReal.inv_le_inv.2 (by exact_mod_cast (by omega : N₀ ≤ k))).trans_lt hN₀
   -- (2) is the lower bound.
-  have hfloor := fun k => genExprP_prob_call_ge (genTyUniform k) sig n Γ hmem hf ha hb hr
-  -- (3): apply (1) at fuel `n + 1` with `ε := palkaFloor sig`, which is positive.
-  obtain ⟨N, hN⟩ := hsmall (n + 1) _ (palkaFloor_pos sig)
+  have hfloor := fun k => genExprP_prob_call_ge (genTyUniform k) sig n Γ hmem hargs
+  -- (3): apply (1) at fuel `n + 1` with `ε := palkaFloor sig m`, which is positive.
+  obtain ⟨N, hN⟩ := hsmall (n + 1) _ (palkaFloor_pos sig f.ty.args.length)
   exact ⟨hsmall n, hfloor, N, fun k hk => (hN k hk).trans_le (hfloor k)⟩
 
 /-- The running example: `String.take : String → Int → String`. -/
@@ -644,12 +679,14 @@ theorem take_separation (n : Nat) (Γ : List Ty) {take : Fn} (hmem : take ∈ si
     (ht : take.ty = takeTy) :
     (∀ ε : ℝ≥0∞, 0 < ε → ∃ N, ∀ numBaseTypes ≥ N,
         prob (genExpr (genTyUniform numBaseTypes) sig n Γ .str) (CallOf take) < ε)
-      ∧ (∀ numBaseTypes, palkaFloor sig ≤
+      ∧ (∀ numBaseTypes, palkaFloor sig 2 ≤
           prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take))
       ∧ ∃ N, ∀ numBaseTypes ≥ N,
           prob (genExpr (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take)
-            < prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take) :=
-  default_vs_palka_separation sig n Γ hmem ht trivial trivial trivial
+            < prob (genExprP (genTyUniform numBaseTypes) sig (n + 1) Γ .str) (CallOf take) := by
+  have h := default_vs_palka_separation sig n Γ hmem (by simp [ht, takeTy, Ty.args])
+    (by simp [ht, takeTy, Ty.args, Ty.IsBase])
+  simpa only [ht, takeTy, Ty.args, Ty.res, List.length_cons, List.length_nil] using h
 
 end compare
 
