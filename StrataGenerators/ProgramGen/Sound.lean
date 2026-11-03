@@ -1056,15 +1056,13 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     { name := nm, typeArgs := (LMonoTy.freeVars body).uniq, type := body }
   have hmk : mkAliasDecl nm body = .type (.syn syn) .empty := rfl
   have hNodup : syn.typeArgs.Nodup := (LMonoTy.freeVars body).nodup_uniq
-  have hclosed : ∀ v, v ∈ LMonoTy.freeVars syn.type → v ∈ syn.typeArgs := by
-    intro v hv; exact (List.mem_of_dedup _ _).mp hv
+  have hfvs : ∀ v, v ∈ LMonoTy.freeVars syn.type ↔ v ∈ syn.typeArgs :=
+    fun v => List.mem_of_dedup _ v
   have hknown : LMonoTy.knownInstance body s.C.knownTypes = true :=
     Lambda.knownInstance_of_wellKinded body _
       (wellKindedTy_of_genNonRecursiveArgTy hinv.ctxOk hbody)
   have hres : ResolvedTyHasType s.C TyVarAdmissibility.all syn.type :=
     ResolvedTyHasType.of_knownInstance hknown
-  have hoccurs : ∀ v ∈ syn.typeArgs, v ∈ LMonoTy.freeVars syn.type :=
-    fun v hv => (List.mem_of_dedup _ _).mpr hv
   -- Every known type name is reserved and `nm` is not, so `nm` is not a known type.
   have hnotKnown : ¬ s.C.knownTypes.containsName syn.name := by
     intro hc
@@ -1073,7 +1071,7 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
     exact hnm_fresh (hinv.knownReserved nm (Std.HashMap.mem_keys.mpr hmem))
   have hdecl : DeclWellTyped P s.C [] (mkAliasDecl nm body) s.C := by
     rw [hmk]
-    exact DeclWellTyped.type_syn s.C [] syn .empty ⟨hclosed, hNodup, hoccurs⟩ hnotKnown hres
+    exact DeclWellTyped.type_syn s.C [] syn .empty ⟨hfvs, hNodup⟩ hnotKnown hres
   subst hds hs'
   refine ⟨DeclsWellTyped.cons _ _ _ _ _ _ hdecl (DeclsWellTyped.nil _ _), ?_⟩
   -- Only `reserved` (by `nm`) and the alias list change, and no `Inv` field reads the aliases.

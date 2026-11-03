@@ -425,9 +425,9 @@ def declWritesReservedType : Decl → Bool
   | .type (.con _) _ => false
 
 /-- The reasons the checker may reject `P` that the typing spec allows, as tags: a reserved
-    name (one `Core.isAllowedName` refuses) or a clash between names of different kinds. -/
+    name (one `Lambda.isAllowedName` refuses) or a clash between names of different kinds. -/
 def expectedRejectionCauses (P : Program) : List String :=
-  (if P.decls.any (fun d => (declBoundNames d).any (!Core.isAllowedName ·)
+  (if P.decls.any (fun d => (declBoundNames d).any (!Lambda.isAllowedName ·)
       || declWritesReservedType d) then
     ["reserved-name"] else [])
     ++ (if hasDeclKindClash P then ["decl-kind-clash"] else [])

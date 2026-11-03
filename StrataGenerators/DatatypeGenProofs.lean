@@ -1270,19 +1270,19 @@ theorem genFreshNames_nodup :
     next s _ _ h => exact List.nodup_cons.mpr ⟨fun hm => h.2 s hm (by simp), h.1⟩
 
 /-- The parameter lists from `genParamsList` are all permutations of one list of distinct
-    names, and `Core.isAllowedName` accepts each of those names. -/
+    names, and `Lambda.isAllowedName` accepts each of those names. -/
 theorem genParamsList_common {reserved : List String} {maxTyParams n : Nat}
     {paramsList : List (List TyIdentifier)}
     (hpl : paramsList ∈ SPMF.support
       (genParamsList (G := SPMF) reserved maxTyParams n)) :
     ∃ params : List TyIdentifier, params.Nodup ∧
-      (∀ p ∈ params, Core.isAllowedName p = true) ∧
+      (∀ p ∈ params, Lambda.isAllowedName p = true) ∧
       ∀ ps ∈ paramsList, ps.Perm params := by
   revert paramsList; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]
   walk [fun k => (isSoundFor_self_support (genFreshNames (G := SPMF) reserved k)).obs,
     fun l => (isSoundFor_self_support (genParamPerms (G := SPMF) l n)).obs]
   next numTyParams _ rawParams hraw _ hperms =>
-    refine ⟨rawParams.filter Core.isAllowedName,
+    refine ⟨rawParams.filter Lambda.isAllowedName,
       (genFreshNames_nodup numTyParams reserved rawParams hraw).filter _,
       fun p hp => (List.mem_filter.mp hp).2, (genParamPerms_support n _ hperms).2⟩
 
@@ -1790,7 +1790,7 @@ theorem genMutuallyRecursiveDatatypes_shape {baseTypes : List String} {tyCons : 
   · intro d hd c hc arg harg; exact (hbshape d hd).2 c hc arg harg
 
 /-- The datatypes of a block from `genMutuallyRecursiveDatatypes` all declare permutations of
-    one list of distinct type parameters, and `Core.isAllowedName` accepts each of them. -/
+    one list of distinct type parameters, and `Lambda.isAllowedName` accepts each of them. -/
 theorem genMutuallyRecursiveDatatypes_typeParams {baseTypes : List String}
     {tyCons : List KnownTyCon}
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
@@ -1799,7 +1799,7 @@ theorem genMutuallyRecursiveDatatypes_typeParams {baseTypes : List String}
             maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
             maxSize extraReserved)) :
     ∃ params : List TyIdentifier, params.Nodup ∧
-      (∀ p ∈ params, Core.isAllowedName p = true) ∧
+      (∀ p ∈ params, Lambda.isAllowedName p = true) ∧
       ∀ d ∈ block, d.typeArgs.Perm params := by
   simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
   obtain ⟨_, _, names, _, paramsList, hparams, ranks, _, hbodies⟩ := hb
@@ -4462,11 +4462,11 @@ theorem genParamPerms_complete {params : List TyIdentifier} :
 
 /-- **Completeness of `genParamsList`.** Take a list `params` of distinct names under the limit
     `maxTyParams`, each an identifier that the generator can reach, absent from `reserved`, and
-    accepted by `Core.isAllowedName`. Then the generator can make each list of permutations of
+    accepted by `Lambda.isAllowedName`. Then the generator can make each list of permutations of
     `params`, at the count of that list.
 
     The generator draws `params` itself through `genFreshNames_complete`, the filter by
-    `Core.isAllowedName` keeps all of it, and `genParamPerms_complete` reaches the
+    `Lambda.isAllowedName` keeps all of it, and `genParamPerms_complete` reaches the
     permutations. -/
 theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat}
     {params : List TyIdentifier}
@@ -4474,14 +4474,14 @@ theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat}
     (hnodup : params.Nodup)
     (hident : ∀ p ∈ params, p ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : ∀ p ∈ params, p ∉ reserved)
-    (hallowed : ∀ p ∈ params, Core.isAllowedName p = true) :
+    (hallowed : ∀ p ∈ params, Lambda.isAllowedName p = true) :
     ∀ (paramsList : List (List TyIdentifier)),
       (∀ ps ∈ paramsList, ps.Perm params) →
       paramsList ∈ SPMF.support
         (genParamsList (G := SPMF) reserved maxTyParams paramsList.length) := by
   intro paramsList hperm
   simp only [genParamsList, mem_support_bind_iff]
-  have hfilter : params.filter Core.isAllowedName = params := List.filter_eq_self.mpr hallowed
+  have hfilter : params.filter Lambda.isAllowedName = params := List.filter_eq_self.mpr hallowed
   refine ⟨params.length, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, hlen⟩, params,
     genFreshNames_complete params reserved hnodup hident hfresh, ?_⟩
   rw [hfilter]
@@ -4548,7 +4548,7 @@ theorem blockHeaders_getElem (block : MutualDatatype Unit) (i : Nat)
       the name pool of the generator needs the other two facts.
     * the number of type parameters of each datatype is not more than `maxTyParams`, those
       parameters are identifiers that the generator can reach, they are different in pairs,
-      `Core.isAllowedName` accepts them, and they are absent from the block names and from
+      `Lambda.isAllowedName` accepts them, and they are absent from the block names and from
       `initialReserved`;
     * all the datatypes declare the same type parameters, up to order;
     * the caller gives a list `ranks`, one rank for each datatype, and each rank is not more than
@@ -4585,7 +4585,7 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
     (hparamsAgree : ∀ d ∈ block, ∀ d' ∈ block, ∀ v, v ∈ d.typeArgs ↔ v ∈ d'.typeArgs)
-    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Core.isAllowedName p = true)
+    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Lambda.isAllowedName p = true)
     (ranks : List Nat)
     (hrankslen : ranks.length = block.length)
     (hranksle : ∀ r ∈ ranks, r ≤ block.length - 1)
@@ -4710,7 +4710,7 @@ open Core Core.TypeSpec in
     is `hnew`. Each of its constructors obeys `hasDefaultTesterName`, and the block is under the
     limits on the datatypes, the parameters and the constructors. Its names and its parameters
     are identifiers that the generator can reach, and they are fresh against `initialReserved`.
-    `Core.isAllowedName` accepts its parameters.
+    `Lambda.isAllowedName` accepts its parameters.
 
     Then `genMutuallyRecursiveDatatypes` can make that block at some size `maxSize`. This proof
     **builds the rank itself**, through `rankExists`. The caller gives no order of the datatypes,
@@ -4734,7 +4734,7 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
     (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SPMF.support (genIdentName (G := SPMF)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
-    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Core.isAllowedName p = true)
+    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Lambda.isAllowedName p = true)
     (hctors_nf : ∀ d ∈ block, ∀ c ∈ d.constrs, hasDefaultTesterName c)
     (hctors_len : ∀ d ∈ block, ∀ c ∈ d.constrs, c.args.length ≤ maxArgs)
     (hnames_ident : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,

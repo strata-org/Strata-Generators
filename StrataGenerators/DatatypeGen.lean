@@ -114,7 +114,7 @@ one of these names:
 
 The generator threads the datatype names through `reserved`, therefore these names
 stay different in pairs. The generator makes each type parameter fresh against the
-reserved set, and it drops each parameter that `Core.isAllowedName` rejects.
+reserved set, and it drops each parameter that `Lambda.isAllowedName` rejects.
 
 The `genFreshName` function for a command uses the same method for a variable name.
 It draws a random legal identifier. If that identifier is already in the reserved
@@ -603,14 +603,14 @@ def genParamPerms [Gen G] (params : List TyIdentifier) : Nat → G (List (List T
 
     The generator draws one list of `[0, maxTyParams]` names, different in pairs and fresh
     against `reserved`, which holds the block names and the reserved keywords. It keeps only
-    the names that `Core.isAllowedName` accepts, so no parameter starts with a reserved
+    the names that `Lambda.isAllowedName` accepts, so no parameter starts with a reserved
     prefix such as `Lambda.genTyPrefix`. Each datatype then gets its own random permutation of
     that list. -/
 def genParamsList [Gen G] (reserved : List String) (maxTyParams : Nat) (n : Nat) :
     G (List (List TyIdentifier)) := do
   let numTyParams ← chooseNat 0 maxTyParams (by omega)
   let rawParams ← genFreshNames reserved numTyParams
-  genParamPerms (rawParams.filter Core.isAllowedName) n
+  genParamPerms (rawParams.filter Lambda.isAllowedName) n
 
 /-- Draw `n` inhabitance ranks, one for each datatype. The generator draws each rank
     independently in the range `[0, maxRank]`, and two datatypes can draw the same rank.
