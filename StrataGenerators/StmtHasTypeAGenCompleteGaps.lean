@@ -102,116 +102,27 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
             (outTargets immutableVars ctx
               (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
             exprs mask) default) := by
-  have hcall : ∀ (d : Nat),
-      (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d []) →
-      (∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr) (mask : List Bool),
-        s ∈ procs ∧
-        ce = CmdExt.call s.pname
-          (StrataGenerators.Stmt.mkArgs s.M
-            (outTargets immutableVars ctx
-              (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
-            exprs mask) default) := by
-    intro d hmem
-    cases procs with
-    | nil => exact ((SPMF.mem_support_bot_iff _).mp hmem).elim
-    | cons p0 ps =>
-      simp only [genCallStmt, mem_support_bind_iff] at hmem
-      obtain ⟨s, hs, σvals, _, hmem⟩ := hmem
-      split at hmem
-      · simp only [mem_support_bind_iff, mem_support_pure_iff] at hmem
-        obtain ⟨exprs, _, mask, _, heq⟩ := hmem
-        simp only [GenStmtResult.mk.injEq] at heq
-        have := initChain_append_call_singleton heq.1
-        exact ⟨s, σvals, exprs, mask, (mem_support_elements_iff (by simp)).mp hs, by
-          simpa only [Statement.call, Stmt.cmd.injEq] using this⟩
-      · exact ((SPMF.mem_support_bot_iff _).mp hmem).elim
-  have hcmdstmt : ∀ (d : Nat),
-      (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx d []) →
-      (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
-        SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx d [])) := by
-    intro d hmem
-    simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hmem
-    obtain ⟨r, hr, heq⟩ := hmem
-    simp only [GenStmtResult.mk.injEq, List.cons.injEq, and_true, Stmt.cmd.injEq] at heq
-    obtain ⟨rfl, _, rfl⟩ := heq
-    exact ⟨r.cmd, rfl, hr⟩
-  have hexit :
-      (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genExitStmt (G := SPMF) labels C ctx) → False := by
-    intro hmem
-    cases labels with
-    | nil => exact (SPMF.mem_support_bot_iff _).mp hmem
-    | cons hd tl =>
-      simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
-        GenStmtResult.mk.injEq, List.cons.injEq, reduceCtorEq, false_and,
-        and_false, exists_false] at hmem
-  have hfunc : ∀ (d : Nat),
-      (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genFuncDeclStmt (G := SPMF) octx C ctx d []) → False := by
-    intro d hmem
-    simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff,
-      GenStmtResult.mk.injEq, List.cons.injEq, reduceCtorEq, false_and,
-      and_false, exists_false] at hmem
-  have htype : ∀ (d : Nat),
-      (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d) → False := by
-    intro d hmem
-    simp only [genTypeDeclStmt, mem_support_bind_iff] at hmem
-    obtain ⟨tc, _, hmem⟩ := hmem
-    split at hmem
-    · simp only [mem_support_pure_iff, GenStmtResult.mk.injEq, List.cons.injEq,
-        reduceCtorEq, false_and] at hmem
-    · exact (SPMF.mem_support_bot_iff _).mp hmem
-  cases n with
-  | zero =>
-    rw [genStmt, mem_support_frequency_iff] at h
-    obtain ⟨w, g, hg, hw, hmem⟩ := h
-    simp only [List.mem_cons, Prod.mk.injEq] at hg
-    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | hg
-    · exact Or.inl (hcmdstmt 0 hmem)
-    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
-      cases labels with
-      | nil => exact Or.inl (hcmdstmt 0 hmem)
-      | cons hd tl => exact (hexit hmem).elim
-    · exact (hfunc 0 hmem).elim
-    · exact (htype 0 hmem).elim
-    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
-      cases procs with
-      | nil => exact Or.inl (hcmdstmt 0 hmem)
-      | cons hd tl => exact Or.inr (hcall 0 hmem)
-    · simp at hg
-  | succ m =>
-    rw [genStmt, mem_support_frequency_iff] at h
-    obtain ⟨w, g, hg, hw, hmem⟩ := h
-    simp only [List.mem_cons, Prod.mk.injEq] at hg
-    rcases hg with ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ |
-      ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | ⟨rfl, rfl⟩ | hg
-    · exact Or.inl (hcmdstmt (m+1) hmem)
-    · -- `exit`, or the `cmd` that the branch falls back to when `labels = []`
-      cases labels with
-      | nil => exact Or.inl (hcmdstmt (m+1) hmem)
-      | cons hd tl => exact (hexit hmem).elim
-    · exact (hfunc (m+1) hmem).elim
-    · exact (htype (m+1) hmem).elim
-    · -- `call`, or the `cmd` that the branch falls back to when `procs = []`
-      cases procs with
-      | nil => exact Or.inl (hcmdstmt (m+1) hmem)
-      | cons hd tl => exact Or.inr (hcall (m+1) hmem)
-    · exact absurd hmem (by
-        simp only [mem_support_bind_iff, mem_support_pure_iff, GenStmtResult.mk.injEq,
-          List.cons.injEq, reduceCtorEq, false_and, and_false, exists_false, not_false_eq_true])
-    · exact absurd hmem (by
-        simp only [mem_support_bind_iff, mem_support_pure_iff, GenStmtResult.mk.injEq,
-          List.cons.injEq, reduceCtorEq, false_and, and_false, exists_false, not_false_eq_true])
-    · exact absurd hmem (by
-        simp only [mem_support_bind_iff, mem_support_pure_iff, GenStmtResult.mk.injEq,
-          List.cons.injEq, reduceCtorEq, false_and, and_false, exists_false, not_false_eq_true])
-    · exact absurd hmem (by
-        simp only [mem_support_bind_iff, mem_support_pure_iff, GenStmtResult.mk.injEq,
-          List.cons.injEq, reduceCtorEq, false_and, and_false, exists_false, not_false_eq_true])
-    · simp at hg
+  refine (?_ : IsSoundFor _ (fun r => r = ⟨[Stmt.cmd ce], C', ctx'⟩ → _)) _ h rfl
+  rw [IsSoundFor.iff_obs]
+  cases n <;> rw [genStmt] <;>
+    unfold genCmdStmt genExitStmt genFuncDeclStmt genTypeDeclStmt genCallStmt <;>
+    walk [(isSoundFor_self_support (genCmd _ _ _ _ _ _)).obs,
+      (isSoundFor_self_support (List.mapM (m := SPMF) _ _)).obs,
+      (isSoundFor_self_support (listOf (elements [true, false] _))).obs,
+      (isSoundFor_self_support (genFunction _ _ _ _)).obs,
+      (isSoundFor_self_support (genTypeConstructor _)).obs,
+      (isSoundFor_self_support (genFreshLabel _)).obs,
+      (isSoundFor_self_support (genStmtChain _ _ _ _ _ _ _ _ _ _)).obs,
+      (isSoundFor_self_support (genLExpr _ _ _ _ _ _ _)).obs,
+      (isSoundFor_self_support (genCondOrNondet _ _ _ _ _)).obs,
+      (isSoundFor_self_support (genOptMeasure _ _ _ _ _)).obs,
+      (isSoundFor_self_support (genInvariants _ _ _ _ _)).obs]
+  all_goals (rename_i heq; simp only [GenStmtResult.mk.injEq, List.cons.injEq, Stmt.cmd.injEq,
+    reduceCtorEq, false_and, and_true] at heq)
+  all_goals first
+    | (obtain ⟨rfl, -, rfl⟩ := heq; exact Or.inl ⟨_, rfl, ‹_›⟩)
+    | exact Or.inr ⟨_, _, _, _, ‹_›, by
+        simpa only [Statement.call, Stmt.cmd.injEq] using initChain_append_call_singleton heq.1.symm⟩
 
 /-- **Inversion at an `assert` command.** `genAssertCmd` is the only branch of
     `genCmd` that produces an `assert`. It emits `default` metadata, and it draws
@@ -221,24 +132,11 @@ theorem mem_genCmd_assert_inv (immutableVars : List (Identifier Unit)) (ctx ctx'
     (h : (⟨.assert l e md, ctx'⟩ : GenCmdResult) ∈
       SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx n [])) :
     md = default ∧ l ∈ SPMF.support (genIdentName (G := SPMF)) := by
-  rw [genCmd_support_iff] at h
-  rcases h with h | h | ⟨_, h⟩ | ⟨_, h⟩ | h | h | h
-  · simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
-  · simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
-  · simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
-  · simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
-  · simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, Cmd.assert.injEq] at h
-    obtain ⟨l', hl', e', _, ⟨rfl, _, rfl⟩, _⟩ := h
-    exact ⟨rfl, hl'⟩
-  · simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
-  · simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff,
-      GenCmdResult.mk.injEq, reduceCtorEq, false_and, exists_false, and_false] at h
+  refine (?_ : IsSoundFor _ (fun r => r = ⟨.assert l e md, ctx'⟩ → _)) _ h rfl
+  walk_genCmd
+  all_goals (rename_i heq; simp only [GenCmdResult.mk.injEq, Cmd.assert.injEq, reduceCtorEq,
+    false_and] at heq)
+  all_goals (obtain ⟨⟨rfl, -, rfl⟩, -⟩ := heq; first | rfl | assumption)
 
 -- ── Well-typedness of an `assert` ────────────────────────────────────────
 

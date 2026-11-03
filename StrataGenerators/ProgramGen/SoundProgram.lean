@@ -48,171 +48,152 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     DeclsHasTypeA P s.C s.Γ ds s'.C s'.Γ ∧ Inv s' := by
-  simp only [genDeclDatatype, mem_support_bind_iff] at h
-  obtain ⟨block, hblock, hmatch⟩ := h
-  -- Well-formedness of the block (consumes `ContextOk` from `Inv`).
-  have hwf : MutualADTWF s.C block := genDatatypeBlock_MutualADTWF hinv hblock
-  -- Block names: Nodup and fresh against `initialReserved … s.reserved`.
-  obtain ⟨hnamesNodup, hnamesFresh⟩ := genDatatypeBlock_names hblock
-  -- Case on the gate (spec-native `addMutualBlock` instances, matching the generator).
-  cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams s.C block with
-  | error e =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    obtain ⟨hds, hs'⟩ := hmatch
-    subst hds hs'
-    exact ⟨DeclsHasType'.nil _ _, hinv⟩
-  | ok C' =>
-    rw [hadd] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    obtain ⟨hds, hs'⟩ := hmatch
-    subst hds hs'
-    refine ⟨?_, ?_⟩
-    · -- `DeclHasType'.type_data` with `MutualADTWF` and the gated `.ok` (the
-      -- generator pins the spec-native `addMutualBlock` instances, so `hadd`
-      -- matches the constructor directly).
-      exact DeclsHasType'.cons _ _ _ _ _ _ _ _
-        (DeclHasType'.type_data s.C C' s.Γ block .empty hwf hadd)
-        (DeclsHasType'.nil _ _)
-    · -- `Inv` preserved.
-      -- Grown reserved set is `block.map (·.name) ++ s.reserved`.
-      -- Block names avoid `initialReserved` over the *combined* pool; the
-      -- external-only reserved set is contained in it, so freshness transfers.
-      have hfresh' : ∀ d ∈ block, d.name ∉
-          DatatypeGen.initialReserved s.baseTypes s.tyCons s.reserved := by
-        intro d hd hmem
-        refine hnamesFresh d hd ?_
-        simp only [DatatypeGen.initialReserved, List.mem_cons, List.mem_append] at hmem ⊢
-        rcases hmem with h | ((h | h) | h) | h
-        · exact Or.inl h
-        · exact Or.inr (Or.inl (Or.inl (Or.inl h)))
-        · exact Or.inr (Or.inl (Or.inl (Or.inr h)))
-        · obtain ⟨kc, hkc, hkceq⟩ := List.mem_map.mp h
-          exact Or.inr (Or.inl (Or.inr
-            (List.mem_map.mpr ⟨kc, List.mem_append_left _ hkc, hkceq⟩)))
-        · exact Or.inr (Or.inr h)
-      -- Freshness against the plain reserved set (used for the pool bookkeeping).
-      have hfresh_res : ∀ d ∈ block, d.name ∉ s.reserved := by
-        intro d hd hmem
-        exact hfresh' d hd (by
-          simp only [DatatypeGen.initialReserved, List.mem_cons, List.mem_append]
-          exact Or.inr (Or.inr hmem))
-      have hctx' : DatatypeGen.ContextOk C' s.baseTypes s.tyCons
-          (block.map (·.name) ++ s.reserved) :=
-        contextOk_addMutualBlock hinv.ctxOk hadd hfresh'
-      -- knownTypes / datatypes field effects.
-      have hkw := addMutualBlock_knownTypes hadd
-      refine
-        { ctxOk := hctx'
-          knownReserved := ?_
-          aliasPoolDisjoint := ?_
-          aliasNamesReserved := ?_
-          baseSupset := hinv.baseSupset
-          tyConsSupset := hinv.tyConsSupset
-          baseReserved := ?_
-          tyConReserved := ?_
-          arrowReserved := ?_
-          typesNil := hinv.typesNil
-          rigidNil := (addMutualBlock_rigid hadd).trans hinv.rigidNil
-          tyConsNeArrow := hinv.tyConsNeArrow
-          datatypesReserved := ?_
-          dtPoolOk := ?_
-          dtConsReserved := ?_
-          storedRefsReserved := ?_ }
-      · -- known types of `C'` reserved in the grown set.
-        intro k hk
-        rcases (hkw k).mp hk with hblk | hold
-        · exact List.mem_append_left _ hblk
-        · exact List.mem_append_right _ (hinv.knownReserved k hold)
-      · -- alias-pool disjointness unchanged (`Γ` and pool unchanged).
-        exact hinv.aliasPoolDisjoint
-      · -- alias names still reserved (reserved only grew).
-        intro a ha
-        exact List.mem_append_right _ (hinv.aliasNamesReserved a ha)
-      · intro x hx; exact List.mem_append_right _ (hinv.baseReserved x hx)
-      · intro x hx; exact List.mem_append_right _ (hinv.tyConReserved x hx)
-      · exact List.mem_append_right _ hinv.arrowReserved
-      · -- datatypesReserved: the datatype names of `C'` are the old ones plus the
-        -- block's names, and the reserved set grew by exactly the block's names.
-        intro n hn
-        rw [addMutualBlock_datatypes hadd, TypeFactory.allTypeNames, allDatatypes_push,
-          List.map_append, List.mem_append] at hn
-        rcases hn with hold | hblk
-        · exact List.mem_append_right _ (hinv.datatypesReserved n
-            (by rw [TypeFactory.allTypeNames]; exact hold))
-        · exact List.mem_append_left _ hblk
-      · -- **dtPoolOk at the grown pool (direction (4)).** The new pool is this
-        -- block's datatypes followed by the old pool.
-        --
-        -- * `known`: `C'.datatypes = C.datatypes.push block`, so both the block's
-        --   names and the old pool's names are in `allTypeNames`.
-        -- * The field `inhab`. For a *new* entry, it is exactly the field `inhabited` of the `MutualADTWF` proof
-        --   above, which already speaks about the factory after the push. For an *old* entry, it is the
-        --   inhabitance of the earlier pool, which `tySymInhab_push` transports across the push.
-        have hdt : C'.datatypes = s.C.datatypes.push block := addMutualBlock_datatypes hadd
-        have hstored : DatatypeGen.StoredRefsAbsent s.C block :=
-          storedRefsAbsent_of_inv hinv hfresh_res
-        refine { known := ?_, arity := ?_, inhab := ?_ }
-        · intro kc hkc
-          rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
-          rcases List.mem_append.mp hkc with hnew | hold
-          · -- A new pool entry's name is a block name.
-            obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
-            exact List.mem_append_right _ (List.mem_map.mpr ⟨d, hd, by rw [← hdeq]⟩)
-          · exact List.mem_append_left _ (hinv.dtPoolOk.known kc hold)
-        · -- Arity: a new entry records its datatype's own `typeArgs` count; old entries
-          -- keep theirs, and `push` only grows `allDatatypes`.
-          intro kc hkc
-          rw [hdt, allDatatypes_push]
-          rcases List.mem_append.mp hkc with hnew | hold
-          · obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
-            exact ⟨d, List.mem_append_right _ hd, by rw [← hdeq], by rw [← hdeq]⟩
-          · obtain ⟨d, hd, hrest⟩ := hinv.dtPoolOk.arity kc hold
-            exact ⟨d, List.mem_append_left _ hd, hrest⟩
-        · intro kc hkc
-          rw [hdt]
-          rcases List.mem_append.mp hkc with hnew | hold
-          · -- New entry: `MutualADTWF.inhabited`.
-            obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
-            rw [← hdeq]
-            exact hwf.inhabited d hd
-          · -- Old entry: transport across the push. Its name is reserved
-            -- (`dtConsReserved`) while block names are fresh, so it is not a block name.
-            refine DatatypeGen.tySymInhab_push hstored ?_ (hinv.dtPoolOk.inhab kc hold)
-            intro hmem
-            obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hmem
-            exact hfresh_res d hd
-              (hdeq ▸ hinv.dtConsReserved kc.1 (List.mem_map.mpr ⟨kc, hold, rfl⟩))
-      · -- dtConsReserved: new entries are block names (just reserved); old ones grew.
-        intro x hx
-        obtain ⟨kc, hkc, hkceq⟩ := List.mem_map.mp hx
+  refine stepSound_of_law P ?_ h
+  rw [IsSoundFor.iff_obs]; unfold genDeclDatatype; dsimp only
+  walk [(support_law (genMutuallyRecursiveDatatypes (G := SPMF) s.baseTypes (s.tyCons ++ s.dtCons)
+    b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
+    b.maxArgs b.maxDatatypeSize s.reserved)).obs]
+  next block _ C' hadd =>
+    -- `DeclHasType'.type_data` with `MutualADTWF` (from `ContextOk`) and the gated `.ok`.
+    exact DeclsHasType'.cons _ _ _ _ _ _ _ _
+      (DeclHasType'.type_data s.C C' s.Γ block .empty (genDatatypeBlock_MutualADTWF hinv ‹_›) hadd)
+      (DeclsHasType'.nil _ _)
+  next block hblock C' hadd =>
+    have hwf : MutualADTWF s.C block := genDatatypeBlock_MutualADTWF hinv hblock
+    -- Block names: Nodup and fresh against `initialReserved … s.reserved`.
+    obtain ⟨hnamesNodup, hnamesFresh⟩ := genDatatypeBlock_names hblock
+    -- Grown reserved set is `block.map (·.name) ++ s.reserved`.
+    -- Block names avoid `initialReserved` over the *combined* pool; the
+    -- external-only reserved set is contained in it, so freshness transfers.
+    have hfresh' : ∀ d ∈ block, d.name ∉
+        DatatypeGen.initialReserved s.baseTypes s.tyCons s.reserved := by
+      intro d hd hmem
+      refine hnamesFresh d hd ?_
+      simp only [DatatypeGen.initialReserved, List.mem_cons, List.mem_append, List.map_append]
+        at hmem ⊢
+      tauto
+    -- Freshness against the plain reserved set (used for the pool bookkeeping).
+    have hfresh_res : ∀ d ∈ block, d.name ∉ s.reserved := by
+      intro d hd hmem
+      exact hfresh' d hd (by
+        simp only [DatatypeGen.initialReserved, List.mem_cons, List.mem_append]
+        exact Or.inr (Or.inr hmem))
+    have hctx' : DatatypeGen.ContextOk C' s.baseTypes s.tyCons
+        (block.map (·.name) ++ s.reserved) :=
+      contextOk_addMutualBlock hinv.ctxOk hadd hfresh'
+    -- knownTypes / datatypes field effects.
+    have hkw := addMutualBlock_knownTypes hadd
+    refine
+      { ctxOk := hctx'
+        knownReserved := ?_
+        aliasPoolDisjoint := ?_
+        aliasNamesReserved := ?_
+        baseSupset := hinv.baseSupset
+        tyConsSupset := hinv.tyConsSupset
+        baseReserved := ?_
+        tyConReserved := ?_
+        arrowReserved := ?_
+        typesNil := hinv.typesNil
+        rigidNil := (addMutualBlock_rigid hadd).trans hinv.rigidNil
+        tyConsNeArrow := hinv.tyConsNeArrow
+        datatypesReserved := ?_
+        dtPoolOk := ?_
+        dtConsReserved := ?_
+        storedRefsReserved := ?_ }
+    · -- known types of `C'` reserved in the grown set.
+      intro k hk
+      rcases (hkw k).mp hk with hblk | hold
+      · exact List.mem_append_left _ hblk
+      · exact List.mem_append_right _ (hinv.knownReserved k hold)
+    · -- alias-pool disjointness unchanged (`Γ` and pool unchanged).
+      exact hinv.aliasPoolDisjoint
+    · -- alias names still reserved (reserved only grew).
+      intro a ha
+      exact List.mem_append_right _ (hinv.aliasNamesReserved a ha)
+    · intro x hx; exact List.mem_append_right _ (hinv.baseReserved x hx)
+    · intro x hx; exact List.mem_append_right _ (hinv.tyConReserved x hx)
+    · exact List.mem_append_right _ hinv.arrowReserved
+    · -- datatypesReserved: the datatype names of `C'` are the old ones plus the
+      -- block's names, and the reserved set grew by exactly the block's names.
+      intro n hn
+      rw [addMutualBlock_datatypes hadd, TypeFactory.allTypeNames, allDatatypes_push,
+        List.map_append, List.mem_append] at hn
+      rcases hn with hold | hblk
+      · exact List.mem_append_right _ (hinv.datatypesReserved n
+          (by rw [TypeFactory.allTypeNames]; exact hold))
+      · exact List.mem_append_left _ hblk
+    · -- **dtPoolOk at the grown pool (direction (4)).** The new pool is this
+      -- block's datatypes followed by the old pool.
+      --
+      -- * `known`: `C'.datatypes = C.datatypes.push block`, so both the block's
+      --   names and the old pool's names are in `allTypeNames`.
+      -- * The field `inhab`. For a *new* entry, it is exactly the field `inhabited` of the `MutualADTWF` proof
+      --   above, which already speaks about the factory after the push. For an *old* entry, it is the
+      --   inhabitance of the earlier pool, which `tySymInhab_push` transports across the push.
+      have hdt : C'.datatypes = s.C.datatypes.push block := addMutualBlock_datatypes hadd
+      have hstored : DatatypeGen.StoredRefsAbsent s.C block :=
+        storedRefsAbsent_of_inv hinv hfresh_res
+      refine { known := ?_, arity := ?_, inhab := ?_ }
+      · intro kc hkc
+        rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
         rcases List.mem_append.mp hkc with hnew | hold
-        · -- A new entry's name is one of the block's names.
+        · -- A new pool entry's name is a block name.
           obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
-          refine List.mem_append_left _ (List.mem_map.mpr ⟨d, hd, ?_⟩)
-          rw [← hkceq, ← hdeq]
-        · exact List.mem_append_right _
-            (hinv.dtConsReserved x (List.mem_map.mpr ⟨kc, hold, hkceq⟩))
-      · -- storedRefsReserved: the stored datatypes of `C'` are the old ones plus the
-        -- block. Old references were reserved; the block's own references are
-        -- confined to the pool ∪ block names ∪ {"arrow"}, all reserved.
-        intro d hd c hc arg harg r hr
-        rw [addMutualBlock_datatypes hadd, allDatatypes_push, List.mem_append] at hd
-        rcases hd with hold | hblk
-        · exact List.mem_append_right _ (hinv.storedRefsReserved d hold c hc arg harg r hr)
-        · -- A reference of a freshly generated block.
-          rcases DatatypeGen.genMutuallyRecursiveDatatypes_refsKnown hblock d hblk c hc
-            arg harg r hr with hbt | htc | hblkn | harr
-          · exact List.mem_append_right _ (hinv.baseReserved r hbt)
-          · obtain ⟨kc, hkc, hkceq⟩ := List.mem_map.mp htc
-            rcases List.mem_append.mp hkc with hext | hdtc
-            · exact List.mem_append_right _
-                (hinv.tyConReserved r (List.mem_map.mpr ⟨kc, hext, hkceq⟩))
-            · exact List.mem_append_right _
-                (hinv.dtConsReserved r (List.mem_map.mpr ⟨kc, hdtc, hkceq⟩))
-          · exact List.mem_append_left _ hblkn
-          · exact List.mem_append_right _ (harr ▸ hinv.arrowReserved)
+          exact List.mem_append_right _ (List.mem_map.mpr ⟨d, hd, by rw [← hdeq]⟩)
+        · exact List.mem_append_left _ (hinv.dtPoolOk.known kc hold)
+      · -- Arity: a new entry records its datatype's own `typeArgs` count; old entries
+        -- keep theirs, and `push` only grows `allDatatypes`.
+        intro kc hkc
+        rw [hdt, allDatatypes_push]
+        rcases List.mem_append.mp hkc with hnew | hold
+        · obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
+          exact ⟨d, List.mem_append_right _ hd, by rw [← hdeq], by rw [← hdeq]⟩
+        · obtain ⟨d, hd, hrest⟩ := hinv.dtPoolOk.arity kc hold
+          exact ⟨d, List.mem_append_left _ hd, hrest⟩
+      · intro kc hkc
+        rw [hdt]
+        rcases List.mem_append.mp hkc with hnew | hold
+        · -- New entry: `MutualADTWF.inhabited`.
+          obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
+          rw [← hdeq]
+          exact hwf.inhabited d hd
+        · -- Old entry: transport across the push. Its name is reserved
+          -- (`dtConsReserved`) while block names are fresh, so it is not a block name.
+          refine DatatypeGen.tySymInhab_push hstored ?_ (hinv.dtPoolOk.inhab kc hold)
+          intro hmem
+          obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hmem
+          exact hfresh_res d hd
+            (hdeq ▸ hinv.dtConsReserved kc.1 (List.mem_map.mpr ⟨kc, hold, rfl⟩))
+    · -- dtConsReserved: new entries are block names (just reserved); old ones grew.
+      intro x hx
+      obtain ⟨kc, hkc, hkceq⟩ := List.mem_map.mp hx
+      rcases List.mem_append.mp hkc with hnew | hold
+      · -- A new entry's name is one of the block's names.
+        obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
+        refine List.mem_append_left _ (List.mem_map.mpr ⟨d, hd, ?_⟩)
+        rw [← hkceq, ← hdeq]
+      · exact List.mem_append_right _
+          (hinv.dtConsReserved x (List.mem_map.mpr ⟨kc, hold, hkceq⟩))
+    · -- storedRefsReserved: the stored datatypes of `C'` are the old ones plus the
+      -- block. Old references were reserved; the block's own references are
+      -- confined to the pool ∪ block names ∪ {"arrow"}, all reserved.
+      intro d hd c hc arg harg r hr
+      rw [addMutualBlock_datatypes hadd, allDatatypes_push, List.mem_append] at hd
+      rcases hd with hold | hblk
+      · exact List.mem_append_right _ (hinv.storedRefsReserved d hold c hc arg harg r hr)
+      · -- A reference of a freshly generated block.
+        rcases DatatypeGen.genMutuallyRecursiveDatatypes_refsKnown hblock d hblk c hc
+          arg harg r hr with hbt | htc | hblkn | harr
+        · exact List.mem_append_right _ (hinv.baseReserved r hbt)
+        · obtain ⟨kc, hkc, hkceq⟩ := List.mem_map.mp htc
+          rcases List.mem_append.mp hkc with hext | hdtc
+          · exact List.mem_append_right _
+              (hinv.tyConReserved r (List.mem_map.mpr ⟨kc, hext, hkceq⟩))
+          · exact List.mem_append_right _
+              (hinv.dtConsReserved r (List.mem_map.mpr ⟨kc, hdtc, hkceq⟩))
+        · exact List.mem_append_left _ hblkn
+        · exact List.mem_append_right _ (harr ▸ hinv.arrowReserved)
+  all_goals first | exact DeclsHasType'.nil _ _ | exact hinv
 
 /-! ## Procedure per-declaration soundness -/
 

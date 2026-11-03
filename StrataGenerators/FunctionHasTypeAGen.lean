@@ -2,6 +2,7 @@ import StrataGenerators.HasTypeAGen
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Dedup
 import StrataGenerators.FunctionHasTypeAGen.IdentName
+import Basalt.Walk.Complete
 import Strata.Languages.Core.FunctionTypeSpec
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
@@ -130,7 +131,6 @@ theorem genIdents_nodup (depth : Nat) (l : List (Identifier Unit))
 -- `genIdentName_no_space`, the `dodgeKeyword` lemmas, `append_underscore_not_keyword` and
 -- `no_keyword_ends_underscore`. Each one is in the namespace `StrataGenerators.Function`.
 
-set_option linter.unusedSimpArgs false in
 /-- The `mapM` inside `genInputs` gives a `ListMap` whose keys are the list of input identifiers and
     each of whose values is in the support of `genLMonoTy tvars depth`. -/
 theorem mapM_genInputs_keys_values (tvars : List TyIdentifier) (depth : Nat)
@@ -143,23 +143,13 @@ theorem mapM_genInputs_keys_values (tvars : List TyIdentifier) (depth : Nat)
     ∀ ty ∈ m.values, ty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth) := by
   induction idents generalizing m with
   | nil =>
-    simp only [ListMap, List.mapM_nil, SPMF.mem_support_pure_iff] at hm
-    subst hm
-    exact ⟨rfl, by intro ty hty; simp [ListMap.values] at hty⟩
+    obtain rfl := SPMF.mem_support_pure_iff.mp hm
+    exact ⟨rfl, nofun⟩
   | cons x xs ih =>
-    simp only [ListMap, List.mapM_cons, SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at hm
-    obtain ⟨pair, hpair, rest, hrest, rfl⟩ := hm
-    -- The support of `genLMonoTy >>= fun ty => pure (x, ty)` holds `pair`. The `bind` and the
-    -- `pure` of `Set` unfold by definition, so the proof takes `pair` apart at once.
-    obtain ⟨ty, hty, rfl⟩ := hpair
-    obtain ⟨hkeys_rest, hvals_rest⟩ := ih rest hrest
-    refine ⟨?_, ?_⟩
-    · simp only [ListMap.keys, hkeys_rest]
-    · intro v hv
-      simp only [ListMap.values, List.mem_cons] at hv
-      rcases hv with rfl | hv
-      · exact hty
-      · exact hvals_rest v hv
+    revert m; show IsSoundFor _ _
+    rw [IsSoundFor.iff_obs, List.mapM_cons]
+    walk [IsSoundFor.obs ih, IsSoundFor.obs (g := genLMonoTy (G := SPMF) tvars depth) fun _ h => h]
+    all_goals aesop (add norm simp [ListMap.keys, ListMap.values])
 
 /-- What membership in the support of `genInputs tvars depth` gives. The keys of the `ListMap` are a
     list of identifiers with no duplicate, and each value is in the support of
@@ -221,16 +211,10 @@ theorem genOptExpr_sound (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentif
     (ho : o ∈ SPMF.support (genOptExpr (G := SPMF) fctx octx tvars depth τ pctx))
     (e : LExpr') (heq : o = some e) :
     HasTypeA' [] e τ := by
-  simp only [genOptExpr,
-    mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)] at ho
-  rcases ho with hnone | ⟨e', he', ho⟩
-  · -- The `none` branch contradicts `o = some e`.
-    exact absurd (heq ▸ hnone) (by simp)
-  · -- In the `some e'` branch, `e'` is well-typed and `e'` equals `e`.
-    subst heq
-    have hee : e' = e := (Option.some.inj ho).symm
-    subst hee
-    exact genLExpr_sound fctx octx pctx tvars [] depth τ _ e' he'
+  refine (show IsSoundFor _ (fun o => ∀ e, o = some e → HasTypeA' [] e τ) by
+    rw [IsSoundFor.iff_obs, genOptExpr]
+    walk [IsSoundFor.obs (genLExpr_sound fctx octx pctx tvars [] depth τ _)]
+    all_goals simp_all) o ho e heq
 
 -- ── The soundness of `genFunction` ───────────────────────────────────
 
@@ -331,7 +315,6 @@ theorem genNameList_not_keyword (depth : Nat) (l : List String)
     ∀ s ∈ l, isReservedKeyword s = false := fun s hs =>
   genIdentName_not_keyword s ((mem_support_genNameList_iff depth l |>.mp hl).2 s hs)
 
-set_option linter.unusedSimpArgs false in
 /-- The converse of `mapM_genInputs_keys_values`. Take a `ListMap` such that
     `genLMonoTy tvars depth` can reach each of its values. The support of the `mapM` inside
     `genInputs`, over the keys of that map, then holds the map. -/
@@ -343,18 +326,11 @@ theorem mapM_genInputs_complete (tvars : List TyIdentifier) (depth : Nat)
         let ty ← genLMonoTy (G := SPMF) tvars depth
         pure (x, ty))) := by
   induction m with
-  | nil =>
-    show [] ∈ SPMF.support (pure [] : SPMF _)
-    rw [mem_support_pure_iff]
+  | nil => exact SPMF.mem_support_pure_iff.mpr rfl
   | cons p rest ih =>
-    obtain ⟨x, ty⟩ := p
-    simp only [ListMap, mem_support_pure_iff, ListMap.keys, List.mapM_cons, mem_support_bind_iff]
-    have hty : ty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth) :=
-      hvals ty (by simp [ListMap.values])
-    have hrest : ∀ ty' ∈ ListMap.values rest,
-        ty' ∈ SPMF.support (genLMonoTy (G := SPMF) tvars depth) := by
-      intro ty' hty'; exact hvals ty' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hty')
-    refine ⟨(x, ty), ⟨ty, hty, rfl⟩, rest, ih hrest, rfl⟩
+    simp only [ListMap.values, List.mem_cons, forall_eq_or_imp] at hvals
+    rw [ListMap.keys, List.mapM_cons]; refine SPMF.mem_support_iff_may.mpr ?_; walk
+    exact ⟨_, hvals.1, _, ih hvals.2, rfl⟩
 
 /-- `genIdents depth` can reach a list of identifiers `ids` that holds no duplicate, if
     `genNameList depth` can reach the list of names `ids.map (·.name)`. -/
@@ -402,15 +378,8 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
     (depth : Nat) (τ : LMonoTy) (o : Option LExpr')
     (ho : ∀ e, o = some e → e ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth τ)) :
     o ∈ SPMF.support (genOptExpr (G := SPMF) fctx octx tvars depth τ) := by
-  simp only [genOptExpr,
-    mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)]
-  cases o with
-  | none =>
-    -- The generator can always reach `none`.
-    exact Or.inl rfl
-  | some e =>
-    -- The generator can reach `some e`, because `genLExpr` can reach `e`.
-    exact Or.inr ⟨e, ho e rfl, rfl⟩
+  rw [SPMF.mem_support_iff_may, genOptExpr]; walk
+  cases o <;> simp_all
 
 /-- Completeness of `genPreconditions`. The generator can always reach the empty list, through the
     `none` branch of `optionGen`. It can reach a list `[p]` of one element when `genLExpr` can reach
@@ -436,39 +405,16 @@ theorem genPreconditions_complete (octx : OpCtx)
     (hreach : ∀ p ∈ ps, p.expr ∈ SPMF.support
       (genLExpr (G := SPMF) (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool)) :
     ps ∈ SPMF.support (genPreconditions (G := SPMF) octx inputs tvars depth) := by
-  simp only [genPreconditions, genPrecondition, mem_support_map_iff,
-    mem_support_optionGen_iff]
-  match ps with
-  | [] =>
-    -- `[]` is `Option.toList none`, and the support of `optionGen` always holds `none`.
-    exact ⟨none, Or.inl rfl, rfl⟩
-  | [p] =>
-    -- `[p]` is `Option.toList (some p)`, and `p.expr` gives the reach of `some p`.
-    refine ⟨some p, Or.inr ⟨p, ?_, rfl⟩, rfl⟩
-    -- Reach `p.expr` through the `.bool` draw, in both cases of the test whether `inputs.toList` is
-    -- empty. That draw is the only generator when there is no formal parameter, and it is the branch
-    -- of weight 1 in the `frequency` when there is one.
-    have hbody : ∀ g : SPMF LExpr',
-        p.expr ∈ SPMF.support g →
-        p ∈ SPMF.support (do let y ← g; pure ({ expr := y, md := () } :
-          Strata.DL.Util.FuncPrecondition LExpr' Unit)) := by
-      intro g hg
-      simp only [mem_support_bind_iff, mem_support_pure_iff]
-      refine ⟨p.expr, hg, ?_⟩
-      -- The proof builds the record again from `p.expr` and the one value of `Unit`.
-      obtain ⟨e, md⟩ := p
-      rfl
-    by_cases hne : inputs.toList ≠ []
-    · rw [dif_pos hne]
-      refine hbody _ ?_
-      rw [mem_support_frequency_iff]
-      refine ⟨1, fun _ => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool,
-        by simp, by omega, hreach p (by simp)⟩
-    · rw [dif_neg hne]
-      exact hbody _ (hreach p (by simp))
-  | _ :: _ :: _ =>
-    -- `hlen` excludes this case.
-    simp at hlen
+  rw [SPMF.mem_support_iff_may, genPreconditions, genPrecondition]; walk
+  rcases ps with _ | ⟨p, _ | ⟨_, _⟩⟩
+  · exact .inr rfl
+  · -- Reach `p.expr` through the `.bool` draw, in both cases of the test whether `inputs.toList` is
+    -- empty: the only generator with no formal parameter, the branch of weight 1 with one.
+    have h := hreach p (by simp)
+    refine .inl ?_; split
+    · exact .inr ⟨_, h, rfl⟩
+    · exact ⟨_, h, rfl⟩
+  · simp at hlen
 
 /-- The **exact** support of `genPrecondition`, as an equivalence. `genPreconditions_complete` gives
     only one direction.
@@ -500,66 +446,23 @@ theorem mem_support_genPrecondition_iff (octx : OpCtx)
                (inputsAsFVarCtx inputs) octx [] tvars [] depth τ) ∧
              e = .eq () (.fvar () x (some τ)) e'))
           ∧ o = some { expr := e, md := () } := by
-  simp only [genPrecondition, mem_support_optionGen_iff]
   constructor
-  · rintro (rfl | ⟨p, hp, rfl⟩)
-    · exact Or.inl rfl
-    refine Or.inr ⟨p.expr, ?_, ?_⟩
-    · by_cases hne : inputs.toList ≠ []
-      · rw [dif_pos hne, mem_support_bind_iff] at hp
-        obtain ⟨e, he, hpe⟩ := hp
-        rw [mem_support_pure_iff] at hpe
-        have hexpr : p.expr = e := by subst hpe; rfl
-        rw [mem_support_frequency_iff] at he
-        obtain ⟨w, g, hmem, _, hg⟩ := he
-        -- The `frequency` list holds two branches, and `simp` splits the membership.
-        simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hmem
-        rcases hmem with ⟨_, rfl⟩ | ⟨_, rfl⟩
-        · -- The branch that mentions an input.
-          rw [genInputMentioningPrecond, mem_support_bind_iff] at hg
-          obtain ⟨⟨x, τ⟩, hxmem, hrest⟩ := hg
-          rw [mem_support_bind_iff] at hrest
-          obtain ⟨e', he', heq⟩ := hrest
-          rw [mem_support_pure_iff] at heq
-          rw [mem_support_elements_iff] at hxmem
-          exact Or.inr ⟨x, τ, e', hxmem, he', by rw [hexpr, ← heq]⟩
-        · -- The `.bool` branch with no bias.
-          exact Or.inl (hexpr ▸ hg)
-      · rw [dif_neg hne, mem_support_bind_iff] at hp
-        obtain ⟨e, he, hpe⟩ := hp
-        rw [mem_support_pure_iff] at hpe
-        exact Or.inl (by rw [show p.expr = e by subst hpe; rfl]; exact he)
-    · obtain ⟨e, md⟩ := p; rfl
-  · rintro (rfl | ⟨e, hbranch, rfl⟩)
-    · exact Or.inl rfl
-    refine Or.inr ⟨{ expr := e, md := () }, ?_, rfl⟩
-    have hpure : ∀ g : SPMF LExpr', e ∈ SPMF.support g →
-        ({ expr := e, md := () } : Strata.DL.Util.FuncPrecondition LExpr' Unit) ∈
-          SPMF.support (do let y ← g; pure ({ expr := y, md := () } :
-            Strata.DL.Util.FuncPrecondition LExpr' Unit)) := by
-      intro g hg
-      rw [mem_support_bind_iff]
-      exact ⟨e, hg, by rw [mem_support_pure_iff]⟩
-    rcases hbranch with hbool | ⟨x, τ, e', hxmem, he', rfl⟩
-    · by_cases hne : inputs.toList ≠ []
-      · rw [dif_pos hne]
-        refine hpure _ ?_
-        rw [mem_support_frequency_iff]
-        exact ⟨1, fun _ => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool,
-          by simp, by omega, hbool⟩
-      · rw [dif_neg hne]; exact hpure _ hbool
+  · revert o; show IsSoundFor _ _
+    rw [IsSoundFor.iff_obs, genPrecondition]
+    walk [fun τ => IsSoundFor.obs (g := genLExpr (G := SPMF) (inputsAsFVarCtx inputs) octx [] tvars [] depth τ)
+      fun _ h => h]
+    all_goals first
+      | exact .inl rfl
+      | exact .inr ⟨_, .inl ‹_›, rfl⟩
+      | exact .inr ⟨_, .inr ⟨_, _, _, ‹_›, ‹_›, rfl⟩, rfl⟩
+  · rintro (rfl | ⟨e, hb | ⟨x, τ, e', hx, he', rfl⟩, rfl⟩)
+    all_goals rw [SPMF.mem_support_iff_may, genPrecondition]; walk
+    · split
+      · exact .inr ⟨_, hb, rfl⟩
+      · exact ⟨_, hb, rfl⟩
     · -- A clause that mentions an input forces `inputs.toList` to be not empty, because it holds `x`.
-      have hne : inputs.toList ≠ [] := by
-        intro h; rw [h] at hxmem; simp at hxmem
-      rw [dif_pos hne]
-      refine hpure _ ?_
-      rw [mem_support_frequency_iff]
-      refine ⟨3, fun _ => genInputMentioningPrecond octx inputs tvars depth hne,
-        by simp, by omega, ?_⟩
-      rw [genInputMentioningPrecond, mem_support_bind_iff]
-      refine ⟨(x, τ), by rw [mem_support_elements_iff]; exact hxmem, ?_⟩
-      rw [mem_support_bind_iff]
-      exact ⟨e', he', by rw [mem_support_pure_iff]⟩
+      rw [dif_pos (List.ne_nil_of_mem hx)]
+      exact .inl ⟨_, hx, _, he', rfl⟩
 
 -- ── The completeness of `genFunction` ────────────────────────────────
 

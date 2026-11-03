@@ -4,6 +4,9 @@ import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.DL.Lambda.DatatypeWF
 import Strata.Languages.Core.DatatypeTypeSpec
 import Strata.Languages.Core.Factory
+import Basalt.Walk.Entry
+import Basalt.Walk.Sound
+import Basalt.Walk.Complete
 
 open Lambda RandomChoice ArbNat ArbChar ArbString
 
@@ -479,94 +482,20 @@ theorem genLeafTy_mem_iff (baseTypes : List String) (blockRefs : List BlockRef)
       (∃ b ∈ baseTypes, ty = .tcons b []) ∨
       (∃ v ∈ tyParams, ty = .ftvar v) ∨
       (rca = true ∧ ∃ br ∈ blockRefs, ty = .tcons br.1 br.2) := by
-  have hvar : ∀ (v : TyIdentifier) vs t,
-      t ∈ SPMF.support
-        ((LMonoTy.ftvar <$> elements (v :: vs) (List.cons_ne_nil v vs) : SPMF LMonoTy)) ↔
-      ∃ v' ∈ v :: vs, t = .ftvar v' := by
-    intro v vs t
-    simp only [mem_support_map_iff, mem_support_elements_iff (List.cons_ne_nil v vs)]
-  unfold genLeafTy
-  match tyParams, rca, blockRefs with
-  | [], false, _ =>
-    rw [genBaseTy_support]
-    constructor
-    · rintro (h | h)
-      · exact Or.inl h
-      · exact Or.inr (Or.inl h)
-    · rintro (h | h | ⟨_, hv, _⟩ | ⟨h, _⟩)
-      · exact Or.inl h
-      · exact Or.inr h
-      · exact absurd hv (by simp)
-      · exact absurd h (by simp)
-  | [], true, [] =>
-    rw [genBaseTy_support]
-    constructor
-    · rintro (h | h)
-      · exact Or.inl h
-      · exact Or.inr (Or.inl h)
-    · rintro (h | h | ⟨_, hv, _⟩ | ⟨_, _, hbr, _⟩)
-      · exact Or.inl h
-      · exact Or.inr h
-      · exact absurd hv (by simp)
-      · exact absurd hbr (by simp)
-  | [], true, br :: brs =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
-    constructor
-    · rintro ⟨g, (rfl | rfl), hmem⟩
-      · rcases (genBaseTy_support _ _).mp hmem with h | h
-        · exact Or.inl h
-        · exact Or.inr (Or.inl h)
-      · obtain ⟨p, hp, rfl⟩ := (genRecOcc_mem_iff br brs ty).mp hmem
-        exact Or.inr (Or.inr (Or.inr ⟨trivial, p, List.mem_cons.mp hp, rfl⟩))
-    · rintro (h | h | ⟨_, hv, _⟩ | ⟨_, p, hp, rfl⟩)
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inl h)⟩
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inr h)⟩
-      · exact absurd hv (by simp)
-      · exact ⟨_, Or.inr rfl, (genRecOcc_mem_iff br brs _).mpr ⟨p, List.mem_cons.mpr hp, rfl⟩⟩
-  | v :: vs, false, _ =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
-    constructor
-    · rintro ⟨g, (rfl | rfl), hmem⟩
-      · rcases (genBaseTy_support _ _).mp hmem with h | h
-        · exact Or.inl h
-        · exact Or.inr (Or.inl h)
-      · obtain ⟨v', hv', rfl⟩ := (hvar v vs ty).mp hmem
-        exact Or.inr (Or.inr (Or.inl ⟨v', List.mem_cons.mp hv', rfl⟩))
-    · rintro (h | h | ⟨v', hv', rfl⟩ | ⟨h, _⟩)
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inl h)⟩
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inr h)⟩
-      · exact ⟨_, Or.inr rfl, (hvar v vs _).mpr ⟨v', List.mem_cons.mpr hv', rfl⟩⟩
-      · exact absurd h (by simp)
-  | v :: vs, true, [] =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
-    constructor
-    · rintro ⟨g, (rfl | rfl), hmem⟩
-      · rcases (genBaseTy_support _ _).mp hmem with h | h
-        · exact Or.inl h
-        · exact Or.inr (Or.inl h)
-      · obtain ⟨v', hv', rfl⟩ := (hvar v vs ty).mp hmem
-        exact Or.inr (Or.inr (Or.inl ⟨v', List.mem_cons.mp hv', rfl⟩))
-    · rintro (h | h | ⟨v', hv', rfl⟩ | ⟨_, _, hbr, _⟩)
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inl h)⟩
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inr h)⟩
-      · exact ⟨_, Or.inr rfl, (hvar v vs _).mpr ⟨v', List.mem_cons.mpr hv', rfl⟩⟩
-      · exact absurd hbr (by simp)
-  | v :: vs, true, br :: brs =>
-    simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
-    constructor
-    · rintro ⟨g, (rfl | rfl | rfl), hmem⟩
-      · rcases (genBaseTy_support _ _).mp hmem with h | h
-        · exact Or.inl h
-        · exact Or.inr (Or.inl h)
-      · obtain ⟨v', hv', rfl⟩ := (hvar v vs ty).mp hmem
-        exact Or.inr (Or.inr (Or.inl ⟨v', List.mem_cons.mp hv', rfl⟩))
-      · obtain ⟨p, hp, rfl⟩ := (genRecOcc_mem_iff br brs ty).mp hmem
-        exact Or.inr (Or.inr (Or.inr ⟨trivial, p, List.mem_cons.mp hp, rfl⟩))
-    · rintro (h | h | ⟨v', hv', rfl⟩ | ⟨_, p, hp, rfl⟩)
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inl h)⟩
-      · exact ⟨_, Or.inl rfl, (genBaseTy_support _ _).mpr (Or.inr h)⟩
-      · exact ⟨_, Or.inr (Or.inl rfl), (hvar v vs _).mpr ⟨v', List.mem_cons.mpr hv', rfl⟩⟩
-      · exact ⟨_, Or.inr (Or.inr rfl), (genRecOcc_mem_iff br brs _).mpr ⟨p, List.mem_cons.mpr hp, rfl⟩⟩
+  have hS : IsSoundFor (genBaseTy (G := SPMF) baseTypes)
+      (fun ty => (∃ w, ty = .bitvec w) ∨ (∃ b ∈ baseTypes, ty = .tcons b [])) :=
+    fun ty h => (genBaseTy_support _ _).mp h
+  have hC : IsCompleteFor (genBaseTy (G := SPMF) baseTypes)
+      (fun ty => (∃ w, ty = .bitvec w) ∨ (∃ b ∈ baseTypes, ty = .tcons b [])) :=
+    fun ty h => (genBaseTy_support _ _).mpr h
+  -- Each direction is one `walk` per arm of the `match`, closed by `aesop`.
+  constructor
+  · revert ty; show IsSoundFor _ _
+    rw [IsSoundFor.iff_obs, genLeafTy.eq_def]
+    split <;> walk [hS.obs] <;> aesop
+  · intro h
+    rw [SPMF.mem_support_iff_may, genLeafTy.eq_def]
+    split <;> walk [hC.obs] <;> aesop
 
 /-! ### The support of `genArgTy`
 
@@ -606,72 +535,31 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
       (size ≠ 0 ∧ ∃ k args, ty = .tcons k args ∧ (k, args.length) ∈ tyCons ∧
         ∀ a ∈ args, a ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons
           blockRefs tyParams false (size / 2))) := by
-  by_cases hs : size = 0
-  · -- Only the leaf disjunct is available.
-    subst hs
-    rw [genArgTy]
-    simp only [reduceIte, ne_eq, not_true_eq_false, false_and, or_false]
-  · rw [genArgTy]
-    simp only [if_neg hs]
-    -- The arrow branch's support, shared by both `tyCons` cases.
-    have harrow : ∀ t, t ∈ SPMF.support
-        ((do let t1 ← genArgTy (G := SPMF) baseTypes tyCons blockRefs
-               tyParams false (size / 2)
-             let t2 ← genArgTy (G := SPMF) baseTypes tyCons blockRefs
-               tyParams rca (size / 2)
-             pure (.arrow t1 t2)) : SPMF LMonoTy) ↔
-        ∃ t1 t2, t = .arrow t1 t2 ∧
-          t1 ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
-            tyParams false (size / 2)) ∧
-          t2 ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
-            tyParams rca (size / 2)) := by
-      intro t
-      simp only [mem_support_bind_iff, mem_support_pure_iff]
-      constructor
-      · rintro ⟨t1, ht1, t2, ht2, rfl⟩; exact ⟨t1, t2, rfl, ht1, ht2⟩
-      · rintro ⟨t1, t2, rfl, h1, h2⟩; exact ⟨t1, h1, t2, h2, rfl⟩
-    match tyCons with
-    | [] =>
-      simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
-      constructor
-      · rintro ⟨g, (rfl | rfl), hmem⟩
-        · exact Or.inr (Or.inl ⟨hs, (harrow ty).mp hmem⟩)
-        · exact Or.inl hmem
-      · rintro (hleaf | ⟨_, t1, t2, rfl, h1, h2⟩ | ⟨_, k, args, _, hkc, _⟩)
-        · exact ⟨_, Or.inr rfl, hleaf⟩
-        · exact ⟨_, Or.inl rfl, (harrow _).mpr ⟨t1, t2, rfl, h1, h2⟩⟩
-        · exact absurd hkc (by simp)
-    | kc :: kcs =>
-      have happ : ∀ t, t ∈ SPMF.support
-          ((do let (tyCtor, arity) ← elements (kc :: kcs) (List.cons_ne_nil kc kcs)
-               let argTys ← vectorOf arity (genArgTy (G := SPMF) baseTypes
-                 (kc :: kcs) blockRefs tyParams false (size / 2))
-               pure (.tcons tyCtor argTys)) : SPMF LMonoTy) ↔
-          ∃ k args, t = .tcons k args ∧ (k, args.length) ∈ kc :: kcs ∧
-            ∀ a ∈ args, a ∈ SPMF.support (genArgTy (G := SPMF) baseTypes
-              (kc :: kcs) blockRefs tyParams false (size / 2)) := by
-        intro t
-        simp only [mem_support_bind_iff, mem_support_pure_iff,
-                   mem_support_elements_iff (List.cons_ne_nil kc kcs)]
-        constructor
-        · rintro ⟨⟨tyCtor, arity⟩, hkc, args, hargs, rfl⟩
-          obtain ⟨hlen, hall⟩ := mem_support_vectorOf_iff.mp hargs
-          exact ⟨tyCtor, args, rfl, hlen ▸ hkc, hall⟩
-        · rintro ⟨k, args, rfl, hkc, hall⟩
-          exact ⟨(k, args.length), hkc, args,
-            mem_support_vectorOf_iff.mpr ⟨rfl, hall⟩, rfl⟩
-      simp only [mem_support_oneOf_iff, List.mem_cons, List.not_mem_nil, or_false]
-      constructor
-      · rintro ⟨g, (rfl | rfl | rfl), hmem⟩
-        · exact Or.inr (Or.inl ⟨hs, (harrow ty).mp hmem⟩)
-        · exact Or.inl hmem
-        · obtain ⟨k, args, rfl, hkc, hall⟩ := (happ ty).mp hmem
-          exact Or.inr (Or.inr ⟨hs, k, args, rfl, List.mem_cons.mp hkc, hall⟩)
-      · rintro (hleaf | ⟨_, t1, t2, rfl, h1, h2⟩ | ⟨_, k, args, rfl, hkc, hall⟩)
-        · exact ⟨_, Or.inr (Or.inl rfl), hleaf⟩
-        · exact ⟨_, Or.inl rfl, (harrow _).mpr ⟨t1, t2, rfl, h1, h2⟩⟩
-        · exact ⟨_, Or.inr (Or.inr rfl),
-            (happ _).mpr ⟨k, args, rfl, List.mem_cons.mpr hkc, hall⟩⟩
+  -- Each direction is one `walk` per branch. The facts stop the walk at `genLeafTy` and at the
+  -- recursive calls, which the statement leaves as support memberships.
+  have hS : ∀ g : SPMF LMonoTy, IsSoundFor g (· ∈ SPMF.support g) := fun _ _ h => h
+  have hC : ∀ g : SPMF LMonoTy, IsCompleteFor g (· ∈ SPMF.support g) := fun _ _ h => h
+  constructor
+  · revert ty; show IsSoundFor _ _
+    rw [IsSoundFor.iff_obs, genArgTy]
+    split
+    · walk [(hS (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
+      all_goals (clear hS hC; aesop)
+    · dsimp only
+      split <;> walk [(hS (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
+        (hS (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
+        (hS (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
+      all_goals (clear hS hC; aesop)
+  · intro h
+    rw [SPMF.mem_support_iff_may, genArgTy]
+    split
+    · walk [(hC (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
+      all_goals (clear hS hC; aesop)
+    · dsimp only
+      split <;> walk [(hC (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
+        (hC (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
+        (hC (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
+      all_goals (clear hS hC; aesop)
 
 
 /-- **The support of `genArgTy` grows with the set of references.** Add more members to
@@ -1073,14 +961,11 @@ theorem fallbackName_not_mem (reserved : List String) :
     the fallback name is never a reserved name. -/
 theorem genFreshName_fresh (reserved : List String) :
     ∀ s ∈ SPMF.support (genFreshName (G := SPMF) reserved), s ∉ reserved := by
-  intro s hs
-  simp only [genFreshName, mem_support_bind_iff, mem_support_ite_iff,
-             mem_support_pure_iff] at hs
-  obtain ⟨s', _, hbranch⟩ := hs
-  rcases hbranch with ⟨_, rfl⟩ | ⟨hne, rfl⟩
-  · exact fallbackName_not_mem reserved
-  · -- Here `reserved.contains s' = false`, which is `s' ∉ reserved`.
-    simpa using hne
+  show IsSoundFor _ _
+  rw [IsSoundFor.iff_obs, genFreshName]
+  walk [IsSoundFor.obs (g := genIdentName (G := SPMF)) (P := fun _ => True) fun _ _ => trivial]
+  -- The fallback is never reserved, and the draw is kept only when `reserved.contains` fails.
+  all_goals simp_all [fallbackName_not_mem]
 
 /-- **One fresh name obeys the conditions of `NamesOk` for a single name.** Take a name that
     the generator drew fresh against `initialReserved baseTypes tyCons`. That name is not
@@ -1280,20 +1165,12 @@ theorem genFreshNames_fresh :
       ∀ nm ∈ names, nm ∉ reserved := by
   intro n
   induction n with
-  | zero =>
-    intro reserved names hnames
-    simp only [genFreshNames, mem_support_pure_iff] at hnames
-    subst hnames; intro nm hnm; exact absurd hnm (by simp)
+  | zero => intro r; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genFreshNames]; walk; simp_all
   | succ n ih =>
-    intro reserved names hnames
-    simp only [genFreshNames, mem_support_bind_iff, mem_support_pure_iff] at hnames
-    obtain ⟨s, hs, rest, hrest, rfl⟩ := hnames
-    intro nm hnm
-    rcases List.mem_cons.mp hnm with rfl | hnm
-    · exact genFreshName_fresh reserved _ hs
-    · -- Each name of the tail is absent from `s :: reserved`, therefore also from
-      -- `reserved`.
-      exact fun hmem => ih (s :: reserved) rest hrest nm hnm (by simp [hmem])
+    -- Each name of the tail is absent from `s :: reserved`, therefore also from `reserved`.
+    intro r; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genFreshNames]
+    walk [IsSoundFor.obs (ih _), IsSoundFor.obs (genFreshName_fresh _)]
+    aesop
 
 /-- `genFreshNames reserved n` always makes a list of `n` names. -/
 theorem genFreshNames_length :
@@ -1302,15 +1179,11 @@ theorem genFreshNames_length :
       names.length = n := by
   intro n
   induction n with
-  | zero =>
-    intro reserved names hnames
-    simp only [genFreshNames, mem_support_pure_iff] at hnames
-    subst hnames; rfl
+  | zero => intro r; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genFreshNames]; walk; rfl
   | succ n ih =>
-    intro reserved names hnames
-    simp only [genFreshNames, mem_support_bind_iff, mem_support_pure_iff] at hnames
-    obtain ⟨s, hs, rest, hrest, rfl⟩ := hnames
-    simp [ih (s :: reserved) rest hrest]
+    intro r; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genFreshNames]
+    walk [IsSoundFor.obs (ih _), IsSoundFor.obs (genFreshName_fresh _)]
+    simp_all
 
 /-- `genParamsList reserved maxTyParams n` always makes a list of `n` parameter lists. -/
 theorem genParamsList_length :
@@ -1321,15 +1194,11 @@ theorem genParamsList_length :
       paramsList.length = n := by
   intro n
   induction n with
-  | zero =>
-    intro reserved maxTyParams paramsList hpl
-    simp only [genParamsList, mem_support_pure_iff] at hpl
-    subst hpl; rfl
+  | zero => intro r m; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]; walk; rfl
   | succ n ih =>
-    intro reserved maxTyParams paramsList hpl
-    simp only [genParamsList, mem_support_bind_iff, mem_support_pure_iff] at hpl
-    obtain ⟨numTyParams, _, params, _, rest, hrest, rfl⟩ := hpl
-    simp [ih reserved maxTyParams rest hrest]
+    intro r m; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]
+    walk [IsSoundFor.obs (ih r m), IsSoundFor.obs (genFreshNames_fresh _ _)]
+    simp_all
 
 /-- `genRanks` makes a list of exactly `n` ranks. -/
 theorem genRanks_length :
@@ -1338,15 +1207,11 @@ theorem genRanks_length :
       ranks.length = n := by
   intro maxRank n
   induction n with
-  | zero =>
-    intro ranks hr
-    simp only [genRanks, mem_support_pure_iff] at hr
-    subst hr; rfl
+  | zero => show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genRanks]; walk; rfl
   | succ n ih =>
-    intro ranks hr
-    simp only [genRanks, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨r, _, rest, hrest, rfl⟩ := hr
-    simp [ih rest hrest]
+    show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genRanks]
+    walk [IsSoundFor.obs ih]
+    simp_all
 
 /-- Build the headers from `names.zip paramsList`. Assume that `names` is not longer than
     `paramsList`. Then the names of those headers are exactly `names`, because a zip and then
@@ -1374,18 +1239,15 @@ theorem genFreshNames_nodup :
       names.Nodup := by
   intro n
   induction n with
-  | zero =>
-    intro reserved names hnames
-    simp only [genFreshNames, mem_support_pure_iff] at hnames
-    subst hnames; exact List.nodup_nil
+  | zero => intro r; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genFreshNames]; walk; simp
   | succ n ih =>
-    intro reserved names hnames
-    simp only [genFreshNames, mem_support_bind_iff, mem_support_pure_iff] at hnames
-    obtain ⟨s, hs, rest, hrest, rfl⟩ := hnames
-    refine List.nodup_cons.mpr ⟨?_, ih (s :: reserved) rest hrest⟩
-    -- `s` is absent from the tail, because each name of the tail is absent from
-    -- `s :: reserved`, and that list holds `s`.
-    exact fun hmem => genFreshNames_fresh _ _ _ hrest s hmem (by simp)
+    intro r; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genFreshNames]
+    -- The tail is `Nodup`, and each of its names is absent from `s :: reserved`, so not `s`.
+    have h2 : ∀ r, IsSoundFor (genFreshNames (G := SPMF) r n)
+        (fun l => l.Nodup ∧ ∀ nm ∈ l, nm ∉ r) :=
+      fun r l hl => ⟨ih r l hl, genFreshNames_fresh n r l hl⟩
+    walk [IsSoundFor.obs (h2 _), IsSoundFor.obs (genFreshName_fresh _)]
+    next s _ _ h => exact List.nodup_cons.mpr ⟨fun hm => h.2 s hm (by simp), h.1⟩
 
 /-- Membership in `visibleRefs headers params`. A block reference `br` is visible exactly
     when it comes from a header whose parameters are a subset of `params`. It then has the
@@ -3492,153 +3354,6 @@ theorem genArgTy_common_size {baseTypes : List String} {tyCons : List KnownTyCon
     · exact genArgTy_mono _ hHd (Nat.le_max_left _ _)
     · exact genArgTy_mono _ (hTl a ha) (Nat.le_max_right _ _)
 
-/-- **Completeness of `genArgTy` against the specification.** Take a constructor argument type
-    that obeys four conditions. It is `ConstrArgWF block`. Each of its free type variables is
-    declared, which `MutualADTWF.argVarsScoped` gives. Its type-constructor references are
-    applied at their declared arities, which `MutualADTWF.argsWellKinded` gives
-    (`ArgsWellKinded`). And every `bitvec` in it is a width rather than an application, which
-    is `BitvecWidthOnly`.
-
-    Then the generator can make that type at some size. This result also needs the uniform
-    reference of each block datatype to be a member of `blockRefs`, which is `hcover`.
-
-    The size is an existential value. The premise about absence gives the value of the flag.
-    `ConstrArgWF` gives that premise at each recursive position.
-
-    The proof is a recursion on the structure of `ty`. It builds membership in the support through
-    `genArgTy_mem_iff` and `genLeafTy_mem_iff`. It adds no relation of its own.
-
-    Two facts work together here. `ConstrArgWF` forbids a block name in exactly the positions
-    that the generator draws at the flag `false`. `ConstrArgWF` also fixes each occurrence with
-    a block name at the head to the uniform form `n (n's typeArgs)`, through
-    `constrArgWF_self_uniform`. `hcover` puts that form in `blockRefs`. Therefore the arity
-    premise says nothing about such an occurrence. -/
-theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTyCon}
-    {C : LContext Core.CoreLParams}
-    {block : MutualDatatype Unit} {blockRefs : List BlockRef}
-    {tyParams : List TyIdentifier}
-    (hn : NamesOk baseTypes tyCons (block.map (·.name)))
-    (hvocab : VocabOk C baseTypes tyCons)
-    (hcover : ∀ d ∈ block, (d.name, d.typeArgs.map .ftvar) ∈ blockRefs) :
-    ∀ (ty : LMonoTy),
-      ConstrArgWF block ty →
-      (∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams) →
-      ArgsWellKinded C block ty →
-      BitvecWidthOnly ty →
-      ∀ (rca : Bool), (rca = false → BlockAbsent block ty) →
-      ∃ size, ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
-        tyParams rca size) := by
-  intro ty
-  induction ty using LMonoTy.induct with
-  | ftvar v =>
-    intro _ hvars _ _ rca _
-    -- `argVarsScoped` gives `v ∈ tyParams`. That type is the rigid type variable, at the
-    -- size 0.
-    have hmemv : v ∈ tyParams := hvars v (by simp [LMonoTy.freeVars])
-    refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-    exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inl ⟨v, hmemv, rfl⟩)))
-  | bitvec n =>
-    -- A bitvector is a *width*, therefore `genBaseTy` draws it through `pickBitvecWidth`.
-    intro _ _ _ _ rca _
-    refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-    exact (genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inl ⟨n, rfl⟩)
-  | tcons k args ih =>
-    intro hwf hvars hwk hbv rca habs
-    by_cases hself : k ∈ block.map (·.name)
-    · -- An occurrence with a block name at the head. `ConstrArgWF` forces it to be uniform,
-      -- therefore `args = d.typeArgs.map .ftvar` for the block datatype `d` with the name `k`.
-      -- `constrArgWF_self_uniform` gives that fact. The type is then the recursive occurrence,
-      -- and that form forces `rca = true`. At the flag `false`, the name `k` would appear at
-      -- the head, and that result contradicts the premise about absence. `hcover` puts the
-      -- reference in `blockRefs`.
-      obtain ⟨d, hd, hdname⟩ := List.mem_map.mp hself
-      subst hdname
-      have hargs : args = d.typeArgs.map .ftvar :=
-        constrArgWF_self_uniform hd (fun d' hd' => hn.block_ne_arrow _ (List.mem_map.mpr ⟨d', hd', rfl⟩)) hwf
-      subst hargs
-      have hrca : rca = true := by
-        cases rca with
-        | true => rfl
-        | false => exact absurd (habs rfl d hd) (fun hab => hab (.head _))
-      subst hrca
-      refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-      exact (genLeafTy_mem_iff _ _ _ _ _).mpr
-        (Or.inr (Or.inr (Or.inr ⟨rfl, (d.name, d.typeArgs.map .ftvar), hcover d hd, rfl⟩)))
-    · -- The head is not a block name, therefore `argsWellKinded` resolves it against
-      -- `C.knownTypes`: `VocabOk.noStoredDatatypes` kills the stored-datatype disjunct and
-      -- `hself` kills the block disjunct.
-      have hk : C.knownTypes[k]? = some args.length := hwk.knownArity hvocab hself
-      unfold BitvecWidthOnly at hbv
-      obtain ⟨hkbv, hbvargs⟩ := hbv
-      by_cases harrow : k = "arrow"
-      · -- An arrow `t1 → t2`. `VocabOk.arrow` registers `arrow` binary, therefore
-        -- `argsWellKinded` pins the argument count to 2.
-        subst harrow
-        have hlen : args.length = 2 := by
-          rw [hvocab.arrow] at hk
-          exact (by simpa using hk : (2 : Nat) = args.length).symm
-        obtain ⟨t1, t2, rfl⟩ : ∃ t1 t2, args = [t1, t2] := by
-          match args, hlen with
-          | [t1, t2], _ => exact ⟨t1, t2, rfl⟩
-        · have ha1 : ArgsWellKinded C block t1 := hwk.arg (by simp)
-          have ha2 : ArgsWellKinded C block t2 := hwk.arg (by simp)
-          have hb1 : BitvecWidthOnly t1 := hbvargs t1 (by simp)
-          have hb2 : BitvecWidthOnly t2 := hbvargs t2 (by simp)
-          have harr : LMonoTy.tcons "arrow" [t1, t2] = LMonoTy.arrow t1 t2 := rfl
-          rw [harr] at hwf
-          obtain ⟨hdom_abs, hwf1, hwf2⟩ := constrArgWF_arrow
-            (fun d' hd' => hn.block_ne_arrow _ (List.mem_map.mpr ⟨d', hd', rfl⟩)) hwf
-          -- The free variables of `t1` / `t2` are among those of the arrow.
-          have hvars1 : ∀ v ∈ LMonoTy.freeVars t1, v ∈ tyParams := fun v hv =>
-            hvars v (by rw [harr]; simp only [LMonoTy.freeVars, LMonoTys.freeVars,
-              List.append_nil, List.mem_append]; exact Or.inl hv)
-          have hvars2 : ∀ v ∈ LMonoTy.freeVars t2, v ∈ tyParams := fun v hv =>
-            hvars v (by rw [harr]; simp only [LMonoTy.freeVars, LMonoTys.freeVars,
-              List.append_nil, List.mem_append]; exact Or.inr hv)
-          obtain ⟨s1, h1⟩ := ih t1 (by simp) hwf1 hvars1 ha1 hb1 false (fun _ => hdom_abs)
-          obtain ⟨s2, h2⟩ := ih t2 (by simp) hwf2 hvars2 ha2 hb2 rca
-            (fun hr => by
-              subst hr
-              intro d' hd'
-              have hab := habs rfl d' hd'
-              rw [harr] at hab
-              exact fun hap => hab (.arg _ _ _ (by simp) hap))
-          refine ⟨2 * (max s1 s2) + 1,
-            (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inl ⟨by omega, t1, t2, rfl,
-              genArgTy_mono _ h1 (by omega), genArgTy_mono _ h2 (by omega)⟩))⟩
-      · by_cases hnil : args = []
-        · -- A base leaf `k` with no argument. `C` registers it at the arity 0, and `VocabOk.base` turns
-          -- that fact into `k ∈ baseTypes`. The derivation of `defaultBaseTypes` from
-          -- `Core.KnownTypes` is what makes this step available.
-          subst hnil
-          refine ⟨0, (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inl ?_)⟩
-          exact (genLeafTy_mem_iff _ _ _ _ _).mpr
-            (Or.inr (Or.inl ⟨k, hvocab.base k (by simpa using hk), rfl⟩))
-        · -- An applied known type constructor. `C` registers it at its argument count, and
-          -- `VocabOk.tyCon` turns that into `(k, args.length) ∈ tyCons`; `k ≠ "bitvec"` comes
-          -- from `BitvecWidthOnly`, which is the one condition `MutualADTWF` does not give.
-          have hkc : (k, args.length) ∈ tyCons :=
-            hvocab.tyCon k args.length hk
-              (fun h0 => hnil (List.eq_nil_of_length_eq_zero h0)) harrow hkbv
-          have hall : ∀ a ∈ args, ArgsWellKinded C block a := fun a ha => hwk.arg ha
-          -- Every block name is absent from every argument (the `headOther` case of
-          -- `NotNested`).
-          have hargs_abs : ∀ a ∈ args, BlockAbsent block a := by
-            intro a ha
-            obtain ⟨hnn, _⟩ := hwf
-            cases hnn with
-            | arrow _ _ _ _ => exact absurd rfl harrow
-            | headBlock _ _ hmem => exact absurd hmem hself
-            | headOther _ _ _ _ habsent _ =>
-              intro d' hd'; exact habsent d' hd' a ha
-          obtain ⟨S, hS⟩ := genArgTy_common_size (args := args) (fun a ha =>
-            ih a ha (absent_constrArgWF (hargs_abs a ha)) (fun v hv =>
-              hvars v (by rw [freeVars_tcons_eq_flatMap]; exact List.mem_flatMap.mpr ⟨a, ha, hv⟩))
-              (hall a ha) (hbvargs a ha) false (fun _ => hargs_abs a ha))
-          refine ⟨2 * S + 1,
-            (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inr ⟨by omega, k, args, rfl,
-              hkc, fun a ha => genArgTy_mono _ (hS a ha) (by omega)⟩))⟩
-
 open Core Core.TypeSpec in
 /-- **Completeness for one type, over a smaller set of references.** This theorem is the same
     as `genArgTy_complete_of_wf`, but its hypothesis about coverage has a condition. Take a block
@@ -3767,6 +3482,42 @@ theorem genArgTy_complete_of_wf_partial {baseTypes : List String} {tyCons : List
           refine ⟨2 * S + 1,
             (genArgTy_mem_iff _ _ _ _ _ _ _).mpr (Or.inr (Or.inr ⟨by omega, k, args, rfl,
               hkc, fun a ha => genArgTy_mono _ (hS a ha) (by omega)⟩))⟩
+
+/-- **Completeness of `genArgTy` against the specification.** Take a constructor argument type
+    that obeys four conditions. It is `ConstrArgWF block`. Each of its free type variables is
+    declared, which `MutualADTWF.argVarsScoped` gives. Its type-constructor references are
+    applied at their declared arities, which `MutualADTWF.argsWellKinded` gives
+    (`ArgsWellKinded`). And every `bitvec` in it is a width rather than an application, which
+    is `BitvecWidthOnly`.
+
+    Then the generator can make that type at some size. This result also needs the uniform
+    reference of each block datatype to be a member of `blockRefs`, which is `hcover`.
+
+    The size is an existential value. The premise about absence gives the value of the flag.
+    `ConstrArgWF` gives that premise at each recursive position.
+
+    It is `genArgTy_complete_of_wf_partial` with the coverage `hcover`, which holds without its
+    condition. Two facts work together in that proof. `ConstrArgWF` forbids a block name in exactly the positions
+    that the generator draws at the flag `false`. `ConstrArgWF` also fixes each occurrence with
+    a block name at the head to the uniform form `n (n's typeArgs)`, through
+    `constrArgWF_self_uniform`. `hcover` puts that form in `blockRefs`. Therefore the arity
+    premise says nothing about such an occurrence. -/
+theorem genArgTy_complete_of_wf {baseTypes : List String} {tyCons : List KnownTyCon}
+    {C : LContext Core.CoreLParams}
+    {block : MutualDatatype Unit} {blockRefs : List BlockRef}
+    {tyParams : List TyIdentifier}
+    (hn : NamesOk baseTypes tyCons (block.map (·.name)))
+    (hvocab : VocabOk C baseTypes tyCons)
+    (hcover : ∀ d ∈ block, (d.name, d.typeArgs.map .ftvar) ∈ blockRefs) :
+    ∀ (ty : LMonoTy),
+      ConstrArgWF block ty →
+      (∀ v ∈ LMonoTy.freeVars ty, v ∈ tyParams) →
+      ArgsWellKinded C block ty →
+      BitvecWidthOnly ty →
+      ∀ (rca : Bool), (rca = false → BlockAbsent block ty) →
+      ∃ size, ty ∈ SPMF.support (genArgTy (G := SPMF) baseTypes tyCons blockRefs
+        tyParams rca size) :=
+  fun ty => genArgTy_complete_of_wf_partial hn hvocab ty (fun d hd _ => hcover d hd)
 
 /-- **Completeness for one type, from the fields of `MutualADTWF`.** Take a constructor
     argument type that obeys four conditions. It is `ConstrArgWF block`, which the field
