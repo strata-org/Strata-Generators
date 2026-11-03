@@ -76,10 +76,6 @@ open StrataGenerators.Stmt (isLocalTypeName)
 
 namespace ProgramGen
 
-/-- A value in a draw's support, as the walk's completeness fact for that draw. -/
-theorem mem_law {α : Type} {g : SPMF α} {a : α} (h : a ∈ SPMF.support g) :
-    IsCompleteFor g (· = a) := fun _ e => e ▸ h
-
 /-! ## Fold inversion -/
 
 /-- **Fold step composition.** Prepending a reachable step to a reachable fold
@@ -413,6 +409,9 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
           reserved := nm :: s.reserved }) ∈
       SPMF.support (genDeclAlias (G := SPMF) s b) := by
   rw [SPMF.mem_support_iff_may]
+  -- Flattening `genAlias` lets the alias step's `match` reduce before the walk. Otherwise the walk
+  -- generates the `genDeclAlias.match_1` lemmas here too, and they clash with the copies that
+  -- ProgramGen.Sound generates when both modules are imported.
   simp only [genDeclAlias, genAlias, mkAliasDecl, bind_assoc, pure_bind]
   walk [(mem_law (genDeclTypeName_complete hnm hnmAllowed hnmNotLocal)).obs]
   exact ⟨_, rfl, _, ⟨Nat.zero_le _, hlen⟩, _, hparams, _, hbody, by rw [if_pos hallowed]⟩

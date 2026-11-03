@@ -99,12 +99,6 @@ theorem namesStep_single {s s' : GenState} {ds : List Decl} {nm : String}
   · rw [hdn]; simpa using hnm
   · rw [hdn]; simp
 
-/-- Every result of a generator that is sound for a step's name tracking tracks the names of that
-    step. A step proves its name tracking as such a soundness fact, by `walk`. -/
-theorem namesStep_of_law {s : GenState} {g : SPMF StepResult}
-    (hg : IsSoundFor g fun r => NamesStep s r.1 r.2)
-    {ds : List Decl} {s' : GenState} (h : (ds, s') ∈ SPMF.support g) : NamesStep s ds s' := hg _ h
-
 /-! ## Declaration names the checker accepts -/
 
 /-- A name that does not start with `$` is allowed, because every reserved name prefix starts
@@ -948,14 +942,6 @@ theorem genDistinctAssertion_names {bt : BaseTys} {tc : TyCons}
 These steps leave the known types and the type-constructor pool unchanged, so `Inv` preservation
 is `contextOk_reserved_mono` plus monotonicity of the reserved facts. -/
 
-/-- Every result of a generator that is sound for a step's typing and invariant is a well-typed
-    declaration list from `s` and keeps `Inv`. A step proves its soundness as such a fact, by
-    `walk`: one goal per path, with the drawn values and the gate's equation in context. -/
-theorem stepSound_of_law (P : Program) {s : GenState} {g : SPMF StepResult}
-    (hg : IsSoundFor g fun r => DeclsWellTyped P s.C [] r.1 r.2.C ∧ Inv r.2)
-    {ds : List Decl} {s' : GenState} (h : (ds, s') ∈ SPMF.support g) :
-    DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := hg _ h
-
 /-- A state whose only change from `s` is prepending `name` to `reserved`
     preserves `Inv`. -/
 theorem inv_cons_reserved {s : GenState} (hinv : Inv s) (name : String) :
@@ -1354,7 +1340,7 @@ theorem genDeclDistinct_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDistinct (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
-  refine stepSound_of_law P ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclDistinct
   walk [(isSoundFor_self_support (genDistinctAssertion (G := SPMF) s.baseTypes s.tyCons s.reserved
     b.maxDistinctVars b.tySize)).obs]
@@ -1398,7 +1384,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclAbstract (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
-  refine stepSound_of_law P ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclAbstract genAbstractType
   walk [(isSoundFor_self_support (genDeclTypeName (G := SPMF) s.reserved)).obs]
   next nm _ ar _ C' hadd =>
@@ -1606,7 +1592,7 @@ theorem genDatatypeBlock_MutualADTWF {s : GenState} {b : Bounds}
 theorem genDeclAxiom_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclAxiom (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  refine namesStep_of_law ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclAxiom genAxiom
   walk [(isSoundFor_self_support (genDeclName (G := SPMF) s.reserved)).obs,
     (true_law (genLExpr (G := SPMF) [] (opsOver [] s.octx) s.pctx [] [] b.exprDepth .bool)).obs]
@@ -1627,7 +1613,7 @@ theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
       b.maxDistinctVars b.tySize)
       (fun t => t.1 ∉ s.reserved ∧ (∀ x ∈ t.2.2, x ∉ t.1 :: s.reserved) ∧ t.2.2.Nodup) :=
     fun ⟨_, _, _⟩ h => genDistinctAssertion_names h
-  refine namesStep_of_law ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclDistinct
   walk [hD.obs]
   next t ht _ C' constDecls hadd =>
@@ -1661,7 +1647,7 @@ theorem genDeclDistinct_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 theorem genDeclAlias_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclAlias (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  refine namesStep_of_law ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclAlias genAlias mkAliasDecl; dsimp only
   walk [(isSoundFor_self_support (genDeclTypeName (G := SPMF) s.reserved)).obs,
     fun r k => (true_law (DatatypeGen.genFreshNames (G := SPMF) r k)).obs,
@@ -1675,7 +1661,7 @@ theorem genDeclAlias_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : Ge
 theorem genDeclAbstract_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclAbstract (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  refine namesStep_of_law ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclAbstract genAbstractType
   walk [(isSoundFor_self_support (genDeclTypeName (G := SPMF) s.reserved)).obs]
   all_goals first
@@ -1687,7 +1673,7 @@ theorem genDeclAbstract_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclFunction (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  refine namesStep_of_law ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclFunction; dsimp only
   walk [(true_law (genFunction (G := SPMF) [] s.octx b.funcDepth s.derivedPctx
       (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons)).obs,
@@ -1702,7 +1688,7 @@ theorem genDeclFunction_names {s : GenState} {b : Bounds} {ds : List Decl} {s' :
 theorem genDeclProcedure_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclProcedure (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  refine namesStep_of_law ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclProcedure; dsimp only
   walk [(true_law (genProcedure (G := SPMF) s.octx s.procs s.C s.Γ b.procSize b.procLen
     s.derivedPctx)).obs, (isSoundFor_self_support (genDeclName (G := SPMF) s.reserved)).obs]
@@ -1715,7 +1701,7 @@ theorem genDeclProcedure_names {s : GenState} {b : Bounds} {ds : List Decl} {s' 
 theorem genDeclDatatype_names {s : GenState} {b : Bounds} {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     NamesStep s ds s' := by
-  refine namesStep_of_law ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclDatatype; dsimp only
   walk [(isSoundFor_self_support (genMutuallyRecursiveDatatypes (G := SPMF) s.baseTypes
     (s.tyCons ++ s.dtCons) b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs

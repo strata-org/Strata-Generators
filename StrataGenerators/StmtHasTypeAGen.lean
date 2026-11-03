@@ -522,23 +522,23 @@ theorem genCallStmt_outCtx_wellKinded {procs : ProcSigCtx}
     exact List.mem_map_of_mem (List.mem_filter.mp hq).1
   revert r; show IsSoundFor _ _; walk_genCallStmt
   next _ _ hWK s hs σvals hσvals _ _ _ _ _ _ =>
-  have hσWK := sampled_inst_wellKinded hWK hσvals
-  refine { hWK with ctxWK := ?_ }
-  intro ty hty
-  rcases mem_values_insertAllCtx _ ctx hty with hnew | hold
-  · rw [List.map_append] at hnew
-    rcases List.mem_append.mp hnew with hM | hT
-    · exact substSig_values_wellKinded _ s.M hσWK
-        (fun t ht => hWK.sigsWK s hs t (by
-          rw [lm_values_append]; exact List.mem_append_left _ ht))
-        ty (hfilt _ _ ty hM)
-    · refine substSig_values_wellKinded _ s.O hσWK
-        (fun t ht => hWK.sigsWK s hs t (by
-          rw [lm_values_append]; exact List.mem_append_right _ ht)) ty ?_
-      rw [← outTargets_values immutableVars ctx (StrataGenerators.Stmt.substSig _ s.O)
-        (functionNames C)]
-      exact hfilt _ _ ty hT
-  · exact hWK.ctxWK ty hold
+    have hσWK := sampled_inst_wellKinded hWK hσvals
+    refine { hWK with ctxWK := ?_ }
+    intro ty hty
+    rcases mem_values_insertAllCtx _ ctx hty with hnew | hold
+    · rw [List.map_append] at hnew
+      rcases List.mem_append.mp hnew with hM | hT
+      · exact substSig_values_wellKinded _ s.M hσWK
+          (fun t ht => hWK.sigsWK s hs t (by
+            rw [lm_values_append]; exact List.mem_append_left _ ht))
+          ty (hfilt _ _ ty hM)
+      · refine substSig_values_wellKinded _ s.O hσWK
+          (fun t ht => hWK.sigsWK s hs t (by
+            rw [lm_values_append]; exact List.mem_append_right _ ht)) ty ?_
+        rw [← outTargets_values immutableVars ctx (StrataGenerators.Stmt.substSig _ s.O)
+          (functionNames C)]
+        exact hfilt _ _ ty hT
+    · exact hWK.ctxWK ty hold
 
 /-- The soundness of `genCallStmt`, at each depth. Each emitted *group* of a call (the `init`
     statements for each missing name, then the call, spliced inline) is a well-typed statement
@@ -561,108 +561,108 @@ theorem genCallStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       (env.toTCtx r.outCtx).types := by
   revert r; show IsSoundFor _ _; walk_genCallStmt
   next _ _ hProcs hWK s hs σvals hσvals hcond exprs hexprs hgenAll mask _ =>
-  -- Name the chosen instantiation `σ` and the instantiated signature blocks the generator uses.
-  generalize hσ : s.typeArgs.zip σvals = σ at hcond hexprs ⊢
-  generalize hMσ : StrataGenerators.Stmt.substSig σ s.M = Mσ at hcond ⊢
-  generalize hIσ : StrataGenerators.Stmt.substSig σ s.I = Iσ at hexprs
-  generalize hOσ : StrataGenerators.Stmt.substSig σ s.O = Oσ at hcond ⊢
-  obtain ⟨hMusable, hNodup, _⟩ := hcond
-  -- Name the out targets the generator picked for itself, and record the two facts that
-  -- the soundness lemmas for a call need: usability, and the alignment of the types by
-  -- position with the *instantiated* out-only block.
-  generalize hT : outTargets immutableVars ctx Oσ (functionNames C) = T at hNodup ⊢
-  have hallusable : (List.append Mσ T).all (usableName immutableVars ctx) = true := by
-    rw [← hT]; exact all_usableName_append immutableVars ctx Mσ Oσ _ hMusable
-  have hTVals : T.values = Oσ.values := by
-    rw [← hT]; exact outTargets_values immutableVars ctx Oσ _
-  -- Callee signature facts from the correspondence.
-  obtain ⟨proc, hfind, _, hInputs, hOutputs, hIdisjOut, hOutNodup⟩ := hProcs s hs
-  have hMnotO : ∀ k ∈ s.M.keys, k ∉ s.O.keys := by
-    rw [lm_keys_append] at hOutNodup
-    exact fun k hk hkO => (List.nodup_append.mp hOutNodup).2.2 k hk k hkO rfl
-  -- The drawn inputs are pointwise reachable, at the *instantiated* input types.
-  have hF₂ := (mem_support_mapM_iff
-    (fun τ => genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] d τ)
-      Iσ.values exprs).mp hexprs
-  have hExLen : exprs.length = s.I.length := by
-    rw [hF₂.length_eq, ← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length]
-  -- Each input is well-typed at the instantiated input type `subst [σ] (s.I.values[i])`.
-  have hExTy : ∀ i (hi : i < exprs.length) (hj : i < s.I.values.length),
-      ExprWellTyped C (env.toTCtx ctx).types (exprs[i]'hi)
-        (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj)) := by
-    intro i hi hj
-    have hjσ : i < Iσ.values.length := by
-      rw [← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length, ← lm_values_length]
-      exact hj
-    have hmem : exprs[i]'hi ∈ SPMF.support
-        (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] d (Iσ.values[i]'hjσ)) := by
-      simpa only [List.get_eq_getElem] using hF₂.get hi hjσ
-    -- `Iσ.values[i] = subst [σ] (s.I.values[i])` (as a value equation, so the
-    -- index proof `hjσ` is untouched).
-    have hval : Iσ.values[i]'hjσ =
-        LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj) := by
-      have hjσ' : i < (StrataGenerators.Stmt.substSig σ s.I).values.length := by
-        rw [hIσ]; exact hjσ
-      rw [← StrataGenerators.Stmt.substSig_values_getElem σ s.I i hjσ' hj]
-      congr 1; rw [hIσ]
-    rw [← hval]
-    exact genLExpr_exprWellTyped_of_known hops (env.corr ctx) hFun hmem
-      (List.all_eq_true.mp hgenAll _ (List.getElem_mem hi))
-  -- Each required name (in the instantiated write-list `Mσ ++ T`) is *either* already bound
-  -- at its recorded type, so the call reuses it, *or* absent, so the call declares it. That
-  -- is the `usable` guard of the generator, moved across `VarCtxCorresponds`.
-  have hReuse : ∀ p ∈ (Mσ ++ T).toList,
-      (env.toTCtx ctx).types.find? p.1 = some (.forAll [] p.2) ∨
-      (env.toTCtx ctx).types.find? p.1 = none := by
-    intro q hq
-    have hq' := List.all_eq_true.mp hallusable q hq
-    rcases hfind_q : ctx.find? q.1 with _ | τ
-    · exact Or.inr ((env.corr ctx).2 q.1 (by simp [VarCtx.isFresh, hfind_q]))
-    · have hnotinit : needsInit ctx q = false := by
-        simp [needsInit, VarCtx.isFresh, hfind_q]
-      have hreuse : reusable immutableVars ctx q = true := by
-        simp only [usableName, hnotinit, Bool.or_false] at hq'; exact hq'
-      have hτ : τ = q.2 := by
-        simp only [reusable, hfind_q, Bool.and_eq_true, beq_iff_eq, Option.some.injEq]
-          at hreuse
-        exact hreuse.1
-      have hb := (env.corr ctx).1 q.1 τ hfind_q
-      rw [hτ] at hb
-      exact Or.inl hb
-  -- Every type the init chain stores is well-kinded in `C`: the sampled `σ` values
-  -- come from the generable set (or are `bool`), both well-kinded, and `substSig`
-  -- preserves well-kindedness.
-  have hσWK : ∀ t ∈ σ.map Prod.snd, C.WellKindedTy t := hσ ▸ sampled_inst_wellKinded hWK hσvals
-  have hwk : ∀ p ∈ (StrataGenerators.Stmt.substSig σ s.M ++ T).toList,
-      C.WellKindedTy p.2 := by
-    intro q hq
-    rcases List.mem_append.mp hq with hqM | hqT
-    · exact substSig_values_wellKinded σ s.M hσWK
-        (fun ty hty => hWK.sigsWK s hs ty (by
-          rw [lm_values_append]; exact List.mem_append_left _ hty))
-        q.2 (by rw [ListMap.values_eq_map_snd]; exact List.mem_map_of_mem hqM)
-    · have hqv : q.2 ∈ T.values := by
-        rw [ListMap.values_eq_map_snd]; exact List.mem_map_of_mem hqT
-      rw [hTVals, ← hOσ] at hqv
-      exact substSig_values_wellKinded σ s.O hσWK
-        (fun ty hty => hWK.sigsWK s hs ty (by
-          rw [lm_values_append]; exact List.mem_append_right _ hty))
-        q.2 hqv
-  -- Move both the emitted chain and the output scope to the single `missingIn`
-  -- filter over the scopes of `env.toTCtx ctx` that `call_mixed_body_sound` speaks about.
-  show StatementsWellTyped P C (env.toTCtx ctx).types labels
-    (initChain (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)) ++ _) C
-    (env.toTCtx
-      (insertAllCtx ctx (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)))).types
-  refine StatementsWellTyped_out_equiv ?_
-    (env.toTCtx_insertAllCtx (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)) ctx)
-  rw [filter_needsInit_append, filter_needsInit_eq_missingIn env ctx]
-  -- `call_mixed_body_sound` takes declared blocks + `σ`; `Mσ`/`Oσ` are the
-  -- instantiated ones the generator used. Rewrite them back to `substSig σ …`.
-  rw [← hMσ] at hNodup hReuse ⊢
-  rw [← hOσ] at hTVals
-  exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hfind hInputs hOutputs
-    hExLen hTVals hExTy hIdisjOut hMnotO hNodup hReuse hwk
+    -- Name the chosen instantiation `σ` and the instantiated signature blocks the generator uses.
+    generalize hσ : s.typeArgs.zip σvals = σ at hcond hexprs ⊢
+    generalize hMσ : StrataGenerators.Stmt.substSig σ s.M = Mσ at hcond ⊢
+    generalize hIσ : StrataGenerators.Stmt.substSig σ s.I = Iσ at hexprs
+    generalize hOσ : StrataGenerators.Stmt.substSig σ s.O = Oσ at hcond ⊢
+    obtain ⟨hMusable, hNodup, _⟩ := hcond
+    -- Name the out targets the generator picked for itself, and record the two facts that
+    -- the soundness lemmas for a call need: usability, and the alignment of the types by
+    -- position with the *instantiated* out-only block.
+    generalize hT : outTargets immutableVars ctx Oσ (functionNames C) = T at hNodup ⊢
+    have hallusable : (List.append Mσ T).all (usableName immutableVars ctx) = true := by
+      rw [← hT]; exact all_usableName_append immutableVars ctx Mσ Oσ _ hMusable
+    have hTVals : T.values = Oσ.values := by
+      rw [← hT]; exact outTargets_values immutableVars ctx Oσ _
+    -- Callee signature facts from the correspondence.
+    obtain ⟨proc, hfind, _, hInputs, hOutputs, hIdisjOut, hOutNodup⟩ := hProcs s hs
+    have hMnotO : ∀ k ∈ s.M.keys, k ∉ s.O.keys := by
+      rw [lm_keys_append] at hOutNodup
+      exact fun k hk hkO => (List.nodup_append.mp hOutNodup).2.2 k hk k hkO rfl
+    -- The drawn inputs are pointwise reachable, at the *instantiated* input types.
+    have hF₂ := (mem_support_mapM_iff
+      (fun τ => genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] d τ)
+        Iσ.values exprs).mp hexprs
+    have hExLen : exprs.length = s.I.length := by
+      rw [hF₂.length_eq, ← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length]
+    -- Each input is well-typed at the instantiated input type `subst [σ] (s.I.values[i])`.
+    have hExTy : ∀ i (hi : i < exprs.length) (hj : i < s.I.values.length),
+        ExprWellTyped C (env.toTCtx ctx).types (exprs[i]'hi)
+          (LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj)) := by
+      intro i hi hj
+      have hjσ : i < Iσ.values.length := by
+        rw [← hIσ, lm_values_length, StrataGenerators.Stmt.substSig_length, ← lm_values_length]
+        exact hj
+      have hmem : exprs[i]'hi ∈ SPMF.support
+          (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] d (Iσ.values[i]'hjσ)) := by
+        simpa only [List.get_eq_getElem] using hF₂.get hi hjσ
+      -- `Iσ.values[i] = subst [σ] (s.I.values[i])` (as a value equation, so the
+      -- index proof `hjσ` is untouched).
+      have hval : Iσ.values[i]'hjσ =
+          LMonoTy.subst (Strata.Util.HMaps.ofScopes [σ]) (s.I.values[i]'hj) := by
+        have hjσ' : i < (StrataGenerators.Stmt.substSig σ s.I).values.length := by
+          rw [hIσ]; exact hjσ
+        rw [← StrataGenerators.Stmt.substSig_values_getElem σ s.I i hjσ' hj]
+        congr 1; rw [hIσ]
+      rw [← hval]
+      exact genLExpr_exprWellTyped_of_known hops (env.corr ctx) hFun hmem
+        (List.all_eq_true.mp hgenAll _ (List.getElem_mem hi))
+    -- Each required name (in the instantiated write-list `Mσ ++ T`) is *either* already bound
+    -- at its recorded type, so the call reuses it, *or* absent, so the call declares it. That
+    -- is the `usable` guard of the generator, moved across `VarCtxCorresponds`.
+    have hReuse : ∀ p ∈ (Mσ ++ T).toList,
+        (env.toTCtx ctx).types.find? p.1 = some (.forAll [] p.2) ∨
+        (env.toTCtx ctx).types.find? p.1 = none := by
+      intro q hq
+      have hq' := List.all_eq_true.mp hallusable q hq
+      rcases hfind_q : ctx.find? q.1 with _ | τ
+      · exact Or.inr ((env.corr ctx).2 q.1 (by simp [VarCtx.isFresh, hfind_q]))
+      · have hnotinit : needsInit ctx q = false := by
+          simp [needsInit, VarCtx.isFresh, hfind_q]
+        have hreuse : reusable immutableVars ctx q = true := by
+          simp only [usableName, hnotinit, Bool.or_false] at hq'; exact hq'
+        have hτ : τ = q.2 := by
+          simp only [reusable, hfind_q, Bool.and_eq_true, beq_iff_eq, Option.some.injEq]
+            at hreuse
+          exact hreuse.1
+        have hb := (env.corr ctx).1 q.1 τ hfind_q
+        rw [hτ] at hb
+        exact Or.inl hb
+    -- Every type the init chain stores is well-kinded in `C`: the sampled `σ` values
+    -- come from the generable set (or are `bool`), both well-kinded, and `substSig`
+    -- preserves well-kindedness.
+    have hσWK : ∀ t ∈ σ.map Prod.snd, C.WellKindedTy t := hσ ▸ sampled_inst_wellKinded hWK hσvals
+    have hwk : ∀ p ∈ (StrataGenerators.Stmt.substSig σ s.M ++ T).toList,
+        C.WellKindedTy p.2 := by
+      intro q hq
+      rcases List.mem_append.mp hq with hqM | hqT
+      · exact substSig_values_wellKinded σ s.M hσWK
+          (fun ty hty => hWK.sigsWK s hs ty (by
+            rw [lm_values_append]; exact List.mem_append_left _ hty))
+          q.2 (by rw [ListMap.values_eq_map_snd]; exact List.mem_map_of_mem hqM)
+      · have hqv : q.2 ∈ T.values := by
+          rw [ListMap.values_eq_map_snd]; exact List.mem_map_of_mem hqT
+        rw [hTVals, ← hOσ] at hqv
+        exact substSig_values_wellKinded σ s.O hσWK
+          (fun ty hty => hWK.sigsWK s hs ty (by
+            rw [lm_values_append]; exact List.mem_append_right _ hty))
+          q.2 hqv
+    -- Move both the emitted chain and the output scope to the single `missingIn`
+    -- filter over the scopes of `env.toTCtx ctx` that `call_mixed_body_sound` speaks about.
+    show StatementsWellTyped P C (env.toTCtx ctx).types labels
+      (initChain (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)) ++ _) C
+      (env.toTCtx
+        (insertAllCtx ctx (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)))).types
+    refine StatementsWellTyped_out_equiv ?_
+      (env.toTCtx_insertAllCtx (Mσ.filter (needsInit ctx) ++ T.filter (needsInit ctx)) ctx)
+    rw [filter_needsInit_append, filter_needsInit_eq_missingIn env ctx]
+    -- `call_mixed_body_sound` takes declared blocks + `σ`; `Mσ`/`Oσ` are the
+    -- instantiated ones the generator used. Rewrite them back to `substSig σ …`.
+    rw [← hMσ] at hNodup hReuse ⊢
+    rw [← hOσ] at hTVals
+    exact call_mixed_body_sound σ s.M s.I s.O T exprs mask hfind hInputs hOutputs
+      hExLen hTVals hExTy hIdisjOut hMnotO hNodup hReuse hwk
 
 -- ── Procedure-call completeness (forward membership) ──────────────────────
 
@@ -877,91 +877,14 @@ theorem genStmt_outC_cases
     (hr : r ∈ SPMF.support
       (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n)) :
     r.outC = C ∨ ∃ k f, C.addKnownTypeWithError k f = .ok r.outC := by
-  have hsame : ∀ r' : GenStmtResult, r'.outC = C →
-      r'.outC = C ∨ ∃ k f, C.addKnownTypeWithError k f = .ok r'.outC :=
-    fun _ h => Or.inl h
-  have hcmd : ∀ d, ∀ r' ∈ SPMF.support
-      (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx d pctx), r'.outC = C := by
-    intro d r' hr'
-    simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff] at hr'
-    obtain ⟨_, _, rfl⟩ := hr'
-    rfl
-  have hexit : ∀ r' ∈ SPMF.support (genExitStmt (G := SPMF) labels C ctx), r'.outC = C := by
-    intro r' hr'
-    cases labels with
-    | nil => simp only [genExitStmt, SPMF.mem_support_bot_iff] at hr'
-    | cons hd tl =>
-      simp only [genExitStmt, mem_support_bind_iff, mem_support_pure_iff,
-                 mem_support_elements_iff] at hr'
-      obtain ⟨_, _, rfl⟩ := hr'
-      rfl
-  have htype : ∀ d, ∀ r' ∈ SPMF.support (genTypeDeclStmt (G := SPMF) C ctx d),
-      r'.outC = C ∨ ∃ k f, C.addKnownTypeWithError k f = .ok r'.outC := by
-    intro d r' hr'
-    simp only [genTypeDeclStmt, mem_support_bind_iff] at hr'
-    obtain ⟨tc, _, hr'⟩ := hr'
-    split at hr'
-    · rename_i C' hadd
-      simp only [mem_support_pure_iff] at hr'; subst hr'
-      exact Or.inr ⟨_, _, hadd⟩
-    · simp only [SPMF.mem_support_bot_iff] at hr'
-  have hcall : ∀ d, ∀ r' ∈ SPMF.support
-      (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d pctx), r'.outC = C := by
-    intro d r' hr'
-    cases procs with
-    | nil => simp only [genCallStmt, SPMF.mem_support_bot_iff] at hr'
-    | cons p₀ ps =>
-      simp only [genCallStmt, mem_support_bind_iff, mem_support_elements_iff] at hr'
-      obtain ⟨_, _, hr'⟩ := hr'
-      obtain ⟨_, _, hr'⟩ := hr'
-      split at hr'
-      · simp only [mem_support_bind_iff] at hr'
-        obtain ⟨_, _, hr'⟩ := hr'
-        split at hr'
-        · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr'
-          obtain ⟨_, _, rfl⟩ := hr'
-          rfl
-        · simp only [SPMF.mem_support_bot_iff] at hr'
-      · simp only [SPMF.mem_support_bot_iff] at hr'
-  cases n with
-  | zero =>
-    simp only [genStmt, mem_support_frequency_iff] at hr
-    obtain ⟨w, g, hg, _, hr⟩ := hr
-    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
-    · exact hsame r (hcmd 0 r hr)
-    · cases labels with
-      | nil => exact hsame r (hcmd 0 r hr)
-      | cons hd tl => exact hsame r (hexit r hr)
-    · exact htype 0 r hr
-    · cases procs with
-      | nil => exact hsame r (hcmd 0 r hr)
-      | cons hd tl => exact hsame r (hcall 0 r hr)
-  | succ size =>
-    simp only [genStmt, mem_support_frequency_iff] at hr
-    obtain ⟨w, g, hg, _, hr⟩ := hr
-    simp only [List.mem_cons, List.mem_nil_iff, Prod.mk.injEq, or_false] at hg
-    rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
-    · exact hsame r (hcmd (size + 1) r hr)
-    · cases labels with
-      | nil => exact hsame r (hcmd (size + 1) r hr)
-      | cons hd tl => exact hsame r (hexit r hr)
-    · exact htype (size + 1) r hr
-    · cases procs with
-      | nil => exact hsame r (hcmd (size + 1) r hr)
-      | cons hd tl => exact hsame r (hcall (size + 1) r hr)
-    · simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
-      obtain ⟨_, _, ⟨⟨_, _⟩⟩, _, _, _, rfl⟩ := hr
-      exact hsame _ rfl
-    · simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
-      obtain ⟨_, _, ⟨⟨_, _⟩⟩, _, ⟨⟨_, _⟩⟩, _, _, _, _, _, rfl⟩ := hr
-      exact hsame _ rfl
-    · simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
-      obtain ⟨⟨⟨_, _⟩⟩, _, ⟨⟨_, _⟩⟩, _, _, _, _, _, rfl⟩ := hr
-      exact hsame _ rfl
-    · simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff] at hr
-      obtain ⟨_, _, _, _, _, _, ⟨⟨_, _⟩⟩, _, _, _, rfl⟩ := hr
-      exact hsame _ rfl
+  have hcall : ∀ d, IsSoundFor (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d pctx)
+      (fun r => r.outC = C) := by
+    intro d; walk_genCallStmt; rfl
+  revert r; show IsSoundFor _ _; walk_genStmt_leaves
+  all_goals first
+    | exact .inl rfl
+    | exact .inl (hcall _ _ ‹_›)
+    | exact .inr ⟨_, _, ‹_›⟩
 
 /-- **`genStmt` only extends the known-type table**: a `typeDecl` only adds a name. -/
 theorem genStmt_outC_mono

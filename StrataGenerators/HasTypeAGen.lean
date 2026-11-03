@@ -926,20 +926,14 @@ private theorem norm_map (τ₁ τ₂ : LMonoTy) :
 /-- Normalize `.seq` abbreviation so `simp [genLExpr]` equation lemmas can match. -/
 private theorem norm_seq (τ : LMonoTy) : LMonoTy.seq τ = LMonoTy.tcons "Sequence" [τ] := rfl
 
-/-- Every natural number that `Nat.arbitrary` draws satisfies the trivial postcondition. `walk` needs
-    a fact for each draw, even one that constrains nothing. -/
-theorem natArbitrary_true : IsSoundFor (ArbNat.Nat.arbitrary (G := SPMF)) (fun _ => True) :=
-  true_law _
-
-/-- Every character that `genInterestingChar` draws satisfies the trivial postcondition. -/
-theorem genInterestingChar_true :
-    IsSoundFor (StrataGenerators.PrimitiveGens.genInterestingChar (G := SPMF)) (fun _ => True) :=
-  true_law _
-
-/-- Every natural number that `natArbGeom` draws satisfies the trivial postcondition. -/
-theorem natArbGeom_true :
-    IsSoundFor (StrataGenerators.PrimitiveGens.natArbGeom (G := SPMF)) (fun _ => True) :=
-  true_law _
+/-- `walk` with the given facts and the facts for the primitive draws of `genLExprBase`
+    (`Nat.arbitrary`, `genInterestingChar`, `natArbGeom`), none of which constrains a term. -/
+syntax "walk_prims " "[" term,* "]" : tactic
+macro_rules
+  | `(tactic| walk_prims [$ts,*]) => `(tactic| walk [$ts,*,
+      (true_law (ArbNat.Nat.arbitrary (G := SPMF))).obs,
+      (true_law (StrataGenerators.PrimitiveGens.genInterestingChar (G := SPMF))).obs,
+      (true_law (StrataGenerators.PrimitiveGens.natArbGeom (G := SPMF))).obs])
 
 /-- `genLExprBase_sound` as a law, by induction on the depth. `split` exposes one arm of
     `genLExprBase` per goal; the arms of the other depth are refuted by `omega`. `walk` then leaves one
@@ -967,8 +961,7 @@ private theorem genLExprBase_sound_aux (fctx : FVarCtx) (octx : OpCtx) (pctx : P
     all_goals first
       | (exfalso; omega)
       | (dsimp only
-         walk [(hB bctx _ _).obs, (hF bctx _ _).obs, (hO bctx _ _).obs,
-          natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs])
+         walk_prims [(hB bctx _ _).obs, (hF bctx _ _).obs, (hO bctx _ _).obs])
     all_goals first
       | assumption
       | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
@@ -986,19 +979,16 @@ private theorem genLExprBase_sound_aux (fctx : FVarCtx) (octx : OpCtx) (pctx : P
       fun σ e he => StrataGenerators.IndirSupport.genIndirPolyCore_hasType fctx octx pctx bctx _ _ _ _
         (fun σ a ha => ih bctx σ a ha) (fun a ha => ih bctx σ a ha) e he
     -- A drawn type constrains nothing.
-    have hA : ∀ τ, IsSoundFor (genAppArgTy (G := SPMF) fctx octx tvars bctx n τ) (fun _ => True) :=
-      fun _ _ _ => trivial
-    have hG : IsSoundFor (genGenerableTy (G := SPMF) fctx octx tvars bctx n) (fun _ => True) :=
-      fun _ _ => trivial
     rw [IsSoundFor.iff_obs, genLExprBase.eq_def]
     split
     all_goals first
       | (exfalso; omega)
       | (obtain rfl := Nat.succ.inj ‹_ = Nat.succ _›
          dsimp only
-         walk [(hB bctx _ _).obs, (hF bctx _ _).obs, (hO bctx _ _).obs,
-          natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs,
-          (ih _ _).obs, (hI _ _).obs, (hP _).obs, (hA _).obs, hG.obs])
+         walk_prims [(hB bctx _ _).obs, (hF bctx _ _).obs, (hO bctx _ _).obs,
+          (ih _ _).obs, (hI _ _).obs, (hP _).obs,
+          fun τ => (true_law (genAppArgTy (G := SPMF) fctx octx tvars bctx n τ)).obs,
+          (true_law (genGenerableTy (G := SPMF) fctx octx tvars bctx n)).obs])
     all_goals first
       | assumption
       | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
@@ -1310,11 +1300,6 @@ open StrataGenerators.IndirSupport
 private abbrev GenTy (tvars : List TyIdentifier) (σ : LMonoTy) : Prop :=
   ∃ m, σ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m)
 
-/-! ### The primitive draws
-
-`natArbitrary_true`, `genInterestingChar_true` and `natArbGeom_true` are stated beside
-`genLExprBase_sound`, which uses them first. -/
-
 /-! ### The variable and operator pools
 
 A leaf from one of these is a `bvar`, an `fvar` or an `op` node, each of `termDepth` 0 — in *any*
@@ -1438,8 +1423,7 @@ local macro "termDepth_arm_zero " bctx:term : tactic =>
     simp only [norm_bool, norm_int, norm_string, norm_real, norm_regex, norm_arrow, norm_map,
       norm_seq, genLExprBase]
     rw [IsSoundFor.iff_obs]
-    walk [natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs,
-      (pickBVar_termDepth _ _ _ $bctx).obs, (pickFVar_termDepth _ _ _ $bctx).obs,
+    walk_prims [(pickBVar_termDepth _ _ _ $bctx).obs, (pickFVar_termDepth _ _ _ $bctx).obs,
       (pickOp_termDepth _ _ _ $bctx).obs]
     all_goals (first
       | (simp only [termDepth, depthBudget]; omega)
@@ -1455,8 +1439,7 @@ local macro "termDepth_arm_succ " bctx:term ", " ihW:term ", " hIndir:term ", "
     simp only [norm_bool, norm_int, norm_string, norm_real, norm_regex, norm_arrow, norm_map,
       norm_seq, genLExprBase]
     rw [IsSoundFor.iff_obs]
-    walk [natArbitrary_true.obs, genInterestingChar_true.obs, natArbGeom_true.obs,
-      (pickBVar_termDepth _ _ _ $bctx).obs, (pickFVar_termDepth _ _ _ $bctx).obs,
+    walk_prims [(pickBVar_termDepth _ _ _ $bctx).obs, (pickFVar_termDepth _ _ _ $bctx).obs,
       (pickOp_termDepth _ _ _ $bctx).obs, ($ihW _ _).obs,
       (genGenerableTy_genTy _ _ _ _ _).obs, (genAppArgTy_genTy _ _ _ _ _ _).obs,
       (genLMonoTy_genTy _ _).obs, ($hIndir _ _).obs, ($hIndirPoly _ $hgen).obs]

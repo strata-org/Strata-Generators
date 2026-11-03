@@ -10,10 +10,8 @@ namespace StrataGenerators.Function
 /-- `genRareFlag` reaches both values. -/
 theorem mem_support_genRareFlag (b : Bool) :
     b ∈ SPMF.support (genRareFlag (G := SPMF)) := by
-  rw [genRareFlag, mem_support_frequency_iff]
-  cases b
-  · exact ⟨7, fun () => pure false, by simp, by omega, by rw [mem_support_pure_iff]⟩
-  · exact ⟨1, fun () => pure true, by simp, by omega, by rw [mem_support_pure_iff]⟩
+  rw [SPMF.mem_support_iff_may, genRareFlag]; walk
+  cases b <;> simp
 
 /-- `genFuncAttr depth` reaches every attribute whose parameter index, if any, is at most
     `depth`. -/
@@ -23,7 +21,7 @@ theorem genFuncAttr_complete (depth : Nat) (a : Strata.DL.Util.FuncAttr)
   have hzero : 0 ∈ List.range (depth + 1) := List.mem_range.mpr (by omega)
   have hidx : ∀ i, attrParamIdx a = some i → i ∈ List.range (depth + 1) :=
     fun i hi => List.mem_range.mpr (by have hle := h i hi; omega)
-  simp only [genFuncAttr, mem_support_bind_iff, mem_support_elements_iff]
+  rw [SPMF.mem_support_iff_may]; unfold genFuncAttr; walk
   cases a with
   | inline => exact ⟨0, hzero, by simp⟩
   | inlineIfConstr i => exact ⟨i, hidx i rfl, by simp⟩

@@ -449,7 +449,7 @@ theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyId
     refine IsSoundFor.iff_obs.mpr ?_
     rw [List.mapM_cons]
     walk [IsSoundFor.obs ih,
-      IsSoundFor.obs (g := genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) fun _ h => h]
+      (isSoundFor_self_support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool)).obs]
     aesop (add norm simp ListMap.values)
 
 /-- Membership in `genChecks octx tvars depth`: every clause's `expr` is a `bool` expression

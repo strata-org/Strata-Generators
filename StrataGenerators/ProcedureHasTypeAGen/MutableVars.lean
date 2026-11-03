@@ -302,9 +302,9 @@ theorem genCallStmt_mutableVars
       k ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) := by
   revert r; show IsSoundFor _ _
   rw [IsSoundFor.iff_obs, genCallStmt.eq_def]
-  walk [IsSoundFor.obs (P := fun _ => True) (g := List.mapM _ _) fun _ _ => trivial,
-    IsSoundFor.obs (P := fun _ => True) (g := genLExpr _ _ _ _ _ _ _) fun _ _ => trivial,
-    IsSoundFor.obs (P := fun _ => True) (g := elements [true, false] _) fun _ _ => trivial]
+  walk [(true_law (List.mapM _ _)).obs,
+    (true_law (genLExpr _ _ _ _ _ _ _)).obs,
+    (true_law (elements [true, false] _)).obs]
   -- Name the instantiated in-out block `Mσ` and the chosen out targets `T`.
   all_goals
     rename_i s _ σvals _ hcond _ _ _ _ _ x hx
@@ -366,12 +366,12 @@ theorem genStmt_mutableVars
         fun d => IsSoundFor.obs (genCallStmt_mutableVars octx pctx tvars immutableVars procs C ctx d),
         fun l C ctx len => IsSoundFor.obs
           (genStmtChain_mutableVars octx pctx tvars immutableVars procs l C ctx _ len),
-        IsSoundFor.obs (P := fun _ => True) (g := genTypeConstructor _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genFreshLabel _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genLExpr _ _ _ _ _ _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genCondOrNondet _ _ _ _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genOptMeasure _ _ _ _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genInvariants _ _ _ _ _) fun _ _ => trivial]
+        (true_law (genTypeConstructor _)).obs,
+        (true_law (genFreshLabel _)).obs,
+        (true_law (genLExpr _ _ _ _ _ _ _)).obs,
+        (true_law (genCondOrNondet _ _ _ _ _)).obs,
+        (true_law (genOptMeasure _ _ _ _ _)).obs,
+        (true_law (genInvariants _ _ _ _ _)).obs]
   all_goals (try simp only [block_modifiedVars_singleton, block_definedVars_singleton,
     HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars, Stmt.definedVars,
     CmdExt.modifiedVars, CmdExt.definedVars, if_false, Bool.false_eq_true, List.not_mem_nil] at *)

@@ -25,115 +25,6 @@ open Lambda RandomChoice StrataGenerators.IndirSupport
 
 namespace StrataGenerators.AnnotFacts
 
-/-! ## Closure of a generator under a property -/
-
-/-- Every element of the support of `s` satisfies `P`. -/
-def Closed {α : Type} (P : α → Prop) (s : SPMF α) : Prop :=
-  ∀ a ∈ SPMF.support s, P a
-
-section Combinators
-
-variable {α β : Type} {P : α → Prop}
-
-/-- A generator that returns `a` draws only terms satisfying `P` when `a` does. -/
-theorem closed_pure {a : α} (h : P a) : Closed P (pure a) := by
-  intro x hx
-  rw [mem_support_pure_iff] at hx
-  rw [hx]
-  exact h
-
-/-- A bind draws only terms satisfying `P` when every continuation it can reach does. -/
-theorem closed_bind {x : SPMF β} {f : β → SPMF α}
-    (h : ∀ b ∈ SPMF.support x, Closed P (f b)) : Closed P (x >>= f) := by
-  intro a ha
-  rw [mem_support_bind_iff] at ha
-  obtain ⟨b, hb, hab⟩ := ha
-  exact h b hb a hab
-
-/-- The empty generator draws nothing. -/
-theorem closed_default : Closed P (default : SPMF α) := by
-  intro a ha
-  exact ((mem_support_bot_iff a).mp ha).elim
-
-/-- A dependent conditional draws only terms satisfying `P` when both branches do. -/
-theorem closed_dite {c : Prop} [Decidable c] {t : c → SPMF α} {e : ¬c → SPMF α}
-    (ht : ∀ h, Closed P (t h)) (he : ∀ h, Closed P (e h)) : Closed P (dite c t e) := by
-  intro a ha
-  rw [mem_support_dite_iff] at ha
-  rcases ha with ⟨h, hmem⟩ | ⟨h, hmem⟩
-  · exact ht h a hmem
-  · exact he h a hmem
-
-/-- A choice between two generators draws only terms satisfying `P` when both do. -/
-theorem closed_oneOf_pair {x y : SPMF α} (hx : Closed P x) (hy : Closed P y) :
-    Closed P (oneOf [fun () => x, fun () => y]) := by
-  intro a ha
-  rw [mem_support_oneOf_pair_iff] at ha
-  rcases ha with hmem | hmem
-  · exact hx a hmem
-  · exact hy a hmem
-
-/-- Every generator of a list satisfies `P`. -/
-def AllClosed (P : α → Prop) (gs : List (Unit → SPMF α)) : Prop :=
-  ∀ g ∈ gs, Closed P (g ())
-
-/-- No generator of the empty list draws a term. -/
-theorem allClosed_nil : AllClosed P [] := by
-  intro g hg
-  exact absurd hg List.not_mem_nil
-
-/-- A list of generators is closed under `P` when its head and its tail are. -/
-theorem allClosed_cons {g : Unit → SPMF α} {gs : List (Unit → SPMF α)}
-    (hg : Closed P (g ())) (hgs : AllClosed P gs) : AllClosed P (g :: gs) := by
-  intro g' hg'
-  rcases List.mem_cons.mp hg' with rfl | hmem
-  · exact hg
-  · exact hgs g' hmem
-
-/-- A uniform choice among generators draws only terms satisfying `P` when each of them does. -/
-theorem closed_oneOf {gs : List (Unit → SPMF α)} (hne : gs ≠ [])
-    (h : AllClosed P gs) : Closed P (oneOf gs hne) := by
-  intro a ha
-  rw [mem_support_oneOf_iff] at ha
-  obtain ⟨g, hg, hmem⟩ := ha
-  exact h g hg a hmem
-
-/-- Every generator of a weighted list satisfies `P`. -/
-def AllClosedW (P : α → Prop) (gs : List (Nat × (Unit → SPMF α))) : Prop :=
-  ∀ p ∈ gs, Closed P (p.2 ())
-
-/-- No generator of the empty weighted list draws a term. -/
-theorem allClosedW_nil : AllClosedW P [] := by
-  intro p hp
-  exact absurd hp List.not_mem_nil
-
-/-- A weighted list of generators is closed under `P` when its head and its tail are. -/
-theorem allClosedW_cons {w : Nat} {g : Unit → SPMF α}
-    {gs : List (Nat × (Unit → SPMF α))}
-    (hg : Closed P (g ())) (hgs : AllClosedW P gs) : AllClosedW P ((w, g) :: gs) := by
-  intro p hp
-  rcases List.mem_cons.mp hp with rfl | hmem
-  · exact hg
-  · exact hgs p hmem
-
-/-- A weighted choice among generators draws only terms satisfying `P` when each of them does. -/
-theorem closed_frequency {gs : List (Nat × (Unit → SPMF α))}
-    (hpos : 0 < List.sum (List.map Prod.fst gs)) (h : AllClosedW P gs) :
-    Closed P (frequency gs hpos) := by
-  intro a ha
-  rw [mem_support_frequency_iff] at ha
-  obtain ⟨w, g, hmem, _, hga⟩ := ha
-  exact h (w, g) hmem a hga
-
-/-- A uniform choice from a list draws only terms satisfying `P` when every element does. -/
-theorem closed_elements [Inhabited α] {xs : List α} (hne : xs ≠ [])
-    (h : ∀ a ∈ xs, P a) : Closed P (elements xs hne) := by
-  intro a ha
-  rw [mem_support_elements_iff] at ha
-  exact h a ha
-
-end Combinators
-
 /-! ## The generic closure argument -/
 
 /-- The conditions under which every term `genLExpr` draws satisfies `P`. The type invariant `T`
@@ -169,7 +60,7 @@ structure ClosureHyps (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     whose types satisfy `T`. -/
 def GenClosed (T : LMonoTy → Prop) (P : LExpr' → Prop)
     (g : BVarCtx → LMonoTy → SPMF LExpr') : Prop :=
-  ∀ bctx τ, (∀ t ∈ bctx, T t) → T τ → Closed P (g bctx τ)
+  ∀ bctx τ, (∀ t ∈ bctx, T t) → T τ → IsSoundFor (g bctx τ) P
 
 section Closure
 
@@ -267,79 +158,29 @@ theorem ClosureHyps.generable (H : ClosureHyps fctx octx pctx tvars T P) {bctx :
 
 /-! ### Leaves -/
 
-/-- A boolean constant is a leaf satisfying `P`. -/
-theorem closed_genBoolConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genBoolConst (G := SPMF)) :=
-  closed_oneOf_pair (closed_pure (H.const _)) (closed_pure (H.const _))
-
-/-- An integer constant is a leaf satisfying `P`. -/
-theorem closed_genIntConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genIntConst (G := SPMF)) :=
-  closed_oneOf_pair (closed_bind fun _ _ => closed_pure (H.const _))
-    (closed_bind fun _ _ => closed_pure (H.const _))
-
-/-- A string constant is a leaf satisfying `P`. -/
-theorem closed_genStrConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genStrConst (G := SPMF)) :=
-  closed_bind fun _ _ => closed_pure (H.const _)
-
-/-- A rational constant is a leaf satisfying `P`. -/
-theorem closed_genRealConst (H : ClosureHyps fctx octx pctx tvars T P) :
-    Closed P (genRealConst (G := SPMF)) :=
-  closed_bind fun _ _ => closed_pure (H.const _)
-
-/-- A bitvector constant is a leaf satisfying `P`. -/
-theorem closed_genBitvecConst (H : ClosureHyps fctx octx pctx tvars T P) (w : Nat) :
-    Closed P (genBitvecConst (G := SPMF) w) :=
-  closed_bind fun _ _ => closed_pure (H.const _)
-
 /-- A bound variable drawn from the binder context satisfies `P`. -/
 theorem closed_pickBVar (H : ClosureHyps fctx octx pctx tvars T P) (bctx : BVarCtx)
-    (τ : LMonoTy) : ∀ hv, Closed P (pickBVar (G := SPMF) bctx τ hv) := by
+    (τ : LMonoTy) : ∀ hv, IsSoundFor (pickBVar (G := SPMF) bctx τ hv) P := by
   intro hv
-  unfold pickBVar
-  refine closed_elements _ ?_
-  intro a ha
-  obtain ⟨i, _, rfl⟩ := List.mem_map.mp ha
+  rw [IsSoundFor.iff_obs]; unfold pickBVar; walk
+  obtain ⟨i, _, rfl⟩ := List.mem_map.mp ‹_›
   exact H.bvar i
 
 /-- A free variable drawn from `fctx` satisfies `P`. -/
 theorem closed_pickFVar (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy) :
-    ∀ hf, Closed P (pickFVar (G := SPMF) fctx τ hf) := by
+    ∀ hf, IsSoundFor (pickFVar (G := SPMF) fctx τ hf) P := by
   intro hf
-  unfold pickFVar
-  refine closed_elements _ ?_
-  intro a ha
-  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp ha
+  rw [IsSoundFor.iff_obs]; unfold pickFVar; walk
+  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp ‹_›
   exact H.fvar (x, τ) ((fvarsOfType_mem_iff fctx τ x).mp hx)
 
 /-- An operator drawn from `octx` at its type satisfies `P`. -/
 theorem closed_pickOp (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy) :
-    ∀ ho, Closed P (pickOp (G := SPMF) octx τ ho) := by
+    ∀ ho, IsSoundFor (pickOp (G := SPMF) octx τ ho) P := by
   intro ho
-  unfold pickOp
-  refine closed_elements _ ?_
-  intro a ha
-  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp ha
+  rw [IsSoundFor.iff_obs]; unfold pickOp; walk
+  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp ‹_›
   exact H.op (x, τ) (mem_opsOfType octx τ x hx)
-
-/-- A bound variable of type `τ` if there is one, and a draw from `k` otherwise. -/
-theorem closed_leafB (H : ClosureHyps fctx octx pctx tvars T P) (bctx : BVarCtx) (τ : LMonoTy)
-    {k : SPMF LExpr'} (hk : Closed P k) :
-    Closed P (if hv : (bvarsOfType bctx τ).length > 0 then pickBVar bctx τ hv else k) :=
-  closed_dite (closed_pickBVar H bctx τ) (fun _ => hk)
-
-/-- A free variable of type `τ` if there is one, and a draw from `k` otherwise. -/
-theorem closed_leafF (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy)
-    {k : SPMF LExpr'} (hk : Closed P k) :
-    Closed P (if hf : (fvarsOfType fctx τ).length > 0 then pickFVar fctx τ hf else k) :=
-  closed_dite (closed_pickFVar H τ) (fun _ => hk)
-
-/-- An operator of type `τ` if there is one, and a draw from `k` otherwise. -/
-theorem closed_leafO (H : ClosureHyps fctx octx pctx tvars T P) (τ : LMonoTy)
-    {k : SPMF LExpr'} (hk : Closed P k) :
-    Closed P (if ho : (opsOfType octx τ).length > 0 then pickOp octx τ ho else k) :=
-  closed_dite (closed_pickOp H τ) (fun _ => hk)
 
 /-! ### Term formers -/
 
@@ -358,56 +199,50 @@ theorem ClosureHyps.mkApps (H : ClosureHyps fctx octx pctx tvars T P) :
 
 variable {g : BVarCtx → LMonoTy → SPMF LExpr'}
 
-/-- An application at a type satisfying `T` draws its argument type from `genLMonoTy`, so both
-    sides are drawn at types satisfying `T`. -/
-theorem closed_genApp (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
-    {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (n : Nat) {τ : LMonoTy} (hτ : T τ) :
-    Closed P (genApp (genAppArgTy (G := SPMF) fctx octx tvars bctx n τ) (g bctx) τ) := by
-  refine closed_bind fun τ' hτ' => ?_
-  have hT' : T τ' := H.genTy n τ' ((genAppArgTy_support fctx octx tvars bctx n τ τ').mp hτ')
-  refine closed_bind fun arg harg => closed_bind fun fn hfn => closed_pure ?_
-  exact H.app fn arg (ih bctx _ hb ((H.arrow τ' τ).mpr ⟨hT', hτ⟩) fn hfn)
-    (ih bctx τ' hb hT' arg harg)
+/-! ### Closing the leaves of the walk
 
-/-- A conditional at a type satisfying `T` draws its condition at `bool` and its branches at that
-    type. -/
-theorem closed_genIte (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
-    {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) {τ : LMonoTy} (hτ : T τ) :
-    Closed P (genIte (g bctx .bool) (g bctx τ) (g bctx τ)) :=
-  closed_bind fun c hc => closed_bind fun t ht => closed_bind fun f hf =>
-    closed_pure
-      (H.ite c t f (ih bctx _ hb H.bool c hc) (ih bctx τ hb hτ t ht) (ih bctx τ hb hτ f hf))
+Each lemma below closes the `walk` leaf of one term former. The facts for the parts of the term
+carry the type conditions in their postcondition. -/
 
-/-- An equality draws both sides at a type from `genLMonoTy`. -/
-theorem closed_genEq (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
-    {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (n : Nat) :
-    Closed P (genEq (genGenerableTy (G := SPMF) fctx octx tvars bctx n) (g bctx)) := by
-  refine closed_bind fun τ' hτ' => ?_
-  have hT' : T τ' := H.genTy n τ' ((genGenerableTy_support fctx octx tvars bctx n τ').mp hτ')
-  exact closed_bind fun a ha => closed_bind fun b hb' =>
-    closed_pure (H.eq a b (ih bctx τ' hb hT' a ha) (ih bctx τ' hb hT' b hb'))
+/-- An application whose function is drawn at `τ' → τ` and whose argument is drawn at `τ'`, all
+    types satisfying `T`, satisfies `P`. -/
+theorem ClosureHyps.app_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
+    {τ τ' : LMonoTy} {fn arg : LExpr'}
+    (hfn : (∀ x ∈ b, T x) → T (.arrow τ' τ) → P fn) (harg : (∀ x ∈ b, T x) → T τ' → P arg)
+    (hb : ∀ x ∈ b, T x) (hτ : T τ) (hτ' : T τ') : P (.app () fn arg) :=
+  H.app fn arg (hfn hb ((H.arrow τ' τ).mpr ⟨hτ', hτ⟩)) (harg hb hτ')
 
-/-- A quantifier draws its binder and trigger types from `genLMonoTy` and its body at `bool`, under
-    the extended binder context. -/
-theorem closed_genQuant (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
-    {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (n : Nat) (k : QuantifierKind) :
-    Closed P (genQuant k (genGenerableTy (G := SPMF) fctx octx tvars bctx n)
-      (fun τ' => g (τ' :: bctx)) (fun τ' => g (τ' :: bctx) .bool)) := by
-  refine closed_bind fun τ' hτ' => closed_bind fun τtr hτtr => ?_
-  have hT' : T τ' := H.genTy n τ' ((genGenerableTy_support fctx octx tvars bctx n τ').mp hτ')
-  have hTtr : T τtr :=
-    H.genTy n τtr ((genGenerableTy_support fctx octx tvars bctx n τtr).mp hτtr)
-  have hb' : ∀ t ∈ τ' :: bctx, T t := List.forall_mem_cons.mpr ⟨hT', hb⟩
-  exact closed_bind fun tr htr => closed_bind fun body hbody =>
-    closed_pure (H.quant k τ' tr body hT' (ih _ τtr hb' hTtr tr htr) (ih _ _ hb' H.bool body hbody))
+/-- A conditional whose condition is drawn at `bool` and whose branches are drawn at a type `τ`
+    satisfying `T` satisfies `P`. -/
+theorem ClosureHyps.ite_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
+    {τ : LMonoTy} {c t f : LExpr'}
+    (hc : (∀ x ∈ b, T x) → T .bool → P c) (ht : (∀ x ∈ b, T x) → T τ → P t)
+    (hf : (∀ x ∈ b, T x) → T τ → P f) (hb : ∀ x ∈ b, T x) (hτ : T τ) : P (.ite () c t f) :=
+  H.ite c t f (hc hb H.bool) (ht hb hτ) (hf hb hτ)
 
-/-- An abstraction at an arrow type satisfying `T` binds the domain and draws its body at the
-    codomain. -/
-theorem closed_genAbs (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
-    {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) {τ₁ τ₂ : LMonoTy} (h₁ : T τ₁) (h₂ : T τ₂) :
-    Closed P (genAbs (g (τ₁ :: bctx) τ₂) τ₁) :=
-  closed_bind fun body hbody => closed_pure
-    (H.abs τ₁ body h₁ (ih _ τ₂ (List.forall_mem_cons.mpr ⟨h₁, hb⟩) h₂ body hbody))
+/-- An equality whose sides are drawn at a type satisfying `T` satisfies `P`. -/
+theorem ClosureHyps.eq_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
+    {τ' : LMonoTy} {e₁ e₂ : LExpr'}
+    (h₁ : (∀ x ∈ b, T x) → T τ' → P e₁) (h₂ : (∀ x ∈ b, T x) → T τ' → P e₂)
+    (hb : ∀ x ∈ b, T x) (hτ' : T τ') : P (.eq () e₁ e₂) :=
+  H.eq e₁ e₂ (h₁ hb hτ') (h₂ hb hτ')
+
+/-- A quantifier whose binder and trigger types satisfy `T`, and whose trigger and body are drawn
+    under the extended binder context, satisfies `P`. -/
+theorem ClosureHyps.quant_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
+    {k : QuantifierKind} {τ' τtr : LMonoTy} {tr body : LExpr'}
+    (htr : (∀ x ∈ τ' :: b, T x) → T τtr → P tr) (hbody : (∀ x ∈ τ' :: b, T x) → T .bool → P body)
+    (hb : ∀ x ∈ b, T x) (hτ' : T τ') (hτtr : T τtr) : P (.quant () k "" (some τ') tr body) :=
+  have hb' : ∀ x ∈ τ' :: b, T x := List.forall_mem_cons.mpr ⟨hτ', hb⟩
+  H.quant k τ' tr body hτ' (htr hb' hτtr) (hbody hb' H.bool)
+
+/-- An abstraction whose binder type satisfies `T` and whose body is drawn under the extended
+    binder context at a type satisfying `T` satisfies `P`. -/
+theorem ClosureHyps.abs_of (H : ClosureHyps fctx octx pctx tvars T P) {b : BVarCtx}
+    {τ₁ τ₂ : LMonoTy} {body : LExpr'}
+    (hbody : (∀ x ∈ τ₁ :: b, T x) → T τ₂ → P body) (hb : ∀ x ∈ b, T x) (h₁ : T τ₁) (h₂ : T τ₂) :
+    P (.abs () "" (some τ₁) body) :=
+  H.abs τ₁ body h₁ (hbody (List.forall_mem_cons.mpr ⟨h₁, hb⟩) h₂)
 
 /-- Every term the monomorphic Indir rule draws satisfies `P` when the argument generator `g`
     draws only terms satisfying `P`: the rule applies an operator of `octx`, whose type
@@ -415,21 +250,13 @@ theorem closed_genAbs (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed
 theorem closed_genIndir (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
     {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) {τ : LMonoTy}
     (hi : (findOpsInCtx octx τ).length > 0) :
-    Closed P (genIndir octx τ (g bctx) hi) := by
+    IsSoundFor (genIndir octx τ (g bctx) hi) P := by
   intro e he
   obtain ⟨name, argTys, args, hmem, hargs, rfl⟩ := genIndir_shape octx τ (g bctx) hi e he
   have hentry := (findOpsInCtx_mem' hmem).1
   have hargTys : ∀ a ∈ argTys, T a := ((H.foldr_arrow argTys τ).mp (H.octxTy _ hentry)).1
   exact H.mkApps args _ (H.op _ hentry)
     (forall₂_forall_of_cond (fun σ hσ => ih bctx σ hb hσ) hargTys hargs)
-
-/-- Every term the monomorphic Indir rule draws, or `g` when no operator returns `τ`, satisfies
-    `P` when `g` draws only terms satisfying `P`. -/
-theorem closed_indirOrRec (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
-    {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) {τ : LMonoTy} (hτ : T τ) :
-    Closed P (if hi : (findOpsInCtx octx τ).length > 0
-      then genIndir octx τ (g bctx) hi else g bctx τ) :=
-  closed_dite (closed_genIndir H ih hb) (fun _ => ih bctx τ hb hτ)
 
 /-- A list drawn by `mapM` over `List.replicate m ()` has length `m`, and each element is drawn
     by the mapped generator. -/
@@ -503,8 +330,8 @@ theorem genIndirPolyCore_cases {fctx : FVarCtx} {octx : OpCtx} {pctx : PolyOpCtx
     to arguments that `g` draws at the instantiated argument types. -/
 theorem closed_poly (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T P g)
     {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) {τ : LMonoTy} (hτ : T τ)
-    {fallback : SPMF LExpr'} (hfb : Closed P fallback) :
-    Closed P (genIndirPolyCore fctx octx pctx bctx τ (g bctx) fallback) := by
+    {fallback : SPMF LExpr'} (hfb : IsSoundFor fallback P) :
+    IsSoundFor (genIndirPolyCore fctx octx pctx bctx τ (g bctx) fallback) P := by
   intro e he
   rcases genIndirPolyCore_cases he with
     ⟨sampled, name, cats, args, hlen, hsam, hmem, hargs, rfl⟩ | hfall
@@ -521,168 +348,62 @@ theorem closed_poly (H : ClosureHyps fctx octx pctx tvars T P) (ih : GenClosed T
 
 /-! ### The generators -/
 
-/-- One level of `genLExprBase`: at depth 0 it draws only leaves, and at depth `n + 1` it draws
-    only terms satisfying `P` if it does so at depth `n`. -/
-theorem closed_genLExprBase_level (H : ClosureHyps fctx octx pctx tvars T P) (depth : Nat)
-    {bctx : BVarCtx} (hb : ∀ t ∈ bctx, T t) (τ : LMonoTy) :
-    (∀ n, depth = n + 1 →
-      GenClosed T P (fun b t => genLExprBase (G := SPMF) fctx octx pctx tvars b n t)) →
-    T τ → Closed P (genLExprBase (G := SPMF) fctx octx pctx tvars bctx depth τ) := by
-  rw [genLExprBase.eq_def]
-  split
-  case h_1 τ₁ τ₂ =>
-    intro _ _
-    exact closed_oneOf _ (allClosed_cons (closed_leafB H bctx _ closed_default) <|
-      allClosed_cons (closed_leafF H _ closed_default) <|
-      allClosed_cons (closed_leafO H _ closed_default) allClosed_nil)
-  case h_2 n τ₁ τ₂ =>
-    intro ih hτ
-    have ihn := ih n rfl
-    obtain ⟨h₁, h₂⟩ := (H.arrow τ₁ τ₂).mp hτ
-    have habs := closed_genAbs H ihn hb h₁ h₂
-    exact closed_frequency _ (allClosedW_cons habs <|
-      allClosedW_cons (closed_genApp H ihn hb n hτ) <|
-      allClosedW_cons (closed_genIte H ihn hb hτ) <|
-      allClosedW_cons (closed_leafB H bctx _ habs) <|
-      allClosedW_cons (closed_leafF H _ habs) <|
-      allClosedW_cons (closed_leafO H _ habs) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-  case h_3 =>
-    intro _ _
-    have hc := closed_genBoolConst H
-    exact closed_oneOf _ (allClosed_cons hc <| allClosed_cons (closed_leafB H bctx _ hc) <|
-      allClosed_cons (closed_leafF H _ hc) <| allClosed_cons (closed_leafO H _ hc) allClosed_nil)
-  case h_4 n =>
-    intro ih hτ
-    have ihn := ih n rfl
-    have hc := closed_genBoolConst H
-    exact closed_frequency _ (allClosedW_cons hc <|
-      allClosedW_cons (closed_genApp H ihn hb n hτ) <|
-      allClosedW_cons (closed_genIte H ihn hb hτ) <|
-      allClosedW_cons (closed_genEq H ihn hb n) <|
-      allClosedW_cons (closed_genQuant H ihn hb n .all) <|
-      allClosedW_cons (closed_genQuant H ihn hb n .exist) <|
-      allClosedW_cons (closed_leafB H bctx _ hc) <|
-      allClosedW_cons (closed_leafF H _ hc) <|
-      allClosedW_cons (closed_leafO H _ hc) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-  case h_5 =>
-    intro _ _
-    have hc := closed_genIntConst H
-    exact closed_oneOf _ (allClosed_cons hc <| allClosed_cons (closed_leafB H bctx _ hc) <|
-      allClosed_cons (closed_leafF H _ hc) <| allClosed_cons (closed_leafO H _ hc) allClosed_nil)
-  case h_6 n =>
-    intro ih hτ
-    have ihn := ih n rfl
-    have hc := closed_genIntConst H
-    exact closed_frequency _ (allClosedW_cons hc <|
-      allClosedW_cons (closed_genApp H ihn hb n hτ) <|
-      allClosedW_cons (closed_genIte H ihn hb hτ) <|
-      allClosedW_cons (closed_leafB H bctx _ hc) <|
-      allClosedW_cons (closed_leafF H _ hc) <|
-      allClosedW_cons (closed_leafO H _ hc) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-  case h_7 _ | h_15 | h_17 _ _ | h_19 _ | h_21 =>
-    intro _ _
-    exact closed_oneOf _
-      (allClosed_cons
-        (closed_leafB H bctx _ (closed_leafF H _ (closed_leafO H _ closed_default))) <|
-      allClosed_cons (closed_leafF H _ (closed_leafB H bctx _ (closed_leafO H _ closed_default))) <|
-      allClosed_cons (closed_leafO H _ (closed_leafB H bctx _ (closed_leafF H _ closed_default)))
-        allClosed_nil)
-  case h_8 n _ | h_16 n | h_18 n _ _ | h_20 n _ =>
-    intro ih hτ
-    have ihn := ih n rfl
-    exact closed_frequency _ (allClosedW_cons (closed_genApp H ihn hb n hτ) <|
-      allClosedW_cons (closed_genIte H ihn hb hτ) <|
-      allClosedW_cons
-        (closed_leafB H bctx _ (closed_leafF H _ (closed_leafO H _ closed_default))) <|
-      allClosedW_cons (closed_leafF H _ (closed_leafB H bctx _ closed_default)) <|
-      allClosedW_cons (closed_leafO H _ (closed_leafB H bctx _ closed_default)) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-  case h_9 =>
-    intro _ _
-    have hc := closed_genStrConst H
-    exact closed_oneOf _ (allClosed_cons hc <| allClosed_cons (closed_leafB H bctx _ hc) <|
-      allClosed_cons (closed_leafF H _ hc) <| allClosed_cons (closed_leafO H _ hc) allClosed_nil)
-  case h_10 n =>
-    intro ih hτ
-    have ihn := ih n rfl
-    have hc := closed_genStrConst H
-    exact closed_frequency _ (allClosedW_cons hc <|
-      allClosedW_cons (closed_genApp H ihn hb n hτ) <|
-      allClosedW_cons (closed_genIte H ihn hb hτ) <|
-      allClosedW_cons (closed_leafB H bctx _ hc) <|
-      allClosedW_cons (closed_leafF H _ hc) <|
-      allClosedW_cons (closed_leafO H _ hc) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-  case h_11 =>
-    intro _ _
-    have hc := closed_genRealConst H
-    exact closed_oneOf _ (allClosed_cons hc <| allClosed_cons (closed_leafB H bctx _ hc) <|
-      allClosed_cons (closed_leafF H _ hc) <| allClosed_cons (closed_leafO H _ hc) allClosed_nil)
-  case h_12 n =>
-    intro ih hτ
-    have ihn := ih n rfl
-    have hc := closed_genRealConst H
-    exact closed_frequency _ (allClosedW_cons hc <|
-      allClosedW_cons (closed_genApp H ihn hb n hτ) <|
-      allClosedW_cons (closed_genIte H ihn hb hτ) <|
-      allClosedW_cons (closed_leafB H bctx _ hc) <|
-      allClosedW_cons (closed_leafF H _ hc) <|
-      allClosedW_cons (closed_leafO H _ hc) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-  case h_13 w =>
-    intro _ _
-    have hc := closed_genBitvecConst H w
-    exact closed_oneOf _ (allClosed_cons hc <| allClosed_cons (closed_leafB H bctx _ hc) <|
-      allClosed_cons (closed_leafF H _ hc) <| allClosed_cons (closed_leafO H _ hc) allClosed_nil)
-  case h_14 n w =>
-    intro ih hτ
-    have ihn := ih n rfl
-    have hc := closed_genBitvecConst H w
-    exact closed_frequency _ (allClosedW_cons hc <|
-      allClosedW_cons (closed_genApp H ihn hb n hτ) <|
-      allClosedW_cons (closed_genIte H ihn hb hτ) <|
-      allClosedW_cons (closed_leafB H bctx _ hc) <|
-      allClosedW_cons (closed_leafF H _ hc) <|
-      allClosedW_cons (closed_leafO H _ hc) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-  case h_22 _ _ n _ _ _ _ _ _ _ _ _ _ =>
-    intro ih hτ
-    have ihn := ih n rfl
-    exact closed_frequency _
-      (allClosedW_cons
-        (closed_leafB H bctx _ (closed_leafF H _ (closed_leafO H _ closed_default))) <|
-      allClosedW_cons
-        (closed_leafF H _ (closed_leafB H bctx _ (closed_leafO H _ closed_default))) <|
-      allClosedW_cons
-        (closed_leafO H _ (closed_leafB H bctx _ (closed_leafF H _ closed_default))) <|
-      allClosedW_cons (closed_indirOrRec H ihn hb hτ) <|
-      allClosedW_cons (closed_poly H ihn hb hτ (ihn bctx _ hb hτ)) allClosedW_nil)
-
-/-- Every term `genLExprBase` draws satisfies `P`, at every depth. -/
+/-- Every term `genLExprBase` draws satisfies `P`, at every depth. By induction on the depth;
+    above depth 0 the induction hypothesis is used with its type conditions moved into the
+    conclusion. -/
 theorem genLExprBase_closed (H : ClosureHyps fctx octx pctx tvars T P) :
     ∀ depth, GenClosed T P
       (fun b t => genLExprBase (G := SPMF) fctx octx pctx tvars b depth t) := by
+  have hB : ∀ bctx τ hv, IsSoundFor (pickBVar (G := SPMF) bctx τ hv) P := closed_pickBVar H
+  have hF : ∀ τ hf, IsSoundFor (pickFVar (G := SPMF) fctx τ hf) P := closed_pickFVar H
+  have hO : ∀ τ ho, IsSoundFor (pickOp (G := SPMF) octx τ ho) P := closed_pickOp H
   intro depth
   induction depth with
   | zero =>
-    intro bctx τ hb hτ
-    exact closed_genLExprBase_level H 0 hb τ (fun n hn => absurd hn (Nat.zero_ne_add_one n)) hτ
+    intro bctx τ _ _
+    dsimp only
+    rw [IsSoundFor.iff_obs, genLExprBase.eq_def]
+    split
+    all_goals first
+      | (exfalso; omega)
+      | (dsimp only
+         walk_prims [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs,
+          fun w => (true_law (StrataGenerators.PrimitiveGens.genBiasedBitVec (G := SPMF) w)).obs])
+    all_goals first
+      | assumption
+      | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
+           LExpr.bitvecConst]; exact H.const _)
   | succ n ih =>
     intro bctx τ hb hτ
-    refine closed_genLExprBase_level H (n + 1) hb τ ?_ hτ
-    intro m hm
-    rw [Nat.add_right_cancel hm] at ih
-    exact ih
+    -- The induction hypothesis as a fact: its type conditions move into the postcondition.
+    have hQ : ∀ b t, IsSoundFor (genLExprBase (G := SPMF) fctx octx pctx tvars b n t)
+        (fun e => (∀ x ∈ b, T x) → T t → P e) := fun b t e he hb' ht' => ih b t hb' ht' e he
+    have hA : ∀ τ, IsSoundFor (genAppArgTy (G := SPMF) fctx octx tvars bctx n τ) T :=
+      fun τ τ' hτ' => H.genTy n τ' ((genAppArgTy_support fctx octx tvars bctx n τ τ').mp hτ')
+    have hG : IsSoundFor (genGenerableTy (G := SPMF) fctx octx tvars bctx n) T :=
+      fun τ' hτ' => H.genTy n τ' ((genGenerableTy_support fctx octx tvars bctx n τ').mp hτ')
+    dsimp only
+    rw [IsSoundFor.iff_obs, genLExprBase.eq_def]
+    split
+    all_goals first
+      | (exfalso; omega)
+      | (obtain rfl := Nat.succ.inj ‹_ = Nat.succ _›
+         dsimp only
+         walk_prims [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs,
+          fun w => (true_law (StrataGenerators.PrimitiveGens.genBiasedBitVec (G := SPMF) w)).obs,
+          (hQ _ _).obs, (hA _).obs, hG.obs, fun hi => (closed_genIndir H ih hb hi).obs,
+          (closed_poly H ih hb hτ (ih bctx _ hb hτ)).obs])
+    all_goals first
+      | assumption
+      | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
+           LExpr.bitvecConst]; exact H.const _)
+      | exact ‹(∀ x ∈ bctx, T x) → T _ → P _› hb hτ
+      | exact H.app_of ‹_› ‹_› hb hτ ‹_›
+      | exact H.ite_of ‹_› ‹_› ‹_› hb hτ
+      | exact H.eq_of ‹_› ‹_› hb ‹_›
+      | exact H.quant_of ‹_› ‹_› hb ‹_› ‹_›
+      | (obtain ⟨h₁, h₂⟩ := (H.arrow _ _).mp hτ
+         exact H.abs_of ‹_› hb h₁ h₂)
 
 /-- **Every term `genLExpr` draws satisfies `P`**, at every depth, when the conditions of
     `ClosureHyps` hold. -/
@@ -694,21 +415,17 @@ theorem genLExpr_closed (H : ClosureHyps fctx octx pctx tvars T P) :
   | zero =>
     intro bctx τ hb hτ
     have hbase := genLExprBase_closed H 0
-    unfold genLExpr
-    exact closed_dite
-      (fun hi => closed_frequency _ (allClosedW_cons (hbase bctx τ hb hτ) <|
-        allClosedW_cons (closed_oneOf_pair (closed_genIndir H hbase hb hi)
-          (closed_poly H hbase hb hτ (hbase bctx τ hb hτ))) allClosedW_nil))
-      (fun _ => closed_oneOf_pair (hbase bctx τ hb hτ) (closed_poly H hbase hb hτ (hbase bctx τ hb hτ)))
+    rw [IsSoundFor.iff_obs]; unfold genLExpr
+    walk [(hbase bctx τ hb hτ).obs, fun hi => (closed_genIndir H hbase hb hi).obs,
+      (closed_poly H hbase hb hτ (hbase bctx τ hb hτ)).obs]
+    all_goals assumption
   | succ n ih =>
     intro bctx τ hb hτ
     have hbase := genLExprBase_closed H (n + 1)
-    unfold genLExpr
-    exact closed_dite
-      (fun hi => closed_frequency _ (allClosedW_cons (hbase bctx τ hb hτ) <|
-        allClosedW_cons (closed_oneOf_pair (closed_genIndir H ih hb hi)
-          (closed_poly H ih hb hτ (hbase bctx τ hb hτ))) allClosedW_nil))
-      (fun _ => closed_oneOf_pair (hbase bctx τ hb hτ) (closed_poly H ih hb hτ (hbase bctx τ hb hτ)))
+    rw [IsSoundFor.iff_obs]; unfold genLExpr
+    walk [(hbase bctx τ hb hτ).obs, fun hi => (closed_genIndir H ih hb hi).obs,
+      (closed_poly H ih hb hτ (hbase bctx τ hb hτ)).obs]
+    all_goals assumption
 
 end Closure
 

@@ -762,35 +762,12 @@ theorem genCmd_outCtx_cases
     (r.outCtx = ctx ∧ ∀ ts, cmdOutScopes ts r.cmd = ts) ∨
     ∃ x mty, r.outCtx = ctx.insert x mty ∧
       ∀ ts, cmdOutScopes ts r.cmd = ts.insert x (.forAll [] mty) := by
-  rw [genCmd_support_iff octx tvars immutableVars ctx depth r pctx avoid kt] at hr
-  rcases hr with hr | (hr | (⟨_, hr⟩ | (⟨_, hr⟩ | (hr | (hr | hr)))))
-  · simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, _, mty, _, e, _, rfl⟩ := hr
-    refine Or.inr ⟨⟨name, ()⟩, mty, rfl, fun ts => ?_⟩
-    dsimp only
-    split <;> rfl
-  · simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨name, _, mty, _, rfl⟩ := hr
-    exact Or.inr ⟨⟨name, ()⟩, mty, rfl, fun _ => rfl⟩
-  · simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff,
-      mem_support_elements_iff] at hr
-    obtain ⟨_, _, e, _, rfl⟩ := hr
-    refine Or.inl ⟨rfl, fun ts => ?_⟩
-    dsimp only
-    split <;> rfl
-  · simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff,
-      mem_support_elements_iff] at hr
-    obtain ⟨_, _, rfl⟩ := hr
-    exact Or.inl ⟨rfl, fun _ => rfl⟩
-  · simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr
-    exact Or.inl ⟨rfl, fun _ => rfl⟩
-  · simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr
-    exact Or.inl ⟨rfl, fun _ => rfl⟩
-  · simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff] at hr
-    obtain ⟨_, _, _, _, rfl⟩ := hr
-    exact Or.inl ⟨rfl, fun _ => rfl⟩
+  revert r; show IsSoundFor _ _; walk_genCmd
+  all_goals first
+    | exact .inl ⟨rfl, fun _ => rfl⟩
+    | exact .inr ⟨_, _, rfl, fun _ => rfl⟩
+    | (refine .inl ⟨rfl, fun _ => ?_⟩; split <;> rfl)
+    | (refine .inr ⟨_, _, rfl, fun _ => ?_⟩; split <;> rfl)
 
 /-- Soundness of `genCmd` through a `GenCmdSoundEnv`: each command in the support of the generator
     is well-typed from the variable scopes of `env.toTCtx ctx` to those of

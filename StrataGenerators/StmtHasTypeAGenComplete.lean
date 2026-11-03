@@ -124,15 +124,15 @@ theorem freshName_reach (ctx : VarCtx) (x : Identifier Unit) {avoid : List Strin
     (hname : x.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : Map.find? ctx x = none) (havoid : x.name ∉ avoid) :
     x.name ∈ SPMF.support (genFreshName (G := SPMF) ctx avoid) := by
-  simp only [genFreshName, mem_support_bind_iff]
-  refine ⟨x.name, hname, ?_⟩
-  simp only [mem_support_ite_iff, mem_support_pure_iff]
-  refine Or.inl ⟨?_, trivial⟩
   have hctx : VarCtx.isFresh ctx ⟨x.name, ()⟩ = true := by
     unfold VarCtx.isFresh VarCtx.find?; obtain ⟨nm, u⟩ := x; cases u; rw [hfresh]; rfl
-  simp only [hctx, Bool.true_and, Bool.not_eq_true', List.contains_eq_mem,
-    decide_eq_false_iff_not]
-  exact havoid
+  have hcond : (ctx.isFresh ⟨x.name, ()⟩ && !avoid.contains x.name) = true := by
+    simp only [hctx, Bool.true_and, Bool.not_eq_true', List.contains_eq_mem,
+      decide_eq_false_iff_not]
+    exact havoid
+  rw [SPMF.mem_support_iff_may, genFreshName]; walk [(mem_law hname).obs]
+  refine ⟨_, rfl, ?_⟩
+  rw [if_pos hcond]
 
 theorem writable_nil_eq (ctx : VarCtx) : ctx.writable [] = ctx := by
   rw [VarCtx.writable]; exact List.filter_eq_self.mpr (fun _ _ => rfl)
@@ -555,8 +555,9 @@ theorem genFreshLabel_complete (labels : List String) (label : String)
     (hreach : label ∈ SPMF.support (genIdentName (G := SPMF)))
     (hfresh : label ∉ labels) :
     label ∈ SPMF.support (genFreshLabel (G := SPMF) labels) := by
-  simp only [genFreshLabel, mem_support_bind_iff]
-  exact ⟨label, hreach, by simp only [mem_support_ite_iff, mem_support_pure_iff]; exact Or.inr ⟨hfresh, trivial⟩⟩
+  rw [SPMF.mem_support_iff_may, genFreshLabel]; walk [(mem_law hreach).obs]
+  refine ⟨_, rfl, ?_⟩
+  rw [if_neg hfresh]
 
 /-- `genFreshLabel_complete`, and `mem_support_genIdentName_iff` discharges its hypothesis on
     reachability from syntax. All three hypotheses are then decidable conditions on `label`. It is
@@ -676,11 +677,10 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     subst hmdc
     refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine genExitStmt_mem procs C ctx n _ ?_
-    simp only [genExitStmt]
     cases L with
     | nil => exact absurd hmem (by simp)
     | cons hd tl =>
-      simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_elements_iff]
+      rw [SPMF.mem_support_iff_may]; unfold genExitStmt; walk
       exact ⟨label, hmem, rfl⟩
   | typeDecl C C' Γ L tc md Δ _ hoktc hequiv =>
     intro ctx n hΓ hnf hok hcall hexpr
@@ -689,9 +689,10 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
     obtain ⟨hlocal, hname_tc, hlen, hparams⟩ := hok
     refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine genTypeDeclStmt_mem procs C ctx n _ ?_
-    simp only [genTypeDeclStmt, mem_support_bind_iff]
-    refine ⟨tc, genTypeConstructor_complete n tc hlocal hname_tc hlen hparams, ?_⟩
-    rw [hoktc]; simp only [mem_support_pure_iff]
+    rw [SPMF.mem_support_iff_may, genTypeDeclStmt]
+    walk [(mem_law (genTypeConstructor_complete n tc hlocal hname_tc hlen hparams)).obs]
+    refine ⟨_, rfl, ?_⟩
+    rw [hoktc]
   | block C ts Cb tsb L label body md ts' hlabel hbody hequiv ihbody =>
     intro ctx n hΓ hnf hok hcall hexpr
     cases n with

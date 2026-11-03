@@ -538,29 +538,31 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
           blockRefs tyParams false (size / 2))) := by
   -- Each direction is one `walk` per branch. The facts stop the walk at `genLeafTy` and at the
   -- recursive calls, which the statement leaves as support memberships.
-  have hS : ∀ g : SPMF LMonoTy, IsSoundFor g (· ∈ SPMF.support g) := fun _ _ h => h
   have hC : ∀ g : SPMF LMonoTy, IsCompleteFor g (· ∈ SPMF.support g) := fun _ _ h => h
   constructor
   · revert ty; show IsSoundFor _ _
     rw [IsSoundFor.iff_obs, genArgTy]
     split
-    · walk [(hS (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
-      all_goals (clear hS hC; aesop)
+    · walk [(isSoundFor_self_support (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
+      all_goals (clear hC; aesop)
     · dsimp only
-      split <;> walk [(hS (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
-        (hS (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
-        (hS (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
-      all_goals (clear hS hC; aesop)
+      split <;> walk [
+        (isSoundFor_self_support (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
+        (isSoundFor_self_support
+          (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
+        (isSoundFor_self_support
+          (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
+      all_goals (clear hC; aesop)
   · intro h
     rw [SPMF.mem_support_iff_may, genArgTy]
     split
     · walk [(hC (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
-      all_goals (clear hS hC; aesop)
+      all_goals (clear hC; aesop)
     · dsimp only
       split <;> walk [(hC (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
         (hC (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
         (hC (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
-      all_goals (clear hS hC; aesop)
+      all_goals (clear hC; aesop)
 
 
 /-- **The support of `genArgTy` grows with the set of references.** Add more members to
@@ -964,7 +966,7 @@ theorem genFreshName_fresh (reserved : List String) :
     ∀ s ∈ SPMF.support (genFreshName (G := SPMF) reserved), s ∉ reserved := by
   show IsSoundFor _ _
   rw [IsSoundFor.iff_obs, genFreshName]
-  walk [IsSoundFor.obs (g := genIdentName (G := SPMF)) (P := fun _ => True) fun _ _ => trivial]
+  walk [(true_law (genIdentName (G := SPMF))).obs]
   -- The fallback is never reserved, and the draw is kept only when `reserved.contains` fails.
   all_goals simp_all [fallbackName_not_mem]
 
@@ -1194,20 +1196,16 @@ theorem genParamPerms_support {params : List TyIdentifier} :
   intro n
   induction n with
   | zero =>
-    intro paramsList hpl
-    simp only [genParamPerms, mem_support_pure_iff] at hpl
-    subst hpl
-    exact ⟨rfl, fun _ hps => absurd hps List.not_mem_nil⟩
+    show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamPerms]; walk
+    all_goals simp_all
   | succ n ih =>
-    intro paramsList hpl
-    simp only [genParamPerms, mem_support_bind_iff, mem_support_pure_iff] at hpl
-    obtain ⟨p, _, rest, hrest, rfl⟩ := hpl
-    obtain ⟨hlen, hperm⟩ := ih rest hrest
-    refine ⟨by simp [hlen], ?_⟩
-    intro ps hps
-    rcases List.mem_cons.mp hps with rfl | hps'
-    · exact p.2.symm
-    · exact hperm ps hps'
+    show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamPerms]
+    walk [(true_law (permutationOf (G := SPMF) params)).obs, IsSoundFor.obs ih]
+    all_goals first
+      | simp [‹_ ∧ _›.1]
+      | (rcases List.mem_cons.mp ‹_ ∈ _ :: _› with rfl | hmem
+         · exact (Subtype.property ‹{ ys // params.Perm ys }›).symm
+         · exact (‹_ ∧ ∀ ps ∈ _, List.Perm ps params›).2 _ hmem)
 
 /-- `genParamsList reserved maxTyParams n` always makes a list of `n` parameter lists. -/
 theorem genParamsList_length :
@@ -1216,10 +1214,11 @@ theorem genParamsList_length :
       paramsList ∈ SPMF.support
         (genParamsList (G := SPMF) reserved maxTyParams n) →
       paramsList.length = n := by
-  intro n reserved maxTyParams paramsList hpl
-  simp only [genParamsList, mem_support_bind_iff] at hpl
-  obtain ⟨_, _, _, _, hperms⟩ := hpl
-  exact (genParamPerms_support n paramsList hperms).1
+  intro n reserved maxTyParams
+  show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]
+  walk [fun r k => (true_law (genFreshNames (G := SPMF) r k)).obs,
+    fun l => (isSoundFor_self_support (genParamPerms (G := SPMF) l n)).obs]
+  exact (genParamPerms_support n _ ‹_›).1
 
 /-- `genRanks` makes a list of exactly `n` ranks. -/
 theorem genRanks_length :
@@ -1279,13 +1278,13 @@ theorem genParamsList_common {reserved : List String} {maxTyParams n : Nat}
     ∃ params : List TyIdentifier, params.Nodup ∧
       (∀ p ∈ params, Core.isAllowedName p = true) ∧
       ∀ ps ∈ paramsList, ps.Perm params := by
-  simp only [genParamsList, mem_support_bind_iff] at hpl
-  obtain ⟨numTyParams, _, rawParams, hraw, hperms⟩ := hpl
-  refine ⟨rawParams.filter Core.isAllowedName,
-    (genFreshNames_nodup numTyParams reserved rawParams hraw).filter _, ?_,
-    (genParamPerms_support n paramsList hperms).2⟩
-  intro p hp
-  exact (List.mem_filter.mp hp).2
+  revert paramsList; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]
+  walk [fun k => (isSoundFor_self_support (genFreshNames (G := SPMF) reserved k)).obs,
+    fun l => (isSoundFor_self_support (genParamPerms (G := SPMF) l n)).obs]
+  next numTyParams _ rawParams hraw _ hperms =>
+    refine ⟨rawParams.filter Core.isAllowedName,
+      (genFreshNames_nodup numTyParams reserved rawParams hraw).filter _,
+      fun p hp => (List.mem_filter.mp hp).2, (genParamPerms_support n _ hperms).2⟩
 
 /-- Two lists without duplicates that hold the same members are permutations of each other. -/
 theorem perm_of_nodup_of_mem_iff {α : Type} [BEq α] [LawfulBEq α] {l₁ l₂ : List α}

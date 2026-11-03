@@ -90,7 +90,7 @@ theorem mapM_genInputs_keys_values (genTy : SPMF LMonoTy)
     revert m; show IsSoundFor _ _
     refine IsSoundFor.iff_obs.mpr ?_
     rw [List.mapM_cons]
-    walk [IsSoundFor.obs ih, IsSoundFor.obs (g := genTy) fun _ h => h]
+    walk [IsSoundFor.obs ih, (isSoundFor_self_support genTy).obs]
     all_goals aesop (add norm simp [ListMap.keys, ListMap.values])
 
 /-- What membership in the support of `genInputs genTy depth` gives. The keys of the `ListMap` are
@@ -826,17 +826,6 @@ theorem genOptExpr_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIden
   rw [SPMF.mem_support_iff_may, genOptExpr]; walk
   cases o <;> simp_all
 
-/-- A clause whose expression a generator reaches is in the support of the clause builder over
-    that generator. -/
-theorem mem_support_precondClause {p : Strata.DL.Util.FuncPrecondition LExpr' Unit}
-    {g : SPMF LExpr'} (hg : p.expr ∈ SPMF.support g) :
-    p ∈ SPMF.support (do let y ← g; pure ({ expr := y, md := () } :
-      Strata.DL.Util.FuncPrecondition LExpr' Unit)) := by
-  simp only [mem_support_bind_iff, mem_support_pure_iff]
-  refine ⟨p.expr, hg, ?_⟩
-  obtain ⟨e, md⟩ := p
-  rfl
-
 /-- Completeness of `genPreconditions`: the generator reaches every list of at most
     `maxFuncClauses` clauses whose expressions `genLExpr` reaches at `.bool` over the formals and
     `ambient`. -/
@@ -850,15 +839,10 @@ theorem genPreconditions_complete (octx : OpCtx)
       (genPreconditions (G := SPMF) octx inputs tvars depth pctx ambient) := by
   rw [genPreconditions, mem_support_listOfMaxLength_iff]
   refine ⟨hlen, fun p hp => ?_⟩
-  rw [genPrecondition]
-  by_cases hne : inputs.toList ≠ []
-  · rw [dif_pos hne]
-    refine mem_support_precondClause ?_
-    rw [mem_support_frequency_iff]
-    exact ⟨1, fun _ => genLExpr (inputsAsFVarCtx inputs ++ ambient) octx pctx tvars [] depth .bool,
-      by simp, by omega, hreach p hp⟩
-  · rw [dif_neg hne]
-    exact mem_support_precondClause (hreach p hp)
+  rw [SPMF.mem_support_iff_may, genPrecondition]; walk
+  split
+  · exact .inr ⟨_, hreach p hp, rfl⟩
+  · exact ⟨_, hreach p hp, rfl⟩
 
 /-- The **exact** support of `genPrecondition`: a clause whose expression is a plain `.bool` draw
     over the formals and `ambient`, or `x == e'` for a formal `x : τ` and a draw `e'` at `τ`. -/
@@ -876,49 +860,20 @@ theorem mem_support_genPrecondition_iff (octx : OpCtx)
              e = .eq () (.fvar () x (some τ)) e'))
           ∧ p = { expr := e, md := () } := by
   constructor
-  · intro hp
-    simp only [genPrecondition, mem_support_bind_iff, mem_support_pure_iff] at hp
-    obtain ⟨e, he, rfl⟩ := hp
-    refine ⟨e, ?_, rfl⟩
-    by_cases hne : inputs.toList ≠ []
-    · rw [dif_pos hne, mem_support_frequency_iff] at he
-      obtain ⟨w, g, hmem, _, hg⟩ := he
-      simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hmem
-      rcases hmem with ⟨_, rfl⟩ | ⟨_, rfl⟩
-      · rw [genInputMentioningPrecond, mem_support_bind_iff] at hg
-        obtain ⟨⟨x, τ⟩, hxmem, hrest⟩ := hg
-        rw [mem_support_bind_iff] at hrest
-        obtain ⟨e', he', heq⟩ := hrest
-        rw [mem_support_pure_iff] at heq
-        rw [mem_support_elements_iff] at hxmem
-        exact Or.inr ⟨x, τ, e', hxmem, he', heq⟩
-      · exact Or.inl hg
-    · rw [dif_neg hne] at he
-      exact Or.inl he
-  · rintro ⟨e, hbranch, rfl⟩
-    rw [genPrecondition]
-    rcases hbranch with hbool | ⟨x, τ, e', hxmem, he', rfl⟩
-    · by_cases hne : inputs.toList ≠ []
-      · rw [dif_pos hne]
-        refine mem_support_precondClause ?_
-        rw [mem_support_frequency_iff]
-        exact ⟨1,
-          fun _ => genLExpr (inputsAsFVarCtx inputs ++ ambient) octx [] tvars [] depth .bool,
-          by simp, by omega, hbool⟩
-      · rw [dif_neg hne]
-        exact mem_support_precondClause hbool
-    · -- A clause that mentions an input forces `inputs.toList` to be not empty, because it holds `x`.
-      have hne : inputs.toList ≠ [] := by
-        intro h; rw [h] at hxmem; simp at hxmem
-      rw [dif_pos hne]
-      refine mem_support_precondClause ?_
-      rw [mem_support_frequency_iff]
-      refine ⟨3, fun _ => genInputMentioningPrecond octx inputs tvars depth hne [] ambient,
-        by simp, by omega, ?_⟩
-      rw [genInputMentioningPrecond, mem_support_bind_iff]
-      refine ⟨(x, τ), by rw [mem_support_elements_iff]; exact hxmem, ?_⟩
-      rw [mem_support_bind_iff]
-      exact ⟨e', he', by rw [mem_support_pure_iff]⟩
+  · revert p; show IsSoundFor _ _
+    rw [IsSoundFor.iff_obs, genPrecondition]; unfold genInputMentioningPrecond
+    walk [fun τ => (isSoundFor_self_support
+      (genLExpr (G := SPMF) (inputsAsFVarCtx inputs ++ ambient) octx [] tvars [] depth τ)).obs]
+    all_goals first
+      | exact ⟨_, .inl ‹_›, rfl⟩
+      | exact ⟨_, .inr ⟨_, _, _, ‹_›, ‹_›, rfl⟩, rfl⟩
+  · rintro ⟨e, hb | ⟨x, τ, e', hx, he', rfl⟩, rfl⟩
+    all_goals rw [SPMF.mem_support_iff_may, genPrecondition]; unfold genInputMentioningPrecond; walk
+    · split
+      · exact .inr ⟨_, hb, rfl⟩
+      · exact ⟨_, hb, rfl⟩
+    · rw [dif_pos (List.ne_nil_of_mem hx)]
+      exact .inl ⟨_, hx, _, he', rfl⟩
 
 -- ── Function-level keyword-freedom ───────────────────────────────────
 

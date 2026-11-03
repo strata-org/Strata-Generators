@@ -615,8 +615,7 @@ private theorem genLExprBase_opsConsistentR_aux (F : @Factory LExprParams') (fct
     all_goals first
       | (exfalso; omega)
       | (dsimp only
-         walk [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs, natArbitrary_true.obs,
-          genInterestingChar_true.obs, natArbGeom_true.obs])
+         walk_prims [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs])
     all_goals first
       | assumption
       | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
@@ -632,19 +631,16 @@ private theorem genLExprBase_opsConsistentR_aux (F : @Factory LExprParams') (fct
         (Lambda.OpsConsistentR F) :=
       fun σ e he => genIndirPolyCore_opsConsistentR F fctx pctx bctx σ 3 (hPoly bctx σ 3) _ _
         (fun σ a ha => ih bctx σ a ha) (fun a ha => ih bctx σ a ha) e he
-    have hA : ∀ τ, IsSoundFor (genAppArgTy (G := SPMF) fctx (factoryOps F) tvars bctx n τ)
-      (fun _ => True) := fun _ _ _ => trivial
-    have hT : IsSoundFor (genGenerableTy (G := SPMF) fctx (factoryOps F) tvars bctx n)
-      (fun _ => True) := fun _ _ => trivial
     rw [IsSoundFor.iff_obs, genLExprBase.eq_def]
     split
     all_goals first
       | (exfalso; omega)
       | (obtain rfl := Nat.succ.inj ‹_ = Nat.succ _›
          dsimp only
-         walk [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs, natArbitrary_true.obs,
-          genInterestingChar_true.obs, natArbGeom_true.obs,
-          (ih _ _).obs, (hI _ _).obs, (hP _).obs, (hA _).obs, hT.obs])
+         walk_prims [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs,
+          (ih _ _).obs, (hI _ _).obs, (hP _).obs,
+          fun τ => (true_law (genAppArgTy (G := SPMF) fctx (factoryOps F) tvars bctx n τ)).obs,
+          (true_law (genGenerableTy (G := SPMF) fctx (factoryOps F) tvars bctx n)).obs])
     all_goals first
       | assumption
       | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,

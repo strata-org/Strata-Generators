@@ -31,7 +31,9 @@ This file holds five things Basalt does not.
    their fixpoints. It carries a per-site fact up to a whole recursive generator, and it is not
    specific to any interpretation.
 5. `isSoundFor_self_support` and `true_law`, the two trivial soundness facts that `walk` takes for
-   a draw whose own law a proof does not need.
+   a draw whose own law a proof does not need; `mem_law`, the completeness fact for a value a
+   draw reaches; and `IsSoundFor.of_mem_pair`, which turns a goal about a drawn pair into an
+   `IsSoundFor` goal.
 
 Two facts about `SPMF` shape every proof here. Membership goes through `SPMF.support`, never through
 the generator itself; and a reweighting preserves the support but not the generator, so the tuning
@@ -91,6 +93,18 @@ theorem isSoundFor_self_support {α} (g : SPMF α) : IsSoundFor g (· ∈ SPMF.s
 /-- Every generator is sound for the trivial postcondition. `walk` takes this as the fact for a
     draw that constrains nothing the proof needs. -/
 theorem true_law {α : Type} (g : SPMF α) : IsSoundFor g (fun _ => True) := fun _ _ => trivial
+
+/-- A value in a generator's support, as the completeness fact that `walk` takes for that draw:
+    the generator reaches every value equal to it. -/
+theorem mem_law {α : Type} {g : SPMF α} {a : α} (h : a ∈ SPMF.support g) :
+    IsCompleteFor g (· = a) := fun _ e => e ▸ h
+
+/-- A soundness fact for a generator of pairs holds at each pair in its support. A proof whose
+    goal is about the two parts of a drawn pair applies this to get an `IsSoundFor` goal for
+    `walk`; the postcondition is read off the goal. -/
+@[elab_as_elim]
+theorem IsSoundFor.of_mem_pair {α β : Type} {g : SPMF (α × β)} {P : α → β → Prop} {a : α} {b : β}
+    (h : (a, b) ∈ SPMF.support g) (hg : IsSoundFor g fun r => P r.1 r.2) : P a b := hg _ h
 
 namespace StrataGenerators
 

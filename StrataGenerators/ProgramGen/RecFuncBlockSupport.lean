@@ -74,30 +74,15 @@ theorem genDeclRecFuncBlock_support {s : GenState} {b : Bounds} {ds : List Decl}
       s.registerFuncs (drawn.map dropInline) = some s₁ ∧
       ds = [.recFuncBlock (drawn.map dropInline) .empty] ∧
       s' = { s₁ with reserved := names ++ s.reserved } := by
-  simp only [genDeclRecFuncBlock, mem_support_bind_iff] at h
-  obtain ⟨k, hk, names, hnames, stubs, hstubs, hmatch⟩ := h
-  rw [mem_support_mapM_iff] at hstubs
-  rw [mem_support_chooseNat_iff] at hk
-  cases hstub : s.registerFuncs stubs with
-  | none =>
-    rw [hstub] at hmatch
-    simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-    exact Or.inl hmatch
-  | some sStub =>
-    rw [hstub] at hmatch
-    simp only [mem_support_bind_iff] at hmatch
-    obtain ⟨drawn, hdrawn, hmatch⟩ := hmatch
-    rw [mem_support_mapM_iff] at hdrawn
-    cases hreg : s.registerFuncs (drawn.map dropInline) with
-    | none =>
-      rw [hreg] at hmatch
-      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-      exact Or.inl hmatch
-    | some s₁ =>
-      rw [hreg] at hmatch
-      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-      exact Or.inr ⟨k, names, stubs, sStub, drawn, s₁, hk.1, hnames, hstubs, hstub, hdrawn, hreg,
-        hmatch.1, hmatch.2⟩
+  refine IsSoundFor.of_mem_pair h ?_
+  rw [IsSoundFor.iff_obs]; unfold genDeclRecFuncBlock; dsimp only
+  walk [fun k => (isSoundFor_self_support (genDeclNames (G := SPMF) s.reserved k)).obs,
+    fun α β (f : α → SPMF β) l => (isSoundFor_self_support (List.mapM (m := SPMF) f l)).obs]
+  all_goals try exact .inl ⟨rfl, rfl⟩
+  next k hk names hnames stubs hstubs sStub hstub drawn hdrawn s₁ hreg =>
+    exact .inr ⟨k, names, stubs, sStub, drawn, s₁, hk.1, hnames,
+      (mem_support_mapM_iff _ _ _).mp hstubs, hstub, (mem_support_mapM_iff _ _ _).mp hdrawn, hreg,
+      rfl, rfl⟩
 
 /-- The members of a drawn block carry the drawn names, in order. -/
 theorem recFuncBlock_member_names {depth : Nat} {avoid : String → Bool}

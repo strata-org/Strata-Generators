@@ -47,7 +47,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     (hinv : Inv s) {ds : List Decl} {s' : GenState}
     (h : (ds, s') ∈ SPMF.support (genDeclDatatype (G := SPMF) s b)) :
     DeclsWellTyped P s.C [] ds s'.C ∧ Inv s' := by
-  refine stepSound_of_law P ?_ h
+  refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclDatatype; dsimp only
   walk [(isSoundFor_self_support (genMutuallyRecursiveDatatypes (G := SPMF) s.baseTypes
     (s.tyCons ++ s.dtCons) b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
