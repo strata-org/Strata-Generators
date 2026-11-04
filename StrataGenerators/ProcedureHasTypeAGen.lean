@@ -4,6 +4,7 @@ import StrataGenerators.ProcedureHasTypeAGen.MutableVars
 import StrataGenerators.CmdHasTypeAGenSound
 import Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec
 import Strata.Languages.Core.Typing.Spec.TypingSpec
+import Strata.Languages.Core.Typing.Props.TypingSpecProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec
 open StrataGenerators.Stmt StrataGenerators.Function
@@ -843,7 +844,9 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
   · -- postconditions: drawn over the seed, whose scope agrees with the body scopes.
     exact hcheck _ _ post hseedFun hseedTyWK
       (fun x _ hx => (Strata.Util.HMaps.Equiv.find? heq x).trans hx) hpost
-  · exact .structured body C' _ (statementsWellTyped_equiv_congr hbodyTyped heq)
+  · -- The body is generated with the type parameters rigid; its typing ignores rigid variables.
+    exact (ProcBodyWellTyped.structured body C' _
+      (statementsWellTyped_equiv_congr hbodyTyped heq)).withRigid C.rigidTypeVars
 
 /-- **Soundness of `genProcedure` at the ambient context.** Every procedure that `genProcedure`
     makes in a context `C` is well-typed (`ProcWellTyped`) at that same `C` with no enclosing

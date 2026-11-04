@@ -42,7 +42,7 @@ that member as rigid type variables.
 soundness proof needs:
 
 * `mem`. Each reference names a true block datatype. `NotNested.headBlock` needs this fact,
-  and so does the third part of `refsKnown`.
+  and so do the block-name cases of `genArgTy_refs` and `genArgTy_arities`.
 * `uniform`. A reference to the name of `d` applies it to exactly `d.typeArgs`.
   `UniformOccur.self` needs this fact.
 * `ftvarArgs`. The arguments of a reference are all rigid type variables. Therefore the
@@ -72,7 +72,7 @@ induction on `size` through these two lemmas.
 **Part 3: soundness against the typing specification.** `genArgTy_constrArgWF` says that
 each type in the support is `ConstrArgWF block`. Its proof is a strong induction on `size`
 through `genArgTy_notNested`, `genArgTy_strictPosUnif` and `genArgTy_absent`. The output of
-`genMutuallyRecursiveDatatypes` then obeys all nine fields of `MutualADTWF`.
+`genMutuallyRecursiveDatatypes` then obeys every field of `MutualADTWF`.
 
 Part 3 also uses the rule for the reserved names. Each datatype name is fresh against
 `initialReserved`. `namesOk_of_fresh` changes that fact into the side conditions that the
@@ -86,10 +86,11 @@ completeness half of this file is that all of those hypotheses except one are al
 fields of `MutualADTWF`, and the one that is not is about the **width** of a bitvector.
 
 The specification handles the whole discipline of the arities by itself, and this file needs no
-predicate for it. The field `refsKnown` uses `getTypeRefs`, which collects the *names* of the
-referenced type constructors only, and it drops the number of their arguments. The field
-`argsWellKinded` checks the number of the arguments against `C.knownTypes`. `defaultBaseTypes` and
-`defaultTyCons` are *derived* from that same register, which is `Core.KnownTypes`.
+predicate for it. The field `argsWellKinded` checks the number of the arguments of each
+referenced type constructor against `C.knownTypes`. `MutualADTWF.refsKnown` follows from it and
+uses `getTypeRefs`, which collects the *names* of the referenced type constructors only.
+`defaultBaseTypes` and `defaultTyCons` are *derived* from that same register, which is
+`Core.KnownTypes`.
 
 An existing field of `MutualADTWF` discharges every difference between the specification and
 the generator except one:
@@ -99,11 +100,11 @@ the generator except one:
 | each free type variable is a member of `d.typeArgs` | `argVarsScoped` |
 | a recursive occurrence is a block name with exactly its `typeArgs` | `argsWF`, through `StrictPosUnif` and `UniformOccur.self` |
 | strict positivity, and no nested occurrence | `argsWF`, through `ConstrArgWF` |
-| each referenced name resolves | `refsKnown`, against one concrete ambient context |
+| each referenced name resolves | `argsWellKinded`, through `MutualADTWF.refsKnown` |
 | the arity of an application is correct | `argsWellKinded`, against `C.knownTypes` |
 | **a bitvector is a width, not an application** | **none. This is `BitvecWidthOnly`.** |
 
-* **Soundness.** Each type in the support obeys all nine fields of
+* **Soundness.** Each type in the support obeys every field of
   `Core.TypeSpec.MutualADTWF`. Read `genArgTy_constrArgWF` and
   `genMutuallyRecursiveDatatypes_MutualADTWF`.
 * **Completeness.** Read `genArgTy_complete_of_MutualADTWF`. Take a block that is
@@ -1855,18 +1856,17 @@ theorem genMutuallyRecursiveDatatypes_argsWF_default
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ConstrArgWF block arg.2 :=
   genMutuallyRecursiveDatatypes_argsWF defaultTyCons_ne_arrow hb
 
-/-! ### `refsKnown`, which says that each referenced name is known
+/-! ### Each referenced name is known
 
-This field is the other field of `MutualADTWF` in this section. `getTypeRefs` collects each
-type constructor name that occurs in a type. This section shows that each such name is a
-`baseTypes` name, a `tyCons` name, the name of a block datatype, or the reserved name
-`"arrow"`. -/
+`getTypeRefs` collects each type constructor name that occurs in a type. This section shows
+that each such name is a `baseTypes` name, a `tyCons` name, the name of a block datatype, or
+the reserved name `"arrow"`. -/
 
 /-- Each type reference in a generated type is a `baseTypes` name, a `tyCons` name, a block
-    name, or `"arrow"`. This lemma is the half of the field `refsKnown` of `MutualADTWF` that
-    speaks about the generator. It holds against each ambient context whose known types and
-    datatypes hold all of `baseTypes` and `tyCons`. Such a context also knows `"arrow"`,
-    because Strata Core always knows that name.
+    name, or `"arrow"`. This lemma is the half of `MutualADTWF.refsKnown` that speaks about the
+    generator. It holds against each ambient context whose known types and datatypes hold all
+    of `baseTypes` and `tyCons`. Such a context also knows `"arrow"`, because Strata Core
+    always knows that name.
 
     The head of a recursive occurrence is a block name, which `BlockRefsWF.mem` gives. Its
     arguments are type variables, which `BlockRefsWF.ftvarArgs` gives. Therefore the
@@ -2109,10 +2109,12 @@ theorem genMutuallyRecursiveDatatypes_argVarsScoped {baseTypes : List String} {t
 
 /-! ### The full structure `Core.TypeSpec.MutualADTWF`
 
-`argsWF` and `refsKnown` are the two difficult fields. The other fields are simpler. Two of
+`argsWF` and `argsWellKinded` are the difficult fields. The other fields are simpler. Two of
 them are about fresh names, which are `namesFresh` and `namesNew`. Two of them say that the
 block is not empty and that its names are different in pairs, which are `nonempty` and
-`namesNodup`. The last one is about inhabitance, which is `inhabited`.
+`namesNodup`. Three are about the type parameters, which are `typeArgsAgree`, `typeArgsNodup`
+and `typeArgsNotReserved`, and `argVarsScoped` says that each argument uses only them. One is
+about inhabitance, which is `inhabited`.
 
 Each field speaks about an ambient `LContext CoreLParams`. Therefore this section first
 states what that context must obey, so that a new generated block is well-formed in it. -/
@@ -2123,7 +2125,8 @@ open Core Core.TypeSpec in
     assumptions that the generator cannot control, because they are about the context and not
     about the block that it builds:
 
-    * `refsKnown` needs each name that the generator can refer to to resolve in `C`.
+    * `argsWellKinded` needs each name that the generator can refer to to resolve in `C` at
+      the arity at which the generator applies it.
     * `namesFresh` and `namesNew` need the existing type names and datatype names of `C` to be
       members of `initialReserved`. Therefore a name that the generator draws fresh against
       that list is not one of them.
@@ -2182,7 +2185,7 @@ end Soundness
 
 /-! ## Inhabitance of the generated block
 
-This part gives the one field of `MutualADTWF` that `argsWF`, `refsKnown` and the facts
+This part gives the one field of `MutualADTWF` that `argsWF`, `argsWellKinded` and the facts
 about fresh names do not give. That field says that each block datatype is inhabited.
 For a datatype `d` of the block, the statement is
 `TySymInhab (C.datatypes.push block) d.name`.
@@ -2394,9 +2397,9 @@ and `defaultContextOk` need no change. -/
     `ContextOk` are not. Therefore `TySymInhab.datatype` gives their inhabitance, and `.external` does
     not.
 
-    The field `known` goes into `MutualADTWF.refsKnown`, through the case for `allTypeNames`. The field
-    `inhab` goes into `MutualADTWF.inhabited`, and `tySymInhab_push` transports it across the push of
-    the block. -/
+    The field `arity` goes into `MutualADTWF.argsWellKinded`, through the case for
+    `allDatatypes`. The field `inhab` goes into `MutualADTWF.inhabited`, and `tySymInhab_push`
+    transports it across the push of the block. -/
 structure DatatypePoolOk (C : LContext CoreLParams) (dtCons : List KnownTyCon) : Prop where
   /-- Each pool name resolves as an existing datatype of `C`. -/
   known : ∀ kc ∈ dtCons, kc.1 ∈ C.datatypes.allTypeNames
@@ -2810,7 +2813,7 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String}
 
 /-- **The main theorem. A generated block is `MutualADTWF`.** Each mutually recursive block
     that `genMutuallyRecursiveDatatypes` makes is well-formed in each context `C` that obeys
-    `ContextOk`. The block obeys all nine fields of `Core.TypeSpec.MutualADTWF`.
+    `ContextOk`. The block obeys every field of `Core.TypeSpec.MutualADTWF`.
 
     This theorem has two groups of hypotheses. The first is one condition on the pool `tyCons`
     that the caller gives, which is `tyCon_ne_arrow`, as for `argsWF`. The second is the
@@ -2859,7 +2862,6 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
       namesNew := ?_
       argVarsScoped := genMutuallyRecursiveDatatypes_argVarsScoped hb
       argsWF := genMutuallyRecursiveDatatypes_argsWF harrow hb
-      refsKnown := ?_
       argsWellKinded := ?_
       inhabited :=
         genMutuallyRecursiveDatatypes_inhabited harrow hctx hpool hstored hsplit hsubTC hb }
@@ -2876,24 +2878,6 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
     · exact absurd
         (hinit_mono _ (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome)))
         (hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩))
-  · -- The field `refsKnown`. Each reference resolves in `C`, or it is a block name, or it is
-    -- `"arrow"`.
-    intro d hd c hc arg harg r hr
-    rcases genMutuallyRecursiveDatatypes_refsKnown hb d hd c hc arg harg r hr with
-      hbt | htc | hblk | harr
-    · rcases hctx.base_known r hbt with hk | hdt
-      · exact Or.inl hk
-      · exact Or.inr (Or.inl hdt)
-    · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp htc
-      -- A reference into the pool is either an external known type (`ContextOk`) or a
-      -- datatype from an earlier declaration (`DatatypePoolOk.known`).
-      rcases hsplit kc hkc with hext | hdt
-      · rcases hctx.tyCon_known kc hext with hk | hdt'
-        · exact Or.inl hk
-        · exact Or.inr (Or.inl hdt')
-      · exact Or.inr (Or.inl (hpool.known kc hdt))
-    · exact Or.inr (Or.inr hblk)
-    · subst harr; exact Or.inl hctx.arrow_known
   · -- The field `argsWellKinded`. The generator is arity-correct by construction
     -- (`genMutuallyRecursiveDatatypes_arities`); the arity fields of `ContextOk` and
     -- `DatatypePoolOk` say that `C` registers each of those names at that same arity.
@@ -3036,7 +3020,6 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
       namesNew := fun d hd => h.namesNew d (hmem hd)
       argVarsScoped := fun d hd => h.argVarsScoped d (hmem hd)
       argsWF := ?_
-      refsKnown := ?_
       argsWellKinded := ?_
       inhabited := ?_ }
   · -- The field `nonempty`. `block'` is not empty, because `block` is not empty and the two
@@ -3048,12 +3031,6 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
     -- relations read only `block.map (·.name)`, and a permutation keeps that set.
     intro d hd c hc arg harg
     exact constrArgWF_perm hnamesperm hperm (h.argsWF d (hmem hd) c hc arg harg)
-  · -- The field `refsKnown`. A permutation keeps the part about a block name.
-    intro d hd c hc arg harg r hr
-    rcases h.refsKnown d (hmem hd) c hc arg harg r hr with hk | hdt | hblk
-    · exact Or.inl hk
-    · exact Or.inr (Or.inl hdt)
-    · exact Or.inr (Or.inr (hnamesperm.mem_iff.mp hblk))
   · -- The field `argsWellKinded`. `getTypeConsArities` reads only the argument type, and a
     -- permutation keeps the disjunct about a block datatype.
     intro d hd c hc arg harg ref n hn
@@ -3699,8 +3676,8 @@ example : (LMonoTy.arrow (.ftvar "a") (.tcons "MyList" [.ftvar "a"])) ∈
       ((genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inr ⟨rfl, ("MyList", [.ftvar "a"]), by simp, rfl⟩)))))
 
 /-- **`MutualADTWF` rejects `Sequence a a`.** `Sequence` at two arguments has the wrong kind. The field
-    `refsKnown` checks only that the name `"Sequence"` resolves, and the field `argsWellKinded` checks the
-    number of the arguments. Therefore the specification rejects this type by itself, and completeness
+    `argsWellKinded` checks the number of the arguments, and not only that the name `"Sequence"`
+    resolves. Therefore the specification rejects this type by itself, and completeness
     needs no separate side condition about an arity. -/
 example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") :
     ¬ ArgsWellKinded coreContext [d] (.tcons "Sequence" [.ftvar a, .ftvar a]) := by
@@ -3719,7 +3696,7 @@ example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") 
     that stays.** Take the type `bitvec a`, which applies the *name* `bitvec` to a type.
 
     `Core.KnownTypes` registers `("bitvec", 1)`, so every field of `MutualADTWF` accepts this
-    type: `refsKnown` resolves the name, `argsWellKinded` sees one argument at arity `1`, and
+    type: `argsWellKinded` sees one argument at arity `1`, and
     the one free variable `a` is declared. `LContext.addMutualBlock` accepts such a block too.
 
     But no `genArgTy` can make it. A bitvector type is `LMonoTy.bitvec n` for a *width*

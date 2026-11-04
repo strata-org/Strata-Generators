@@ -148,8 +148,7 @@ theorem assert_wt (P : Program) (C : LContext CoreLParams) (ts : TypeScopes) (L 
     (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
     (he : ExprWellTyped C ts e .bool) :
     StatementWellTyped P C ts L (Statement.assert l e md) C ts :=
-  .cmd _ _ _ _ _ _ (.cmd _ _ _ (.assert _ _ _ _ _ he (Strata.Util.HMaps.Equiv.refl _)))
-    (Strata.Util.HMaps.Equiv.refl _)
+  .cmd _ _ _ _ _ (.cmd _ _ _ (.assert _ _ _ _ _ he (Strata.Util.HMaps.Equiv.refl _)))
 
 -- ── Gap 1: the metadata clause of `InGenShape` ───────────────────────────
 
@@ -347,8 +346,8 @@ theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
     StatementWellTyped progP C (procToTCtx callerCtx).types L otherTargetCall C
       (procToTCtx callerCtx).types := by
   have hfind : Program.Procedure.find? progP "p" = some procP := by decide
-  refine .cmd _ _ _ _ _ _ (.call _ "p" _ procP _ [] _ hfind ?_ ?_ ?_ ?_
-    (Strata.Util.HMaps.Equiv.refl _)) (Strata.Util.HMaps.Equiv.refl _)
+  refine .cmd _ _ _ _ _ (.call _ "p" _ procP _ [] _ hfind ?_ ?_ ?_ ?_
+    (Strata.Util.HMaps.Equiv.refl _))
   · refine ⟨by rw [hfind]; rfl, ?_, by decide, ?_⟩
     · intro proc hproc
       rw [hfind] at hproc

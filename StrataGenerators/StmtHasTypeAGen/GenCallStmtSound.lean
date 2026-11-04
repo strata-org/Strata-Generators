@@ -424,10 +424,9 @@ theorem initChain_types {P : Program} {C : LContext CoreLParams} {L : List Strin
     have hhead : StatementWellTyped P C ts L
         (Statement.init hd.1 (.forAll [] hd.2) .nondet default) C
         (ts.insert hd.1 (.forAll [] hd.2)) :=
-      .cmd C ts _ L _ _
+      .cmd C ts L _ _
         (.cmd ts _ _ (.init_nondet ts hd.1 (.forAll [] hd.2) hd.2 default _ hfresh0 rfl
           (hwk hd List.mem_cons_self) (Strata.Util.HMaps.Equiv.refl _)))
-        (Strata.Util.HMaps.Equiv.refl _)
     have htail : StatementsWellTyped P C (ts.insert hd.1 (.forAll [] hd.2)) L
         (initChain tl) C (insertAll ts (hd :: tl)) := by
       refine ih (fun p hp => hwk p (List.mem_cons_of_mem _ hp)) _ ?_
@@ -913,8 +912,8 @@ private theorem statementsWellTyped_equiv_congr_fuel {P : Program} : ∀ (n : Na
       refine .cons C Ca _ ts₂ tsa _ L s ss' ?_ hss
       -- Only the head statement is retyped; the tail already starts from `tsa`.
       cases hs with
-      | cmd _ _ tsc L c _ hc heq =>
-        exact .cmd C ts₂ tsc L c _ (cmdExtWellTyped_equiv_congr hc he) heq
+      | cmd _ _ L c _ hc =>
+        exact .cmd C ts₂ L c _ (cmdExtWellTyped_equiv_congr hc he)
       | block _ _ C_body ts_body L label body md _ hfresh hbody heq =>
         exact .block C ts₂ C_body ts_body L label body md _ hfresh
           (ih body (by simp at hfuel; omega) hbody he) (heq.trans he.symm)
@@ -1134,13 +1133,12 @@ theorem call_mixed_body_sound
   have hcall : StatementWellTyped P C (insertAll ts (missingIn ts (substSig σ M ++ T))) L
       (Statement.call pname (mkArgs M T exprs mask) default) C
       (insertAll ts (missingIn ts (substSig σ M ++ T))) :=
-    .cmd C _ _ L _ _
+    .cmd C _ L _ _
       (call_recipe_inout_sound σ M I O T exprs mask hfind hInputs hOutputs hExLen
         (by rw [← lm_values_length T, ← lm_values_length O, hTVals, substSig_values,
               List.length_map])
         hMinΓ hTinΓ (fun i hi hj => exprWellTyped_mono (hExTy i hi hj) hext) hExNoFvar
         hIdisjOut hMnotO hLhsNodup)
-      (Strata.Util.HMaps.Equiv.refl _)
   exact StatementsWellTyped_append hchain (StatementsWellTyped_singleton hcall)
 
 end StrataGenerators.Stmt

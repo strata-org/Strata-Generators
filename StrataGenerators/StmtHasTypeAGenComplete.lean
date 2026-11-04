@@ -636,14 +636,14 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
           SPMF.support
             (genStmtChain (G := SPMF) octx tvars [] procs L C ctx [] n ss.length)) with
-  | cmd C ts tsc L c ts' hc hequiv =>
+  | cmd C ts L c ts' hc =>
     intro ctx n hΓ hnf hok hcall hexpr
     cases hc with
     | cmd c2 _ hcmd =>
       obtain ⟨ctx', hctx', hstep, hmem⟩ :=
-        genCmdStmt_complete_spec procs L C ctx n ts tsc c2 hΓ hcmd hnf hok
+        genCmdStmt_complete_spec procs L C ctx n ts ts' c2 hΓ hcmd hnf hok
           (by simpa [ExprOk] using hexpr)
-      exact ⟨ctx', hequiv.trans hctx', hstep, hmem⟩
+      exact ⟨ctx', hctx', hstep, hmem⟩
     | call pname callArgs proc md σ _ hfind hwf hlhs hin hout hequiv2 =>
       -- Shape gives `md = default`; `CallOk` gives membership + recipe + guard + empty chain.
       have hmdc : md = default := hnf
@@ -654,7 +654,7 @@ theorem spec_complete (P : Program) (procs : ProcSigCtx)
         refine List.all_eq_true.mpr (fun e he => callInputs_binderAnnotsKnown hfind hwf hin e ?_)
         rw [hargs, getIn_mkArgs]
         exact List.mem_append_right _ he
-      refine ⟨ctx, (hequiv.trans hequiv2).trans hΓ, rfl, ?_⟩
+      refine ⟨ctx, hequiv2.trans hΓ, rfl, ?_⟩
       -- The emitted group is `initChain (…) ++ [call]`; the chain is empty (`hEmpty`),
       -- and the output scope `insertAllCtx ctx [] = ctx`.
       refine genCallStmt_mem procs C ctx n _ ?_

@@ -245,9 +245,8 @@ theorem genCmdStmt_sound (P : Program) (env : GenStmtSoundEnv octx tvars pctx)
       (env.toTCtx r.outCtx).types := by
   revert r; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genCmdStmt]
   walk [(isSoundFor_self_support (genCmd _ _ _ _ _ _ _ _)).obs]
-  exact StatementsWellTyped_singleton (.cmd C _ _ labels _ _ (.cmd _ _ _
-    (genCmd_sound_env octx tvars immutableVars ctx d C pctx (env.toCmdEnv C d) hops hFun _ ‹_›))
-    (Strata.Util.HMaps.Equiv.refl _))
+  exact StatementsWellTyped_singleton (.cmd C _ labels _ _ (.cmd _ _ _
+    (genCmd_sound_env octx tvars immutableVars ctx d C pctx (env.toCmdEnv C d) hops hFun _ ‹_›)))
 
 /-- Soundness of `genExitStmt`. With enclosing labels the target is drawn from
     them (`label ∈ L`, discharging the `exit` premise); with no enclosing block

@@ -893,11 +893,11 @@ theorem distinctElems_typed {τ : LMonoTy} {names : List String} {C : LContext C
 
 /-- A ground element type leaves no type variable in the annotations of a `distinct`'s elements. -/
 theorem distinctElems_annots {τ : LMonoTy} {names : List String} (hτ : LMonoTy.freeVars τ = []) :
-    ∀ e ∈ distinctElems τ names, ∀ v ∈ annotTyVars e, v ∈ ([] : List TyIdentifier) := by
-  intro e he v hv
+    ∀ e ∈ distinctElems τ names, annotTyVars e = [] := by
+  intro e he
   simp only [distinctElems, List.mem_map] at he
   obtain ⟨c, _, rfl⟩ := he
-  simp [annotTyVars, exprAnnotTys, hτ] at hv
+  simp [annotTyVars, exprAnnotTys, hτ]
 
 /-- The element type a `genDistinctAssertion` draw produces is **ground**: it is drawn
     over `tyParams := []`, so `genArgTy_freeVars` (at the vacuous
@@ -1165,7 +1165,8 @@ theorem genDeclAxiom_sound (P : Program) {s : GenState} {b : Bounds}
   refine ⟨?_, inv_cons_reserved hinv _⟩
   rw [hdecl_eq]
   exact DeclsWellTyped.cons _ _ _ _ _ _
-    (DeclWellTyped.ax s.C [] a .empty htyped hscoped) (DeclsWellTyped.nil _ _)
+    (DeclWellTyped.ax s.C [] a .empty htyped (List.eq_nil_of_subset_nil hscoped))
+    (DeclsWellTyped.nil _ _)
 
 /-! ### The constants a `distinct` ranges over
 
@@ -2091,7 +2092,7 @@ theorem genBlockFactory_sigsKnown_of_addMutualBlock {C C' : LContext CoreLParams
   intro fgen hfgen
   have h' := h
   obtain ⟨-, ds, fgen', fs, ks, hds, hfgen', hfs, hks, rfl⟩ :=
-    @LContext.addMutualBlock_ok_inv CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams C _ block h
   obtain rfl : fgen = fgen' := Except.ok.inj (hfgen.symm.trans hfgen')
   simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
@@ -2145,9 +2146,9 @@ theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
     ∃ F, BlockFunctionsAdded C C' block F := by
   have hsigs := genBlockFactory_sigsKnown_of_addMutualBlock h hdk harrow hbool
   obtain ⟨-, ds, fgen, fs, ks, hds, hfgen, hfs, hks, rfl⟩ :=
-    @LContext.addMutualBlock_ok_inv CoreLParams _ instInhabitedPUnit instInhabitedPUnit
+    @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams C _ block h
-  have hdec := TypeFactory_addMutualBlock_decompose _ _ block _ hds
+  have hdec := TypeFactory.addMutualBlock_ok_inv _ _ block _ hds
   simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
   rw [← Array.foldlM_toList] at hfs
   obtain ⟨hold, hnew, hall⟩ := foldlM_tryPush_lookup _ C.functions fs hfs
