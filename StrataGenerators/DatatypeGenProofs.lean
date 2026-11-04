@@ -2139,23 +2139,14 @@ open Core Core.TypeSpec in
     condition. -/
 structure ContextOk (C : LContext CoreLParams) (baseTypes : List String)
     (tyCons : List KnownTyCon) (extraReserved : List String) : Prop where
-  /-- Each base type resolves as a known type of `C`, or as an existing datatype of `C`. -/
-  base_known : ∀ b ∈ baseTypes,
-    b ∈ C.knownTypes.keywords ∨ b ∈ C.datatypes.allTypeNames
-  /-- Each applied type constructor resolves as a known type of `C`, or as a datatype of
-      `C`. -/
-  tyCon_known : ∀ kc ∈ tyCons,
-    kc.1 ∈ C.knownTypes.keywords ∨ kc.1 ∈ C.datatypes.allTypeNames
-  /-- `"arrow"` resolves as a known type of `C`. Strata Core always knows that name. -/
-  arrow_known : "arrow" ∈ C.knownTypes.keywords
   /-- Each base type is a **nullary known type constructor** of `C`. The field
       `argsWellKinded` of `MutualADTWF` needs the arity and not only the name, because the
       generator emits a base type as `.tcons b []`.
 
-      This field has no second case for a datatype of `C`, and `base_known` does have one.
-      `knownTypes` always backs the vocabulary that a generator draws from, and `DatatypePoolOk`
-      carries each datatype name separately. `LContext.WellKindedTy`, which the `init` rule and the
-      `signatureWellKinded` rule use, reads `knownTypes` only. -/
+      This field has no case for a datatype of `C`. `knownTypes` always backs the vocabulary
+      that a generator draws from, and `DatatypePoolOk` carries each datatype name separately.
+      `LContext.WellKindedTy`, which the `init` rule and the `signatureWellKinded` rule use,
+      reads `knownTypes` only. -/
   base_arity : ∀ b ∈ baseTypes, C.knownTypes[b]? = some 0
   /-- Each applied type constructor is a known type constructor of `C` at **its own
       arity**. The generator draws `(kc.1, kc.2)` from the pool and then makes exactly
@@ -2401,11 +2392,9 @@ and `defaultContextOk` need no change. -/
     `allDatatypes`. The field `inhab` goes into `MutualADTWF.inhabited`, and `tySymInhab_push`
     transports it across the push of the block. -/
 structure DatatypePoolOk (C : LContext CoreLParams) (dtCons : List KnownTyCon) : Prop where
-  /-- Each pool name resolves as an existing datatype of `C`. -/
-  known : ∀ kc ∈ dtCons, kc.1 ∈ C.datatypes.allTypeNames
   /-- Each pool name resolves as an existing datatype of `C` *at the pool's arity*: the
-      datatype declares exactly `kc.2` type parameters. This is the arity-aware form of
-      `known`, and it is what `MutualADTWF.argsWellKinded` needs. -/
+      datatype declares exactly `kc.2` type parameters. `MutualADTWF.argsWellKinded` needs
+      this. -/
   arity : ∀ kc ∈ dtCons,
     ∃ d ∈ C.datatypes.allDatatypes, d.name = kc.1 ∧ d.typeArgs.length = kc.2
   /-- Each pool name is inhabited in `C`'s own factory. -/
@@ -2918,26 +2907,9 @@ def coreContext : LContext CoreLParams :=
 theorem defaultContextOk :
     ContextOk coreContext defaultBaseTypes defaultTyCons Core.KnownTypes.keywords := by
   refine
-    { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
-      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
+    { base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · -- Each default base type is a known primitive of `coreContext`: it was *read off*
-    -- `Core.KnownTypes`, so this needs no case analysis on the list's contents.
-    intro b hb
-    refine Or.inl (Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_))
-    show Core.KnownTypes[b]?.isSome = true
-    rw [defaultBaseTypes_arity b hb]; rfl
-  · -- Each default type constructor is a known primitive of `coreContext`.
-    intro kc hkc
-    refine Or.inl (Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_))
-    show Core.KnownTypes[kc.1]?.isSome = true
-    rw [defaultTyCons_arity kc hkc]; rfl
-  · -- `"arrow"` is a known primitive of `coreContext`. This one *is* a fact about the
-    -- particular contents of `Core.KnownTypes`, because `genArgTy` hardcodes the name.
-    refine Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_)
-    show Core.KnownTypes["arrow"]?.isSome = true
-    rw [Core.knownTypes_getElem?]; rfl
   · -- Each default base type is registered at arity 0, by construction of the list.
     exact defaultBaseTypes_arity
   · -- Each default type constructor is registered at its own arity, by construction.
@@ -2978,7 +2950,7 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
   -- side conditions (`DatatypePoolOk`, `StoredRefsAbsent`) are vacuous.
   genMutuallyRecursiveDatatypes_MutualADTWF (dtCons := []) defaultTyCons_ne_arrow
     defaultContextOk
-    { known := by simp, arity := by simp, inhab := by simp }
+    { arity := by simp, inhab := by simp }
     (by
       intro d hd
       simp [coreContext, TypeFactory.allDatatypes] at hd)

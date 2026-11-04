@@ -144,25 +144,16 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
     · -- **dtPoolOk at the grown pool (direction (4)).** The new pool is this
       -- block's datatypes followed by the old pool.
       --
-      -- * `known`: `C'.datatypes = C.datatypes.push block`, so both the block's
-      --   names and the old pool's names are in `allTypeNames`.
+      -- * The field `arity`. A new entry records its datatype's own `typeArgs` count, and an old
+      --   entry keeps its datatype, because `push` only grows `allDatatypes`.
       -- * The field `inhab`. For a *new* entry, it is exactly the field `inhabited` of the `MutualADTWF` proof
       --   above, which already speaks about the factory after the push. For an *old* entry, it is the
       --   inhabitance of the earlier pool, which `tySymInhab_push` transports across the push.
       have hdt : C'.datatypes = s.C.datatypes.push block := addMutualBlock_datatypes hadd
       have hstored : DatatypeGen.StoredRefsAbsent s.C block :=
         storedRefsAbsent_of_inv hinv hfresh_res
-      refine { known := ?_, arity := ?_, inhab := ?_ }
+      refine { arity := ?_, inhab := ?_ }
       · intro kc hkc
-        rw [hdt, allTypeNames_push]
-        rcases List.mem_append.mp hkc with hnew | hold
-        · -- A new pool entry's name is a block name.
-          obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew
-          exact List.mem_append_right _ (List.mem_map.mpr ⟨d, hd, by rw [← hdeq]⟩)
-        · exact List.mem_append_left _ (hinv.dtPoolOk.known kc hold)
-      · -- Arity: a new entry records its datatype's own `typeArgs` count; old entries
-        -- keep theirs, and `push` only grows `allDatatypes`.
-        intro kc hkc
         rw [hdt, allDatatypes_push]
         rcases List.mem_append.mp hkc with hnew | hold
         · obtain ⟨d, hd, hdeq⟩ := List.mem_map.mp hnew

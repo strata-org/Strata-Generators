@@ -337,13 +337,9 @@ theorem contextOk_addFactory {C C' : LContext CoreLParams} {fn : LFunc CoreLPara
     DatatypeGen.ContextOk C' bt tc R := by
   obtain ⟨hkt, hdt⟩ := addFactory_fields h
   refine
-    { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
-      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
+    { base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · rw [hkt, hdt]; exact hok.base_known
-  · rw [hkt, hdt]; exact hok.tyCon_known
-  · rw [hkt]; exact hok.arrow_known
   · rw [hkt]; exact hok.base_arity
   · rw [hkt]; exact hok.tyCon_arity
   · rw [hkt]; exact hok.arrow_arity
@@ -419,28 +415,17 @@ theorem mem_keys_insertIfNew_of_mem {ks : KnownTypes} {nm : String} {ar : Nat} {
 
 /-- `ContextOk` is preserved by `addKnownTypeWithError` when the new type's name
     is already reserved. Adding a known type only grows `knownTypes` and never
-    touches `datatypes`, so the external/known fields transfer. -/
+    touches `datatypes`, so the arity and external fields transfer. -/
 theorem contextOk_addKnownType {C C' : LContext CoreLParams} {nm : String} {ar : Nat}
     {bt : List String} {tc : List DatatypeGen.KnownTyCon} {R : List String}
     (hok : DatatypeGen.ContextOk C bt tc R) (hnmR : nm ∈ R)
     (h : C.addKnownTypeWithError { name := nm, metadata := ar } default = .ok C') :
     DatatypeGen.ContextOk C' bt tc R := by
   obtain ⟨hkt, hdt⟩ := addKnownType_fields h
-  -- `keywords = keys`; monotone under insertIfNew.
-  have hkw : ∀ k, k ∈ C.knownTypes.keywords → k ∈ C'.knownTypes.keywords := by
-    intro k hk; rw [hkt]; exact mem_keys_insertIfNew_of_mem hk
   refine
-    { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
-      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
+    { base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · intro b hb; rcases hok.base_known b hb with hk | hd
-    · exact Or.inl (hkw b hk)
-    · exact Or.inr (by rw [hdt]; exact hd)
-  · intro kc hkc; rcases hok.tyCon_known kc hkc with hk | hd
-    · exact Or.inl (hkw kc.1 hk)
-    · exact Or.inr (by rw [hdt]; exact hd)
-  · exact hkw "arrow" hok.arrow_known
   -- Arities: `insertIfNew` never overwrites, so every old binding survives.
   · intro b hb
     rw [hkt]; exact getElem?_insertIfNew_of_getElem? (hok.base_arity b hb)
@@ -468,8 +453,8 @@ with `nm` added to `baseTypes` (arity 0) or `tyCons` (arity ≥ 1).
 
 Two facts about the new entry carry it:
 
-* **known**: `nm ∈ C'.knownTypes.keywords`, immediate from the `insertIfNew` the
-  gate ran, giving `base_known`/`tyCon_known`;
+* **arity**: `C'.knownTypes[nm]? = some ar`. The gate rejects a name that is already
+  registered, so its `insertIfNew` really inserts. This gives `base_arity`/`tyCon_arity`;
 * **external**: `C'.datatypes.getType nm = none`. `addKnownTypeWithError` leaves
   `datatypes` unchanged, so this is a fact about `C`. The caller gives it, from
   the fold's `datatypesReserved` invariant plus `nm ∉ reserved`. -/
@@ -508,11 +493,6 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
     DatatypeGen.ContextOk C' (if ar = 0 then nm :: bt else bt)
       (if ar = 0 then tc else (nm, ar) :: tc) R := by
   obtain ⟨hkt, hdt⟩ := addKnownType_fields h
-  have hkw : ∀ k, k ∈ C.knownTypes.keywords → k ∈ C'.knownTypes.keywords := by
-    intro k hk; rw [hkt]; exact mem_keys_insertIfNew_of_mem hk
-  have hnm_known : nm ∈ C'.knownTypes.keywords := by
-    rw [hkt, KnownTypes.keywords, Std.HashMap.mem_keys]
-    exact Std.HashMap.mem_insertIfNew.mpr (Or.inl (by simp))
   -- `nm ∈ R`, so `nm` is in the grown `initialReserved` via its `R` tail; and every
   -- member of the *old* `initialReserved` stays in the grown one (the
   -- `baseTypes`/`tyCons` clauses only gained an element).
@@ -539,39 +519,10 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
     have hnew : nm ∉ C.knownTypes := addKnownType_name_fresh h
     simp [hnew]
   refine
-    { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
-      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
+    { base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · -- base types: the new `nm` (if nullary) is known by `hnm_known`; old ones by monotonicity.
-    intro b hb
-    by_cases har0 : ar = 0
-    · simp only [har0, if_pos] at hb
-      rcases List.mem_cons.mp hb with rfl | hb
-      · exact Or.inl hnm_known
-      · rcases hok.base_known b hb with hk | hd
-        · exact Or.inl (hkw b hk)
-        · exact Or.inr (by rw [hdt]; exact hd)
-    · simp only [if_neg har0] at hb
-      rcases hok.base_known b hb with hk | hd
-      · exact Or.inl (hkw b hk)
-      · exact Or.inr (by rw [hdt]; exact hd)
-  · -- applied constructors: symmetric.
-    intro kc hkc
-    by_cases har0 : ar = 0
-    · simp only [har0, if_pos] at hkc
-      rcases hok.tyCon_known kc hkc with hk | hd
-      · exact Or.inl (hkw kc.1 hk)
-      · exact Or.inr (by rw [hdt]; exact hd)
-    · simp only [if_neg har0] at hkc
-      rcases List.mem_cons.mp hkc with rfl | hkc
-      · exact Or.inl hnm_known
-      · rcases hok.tyCon_known kc hkc with hk | hd
-        · exact Or.inl (hkw kc.1 hk)
-        · exact Or.inr (by rw [hdt]; exact hd)
-  · exact hkw "arrow" hok.arrow_known
-  -- Arities, in the same three shapes: the new entry at `ar`, old entries preserved by
-  -- `insertIfNew`.
+  -- Arities: the new entry at `ar`, old entries preserved by `insertIfNew`.
   · intro b hb
     by_cases har0 : ar = 0
     · simp only [har0, if_pos] at hb
@@ -672,10 +623,7 @@ theorem contextOk_reserved_mono {C : LContext CoreLParams} {bt : List String}
     · exact Or.inr (Or.inl (Or.inr h))
     · exact Or.inr (Or.inr (hsub h))
   exact
-    { base_known := h.base_known
-      tyCon_known := h.tyCon_known
-      arrow_known := h.arrow_known
-      base_arity := h.base_arity
+    { base_arity := h.base_arity
       tyCon_arity := h.tyCon_arity
       arrow_arity := h.arrow_arity
       knownTypes_reserved := fun k hk => hinit (h.knownTypes_reserved k hk)
@@ -1110,8 +1058,7 @@ theorem inv_addFactory {s : GenState} (hinv : Inv s) {fn : LFunc CoreLParams}
       rigidNil := (addFactory_rigid hadd).trans hinv.rigidNil
       tyConsNeArrow := hinv.tyConsNeArrow
       datatypesReserved := fun n hn => hinv.datatypesReserved n (by rw [hdt] at hn; exact hn)
-      dtPoolOk := { known := by rw [hdt]; exact hinv.dtPoolOk.known
-                    arity := by rw [hdt]; exact hinv.dtPoolOk.arity
+      dtPoolOk := { arity := by rw [hdt]; exact hinv.dtPoolOk.arity
                     inhab := by rw [hdt]; exact hinv.dtPoolOk.inhab }
       dtConsReserved := hinv.dtConsReserved
       storedRefsReserved := fun d hd c hc arg harg r hr =>
@@ -1488,8 +1435,7 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
       rw [hdt] at hn
       exact List.mem_cons_of_mem _ (hinv.datatypesReserved n hn)
     · -- dtPoolOk: `datatypes` unchanged.
-      exact { known := by rw [hdt]; exact hinv.dtPoolOk.known
-              arity := by rw [hdt]; exact hinv.dtPoolOk.arity
+      exact { arity := by rw [hdt]; exact hinv.dtPoolOk.arity
               inhab := by rw [hdt]; exact hinv.dtPoolOk.inhab }
     · -- storedRefsReserved: `datatypes` unchanged, reserved only grew.
       intro d hd c hc arg harg r hr
@@ -1582,7 +1528,10 @@ theorem genDatatypeBlock_MutualADTWF {s : GenState} {b : Bounds}
   · -- A pool name is a *datatype* of `C`, while `"arrow"` is external there
     -- (`ContextOk.arrow_external`), so a pool name cannot be `"arrow"`.
     intro heq
-    have hmem : "arrow" ∈ s.C.datatypes.allTypeNames := heq ▸ hinv.dtPoolOk.known kc hdt
+    obtain ⟨d, hd, hdname, -⟩ := hinv.dtPoolOk.arity kc hdt
+    have hmem : "arrow" ∈ s.C.datatypes.allTypeNames := by
+      simp only [TypeFactory.allTypeNames, List.mem_map]
+      exact ⟨d, hd, hdname.trans heq⟩
     exact absurd hinv.ctxOk.arrow_external (getType_ne_none_of_mem_allTypeNames hmem)
 
 /-! ## Per-step name tracking -/
@@ -2365,8 +2314,7 @@ theorem inv_initState : Inv initState := by
       rigidNil := rfl
       tyConsNeArrow := ?_
       datatypesReserved := ?_
-      dtPoolOk := { known := by simp [initState], arity := by simp [initState],
-                    inhab := by simp [initState] }
+      dtPoolOk := { arity := by simp [initState], inhab := by simp [initState] }
       dtConsReserved := by intro x hx; simp [initState] at hx
       storedRefsReserved := ?_
       datatypesKnown := by

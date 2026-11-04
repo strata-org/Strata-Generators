@@ -273,8 +273,8 @@ theorem simpleTyArities_of_addMutualBlock {C C' : LContext CoreLParams}
     `initialReserved`), the result satisfies `ContextOk` for the reserved set
     grown by the block names.
 
-    * "known" fields: `knownTypes` only grows, so old memberships survive
-      (`addMutualBlock_knownTypes`).
+    * arity fields: `knownTypes` keeps every old binding
+      (`addMutualBlock_knownTypes_getElem?`).
     * `knownTypes_reserved` / `datatypes_reserved`: block names are in the grown
       reserved set by construction; old keys/names are in `R ⊆` grown set.
     * "external" fields: `datatypes = C.datatypes.push block`, and a default type
@@ -318,31 +318,10 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     intro x hx hmem
     obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hmem
     exact hfresh d hd hx
-  -- The arity disjuncts transfer the same way as the "known" ones: `knownTypes` keeps every
-  -- old binding (`addMutualBlock_knownTypes_getElem?`), and `allDatatypes` only grows.
-  have hdt_mono : ∀ {d : LDatatype Unit}, d ∈ C.datatypes.allDatatypes →
-      d ∈ C'.datatypes.allDatatypes := by
-    intro d hd
-    rw [hdt, allDatatypes_push]
-    exact List.mem_append_left _ hd
   refine
-    { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
-      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
+    { base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · intro b hb
-    rcases hctx.base_known b hb with hk | hd
-    · exact Or.inl ((hkt b).mpr (Or.inr hk))
-    · exact Or.inr (by
-        rw [hdt, allTypeNames_push]
-        exact List.mem_append_left _ hd)
-  · intro kc hkc
-    rcases hctx.tyCon_known kc hkc with hk | hd
-    · exact Or.inl ((hkt kc.1).mpr (Or.inr hk))
-    · exact Or.inr (by
-        rw [hdt, allTypeNames_push]
-        exact List.mem_append_left _ hd)
-  · exact (hkt "arrow").mpr (Or.inr hctx.arrow_known)
   · intro b hb
     exact addMutualBlock_knownTypes_getElem? h (hctx.base_arity b hb)
   · intro kc hkc
