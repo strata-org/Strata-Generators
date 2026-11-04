@@ -321,21 +321,7 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
 
 `genDeclDatatype` draws its block over a pool of type *constructors*, which
 never contains an alias name: `genDeclAlias` extends only `Γ.aliases` and
-`reserved`, never `baseTypes`/`tyCons`/`dtCons`. So no generated block mentions an alias.
-
-A step that *did* draw over the alias names and then de-aliased with the checker's
-own `MutualDatatype.resolveAliases` was prototyped and **removed**, because it
-could not be proved sound: generator soundness gives `MutualADTWF s.C block₀` for
-the block that it *draws*, and `DeclHasType'.type_data` needs it for the block that the context *stores*,
-which is the block after the resolution of the aliases. `MutualADTWF` does **not** survive that resolution.
-An alias whose body is an arrow can move a name of the block into the domain of an arrow, and that breaks
-strict positivity.
-
-That gap is not reachable by *this* generator (`genArgTy` draws application
-arguments at `recCallsAllowed := false`, so a block name never appears inside an
-alias application's arguments), so the removed step was unproven rather than
-known-unsound. It is parked pending a question to the Strata team about whether
-positivity is meant to be checked pre- or post-resolution. -/
+`reserved`, never `baseTypes`/`tyCons`/`dtCons`. So no generated block mentions an alias. -/
 
 /-- How many times a declared function's operator entry is repeated in `octx` /
     `pctx`.

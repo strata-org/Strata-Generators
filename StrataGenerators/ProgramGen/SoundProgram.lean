@@ -52,13 +52,11 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
   walk [(isSoundFor_self_support (genMutuallyRecursiveDatatypes (G := SPMF) s.baseTypes
     (s.tyCons ++ s.dtCons) b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
     b.maxArgs b.maxDatatypeSize s.reserved)).obs]
-  next block hblock _ C' hadd =>
-    -- Well-formedness of the block (consumes `ContextOk` from `Inv`).
-    have hwf : MutualADTWF s.C block := genDatatypeBlock_MutualADTWF hinv hblock
+  next block _ _ C' hadd =>
     -- The generator pins the spec's `addMutualBlock` instances, so `hadd` matches the
     -- constructor directly.
     exact DeclsWellTyped.cons _ _ _ _ _ _
-      (DeclWellTyped.type_data s.C C' [] block .empty hwf hadd)
+      (DeclWellTyped.type_data s.C C' [] block .empty hadd)
       (DeclsWellTyped.nil _ _)
   next block hblock _ C' hadd =>
     have hwf : MutualADTWF s.C block := genDatatypeBlock_MutualADTWF hinv hblock
