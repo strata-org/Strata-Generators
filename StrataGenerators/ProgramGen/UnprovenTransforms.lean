@@ -653,7 +653,7 @@ def checkS2uCmdCountGrows (p : Program) : Bool :=
 
     `StructuredToUnstructured` is the only pass in the tree that makes a `.cfg`
     body, so nothing else produces the constructor and no other property can reach
-    this hole. The `#guard`s at the end of this file pin it.
+    this case. The `#guard`s at the end of this file pin it.
 
     The property is vacuous on a program with no procedure: there is then no `.cfg`
     body to print. -/
@@ -1224,7 +1224,7 @@ def inlineEvalFactory (p : Program) : Lambda.Factory CoreLParams :=
     see a declared function's body. -/
 def evalOver (F : Lambda.Factory CoreLParams) (e : Expression.Expr) : Expression.Expr :=
   (LExpr.evalWithLState 100
-    { state := [], config := { factory := F, fuel := 200, usedNames := {} } } e).fst
+    { state := [], config := { factory := F, fuel := 200 } } e).fst
 
 /-- Whether `e` holds a `.abs` or `.quant` node anywhere.
 
@@ -1863,7 +1863,7 @@ def checkHoistSymbolicNoLoss (p : Program) : Bool :=
 /-! ## The deterministic guards
 
 Each guard below is a small program that a person wrote. Together they pin each dimension that generated
-input cannot reach, and each of the three known defects. Therefore a change to any of them breaks the
+input cannot reach, and each of the two known defects. Therefore a change to any of them breaks the
 build.
 
 Generated input cannot reach three things. The first is a name that collides with the prefix that a pass
@@ -1890,16 +1890,15 @@ private def intLit (i : Int) : Expression.Expr := .const () (.intConst i)
 /-- A trivial `assert` leaf. -/
 private def guardAssert (l : String) : Statement := Statement.assert l trueLit .empty
 
--- ── The three known defects ───────────────────────────────────────────────
+-- ── The two known defects, and the `.cfg` body ────────────────────────────
 
 -- `LoopElim` mints `loopElim_havoc_{n}` two times for one loop, so the output
 -- holds two blocks under one label. Pinned on a bare loop, which is the shape
 -- `LoopElim` accepts.
 #guard !checkLoopBlockLabelsNodup (guardProg [.loop .nondet none [] [guardAssert "a"] .empty])
 
--- A procedure with a `.cfg` body does not print: `procToCST` writes
--- "CFG bodies not yet supported" and emits an empty body.
-#guard !checkS2uCfgPrintable (guardProg [guardAssert "a"])
+-- A procedure with a `.cfg` body prints without a conversion error.
+#guard checkS2uCfgPrintable (guardProg [guardAssert "a"])
 
 -- The same `.cfg` body typechecks: `Program.typeCheck` accepts a CFG body whose
 -- local declarations are fresh, as it accepts the structured original.

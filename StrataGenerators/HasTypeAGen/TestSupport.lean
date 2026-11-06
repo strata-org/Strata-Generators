@@ -121,8 +121,7 @@ def corePartialOps : OpCtx := coreMonoOps
 def coreState : LState LExprParams' :=
   { state := [],
     config := { factory := coreFactory,
-                fuel := 200,
-                usedNames := {} } }
+                fuel := 200 } }
 
 /-- Evaluate an expression with the given fuel over `coreFactory`. An operator
     reduces when it has constant arguments. A free variable is irreducible. -/
