@@ -4,7 +4,7 @@ import Basalt.Combinators
 import StrataGenerators.BasaltCompat.Defs
 import Basalt.Tuning.Attr
 import BasaltExamples.ArbString.Def
-import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
+import Strata.Languages.Core.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.StmtHasTypeAGen.CallDefs

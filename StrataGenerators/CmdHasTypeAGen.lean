@@ -1,7 +1,7 @@
 import StrataGenerators.GenSupport
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen
-import Strata.DL.Lambda.LExprTypeSpecProps
+import Strata.DL.Lambda.KnownTypesProps
 import Strata.Languages.Core.Typing.Spec.TypingSpec
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
@@ -304,7 +304,7 @@ theorem exprCtxOk_of_corresponds {C : LContext CoreLParams} {ts : TypeScopes} {o
   have hval : q.2 ∈ ctx.values := by
     rw [Map.values_eq_map_snd]
     exact List.mem_map_of_mem hq
-  exact ⟨Lambda.knownInstance_of_wellKinded q.2 C.knownTypes (hwk q.2 hval),
+  exact ⟨Lambda.LMonoTy.wellKinded_knownInstance q.2 C.knownTypes (hwk q.2 hval),
     hCorr.1 q.1 q.2 (Map.find?_of_mem_of_functional ctx q.1 q.2 hFun hq)⟩
 
 /-- The free variables that `genLExpr` reads from a scope `ctx` are declared, at their types, in

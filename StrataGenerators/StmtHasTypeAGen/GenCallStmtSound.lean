@@ -1,6 +1,6 @@
 import StrataGenerators.CmdHasTypeAGen
 import StrataGenerators.StmtHasTypeAGen.CallDefs
-import Strata.Languages.Core.Typing.Spec.StatementTypeSpec
+import Strata.Languages.Core.StatementTypeSpec
 import Strata.Languages.Core.Typing.Spec.TypingSpec
 import Strata.Languages.Core.CallWFProps
 

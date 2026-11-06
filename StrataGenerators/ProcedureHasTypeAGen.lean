@@ -2,7 +2,7 @@ import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.ProcedureHasTypeAGen.Support
 import StrataGenerators.ProcedureHasTypeAGen.MutableVars
 import StrataGenerators.CmdHasTypeAGenSound
-import Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec
+import Strata.Languages.Core.ProcedureTypeSpec
 import Strata.Languages.Core.Typing.Spec.TypingSpec
 import Strata.Languages.Core.Typing.Props.TypingSpecProps
 

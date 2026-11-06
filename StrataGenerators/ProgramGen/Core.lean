@@ -6,7 +6,7 @@ import StrataGenerators.DatatypeGenProofs
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.ProcedureHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.Defs
-import Strata.Languages.Core.Typing.Spec.ProgramTypeSpec
+import Strata.Languages.Core.ProgramTypeSpec
 
 open Lambda RandomChoice Core Core.TypeSpec Imperative
 open DatatypeGen

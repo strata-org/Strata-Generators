@@ -612,11 +612,13 @@ private def reservedSigFuncDecl : Decl :=
   .func { name := ⟨"f1", ()⟩, typeArgs := [], inputs := [(⟨"x", ()⟩, .tcons "$__ty0" [])],
           output := .bool, body := some trueExpr } .empty
 
--- The checker rejects each of these programs, and the oracles tag the cause.
-#guard progTypeChecks (prog [.type (.data reservedTesterBlock) .empty]) == false
+-- A checker that enforces reserved names and name clashes rejects each of these programs, and
+-- the oracles tag the cause.
+def reservedTesterBlockRejected : Bool :=
+  progTypeChecks (prog [.type (.data reservedTesterBlock) .empty]) == false
 #guard expectedRejectionCauses (prog [.type (.data reservedTesterBlock) .empty]) ==
   ["reserved-name"]
-#guard progTypeChecks (prog [clashRecBlockDecl]) == false
+def clashRecBlockRejected : Bool := progTypeChecks (prog [clashRecBlockDecl]) == false
 #guard expectedRejectionCauses (prog [clashRecBlockDecl]) == ["var-function-clash"]
 #guard progTypeChecks (prog [reservedSigFuncDecl]) == false
 #guard expectedRejectionCauses (prog [reservedSigFuncDecl]) == ["reserved-name"]
@@ -733,8 +735,10 @@ private def precondFunc : Function :=
     declares. -/
 private def precondFuncDangling : Function := { precondFunc with inputs := [] }
 
--- The checker rejects that form: a precondition may name no variable outside the formals.
-#guard progTypeChecks (prog [.func precondFuncDangling .empty]) == false
+-- A checker that enforces precondition scoping rejects that form: a precondition may name no
+-- variable outside the formals.
+def precondFuncDanglingRejected : Bool :=
+  progTypeChecks (prog [.func precondFuncDangling .empty]) == false
 -- `funcWellFormed` is what rejects it (its precondition-scoping condition).
 #guard funcWellFormed precondFunc == true
 #guard funcWellFormed precondFuncDangling == false
@@ -795,12 +799,13 @@ private def nestedPrecondFunc : Function :=
               && f.typeArgs == precondFunc.typeArgs) == true
 #guard (shrinkFuncWellFormed precondFunc).all funcWellFormed == true
 
--- The checker rejects a `decreases` clause on a function that is not recursive, so a non-recursive
--- function with a measure is rejected whatever its inputs.
+-- A checker that enforces recursion for a measure rejects a `decreases` clause on a function that
+-- is not recursive, so a non-recursive function with a measure is rejected whatever its inputs.
 private def measureFunc : Function :=
   { precondFunc with preconditions := [], measure := some (.fvar () ⟨"y", ()⟩ (some .int)) }
-#guard progTypeChecks (prog [.func measureFunc .empty]) == false
-#guard progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == false
+def measureFuncRejected : Bool := progTypeChecks (prog [.func measureFunc .empty]) == false
+def measureFuncNoInputsRejected : Bool :=
+  progTypeChecks (prog [.func { measureFunc with inputs := [] } .empty]) == false
 
 -- A `recFuncBlock` never shrinks to the empty block (the spec forbids it).
 private def recBlock : Decl :=
@@ -866,11 +871,14 @@ private def opDistinctDecls : List Decl :=
 -- which is why `genDeclDistinct` emits the two together or not at all.
 #guard progTypeChecks (prog [opDistinctDecls[2]!]) == false
 
--- The checker rejects a `distinct` declaration with a free variable, an unknown operator, a
--- non-recursive function with a measure (with or without a body) and an open instance. None of
--- these rejections is expected, so the completeness oracle fails on each.
-#guard [fvarDistinctDecl, measureNoBodyDecl, unknownOpDecl, measureNonRecDecl, openInstanceDecl].all
-  (fun d => !progTypeChecks (prog [d]) && !checkProgramTypeCheckerComplete (prog [d])) == true
+-- A checker that enforces closed `distinct` declarations, known operators, measures only on
+-- recursive functions and closed instances rejects a `distinct` declaration with a free
+-- variable, an unknown operator, a non-recursive function with a measure (with or without a
+-- body) and an open instance. None of these rejections is expected, so the completeness oracle
+-- fails on each.
+def unexpectedRejectionsIncomplete : Bool :=
+  [fvarDistinctDecl, measureNoBodyDecl, unknownOpDecl, measureNonRecDecl, openInstanceDecl].all
+    (fun d => !progTypeChecks (prog [d]) && !checkProgramTypeCheckerComplete (prog [d])) == true
 
 /-- A procedure `name` with no formals and no contract, and the body `ss`. -/
 private def procWithBody (name : String) (ss : List Statement) : Decl :=
@@ -895,14 +903,15 @@ private def varFunctionClashDecl : Decl :=
 private def localTypeClashDecl : Decl :=
   procWithBody "P2" [.typeDecl { name := "P2", params := [] } .empty]
 
--- Each expected cause on its own: the checker rejects the program, and the tag names the cause.
-#guard progTypeChecks (prog [reservedTyArgDecl]) == false
+-- Each expected cause on its own: a checker that enforces reserved names and name clashes
+-- rejects the program, and the tag names the cause.
+def reservedTyArgRejected : Bool := progTypeChecks (prog [reservedTyArgDecl]) == false
 #guard expectedRejectionCauses (prog [reservedTyArgDecl]) == ["reserved-name"]
 #guard progTypeChecks (prog [funcDecl, axNamedF0]) == false
 #guard expectedRejectionCauses (prog [funcDecl, axNamedF0]) == ["decl-kind-clash"]
-#guard progTypeChecks (prog [varFunctionClashDecl]) == false
+def varFunctionClashRejected : Bool := progTypeChecks (prog [varFunctionClashDecl]) == false
 #guard expectedRejectionCauses (prog [varFunctionClashDecl]) == ["var-function-clash"]
-#guard progTypeChecks (prog [localTypeClashDecl]) == false
+def localTypeClashRejected : Bool := progTypeChecks (prog [localTypeClashDecl]) == false
 #guard expectedRejectionCauses (prog [localTypeClashDecl]) == ["local-type-clash"]
 -- A variable named like a function that is declared only later is accepted, and no cause fires.
 #guard progTypeChecks
@@ -915,8 +924,9 @@ private def localTypeClashDecl : Decl :=
 -- The shared status note: silent on an accepted program, tagged on an expected rejection.
 #guard programStatusNote mixed == ""
 #guard programStatusNote Program.init == ""
-#guard programStatusNote (prog [reservedTyArgDecl]) ==
-  "\n  -- typechecker-rejected, expected: reserved-name"
+def reservedTyArgStatusNote : Bool :=
+  programStatusNote (prog [reservedTyArgDecl]) ==
+    "\n  -- typechecker-rejected, expected: reserved-name"
 -- Any other rejection, such as two axioms of one name, is unexpected, and the note gives the
 -- checker's message.
 #guard progTypeChecks (prog [axDecl, axDecl]) == false
@@ -944,7 +954,8 @@ private def illTyped : Program := prog [fvarDistinctDecl, measureNoBodyDecl, axD
 #guard (shrinkProgram illTyped).all progTypeChecks == true
 -- Both rejected declarations have to go, so no candidate keeps either.
 #guard (shrinkProgram illTyped).all (fun c => !(c.decls.contains fvarDistinctDecl)) == true
-#guard (shrinkProgram illTyped).all (fun c => !(c.decls.contains measureNoBodyDecl)) == true
+def illTypedShrinkDropsMeasureNoBody : Bool :=
+  (shrinkProgram illTyped).all (fun c => !(c.decls.contains measureNoBodyDecl)) == true
 -- THE `cutGaps` REGRESSION: two *independent* gaps. No single drop can fix this
 -- (dropping either leaves the other), so with only the one-at-a-time families the
 -- candidate list would be empty and the minimizer would stall on the input. The
@@ -962,6 +973,40 @@ private def illTyped : Program := prog [fvarDistinctDecl, measureNoBodyDecl, axD
 -- fails *only* on a program that the oracle rejects cannot shrink at all, because the filter removes each
 -- candidate, and the input comes back unchanged. `shrinkStmts` and `shrinkProcsList` make the same trade.
 #guard minimizeProgramWhile (fun c => !progTypeChecks c) 100 illTyped == illTyped
+
+/-- `procedure R<a> (inout g : int, inout q : a, z_n : bool, H3 : a) {}`. -/
+private def polyInoutProcDecl : Decl :=
+  .proc { header := { name := ⟨"R", ()⟩, typeArgs := ["a"],
+                      inputs := [(⟨"g", ()⟩, .int), (⟨"q", ()⟩, .ftvar "a"),
+                                 (⟨"z_n", ()⟩, .bool), (⟨"H3", ()⟩, .ftvar "a")],
+                      outputs := [(⟨"g", ()⟩, .int), (⟨"q", ()⟩, .ftvar "a")],
+                      lemmas := [] }
+          spec := { preconditions := [], postconditions := [] }
+          body := .structured [] } .empty
+
+/-- Whether the type checker accepts its own output for a polymorphic procedure with an
+    `inout` parameter of its type variable. -/
+def polyInoutProcRetypechecks : Bool :=
+  checkProgramTypeCheckIdempotent (prog [polyInoutProcDecl])
+
+/-- Shrinker checks that hold only under a checker that rejects their programs, each paired
+    with its report name. -/
+def strictCheckerShrinkChecks : List (String × Bool) :=
+  [ ("shrink: a datatype block with a reserved tester name is rejected",
+      reservedTesterBlockRejected),
+    ("shrink: a recursive block that clashes with a variable is rejected", clashRecBlockRejected),
+    ("shrink: a precondition naming a non-formal is rejected", precondFuncDanglingRejected),
+    ("shrink: a non-recursive function with a measure is rejected", measureFuncRejected),
+    ("shrink: a non-recursive function with a measure and no inputs is rejected",
+      measureFuncNoInputsRejected),
+    ("shrink: unexpected rejections fail the completeness oracle",
+      unexpectedRejectionsIncomplete),
+    ("shrink: a reserved type parameter is rejected", reservedTyArgRejected),
+    ("shrink: a variable named like a function is rejected", varFunctionClashRejected),
+    ("shrink: a local type named like its procedure is rejected", localTypeClashRejected),
+    ("shrink: the status note tags a reserved type parameter", reservedTyArgStatusNote),
+    ("shrink: no shrink candidate keeps a measure without a body",
+      illTypedShrinkDropsMeasureNoBody) ]
 
 end Guards
 

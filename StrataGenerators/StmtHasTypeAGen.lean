@@ -211,7 +211,7 @@ theorem knownInstance_mono {C C' : LContext CoreLParams}
     (hmono : ∀ (n : String) (v : Nat), C.knownTypes[n]? = some v → C'.knownTypes[n]? = some v)
     {ty : LMonoTy} (h : LMonoTy.knownInstance ty C.knownTypes = true) :
     LMonoTy.knownInstance ty C'.knownTypes = true :=
-  Lambda.knownInstance_of_wellKinded ty C'.knownTypes
+  Lambda.LMonoTy.wellKinded_knownInstance ty C'.knownTypes
     (wellKindedTy_mono hmono (LMonoTy.knownInstance_wellKinded ty C.knownTypes h))
 
 /-- `WellKindedOk` transports along an extension of the known-type table. -/

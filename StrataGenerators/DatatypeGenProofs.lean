@@ -2,7 +2,7 @@ import StrataGenerators.GenSupport
 import StrataGenerators.DatatypeGen
 import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.DL.Lambda.DatatypeWF
-import Strata.Languages.Core.Typing.Spec.DatatypeTypeSpec
+import Strata.Languages.Core.DatatypeTypeSpec
 import Strata.Languages.Core.Factory
 import Strata.Languages.Core.FactoryProps
 import Basalt.Walk.Entry

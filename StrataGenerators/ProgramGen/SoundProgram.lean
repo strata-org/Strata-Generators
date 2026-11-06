@@ -121,7 +121,8 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
         dtPoolOk := ?_
         dtConsReserved := ?_
         storedRefsReserved := ?_
-        datatypesKnown := datatypesKnown_addMutualBlock hadd hinv.datatypesKnown
+        datatypesKnown := @Lambda.datatypesKnown_addMutualBlock _ _ _
+          Core.instToFormatIDMetaCoreLParams _ _ _ _ hadd hinv.datatypesKnown
         octxWK := ?_
         sigsWK := fun sig hsig ty hty => wellKindedTy_mono hmono (hinv.sigsWK sig hsig ty hty)
         exprCtx := exprCtxOk_addMutualBlock hinv.exprCtx hb hmono hpctx
@@ -297,11 +298,11 @@ theorem inv_registerFunc {s : GenState} (hinv : Inv s) {func : Function}
     wellKindedTy_mkArrow' harrow (hsigWK _ List.mem_cons_self) _ (fun t ht =>
       hsigWK t (List.mem_cons_of_mem _ (by rw [ListMap.values_eq_map_snd]; exact ht)))
   have hcurK : LMonoTy.knownInstance (funcCurriedTy func) C'.knownTypes = true :=
-    Lambda.knownInstance_of_wellKinded _ _ hcurWK
+    Lambda.LMonoTy.wellKinded_knownInstance _ _ hcurWK
   have hfuncTy : func.toLFunc.type = .ok (.forAll func.toLFunc.typeArgs
       (LMonoTy.mkArrow' func.toLFunc.output (func.toLFunc.inputs.map Prod.snd))) :=
     type_eq_of_sigWF harrow hsig.inputsNodup hsig.typeArgsNodup
-      (Lambda.knownInstance_of_wellKinded _ _ (hsigWK _ List.mem_cons_self))
+      (Lambda.LMonoTy.wellKinded_knownInstance _ _ (hsigWK _ List.mem_cons_self))
   have hctx' : ExprCtxOk C' [] [] s.octx (s.pctx ++ s.derivedPctx) :=
     hinv.exprCtx.extend hext (fun f hf => by rw [List.mem_singleton.mp hf]; exact hfuncTy)
   have hmemFunc : C'.functions[func.name.name]? = some func.toLFunc := by
@@ -414,7 +415,7 @@ theorem registerFuncs_sound {s s' : GenState} (hinv : Inv s) {fs : List Function
         fun g hg => (hsig g (List.mem_cons_of_mem _ hg)).congr hkt rfl rfl rfl
       obtain ⟨hinv', hext', hfresh'⟩ := ih hinv₁ h hsig₁
       have hext₁ := factoryExtendedBy_of_addFactory hadd
-      refine ⟨hinv', factoryExtendedBy_append s.C C₁ s'.C _ _ hext₁ hext', ?_⟩
+      refine ⟨hinv', factoryExtendedBy_append hext₁ hext', ?_⟩
       intro g hg hmem
       rcases List.mem_cons.mp hg with rfl | hg
       · exact addFactory_name_fresh hadd hmem

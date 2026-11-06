@@ -355,7 +355,7 @@ def declVarNames : Decl → List String
 def declFuncNames : Decl → List String
   | .func f _ => [f.name.name]
   | .recFuncBlock fs _ => fs.map (·.name.name)
-  | .type (.data block) _ => Core.MutualDatatype.generatedFuncNames block
+  | .type (.data block) _ => Lambda.MutualDatatype.generatedFuncNames block
   | _ => []
 
 /-- Every name a declaration declares or binds. -/
@@ -413,7 +413,8 @@ def funcWritesReservedType (f : Function) : Bool :=
 def declWritesReservedType : Decl → Bool
   | .proc p _ =>
     !Procedure.allTys (mtyAllTyConsNames isAllowedName) p
-      || !Statement.procedureSignatureTypesAllowed p
+      || !(p.header.inputs.values ++ p.header.outputs.values).all
+        (mtyAllTyConsNames isAllowedName)
   | .func f _ => funcWritesReservedType f
   | .recFuncBlock fs _ => fs.any funcWritesReservedType
   | .ax a _ => !allExprTys (mtyAllTyConsNames isAllowedName) a.e

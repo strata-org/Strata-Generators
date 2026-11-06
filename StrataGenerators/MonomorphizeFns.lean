@@ -351,7 +351,7 @@ abbrev checkMonoOutputTypechecks (p : Program) : Prop :=
     ∀ q ∈ (Core.typeCheck Core.VerifyOptions.quiet p).toOption,
       ∀ r ∈ runMono q,
         (Core.typeCheck Core.VerifyOptions.quiet r.1.2
-          (factory := some r.2.factory)).toOption.isSome = true
+          (factory := r.2.factory)).toOption.isSome = true
 
 /-- **The pass is idempotent, and it reports so.** After one run, each function is monomorphic. Therefore the
     second run has nothing to specialize, it must give the same program, and it must report `changed = false`.

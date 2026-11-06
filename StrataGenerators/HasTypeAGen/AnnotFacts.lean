@@ -1,6 +1,6 @@
 import StrataGenerators.HasTypeAGenOpsConsistent
 import Strata.Languages.Core.Typing.Spec.TypingSpec
-import Strata.DL.Lambda.LExprTypeSpecProps
+import Strata.DL.Lambda.KnownTypesProps
 
 /-!
 # The annotations of a generated expression

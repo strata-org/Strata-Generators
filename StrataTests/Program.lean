@@ -66,3 +66,20 @@ def programADTProps : List TestDecl :=
        fun gp => checkCalledDerivedAreDeclared gp.prog),
       ("program: ADT calls follow the datatype declaration",
        fun gp => checkDerivedCallsFollowDeclaration gp.prog) ]
+
+/-- The whole-program shrinker's checks that need a checker stricter than Core's
+    `Program.typeCheck`. -/
+@[strata_properties]
+def programShrinkStrictChecks : List TestDecl :=
+  strictCheckerShrinkChecks.map fun (name, verdict) =>
+    knownFailure "needs a checker that rejects this program; Core's `Program.typeCheck` \
+      accepts it" (TestDecl.witness name verdict)
+
+/-- A hand-built witness for the sampled property `program: typeCheck output re-typechecks`,
+    which a draw falsifies only sometimes. -/
+@[strata_property]
+def programPolyInoutRetypechecks : TestDecl :=
+  knownFailure "Core's `Program.typeCheck` rejects its own output for a polymorphic \
+    procedure with an inout parameter of its type variable" <|
+    TestDecl.witness "program: a polymorphic procedure with an inout parameter re-typechecks"
+      polyInoutProcRetypechecks

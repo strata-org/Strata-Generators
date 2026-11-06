@@ -235,31 +235,6 @@ theorem exists_getElem?_of_mem {F : Factory CoreLParams} {name : String} (h : na
     exact absurd hsome Bool.false_ne_true
   · exact ⟨_, rfl⟩
 
-/-- Factory extension composes: extending `C` by `xs` to `C1` and then `C1` by `ys` to `C2`
-    extends `C` by `xs ++ ys` to `C2`. -/
-theorem factoryExtendedBy_append {agrees : LFunc CoreLParams → LFunc CoreLParams → Prop}
-    (C C1 C2 : LContext CoreLParams) (xs ys : List (LFunc CoreLParams))
-    (h1 : FactoryExtendedBy agrees C C1 xs) (h2 : FactoryExtendedBy agrees C1 C2 ys) :
-    FactoryExtendedBy agrees C C2 (xs ++ ys) := by
-  refine { knownTypes_eq := ?_, datatypes_eq := ?_, idents_eq := ?_, rigidTypeVars_eq := ?_,
-           preserves_old := ?_, contains_new := ?_, no_other := ?_ }
-  · rw [h2.knownTypes_eq, h1.knownTypes_eq]
-  · rw [h2.datatypes_eq, h1.datatypes_eq]
-  · rw [h2.idents_eq, h1.idents_eq]
-  · rw [h2.rigidTypeVars_eq, h1.rigidTypeVars_eq]
-  · intro nm g h; exact h2.preserves_old nm g (h1.preserves_old nm g h)
-  · intro f hf
-    rcases List.mem_append.mp hf with hx | hy
-    · obtain ⟨g, hg, hagree⟩ := h1.contains_new f hx
-      exact ⟨g, h2.preserves_old _ g hg, hagree⟩
-    · exact h2.contains_new f hy
-  · intro nm h
-    rcases h2.no_other nm h with h1c | hys
-    · rcases h1.no_other nm h1c with hC | hxs
-      · exact Or.inl hC
-      · exact Or.inr (by rw [List.map_append]; exact List.mem_append.mpr (Or.inl hxs))
-    · exact Or.inr (by rw [List.map_append]; exact List.mem_append.mpr (Or.inr hys))
-
 /-- A successful `addFactoryFunctionWithError C fn = .ok C'` makes `C'` the extension of `C` by
     exactly `fn`: old entries are unchanged and `fn`'s name stores `fn` itself. -/
 theorem factoryExtendedBy_of_addFactory
@@ -1007,7 +982,7 @@ theorem genDeclAlias_sound (P : Program) {s : GenState} {b : Bounds}
   have hfvs : ∀ v, v ∈ LMonoTy.freeVars syn.type ↔ v ∈ syn.typeArgs :=
     fun v => List.mem_of_dedup _ v
   have hknown : LMonoTy.knownInstance body s.C.knownTypes = true :=
-    Lambda.knownInstance_of_wellKinded body _
+    Lambda.LMonoTy.wellKinded_knownInstance body _
       (wellKindedTy_of_genNonRecursiveArgTy hinv.ctxOk hbody)
   have hres : ResolvedTyWF s.C TyVarAdmissibility.all syn.type :=
     ResolvedTyWF.of_knownInstance hknown
@@ -2185,7 +2160,7 @@ theorem exprCtxOk_addMutualBlock {C C' : LContext CoreLParams} {block : MutualDa
     rw [OpCtx.ops_ofList] at hp
     rcases List.mem_append.mp hp with hnew | hold
     · obtain ⟨fn, hfn, heq⟩ := mem_adtDerivedOps hb.derived hnew
-      refine ⟨knownInstance_of_wellKinded _ _ (adtDerivedOps_wellKinded hb harities.arrow sel p
+      refine ⟨LMonoTy.wellKinded_knownInstance _ _ (adtDerivedOps_wellKinded hb harities.arrow sel p
         hnew), fn, hb.contains_new _ _ hfn, [], ?_⟩
       rw [LMonoTy.subst_nil]
       exact heq
@@ -2204,7 +2179,7 @@ theorem exprCtxOk_addMutualBlock {C C' : LContext CoreLParams} {block : MutualDa
         PCtxWF_factoryPolyOps F nm _ (mem_adtDerivedPolyOps hb.derived hnew)
       simp only [LTy.forAll.injEq] at heq
       obtain ⟨-, rfl⟩ := heq
-      exact knownInstance_of_wellKinded _ _
+      exact LMonoTy.wellKinded_knownInstance _ _
         (blockFunction_wellKinded hb harities.arrow (Lambda.Factory.memToArrayOfGetElem? hfn))
     · exact knownInstance_mono _ _ _ hk (hctx.polysKnown nm bvs body hold)
 
@@ -2277,14 +2252,15 @@ theorem exprCtxOk_programContext :
     have hwf := Core.Factory_wf.lfuncs_wf f hmem
     have hin : f.inputs.keys.Nodup := inputs_keys_nodup_of_wf hwf
     have hout : LMonoTy.knownInstance f.output programContext.knownTypes = true :=
-      knownInstance_of_wellKinded _ _ (wellKindedTy_of_mkArrow'_out _ (coreFactory_wellKinded hmem))
+      LMonoTy.wellKinded_knownInstance _ _
+        (wellKindedTy_of_mkArrow'_out _ (coreFactory_wellKinded hmem))
     exact type_eq_of_sigWF simpleTyArities_programContext.arrow hin hwf.typeArgs_nodup hout
   fvars := fun _ hp => absurd hp List.not_mem_nil
   ops := by
     intro p hp
     obtain ⟨nm, τ⟩ := p
     obtain ⟨fn, hfn, rfl⟩ := factoryOps_mem_char Core.Factory nm τ hp
-    exact ⟨knownInstance_of_wellKinded _ _ (coreMonoOps_wellKinded _ hp), fn, hfn, [],
+    exact ⟨LMonoTy.wellKinded_knownInstance _ _ (coreMonoOps_wellKinded _ hp), fn, hfn, [],
       (LMonoTy.subst_nil _).symm⟩
   polys := fun name lty hmem =>
     PCtxWF_factoryPolyOps Core.Factory name lty (corePolyOps_subset_factoryPolyOps _ hmem)
@@ -2294,7 +2270,7 @@ theorem exprCtxOk_programContext :
     simp only [factoryPolyOps, List.mem_filterMap, Option.some.injEq, Prod.mk.injEq,
       LTy.forAll.injEq] at hfp
     obtain ⟨f, hf, -, -, rfl⟩ := hfp
-    exact knownInstance_of_wellKinded _ _ (coreFactory_wellKinded (Array.mem_def.mpr hf))
+    exact LMonoTy.wellKinded_knownInstance _ _ (coreFactory_wellKinded (Array.mem_def.mpr hf))
 
 /-- The initial fold state satisfies `Inv`. -/
 theorem inv_initState : Inv initState := by

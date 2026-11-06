@@ -3,7 +3,7 @@ import StrataGenerators.HasTypeAGen.AnnotFacts
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Dedup
 import StrataGenerators.FunctionHasTypeAGen.IdentName
-import Strata.Languages.Core.Typing.Spec.FunctionTypeSpec
+import Strata.Languages.Core.FunctionTypeSpec
 import Strata.Util.ListMapProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
@@ -560,7 +560,7 @@ theorem genFuncParts_sound (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx : O
   have hkeysNodup : func.inputs.keys.Nodup := hsigF.inputsNodup
   have hknown : ∀ ty ∈ func.output :: func.inputs.values,
       LMonoTy.knownInstance ty C.knownTypes = true :=
-    fun ty hty => Lambda.knownInstance_of_wellKinded _ _ (hsigF.signatureWellKinded ty hty)
+    fun ty hty => Lambda.LMonoTy.wellKinded_knownInstance _ _ (hsigF.signatureWellKinded ty hty)
   have hsigVars : ∀ ty ∈ func.output :: func.inputs.values, ∀ v ∈ LMonoTy.freeVars ty,
       v ∈ func.typeArgs := hsigF.sigVars
   have hsubOps : ∀ p ∈ (opsOver func.typeArgs octx).ops, p ∈ octx.ops ∧
