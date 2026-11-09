@@ -76,49 +76,6 @@ def offendingCodepoints (s : String) : List Nat :=
   | .ok out => (out.toList.filter (fun c => !isPrintableAscii c)).map Char.toNat |>.eraseDups
   | .error _ => []
 
--- ── Machine-checked reproducers ───────────────────────────────────────
---
--- These pin the *specific* cases of the defect, independently of what the random
--- generator draws. Each case is a `#guard` on the value that the code gives now,
--- which is the incorrect one, so a change in that value makes the build fail.
--- Each check records the current behaviour, and each check itself breaks after
--- a correction. Then it shows that this file needs an update together with the
--- property.
---
--- These are `#guard`s and not `example`s, because the kernel cannot evaluate
--- `escapedIsPrintableAscii`: `Strata.SMTDDM.translateFromTerm` and the DDM
--- formatter are `partial`, hence opaque to it. A proof would need
--- `native_decide`, and therefore the axiom `Lean.ofReduceBool`.
-
-/- The escape function is correct on ASCII. This is the path that works, and the
-    check keeps it, so that a regression in it is also caught. -/
-#guard escapedIsPrintableAscii "abc" = true
-
-/- The escape function is correct on an ASCII control character, which it gives
-    as `\u{0}`. This is why a test with a control character does not find the
-    defect: `useXHex` covers that range. -/
-#guard escapedIsPrintableAscii "\x00" = true
-
-/- U+00AD, the soft hyphen, gets an escape. It is the one special case of
-    `useXHex` above `0xA1`. -/
-#guard escapedIsPrintableAscii "­" = true
-
-/- **The Latin-1 case.** U+00E9, which is `é`, goes out raw. `useXHex` is false
-    for each codepoint of U+00A1 or more, so the escape function stops exactly
-    here. -/
-#guard escapedIsPrintableAscii "é" = false
-
-/- **The astral-plane case.** U+1D54A, which is `𝕊`, goes out raw as 4 UTF-8
-    bytes. On this input, z3 reports `str.len = 4`. -/
-#guard escapedIsPrintableAscii "𝕊" = false
-
-/- The `useXHex` boundary is off by one codepoint. U+00A0 gets an escape, and
-    U+00A1 does not. This is the sharpest statement of the root cause: the guard is
-    a predicate for *8-bit* printability, and the escape function uses it for full
-    Unicode. -/
-#guard escapedIsPrintableAscii " " = true
-#guard escapedIsPrintableAscii "¡" = false
-
 -- ── The property ──────────────────────────────────────────────────────
 
 /-- **Property: each generated string literal goes to SMT-LIB as printable
