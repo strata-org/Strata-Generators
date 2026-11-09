@@ -207,29 +207,29 @@ def checkTrichotomy (d₁ d₂ : Decimal) : Bool :=
 -- it then shows that this file needs a change too.
 
 /-- `3e0` and `30e-1` denote one value. -/
-example : Decimal.toRat ⟨3, 0⟩ = Decimal.toRat ⟨30, -1⟩ := by native_decide
+example : Decimal.toRat ⟨3, 0⟩ = Decimal.toRat ⟨30, -1⟩ := by decide
 
 /-- **The defect in the fold of `eq`.** The two spellings above fold to `false`,
     although they denote one value. -/
-example : actualEqFold ⟨3, 0⟩ ⟨30, -1⟩ = some false := by native_decide
-example : checkEqFold ⟨3, 0⟩ ⟨30, -1⟩ = false := by native_decide
+example : actualEqFold ⟨3, 0⟩ ⟨30, -1⟩ = some false := by decide
+example : checkEqFold ⟨3, 0⟩ ⟨30, -1⟩ = false := by decide
 
 /-- **The defect in the comparator.** Each of `lt` in both directions and the fold
     of `eq` is `false`, so the comparator is not a total order. -/
-example : TermPrim.lt (.real ⟨3, 0⟩) (.real ⟨30, -1⟩) = false := by native_decide
-example : TermPrim.lt (.real ⟨30, -1⟩) (.real ⟨3, 0⟩) = false := by native_decide
-example : checkTrichotomy ⟨3, 0⟩ ⟨30, -1⟩ = false := by native_decide
+example : TermPrim.lt (.real ⟨3, 0⟩) (.real ⟨30, -1⟩) = false := by decide
+example : TermPrim.lt (.real ⟨30, -1⟩) (.real ⟨3, 0⟩) = false := by decide
+example : checkTrichotomy ⟨3, 0⟩ ⟨30, -1⟩ = false := by decide
 
 /-- The path for `Int` is correct, which shows that the defect comes from the
     representation and not from `Factory.eq` itself. `Int` is canonical, so a
     structural comparison of two `Int` literals is a comparison of their values. -/
-example : Factory.eq (Term.int 3) (Term.int 3) = Term.prim (.bool true) := by native_decide
-example : Factory.eq (Term.int 3) (Term.int 4) = Term.prim (.bool false) := by native_decide
+example : Factory.eq (Term.int 3) (Term.int 3) = Term.prim (.bool true) := by decide
+example : Factory.eq (Term.int 3) (Term.int 4) = Term.prim (.bool false) := by decide
 
 /-- A pair of structurally identical reals folds to `true`, through the first
     branch of `Factory.eq`. Therefore the defect needs two *different* spellings,
     which is what `genSameValuePair` builds. -/
-example : actualEqFold ⟨3, 0⟩ ⟨3, 0⟩ = some true := by native_decide
+example : actualEqFold ⟨3, 0⟩ ⟨3, 0⟩ = some true := by decide
 
 -- ── The properties as suite nodes ─────────────────────────────────────
 

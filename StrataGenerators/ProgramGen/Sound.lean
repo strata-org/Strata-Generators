@@ -604,17 +604,17 @@ theorem simpleTyArities_of_inv {s : GenState} (hinv : Inv s) : SimpleTyArities s
   have htc : ∀ kc ∈ DatatypeGen.defaultTyCons, s.C.knownTypes[kc.1]? = some kc.2 :=
     fun kc hkc => hinv.ctxOk.tyCon_arity kc (hinv.tyConsSupset hkc)
   -- Membership in the *derived* pool is a lookup of an arity in `Core.KnownTypes`, which
-  -- `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` give, and which `native_decide` settles.
+  -- `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` give, and which `DatatypeGen.knownTypes_getElem?_of_mem` settles.
   refine ⟨?_, ?_, ?_, ?_, ?_, hinv.ctxOk.arrow_arity, ?_, ?_⟩
-  · exact hb "bool" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "int" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "string" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "real" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
-  · exact hb "regex" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (by native_decide))
+  · exact hb "bool" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (DatatypeGen.knownTypes_getElem?_of_mem (by decide)))
+  · exact hb "int" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (DatatypeGen.knownTypes_getElem?_of_mem (by decide)))
+  · exact hb "string" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (DatatypeGen.knownTypes_getElem?_of_mem (by decide)))
+  · exact hb "real" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (DatatypeGen.knownTypes_getElem?_of_mem (by decide)))
+  · exact hb "regex" (DatatypeGen.mem_defaultBaseTypes_iff.mpr (DatatypeGen.knownTypes_getElem?_of_mem (by decide)))
   · exact htc ("Map", 2) (DatatypeGen.mem_defaultTyCons_iff.mpr
-      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨by native_decide, by simp, by simp⟩, by simp⟩)
+      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨DatatypeGen.knownTypes_getElem?_of_mem (by decide), by simp, by simp⟩, by simp⟩)
   · exact htc ("Sequence", 1) (DatatypeGen.mem_defaultTyCons_iff.mpr
-      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨by native_decide, by simp, by simp⟩, by simp⟩)
+      ⟨DatatypeGen.mem_coreAppliedTyCons_iff.mpr ⟨DatatypeGen.knownTypes_getElem?_of_mem (by decide), by simp, by simp⟩, by simp⟩)
 
 /-! ## Reference confinement for `genNonRecursiveArgTy` -/
 

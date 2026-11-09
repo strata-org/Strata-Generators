@@ -227,11 +227,11 @@ The `init` rules and `signatureWellKinded` need the ambient context to register 
 type constructors at their own arities. The fold only *grows* `knownTypes` (with
 `insertIfNew`, which never overwrites). Therefore each step keeps the property. -/
 
-/-- `coreContext` registers each of the eight type constructors at its own arity. Discharged by
-    `native_decide` on `Core.KnownTypes`, like `defaultContextOk`. -/
+/-- `coreContext` registers each of the eight type constructors at its own arity. Each field is a
+    kernel-checked lookup (`DatatypeGen.knownTypes_getElem?_of_mem`), like `defaultContextOk`. -/
 theorem coreContextSimpleTyArities : SimpleTyArities DatatypeGen.coreContext := by
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  all_goals (show Core.KnownTypes[_]? = some _; native_decide)
+  all_goals exact DatatypeGen.knownTypes_getElem?_of_mem (by decide)
 
 /-- `SimpleTyArities` survives an `insertIfNew` on `knownTypes`: the eight bindings it
     asserts are already present, and `insertIfNew` never overwrites. -/
