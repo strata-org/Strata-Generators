@@ -1,6 +1,7 @@
 -- The check predicates that each registered property scores with. Each property pairs its name with its
 -- check in one place, in a file under `StrataTests/`.
 import StrataGenerators.PhaseChangedFlag
+import StrataGenerators.UnitFormat
 import StrataGenerators.PrinterCoverage
 import StrataGenerators.ProcedureHasTypeAGen.TestSupport
 import StrataGenerators.ProgramGen.UnprovenTransforms
@@ -161,9 +162,7 @@ instance : Repr LExpr' where
 instance : Repr LMonoTy where
   reprPrec τ _ := ppType τ
 
-open Std in
-instance : ToFormat Unit where
-  format _ := .nil
+attribute [local instance] unitToFormat
 
 -- ── The properties about the evaluator ───────────────────────────────
 --

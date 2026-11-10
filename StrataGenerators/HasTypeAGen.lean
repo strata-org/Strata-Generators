@@ -1,4 +1,5 @@
 import StrataGenerators.GenSupport
+import StrataGenerators.UnitFormat
 import Basalt.Walk.Entry
 import Basalt.Walk.Complete
 import Basalt.Walk.Sound
@@ -1806,9 +1807,7 @@ theorem genLMonoTy_isSoundAndComplete {tvars : List TyIdentifier} {n : Nat} :
 -- ── Quick test ────────────────────────────────────────────────────────
 
 -- This `ToFormat` instance lets the code print a generated `LExpr`. The metadata type is `Unit`.
-open Std in
-instance : ToFormat Unit where
-  format _ := .nil
+attribute [local instance] unitToFormat
 
 -- Print five random expressions. Two examples of the output are:
 -- (if (if #true then #true else #true) then #true else #true)

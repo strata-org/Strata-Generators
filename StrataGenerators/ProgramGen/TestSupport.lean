@@ -125,7 +125,7 @@ where
       | .error _ => false
     | .type (.data block) _ :: rest =>
       match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-          instToFormatIDMetaCoreLParams C block with
+          _ C block with
       | .ok C' => go C' rest
       | .error _ => false
     | _ :: rest => go C rest

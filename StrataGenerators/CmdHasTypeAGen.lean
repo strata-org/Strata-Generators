@@ -1,4 +1,5 @@
 import StrataGenerators.GenSupport
+import StrataGenerators.UnitFormat
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen
 import Strata.DL.Lambda.KnownTypesProps
@@ -829,9 +830,7 @@ theorem genCmds_sound
 
 -- ── A quick check that the generator runs ─────────────────────────────
 
-open Std in
-instance instToFormatUnitCmdHasTypeAGen : ToFormat Unit where
-  format _ := .nil
+attribute [local instance] unitToFormat
 
 #guard_msgs(drop warning, drop all) in
 #eval (for _ in [:5] do

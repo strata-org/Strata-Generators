@@ -285,13 +285,12 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let block ← genMutuallyRecursiveDatatypes s.baseTypes (s.tyCons ++ s.dtCons)
     b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
     b.maxArgs b.maxDatatypeSize s.reserved
-  -- Pin the `CoreLParams`-native `Inhabited`/`ToFormat` instances (the ones the
-  -- spec's `DeclHasType'.type_data` fixes), rather than the shadowing `ToFormat
-  -- Unit` instances the sub-generators bring into scope, so a gated `= .ok C'`
-  -- matches the spec constructor with no instance-diamond bridge in the proof.
+  -- Pin the `CoreLParams`-native `Inhabited` instances (the ones the spec's
+  -- `DeclHasType'.type_data` fixes), so a gated `= .ok C'` matches the spec
+  -- constructor with no instance-diamond bridge in the proof.
   if block.all (fun d => isAllowedName d.name && !StrataGenerators.Stmt.isLocalTypeName d.name) then
   match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams s.C block with
+      _ s.C block with
   | .ok C' =>
     let names := block.map (·.name)
     -- Grow the prior-datatype pool by this block's datatypes, so a *later* block may

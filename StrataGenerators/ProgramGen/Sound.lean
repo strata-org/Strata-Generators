@@ -1847,7 +1847,7 @@ theorem genDeclStep_typeNames {s : GenState} {b : Bounds} {ds : List Decl} {s' :
     split at hmatch
     · rename_i hgate
       cases hadd : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-          instToFormatIDMetaCoreLParams s.C block with
+          _ s.C block with
       | error e =>
         rw [hadd] at hmatch
         simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
@@ -2005,19 +2005,19 @@ theorem foldlM_tryPush_ok_of_names_sub {i₁ : Inhabited CoreLParams.Metadata}
 theorem genBlockFactory_sigsKnown_of_addMutualBlock {C C' : LContext CoreLParams}
     {block : MutualDatatype Unit}
     (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams C block = .ok C')
+      _ C block = .ok C')
     (hdk : C.DatatypesKnown)
     (harrow : C.knownTypes["arrow"]? = some 2) (hbool : C.knownTypes["bool"]? = some 0) :
     ∀ (fgen : Factory CoreLParams),
       @genBlockFactory CoreLParams instInhabitedPUnit instInhabitedPUnit
-        instToFormatIDMetaCoreLParams _ block = .ok fgen →
+        _ _ block = .ok fgen →
       ∀ f ∈ fgen.toArray, ∀ ty ∈ f.output :: f.inputs.values,
         LMonoTy.knownInstance ty C'.knownTypes = true := by
   intro fgen hfgen
   have h' := h
   obtain ⟨-, ds, fgen', fs, ks, hds, hfgen', hfs, hks, rfl⟩ :=
     @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams C _ block h
+      _ C _ block h
   obtain rfl : fgen = fgen' := Except.ok.inj (hfgen.symm.trans hfgen')
   simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
   rw [← Array.foldlM_toList] at hfs
@@ -2025,7 +2025,7 @@ theorem genBlockFactory_sigsKnown_of_addMutualBlock {C C' : LContext CoreLParams
     (fun name hname => absurd hname (Lambda.Factory.default_empty name)) hfs
   -- The same registration with an empty function table.
   have h₀ : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams { C with functions := Lambda.Factory.default } block =
+      _ { C with functions := Lambda.Factory.default } block =
       .ok { C with datatypes := ds, functions := fs₀, knownTypes := ks } := by
     simp only [LContext.addMutualBlock, bind, Except.bind] at h' ⊢
     split at h'
@@ -2064,14 +2064,14 @@ structure BlockFunctionsAdded (C C' : LContext CoreLParams) (block : MutualDatat
 theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
     {block : MutualDatatype Unit}
     (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams C block = .ok C')
+      _ C block = .ok C')
     (hdk : C.DatatypesKnown)
     (harrow : C.knownTypes["arrow"]? = some 2) (hbool : C.knownTypes["bool"]? = some 0) :
     ∃ F, BlockFunctionsAdded C C' block F := by
   have hsigs := genBlockFactory_sigsKnown_of_addMutualBlock h hdk harrow hbool
   obtain ⟨-, ds, fgen, fs, ks, hds, hfgen, hfs, hks, rfl⟩ :=
     @LContext.addMutualBlock_ok_eq CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams C _ block h
+      _ C _ block h
   have hdec := TypeFactory.addMutualBlock_ok_inv _ _ block _ hds
   simp only [Lambda.Factory.addFactory, Lambda.Factory.tryAddAll] at hfs
   rw [← Array.foldlM_toList] at hfs
@@ -2079,7 +2079,7 @@ theorem blockFunctionsAdded_of_addMutualBlock {C C' : LContext CoreLParams}
   refine ⟨fgen,
     { derived := ?_
       wf := @genBlockFactory_wf CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-        instToFormatIDMetaCoreLParams block fgen hdec.1 hdec.2.2.1 hfgen
+        _ block fgen hdec.1 hdec.2.2.1 hfgen
       sigsKnown := hsigs fgen hfgen
       preserves_old := hold
       contains_new := ?_
