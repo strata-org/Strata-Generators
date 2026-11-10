@@ -163,13 +163,13 @@ theorem support_mapM_congr {ι : Type u} {α : Type u} {f g : ι → SPMF α}
 `Lean.Order.fix` is the least upper bound of the transfinite iteration of its functional, so a claim
 about `fix F` follows from `Lean.Order.fix_induct` once the claim is *admissible*: it must pass from
 the members of a chain to the chain's supremum. A support inclusion is admissible, because
-`SPMF.mem_support_csup` says the support of a supremum is the union of the supports. -/
+`SPMF.mem_support_csup_iff` says the support of a supremum is the union of the supports. -/
 
 /-- A support inclusion is admissible, so fixpoint induction can prove one. -/
 theorem admissible_support_subset {γ : Type u} (T : Set γ) :
     admissible (fun (s : SPMF γ) => s.support ⊆ T) := by
   intro c hc h a ha
-  obtain ⟨s, hcs, has⟩ := (mem_support_csup hc).mp ha
+  obtain ⟨s, hcs, has⟩ := (mem_support_csup_iff hc).mp ha
   exact h s hcs has
 
 /-- **θ-invariance for a `partial_fixpoint` generator.**
