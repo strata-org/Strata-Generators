@@ -1019,9 +1019,9 @@ what `MutualADTWF.argsWellKinded` gives, into membership in the vocabulary of th
 step is what lets completeness need no side condition about an arity. Read `VocabOk` and
 `BitvecWidthOnly` below.
 
-Each of the three proofs follows the shape of the `filter`, and none of them uses `decide` or
-`native_decide`. Therefore each one holds for each content of `Core.KnownTypes`, and a new primitive
-in that register needs no change here. -/
+Each of the three proofs follows the shape of the `filter`, and none of them uses `decide`.
+Therefore each one holds for each content of `Core.KnownTypes`, and a new primitive in that
+register needs no change here. -/
 
 /-- Reading `defaultBaseTypes` back: it is exactly the arity-`0` part of `Core.KnownTypes`. -/
 theorem mem_defaultBaseTypes_iff {b : String} :

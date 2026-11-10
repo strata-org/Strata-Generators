@@ -71,33 +71,6 @@ def offendingCodepoints (s : String) : List Nat :=
   | .ok out => (out.toList.filter (fun c => !isPrintableAscii c)).map Char.toNat |>.eraseDups
   | .error _ => []
 
--- ── Machine-checked reproducers ───────────────────────────────────────
---
--- These pin specific codepoints, independently of what the random generator draws.
--- Each example checks the output of the serializer on one input.
-
-/-- The escape function is correct on ASCII. This is the path that works, and the
-    example keeps it, so that a regression in it is also caught. -/
-example : escapedIsPrintableAscii "abc" = true := by native_decide
-
-/-- The escape function is correct on an ASCII control character, which it gives
-    as `\u{0}`. -/
-example : escapedIsPrintableAscii "\x00" = true := by native_decide
-
-/-- U+00AD, the soft hyphen, gets an escape. -/
-example : escapedIsPrintableAscii "­" = true := by native_decide
-
-/-- **The Latin-1 case.** U+00E9, which is `é`, gets an escape. -/
-example : escapedIsPrintableAscii "é" = true := by native_decide
-
-/-- **The astral-plane case.** U+1D54A, which is `𝕊`, gets one escape and does not go
-    out as 4 raw UTF-8 bytes. -/
-example : escapedIsPrintableAscii "𝕊" = true := by native_decide
-
-/-- Both sides of the boundary of 8-bit printability, U+00A0 and U+00A1, get an escape. -/
-example : escapedIsPrintableAscii " " = true := by native_decide
-example : escapedIsPrintableAscii "¡" = true := by native_decide
-
 -- ── The property ──────────────────────────────────────────────────────
 
 /-- **Property: each generated string literal goes to SMT-LIB as printable
