@@ -3,15 +3,11 @@ version = "0.1.0"
 defaultTargets = ["StrataGenerators", "StrataTests"]
 testDriver = "test"
 
-# Strata and StrataDDM are local checkouts. Strata's own lakefile names StrataDDM and
-# plausible without a source, so this package supplies both.
+# Strata brings in StrataDDM itself.
 [[require]]
 name = "Strata"
-path = "/workplace/cohenjo/strata-gen-pin/Strata"
-
-[[require]]
-name = "StrataDDM"
-path = "/workplace/cohenjo/strata-gen-pin/StrataDDM-4.34"
+git = "https://github.com/strata-org/Strata"
+rev = "b3aaa6faa6523b60146ec8b82857aa1786e49a28"
 
 # The plausible revision that Strata, LSpec and mathlib v4.34.0 all use.
 [[require]]

@@ -190,36 +190,6 @@ theorem Map.find?_of_mem_of_functional {α β : Type} [DecidableEq α]
         exact ih (fun y w₁ w₂ h₁ h₂ =>
           hfun y w₁ w₂ (List.Mem.tail _ h₁) (List.Mem.tail _ h₂)) hmem'
 
-/-- Each member of `m.insert x v` is a member of `m`, or it is the new entry `(x, v)`. An
-    insertion replaces the first entry with the key `x`, which leaves a new head `(x, v)` and a
-    tail that `m` also holds, or it adds `(x, v)` to the end. -/
-theorem Map.mem_insert {α β : Type} [DecidableEq α]
-    (m : Map α β) (x : α) (v : β) (y : α) (w : β)
-    (hmem : List.Mem (y, w) (m.insert x v)) :
-    List.Mem (y, w) m ∨ (y, w) = (x, v) := by
-  induction m with
-  | nil =>
-    simp only [Map.insert] at hmem
-    cases hmem with
-    | head => exact Or.inr rfl
-    | tail _ h => cases h
-  | cons hd rest ih =>
-    obtain ⟨a, b⟩ := hd
-    by_cases hax : a = x
-    · -- The insertion replaces the head, which gives `(x, v) :: rest`.
-      rw [Map.insert_cons_of_eq hax] at hmem
-      cases hmem with
-      | head => exact Or.inr rfl
-      | tail _ h => exact Or.inl (List.Mem.tail _ h)
-    · -- The insertion keeps the head, so recurse.
-      rw [Map.insert_cons_of_ne hax] at hmem
-      cases hmem with
-      | head => exact Or.inl (List.Mem.head _)
-      | tail _ h =>
-        rcases ih h with h' | h'
-        · exact Or.inl (List.Mem.tail _ h')
-        · exact Or.inr h'
-
 /-- An insertion at a *fresh* key keeps functionality. `x` is absent from `m`, so the insertion
     adds `(x, v)` to the end, it changes no binding that exists, and no entry that exists shares
     its key. This lemma carries the invariant `Functional` across the `init` command. The output
@@ -231,8 +201,8 @@ theorem Map.insert_functional_of_fresh {α β : Type} [DecidableEq α]
     Map.Functional (m.insert x v) := by
   intro y w₁ w₂ h₁ h₂
   have hnotin := Map.not_mem_of_find?_none m x hfresh
-  rcases Map.mem_insert m x v y w₁ h₁ with hm₁ | he₁ <;>
-    rcases Map.mem_insert m x v y w₂ h₂ with hm₂ | he₂
+  rcases (Map.mem_insert (m := m) (k := x) (w := v) h₁).symm with hm₁ | he₁ <;>
+    rcases (Map.mem_insert (m := m) (k := x) (w := v) h₂).symm with hm₂ | he₂
   · exact hfun y w₁ w₂ hm₁ hm₂
   · -- `m` holds `(y, w₁)`, and `(y, w₂) = (x, v)`. Therefore `y = x`, and that contradicts
     -- the freshness of `x`.
