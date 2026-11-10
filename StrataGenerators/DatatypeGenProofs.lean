@@ -1015,9 +1015,46 @@ what `MutualADTWF.argsWellKinded` gives, into membership in the vocabulary of th
 step is what lets completeness need no side condition about an arity. Read `VocabOk` and
 `BitvecWidthOnly` below.
 
-Each of the three proofs follows the shape of the `filter`, and none of them uses `decide` or
-`native_decide`. Therefore each one holds for each content of `Core.KnownTypes`, and a new primitive
+Each of the three proofs follows the shape of the `filter`, and none of them uses `decide`. Therefore each one holds for each content of `Core.KnownTypes`, and a new primitive
 in that register needs no change here. -/
+
+/-! #### Concrete lookups in `Core.KnownTypes`, checked by the kernel
+
+`Core.KnownTypes` is a `Std.HashMap` built by `Std.HashMap.ofList`. The kernel cannot evaluate a
+lookup in it directly, because `String.hash` is opaque. But a lookup in an `ofList` map needs no
+hash: `Std.HashMap.getElem?_ofList_of_mem` reads it off the underlying association list, provided
+that the keys of that list are pairwise distinct. The list itself, and the facts about it, are
+closed terms over `String` and `Nat`, so `decide` checks them in the kernel. -/
+
+/-- The association list from which `Core.KnownTypes` is built, written out. -/
+def knownTypesList : List (String × Nat) :=
+  [("bool", 0), ("int", 0), ("string", 0), ("regex", 0), ("real", 0), ("Triggers", 0),
+   ("TriggerGroup", 0), ("bitvec", 1), ("arrow", 2), ("Map", 2), ("Sequence", 1), ("Set", 1)]
+
+/-- `Core.KnownTypes` is `Std.HashMap.ofList knownTypesList`. The list is computed from the
+    `LTy`s of `Core.KnownLTys` by `decide`. -/
+theorem knownTypes_eq_ofList : Core.KnownTypes = Std.HashMap.ofList knownTypesList := by
+  have h : (Core.KnownLTys.map (fun ty => ty.toKnownType!)).map (fun x => (x.name, x.arity)) =
+      knownTypesList := by decide
+  show Std.HashMap.ofList _ = _
+  rw [h]
+
+/-- The keys of `knownTypesList` are pairwise distinct. -/
+theorem knownTypesList_pairwise :
+    knownTypesList.Pairwise (fun a b => (a.fst == b.fst) = false) := by decide
+
+/-- A pair of `knownTypesList` is a binding of `Core.KnownTypes`. Use it with `(by decide)` for
+    the membership. -/
+theorem knownTypes_getElem?_of_mem {k : String} {n : Nat} (h : (k, n) ∈ knownTypesList) :
+    Core.KnownTypes[k]? = some n := by
+  rw [knownTypes_eq_ofList]
+  exact Std.HashMap.getElem?_ofList_of_mem (by simp) knownTypesList_pairwise h
+
+/-- A key of `knownTypesList` is a member of `Core.KnownTypes.keywords`. -/
+theorem mem_knownTypes_keywords_of_mem {k : String} {n : Nat} (h : (k, n) ∈ knownTypesList) :
+    k ∈ Core.KnownTypes.keywords :=
+  Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr
+    (by rw [knownTypes_getElem?_of_mem h]; rfl))
 
 /-- Reading `defaultBaseTypes` back: it is exactly the arity-`0` part of `Core.KnownTypes`. -/
 theorem mem_defaultBaseTypes_iff {b : String} :
@@ -1068,11 +1105,11 @@ theorem defaultBaseTypes_arity : ∀ b ∈ defaultBaseTypes, Core.KnownTypes[b]?
 
 /-- `Sequence` at **2** arguments is not in the default vocabulary, because `Core.KnownTypes`
     registers it at arity `1`. This is the counterexample behind
-    `not_complete_without_arity`; `native_decide` is only for the one arity lookup. -/
+    `not_complete_without_arity`; `knownTypes_getElem?_of_mem` gives the one arity lookup. -/
 theorem seq_two_not_mem_defaultTyCons : ("Sequence", 2) ∉ defaultTyCons := by
   intro h
   have h1 := defaultTyCons_arity _ h
-  have h2 : Core.KnownTypes["Sequence"]? = some 1 := by native_decide
+  have h2 : Core.KnownTypes["Sequence"]? = some 1 := knownTypes_getElem?_of_mem (by decide)
   rw [h2] at h1
   exact absurd h1 (by simp)
 
@@ -2824,10 +2861,10 @@ This section gives `Core.KnownTypes.keywords` for `extraReserved`. That list is 
 names that the caller must forbid. Therefore a block name cannot be the same as a symbol that
 Core already knows.
 
-`Core.KnownTypes.keywords` is a `HashMap`, and the kernel does not reduce its entries.
-Therefore `native_decide` gives the concrete facts about membership in it. That tactic adds
-the axiom `Lean.ofReduceBool` to this corollary alone. The abstract theorem
-`genMutuallyRecursiveDatatypes_MutualADTWF` stays clean in its axioms. -/
+`Core.KnownTypes` is a `HashMap`, and the kernel does not compute a `String` hash. Therefore
+the concrete facts about membership in it go through `knownTypes_getElem?_of_mem` and
+`mem_knownTypes_keywords_of_mem`, which read a lookup off the association list of the map.
+Those facts are checked by `decide` in the kernel, so this section adds no axiom. -/
 
 /-- The reference context of Strata Core. Its known types are `Core.KnownTypes`, and it holds
     no datatype from a user. -/
@@ -2860,13 +2897,13 @@ theorem defaultContextOk :
     rw [defaultTyCons_arity kc hkc]; rfl
   · -- `"arrow"` is a known primitive of `coreContext`. This one *is* a fact about the
     -- particular contents of `Core.KnownTypes`, because `genArgTy` hardcodes the name.
-    show "arrow" ∈ Core.KnownTypes.keywords; native_decide
+    exact mem_knownTypes_keywords_of_mem (n := 2) (by decide)
   · -- Each default base type is registered at arity 0, by construction of the list.
     exact defaultBaseTypes_arity
   · -- Each default type constructor is registered at its own arity, by construction.
     exact defaultTyCons_arity
   · -- `"arrow"` is registered at arity 2.
-    show Core.KnownTypes["arrow"]? = some 2; native_decide
+    exact knownTypes_getElem?_of_mem (by decide)
   · -- Each known type of `coreContext` is a member of the extra reserved list, with no
     -- change.
     intro k hk
@@ -2891,9 +2928,8 @@ theorem defaultContextOk :
     `decide` discharges the one side condition, which is `defaultTyCons_ne_arrow`.
     `defaultContextOk` discharges the eight fields of `ContextOk`.
 
-    This corollary uses `native_decide` for membership in `Core.KnownTypes.keywords`.
-    Therefore it depends on `Lean.ofReduceBool`, together with the standard axioms. The
-    abstract theorem `genMutuallyRecursiveDatatypes_MutualADTWF` does not depend on it. -/
+    The membership facts about `Core.KnownTypes.keywords` are checked in the kernel, so this
+    corollary depends only on the standard axioms. -/
 theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {block : MutualDatatype Unit}
@@ -3259,12 +3295,12 @@ structure VocabOk (C : LContext Core.CoreLParams) (baseTypes : List String)
 /-- **The default vocabulary satisfies `VocabOk` in `coreContext`.** The fields `base` and `tyCon` hold
     by construction, because the two lists *are* `Core.KnownTypes` split by arity, and
     `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` read them back. Only the arity of `arrow`
-    needs a lookup by `native_decide`, because `genArgTy` holds that name as a literal. -/
+    needs a concrete lookup (`knownTypes_getElem?_of_mem`), because `genArgTy` holds that name as a literal. -/
 theorem defaultVocabOk : VocabOk coreContext defaultBaseTypes defaultTyCons where
   base := fun _ h => mem_defaultBaseTypes_iff.mpr h
   tyCon := fun k n h hn harrow hbv =>
     mem_defaultTyCons_iff.mpr ⟨mem_coreAppliedTyCons_iff.mpr ⟨h, hn, harrow⟩, hbv⟩
-  arrow := by show Core.KnownTypes["arrow"]? = some 2; native_decide
+  arrow := knownTypes_getElem?_of_mem (by decide)
   noStoredDatatypes := by simp [coreContext, TypeFactory.allDatatypes]
 
 /-- The head of a non-block application is registered in `C.knownTypes` at its argument
@@ -3614,7 +3650,7 @@ example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") 
     ¬ ArgsWellKinded coreContext [d] (.tcons "Sequence" [.ftvar a, .ftvar a]) := by
   intro h
   have h1 : coreContext.knownTypes["Sequence"]? = some 1 := by
-    show Core.KnownTypes["Sequence"]? = some 1; native_decide
+    exact knownTypes_getElem?_of_mem (by decide)
   rcases h.head with hk | ⟨d', hd', _⟩ | ⟨d', hd', hname, _⟩
   · -- `argsWellKinded` would need `Sequence` registered at arity 2; it is registered at 1.
     rw [h1] at hk; simp at hk
@@ -3690,8 +3726,7 @@ theorem not_complete_without_bitvecWidthOnly (d : LDatatype Unit)
       Prod.mk.injEq] at hmem
     obtain ⟨rfl, rfl⟩ := hmem
     refine Or.inl ?_
-    show Core.KnownTypes["bitvec"]? = some 1
-    native_decide
+    exact knownTypes_getElem?_of_mem (by decide)
   · -- `BitvecWidthOnly` fails immediately: its `tcons` case needs `k ≠ "bitvec"`.
     unfold BitvecWidthOnly
     exact fun h => h.1 rfl

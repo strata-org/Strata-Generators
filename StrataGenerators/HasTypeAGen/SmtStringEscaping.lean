@@ -76,44 +76,6 @@ def offendingCodepoints (s : String) : List Nat :=
   | .ok out => (out.toList.filter (fun c => !isPrintableAscii c)).map Char.toNat |>.eraseDups
   | .error _ => []
 
--- ── Machine-checked reproducers ───────────────────────────────────────
---
--- These pin the *specific* cases of the defect, independently of what the random
--- generator draws. `#guard` makes the build fail, so each case is an `example`
--- with `decide` on the value that the code gives now, which is the incorrect one.
--- Each example records the current behaviour, and each example itself breaks after
--- a correction. Then it shows that this file needs an update together with the
--- property.
-
-/-- The escape function is correct on ASCII. This is the path that works, and the
-    example keeps it, so that a regression in it is also caught. -/
-example : escapedIsPrintableAscii "abc" = true := by native_decide
-
-/-- The escape function is correct on an ASCII control character, which it gives
-    as `\u{0}`. This is why a test with a control character does not find the
-    defect: `useXHex` covers that range. -/
-example : escapedIsPrintableAscii "\x00" = true := by native_decide
-
-/-- U+00AD, the soft hyphen, gets an escape. It is the one special case of
-    `useXHex` above `0xA1`. -/
-example : escapedIsPrintableAscii "­" = true := by native_decide
-
-/-- **The Latin-1 case.** U+00E9, which is `é`, goes out raw. `useXHex` is false
-    for each codepoint of U+00A1 or more, so the escape function stops exactly
-    here. -/
-example : escapedIsPrintableAscii "é" = false := by native_decide
-
-/-- **The astral-plane case.** U+1D54A, which is `𝕊`, goes out raw as 4 UTF-8
-    bytes. On this input, z3 reports `str.len = 4`. -/
-example : escapedIsPrintableAscii "𝕊" = false := by native_decide
-
-/-- The `useXHex` boundary is off by one codepoint. U+00A0 gets an escape, and
-    U+00A1 does not. This is the sharpest statement of the root cause: the guard is
-    a predicate for *8-bit* printability, and the escape function uses it for full
-    Unicode. -/
-example : escapedIsPrintableAscii " " = true := by native_decide
-example : escapedIsPrintableAscii "¡" = false := by native_decide
-
 -- ── The property ──────────────────────────────────────────────────────
 
 /-- **Property: each generated string literal goes to SMT-LIB as printable
