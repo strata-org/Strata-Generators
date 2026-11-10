@@ -67,10 +67,10 @@ theorem findGo_of_mem_of_prefix_fresh {k : DeclKind} {x : Expression.Ident}
   induction pre with
   | nil =>
     simp only [List.nil_append, Program.find?.go]
-    rw [if_pos (by simp [hk, hx])]
+    rw [ite_eq_left (by simp [hk, hx])]
   | cons d' rest ih =>
     simp only [List.cons_append, Program.find?.go]
-    rw [if_neg (by
+    rw [ite_eq_right (by
       intro hmatch
       simp only [Bool.and_eq_true, beq_iff_eq] at hmatch
       exact hfresh d' List.mem_cons_self hmatch)]
@@ -297,7 +297,7 @@ theorem commonPrefixList_append {α : Type} [DecidableEq α] :
     intro A B
     show ProgramGen.commonPrefixList (a :: (as ++ A)) (a :: (as ++ B))
         = a :: (as ++ ProgramGen.commonPrefixList A B)
-    rw [ProgramGen.commonPrefixList, if_pos rfl, ih A B]
+    rw [ProgramGen.commonPrefixList, ite_eq_left rfl, ih A B]
 
 /-- Two signatures whose *keys* are disjoint have no common prefix: a shared
     leading entry would share its key. -/
@@ -311,7 +311,7 @@ theorem commonPrefix_eq_nil_of_disjoint {A B : List (Identifier Unit × LMonoTy)
     | nil => rfl
     | cons b bs =>
       simp only [ProgramGen.commonPrefixList]
-      rw [if_neg]
+      rw [ite_eq_right]
       intro heq
       -- `a = b` would put `a.1` in both key lists.
       refine h a.1 ?_ ?_

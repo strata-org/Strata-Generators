@@ -2111,17 +2111,17 @@ theorem findPolymorphicOps_complete
   rw [List.mem_flatMap]
   refine ⟨(name, LTy.forAll boundVars monoTy), hmem, ?_⟩
   simp only [hfresh, hdec]
-  rw [if_neg (by omega), List.mem_filterMap]
+  rw [ite_eq_right (by omega), List.mem_filterMap]
   refine ⟨k, List.mem_range.mpr hk, ?_⟩
   -- Discharge the `do` block over `Option`. First resolve the bind of the unification, and then both
   -- guards.
   rw [hunify]
   simp only [bind, Option.bind, guard, pure]
-  rw [if_pos (by
+  rw [ite_eq_left (by
     rcases hguard1 with h | h
     · simp [h]
     · simp [List.isEmpty_iff, h])]
-  rw [if_pos (by rw [beq_iff_eq]; exact hguard2)]
+  rw [ite_eq_left (by rw [beq_iff_eq]; exact hguard2)]
   rw [hcat]
 
 /-- The inversion of `mkApps_hasType`. A well-typed application spine `mkApps base args : τ` gives a
@@ -2325,15 +2325,15 @@ theorem genLMonoTy_mem_knownInstance {C : LContext CoreLParams} (hC : SimpleTyAr
   case arrow =>
     intro τ₁ τ₂ _ _ ih₁ ih₂
     refine htcons "arrow" [τ₁, τ₂] hC.arrow ?_
-    simp only [LMonoTys.knownInstances, ih₁, ih₂, if_true]
+    simp only [LMonoTys.knownInstances, ih₁, ih₂, ite_true]
   case map =>
     intro τ₁ τ₂ _ _ ih₁ ih₂
     refine htcons "Map" [τ₁, τ₂] hC.map ?_
-    simp only [LMonoTys.knownInstances, ih₁, ih₂, if_true]
+    simp only [LMonoTys.knownInstances, ih₁, ih₂, ite_true]
   case seq =>
     intro τ _ ih
     refine htcons "Sequence" [τ] hC.seq ?_
-    simp only [LMonoTys.knownInstances, ih, if_true]
+    simp only [LMonoTys.knownInstances, ih, ite_true]
 
 /-- `bool` is registered in every context that registers the built-in types. -/
 theorem knownInstance_bool {C : LContext CoreLParams} (hC : SimpleTyArities C) :
@@ -3888,10 +3888,10 @@ private theorem single_sample_mem (generableTys : List LMonoTy) (σ : LMonoTy)
         elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
       else pickBaseType) () : SPMF LMonoTy) := by
   by_cases hg : generableTys.length > 0
-  · simp only [dif_pos hg]
+  · simp only [dite_eq_left hg]
     rw [mem_support_elements_iff]
     exact hpos hg
-  · simp only [dif_neg hg]
+  · simp only [dite_eq_right hg]
     exact hneg hg
 
 set_option linter.unusedVariables false in

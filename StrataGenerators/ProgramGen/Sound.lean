@@ -245,10 +245,10 @@ theorem factoryExtendedBy_of_addFactory
   -- `tryPush` unfolds to a `dite` on `fn.name.name ∈ C.functions`.
   unfold Lambda.Factory.tryPush at h
   by_cases hmem : fn.name.name ∈ C.functions
-  · rw [dif_pos hmem] at h
+  · rw [dite_eq_left hmem] at h
     simp only [bind, Except.bind] at h
     exact absurd h (by simp)
-  · simp only [hmem, dif_neg, not_false_iff, bind, Except.bind, Except.ok.injEq] at h
+  · simp only [hmem, dite_eq_right, not_false_iff, bind, Except.bind, Except.ok.injEq] at h
     -- Now `C' = { C with functions := C.functions.push fn hmem }`.
     subst h
     refine
@@ -263,12 +263,12 @@ theorem factoryExtendedBy_of_addFactory
       have hne : nm ≠ fn.name.name := by
         rintro rfl
         exact hmem (mem_of_getElem?_eq_some hg)
-      simp only [getElem?_push C.functions fn hmem nm, hne, if_false]
+      simp only [getElem?_push C.functions fn hmem nm, hne, ite_false]
       exact hg
     · intro f hf
       simp only [List.mem_singleton] at hf
       subst hf
-      exact ⟨f, by simp only [getElem?_push C.functions f hmem, if_true], rfl⟩
+      exact ⟨f, by simp only [getElem?_push C.functions f hmem, ite_true], rfl⟩
     · intro nm hnm
       rcases (mem_push_iff C.functions fn hmem nm).mp hnm with rfl | hmem'
       · right; simp
@@ -280,7 +280,7 @@ theorem addFactory_name_fresh {C C' : LContext CoreLParams} {fn : LFunc CoreLPar
     (h : C.addFactoryFunctionWithError fn = .ok C') : fn.name.name ∉ C.functions := by
   intro hmem
   unfold LContext.addFactoryFunctionWithError Lambda.Factory.tryPush at h
-  rw [dif_pos hmem] at h
+  rw [dite_eq_left hmem] at h
   simp only [bind, Except.bind] at h
   exact absurd h (by simp)
 
@@ -476,7 +476,7 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
         (if ar = 0 then tc else (nm, ar) :: tc) R := by
     intro x hx
     simp only [DatatypeGen.initialReserved, List.mem_cons, List.mem_append] at hx ⊢
-    by_cases har0 : ar = 0 <;> simp only [har0, if_pos, if_false] <;>
+    by_cases har0 : ar = 0 <;> simp only [har0, ite_eq_left, ite_false] <;>
       rcases hx with h | ((h | h) | h) | h
     all_goals first
       | exact Or.inl h
@@ -500,17 +500,17 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
   -- Arities: the new entry at `ar`, old entries preserved by `insertIfNew`.
   · intro b hb
     by_cases har0 : ar = 0
-    · simp only [har0, if_pos] at hb
+    · simp only [har0, ite_eq_left] at hb
       rcases List.mem_cons.mp hb with rfl | hb
       · exact har0 ▸ hnm_arity
       · rw [hkt]; exact getElem?_insertIfNew_of_getElem? (hok.base_arity b hb)
-    · simp only [if_neg har0] at hb
+    · simp only [ite_eq_right har0] at hb
       rw [hkt]; exact getElem?_insertIfNew_of_getElem? (hok.base_arity b hb)
   · intro kc hkc
     by_cases har0 : ar = 0
-    · simp only [har0, if_pos] at hkc
+    · simp only [har0, ite_eq_left] at hkc
       rw [hkt]; exact getElem?_insertIfNew_of_getElem? (hok.tyCon_arity kc hkc)
-    · simp only [if_neg har0] at hkc
+    · simp only [ite_eq_right har0] at hkc
       rcases List.mem_cons.mp hkc with rfl | hkc
       · exact hnm_arity
       · rw [hkt]; exact getElem?_insertIfNew_of_getElem? (hok.tyCon_arity kc hkc)
@@ -526,16 +526,16 @@ theorem contextOk_addKnownType_grow {C C' : LContext CoreLParams} {nm : String} 
     intro b hb
     rw [hdt]
     by_cases har0 : ar = 0
-    · simp only [har0, if_pos] at hb
+    · simp only [har0, ite_eq_left] at hb
       rcases List.mem_cons.mp hb with rfl | hb
       · exact hnm_ext
       · exact hok.base_external b hb
-    · simp only [if_neg har0] at hb; exact hok.base_external b hb
+    · simp only [ite_eq_right har0] at hb; exact hok.base_external b hb
   · intro kc hkc
     rw [hdt]
     by_cases har0 : ar = 0
-    · simp only [har0, if_pos] at hkc; exact hok.tyCon_external kc hkc
-    · simp only [if_neg har0] at hkc
+    · simp only [har0, ite_eq_left] at hkc; exact hok.tyCon_external kc hkc
+    · simp only [ite_eq_right har0] at hkc
       rcases List.mem_cons.mp hkc with rfl | hkc
       · exact hnm_ext
       · exact hok.tyCon_external kc hkc
@@ -1365,29 +1365,29 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
       · exact List.mem_cons_of_mem _ (hinv.knownReserved k hold)
     · -- baseSupset: default ⊆ (maybe nm ::) s.baseTypes.
       by_cases har0 : ar = 0
-      · subst har0; simp only [if_pos]
+      · subst har0; simp only [ite_eq_left]
         exact fun x hx => List.mem_cons_of_mem _ (hinv.baseSupset hx)
-      · simp only [if_neg har0]; exact hinv.baseSupset
+      · simp only [ite_eq_right har0]; exact hinv.baseSupset
     · -- tyConsSupset.
       by_cases har0 : ar = 0
-      · subst har0; simp only [if_pos]; exact hinv.tyConsSupset
-      · simp only [if_neg har0]
+      · subst har0; simp only [ite_eq_left]; exact hinv.tyConsSupset
+      · simp only [ite_eq_right har0]
         exact fun x hx => List.mem_cons_of_mem _ (hinv.tyConsSupset hx)
     · -- baseReserved: new base type is `nm ∈ nm :: reserved`; old ones reserved.
       by_cases har0 : ar = 0
-      · subst har0; simp only [if_pos]
+      · subst har0; simp only [ite_eq_left]
         intro x hx
         simp only [List.mem_cons] at hx
         rcases hx with rfl | hx
         · exact List.mem_cons_self
         · exact List.mem_cons_of_mem _ (hinv.baseReserved x hx)
-      · simp only [if_neg har0]
+      · simp only [ite_eq_right har0]
         intro x hx; exact List.mem_cons_of_mem _ (hinv.baseReserved x hx)
     · -- tyConReserved.
       by_cases har0 : ar = 0
-      · subst har0; simp only [if_pos]
+      · subst har0; simp only [ite_eq_left]
         intro x hx; exact List.mem_cons_of_mem _ (hinv.tyConReserved x hx)
-      · simp only [if_neg har0]
+      · simp only [ite_eq_right har0]
         intro x hx
         simp only [List.map_cons, List.mem_cons] at hx
         rcases hx with rfl | hx
@@ -1397,8 +1397,8 @@ theorem genDeclAbstract_sound (P : Program) {s : GenState} {b : Bounds}
     · -- tyConsNeArrow: the new applied constructor is `nm`, which is fresh, while
       -- `"arrow"` is reserved, so the new name differs from it.
       by_cases har0 : ar = 0
-      · subst har0; simp only [if_pos]; exact hinv.tyConsNeArrow
-      · simp only [if_neg har0]
+      · subst har0; simp only [ite_eq_left]; exact hinv.tyConsNeArrow
+      · simp only [ite_eq_right har0]
         intro kc hkc
         rcases List.mem_cons.mp hkc with rfl | hkc
         · show nm ≠ "arrow"
@@ -1765,7 +1765,7 @@ theorem typeNamesNotLocal_type {t : TypeDecl} {md : MetaData Expression}
     TypeNamesNotLocal [.type t md] := by
   intro x hx
   simp only [programNamesOfKind, declNameKind, Decl.kind, List.filter_cons, List.filter_nil,
-    beq_self_eq_true, if_true, List.flatMap_cons, List.flatMap_nil, List.append_nil,
+    beq_self_eq_true, ite_true, List.flatMap_cons, List.flatMap_nil, List.append_nil,
     Decl.names] at hx
   exact Bool.eq_false_iff.mp (h x hx)
 
@@ -1949,9 +1949,9 @@ theorem foldlM_tryPush_lookup {i₁ : Inhabited CoreLParams.Metadata}
   | fn :: rest, F, F', h => by
     unfold Lambda.Factory.tryPush at h
     by_cases hmem : fn.name.name ∈ F
-    · simp only [List.foldlM_cons, dif_pos hmem, bind, Except.bind] at h
+    · simp only [List.foldlM_cons, dite_eq_left hmem, bind, Except.bind] at h
       exact absurd h (by simp)
-    · simp only [List.foldlM_cons, dif_neg hmem, bind, Except.bind] at h
+    · simp only [List.foldlM_cons, dite_eq_right hmem, bind, Except.bind] at h
       obtain ⟨hold, hnew, hall⟩ := foldlM_tryPush_lookup rest _ F' h
       refine ⟨?_, ?_, ?_⟩
       · intro nm g hg
@@ -1959,12 +1959,12 @@ theorem foldlM_tryPush_lookup {i₁ : Inhabited CoreLParams.Metadata}
           rintro rfl
           exact hmem (mem_of_getElem?_eq_some hg)
         refine hold nm g ?_
-        rw [getElem?_push F fn hmem nm, if_neg hne]
+        rw [getElem?_push F fn hmem nm, ite_eq_right hne]
         exact hg
       · intro f hf
         rcases List.mem_cons.mp hf with rfl | hf
         · refine hold _ _ ?_
-          rw [getElem?_push F f hmem, if_pos rfl]
+          rw [getElem?_push F f hmem, ite_eq_left rfl]
         · exact hnew f hf
       · intro nm g hg
         rcases hall nm g hg with hpush | hrest

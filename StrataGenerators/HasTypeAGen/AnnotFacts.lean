@@ -825,7 +825,7 @@ theorem type_eq_of_sigWF {f : LFunc CoreLParams} {ks : KnownTypes}
     f.type = .ok (.forAll f.typeArgs (LMonoTy.mkArrow' f.output (f.inputs.map Prod.snd))) := by
   have hok : ∃ ty, f.type = .ok ty := by
     unfold LFunc.type LFuncDefined.type
-    simp only [hin, hta, decide_true, Bool.not_true, Bool.false_eq_true, if_false]
+    simp only [hin, hta, decide_true, Bool.not_true, Bool.false_eq_true, ite_false]
     split <;> exact ⟨_, rfl⟩
   obtain ⟨ty, hty⟩ := hok
   rw [hty, LFunc.type_eq_mkArrow' harrow hty hout]

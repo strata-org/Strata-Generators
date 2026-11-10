@@ -139,7 +139,7 @@ theorem genDeclName_complete {reserved : List String} {nm : String}
     (hallowed : isAllowedName nm = true) :
     nm ∈ SPMF.support (genDeclName (G := SPMF) reserved) := by
   simp only [genDeclName, mem_support_bind_iff, mem_support_pure_iff]
-  exact ⟨nm, hnm, by rw [if_pos hallowed]⟩
+  exact ⟨nm, hnm, by rw [ite_eq_left hallowed]⟩
 
 /-- Every name `genFreshName` reaches that uses no reserved prefix and is not a local type name
     is a name `genDeclTypeName` reaches. -/
@@ -149,7 +149,7 @@ theorem genDeclTypeName_complete {reserved : List String} {nm : String}
     nm ∈ SPMF.support (genDeclTypeName (G := SPMF) reserved) := by
   simp only [genDeclTypeName, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨nm, genDeclName_complete hnm hallowed, by
-    simp only [hnotLocal, Bool.false_eq_true, if_false]⟩
+    simp only [hnotLocal, Bool.false_eq_true, ite_false]⟩
 
 /-- The name lists that `genDeclNames reserved` reaches in order: each name is one that
     `genFreshName` reaches against `reserved` and the names before it, with no reserved prefix. -/
@@ -414,7 +414,7 @@ theorem genDeclAlias_complete {s : GenState} {b : Bounds} {nm : String}
   -- ProgramGen.Sound generates when both modules are imported.
   simp only [genDeclAlias, genAlias, mkAliasDecl, bind_assoc, pure_bind]
   walk [(mem_law (genDeclTypeName_complete hnm hnmAllowed hnmNotLocal)).obs]
-  exact ⟨_, rfl, _, ⟨Nat.zero_le _, hlen⟩, _, hparams, _, hbody, by rw [if_pos hallowed]⟩
+  exact ⟨_, rfl, _, ⟨Nat.zero_le _, hlen⟩, _, hparams, _, hbody, by rw [ite_eq_left hallowed]⟩
 
 /-- **Reachability of the alias step at the usual list of parameters.** This is
     `genDeclAlias_complete` with `tyParams := (LMonoTy.freeVars body).uniq`, which
@@ -495,7 +495,7 @@ theorem genDeclDistinct_complete {s : GenState} {b : Bounds} {nm : String}
       mtyAllTyConsNames isAllowedName τ) = true := by
     simp [List.filter_eq_self.mpr hconstsAllowed, hlen2, hτAllowed]
   exact ⟨_, rfl, _, rfl, _, ⟨hlen2, hlen⟩, _, hconsts, by
-    rw [if_pos hgate, List.filter_eq_self.mpr hconstsAllowed, hadd]⟩
+    rw [ite_eq_left hgate, List.filter_eq_self.mpr hconstsAllowed, hadd]⟩
 
 /-! ## Per-step reachability: datatype blocks
 
@@ -542,7 +542,7 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
     intro d hd
     simp only [hnamesAllowed d hd, hnamesNotLocal d hd, Bool.not_false, Bool.and_self]
   rw [SPMF.mem_support_iff_may]; unfold genDeclDatatype; walk [(mem_law hblock).obs]
-  exact ⟨_, rfl, by rw [if_pos (List.all_eq_true.mpr hgate), hC]⟩
+  exact ⟨_, rfl, by rw [ite_eq_left (List.all_eq_true.mpr hgate), hC]⟩
 
 open Core.TypeSpec DatatypeGen in
 /-- **The step for a datatype is reachable from `MutualADTWF` alone.** This theorem is

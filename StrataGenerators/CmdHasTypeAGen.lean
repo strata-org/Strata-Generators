@@ -79,7 +79,7 @@ theorem Map.find?_of_mem_of_nodup {α β : Type} [DecidableEq α]
       have hxkey : x ∈ rest.map Prod.fst :=
         List.mem_map.mpr ⟨(x, v), hmem', rfl⟩
       have hne : a ≠ x := fun h => hnotin (h ▸ hxkey)
-      simp only [hne, if_false]
+      simp only [hne, ite_false]
       exact ih (by rw [Map.keys_eq_map_fst (m := rest)]; exact hrest) hmem'
 
 /-- `Map.insert` keeps the list of keys free of a duplicate. An insertion replaces a binding that
@@ -677,7 +677,7 @@ def GenLExprComplete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
 /-- `knownOrTrue` keeps an expression whose binder annotations are known. -/
 theorem knownOrTrue_of_known {kt : Lambda.KnownTypes} {e : LExpr'}
     (hknown : binderAnnotsKnownIn kt e = true) : knownOrTrue kt e = e := by
-  simp only [knownOrTrue, hknown, if_true]
+  simp only [knownOrTrue, hknown, ite_true]
 
 -- ── The typing of a sequence of commands, as a chain ────────────────
 

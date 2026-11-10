@@ -46,7 +46,7 @@ theorem addWithError_eq_insertIfNew {m m' : Identifiers Nat} {x : Identifier Nat
   simp only at h hsnd
   cases b with
   | true => simp at h
-  | false => simp only [Bool.false_eq_true, if_false] at h; injection h with h; rw [← h, hsnd]
+  | false => simp only [Bool.false_eq_true, ite_false] at h; injection h with h; rw [← h, hsnd]
 
 /-- `keywords`-membership after `insertIfNew`: the resulting keys are the old
     keys plus the inserted name. -/

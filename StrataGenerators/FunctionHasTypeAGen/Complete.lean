@@ -95,7 +95,7 @@ theorem genMeasure_complete (dts : List (String × Nat)) (fctx : FVarCtx) (octx 
     refine ⟨o, genOptExpr_complete _ _ _ _ _ o (fun m hm => (h m hm).2), ?_⟩
     cases o with
     | none => rfl
-    | some m => simp only [Option.filter_some, (h m rfl).1, if_true]
+    | some m => simp only [Option.filter_some, (h m rfl).1, ite_true]
   unfold genMeasure
   split
   · rename_i hne
@@ -170,16 +170,16 @@ theorem genFuncParts_complete (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx 
           func.attr.toList, ?_,
           func.lemmas, mem_support_genNameList_iff depth _ |>.mpr ⟨hLemmasLen, hLemmasReach⟩, rfl⟩
   · cases hc : func.isConstr
-    · rw [if_neg (by simp)]
+    · rw [ite_eq_right (by simp)]
       exact genOptExpr_complete _ _ func.typeArgs depth func.output func.body hBodyReach
-    · rw [if_pos rfl, hwt.constrNoBody hc, mem_support_pure_iff]
+    · rw [ite_eq_left rfl, hwt.constrNoBody hc, mem_support_pure_iff]
   · exact genPreconditions_complete _ func.inputs func.typeArgs depth _
       func.preconditions hPreLen hPreReach
   · rw [mem_support_listOfMaxLength_iff]
     exact ⟨hAxiomsLen, hAxiomsReach⟩
   · cases hr : func.isRecursive
-    · rw [if_neg (by simp), hwt.measureOnlyRecursive hr, mem_support_pure_iff]
-    · rw [if_pos rfl]
+    · rw [ite_eq_right (by simp), hwt.measureOnlyRecursive hr, mem_support_pure_iff]
+    · rw [ite_eq_left rfl]
       refine genMeasure_complete dts _ _ func.typeArgs depth pctx func.inputs func.measure ?_
       intro m hm
       rcases hMeasureReach m hm with hreach | hdt

@@ -66,7 +66,7 @@ theorem support_oneOf_pair {x y : SPMF α} :
     (oneOf [fun () => x, fun () => y]).support = x.support ∪ y.support := by
   rw [support_oneOf]
   ext b
-  simp only [Set.mem_setOf_eq, Set.mem_union, List.mem_cons, List.not_mem_nil, or_false,
+  simp only [Set.mem_ofPred_eq, Set.mem_union, List.mem_cons, List.not_mem_nil, or_false,
     exists_eq_or_imp, exists_eq_left]
 
 /-- Membership form of `support_oneOf_pair`. -/
@@ -86,8 +86,7 @@ theorem support_elements {xs : List α} (hne : xs ≠ []) :
     obtain ⟨⟨i, ⟨hi_gt, hi_lt⟩⟩, h_idx, ha⟩ := h
     obtain ⟨⟨n, ⟨hgt, hlt⟩⟩, ⟨h_lowerbound, h_upperbound⟩, hi⟩ := h_idx
     have h_pos : 0 < xs.length := by
-      rw [List.length_pos_iff]
-      assumption
+      rwa [List.length_pos_iff]
     have h_lt : i < xs.length := by omega
     dsimp at ha
     simp only [mem_support_pure_iff] at ha
@@ -141,7 +140,7 @@ theorem support_coin {r : Rat} (h0 : 0 < r) (h1 : r < 1) :
   have hden : r.num < (r.den : ℤ) := Rat.num_lt_denom_iff.mpr h1
   simp [coin, support_bind, support_choose, support_pure]
   ext b
-  simp only [Set.mem_setOf_eq]
+  simp only [Set.mem_ofPred_eq]
   constructor
   · rintro _
     cases b <;> simp
@@ -177,7 +176,7 @@ theorem support_biasedOptionGen {r : Rat} {g : SPMF α} (h0 : 0 < r) (h1 : r < 1
   have hden_pos : 0 < r.den := r.den_pos
   simp [biasedOptionGen, coin, support_bind, support_choose]
   ext a
-  simp [Set.mem_setOf_eq]
+  simp only [Set.mem_ofPred_eq, Set.mem_insert_iff]
   constructor <;> intros h
   · obtain ⟨a, hge, h⟩ := h
     rcases h with ⟨hle, rfl⟩ | ⟨hlt, ha⟩

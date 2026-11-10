@@ -390,7 +390,7 @@ example : TunableGen.genWith (α := GenStmts) stmtDefault = Arbitrary.arbitrary 
 example : TunableGen.genWith (α := GenProcs) stmtDefault = Arbitrary.arbitrary := by
   simp only [TunableGen.genWith, genProcedureT_defaults]; rfl
 example : TunableGen.genWith (α := GenCmdsWithCtx) cmdDefault = Arbitrary.arbitrary := by
-  simp only [TunableGen.genWith, genCmdsT_defaults]; rfl
+  simp only [TunableGen.genWith]; rfl
 example : TunableGen.genWith (α := GenCmdWithCtx) cmdDefault = Arbitrary.arbitrary := by
   simp only [TunableGen.genWith, cmdDefault, genCmd.tuned_defaults]; rfl
 example : TunableGen.genWith (α := TypedExpr) exprBreadth = Arbitrary.arbitrary := by

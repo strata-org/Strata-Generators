@@ -397,12 +397,12 @@ theorem outTargets_eq_of_reused (immutableVars : List (Identifier Unit)) (ctx : 
   apply List.map_congr_left
   intro q hq
   by_cases hre : reusable immutableVars ctx q.1 = true
-  · simp only [outTarget, hre, if_true]
+  · simp only [outTarget, hre, ite_true]
   · exfalso
     have hmem : outTarget immutableVars ctx (maxNameLen ctx + maxStrLen []) q.1 q.2 ∈
         (outTargets immutableVars ctx O []).filter (needsInit ctx) := by
       refine List.mem_filter.mpr ⟨List.mem_map.mpr ⟨q, hq, rfl⟩, ?_⟩
-      simp only [outTarget, hre, Bool.false_eq_true, if_false, needsInit]
+      simp only [outTarget, hre, Bool.false_eq_true, ite_false, needsInit]
       exact indexedFreshName_isFresh_of_le ctx (Nat.le_add_right _ _) q.2
     rw [h] at hmem
     exact List.not_mem_nil hmem
@@ -740,10 +740,10 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     -- Exhibit the sampled `σvals` for the type-instantiation `mapM`.
     refine ⟨σvals, hσvals, ?_⟩
     -- Take the guard-true branch (`hMusable` and `hNodup` are exactly its condition).
-    rw [if_pos ⟨hMusable, hNodup, hMnotFn⟩]
+    rw [ite_eq_left ⟨hMusable, hNodup, hMnotFn⟩]
     simp only [mem_support_bind_iff]
     refine ⟨exprs, (mem_support_mapM_iff _ _ exprs).mpr hexprs, ?_⟩
-    rw [if_pos hgen]
+    rw [ite_eq_left hgen]
     simp only [mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨mask, mem_support_argMask mask, rfl⟩
 
@@ -1259,7 +1259,7 @@ theorem genLocalTypeName_complete {s : String}
     (hlocal : isLocalTypeName s = true) :
     s ∈ SPMF.support (genLocalTypeName (G := SPMF)) := by
   simp only [genLocalTypeName, mem_support_bind_iff, mem_support_pure_iff]
-  exact ⟨s, hs, by simp only [hlocal, if_true]⟩
+  exact ⟨s, hs, by simp only [hlocal, ite_true]⟩
 
 /-- The completeness of `genTypeConstructor`. A type constructor is reachable when its name is a
     local type name, its name and each of its parameter names is a reachable identifier of

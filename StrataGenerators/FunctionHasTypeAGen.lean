@@ -272,7 +272,7 @@ theorem genPreconditions_sound {C : LContext CoreLParams} {ts : TypeScopes} {oct
   simp only [genPrecondition, mem_support_bind_iff, mem_support_pure_iff] at hq
   obtain ⟨e, he, rfl⟩ := hq
   by_cases hne : inputs.toList ≠ []
-  · rw [dif_pos hne, mem_support_frequency_iff] at he
+  · rw [dite_eq_left hne, mem_support_frequency_iff] at he
     obtain ⟨w, g, hmem, _, hg⟩ := he
     simp only [List.mem_cons, List.not_mem_nil, or_false, Prod.mk.injEq] at hmem
     rcases hmem with ⟨_, rfl⟩ | ⟨_, rfl⟩
@@ -291,7 +291,7 @@ theorem genPreconditions_sound {C : LContext CoreLParams} {ts : TypeScopes} {oct
           hA.eq _ _ (hA.fvar _ hfx) htyped.2⟩,
         hB.eq _ _ (hB.fvar _ hfx) hscoped⟩
     · exact hdraw .bool _ hA.bool hB.bool hg
-  · rw [dif_neg hne] at he
+  · rw [dite_eq_right hne] at he
     exact hdraw .bool _ hA.bool hB.bool he
 
 /-- A name is a key of a signature exactly when the signature gives it a type. -/
@@ -306,7 +306,7 @@ theorem keys_contains_iff_find? {m : ListMap (Identifier Unit) LMonoTy} {x : Ide
       simp [ListMap.keys, ListMap.find?]
     · have hyx : y ≠ x := Ne.symm hxy
       simp only [ListMap.keys, List.contains_cons, Bool.or_eq_true, beq_iff_eq, ListMap.find?,
-        hyx, if_false]
+        hyx, ite_false]
       rw [← ih]
       constructor
       · rintro (h | h)
@@ -330,7 +330,7 @@ theorem find?_of_mem_nodup {m : ListMap (Identifier Unit) LMonoTy} {x : Identifi
         refine hnd.1 ?_
         rw [ListMap.keys_eq_map_fst (m := rest)]
         exact List.mem_map_of_mem (f := Prod.fst) hrest
-      simp only [ListMap.find?, hyx, if_false]
+      simp only [ListMap.find?, hyx, ite_false]
       exact ih hnd.2 hrest
 
 /-- A formal of `datatypeFormals dts inputs` is an entry of `inputs` whose type is a datatype
@@ -661,7 +661,7 @@ theorem genFuncParts_sound (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx : O
     intro hnr
     rw [hRec] at hnr
     rw [hMeas]
-    rw [if_neg (by simp [hnr]), mem_support_pure_iff] at hmeasure
+    rw [ite_eq_right (by simp [hnr]), mem_support_pure_iff] at hmeasure
     exact hmeasure
   case measureTyped =>
     intro m hm
@@ -703,7 +703,7 @@ theorem genFuncParts_sound (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx : O
     intro hc
     rw [hConstr] at hc
     rw [hBody]
-    rw [if_pos hc, mem_support_pure_iff] at hbody
+    rw [ite_eq_left hc, mem_support_pure_iff] at hbody
     exact hbody
 
 /-- **Soundness of `genFunction`.** Every function the generator makes is well-typed in
@@ -872,7 +872,7 @@ theorem mem_support_genPrecondition_iff (octx : OpCtx)
     · split
       · exact .inr ⟨_, hb, rfl⟩
       · exact ⟨_, hb, rfl⟩
-    · rw [dif_pos (List.ne_nil_of_mem hx)]
+    · rw [dite_eq_left (List.ne_nil_of_mem hx)]
       exact .inl ⟨_, hx, _, he', rfl⟩
 
 -- ── Function-level keyword-freedom ───────────────────────────────────

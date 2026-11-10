@@ -1305,11 +1305,11 @@ theorem visibleRefs_mem_iff (headers : List TypeConstructor) (params : List TyId
   constructor
   · rintro ⟨h, hh, heq⟩
     by_cases hsub : h.params ⊆ params
-    · rw [if_pos hsub] at heq
+    · rw [ite_eq_left hsub] at heq
       exact ⟨h, hh, hsub, (Option.some.inj heq).symm⟩
-    · rw [if_neg hsub] at heq; exact absurd heq (by simp)
+    · rw [ite_eq_right hsub] at heq; exact absurd heq (by simp)
   · rintro ⟨h, hh, hsub, rfl⟩
-    exact ⟨h, hh, by rw [if_pos hsub]⟩
+    exact ⟨h, hh, by rw [ite_eq_left hsub]⟩
 
 /-- `visibleRefs` grows with its list of headers. A reference that is visible against a part of
     the headers is also visible against all of them.
@@ -1332,7 +1332,7 @@ theorem lowerRankHeaders_mem_iff (rankedHeaders : List (TypeConstructor × Nat))
   constructor
   · rintro ⟨⟨h', r'⟩, hmem, hif⟩
     by_cases hlt : r' < r
-    · simp only [hlt, if_true, Option.some.injEq] at hif
+    · simp only [hlt, ite_true, Option.some.injEq] at hif
       exact ⟨r', hif ▸ hmem, hlt⟩
     · simp [hlt] at hif
   · rintro ⟨r', hmem, hlt⟩
@@ -3155,8 +3155,8 @@ theorem rankExists (adts : @TypeFactory Unit) :
       intro n hnR
       simp only
       by_cases hn : n = src
-      · rw [if_pos hn]; omega
-      · rw [if_neg hn]
+      · rw [ite_eq_left hn]; omega
+      · rw [ite_eq_right hn]
         have hne : n ∈ R.erase src := (List.mem_erase_of_ne hn).mpr hnR
         have hb := hrank'bound n hne
         omega
@@ -3172,10 +3172,10 @@ theorem rankExists (adts : @TypeFactory Unit) :
         refine ⟨d, hget, c, hcmem, ?_⟩
         intro ref href hrefR
         simp only
-        rw [if_neg hn]
+        rw [ite_eq_right hn]
         by_cases hrefsrc : ref = src
-        · rw [if_pos hrefsrc]; omega
-        · rw [if_neg hrefsrc]
+        · rw [ite_eq_left hrefsrc]; omega
+        · rw [ite_eq_right hrefsrc]
           have hreferase : ref ∈ R.erase src := (List.mem_erase_of_ne hrefsrc).mpr hrefR
           have hedge := hcwit ref href hreferase
           omega

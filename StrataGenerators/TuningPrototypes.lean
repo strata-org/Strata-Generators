@@ -236,11 +236,11 @@ theorem genCmd_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIde
       = SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx avoid kt) := by
   unfold genCmd genCmd.tuned
   by_cases h : (ctx.writable immutableVars).length > 0
-  · simp only [dif_pos h]
+  · simp only [dite_eq_left h]
     apply SPMF.support_frequency_congr_weights
     · rfl
     all_goals simp [Tuning.weight_pos]
-  · simp only [dif_neg h]
+  · simp only [dite_eq_right h]
     apply SPMF.support_frequency_congr_weights
     · rfl
     all_goals simp [Tuning.weight_pos]
@@ -300,9 +300,9 @@ theorem genLMonoTy_tuned_support_eq (θ : Tuning) (tvars : List TyIdentifier) :
         SPMF.support (do let τ ← genLMonoTy.tuned (G := SPMF) θ tvars k; pure (f τ))
           = SPMF.support (do let τ ← genLMonoTy (G := SPMF) tvars k; pure (f τ)) :=
       fun _ => SPMF.support_bind_congr ih (fun _ => rfl)
-    -- Split the `dite` with a congruence rather than with `dif_pos`/`dif_neg`: rewriting the
-    -- condition away would rewrite it inside the recursive occurrences too, and those have to stay
-    -- definitionally `genLMonoTy.tuned θ tvars k` for `ih` to apply.
+    -- Split the `dite` with a congruence rather than with `dite_eq_left`/`dite_eq_right`:
+    -- rewriting the condition away would rewrite it inside the recursive occurrences too, and those
+    -- have to stay definitionally `genLMonoTy.tuned θ tvars k` for `ih` to apply.
     refine SPMF.support_dite_congr (fun h => ?_) (fun h => ?_)
     · apply SPMF.support_frequency_congr_branches
       · simp [Tuning.weight_pos]
@@ -369,16 +369,16 @@ that, `split` picks a `dite` from inside an arm instead of the match, and `split
 
 Three moves get around it.
 
-1. **Keep the two sides in step.** Generalise the depth back to a variable before splitting — the
-   `hgen` of each branch below — so `split` fires on the shipping side at a *variable* discriminant and
-   substitutes the depth and `τ` into the tuned side as well. Both then reduce together.
+1. **Keep the two sides in step.** Case-split with `genLExprBase.induct`, whose motive takes the
+   depth and the target type as variables. Each case then fixes both sides to the same arm, so they
+   reduce together.
 2. **One lemma per arm.** At a constructor pattern the tuned side whnfs to its `frequency`, so
    `apply SPMF.support_frequency_congr_branches` unifies straight through the matcher. That whnf is the
    dominant cost of an arm, and a heartbeat budget is per declaration, so each of the 21 arms is its own
    lemma with its own budget rather than all of them sharing one.
-3. **The catch-alls by matcher equation.** `genLExprBase.match_1.eq_21` and `.eq_22` take exactly the
-   ten negative facts about `τ` that `split` hands over, and rewrite the matcher — the over-applied one
-   included — to the catch-all arm. They are generated on demand and resolve by name.
+3. **The catch-alls by the ten negative facts.** The catch-all cases of `genLExprBase.induct` supply
+   ten facts that `τ` is none of the other shapes. With those in context, `simp only` reduces the
+   matcher, the over-applied one included, to the catch-all arm.
 
 Nothing here needs a `θ` to be well-behaved. `Tuning.weight` is `max a 1 + d * b`, so
 `Tuning.weight_pos` holds for every `θ`, index and depth, and a schedule entry of `(0, 0)` reads as
@@ -746,9 +746,10 @@ private theorem arm_seq_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
         (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
     case indirPoly =>
       exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
-/-- The successor catch-all: a target type the generator has no rule for. The matcher cannot reduce at
-    an opaque `τ`, so `genLExprBase.match_1.eq_22` does it instead, consuming the ten negative facts
-    that `split` provides. -/
+
+/-- The successor catch-all: a target type the generator has no rule for. The matcher does not
+    reduce at an opaque `τ` by itself, so `simp only` uses the ten negative facts about `τ` to
+    select the catch-all arm. -/
 private theorem arm_other_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (τ : LMonoTy)
     (hArrow : ∀ τ₁ τ₂, τ = LMonoTy.tcons "arrow" [τ₁, τ₂] → False)
@@ -767,9 +768,9 @@ private theorem arm_other_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
   unfold genLExprBase.tuned
   dsimp only
   rw [genLExprBase.eq_def]
-  simp only [genLExprBase.match_1.eq_22]
-  -- This arm reaches the `frequency` through `genLExprBase.match_1.eq_22`, which leaves both weight
-  -- sums already determined, so `refine` solves them by unification and only three goals remain.
+  simp only
+  -- Reducing the matcher leaves both weight sums already determined, so `refine` solves them by
+  -- unification and only three goals remain.
   refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel _ _
   case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
   case pos' => intro _ hmem; fin_cases hmem <;> simp
@@ -784,7 +785,7 @@ private theorem arm_other_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
     case indirPoly =>
       exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 
-/-- The depth-0 catch-all. Same shape as `arm_other_succ`, with `eq_21`; at depth 0 the two `oneOf`s
+/-- The depth-0 catch-all. Same shape as `arm_other_succ`; at depth 0 the two `oneOf`s
     carry no weight, so the branches agree by reflexivity. -/
 private theorem arm_other_zero (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (τ : LMonoTy)
@@ -809,49 +810,53 @@ private theorem arm_other_zero (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
   try dsimp only [Nat.brecOn, Nat.brecOn.go]
   try dsimp only
   rw [genLExprBase.eq_def]
-  simp only [genLExprBase.match_1.eq_21]
+  simp only
+
 /-- Depth 0, every target type. No arm carries a weight at depth 0 — each is a uniform `oneOf` — so the
     tuned generator and the shipping one are the *same* generator there, and every arm closes by
-    reflexivity. The case analysis goes through the matcher's own splitter rather than `split`, so the
-    shipping side is never reduced and each arm's goal keeps the shape the lemmas are stated in. -/
+    reflexivity. The case analysis uses `genLExprBase.induct` rather than `split`, so the shipping
+    side is never reduced and each arm's goal keeps the shape the lemmas are stated in. -/
 private theorem arm_zero_all (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (τ : LMonoTy) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx 0 τ).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx 0 τ).support := by
-  refine genLExprBase.match_1.splitter
-    (motive := fun m t => m = 0 →
-      (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx m t).support
-        = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx m t).support)
-    0 τ
-      (fun τ₁ τ₂ _ => rfl)
-      (fun _ _ _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun nm _ => rfl)
-      (fun _ _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun w _ => rfl)
-      (fun _ _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun τ₁ τ₂ _ => rfl)
-      (fun _ _ _ h => absurd h (by omega))
-      (fun σ _ => rfl)
-      (fun _ _ h => absurd h (by omega))
-      (fun t hA hB hC hD hE hF hG hH hI hJ _ => arm_other_zero θ fctx octx pctx tvars bctx t hA hB hC hD hE hF hG hH hI hJ)
-      (fun _ _ _ _ _ _ _ _ _ _ _ _ h => absurd h (by omega))
-    rfl
+  refine genLExprBase.induct
+    (motive := fun b m t => m = 0 →
+      (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars b m t).support
+        = (genLExprBase (G := SPMF) fctx octx pctx tvars b m t).support)
+    ?arrowZ ?arrowS ?boolZ ?boolS ?intZ ?intS ?ftvarZ ?ftvarS ?stringZ ?stringS ?realZ ?realS
+    ?bitvecZ ?bitvecS ?regexZ ?regexS ?mapZ ?mapS ?seqZ ?seqS ?otherZ ?otherS bctx 0 τ rfl
+  case arrowZ => intro _ _ _ _; rfl
+  case arrowS => intro _ _ _ _ _ _ _ h; omega
+  case boolZ => intro _ _; rfl
+  case boolS => intro _ _ _ _ h; omega
+  case intZ => intro _ _; rfl
+  case intS => intro _ _ _ _ h; omega
+  case ftvarZ => intro _ _ _; rfl
+  case ftvarS => intro _ _ _ _ _ h; omega
+  case stringZ => intro _ _; rfl
+  case stringS => intro _ _ _ _ h; omega
+  case realZ => intro _ _; rfl
+  case realS => intro _ _ _ _ h; omega
+  case bitvecZ => intro _ _ _; rfl
+  case bitvecS => intro _ _ _ _ _ h; omega
+  case regexZ => intro _ _; rfl
+  case regexS => intro _ _ _ _ h; omega
+  case mapZ => intro _ _ _ _; rfl
+  case mapS => intro _ _ _ _ _ _ h; omega
+  case seqZ => intro _ _ _; rfl
+  case seqS => intro _ _ _ _ _ h; omega
+  case otherZ =>
+    intro b t hArrow hBool hInt hFtvar hString hReal hBitvec hRegex hMap hSeq _
+    exact arm_other_zero θ fctx octx pctx tvars b t hArrow hBool hInt hFtvar hString hReal hBitvec
+      hRegex hMap hSeq
+  case otherS => intro _ _ _ _ _ _ _ _ _ _ _ _ _ h; omega
 
 /-- **At every `θ`, the tuned base expression generator has the support `genLExprBase` has.** Eleven
     sites, 84 branch weights, and a match on the target type as well as on the depth. The section note
     above explains the three moves; this theorem is only the dispatch, one line per arm.
 
-    The motive carries `m = k + 1` so that the splitter's depth-0 arms are discharged by `omega` rather
+    The motive carries `m = k + 1` so that the depth-0 cases are discharged by `omega` rather
     than proved twice; `arm_zero_all` handles depth 0 on its own. -/
 theorem genLExprBase_tuned_support_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) :
@@ -863,34 +868,67 @@ theorem genLExprBase_tuned_support_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpC
   | zero => intro bctx τ; exact arm_zero_all θ fctx octx pctx tvars bctx τ
   | succ k ih =>
     intro bctx τ
-    refine genLExprBase.match_1.splitter
-      (motive := fun m t => m = k + 1 →
-        (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx m t).support
-          = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx m t).support)
-      (k + 1) τ
-      (fun _ _ h => absurd h (by omega))
-      (fun j τ₁ τ₂ h => by cases Nat.succ.inj h; exact arm_arrow_succ θ fctx octx pctx tvars bctx _ τ₁ τ₂ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_bool_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_int_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j nm h => by cases Nat.succ.inj h; exact arm_ftvar_succ θ fctx octx pctx tvars bctx _ nm ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_string_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_real_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j w h => by cases Nat.succ.inj h; exact arm_bitvec_succ θ fctx octx pctx tvars bctx _ w ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_regex_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ _ h => absurd h (by omega))
-      (fun j τ₁ τ₂ h => by cases Nat.succ.inj h; exact arm_map_succ θ fctx octx pctx tvars bctx _ τ₁ τ₂ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j σ h => by cases Nat.succ.inj h; exact arm_seq_succ θ fctx octx pctx tvars bctx _ σ ih)
-      (fun _ _ _ _ _ _ _ _ _ _ _ h => absurd h (by omega))
-      (fun _ t hA hB hC hD hE hF hG hH hI hJ h => by cases Nat.succ.inj h; exact arm_other_succ θ fctx octx pctx tvars bctx _ t hA hB hC hD hE hF hG hH hI hJ ih)
-      rfl
+    refine genLExprBase.induct
+      (motive := fun b m t => m = k + 1 →
+        (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars b m t).support
+          = (genLExprBase (G := SPMF) fctx octx pctx tvars b m t).support)
+      ?arrowZ ?arrowS ?boolZ ?boolS ?intZ ?intS ?ftvarZ ?ftvarS ?stringZ ?stringS ?realZ ?realS
+      ?bitvecZ ?bitvecS ?regexZ ?regexS ?mapZ ?mapS ?seqZ ?seqS ?otherZ ?otherS bctx (k + 1) τ rfl
+    case arrowZ => intro _ _ _ h; omega
+    case arrowS =>
+      intro b j τ₁ τ₂ _ _ _ h
+      cases Nat.succ.inj h
+      exact arm_arrow_succ θ fctx octx pctx tvars b _ τ₁ τ₂ ih
+    case boolZ => intro _ h; omega
+    case boolS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_bool_succ θ fctx octx pctx tvars b _ ih
+    case intZ => intro _ h; omega
+    case intS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_int_succ θ fctx octx pctx tvars b _ ih
+    case ftvarZ => intro _ _ h; omega
+    case ftvarS =>
+      intro b j nm _ _ h
+      cases Nat.succ.inj h
+      exact arm_ftvar_succ θ fctx octx pctx tvars b _ nm ih
+    case stringZ => intro _ h; omega
+    case stringS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_string_succ θ fctx octx pctx tvars b _ ih
+    case realZ => intro _ h; omega
+    case realS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_real_succ θ fctx octx pctx tvars b _ ih
+    case bitvecZ => intro _ _ h; omega
+    case bitvecS =>
+      intro b j w _ _ h
+      cases Nat.succ.inj h
+      exact arm_bitvec_succ θ fctx octx pctx tvars b _ w ih
+    case regexZ => intro _ h; omega
+    case regexS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_regex_succ θ fctx octx pctx tvars b _ ih
+    case mapZ => intro _ _ _ h; omega
+    case mapS =>
+      intro b j τ₁ τ₂ _ _ h
+      cases Nat.succ.inj h
+      exact arm_map_succ θ fctx octx pctx tvars b _ τ₁ τ₂ ih
+    case seqZ => intro _ _ h; omega
+    case seqS =>
+      intro b j σ _ _ h
+      cases Nat.succ.inj h
+      exact arm_seq_succ θ fctx octx pctx tvars b _ σ ih
+    case otherZ => intro _ _ _ _ _ _ _ _ _ _ _ h; omega
+    case otherS =>
+      intro b j t hA hB hC hD hE hF hG hH hI hJ _ h
+      cases Nat.succ.inj h
+      exact arm_other_succ θ fctx octx pctx tvars b _ t hA hB hC hD hE hF hG hH hI hJ ih
 
 /-- The payoff, stated once. Any soundness and completeness fact about the shipping expression
     generator holds of every tuning of it, and the proof never mentions the predicate. -/

@@ -132,7 +132,7 @@ theorem freshName_reach (ctx : VarCtx) (x : Identifier Unit) {avoid : List Strin
     exact havoid
   rw [SPMF.mem_support_iff_may, genFreshName]; walk [(mem_law hname).obs]
   refine ⟨_, rfl, ?_⟩
-  rw [if_pos hcond]
+  rw [ite_eq_left hcond]
 
 theorem writable_nil_eq (ctx : VarCtx) : ctx.writable [] = ctx := by
   rw [VarCtx.writable]; exact List.filter_eq_self.mpr (fun _ _ => rfl)
@@ -479,7 +479,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
       rw [genCmd_support_iff octx tvars [] ctx n _ [] [] C.knownTypes]; refine Or.inl ?_
       simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
       exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname hfresh' List.not_mem_nil,
-        mty, hmtyReach, e, hreach, by rw [if_pos hgen]⟩)
+        mty, hmtyReach, e, hreach, by rw [ite_eq_left hgen]⟩)
   | init_nondet x xty mty md _ hfresh hxty hwk hequiv =>
     subst hxty
     have hmdc : md = default := hshape
@@ -504,7 +504,7 @@ theorem genCmdStmt_complete_spec (procs : ProcSigCtx) (labels : List String)
     refine Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩))
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨(x, mty), (mem_support_elements_iff _).mpr hmem, e, hE mty (hctxFind x mty hfind),
-      by rw [if_pos (binderAnnotsKnownIn_iff.mpr hexpr.2.1)]⟩
+      by rw [ite_eq_left (binderAnnotsKnownIn_iff.mpr hexpr.2.1)]⟩
   | set_nondet x mty md _ hfind hequiv =>
     have hmdc : md = default := hshape
     subst hmdc
@@ -557,7 +557,7 @@ theorem genFreshLabel_complete (labels : List String) (label : String)
     label ∈ SPMF.support (genFreshLabel (G := SPMF) labels) := by
   rw [SPMF.mem_support_iff_may, genFreshLabel]; walk [(mem_law hreach).obs]
   refine ⟨_, rfl, ?_⟩
-  rw [if_neg hfresh]
+  rw [ite_eq_right hfresh]
 
 /-- `genFreshLabel_complete`, and `mem_support_genIdentName_iff` discharges its hypothesis on
     reachability from syntax. All three hypotheses are then decidable conditions on `label`. It is

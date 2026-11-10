@@ -374,7 +374,7 @@ theorem genStmt_mutableVars
         (true_law (genInvariants _ _ _ _ _)).obs]
   all_goals (try simp only [block_modifiedVars_singleton, block_definedVars_singleton,
     HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars, Stmt.definedVars,
-    CmdExt.modifiedVars, CmdExt.definedVars, if_false, Bool.false_eq_true, List.not_mem_nil] at *)
+    CmdExt.modifiedVars, CmdExt.definedVars, ite_false, Bool.false_eq_true, List.not_mem_nil] at *)
     <;> grind
 termination_by (n, 0, 0)
 

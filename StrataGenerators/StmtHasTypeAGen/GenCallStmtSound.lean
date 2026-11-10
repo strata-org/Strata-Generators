@@ -483,8 +483,9 @@ theorem nodup_getElem_not_mem_take {α} {l : List α} (hnd : l.Nodup)
   rw [List.length_take] at hj
   rw [List.getElem_take] at hval
   have hji : j < i := by omega
-  have : j = i := (List.getElem?_inj (by omega) hnd).mp (by
-    rw [List.getElem?_eq_getElem (by omega), List.getElem?_eq_getElem hi, hval])
+  have hget : l[j]? = l[i]? := by
+    rw [List.getElem?_eq_getElem (by omega), List.getElem?_eq_getElem hi, hval]
+  have hjeq : j = i := (List.Nodup.getElem?_inj (by omega) hnd).mp hget
   omega
 
 /-- The `i`-th key/value pair of a `ListMap` is a member of its underlying list. -/

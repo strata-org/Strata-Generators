@@ -51,7 +51,7 @@ theorem Map.find?_eq_lookup {β} (m : Map (Identifier Unit) β) (x : Identifier 
     simp only [Map.find?, List.lookup_cons]
     by_cases hk : k = x
     · subst hk; simp
-    · rw [if_neg hk, show (x == k) = false from by simp [Ne.symm hk], ih]
+    · rw [ite_eq_right hk, show (x == k) = false from by simp [Ne.symm hk], ih]
 
 /-- The concrete single-scope `TContext` for a flat `VarCtx`: one new scope in
     which every variable is bound to its declared monotype as a trivial polytype

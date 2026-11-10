@@ -501,16 +501,16 @@ private theorem dedupTys_go_eq (l : List LMonoTy) (seen : Std.HashSet LMonoTy)
   | cons x rest ih =>
     rw [dedupTys.go, List.eraseDupsBy.loop]
     by_cases hx : seen.contains x = true
-    · have : acc.any (x == ·) = true := by
+    · have hany : acc.any (x == ·) = true := by
         simp only [List.any_eq_true, beq_iff_eq]
         exact ⟨x, (hinv x).mp hx, rfl⟩
-      simp only [hx, this, if_true]
+      simp only [hx, hany, ite_true]
       exact ih seen acc hinv
     · have hnot : acc.any (x == ·) = false := by
         simp only [Bool.eq_false_iff, ne_eq, List.any_eq_true, beq_iff_eq, not_exists]
         rintro y ⟨hy, rfl⟩
         exact hx ((hinv _).mpr hy)
-      simp only [hx, hnot, Bool.false_eq_true, if_false]
+      simp only [hx, hnot, Bool.false_eq_true, ite_false]
       refine ih (seen.insert x) (x :: acc) ?_
       intro y
       rw [Std.HashSet.contains_insert]
