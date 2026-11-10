@@ -50,13 +50,6 @@ theorem mem_support_bot_iff {α : Type u} (a : α) : a ∈ (default : SPMF α).s
   refine ⟨fun h => h ?_, False.elim⟩
   rfl
 
-/-- `mem_support_listOf` under its `Iff` name, for symmetry with the rest of the family. A list is in
-    the support of `listOf g` exactly when each of its elements is in the support of `g`; `listOf`
-    puts no bound on the length. -/
-theorem mem_support_listOf_iff {g : SPMF α} {xs : List α} :
-    xs ∈ (listOf g).support ↔ ∀ x ∈ xs, x ∈ g.support :=
-  mem_support_listOf
-
 /-- The `mpr` direction of `mem_support_listOf_iff`, named for use as a term. -/
 theorem mem_support_listOf_of_forall {g : SPMF α} {xs : List α}
     (hxs : ∀ x ∈ xs, x ∈ g.support) : xs ∈ (listOf g).support :=
@@ -79,10 +72,10 @@ export SPMF (support support_bind mem_support_bind_iff support_pure mem_support_
   mem_support_chooseNat_iff mem_support_chooseInt_iff support_oneOf_pair mem_support_oneOf_pair_iff support_oneOf
   mem_support_oneOf_iff support_frequency mem_support_frequency_iff support_elements
   mem_support_elements_iff support_vectorOf mem_support_vectorOf_iff support_listOfMaxLength
-  mem_support_listOfMaxLength_iff support_listOf mem_support_listOf mem_support_listOf_iff
-  mem_support_listOf_of_forall support_nonEmptyListOf mem_support_nonEmptylistOf support_coin
+  mem_support_listOfMaxLength_iff support_listOf mem_support_listOf_iff
+  mem_support_listOf_of_forall support_nonEmptyListOf mem_support_nonEmptyListOf_iff support_coin
   mem_support_coin_iff support_biasedOptionGen mem_support_biasedOptionGen_iff support_optionGen
-  mem_support_optionGen_iff mem_support_bot_iff mem_support_csup bind_congr_support bot_bind
+  mem_support_optionGen_iff mem_support_bot_iff mem_support_csup_iff bot_bind
   support_frequency_reweight support_frequency_congr_weights)
 
 /-- The trivial law of a generator: each value in its support is in its support. A `walk` over a

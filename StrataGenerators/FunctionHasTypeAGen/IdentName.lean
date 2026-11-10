@@ -313,7 +313,7 @@ theorem mem_support_genIdentName_iff (s : String) :
         mem_support_elements_iff (show startChars ≠ [] from by decide +kernel)] using hx
     have hrest : ∀ c ∈ xs, c ∈ remainingChars := by
       intro c hc
-      have := SPMF.mem_support_listOf.mp hxs c hc
+      have := SPMF.mem_support_listOf_iff.mp hxs c hc
       simpa only [genRemainingChar,
         mem_support_elements_iff (show remainingChars ≠ [] from by decide +kernel)] using this
     refine ⟨?_, dodgeKeyword_not_keyword _⟩
