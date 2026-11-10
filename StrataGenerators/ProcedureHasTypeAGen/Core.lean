@@ -3,6 +3,7 @@
 -- `ProcedureHasTypeAGen/TestSupport.lean` exist. The proof file (`ProcedureHasTypeAGen.lean`) still
 -- sees the statement proofs via `Support.lean`.
 import StrataGenerators.StmtHasTypeAGen.Core
+import StrataGenerators.UnitFormat
 import Strata.Languages.Core.Procedure
 
 open Lambda LExpr RandomChoice Core Imperative ArbString Std
@@ -245,9 +246,7 @@ def headerProcSig (name : String) (h : Procedure.Header) : ProcSig where
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
-open Std in
-instance instToFormatUnitProcedureHasTypeAGen : ToFormat Unit where
-  format _ := .nil
+attribute [local instance] unitToFormat
 
 -- Smoke test: a handful of procedures at size 2, up to 4 body statements.
 #guard_msgs(drop warning, drop all) in

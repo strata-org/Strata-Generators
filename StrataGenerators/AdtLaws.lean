@@ -155,7 +155,7 @@ def groundFieldTys (d : LDatatype Unit) (c : LConstr Unit) : List LMonoTy :=
       `DatatypeGenProofs` use, so that change is later work. -/
 def blockAccepted (block : MutualDatatype Unit) : Bool :=
   match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams DatatypeGen.coreContext block with
+      _ DatatypeGen.coreContext block with
   | .ok _ => true
   | .error _ => false
 

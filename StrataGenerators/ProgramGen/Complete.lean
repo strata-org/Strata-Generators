@@ -528,7 +528,7 @@ theorem genDeclDatatype_complete {s : GenState} {b : Bounds}
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
     (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
     (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams s.C block = .ok C') :
+      _ s.C block = .ok C') :
     (([.type (.data block) .empty]),
         { s with C := C'
                  reserved := block.map (·.name) ++ s.reserved
@@ -588,7 +588,7 @@ theorem genDeclDatatype_complete_of_MutualADTWF {s : GenState} {b : Bounds}
     (hvocab : VocabOk s.C s.baseTypes (s.tyCons ++ s.dtCons))
     (hbv : ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, BitvecWidthOnly arg.2)
     (hC : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams s.C block = .ok C') :
+      _ s.C block = .ok C') :
     ∃ sz, (([.type (.data block) .empty]),
         { s with C := C'
                  reserved := block.map (·.name) ++ s.reserved
@@ -676,7 +676,7 @@ example (b : Bounds) (block : MutualDatatype Unit) (C' : LContext Core.CoreLPara
     (hnamesAllowed : ∀ d ∈ block, isAllowedName d.name = true)
     (hnamesNotLocal : ∀ d ∈ block, isLocalTypeName d.name = false)
     (hC : @LContext.addMutualBlock Core.CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams initState.C block = .ok C') :
+      _ initState.C block = .ok C') :
     (Core.Program.mk (decls := [.type (.data block) .empty])) ∈
       SPMF.support (genProgram (G := SPMF) 1 b) := by
   have hstep := genDeclDatatype_complete (s := initState) (b := b) hblock hnamesAllowed

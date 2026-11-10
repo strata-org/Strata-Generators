@@ -350,7 +350,7 @@ def DerivedOpFamilies.admits (sel : DerivedOpFamilies) : DerivedOpFamily → Boo
 def blockDerivedFactory (block : MutualDatatype Unit) :
     Option (@Lambda.Factory LExprParams') :=
   (@Lambda.genBlockFactory LExprParams' instInhabitedPUnit instInhabitedPUnit
-    instToFormatIDMetaCoreLParams _ block).toOption
+    _ _ block).toOption
 
 /-- The quantified type variables of a type scheme. `[]` exactly when the scheme
     is ground, i.e. when the datatype it came from has no type parameters. -/

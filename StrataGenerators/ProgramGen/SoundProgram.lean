@@ -32,7 +32,7 @@ namespace ProgramGen
     `datatypes`/`knownTypes`/`functions`). -/
 theorem addMutualBlock_rigid {C C' : LContext CoreLParams} {block : MutualDatatype Unit}
     (h : @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
-      instToFormatIDMetaCoreLParams C block = .ok C') :
+      _ C block = .ok C') :
     C'.rigidTypeVars = C.rigidTypeVars := by
   unfold LContext.addMutualBlock at h
   simp only [bind, Except.bind, pure, Except.pure] at h
@@ -122,7 +122,7 @@ theorem genDeclDatatype_sound (P : Program) {s : GenState} {b : Bounds}
         dtConsReserved := ?_
         storedRefsReserved := ?_
         datatypesKnown := @Lambda.datatypesKnown_addMutualBlock _ _ _
-          Core.instToFormatIDMetaCoreLParams _ _ _ _ hadd hinv.datatypesKnown
+          _ _ _ _ _ hadd hinv.datatypesKnown
         octxWK := ?_
         sigsWK := fun sig hsig ty hty => wellKindedTy_mono hmono (hinv.sigsWK sig hsig ty hty)
         exprCtx := exprCtxOk_addMutualBlock hinv.exprCtx hb hmono hpctx

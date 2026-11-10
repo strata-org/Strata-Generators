@@ -8,6 +8,7 @@ import Strata.Languages.Core.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
 import StrataGenerators.StmtHasTypeAGen.CallDefs
+import StrataGenerators.UnitFormat
 
 open Lambda RandomChoice Core Imperative ArbString
 
@@ -588,9 +589,7 @@ def genProgramStmts [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
-open Std in
-instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
-  format _ := .nil
+attribute [local instance] unitToFormat
 
 -- Smoke test: a handful of individual statements at size 2.
 #guard_msgs(drop warning, drop all) in
