@@ -6,7 +6,7 @@ testDriver = "test"
 [[require]]
 name = "Strata"
 git = "https://github.com/strata-org/Strata"
-rev = "main"
+rev = "b3aaa6faa6523b60146ec8b82857aa1786e49a28"
 
 # We use Plausible's public v4.34 tag to ensure consistency in Lean version
 [[require]]
