@@ -9,7 +9,8 @@ name = "Strata"
 git = "https://github.com/strata-org/Strata"
 rev = "b3aaa6faa6523b60146ec8b82857aa1786e49a28"
 
-# The plausible revision that Strata, LSpec and mathlib v4.34.0 all use.
+# plausible v4.34.0, the revision LSpec and mathlib v4.34.0 use.
+# It overrides the older revision that Strata names.
 [[require]]
 name = "plausible"
 git = "https://github.com/leanprover-community/plausible"
