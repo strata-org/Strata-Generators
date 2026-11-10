@@ -36,7 +36,7 @@ def properties : List (String × Property) :=
     ("stmt-anf-preservation", fun _ => StrataFuzz.Stmt.prop_stmtAnfPreservesTyping),
     ("stmt-typecheck-complete", fun _ => StrataFuzz.Stmt.prop_stmtTypeCheckComplete),
     ("expr-preservation-deep", fun _ => StrataFuzz.Expr.prop_exprPreservationDeep),
-    ("prog-lift-output-typechecks", fun _ => StrataFuzz.Program.prop_liftOutputTypechecks) ]
+    ("prog-typecheck-complete", fun _ => StrataFuzz.Program.prop_progTypeCheckComplete) ]
 
 /-- Attempts a failed draw is redrawn before it is scored as a discard. -/
 def retryFuel : Nat := 500
@@ -69,7 +69,7 @@ def replayDir (T : Property) (dir : String) : IO Unit := do
     let bytes ← IO.FS.readBinFile e.path
     -- Match on the outcome so the (pure) `runOne` is forced — the point is to *execute* the
     -- instrumented code-under-test, which the coverage meter observes.
-    match runOne (T FuzzGen) bytes with
+    match (runOne (T FuzzGen) bytes).outcome with
     | .error (.fail _) => fails := fails + 1
     | _ => pure ()
     n := n + 1

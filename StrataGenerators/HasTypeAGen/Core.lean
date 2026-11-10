@@ -168,7 +168,7 @@ def monoTyDepth : LMonoTy → Nat
 
 -- ── Well-typing relation ─────────────────────────────────────────────
 
-/-- The `HasTypeA` typing judgement of Strata, at the parameter types of this package. -/
+/-- The `HasTypeA` typing judgment of Strata, at the parameter types of this package. -/
 abbrev HasTypeA' := LExpr.HasTypeA (T := LExprParams')
 
 -- ── Helpers ──────────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ abbrev genAlphanumList [Gen G] : G (List Char) := listOf Char.arbitrary
     `genStrConst`. -/
 @[reducible] def genRealConst [Gen G] : G LExpr' := do
   let r ← StrataGenerators.PrimitiveGens.genRat
-  pure (.realConst () r)
+  pure (.rationalConst () r)
 
 /-- Generate a random bitvector constant of width `n`.
 
@@ -501,16 +501,16 @@ private theorem dedupTys_go_eq (l : List LMonoTy) (seen : Std.HashSet LMonoTy)
   | cons x rest ih =>
     rw [dedupTys.go, List.eraseDupsBy.loop]
     by_cases hx : seen.contains x = true
-    · have : acc.any (x == ·) = true := by
+    · have hany : acc.any (x == ·) = true := by
         simp only [List.any_eq_true, beq_iff_eq]
         exact ⟨x, (hinv x).mp hx, rfl⟩
-      simp only [hx, this, if_true]
+      simp only [hx, hany, ite_true]
       exact ih seen acc hinv
     · have hnot : acc.any (x == ·) = false := by
         simp only [Bool.eq_false_iff, ne_eq, List.any_eq_true, beq_iff_eq, not_exists]
         rintro y ⟨hy, rfl⟩
         exact hx ((hinv _).mpr hy)
-      simp only [hx, hnot, Bool.false_eq_true, if_false]
+      simp only [hx, hnot, Bool.false_eq_true, ite_false]
       refine ih (seen.insert x) (x :: acc) ?_
       intro y
       rw [Std.HashSet.contains_insert]
@@ -949,6 +949,10 @@ def genIndir [Gen G] (octx : OpCtx) (τ : LMonoTy)
   -- Then, apply the operator to all the args
   pure (mkApps opExpr args)
 
+/-- The largest number of binders of a scheme of `pctx`, and `0` for an empty context. -/
+def maxBinders (pctx : PolyOpCtx) : Nat :=
+  pctx.foldr (fun p acc => match p.2 with | .forAll bvs _ => max bvs.length acc) 0
+
 /-- Generate a well-typed `LExpr` of the type `τ` with the IndirPoly rule of Pałka et al. 2011,
     Section 4. The rule applies a polymorphic library function in three steps:
     1. It unifies the result type of the function with the target type `τ`.
@@ -973,11 +977,12 @@ def genIndirPolyCore [Gen G] (fctx : FVarCtx) (octx : OpCtx)
   -- Compute the set of generable types from the current context
   let generableTys := generableTypesFromCtx bctx fctx octx
 
-  -- For each possible type variable, sample a random type to instantiate it with.
+  -- Sample one random type for each binder that unification can leave open: as many as the scheme
+  -- of `pctx` with the most binders has, and never fewer than `maxNumArgs`.
   -- When no generable types exist, fall back to an arbitrary base type
   -- (`pickBaseType`: bool/int/string/real/regex/bitvec) rather than always `.bool`,
   -- so the empty-context case still explores every ground type.
-  let sampledTys ← List.replicate maxNumArgs ()
+  let sampledTys ← List.replicate (max maxNumArgs (maxBinders pctx)) ()
     |>.mapM (fun _ =>
       if hg : generableTys.length > 0 then do
         elements generableTys (by

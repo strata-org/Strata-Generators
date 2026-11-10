@@ -71,12 +71,15 @@ namespace StrataGenerators.Procedure
 theorem mem_writable_keys_iff (ctx : VarCtx) (immutableVars : List (Identifier Unit))
     (k : Identifier Unit) :
     k ∈ Map.keys (ctx.writable immutableVars) ↔ k ∈ Map.keys ctx ∧ (!immutableVars.contains k) = true := by
-  simp only [VarCtx.writable, Map.keys_eq_map_fst, List.mem_map, List.mem_filter]
+  rw [Map.keys_eq_map_fst (ctx.writable immutableVars), Map.keys_eq_map_fst ctx]
   constructor
-  · rintro ⟨p, ⟨hp_mem, hp_pred⟩, rfl⟩
-    exact ⟨⟨p, hp_mem, rfl⟩, hp_pred⟩
-  · rintro ⟨⟨p, hp_mem, rfl⟩, hpred⟩
-    exact ⟨p, ⟨hp_mem, hpred⟩, rfl⟩
+  · intro h
+    obtain ⟨p, hp, rfl⟩ := List.mem_map.mp h
+    obtain ⟨hp_mem, hp_pred⟩ := List.mem_filter.mp hp
+    exact ⟨List.mem_map_of_mem hp_mem, hp_pred⟩
+  · rintro ⟨h, hpred⟩
+    obtain ⟨p, hp_mem, rfl⟩ := List.mem_map.mp h
+    exact List.mem_map_of_mem (List.mem_filter.mpr ⟨hp_mem, hpred⟩)
 
 /-- The mutable keys after an `init` of `n` are the old mutable keys and `n`. -/
 private theorem init_writable_keys {ctx : VarCtx} {iv : List (Identifier Unit)} {n mty k ty e md}
@@ -103,19 +106,16 @@ private theorem set_modified {ctx : VarCtx} {iv : List (Identifier Unit)} {r : I
     either a mutable input key or the freshly-`init`-defined name. -/
 theorem genCmd_mutableVars
     (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat)
-    (r : GenCmdResult)
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) {avoid : List String}
+    {kt : Lambda.KnownTypes} (r : GenCmdResult)
     (hr : r ∈ SPMF.support
-      (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx)) :
+      (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx avoid kt)) :
     (∀ v ∈ HasVarsImp.modifiedVars (P := Expression) r.cmd,
       v ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
       k ∈ Map.keys (ctx.writable immutableVars) ++ HasVarsImp.definedVars (P := Expression) r.cmd false) := by
-  revert r; show IsSoundFor _ _
-  rw [IsSoundFor.iff_obs, genCmd]; dsimp only
-  walk [IsSoundFor.obs (P := fun _ => True) (g := genIdentName) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genLMonoTy _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genLExpr _ _ _ _ _ _ _) fun _ _ => trivial]
+  revert r; show IsSoundFor _ _; walk_genCmd
+  all_goals try split_ifs at *
   all_goals first
     | exact List.mem_append_left _ ‹_›
     | exact init_writable_keys ‹_›
@@ -222,7 +222,7 @@ theorem initChain_definedVars (news : List (Identifier Unit × LMonoTy)) :
     Block.definedVars (P := Expression) (StrataGenerators.Stmt.initChain news) false
       = news.map Prod.fst := by
   simp only [block_definedVars_eq_flatMap, StrataGenerators.Stmt.initChain, List.flatMap_map,
-    Stmt.definedVars, HasVarsImp.definedVars, Command.definedVars, Cmd.definedVars]
+    Stmt.definedVars, HasVarsImp.definedVars]
   exact (List.map_eq_flatMap ..).symm
 
 /-- The *group* of a generated procedure call, which is the inline chain of the `init` statements followed by the
@@ -239,7 +239,7 @@ theorem callGroup_modifiedVars (M T : @LMonoTySignature Unit) (pname : String)
       = M.keys ++ T.keys := by
   rw [block_modifiedVars_append, initChain_modifiedVars]
   simp only [List.nil_append, Block.modifiedVars, Stmt.modifiedVars, HasVarsImp.modifiedVars,
-    Command.modifiedVars, StrataGenerators.Stmt.getLhs_mkArgs, List.append_nil]
+    CmdExt.modifiedVars, StrataGenerators.Stmt.getLhs_mkArgs, List.append_nil]
 
 /-- The generated procedure-call group defines exactly the `init`ed names
     the names of the missing entries. The chain at the front declares each of them, and the `call` defines
@@ -253,7 +253,7 @@ theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
         [Statement.call pname (StrataGenerators.Stmt.mkArgs M T exprs mask) default]) false
       = missing.map Prod.fst := by
   rw [block_definedVars_append, initChain_definedVars]
-  simp only [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, Command.definedVars,
+  simp only [Block.definedVars, Stmt.definedVars, HasVarsImp.definedVars, CmdExt.definedVars,
     List.append_nil]
 
 /-- A required name `v ∈ M.keys ++ T.keys` is a key of `M ++ T`, the variables the
@@ -263,10 +263,14 @@ theorem callGroup_definedVars (M T : @LMonoTySignature Unit) (pname : String)
 theorem mem_keys_append_exists (M T : @LMonoTySignature Unit) (v : Identifier Unit)
     (hv : v ∈ M.keys ++ T.keys) :
     ∃ q : Identifier Unit × LMonoTy, q ∈ List.append M T ∧ q.1 = v := by
-  -- `keys` is a `map` of the first projection, so the append of the two lists of the keys is one `map` over the
-  -- append of the two signatures. `List.mem_map` then closes the goal.
-  rw [ListMap.keys_eq_map_fst, ListMap.keys_eq_map_fst, ← List.map_append] at hv
-  exact List.mem_map.mp hv
+  -- A key of either block is the first component of one of that block's entries.
+  rcases List.mem_append.mp hv with h | h
+  · rw [ListMap.keys_eq_map_fst M] at h
+    obtain ⟨q, hq, rfl⟩ := List.mem_map.mp h
+    exact ⟨q, List.mem_append_left _ hq, rfl⟩
+  · rw [ListMap.keys_eq_map_fst T] at h
+    obtain ⟨q, hq, rfl⟩ := List.mem_map.mp h
+    exact ⟨q, List.mem_append_right _ hq, rfl⟩
 
 /-- **The invariant about the rights to modify a variable, for one call statement.** The emitted group is the
     inline chain of the `init` statements followed by the `call`, as a statement *list*, and the generator splices
@@ -298,27 +302,29 @@ theorem genCallStmt_mutableVars
       k ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) := by
   revert r; show IsSoundFor _ _
   rw [IsSoundFor.iff_obs, genCallStmt.eq_def]
-  walk [IsSoundFor.obs (P := fun _ => True) (g := List.mapM _ _) fun _ _ => trivial,
-    IsSoundFor.obs (P := fun _ => True) (g := genLExpr _ _ _ _ _ _ _) fun _ _ => trivial,
-    IsSoundFor.obs (P := fun _ => True) (g := elements [true, false] _) fun _ _ => trivial]
+  walk [(true_law (List.mapM _ _)).obs,
+    (true_law (genLExpr _ _ _ _ _ _ _)).obs,
+    (true_law (elements [true, false] _)).obs]
   -- Name the instantiated in-out block `Mσ` and the chosen out targets `T`.
   all_goals
-    rename_i s _ σvals _ hcond _ _ _ _ x hx
+    rename_i s _ σvals _ hcond _ _ _ _ _ x hx
     generalize hMσ : StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M = Mσ at hcond hx ⊢
-    generalize hT : outTargets immutableVars ctx _ = T at hcond hx ⊢
+    generalize hT : outTargets immutableVars ctx _ (functionNames C) = T at hcond hx ⊢
     simp only [callGroup_modifiedVars, callGroup_definedVars, filter_needsInit_append] at hx ⊢
   · -- Each LHS name is either `init`-defined (absent from `ctx`) or reused
     -- (bound in `ctx`, hence a mutable key, which is the writability part of `reusable`).
     rw [show s.M.keys = Mσ.keys by rw [← hMσ, StrataGenerators.Stmt.substSig_keys]] at hx
     obtain ⟨q, hq, rfl⟩ := mem_keys_append_exists Mσ T _ hx
     rcases hfind_q : ctx.find? q.1 with _ | τ
-    · exact List.mem_append_right _ (List.mem_map.mpr
-        ⟨q, List.mem_filter.mpr ⟨hq, by simp [needsInit, VarCtx.isFresh, hfind_q]⟩, rfl⟩)
+    · have hinit : needsInit ctx q = true := by simp [needsInit, VarCtx.isFresh, hfind_q]
+      exact List.mem_append_right _ (List.mem_map.mpr ⟨q, List.mem_filter.mpr ⟨hq, hinit⟩, rfl⟩)
     · -- Every out target is usable (`outTargets_all_usableName`), so the guard extends to `Mσ ++ T`.
-      have hq' := List.all_eq_true.mp
-        (hT ▸ all_usableName_append immutableVars ctx Mσ _ hcond.1 : (List.append Mσ T).all _ = true) q hq
-      simp only [usableName, show needsInit ctx q = false by simp [needsInit, VarCtx.isFresh, hfind_q],
-        Bool.or_false, reusable, hfind_q, Bool.and_eq_true, beq_iff_eq] at hq'
+      have hall : (List.append Mσ T).all (usableName immutableVars ctx) = true :=
+        hT ▸ all_usableName_append immutableVars ctx Mσ _ _ hcond.1
+      have hnotinit : needsInit ctx q = false := by simp [needsInit, VarCtx.isFresh, hfind_q]
+      have hq' := List.all_eq_true.mp hall q hq
+      simp only [usableName, hnotinit, Bool.or_false, reusable, hfind_q, Bool.and_eq_true,
+        beq_iff_eq] at hq'
       exact List.mem_append_left _
         ((mem_writable_keys_iff ctx immutableVars q.1).mpr ⟨Map.find?_mem_keys ctx hfind_q, hq'.2⟩)
   · -- `insertAllCtx` only adds the `init`ed names, which are exactly the group's `definedVars`.
@@ -335,7 +341,7 @@ mutual
     statement modifies is a key of the threaded input context or is defined by the
     statement; and every output-context key is likewise accounted for.
 
-    Leaves: `cmd` reduces to `genCmd_mutableVars`; `exit`/`funcDecl`/`typeDecl`
+    Leaves: `cmd` reduces to `genCmd_mutableVars`; `exit`/`typeDecl`
     modify and define nothing (and leave `ctx` unchanged). Nesting constructors
     (`block`, `ite`, `loop`) have output scope `= ctx` and delegate both
     `modifiedVars` and `definedVars _ false` to the recursively-generated body, so
@@ -355,20 +361,20 @@ theorem genStmt_mutableVars
       k ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) := by
   revert r; show IsSoundFor _ _
   cases n <;> rw [IsSoundFor.iff_obs, genStmt] <;>
-  walk [fun ctx d => IsSoundFor.obs (genCmd_mutableVars octx pctx tvars immutableVars ctx d),
+  walk [fun ctx d kt => IsSoundFor.obs
+          (genCmd_mutableVars octx pctx tvars immutableVars ctx d (avoid := []) (kt := kt)),
         fun d => IsSoundFor.obs (genCallStmt_mutableVars octx pctx tvars immutableVars procs C ctx d),
         fun l C ctx len => IsSoundFor.obs
           (genStmtChain_mutableVars octx pctx tvars immutableVars procs l C ctx _ len),
-        IsSoundFor.obs (P := fun _ => True) (g := genFunction _ _ _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genTypeConstructor _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genFreshLabel _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genLExpr _ _ _ _ _ _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genCondOrNondet _ _ _ _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genOptMeasure _ _ _ _ _) fun _ _ => trivial,
-        IsSoundFor.obs (P := fun _ => True) (g := genInvariants _ _ _ _ _) fun _ _ => trivial]
+        (true_law (genTypeConstructor _)).obs,
+        (true_law (genFreshLabel _)).obs,
+        (true_law (genLExpr _ _ _ _ _ _ _)).obs,
+        (true_law (genCondOrNondet _ _ _ _ _)).obs,
+        (true_law (genOptMeasure _ _ _ _ _)).obs,
+        (true_law (genInvariants _ _ _ _ _)).obs]
   all_goals (try simp only [block_modifiedVars_singleton, block_definedVars_singleton,
     HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars, Stmt.definedVars,
-    Command.modifiedVars, Command.definedVars, if_false, Bool.false_eq_true, List.not_mem_nil] at *)
+    CmdExt.modifiedVars, CmdExt.definedVars, ite_false, Bool.false_eq_true, List.not_mem_nil] at *)
     <;> grind
 termination_by (n, 0, 0)
 

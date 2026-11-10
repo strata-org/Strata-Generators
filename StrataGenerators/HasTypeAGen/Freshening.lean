@@ -277,7 +277,7 @@ theorem find?_ofList_reverse {α β} [BEq α] [LawfulBEq α] [Hashable α] [Lawf
     · subst hk; simp
     · have h1 : (k == x) = false := by simp [hk]
       have h2 : (x == k) = false := by simp [Ne.symm hk]
-      simp only [h1, Bool.false_eq_true, if_false, h2, ih]
+      simp only [h1, Bool.false_eq_true, ite_false, h2, ih]
 
 /-- `HMaps.find?` on a `substScope` gives the same result as `List.lookup` on the association list
     that built the scope. `substScope` reverses the list before it calls `HMap.ofList`, so that the

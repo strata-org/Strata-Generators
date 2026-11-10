@@ -58,23 +58,21 @@ are the names a profile is written in. An `example` in this module pins each blo
 reorders a branch in the generator, the build breaks rather than the profile silently moving to the
 wrong branch. -/
 
-/-! Flat indices of `genStmt`'s two sites. The `size = 0` leaf list holds 0 to 4, and the
-`size + 1` list holds 5 to 13. -/
+/-! Flat indices of `genStmt`'s two sites. The `size = 0` leaf list holds 0 to 3, and the
+`size + 1` list holds 4 to 11. -/
 namespace StmtIdx
 def cmd0      : Nat := 0
 def exit0     : Nat := 1
-def funcDecl0 : Nat := 2
-def typeDecl0 : Nat := 3
-def call0     : Nat := 4
-def cmd       : Nat := 5
-def exit      : Nat := 6
-def funcDecl  : Nat := 7
-def typeDecl  : Nat := 8
-def call      : Nat := 9
-def block     : Nat := 10
-def iteDet    : Nat := 11
-def iteNondet : Nat := 12
-def loop      : Nat := 13
+def typeDecl0 : Nat := 2
+def call0     : Nat := 3
+def cmd       : Nat := 4
+def exit      : Nat := 5
+def typeDecl  : Nat := 6
+def call      : Nat := 7
+def block     : Nat := 8
+def iteDet    : Nat := 9
+def iteNondet : Nat := 10
+def loop      : Nat := 11
 end StmtIdx
 
 /-! Flat indices of `genCmd`'s two sites. The writable-context list holds 0 to 6, and it is the only
@@ -166,7 +164,7 @@ end ExprIdx
 
 /-! ### Statements -/
 
-/-- The shipping statement distribution. The leaves stand at 4 to 1 to 1 to 1 to 1, and `block`,
+/-- The shipping statement distribution. The leaves stand at 4 to 1 to 1 to 1, and `block`,
 `ite`, `ite-nondet` and `loop` stand at 2 to 2 to 1 to 2. -/
 def stmtDefault : Tuning := genStmt._mutual.defaults
 
@@ -186,38 +184,31 @@ about a loop's *contents* rather than its nesting. -/
 def stmtLoopWide : Tuning :=
   withWeights stmtDefault [(StmtIdx.loop, 16), (StmtIdx.cmd, 12), (StmtIdx.cmd0, 12)]
 
-/-- **`funcDecl`-heavy** (`stmt: typechecker accepts generated statements`). The honest gap between
-the spec and the algorithm is a `funcDecl` statement, so this profile makes the counterexample the
-common case. It is also the profile for the declared-function paths of PrecondElim. -/
-def stmtFuncDeclHeavy : Tuning :=
-  withWeights stmtDefault [(StmtIdx.funcDecl, 12), (StmtIdx.funcDecl0, 12)]
-
 /-- **Call-heavy** (`proc: FilterProcedures …`, and every call-graph field). A `call` needs a callee,
 so this profile bites only when the generator has a non-empty `ProcSigCtx`. The procedure-list
 harness is the one that supplies one. -/
 def stmtCallHeavy : Tuning :=
   withWeights stmtDefault [(StmtIdx.call, 12), (StmtIdx.call0, 12)]
 
-/-- **Everything at once** for the statement suite. Loops are common, and the three leaves that
-Kleene does not support and `call` are all well represented. One run then exercises the `LoopElim`,
+/-- **Everything at once** for the statement suite. Loops are common, and `exit`, which Kleene
+does not support, and `call` are both well represented. One run then exercises the `LoopElim`,
 `DetToKleene` and typechecker properties together. The price is that it is optimal for none of
 them. -/
 def stmtMixed : Tuning :=
   withWeights stmtDefault
-    [(StmtIdx.loop, 8), (StmtIdx.funcDecl, 3), (StmtIdx.exit, 6), (StmtIdx.call, 3),
+    [(StmtIdx.loop, 8), (StmtIdx.exit, 6), (StmtIdx.call, 3),
      (StmtIdx.block, 4),
-     (StmtIdx.funcDecl0, 3), (StmtIdx.exit0, 6), (StmtIdx.call0, 3)]
+     (StmtIdx.exit0, 6), (StmtIdx.call0, 3)]
 
 /-! ### Procedures: the same statement knobs, aimed at the three transform passes -/
 
 /-- **FilterProcedures.** Call-graph edges are the whole point, so `call` dominates. -/
 def procCallHeavy : Tuning := stmtCallHeavy
 
-/-- **PrecondElim.** A `funcDecl` carries a precondition into the program, and a `call` creates the
-call site to assert at. This profile raises both. -/
+/-- **PrecondElim.** A `call` creates the call site at which the pass asserts the callee's
+precondition, so this profile raises `call`. -/
 def procPrecondHeavy : Tuning :=
-  withWeights stmtDefault
-    [(StmtIdx.funcDecl, 10), (StmtIdx.call, 6), (StmtIdx.funcDecl0, 10), (StmtIdx.call0, 6)]
+  withWeights stmtDefault [(StmtIdx.call, 6), (StmtIdx.call0, 6)]
 
 /-! **There is deliberately no ANFEncoder profile**, and the reason is about the pass rather than
 about the weights. `Core.ANFEncoder` eliminates common subexpressions. It does not flatten
@@ -396,54 +387,23 @@ def genProgramStmtsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List T
     G (List Statement × LContext CoreLParams × VarCtx) :=
   genStmtChainT θ octx tvars [] [] [] (LContext.default) [] pctx size len
 
-/-- `genCmds` with every branch weight read from `θ`. `genCmds` is a plain fold over `genCmd` and has
-no `frequency` site of its own, so this module writes the tuned chain out rather than let the
-attribute emit it. -/
+/-- `genCmds` with every branch weight read from `θ`: the fold `genCmdsWith` over the tuned
+`genCmd`. -/
 def genCmdsT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) :
-    Nat → G (List (Cmd Expression) × VarCtx)
-  | 0 => pure ([], ctx)
-  | n + 1 => do
-    let ⟨cmd, ctx'⟩ ← genCmd.tuned θ octx tvars immutableVars ctx depth []
-    let (rest, ctx'') ← genCmdsT θ octx tvars immutableVars ctx' depth n
-    pure (cmd :: rest, ctx'')
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (n : Nat)
+    (avoid : List String := []) (kt : Lambda.KnownTypes := Core.KnownTypes) :
+    G (List (Cmd Expression) × VarCtx) :=
+  genCmdsWith (genCmd.tuned θ octx tvars immutableVars · depth [] avoid kt) ctx n
 
-/-- `genProcedure` with the statement weights of its *body* read from `θ`. The body is
-`StrataGenerators.Procedure.genProcedure`'s body, and the `genStmtChainT` call is the only
-difference. -/
+/-- `genProcedure` with the statement weights of its *body* read from `θ`: `genProcedureWith` over
+`genStmtChainT θ`. -/
 def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
-    (pctx : PolyOpCtx := []) : G Procedure := do
-  let name ← genIdentName
-  let typeArgs ← genTypeArgs size
-  let inout ← genInputs typeArgs size
-  let rawInputOnly ← genInputs typeArgs size
-  let inputOnly := StrataGenerators.Procedure.disjointInputs rawInputOnly inout
-  let rawOutputOnly ← genInputs typeArgs size
-  let outputOnly :=
-    StrataGenerators.Procedure.disjointInputs rawOutputOnly (inout ++ inputOnly)
-  let inputs := inout ++ inputOnly
-  let outputs := inout ++ outputOnly
-  let preconditions ←
-    StrataGenerators.Procedure.genChecks (StrataGenerators.Procedure.sigFctx inputs)
-      octx typeArgs size pctx
-  let postconditions ←
-    StrataGenerators.Procedure.genChecks
-      (StrataGenerators.Procedure.sigFctx
-        (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout))
-      octx typeArgs size pctx
-  let (body, _, _) ← genStmtChainT θ octx typeArgs
-    (ListMap.keys inputs ++ ListMap.keys (StrataGenerators.Procedure.oldVars inout)) procs []
-    ({ C with rigidTypeVars := typeArgs })
-    (inputs ++ outputs ++ StrataGenerators.Procedure.oldVars inout) pctx size len
-  pure {
-    header := {
-      name := ⟨name, ()⟩, typeArgs := typeArgs, inputs := inputs, outputs := outputs,
-      noFilter := false
-    },
-    spec := { preconditions := preconditions, postconditions := postconditions },
-    body := .structured body
-  }
+    (pctx : PolyOpCtx := []) : G Procedure :=
+  StrataGenerators.Procedure.genProcedureWith
+    (fun tvars immutableVars C' ctx =>
+      genStmtChainT θ octx tvars immutableVars procs [] C' ctx pctx size len)
+    octx C size pctx
 
 /-- `genIndirPoly` with the weights of the generator it falls back to read from `θ`. The body is
 `StrataGenerators.genIndirPoly`'s body, with both `genLExprBase`-valued defaults tuned. -/
@@ -459,9 +419,8 @@ on `depth`.
 
 This is what makes an expression weight reach the generator that the `expr:` properties draw from.
 `genLExpr` calls `genLExprBase` *by name*, and so does `genIndirPoly`, so `@[tunable]` cannot thread
-`θ` across that boundary. This wrapper therefore restates `genLExpr`'s body over the tuned callee, as
-`genProcedureT` does for `genProcedure`. `genLExprT_defaults` below keeps the restatement from
-drifting.
+`θ` across that boundary. This wrapper therefore restates `genLExpr`'s body over the tuned callee.
+`genLExprT_defaults` below keeps the restatement from drifting.
 
 `genLExpr`'s own root `frequency` keeps its literal weights. That is the 1 to 9 split between the base
 rules and an operator application. `θ` addresses `genLExprBase`'s 84 branches, and a second
@@ -493,8 +452,8 @@ def genLExprT [_root_.Gen G] (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
 -- ══════════════════════════════════════════════════════════════════════════
 
 /-! At `θ = defaults` each wrapper is the shipping generator *definitionally*, and the kernel checks
-each `Eq.refl`. `genProcedureT` and `genLExprT` restate a generator body rather than delegate to one,
-and these theorems are what keep them from drifting: a divergence in any field fails one of them.
+each `Eq.refl`. `genLExprT` restates a generator body rather than delegate to one, and these
+theorems are what keep it from drifting.
 `StrataGenerators.TuningPrototypes` states the same facts at the level of supports, for every `θ`
 rather than for the defaults alone. -/
 
@@ -524,14 +483,11 @@ unseal StrataGenerators.Stmt.genStmt StrataGenerators.Stmt.genStmtChain
 
 /-- At the shipping weights, the tuned command chain is `genCmds`, for any chain length. -/
 @[simp] theorem genCmdsT_defaults [_root_.Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth n : Nat) :
-    genCmdsT (G := G) cmdDefault octx tvars immutableVars ctx depth n
-      = genCmds octx tvars immutableVars ctx depth n := by
-  induction n generalizing ctx with
-  | zero => rfl
-  | succ n ih =>
-    simp only [cmdDefault] at ih
-    simp only [genCmdsT, genCmds, cmdDefault, genCmd.tuned_defaults, ih]
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth n : Nat) (avoid : List String)
+    (kt : Lambda.KnownTypes) :
+    genCmdsT (G := G) cmdDefault octx tvars immutableVars ctx depth n avoid kt
+      = genCmds octx tvars immutableVars ctx depth n avoid kt := by
+  simp only [genCmdsT, genCmds, cmdDefault, genCmd.tuned_defaults]
 
 /-- At the shipping weights, the tuned procedure generator is `genProcedure`. -/
 @[simp] theorem genProcedureT_defaults [_root_.Gen G] (octx : OpCtx) (procs : ProcSigCtx)
@@ -573,8 +529,8 @@ offset changes and one of these examples fails. Without them, every profile woul
 the wrong branch. -/
 
 example : genStmt._mutual.sites.size = 2 := rfl
-example : (genStmt._mutual.sites[0]!.offset, genStmt._mutual.sites[0]!.arity) = (0, 5) := rfl
-example : (genStmt._mutual.sites[1]!.offset, genStmt._mutual.sites[1]!.arity) = (5, 9) := rfl
+example : (genStmt._mutual.sites[0]!.offset, genStmt._mutual.sites[0]!.arity) = (0, 4) := rfl
+example : (genStmt._mutual.sites[1]!.offset, genStmt._mutual.sites[1]!.arity) = (4, 8) := rfl
 example : genStmt._mutual.defaults = genStmt.defaults := rfl
 example : (genCmd.sites[0]!.offset, genCmd.sites[0]!.arity) = (0, 7) := rfl
 example : (genCmd.sites[1]!.offset, genCmd.sites[1]!.arity) = (7, 5) := rfl

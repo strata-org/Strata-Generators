@@ -16,9 +16,8 @@ against the signatures of the siblings `P0` to `P{i-1}`. Therefore the propertie
 closure of the callees and for the call graph are not vacuous.
 
 Two properties state a faithful contract between the `changed` flag and a real change to the
-program, and the passes break the contract in two places. `FilterProcedures` sets
-`changed := true` even when it removes nothing. The `.funcDecl` branch of `PrecondElim`
-reports no change while it inserts a `$$wf` block.
+program. `FilterProcedures` breaks the contract: it sets `changed := true` even when it removes
+nothing.
 -/
 
 open Lambda Core Imperative
@@ -47,29 +46,29 @@ def procTransforms : List TestDecl :=
        fun gp => checkFilterAnalysisPreserving gp.procs),
       -- PrecondElim: `PrecondElimPhaseCorrect`
       ("proc: PrecondElim $wf procs are well-formed",
-       fun gp => checkPrecondGeneratedWF gp.procs),
+       fun gp => checkPrecondGeneratedWF gp.procs gp.funcs),
       ("proc: PrecondElim strips all preconditions",
-       fun gp => checkPrecondPreconditionsStripped gp.procs),
+       fun gp => checkPrecondPreconditionsStripped gp.procs gp.funcs),
       ("proc: PrecondElim preserves type/ax/distinct decls",
        fun gp => checkPrecondNonProcDeclsPreserved gp.procs),
       ("proc: PrecondElim preserves procedures (name+spec)",
        fun gp => checkPrecondProceduresPreserved gp.procs),
       ("proc: PrecondElim preserves functions (name+body+sig)",
-       fun gp => checkPrecondFunctionsPreserved gp.procs),
+       fun gp => checkPrecondFunctionsPreserved gp.procs gp.funcs),
       ("proc: PrecondElim removes no declarations",
-       fun gp => checkPrecondNoDeclsRemoved gp.procs),
+       fun gp => checkPrecondNoDeclsRemoved gp.procs gp.funcs),
       ("proc: PrecondElim preserves declaration order",
-       fun gp => checkPrecondOrderPreserved gp.procs),
+       fun gp => checkPrecondOrderPreserved gp.procs gp.funcs),
       ("proc: PrecondElim changed flag is faithful",
        fun gp => checkPrecondChangedFlagValid gp.procs),
       ("proc: PrecondElim asserts every partial call",
        fun gp => checkPrecondCallSiteAsserts gp.procs),
       ("proc: PrecondElim factory only grows",
        fun gp => checkPrecondFactoryGrows gp.procs),
-      ("proc: PrecondElim factory has every declared function",
-       fun gp => checkPrecondFactoryComplete gp.procs),
+      ("proc: PrecondElim leaves the factory unchanged",
+       fun gp => checkPrecondFactoryUnchanged gp.procs gp.funcs),
       ("proc: PrecondElim factory strips declared functions",
-       fun gp => checkPrecondDeclaredFactoryStripped gp.procs),
+       fun gp => checkPrecondDeclaredFactoryStripped gp.procs gp.funcs),
       ("proc: PrecondElim preserves call-graph WF",
        fun gp => checkPrecondAnalysisPreserving gp.procs),
       -- ANFEncoder: `ANFEncoderPhaseCorrect`

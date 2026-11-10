@@ -4,7 +4,6 @@ import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
 import StrataGenerators.ProcedureHasTypeAGen.TestSupport
 import StrataGenerators.ProgramGen.UnprovenTransforms
-import StrataGenerators.ProgramGen.LiftFuncDecls
 import StrataGenerators.AdtLaws
 import StrataGenerators.AliasResolution
 import StrataGenerators.MutualBlockShape
@@ -254,8 +253,9 @@ instance : Shrinkable GenCmdWithCtx where
 def genCmdWithCtxG [Gen G] (ctxSize : Nat) : G GenCmdWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
-  let (_, baseCtx) ← genCmds (G := G) coreMonoOps tvars [] [] depth ctxSize
-  let ⟨cmd, ctx'⟩ ← genCmd (G := G) coreMonoOps tvars [] baseCtx depth
+  let avoid := StrataGenerators.Stmt.functionNames cmdSeqCheckContext
+  let (_, baseCtx) ← genCmds (G := G) coreMonoOps tvars [] [] depth ctxSize avoid
+  let ⟨cmd, ctx'⟩ ← genCmd (G := G) coreMonoOps tvars [] baseCtx depth [] avoid
   pure ⟨cmd, baseCtx, ctx'⟩
 
 instance : Arbitrary GenCmdWithCtx where
@@ -286,6 +286,7 @@ def genCmdsWithCtxG [Gen G] (n : Nat) : G GenCmdsWithCtx := do
   let depth := 2
   let tvars : List TyIdentifier := []
   let (cmds, ctx') ← genCmds (G := G) coreMonoOps tvars [] [] depth n
+    (StrataGenerators.Stmt.functionNames cmdSeqCheckContext)
   pure ⟨cmds, [], ctx'⟩
 
 instance : Arbitrary GenCmdsWithCtx where
@@ -326,7 +327,8 @@ instance : Shrinkable GenFunction where
     property can read the matching type map. The depth grows with the size parameter of the harness, as it
     does in `genCmdWithCtxG`. -/
 def genFunctionG [Gen G] (fctx : FVarCtx) (depth : Nat) : G GenFunction := do
-  let func ← genFunction (G := G) fctx coreMonoOps depth
+  let func ← genFunction (G := G) fctx coreMonoOps depth []
+    (fun s => (StrataGenerators.Stmt.functionNames funcCheckContext).contains s)
   pure ⟨func, fctx⟩
 
 instance : Arbitrary GenFunction where
@@ -346,9 +348,7 @@ structure ClosedGenFunction where
 
 instance : Repr ClosedGenFunction where
   reprPrec gf _ :=
-    -- Name the body and the measure. The printer omits an absent body and an absent measure, and that
-    -- difference is exactly what the gap in completeness depends on. That gap is a function with a measure
-    -- and no body, so a counterexample must show the difference.
+    -- Name the body and the measure, which the printer omits when absent.
     let tag := s!"[body={gf.func.body.isSome}, measure={gf.func.measure.isSome}]"
     s!"{tag}\n{formatFunc gf.func}"
 
@@ -361,7 +361,8 @@ instance : Shrinkable ClosedGenFunction where
   shrink gf := (shrinkFuncWellFormed gf.func).map fun f' => { gf with func := f' }
 
 def genClosedFunctionG [Gen G] (depth : Nat) : G ClosedGenFunction := do
-  let func ← genFunction (G := G) [] coreMonoOps depth
+  let func ← genFunction (G := G) [] coreMonoOps depth []
+    (fun s => (StrataGenerators.Stmt.functionNames funcCheckContext).contains s)
   pure ⟨func⟩
 
 instance : Arbitrary ClosedGenFunction where
@@ -448,14 +449,8 @@ structure GenStmts where
   stmts : List Statement
 
 instance : Repr GenStmts where
-  -- The rendering uses the formatter of Strata, which gives real Core concrete syntax. It appends a summary
-  -- of each `funcDecl` shape, because the formatter cannot write a `funcDecl` statement with no body, and it
-  -- puts a dummy body there instead. A `funcDecl` with a measure and no body is exactly the counterexample
-  -- to the completeness of the typechecker, so the summary records the true shape.
-  reprPrec gs _ :=
-    let shapes := funcDeclShapesList gs.stmts
-    let suffix := if shapes.isEmpty then "" else s!"\n  -- {" ".intercalate shapes}"
-    formatStmts gs.stmts ++ suffix
+  -- The rendering uses the formatter of Strata, which gives real Core concrete syntax.
+  reprPrec gs _ := formatStmts gs.stmts
 
 -- This instance shrinks the statement list structurally. It can drop a statement, replace one statement by
 -- a smaller one, or put the body of a compound statement in place of that statement. It keeps only a
@@ -525,15 +520,18 @@ open StrataGenerators.Procedure.TestSupport
 /-- A generated list of well-typed procedures, for an assembly into a program. The wrapper renames each
     procedure to `P0`, `P1` and so on, so that no two names collide. The generator draws each name on its
     own, so two procedures could otherwise share a name, and a check that reads a name would then give the
-    wrong answer. -/
+    wrong answer. `funcs` holds top-level functions, named `F0`, `F1` and so on, which the PrecondElim
+    properties place in front of the procedures through `mkMixedProgram`. -/
 structure GenProcs where
   procs : List Core.Procedure
+  funcs : List Core.Function := []
 
 instance : Repr GenProcs where
   -- The rendering uses the formatter of Strata, which gives real Core concrete syntax. Therefore a
   -- counterexample shows exactly the program that the pass received.
   reprPrec gp _ :=
-    let prog : Core.Program := { decls := gp.procs.map (Core.Decl.proc · .empty) }
+    let prog : Core.Program :=
+      { decls := gp.funcs.map (Core.Decl.func · .empty) ++ gp.procs.map (Core.Decl.proc · .empty) }
     (Core.formatProgram prog).pretty
 
 -- This instance uses the shared shrinker `shrinkProcsList`. That shrinker can drop a whole procedure, and
@@ -543,7 +541,20 @@ instance : Repr GenProcs where
 -- *well-typed* program. That condition matters, because each of these properties has content on well-typed
 -- input only. The shrinker holds each header fixed, so each procedure keeps its signature.
 instance : Shrinkable GenProcs where
-  shrink gp := (shrinkProcsList gp.procs).map (⟨·⟩)
+  shrink gp := (if gp.funcs.isEmpty then [] else [{ gp with funcs := [] }]) ++
+    (shrinkProcsList gp.procs).map ({ gp with procs := · })
+
+/-- Up to two top-level functions `F0`, `F1` over the partial operators, so a precondition can call
+    one and PrecondElim emits a `$$wf` procedure for it. No formal is named after a function of the
+    factory, a measure is dropped since the checker allows one only on a recursive function, and a
+    function the checker rejects is left out. -/
+def genProcsFuncs [Gen G] (depth : Nat) : G (List Core.Function) := do
+  let nFuncs ← chooseNat 0 2
+  let fs ← (List.range nFuncs).mapM fun i => do
+    let f ← genFunction (G := G) [] corePartialOps depth []
+      (fun x => (StrataGenerators.Stmt.functionNames stmtCheckContext).contains x)
+    pure { f with name := ⟨s!"F{i}", ()⟩, measure := none }
+  pure (fs.filter checkFunctionTypeChecks)
 
 -- The nesting `size` of one procedure stays at 2 or below, the length of a body at 3 or below, and the
 -- number of the procedures between 2 and 4. The properties about a transform need no large program. As in
@@ -575,7 +586,7 @@ def genProcsG [Gen G] (n size len : Nat)
       let sigs := acc.2 ++ [StrataGenerators.Procedure.headerProcSig s!"P{i}" proc.header]
       pure (acc.1 ++ [proc], sigs))
     (([], []) : List Core.Procedure × StrataGenerators.Stmt.ProcSigCtx)
-  pure ⟨relabelProcs ps⟩
+  pure { procs := relabelProcs ps, funcs := ← genProcsFuncs size }
 
 instance : Arbitrary GenProcs where
   arbitrary := retryGen 8000 (Plausible.Gen.sized fun s =>
@@ -600,12 +611,12 @@ instance : Generable GenProcs where
 --
 -- Most of the suite quantifies over this type. That includes the whole-program checks and the checks about a
 -- call to a derived function in `StrataTests/Program.lean`, the properties about a transform with no proof in
--- `StrataTests/Transforms.lean`, the properties about the lifting of a lambda in `StrataTests/Lift.lean`, the
+-- `StrataTests/Transforms.lean`, the
 -- properties about an alias in `StrataTests/Alias.lean`, and the property about the coverage of the printer in
 -- `StrataTests/Printer.lean`. That last property needs a whole `Program`, because the constructs that the
 -- printer cannot write are spread across a type declaration, which can hold a bitvector width in a signature,
--- an expression, which can hold an operator between a bitvector and an integer, and a statement, which can be
--- a `funcDecl` with no body. `genProgram` reaches each of the three.
+-- and an expression, which can hold an operator between a bitvector and an integer. `genProgram` reaches
+-- both.
 --
 -- This generator is also the only place where a call to a derived function of a datatype is visible from end
 -- to end. A block of datatypes extends the vocabulary of the operators, and each *later* function and
@@ -623,18 +634,18 @@ instance : Repr GenProgram where
   -- The rendering uses the formatter of Strata, which gives real Core concrete syntax, so a counterexample
   -- shows exactly the program under test. It then appends the shared `programStatusNote`. That note matters,
   -- because the shrinker cannot minimize a program that the typechecker rejects. The oracle of the shrinker
-  -- *is* that typechecker. Therefore the note names the gap that caused the rejection, and a reader does not
-  -- have to find it in a program of the full size. The note gives the message of the checker itself when the
-  -- rejection matches no known gap. The renderer of the Tyche panel uses the same function, so the two views
-  -- agree.
+  -- *is* that typechecker. Therefore the note names the expected cause of the rejection, or gives
+  -- the checker's message for an unexpected one. The renderer of the Tyche panel uses the same
+  -- function, so the two views agree.
   reprPrec gp _ :=
     (Core.formatProgram gp.prog).pretty ++ programStatusNote gp.prog
 
--- This instance uses the whole-program shrinker `shrinkProgram`. That shrinker can drop a declaration, keep a
--- prefix of the declarations, remove each declaration that holds a known gap at one time, or reduce one
--- declaration in place, through the shrinker for a procedure, a function, a statement or an expression.
--- `Program.typeCheck` of Strata checks each candidate, so a reported counterexample is always a well-typed
--- program. The shrinker keeps the order of the declarations, and it renames nothing.
+-- This instance uses the whole-program shrinker `shrinkProgram`. That shrinker can drop a
+-- declaration, keep a prefix of the declarations, remove every declaration that `declHasGap` flags
+-- at once, or reduce one declaration in place, through the shrinker for a procedure, a function, a
+-- statement or an expression. `Program.typeCheck` of Strata checks each candidate, so a reported
+-- counterexample is always a well-typed program. The shrinker keeps the order of the declarations,
+-- and it renames nothing.
 instance : Shrinkable GenProgram where
   shrink gp := (shrinkProgram gp.prog).map (⟨·⟩)
 
@@ -665,11 +676,11 @@ instance : Generable GenProgram where
 
 -- ── The diagnostic for the whole-program shrinker ────────────────────
 --
--- No whole-program property shows how well the *shrinker* works. The one property that reliably reports a
--- counterexample does so on a program that holds a known gap, and no shrinker with this oracle can minimize
--- such a program. The one property whose counterexample does shrink reports one rarely, so most runs never
--- see it. On a run that reaches neither, nothing exercises the `Shrinkable GenProgram` instance, and a
--- change to it would stay invisible.
+-- No whole-program property shows how well the *shrinker* works. The one property that reliably
+-- reports a counterexample does so on a program that the checker rejects, and no shrinker with this
+-- oracle can minimize such a program. The one property whose counterexample does shrink reports one
+-- rarely, so most runs never see it. On a run that reaches neither, nothing exercises the
+-- `Shrinkable GenProgram` instance, and a change to it would stay invisible.
 --
 -- This diagnostic closes that hole. It minimizes each sampled program against a property that always fails,
 -- and it reports how far the shrinker reduced the program, together with the two invariants that matter. It
@@ -1041,9 +1052,10 @@ def specialCharProbeDiagnostic (numTrials maxSize : Nat) : IO (Nat × Nat) := do
     *constructs* that cause a message, over a whole sample, and a view of one counterexample cannot give
     that.
 
-    The whole-program shrinker does minimize the witness of the gated property, and only when the draw type
-    checks, because its filter for a candidate is `Program.typeCheck`. On a draw that holds a known gap, the
-    harness reports the witness at its full size, and these counts are then the only guide to the cause.
+    The whole-program shrinker does minimize the witness of the gated property, and only when the
+    draw type checks, because its filter for a candidate is `Program.typeCheck`. On a draw that the
+    checker rejects, the harness reports the witness at its full size, and these counts are then the
+    only guide to the cause.
 
     The result is the number of the programs for which the printer wrote a message, the number of the
     programs that the action drew, and the number that the parser reads although the printer wrote a

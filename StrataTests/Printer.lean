@@ -46,10 +46,9 @@ def printerBvWidthAgreement : TestDecl :=
     checkAllWidthsAgree).withEnumeratedPanel bvWidthAgreementSamples
 
 /-- No generated program causes a conversion error. The property quantifies over a whole
-    program, because the constructs that the printer cannot write occur in three places: a
-    type declaration holds a `bitvec` width in a signature, an expression holds a `Bv↔Int`
-    operator, and a statement holds a `funcDecl` without a body. Only `genProgram` reaches
-    all three places.
+    program, because the constructs that the printer cannot write occur in two places: a
+    type declaration holds a `bitvec` width in a signature, and an expression holds a `Bv↔Int`
+    operator. Only `genProgram` reaches both places.
 
     The shrinker can reduce a counterexample to this property. The oracle here is the
     printer, and it is not the type checker that the shrinker uses to keep each candidate

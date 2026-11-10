@@ -17,7 +17,7 @@ together into a `Program` generator, threading the real ambient context
 (`LContext CoreLParams`), type scope (`TContext Unit`), reserved-name set, and
 pool of referenceable type constructors across a declaration fold.
 
-Soundness (every generated program is `ProgramHasTypeA coreContext {} P`) and
+Soundness (every generated program is `ProgramWellTyped programContext [] P`) and
 completeness live in `StrataGenerators.ProgramGen.Sound` /
 `StrataGenerators.ProgramGen.Complete`.
 -/
@@ -51,26 +51,23 @@ structure GenState where
       `TySymInhab` through `.datatype` (carried by
       `Inv.dtPoolOk`) rather than `.external`. Grown by each datatype step. -/
   dtCons : TyCons
-  /-- Monomorphic operator context for generated expressions (axiom bodies,
-      function bodies, procedure contracts/bodies).
+  /-- Monomorphic operator context for generated expressions (axiom bodies, function bodies,
+      procedure contracts/bodies).
 
-      Seeded with Core's primitives (`coreMonoOps`) and grown from **two** sources,
-      which between them are what let a later body call anything the program
-      declared earlier:
+      Seeded with Core's primitives (`coreMonoOps`) and grown from **two** sources, which between
+      them are what let a later body call anything the program declared earlier:
 
       * Each **step for a datatype** adds the derived functions of the block that the step declares, at their
         ground types. Those functions are the constructors, the testers, and the safe and unsafe accessors of a
         field, which `adtDerivedOps` gives.
-      * each **monomorphic function declaration** (`genDeclFunction`), so a body
-        generated later may call a function the program declares. Without it a
+      * each **monomorphic function declaration** (`genDeclFunction`, `genDeclRecFuncBlock`), so
+        a body generated later may call a function the program declares. Without it a
         program declared functions none of its own bodies could name, and
         `FunctionInlining` ran as the identity on every draw.
 
-      Soundness is *indifferent* to this list: under the annotated spec an `.op`
-      node takes its type from its own annotation, and `genLExpr_sound` quantifies over an arbitrary operator
-      context. No field of `Inv` names this field, and that is why it needs no invariant. Therefore growth of
-      this field widens the support and changes no obligation of a proof. The field `procs` differs, because its
-      threading needs a field of the invariant. -/
+      Expression well-typedness checks every operator annotation against the function of `C` of its
+      name, so every operator here has a registered, well-kinded type that instantiates that
+      function's signature (`Inv.octxWK`, `Inv.exprCtx`). -/
   octx : OpCtx
   /-- The context of the polymorphic operators, which the `IndirPoly` rule uses. It grows from the same two
       sources as `octx`. Each step for a datatype adds the derived functions of the block under their full type
@@ -80,8 +77,8 @@ structure GenState where
       also registers here, and not in `octx`, so a later body can call each declared function, and not the
       monomorphic ones only.
 
-      Same soundness remark as `octx`: arbitrary values are sound, because
-      `genLExpr_sound` quantifies over `pctx` and `Inv` never mentions it. -/
+      Every scheme here is the registered, closed scheme of a function of `C` (`Inv.exprCtx`,
+      `Inv.polysClosed`). -/
   pctx : PolyOpCtx
   /-- The polymorphic schemes that a datatype derives, and nothing else. This field is `pctx` without the
       primitives of Core. The generator gives this field, and not `pctx`, to the body of a *function* and of a
@@ -94,26 +91,28 @@ structure GenState where
       which gives a body exactly the reach that it needs. That reach is the constructors, the testers and the
       accessors of a datatype that an earlier declaration gives, at a small part of the cost.
 
-      Soundness does not read this field, as it does not read `octx` and `pctx`. -/
+      It meets the same conditions as `pctx`. -/
   derivedPctx : PolyOpCtx
-  /-- The procedures that a declaration gives *so far*, as callable signatures. The fold gives this field to
-      `genProcedure`, so that a generated body can `call` one of them. That is what puts a real call between two
-      procedures into the emitted program.
+  /-- The procedures that a declaration gives *so far*, as callable signatures. The fold gives this
+      field to `genProcedure`, so that a generated body can `call` one of them. That is what puts a
+      real call between two procedures into the emitted program.
 
-      Unlike `octx`/`pctx`, this is **not** soundness-neutral:
-      `genProcedure_sound` needs `ProcSigCorresponds procs P`, i.e. every entry must
-      resolve in the *enclosing* program. The fold cannot check that condition against a program that it has
-      not finished, so the field `Inv.procsResolve` of the invariant carries the obligation, and a theorem
-      discharges it at the top level. Read `ProgramGen.ProcSigThread`. -/
+      A body that calls a procedure is well typed only when every entry here resolves in the
+      *enclosing* program. The fold cannot check that against a program it has not finished, so the
+      soundness of each step assumes it, and the finished program meets it. -/
   procs : StrataGenerators.Stmt.ProcSigCtx
   deriving Inhabited
 
-/-- The initial fold state: the Strata Core reference context `coreContext`, an
-    empty type scope, the reserved seed (`initialReserved` over the default type
-    constructors, plus every name Core already knows so generated names dodge
-    them), and the default pool of referenceable type constructors. -/
+/-- The context a program is generated and typed in: Core's known types and the functions of
+    `Core.Factory`, which the operators of generated expressions are drawn from. -/
+def programContext : LContext CoreLParams :=
+  { coreContext with functions := Core.Factory }
+
+/-- The initial fold state: the context `programContext`, an empty type scope, the reserved seed
+    (`initialReserved` over the default type constructors, plus every name Core already knows so
+    generated names dodge them), and the default pool of referenceable type constructors. -/
 def initState : GenState :=
-  { C := coreContext
+  { C := programContext
     Γ := {}
     reserved := initialReserved defaultBaseTypes defaultTyCons Core.KnownTypes.keywords
     baseTypes := defaultBaseTypes
@@ -140,8 +139,11 @@ structure Bounds where
   exprDepth : Nat := 3
   /-- Depth budget for function bodies. -/
   funcDepth : Nat := 3
+  /-- Max number of functions in a block of mutually recursive functions. A block has at least
+      one, whatever this bound. -/
+  maxRecFuncs : Nat := 2
   /-- Max number of elements (hence declared constants) in a `distinct`
-      assertion. -/
+      assertion. A `distinct` draws at least two, whatever this bound. -/
   maxDistinctVars : Nat := 3
   /-- Datatype-block knobs (forwarded to `genMutuallyRecursiveDatatypes`). -/
   maxExtraDatatypes : Nat := 1
@@ -192,17 +194,27 @@ def genDeclAbstract [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   | .ok C' => pure ([decl], s.addAbstract name arity C')
   | .error _ => pure ([], s)
 
+/-- Whether every type argument of an alias and every type-constructor name in its body is a name
+    the checker accepts as a user name (`isAllowedName`), as `DeclHasType'.type_syn` asks. -/
+def aliasNamesAllowed (ts : TypeSynonym) : Bool :=
+  ts.typeArgs.all isAllowedName && mtyAllTyConsNames isAllowedName ts.type
+
 /-- Generate a type-alias declaration and emit it, extending the type scope with
     the alias (its body is stored verbatim; `mkAliasDecl` keeps it alias-free by
-    deriving `typeArgs` from the body). -/
+    deriving `typeArgs` from the body). A draw whose type arguments or body constructors use a
+    reserved prefix (`aliasNamesAllowed`) emits nothing. -/
 def genDeclAlias [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let (decl, name) ← genAlias s.baseTypes s.tyCons s.reserved b.maxAliasTyParams b.tySize
-  -- Extend Γ with the alias matching what `DeclHasType'.type_syn` records.
-  let Γ' := match decl with
-    | .type (.syn ts) _ =>
-      { s.Γ with aliases := { typeArgs := ts.typeArgs, name := ts.name, type := ts.type } :: s.Γ.aliases }
-    | _ => s.Γ
-  pure ([decl], { s with Γ := Γ', reserved := name :: s.reserved })
+  match decl with
+  | .type (.syn ts) _ =>
+    if aliasNamesAllowed ts then
+      -- Extend Γ with the alias matching what `DeclHasType'.type_syn` records.
+      pure ([decl], { s with
+        Γ := { s.Γ with aliases :=
+          { typeArgs := ts.typeArgs, name := ts.name, type := ts.type } :: s.Γ.aliases }
+        reserved := name :: s.reserved })
+    else pure ([], s)
+  | _ => pure ([], s)
 
 /-- Generate an axiom declaration (Bool expression) and emit it. Context/scope
     unchanged. -/
@@ -235,15 +247,20 @@ def addConstants (C : LContext CoreLParams) (τ : LMonoTy) :
     declared earlier in the program.
 
     This step grows `C` (by the constants' factory entries) and reserves
-    `numVars + 1` names; `Γ` and the type vocabulary are unchanged. -/
+    `numVars + 1` names; `Γ` and the type vocabulary are unchanged. It emits nothing when fewer than
+    two constants are drawn or when the element type names a constructor with a reserved prefix,
+    since `DeclHasType'.distinct` asks for two elements and each constant's signature must use
+    allowed constructor names. -/
 def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let (name, τ, constNames) ←
     genDistinctAssertion s.baseTypes s.tyCons s.reserved b.maxDistinctVars b.tySize
-  match addConstants s.C τ constNames with
-  | some (C', constDecls) =>
-    pure (constDecls ++ [mkDistinctDecl name (distinctElems τ constNames)],
-          { s with C := C', reserved := constNames ++ name :: s.reserved })
-  | none => pure ([], s)
+  if decide (2 ≤ constNames.length) && mtyAllTyConsNames isAllowedName τ then
+    match addConstants s.C τ constNames with
+    | some (C', constDecls) =>
+      pure (constDecls ++ [mkDistinctDecl name (distinctElems τ constNames)],
+            { s with C := C', reserved := constNames ++ name :: s.reserved })
+    | none => pure ([], s)
+  else pure ([], s)
 
 /-- Generate a datatype block and, if `addMutualBlock` accepts it, emit it and
     grow the context. The block references the *threaded* pool
@@ -257,7 +274,8 @@ def genDeclDistinct [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     the fold invariant contains every name the program has declared so far, *and*
     every type name `C` knows), so the block's names avoid both `C`'s existing
     types (→ `MutualADTWF`) and every other declaration's name (→
-    `getNames.Nodup`). -/
+    `getNames.Nodup`). A block with a datatype name that the checker does not accept as a user
+    name (`isAllowedName`) or that is a local type name (`isLocalTypeName`) emits nothing. -/
 def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   -- The pool of the applied constructors is the external pool *and* the pool of the datatypes that an earlier
   -- declaration gives. The generator draws such a datatype exactly as it draws each other applied constructor,
@@ -271,6 +289,7 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   -- spec's `DeclHasType'.type_data` fixes), rather than the shadowing `ToFormat
   -- Unit` instances the sub-generators bring into scope, so a gated `= .ok C'`
   -- matches the spec constructor with no instance-diamond bridge in the proof.
+  if block.all (fun d => isAllowedName d.name && !StrataGenerators.Stmt.isLocalTypeName d.name) then
   match @LContext.addMutualBlock CoreLParams _ instInhabitedPUnit instInhabitedPUnit
       instToFormatIDMetaCoreLParams s.C block with
   | .ok C' =>
@@ -296,27 +315,13 @@ def genDeclDatatype [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
                    derivedPctx :=
                      adtDerivedPolyOps block b.derivedFamilies ++ s.derivedPctx })
   | .error _ => pure ([], s)
+  else pure ([], s)
 
 /-! ### The generator emits no block that names an earlier *alias*
 
 `genDeclDatatype` draws its block over a pool of type *constructors*, which
 never contains an alias name: `genDeclAlias` extends only `Γ.aliases` and
-`reserved`, never `baseTypes`/`tyCons`/`dtCons` (the invariant recorded by
-`Inv.aliasPoolDisjoint`). So no generated block mentions an alias.
-
-A step that *did* draw over the alias names and then de-aliased with the checker's
-own `MutualDatatype.resolveAliases` was prototyped and **removed**, because it
-could not be proved sound: generator soundness gives `MutualADTWF s.C block₀` for
-the block that it *draws*, and `DeclHasType'.type_data` needs it for the block that the context *stores*,
-which is the block after the resolution of the aliases. `MutualADTWF` does **not** survive that resolution.
-An alias whose body is an arrow can move a name of the block into the domain of an arrow, and that breaks
-strict positivity.
-
-That gap is not reachable by *this* generator (`genArgTy` draws application
-arguments at `recCallsAllowed := false`, so a block name never appears inside an
-alias application's arguments), so the removed step was unproven rather than
-known-unsound. It is parked pending a question to the Strata team about whether
-positivity is meant to be checked pre- or post-resolution. -/
+`reserved`, never `baseTypes`/`tyCons`/`dtCons`. So no generated block mentions an alias. -/
 
 /-- How many times a declared function's operator entry is repeated in `octx` /
     `pctx`.
@@ -380,7 +385,31 @@ def funcPolyOpEntry (f : Function) : Option (String × LTy) :=
   if f.typeArgs.isEmpty then none
   else some (f.name.name, .forAll f.typeArgs (funcCurriedTy f))
 
-/-- Generate a function that is not recursive, and rename it to a fresh name, so that the names of the program
+/-- Replace the context by `C'`, which declares `func`, and register the operator entry of `func`
+    `declaredFuncWeight` times: in `octx` for a monomorphic function, in `pctx` for a polymorphic
+    one. -/
+def GenState.registerFunc (s : GenState) (C' : LContext CoreLParams) (func : Function) :
+    GenState :=
+  { s with
+    C := C'
+    octx := match funcOpEntry func with
+      | some entry => OpCtx.ofList (s.octx.ops ++ List.replicate declaredFuncWeight entry)
+      | none => s.octx
+    pctx := match funcPolyOpEntry func with
+      | some entry => s.pctx ++ List.replicate declaredFuncWeight entry
+      | none => s.pctx }
+
+/-- Add the functions of `fs` in order through `addFactoryFunctionWithError`, registering each
+    (`GenState.registerFunc`); `none` when an add fails. -/
+def GenState.registerFuncs (s : GenState) : List Function → Option GenState
+  | [] => some s
+  | f :: fs =>
+    match s.C.addFactoryFunctionWithError f.toLFunc with
+    | .ok C' => (s.registerFunc C' f).registerFuncs fs
+    | .error _ => none
+
+/-- Generate a function, make it non-recursive with no measure, as a function declaration must be,
+    and rename it to a fresh name, so that the names of the program
     stay distinct and no change to `FuncHasType'` is necessary, because that specification puts no condition on
     a name. When `addFactoryFunctionWithError` accepts the function, emit it, grow the factory of the context,
     and register it in the vocabulary of the operators.
@@ -393,45 +422,55 @@ def funcPolyOpEntry (f : Function) : Option (String × LTy) :=
     `Factory.callOfLFunc`) ran as the identity. See the `FunctionInlining` notes in
     `StrataGenerators/ProgramGen/UnprovenTransforms.lean`.
 
-    This is **soundness-neutral**, which is what makes it a one-line change rather
-    than a proof effort: under the annotated spec an `.op` node is typed from its own
-    annotation, so `genLExpr_sound` quantifies over an arbitrary `octx` and the
-    `Inv` invariant never mentions the field. Seeding it widens the support without
-    touching any obligation. Contrast `procs`, whose threading *did* need a new
-    invariant field (`Inv.procsResolve`) because `genProcedure_sound` requires every
-    entry to resolve in the enclosing program.
+    The registered entry is the signature of the function that the grown context declares under
+    that name.
 
     Registration goes to `octx` for a monomorphic function and to `pctx` for a
     polymorphic one, so **every** declared function becomes callable rather than only
     the monomorphic minority (measured: 44 of 158 declared functions are
-    monomorphic, so the `pctx` half covers the other 114). Both are registered only
-    on the `.ok` branch: a function the context rejects is not emitted, so recording
-    it would offer a call target the program does not declare. -/
+    monomorphic, so the `pctx` half covers the other 114). -/
 def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
+  -- No formal is named after a function of `s.C`.
   let func₀ ← genFunction [] s.octx b.funcDepth s.derivedPctx
-  let name ← DatatypeGen.genFreshName s.reserved
-  let func := { func₀ with name := ⟨name, ()⟩ }
-  match s.C.addFactoryFunctionWithError func.toLFunc with
-  | .ok C' =>
-    let octx' := match funcOpEntry func with
-      | some entry => OpCtx.ofList (s.octx.ops ++ List.replicate declaredFuncWeight entry)
-      | none => s.octx
-    let pctx' := match funcPolyOpEntry func with
-      | some entry => s.pctx ++ List.replicate declaredFuncWeight entry
-      | none => s.pctx
-    pure ([.func func .empty],
-          { s with C := C', reserved := name :: s.reserved,
-                   octx := octx', pctx := pctx' })
-  | .error _ => pure ([], s)
+    (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons
+  let name ← genDeclName s.reserved
+  let func := { func₀ with name := ⟨name, ()⟩, isRecursive := false, measure := none }
+  match s.registerFuncs [func] with
+  | some s' => pure ([.func func .empty], { s' with reserved := name :: s.reserved })
+  | none => pure ([], s)
+
+/-- `f` without its `inline` attributes, which a member of a recursive block may not carry. -/
+def dropInline (f : Function) : Function :=
+  { f with attr := f.attr.filter (fun a => decide (a ≠ .inline)) }
+
+/-- Generate a block of between one and `maxRecFuncs` mutually recursive functions. Each member has
+    a fresh name and a signature whose formals are named after no function of `s.C` and no member.
+    The signatures alone (the stubs) are added to the context first, and each member's parts are
+    drawn against that context and the stubs' operator entries, so a body may call any member.
+    The members are recursive, carry no `inline` attribute, and are added and registered. A failed
+    add emits nothing. -/
+def genDeclRecFuncBlock [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
+  let k ← chooseNat 1 (max 1 b.maxRecFuncs) (Nat.le_max_left 1 _)
+  let names ← genDeclNames s.reserved k
+  let avoid := fun x => (StrataGenerators.Stmt.functionNames s.C).contains x || names.contains x
+  let stubs ← names.mapM (fun nm => genFuncSig nm b.funcDepth avoid s.dtCons)
+  match s.registerFuncs stubs with
+  | none => pure ([], s)
+  | some sStub =>
+    let pctx := stubs.filterMap funcPolyOpEntry ++ s.derivedPctx
+    let drawn ← stubs.mapM (genFuncParts (pure true) [] sStub.octx b.funcDepth pctx s.dtCons)
+    let funcs := drawn.map dropInline
+    match s.registerFuncs funcs with
+    | none => pure ([], s)
+    | some s' => pure ([.recFuncBlock funcs .empty], { s' with reserved := names ++ s.reserved })
 
 /-- Generate a procedure and rename it to a globally fresh name (the program's
     names stay distinct without touching `ProcHasType'`, which does not constrain
     the procedure name). The body is generated under the *real* ambient context
-    `{ s.C with rigidTypeVars := typeArgs }` and type-scope `s.Γ` (Option B: the
-    generator threads `C`/`Γ`), under the *accumulated* callable-procedure context
-    `s.procs`, so the body may `call` any procedure declared earlier in the
-    program. Procedures leave `C`/`Γ` unchanged (per `DeclHasType'.proc`), so there
-    is no gate.
+    `s.C` and type-scope `s.Γ` (the generator threads `C`/`Γ`), under the *accumulated*
+    callable-procedure context `s.procs`, so the body may `call` any procedure declared earlier
+    in the program. Its operators are all of `s.octx`. Procedures leave `C`/`Γ` unchanged (per
+    `DeclHasType'.proc`), so there is no gate.
 
     The emitted procedure is then *registered* in `s.procs` (at its renamed,
     globally fresh name) so later procedures may call it. `M` is recovered as the
@@ -439,7 +478,7 @@ def genDeclFunction [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
     procedure (see `commonPrefix` in `ProgramGen.Core`). -/
 def genDeclProcedure [Gen G] (s : GenState) (b : Bounds) : G StepResult := do
   let proc₀ ← genProcedure s.octx s.procs s.C s.Γ b.procSize b.procLen s.derivedPctx
-  let name ← DatatypeGen.genFreshName s.reserved
+  let name ← genDeclName s.reserved
   let proc := { proc₀ with header := { proc₀.header with name := ⟨name, ()⟩ } }
   let M := commonPrefix proc.header.inputs proc.header.outputs
   let sig : StrataGenerators.Stmt.ProcSig :=
@@ -461,13 +500,14 @@ def hasCallableFunc (s : GenState) : Bool :=
   s.octx.ops.length + s.pctx.length >
     initState.octx.ops.length + initState.pctx.length
 
-/-- The declaration-kind selector: pick one of the seven declaration kinds and run
+/-- The declaration-kind selector: pick one of the eight declaration kinds and run
     its step generator. Every kind here is covered by `genProgram_sound`.
 
     **Weights.** Procedures, functions and datatype blocks carry the interesting
     structure (bodies, calls, constructor arguments), so they are weighted up;
     abstract types, aliases, axioms and `distinct` are cheap one-liners and are
-    weighted down. The procedure weight matters most for *inter-procedure calls*:
+    weighted down, and so is a recursive function block. The procedure weight matters most for
+    *inter-procedure calls*:
     a call needs at least two procedure declarations (the first runs with
     `procs = []`), so the odds of a call scale roughly with the square of this
     weight's share.
@@ -498,10 +538,10 @@ def genDeclStep [Gen G] (s : GenState) (b : Bounds) : G StepResult :=
     , (1, fun () => genDeclDistinct s b)
     , (3, fun () => genDeclDatatype s b)
     , (wFunc, fun () => genDeclFunction s b)
-    , (wProc, fun () => genDeclProcedure s b) ]
+    , (wProc, fun () => genDeclProcedure s b)
+    , (1, fun () => genDeclRecFuncBlock s b) ]
   frequency gs (by
-    -- The four fixed entries of the weight 1, and the weight of the datatype step, already make the sum
-    -- positive. Therefore this obligation holds in each phase, and the proof needs no split on the `if`.
+    -- The fixed weights alone make the sum positive, so the proof needs no split on the `if`.
     simp only [gs, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
     omega)
 

@@ -8,7 +8,7 @@ import StrataGenerators.HasTypeAGen.TestSupport
 import StrataGenerators.StmtHasTypeAGen.Core
 import StrataGenerators.StmtHasTypeAGen.TestSupport
 import StrataGenerators.ProgramGen
-import StrataGenerators.ProgramGen.LiftFuncDecls
+import StrataGenerators.ProgramGen.Shrink
 -- `ASTtoCST` gives `Program` a `ToString` (via `Core.formatProgram`); the DDM printer is Mathlib-free.
 import Strata.Languages.Core.DDMTransform.ASTtoCST
 
@@ -109,7 +109,6 @@ end Stmt
 /-! ## Whole programs -/
 namespace Program
 open Lambda Core
-open StrataGenerators.Program.LiftFuncDecls
 
 /-- Fixed number of top-level declarations (≥ 2, so a pass reading one and rewriting another has work
 to do; small so a draw is not dominated by generation dead-ends). -/
@@ -118,11 +117,11 @@ abbrev numDecls : Nat := 3
 /-- Draw a whole program. Mirrors the `Generable GenProgram` instance. -/
 def genProg [Gen G] : G Core.Program := ProgramGen.genProgram (G := G) numDecls {}
 
-/-- `LiftInternalFuncDecls` output typechecks: lifting a well-typed program's internal `funcDecl`s to
-top level yields a program the checker still accepts. Must never fail. Exercises the Lift pass and the
-whole-program typechecker. -/
-def prop_liftOutputTypechecks [Gen G] : PropM G Unit :=
-  checkGen (genProg (G := G)) checkLiftOutputTypechecks (fun p => toString p)
+/-- The whole-program typechecker accepts every generated program, except one it may reject by
+`checkerRejectionExpected`. -/
+def prop_progTypeCheckComplete [Gen G] : PropM G Unit :=
+  checkGen (genProg (G := G)) StrataGenerators.Program.TestSupport.checkProgramTypeCheckerComplete
+    (fun p => toString p)
 
 end Program
 end StrataFuzz

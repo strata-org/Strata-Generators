@@ -7,17 +7,12 @@ open Strata.SMT StrataGenerators.PrimitiveGens
 /-!
 # The SMT-LIB escape function for a string literal
 
-This file holds a property-based test for a defect in the escape function. A Core
-string literal that contains a non-ASCII codepoint goes into the SMT-LIB query as
-**raw UTF-8 bytes**, and not as a `\u{...}` escape. cvc5 rejects such a query
-outright, with `Parse Error: Non-printable character in string literal`. z3
-accepts the query, but it reads each byte as a separate character. Thus
-`str.len "é"` is `2` for z3, and the interpreted `Str.Length` of Strata, which is
-`Int.ofNat s.length` and counts *codepoints*, gives `1`.
-
-The property states the full claim, so it pins a true defect and it hides none. The four
-`proc:` properties use the same convention. A correction to the escape function needs no
-change to this file, and that is what makes the file a net around the fix.
+This file holds a property-based test that the escape function writes every non-ASCII
+codepoint of a Core string literal as a `\u{...}` escape. If a non-ASCII codepoint instead
+goes into the SMT-LIB query as **raw UTF-8 bytes**, cvc5 rejects the query outright, with
+`Parse Error: Non-printable character in string literal`. z3 accepts the query, but it reads
+each byte as a separate character. Thus `str.len "é"` is `2` for z3, and the interpreted
+`Str.Length` of Strata, which is `Int.ofNat s.length` and counts *codepoints*, gives `1`.
 
 ## Why the test has this shape
 

@@ -52,18 +52,18 @@ Each compound case, which is `.app`, `.ite`, `.abs`, `.eq` or `.quant`, is struc
 
 ## `OpsConsistentR` on the side of *completeness*
 
-The last section of this file uses the same judgement in the other direction. It discharges the
+The last section of this file uses the same judgment in the other direction. It discharges the
 `SchemeInstAt` predicate of `HasTypeAGen.lean`, which is the witness at the level of the specification
 that the completeness of the polymorphic case needs, from an `OpsConsistentR F e` of the caller. That
 step is `schemeInstAt_of_opsConsistentR`, and `genLExpr_complete_poly_opsConsistentR` packages the
-result. That theorem gives reachability from the two judgements alone, with no generator internal in its
+result. That theorem gives reachability from the two judgments alone, with no generator internal in its
 hypotheses.
 
 `OpsConsistentR` must be a *premise* there. The `.op` rule of `HasTypeA'` accepts each annotation that a
 node carries, so a well-typed term can carry an annotation that is not an instance of the scheme of the
-operator. The generator would never emit such a term, and `OpsConsistentR.op_in` is the judgement that
+operator. The generator would never emit such a term, and `OpsConsistentR.op_in` is the judgment that
 excludes it, and it gives the instantiating substitution. The two directions therefore stay symmetric:
-on the side of soundness, both judgements are theorems about a generated term, and on the side of
+on the side of soundness, both judgments are theorems about a generated term, and on the side of
 completeness, both are assumptions about the target term.
 
 ### A defect in `freshenBoundVars` that this section exposes
@@ -567,7 +567,7 @@ theorem genIndir_opsConsistentR (F : @Factory LExprParams') (τ : LMonoTy)
   obtain ⟨nm, argTys, args, hmem, hargs, rfl⟩ :=
     genIndir_shape (factoryOps F) τ genArg h e he
   exact mkApps_opsConsistentR F _ args (indir_op_opsConsistentR F τ nm argTys hmem)
-    (mapM_forall genArg hArg argTys args ((mem_mapM_iff' genArg argTys args).mpr hargs))
+    (mapM_forall genArg hArg argTys args ((mem_support_mapM_iff genArg argTys args).mpr hargs))
 
 open StrataGenerators.IndirSupport in
 /-- Each term of the polymorphic IndirPoly rule satisfies `OpsConsistentR`, under the condition
@@ -587,21 +587,8 @@ theorem genIndirPolyCore_opsConsistentR (F : @Factory LExprParams') (fctx : FVar
     ⟨sampled, nm, concreteArgTys, args, hmem, hargs, rfl⟩ | hfb
   · exact mkApps_opsConsistentR F _ args (hPoly sampled nm concreteArgTys hmem)
       (mapM_forall genArg hArg concreteArgTys args
-        ((mem_mapM_iff' genArg concreteArgTys args).mpr hargs))
+        ((mem_support_mapM_iff genArg concreteArgTys args).mpr hargs))
   · exact hFallback e hfb
-
-/-- The primitive draws and the drawn types constrain nothing, so the trivial postcondition is the
-    fact that `walk` needs for them. -/
-private theorem natArbitrary_true' : IsSoundFor (ArbNat.Nat.arbitrary (G := SPMF)) (fun _ => True) :=
-  fun _ _ => trivial
-
-private theorem genInterestingChar_true' :
-    IsSoundFor (StrataGenerators.PrimitiveGens.genInterestingChar (G := SPMF)) (fun _ => True) :=
-  fun _ _ => trivial
-
-private theorem natArbGeom_true' :
-    IsSoundFor (StrataGenerators.PrimitiveGens.natArbGeom (G := SPMF)) (fun _ => True) :=
-  fun _ _ => trivial
 
 /-- `genLExprBase_opsConsistentR` as a law, by induction on the depth. `split` exposes one arm of
     `genLExprBase` per goal, and `omega` refutes the arms of the other depth. `walk` then leaves one goal
@@ -628,11 +615,10 @@ private theorem genLExprBase_opsConsistentR_aux (F : @Factory LExprParams') (fct
     all_goals first
       | (exfalso; omega)
       | (dsimp only
-         walk [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs, natArbitrary_true'.obs,
-          genInterestingChar_true'.obs, natArbGeom_true'.obs])
+         walk_prims [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs])
     all_goals first
       | assumption
-      | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.realConst,
+      | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
           LExpr.bitvecConst]; exact .const)
   | succ n ih =>
     intro bctx τ
@@ -645,24 +631,22 @@ private theorem genLExprBase_opsConsistentR_aux (F : @Factory LExprParams') (fct
         (Lambda.OpsConsistentR F) :=
       fun σ e he => genIndirPolyCore_opsConsistentR F fctx pctx bctx σ 3 (hPoly bctx σ 3) _ _
         (fun σ a ha => ih bctx σ a ha) (fun a ha => ih bctx σ a ha) e he
-    have hA : ∀ τ, IsSoundFor (genAppArgTy (G := SPMF) fctx (factoryOps F) tvars bctx n τ)
-      (fun _ => True) := fun _ _ _ => trivial
-    have hT : IsSoundFor (genGenerableTy (G := SPMF) fctx (factoryOps F) tvars bctx n)
-      (fun _ => True) := fun _ _ => trivial
     rw [IsSoundFor.iff_obs, genLExprBase.eq_def]
     split
     all_goals first
       | (exfalso; omega)
       | (obtain rfl := Nat.succ.inj ‹_ = Nat.succ _›
          dsimp only
-         walk [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs, natArbitrary_true'.obs,
-          genInterestingChar_true'.obs, natArbGeom_true'.obs,
-          (ih _ _).obs, (hI _ _).obs, (hP _).obs, (hA _).obs, hT.obs])
+         walk_prims [(hB bctx _ _).obs, (hF _ _).obs, (hO _ _).obs,
+          (ih _ _).obs, (hI _ _).obs, (hP _).obs,
+          fun τ => (true_law (genAppArgTy (G := SPMF) fctx (factoryOps F) tvars bctx n τ)).obs,
+          (true_law (genGenerableTy (G := SPMF) fctx (factoryOps F) tvars bctx n)).obs])
     all_goals first
       | assumption
-      | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.realConst,
+      | (simp only [LExpr.boolConst, LExpr.intConst, LExpr.strConst, LExpr.rationalConst,
           LExpr.bitvecConst]; exact .const)
       | (constructor <;> assumption)
+
 theorem genLExprBase_opsConsistentR (F : @Factory LExprParams') (fctx : FVarCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
     -- The IndirPoly rule is inside `genLExprBase`, so this theorem needs the same condition about a
     -- polymorphic annotation as `genLExpr_opsConsistentR`. The condition quantifies over each binder context
@@ -876,13 +860,13 @@ theorem genLExpr_opsConsistentR_nil (F : @Factory LExprParams') (fctx : FVarCtx)
 --
 -- `SchemeInstAt`, in `HasTypeAGen.lean`, is the witness at the level of the specification that
 -- `genLExpr_complete_poly_fullySpecShaped` needs. This section gives it from a `Lambda.OpsConsistentR F e` of
--- the caller. The `.op_in` constructor of that judgement holds exactly the missing part: the substitution
+-- the caller. The `.op_in` constructor of that judgment holds exactly the missing part: the substitution
 -- that sends the generic type of the operator to the annotation of the node.
 --
 -- `HasTypeA'` alone cannot give that witness. Its `.op` rule types an `.op` node at *each* annotation that
 -- the node carries. Therefore a well-typed term can carry an annotation that is not an instance of the
 -- scheme of the operator, and the generator would never emit such an annotation. `OpsConsistentR` is the
--- judgement that excludes it, so the side of completeness takes it as a premise. That is symmetric to
+-- judgment that excludes it, so the side of completeness takes it as a premise. That is symmetric to
 -- `HasTypeA'`, and on the side of soundness it is a *theorem*, which is
 -- `genLExpr_opsConsistentR_factory`.
 --
@@ -1317,11 +1301,11 @@ theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
     cases h' with
     | app hbase _ => exact hbase
 
-/-- **The completeness of the polymorphic case from the two judgements, with no generator internal.**
+/-- **The completeness of the polymorphic case from the two judgments, with no generator internal.**
 
     This is the statement at the level of the specification. A spine over a polymorphic operator is reachable
     from `HasTypeA'` *and* `OpsConsistentR`, together with decidable facts about the scheme. Those two
-    judgements are the same two that the direction of soundness establishes, in `genLExpr_sound` and in
+    judgments are the same two that the direction of soundness establishes, in `genLExpr_sound` and in
     `genLExpr_opsConsistentR_factory`. The hypotheses name no `findPolymorphicOps`, no `unifyTypes` and no
     `SchemeInstAt`, because `schemeInstAt_of_opsConsistentR` builds the witness inside the proof.
 
@@ -1329,7 +1313,7 @@ theorem mkApps_opsConsistentR_inv (F : @Factory LExprParams') (base : LExpr')
     accepts each annotation that a node carries, so a well-typed term can carry an annotation that is not an
     instance of the scheme of the operator. The generator would never give such a term, and it is correctly
     not reachable. `OpsConsistentR` closes that gap, and it keeps the two directions symmetric. On the side of
-    soundness, both judgements are *theorems* about a generated term. On the side of completeness, both are
+    soundness, both judgments are *theorems* about a generated term. On the side of completeness, both are
     *assumptions* about the target term.
 
     The other premises are the bundle for the recursive completeness of each argument, as in each other
@@ -1347,7 +1331,7 @@ theorem genLExpr_complete_poly_opsConsistentR
     (hwt : HasTypeA' bctx (mkApps (.op () ⟨name, ()⟩ (some annot)) args) τ)
     (hops : Lambda.OpsConsistentR F (mkApps (.op () ⟨name, ()⟩ (some annot)) args))
     (sampledTys : List LMonoTy)
-    (hLen : sampledTys.length = maxNumArgs)
+    (hLen : sampledTys.length = max maxNumArgs (maxBinders pctx))
     (hValid : ∀ σ ∈ sampledTys,
       ((generableTypesFromCtx bctx fctx octx).length > 0 →
         σ ∈ generableTypesFromCtx bctx fctx octx) ∧
@@ -1355,7 +1339,7 @@ theorem genLExpr_complete_poly_opsConsistentR
         σ ∈ SPMF.support (pickBaseType (G := SPMF))))
     (hAnnot : annot = concreteArgTys.foldr (fun σ acc => LMonoTy.arrow σ acc) τ)
     (hArgLen : args.length = concreteArgTys.length)
-    (hArgsComplete : List.Rel₂
+    (hArgsComplete : List.Forall₂
       (fun arg σ => (∃ m, σ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m)) ∧
         emptyNames arg ∧ allVarsInCtx fctx octx arg ∧
         AllTypesSimple tvars (depth - 1) bctx arg ∧ termDepth bctx arg ≤ depth - 1)

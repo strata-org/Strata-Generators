@@ -3,25 +3,38 @@ version = "0.1.0"
 defaultTargets = ["StrataGenerators", "StrataTests"]
 testDriver = "test"
 
+# Strata brings in StrataDDM itself.
 [[require]]
 name = "Strata"
 git = "https://github.com/strata-org/Strata"
-rev = "main"
+rev = "b3aaa6faa6523b60146ec8b82857aa1786e49a28"
 
-# The reworked FuzzGen + `Basalt.PBT` API is now merged on basalt's Lean-4.29 branch
-# (`lean-4.29`, carrying `Basalt/PBT/*` + `Basalt/Fuzz/*`), so consume it over the network like
-# any other dependency — the same rev the mainline suite pins.
+# plausible v4.34.0, the revision LSpec and mathlib v4.34.0 use.
+# It overrides the older revision that Strata names.
+[[require]]
+name = "plausible"
+git = "https://github.com/leanprover-community/plausible"
+rev = "118aa17ee84656b8bd727fef7c458ee8c833385c"
+
+# A basalt revision on Lean 4.34.0 with the `SPMF`, `Basalt.PBT` and `Basalt.Fuzz` APIs. Later
+# 4.34 revisions compile the `Basalt` library with sanitizer coverage, which breaks linking the
+# test executables.
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
-rev = "lean-4.29"
+rev = "08f06f180c8517f9429fbd9ce5ac0a7e5c51dd21"
 
-# Note: Strata is on Lean 4.29.1, but mainline LSpec is on 4.31,
-# so we currently depend on a custom fork of LSpec that is on 4.29
 [[require]]
 name = "LSpec"
-git = "https://github.com/ngernest/LSpec"
-rev = "aa07f8c"
+git = "https://github.com/argumentcomputer/LSpec"
+rev = "369c09df268d7077dfea04a136abbd168351a6b4"
+
+# The mathlib release for Lean 4.34.0. It is last so that mathlib's own pins of its
+# dependencies take precedence over basalt's.
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.34.0"
 
 [[lean_lib]]
 name = "StrataGenerators"

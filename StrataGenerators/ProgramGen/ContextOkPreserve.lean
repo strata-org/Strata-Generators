@@ -46,7 +46,7 @@ theorem addWithError_eq_insertIfNew {m m' : Identifiers Nat} {x : Identifier Nat
   simp only at h hsnd
   cases b with
   | true => simp at h
-  | false => simp only [Bool.false_eq_true, if_false] at h; injection h with h; rw [← h, hsnd]
+  | false => simp only [Bool.false_eq_true, ite_false] at h; injection h with h; rw [← h, hsnd]
 
 /-- `keywords`-membership after `insertIfNew`: the resulting keys are the old
     keys plus the inserted name. -/
@@ -227,11 +227,10 @@ The `init` rules and `signatureWellKinded` need the ambient context to register 
 type constructors at their own arities. The fold only *grows* `knownTypes` (with
 `insertIfNew`, which never overwrites). Therefore each step keeps the property. -/
 
-/-- `coreContext` registers each of the eight type constructors at its own arity. Each field is a
-    kernel-checked lookup (`DatatypeGen.knownTypes_getElem?_of_mem`), like `defaultContextOk`. -/
+/-- `coreContext` registers each of the eight type constructors at its own arity. -/
 theorem coreContextSimpleTyArities : SimpleTyArities DatatypeGen.coreContext := by
   refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩
-  all_goals exact DatatypeGen.knownTypes_getElem?_of_mem (by decide)
+  all_goals (show Core.KnownTypes[_]? = some _; rw [Core.knownTypes_getElem?]; rfl)
 
 /-- `SimpleTyArities` survives an `insertIfNew` on `knownTypes`: the eight bindings it
     asserts are already present, and `insertIfNew` never overwrites. -/
@@ -274,8 +273,8 @@ theorem simpleTyArities_of_addMutualBlock {C C' : LContext CoreLParams}
     `initialReserved`), the result satisfies `ContextOk` for the reserved set
     grown by the block names.
 
-    * "known" fields: `knownTypes` only grows, so old memberships survive
-      (`addMutualBlock_knownTypes`).
+    * arity fields: `knownTypes` keeps every old binding
+      (`addMutualBlock_knownTypes_getElem?`).
     * `knownTypes_reserved` / `datatypes_reserved`: block names are in the grown
       reserved set by construction; old keys/names are in `R ⊆` grown set.
     * "external" fields: `datatypes = C.datatypes.push block`, and a default type
@@ -319,31 +318,10 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     intro x hx hmem
     obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hmem
     exact hfresh d hd hx
-  -- The arity disjuncts transfer the same way as the "known" ones: `knownTypes` keeps every
-  -- old binding (`addMutualBlock_knownTypes_getElem?`), and `allDatatypes` only grows.
-  have hdt_mono : ∀ {d : LDatatype Unit}, d ∈ C.datatypes.allDatatypes →
-      d ∈ C'.datatypes.allDatatypes := by
-    intro d hd
-    rw [hdt, allDatatypes_push]
-    exact List.mem_append_left _ hd
   refine
-    { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
-      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
+    { base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · intro b hb
-    rcases hctx.base_known b hb with hk | hd
-    · exact Or.inl ((hkt b).mpr (Or.inr hk))
-    · exact Or.inr (by
-        rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
-        exact List.mem_append_left _ hd)
-  · intro kc hkc
-    rcases hctx.tyCon_known kc hkc with hk | hd
-    · exact Or.inl ((hkt kc.1).mpr (Or.inr hk))
-    · exact Or.inr (by
-        rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append]
-        exact List.mem_append_left _ hd)
-  · exact (hkt "arrow").mpr (Or.inr hctx.arrow_known)
   · intro b hb
     exact addMutualBlock_knownTypes_getElem? h (hctx.base_arity b hb)
   · intro kc hkc
@@ -354,10 +332,9 @@ theorem contextOk_addMutualBlock {C C' : LContext CoreLParams} {R : List String}
     · exact hblk_res key hblk
     · exact hres_mono key (hctx.knownTypes_reserved key hold)
   · intro nm hnm
-    rw [hdt, TypeFactory.allTypeNames, allDatatypes_push, List.map_append, List.mem_append] at hnm
+    rw [hdt, allTypeNames_push, List.mem_append] at hnm
     rcases hnm with hold | hblk
-    · exact hres_mono nm (hctx.datatypes_reserved nm (by
-        rw [TypeFactory.allTypeNames]; exact hold))
+    · exact hres_mono nm (hctx.datatypes_reserved nm hold)
     · exact hblk_res nm hblk
   · intro b hb
     rw [hdt]

@@ -4,6 +4,7 @@ import StrataGenerators.FunctionHasTypeAGen.IdentName
 import Strata.DL.Lambda.DatatypeWF
 import Strata.Languages.Core.DatatypeTypeSpec
 import Strata.Languages.Core.Factory
+import Strata.Languages.Core.FactoryProps
 import Basalt.Walk.Entry
 import Basalt.Walk.Sound
 import Basalt.Walk.Complete
@@ -41,7 +42,7 @@ that member as rigid type variables.
 soundness proof needs:
 
 * `mem`. Each reference names a true block datatype. `NotNested.headBlock` needs this fact,
-  and so does the third part of `refsKnown`.
+  and so do the block-name cases of `genArgTy_refs` and `genArgTy_arities`.
 * `uniform`. A reference to the name of `d` applies it to exactly `d.typeArgs`.
   `UniformOccur.self` needs this fact.
 * `ftvarArgs`. The arguments of a reference are all rigid type variables. Therefore the
@@ -71,7 +72,7 @@ induction on `size` through these two lemmas.
 **Part 3: soundness against the typing specification.** `genArgTy_constrArgWF` says that
 each type in the support is `ConstrArgWF block`. Its proof is a strong induction on `size`
 through `genArgTy_notNested`, `genArgTy_strictPosUnif` and `genArgTy_absent`. The output of
-`genMutuallyRecursiveDatatypes` then obeys all nine fields of `MutualADTWF`.
+`genMutuallyRecursiveDatatypes` then obeys every field of `MutualADTWF`.
 
 Part 3 also uses the rule for the reserved names. Each datatype name is fresh against
 `initialReserved`. `namesOk_of_fresh` changes that fact into the side conditions that the
@@ -85,10 +86,11 @@ completeness half of this file is that all of those hypotheses except one are al
 fields of `MutualADTWF`, and the one that is not is about the **width** of a bitvector.
 
 The specification handles the whole discipline of the arities by itself, and this file needs no
-predicate for it. The field `refsKnown` uses `getTypeRefs`, which collects the *names* of the
-referenced type constructors only, and it drops the number of their arguments. The field
-`argsWellKinded` checks the number of the arguments against `C.knownTypes`. `defaultBaseTypes` and
-`defaultTyCons` are *derived* from that same register, which is `Core.KnownTypes`.
+predicate for it. The field `argsWellKinded` checks the number of the arguments of each
+referenced type constructor against `C.knownTypes`. `MutualADTWF.refsKnown` follows from it and
+uses `getTypeRefs`, which collects the *names* of the referenced type constructors only.
+`defaultBaseTypes` and `defaultTyCons` are *derived* from that same register, which is
+`Core.KnownTypes`.
 
 An existing field of `MutualADTWF` discharges every difference between the specification and
 the generator except one:
@@ -98,11 +100,11 @@ the generator except one:
 | each free type variable is a member of `d.typeArgs` | `argVarsScoped` |
 | a recursive occurrence is a block name with exactly its `typeArgs` | `argsWF`, through `StrictPosUnif` and `UniformOccur.self` |
 | strict positivity, and no nested occurrence | `argsWF`, through `ConstrArgWF` |
-| each referenced name resolves | `refsKnown`, against one concrete ambient context |
+| each referenced name resolves | `argsWellKinded`, through `MutualADTWF.refsKnown` |
 | the arity of an application is correct | `argsWellKinded`, against `C.knownTypes` |
 | **a bitvector is a width, not an application** | **none. This is `BitvecWidthOnly`.** |
 
-* **Soundness.** Each type in the support obeys all nine fields of
+* **Soundness.** Each type in the support obeys every field of
   `Core.TypeSpec.MutualADTWF`. Read `genArgTy_constrArgWF` and
   `genMutuallyRecursiveDatatypes_MutualADTWF`.
 * **Completeness.** Read `genArgTy_complete_of_MutualADTWF`. Take a block that is
@@ -537,29 +539,31 @@ theorem genArgTy_mem_iff (baseTypes : List String) (tyCons : List KnownTyCon)
           blockRefs tyParams false (size / 2))) := by
   -- Each direction is one `walk` per branch. The facts stop the walk at `genLeafTy` and at the
   -- recursive calls, which the statement leaves as support memberships.
-  have hS : ∀ g : SPMF LMonoTy, IsSoundFor g (· ∈ SPMF.support g) := fun _ _ h => h
   have hC : ∀ g : SPMF LMonoTy, IsCompleteFor g (· ∈ SPMF.support g) := fun _ _ h => h
   constructor
   · revert ty; show IsSoundFor _ _
     rw [IsSoundFor.iff_obs, genArgTy]
     split
-    · walk [(hS (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
-      all_goals (clear hS hC; aesop)
+    · walk [(isSoundFor_self_support (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
+      all_goals (clear hC; aesop)
     · dsimp only
-      split <;> walk [(hS (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
-        (hS (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
-        (hS (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
-      all_goals (clear hS hC; aesop)
+      split <;> walk [
+        (isSoundFor_self_support (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
+        (isSoundFor_self_support
+          (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
+        (isSoundFor_self_support
+          (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
+      all_goals (clear hC; aesop)
   · intro h
     rw [SPMF.mem_support_iff_may, genArgTy]
     split
     · walk [(hC (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs]
-      all_goals (clear hS hC; aesop)
+      all_goals (clear hC; aesop)
     · dsimp only
       split <;> walk [(hC (genLeafTy (G := SPMF) baseTypes blockRefs tyParams rca)).obs,
         (hC (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams rca (size / 2))).obs,
         (hC (genArgTy (G := SPMF) baseTypes _ blockRefs tyParams false (size / 2))).obs]
-      all_goals (clear hS hC; aesop)
+      all_goals (clear hC; aesop)
 
 
 /-- **The support of `genArgTy` grows with the set of references.** Add more members to
@@ -963,7 +967,7 @@ theorem genFreshName_fresh (reserved : List String) :
     ∀ s ∈ SPMF.support (genFreshName (G := SPMF) reserved), s ∉ reserved := by
   show IsSoundFor _ _
   rw [IsSoundFor.iff_obs, genFreshName]
-  walk [IsSoundFor.obs (g := genIdentName (G := SPMF)) (P := fun _ => True) fun _ _ => trivial]
+  walk [(true_law (genIdentName (G := SPMF))).obs]
   -- The fallback is never reserved, and the draw is kept only when `reserved.contains` fails.
   all_goals simp_all [fallbackName_not_mem]
 
@@ -1015,46 +1019,9 @@ what `MutualADTWF.argsWellKinded` gives, into membership in the vocabulary of th
 step is what lets completeness need no side condition about an arity. Read `VocabOk` and
 `BitvecWidthOnly` below.
 
-Each of the three proofs follows the shape of the `filter`, and none of them uses `decide`. Therefore each one holds for each content of `Core.KnownTypes`, and a new primitive
-in that register needs no change here. -/
-
-/-! #### Concrete lookups in `Core.KnownTypes`, checked by the kernel
-
-`Core.KnownTypes` is a `Std.HashMap` built by `Std.HashMap.ofList`. The kernel cannot evaluate a
-lookup in it directly, because `String.hash` is opaque. But a lookup in an `ofList` map needs no
-hash: `Std.HashMap.getElem?_ofList_of_mem` reads it off the underlying association list, provided
-that the keys of that list are pairwise distinct. The list itself, and the facts about it, are
-closed terms over `String` and `Nat`, so `decide` checks them in the kernel. -/
-
-/-- The association list from which `Core.KnownTypes` is built, written out. -/
-def knownTypesList : List (String × Nat) :=
-  [("bool", 0), ("int", 0), ("string", 0), ("regex", 0), ("real", 0), ("Triggers", 0),
-   ("TriggerGroup", 0), ("bitvec", 1), ("arrow", 2), ("Map", 2), ("Sequence", 1), ("Set", 1)]
-
-/-- `Core.KnownTypes` is `Std.HashMap.ofList knownTypesList`. The list is computed from the
-    `LTy`s of `Core.KnownLTys` by `decide`. -/
-theorem knownTypes_eq_ofList : Core.KnownTypes = Std.HashMap.ofList knownTypesList := by
-  have h : (Core.KnownLTys.map (fun ty => ty.toKnownType!)).map (fun x => (x.name, x.arity)) =
-      knownTypesList := by decide
-  show Std.HashMap.ofList _ = _
-  rw [h]
-
-/-- The keys of `knownTypesList` are pairwise distinct. -/
-theorem knownTypesList_pairwise :
-    knownTypesList.Pairwise (fun a b => (a.fst == b.fst) = false) := by decide
-
-/-- A pair of `knownTypesList` is a binding of `Core.KnownTypes`. Use it with `(by decide)` for
-    the membership. -/
-theorem knownTypes_getElem?_of_mem {k : String} {n : Nat} (h : (k, n) ∈ knownTypesList) :
-    Core.KnownTypes[k]? = some n := by
-  rw [knownTypes_eq_ofList]
-  exact Std.HashMap.getElem?_ofList_of_mem (by simp) knownTypesList_pairwise h
-
-/-- A key of `knownTypesList` is a member of `Core.KnownTypes.keywords`. -/
-theorem mem_knownTypes_keywords_of_mem {k : String} {n : Nat} (h : (k, n) ∈ knownTypesList) :
-    k ∈ Core.KnownTypes.keywords :=
-  Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr
-    (by rw [knownTypes_getElem?_of_mem h]; rfl))
+Each of the three proofs follows the shape of the `filter`, and none of them uses `decide`.
+Therefore each one holds for each content of `Core.KnownTypes`, and a new primitive in that
+register needs no change here. -/
 
 /-- Reading `defaultBaseTypes` back: it is exactly the arity-`0` part of `Core.KnownTypes`. -/
 theorem mem_defaultBaseTypes_iff {b : String} :
@@ -1104,12 +1071,11 @@ theorem defaultBaseTypes_arity : ∀ b ∈ defaultBaseTypes, Core.KnownTypes[b]?
   fun _ hb => mem_defaultBaseTypes_iff.mp hb
 
 /-- `Sequence` at **2** arguments is not in the default vocabulary, because `Core.KnownTypes`
-    registers it at arity `1`. This is the counterexample behind
-    `not_complete_without_arity`; `knownTypes_getElem?_of_mem` gives the one arity lookup. -/
+    registers it at arity `1`. -/
 theorem seq_two_not_mem_defaultTyCons : ("Sequence", 2) ∉ defaultTyCons := by
   intro h
   have h1 := defaultTyCons_arity _ h
-  have h2 : Core.KnownTypes["Sequence"]? = some 1 := knownTypes_getElem?_of_mem (by decide)
+  have h2 : Core.KnownTypes["Sequence"]? = some 1 := by rw [Core.knownTypes_getElem?]; rfl
   rw [h2] at h1
   exact absurd h1 (by simp)
 
@@ -1222,6 +1188,26 @@ theorem genFreshNames_length :
     walk [IsSoundFor.obs (ih _), IsSoundFor.obs (genFreshName_fresh _)]
     simp_all
 
+/-- `genParamPerms params n` always makes `n` lists, and each of them is a permutation of
+    `params`. -/
+theorem genParamPerms_support {params : List TyIdentifier} :
+    ∀ (n : Nat) (paramsList : List (List TyIdentifier)),
+      paramsList ∈ SPMF.support (genParamPerms (G := SPMF) params n) →
+      paramsList.length = n ∧ ∀ ps ∈ paramsList, ps.Perm params := by
+  intro n
+  induction n with
+  | zero =>
+    show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamPerms]; walk
+    all_goals simp_all
+  | succ n ih =>
+    show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamPerms]
+    walk [(true_law (permutationOf (G := SPMF) params)).obs, IsSoundFor.obs ih]
+    all_goals first
+      | simp [‹_ ∧ _›.1]
+      | (rcases List.mem_cons.mp ‹_ ∈ _ :: _› with rfl | hmem
+         · exact (Subtype.property ‹{ ys // params.Perm ys }›).symm
+         · exact (‹_ ∧ ∀ ps ∈ _, List.Perm ps params›).2 _ hmem)
+
 /-- `genParamsList reserved maxTyParams n` always makes a list of `n` parameter lists. -/
 theorem genParamsList_length :
     ∀ (n : Nat) (reserved : List String) (maxTyParams : Nat)
@@ -1229,13 +1215,11 @@ theorem genParamsList_length :
       paramsList ∈ SPMF.support
         (genParamsList (G := SPMF) reserved maxTyParams n) →
       paramsList.length = n := by
-  intro n
-  induction n with
-  | zero => intro r m; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]; walk; rfl
-  | succ n ih =>
-    intro r m; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]
-    walk [IsSoundFor.obs (ih r m), IsSoundFor.obs (genFreshNames_fresh _ _)]
-    simp_all
+  intro n reserved maxTyParams
+  show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]
+  walk [fun r k => (true_law (genFreshNames (G := SPMF) r k)).obs,
+    fun l => (isSoundFor_self_support (genParamPerms (G := SPMF) l n)).obs]
+  exact (genParamPerms_support n _ ‹_›).1
 
 /-- `genRanks` makes a list of exactly `n` ranks. -/
 theorem genRanks_length :
@@ -1286,6 +1270,30 @@ theorem genFreshNames_nodup :
     walk [IsSoundFor.obs (h2 _), IsSoundFor.obs (genFreshName_fresh _)]
     next s _ _ h => exact List.nodup_cons.mpr ⟨fun hm => h.2 s hm (by simp), h.1⟩
 
+/-- The parameter lists from `genParamsList` are all permutations of one list of distinct
+    names, and `Lambda.isAllowedName` accepts each of those names. -/
+theorem genParamsList_common {reserved : List String} {maxTyParams n : Nat}
+    {paramsList : List (List TyIdentifier)}
+    (hpl : paramsList ∈ SPMF.support
+      (genParamsList (G := SPMF) reserved maxTyParams n)) :
+    ∃ params : List TyIdentifier, params.Nodup ∧
+      (∀ p ∈ params, Lambda.isAllowedName p = true) ∧
+      ∀ ps ∈ paramsList, ps.Perm params := by
+  revert paramsList; show IsSoundFor _ _; rw [IsSoundFor.iff_obs, genParamsList]
+  walk [fun k => (isSoundFor_self_support (genFreshNames (G := SPMF) reserved k)).obs,
+    fun l => (isSoundFor_self_support (genParamPerms (G := SPMF) l n)).obs]
+  next numTyParams _ rawParams hraw _ hperms =>
+    refine ⟨rawParams.filter Lambda.isAllowedName,
+      (genFreshNames_nodup numTyParams reserved rawParams hraw).filter _,
+      fun p hp => (List.mem_filter.mp hp).2, (genParamPerms_support n _ hperms).2⟩
+
+/-- Two lists without duplicates that hold the same members are permutations of each other. -/
+theorem perm_of_nodup_of_mem_iff {α : Type} [BEq α] [LawfulBEq α] {l₁ l₂ : List α}
+    (d₁ : l₁.Nodup) (d₂ : l₂.Nodup) (h : ∀ a, a ∈ l₁ ↔ a ∈ l₂) : l₁.Perm l₂ := by
+  rw [List.perm_iff_count]
+  intro a
+  simp only [d₁.count, d₂.count, h a]
+
 /-- Membership in `visibleRefs headers params`. A block reference `br` is visible exactly
     when it comes from a header whose parameters are a subset of `params`. It then has the
     form of the uniform occurrence `(h.name, h.params.map .ftvar)`. -/
@@ -1297,11 +1305,11 @@ theorem visibleRefs_mem_iff (headers : List TypeConstructor) (params : List TyId
   constructor
   · rintro ⟨h, hh, heq⟩
     by_cases hsub : h.params ⊆ params
-    · rw [if_pos hsub] at heq
+    · rw [ite_eq_left hsub] at heq
       exact ⟨h, hh, hsub, (Option.some.inj heq).symm⟩
-    · rw [if_neg hsub] at heq; exact absurd heq (by simp)
+    · rw [ite_eq_right hsub] at heq; exact absurd heq (by simp)
   · rintro ⟨h, hh, hsub, rfl⟩
-    exact ⟨h, hh, by rw [if_pos hsub]⟩
+    exact ⟨h, hh, by rw [ite_eq_left hsub]⟩
 
 /-- `visibleRefs` grows with its list of headers. A reference that is visible against a part of
     the headers is also visible against all of them.
@@ -1324,7 +1332,7 @@ theorem lowerRankHeaders_mem_iff (rankedHeaders : List (TypeConstructor × Nat))
   constructor
   · rintro ⟨⟨h', r'⟩, hmem, hif⟩
     by_cases hlt : r' < r
-    · simp only [hlt, if_true, Option.some.injEq] at hif
+    · simp only [hlt, ite_true, Option.some.injEq] at hif
       exact ⟨r', hif ▸ hmem, hlt⟩
     · simp [hlt] at hif
   · rintro ⟨r', hmem, hlt⟩
@@ -1782,6 +1790,37 @@ theorem genMutuallyRecursiveDatatypes_shape {baseTypes : List String} {tyCons : 
     exact ⟨hr.1, hrhsub hr hhr, h1, h2⟩
   · intro d hd c hc arg harg; exact (hbshape d hd).2 c hc arg harg
 
+/-- The datatypes of a block from `genMutuallyRecursiveDatatypes` all declare permutations of
+    one list of distinct type parameters, and `Lambda.isAllowedName` accepts each of them. -/
+theorem genMutuallyRecursiveDatatypes_typeParams {baseTypes : List String}
+    {tyCons : List KnownTyCon}
+    {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
+    {extraReserved : List String} {block : MutualDatatype Unit}
+    (hb : block ∈ SPMF.support (genMutuallyRecursiveDatatypes (G := SPMF) baseTypes tyCons
+            maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs
+            maxSize extraReserved)) :
+    ∃ params : List TyIdentifier, params.Nodup ∧
+      (∀ p ∈ params, Lambda.isAllowedName p = true) ∧
+      ∀ d ∈ block, d.typeArgs.Perm params := by
+  simp only [genMutuallyRecursiveDatatypes, mem_support_bind_iff] at hb
+  obtain ⟨_, _, names, _, paramsList, hparams, ranks, _, hbodies⟩ := hb
+  let headers : List TypeConstructor :=
+    (names.zip paramsList).map (fun p => { name := p.1, params := p.2 })
+  have hrhsub : ∀ hr ∈ headers.zip ranks, hr.1 ∈ headers :=
+    fun hr hhr => (List.of_mem_zip hhr).1
+  have hbshape := genConstructorsForAllTypes_shape hrhsub (headers.zip ranks) block hrhsub hbodies
+  obtain ⟨params, hnodup, hallowed, hperm⟩ := genParamsList_common hparams
+  refine ⟨params, hnodup, hallowed, ?_⟩
+  intro d hd
+  obtain ⟨⟨hr, hhr, -, hparamsEq⟩, -⟩ := hbshape d hd
+  -- The header of `d` is a member of `headers`, therefore its parameters are one of the
+  -- drawn lists.
+  obtain ⟨pair, hpair, hpairEq⟩ := List.mem_map.mp (hrhsub hr hhr)
+  have hmemPL : hr.1.params ∈ paramsList := by
+    rw [← hpairEq]; exact (List.of_mem_zip hpair).2
+  rw [← hparamsEq]
+  exact hperm _ hmemPL
+
 /-- **The main theorem for soundness, which gives `argsWF`.** Each constructor argument type
     of a block from `genMutuallyRecursiveDatatypes` is well-formed for that block. This
     statement is exactly the field `argsWF` of `Core.TypeSpec.MutualADTWF`.
@@ -1817,18 +1856,17 @@ theorem genMutuallyRecursiveDatatypes_argsWF_default
     ∀ d ∈ block, ∀ c ∈ d.constrs, ∀ arg ∈ c.args, ConstrArgWF block arg.2 :=
   genMutuallyRecursiveDatatypes_argsWF defaultTyCons_ne_arrow hb
 
-/-! ### `refsKnown`, which says that each referenced name is known
+/-! ### Each referenced name is known
 
-This field is the other field of `MutualADTWF` in this section. `getTypeRefs` collects each
-type constructor name that occurs in a type. This section shows that each such name is a
-`baseTypes` name, a `tyCons` name, the name of a block datatype, or the reserved name
-`"arrow"`. -/
+`getTypeRefs` collects each type constructor name that occurs in a type. This section shows
+that each such name is a `baseTypes` name, a `tyCons` name, the name of a block datatype, or
+the reserved name `"arrow"`. -/
 
 /-- Each type reference in a generated type is a `baseTypes` name, a `tyCons` name, a block
-    name, or `"arrow"`. This lemma is the half of the field `refsKnown` of `MutualADTWF` that
-    speaks about the generator. It holds against each ambient context whose known types and
-    datatypes hold all of `baseTypes` and `tyCons`. Such a context also knows `"arrow"`,
-    because Strata Core always knows that name.
+    name, or `"arrow"`. This lemma is the half of `MutualADTWF.refsKnown` that speaks about the
+    generator. It holds against each ambient context whose known types and datatypes hold all
+    of `baseTypes` and `tyCons`. Such a context also knows `"arrow"`, because Strata Core
+    always knows that name.
 
     The head of a recursive occurrence is a block name, which `BlockRefsWF.mem` gives. Its
     arguments are type variables, which `BlockRefsWF.ftvarArgs` gives. Therefore the
@@ -2071,10 +2109,12 @@ theorem genMutuallyRecursiveDatatypes_argVarsScoped {baseTypes : List String} {t
 
 /-! ### The full structure `Core.TypeSpec.MutualADTWF`
 
-`argsWF` and `refsKnown` are the two difficult fields. The other fields are simpler. Two of
+`argsWF` and `argsWellKinded` are the difficult fields. The other fields are simpler. Two of
 them are about fresh names, which are `namesFresh` and `namesNew`. Two of them say that the
 block is not empty and that its names are different in pairs, which are `nonempty` and
-`namesNodup`. The last one is about inhabitance, which is `inhabited`.
+`namesNodup`. Three are about the type parameters, which are `typeArgsAgree`, `typeArgsNodup`
+and `typeArgsNotReserved`, and `argVarsScoped` says that each argument uses only them. One is
+about inhabitance, which is `inhabited`.
 
 Each field speaks about an ambient `LContext CoreLParams`. Therefore this section first
 states what that context must obey, so that a new generated block is well-formed in it. -/
@@ -2085,7 +2125,8 @@ open Core Core.TypeSpec in
     assumptions that the generator cannot control, because they are about the context and not
     about the block that it builds:
 
-    * `refsKnown` needs each name that the generator can refer to to resolve in `C`.
+    * `argsWellKinded` needs each name that the generator can refer to to resolve in `C` at
+      the arity at which the generator applies it.
     * `namesFresh` and `namesNew` need the existing type names and datatype names of `C` to be
       members of `initialReserved`. Therefore a name that the generator draws fresh against
       that list is not one of them.
@@ -2098,23 +2139,14 @@ open Core Core.TypeSpec in
     condition. -/
 structure ContextOk (C : LContext CoreLParams) (baseTypes : List String)
     (tyCons : List KnownTyCon) (extraReserved : List String) : Prop where
-  /-- Each base type resolves as a known type of `C`, or as an existing datatype of `C`. -/
-  base_known : ∀ b ∈ baseTypes,
-    b ∈ C.knownTypes.keywords ∨ b ∈ C.datatypes.allTypeNames
-  /-- Each applied type constructor resolves as a known type of `C`, or as a datatype of
-      `C`. -/
-  tyCon_known : ∀ kc ∈ tyCons,
-    kc.1 ∈ C.knownTypes.keywords ∨ kc.1 ∈ C.datatypes.allTypeNames
-  /-- `"arrow"` resolves as a known type of `C`. Strata Core always knows that name. -/
-  arrow_known : "arrow" ∈ C.knownTypes.keywords
   /-- Each base type is a **nullary known type constructor** of `C`. The field
       `argsWellKinded` of `MutualADTWF` needs the arity and not only the name, because the
       generator emits a base type as `.tcons b []`.
 
-      This field has no second case for a datatype of `C`, and `base_known` does have one.
-      `knownTypes` always backs the vocabulary that a generator draws from, and `DatatypePoolOk`
-      carries each datatype name separately. `LContext.WellKindedTy`, which the `init` rule and the
-      `signatureWellKinded` rule use, reads `knownTypes` only. -/
+      This field has no case for a datatype of `C`. `knownTypes` always backs the vocabulary
+      that a generator draws from, and `DatatypePoolOk` carries each datatype name separately.
+      `LContext.WellKindedTy`, which the `init` rule and the `signatureWellKinded` rule use,
+      reads `knownTypes` only. -/
   base_arity : ∀ b ∈ baseTypes, C.knownTypes[b]? = some 0
   /-- Each applied type constructor is a known type constructor of `C` at **its own
       arity**. The generator draws `(kc.1, kc.2)` from the pool and then makes exactly
@@ -2144,7 +2176,7 @@ end Soundness
 
 /-! ## Inhabitance of the generated block
 
-This part gives the one field of `MutualADTWF` that `argsWF`, `refsKnown` and the facts
+This part gives the one field of `MutualADTWF` that `argsWF`, `argsWellKinded` and the facts
 about fresh names do not give. That field says that each block datatype is inhabited.
 For a datatype `d` of the block, the statement is
 `TySymInhab (C.datatypes.push block) d.name`.
@@ -2203,18 +2235,34 @@ theorem find?_name_eq_none {block : MutualDatatype Unit} {name : String}
     simp only [List.find?_cons, beq_eq_false_iff_ne.mpr (fun h => hne0 h.symm)]
     exact ih hne'
 
+/-- `allDatatypes_push` for an arbitrary factory. -/
+theorem allDatatypes_push' {F : @TypeFactory Unit} {block : MutualDatatype Unit} :
+    TypeFactory.allDatatypes (F.push block) = F.allDatatypes ++ block := by
+  unfold TypeFactory.allDatatypes
+  rw [Array.toList_push (xs := F)]
+  simp
+
 /-- A push of `block` adds its datatypes to the end of the flat list of datatypes. -/
 theorem allDatatypes_push {C : LContext CoreLParams} {block : MutualDatatype Unit} :
     TypeFactory.allDatatypes (C.datatypes.push block) =
-      C.datatypes.allDatatypes ++ block := by
-  simp [TypeFactory.allDatatypes, Array.toList_push, List.flatten_append]
+      C.datatypes.allDatatypes ++ block :=
+  allDatatypes_push'
 
-/-- `allDatatypes_push` for an arbitrary factory (not just one that is some
-    context's `datatypes` field). Used by `tySymInhab_push`, which is stated over a
-    bare `TypeFactory`. -/
-theorem allDatatypes_push' {F : @TypeFactory Unit} {block : MutualDatatype Unit} :
-    TypeFactory.allDatatypes (F.push block) = F.allDatatypes ++ block := by
-  simp [TypeFactory.allDatatypes, Array.toList_push, List.flatten_append]
+/-- Looking a name up in a factory with `block` pushed searches the datatypes of the factory and
+    then those of `block`. -/
+theorem getType_push_eq {F : @TypeFactory Unit} {block : MutualDatatype Unit} {name : String} :
+    TypeFactory.getType (F.push block) name =
+      (F.allDatatypes ++ block).find? (fun d => d.name == name) := by
+  show (TypeFactory.allDatatypes (F.push block)).find? (fun d => d.name == name) = _
+  rw [allDatatypes_push']
+
+/-- The type names of a factory with `block` pushed are those of the factory, then the names of
+    `block`. -/
+theorem allTypeNames_push {F : @TypeFactory Unit} {block : MutualDatatype Unit} :
+    TypeFactory.allTypeNames (F.push block) = F.allTypeNames ++ block.map (·.name) := by
+  show (TypeFactory.allDatatypes (F.push block)).map (·.name) = _
+  rw [allDatatypes_push', List.map_append]
+  rfl
 
 /-- `getType` on a factory with `block` added. A push of `block` makes the name of each member
     resolve to that member. This result needs two conditions. The name must not already
@@ -2227,7 +2275,7 @@ theorem getType_push_self {C : LContext CoreLParams} {block : MutualDatatype Uni
   have hnone : C.datatypes.allDatatypes.find? (fun d' => d'.name == d.name) = none := hnew
   -- `find?` passes over the first part, which holds no such name, and it then matches `d`
   -- in the block at the end.
-  rw [TypeFactory.getType, allDatatypes_push, List.find?_append, hnone, Option.none_or,
+  rw [getType_push_eq, List.find?_append, hnone, Option.none_or,
       find?_name_eq_of_mem hnodup hd]
 
 /-- `getType` on the longer factory, for a name that is absent from the block. The result
@@ -2238,7 +2286,7 @@ theorem getType_push_other {C : LContext CoreLParams} {block : MutualDatatype Un
     TypeFactory.getType (C.datatypes.push block) name = none := by
   have hnone : C.datatypes.allDatatypes.find? (fun d' => d'.name == name) = none := hext
   -- The first part gives no result, by `hext`. No block datatype matches, by `hne`.
-  rw [TypeFactory.getType, allDatatypes_push, List.find?_append, hnone, Option.none_or,
+  rw [getType_push_eq, List.find?_append, hnone, Option.none_or,
       find?_name_eq_none hne]
 
 /-! ### Transporting inhabitance of an *existing* datatype across a block push
@@ -2284,10 +2332,10 @@ theorem tySymInhab_push {adts : @TypeFactory Unit} {block : MutualDatatype Unit}
       TypeFactory.getType (adts.push block) n = adts.getType n := by
     intro n hn
     rcases hsome : adts.getType n with _ | d
-    · rw [TypeFactory.getType, allDatatypes_push', List.find?_append,
+    · rw [getType_push_eq, List.find?_append,
         (show adts.allDatatypes.find? (fun d' => d'.name == n) = none from hsome),
         Option.none_or, find?_name_eq_none hn]
-    · rw [TypeFactory.getType, allDatatypes_push', List.find?_append,
+    · rw [getType_push_eq, List.find?_append,
         (show adts.allDatatypes.find? (fun d' => d'.name == n) = some d from hsome),
         Option.some_or]
   refine TySymInhab.rec
@@ -2340,15 +2388,13 @@ and `defaultContextOk` need no change. -/
     `ContextOk` are not. Therefore `TySymInhab.datatype` gives their inhabitance, and `.external` does
     not.
 
-    The field `known` goes into `MutualADTWF.refsKnown`, through the case for `allTypeNames`. The field
-    `inhab` goes into `MutualADTWF.inhabited`, and `tySymInhab_push` transports it across the push of
-    the block. -/
+    The field `arity` goes into `MutualADTWF.argsWellKinded`, through the case for
+    `allDatatypes`. The field `inhab` goes into `MutualADTWF.inhabited`, and `tySymInhab_push`
+    transports it across the push of the block. -/
 structure DatatypePoolOk (C : LContext CoreLParams) (dtCons : List KnownTyCon) : Prop where
-  /-- Each pool name resolves as an existing datatype of `C`. -/
-  known : ∀ kc ∈ dtCons, kc.1 ∈ C.datatypes.allTypeNames
   /-- Each pool name resolves as an existing datatype of `C` *at the pool's arity*: the
-      datatype declares exactly `kc.2` type parameters. This is the arity-aware form of
-      `known`, and it is what `MutualADTWF.argsWellKinded` needs. -/
+      datatype declares exactly `kc.2` type parameters. `MutualADTWF.argsWellKinded` needs
+      this. -/
   arity : ∀ kc ∈ dtCons,
     ∃ d ∈ C.datatypes.allDatatypes, d.name = kc.1 ∧ d.typeArgs.length = kc.2
   /-- Each pool name is inhabited in `C`'s own factory. -/
@@ -2565,8 +2611,8 @@ theorem getType_push_perm {C : LContext CoreLParams} {block block' : MutualDatat
   · -- `name` resolves in both blocks, and it resolves to the one datatype with that name.
     obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hmem
     have hd' : d ∈ block' := (hperm.mem_iff).mp hd
-    rw [TypeFactory.getType, allDatatypes_push, List.find?_append,
-        TypeFactory.getType, allDatatypes_push, List.find?_append]
+    rw [getType_push_eq, List.find?_append,
+        getType_push_eq, List.find?_append]
     -- Both blocks match `d`. The first part, which comes from `C.datatypes`, is the same for
     -- both.
     rcases hpre : (C.datatypes.allDatatypes.find? (fun d' => d'.name == d.name)) with _ | dd
@@ -2575,8 +2621,8 @@ theorem getType_push_perm {C : LContext CoreLParams} {block block' : MutualDatat
     · rw [hpre, Option.some_or, Option.some_or]
   · -- `name` resolves in no block. Therefore both sides reduce to the first part.
     have hmem' : name ∉ block'.map (·.name) := fun h => hmem ((hperm.map (·.name)).mem_iff.mpr h)
-    rw [TypeFactory.getType, allDatatypes_push, List.find?_append,
-        TypeFactory.getType, allDatatypes_push, List.find?_append,
+    rw [getType_push_eq, List.find?_append,
+        getType_push_eq, List.find?_append,
         find?_name_eq_none hmem, find?_name_eq_none hmem']
 
 /-- **Inhabitance holds for two factories that agree on `getType`.** The three relations
@@ -2756,7 +2802,7 @@ theorem genMutuallyRecursiveDatatypes_inhabited {baseTypes : List String}
 
 /-- **The main theorem. A generated block is `MutualADTWF`.** Each mutually recursive block
     that `genMutuallyRecursiveDatatypes` makes is well-formed in each context `C` that obeys
-    `ContextOk`. The block obeys all nine fields of `Core.TypeSpec.MutualADTWF`.
+    `ContextOk`. The block obeys every field of `Core.TypeSpec.MutualADTWF`.
 
     This theorem has two groups of hypotheses. The first is one condition on the pool `tyCons`
     that the caller gives, which is `tyCon_ne_arrow`, as for `argsWF`. The second is the
@@ -2793,14 +2839,18 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
     · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp h
       exact Or.inr (Or.inl (Or.inr (List.mem_map.mpr ⟨kc, hsubTC kc hkc, rfl⟩)))
     · exact Or.inr (Or.inr h)
+  obtain ⟨params, hpnodup, hpallowed, hpperm⟩ := genMutuallyRecursiveDatatypes_typeParams hb
   refine
     { nonempty := hne
       namesNodup := by rw [hbnames]; exact hnodupH
+      typeArgsAgree := fun d hd d' hd' _ =>
+        (hpperm d hd).mem_iff.trans (hpperm d' hd').mem_iff.symm
+      typeArgsNodup := fun d hd => (hpperm d hd).nodup_iff.mpr hpnodup
+      typeArgsNotReserved := fun d hd v hv => hpallowed v ((hpperm d hd).mem_iff.mp hv)
       namesFresh := ?_
       namesNew := ?_
       argVarsScoped := genMutuallyRecursiveDatatypes_argVarsScoped hb
       argsWF := genMutuallyRecursiveDatatypes_argsWF harrow hb
-      refsKnown := ?_
       argsWellKinded := ?_
       inhabited :=
         genMutuallyRecursiveDatatypes_inhabited harrow hctx hpool hstored hsplit hsubTC hb }
@@ -2817,24 +2867,6 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF {baseTypes : List String}
     · exact absurd
         (hinit_mono _ (hctx.datatypes_reserved _ (name_mem_allTypeNames_of_getType hsome)))
         (hnfresh d.name (List.mem_map.mpr ⟨d, hd, rfl⟩))
-  · -- The field `refsKnown`. Each reference resolves in `C`, or it is a block name, or it is
-    -- `"arrow"`.
-    intro d hd c hc arg harg r hr
-    rcases genMutuallyRecursiveDatatypes_refsKnown hb d hd c hc arg harg r hr with
-      hbt | htc | hblk | harr
-    · rcases hctx.base_known r hbt with hk | hdt
-      · exact Or.inl hk
-      · exact Or.inr (Or.inl hdt)
-    · obtain ⟨kc, hkc, rfl⟩ := List.mem_map.mp htc
-      -- A reference into the pool is either an external known type (`ContextOk`) or a
-      -- datatype from an earlier declaration (`DatatypePoolOk.known`).
-      rcases hsplit kc hkc with hext | hdt
-      · rcases hctx.tyCon_known kc hext with hk | hdt'
-        · exact Or.inl hk
-        · exact Or.inr (Or.inl hdt')
-      · exact Or.inr (Or.inl (hpool.known kc hdt))
-    · exact Or.inr (Or.inr hblk)
-    · subst harr; exact Or.inl hctx.arrow_known
   · -- The field `argsWellKinded`. The generator is arity-correct by construction
     -- (`genMutuallyRecursiveDatatypes_arities`); the arity fields of `ContextOk` and
     -- `DatatypePoolOk` say that `C` registers each of those names at that same arity.
@@ -2859,12 +2891,7 @@ no datatypes. It then shows that the generator is sound against that context.
 
 This section gives `Core.KnownTypes.keywords` for `extraReserved`. That list is the pool of
 names that the caller must forbid. Therefore a block name cannot be the same as a symbol that
-Core already knows.
-
-`Core.KnownTypes` is a `HashMap`, and the kernel does not compute a `String` hash. Therefore
-the concrete facts about membership in it go through `knownTypes_getElem?_of_mem` and
-`mem_knownTypes_keywords_of_mem`, which read a lookup off the association list of the map.
-Those facts are checked by `decide` in the kernel, so this section adds no axiom. -/
+Core already knows. -/
 
 /-- The reference context of Strata Core. Its known types are `Core.KnownTypes`, and it holds
     no datatype from a user. -/
@@ -2880,30 +2907,15 @@ def coreContext : LContext CoreLParams :=
 theorem defaultContextOk :
     ContextOk coreContext defaultBaseTypes defaultTyCons Core.KnownTypes.keywords := by
   refine
-    { base_known := ?_, tyCon_known := ?_, arrow_known := ?_,
-      base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
+    { base_arity := ?_, tyCon_arity := ?_, arrow_arity := ?_,
       knownTypes_reserved := ?_, datatypes_reserved := ?_,
       base_external := ?_, tyCon_external := ?_, arrow_external := ?_ }
-  · -- Each default base type is a known primitive of `coreContext`: it was *read off*
-    -- `Core.KnownTypes`, so this needs no case analysis on the list's contents.
-    intro b hb
-    refine Or.inl (Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_))
-    show Core.KnownTypes[b]?.isSome = true
-    rw [defaultBaseTypes_arity b hb]; rfl
-  · -- Each default type constructor is a known primitive of `coreContext`.
-    intro kc hkc
-    refine Or.inl (Std.HashMap.mem_keys.mpr (Std.HashMap.mem_iff_isSome_getElem?.mpr ?_))
-    show Core.KnownTypes[kc.1]?.isSome = true
-    rw [defaultTyCons_arity kc hkc]; rfl
-  · -- `"arrow"` is a known primitive of `coreContext`. This one *is* a fact about the
-    -- particular contents of `Core.KnownTypes`, because `genArgTy` hardcodes the name.
-    exact mem_knownTypes_keywords_of_mem (n := 2) (by decide)
   · -- Each default base type is registered at arity 0, by construction of the list.
     exact defaultBaseTypes_arity
   · -- Each default type constructor is registered at its own arity, by construction.
     exact defaultTyCons_arity
   · -- `"arrow"` is registered at arity 2.
-    exact knownTypes_getElem?_of_mem (by decide)
+    show Core.KnownTypes["arrow"]? = some 2; rw [Core.knownTypes_getElem?]; rfl
   · -- Each known type of `coreContext` is a member of the extra reserved list, with no
     -- change.
     intro k hk
@@ -2926,10 +2938,7 @@ theorem defaultContextOk :
     is the context that Core programs use.
 
     `decide` discharges the one side condition, which is `defaultTyCons_ne_arrow`.
-    `defaultContextOk` discharges the eight fields of `ContextOk`.
-
-    The membership facts about `Core.KnownTypes.keywords` are checked in the kernel, so this
-    corollary depends only on the standard axioms. -/
+    `defaultContextOk` discharges the eight fields of `ContextOk`. -/
 theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
     {maxExtraDatatypes maxTyParams maxExtraBaseConstrs maxRecConstrs maxArgs maxSize : Nat}
     {block : MutualDatatype Unit}
@@ -2941,7 +2950,7 @@ theorem genMutuallyRecursiveDatatypes_MutualADTWF_default
   -- side conditions (`DatatypePoolOk`, `StoredRefsAbsent`) are vacuous.
   genMutuallyRecursiveDatatypes_MutualADTWF (dtCons := []) defaultTyCons_ne_arrow
     defaultContextOk
-    { known := by simp, arity := by simp, inhab := by simp }
+    { arity := by simp, inhab := by simp }
     (by
       intro d hd
       simp [coreContext, TypeFactory.allDatatypes] at hd)
@@ -2976,11 +2985,13 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
   refine
     { nonempty := ?_
       namesNodup := (hnamesperm.nodup_iff).mp h.namesNodup
+      typeArgsAgree := fun d hd d' hd' => h.typeArgsAgree d (hmem hd) d' (hmem hd')
+      typeArgsNodup := fun d hd => h.typeArgsNodup d (hmem hd)
+      typeArgsNotReserved := fun d hd => h.typeArgsNotReserved d (hmem hd)
       namesFresh := fun d hd => h.namesFresh d (hmem hd)
       namesNew := fun d hd => h.namesNew d (hmem hd)
       argVarsScoped := fun d hd => h.argVarsScoped d (hmem hd)
       argsWF := ?_
-      refsKnown := ?_
       argsWellKinded := ?_
       inhabited := ?_ }
   · -- The field `nonempty`. `block'` is not empty, because `block` is not empty and the two
@@ -2992,12 +3003,6 @@ theorem MutualADTWF_perm {C : LContext CoreLParams} {block block' : MutualDataty
     -- relations read only `block.map (·.name)`, and a permutation keeps that set.
     intro d hd c hc arg harg
     exact constrArgWF_perm hnamesperm hperm (h.argsWF d (hmem hd) c hc arg harg)
-  · -- The field `refsKnown`. A permutation keeps the part about a block name.
-    intro d hd c hc arg harg r hr
-    rcases h.refsKnown d (hmem hd) c hc arg harg r hr with hk | hdt | hblk
-    · exact Or.inl hk
-    · exact Or.inr (Or.inl hdt)
-    · exact Or.inr (Or.inr (hnamesperm.mem_iff.mp hblk))
   · -- The field `argsWellKinded`. `getTypeConsArities` reads only the argument type, and a
     -- permutation keeps the disjunct about a block datatype.
     intro d hd c hc arg harg ref n hn
@@ -3150,8 +3155,8 @@ theorem rankExists (adts : @TypeFactory Unit) :
       intro n hnR
       simp only
       by_cases hn : n = src
-      · rw [if_pos hn]; omega
-      · rw [if_neg hn]
+      · rw [ite_eq_left hn]; omega
+      · rw [ite_eq_right hn]
         have hne : n ∈ R.erase src := (List.mem_erase_of_ne hn).mpr hnR
         have hb := hrank'bound n hne
         omega
@@ -3167,10 +3172,10 @@ theorem rankExists (adts : @TypeFactory Unit) :
         refine ⟨d, hget, c, hcmem, ?_⟩
         intro ref href hrefR
         simp only
-        rw [if_neg hn]
+        rw [ite_eq_right hn]
         by_cases hrefsrc : ref = src
-        · rw [if_pos hrefsrc]; omega
-        · rw [if_neg hrefsrc]
+        · rw [ite_eq_left hrefsrc]; omega
+        · rw [ite_eq_right hrefsrc]
           have hreferase : ref ∈ R.erase src := (List.mem_erase_of_ne hrefsrc).mpr hrefR
           have hedge := hcwit ref href hreferase
           omega
@@ -3181,8 +3186,8 @@ end InhabRank
 
 Completeness holds against `MutualADTWF` plus premises that are all about the *context* and
 the *names the generator uses*, and one residual side condition on the type itself:
-`BitvecWidthOnly`. Read `genArgTy_complete_of_MutualADTWF`. Completeness against `MutualADTWF` alone is
-false. Read `not_complete_without_arity`. -/
+`BitvecWidthOnly`. Read `genArgTy_complete_of_MutualADTWF`. Completeness against `MutualADTWF`
+alone is false. -/
 
 section Completeness
 
@@ -3295,12 +3300,12 @@ structure VocabOk (C : LContext Core.CoreLParams) (baseTypes : List String)
 /-- **The default vocabulary satisfies `VocabOk` in `coreContext`.** The fields `base` and `tyCon` hold
     by construction, because the two lists *are* `Core.KnownTypes` split by arity, and
     `mem_defaultBaseTypes_iff` and `mem_defaultTyCons_iff` read them back. Only the arity of `arrow`
-    needs a concrete lookup (`knownTypes_getElem?_of_mem`), because `genArgTy` holds that name as a literal. -/
+    needs a concrete lookup, because `genArgTy` holds that name as a literal. -/
 theorem defaultVocabOk : VocabOk coreContext defaultBaseTypes defaultTyCons where
   base := fun _ h => mem_defaultBaseTypes_iff.mpr h
   tyCon := fun k n h hn harrow hbv =>
     mem_defaultTyCons_iff.mpr ⟨mem_coreAppliedTyCons_iff.mpr ⟨h, hn, harrow⟩, hbv⟩
-  arrow := knownTypes_getElem?_of_mem (by decide)
+  arrow := by show Core.KnownTypes["arrow"]? = some 2; rw [Core.knownTypes_getElem?]; rfl
   noStoredDatatypes := by simp [coreContext, TypeFactory.allDatatypes]
 
 /-- The head of a non-block application is registered in `C.knownTypes` at its argument
@@ -3643,14 +3648,14 @@ example : (LMonoTy.arrow (.ftvar "a") (.tcons "MyList" [.ftvar "a"])) ∈
       ((genLeafTy_mem_iff _ _ _ _ _).mpr (Or.inr (Or.inr (Or.inr ⟨rfl, ("MyList", [.ftvar "a"]), by simp, rfl⟩)))))
 
 /-- **`MutualADTWF` rejects `Sequence a a`.** `Sequence` at two arguments has the wrong kind. The field
-    `refsKnown` checks only that the name `"Sequence"` resolves, and the field `argsWellKinded` checks the
-    number of the arguments. Therefore the specification rejects this type by itself, and completeness
+    `argsWellKinded` checks the number of the arguments, and not only that the name `"Sequence"`
+    resolves. Therefore the specification rejects this type by itself, and completeness
     needs no separate side condition about an arity. -/
 example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") :
     ¬ ArgsWellKinded coreContext [d] (.tcons "Sequence" [.ftvar a, .ftvar a]) := by
   intro h
   have h1 : coreContext.knownTypes["Sequence"]? = some 1 := by
-    exact knownTypes_getElem?_of_mem (by decide)
+    show Core.KnownTypes["Sequence"]? = some 1; rw [Core.knownTypes_getElem?]; rfl
   rcases h.head with hk | ⟨d', hd', _⟩ | ⟨d', hd', hname, _⟩
   · -- `argsWellKinded` would need `Sequence` registered at arity 2; it is registered at 1.
     rw [h1] at hk; simp at hk
@@ -3663,7 +3668,7 @@ example (d : LDatatype Unit) (a : TyIdentifier) (hd_ne : d.name ≠ "Sequence") 
     that stays.** Take the type `bitvec a`, which applies the *name* `bitvec` to a type.
 
     `Core.KnownTypes` registers `("bitvec", 1)`, so every field of `MutualADTWF` accepts this
-    type: `refsKnown` resolves the name, `argsWellKinded` sees one argument at arity `1`, and
+    type: `argsWellKinded` sees one argument at arity `1`, and
     the one free variable `a` is declared. `LContext.addMutualBlock` accepts such a block too.
 
     But no `genArgTy` can make it. A bitvector type is `LMonoTy.bitvec n` for a *width*
@@ -3726,7 +3731,8 @@ theorem not_complete_without_bitvecWidthOnly (d : LDatatype Unit)
       Prod.mk.injEq] at hmem
     obtain ⟨rfl, rfl⟩ := hmem
     refine Or.inl ?_
-    exact knownTypes_getElem?_of_mem (by decide)
+    show Core.KnownTypes["bitvec"]? = some 1
+    rw [Core.knownTypes_getElem?]; rfl
   · -- `BitvecWidthOnly` fails immediately: its `tcons` case needs `k ≠ "bitvec"`.
     unfold BitvecWidthOnly
     exact fun h => h.1 rfl
@@ -4383,35 +4389,52 @@ theorem genConstructorsForAllTypes_complete {baseTypes : List String} {tyCons : 
 
 /-! ### Completeness of phase 1 and of the full generator -/
 
-/-- **Completeness of `genParamsList`.** The generator can make a target list of parameter lists
-    `paramsList` at the count `paramsList.length`, under three conditions. The length of each
-    inner list is not more than `maxTyParams`. Each inner list obeys `Nodup`. Each of its members
-    is an identifier that the generator can reach, and each member is absent from `reserved`.
-
-    Each `chooseNat` picks the length of one inner list, and `genFreshNames_complete` reaches that
-    list. The proof is an induction on `paramsList`. -/
-theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat} :
+/-- **Completeness of `genParamPerms`.** The generator can make each list of permutations of
+    `params`, at the count of that list. Each draw of `permutationOf` reaches its permutation,
+    which `permutationOf_complete` gives. -/
+theorem genParamPerms_complete {params : List TyIdentifier} :
     ∀ (paramsList : List (List TyIdentifier)),
-      (∀ params ∈ paramsList, params.length ≤ maxTyParams) →
-      (∀ params ∈ paramsList, params.Nodup) →
-      (∀ params ∈ paramsList, ∀ p ∈ params, p ∈ SPMF.support (genIdentName (G := SPMF))) →
-      (∀ params ∈ paramsList, ∀ p ∈ params, p ∉ reserved) →
+      (∀ ps ∈ paramsList, ps.Perm params) →
       paramsList ∈ SPMF.support
-        (genParamsList (G := SPMF) reserved maxTyParams paramsList.length) := by
+        (genParamPerms (G := SPMF) params paramsList.length) := by
   intro paramsList
   induction paramsList with
   | nil =>
-    intro _ _ _ _
-    simp only [List.length_nil, genParamsList, mem_support_pure_iff]
-  | cons params rest ih =>
-    intro hlen hnodup hident hfresh
-    simp only [List.length_cons, genParamsList, mem_support_bind_iff, mem_support_pure_iff]
-    refine ⟨params.length, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, hlen params (by simp)⟩,
-      params, ?_, rest, ?_, rfl⟩
-    · exact genFreshNames_complete params reserved (hnodup params (by simp))
-        (fun p hp => hident params (by simp) p hp) (fun p hp => hfresh params (by simp) p hp)
-    · exact ih (fun p hp => hlen p (by simp [hp])) (fun p hp => hnodup p (by simp [hp]))
-        (fun p hp => hident p (by simp [hp])) (fun p hp => hfresh p (by simp [hp]))
+    intro _
+    simp only [List.length_nil, genParamPerms, mem_support_pure_iff]
+  | cons ps rest ih =>
+    intro hperm
+    simp only [List.length_cons, genParamPerms, mem_support_bind_iff, mem_support_pure_iff]
+    have hps : params.Perm ps := (hperm ps List.mem_cons_self).symm
+    refine ⟨⟨ps, hps⟩, permutationOf_complete params ps hps, rest, ?_, rfl⟩
+    exact ih (fun ps' hps' => hperm ps' (List.mem_cons_of_mem _ hps'))
+
+/-- **Completeness of `genParamsList`.** Take a list `params` of distinct names under the limit
+    `maxTyParams`, each an identifier that the generator can reach, absent from `reserved`, and
+    accepted by `Lambda.isAllowedName`. Then the generator can make each list of permutations of
+    `params`, at the count of that list.
+
+    The generator draws `params` itself through `genFreshNames_complete`, the filter by
+    `Lambda.isAllowedName` keeps all of it, and `genParamPerms_complete` reaches the
+    permutations. -/
+theorem genParamsList_complete {reserved : List String} {maxTyParams : Nat}
+    {params : List TyIdentifier}
+    (hlen : params.length ≤ maxTyParams)
+    (hnodup : params.Nodup)
+    (hident : ∀ p ∈ params, p ∈ SPMF.support (genIdentName (G := SPMF)))
+    (hfresh : ∀ p ∈ params, p ∉ reserved)
+    (hallowed : ∀ p ∈ params, Lambda.isAllowedName p = true) :
+    ∀ (paramsList : List (List TyIdentifier)),
+      (∀ ps ∈ paramsList, ps.Perm params) →
+      paramsList ∈ SPMF.support
+        (genParamsList (G := SPMF) reserved maxTyParams paramsList.length) := by
+  intro paramsList hperm
+  simp only [genParamsList, mem_support_bind_iff]
+  have hfilter : params.filter Lambda.isAllowedName = params := List.filter_eq_self.mpr hallowed
+  refine ⟨params.length, mem_support_chooseNat_iff.mpr ⟨Nat.zero_le _, hlen⟩, params,
+    genFreshNames_complete params reserved hnodup hident hfresh, ?_⟩
+  rw [hfilter]
+  exact genParamPerms_complete paramsList hperm
 
 /-- **Completeness of `genRanks`.** The generator can make a target list of ranks `ranks` at the
     count `ranks.length`, when each rank is not more than `maxRank`. Each `chooseNat` picks one
@@ -4473,8 +4496,10 @@ theorem blockHeaders_getElem (block : MutualDatatype Unit) (i : Nat)
       pairs, and they are absent from `initialReserved`. `MutualADTWF` gives `namesNodup`, and
       the name pool of the generator needs the other two facts.
     * the number of type parameters of each datatype is not more than `maxTyParams`, those
-      parameters are identifiers that the generator can reach, they are different in pairs, and
-      they are absent from the block names and from `initialReserved`;
+      parameters are identifiers that the generator can reach, they are different in pairs,
+      `Lambda.isAllowedName` accepts them, and they are absent from the block names and from
+      `initialReserved`;
+    * all the datatypes declare the same type parameters, up to order;
     * the caller gives a list `ranks`, one rank for each datatype, and each rank is not more than
       `block.length - 1`;
     * each datatype body divides, up to a permutation, into an inhabited constructor and the
@@ -4491,7 +4516,8 @@ theorem blockHeaders_getElem (block : MutualDatatype Unit) (i : Nat)
     names for each inhabited constructor.
 
     Phase 1 draws `numExtra := block.length - 1`, `names := block.map (·.name)` and
-    `paramsList := block.map (·.typeArgs)`. Phase 2 is
+    `paramsList := block.map (·.typeArgs)`, whose lists are permutations of the parameters of
+    the first datatype. Phase 2 is
     `genConstructorsForAllTypes_complete`. -/
 theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     {tyCons : List KnownTyCon}
@@ -4507,6 +4533,8 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SPMF.support (genIdentName (G := SPMF)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
+    (hparamsAgree : ∀ d ∈ block, ∀ d' ∈ block, ∀ v, v ∈ d.typeArgs ↔ v ∈ d'.typeArgs)
+    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Lambda.isAllowedName p = true)
     (ranks : List Nat)
     (hrankslen : ranks.length = block.length)
     (hranksle : ∀ r ∈ ranks, r ≤ block.length - 1)
@@ -4557,13 +4585,16 @@ theorem genMutuallyRecursiveDatatypes_complete {baseTypes : List String}
     -- under the limit, and the length of the list agrees with the length of `names`.
     have hnameslen : (block.map (·.name)).length = (block.map (·.typeArgs)).length := by simp
     rw [hnameslen]
-    exact genParamsList_complete _
-      (fun params hp => by obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsLen d hd)
-      (fun params hp => by obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsNodup d hd)
-      (fun params hp p hpp => by
-        obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsIdent d hd p hpp)
-      (fun params hp p hpp => by
-        obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hp; exact hparamsFresh d hd p hpp)
+    -- Every list of parameters is a permutation of the parameters of the first datatype `d₀`,
+    -- because the lists hold the same members and each has no duplicate.
+    have hd₀ : block.head hne ∈ block := List.head_mem hne
+    refine genParamsList_complete (params := (block.head hne).typeArgs)
+      (hparamsLen _ hd₀) (hparamsNodup _ hd₀) (hparamsIdent _ hd₀) (hparamsFresh _ hd₀)
+      (hparamsAllowed _ hd₀) _ ?_
+    intro ps hps
+    obtain ⟨d, hd, rfl⟩ := List.mem_map.mp hps
+    exact perm_of_nodup_of_mem_iff (hparamsNodup d hd) (hparamsNodup _ hd₀)
+      (hparamsAgree d hd _ hd₀)
   -- Here `ranks` is the list of ranks that the caller gives, and the generator draws
   -- `names.length` ranks.
   refine ⟨ranks, ?_, ?_⟩
@@ -4628,6 +4659,7 @@ open Core Core.TypeSpec in
     is `hnew`. Each of its constructors obeys `hasDefaultTesterName`, and the block is under the
     limits on the datatypes, the parameters and the constructors. Its names and its parameters
     are identifiers that the generator can reach, and they are fresh against `initialReserved`.
+    `Lambda.isAllowedName` accepts its parameters.
 
     Then `genMutuallyRecursiveDatatypes` can make that block at some size `maxSize`. This proof
     **builds the rank itself**, through `rankExists`. The caller gives no order of the datatypes,
@@ -4648,10 +4680,10 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
     (hnamesIdent : ∀ d ∈ block, d.name ∈ SPMF.support (genIdentName (G := SPMF)))
     (hnamesFresh : ∀ d ∈ block, d.name ∉ initialReserved baseTypes tyCons extraReserved)
     (hparamsLen : ∀ d ∈ block, d.typeArgs.length ≤ maxTyParams)
-    (hparamsNodup : ∀ d ∈ block, d.typeArgs.Nodup)
     (hparamsIdent : ∀ d ∈ block, ∀ p ∈ d.typeArgs, p ∈ SPMF.support (genIdentName (G := SPMF)))
     (hparamsFresh : ∀ d ∈ block, ∀ p ∈ d.typeArgs,
       p ∉ block.map (·.name) ++ initialReserved baseTypes tyCons extraReserved)
+    (hparamsAllowed : ∀ d ∈ block, ∀ p ∈ d.typeArgs, Lambda.isAllowedName p = true)
     (hctors_nf : ∀ d ∈ block, ∀ c ∈ d.constrs, hasDefaultTesterName c)
     (hctors_len : ∀ d ∈ block, ∀ c ∈ d.constrs, c.args.length ≤ maxArgs)
     (hnames_ident : ∀ d ∈ block, ∀ nm' ∈ ctorsNames d.constrs,
@@ -4820,7 +4852,8 @@ theorem genMutuallyRecursiveDatatypes_complete_of_MutualADTWF {baseTypes : List 
         exact ⟨S, cw, hcw, hcwl, hSw, hSf⟩)
   -- Apply the completeness with the ranks as a parameter, at `maxSize := N`.
   refine ⟨N, genMutuallyRecursiveDatatypes_complete hwf.nonempty hcount hnodup hnamesIdent
-    hnamesFresh hparamsLen hparamsNodup hparamsIdent hparamsFresh ranks hrankslen hranksle ?_⟩
+    hnamesFresh hparamsLen hwf.typeArgsNodup hparamsIdent hparamsFresh hwf.typeArgsAgree
+    hparamsAllowed ranks hrankslen hranksle ?_⟩
   intro i hi hi'
   have hd : (block[i]'hi) ∈ block := List.getElem_mem hi
   obtain ⟨cw, hcw, _hcwl, hNwit, hNfull⟩ := hN (block[i]'hi) hd

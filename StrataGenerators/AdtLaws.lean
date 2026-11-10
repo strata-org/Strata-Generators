@@ -305,11 +305,9 @@ private def assertSt (l : String) (e : Expression.Expr) : Statement :=
   .cmd (.cmd (.assert l e .empty))
 
 /-- A procedure that has a body and no input, no output and no specification. It is the
-    container for the obligations of one law. `noFilter := true` stops `FilterProcedures` from
-    the removal of the procedure, because nothing calls it. -/
+    container for the obligations of one law. -/
 private def lawProc (name : String) (body : List Statement) : Decl :=
-  .proc { header := { name := ⟨name, ()⟩, typeArgs := [], inputs := [], outputs := [],
-                      noFilter := true }
+  .proc { header := { name := ⟨name, ()⟩, typeArgs := [], inputs := [], outputs := [] }
           spec := { preconditions := [], postconditions := [] }
           body := .structured body } .empty
 
@@ -594,7 +592,7 @@ def stmtAsserts (s : Statement) : List (String × Expression.Expr) :=
   | .block _ b _ => stmtsAsserts b
   | .ite _ t e _ => stmtsAsserts t ++ stmtsAsserts e
   | .loop _ _ _ b _ => stmtsAsserts b
-  | .exit _ _ | .funcDecl _ _ | .typeDecl _ _ => []
+  | .exit _ _ | .typeDecl _ _ => []
 
 /-- `stmtAsserts` over a list of statements. -/
 def stmtsAsserts (ss : List Statement) : List (String × Expression.Expr) :=

@@ -56,15 +56,11 @@ def adtBlockChecks : List TestDecl :=
       -- vacuity.
       ("adt: constructor-form disjointness folds during symbolic evaluation",
        fun gb => checkDisjFoldsDuringSymEval gb.block),
-      -- This property is here and not in the `mutual:` suite, because the defect is not
-      -- specific to an independent block. `visibleRefs` lets a datatype refer to a
-      -- datatype whose parameters are a subset of its own, and the parameter lists in the
-      -- block then differ.
+      -- The generator gives every datatype of a block the same type parameters, as
+      -- `MutualADTWF.typeArgsAgree` requires, so a draw cannot reach the eliminator-scope
+      -- defect that `MutualBlockShape.paramMismatchWitness` pins.
       ("mutual: derived functions bind every type variable they mention",
-       fun gb => StrataGenerators.MutualBlockShape.checkDerivedFuncsWellScoped gb.block,
-       .knownFailure "reported upstream: `elimFuncs` builds `d$Elim`'s case-function \
-arguments from every datatype in the block but binds only `d`'s own type parameters, so \
-a sibling's parameters occur free") ]
+       fun gb => StrataGenerators.MutualBlockShape.checkDerivedFuncsWellScoped gb.block) ]
 
 /-- One run of the pipeline for one block gives the obligations of *every* law family.
     Therefore the three properties that need a solver share one computation. A separate

@@ -14,9 +14,10 @@ open StrataGenerators.Test
 open StrataGenerators.Stmt.TestSupport
 
 /-- Each free variable in the body and in the measure of a generated function has an
-    annotation that agrees with the type map of the context that the generator used. This
-    holds because `pickFVar` always emits an `fvar` node with the annotation `some τ`, where
-    `τ` is the type that the variable has in the context. -/
+    annotation that agrees with the type of the formal of that name, or else with the type map
+    of the context that the generator used. This holds because `pickFVar` always emits an
+    `fvar` node with the annotation `some τ`, where `τ` is the type that the variable has in
+    the context. -/
 @[strata_property]
 def fnFvarsAnnotated : TestDecl :=
   (TestDecl.property "function: fvars annotated by context type map"
@@ -42,25 +43,14 @@ def fnBodyPreservation : TestDecl :=
     (fun (gf : ClosedGenFunction) => checkFunctionBodyPreservation gf.func)).withPanel
     genAndCheckFunctionBodyPreservation
 
-/-- Completeness of the type checker for a function, which is the dual of its soundness.
-    `genFunction` is sound, because its output satisfies `FuncHasType'`. Therefore
-    `Function.typeCheck` must accept each generated function.
-
-    It does not accept all of them. The specification lets a function have a measure and no
-    body, and the algorithm rejects such a function. This property states the full claim, so
-    it reports the gap and does not hide it. -/
+/-- Completeness of the type checker for a function: `Function.typeCheck` accepts each
+    generated function, except one with a reserved name or a parameter named like a function
+    (`checkerRejectionExpected`). Any other rejection is a failure. -/
 @[strata_property]
 def fnTypeCheckComplete : TestDecl :=
   (TestDecl.property "function: typeCheck accepts generated functions (completeness)"
     (fun (gf : ClosedGenFunction) => checkFunctionTypeCheckerComplete gf.func)).withPanel
     genAndCheckFunctionTypeCheckComplete
-
-/-- Each function that `Function.typeCheck` rejects has a measure and no body. This property
-    pins the one known gap in completeness, and it finds a *second* cause if one appears. -/
-@[strata_property]
-def fnRejectionOnlyMeasure : TestDecl :=
-  .property "function: typeCheck rejections are only measure-without-body"
-     (fun (gf : ClosedGenFunction) => funcRejectionImpliesMeasureNoBody gf.func)
 
 /-- The sequence of pretty-print, parse and pretty-print again is a fixed point.
 

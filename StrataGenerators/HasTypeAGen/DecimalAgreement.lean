@@ -8,7 +8,7 @@ open Strata.SMT StrataDDM StrataGenerators.PrimitiveGens
 # `Decimal` against `Rat`: the encoding of a real in the SMT dialect
 
 Strata Core has **two** representations of a real number. At the level of the AST
-and of the denotational semantics, a real is Lean's `Rat`: `LExpr.realConst` takes
+and of the denotational semantics, a real is Lean's `Rat`: `LExpr.rationalConst` takes
 a `Rat`, and `SortDenote` maps `real` to `Rat`. In the term language of the SMT
 dialect, a real is a `StrataDDM.Decimal`, which is a pair of a `mantissa : Int`
 and an `exponent : Int`.
