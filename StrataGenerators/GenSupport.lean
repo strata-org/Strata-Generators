@@ -18,7 +18,7 @@ speak about `SPMF.support`, the set of values whose mass is not zero. Basalt own
 `mem_support_*_iff` lemmas, `Basalt/Laws.lean` has `IsSoundAndComplete`, and
 `Basalt/Tactic/Support.lean` has `support_simp`, the packaged `simp only` set for support inversion.
 
-This file holds four things Basalt does not.
+This file holds five things Basalt does not.
 
 1. `SPMF.mem_support_bot_iff`, so that a `simp` set can discharge the branch of a generator that
    produces nothing.
@@ -30,6 +30,10 @@ This file holds four things Basalt does not.
 4. `wellFounded_fix_rel`, which lifts a relation between two step functions to a relation between
    their fixpoints. It carries a per-site fact up to a whole recursive generator, and it is not
    specific to any interpretation.
+5. `isSoundFor_self_support` and `true_law`, the two trivial soundness facts that `walk` takes for
+   a draw whose own law a proof does not need; `mem_law`, the completeness fact for a value a
+   draw reaches; and `IsSoundFor.of_mem_pair`, which turns a goal about a drawn pair into an
+   `IsSoundFor` goal.
 
 Two facts about `SPMF` shape every proof here. Membership goes through `SPMF.support`, never through
 the generator itself; and a reweighting preserves the support but not the generator, so the tuning
@@ -43,15 +47,8 @@ namespace SPMF
     `Inhabited` instance gives. -/
 @[simp]
 theorem mem_support_bot_iff {α : Type u} (a : α) : a ∈ (default : SPMF α).support ↔ False := by
-  simp only [SPMF.mem_support_iff, default, Bot.bot, ne_eq, iff_false, Decidable.not_not]
+  refine ⟨fun h => h ?_, False.elim⟩
   rfl
-
-/-- `mem_support_listOf` under its `Iff` name, for symmetry with the rest of the family. A list is in
-    the support of `listOf g` exactly when each of its elements is in the support of `g`; `listOf`
-    puts no bound on the length. -/
-theorem mem_support_listOf_iff {g : SPMF α} {xs : List α} :
-    xs ∈ (listOf g).support ↔ ∀ x ∈ xs, x ∈ g.support :=
-  mem_support_listOf
 
 /-- The `mpr` direction of `mem_support_listOf_iff`, named for use as a term. -/
 theorem mem_support_listOf_of_forall {g : SPMF α} {xs : List α}
@@ -75,11 +72,32 @@ export SPMF (support support_bind mem_support_bind_iff support_pure mem_support_
   mem_support_chooseNat_iff mem_support_chooseInt_iff support_oneOf_pair mem_support_oneOf_pair_iff support_oneOf
   mem_support_oneOf_iff support_frequency mem_support_frequency_iff support_elements
   mem_support_elements_iff support_vectorOf mem_support_vectorOf_iff support_listOfMaxLength
-  mem_support_listOfMaxLength_iff support_listOf mem_support_listOf mem_support_listOf_iff
-  mem_support_listOf_of_forall support_nonEmptyListOf mem_support_nonEmptylistOf support_coin
+  mem_support_listOfMaxLength_iff support_listOf mem_support_listOf_iff
+  mem_support_listOf_of_forall support_nonEmptyListOf mem_support_nonEmptyListOf_iff support_coin
   mem_support_coin_iff support_biasedOptionGen mem_support_biasedOptionGen_iff support_optionGen
-  mem_support_optionGen_iff mem_support_bot_iff mem_support_csup bind_congr_support bot_bind
+  mem_support_optionGen_iff mem_support_bot_iff mem_support_csup_iff bot_bind
   support_frequency_reweight support_frequency_congr_weights)
+
+/-- The trivial law of a generator: each value in its support is in its support. A `walk` over a
+    generator built from smaller ones takes this as the fact for each smaller one, and leaves the
+    membership in context for the caller. -/
+theorem isSoundFor_self_support {α} (g : SPMF α) : IsSoundFor g (· ∈ SPMF.support g) := fun _ h => h
+
+/-- Every generator is sound for the trivial postcondition. `walk` takes this as the fact for a
+    draw that constrains nothing the proof needs. -/
+theorem true_law {α : Type} (g : SPMF α) : IsSoundFor g (fun _ => True) := fun _ _ => trivial
+
+/-- A value in a generator's support, as the completeness fact that `walk` takes for that draw:
+    the generator reaches every value equal to it. -/
+theorem mem_law {α : Type} {g : SPMF α} {a : α} (h : a ∈ SPMF.support g) :
+    IsCompleteFor g (· = a) := fun _ e => e ▸ h
+
+/-- A soundness fact for a generator of pairs holds at each pair in its support. A proof whose
+    goal is about the two parts of a drawn pair applies this to get an `IsSoundFor` goal for
+    `walk`; the postcondition is read off the goal. -/
+@[elab_as_elim]
+theorem IsSoundFor.of_mem_pair {α β : Type} {g : SPMF (α × β)} {P : α → β → Prop} {a : α} {b : β}
+    (h : (a, b) ∈ SPMF.support g) (hg : IsSoundFor g fun r => P r.1 r.2) : P a b := hg _ h
 
 namespace StrataGenerators
 
@@ -92,9 +110,9 @@ and `PrecondElim` is the pass that acts on it.
 A tuning can address the split only if the tagged generator writes the split out in its own body:
 `@[tunable]` collects the `frequency` calls in that body, and inlines only that declaration's own
 compiler-generated auxiliaries. This combinator takes its weights as variables rather than as
-literals, so the attribute rejects the combinator itself. `TuningPrototypes.genPreconditionW` writes
-the two-branch `frequency` inline and then records by `rfl` that the result is this combinator at
-weights 1 to 1, so the support lemma below still describes it.
+literals, so the attribute rejects the combinator itself. A tunable generator therefore writes the
+two-branch `frequency` inline and records by `rfl` that the result is this combinator, so the support
+lemma below still describes it.
 
 Both weights must be positive for the support to match `optionGen`'s. `Tuning.weight` clamps every
 weight to 1 or more, so a tuned generator that wraps this stays total for every runtime `θ`.

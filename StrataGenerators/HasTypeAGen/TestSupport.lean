@@ -46,7 +46,7 @@ def ppExpr (e : LExpr') (prec : Nat := 0) : String :=
   | .const _ (.boolConst b) => s!"#{b}"
   | .const _ (.intConst i) => s!"#{i}"
   | .const _ (.strConst s) => s!"\"{s}\""
-  | .const _ (.realConst r) => s!"#{r}"
+  | .const _ (.rationalConst r) => s!"#{r}"
   | .const _ (.bitvecConst _ b) => s!"#{b.toNat}"
   | .op _ o _ => s!"{o.name}"
   | .bvar _ i => s!"%{i}"
@@ -121,17 +121,16 @@ def corePartialOps : OpCtx := coreMonoOps
 def coreState : LState LExprParams' :=
   { state := [],
     config := { factory := coreFactory,
-                fuel := 200,
-                usedNames := {} } }
+                fuel := 200 } }
 
 /-- Evaluate an expression with the given fuel over `coreFactory`. An operator
     reduces when it has constant arguments. A free variable is irreducible. -/
 def eval (fuel : Nat) (e : LExpr') : LExpr' :=
   (LExpr.evalWithLState fuel coreState e).fst
 
-/-- Report whether an expression is a canonical value over `coreFactory`. -/
+/-- Report whether an expression is a value over `coreFactory`. -/
 def isValue (e : LExpr') : Bool :=
-  LExpr.isCanonicalValue coreState.config.factory e
+  LExpr.isValue coreState.config.factory e
 
 -- ── Expression property checks (shared by both harnesses) ────────────────
 -- The pass/fail decision for each expression-generator property lives here so
@@ -155,15 +154,17 @@ def checkFvarsPreserved (expr : LExpr') : Bool :=
 
 -- ── Resolve-after-erasure property (shared by both harnesses) ─────────────
 
-/-- Known types covering all base types the generator can produce. Required for
-    `LExpr.resolve` to reconstruct arrow/Map/Seq aliases after erasure. -/
+/-- Known types covering every type constructor that the generator can produce.
+    `LExpr.resolve` rejects a type whose constructor is not registered here. -/
 def resolveKnownTypes : Lambda.KnownTypes :=
   open Lambda.LTy.Syntax in
   Lambda.makeKnownTypes ([t[∀a b. %a → %b],
     t[bool], t[int], t[string], t[real], t[regex],
+    t[Triggers], t[TriggerGroup],
     t[∀n. bitvec n],
     t[∀a b. Map %a %b],
-    t[∀a. Sequence %a]].map (fun k => k.toKnownType!))
+    t[∀a. Sequence %a],
+    t[∀a. Set %a]].map (fun k => k.toKnownType!))
 
 /-- `LContext` with `coreFactory` and each known type that the generator needs. -/
 def resolveLContext : Lambda.LContext LExprParams' :=

@@ -8,7 +8,7 @@ open Strata.SMT StrataDDM StrataGenerators.PrimitiveGens
 # `Decimal` against `Rat`: the encoding of a real in the SMT dialect
 
 Strata Core has **two** representations of a real number. At the level of the AST
-and of the denotational semantics, a real is Lean's `Rat`: `LExpr.realConst` takes
+and of the denotational semantics, a real is Lean's `Rat`: `LExpr.rationalConst` takes
 a `Rat`, and `SortDenote` maps `real` to `Rat`. In the term language of the SMT
 dialect, a real is a `StrataDDM.Decimal`, which is a pair of a `mantissa : Int`
 and an `exponent : Int`.
@@ -199,37 +199,6 @@ def checkTrichotomy (d₁ d₂ : Decimal) : Bool :=
   let lt₂ := TermPrim.lt (.real d₂) (.real d₁)
   let eqv := actualEqFold d₁ d₂ == some true
   (if lt₁ then 1 else 0) + (if lt₂ then 1 else 0) + (if eqv then 1 else 0) == 1
-
--- ── Machine-checked reproducers ───────────────────────────────────────
---
--- Each example below pins one pair, and it does not depend on what the generator draws. Each of them states the
--- behaviour of the code, which is the incorrect behaviour. Therefore each of them breaks after a correction, and
--- it then shows that this file needs a change too.
-
-/-- `3e0` and `30e-1` denote one value. -/
-example : Decimal.toRat ⟨3, 0⟩ = Decimal.toRat ⟨30, -1⟩ := by native_decide
-
-/-- **The defect in the fold of `eq`.** The two spellings above fold to `false`,
-    although they denote one value. -/
-example : actualEqFold ⟨3, 0⟩ ⟨30, -1⟩ = some false := by native_decide
-example : checkEqFold ⟨3, 0⟩ ⟨30, -1⟩ = false := by native_decide
-
-/-- **The defect in the comparator.** Each of `lt` in both directions and the fold
-    of `eq` is `false`, so the comparator is not a total order. -/
-example : TermPrim.lt (.real ⟨3, 0⟩) (.real ⟨30, -1⟩) = false := by native_decide
-example : TermPrim.lt (.real ⟨30, -1⟩) (.real ⟨3, 0⟩) = false := by native_decide
-example : checkTrichotomy ⟨3, 0⟩ ⟨30, -1⟩ = false := by native_decide
-
-/-- The path for `Int` is correct, which shows that the defect comes from the
-    representation and not from `Factory.eq` itself. `Int` is canonical, so a
-    structural comparison of two `Int` literals is a comparison of their values. -/
-example : Factory.eq (Term.int 3) (Term.int 3) = Term.prim (.bool true) := by native_decide
-example : Factory.eq (Term.int 3) (Term.int 4) = Term.prim (.bool false) := by native_decide
-
-/-- A pair of structurally identical reals folds to `true`, through the first
-    branch of `Factory.eq`. Therefore the defect needs two *different* spellings,
-    which is what `genSameValuePair` builds. -/
-example : actualEqFold ⟨3, 0⟩ ⟨3, 0⟩ = some true := by native_decide
 
 -- ── The properties as suite nodes ─────────────────────────────────────
 

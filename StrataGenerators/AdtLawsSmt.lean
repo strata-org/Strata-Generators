@@ -1,5 +1,6 @@
 import StrataGenerators.AdtLaws
 import StrataGenerators.HasTypeAGen.SmtEval
+import Strata.Languages.Core.IncrementalSolve
 
 /-!
 # The ADT laws against a live solver, under a gate

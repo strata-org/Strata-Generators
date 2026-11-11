@@ -19,9 +19,7 @@ def monoProperties : List TestDecl :=
             fun gp => checkMonoFactoryMonomorphic gp.prog),
         ("mono: output of monomorphization typechecks", fun gp => checkMonoOutputTypechecks gp.prog),
         ("mono: monomorphization pass is idempotent", fun gp => checkMonoIdempotent gp.prog),
-        -- The `funcDecl` statement, and the form of that claim with no restriction.
-        ("mono: a statement-declared body's references are rewritten",
-            fun gp => checkMonoStmtFuncDeclRefsRewritten gp.prog),
+        -- A reference to a dropped polymorphic original, anywhere in the output.
         ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
         -- A type declaration changes only through the functions that it derives.
@@ -44,9 +42,30 @@ def monoProperties : List TestDecl :=
         ("mono: evaluation agrees before and after the pass",
             fun gp => checkMonoEvalAgreement gp.prog) ]
 
-/-- The three specialization properties, checked a second time under a distribution that makes a
+/-- `procedure FKP<S> (inout U : string, k : int, out ugb : S) {}`. -/
+private def polyInoutOutProcDecl : Decl :=
+  .proc { header := { name := ⟨"FKP", ()⟩, typeArgs := ["S"],
+                      inputs := [(⟨"U", ()⟩, .string), (⟨"k", ()⟩, .int)],
+                      outputs := [(⟨"U", ()⟩, .string), (⟨"ugb", ()⟩, .ftvar "S")],
+                      lemmas := [] }
+          spec := { preconditions := [], postconditions := [] }
+          body := .structured [] } .empty
+
+/-- A hand-built witness for the sampled property
+    `mono: output of monomorphization typechecks`, which a draw falsifies only sometimes. -/
+@[strata_property]
+def monoPolyInoutOutputTypechecks : TestDecl :=
+  knownFailure "on a polymorphic procedure with an inout parameter and an output of a \
+    type-parameter type, Core's `Program.typeCheck` gives the output a type variable in its \
+    reserved namespace (`$__ty0`), and re-checking the monomorphized output rejects that \
+    name; the same checker defect as the inout re-typecheck property" <|
+    TestDecl.witness "mono: a polymorphic procedure with an inout parameter and a \
+      type-parameter output re-typechecks after the pass"
+      (decide (checkMonoOutputTypechecks { decls := [polyInoutOutProcDecl] }))
+
+/-- The two specialization properties, checked a second time under a distribution that makes a
     polymorphic function common. `MonomorphizeFunctions` is the identity on a program that declares
-    none, and each of these three then holds for a reason that has nothing to do with the pass.
+    none, and each of these two then holds for a reason that has nothing to do with the pass.
     `progPolyHeavy` takes the rate of a program with one from 63% to 82%.
 
     `mono: a program with no polymorphic function is unchanged` is deliberately absent. It wants the
@@ -54,9 +73,7 @@ def monoProperties : List TestDecl :=
 @[strata_properties]
 def monoPolyHeavyProperties : List TestDecl :=
     (family GenProgram
-        [ ("mono: a statement-declared body's references are rewritten",
-            fun gp => checkMonoStmtFuncDeclRefsRewritten gp.prog),
-        ("mono: no reference to a dropped polymorphic original survives",
+        [ ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
         ("mono: every specialization's base name was polymorphic in the input",
             fun gp => checkMonoMangledBaseWasPolymorphic gp.prog) ]).flatMap

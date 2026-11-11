@@ -5,13 +5,13 @@ Core programs. These generators are built using [Basalt](https://github.com/hgol
 a Lean property-based testing library. Using Basalt, we prove these generators sound and complete with respect to Strata Core's typing relations.
 
 Specifically, the repo contains generators for the following fragment of Strata Core:
-- Expressions (`LExpr`s) (typing relation: `HasTypeA`)
-  - Note: our `LExpr` generator targets the `HasTypeA` typing relation (which pertains to well-annotated locally nameless terms), not `HasTypeA`
-- Commands (typing relation: `CmdHasTypeA`)
-- Functions (typing relation: `FunctionHasTypeA`)
-- Statements & statement sequences (typing relation: `StmtHasTypeA`, `StmtsHasTypeA`)
-- Procedures (typing relation: `ProcHasTypeA`)
-- Whole programs (typing relation: `ProgramHasTypeA`)
+- Expressions (`LExpr`s) (typing relation: `ExprWellTyped`)
+  - Note: `ExprWellTyped` is `HasTypeA` (the annotation-checking relation on locally nameless terms), together with the conditions that binder annotations use registered type constructors and that annotations agree with the variable scopes; the `LExpr` generator is proved sound against each part.
+- Commands (typing relation: `CmdWellTyped`)
+- Functions (typing relation: `FuncWellTyped`)
+- Statements & statement sequences (typing relation: `StatementWellTyped`, `StatementsWellTyped`)
+- Procedures (typing relation: `ProcWellTyped`)
+- Whole programs (typing relation: `ProgramWellTyped`)
 
 ## Generator Interpretations
 Basalt generators are polymorphic in their monad (see the [Basalt repo](https://github.com/hgoldstein95/basalt) for more details): this means they can be interpreted differently for execution / proofs. 
@@ -22,8 +22,7 @@ sub-probability mass functions) and reason about a generator's *support* (the se
 can be produced by the generator), via `SPMF.support`.
 
 `StrataGenerators/GenSupport.lean` holds the few support results this package needs beyond the ones
-Basalt provides. See [docs/spmf_refactor.md](docs/spmf_refactor.md) for how the proofs are organised
-at `SPMF`.
+Basalt provides.
 
 ### Organization
 
@@ -33,10 +32,11 @@ the actual code for the generator, while `HasTypeAGen.lean` contains the generat
 
 ## Dependencies
 
-- `Strata`
+- `Strata` (a git dependency on the public Strata repository, pinned in `lakefile.toml` to a revision of its `main` branch)
 - `Basalt` (used for proving generators correct)
 - `Plausible` (used to run generators)
 - `LSpec` (Lean testing framework, we use LSpec's test harnesses to run tests)
+- `mathlib` (pinned to the `v4.34.0` release; `lake exe cache get` fetches its prebuilt artifacts)
 - (Optionally) An SMT solver (cvc5 or z3) to test Strata properties related to SMT encoding, which are not run by default
   - See the [installation instructions in the Strata repository](https://github.com/strata-org/strata#smt-solvers) on how to install cvc5/z3
 
@@ -61,7 +61,7 @@ the actual code for the generator, while `HasTypeAGen.lean` contains the generat
 
 To run a test executable, which tests a variety of properties using these Strata Core generators,
 run `lake test -- --quick`. (The `--quick` flag minimizes the no. of tests run, if we omit this flag,
-the entire test suite, consisting of 80+ properites, takes 10+ minutes to run. This is because it runs each property with 1000 random trials, with 
+the entire test suite, consisting of 160+ properties, takes 10+ minutes to run. This is because it runs each property with 1000 random trials, with 
 the randomly generated inputs having a larger size.)
 
 This executable runs a Plausible test suite via LSpec, and visualizes test results using [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
@@ -81,20 +81,21 @@ lake build test
 .lake/build/bin/test [numTrials] [maxSize] [flags]
 ```
 
-- `numTrials` (default: 1000) —: umber of random test cases per property
+- `numTrials` (default: 1000): number of random test cases per property
 - `maxSize` (default: 5): maximum size parameter for generation (controls
   the depth of the generated AST)
 
 Flags (all optional; the Tyche visualization pass is on by default):
 
 - `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
-  Currently, this flag runs 100 trials for each property, with `size = 2` passed to the generators.
+  This flag runs 100 trials for each property, with `size = 2` passed to the generators.
   This flag omits Tyche visualizations:
 - `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
 - `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
 - `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
 - `--smt` — Tests properties related to Strata SMT encodings. This CLI flag requires a local installation of an SMT solver (cvc5/z3). 
   If `--smt` is passed but the SMT solver cannot be run, the test harness emits an error and exits with a non-zero exit code.
+- `--known-failure=NAME`: treat the property with the whole name `NAME` as known to fail for this run only (see `Marking individual properties as known to fail` below)
 
 See [`properties_bugs_found.md`](properties_bugs_found.md) for the full list of properties tested & bugs found.
 For the actual code for the properties, refer to the `StrataTests/` directory (see the `Adding a new property` section below for more details
@@ -103,7 +104,7 @@ on how this directory is organized).
 ### LSpec-free harness (`test-plain`)
 
 There is a second test executable, `test-plain`, that does not depend on LSpec. 
-All properties, generators and CLI flags are shared with the default test runner (the one inovked by doing `lake test`).
+All properties, generators and CLI flags are shared with the default test runner (the one invoked by doing `lake test`).
 
 To run the alternate `test-plain` harness, do:
 ```bash
@@ -111,8 +112,9 @@ lake build test-plain
 .lake/build/bin/test-plain [numTrials] [maxSize] [--smt]
 ```
 
-`test-plain` keeps the LSpec dependency droppable. LSpec reaches this package only through a
-fork that is pinned to Lean 4.29, because mainline LSpec is on Lean 4.31.
+`test-plain` keeps the LSpec dependency droppable. LSpec is a git dependency on mainline
+[LSpec](https://github.com/argumentcomputer/LSpec), pinned in `lakefile.toml` to a revision on
+the same Lean toolchain as this package (Lean 4.34.0, see `lean-toolchain`).
 
 ## Tuning the generators' distributions
 
@@ -133,10 +135,10 @@ and `ProgramTuning.lean`: here is a full list of the weights:
 
 | Lean file | Tunings |
 |---|---|
-| [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) | <ul><li>`stmtLoopHeavy` (prioritizes loops)</li><li>`stmtFuncDeclHeavy` (prioritizes function declarations)</li><li>`stmtLoopWide` (prioritizes non-nested loops)</li><li>`stmtMixed` (general-purpose distribution for statements that exercises loop-related transformations & as well as the `detToKleene` pass)</li><li>`procCallHeavy` (prioritizes procedure call statements)</li><li>`procPrecondHeavy` (prioritizes functions with preconditions)</li><li>`cmdSetHeavy` (prioritizes the `.set` command)</li><li>`cmdInitHeavy` (prioritizes the `.init` command)</li><li>`cmdCheckHeavy` (prioritizes the `.check` command)</li><li>`exprEvalHeavy` (prioritizes expressions that are *not* values, i.e. expressions that change under evaluation)</li><li>`exprQuantHeavy` (prioritizes expressions with universal / existential quantification)</li><li>`exprIndirHeavy` (prioritizes factory function calls)</li><li>`exprFVarHeavy` (prioritizes expressions with free variables)</li><li>`tyCompoundHeavy` (prioritzes compound types, such as functions, `Map` & `Sequence`)</li></ul> |
-| [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) | <ul><li>`progPolyHeavy` (prioritizes polymorphic functions)</li><li>`progDatatypeHeavy` (prioritzes algebraic data type definitions)</li></ul> |
+| [`TuningProfiles.lean`](./StrataGenerators/TuningProfiles.lean) | <ul><li>`stmtLoopHeavy` (prioritizes loops)</li><li>`stmtCallHeavy` (prioritizes procedure call statements; `procCallHeavy` is the same profile)</li><li>`stmtLoopWide` (prioritizes non-nested loops)</li><li>`stmtMixed` (general-purpose distribution for statements that exercises loop-related transformations & as well as the `detToKleene` pass)</li><li>`procPrecondHeavy` (prioritizes functions with preconditions)</li><li>`cmdSetHeavy` (prioritizes the `.set` command)</li><li>`cmdInitHeavy` (prioritizes the `.init` command)</li><li>`cmdCheckHeavy` (prioritizes the `.check` command)</li><li>`exprEvalHeavy` (prioritizes expressions that are *not* values, i.e. expressions that change under evaluation)</li><li>`exprQuantHeavy` (prioritizes expressions with universal / existential quantification)</li><li>`exprIndirHeavy` (prioritizes factory function calls)</li><li>`exprFVarHeavy` (prioritizes expressions with free variables)</li><li>`tyCompoundHeavy` (prioritizes compound types, such as functions, `Map` & `Sequence`)</li></ul> |
+| [`ProgramTuning.lean`](./StrataGenerators/ProgramTuning.lean) | <ul><li>`progPolyHeavy` (prioritizes polymorphic functions)</li><li>`progDatatypeHeavy` (prioritizes algebraic data type definitions)</li></ul> |
 
-Note: at time of writing, the generators for `GenFunction`, `GenAdtBlock` and `GenIndepBlock` do not support tuning.
+Note: the generators for `GenFunction`, `ClosedGenFunction`, `GenAdtBlock` and `GenIndepBlock` do not support tuning.
 
 (Aside: These weights 
 were measured using the `dist-report` executable in this repo, which measures
@@ -160,7 +162,7 @@ def loopElimZeroLoops : TestDecl :=
 ## Adding a new property
 
 Properties to test are defined in the `StrataTests/` directory. 
-As an end-user of this library, you can add properites to either an existing file in `StrataTests/`, 
+As an end-user of this library, you can add properties to either an existing file in `StrataTests/`, 
 or create a new file in `StrataTests/`.
 
 To add a new property (e.g. to test that a new pass `myPass` is idempotent), add the following:
@@ -191,6 +193,11 @@ in order for typeclass resolution to succeed.
 
 The `@[strata_property]` attribute records the test declaration, allowing 
 the test driver to pick it up.
+
+A claim that is best stated on inputs you build by hand, rather than on generated ones, uses
+`TestDecl.witness` (one closed `Bool`) or `TestDecl.witnesses` (a fixed, finite list of inputs,
+each checked in turn). See `StrataGenerators/Test.lean` for these and the other shapes of a
+property.
 
 
 If you added / removed a file in `StrataTests/`, run the following in order to populate 
@@ -268,8 +275,10 @@ def myPassOutputTypechecks : TestDecl :=
       fun (gp : GenProgram) => checkMyPassOutputTypechecks gp.prog
 ```
 
-The test suite then avoids reporting counterexamples that cause this property to fail,
-facilitating bug triage.
+The test suite then hides the counterexample of this property, reports the reason instead, and
+does not let the failure gate the exit code, facilitating bug triage. If a property marked this
+way ever passes, the run fails, so that a fix does not go unnoticed. `lake test -- --list` shows
+which properties are marked, and why.
 
 If the property is part of a `family`, we add `.knownFailure "<failure_reason>"` as
 an extra component of the tuple corresponding to the property. For example, 
@@ -278,7 +287,7 @@ property as known to fail, we would do this:
 
 ```lean
 def stmtTransforms' : List TestDecl :=
-  family genStmts [
+  family GenStmts [
     ("stmt: LoopElim eliminates all loops",  fun gs => checkLoopElimZeroLoops gs.stmts, 
     .knownFailure "<failure_reason>"),
     ...

@@ -97,7 +97,7 @@ def unprovenTransforms : List TestDecl :=
        fun gp => checkLoopVcStatFaithful gp.prog),
       ("loop: no verification condition is lost through LoopElim",
        fun gp => checkLoopVcSurvivesElim gp.prog),
-      ("loop: InsertLoopInvariantAsserts rejects nothing",
+      ("loop: a nondet loop with a measure is accepted",
        fun gp => checkLoopNondetMeasureAccepted gp.prog),
       ("loop: LoopElim mints distinct block labels",
        fun gp => checkLoopBlockLabelsNodup gp.prog),

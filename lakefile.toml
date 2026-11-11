@@ -6,22 +6,34 @@ testDriver = "test"
 [[require]]
 name = "Strata"
 git = "https://github.com/strata-org/Strata"
-rev = "main"
+rev = "b3aaa6faa6523b60146ec8b82857aa1786e49a28"
 
-# The reworked FuzzGen + `Basalt.PBT` API is now merged on basalt's Lean-4.29 branch
-# (`lean-4.29`, carrying `Basalt/PBT/*` + `Basalt/Fuzz/*`), so consume it over the network like
-# any other dependency — the same rev the mainline suite pins.
+# We use Plausible's public v4.34 tag to ensure consistency in Lean version
+[[require]]
+name = "plausible"
+git = "https://github.com/leanprover-community/plausible"
+rev = "v4.34.0"
+
+# We use a branch of Basalt where the Lean version is pinned to 4.34 
+# (Basalt's `main` branch is on 4.35). 
+# (Note: this is newer than Basalt's current 4.34 tag, which is out of date)
 [[require]]
 name = "basalt"
 git = "https://github.com/hgoldstein95/basalt"
-rev = "lean-4.29"
+rev = "lean-4.34"
 
-# Note: Strata is on Lean 4.29.1, but mainline LSpec is on 4.31,
-# so we currently depend on a custom fork of LSpec that is on 4.29
+# Note: LSpec's `main` branch is on 4.31, not 4.30, so a warning will appear 
+# when we do `lake build` -- this is a benign warning and fine to ignore.
 [[require]]
 name = "LSpec"
-git = "https://github.com/ngernest/LSpec"
-rev = "aa07f8c"
+git = "https://github.com/argumentcomputer/LSpec"
+rev = "main"
+
+# The mathlib release for Lean 4.34.0
+[[require]]
+name = "mathlib"
+scope = "leanprover-community"
+rev = "v4.34.0"
 
 [[lean_lib]]
 name = "StrataGenerators"

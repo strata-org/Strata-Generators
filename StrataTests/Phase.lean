@@ -4,9 +4,9 @@ import StrataGenerators.TycheViz
 /-!
 # Properties of the `changed` flag of a pipeline phase
 
-Four phases set `changed := true` without a test: `FilterProcedures`,
-`RemoveIrrelevantAxioms`, `typeCheck` and `symbolicEval`. The `proc:` suite pins
-`FilterProcedures` and `PrecondElim` one at a time. The properties here state the contract
+Five phases set `changed := true` without a test: `RemoveIrrelevantAxioms`, `typeCheck`,
+`symbolicEval`, `nondetElim` and `betaReduce`. The `proc:` suite checks `FilterProcedures` and
+`PrecondElim` one at a time. The properties here state the contract
 *uniformly over a list of phases*, so they also cover a phase that someone adds later.
 -/
 
@@ -16,8 +16,8 @@ open StrataGenerators.PhaseChangedFlag
 
 /-- The two witnesses for a phase that changes nothing. Each witness gives a phase and a
     program that the phase cannot change. The verdict is therefore a closed `Bool`, and a
-    random sample would hide which case the witness covers. Together the two witnesses pin
-    two of the four sites that set the flag without a test. -/
+    random sample would hide which case the witness covers. The `RemoveIrrelevantAxioms` witness
+    pins a site that sets the flag without a test; `FilterProcedures` computes its flag. -/
 @[strata_properties]
 def phaseNoOpWitnesses : List TestDecl :=
   [ ("phase: RemoveIrrelevantAxioms changed flag is faithful on a no-op",
@@ -38,7 +38,7 @@ def phaseAllChangedFlag : TestDecl :=
     (fun (gp : GenProcs) => checkAllPhasesChangedFlag gp.procs)).withPanel
     (genPhaseSweepProp name (checkAllPhasesChangedFlag ·) allCorePhases)
 
-/-- Each phase *except* the four known sites that set `changed := true` without a test. The
+/-- Each phase *except* the known sites that set `changed := true` without a test. The
     property guards the phases that really compute the flag. -/
 @[strata_property]
 def phaseHonestChangedFlag : TestDecl :=
