@@ -255,12 +255,12 @@ mutual
     the generator's recipe for *some* sampled type-instantiation `σvals` (with
     `σ := s.typeArgs.zip σvals`) and *some* argument-order mask `mask`:
     `mkArgs s.M (outTargets [] ctx (substSig σ s.O)) exprs mask` for some callee `s`
-    and for some by-value inputs. The predicate also holds the guard of the generator, which asks for a usable
-    instantiated in-out block and for distinct written-to keys, the reachability of each input by `genLExpr` at
-    the *instantiated* input type of the callee, binder annotations of each input that the generator can
-    make, and the absence of a necessary fresh `init` statement (a
-    well-typed call has all names in scope, so the emitted group is the bare call and
-    the output scope is `ctx`). `hσvals` places `σvals` in the sampling step's support.
+    and for some by-value inputs. The predicate also asks for a usable instantiated in-out block and for
+    the reachability of each input by `genLExpr` at the *instantiated* input type of the callee.
+    `hσvals` places `σvals` in the sampling step's support. The generator's other guards follow from the
+    typing of the call: its written-to names are distinct (`WFcallProp.lhsWF`, `call_written_nodup`)
+    and all in scope (`call_no_init`), so the emitted group is the bare call and the output scope is
+    `ctx`.
     `True` on every non-call leaf; nested bodies recurse with the body's own scope.
 
     The `mask` existential is what makes the argument *order* free. `mkArgs` used to
@@ -288,14 +288,9 @@ def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName imm ctx) = true ∧
-        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
-          ++ outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
         List.Forall₂
           (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n τ))
-          exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
-        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
-          ++ (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
-                (needsInit ctx) = []
+          exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values
   | .cmd (CmdExt.cmd _) => True
   -- Nested bodies are generated one size smaller, so their calls' inputs are
   -- reachable at `n-1` (mirroring `AlphabetOk` and `genStmt (size+1)` → `size`).
@@ -615,6 +610,53 @@ theorem callInputs_binderAnnotsKnown {C : LContext CoreLParams} {P : Program} {t
 
 -- ── Mutual statement / statement-chain completeness ─────────────────────────
 
+private theorem keys_append (a b : @LMonoTySignature Unit) :
+    ListMap.keys (a ++ b) = ListMap.keys a ++ ListMap.keys b := by
+  induction a with
+  | nil => rfl
+  | cons p a ih => obtain ⟨k, v⟩ := p; exact congrArg (k :: ·) ih
+
+private theorem mem_keys_of_mem {q : Identifier Unit × LMonoTy} :
+    ∀ {l : List (Identifier Unit × LMonoTy)}, q ∈ l → q.1 ∈ ListMap.keys l
+  | _ :: _, .head _ => .head _
+  | _ :: _, .tail _ h => .tail _ (mem_keys_of_mem h)
+
+/-- A well-typed call's written-to names are distinct (`WFcallProp.lhsWF`), so the in-out block and
+    the out targets of its recipe have distinct keys. -/
+theorem call_written_nodup {imm : List (Identifier Unit)} {ctx : VarCtx}
+    {M O : @LMonoTySignature Unit} {σ : List (TyIdentifier × LMonoTy)}
+    {exprs : List Expression.Expr} {mask : List Bool} {callArgs : List (CallArg Expression)}
+    (hargs : callArgs = StrataGenerators.Stmt.mkArgs M
+      (outTargets imm ctx (StrataGenerators.Stmt.substSig σ O)) exprs mask)
+    (hnd : (CallArg.getLhs callArgs).Nodup) :
+    (StrataGenerators.Stmt.substSig σ M
+      ++ outTargets imm ctx (StrataGenerators.Stmt.substSig σ O)).keys.Nodup := by
+  rw [hargs, getLhs_mkArgs] at hnd
+  rwa [keys_append, StrataGenerators.Stmt.substSig_keys]
+
+/-- A well-typed call's written-to names are all in scope, so its recipe declares none of them: the
+    generator emits the bare call. -/
+theorem call_no_init {imm : List (Identifier Unit)} {ctx : VarCtx} {ts : TypeScopes}
+    {M O : @LMonoTySignature Unit} {σ : List (TyIdentifier × LMonoTy)}
+    {exprs : List Expression.Expr} {mask : List Bool} {callArgs : List (CallArg Expression)}
+    (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
+    (hargs : callArgs = StrataGenerators.Stmt.mkArgs M
+      (outTargets imm ctx (StrataGenerators.Stmt.substSig σ O)) exprs mask)
+    (hlhs : ∀ v, v ∈ CallArg.getLhs callArgs → (ts.find? v).isSome) :
+    (StrataGenerators.Stmt.substSig σ M).filter (needsInit ctx)
+      ++ (outTargets imm ctx (StrataGenerators.Stmt.substSig σ O)).filter (needsInit ctx) = [] := by
+  have hin : ∀ q : Identifier Unit × LMonoTy, q.1 ∈ CallArg.getLhs callArgs → needsInit ctx q = false := by
+    intro q hq
+    have h := hlhs q.1 hq
+    rw [hΓ.find? q.1, procToTCtx_find] at h
+    simpa [needsInit, VarCtx.isFresh, VarCtx.find?, Option.isSome_map] using h
+  rw [hargs, getLhs_mkArgs] at hin
+  rw [List.append_eq_nil_iff]
+  refine ⟨List.filter_eq_nil_iff.mpr fun q hq => ?_, List.filter_eq_nil_iff.mpr fun q hq => ?_⟩
+  · simpa using hin q (List.mem_append_left _ (by
+      simpa [StrataGenerators.Stmt.substSig_keys] using mem_keys_of_mem hq))
+  · simpa using hin q (List.mem_append_right _ (mem_keys_of_mem hq))
+
 /-- **Completeness of `genStmt` / `genStmtChain`, indexed by the typing derivation.**
     Every well-typed statement in generator shape (`InGenShape`), satisfying the
     alphabet kernel (`AlphabetOk` at some size `n`), the call recipe (`CallOk`) and expression
@@ -657,8 +699,9 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
       -- Shape gives `md = default`; `CallOk` gives membership + recipe + guard + empty chain.
       have hmdc : md = default := hnf
       subst hmdc
-      obtain ⟨s, σvals, exprs, mask, hsmem, hpname, hσvals, hargs, hMusable, hNodup,
-        hForall, hEmpty⟩ := hcall
+      obtain ⟨s, σvals, exprs, mask, hsmem, hpname, hσvals, hargs, hMusable, hForall⟩ := hcall
+      have hNodup := call_written_nodup hargs hwf.lhsWF
+      have hEmpty := call_no_init hΓ hargs hlhs
       have hgen : exprs.all (binderAnnotsKnownIn C.knownTypes) = true := by
         refine List.all_eq_true.mpr (fun e he => callInputs_binderAnnotsKnown hfind hwf hin e ?_)
         rw [hargs, getIn_mkArgs]

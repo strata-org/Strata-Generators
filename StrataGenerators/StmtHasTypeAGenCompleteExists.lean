@@ -293,13 +293,8 @@ def CallOkE (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) :
           (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName imm ctx) = true ∧
-        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
-          ++ outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
         List.Forall₂ (fun e τ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx τ e)
-          exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
-        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
-          ++ (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
-                (needsInit ctx) = []
+          exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values
   | .cmd (CmdExt.cmd _) => True
   | .block _ body _ => CallOkEList imm procs ctx body
   | .ite _ t e _ => CallOkEList imm procs ctx t ∧ CallOkEList imm procs ctx e
@@ -317,8 +312,8 @@ mutual
 theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
     ∀ (ctx : VarCtx) (s : Statement), CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s →
       Eventually fun n => CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n s
-  | _, .cmd (CmdExt.call _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h₇, h₈⟩ =>
-    (Eventually.forall₂ h₇).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h, h₈⟩
+  | _, .cmd (CmdExt.call _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆⟩ =>
+    (Eventually.forall₂ h₆).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h⟩
   | _, .cmd (CmdExt.cmd _), _ => .of_forall fun _ => trivial
   | ctx, .block _ body _, h => (callOkEList_eventually imm procs ctx body h).pred
   | ctx, .ite _ t e _, ⟨ht, he⟩ =>

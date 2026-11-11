@@ -47,10 +47,10 @@ discharges one:
   `loop`, an `exit` and a `typeDecl`. It leaves a `.cmd` node
   untouched. The gap of `metadata_gap` is at a `.cmd` node, so this function
   cannot close it.
-* `Core.WF.WFcallProp.lhsWF` gives the `Nodup` fact that `CallOk` needs for the
-  write keys of a call. Its parent `Core.WF.WFStatementProp` is not recursive:
-  the `block`, `ite` and `loop` cases are empty structures. So it says nothing
-  about a call inside a body.
+* The call rule's own premise `Core.WF.WFcallProp` gives the `Nodup` fact for the
+  write keys of a call (`lhsWF`), and its in-scope premise gives that no write key needs
+  an `init`. `CallOk` therefore no longer asks for either: `call_written_nodup` and
+  `call_no_init` derive them inside `spec_complete_at`.
 * `LContext.WellKindedTy` bounds the type constructors of an `init` annotation.
   `genLMonoTy`'s support also bounds the depth of the type and the free type
   variables (`genLMonoTy_support`), so `WellKindedTy` is too weak.
