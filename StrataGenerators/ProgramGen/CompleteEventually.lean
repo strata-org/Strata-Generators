@@ -6,22 +6,21 @@ import StrataGenerators.StmtHasTypeAGenCompleteExists
 
 `Bounds` collects the size parameters of the program generator, so that a statement about the
 generator quantifies over one `Bounds` value instead of reasoning about each size separately.
-`genProgram_complete_of_fold` composes per-step reachability at one *fixed* `b : Bounds`. This
+`genProgram_complete_of_fold` composes declaration-extension lemmas at one *fixed* `b : Bounds`. This
 module removes `b` from the statement: `genProgram_complete_eventually` says that if each
 declaration step of a trace is reachable at every large enough bound, the whole program is reachable
 by `genProgram … b` for *some* `b`.
 
-Every premise of a step lemma asks a bound to be *large enough*, so it suffices to look at the
-`Bounds` values whose numeric fields all equal one number `N` (`Bounds.uniform N fam`). "At every large
-enough bound" is then `Eventually` over `N`, and the steps of a trace combine through
-`Eventually.and`.
+Every premise of a declaration-extension lemma asks a bound to be *large enough*, so it suffices to
+look at the `Bounds` values whose numeric fields all equal one number `N` (`Bounds.uniform N fam`).
+"At every large enough bound" is then `Eventually` over `N`, and the steps of a trace combine
+through `Eventually.and`.
 
-The per-kind lemmas `step*_eventually` lift each declaration kind's step lemma to this form. A
-premise that bounds a length by a field holds eventually by itself. A premise about a
-sub-generator's support at one field (`genNonRecursiveArgTy` at `tySize`, `genLExpr` at `exprDepth`,
-`genProcedure` at `procSize`, `procLen` and `maxStmtSeqLen`, `genFuncSig`, `genFuncParts` and
-`genFunction` at `funcDepth`, the datatype generator at its fields) becomes an `Eventually` premise
-in that field.
+The lemmas `extend*_eventually` lift each declaration-extension lemma to this form. A premise that
+bounds a length by a field holds eventually by itself. A premise about a sub-generator's support at
+one field (`genNonRecursiveArgTy` at `tySize`, `genLExpr` at `exprDepth`, `genProcedure` at
+`procSize`, `procLen` and `maxStmtSeqLen`, `genFuncSig`, `genFuncParts` and `genFunction` at
+`funcDepth`, the datatype generator at its fields) becomes an `Eventually` premise in that field.
 -/
 
 open Lambda RandomChoice Core Imperative
@@ -50,12 +49,12 @@ def Bounds.uniform (N : Nat) (fam : DerivedOpFamilies) : Bounds where
   maxStmtSeqLen := N
   derivedFamilies := fam
 
--- ── Per-kind steps, at every large enough uniform bound ─────────────────────
+-- ── Declaration-extension lemmas, at every large enough uniform bound ───────
 
 section steps
 variable {fam : DerivedOpFamilies} {s : GenState}
 
-theorem stepAbstract_eventually {nm : String} {ar : Nat} {C' : LContext CoreLParams}
+theorem extendAbstract_eventually {nm : String} {ar : Nat} {C' : LContext CoreLParams}
     (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true) (hnmNotLocal : isLocalTypeName nm = false)
     (hC : s.C.addKnownTypeWithError { name := nm, metadata := ar } default = .ok C') :
@@ -64,7 +63,7 @@ theorem stepAbstract_eventually {nm : String} {ar : Nat} {C' : LContext CoreLPar
   (le_eventually ar).mono fun _ h =>
     genDeclStep_complete_of_mem (.inl (genDeclAbstract_complete hnm hnmAllowed hnmNotLocal h hC))
 
-theorem stepAlias_eventually {nm : String} {tyParams : List TyIdentifier} {body : LMonoTy}
+theorem extendAlias_eventually {nm : String} {tyParams : List TyIdentifier} {body : LMonoTy}
     (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true) (hnmNotLocal : isLocalTypeName nm = false)
     (hparams : tyParams ∈ SPMF.support
@@ -84,7 +83,7 @@ theorem stepAlias_eventually {nm : String} {tyParams : List TyIdentifier} {body 
     genDeclStep_complete_of_mem (.inr (.inl
       (genDeclAlias_complete hnm hnmAllowed hnmNotLocal h₁ hparams h₂ hallowed)))
 
-theorem stepAxiom_eventually {nm : String} {e : PExpr}
+theorem extendAxiom_eventually {nm : String} {e : PExpr}
     (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
     (he : Eventually fun d => e ∈ SPMF.support
@@ -94,7 +93,7 @@ theorem stepAxiom_eventually {nm : String} {e : PExpr}
   he.mono fun _ h =>
     genDeclStep_complete_of_mem (.inr (.inr (.inl (genDeclAxiom_complete hnm hnmAllowed h))))
 
-theorem stepDistinct_eventually {nm : String} {τ : LMonoTy} {constNames : List String}
+theorem extendDistinct_eventually {nm : String} {τ : LMonoTy} {constNames : List String}
     {C' : LContext CoreLParams} {constDecls : List Decl}
     (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
     (hnmAllowed : isAllowedName nm = true)
@@ -114,7 +113,7 @@ theorem stepDistinct_eventually {nm : String} {τ : LMonoTy} {constNames : List 
       (genDeclDistinct_complete hnm hnmAllowed h₁ hτAllowed hlen2 (le_max_of_le_right h₂) hconsts
         hconstsAllowed hadd)))))
 
-theorem stepDatatype_eventually {block : MutualDatatype Unit} {C' : LContext CoreLParams}
+theorem extendDatatype_eventually {block : MutualDatatype Unit} {C' : LContext CoreLParams}
     (hblock : Eventually fun N => block ∈ SPMF.support
       (DatatypeGen.genMutuallyRecursiveDatatypes (G := SPMF)
         s.baseTypes (s.tyCons ++ s.dtCons) N N N N N N s.reserved))
@@ -133,7 +132,7 @@ theorem stepDatatype_eventually {block : MutualDatatype Unit} {C' : LContext Cor
   hblock.mono fun _ h => genDeclStep_complete_of_mem (.inr (.inr (.inr (.inr (.inl
     (genDeclDatatype_complete h hnamesAllowed hnamesNotLocal hC))))))
 
-theorem stepProcedure_eventually {proc : Procedure} {nm : String}
+theorem extendProcedure_eventually {proc : Procedure} {nm : String}
     (hproc : Eventually fun N => proc ∈ SPMF.support
       (StrataGenerators.Procedure.genProcedure (G := SPMF) s.octx s.procs s.C s.Γ N N s.derivedPctx
         (maxStmtSeqLen := N)))
@@ -145,7 +144,20 @@ theorem stepProcedure_eventually {proc : Procedure} {nm : String}
   hproc.mono fun _ h => genDeclStep_complete_of_mem (.inr (.inr (.inr (.inr (.inr (.inr (.inl
     (genDeclProcedure_complete h hname hnm hnmAllowed))))))))
 
-theorem stepRecFuncBlock_eventually {names : List String} {funcs : List Function}
+theorem extendFunction_eventually {nm : String} {func : Function} {s' : GenState}
+    (hfunc : Eventually fun d => func ∈ SPMF.support (genFunction (G := SPMF) [] s.octx d
+      s.derivedPctx (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons))
+    (hname : func.name = ⟨nm, ()⟩) (hnonrec : func.isRecursive = false)
+    (hmeasure : func.measure = none)
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
+    (hnmAllowed : isAllowedName nm = true)
+    (hreg : s.registerFuncs [func] = some s') :
+    Eventually fun N => ([.func func .empty], { s' with reserved := nm :: s.reserved }) ∈
+      SPMF.support (genDeclStep (G := SPMF) s (Bounds.uniform N fam)) :=
+  hfunc.mono fun _ h => genDeclStep_complete_of_mem (.inr (.inr (.inr (.inr (.inr (.inl
+    (genDeclFunction_complete h hname hnonrec hmeasure hnm hnmAllowed hreg)))))))
+
+theorem extendRecFuncBlock_eventually {names : List String} {funcs : List Function}
     {sStub s₁ : GenState}
     (hlen : 1 ≤ names.length)
     (hnames : DeclNamesReach s.reserved names)
@@ -201,7 +213,7 @@ theorem genDeclsFold_complete_eventually (fam : DerivedOpFamilies) :
 
 /-- **Whole-program completeness, for some `Bounds`.** If each declaration step of a trace
     from `initState` is reachable at every large enough uniform bound (`TraceReach`, built from the
-    `step*_eventually` lemmas), then `genProgram` reaches the program of the trace's declarations at
+    `extend*_eventually` lemmas), then `genProgram` reaches the program of the trace's declarations at
     some `b : Bounds` with the families `fam`. -/
 theorem genProgram_complete_eventually (fam : DerivedOpFamilies)
     (steps : List (List Decl × GenState)) (h : TraceReach fam initState steps) :

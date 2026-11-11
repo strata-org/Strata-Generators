@@ -17,12 +17,13 @@ own completeness lemmas (`genFunction_complete`, `genArgTy_complete_of_MutualADT
 `genLExpr_complete`), this reduces program reachability to per-declaration
 reachability with no new program-level obligation.
 
-This file proves that composition, plus the per-step reachability lemmas that a
-caller composes with it.
+This file proves that composition, plus a *declaration-extension lemma* for each kind of
+declaration: a lemma that one step of `genDeclStep` can extend the generator state with a given
+declaration, giving a given next state. A caller composes these lemmas through the fold.
 
 ## Status: all 8 declaration kinds
 
-This file has per-step reachability lemmas for **axioms, abstract types, aliases, `distinct`,
+This file has declaration-extension lemmas for **axioms, abstract types, aliases, `distinct`,
 datatype blocks, functions, procedures and recursive function blocks** (the `genDecl*_complete`
 theorems below). `StrataGenerators.ProgramGen.CompleteEventually` composes the steps into a
 whole-program theorem for some `Bounds`.
@@ -46,14 +47,15 @@ in the bounds. `genDeclDatatype_complete_of_MutualADTWF` discharges that hypothe
 through `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, and the size in its conclusion is then
 existential.
 
-The two `example`s at the end of this file compose a per-step lemma through the
+The two `example`s at the end of this file compose a declaration-extension lemma through the
 dispatch, the fold and the assembly of a program, for an abstract-type step and for
 a datatype step. The result is a reachable whole program, so the interface of these
 lemmas holds up in use.
 
 This file proves that program reachability *reduces to*
-per-declaration reachability, and it gives a step lemma for each of the 8 declaration kinds. Each step lemma takes premises about the reachability of a
-declaration's parts by the sub-generators.
+per-declaration reachability, and it gives a declaration-extension lemma for each of the 8 declaration
+kinds. Each one takes premises about the reachability of a declaration's parts by the
+sub-generators.
 -/
 
 open Lambda RandomChoice Core Imperative
@@ -155,7 +157,7 @@ theorem genDeclNames_complete : ∀ {reserved names : List String},
     simp only [List.length_cons, genDeclNames, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨nm, genDeclName_complete hnm hallowed, _, genDeclNames_complete hrest, rfl⟩
 
-/-! ## Representative per-step reachability: axioms -/
+/-! ## Extending the state with an axiom -/
 
 /-- The axiom step reaches every axiom whose name `genFreshName` reaches with no reserved prefix
     and whose body `genLExpr` reaches at `bool` over the operators with ground types. -/
@@ -170,7 +172,7 @@ theorem genDeclAxiom_complete {s : GenState} {b : Bounds} {nm : String} {e : PEx
   simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq]
   exact ⟨(mkAxiomDecl nm e, nm), ⟨nm, genDeclName_complete hnm hnmAllowed, e, he, rfl⟩, rfl, rfl⟩
 
-/-! ## Per-step reachability: functions -/
+/-! ## Extending the state with a function -/
 
 /-- The function step reaches every non-recursive function with no measure that `genFunction`
     reaches, under a fresh, allowed name, when the context registers it. `genFunction_complete`
@@ -193,7 +195,7 @@ theorem genDeclFunction_complete {s : GenState} {b : Bounds} {nm : String} {func
   rw [hfix, hreg]
   exact mem_support_pure_iff.mpr rfl
 
-/-! ## Per-step reachability: procedures -/
+/-! ## Extending the state with a procedure -/
 
 /-- The state after the procedure step declares `proc` under the name `nm`: the name is reserved, and
     the call signature is recorded, as `genDeclProcedure` computes it. -/
@@ -220,7 +222,7 @@ theorem genDeclProcedure_complete {s : GenState} {b : Bounds} {proc : Procedure}
   simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨proc, hproc, nm, genDeclName_complete hnm hnmAllowed, Prod.ext (by rw [hrename]) rfl⟩
 
-/-! ## Per-step reachability: recursive function blocks -/
+/-! ## Extending the state with a recursive function block -/
 
 /-- Dropping `inline` attributes leaves a function with none unchanged. -/
 theorem dropInline_of_noInline {f : Function} (h : ∀ a ∈ f.attr, a ≠ .inline) :
@@ -363,7 +365,7 @@ theorem genNonRecursiveArgTy_complete {baseTypes : BaseTys} {tyCons : TyCons}
   · exact ⟨by simp, fun kc hkc => htyCons kc hkc, by simp, by simp⟩
   · simp
 
-/-! ## Per-step reachability: abstract types
+/-! ## Extending the state with an abstract type
 
 The abstract-type step draws a fresh name and an arity in `[0, maxTyConArity]`. It
 then emits `type name (_ … _);` and adds the new type constructor to the state.
@@ -396,7 +398,7 @@ theorem genDeclAbstract_complete {s : GenState} {b : Bounds} {nm : String} {ar :
   walk [(mem_law (genDeclTypeName_complete hnm hnmAllowed hnmNotLocal)).obs]
   exact ⟨_, rfl, ar, ⟨Nat.zero_le _, har⟩, by rw [hC]⟩
 
-/-! ## Per-step reachability: type aliases
+/-! ## Extending the state with a type alias
 
 The alias step draws a fresh name, a count of parameters, a fresh list of
 parameters, and a body over the type constructors in scope *and* those parameters.
@@ -479,7 +481,7 @@ theorem genDeclAlias_complete_of_body {s : GenState} {b : Bounds} {nm : String}
       SPMF.support (genDeclAlias (G := SPMF) s b) :=
   genDeclAlias_complete hnm hnmAllowed hnmNotLocal hlen hparams hbody hallowed
 
-/-! ## Per-step reachability: `distinct`
+/-! ## Extending the state with a `distinct` declaration
 
 The `distinct` step draws a fresh name, one monotype `τ` over the type
 constructors in scope, a count of constants, and that many fresh constant names.
@@ -533,7 +535,7 @@ theorem genDeclDistinct_complete {s : GenState} {b : Bounds} {nm : String}
   exact ⟨_, rfl, _, rfl, _, ⟨hlen2, hlen⟩, _, hconsts, by
     rw [ite_eq_left hgate, List.filter_eq_self.mpr hconstsAllowed, hadd]⟩
 
-/-! ## Per-step reachability: datatype blocks
+/-! ## Extending the state with a datatype block
 
 The step for a datatype draws a block over the *combined* pool, which holds the external applied constructors
 and the datatypes that an earlier block gives. It then gates the block on `LContext.addMutualBlock`. The
@@ -669,7 +671,7 @@ There are two, at the opposite ends of the range of the steps. The first is the
 abstract-type step, which is the most simple kind, and it grows one field of the
 state. The second is the datatype step, which grows three (`C`, `reserved` and
 `dtCons`) and passes through the `addMutualBlock` gate. The second is therefore the
-one that checks that the state a per-step lemma *names* is the state the fold
+one that checks that the state a declaration-extension lemma *names* is the state the fold
 *threads*, which a one-field step cannot really test.
 
 Both typecheck with no adjustment beyond `simpa` or `simp [genDeclsFold]`, so the

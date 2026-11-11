@@ -17,8 +17,8 @@ import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProgramGen.ProcSigThread
 import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
--- Whole-program completeness for some `Bounds`, from per-step reachability at every large enough
--- bound.
+-- Whole-program completeness for some `Bounds`, from declaration-extension lemmas at every large
+-- enough bound.
 import StrataGenerators.ProgramGen.CompleteEventually
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
