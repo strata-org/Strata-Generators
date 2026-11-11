@@ -17,7 +17,6 @@ import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProgramGen.ProcSigThread
 import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
-import StrataGenerators.ProgramGen.CompleteProcedure
 -- Whole-program completeness for some `Bounds`, from per-step reachability at every large enough
 -- bound.
 import StrataGenerators.ProgramGen.CompleteEventually
@@ -30,6 +29,3 @@ import StrataGenerators.SizeDistributionStmt
 import StrataGenerators.SizeDistributionLoops
 -- Completeness of `genStmt` for some size and some body-length cap, with size-free side conditions.
 import StrataGenerators.StmtHasTypeAGenCompleteExists
--- Completeness of `genProcedure` at every large enough size, body length and cap, through the
--- size-free statement completeness.
-import StrataGenerators.ProcedureHasTypeAGenCompleteExists

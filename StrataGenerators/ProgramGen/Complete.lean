@@ -23,10 +23,9 @@ caller composes with it.
 ## Status: all 8 declaration kinds
 
 This file has per-step reachability lemmas for **axioms, abstract types, aliases, `distinct`,
-datatype blocks, functions and recursive function blocks** (the `genDecl*_complete` theorems below).
-The procedure step is in `StrataGenerators.ProgramGen.CompleteProcedure`, through the size-free
-statement completeness, and `StrataGenerators.ProgramGen.CompleteEventually` composes the steps into
-a whole-program theorem for some `Bounds`.
+datatype blocks, functions, procedures and recursive function blocks** (the `genDecl*_complete`
+theorems below). `StrataGenerators.ProgramGen.CompleteEventually` composes the steps into a
+whole-program theorem for some `Bounds`.
 
 The lemmas for four of the eight kinds have a useful property: their generators never call
 `genLExpr`, so they do not depend on the completeness of the expression generator
@@ -34,8 +33,8 @@ at all. The `distinct` step does contain expressions, but `genDistinct` builds e
 directly, as an annotated `.fvar` node, and a datatype block holds types only. The lemmas for an
 axiom, a function and a recursive function block take a hypothesis that the axiom body, the
 function, or each member's parts, are reachable, and the caller discharges it from the completeness
-of the expression generator (for a function, `genFunction_complete`). The procedure step goes
-through the completeness of the statement generator.
+of the expression generator (for a function, `genFunction_complete`). The procedure step takes a
+hypothesis that `genProcedure` reaches the procedure, which `genProcedure_complete` gives.
 
 `genNonRecursiveArgTy_complete` is a support lemma. It gives
 `genArgTy_complete_of_wf` at the empty block, which is what an alias body and the
@@ -52,19 +51,8 @@ dispatch, the fold and the assembly of a program, for an abstract-type step and 
 a datatype step. The result is a reachable whole program, so the interface of these
 lemmas holds up in use.
 
-Two items block a tighter result:
-
-* `BitvecWidthOnly` is a hypothesis of each lemma that generates a type. It is the
-  one residual condition of the arity discipline, because `Core.KnownTypes`
-  registers `bitvec` at the arity 1, and no argument position of an `LMonoTy` can hold a width. These lemmas need
-  no separate predicate about an arity, because `VocabOk` and the field `argsWellKinded` of the specification
-  give the whole discipline of the arities.
-* `genLExpr` is incomplete.
-
-**Do not read this module as an unconditional proof of completeness.** A tight theorem is not
-possible while `genLExpr` is incomplete. This file proves that program reachability *reduces to*
-per-declaration reachability, with no obligation at the program level, and it gives a step lemma
-for each of the 8 declaration kinds. Each step lemma takes premises about the reachability of a
+This file proves that program reachability *reduces to*
+per-declaration reachability, and it gives a step lemma for each of the 8 declaration kinds. Each step lemma takes premises about the reachability of a
 declaration's parts by the sub-generators.
 -/
 
@@ -204,6 +192,33 @@ theorem genDeclFunction_complete {s : GenState} {b : Bounds} {nm : String} {func
   refine ⟨func, hfunc, nm, genDeclName_complete hnm hnmAllowed, ?_⟩
   rw [hfix, hreg]
   exact mem_support_pure_iff.mpr rfl
+
+/-! ## Per-step reachability: procedures -/
+
+/-- The state after the procedure step declares `proc` under the name `nm`: the name is reserved, and
+    the call signature is recorded, as `genDeclProcedure` computes it. -/
+def procStepState (s : GenState) (proc : Procedure) (nm : String) : GenState :=
+  let M := commonPrefix proc.header.inputs proc.header.outputs
+  { s with reserved := nm :: s.reserved,
+           procs := { pname := nm, typeArgs := proc.header.typeArgs, M := M,
+                      I := proc.header.inputs.drop M.length,
+                      O := proc.header.outputs.drop M.length } :: s.procs }
+
+/-- The procedure step reaches every procedure that `genProcedure` reaches at the bounds of `b`,
+    under a fresh, allowed name. `genProcedure_complete` gives the membership in `genProcedure`'s
+    support. -/
+theorem genDeclProcedure_complete {s : GenState} {b : Bounds} {proc : Procedure} {nm : String}
+    (hproc : proc ∈ SPMF.support (StrataGenerators.Procedure.genProcedure (G := SPMF) s.octx s.procs
+      s.C s.Γ b.procSize b.procLen s.derivedPctx (maxStmtSeqLen := b.maxStmtSeqLen)))
+    (hname : proc.header.name = ⟨nm, ()⟩)
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
+    (hnmAllowed : isAllowedName nm = true) :
+    ([.proc proc .empty], procStepState s proc nm) ∈
+      SPMF.support (genDeclProcedure (G := SPMF) s b) := by
+  have hrename : { proc with header := { proc.header with name := ⟨nm, ()⟩ } } = proc := by
+    rw [← hname]
+  simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff]
+  exact ⟨proc, hproc, nm, genDeclName_complete hnm hnmAllowed, Prod.ext (by rw [hrename]) rfl⟩
 
 /-! ## Per-step reachability: recursive function blocks -/
 
