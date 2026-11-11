@@ -20,27 +20,22 @@ reachability with no new program-level obligation.
 This file proves that composition, plus the per-step reachability lemmas that a
 caller composes with it.
 
-## Status: 7 of the 8 declaration kinds
+## Status: all 8 declaration kinds
 
-This file has per-step reachability lemmas for **axioms, abstract types, aliases,
-`distinct`, datatype blocks and recursive function blocks** (the `genDecl*_complete`
-theorems below). The procedure step is in `StrataGenerators.ProgramGen.CompleteProcedure`, through
-the size-free statement completeness, and `StrataGenerators.ProgramGen.CompleteEventually` composes
-the steps into a whole-program theorem for some `Bounds`. Functions
-have no lemma. What the function step needs is catalogued in the repo's issue tracker, along with
-the other blockers
-(`genIdentName` has no two-directional support lemma, and `genLExpr` is itself
-incomplete). The `ArityOk` blocker is
-**gone**: upstream's `argsWellKinded` plus a vocabulary derived from
-`Core.KnownTypes` discharged it.
+This file has per-step reachability lemmas for **axioms, abstract types, aliases, `distinct`,
+datatype blocks, functions and recursive function blocks** (the `genDecl*_complete` theorems below).
+The procedure step is in `StrataGenerators.ProgramGen.CompleteProcedure`, through the size-free
+statement completeness, and `StrataGenerators.ProgramGen.CompleteEventually` composes the steps into
+a whole-program theorem for some `Bounds`.
 
-The lemmas for four of the six kinds have a useful property: their generators never call
+The lemmas for four of the eight kinds have a useful property: their generators never call
 `genLExpr`, so they do not depend on the completeness of the expression generator
 at all. The `distinct` step does contain expressions, but `genDistinct` builds each of them
 directly, as an annotated `.fvar` node, and a datatype block holds types only. The lemmas for an
-axiom and for a recursive function block are the exceptions: they take a hypothesis that the
-axiom body, or each member's parts, are reachable, and the caller discharges it from the
-completeness of the expression generator.
+axiom, a function and a recursive function block take a hypothesis that the axiom body, the
+function, or each member's parts, are reachable, and the caller discharges it from the completeness
+of the expression generator (for a function, `genFunction_complete`). The procedure step goes
+through the completeness of the statement generator.
 
 `genNonRecursiveArgTy_complete` is a support lemma. It gives
 `genArgTy_complete_of_wf` at the empty block, which is what an alias body and the
@@ -66,11 +61,11 @@ Two items block a tighter result:
   give the whole discipline of the arities.
 * `genLExpr` is incomplete.
 
-**Do not read this module as a proof of completeness.** There is no whole-program
-completeness theorem, and a tight theorem is not possible while `genLExpr` is
-incomplete. This file proves two things. First, program reachability *reduces to*
-per-declaration reachability, and this adds no obligation at the program level.
-Second, 6 of the 8 per-declaration obligations are discharged.
+**Do not read this module as an unconditional proof of completeness.** A tight theorem is not
+possible while `genLExpr` is incomplete. This file proves that program reachability *reduces to*
+per-declaration reachability, with no obligation at the program level, and it gives a step lemma
+for each of the 8 declaration kinds. Each step lemma takes premises about the reachability of a
+declaration's parts by the sub-generators.
 -/
 
 open Lambda RandomChoice Core Imperative
@@ -186,6 +181,29 @@ theorem genDeclAxiom_complete {s : GenState} {b : Bounds} {nm : String} {e : PEx
       SPMF.support (genDeclAxiom (G := SPMF) s b) := by
   simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq]
   exact ⟨(mkAxiomDecl nm e, nm), ⟨nm, genDeclName_complete hnm hnmAllowed, e, he, rfl⟩, rfl, rfl⟩
+
+/-! ## Per-step reachability: functions -/
+
+/-- The function step reaches every non-recursive function with no measure that `genFunction`
+    reaches, under a fresh, allowed name, when the context registers it. `genFunction_complete`
+    gives the membership in `genFunction`'s support. -/
+theorem genDeclFunction_complete {s : GenState} {b : Bounds} {nm : String} {func : Function}
+    {s' : GenState}
+    (hfunc : func ∈ SPMF.support (genFunction (G := SPMF) [] s.octx b.funcDepth s.derivedPctx
+      (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons))
+    (hname : func.name = ⟨nm, ()⟩) (hnonrec : func.isRecursive = false)
+    (hmeasure : func.measure = none)
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
+    (hnmAllowed : isAllowedName nm = true)
+    (hreg : s.registerFuncs [func] = some s') :
+    ([.func func .empty], { s' with reserved := nm :: s.reserved }) ∈
+      SPMF.support (genDeclFunction (G := SPMF) s b) := by
+  have hfix : { func with name := ⟨nm, ()⟩, isRecursive := false, measure := none } = func := by
+    rw [← hname, ← hnonrec, ← hmeasure]
+  simp only [genDeclFunction, mem_support_bind_iff]
+  refine ⟨func, hfunc, nm, genDeclName_complete hnm hnmAllowed, ?_⟩
+  rw [hfix, hreg]
+  exact mem_support_pure_iff.mpr rfl
 
 /-! ## Per-step reachability: recursive function blocks -/
 

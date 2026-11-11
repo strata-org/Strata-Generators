@@ -16,14 +16,11 @@ enough bound" is then `Eventually` over `N`, and the steps of a trace combine th
 `Eventually.and`.
 
 The per-kind lemmas `step*_eventually` lift each declaration kind's step lemma to this form. A
-premise that bounds a length by a field holds eventually by itself. A premise about a sub-generator's
-support at one field (`genNonRecursiveArgTy` at `tySize`, `genLExpr` at `exprDepth`, `genFuncSig` and
-`genFuncParts` at `funcDepth`, the datatype generator at its fields) becomes an `Eventually` premise
-in that field. The procedure step reads its bounds through `genDeclProcedure_complete`, so it
-inherits the size-free statement completeness.
-
-A plain function declaration (`genDeclFunction`) has no step lemma yet, so a trace covered here
-declares its functions in recursive function blocks.
+premise that bounds a length by a field holds eventually by itself. A premise about a
+sub-generator's support at one field (`genNonRecursiveArgTy` at `tySize`, `genLExpr` at `exprDepth`,
+`genFuncSig`, `genFuncParts` and `genFunction` at `funcDepth`, the datatype generator at its
+fields) becomes an `Eventually` premise in that field. The procedure step reads its bounds through
+`genDeclProcedure_complete`, so it inherits the size-free statement completeness.
 -/
 
 open Lambda RandomChoice Core Imperative
@@ -148,6 +145,19 @@ theorem stepProcedure_eventually {proc : Procedure} {nm : String} {L : Nat}
   exact ⟨max K (max N L), fun M hM => genDeclStep_complete_of_mem (.inr (.inr (.inr (.inr (.inr
     (.inr (.inl (h (Bounds.uniform M fam) (show N ≤ M by omega) (show L ≤ M by omega)
       (show K ≤ M by omega)))))))))⟩
+
+theorem stepFunction_eventually {nm : String} {func : Function} {s' : GenState}
+    (hfunc : Eventually fun d => func ∈ SPMF.support (genFunction (G := SPMF) [] s.octx d
+      s.derivedPctx (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons))
+    (hname : func.name = ⟨nm, ()⟩) (hnonrec : func.isRecursive = false)
+    (hmeasure : func.measure = none)
+    (hnm : nm ∈ SPMF.support (DatatypeGen.genFreshName (G := SPMF) s.reserved))
+    (hnmAllowed : isAllowedName nm = true)
+    (hreg : s.registerFuncs [func] = some s') :
+    Eventually fun N => ([.func func .empty], { s' with reserved := nm :: s.reserved }) ∈
+      SPMF.support (genDeclStep (G := SPMF) s (Bounds.uniform N fam)) :=
+  hfunc.mono fun _ h => genDeclStep_complete_of_mem (.inr (.inr (.inr (.inr (.inr (.inl
+    (genDeclFunction_complete h hname hnonrec hmeasure hnm hnmAllowed hreg)))))))
 
 theorem stepRecFuncBlock_eventually {names : List String} {funcs : List Function}
     {sStub s₁ : GenState}
