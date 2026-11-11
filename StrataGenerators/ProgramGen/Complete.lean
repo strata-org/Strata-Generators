@@ -25,7 +25,8 @@ caller composes with it.
 This file has per-step reachability lemmas for **axioms, abstract types, aliases,
 `distinct`, datatype blocks and recursive function blocks** (the `genDecl*_complete`
 theorems below). The procedure step is in `StrataGenerators.ProgramGen.CompleteProcedure`, through
-the size-free statement completeness, while the program has no polymorphic operator yet. Functions
+the size-free statement completeness, and `StrataGenerators.ProgramGen.CompleteEventually` composes
+the steps into a whole-program theorem for some bounds record. Functions
 have no lemma. What the function step needs is catalogued in the repo's issue tracker, along with
 the other blockers
 (`genIdentName` has no two-directional support lemma, and `genLExpr` is itself

@@ -18,6 +18,9 @@ import StrataGenerators.ProgramGen.ProcSigThread
 import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
 import StrataGenerators.ProgramGen.CompleteProcedure
+-- Whole-program completeness for some bounds record, from per-step reachability at every large
+-- enough bounds record.
+import StrataGenerators.ProgramGen.CompleteEventually
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
 -- `SPMF.prob` bounds on how the size and the body-length cap shape the statement generator's

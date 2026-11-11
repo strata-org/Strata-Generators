@@ -43,7 +43,7 @@ theorem le_eventually (a : Nat) : Eventually (a ≤ ·) := ⟨a, fun _ h => h⟩
     `spec_complete_chain_ev`, at the scope `M ++ I ++ (M ++ O) ++ oldVars M` and the immutable
     variables `keys (M ++ I) ++ keys (oldVars M)` that `genProcedure` seeds the body with. -/
 theorem genProcedure_complete_ev (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (proc : Procedure)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (pctx : PolyOpCtx) (proc : Procedure)
     (M I O : ListMap (Identifier Unit) LMonoTy)
     (bodyss : List Statement) (C' : LContext CoreLParams) (ts ts' : TypeScopes)
     (hBodyEq : proc.body = .structured bodyss)
@@ -73,13 +73,13 @@ theorem genProcedure_complete_ev (P : Program) (octx : OpCtx) (procs : ProcSigCt
     (hPreMd : ∀ c ∈ proc.spec.preconditions.values, c.md = #[])
     (hPreExpr : ∀ c ∈ proc.spec.preconditions.values, Eventually fun d =>
       c.expr ∈ SPMF.support (genLExpr (G := SPMF)
-        (sigFctx (M ++ I)) octx [] proc.header.typeArgs [] d .bool))
+        (sigFctx (M ++ I)) octx pctx proc.header.typeArgs [] d .bool))
     (hPostLabels : ∀ s ∈ proc.spec.postconditions.keys, s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hPostAttr : ∀ c ∈ proc.spec.postconditions.values, c.attr = .Default)
     (hPostMd : ∀ c ∈ proc.spec.postconditions.values, c.md = #[])
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values, Eventually fun d =>
       c.expr ∈ SPMF.support (genLExpr (G := SPMF)
-        (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx [] proc.header.typeArgs [] d .bool))
+        (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx pctx proc.header.typeArgs [] d .bool))
     -- The body, through the size-free statement completeness:
     (hBodyWT : StatementsWellTyped P { C with rigidTypeVars := C.rigidTypeVars ++ proc.header.typeArgs }
       ts [] bodyss C' ts')
@@ -87,14 +87,14 @@ theorem genProcedure_complete_ev (P : Program) (octx : OpCtx) (procs : ProcSigCt
     (hBodyShape : InGenShapeList bodyss)
     (hBodyWrites : WritesOkList (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) bodyss)
     (hBodyNames : AlphabetOkEList proc.header.typeArgs bodyss)
-    (hBodyCalls : CallOkEList (octx := octx) (tvars := proc.header.typeArgs)
+    (hBodyCalls : CallOkEList (octx := octx) (tvars := proc.header.typeArgs) (pctx := pctx)
       (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs (M ++ I ++ (M ++ O) ++ oldVars M)
       bodyss)
-    (hBodyExprs : ExprOkEList (octx := octx) (tvars := proc.header.typeArgs)
+    (hBodyExprs : ExprOkEList (octx := octx) (tvars := proc.header.typeArgs) (pctx := pctx)
       (M ++ I ++ (M ++ O) ++ oldVars M) bodyss)
     (hLemmasReach : ∀ s ∈ proc.header.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF))) :
     ∃ K, Eventually fun size => ∀ len k, bodyss.length ≤ len → K ≤ k →
-      proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len (maxStmtSeqLen := k)) := by
+      proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := k)) := by
   obtain ⟨K, hbody⟩ := spec_complete_chain_ev P (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M))
     procs bodyss _ ts [] C' ts' hBodyWT _ hBodyΓ hBodyShape hBodyWrites hBodyNames hBodyCalls
     hBodyExprs

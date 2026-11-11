@@ -469,14 +469,14 @@ theorem genChecks_support (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdenti
 /-- Reverse of `mapM_genChecks_values`: a `ListMap` of checks whose every `expr`
     is reachable by `genLExpr … .bool` is in the support
     of the `mapM` inside `genChecks`, run over its own keys. -/
-theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) {pctx : PolyOpCtx}
     (m : ListMap CoreLabel Procedure.Check)
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool)) :
     m ∈ SPMF.support
       (m.keys.mapM (m := SPMF) (fun l => do
-        let e ← genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool
+        let e ← genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check)))) := by
   induction m with
   | nil => exact SPMF.mem_support_pure_iff.mpr rfl
@@ -492,13 +492,13 @@ theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List Ty
     reachable by `genNameList`, whose clauses are all default-`attr`/empty-`md`,
     and whose every `expr` is reachable by `genLExpr … .bool`, is in the support of
     `genChecks`. -/
-theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) {pctx : PolyOpCtx}
     (m : ListMap CoreLabel Procedure.Check)
     (hlabels : m.keys ∈ SPMF.support (genNameList (G := SPMF) depth))
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
-    m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth) := by
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool)) :
+    m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth pctx) := by
   unfold genChecks
   exact mem_support_bind_iff.mpr
     ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
@@ -917,7 +917,7 @@ set_option maxHeartbeats 800000 in
     The block name-length / reachability conditions are stated concretely via
     `mem_support_genNameList_iff`. -/
 theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) {pctx : PolyOpCtx}
     (proc : Procedure)
     (M I O : ListMap (Identifier Unit) LMonoTy)
     (bodyss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
@@ -960,23 +960,23 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
     (hPreMd : ∀ c ∈ proc.spec.preconditions.values, c.md = #[])
     (hPreExpr : ∀ c ∈ proc.spec.preconditions.values,
       c.expr ∈ SPMF.support (genLExpr (G := SPMF)
-        (sigFctx (M ++ I)) octx [] proc.header.typeArgs [] size .bool))
+        (sigFctx (M ++ I)) octx pctx proc.header.typeArgs [] size .bool))
     -- postconditions:
     (hPostLabels : proc.spec.postconditions.keys ∈ SPMF.support (genNameList (G := SPMF) size))
     (hPostAttr : ∀ c ∈ proc.spec.postconditions.values, c.attr = .Default)
     (hPostMd : ∀ c ∈ proc.spec.postconditions.values, c.md = #[])
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
       c.expr ∈ SPMF.support (genLExpr (G := SPMF)
-        (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx [] proc.header.typeArgs [] size .bool))
+        (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx pctx proc.header.typeArgs [] size .bool))
     (bodyLen : Nat) (hBodyLen : bodyLen ≤ len)
     (hBodyReach : (bodyss, C', ctx') ∈ SPMF.support
       (genStmtChain (G := SPMF) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { C with rigidTypeVars := C.rigidTypeVars ++ proc.header.typeArgs }
-        (M ++ I ++ (M ++ O) ++ oldVars M) [] size bodyLen maxStmtSeqLen))
+        (M ++ I ++ (M ++ O) ++ oldVars M) pctx size bodyLen maxStmtSeqLen))
     (hLemmasLen : proc.header.lemmas.length ≤ size)
     (hLemmasReach : ∀ s ∈ proc.header.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF))) :
-    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len (maxStmtSeqLen := maxStmtSeqLen)) := by
+    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := maxStmtSeqLen)) := by
   simp only [genProcedure, genProcedureWith, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM

@@ -23,7 +23,7 @@ lemma shows that a size-free condition gives the original condition at every lar
 -/
 
 namespace StrataGenerators.Stmt.SpecComplete
-variable {octx : OpCtx} {tvars : List TyIdentifier}
+variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
 
 
 -- ── "Eventually" ─────────────────────────────────────────────────────────────
@@ -67,7 +67,7 @@ theorem Eventually.forall₂ {α β : Type} {R : α → β → Nat → Prop} :
 /-- `e` is in `genLExpr`'s support at the type `τ`, in the scope `ctx`, at every large enough
     depth. -/
 def ExprReach (ctx : VarCtx) (τ : LMonoTy) (e : Expression.Expr) : Prop :=
-  Eventually fun d => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] d τ)
+  Eventually fun d => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] d τ)
 
 /-- `ExprReach` from the syntactic side conditions of `genLExpr_complete`, none of which mentions
     a depth. -/
@@ -75,7 +75,7 @@ theorem exprReach_of_syntactic (ctx : VarCtx) (τ : LMonoTy) (e : Expression.Exp
     (hτ : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m))
     (hwt : HasTypeA' [] e τ) (hnames : emptyNames e) (hvars : allVarsInCtx ctx.toFVarCtx octx e)
     (hats : ∃ m, AllTypesSimple tvars m [] e) :
-    ExprReach (octx := octx) (tvars := tvars) ctx τ e := by
+    ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx τ e := by
   obtain ⟨m, hm⟩ := hats
   exact ⟨max m (termDepth [] e), fun d hd => genLExpr_complete _ _ _ _ _ d τ hτ 3 e
     (.inl ⟨hwt, hnames, hvars, allTypesSimple_mono_le tvars m d [] e (by omega) hm, by omega⟩)⟩
@@ -180,29 +180,29 @@ end
 
 /-- `CmdExprOk` with `ExprReach` in place of reachability at one depth. -/
 def CmdExprOkE (ctx : VarCtx) : Cmd Expression → Prop
-  | .init _ (.forAll [] mty) (.det e) _ => ExprReach (octx := octx) (tvars := tvars) ctx mty e
+  | .init _ (.forAll [] mty) (.det e) _ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx mty e
   | .init _ _ _ _ => True
   | .set x (.det e) _ =>
-      ∀ mty, Map.find? ctx x = some mty → ExprReach (octx := octx) (tvars := tvars) ctx mty e
+      ∀ mty, Map.find? ctx x = some mty → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx mty e
   | .set _ _ _ => True
-  | .assert _ e _ => ExprReach (octx := octx) (tvars := tvars) ctx .bool e
-  | .assume _ e _ => ExprReach (octx := octx) (tvars := tvars) ctx .bool e
-  | .cover _ e _ => ExprReach (octx := octx) (tvars := tvars) ctx .bool e
+  | .assert _ e _ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool e
+  | .assume _ e _ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool e
+  | .cover _ e _ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool e
 
 mutual
 /-- `ExprOk` with `ExprReach` in place of reachability at one depth. It needs no size, so a
     nested body is checked in its own scope only. -/
 def ExprOkE (ctx : VarCtx) : Statement → Prop
-  | .cmd (CmdExt.cmd c) => CmdExprOkE (octx := octx) (tvars := tvars) ctx c
+  | .cmd (CmdExt.cmd c) => CmdExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx c
   | .cmd (CmdExt.call _ _ _) => True
   | .block _ body _ => ExprOkEList ctx body
   | .ite cond t e _ =>
-      (∀ g, cond = .det g → ExprReach (octx := octx) (tvars := tvars) ctx .bool g) ∧
+      (∀ g, cond = .det g → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool g) ∧
       ExprOkEList ctx t ∧ ExprOkEList ctx e
   | .loop guard measure invs body _ =>
-      (∀ g, guard = .det g → ExprReach (octx := octx) (tvars := tvars) ctx .bool g) ∧
-      (∀ m, measure = some m → ExprReach (octx := octx) (tvars := tvars) ctx .int m) ∧
-      (∀ p ∈ invs, ExprReach (octx := octx) (tvars := tvars) ctx .bool p.2) ∧
+      (∀ g, guard = .det g → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool g) ∧
+      (∀ m, measure = some m → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .int m) ∧
+      (∀ p ∈ invs, ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool p.2) ∧
       ExprOkEList ctx body
   | .exit _ _ => True
   | .typeDecl _ _ => True
@@ -214,8 +214,8 @@ def ExprOkEList (ctx : VarCtx) : List Statement → Prop
 end
 
 theorem cmdExprOkE_eventually (ctx : VarCtx) :
-    ∀ (c : Cmd Expression), CmdExprOkE (octx := octx) (tvars := tvars) ctx c →
-      Eventually fun n => CmdExprOk (octx := octx) (tvars := tvars) ctx n c
+    ∀ (c : Cmd Expression), CmdExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx c →
+      Eventually fun n => CmdExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n c
   | .init _ (.forAll [] _) (.det _) _, h => h
   | .init _ (.forAll [] _) .nondet _, _ => .of_forall fun _ => trivial
   | .init _ (.forAll (_ :: _) _) _ _, _ => .of_forall fun _ => trivial
@@ -232,25 +232,25 @@ theorem cmdExprOkE_eventually (ctx : VarCtx) :
 /-- A guard that is reachable whenever it is deterministic. -/
 private theorem guard_eventually {ctx : VarCtx} {τ : LMonoTy} :
     ∀ (g : ExprOrNondet Expression),
-      (∀ e, g = .det e → ExprReach (octx := octx) (tvars := tvars) ctx τ e) →
+      (∀ e, g = .det e → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx τ e) →
       Eventually fun n => ∀ e, g = .det e →
-        e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n τ)
+        e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n τ)
   | .det e, h => (h e rfl).mono fun _ hn _ he => by cases he; exact hn
   | .nondet, _ => .of_forall fun _ _ he => nomatch he
 
 /-- A measure that is reachable whenever it is present. -/
 private theorem measure_eventually {ctx : VarCtx} :
     ∀ (m : Option Expression.Expr),
-      (∀ e, m = some e → ExprReach (octx := octx) (tvars := tvars) ctx .int e) →
+      (∀ e, m = some e → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .int e) →
       Eventually fun n => ∀ e, m = some e →
-        e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .int)
+        e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .int)
   | some e, h => (h e rfl).mono fun _ hn _ he => by cases he; exact hn
   | none, _ => .of_forall fun _ _ he => nomatch he
 
 mutual
 theorem exprOkE_eventually : ∀ (ctx : VarCtx) (s : Statement),
-    ExprOkE (octx := octx) (tvars := tvars) ctx s →
-      Eventually fun n => ExprOk (octx := octx) (tvars := tvars) ctx n s
+    ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s →
+      Eventually fun n => ExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n s
   | ctx, .cmd (CmdExt.cmd c), h => cmdExprOkE_eventually ctx c h
   | _, .cmd (CmdExt.call _ _ _), _ => .of_forall fun _ => trivial
   | ctx, .block _ body _, h => (exprOkEList_eventually ctx body h).pred
@@ -265,8 +265,8 @@ theorem exprOkE_eventually : ∀ (ctx : VarCtx) (s : Statement),
   | _, .typeDecl _ _, _ => .of_forall fun _ => trivial
 
 theorem exprOkEList_eventually : ∀ (ctx : VarCtx) (ss : List Statement),
-    ExprOkEList (octx := octx) (tvars := tvars) ctx ss →
-      Eventually fun n => ExprOkList (octx := octx) (tvars := tvars) ctx n ss
+    ExprOkEList (octx := octx) (tvars := tvars) (pctx := pctx) ctx ss →
+      Eventually fun n => ExprOkList (octx := octx) (tvars := tvars) (pctx := pctx) ctx n ss
   | _, [], _ => .of_forall fun _ => trivial
   | ctx, s :: ss, ⟨hs, hss⟩ =>
     (exprOkE_eventually ctx s hs).and (exprOkEList_eventually (stepCtx ctx s) ss hss)
@@ -295,7 +295,7 @@ def CallOkE (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) :
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName imm ctx) = true ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
           ++ outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
-        List.Forall₂ (fun e τ => ExprReach (octx := octx) (tvars := tvars) ctx τ e)
+        List.Forall₂ (fun e τ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx τ e)
           exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
           ++ (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
@@ -315,8 +315,8 @@ end
 
 mutual
 theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
-    ∀ (ctx : VarCtx) (s : Statement), CallOkE (octx := octx) (tvars := tvars) imm procs ctx s →
-      Eventually fun n => CallOk (octx := octx) (tvars := tvars) imm procs ctx n s
+    ∀ (ctx : VarCtx) (s : Statement), CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s →
+      Eventually fun n => CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n s
   | _, .cmd (CmdExt.call _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h₇, h₈⟩ =>
     (Eventually.forall₂ h₇).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h, h₈⟩
   | _, .cmd (CmdExt.cmd _), _ => .of_forall fun _ => trivial
@@ -328,8 +328,8 @@ theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
   | _, .typeDecl _ _, _ => .of_forall fun _ => trivial
 
 theorem callOkEList_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
-    ∀ (ctx : VarCtx) (ss : List Statement), CallOkEList (octx := octx) (tvars := tvars) imm procs ctx ss →
-      Eventually fun n => CallOkList (octx := octx) (tvars := tvars) imm procs ctx n ss
+    ∀ (ctx : VarCtx) (ss : List Statement), CallOkEList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx ss →
+      Eventually fun n => CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n ss
   | _, [], _ => .of_forall fun _ => trivial
   | ctx, s :: ss, ⟨hs, hss⟩ =>
     (callOkE_eventually imm procs ctx s hs).and (callOkEList_eventually imm procs (stepCtx ctx s) ss hss)
@@ -346,11 +346,11 @@ theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (pro
       (C' : LContext CoreLParams) (ts' : TypeScopes), StatementsWellTyped P C ts L ss C' ts' →
     ∀ (ctx : VarCtx) (n : Nat), Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types →
       InGenShapeList ss → WritesOkList imm ss → AlphabetOkList tvars k n ss →
-      CallOkList (octx := octx) (tvars := tvars) imm procs ctx n ss →
-      ExprOkList (octx := octx) (tvars := tvars) ctx n ss →
+      CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n ss →
+      ExprOkList (octx := octx) (tvars := tvars) (pctx := pctx) ctx n ss →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-          SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx [] n ss.length k)
+          SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx pctx n ss.length k)
   | [], C, _, _, _, _, hss, ctx, n, hΓ, _, _, _, _, _ => by
     cases hss with
     | nil _ _ _ _ hequiv => exact ⟨ctx, hequiv.trans hΓ, rfl, genStmtChain_nil_mem procs C ctx n⟩
@@ -379,12 +379,12 @@ theorem spec_complete_chain_ev (P : Program) (imm : List (Identifier Unit)) (pro
     (C' : LContext CoreLParams) (ts' : TypeScopes) (hss : StatementsWellTyped P C ts L ss C' ts')
     (ctx : VarCtx) (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
     (hshape : InGenShapeList ss) (hwr : WritesOkList imm ss) (hok : AlphabetOkEList tvars ss)
-    (hcall : CallOkEList (octx := octx) (tvars := tvars) imm procs ctx ss)
-    (hexpr : ExprOkEList (octx := octx) (tvars := tvars) ctx ss) :
+    (hcall : CallOkEList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx ss)
+    (hexpr : ExprOkEList (octx := octx) (tvars := tvars) (pctx := pctx) ctx ss) :
     ∃ K, Eventually fun n => ∀ k, K ≤ k →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
-          SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx [] n ss.length k) := by
+          SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx pctx n ss.length k) := by
   obtain ⟨K, ha⟩ := alphabetOkEList_eventually ss hok
   exact ⟨K, (ha.and ((callOkEList_eventually imm procs ctx ss hcall).and
     (exprOkEList_eventually ctx ss hexpr))).mono fun n ⟨hA, hC, hE⟩ k hk =>
@@ -402,12 +402,12 @@ theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : Proc
     (h : StatementWellTyped P C ts labels s C' ts') (ctx : VarCtx)
     (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
     (hshape : InGenShape s) (hwr : WritesOk imm s) (hok : AlphabetOkE tvars s)
-    (hcall : CallOkE (octx := octx) (tvars := tvars) imm procs ctx s)
-    (hexpr : ExprOkE (octx := octx) (tvars := tvars) ctx s) :
+    (hcall : CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s)
+    (hexpr : ExprOkE (octx := octx) (tvars := tvars) (pctx := pctx) ctx s) :
     ∃ k n ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
       ctx' = stepCtx ctx s ∧
       (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx [] n k) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx n k) := by
   obtain ⟨K, ha⟩ := alphabetOkE_eventually s hok
   obtain ⟨N, hN⟩ := (ha.and ((callOkE_eventually imm procs ctx s hcall).and
     (exprOkE_eventually ctx s hexpr)))

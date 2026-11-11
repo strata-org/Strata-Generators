@@ -106,7 +106,7 @@ statement that satisfies it.
 
 namespace StrataGenerators.Stmt.SpecComplete
 variable {octx : OpCtx} {tvars : List TyIdentifier}
-variable {maxStmtSeqLen : Nat}
+variable {maxStmtSeqLen : Nat} {pctx : PolyOpCtx}
 
 -- ── bridge lemmas ──
 theorem procToTCtx_find_rev (ctx : VarCtx) (x : Identifier Unit) (mty : LMonoTy)
@@ -291,7 +291,7 @@ def CallOk (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) (n
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
           ++ outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
         List.Forall₂
-          (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n τ))
+          (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n τ))
           exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
           ++ (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
@@ -342,18 +342,18 @@ end
     that is the type the generator draws the right-hand side at. -/
 def CmdExprOk (ctx : VarCtx) (n : Nat) : Cmd Expression → Prop
   | .init _ (.forAll [] mty) (.det e) _ =>
-      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n mty)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n mty)
   | .init _ _ _ _ => True
   | .set x (.det e) _ =>
       ∀ mty, Map.find? ctx x = some mty →
-        e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n mty)
+        e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n mty)
   | .set _ _ _ => True
   | .assert _ e _ =>
-      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .bool)
   | .assume _ e _ =>
-      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .bool)
   | .cover _ e _ =>
-      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)
+      e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .bool)
 
 mutual
 /-- **Expression reachability, threaded through the evolving scope and size.** Every
@@ -373,21 +373,21 @@ mutual
     the syntactic side conditions of `genLExpr_complete`. Nested bodies drop to `n - 1`
     and re-thread the scope, exactly as `AlphabetOk` and `CallOk` do. -/
 def ExprOk (ctx : VarCtx) (n : Nat) : Statement → Prop
-  | .cmd (CmdExt.cmd c) => CmdExprOk (octx := octx) (tvars := tvars) ctx n c
+  | .cmd (CmdExt.cmd c) => CmdExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n c
   -- A call's by-value inputs are `CallOk`'s business, not this predicate's.
   | .cmd (CmdExt.call _ _ _) => True
   | .block _ body _ => ExprOkList ctx (n - 1) body
   | .ite cond t e _ =>
       (∀ g, cond = .det g →
-        g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+        g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .bool)) ∧
       ExprOkList ctx (n - 1) t ∧ ExprOkList ctx (n - 1) e
   | .loop guard measure invs body _ =>
       (∀ g, guard = .det g →
-        g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+        g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .bool)) ∧
       (∀ m, measure = some m →
-        m ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .int)) ∧
+        m ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .int)) ∧
       (∀ p ∈ invs, p.2 ∈
-        SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] n .bool)) ∧
+        SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] n .bool)) ∧
       ExprOkList ctx (n - 1) body
   | .exit _ _ => True
   | .typeDecl _ _ => True
@@ -414,15 +414,15 @@ theorem exprOk_assert_of_syntactic (ctx : VarCtx) (n : Nat) (l : String)
     (hvars : allVarsInCtx ctx.toFVarCtx octx e)
     (hats : AllTypesSimple tvars n [] e)
     (hdepth : termDepth [] e ≤ n) :
-    CmdExprOk (octx := octx) (tvars := tvars) ctx n (.assert l e md) :=
-  genLExpr_complete ctx.toFVarCtx octx [] tvars [] n .bool
+    CmdExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n (.assert l e md) :=
+  genLExpr_complete ctx.toFVarCtx octx pctx tvars [] n .bool
     genLMonoTy_mem_bool 3 e (Or.inl ⟨hwt, hnames, hvars, hats, hdepth⟩)
 
 /-- **`ExprOk` holds of one concrete statement**, at each size and in the empty scope. That statement is
     `assert [l]: true;`. This witness is what gives `spec_complete_at` real content, and
     `Gaps.hExprC_unsatisfiable` proves that a hypothesis over each environment has no such witness. -/
 theorem exprOk_assert_true (n : Nat) :
-    ExprOk (octx := octx) (tvars := tvars) []  n
+    ExprOk (octx := octx) (tvars := tvars) (pctx := pctx) []  n
       (.cmd (CmdExt.cmd (.assert "l" (LExpr.const () (LConst.boolConst true)) default))) := by
   simp only [ExprOk]
   exact exprOk_assert_of_syntactic [] n "l" _ default
@@ -444,17 +444,17 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     (hwt : CmdWellTyped C ts c ts')
     (hshape : InGenShape (.cmd (CmdExt.cmd c))) (hwrites : WritesOk imm (.cmd (CmdExt.cmd c)))
     (hok : AlphabetOk tvars maxStmtSeqLen n (.cmd (CmdExt.cmd c)))
-    (hExprC : CmdExprOk (octx := octx) (tvars := tvars) ctx n c) :
+    (hExprC : CmdExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n c) :
     ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
       ctx' = stepCtx ctx (.cmd (CmdExt.cmd c)) ∧
       (⟨[Stmt.cmd (CmdExt.cmd c)], C, ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx [] n maxStmtSeqLen) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx n maxStmtSeqLen) := by
   -- Reduce the goal to membership in `genCmd`'s support via the `genCmdStmt` wrapper
   -- and the `genCmdStmt_mem` lifting into `genStmt`.
   have hlift : ∀ (r : GenCmdResult),
-      r ∈ SPMF.support (genCmd (G := SPMF) octx tvars imm ctx n [] [] C.knownTypes) →
+      r ∈ SPMF.support (genCmd (G := SPMF) octx tvars imm ctx n pctx [] C.knownTypes) →
       (⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩ : GenStmtResult) ∈
-        SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx [] n maxStmtSeqLen) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx n maxStmtSeqLen) := by
     intro r hr
     refine genCmdStmt_mem procs C ctx n _ ?_
     simp only [genCmdStmt, mem_support_bind_iff, mem_support_pure_iff]
@@ -484,7 +484,7 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     have hfresh' : Map.find? ctx ⟨nm, ()⟩ = none := hctxFresh ⟨nm, ()⟩ hfresh
     refine ⟨ctx.insert ⟨nm, ()⟩ mty, hequiv.trans (hinsertEquiv ⟨nm, ()⟩ mty), rfl, ?_⟩
     exact hlift ⟨.init ⟨nm,()⟩ (.forAll [] mty) (.det e) default, ctx.insert ⟨nm,()⟩ mty⟩ (by
-      rw [genCmd_support_iff octx tvars imm ctx n _ [] [] C.knownTypes]; refine Or.inl ?_
+      rw [genCmd_support_iff octx tvars imm ctx n _ pctx [] C.knownTypes]; refine Or.inl ?_
       simp only [genInitDet, mem_support_bind_iff, mem_support_pure_iff]
       exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname hfresh' List.not_mem_nil,
         mty, hmtyReach, e, hreach, by rw [ite_eq_left hgen]⟩)
@@ -497,7 +497,7 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     have hfresh' : Map.find? ctx ⟨nm, ()⟩ = none := hctxFresh ⟨nm, ()⟩ hfresh
     refine ⟨ctx.insert ⟨nm, ()⟩ mty, hequiv.trans (hinsertEquiv ⟨nm, ()⟩ mty), rfl, ?_⟩
     exact hlift ⟨.init ⟨nm,()⟩ (.forAll [] mty) .nondet default, ctx.insert ⟨nm,()⟩ mty⟩ (by
-      rw [genCmd_support_iff octx tvars imm ctx n _ [] [] C.knownTypes]; refine Or.inr (Or.inl ?_)
+      rw [genCmd_support_iff octx tvars imm ctx n _ pctx [] C.knownTypes]; refine Or.inr (Or.inl ?_)
       simp only [genInitNondet, mem_support_bind_iff, mem_support_pure_iff]
       exact ⟨nm, freshName_reach ctx ⟨nm,()⟩ hname hfresh' List.not_mem_nil, mty, hmtyReach, rfl⟩)
   | set_det x mty e md _ hfind hexpr hequiv =>
@@ -508,7 +508,7 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     have hmem := hwritable x mty hfind hwrites
     refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine hlift ⟨.set x (.det e) default, ctx⟩ ?_
-    rw [genCmd_support_iff octx tvars imm ctx n _ [] [] C.knownTypes]
+    rw [genCmd_support_iff octx tvars imm ctx n _ pctx [] C.knownTypes]
     refine Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩))
     simp only [genSetDet, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨(x, mty), (mem_support_elements_iff _).mpr hmem, e, hE mty (hctxFind x mty hfind),
@@ -519,7 +519,7 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     have hmem := hwritable x mty hfind hwrites
     refine ⟨ctx, hequiv.trans hΓ, rfl, ?_⟩
     refine hlift ⟨.set x .nondet default, ctx⟩ ?_
-    rw [genCmd_support_iff octx tvars imm ctx n _ [] [] C.knownTypes]
+    rw [genCmd_support_iff octx tvars imm ctx n _ pctx [] C.knownTypes]
     refine Or.inr (Or.inr (Or.inr (Or.inl ⟨List.length_pos_of_mem hmem, ?_⟩)))
     simp only [genSetNondet, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨(x, mty), (mem_support_elements_iff _).mpr hmem, rfl⟩
@@ -530,7 +530,7 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     have hE := hExprC
     simp only [CmdExprOk] at hE
     refine ⟨ctx, hequiv.trans hΓ, rfl, hlift ⟨.assert l e default, ctx⟩ ?_⟩
-    rw [genCmd_support_iff octx tvars imm ctx n _ [] [] C.knownTypes]
+    rw [genCmd_support_iff octx tvars imm ctx n _ pctx [] C.knownTypes]
     refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ?_))))
     simp only [genAssertCmd, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨l, hlreach, e, hE, by rw [knownOrTrue_of_known (binderAnnotsKnownIn_iff.mpr hexpr.2.1)]⟩
@@ -541,7 +541,7 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     have hE := hExprC
     simp only [CmdExprOk] at hE
     refine ⟨ctx, hequiv.trans hΓ, rfl, hlift ⟨.assume l e default, ctx⟩ ?_⟩
-    rw [genCmd_support_iff octx tvars imm ctx n _ [] [] C.knownTypes]
+    rw [genCmd_support_iff octx tvars imm ctx n _ pctx [] C.knownTypes]
     refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ?_)))))
     simp only [genAssumeCmd, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨l, hlreach, e, hE, by rw [knownOrTrue_of_known (binderAnnotsKnownIn_iff.mpr hexpr.2.1)]⟩
@@ -552,7 +552,7 @@ theorem genCmdStmt_complete_spec (imm : List (Identifier Unit)) (procs : ProcSig
     have hE := hExprC
     simp only [CmdExprOk] at hE
     refine ⟨ctx, hequiv.trans hΓ, rfl, hlift ⟨.cover l e default, ctx⟩ ?_⟩
-    rw [genCmd_support_iff octx tvars imm ctx n _ [] [] C.knownTypes]
+    rw [genCmd_support_iff octx tvars imm ctx n _ pctx [] C.knownTypes]
     refine Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ?_)))))
     simp only [genCoverCmd, mem_support_bind_iff, mem_support_pure_iff]
     exact ⟨l, hlreach, e, hE, by rw [knownOrTrue_of_known (binderAnnotsKnownIn_iff.mpr hexpr.2.1)]⟩
@@ -628,23 +628,23 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
     ∀ (ctx : VarCtx) (n : Nat),
       Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types →
       InGenShape s → WritesOk imm s → AlphabetOk tvars maxStmtSeqLen n s →
-      CallOk (octx := octx) (tvars := tvars) imm procs ctx n s →
-      ExprOk (octx := octx) (tvars := tvars) ctx n s →
+      CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n s →
+      ExprOk (octx := octx) (tvars := tvars) (pctx := pctx) ctx n s →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
         ctx' = stepCtx ctx s ∧
         (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
-          SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx [] n maxStmtSeqLen) := by
+          SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx n maxStmtSeqLen) := by
   induction h using StatementWellTyped.rec (motive_2 := fun C ts L ss C' ts' _ =>
     ∀ (ctx : VarCtx) (n : Nat),
       Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types →
       InGenShapeList ss → WritesOkList imm ss → AlphabetOkList tvars maxStmtSeqLen n ss →
-      CallOkList (octx := octx) (tvars := tvars) imm procs ctx n ss →
-      ExprOkList (octx := octx) (tvars := tvars) ctx n ss →
+      CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n ss →
+      ExprOkList (octx := octx) (tvars := tvars) (pctx := pctx) ctx n ss →
       ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
         ctx' = stepCtxList ctx ss ∧
         ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
           SPMF.support
-            (genStmtChain (G := SPMF) octx tvars imm procs L C ctx [] n ss.length maxStmtSeqLen)) with
+            (genStmtChain (G := SPMF) octx tvars imm procs L C ctx pctx n ss.length maxStmtSeqLen)) with
   | cmd C ts L c ts' hc =>
     intro ctx n hΓ hnf hwr hok hcall hexpr
     cases hc with
@@ -674,7 +674,7 @@ theorem spec_complete_at (P : Program) (imm : List (Identifier Unit)) (procs : P
       have hMnotFn : ((StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter
           (needsInit ctx)).all (fun q => !(functionNames C).contains q.1.name) = true := by
         rw [hEmpty'.1]; rfl
-      have hmem := genCallStmt_mem_complete (octx := octx) (tvars := tvars)
+      have hmem := genCallStmt_mem_complete (octx := octx) (tvars := tvars) (pctx := pctx)
         (immutableVars := imm) procs C ctx n s hsmem σvals hσvals exprs mask hMusable
         (by rw [hT]; exact hNodup) hMnotFn hForall hgen
       rw [hT, hEmpty] at hmem
