@@ -6,12 +6,14 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 /-!
 # The completeness of `genStmt` and `genStmtChain`, indexed by `StatementWellTyped`
 
-`spec_complete` proves that each well-typed statement is in the support of `genStmt`. The declarative
+`spec_complete_at` proves that each well-typed statement is in the support of `genStmt` at a given size and
+body-length cap, under side conditions that mention both. `spec_complete`, in
+`StrataGenerators.StmtHasTypeAGenCompleteExists`, removes the size and the cap from the side conditions and
+is the main completeness statement. The declarative
 relation `StatementWellTyped`, in `Strata.Languages.Core.Typing.Spec.TypingSpec`, decides
 which statements are well typed. The proof needs **no** helper relation that follows the shape
-of the generator. It runs by induction on the *typing derivation* itself, through the two
-mutually recursive theorems
-`genStmt_spec_complete` and `genStmtChain_spec_complete`.
+of the generator. It runs by induction on the *typing derivation* itself, with one motive for a
+statement and one for a statement chain.
 
 ## The side conditions
 
@@ -394,7 +396,7 @@ theorem exprOk_assert_of_syntactic (ctx : VarCtx) (n : Nat) (l : String)
     genLMonoTy_mem_bool 3 e (Or.inl ⟨hwt, hnames, hvars, hats, hdepth⟩)
 
 /-- **`ExprOk` holds of one concrete statement**, at each size and in the empty scope. That statement is
-    `assert [l]: true;`. This witness is what gives `spec_complete` real content, and
+    `assert [l]: true;`. This witness is what gives `spec_complete_at` real content, and
     `Gaps.hExprC_unsatisfiable` proves that a hypothesis over each environment has no such witness. -/
 theorem exprOk_assert_true (n : Nat) :
     ExprOk (octx := octx) (tvars := tvars) []  n
@@ -597,7 +599,7 @@ theorem callInputs_binderAnnotsKnown {C : LContext CoreLParams} {P : Program} {t
     reachability (`ExprOk`), is in `genStmt`'s support at the exact statement, with an output
     scope (through `procToTCtx`) equivalent to the output scopes of the typing. `immutableVars`
     is fixed to `[]`. -/
-theorem spec_complete (P : Program) (procs : ProcSigCtx)
+theorem spec_complete_at (P : Program) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ts : TypeScopes) (labels : List String)
     (s : Statement) (C' : LContext CoreLParams) (ts' : TypeScopes)
     (h : StatementWellTyped P C ts labels s C' ts') :

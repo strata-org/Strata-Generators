@@ -4,9 +4,9 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
-# The side conditions of `spec_complete` are necessary
+# The side conditions of `spec_complete_at` are necessary
 
-`spec_complete` in `StmtHasTypeAGenComplete.lean` carries three side conditions:
+`spec_complete_at` in `StmtHasTypeAGenComplete.lean` carries three side conditions:
 `InGenShape`, `AlphabetOk` and `CallOk`. This file shows that you cannot remove
 them. For each of the three, it gives a statement that is well-typed under
 `StatementWellTyped` but is not in the support of `genStmt`. Therefore no
@@ -402,7 +402,7 @@ theorem otherTargetCall_gap (labels : List String)
       SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) :=
   ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
--- ── `spec_complete`'s old environment hypotheses were unsatisfiable ──────────
+-- ── `spec_complete_at`'s old environment hypotheses were unsatisfiable ───────
 
 /-! ### A hypothesis over each environment is unsatisfiable, at each depth
 
@@ -441,7 +441,7 @@ theorem not_exists_depth_GenLExprComplete :
     `hExprC`'s `ctx = []` instance. -/
 theorem toFVarCtx_nil : VarCtx.toFVarCtx [] = [] := rfl
 
-/-- **The old `hExprC` was unsatisfiable**, so the old `spec_complete` was vacuous.
+/-- **The old `hExprC` was unsatisfiable**, so the old `spec_complete_at` was vacuous.
     Instantiate at `ctx = []`. -/
 theorem hExprC_unsatisfiable :
     ¬ (∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d) := by
