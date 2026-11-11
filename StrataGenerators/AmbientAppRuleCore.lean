@@ -1,5 +1,7 @@
 import StrataGenerators.AmbientAppRule
 import Strata.Languages.Core.Factory
+import Strata.Languages.Core.FactoryProps
+import StrataGenerators.FactoryArrayBridge
 
 /-!
 # The app-rule comparison over Strata Core's factory
@@ -30,10 +32,8 @@ has no type variables.
 (`Ty.other`), so a toy argument draw at, e.g., `regex` or `Map int bool` always succeeds. Strata
 has no literals for those types; the lower bound on Pałka et al.'s rule relies on this.
 
-**Axioms.** `coreSig_args_base` and `substrFn_mem` are checked with `native_decide`, and each use
-adds its own auxiliary axiom (trust in the compiled evaluator). That is the same kind of trust every
-statement about the factory already carries: `Core.Factory`'s `name_nodup` field is itself proved
-by `native_decide`.
+**Axioms.** `coreSig_args_base` and `substrFn_mem` are checked by the kernel (`decide +kernel`),
+over the array that `Core.Factory` is built from, so they depend only on the standard axioms.
 -/
 
 namespace StrataGenerators.AmbientApp
@@ -71,9 +71,23 @@ theorem Ty.isBase_iff (τ : Ty) : τ.isBase = true ↔ τ.IsBase := by
 
 /-- **Core's factory is first order**: no monomorphic factory function takes a function. -/
 theorem coreSig_args_base : ∀ f ∈ coreSig, ∀ a ∈ f.ty.args, a.IsBase := by
-  have h : (coreSig.all fun f => f.ty.args.all Ty.isBase) = true := by native_decide
-  simp only [List.all_eq_true] at h
-  exact fun f hf a ha => (Ty.isBase_iff a).1 (h f hf a ha)
+  -- The check runs in the kernel on the array `Core.Factory` is built from, and
+  -- `Core.Factory_all_of_WFFactoryArray` moves it to the factory.
+  have hall : (Core.WFFactoryArray.toList.all fun wf =>
+      (Ty.ofLMonoTy (LMonoTy.mkArrow' wf.func.output (wf.func.inputs.map Prod.snd))).args.all
+        Ty.isBase) = true := by
+    simp only [Core.WFFactoryArray, Array.toList_appendList]
+    decide +kernel
+  intro f hf a ha
+  simp only [coreSig, List.mem_filterMap] at hf
+  obtain ⟨lf, hlf, hsome⟩ := hf
+  have hbase := Core.Factory_all_of_WFFactoryArray
+    (fun lf => (Ty.ofLMonoTy (LMonoTy.mkArrow' lf.output (lf.inputs.map Prod.snd))).args.all
+      Ty.isBase) hall lf (Array.mem_toList_iff.mp hlf)
+  split at hsome
+  · cases hsome
+    exact (Ty.isBase_iff a).1 (List.all_eq_true.1 hbase a ha)
+  · cases hsome
 
 /-- **Ratio, over Core's factory.** For every monomorphic Core factory function
 `f : a₁ → ⋯ → aₘ → r` and `k ≥ 2` uniformly drawn base types, Pałka et al.'s rule calls `f` at
@@ -105,8 +119,15 @@ theorem core_separation (n : Nat) (Γ : List Ty) {f : Fn} (hmem : f ∈ coreSig)
 def substrFn : Fn := ⟨"Str.Substr", .arrow .str (.arrow .int (.arrow .int .str))⟩
 
 theorem substrFn_mem : substrFn ∈ coreSig := by
-  have h : coreSig.contains substrFn = true := by native_decide
-  simpa using h
+  -- `Str.Substr` is entry 32 of the array `Core.Factory` is built from.
+  have hlist : Core.strSubstrFunc ∈ Core.WFFactoryArray.toList := by
+    simp only [Core.WFFactoryArray, Array.toList_appendList]
+    exact List.mem_append_left _ (List.mem_append_left _ (List.mem_append_left _
+      (List.mem_of_getElem? (i := 32) rfl)))
+  have hmem : Core.strSubstrFunc.func ∈ Core.Factory.toArray := by
+    rw [Core.factory_toArray]
+    exact Array.mem_map.2 ⟨_, Array.mem_toList_iff.mp hlist, rfl⟩
+  exact List.mem_filterMap.2 ⟨_, Array.mem_toList_iff.mpr hmem, by decide +kernel⟩
 
 /-- A three-argument instance: `Str.Substr`. With `k` uniform base types, the STLC rule must
 guess three argument types (`≤ 1/k³`), while Pałka et al.'s rule stays above
