@@ -434,8 +434,8 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     an `ite`) and of the invariant list of a `loop`. `genStmt` draws each of these lengths uniformly
     from `[0, maxStmtSeqLen]`.
 
-    The cap does not depend on `size`. When the cap was `size + 1`, the proved bound on the expected
-    number of loops grew like `n!`. With a fixed cap, one statement draw makes
+    The cap does not depend on `size`. When the cap was `size + 1`, the best upper bound that this
+    analysis gives on the expected number of loops grew like `n!`. With a fixed cap, one statement draw makes
     `expectedChildStmts maxStmtSeqLen θ` statement draws one level down, on average. If this is less
     than `1`, the expected number of nested statements (`block`, `ite` and `loop`) has an upper bound
     that does not depend on `size`. At the shipping weights this number is `3 · maxStmtSeqLen / 16`,

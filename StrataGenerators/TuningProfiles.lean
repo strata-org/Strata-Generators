@@ -179,8 +179,8 @@ def stmtDefault : Tuning := genStmt._mutual.defaults
 
 /-- **The body-length cap for a statement profile.** The largest cap, at most
 `defaultMaxStmtSeqLen`, at which one statement draw makes fewer than one statement draw one level
-down on average. With `W` the total weight of the `size + 1` site and
-`B = w_block + 2 w_ite + 2 w_iteNondet + w_loop` the bodies that one draw opens, the expected
+down on average. With `W` the total weight of the `size + 1` site, `w_x` the weight of branch `x`,
+and `B = w_block + 2 w_ite + 2 w_iteNondet + w_loop` the bodies that one draw opens, the expected
 number of child statements is `B / W · cap / 2`, and it is less than `1` exactly when
 `B · cap < 2 W`. `SizeDistributionLoops.expectedChildStmts_maxStmtSeqLenFor_lt_one` proves it.
 

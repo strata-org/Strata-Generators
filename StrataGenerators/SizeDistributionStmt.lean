@@ -6,7 +6,7 @@ import StrataGenerators.StmtHasTypeAGen
 
 **Statements** (`genStmt`). `genStmt_nesting_threshold`: at size `0` the top level never holds a
 `block`, `ite` or `loop`, in every context; at size `n + 1` it holds each of them with positive
-probability, each a closed form in the size `n` and the body-length cap `k = maxStmtSeqLen`:
+probability, each a closed form in the body-length cap `k = maxStmtSeqLen` alone:
 `iteAtSize k = 1/(16 (k+1)²)`, `blockAtSize k = 1/(32 (k+1))`,
 `loopAtSize k = 1/(320 (k+1)²)`. Each witness is the empty form of the statement (empty
 branches, empty body, nondeterministic guard), so it needs no sub-draw to succeed. Each body length

@@ -28,7 +28,7 @@ quantities control every bound:
 ## Expected counts
 
 `genStmtT_expect_count_le` bounds the expected number of nested statements (at every depth) by the
-solution of `B 0 = 0`, `B (n + 1) = share + r · B n`, with `r = expectedChildStmts`. The closed form
+solution of `B 0 = 0`, `B (n + 1) = nestShare c θ + r · B n`, with `r = expectedChildStmts`. The closed form
 (`countBound_eq`) is a geometric sum:
 
 ```
@@ -664,7 +664,7 @@ theorem genStmtT_expect_count_le (c : NestCost) (θ : Tuning) (octx : OpCtx)
 -- ── Closed forms ─────────────────────────────────────────────────────────
 
 /-- **The closed form of the count bound**: a geometric sum in the expected number of child
-statements, `share · (1 + r + … + r^{n-1})`. -/
+statements, `nestShare c θ · (1 + r + … + r^{n-1})`. -/
 theorem countBound_eq (c : NestCost) (maxStmtSeqLen : Nat) (θ : Tuning) (n : Nat) :
     countBound c maxStmtSeqLen θ n
       = nestShare c θ * ∑ i ∈ Finset.range n, expectedChildStmts maxStmtSeqLen θ ^ i := by
@@ -683,7 +683,7 @@ theorem geom_le_inv (r : ℝ≥0∞) (n : Nat) : ∑ i ∈ Finset.range n, r ^ i
   rw [← ENNReal.tsum_geometric]
   exact ENNReal.sum_le_tsum _
 
-/-- **The expected count, uniformly in the size**: at most `share / (1 − r)`. This is finite exactly
+/-- **The expected count, uniformly in the size**: at most `nestShare c θ / (1 − r)`. This is finite exactly
 when `r = expectedChildStmts maxStmtSeqLen θ < 1`. -/
 theorem genStmtT_expect_count_le_geom (c : NestCost) (θ : Tuning) (octx : OpCtx)
     (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
@@ -801,7 +801,7 @@ theorem genStmt_expect_numNesting_le (octx : OpCtx) (tvars : List TyIdentifier)
 
 -- ── Every profile, at its own cap ────────────────────────────────────────
 
-/-- **The per-profile cap keeps every profile subcritical.** At `maxStmtSeqLenFor θ`, one statement
+/-- **The per-profile cap keeps `r` below `1` for every profile.** At `maxStmtSeqLenFor θ`, one statement
 draw makes fewer than one statement draw one level down, on average, for every `θ`. -/
 theorem expectedChildStmts_maxStmtSeqLenFor_lt_one (θ : Tuning) :
     expectedChildStmts (maxStmtSeqLenFor θ) θ < 1 := by
