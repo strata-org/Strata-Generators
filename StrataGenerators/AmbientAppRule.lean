@@ -37,8 +37,7 @@ generator `genTy`, fuel `n`, and context `Γ`:
   to `0` while Pałka et al.'s stays `≥ palkaFloor sig m`, so from some `N` on Pałka et al.'s is
   strictly more frequent.
 
-`String.take : String → Int → String` is the running example (`take_separation`);
-`AmbientAppRuleCore.lean` instantiates `sig` with the monomorphic functions of `Core.Factory`.
+`String.take : String → Int → String` is the running example (`take_separation`).
 -/
 
 namespace StrataGenerators.AmbientApp

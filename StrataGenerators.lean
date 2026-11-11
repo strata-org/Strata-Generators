@@ -20,7 +20,6 @@ import StrataGenerators.ProgramGen.Complete
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
 -- Default STLC application rule vs. Pałka et al.'s ambient-function rule: in a toy STLC
--- (`AmbientAppRule*`), and in `genLExprBase` with and without its Indir branches (`PalkaAblation`).
+-- (`AmbientAppRule`), and in `genLExprBase` with and without its Indir branches (`PalkaAblation`).
 import StrataGenerators.AmbientAppRule
-import StrataGenerators.AmbientAppRuleCore
 import StrataGenerators.PalkaAblation.Aggregate
