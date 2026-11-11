@@ -26,21 +26,13 @@ profile with heavy nesting. Such a profile does not reach the longer nested bodi
 which family of properties, and the measurements behind them. This file is the guarantee that no choice
 made there can cost coverage.
 
-* **§1 `PrecondElim`, knob 1: the shape of a precondition, with no edit to the source.**
+* **§1 `PrecondElim`: the shape of a precondition, with no edit to the source.**
   `StrataGenerators.TuningProfiles` tags `genPrecondition` rather than its definition site does. The
   attribute rewrites the elaborated body, so a tag need not sit at the definition site. The site it
   finds is `genPrecondition`'s existing 3 to 1 split between a clause that mentions an input and a
   plain `.bool` draw, and `genPrecondition.tuned θ` moves that ratio at run time.
 
-* **§2 `PrecondElim`, knob 2: whether a precondition is present at all.**
-  A rational `coin` in `optionGen` decides that split. A coin is not a `frequency`, so `@[tunable]`
-  cannot see it. `genPreconditionW` reworks the split into the two-branch `frequency` of
-  `StrataGenerators.weightedOptionGen`, written inline so that the attribute sees it. A proof shows that the
-  rework has the support the shipping `genPrecondition` has, so the conversion changes only the
-  distribution. The same rework would expose the body and measure coins of `genFunction`, which is what
-  the `function:` family needs. This file does not do it.
-
-* **§3 `LoopElim`: the real statement generator.** `StrataGenerators.Stmt.genStmt` carries the tag at
+* **§2 `LoopElim`: the real statement generator.** `StrataGenerators.Stmt.genStmt` carries the tag at
   its definition site, and `genStmt_mutual_tuned_eq` proves θ-invariance for the *whole mutual block*.
   So `loop` is flat index 13 of a real knob rather than of a mirror. Two changes in
   `StmtHasTypeAGen/Core.lean` made the tag possible:
@@ -55,7 +47,7 @@ made there can cost coverage.
      already in the union. Both forms are throw-free, since `frequency` skips a zero-weight branch. They
      differ in one way: `cmd` now absorbs the share of a pruned branch, where the old list renormalised.
 
-* **§4 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` carry the same θ-invariance guarantee.
+* **§3 The rest.** `genCmd`, `genLMonoTy` and `genLExprBase` carry the same θ-invariance guarantee.
   `genLExprBase` has 84 branch weights across eleven per-type sites. The three cover one recursion form
   each: no recursion, `Nat.brecOn`, and `Nat.brecOn` under a wide match.
 -/
@@ -65,11 +57,11 @@ namespace TuningPrototypes
 open Strata.DL.Util (FuncPrecondition)
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 1. PrecondElim, knob 1: tuning the shipping generator in place
+-- 1. PrecondElim: tuning the shipping generator in place
 -- ══════════════════════════════════════════════════════════════════════════
 
-/-! `genPrecondition` already contains a `frequency`. Inside the `some` clause it prefers a
-precondition that mentions an input over a plain `.bool` draw, at 3 to 1.
+/-! `genPrecondition` already contains a `frequency`. It prefers a precondition that mentions an
+input over a plain `.bool` draw, at 3 to 1.
 `StrataGenerators.TuningProfiles` tags it from a different module, with no edit to its source, and that
 makes the ratio a runtime knob. -/
 
@@ -97,152 +89,28 @@ def precondInputHeavy : Tuning := ⟨#[(10, 0), (1, 0)]⟩
     so it closes by reflexivity. -/
 theorem genPrecondition_tuned_support_eq (θ : Tuning) (octx : OpCtx)
     (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat)
-    (pctx : PolyOpCtx) :
-    SPMF.support (genPrecondition.tuned (G := SPMF) θ octx inputs tvars depth pctx)
-      = SPMF.support (genPrecondition (G := SPMF) octx inputs tvars depth pctx) := by
+    (pctx : PolyOpCtx) (ambient : FVarCtx) :
+    SPMF.support (genPrecondition.tuned (G := SPMF) θ octx inputs tvars depth pctx ambient)
+      = SPMF.support (genPrecondition (G := SPMF) octx inputs tvars depth pctx ambient) := by
   unfold genPrecondition genPrecondition.tuned
-  refine SPMF.support_optionGen_congr ?_
-  dsimp only
-  refine SPMF.support_dite_congr (fun hne => ?_) (fun _ => rfl)
   refine SPMF.support_bind_congr ?_ (fun _ => rfl)
+  refine SPMF.support_dite_congr (fun hne => ?_) (fun _ => rfl)
   apply SPMF.support_frequency_congr_weights
   · rfl
   all_goals simp [Tuning.weight_pos]
 
 /-- Any soundness-and-completeness fact transfers without knowing what the predicate is. -/
 example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx)
-    (P : Option (FuncPrecondition LExpr' Unit) → Prop)
+    (tvars : List TyIdentifier) (depth : Nat) (pctx : PolyOpCtx) (ambient : FVarCtx)
+    (P : FuncPrecondition LExpr' Unit → Prop)
     (h : IsSoundAndComplete
-      (genPrecondition (G := SPMF) octx inputs tvars depth pctx) P) :
+      (genPrecondition (G := SPMF) octx inputs tvars depth pctx ambient) P) :
     IsSoundAndComplete
-      (genPrecondition.tuned (G := SPMF) θ octx inputs tvars depth pctx) P :=
+      (genPrecondition.tuned (G := SPMF) θ octx inputs tvars depth pctx ambient) P :=
   IsSoundAndComplete.of_support_eq (genPrecondition_tuned_support_eq ..) h
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 2. PrecondElim, knob 2: tuning whether a precondition is present
--- ══════════════════════════════════════════════════════════════════════════
-
-/-- The body of `genPrecondition`'s `some` clause. It prefers a clause that mentions an input over a
-    plain `.bool` draw, at 3 to 1, in the free-variable context `inputsAsFVarCtx inputs`.
-
-    It sits in its own definition so that the tunable split below has exactly *one* site, the choice
-    between `some` and `none`. Otherwise that split would also capture this inner `frequency`, which is
-    knob 1's concern. `@[tunable]` inlines only the tagged declaration's own auxiliaries, so it does not
-    collect a `frequency` from a separate definition like this one. -/
-def genPrecondClause [Gen G] (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    G (FuncPrecondition LExpr' Unit) := do
-  let e ←
-    if hne : inputs.toList ≠ [] then
-      frequency
-        [ (3, fun () => genInputMentioningPrecond octx inputs tvars depth hne),
-          (1, fun () => genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool) ]
-        (by show 0 < 3 + 1; omega)
-    else
-      genLExpr (inputsAsFVarCtx inputs) octx [] tvars [] depth .bool
-  pure { expr := e, md := () }
-
-/-- `genPrecondition` with the `some` and `none` split made tunable.
-
-    The body is `FunctionHasTypeAGen.Core.genPrecondition`'s body, with one change: a two-branch
-    `frequency` replaces the outer `optionGen`, whose `coin` fixes the split at one half. That
-    `frequency` is a tunable site, and it has the shape of `StrataGenerators.weightedOptionGen`. So
-    `genPreconditionW.tuned θ` biases how often a function carries a `requires` clause, and that is the
-    knob `PrecondElim` needs turned up.
-
-    The split is written out rather than delegated to `StrataGenerators.weightedOptionGen`, because `@[tunable]`
-    collects the `frequency` calls in the tagged definition's own body. The combinator takes its weights
-    as variables rather than as literals, so it is not tunable itself. `genPreconditionW_eq_weighted`
-    below records that the two are nonetheless the same term.
-
-    The definition has a binder named `depth`, so the site reads its weights at that depth. A schedule
-    with a nonzero growth coefficient can therefore make a precondition rarer in a deeper expression
-    budget. `SPMF` cannot see that, and that is the guarantee rather than a limitation: no
-    schedule changes what is reachable. -/
-@[tunable]
-def genPreconditionW [Gen G] (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    G (Option (FuncPrecondition LExpr' Unit)) :=
-  frequency [
-    (1, fun _ => do let p ← genPrecondClause octx inputs tvars depth; pure (some p)),
-    (1, fun _ => pure none)
-  ] (by simp)
-
-/-- One tunable site of arity 2, with no recursive call. -/
-example : genPreconditionW.sites = #[⟨`TuningPrototypes.genPreconditionW.site0, 0, 2, #[0, 0]⟩] := rfl
-
-example : genPreconditionW.defaults = ⟨#[(1, 0), (1, 0)]⟩ := rfl
-
-/-- The inline split is `StrataGenerators.weightedOptionGen`'s split at weights 1 to 1. They are the same term, so
-    the support lemma for the combinator describes `genPreconditionW`'s support directly. -/
-theorem genPreconditionW_eq_weighted [Gen G] (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    genPreconditionW (G := G) octx inputs tvars depth
-      = StrataGenerators.weightedOptionGen 1 1 (genPrecondClause octx inputs tvars depth) := rfl
-
-/-- Two `Tuning`s for the presence site. The first is the default 1 to 1. The second aims at
-    `PrecondElim` and makes a precondition present about four times as often as absent. Both keep the
-    full support. -/
-def presenceDefault : Tuning := genPreconditionW.defaults
-def presenceHeavy : Tuning := ⟨#[(4, 0), (1, 0)]⟩
-
-/-- The tunable rework reaches the same values as the shipping `genPrecondition`. Every soundness and
-    completeness result about the shipping generator therefore transfers to the rework. This is the
-    theorem that certifies the conversion: only the distribution changes.
-
-    The proof reduces both sides to the same disjunction over what `genPrecondClause` reaches. The
-    shipping `genPrecondition` is *definitionally* `optionGen (genPrecondClause …)`, because its
-    `optionGen` payload is the `do` block above. So the `frequency` split here and the `coin` split
-    there reach the same values. -/
-theorem genPreconditionW_support_eq (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    SPMF.support (genPreconditionW (G := SPMF) octx inputs tvars depth) =
-      SPMF.support (genPrecondition (G := SPMF) octx inputs tvars depth) := by
-  have hrhs : genPrecondition (G := SPMF) octx inputs tvars depth
-      = optionGen (genPrecondClause octx inputs tvars depth) := rfl
-  ext o
-  rw [hrhs, SPMF.mem_support_optionGen_iff]
-  simp only [genPreconditionW, SPMF.mem_support_frequency_iff]
-  constructor
-  · rintro ⟨w, g, hmem, _, hg⟩
-    rcases List.mem_cons.mp hmem with heq | hmem'
-    · obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ heq
-      simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff] at hg
-      obtain ⟨p, hp, rfl⟩ := hg
-      exact Or.inr ⟨p, hp, rfl⟩
-    · rcases List.mem_cons.mp hmem' with heq | hnil
-      · obtain ⟨rfl, rfl⟩ := Prod.mk.injEq .. ▸ heq
-        simp only [SPMF.mem_support_pure_iff] at hg
-        exact Or.inl hg
-      · simp at hnil
-  · rintro (rfl | ⟨p, hp, rfl⟩)
-    · refine ⟨1, _, List.mem_cons_of_mem _ List.mem_cons_self, by omega, ?_⟩
-      simp only [SPMF.mem_support_pure_iff]
-    · refine ⟨1, _, List.mem_cons_self, by omega, ?_⟩
-      simp only [SPMF.mem_support_bind_iff, SPMF.mem_support_pure_iff]
-      exact ⟨p, hp, rfl⟩
-
-/-- Boosting the precondition rate is behavior-preserving for *any* `θ`, so soundness/completeness of
-    the function generator is unaffected: only the frequency of `requires` clauses changes. -/
-theorem genPreconditionW_tuned_support_eq (θ : Tuning) (octx : OpCtx)
-    (inputs : ListMap (Identifier Unit) LMonoTy) (tvars : List TyIdentifier) (depth : Nat) :
-    SPMF.support (genPreconditionW.tuned (G := SPMF) θ octx inputs tvars depth)
-      = SPMF.support (genPreconditionW (G := SPMF) octx inputs tvars depth) := by
-  unfold genPreconditionW genPreconditionW.tuned
-  apply SPMF.support_frequency_congr_weights
-  · rfl
-  all_goals simp [Tuning.weight_pos]
-
-/-- Chaining the two: every tuning of the reworked generator has the shipping generator's support. -/
-example (θ : Tuning) (octx : OpCtx) (inputs : ListMap (Identifier Unit) LMonoTy)
-    (tvars : List TyIdentifier) (depth : Nat) :
-    SPMF.support (genPreconditionW.tuned (G := SPMF) θ octx inputs tvars depth) =
-      SPMF.support (genPrecondition (G := SPMF) octx inputs tvars depth) := by
-  rw [genPreconditionW_tuned_support_eq, genPreconditionW_support_eq]
-
--- ══════════════════════════════════════════════════════════════════════════
--- 3. LoopElim: the real statement generator
+-- 2. LoopElim: the real statement generator
 -- ══════════════════════════════════════════════════════════════════════════
 
 /-! `StrataGenerators.Stmt.genStmt` carries the tag at its definition site, and
@@ -362,7 +230,7 @@ theorem genProcedureT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (procs : Pro
     | rfl
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 4. The command, type and expression generators
+-- 3. The command, type and expression generators
 -- ══════════════════════════════════════════════════════════════════════════
 
 /-- At every `θ`, the tuned command generator is `genCmd`. `genCmd` is not recursive, so this uses the
@@ -370,16 +238,17 @@ theorem genProcedureT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (procs : Pro
     `dite`, and the `set` branches *use* that `dite`'s proof, so the proof splits on the condition first.
     §1 does the same for `genPrecondition`. -/
 theorem genCmd_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx) :
-    SPMF.support (genCmd.tuned (G := SPMF) θ octx tvars immutableVars ctx depth pctx)
-      = SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx) := by
+    (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx)
+    (avoid : List String) (kt : Lambda.KnownTypes) :
+    SPMF.support (genCmd.tuned (G := SPMF) θ octx tvars immutableVars ctx depth pctx avoid kt)
+      = SPMF.support (genCmd (G := SPMF) octx tvars immutableVars ctx depth pctx avoid kt) := by
   unfold genCmd genCmd.tuned
   by_cases h : (ctx.writable immutableVars).length > 0
-  · simp only [dif_pos h]
+  · simp only [dite_eq_left h]
     apply SPMF.support_frequency_congr_weights
     · rfl
     all_goals simp [Tuning.weight_pos]
-  · simp only [dif_neg h]
+  · simp only [dite_eq_right h]
     apply SPMF.support_frequency_congr_weights
     · rfl
     all_goals simp [Tuning.weight_pos]
@@ -387,16 +256,16 @@ theorem genCmd_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIde
 /-- At every `θ`, the tuned command *chain* is `genCmds`, for any chain length. Proved by induction on
     the length. -/
 theorem genCmdsT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (depth : Nat) :
+    (immutableVars : List (Identifier Unit)) (depth : Nat) (avoid : List String)
+    (kt : Lambda.KnownTypes) :
     ∀ (n : Nat) (ctx : VarCtx),
-      SPMF.support (genCmdsT (G := SPMF) θ octx tvars immutableVars ctx depth n)
-        = SPMF.support (genCmds (G := SPMF) octx tvars immutableVars ctx depth n) := by
+      SPMF.support (genCmdsT (G := SPMF) θ octx tvars immutableVars ctx depth n avoid kt)
+        = SPMF.support (genCmds (G := SPMF) octx tvars immutableVars ctx depth n avoid kt) := by
   intro n
   induction n with
   | zero => intro ctx; rfl
   | succ n ih =>
     intro ctx
-    simp only [genCmdsT, genCmds]
     exact SPMF.support_bind_congr (genCmd_tuned_support_eq ..)
       (fun _ => SPMF.support_bind_congr (ih _) (fun _ => rfl))
 
@@ -439,9 +308,9 @@ theorem genLMonoTy_tuned_support_eq (θ : Tuning) (tvars : List TyIdentifier) :
         SPMF.support (do let τ ← genLMonoTy.tuned (G := SPMF) θ tvars k; pure (f τ))
           = SPMF.support (do let τ ← genLMonoTy (G := SPMF) tvars k; pure (f τ)) :=
       fun _ => SPMF.support_bind_congr ih (fun _ => rfl)
-    -- Split the `dite` with a congruence rather than with `dif_pos`/`dif_neg`: rewriting the
-    -- condition away would rewrite it inside the recursive occurrences too, and those have to stay
-    -- definitionally `genLMonoTy.tuned θ tvars k` for `ih` to apply.
+    -- Split the `dite` with a congruence rather than with `dite_eq_left`/`dite_eq_right`:
+    -- rewriting the condition away would rewrite it inside the recursive occurrences too, and those
+    -- have to stay definitionally `genLMonoTy.tuned θ tvars k` for `ih` to apply.
     refine SPMF.support_dite_congr (fun h => ?_) (fun h => ?_)
     · apply SPMF.support_frequency_congr_branches
       · simp [Tuning.weight_pos]
@@ -508,16 +377,16 @@ that, `split` picks a `dite` from inside an arm instead of the match, and `split
 
 Three moves get around it.
 
-1. **Keep the two sides in step.** Generalise the depth back to a variable before splitting — the
-   `hgen` of each branch below — so `split` fires on the shipping side at a *variable* discriminant and
-   substitutes the depth and `τ` into the tuned side as well. Both then reduce together.
+1. **Keep the two sides in step.** Case-split with `genLExprBase.induct`, whose motive takes the
+   depth and the target type as variables. Each case then fixes both sides to the same arm, so they
+   reduce together.
 2. **One lemma per arm.** At a constructor pattern the tuned side whnfs to its `frequency`, so
    `apply SPMF.support_frequency_congr_branches` unifies straight through the matcher. That whnf is the
    dominant cost of an arm, and a heartbeat budget is per declaration, so each of the 21 arms is its own
    lemma with its own budget rather than all of them sharing one.
-3. **The catch-alls by matcher equation.** `genLExprBase.match_1.eq_21` and `.eq_22` take exactly the
-   ten negative facts about `τ` that `split` hands over, and rewrite the matcher — the over-applied one
-   included — to the catch-all arm. They are generated on demand and resolve by name.
+3. **The catch-alls by the ten negative facts.** The catch-all cases of `genLExprBase.induct` supply
+   ten facts that `τ` is none of the other shapes. With those in context, `simp only` reduces the
+   matcher, the over-applied one included, to the catch-all arm.
 
 Nothing here needs a `θ` to be well-behaved. `Tuning.weight` is `max a 1 + d * b`, so
 `Tuning.weight_pos` holds for every `θ`, index and depth, and a schedule entry of `(0, 0)` reads as
@@ -885,9 +754,10 @@ private theorem arm_seq_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx
         (fun _ => support_genIndir_congr _ _ (fun σ' => ih _ σ') _) (fun _ => ih _ _)
     case indirPoly =>
       exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
-/-- The successor catch-all: a target type the generator has no rule for. The matcher cannot reduce at
-    an opaque `τ`, so `genLExprBase.match_1.eq_22` does it instead, consuming the ten negative facts
-    that `split` provides. -/
+
+/-- The successor catch-all: a target type the generator has no rule for. The matcher does not
+    reduce at an opaque `τ` by itself, so `simp only` uses the ten negative facts about `τ` to
+    select the catch-all arm. -/
 private theorem arm_other_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (k : Nat) (τ : LMonoTy)
     (hArrow : ∀ τ₁ τ₂, τ = LMonoTy.tcons "arrow" [τ₁, τ₂] → False)
@@ -906,9 +776,9 @@ private theorem arm_other_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
   unfold genLExprBase.tuned
   dsimp only
   rw [genLExprBase.eq_def]
-  simp only [genLExprBase.match_1.eq_22]
-  -- This arm reaches the `frequency` through `genLExprBase.match_1.eq_22`, which leaves both weight
-  -- sums already determined, so `refine` solves them by unification and only three goals remain.
+  simp only
+  -- Reducing the matcher leaves both weight sums already determined, so `refine` solves them by
+  -- unification and only three goals remain.
   refine SPMF.support_frequency_congr_branches ?pos ?pos' ?rel _ _
   case pos => intro _ hmem; fin_cases hmem <;> simp [Tuning.weight_pos]
   case pos' => intro _ hmem; fin_cases hmem <;> simp
@@ -923,7 +793,7 @@ private theorem arm_other_succ (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
     case indirPoly =>
       exact support_genIndirPolyCore_congr _ _ _ _ _ (fun σ' => ih _ σ') (ih _ _) 3
 
-/-- The depth-0 catch-all. Same shape as `arm_other_succ`, with `eq_21`; at depth 0 the two `oneOf`s
+/-- The depth-0 catch-all. Same shape as `arm_other_succ`; at depth 0 the two `oneOf`s
     carry no weight, so the branches agree by reflexivity. -/
 private theorem arm_other_zero (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (τ : LMonoTy)
@@ -948,49 +818,53 @@ private theorem arm_other_zero (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pc
   try dsimp only [Nat.brecOn, Nat.brecOn.go]
   try dsimp only
   rw [genLExprBase.eq_def]
-  simp only [genLExprBase.match_1.eq_21]
+  simp only
+
 /-- Depth 0, every target type. No arm carries a weight at depth 0 — each is a uniform `oneOf` — so the
     tuned generator and the shipping one are the *same* generator there, and every arm closes by
-    reflexivity. The case analysis goes through the matcher's own splitter rather than `split`, so the
-    shipping side is never reduced and each arm's goal keeps the shape the lemmas are stated in. -/
+    reflexivity. The case analysis uses `genLExprBase.induct` rather than `split`, so the shipping
+    side is never reduced and each arm's goal keeps the shape the lemmas are stated in. -/
 private theorem arm_zero_all (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (τ : LMonoTy) :
     (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx 0 τ).support
       = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx 0 τ).support := by
-  refine genLExprBase.match_1.splitter
-    (motive := fun m t => m = 0 →
-      (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx m t).support
-        = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx m t).support)
-    0 τ
-      (fun τ₁ τ₂ _ => rfl)
-      (fun _ _ _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun nm _ => rfl)
-      (fun _ _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun w _ => rfl)
-      (fun _ _ h => absurd h (by omega))
-      (fun _ _ => rfl)
-      (fun _ h => absurd h (by omega))
-      (fun τ₁ τ₂ _ => rfl)
-      (fun _ _ _ h => absurd h (by omega))
-      (fun σ _ => rfl)
-      (fun _ _ h => absurd h (by omega))
-      (fun t hA hB hC hD hE hF hG hH hI hJ _ => arm_other_zero θ fctx octx pctx tvars bctx t hA hB hC hD hE hF hG hH hI hJ)
-      (fun _ _ _ _ _ _ _ _ _ _ _ _ h => absurd h (by omega))
-    rfl
+  refine genLExprBase.induct
+    (motive := fun b m t => m = 0 →
+      (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars b m t).support
+        = (genLExprBase (G := SPMF) fctx octx pctx tvars b m t).support)
+    ?arrowZ ?arrowS ?boolZ ?boolS ?intZ ?intS ?ftvarZ ?ftvarS ?stringZ ?stringS ?realZ ?realS
+    ?bitvecZ ?bitvecS ?regexZ ?regexS ?mapZ ?mapS ?seqZ ?seqS ?otherZ ?otherS bctx 0 τ rfl
+  case arrowZ => intro _ _ _ _; rfl
+  case arrowS => intro _ _ _ _ _ _ _ h; omega
+  case boolZ => intro _ _; rfl
+  case boolS => intro _ _ _ _ h; omega
+  case intZ => intro _ _; rfl
+  case intS => intro _ _ _ _ h; omega
+  case ftvarZ => intro _ _ _; rfl
+  case ftvarS => intro _ _ _ _ _ h; omega
+  case stringZ => intro _ _; rfl
+  case stringS => intro _ _ _ _ h; omega
+  case realZ => intro _ _; rfl
+  case realS => intro _ _ _ _ h; omega
+  case bitvecZ => intro _ _ _; rfl
+  case bitvecS => intro _ _ _ _ _ h; omega
+  case regexZ => intro _ _; rfl
+  case regexS => intro _ _ _ _ h; omega
+  case mapZ => intro _ _ _ _; rfl
+  case mapS => intro _ _ _ _ _ _ h; omega
+  case seqZ => intro _ _ _; rfl
+  case seqS => intro _ _ _ _ _ h; omega
+  case otherZ =>
+    intro b t hArrow hBool hInt hFtvar hString hReal hBitvec hRegex hMap hSeq _
+    exact arm_other_zero θ fctx octx pctx tvars b t hArrow hBool hInt hFtvar hString hReal hBitvec
+      hRegex hMap hSeq
+  case otherS => intro _ _ _ _ _ _ _ _ _ _ _ _ _ h; omega
 
 /-- **At every `θ`, the tuned base expression generator has the support `genLExprBase` has.** Eleven
     sites, 84 branch weights, and a match on the target type as well as on the depth. The section note
     above explains the three moves; this theorem is only the dispatch, one line per arm.
 
-    The motive carries `m = k + 1` so that the splitter's depth-0 arms are discharged by `omega` rather
+    The motive carries `m = k + 1` so that the depth-0 cases are discharged by `omega` rather
     than proved twice; `arm_zero_all` handles depth 0 on its own. -/
 theorem genLExprBase_tuned_support_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpCtx)
     (pctx : PolyOpCtx) (tvars : List TyIdentifier) :
@@ -1002,34 +876,67 @@ theorem genLExprBase_tuned_support_eq (θ : Tuning) (fctx : FVarCtx) (octx : OpC
   | zero => intro bctx τ; exact arm_zero_all θ fctx octx pctx tvars bctx τ
   | succ k ih =>
     intro bctx τ
-    refine genLExprBase.match_1.splitter
-      (motive := fun m t => m = k + 1 →
-        (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars bctx m t).support
-          = (genLExprBase (G := SPMF) fctx octx pctx tvars bctx m t).support)
-      (k + 1) τ
-      (fun _ _ h => absurd h (by omega))
-      (fun j τ₁ τ₂ h => by cases Nat.succ.inj h; exact arm_arrow_succ θ fctx octx pctx tvars bctx _ τ₁ τ₂ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_bool_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_int_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j nm h => by cases Nat.succ.inj h; exact arm_ftvar_succ θ fctx octx pctx tvars bctx _ nm ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_string_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_real_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j w h => by cases Nat.succ.inj h; exact arm_bitvec_succ θ fctx octx pctx tvars bctx _ w ih)
-      (fun _ h => absurd h (by omega))
-      (fun j h => by cases Nat.succ.inj h; exact arm_regex_succ θ fctx octx pctx tvars bctx _ ih)
-      (fun _ _ h => absurd h (by omega))
-      (fun j τ₁ τ₂ h => by cases Nat.succ.inj h; exact arm_map_succ θ fctx octx pctx tvars bctx _ τ₁ τ₂ ih)
-      (fun _ h => absurd h (by omega))
-      (fun j σ h => by cases Nat.succ.inj h; exact arm_seq_succ θ fctx octx pctx tvars bctx _ σ ih)
-      (fun _ _ _ _ _ _ _ _ _ _ _ h => absurd h (by omega))
-      (fun _ t hA hB hC hD hE hF hG hH hI hJ h => by cases Nat.succ.inj h; exact arm_other_succ θ fctx octx pctx tvars bctx _ t hA hB hC hD hE hF hG hH hI hJ ih)
-      rfl
+    refine genLExprBase.induct
+      (motive := fun b m t => m = k + 1 →
+        (genLExprBase.tuned (G := SPMF) θ fctx octx pctx tvars b m t).support
+          = (genLExprBase (G := SPMF) fctx octx pctx tvars b m t).support)
+      ?arrowZ ?arrowS ?boolZ ?boolS ?intZ ?intS ?ftvarZ ?ftvarS ?stringZ ?stringS ?realZ ?realS
+      ?bitvecZ ?bitvecS ?regexZ ?regexS ?mapZ ?mapS ?seqZ ?seqS ?otherZ ?otherS bctx (k + 1) τ rfl
+    case arrowZ => intro _ _ _ h; omega
+    case arrowS =>
+      intro b j τ₁ τ₂ _ _ _ h
+      cases Nat.succ.inj h
+      exact arm_arrow_succ θ fctx octx pctx tvars b _ τ₁ τ₂ ih
+    case boolZ => intro _ h; omega
+    case boolS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_bool_succ θ fctx octx pctx tvars b _ ih
+    case intZ => intro _ h; omega
+    case intS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_int_succ θ fctx octx pctx tvars b _ ih
+    case ftvarZ => intro _ _ h; omega
+    case ftvarS =>
+      intro b j nm _ _ h
+      cases Nat.succ.inj h
+      exact arm_ftvar_succ θ fctx octx pctx tvars b _ nm ih
+    case stringZ => intro _ h; omega
+    case stringS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_string_succ θ fctx octx pctx tvars b _ ih
+    case realZ => intro _ h; omega
+    case realS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_real_succ θ fctx octx pctx tvars b _ ih
+    case bitvecZ => intro _ _ h; omega
+    case bitvecS =>
+      intro b j w _ _ h
+      cases Nat.succ.inj h
+      exact arm_bitvec_succ θ fctx octx pctx tvars b _ w ih
+    case regexZ => intro _ h; omega
+    case regexS =>
+      intro b j _ _ h
+      cases Nat.succ.inj h
+      exact arm_regex_succ θ fctx octx pctx tvars b _ ih
+    case mapZ => intro _ _ _ h; omega
+    case mapS =>
+      intro b j τ₁ τ₂ _ _ h
+      cases Nat.succ.inj h
+      exact arm_map_succ θ fctx octx pctx tvars b _ τ₁ τ₂ ih
+    case seqZ => intro _ _ h; omega
+    case seqS =>
+      intro b j σ _ _ h
+      cases Nat.succ.inj h
+      exact arm_seq_succ θ fctx octx pctx tvars b _ σ ih
+    case otherZ => intro _ _ _ _ _ _ _ _ _ _ _ h; omega
+    case otherS =>
+      intro b j t hA hB hC hD hE hF hG hH hI hJ _ h
+      cases Nat.succ.inj h
+      exact arm_other_succ θ fctx octx pctx tvars b _ t hA hB hC hD hE hF hG hH hI hJ ih
 
 /-- The payoff, stated once. Any soundness and completeness fact about the shipping expression
     generator holds of every tuning of it, and the proof never mentions the predicate. -/

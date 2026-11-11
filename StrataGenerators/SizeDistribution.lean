@@ -92,11 +92,11 @@ records what each factor pays for. -/
 mass that is proved. -/
 noncomputable def nameMass : ℝ≥0∞ := 1 / 2
 
-/-- One declaration kind's weight share in `genDeclStep`. -/
-noncomputable def stepShare : ℝ≥0∞ := 1 / 14
+/-- One declaration kind's weight share in `genDeclStep`: weight `1` of the total `15`. -/
+noncomputable def stepShare : ℝ≥0∞ := 1 / 15
 
 /-- A lower bound on the mass of one declaration step, through the abstract-type kind. -/
-noncomputable def stepMass : ℝ≥0∞ := 1 / 28
+noncomputable def stepMass : ℝ≥0∞ := 1 / 30
 
 theorem prob_frequency_ge {α} (gs : List (Nat × (Unit → SPMF α))) (h : 0 < (gs.map Prod.fst).sum)
     (i : Nat) (hi : i < gs.length) (E : Set α) :
@@ -113,23 +113,6 @@ theorem prob_oneOf_ge {α} (gs : List (Unit → SPMF α)) (h : gs ≠ [])
   rw [prob_oneOf, ← ENNReal.mul_div_right_comm, one_mul]
   refine ENNReal.div_le_div_right ?_ _
   exact List.le_sum_of_mem (List.mem_map.mpr ⟨gs[i], List.getElem_mem hi, rfl⟩)
-
-theorem prob_bind_ge {α β} {x : SPMF α} {f : α → SPMF β} {E : Set β} (F : Set α) {d : ℝ≥0∞}
-    (hd : ∀ a ∈ F, d ≤ prob (f a) E) : prob x F * d ≤ prob (x >>= f) E := by
-  rw [prob_bind, mul_comm, prob, ← expect_mul_left]
-  refine expect_mono fun a => ?_
-  by_cases ha : a ∈ F
-  · simpa [Set.indicator, ha] using hd a ha
-  · simp [Set.indicator, ha]
-
-theorem prob_pure_of_mem {α} {a : α} {E : Set α} (h : a ∈ E) :
-    prob (Pure.pure a : SPMF α) E = 1 := by
-  classical
-  rw [prob_pure]; simp [h]
-
-theorem prob_univ {α} (p : SPMF α) : prob p Set.univ = p.mass := by
-  rw [← expect_one]; unfold prob; congr 1; funext a; simp
-
 
 theorem sum_zipWith_le {α} {E : Set α} {lbs : List ℝ≥0∞} {gs : List (Nat × (Unit → SPMF α))}
     (h : List.Forall₂ (fun lb g => lb ≤ prob (g.2 ()) E) lbs gs) :
@@ -882,7 +865,7 @@ theorem prob_height_ge (n : Nat) (bctx : BVarCtx) :
   induction n with
   | zero =>
     have h := mass_bool_ge fctx octx pctx tvars 0 bctx
-    simpa [Set.setOf_true] using h
+    simpa [Set.ofPred_true, LMonoTy.bool] using h
   | succ n ih =>
     have hm := mass_bool_ge fctx octx pctx tvars n bctx
     refine le_trans ?_ (le_trans (bool_ite_ge fctx octx pctx tvars n bctx
@@ -894,7 +877,7 @@ theorem prob_height_ge (n : Nat) (bctx : BVarCtx) :
       rw [hq] at ih
       gcongr <;> exact hm
     · rintro _ ⟨c, t, f, rfl, hc, -, -⟩
-      simp only [Set.mem_setOf_eq, height] at hc ⊢
+      simp only [Set.mem_ofPred_eq, height] at hc ⊢
       omega
 
 /-- **The height distribution's top atom, closed form.** Without a factory of positive arity,
@@ -908,7 +891,7 @@ theorem prob_height_eq (hops : ∀ σ, findOpsInCtx octx σ = []) (n : Nat) (bct
       ∧ 0 < heightAtSize n :=
   ⟨le_trans (prob_height_ge fctx octx [] tvars n bctx) (prob_mono_support fun e he h => by
     have := height_le fctx octx tvars hops n bctx _ e he
-    simp only [Set.mem_setOf_eq] at h ⊢; omega), heightAtSize_pos n⟩
+    simp only [Set.mem_ofPred_eq] at h ⊢; omega), heightAtSize_pos n⟩
 
 -- ── Headline bounds in terms of the weights ─────────────────────────
 
@@ -1002,14 +985,14 @@ theorem prob_height_ge_tuned (θ : Tuning) (n : Nat) (bctx : BVarCtx) :
   induction n with
   | zero =>
     have h := massT_bool_ge fctx octx pctx tvars θ 0 bctx
-    simpa [Set.setOf_true, heightT, massT] using h
+    simpa [Set.ofPred_true, LMonoTy.bool, heightT, massT] using h
   | succ n ih =>
     have hm := massT_bool_ge fctx octx pctx tvars θ n bctx
     refine le_trans ?_ (le_trans (boolT_ite_ge fctx octx pctx tvars θ n bctx
       {x | n ≤ height x} Set.univ Set.univ) (prob_mono ?_))
     · simp only [heightT]; gcongr <;> exact hm
     · rintro _ ⟨c, t, f, rfl, hc, -, -⟩
-      simp only [Set.mem_setOf_eq, height] at hc ⊢
+      simp only [Set.mem_ofPred_eq, height] at hc ⊢
       omega
 
 theorem heightT_pos (θ : Tuning) : ∀ n, 0 < heightT θ n

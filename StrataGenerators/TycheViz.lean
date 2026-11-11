@@ -99,7 +99,7 @@ def exprKind : LExpr' → String
   | .const _ (.boolConst _) => "boolConst"
   | .const _ (.intConst _) => "intConst"
   | .const _ (.strConst _) => "strConst"
-  | .const _ (.realConst _) => "realConst"
+  | .const _ (.rationalConst _) => "realConst"
   | .const _ (.bitvecConst _ _) => "bitvecConst"
   | .quant _ _ _ _ _ _ => "quant"
 
@@ -336,8 +336,9 @@ private def genCmdFromRandomCtx (depth : Nat := 0) : IO (Cmd Expression × VarCt
   let d ← if depth == 0 then randomDepth else pure depth
   let tvars : List TyIdentifier := []
   let numCmds ← IO.rand 0 8
-  let (_, baseCtx) ← genCmds (G := IO) coreMonoOps tvars [] [] d numCmds
-  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] baseCtx d
+  let avoid := StrataGenerators.Stmt.functionNames cmdSeqCheckContext
+  let (_, baseCtx) ← genCmds (G := IO) coreMonoOps tvars [] [] d numCmds avoid
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] baseCtx d [] avoid
   return (cmd, baseCtx, ctx', d)
 
 -- ── The four command properties that give one verdict ────────────────
@@ -490,12 +491,11 @@ def genAndCheckFunctionTypeCheckSound (depth : Nat := 0) : IO FunctionTypeCheckS
 
 -- ── The completeness of the typechecker ──────────────────────────────
 --
--- This panel is the dual of the panel for soundness above. `genFunction` has a proof of soundness, so
--- `Function.typeCheck` must accept each generated function. It does not accept each one: the
--- specification permits a measure with no body, and the algorithm rejects such a function. Therefore a
--- function that the typechecker rejects counts as a counterexample here, and the feature
--- `measure_no_body` shows the cause. The panel uses the predicates over the full Core factory from the
--- shared module for a statement, so no operator fails to resolve for a false reason. The representation
+-- This panel is the dual of the panel for soundness above. `Function.typeCheck` must accept each
+-- generated function, except one it may reject by `checkerRejectionExpected`; any other rejection
+-- counts as a counterexample here (`checkFunctionTypeCheckerComplete`). The panel uses the
+-- predicates over the full Core factory from the shared module for a statement, so no operator
+-- fails to resolve for a false reason. The representation
 -- names the body and the measure, because the printer omits an absent body and an absent measure.
 open StrataGenerators.Stmt.TestSupport in
 structure FunctionTypeCheckCompleteResult where
@@ -506,15 +506,13 @@ structure FunctionTypeCheckCompleteResult where
 open StrataGenerators.Stmt.TestSupport in
 instance : Tyche.TycheSample FunctionTypeCheckCompleteResult where
   toSample r :=
-    -- A sample satisfies the property when the typechecker accepts the function, which the
-    -- specification already accepts. A rejection is a counterexample, and it is a true gap in
-    -- completeness.
+    -- A sample satisfies the property when the typechecker accepts the function or rejects it
+    -- for an expected reason.
     let measNoBody := funcMeasureWithoutBody r.func
     { representation := s!"[body={r.func.body.isSome}, measure={r.func.measure.isSome}]\n{formatFunc r.func}"
       status := if r.accepted then .passed else .failed
       features := [
-        ("typecheck_accepted", .nominal (if r.accepted then "yes" else "no")),
-        -- The known gap: the typechecker rejects a function that has a measure and no body.
+        ("typecheck_accepted", .nominal (if checkFunctionTypeChecks r.func then "yes" else "no")),
         ("measure_no_body", .nominal (if measNoBody then "yes" else "no")),
         ("func_shape", .nominal (funcShape r.func)),
         ("has_body", .nominal (if r.func.body.isSome then "yes" else "no")),
@@ -526,8 +524,8 @@ instance : Tyche.TycheSample FunctionTypeCheckCompleteResult where
       ] }
 
 open StrataGenerators.Stmt.TestSupport in
-/-- Generate a closed function, and record whether `Function.typeCheck` accepts it in the full context of
-    Strata Core. -/
+/-- Generate a closed function, and record whether `checkFunctionTypeCheckerComplete` holds for
+    it. -/
 def genAndCheckFunctionTypeCheckComplete (depth : Nat := 0) : IO FunctionTypeCheckCompleteResult := do
   let d ← if depth == 0 then randomDepth else pure depth
   let func ← genFunctionIO [] coreMonoOps d
@@ -730,20 +728,14 @@ private def stmtListFeatures (ss : List Statement) (genSize : Nat) :
     ("ast_size", .ordinal (sizeStmts ss)),
     ("num_loops", .ordinal (countLoopsStmts ss)),
     ("num_exits", .ordinal (countExitStmts ss)),
-    ("num_funcDecls", .ordinal (countFuncDeclStmts ss)),
     ("num_typeDecls", .ordinal (countTypeDeclStmts ss)),
-    ("has_funcDecl", .nominal (if stmtsHaveFuncDecl ss then "yes" else "no")),
     ("top_kind", .nominal (match ss with | s :: _ => stmtKind s | [] => "empty")),
     ("generator_size", .ordinal genSize) ]
 
 /-- Render a statement list for a Tyche panel with the formatter of Strata, which gives real Core concrete
-    syntax. The function appends a summary of the form `funcDecl[body=…, measure=…]`, because the formatter
-    cannot write a `funcDecl` statement with no body, and it puts a dummy body there instead. That shape is
-    exactly the counterexample to completeness. -/
+    syntax. -/
 def stmtRepr (ss : List Statement) : String :=
-  let shapes := funcDeclShapesList ss
-  let suffix := if shapes.isEmpty then "" else s!"\n-- {" ".intercalate shapes}"
-  formatStmts ss ++ suffix
+  formatStmts ss
 
 /-- Generate one well-typed statement list at `IO`, for the Tyche panels. The function draws the nesting and the
     length from one size, as `TestScaffold.genStmtsG` does, so the panel shows the shapes that the property
@@ -928,16 +920,16 @@ def procFactoryStrippedDiagnostic (ps : List Core.Procedure) : String :=
 -- derived `program:` panel. The copy here supports the panel for the printer below, whose verdict is an
 -- `IO` computation and which no code can therefore derive.
 --
--- For the panel about the acceptance of a program by the typechecker, the typechecker rejects a large part
--- of the draws, for one of three known causes. The feature `rejection_cause` below separates those three
--- causes, so the panel does not show one undifferentiated block. The shrinker cannot minimize such a
--- rejection, because its oracle is the checker under test. Therefore the feature `num_decls` of a rejected
--- sample gives the size of the draw, and not a smaller size.
+-- For the panel about the acceptance of a program by the typechecker, the feature `rejection_cause`
+-- below gives the expected cause of a rejection, if any (`expectedRejectionCauses`), so the panel
+-- does not show one undifferentiated block. The shrinker cannot minimize such a rejection, because
+-- its oracle is the checker under test. Therefore the feature `num_decls` of a rejected sample
+-- gives the size of the draw, and not a smaller size.
 
 open StrataGenerators.Program.TestSupport in
 /-- The structural features of a generated program. They are the number of the declarations, the reducible
-    size, the kinds of the declarations that the program holds, and the known gap that the program holds,
-    if it holds one. That last feature separates the samples of the panel for completeness. -/
+    size, the kinds of the declarations that the program holds, and the expected causes of a checker
+    rejection. That last feature separates the samples of the panel for completeness. -/
 private def programFeatures (p : Core.Program) (genSize : Nat) :
     List (String × Tyche.Feature) :=
   let kind : Core.Decl → String
@@ -945,11 +937,12 @@ private def programFeatures (p : Core.Program) (genSize : Nat) :
     | .type (.syn _) _ => "type.syn"
     | .type (.data _) _ => "type.data"
     | .ax _ _ => "axiom"
+    | .lemma _ _ => "lemma"
     | .distinct _ _ _ => "distinct"
     | .proc _ _ => "proc"
     | .func _ _ => "func"
     | .recFuncBlock _ _ => "recFuncBlock"
-  let causes := programRejectionCause p
+  let causes := expectedRejectionCauses p
   [ ("num_decls", .ordinal p.decls.length),
     ("program_size", .ordinal (sizeProgram p)),
     ("decl_kinds", .nominal (" ".intercalate (p.decls.map kind).eraseDups)),

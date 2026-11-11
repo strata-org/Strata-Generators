@@ -3,16 +3,19 @@ import StrataGenerators.ProcedureHasTypeAGen.Support
 import StrataGenerators.ProcedureHasTypeAGen.MutableVars
 import StrataGenerators.CmdHasTypeAGenSound
 import Strata.Languages.Core.ProcedureTypeSpec
+import Strata.Languages.Core.Typing.Spec.TypingSpec
+import Strata.Languages.Core.Typing.Props.TypingSpecProps
 
 open Lambda LExpr RandomChoice Core Imperative TypeSpec
 open StrataGenerators.Stmt StrataGenerators.Function
+open StrataGenerators.AnnotFacts (genLExpr_exprWellTyped)
 
 /-!
 # Soundness and completeness of `genProcedure`
 
 `genProcedure` (in `ProcedureHasTypeAGen/Core.lean`) generates well-typed Strata
 Core procedures. This file proves it **sound** and **complete** with respect to
-the `ProcHasTypeA` typing relation of `Strata.Languages.Core.ProcedureTypeSpec`.
+the `ProcHasTypeA` typing relation of `Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec`.
 
 The proof is *compositional*: it reuses `genInputs_support`/`genInputs_complete`
 for the output signature, exactly as the generator of a function uses them for its inputs. It also uses
@@ -22,13 +25,10 @@ completeness proof takes that membership as a hypothesis, and `spec_complete` ca
 
 ## The context-alignment lemma
 
-The one genuinely procedure-specific fact is `procBodyContext_default`: with
-empty inputs, empty type-arguments, and no in-out parameters, the declarative
-body context `procBodyContext Γ proc` (a single new scope binding inputs ++
-outputs and the old bindings, becomes `procToTCtx proc.header.outputs`. That is exactly the context that
-`genStmtChain_sound` gives when it starts from the output parameters. That fact is what makes the
-`StatementsHasTypeA` of the generated body agree *definitionally* with the
-`ProcBodyHasType'.structured` obligation.
+The one procedure-specific fact is `procBodyScopes_inout`: the body scopes of a generated
+procedure (one new scope binding the inputs, the outputs and the `old` bindings of the in-out
+block) agree on every lookup with the single scope the body generator starts from. That lets the
+typing of the generated body discharge the procedure rule's body obligation.
 -/
 
 namespace StrataGenerators.Procedure
@@ -40,51 +40,42 @@ variable {maxStmtSeqLen : Nat}
     is needed to move between the statement generator (which threads `Map.keys`)
     and the procedure typing spec (which uses `proc.header.outputs.keys`, i.e.
     `ListMap.keys`). -/
-theorem Map_keys_eq_ListMap_keys {α β} (m : List (α × β)) :
+theorem Map_keys_eq_ListMap_keys {α β} (m : ListMap α β) :
     Map.keys m = ListMap.keys m := by
   induction m with
   | nil => rfl
-  | cons p m ih => obtain ⟨a, b⟩ := p; simp only [Map.keys, ListMap.keys, ih]
+  | cons p m ih => obtain ⟨a, b⟩ := p; exact congrArg (a :: ·) ih
 
-/-- `ListMap.keys` distributes over the append of two `ListMap` values, and that append is `List.append`. The
-    `++` of a `ListMap` is not *syntactically* `List.append`, so `List.map_append` does not apply directly. The
-    proof therefore goes through the bridge lemma about `Map.keys`. -/
+/-- `ListMap.keys` distributes over the append of two `ListMap` values. -/
 theorem ListMap_keys_append (a b : ListMap (Identifier Unit) LMonoTy) :
     ListMap.keys (a ++ b) = ListMap.keys a ++ ListMap.keys b := by
-  rw [← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys, ← Map_keys_eq_ListMap_keys]
-  exact Map.keys_append a b
+  induction a with
+  | nil => rfl
+  | cons p a ih => obtain ⟨k, v⟩ := p; exact congrArg (k :: ·) ih
 
 /-- `Map.values` and `ListMap.values` are the same traversal of the same list. -/
-theorem Map_values_eq_ListMap_values {α β} (m : List (α × β)) :
+theorem Map_values_eq_ListMap_values {α β} (m : ListMap α β) :
     Map.values m = ListMap.values m := by
   induction m with
   | nil => rfl
-  | cons p m ih => obtain ⟨a, b⟩ := p; simp only [Map.values, ListMap.values, ih]
-
-/-- `ListMap.values` distributes over the `ListMap` append. -/
-theorem ListMap_values_append (a b : ListMap (Identifier Unit) LMonoTy) :
-    (a ++ b).values = a.values ++ b.values := by
-  show ListMap.values (List.append a b) = _
-  rw [ListMap.values_eq_map_snd, ListMap.values_eq_map_snd, ListMap.values_eq_map_snd]
-  simp [List.map_append]
+  | cons p m ih => obtain ⟨a, b⟩ := p; exact congrArg (b :: ·) ih
 
 /-- **In-out parameters.** For the three-block layout `inputs = M ++ I`,
     `outputs = M ++ O` (the shared block `M` leading both) with the three blocks
     mutually disjoint, the in-out parameters (`getInoutParams`, i.e. the inputs
     whose key is also an output key) are exactly the shared block `M`: every
     `M`-entry's key is an output key (`hM`), every `I`-entry's is not (`hI`). -/
-theorem getInoutParams_inout (name : String) (tyArgs : List TyIdentifier)
+theorem getInoutParams_inout (name : String) (tyArgs : List TyIdentifier) {lemmas : List String}
     (M I O : List ((Identifier Unit) × LMonoTy))
     (hI : ∀ p ∈ I, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = false)
     (hM : ∀ p ∈ M, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = true) :
     ({ name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I, outputs := M ++ O,
-       noFilter := false } : Procedure.Header).getInoutParams = M := by
+       lemmas := lemmas } : Procedure.Header).getInoutParams = M := by
   simp only [Procedure.Header.getInoutParams]
   show List.filter _ (M ++ I) = M
-  rw [List.filter_append, List.filter_eq_self.mpr hM,
-      -- `getInoutParams`' predicate is a pattern-matching lambda, so `rw` has no `p.fst` to
-      -- key on; `exact` closes the goal up to the structure eta that reduces the match.
-      List.filter_eq_nil_iff.mpr (by intro p hp; simp only [Bool.not_eq_true]; exact hI p hp)]
+  have hInil : List.filter (fun p => (ListMap.keys (M ++ O)).contains p.1) I = [] :=
+    List.filter_eq_nil_iff.mpr (fun p hp hpt => Bool.false_ne_true ((hI p hp).symm.trans hpt))
+  rw [List.filter_append, List.filter_eq_self.mpr hM, hInil]
   simp
 
 /-- Rotating a three-way append is a permutation. (Lean core has `perm_append_comm` for
@@ -145,44 +136,37 @@ theorem find?_ofList_perm_of_functional {α β} [BEq α] [LawfulBEq α] [Hashabl
       hmem1 w (List.mem_reverse.mp (Freshening.lookup_mem _ _ _ hw))
     exact congrArg some (hfun k v1 w hv1 hvw)
 
-/-- **Context alignment (in-out), Γ-parameterized.** For the three-block layout (shared
-    block `M` leading both signatures) over an ambient type-scope `Γ` with `Γ.types = []`,
-    the declarative body context `procBodyContext Γ proc` agrees with the single-scope
-    `procToTCtxΓ Γ (inputs ++ outputs ++ oldVars M)`.
+/-- Mapping over an appended `ListMap` maps each part. -/
+theorem listMap_map_append {α β γ : Type} (f : α × β → γ) (l₁ l₂ : ListMap α β) :
+    List.map f (l₁ ++ l₂) = List.map f l₁ ++ List.map f l₂ :=
+  List.map_append
 
-    Agreement is `TContext.Equiv`, not equality: `procBodyContext` builds its scope as
-    `HMap.ofList (old ++ outputs ++ inputs)`, and `procToTCtxΓ` builds
-    `HMap.ofList ((inputs ++ outputs ++ old).reverse)`. Those hold the same bindings in a different order.
-    Therefore a *lookup* in one gives the same value as a lookup in the other, because the seed is functional,
-    and the two hash-map values differ. The hypothesis `hfun` gives that functionality, and `seed_functional`
-    gives it at a call site. -/
-theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
-    (name : String) (tyArgs : List TyIdentifier)
+/-- **Context alignment (in-out).** Take a procedure whose inputs are `M ++ I` and whose outputs
+    are `M ++ O`, where the keys of `M` are output keys and no key of `I` is, so that `M` is its
+    in-out block. Over an empty ambient stack, its body scopes agree on every lookup with the
+    single scope `procToTCtx` builds from `inputs ++ outputs ++ old M`, when that list binds each
+    key to one type. -/
+theorem procBodyScopes_inout (name : String) (tyArgs : List TyIdentifier) {lemmas : List String}
     (M I O : List ((Identifier Unit) × LMonoTy))
     (hI : ∀ p ∈ I, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = false)
     (hM : ∀ p ∈ M, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = true)
     (hfun : Map.Functional
       (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))))
     (pre post : ListMap CoreLabel Procedure.Check) (body : Procedure.Body) :
-    TContext.Equiv (T := CoreLParams)
-      (procBodyContext Γ
+    Strata.Util.HMaps.Equiv
+      (procBodyScopes []
         { header := { name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I,
-                      outputs := M ++ O, noFilter := false },
+                      outputs := M ++ O, lemmas := lemmas },
           spec := { preconditions := pre, postconditions := post },
           body := body })
-      (procToTCtxΓ Γ (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))) := by
-  -- Write the two scopes out. The specification builds `old ++ outputs ++ inputs`, and the generator builds the
-  -- reverse of `inputs ++ outputs ++ old`. This file uses no set type, so each block appears in full.
+      (procToTCtx
+        (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))).types := by
   have hperm :
       (((M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
           (fun p => (p.1, LTy.forAll [] p.2))).reverse).Perm
-      ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
-            (fun p => (p.1, LTy.forAll [] p.2))
-        ++ (M ++ O).map (fun p => (p.1, LTy.forAll [] p.2))
-        ++ (M ++ I).map (fun p => (p.1, LTy.forAll [] p.2))) := by
-    refine (List.reverse_perm _).trans ?_
-    simp only [List.map_append, List.map_map, Function.comp_def]
-    exact perm_append_rotate _ _ _
+      ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)) ++ (M ++ O) ++ (M ++ I)).map
+          (fun q => (q.1, LTy.forAll [] q.2))) :=
+    (List.reverse_perm _).trans ((perm_append_rotate _ _ _).map _)
   have hfun' : ∀ (k : Identifier Unit) (v1 v2 : LTy),
       (k, v1) ∈ (((M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
           (fun p => (p.1, LTy.forAll [] p.2))).reverse) →
@@ -197,43 +181,18 @@ theorem procBodyContext_inoutΓ (Γ : TContext Unit) (hΓtypes : Γ.types = [])
     obtain ⟨hk2, hv2⟩ := hpe2
     rw [← hv1, ← hv2,
       hfun k p1.2 p2.2 (by rw [← hk1]; exact hp1) (by rw [← hk2]; exact hp2)]
-  refine ⟨?_, rfl⟩
-  rw [show (procBodyContext Γ
+  rw [show procBodyScopes []
         { header := { name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I,
-                      outputs := M ++ O, noFilter := false },
+                      outputs := M ++ O, lemmas := lemmas },
           spec := { preconditions := pre, postconditions := post },
-          body := body }).types
+          body := body }
       = [Strata.Util.HMap.ofList
-          ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
-                (fun p => (p.1, LTy.forAll [] p.2))
-            ++ (M ++ O).map (fun p => (p.1, LTy.forAll [] p.2))
-            ++ (M ++ I).map (fun p => (p.1, LTy.forAll [] p.2)))] from by
-    simp only [procBodyContext, hΓtypes, Strata.Util.HMaps.push,
-      getInoutParams_inout name tyArgs M I O hI hM, List.map_map, Function.comp_def]]
-  rw [show (procToTCtxΓ Γ
-        (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))).types
-      = [Strata.Util.HMap.ofList
-          (((M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))).map
-            (fun p => (p.1, LTy.forAll [] p.2))).reverse)] from rfl]
+          ((M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)) ++ (M ++ O) ++ (M ++ I)).map
+            (fun q => (q.1, LTy.forAll [] q.2)))] from by
+    simp only [procBodyScopes, Strata.Util.HMaps.push, formalsScope,
+      getInoutParams_inout name tyArgs M I O hI hM]
+    rfl]
   exact ⟨fun k => (find?_ofList_perm_of_functional hperm hfun' k).symm, True.intro⟩
-
-/-- **Context alignment (in-out).** The `default`-ambient special case of
-    `procBodyContext_inoutΓ` (`default.types = []`). -/
-theorem procBodyContext_inout (name : String) (tyArgs : List TyIdentifier)
-    (M I O : List ((Identifier Unit) × LMonoTy))
-    (hI : ∀ p ∈ I, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = false)
-    (hM : ∀ p ∈ M, ((ListMap.keys (M ++ O)).contains (Prod.fst p)) = true)
-    (hfun : Map.Functional
-      (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2))))
-    (pre post : ListMap CoreLabel Procedure.Check) (body : Procedure.Body) :
-    TContext.Equiv (T := CoreLParams)
-      (procBodyContext (default)
-        { header := { name := ⟨name, ()⟩, typeArgs := tyArgs, inputs := M ++ I,
-                      outputs := M ++ O, noFilter := false },
-          spec := { preconditions := pre, postconditions := post },
-          body := body })
-      (procToTCtx (M ++ I ++ (M ++ O) ++ M.map (fun p => (CoreIdent.mkOld p.1.name, p.2)))) :=
-  procBodyContext_inoutΓ default rfl name tyArgs M I O hI hM hfun pre post body
 
 -- ── Facts about `disjointInputs` ──────────────────────────────────────────
 
@@ -243,21 +202,19 @@ theorem procBodyContext_inout (name : String) (tyArgs : List TyIdentifier)
     alignment needs (`getInoutParams = []`). -/
 theorem disjointInputs_disjoint (ins outs : ListMap (Identifier Unit) LMonoTy) :
     ((disjointInputs ins outs).filter fun p => (ListMap.keys outs).contains p.1) = [] := by
-  rw [List.filter_eq_nil_iff]
-  intro p hp
-  simp only [disjointInputs, List.mem_filter] at hp
-  simpa only [Bool.not_eq_true', Bool.not_eq_false, Bool.not_eq_true] using hp.2
+  refine List.filter_eq_nil_iff.mpr fun p hp => ?_
+  have hp2 := (List.mem_filter.mp hp).2
+  simpa only [Bool.not_eq_true', Bool.not_eq_false, Bool.not_eq_true] using hp2
 
 /-- A surviving key of `disjointInputs ins outs` is never an output key. -/
 theorem disjointInputs_key_not_output (ins outs : ListMap (Identifier Unit) LMonoTy)
     (k : Identifier Unit) (hk : k ∈ ListMap.keys (disjointInputs ins outs)) :
     k ∉ ListMap.keys outs := by
-  rw [ListMap.keys_eq_map_fst, List.mem_map] at hk
-  obtain ⟨p, hp_mem, rfl⟩ := hk
-  simp only [disjointInputs, List.mem_filter] at hp_mem
-  have := hp_mem.2
-  rw [Bool.not_eq_true', ← Bool.not_eq_true, List.contains_iff_mem] at this
-  exact this
+  rw [ListMap.keys_eq_map_fst (disjointInputs ins outs)] at hk
+  obtain ⟨p, hp_mem, rfl⟩ := List.mem_map.mp hk
+  have hp2 := (List.mem_filter.mp hp_mem).2
+  rw [Bool.not_eq_true', ← Bool.not_eq_true, List.contains_iff_mem] at hp2
+  exact hp2
 
 /-- **Idempotence of `disjointInputs`.** When `X`'s keys are already disjoint from
     `Y`'s, filtering `X` by `Y`-key membership removes nothing: `disjointInputs X Y
@@ -361,16 +318,20 @@ theorem oldVars_values (M : ListMap (Identifier Unit) LMonoTy) :
     rw [show ListMap.values (List.map (fun x => (CoreIdent.mkOld x.fst.name, x.snd)) M)
           = ListMap.values M from ih]
 
+/-- The name `CoreIdent.mkOld s` contains a space. -/
+theorem mkOld_name_space (s : String) : ' ' ∈ (CoreIdent.mkOld s).name.toList := by
+  simp only [CoreIdent.mkOld, CoreIdent.oldStr, String.toList_append]
+  exact List.mem_append_left _ (by decide)
+
 /-- Every key of `oldVars M` contains a space (`CoreIdent.mkOld` prefixes
     `"old "`). This is the fact that keeps `oldVars M` key-disjoint from the
     space-free generated parameter names of `M`/`I`/`O`. -/
 theorem oldVars_key_space (M : ListMap (Identifier Unit) LMonoTy)
     (k : Identifier Unit) (hk : k ∈ Map.keys (oldVars M)) : ' ' ∈ k.name.toList := by
-  simp only [oldVars, Map.keys_eq_map_fst, List.map_map, List.mem_map, Function.comp] at hk
-  obtain ⟨p, _, rfl⟩ := hk
-  -- `p.fst = (fun (id, ty) => (mkOld id.name, ty)) q).fst = mkOld q.1.name`
-  simp only [CoreIdent.mkOld, CoreIdent.oldStr, String.toList_append]
-  exact List.mem_append_left _ (by decide)
+  rw [Map.keys_eq_map_fst (oldVars M)] at hk
+  obtain ⟨q, hq, rfl⟩ := List.mem_map.mp hk
+  obtain ⟨p, _, rfl⟩ := List.mem_map.mp hq
+  exact mkOld_name_space _
 
 /-- The keys of `oldVars M` are `Nodup` whenever `M`'s keys are: `CoreIdent.mkOld`
     composed with `.name` is injective (a `Unit`-tagged identifier is determined by
@@ -378,14 +339,17 @@ theorem oldVars_key_space (M : ListMap (Identifier Unit) LMonoTy)
     key list preserves `Nodup`. -/
 theorem oldVars_keys_nodup (M : ListMap (Identifier Unit) LMonoTy)
     (hM : (Map.keys M).Nodup) : (Map.keys (oldVars M)).Nodup := by
-  rw [oldVars, Map.keys_eq_map_fst, List.map_map]
-  rw [Map.keys_eq_map_fst] at hM
+  rw [Map.keys_eq_map_fst (oldVars M)]
+  rw [Map.keys_eq_map_fst M] at hM
   -- `(oldVars M).keys = M.map (fun p => mkOld p.1.name)`, which factors through
   -- `M.keys = M.map Prod.fst` by an injective post-map.
-  have hcomp : (Prod.fst ∘ fun (p : (Identifier Unit) × LMonoTy) => (CoreIdent.mkOld p.1.name, p.2))
-      = (fun id : Identifier Unit => CoreIdent.mkOld id.name) ∘ Prod.fst := by
-    funext p; rfl
-  rw [hcomp, ← List.map_map]
+  have hmap : ∀ L : List ((Identifier Unit) × LMonoTy), List.map Prod.fst (oldVars L) =
+      (List.map Prod.fst L).map (fun id : Identifier Unit => CoreIdent.mkOld id.name) := by
+    intro L
+    induction L with
+    | nil => rfl
+    | cons p L ih => obtain ⟨a, b⟩ := p; exact congrArg (CoreIdent.mkOld a.name :: ·) ih
+  rw [hmap M]
   apply hM.map
   intro a b hab
   simp only [CoreIdent.mkOld, CoreIdent.oldStr, Identifier.mk.injEq,
@@ -470,44 +434,41 @@ theorem seed_functional
 -- ── Support / completeness of `genChecks` ─────────────────────────────────
 
 /-- The `mapM` inside `genChecks` produces a `ListMap` whose every value's `expr`
-    is a `bool` expression in the support of `genLExpr … .bool`. -/
+    is in the support of `genLExpr … .bool`. -/
 theorem mapM_genChecks_values (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (labels : List CoreLabel) (m : ListMap CoreLabel Procedure.Check) (pctx : PolyOpCtx := [])
     (hm : m ∈ SPMF.support
       (labels.mapM (m := SPMF) (fun l => do
         let e ← genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check))))) :
-    ∀ c ∈ m.values, c.expr ∈ SPMF.support
-      (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
+    ∀ c ∈ m.values,
+      c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
   induction labels generalizing m with
   | nil =>
-    simp only [ListMap, List.mapM_nil, mem_support_pure_iff] at hm
-    subst hm
-    intro c hc; simp only [ListMap.values, List.not_mem_nil] at hc
+    obtain rfl := SPMF.mem_support_pure_iff.mp hm
+    exact nofun
   | cons l ls ih =>
-    simp only [ListMap, List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff] at hm
-    obtain ⟨pair, hpair, rest, hrest, rfl⟩ := hm
-    obtain ⟨e, he, rfl⟩ := hpair
-    intro c hc
-    simp only [ListMap.values, List.mem_cons] at hc
-    rcases hc with rfl | hc
-    · exact he
-    · exact ih rest hrest c (by simpa only [ListMap.values] using hc)
+    revert m; show IsSoundFor _ _
+    refine IsSoundFor.iff_obs.mpr ?_
+    rw [List.mapM_cons]
+    walk [IsSoundFor.obs ih,
+      (isSoundFor_self_support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool)).obs]
+    aesop (add norm simp ListMap.values)
 
-/-- Membership in `genChecks octx tvars depth`: every clause's `expr` is a `bool`
-    expression reachable by `genLExpr`. -/
+/-- Membership in `genChecks octx tvars depth`: every clause's `expr` is a `bool` expression
+    reachable by `genLExpr`. -/
 theorem genChecks_support (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check) (pctx : PolyOpCtx := [])
     (hm : m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth pctx)) :
-    ∀ c ∈ m.values, c.expr ∈ SPMF.support
-      (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
-  simp only [genChecks, mem_support_bind_iff] at hm
-  obtain ⟨labels, _, hm⟩ := hm
+    ∀ c ∈ m.values,
+      c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool) := by
+  unfold genChecks at hm
+  obtain ⟨labels, _, hm⟩ := mem_support_bind_iff.mp hm
   exact mapM_genChecks_values fctx octx tvars depth labels m pctx hm
 
 /-- Reverse of `mapM_genChecks_values`: a `ListMap` of checks whose every `expr`
-    is reachable by `genLExpr … .bool` is in the support of the `mapM` inside
-    `genChecks`, run over its own keys. -/
+    is reachable by `genLExpr … .bool` is in the support
+    of the `mapM` inside `genChecks`, run over its own keys. -/
 theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check)
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
@@ -518,36 +479,19 @@ theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List Ty
         let e ← genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check)))) := by
   induction m with
-  | nil =>
-    show [] ∈ SPMF.support (pure [] : SPMF _)
-    rw [mem_support_pure_iff]
+  | nil => exact SPMF.mem_support_pure_iff.mpr rfl
   | cons p rest ih =>
-    obtain ⟨l, c⟩ := p
-    simp only [ListMap, ListMap.keys, List.mapM_cons, mem_support_bind_iff, mem_support_pure_iff]
-    have hc_mem : c ∈ ListMap.values ((l, c) :: rest) := by simp [ListMap.values]
-    have hce := hvals c hc_mem
-    have hrest : ∀ c' ∈ ListMap.values rest,
-        c'.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool) := by
-      intro c' hc'; exact hvals c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
-    have hrest_attr : ∀ c' ∈ ListMap.values rest, c'.attr = .Default := by
-      intro c' hc'; exact hattr c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
-    have hrest_md : ∀ c' ∈ ListMap.values rest, c'.md = #[] := by
-      intro c' hc'; exact hmd c' (by simp only [ListMap.values, List.mem_cons]; exact Or.inr hc')
-    -- The head check `{ expr := c.expr }` (which `pure` produces) equals `c`, since
-    -- `c`'s `attr`/`md` are at defaults.
-    have hc_eq : ({ expr := c.expr } : Procedure.Check) = c := by
-      have ha := hattr _ hc_mem
-      have hmm := hmd _ hc_mem
-      cases c with
-      | mk e a md => subst ha; subst hmm; rfl
-    -- Witness the actual head pair `(l, c)`; its membership in the generator's
-    -- head step holds because `pure` produces `(l, { expr := c.expr }) = (l, c)`.
-    exact ⟨(l, c), ⟨c.expr, hce, by rw [hc_eq]⟩, rest, ih hrest_attr hrest_md hrest, rfl⟩
+    -- The head check is `{ expr := c.expr }`, which is `c` because its `attr`/`md` are at defaults.
+    obtain ⟨l, ⟨e, a, md⟩⟩ := p
+    simp only [ListMap.values, List.mem_cons, forall_eq_or_imp] at hattr hmd hvals
+    obtain ⟨rfl, hattr⟩ := hattr; obtain ⟨rfl, hmd⟩ := hmd
+    rw [ListMap.keys, List.mapM_cons]; refine SPMF.mem_support_iff_may.mpr ?_; walk
+    exact ⟨_, hvals.1, _, ih hattr hmd hvals.2, rfl⟩
 
 /-- Completeness of `genChecks`: a check `ListMap` whose labels' names are
     reachable by `genNameList`, whose clauses are all default-`attr`/empty-`md`,
-    and whose every `expr` is reachable by `genLExpr … .bool`, is in the support
-    of `genChecks`. -/
+    and whose every `expr` is reachable by `genLExpr … .bool`, is in the support of
+    `genChecks`. -/
 theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
     (m : ListMap CoreLabel Procedure.Check)
     (hlabels : m.keys ∈ SPMF.support (genNameList (G := SPMF) depth))
@@ -555,311 +499,160 @@ theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdent
     (hmd : ∀ c ∈ m.values, c.md = #[])
     (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
     m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth) := by
-  simp only [genChecks, mem_support_bind_iff]
-  exact ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
+  unfold genChecks
+  exact mem_support_bind_iff.mpr
+    ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
 
--- ── rigidTypeVars weakening ───────────────────────────────────────────────
+-- ── Context irrelevance of function typing ───────────────────────────────
 
-/-- **`RigidAnnotCompat` is antitone in `rigidVars`.** Shrinking the rigid-variable
-    set only *weakens* the "σ is identity on rigid vars" constraint on the
-    witnessing substitution, so the same σ still works. No reflexivity or
-    generator-specific fact is needed. -/
-theorem RigidAnnotCompat.weaken {aliases : List TypeAlias} {rv1 rv2 : List TyIdentifier}
-    {ann mty : LMonoTy} (h : RigidAnnotCompat aliases rv1 ann mty) (hsub : rv2 ⊆ rv1) :
-    RigidAnnotCompat aliases rv2 ann mty := by
-  obtain ⟨σ, hfix, haeq⟩ := h
-  exact ⟨σ, fun v hv => hfix v (hsub hv), haeq⟩
+-- ── Formal parameters avoid function names ───────────────────────────────
 
-/-- **`CmdHasType'` rigidTypeVars weakening.** The ambient `C` is consumed by
-    `CmdHasType'` (under `instHasTypeA`) only via `C.rigidTypeVars` in the
-    `RigidAnnotCompat` premise of the `init` cases (`exprTyped` ignores `C`), so
-    replacing `C.rigidTypeVars` by any subset `rv` preserves typing. `CmdHasType'`
-    leaves `C` untouched in its output, so only `Γ` threads through. -/
-theorem CmdHasTypeA_weaken_rigid {C : LContext CoreLParams}
-    {Γ Γ' : TContext Unit} {c : Cmd Expression} {rv : List TyIdentifier}
-    (h : CmdHasTypeA C Γ c Γ') (hsub : rv ⊆ C.rigidTypeVars) :
-    CmdHasTypeA { C with rigidTypeVars := rv } Γ c Γ' := by
-  cases h with
-  | init_det x xty e mty tys md _Δ hfresh hnovar hlen hcompat hwk hexpr hequiv =>
-    exact CmdHasType'.init_det _ x xty e mty tys md _ hfresh hnovar hlen
-      (RigidAnnotCompat.weaken hcompat hsub) hwk hexpr hequiv
-  | init_nondet x xty mty tys md _Δ hfresh hlen hcompat hwk hequiv =>
-    exact CmdHasType'.init_nondet _ x xty mty tys md _ hfresh hlen
-      (RigidAnnotCompat.weaken hcompat hsub) hwk hequiv
-  | set_det x mty e md _Δ hfind hexpr hequiv =>
-    exact CmdHasType'.set_det _ x mty e md _ hfind hexpr hequiv
-  | set_nondet x mty md _Δ hfind hequiv => exact CmdHasType'.set_nondet _ x mty md _ hfind hequiv
-  | assert l e md _Δ hexpr hequiv => exact CmdHasType'.assert _ l e md _ hexpr hequiv
-  | assume l e md _Δ hexpr hequiv => exact CmdHasType'.assume _ l e md _ hexpr hequiv
-  | cover l e md _Δ hexpr hequiv => exact CmdHasType'.cover _ l e md _ hexpr hequiv
+/-- A signature drawn by `genInputs` without the parameters named after a function of `C` has
+    distinct keys, types that `genLMonoTy` reaches, keys without a space, and no key named after a
+    function of `C`. -/
+theorem avoidFunctionNames_support (C : LContext CoreLParams) (tvars : List TyIdentifier)
+    (size : Nat) (raw : ListMap (Identifier Unit) LMonoTy)
+    (hraw : raw ∈ SPMF.support
+      (genInputs (G := SPMF) (genLMonoTy (G := SPMF) tvars size) size)) :
+    (ListMap.keys (avoidFunctionNames C raw)).Nodup ∧
+    (∀ ty ∈ (avoidFunctionNames C raw).values,
+      ty ∈ SPMF.support (genLMonoTy (G := SPMF) tvars size)) ∧
+    (∀ k ∈ ListMap.keys (avoidFunctionNames C raw), ' ' ∉ k.name.toList) ∧
+    (∀ k ∈ ListMap.keys (avoidFunctionNames C raw), k.name ∉ C.functions) := by
+  obtain ⟨hnodup, hvals⟩ := genInputs_support _ size raw hraw
+  refine ⟨keys_filter_nodup _ raw hnodup,
+    fun ty hty => hvals ty (ListMap.mem_values_filter _ raw ty hty), ?_, ?_⟩
+  · intro k hk
+    obtain ⟨y, hmem, _⟩ := mem_keys_filter _ raw k hk
+    have hkraw : k ∈ ListMap.keys raw := by
+      rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨(k, y), hmem, rfl⟩
+    exact genInputs_key_no_space _ size raw hraw k hkraw
+  · intro k hk hfn
+    obtain ⟨y, _, hkeep⟩ := mem_keys_filter _ raw k hk
+    have hin : (functionNames C).contains k.name = true :=
+      List.contains_iff_mem.mpr (mem_functionNames hfn)
+    simp only [hin, Bool.not_true] at hkeep
+    exact Bool.false_ne_true hkeep
 
-/-- **`CmdExtHasType'` rigidTypeVars weakening.** The `cmd` case delegates to
-    `CmdHasTypeA_weaken_rigid`; the `call` case's use of `C` is only through
-    `S.exprTyped C …` (which, under `instHasTypeA`, ignores `C`) and is otherwise
-    context-blind, so the very same witnesses transport. -/
-theorem CmdExtHasTypeA_weaken_rigid {P : Program} {C : LContext CoreLParams}
-    {Γ Γ' : TContext Unit} {c : Command} {rv : List TyIdentifier}
-    (h : CmdExtHasTypeA C P Γ c Γ') (hsub : rv ⊆ C.rigidTypeVars) :
-    CmdExtHasTypeA { C with rigidTypeVars := rv } P Γ c Γ' := by
-  cases h with
-  | cmd _ c0 hcmd =>
-    exact CmdExtHasType'.cmd _ _ c0 (CmdHasTypeA_weaken_rigid hcmd hsub)
-  | call pname callArgs proc md σ _Δ hfind hInLen hOutLen hLhs hIn hOut hInout hequiv =>
-    exact CmdExtHasType'.call _ pname callArgs proc md σ _ hfind hInLen hOutLen hLhs
-      hIn hOut hInout hequiv
-
-/-- **`FuncHasTypeA` is ambient-`C`-irrelevant.** Under `instHasTypeA`, every field
-    of `FuncHasType'` either ignores `C` (nodup/undeclared-vars are syntactic) or
-    uses it only through `S.exprTyped C … = HasTypeA [] …`, which drops `C`. So the
-    predicate transports across any change of ambient context. -/
-theorem FuncHasTypeA_C_irrel {C C' : LContext CoreLParams} {Γ : TContext Unit}
-    {func : Function} (h : FuncHasTypeA C Γ func)
-    -- `signatureWellKinded` reads the context, and it reads its `knownTypes` field only. Therefore each change
-    -- that keeps that field, such as a change to `rigidTypeVars`, carries the property across.
-    (hkt : C'.knownTypes = C.knownTypes) : FuncHasTypeA C' Γ func :=
-  { inputsNodup := h.inputsNodup
-    typeArgsNodup := h.typeArgsNodup
-    noUndeclaredVars := h.noUndeclaredVars
-    signatureWellKinded := by
-      intro ty hty
-      obtain ⟨ty', hcompat, hwk⟩ := h.signatureWellKinded ty hty
-      refine ⟨ty', hcompat, ?_⟩
-      unfold LContext.WellKindedTy at hwk ⊢
-      rw [hkt]; exact hwk
-    bodyTyped := h.bodyTyped
-    measureTyped := h.measureTyped }
-
-/-- **`StatementHasType'`/`StatementsHasType'` rigidTypeVars weakening** (annotated spec).
-    The ambient `C.rigidTypeVars` flows *unchanged* through every statement
-    constructor (`funcDecl` extends only `C.functions`, `typeDecl` only
-    `C.knownTypes`; neither touches `rigidTypeVars`), and it is consumed only
-    inside the `RigidAnnotCompat` condition of an `init` command. Therefore a subset of `C.rigidTypeVars`, in the
-    input context and in the output context, keeps the typing.
-    Proved by mutual induction on the derivation. -/
-theorem StatementHasTypeA_rigid_eq {P : Program} {C C' : LContext CoreLParams}
-    {Γ Γ' : TContext Unit} {L : List String} {s : Statement}
-    (h : StatementHasTypeA P C Γ L s C' Γ') : C'.rigidTypeVars = C.rigidTypeVars := by
-  cases h with
-  | cmd => rfl
-  | block => rfl
-  | ite_det => rfl
-  | ite_nondet => rfl
-  | loop => rfl
-  | exit => rfl
-  | funcDecl _ _ _ decl func md _ h_nrec h_of h_func _ =>
-    simp only [LContext.addFactoryFunction]; split <;> rfl
-  | typeDecl _ C0' _ _ tc md _ h_add _ =>
-    simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at h_add
-    split at h_add
-    · simp only [reduceCtorEq] at h_add
-    · injection h_add with h_add_eq; rw [← h_add_eq]
-
-theorem StatementHasTypeA_weaken_rigid {P : Program} {C C' : LContext CoreLParams}
-    {Γ Γ' : TContext Unit} {L : List String} {s : Statement} {rv : List TyIdentifier}
-    (h : StatementHasTypeA P C Γ L s C' Γ') (hsub : rv ⊆ C.rigidTypeVars) :
-    StatementHasTypeA P { C with rigidTypeVars := rv } Γ L s { C' with rigidTypeVars := rv } Γ' := by
-  revert hsub
-  induction h using StatementHasType'.rec
-    (motive_2 := fun C Γ L ss C' Γ' (_ : StatementsHasTypeA P C Γ L ss C' Γ') =>
-      rv ⊆ C.rigidTypeVars →
-      StatementsHasTypeA P { C with rigidTypeVars := rv } Γ L ss { C' with rigidTypeVars := rv } Γ') with
-  | cmd C Γ Γ2 L c Δ hc hequiv =>
-    intro hsub
-    exact StatementHasType'.cmd _ Γ Γ2 L c Δ (CmdExtHasTypeA_weaken_rigid hc hsub) hequiv
-  | block C Γ C_body Γ_body L label body md Δ hlab hbody hequiv ih =>
-    intro hsub
-    exact StatementHasType'.block _ Γ { C_body with rigidTypeVars := rv } Γ_body L label body md
-      Δ hlab (ih hsub) hequiv
-  | ite_det C Γ C_t Γ_t C_e Γ_e L cond thenb elseb md Δ hcond hthen helse hequiv iht ihe =>
-    intro hsub
-    exact StatementHasType'.ite_det _ Γ { C_t with rigidTypeVars := rv } Γ_t
-      { C_e with rigidTypeVars := rv } Γ_e L cond thenb elseb md Δ hcond (iht hsub) (ihe hsub)
-      hequiv
-  | ite_nondet C Γ C_t Γ_t C_e Γ_e L thenb elseb md Δ hthen helse hequiv iht ihe =>
-    intro hsub
-    exact StatementHasType'.ite_nondet _ Γ { C_t with rigidTypeVars := rv } Γ_t
-      { C_e with rigidTypeVars := rv } Γ_e L thenb elseb md Δ (iht hsub) (ihe hsub) hequiv
-  | loop C Γ C_body Γ_body L guard measure invariants body md Δ hg hm hi hbody hequiv ih =>
-    intro hsub
-    exact StatementHasType'.loop _ Γ { C_body with rigidTypeVars := rv } Γ_body L guard measure
-      invariants body md Δ hg hm hi (ih hsub) hequiv
-  | exit C Γ L label md Δ hmem hequiv =>
-    intro _; exact StatementHasType'.exit _ Γ L label md Δ hmem hequiv
-  | funcDecl C Γ L decl func md Δ hrec hof hfunc hequiv =>
-    intro _
-    -- `addFactoryFunction` leaves `rigidTypeVars` untouched, so the output context
-    -- is `{ (C.addFactoryFunction …) with rigidTypeVars := rv }`.
-    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addFactoryFunction func.toLFunc
-        = { C.addFactoryFunction func.toLFunc with rigidTypeVars := rv } := by
-      simp only [LContext.addFactoryFunction]; split <;> rfl
-    rw [← hcong]
-    exact StatementHasType'.funcDecl _ Γ L decl func md Δ hrec hof
-      (FuncHasTypeA_C_irrel hfunc rfl) hequiv
-  | typeDecl C C0' Γ L tc md Δ hadd hequiv =>
-    intro _
-    -- `addKnownTypeWithError` leaves `rigidTypeVars` untouched.
-    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addKnownTypeWithError
-        { name := tc.name, metadata := tc.numargs } default
-        = .ok { C0' with rigidTypeVars := rv } := by
-      simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at hadd ⊢
-      split at hadd
-      · simp only [reduceCtorEq] at hadd
-      · injection hadd with hadd_eq; subst hadd_eq; rfl
-    exact StatementHasType'.typeDecl _ { C0' with rigidTypeVars := rv } Γ L tc md Δ hcong hequiv
-  | nil C Γ L Δ hequiv =>
-    exact StatementsHasType'.nil (τ := LMonoTy) (P := P) _ Γ L Δ hequiv
-  | cons C C' C'' Γ Γ' Γ'' L s ss hs hss ihs ihss =>
-    rename_i hsub
-    -- `hs`'s output `C'` has the same rigidTypeVars as `C` (statement typing
-    -- preserves them), so the tail's subset hypothesis is discharged.
-    have hrig : C'.rigidTypeVars = C.rigidTypeVars := StatementHasTypeA_rigid_eq hs
-    exact StatementsHasType'.cons _ { C' with rigidTypeVars := rv } _ Γ Γ' Γ'' L s ss
-      (ihs hsub) (ihss (hrig ▸ hsub))
-
-/-- **`StatementsHasType'` rigidTypeVars weakening** (list form), specializing the
-    mutual induction above. -/
-theorem StatementsHasTypeA_weaken_rigid {P : Program} {C C' : LContext CoreLParams}
-    {Γ Γ' : TContext Unit} {L : List String} {ss : List Statement} {rv : List TyIdentifier}
-    (h : StatementsHasTypeA P C Γ L ss C' Γ') (hsub : rv ⊆ C.rigidTypeVars) :
-    StatementsHasTypeA P { C with rigidTypeVars := rv } Γ L ss { C' with rigidTypeVars := rv } Γ' := by
-  revert hsub
-  induction h using StatementsHasType'.rec
-    (motive_1 := fun C Γ L s C' Γ' (_ : StatementHasTypeA P C Γ L s C' Γ') =>
-      rv ⊆ C.rigidTypeVars →
-      StatementHasTypeA P { C with rigidTypeVars := rv } Γ L s { C' with rigidTypeVars := rv } Γ') with
-  | cmd C Γ Γ2 L c Δ hc hequiv =>
-    rename_i hsub
-    exact StatementHasType'.cmd _ Γ Γ2 L c Δ (CmdExtHasTypeA_weaken_rigid hc hsub) hequiv
-  | block C Γ C_body Γ_body L label body md Δ hlab hbody hequiv ih =>
-    rename_i hsub
-    exact StatementHasType'.block _ Γ { C_body with rigidTypeVars := rv } Γ_body L label body md
-      Δ hlab (ih hsub) hequiv
-  | ite_det C Γ C_t Γ_t C_e Γ_e L cond thenb elseb md Δ hcond hthen helse hequiv iht ihe =>
-    rename_i hsub
-    exact StatementHasType'.ite_det _ Γ { C_t with rigidTypeVars := rv } Γ_t
-      { C_e with rigidTypeVars := rv } Γ_e L cond thenb elseb md Δ hcond (iht hsub) (ihe hsub)
-      hequiv
-  | ite_nondet C Γ C_t Γ_t C_e Γ_e L thenb elseb md Δ hthen helse hequiv iht ihe =>
-    rename_i hsub
-    exact StatementHasType'.ite_nondet _ Γ { C_t with rigidTypeVars := rv } Γ_t
-      { C_e with rigidTypeVars := rv } Γ_e L thenb elseb md Δ (iht hsub) (ihe hsub) hequiv
-  | loop C Γ C_body Γ_body L guard measure invariants body md Δ hg hm hi hbody hequiv ih =>
-    rename_i hsub
-    exact StatementHasType'.loop _ Γ { C_body with rigidTypeVars := rv } Γ_body L guard measure
-      invariants body md Δ hg hm hi (ih hsub) hequiv
-  | exit C Γ L label md Δ hmem hequiv =>
-    exact StatementHasType'.exit _ Γ L label md Δ hmem hequiv
-  | funcDecl C Γ L decl func md Δ hrec hof hfunc hequiv =>
-    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addFactoryFunction func.toLFunc
-        = { C.addFactoryFunction func.toLFunc with rigidTypeVars := rv } := by
-      simp only [LContext.addFactoryFunction]; split <;> rfl
-    rw [← hcong]
-    exact StatementHasType'.funcDecl _ Γ L decl func md Δ hrec hof
-      (FuncHasTypeA_C_irrel hfunc rfl) hequiv
-  | typeDecl C C0' Γ L tc md Δ hadd hequiv =>
-    have hcong : ({ C with rigidTypeVars := rv } : LContext CoreLParams).addKnownTypeWithError
-        { name := tc.name, metadata := tc.numargs } default
-        = .ok { C0' with rigidTypeVars := rv } := by
-      simp only [LContext.addKnownTypeWithError, Bind.bind, Except.bind] at hadd ⊢
-      split at hadd
-      · simp only [reduceCtorEq] at hadd
-      · injection hadd with hadd_eq; subst hadd_eq; rfl
-    exact StatementHasType'.typeDecl _ { C0' with rigidTypeVars := rv } Γ L tc md Δ hcong hequiv
-  | nil C Γ L Δ hequiv =>
-    intro _; exact StatementsHasType'.nil (τ := LMonoTy) (P := P) _ Γ L Δ hequiv
-  | cons C C' C'' Γ Γ' Γ'' L s ss hs hss ihs ihss =>
-    intro hsub
-    have hrig : C'.rigidTypeVars = C.rigidTypeVars := StatementHasTypeA_rigid_eq hs
-    exact StatementsHasType'.cons _ { C' with rigidTypeVars := rv } _ Γ Γ' Γ'' L s ss
-      (ihs hsub) (ihss (hrig ▸ hsub))
+/-- A signature with no key named after a function of `C` is unchanged by
+    `avoidFunctionNames`. -/
+theorem avoidFunctionNames_eq_self (C : LContext CoreLParams)
+    (sig : ListMap (Identifier Unit) LMonoTy)
+    (h : ∀ k ∈ ListMap.keys sig, k.name ∉ C.functions) : avoidFunctionNames C sig = sig := by
+  simp only [avoidFunctionNames]
+  apply List.filter_eq_self.mpr
+  intro p hp
+  have hk : p.1 ∈ ListMap.keys sig := by
+    rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨p, hp, rfl⟩
+  have hnot : (functionNames C).contains p.1.name = false := by
+    rw [Bool.eq_false_iff, ne_eq, List.contains_iff_mem]
+    exact fun hmem => h p.1 hk (mem_functions_of_mem_functionNames hmem)
+  simp only [hnot, Bool.not_false]
 
 -- ── Soundness ────────────────────────────────────────────────────────────
 
+/-- The scope of the generator for a signature with distinct keys agrees on every lookup with the
+    single scope that binds each entry of the signature at its type. -/
+theorem procToTCtx_find_eq_ofList (sig : ListMap (Identifier Unit) LMonoTy)
+    (hnd : (Map.keys sig).Nodup) (k : Identifier Unit) :
+    (procToTCtx sig).types.find? k =
+      Strata.Util.HMaps.find?
+        [Strata.Util.HMap.ofList (sig.map (fun p => (p.1, LTy.forAll [] p.2)))] k := by
+  have hfun := Map.functional_of_nodup sig hnd
+  show Strata.Util.HMaps.find? [_] k = _
+  rw [Strata.Util.HMaps.find?_single_scope, Strata.Util.HMaps.find?_single_scope]
+  refine find?_ofList_perm_of_functional (List.reverse_perm _) ?_ k
+  intro x v1 v2 h1 h2
+  obtain ⟨⟨a1, t1⟩, hp1, hpe1⟩ := List.mem_map.mp (List.mem_reverse.mp h1)
+  obtain ⟨⟨a2, t2⟩, hp2, hpe2⟩ := List.mem_map.mp (List.mem_reverse.mp h2)
+  simp only [Prod.mk.injEq] at hpe1 hpe2
+  obtain ⟨rfl, rfl⟩ := hpe1
+  obtain ⟨rfl, rfl⟩ := hpe2
+  rw [hfun a2 t1 t2 hp1 hp2]
+
+/-- The outputs of a procedure that `genProcedure` draws have distinct names: the in-out block and
+    the output-only block each have distinct names, and the output-only block avoids the in-out
+    names. -/
+theorem genProcedure_outputs_nodup {octx : OpCtx} {procs : ProcSigCtx} {C : LContext CoreLParams}
+    {Γ : TContext Unit} {size len : Nat} {pctx : PolyOpCtx} {proc : Procedure}
+    (hproc : proc ∈ SPMF.support
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := maxStmtSeqLen))) :
+    (ListMap.keys proc.header.outputs).Nodup := by
+  simp only [genProcedure, genProcedureWith, mem_support_bind_iff, mem_support_pure_iff] at hproc
+  obtain ⟨_, _, typeArgs, _, rawM, hrawM, rawIn, _, rawOut, hrawOut, _, _, _, _, _, _, _, _,
+    rfl⟩ := hproc
+  show (ListMap.keys (avoidFunctionNames C rawM ++ disjointInputs (avoidFunctionNames C rawOut)
+    (avoidFunctionNames C rawM ++ disjointInputs (avoidFunctionNames C rawIn)
+      (avoidFunctionNames C rawM)))).Nodup
+  rw [ListMap_keys_append, List.nodup_append]
+  refine ⟨(avoidFunctionNames_support C typeArgs size rawM hrawM).1,
+    disjointInputs_keys_nodup _ _ (avoidFunctionNames_support C typeArgs size rawOut hrawOut).1, ?_⟩
+  intro a ha b hb hab
+  refine disjointInputs_key_not_output _ _ b hb ?_
+  rw [ListMap_keys_append, List.mem_append]
+  exact Or.inl (hab ▸ ha)
+
 set_option maxHeartbeats 800000 in
-/-- **Soundness of `genProcedure`.** Every procedure in the generator's support
-    is well-typed w.r.t. `ProcHasTypeA` for any program `P` (and any ambient
-    context `C`) whose callable procedures the threaded call-target context `procs`
-    faithfully describes, which is `ProcSigCorresponds procs P`. That is the one side condition, and it has no
-    content when the context of the callable procedures is empty. It goes straight into
-    `genStmtChain_sound`, which the `.call` case of the soundness of the body needs, so that each emitted `call`
-    is certified against the program.
+/-- **Soundness of `genProcedure`.** Every procedure in the generator's support is well-typed
+    (`ProcWellTyped`) in context `C` with no enclosing variable scope, for any program `P` whose
+    callable procedures the call-target context `procs` describes (`ProcSigCorresponds`) and
+    whose type names are not local type names (`isLocalTypeName`). This
+    holds when the operators and schemes the expressions draw on agree with `C` (`ExprCtxOk`), and
+    the operator types and the written-to blocks of the callees are well kinded in `C` at every
+    list of rigid type variables (`WellKindedAmbient`).
 
-    The proof discharges each field of the specification as follows:
-
-    - The field about distinct type arguments comes from `genTypeArgs_nodup`.
-    - The field about distinct input keys comes from `genInputs_support`, and it survives the filter
-      `disjointInputs`, which gives a sublist.
-    - The field about distinct output keys comes from `genInputs_support`.
-    - The field about an undeclared variable holds because each free type variable of an input type and of an
-      output type is a type argument, which `genLMonoTy typeArgs` gives. The values of the filtered inputs are
-      also a subset of the values of the raw inputs.
-    - The two fields about a contract clause each reduce, under the annotated specification, to
-      `HasTypeA [] c.expr bool`, and that is exactly what `genLExpr … .bool` gives.
-    - The field about the body comes from `genStmtChain_sound`, through `procBodyContext_default`, which holds
-      because the filtered inputs are disjoint from the outputs. That lemma identifies the context of the body
-      with the context that the generator seeds from the inputs and the outputs.
-    - The field about the rights to modify a variable comes from `genStmtChain_mutableVars`. Each modified
-      variable is a *mutable* key of the inputs and the outputs, and it is therefore an output key, through
-      `mem_writable_append_keys`, or the body defines it. -/
+    The body is typed from the generator's seed of inputs, outputs and `old` bindings, whose
+    scope agrees with the procedure's body scopes on every lookup. -/
 theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
-    (hProcs : ProcSigCorresponds procs P) (size len : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
-    -- Upstream's `init` rules and `ProcHasType'.signatureWellKinded` need every stored /
-    -- declared monotype to be well-kinded in the ambient context. `hC` covers the
-    -- procedure's own signature (the generator makes all of the types); `hWK` is the
-    -- premise at the level of a statement. Read the note about `StmtHasTypeAGen.WellKindedOk`. The proof assumes
-    -- the half about the context only. The half about the local scope holds at the seed of the body, because that
-    -- scope holds a generated signature type only, which `hseedWK` below gives, and it is
-    -- carried along the body by `wellKindedOk_preserved`.
-    (hC : SimpleTyArities C)
+    (hProcs : ProcSigCorresponds procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
+    (size len : Nat) (C : LContext CoreLParams) (Γ : TContext Unit)
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
-    (proc : Procedure) (pctx : PolyOpCtx := [])
+    (pctx : PolyOpCtx) (hops : StrataGenerators.AnnotFacts.ExprCtxOk C [] [] octx pctx)
+    (proc : Procedure)
     (hproc : proc ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen)) :
-    ProcHasTypeA P { C with rigidTypeVars := proc.header.typeArgs } Γ proc := by
-  simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hproc
-  obtain ⟨name, _hname, typeArgs, htypeArgs, M, hM, rawInputOnly, hrawInputOnly,
-          rawOutputOnly, hrawOutputOnly, pre, hpre, post, hpost,
-          ⟨body, C', ctx'⟩, hbody, rfl⟩ := hproc
-  -- The three signature blocks: `M` (in-out), `I := disjointInputs rawInputOnly M`
-  -- (input-only), `O := disjointInputs rawOutputOnly (M ++ I)` (output-only). `set`
-  -- is unavailable, so these derived terms appear in full below.
-  -- Facts about `typeArgs` and the three generated blocks.
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := maxStmtSeqLen))) :
+    ProcWellTyped P C [] proc := by
+  have hOutputsNodup := genProcedure_outputs_nodup hproc
+  simp only [genProcedure, genProcedureWith, mem_support_bind_iff, mem_support_pure_iff] at hproc
+  obtain ⟨name, _, typeArgs, htypeArgs, rawM, hrawM, rawIn, hrawIn,
+          rawOut, hrawOut, pre, hpre, post, hpost,
+          ⟨body, C', ctx'⟩, hbody, lemmas, _, rfl⟩ := hproc
+  -- The three blocks without the function names: `M` (in-out), `rawInputOnly` and
+  -- `rawOutputOnly`, before the disjointness filters.
+  obtain ⟨hMKeysNodup, hMVals, hMs0, _⟩ := avoidFunctionNames_support C typeArgs size rawM hrawM
+  obtain ⟨hRawInKeysNodup, hRawInVals, hRawIns, _⟩ :=
+    avoidFunctionNames_support C typeArgs size rawIn hrawIn
+  obtain ⟨_, hRawOutVals, hRawOuts, _⟩ := avoidFunctionNames_support C typeArgs size rawOut hrawOut
+  generalize avoidFunctionNames C rawM = M
+    at hMKeysNodup hMVals hMs0 hOutputsNodup hpre hpost hbody ⊢
+  generalize avoidFunctionNames C rawIn = rawInputOnly
+    at hRawInKeysNodup hRawInVals hRawIns hOutputsNodup hpre hpost hbody ⊢
+  generalize avoidFunctionNames C rawOut = rawOutputOnly
+    at hRawOutVals hRawOuts hOutputsNodup hpost hbody ⊢
+  -- The derived blocks `I := disjointInputs rawInputOnly M` and
+  -- `O := disjointInputs rawOutputOnly (M ++ I)` appear in full below.
   have htyNodup : typeArgs.Nodup := genTypeArgs_nodup size typeArgs htypeArgs
-  obtain ⟨hMKeysNodup, hMVals⟩ := genInputs_support typeArgs size M hM
-  obtain ⟨hRawInKeysNodup, hRawInVals⟩ := genInputs_support typeArgs size rawInputOnly hrawInputOnly
-  obtain ⟨hRawOutKeysNodup, hRawOutVals⟩ := genInputs_support typeArgs size rawOutputOnly hrawOutputOnly
   have hIKeysNodup : (ListMap.keys (disjointInputs rawInputOnly M)).Nodup :=
     disjointInputs_keys_nodup rawInputOnly M hRawInKeysNodup
-  have hOKeysNodup :
-      (ListMap.keys (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))).Nodup :=
-    disjointInputs_keys_nodup rawOutputOnly (M ++ disjointInputs rawInputOnly M) hRawOutKeysNodup
-  -- `inputsNodup` / `outputsNodup`: each is an append of two disjoint `Nodup` blocks.
+  -- `inputsNodup`: an append of two disjoint `Nodup` blocks.
   have hInputsNodup : (ListMap.keys (M ++ disjointInputs rawInputOnly M)).Nodup := by
     rw [ListMap_keys_append, List.nodup_append]
     refine ⟨hMKeysNodup, hIKeysNodup, ?_⟩
     intro a ha b hb hab
     exact disjointInputs_key_not_output rawInputOnly M b hb (hab ▸ ha)
-  have hOutputsNodup :
-      (ListMap.keys (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))).Nodup := by
-    rw [ListMap_keys_append, List.nodup_append]
-    refine ⟨hMKeysNodup, hOKeysNodup, ?_⟩
-    intro a ha b hb hab
-    refine disjointInputs_key_not_output rawOutputOnly (M ++ disjointInputs rawInputOnly M) b hb ?_
-    rw [ListMap_keys_append, List.mem_append]; exact Or.inl (hab ▸ ha)
   -- Space-freeness of the three blocks' keys (generated names have no space).
   have hMs : ∀ k ∈ Map.keys M, ' ' ∉ k.name.toList := by
     intro k hk; rw [Map_keys_eq_ListMap_keys] at hk
-    exact genInputs_key_no_space typeArgs size M hM k hk
+    exact hMs0 k hk
   have hIs : ∀ k ∈ Map.keys (disjointInputs rawInputOnly M), ' ' ∉ k.name.toList := by
     intro k hk; rw [Map_keys_eq_ListMap_keys] at hk
-    exact genInputs_key_no_space typeArgs size rawInputOnly hrawInputOnly k
-      ((disjointInputs_keys_sublist rawInputOnly M).subset hk)
+    exact hRawIns k ((disjointInputs_keys_sublist rawInputOnly M).subset hk)
   have hOs : ∀ k ∈ Map.keys (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)),
       ' ' ∉ k.name.toList := by
     intro k hk; rw [Map_keys_eq_ListMap_keys] at hk
-    exact genInputs_key_no_space typeArgs size rawOutputOnly hrawOutputOnly k
+    exact hRawOuts k
       ((disjointInputs_keys_sublist rawOutputOnly (M ++ disjointInputs rawInputOnly M)).subset hk)
   -- Cross-block disjointness (`Map.keys` form) for `seed_functional`.
   have hI_notMO : ∀ k ∈ Map.keys (disjointInputs rawInputOnly M),
@@ -889,7 +682,7 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))
       hMKeysNodup' hInNodup' hOutNodup' hI_notMO hO_notMI hMs hIs hOs
   -- `contains`-forms of the block-membership facts (`getInoutParams = M`,
-  -- `procBodyContext` alignment): every `M`-key is a `(M ++ O)`-key; no `I`-key is.
+  -- body-scope alignment): every `M`-key is a `(M ++ O)`-key; no `I`-key is.
   have hIc : ∀ p, List.Mem p (disjointInputs rawInputOnly M) →
       ((ListMap.keys (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))).contains
         (Prod.fst p)) = false := by
@@ -914,55 +707,95 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       ty ∈ SPMF.support (genLMonoTy (G := SPMF) typeArgs size) := by
     intro ty hty
     rcases hty with h | h
-    · rw [ListMap_values_append, List.mem_append] at h
+    · rw [ListMap.values_append, List.mem_append] at h
       rcases h with h | h
       · exact hMVals ty h
       · exact hRawInVals ty (disjointInputs_values_mem rawInputOnly M ty h)
-    · rw [ListMap_values_append, List.mem_append] at h
+    · rw [ListMap.values_append, List.mem_append] at h
       rcases h with h | h
       · exact hMVals ty h
       · exact hRawOutVals ty
           (disjointInputs_values_mem rawOutputOnly (M ++ disjointInputs rawInputOnly M) ty h)
-  -- The body seed's scope holds nothing but generated signature types, so every one of
-  -- them is well-kinded in `C`. This is the scope-local half of `WellKindedOk`, which the
-  -- caller therefore does not have to assume.
+  -- The body seed's scope holds nothing but generated signature types.
+  have hseedVals : ∀ ty ∈ Map.values
+      (M ++ disjointInputs rawInputOnly M ++
+        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M),
+      ty ∈ SPMF.support (genLMonoTy (G := SPMF) typeArgs size) := by
+    intro ty hty
+    refine key ty ?_
+    rw [Map_values_eq_ListMap_values, ListMap.values_append, ListMap.values_append,
+      oldVars_values, List.mem_append, List.mem_append] at hty
+    rcases hty with (hMI | hMO) | hM
+    · exact Or.inl hMI
+    · exact Or.inr hMO
+    · exact Or.inl (by rw [ListMap.values_append, List.mem_append]; exact Or.inl hM)
+  have hseedTyWK : ∀ ty ∈ Map.values
+      (M ++ disjointInputs rawInputOnly M ++
+        (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M),
+      C.WellKindedTy ty :=
+    fun ty hty =>
+      genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hops.arities ⟨size, hseedVals ty hty⟩
+  -- So every seed type is well-kinded in `C`: the scope-local half of `WellKindedOk`.
   have hseedWK : StrataGenerators.Stmt.WellKindedOk octx procs
-      { C with rigidTypeVars := typeArgs }
+      { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M) :=
-    { hWK typeArgs with
-      ctxWK := by
-        intro ty hty
-        refine genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hC ⟨size, key ty ?_⟩
-        rw [Map_values_eq_ListMap_values, ListMap_values_append, ListMap_values_append,
-          oldVars_values, List.mem_append, List.mem_append] at hty
-        rcases hty with (hMI | hMO) | hM
-        · exact Or.inl hMI
-        · exact Or.inr hMO
-        · exact Or.inl (by rw [ListMap_values_append, List.mem_append]; exact Or.inl hM) }
+    { hWK (C.rigidTypeVars ++ typeArgs) with ctxWK := hseedTyWK }
   -- Body soundness (seeded at `inputs ++ outputs ++ oldVars M`, immutable = inputs.keys ++ old.keys).
-  have hbodyTyped : StatementsHasTypeA P { C with rigidTypeVars := typeArgs }
-      ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx
+  have hbodyTyped : StatementsWellTyped P { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
+      (procToTCtx
         (M ++ disjointInputs rawInputOnly M ++
-          (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)) []
-      body C' ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx ctx') :=
-    genStmtChain_sound P (procStmtEnvΓ Γ octx typeArgs pctx)
+          (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++
+            oldVars M)).types []
+      body C' (procToTCtx ctx').types :=
+    genStmtChain_sound P (procStmtEnv octx typeArgs pctx)
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs
-      hProcs []
-      { C with rigidTypeVars := typeArgs }
+      hProcs hLocalTypes []
+      { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
-      hseedWK size len hseedFun (body, C', ctx') hbody
+      hseedWK (hops.mono rfl (fun _ _ hv => hv)) size len hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
   have hmod := genStmtChain_mutableVars octx pctx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
-      { C with rigidTypeVars := typeArgs }
+      { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
       size len (body, C', ctx') hbody
+  -- The body scopes of the procedure agree with the scope of the seed on every lookup.
+  have heq := procBodyScopes_inout name typeArgs (lemmas := lemmas) M
+    (disjointInputs rawInputOnly M)
+    (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) hIc hMc hseedFun
+    pre post (.structured body)
+  -- A contract clause drawn over a scope `ctx` is well-typed at `bool` in every variable
+  -- scopes that bind each name of `ctx` at its type.
+  have hcheck : ∀ (ctx : VarCtx) (ts : TypeScopes) (m : ListMap CoreLabel Procedure.Check),
+      Map.Functional ctx → (∀ ty ∈ ctx.values, C.WellKindedTy ty) →
+      (∀ x v, (procToTCtx ctx).types.find? x = some v → ts.find? x = some v) →
+      m ∈ SPMF.support (genChecks (G := SPMF) (sigFctx ctx) octx typeArgs size pctx) →
+      ∀ c ∈ m.values, ExprWellTyped C ts c.expr .bool := by
+    intro ctx ts m hfun hwk hts hm c hc
+    have he := genChecks_support (sigFctx ctx) octx typeArgs size m pctx hm c hc
+    exact exprWellTyped_mono
+      (genLExpr_exprWellTyped (exprCtxOk_of_corresponds hops (procToTCtx_corr ctx) hfun hwk)
+        (knownInstance_bool hops.arities) he) hts
+  -- No formal key holds a space, and the saved starting value of an in-out parameter `g` is
+  -- named `"old " ++ g`, which does.
+  have hOldFresh : ∀ g : Identifier Unit, CoreIdent.mkOld g.name ∉
+      ListMap.keys (M ++ disjointInputs rawInputOnly M) ++
+        ListMap.keys (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) := by
+    intro g hmem
+    have hspace := mkOld_name_space g.name
+    rcases List.mem_append.mp hmem with h | h <;> rw [ListMap_keys_append] at h <;>
+      rcases List.mem_append.mp h with h' | h'
+    · exact hMs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
+    · exact hIs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
+    · exact hMs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
+    · exact hOs _ (by rw [Map_keys_eq_ListMap_keys]; exact h') hspace
   refine {
     inputsNodup := hInputsNodup,
     outputsNodup := hOutputsNodup,
+    oldNamesFresh := fun g _ => hOldFresh g,
     typeArgsNodup := htyNodup,
     noUndeclaredVars := ?_,
     signatureWellKinded := ?_,
@@ -981,18 +814,15 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
     obtain ⟨ty, hty_mem, hv_ty⟩ := hpiece
     have hftv : allFtvarsIn typeArgs ty := genLMonoTy_mem_ftvars (key ty hty_mem)
     exact allFtvarsIn_freeVars hftv v hv_ty
-  · -- signatureWellKinded: `tyCompat` is equality at `HasTypeA`, and the generator makes
-    -- every declared type. Therefore `hC` gives well-kindedness (`hC` only reads
-    -- `knownTypes`, which the `rigidTypeVars` refinement does not touch).
+  · -- signatureWellKinded: the generator makes every declared type.
     intro ty hty
-    refine ⟨ty, rfl, genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hC ?_⟩
-    refine ⟨size, key ty ?_⟩
+    refine genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hops.arities ⟨size, key ty ?_⟩
     rcases List.mem_append.mp hty with h | h
     · exact Or.inl h
     · exact Or.inr h
-  · -- The field about the rights to modify a variable. A modified variable is a mutable key of the seed, which
-    -- is the inputs, then the outputs, then the old variables. Therefore `mem_writable_seed_keys` makes it an
-    -- *output* key, or the body defines it.
+  · -- A modified variable is a mutable key of the seed, which is the inputs, then the outputs,
+    -- then the old variables. Therefore `mem_writable_seed_keys` makes it an *output* key, or the
+    -- body defines it.
     intro v hv
     show v ∈ ListMap.keys (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M))
         ++ HasVarsImp.definedVars (P := Expression) body false
@@ -1004,85 +834,39 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
         (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) ?_ v h
       rw [Map_keys_eq_ListMap_keys, Map_keys_eq_ListMap_keys]
     · exact List.mem_append_right _ h
-  · -- The field about a precondition. Under the annotated specification, it is `HasTypeA [] c.expr bool`,
-    -- because the specification reads no context, and it therefore reads no context for the free variables of
-    -- the clause.
-    intro c hc
-    exact genLExpr_sound _ octx pctx typeArgs [] size .bool _ c.expr
-      (genChecks_support _ octx typeArgs size pre pctx hpre c hc)
-  · -- postconditionsTyped: identical reduction (the context is ignored).
-    intro c hc
-    exact genLExpr_sound _ octx pctx typeArgs [] size .bool _ c.expr
-      (genChecks_support _ octx typeArgs size post pctx hpost c hc)
-  · -- bodyTyped: align the body context via `procBodyContext_inoutΓ`. The two contexts
-    -- agree only up to `TContext.Equiv` (opaque hash-map scopes), so the body derivation
-    -- is transported along it with `statementsHasTypeA_equiv_congr`.
-    refine ProcBodyHasType'.structured body C' ((procStmtEnvΓ Γ octx typeArgs pctx).toTCtx ctx') ?_
-    have heq := procBodyContext_inoutΓ Γ hΓtypes name typeArgs M (disjointInputs rawInputOnly M)
-      (disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) hIc hMc hseedFun
-      pre post (.structured body)
-    rw [procStmtEnvΓ_toTCtx] at hbodyTyped
-    exact StrataGenerators.Stmt.statementsHasTypeA_equiv_congr hbodyTyped heq
+  · -- preconditions: drawn over the inputs, whose scope agrees with the input scopes.
+    refine hcheck _ _ pre (Map.functional_of_nodup _ hInNodup') ?_ ?_ hpre
+    · intro ty hty
+      refine genLMonoTy_mem_wellKindedTy (tvars := typeArgs) hops.arities ⟨size, key ty ?_⟩
+      rw [Map_values_eq_ListMap_values] at hty
+      exact Or.inl hty
+    · intro x v hx
+      rw [procToTCtx_find_eq_ofList _ hInNodup' x] at hx
+      exact hx
+  · -- postconditions: drawn over the seed, whose scope agrees with the body scopes.
+    exact hcheck _ _ post hseedFun hseedTyWK
+      (fun x _ hx => (Strata.Util.HMaps.Equiv.find? heq x).trans hx) hpost
+  · -- The body is generated with the type parameters rigid; its typing ignores rigid variables.
+    exact (ProcBodyWellTyped.structured body C' _
+      (statementsWellTyped_equiv_congr hbodyTyped heq)).withRigid C.rigidTypeVars
 
-/-- **`ProcBodyHasType'` rigidTypeVars weakening.** Only the `structured` case
-    carries a `StatementsHasTypeA` obligation (weakened via `StatementsHasTypeA_weaken_rigid`);
-    the `cfg` case is unconstrained. The body-scope `Γ_body` is independent of the
-    ambient `C`. -/
-theorem ProcBodyHasTypeA_weaken_rigid {P : Program} {C : LContext CoreLParams}
-    {Γ_body : TContext Unit} {b : Procedure.Body} {rv : List TyIdentifier}
-    (h : ProcBodyHasType' LMonoTy P C Γ_body b) (hsub : rv ⊆ C.rigidTypeVars) :
-    ProcBodyHasType' LMonoTy P { C with rigidTypeVars := rv } Γ_body b := by
-  cases h with
-  | structured ss C'' Γ'' hst =>
-    exact ProcBodyHasType'.structured ss { C'' with rigidTypeVars := rv } Γ''
-      (StatementsHasTypeA_weaken_rigid hst hsub)
-  | cfg c => exact ProcBodyHasType'.cfg c
-
-/-- **Soundness of `genProcedure` at the *ambient* context.** `genProcedure_sound`
-    concludes at the `typeArgs`-overridden rigid context (matching
-    `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters before
-    checking the body). But the program-level spec `DeclHasType'.proc` threads the
-    ambient `C` *unchanged*. This lemma bridges the two: since the body's
-    `StatementsHasTypeA` consumes `C.rigidTypeVars` only through the reflexive-friendly,
-    antitone `RigidAnnotCompat` in `init` (and the contract clauses ignore `C`
-    at all under the annotated specification. Therefore the conclusion holds at each set of the rigid variables
-    that is a subset of the type arguments of the procedure, and in particular at the set of `C` itself, through
-    `StatementsHasTypeA_weaken_rigid`.
-
-    The side-condition `C.rigidTypeVars ⊆ proc.header.typeArgs` holds vacuously when
-    the ambient `C.rigidTypeVars = []` (the program-generator fold's invariant), so
-    a caller with `hCrigid : C.rigidTypeVars = []` discharges it by
-    `hCrigid ▸ List.nil_subset _`. -/
+/-- **Soundness of `genProcedure` at the ambient context.** Every procedure that `genProcedure`
+    makes in a context `C` is well-typed (`ProcWellTyped`) at that same `C` with no enclosing
+    variable scope, when every callable procedure resolves in `P`, no type name of `P` is a local
+    type name, the operator types and the callee signature types are well kinded in `C`, and the
+    operators and schemes agree with `C`. -/
 theorem genProcedure_sound_ambient (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
-    (hProcs : ProcSigCorresponds procs P) (size len : Nat)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (hΓtypes : Γ.types = [])
-    (hC : SimpleTyArities C)
+    (hProcs : ProcSigCorresponds procs P)
+    (hLocalTypes : ∀ n ∈ programNamesOfKind P .type, ¬ isLocalTypeName n.name)
+    (size len : Nat) (C : LContext CoreLParams) (Γ : TContext Unit)
     (hWK : ∀ rv : List TyIdentifier,
       StrataGenerators.Stmt.WellKindedAmbient octx procs { C with rigidTypeVars := rv })
-    (proc : Procedure) (pctx : PolyOpCtx := [])
+    (pctx : PolyOpCtx) (hops : StrataGenerators.AnnotFacts.ExprCtxOk C [] [] octx pctx)
+    (proc : Procedure)
     (hproc : proc ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen))
-    (hCrigid : C.rigidTypeVars ⊆ proc.header.typeArgs) :
-    ProcHasTypeA P C Γ proc := by
-  have hbase :=
-    genProcedure_sound P octx procs hProcs size len C Γ hΓtypes hC hWK proc pctx hproc
-  -- All fields except `bodyTyped` are ambient-`C`-blind (the contract clauses use
-  -- `S.exprTyped C … = HasTypeA [] …`, which drops `C`); only `bodyTyped` threads
-  -- `C.rigidTypeVars`, and it weakens down to `C`'s own rigid set.
-  refine { hbase with bodyTyped := ?_ }
-  -- `procBodyContext Γ proc` does not depend on the ambient `C`; the body typing
-  -- weakens down to `C`'s own rigid set. Weakening `{ C with rigidTypeVars := typeArgs }`
-  -- by `C.rigidTypeVars ⊆ typeArgs` yields the body typed at
-  -- `{ { C with rigidTypeVars := typeArgs } with rigidTypeVars := C.rigidTypeVars }`,
-  -- which is `C` (structure eta: all fields restored to `C`'s).
-  have hsub : C.rigidTypeVars ⊆
-      ({ C with rigidTypeVars := proc.header.typeArgs } : LContext CoreLParams).rigidTypeVars :=
-    hCrigid
-  have hw := ProcBodyHasTypeA_weaken_rigid (rv := C.rigidTypeVars) hbase.bodyTyped hsub
-  have hCeq : ({ ({ C with rigidTypeVars := proc.header.typeArgs } : LContext CoreLParams)
-      with rigidTypeVars := C.rigidTypeVars } : LContext CoreLParams) = C := rfl
-  rw [hCeq] at hw
-  exact hw
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := maxStmtSeqLen))) :
+    ProcWellTyped P C [] proc :=
+  genProcedure_sound P octx procs hProcs hLocalTypes size len C Γ hWK pctx hops proc hproc
 
 -- ── Completeness ─────────────────────────────────────────────────────────
 
@@ -1091,12 +875,9 @@ set_option maxHeartbeats 800000 in
     generator into three blocks. The inputs are the shared in-out block and then the input-only block, and the
     outputs are the shared block and then the output-only block. The shared block comes first in both. The keys
     of the input-only block are disjoint from the keys of the shared block, and the keys of the output-only
-    block are disjoint from the keys of the other two. The procedure must also
-    (a) have the default
-    values for each field that the generator does not vary (`noFilter := false`, a
-    *structured* body) and (b) whose name, type arguments, each of the three
-    signature blocks, contract, and body are individually reachable by the
-    corresponding sub-generators, is in `genProcedure`'s support.
+    block are disjoint from the keys of the other two. If the procedure also has a *structured*
+    body, and the sub-generators reach its name, type arguments, three signature blocks, lemma
+    names, contract and body, it is in `genProcedure`'s support.
 
     The three-block disjointness hypotheses (`hIdisjM`, `hOdisjMI`) are the
     completeness-only side-conditions witnessing that the generator's
@@ -1115,15 +896,20 @@ set_option maxHeartbeats 800000 in
       than `size` in number, and that `genIdentName` reaches each of them.
     - The premises for each of the three blocks say that its keys are distinct, that its length is inside the
       bound, that `genIdentName` reaches each of its key names, and that `genLMonoTy` reaches each of its values.
+    - `hFormalsNotFn` says that no formal parameter is named after a function of `C`, as the
+      procedure rule asks.
     - The premises for each contract clause say that its attribute field and its metadata field hold their
-      default values, that `genNameList` reaches its list of labels, and that `genLExpr … .bool` reaches its
-      expression.
+      default values, that `genNameList` reaches its list of labels, and that `genLExpr … .bool`
+      reaches its expression.
     - `hBodyReach` says that the statement list of the body is in the support of `genStmtChain`, at exactly the
       seed that the generator uses, which is the three blocks and then the old variables, with the keys of the
       inputs and of the old variables as the immutable names, at an empty context of the labels and of the free
       variables,
-      type-variable list `typeArgs`, and the rigidified ambient `C`. (A caller can
+      type-variable list `typeArgs`, and the ambient `C` with `typeArgs` added to its rigid type
+      variables. (A caller can
       obtain this membership from `spec_complete` applied to each body statement.)
+    - `hLemmasLen` and `hLemmasReach` say that the lemma names are not more than `size` in number
+      and that `genIdentName` reaches each of them.
 
     The block name-length / reachability conditions are stated concretely via
     `mem_support_genNameList_iff`. -/
@@ -1132,8 +918,7 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
     (proc : Procedure)
     (M I O : ListMap (Identifier Unit) LMonoTy)
     (bodyss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
-    -- the generator does not vary these fields, so they must be at defaults:
-    (hNoFilter : proc.header.noFilter = false)
+    -- the generator makes only a structured body:
     (hBodyEq : proc.body = .structured bodyss)
     -- three-block decomposition (shared block `M` leading both):
     (hInputsEq : proc.header.inputs = M ++ I)
@@ -1163,6 +948,9 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
     (hONamesReach : ∀ s ∈ O.keys.map (·.name), s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hOTyReach : ∀ ty ∈ O.values,
       ty ∈ SPMF.support (genLMonoTy (G := SPMF) proc.header.typeArgs size))
+    -- no formal parameter is named after a function:
+    (hFormalsNotFn : ∀ id ∈ proc.header.inputs.keys ++ proc.header.outputs.keys,
+      id.name ∉ C.functions)
     -- preconditions:
     (hPreLabels : proc.spec.preconditions.keys ∈ SPMF.support (genNameList (G := SPMF) size))
     (hPreAttr : ∀ c ∈ proc.spec.preconditions.values, c.attr = .Default)
@@ -1180,13 +968,30 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
     (hBodyReach : (bodyss, C', ctx') ∈ SPMF.support
       (genStmtChain (G := SPMF) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
-        { C with rigidTypeVars := proc.header.typeArgs }
-        (M ++ I ++ (M ++ O) ++ oldVars M) [] size len maxStmtSeqLen)) :
+        { C with rigidTypeVars := C.rigidTypeVars ++ proc.header.typeArgs }
+        (M ++ I ++ (M ++ O) ++ oldVars M) [] size len maxStmtSeqLen))
+    (hLemmasLen : proc.header.lemmas.length ≤ size)
+    (hLemmasReach : ∀ s ∈ proc.header.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF))) :
     proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len (maxStmtSeqLen := maxStmtSeqLen)) := by
-  simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff]
+  simp only [genProcedure, genProcedureWith, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM
   have hO_eq : disjointInputs O (M ++ I) = O := disjointInputs_eq_self O (M ++ I) hOdisjMI
+  -- No block has a key named after a function, so `avoidFunctionNames` keeps each of them.
+  have hFormals : ∀ id ∈ ListMap.keys (M ++ I) ++ ListMap.keys (M ++ O), id.name ∉ C.functions := by
+    rw [← hInputsEq, ← hOutputsEq]; exact hFormalsNotFn
+  have hMeq : avoidFunctionNames C M = M := by
+    refine avoidFunctionNames_eq_self C M (fun k hk => hFormals k ?_)
+    rw [ListMap_keys_append]
+    exact List.mem_append_left _ (List.mem_append_left _ hk)
+  have hIeq : avoidFunctionNames C I = I := by
+    refine avoidFunctionNames_eq_self C I (fun k hk => hFormals k ?_)
+    rw [ListMap_keys_append]
+    exact List.mem_append_left _ (List.mem_append_right _ hk)
+  have hOeq : avoidFunctionNames C O = O := by
+    refine avoidFunctionNames_eq_self C O (fun k hk => hFormals k ?_)
+    rw [ListMap_keys_append, ListMap_keys_append]
+    exact List.mem_append_right _ (List.mem_append_right _ hk)
   -- Witnesses: name, type args, the three blocks `M`/`I`/`O`, contracts, body triple.
   refine ⟨proc.header.name.name, hName,
           proc.header.typeArgs, ?_,
@@ -1195,33 +1000,35 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
           O, ?_,
           proc.spec.preconditions, ?_,
           proc.spec.postconditions, ?_,
-          (bodyss, C', ctx'), ?_, ?_⟩
+          (bodyss, C', ctx'), ?_,
+          proc.header.lemmas, mem_support_genNameList_iff size _ |>.mpr ⟨hLemmasLen, hLemmasReach⟩,
+          ?_⟩
   · exact genTypeArgs_complete size proc.header.typeArgs hTyArgsNodup
       (mem_support_genNameList_iff size _ |>.mpr ⟨hTyArgsLen, hTyArgsReach⟩)
-  · exact genInputs_complete proc.header.typeArgs size M hMNodup
+  · exact genInputs_complete _ size M hMNodup
       (mem_support_genNameList_iff size _ |>.mpr ⟨hMNamesLen, hMNamesReach⟩) hMTyReach
-  · exact genInputs_complete proc.header.typeArgs size I hINodup
+  · exact genInputs_complete _ size I hINodup
       (mem_support_genNameList_iff size _ |>.mpr ⟨hINamesLen, hINamesReach⟩) hITyReach
-  · exact genInputs_complete proc.header.typeArgs size O hONodup
+  · exact genInputs_complete _ size O hONodup
       (mem_support_genNameList_iff size _ |>.mpr ⟨hONamesLen, hONamesReach⟩) hOTyReach
-  · rw [hI_eq]
+  · rw [hMeq, hIeq, hI_eq]
     exact genChecks_complete (sigFctx (M ++ I))
       octx proc.header.typeArgs size proc.spec.preconditions
       hPreLabels hPreAttr hPreMd hPreExpr
-  · rw [hI_eq, hO_eq]
+  · rw [hMeq, hIeq, hI_eq, hOeq, hO_eq]
     exact genChecks_complete (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M))
       octx proc.header.typeArgs size proc.spec.postconditions
       hPostLabels hPostAttr hPostMd hPostExpr
-  · -- body reachable: the generator's filtered blocks equal `I`/`O`; `hBodyReach`
+  · -- body reachable: the generator's filtered blocks equal `M`/`I`/`O`; `hBodyReach`
     -- is the body's `genStmtChain` support membership directly.
-    rw [hI_eq, hO_eq]
+    rw [hMeq, hIeq, hI_eq, hOeq, hO_eq]
     exact hBodyReach
   · -- the reassembled record equals `proc`.
-    rw [hI_eq, hO_eq]
-    obtain ⟨⟨pname, ptyArgs, pinputs, poutputs, pnoFilter⟩, ⟨ppre, ppost⟩, pbody⟩ := proc
+    rw [hMeq, hIeq, hI_eq, hOeq, hO_eq]
+    obtain ⟨⟨pname, ptyArgs, pinputs, poutputs, plemmas⟩, ⟨ppre, ppost⟩, pbody⟩ := proc
     obtain ⟨nm, nmeta⟩ := pname
-    simp only at hInputsEq hOutputsEq hNoFilter hBodyEq ⊢
-    subst hNoFilter hBodyEq hInputsEq hOutputsEq
+    simp only at hInputsEq hOutputsEq hBodyEq ⊢
+    subst hBodyEq hInputsEq hOutputsEq
     rfl
 
 end StrataGenerators.Procedure

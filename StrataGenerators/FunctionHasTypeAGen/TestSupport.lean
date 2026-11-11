@@ -1,4 +1,5 @@
 import StrataGenerators.FunctionHasTypeAGen.Core
+import StrataGenerators.StmtHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.Languages.Core.FunctionType
@@ -76,23 +77,17 @@ def fctxToTyMap (fctx : FVarCtx) : Map (Identifier Unit) LMonoTy :=
   fctx.map (fun (name, ty) => (⟨name, ()⟩, ty))
 
 /-- **The property under test**, for a whole function. Each free variable in the body and in the
-    measure has an annotation that agrees with `tyMap`. The body and the measure are optional, and a
-    function that has neither is a vacuous pass. -/
+    measure has an annotation that agrees with the formals of the function and, for any other name,
+    with `tyMap`. The body and the measure are optional, and a function that has neither is a
+    vacuous pass. -/
 def functionFvarsAnnotatedBy (tyMap : Map (Identifier Unit) LMonoTy) (func : Function) : Bool :=
-  (match func.body with | some b => fvarsAnnotatedBy tyMap b | none => true) &&
-  (match func.measure with | some m => fvarsAnnotatedBy tyMap m | none => true)
+  let scope : Map (Identifier Unit) LMonoTy := Map.ofList func.inputs.toList ++ tyMap
+  (match func.body with | some b => fvarsAnnotatedBy scope b | none => true) &&
+  (match func.measure with | some m => fvarsAnnotatedBy scope m | none => true)
 
 -- The output for a function goes through the `Core.formatProgram` of Strata. `formatFunc` and
 -- `formatFuncAsProgram` in `StrataGenerators.FunctionHasTypeAGen.Roundtrip` call it, so a report
 -- shows the output of the real formatter.
-
--- ── The wrappers around the generator ─────────────────────────────────────
-
-/-- Makes one well-typed `Function` in `IO`, with a direct call of `genFunction`. The default values
-    follow the other wrappers of the harness: `defaultFCtx`, `coreMonoOps` and the depth 3. -/
-def genFunctionIO (fctx : FVarCtx := defaultFCtx) (octx : OpCtx := coreMonoOps)
-    (depth : Nat := 3) : IO Function :=
-  genFunction (G := IO) fctx octx depth
 
 -- ── The known types and the context for `Function.typeCheck` ──────────────
 
@@ -113,6 +108,16 @@ def funcCheckContext : Lambda.LContext CoreLParams :=
   { Lambda.LContext.default with
     functions := coreFactory,
     knownTypes := funcCheckKnownTypes }
+
+-- ── The wrappers around the generator ─────────────────────────────────────
+
+/-- Makes one well-typed `Function` in `IO`, with a direct call of `genFunction`. The default values
+    follow the other wrappers of the harness: `defaultFCtx`, `coreMonoOps` and the depth 3. No input
+    is named after a function of `funcCheckContext`. -/
+def genFunctionIO (fctx : FVarCtx := defaultFCtx) (octx : OpCtx := coreMonoOps)
+    (depth : Nat := 3) : IO Function :=
+  genFunction (G := IO) fctx octx depth []
+    (fun s => (StrataGenerators.Stmt.functionNames funcCheckContext).contains s)
 
 -- ── The checks for a function, which both drivers share ───────────────────
 

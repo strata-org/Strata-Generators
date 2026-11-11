@@ -31,8 +31,8 @@ The oracle finds an error in about half of the programs from the `Arbitrary GenP
 instance, which draws 2 to 5 declarations. The rate is higher at 6 declarations, because each
 declaration is another chance to reach a construct that the printer cannot write. Compare a
 run against the rate for the number of declarations that the run drew. The errors come from
-seven different sites: `lmonoTyToCoreType`, `lconstToExpr`, `handleUnaryOps`,
-`handleBitvecBinaryOps`, `lopToExpr`, `extractTriggerPatterns` and `funcDeclToStatement`.
+six different sites: `lmonoTyToCoreType`, `lconstToExpr`, `handleUnaryOps`,
+`handleBitvecBinaryOps`, `lopToExpr` and `extractTriggerPatterns`.
 
 Almost each program with an error also fails to parse again, so the round-trip property
 already reports those programs, but it cannot say why. The few programs that parse again are
@@ -97,12 +97,35 @@ def printedText (s : String) : String :=
     must not score the rejection as a defect of Strata. -/
 def syntheticOps : List String := ["id", "churchTrue", "churchFalse"]
 
+/-- Each conversion error in a list of printed lines, as its first line and its whole message.
+    A long type wraps the message onto more lines, and the line that starts with `Context:` ends
+    the message. -/
+def errorMessages : List String → List (String × String)
+  | [] => []
+  | line :: rest =>
+    let more := rest.takeWhile fun l =>
+      !l.startsWith errorLinePrefix && !l.startsWith "Context:"
+    let others := errorMessages rest
+    if line.startsWith errorLinePrefix then
+      (line, " ".intercalate (line :: more.map (·.trimAscii.toString))) :: others
+    else others
+
+/-- The type constructors that the printer cannot write. -/
+def knownGapTypes : List String := ["Set", "Triggers", "TriggerGroup"]
+
+/-- Whether an error message is about a type in `knownGapTypes` or a `Set.` operator. -/
+def isKnownGapError (msg : String) : Bool :=
+  knownGapTypes.any (fun n =>
+      (msg.splitOn s!"unknown type: Lambda.LMonoTy.tcons \"{n}\" ").length > 1)
+    || ((msg.splitOn ": ").getLast?.getD "").startsWith "Set."
+
 /-- The lines for a conversion error in a printed program. The list holds no line that a
-    synthetic operator of this package caused. -/
+    synthetic operator of this package caused, and no line about a known gap in the printer. -/
 def strataErrorLines (s : String) : List String :=
-  (s.splitOn "\n").filter fun line =>
-    line.startsWith errorLinePrefix
-      && !(syntheticOps.any fun op => line.endsWith s!": {op}")
+  ((errorMessages (s.splitOn "\n")).filter fun (line, msg) =>
+    !(syntheticOps.any fun op => line.endsWith s!": {op}")
+      -- `Set`, `Triggers` and `TriggerGroup` are known gaps in the printer.
+      && !isKnownGapError msg).map (·.1)
 
 /-- The function of the printer that an error line names. A line has the form
     `Unsupported construct in {site}: {detail}`, and `ASTToCSTError.toString` writes it. A report

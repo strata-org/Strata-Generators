@@ -1,5 +1,7 @@
 import StrataGenerators.SizeDistributionStmt
 import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.RecFuncBlockSupport
+import StrataGenerators.ProgramGen.Sound
 import StrataGenerators.FunctionHasTypeAGen
 
 /-!
@@ -12,7 +14,7 @@ per-declaration size knobs. This module proves size results about the *program* 
   generated program holds a procedure whose body has a top-level `block`, `ite` or `loop`
   (probability exactly `0`, for every `numDecls`). With `procSize ≥ 1` and `procLen ≥ 1`, a program
   of `m + 1` declarations holds one with a top-level `loop` with probability at least
-  `1/14 · procBound · (1/28)^m > 0`.
+  `1/15 · procBound · (1/30)^m > 0`.
 
 `prob_genProgram_ge` is the transfer lemma: an event that the first declaration step reaches with
 probability `c` is reached by a program of `m + 1` declarations with probability
@@ -34,12 +36,24 @@ theorem prob_dtFreshName_univ (reserved : List String) :
   refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge prob_genIdentName_univ fun s => ?_)
   split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
 
+theorem prob_genDeclName_univ (reserved : List String) :
+    nameMass ≤ prob (genDeclName (G := SPMF) reserved) Set.univ := by
+  unfold genDeclName
+  refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (prob_dtFreshName_univ _)
+    fun _ => (prob_pure_of_mem (Set.mem_univ _)).ge)
+
+theorem prob_genDeclTypeName_univ (reserved : List String) :
+    nameMass ≤ prob (genDeclTypeName (G := SPMF) reserved) Set.univ := by
+  unfold genDeclTypeName
+  refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (prob_genDeclName_univ _)
+    fun _ => (prob_pure_of_mem (Set.mem_univ _)).ge)
+
 theorem prob_genDeclAbstract_univ (s : GenState) (b : Bounds) :
     nameMass ≤ prob (genDeclAbstract (G := SPMF) s b) Set.univ := by
   rw [nameMass]
   unfold genDeclAbstract genAbstractType
   refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge ?_ fun x => ?_)
-  · refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (prob_dtFreshName_univ _)
+  · refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge (prob_genDeclTypeName_univ _)
       fun _ => ?_)
     refine le_trans (le_of_eq (one_mul _).symm) (prob_bind_univ_ge ?_ fun _ =>
       (prob_pure_of_mem (Set.mem_univ _)).ge)
@@ -110,7 +124,7 @@ theorem prob_listOfMaxLength_nil {α} (m : Nat) (g : SPMF α) :
     (le_trans (mul_le_mul' (prob_choose_zero m (Nat.zero_le _)) le_rfl)
       (prob_bind_ge _ fun x hx => ?_))
   obtain ⟨⟨v, hv⟩⟩ := x
-  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [Set.mem_ofPred_eq] at hx; subst hx
   simp only [LawfulMonad.pure_bind, vectorOf, List.replicate, List.foldr]
   exact (prob_pure_of_mem (Set.mem_singleton _)).ge
 
@@ -118,8 +132,8 @@ theorem prob_genNameList_nil (d : Nat) :
     1 / ((d : ℝ≥0∞) + 1) ≤ prob (genNameList (G := SPMF) d) {[]} := by
   unfold genNameList; exact prob_listOfMaxLength_nil _ _
 
-theorem prob_genInputs_nil (tv : List TyIdentifier) (d : Nat) :
-    1 / ((d : ℝ≥0∞) + 1) ≤ prob (genInputs (G := SPMF) tv d) {[]} := by
+theorem prob_genInputs_nil (gt : SPMF LMonoTy) (d : Nat) :
+    1 / ((d : ℝ≥0∞) + 1) ≤ prob (genInputs (G := SPMF) gt d) {[]} := by
   unfold genInputs genIdents
   rw [map_eq_pure_bind, LawfulMonad.bind_assoc]
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' (prob_genNameList_nil d) le_rfl)
@@ -148,39 +162,42 @@ theorem prob_genChecks_univ (fc : FVarCtx) (octx : OpCtx) (tv : List TyIdentifie
 def ProcTop (P : Statement → Prop) (p : Procedure) : Prop :=
   ∃ ss, p.body = .structured ss ∧ ∃ st ∈ ss, P st
 
-/-- **A procedure body inherits a top-level event from its first statement.** All six list-valued
-header draws are taken at their empty value (probability at least `1/(size+1)` each), and the
-remaining `len` body statements contribute their mass. `B` is any lower bound on the first
-statement's event that holds uniformly in the scope. -/
+/-- **A procedure body inherits a top-level event from its first statement.** The six list-valued
+header draws before the body are taken at their empty value (probability at least `1/(size+1)`
+each), the remaining `len` body statements contribute their mass, and the `lemmas` list after the
+body pays one more `1/(size+1)` for its mass. `B` is any lower bound on the first statement's event
+that holds uniformly in the scope. -/
 theorem prob_genProcedure_top_ge (P : Statement → Prop) (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) (pctx : PolyOpCtx)
     (k : Nat) (B : ℝ≥0∞)
     (hB : ∀ imm C' ctx,
       B ≤ prob (genStmt (G := SPMF) octx [] imm procs [] C' ctx pctx size k) (TopLevelEvent P)) :
-    nameMass * ((1 / ((size : ℝ≥0∞) + 1)) ^ 6 * (B * stmtMassBound k size ^ len))
+    nameMass * ((1 / ((size : ℝ≥0∞) + 1)) ^ 7 * (B * stmtMassBound k size ^ len))
       ≤ prob (genProcedure (G := SPMF) octx procs C Γ size (len + 1) pctx k)
           {p | ProcTop P p} := by
   rw [nameMass]
   set c : ℝ≥0∞ := 1 / ((size : ℝ≥0∞) + 1)
-  have hre : c ^ 6 * (B * stmtMassBound k size ^ len) =
-      c * (c * (c * (c * (c * (c * (B * stmtMassBound k size ^ len)))))) := by ring
+  have hre : c ^ 7 * (B * stmtMassBound k size ^ len) =
+      c * (c * (c * (c * (c * (c * (B * stmtMassBound k size ^ len * c)))))) := by ring
   rw [hre]
-  unfold genProcedure
+  unfold genProcedure genProcedureWith
   refine le_trans (mul_le_mul' prob_genIdentName_univ le_rfl) (prob_bind_ge Set.univ fun _ _ => ?_)
   refine le_trans (mul_le_mul' (prob_genTypeArgs_nil size) le_rfl) (prob_bind_ge {[]} fun ta hta => ?_)
   rw [Set.mem_singleton_iff.mp hta]
-  refine le_trans (mul_le_mul' (prob_genInputs_nil [] size) le_rfl) (prob_bind_ge {[]} fun _ _ => ?_)
-  refine le_trans (mul_le_mul' (prob_genInputs_nil [] size) le_rfl) (prob_bind_ge {[]} fun _ _ => ?_)
-  refine le_trans (mul_le_mul' (prob_genInputs_nil [] size) le_rfl) (prob_bind_ge {[]} fun _ _ => ?_)
+  refine le_trans (mul_le_mul' (prob_genInputs_nil _ size) le_rfl) (prob_bind_ge {[]} fun _ _ => ?_)
+  refine le_trans (mul_le_mul' (prob_genInputs_nil _ size) le_rfl) (prob_bind_ge {[]} fun _ _ => ?_)
+  refine le_trans (mul_le_mul' (prob_genInputs_nil _ size) le_rfl) (prob_bind_ge {[]} fun _ _ => ?_)
   refine le_trans (mul_le_mul' (prob_genChecks_univ _ _ _ _ _) le_rfl)
     (prob_bind_ge Set.univ fun _ _ => ?_)
   refine le_trans (mul_le_mul' (prob_genChecks_univ _ _ _ _ _) le_rfl)
     (prob_bind_ge Set.univ fun _ _ => ?_)
-  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
+  refine le_trans (mul_le_mul'
     (le_trans (mul_le_mul' (hB _ _ _) le_rfl)
       (prob_genStmtChain_top_ge octx [] pctx P _ procs [] _ _ size len k)) le_rfl)
-    (prob_bind_ge (TopLevelEventChain P) fun t ht => ?_))
+    (prob_bind_ge (TopLevelEventChain P) fun t ht => ?_)
   obtain ⟨body, _, _⟩ := t
+  refine le_trans (le_trans (prob_genNameList_nil size) (prob_mono (Set.subset_univ _)))
+    (le_trans (le_of_eq (mul_one _).symm) (prob_bind_ge Set.univ fun _ _ => ?_))
   refine (prob_pure_of_mem ?_).ge
   exact ⟨body, rfl, ht⟩
 
@@ -188,7 +205,7 @@ theorem prob_genProcedure_top_ge (P : Statement → Prop) (octx : OpCtx) (procs 
 
 /-- **The program-level transfer.** Any declaration event that the first declaration step reaches
 with probability at least `c` is reached by a program of `m + 1` declarations with probability at
-least `c · (1/28)^m`; the second factor pays for the mass of the other `m` steps. -/
+least `c · (1/30)^m`; the second factor pays for the mass of the other `m` steps. -/
 theorem prob_genProgram_ge (Q : Decl → Prop) (m : Nat) (b : Bounds) (c : ℝ≥0∞)
     (hstep : c ≤ prob (genDeclStep (G := SPMF) initState b) {r | ∃ d ∈ r.1, Q d}) :
     c * stepMass ^ m ≤ prob (genProgram (G := SPMF) (m + 1) b) {P | ∃ d ∈ P.decls, Q d} := by
@@ -215,14 +232,14 @@ theorem prob_genDeclProcedure_ge (P : Statement → Prop) (s : GenState) (b : Bo
     (hlen : b.procLen = len + 1) (B : ℝ≥0∞)
     (hB : ∀ imm C' ctx, B ≤ prob (genStmt (G := SPMF) s.octx [] imm s.procs [] C' ctx s.derivedPctx
       b.procSize b.maxStmtSeqLen) (TopLevelEvent P)) :
-    1 / 2 * ((1 / ((b.procSize : ℝ≥0∞) + 1)) ^ 6 *
+    1 / 2 * ((1 / ((b.procSize : ℝ≥0∞) + 1)) ^ 7 *
         (B * stmtMassBound b.maxStmtSeqLen b.procSize ^ len)) * (1 / 2)
       ≤ prob (genDeclProcedure (G := SPMF) s b) {r | ∃ d ∈ r.1, IsProcWith P d} := by
   unfold genDeclProcedure
   rw [hlen]
   refine le_trans (mul_le_mul' (prob_genProcedure_top_ge P _ _ _ _ _ len _ _ B hB) le_rfl)
     (prob_bind_ge {p | ProcTop P p} fun p hp => ?_)
-  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' (prob_dtFreshName_univ _) le_rfl)
+  refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' (prob_genDeclName_univ _) le_rfl)
     (prob_bind_ge Set.univ fun _ _ => ?_))
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, hp⟩
@@ -230,11 +247,11 @@ theorem prob_genDeclProcedure_ge (P : Statement → Prop) (s : GenState) (b : Bo
 /-- The bound for a procedure of size `size`, `len + 1` statements and body-length cap `k`, whose
 first statement has probability at least `B`, with its fresh name. -/
 noncomputable def procBound (size len k : Nat) (B : ℝ≥0∞) : ℝ≥0∞ :=
-  nameMass * ((1 / ((size : ℝ≥0∞) + 1)) ^ 6 * (B * stmtMassBound k size ^ len)) * nameMass
+  nameMass * ((1 / ((size : ℝ≥0∞) + 1)) ^ 7 * (B * stmtMassBound k size ^ len)) * nameMass
 
 /-- **Whole programs, procedure bodies with loops.** With `procSize ≥ 1` and `procLen ≥ 1`, a
 program of `m + 1` declarations holds a procedure whose body has a top-level `loop` with
-probability at least `1/14 · procBound · (1/28)^m`. -/
+probability at least `1/15 · procBound · (1/30)^m`. -/
 theorem prob_genProgram_proc_loop (m n len : Nat) (b : Bounds) (hs : b.procSize = n + 1)
     (hl : b.procLen = len + 1) :
     stepShare * procBound (n + 1) len b.maxStmtSeqLen (loopAtSize b.maxStmtSeqLen) * stepMass ^ m ≤
@@ -259,11 +276,11 @@ theorem genProcedure_zero_flat (octx : OpCtx) (procs : ProcSigCtx) (C : LContext
     IsSoundFor (genProcedure (G := SPMF) octx procs C Γ 0 len pctx k)
       (fun p => ¬ ProcTop IsNesting p) := by
   rw [IsSoundFor.iff_obs]
-  unfold genProcedure
+  unfold genProcedure genProcedureWith
   walk [(sound_true genIdentName).obs, (sound_true (genTypeArgs _)).obs,
     (sound_true (genInputs _ _)).obs, (sound_true (genChecks _ _ _ _ _)).obs,
-    (genStmtChain_zero_flat octx _ pctx _ procs _ _ k _ _).obs]
-  rename_i hb
+    (genStmtChain_zero_flat octx _ pctx _ procs _ _ k _ _).obs, (sound_true (genNameList _)).obs]
+  rename_i hb _ _
   rintro ⟨ss, hss, st, hst, hn⟩
   injection hss with h
   subst h
@@ -298,25 +315,40 @@ theorem genDeclStep_zero_flat (s : GenState) (b : Bounds) (hs : b.procSize = 0) 
   have hp : IsSoundFor (genProcedure (G := SPMF) s.octx s.procs s.C s.Γ b.procSize b.procLen
       s.derivedPctx b.maxStmtSeqLen) (fun p => ¬ ProcTop IsNesting p) := by
     rw [hs]; exact genProcedure_zero_flat _ _ _ _ _ _ _
+  have hR : IsSoundFor (genDeclRecFuncBlock (G := SPMF) s b) (fun r => NoNestingProc r.1) := by
+    rintro ⟨ds, s'⟩ hr
+    rcases genDeclRecFuncBlock_support hr with ⟨rfl, -⟩ | ⟨_, _, _, _, _, _, _, _, _, _, _, _, rfl, -⟩
+    · simp [NoNestingProc]
+    · simp [NoNestingProc, IsProcWith]
   rw [IsSoundFor.iff_obs]
-  unfold genDeclStep genDeclAbstract genAbstractType genDeclAlias genAlias genDeclAxiom genAxiom
-    genDeclDistinct genDistinctAssertion genDeclDatatype genDeclFunction genDeclProcedure
-  walk [(sound_true (DatatypeGen.genFreshName _)).obs, (sound_true (DatatypeGen.genFreshNames _ _)).obs,
-    (sound_true (chooseNat _ _ _)).obs, (sound_true (genNonRecursiveArgTy _ _ _ _)).obs,
-    (sound_true (genLExpr _ _ _ _ _ _ _ _ _)).obs, (sound_true (genFunction _ _ _ _)).obs,
-    (sound_true (DatatypeGen.genMutuallyRecursiveDatatypes _ _ _ _ _ _ _ _ _)).obs, hp.obs]
+  unfold genDeclStep genDeclAbstract genAbstractType genDeclAlias genDeclAxiom genAxiom
+    genDeclDistinct genDeclDatatype genDeclFunction genDeclProcedure
+  simp only [genAlias, mkAliasDecl, bind_assoc, pure_bind]
+  walk [(sound_true (genDeclTypeName (G := SPMF) s.reserved)).obs,
+    (sound_true (chooseNat _ _ _)).obs, (sound_true (genLExpr _ _ _ _ _ _ _ _ _)).obs,
+    (sound_true (DatatypeGen.genFreshName _)).obs,
+    fun r k => (sound_true (DatatypeGen.genFreshNames (G := SPMF) r k)).obs,
+    fun tp => (sound_true (genNonRecursiveArgTy (G := SPMF) s.baseTypes s.tyCons tp b.tySize)).obs,
+    (sound_true (genDistinctAssertion (G := SPMF) s.baseTypes s.tyCons s.reserved
+      b.maxDistinctVars b.tySize)).obs,
+    (sound_true (DatatypeGen.genMutuallyRecursiveDatatypes (G := SPMF) s.baseTypes (s.tyCons ++ s.dtCons)
+      b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
+      b.maxArgs b.maxDatatypeSize s.reserved)).obs,
+    (sound_true (genFunction (G := SPMF) [] s.octx b.funcDepth s.derivedPctx
+      (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons)).obs,
+    (sound_true (genDeclName (G := SPMF) s.reserved)).obs,
+    hp.obs, hR.obs]
   all_goals first
-    | (simp [NoNestingProc, IsProcWith, mkAbstractTypeDecl, mkAliasDecl, mkAxiomDecl,
-        mkDistinctDecl]; done)
+    | assumption
+    | (simp [NoNestingProc, IsProcWith, mkAbstractTypeDecl, mkAxiomDecl]; done)
     | (rename_i heq
        intro d hd
        rcases List.mem_append.mp hd with hd | hd
        · exact addConstants_noNestingProc _ _ _ _ _ heq d hd
        · simp only [List.mem_singleton] at hd; subst hd; simp [mkDistinctDecl, IsProcWith])
-    | (rename_i hproc _ _
-       intro d hd
+    | (intro d hd
        simp only [List.mem_singleton] at hd; subst hd
-       exact hproc)
+       simpa [IsProcWith, ProcTop] using ‹¬ ProcTop IsNesting _›)
 
 theorem genDeclsFold_zero_flat (b : Bounds) (hs : b.procSize = 0) :
     ∀ (m : Nat) (s : GenState), IsSoundFor (genDeclsFold (G := SPMF) s b m)
@@ -340,7 +372,7 @@ theorem genDeclsFold_zero_flat (b : Bounds) (hs : b.procSize = 0) :
 /-- **The program-level statement threshold.** With `procSize = 0` no generated program holds a
 procedure whose body has a top-level `block`, `ite` or `loop`; with `procSize ≥ 1` (and a body of
 at least one statement) a program of `m + 1` declarations holds one with a top-level `loop` with
-probability at least `1/14 · procBound · (1/28)^m > 0`. -/
+probability at least `1/15 · procBound · (1/30)^m > 0`. -/
 theorem genProgram_nesting_threshold (b : Bounds) :
     (b.procSize = 0 → ∀ numDecls,
       prob (genProgram (G := SPMF) numDecls b) {P | ∃ d ∈ P.decls, IsProcWith IsNesting d} = 0) ∧

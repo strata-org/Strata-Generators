@@ -93,13 +93,6 @@ theorem genExitStmt_flat :
     obtain ⟨_, _, rfl⟩ := hr
     simp [HasNesting, IsNesting]
 
-theorem genFuncDeclStmt_flat :
-    IsSoundFor (genFuncDeclStmt (G := SPMF) octx C ctx d pctx) (fun r => ¬ HasNesting r) := by
-  intro r hr
-  simp only [genFuncDeclStmt, mem_support_bind_iff, mem_support_pure_iff] at hr
-  obtain ⟨_, _, rfl⟩ := hr
-  simp [HasNesting, IsNesting]
-
 theorem genTypeDeclStmt_flat :
     IsSoundFor (genTypeDeclStmt (G := SPMF) C ctx d) (fun r => ¬ HasNesting r) := by
   intro r hr
@@ -119,14 +112,18 @@ theorem genCallStmt_flat :
     simp only [genCallStmt, mem_support_bind_iff] at hr
     obtain ⟨_, _, _, _, hr⟩ := hr
     split at hr
-    · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-      obtain ⟨_, _, _, _, rfl⟩ := hr
-      simp only [HasNesting, List.mem_append, List.mem_singleton, not_exists, not_and]
-      rintro s (hs | rfl)
-      · simp only [StrataGenerators.Stmt.initChain, List.mem_map] at hs
-        obtain ⟨_, _, rfl⟩ := hs
-        simp [IsNesting]
-      · simp [IsNesting]
+    · simp only [mem_support_bind_iff] at hr
+      obtain ⟨_, _, hr⟩ := hr
+      split at hr
+      · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
+        obtain ⟨_, _, rfl⟩ := hr
+        simp only [HasNesting, List.mem_append, List.mem_singleton, not_exists, not_and]
+        rintro s (hs | rfl)
+        · simp only [StrataGenerators.Stmt.initChain, List.mem_map] at hs
+          obtain ⟨_, _, rfl⟩ := hs
+          simp [IsNesting]
+        · simp [IsNesting]
+      · simp only [mem_support_bot_iff] at hr
     · simp only [mem_support_bot_iff] at hr
 
 end leaves
@@ -138,7 +135,7 @@ theorem genStmt_zero_flat (imm : List (Identifier Unit)) (procs : ProcSigCtx)
       (fun r => ¬ HasNesting r) := by
   rw [IsSoundFor.iff_obs, genStmt]
   walk [(genCmdStmt_flat octx tvars pctx _ _ _ _).obs, (genExitStmt_flat _ _ _).obs,
-    (genFuncDeclStmt_flat octx pctx _ _ _).obs, (genTypeDeclStmt_flat _ _ _).obs,
+    (genTypeDeclStmt_flat _ _ _).obs,
     (genCallStmt_flat octx tvars pctx _ _ _ _ _).obs]
   all_goals assumption
 
@@ -246,18 +243,18 @@ theorem prob_genStmt_ite_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
           (TopLevelEvent IsIte) := by
   rw [iteAtSize_eq, genStmt]
-  refine le_trans ?_ (prob_frequency_ge _ _ 7 (by simp) _)
+  refine le_trans ?_ (prob_frequency_ge _ _ 6 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
     List.sum_cons, List.sum_nil]
   refine mul_le_mul' (le_of_eq (by norm_num)) ?_
   have hc := prob_choose_zero k (Nat.zero_le _)
   refine le_trans (mul_le_mul' hc le_rfl) (prob_bind_ge _ fun x hx => ?_)
   obtain ⟨⟨v, hv⟩⟩ := x
-  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [Set.mem_ofPred_eq] at hx; subst hx
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' hc le_rfl)
     (prob_bind_ge _ fun y hy => ?_))
   obtain ⟨⟨w, hw⟩⟩ := y
-  simp only [Set.mem_setOf_eq] at hy; subst hy
+  simp only [Set.mem_ofPred_eq] at hy; subst hy
   simp only [genStmtChain_zero, LawfulMonad.pure_bind]
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, trivial⟩
@@ -301,7 +298,7 @@ theorem prob_listOfMaxLength_univ {α} (m : Nat) (g : SPMF α) :
     (le_trans (mul_le_mul' (prob_choose_zero m (Nat.zero_le _)) le_rfl)
       (prob_bind_ge _ fun x hx => ?_))
   obtain ⟨⟨v, hv⟩⟩ := x
-  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [Set.mem_ofPred_eq] at hx; subst hx
   simp only [LawfulMonad.pure_bind, vectorOf, List.replicate, List.foldr]
   exact (prob_pure_of_mem (Set.mem_univ _)).ge
 
@@ -317,7 +314,7 @@ theorem prob_genStmt_block_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
           (TopLevelEvent IsBlock) := by
   rw [blockAtSize_eq, genStmt]
-  refine le_trans ?_ (prob_frequency_ge _ _ 5 (by simp) _)
+  refine le_trans ?_ (prob_frequency_ge _ _ 4 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
     List.sum_cons, List.sum_nil]
   refine mul_le_mul' (le_of_eq (by norm_num)) ?_
@@ -327,7 +324,7 @@ theorem prob_genStmt_block_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' hc le_rfl)
     (prob_bind_ge _ fun x hx => ?_))
   obtain ⟨⟨v, hv⟩⟩ := x
-  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [Set.mem_ofPred_eq] at hx; subst hx
   simp only [genStmtChain_zero, LawfulMonad.pure_bind]
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, trivial⟩
@@ -340,7 +337,7 @@ theorem prob_genStmt_loop_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
       ≤ prob (genStmt (G := SPMF) octx tvars imm procs labels C ctx pctx (n + 1) k)
           (TopLevelEvent IsLoop) := by
   rw [loopAtSize_eq, genStmt]
-  refine le_trans ?_ (prob_frequency_ge _ _ 8 (by simp) _)
+  refine le_trans ?_ (prob_frequency_ge _ _ 7 (by simp) _)
   simp only [List.getElem_cons_succ, List.getElem_cons_zero, List.map_cons, List.map_nil,
     List.sum_cons, List.sum_nil]
   refine mul_le_mul' (le_of_eq (by norm_num)) ?_
@@ -354,7 +351,7 @@ theorem prob_genStmt_loop_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
   refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul' hc le_rfl)
     (prob_bind_ge _ fun x hx => ?_))
   obtain ⟨⟨v, hv⟩⟩ := x
-  simp only [Set.mem_setOf_eq] at hx; subst hx
+  simp only [Set.mem_ofPred_eq] at hx; subst hx
   simp only [genStmtChain_zero, LawfulMonad.pure_bind]
   refine (prob_pure_of_mem ?_).ge
   exact ⟨_, List.mem_singleton_self _, trivial⟩
@@ -362,19 +359,20 @@ theorem prob_genStmt_loop_ge (imm : List (Identifier Unit)) (procs : ProcSigCtx)
 
 -- ── Masses, for threading through sequences ─────────────────────────
 
-theorem prob_genFreshName_univ (ctx : VarCtx) :
-    nameMass ≤ prob (_root_.genFreshName (G := SPMF) ctx) Set.univ := by
+theorem prob_genFreshName_univ (ctx : VarCtx) (avoid : List String := []) :
+    nameMass ≤ prob (_root_.genFreshName (G := SPMF) ctx avoid) Set.univ := by
   rw [nameMass]
   unfold _root_.genFreshName
   refine le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge prob_genIdentName_univ fun s => ?_)
   split <;> exact (prob_pure_of_mem (Set.mem_univ _)).ge
 
-theorem prob_genCmd_univ (imm : List (Identifier Unit)) (ctx : VarCtx) (d : Nat) :
+theorem prob_genCmd_univ (imm : List (Identifier Unit)) (ctx : VarCtx) (d : Nat)
+    (avoid : List String := []) (kt : Lambda.KnownTypes := Core.KnownTypes) :
     1 / 14 * (1 / 2 * (1 / 12)) ≤
-      prob (genCmd (G := SPMF) octx tvars imm ctx d pctx) Set.univ := by
-  have hi : 1 / 2 * (1 / 12) ≤ prob (genInitNondet (G := SPMF) tvars ctx d) Set.univ := by
+      prob (genCmd (G := SPMF) octx tvars imm ctx d pctx avoid kt) Set.univ := by
+  have hi : 1 / 2 * (1 / 12) ≤ prob (genInitNondet (G := SPMF) tvars ctx d avoid) Set.univ := by
     unfold genInitNondet
-    refine prob_bind_univ_ge (prob_genFreshName_univ ctx) fun _ => ?_
+    refine prob_bind_univ_ge (prob_genFreshName_univ ctx avoid) fun _ => ?_
     refine le_trans (le_of_eq (mul_one _).symm) (le_trans (mul_le_mul'
       (le_trans (prob_genLMonoTy_bool tvars d) (prob_mono (Set.subset_univ _))) le_rfl)
       (prob_bind_ge Set.univ fun _ _ => (prob_pure_of_mem (Set.mem_univ _)).ge))
@@ -391,7 +389,7 @@ theorem prob_genCmd_univ (imm : List (Identifier Unit)) (ctx : VarCtx) (d : Nat)
 /-- A size-indexed lower bound on the mass of `genStmt` with body-length cap `k`. At size 0 it is
 the command branch; above, the empty nondeterministic `ite`. -/
 noncomputable def stmtMassBound (k : Nat) : Nat → ℝ≥0∞
-  | 0 => 4 / 10 * (1 / 14 * (1 / 2 * (1 / 12)))
+  | 0 => 4 / 9 * (1 / 14 * (1 / 2 * (1 / 12)))
   | _ + 1 => iteAtSize k
 
 theorem prob_genStmt_univ (imm : List (Identifier Unit)) (procs : ProcSigCtx)
@@ -406,7 +404,7 @@ theorem prob_genStmt_univ (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     refine mul_le_mul' (le_of_eq (by norm_num)) ?_
     unfold genCmdStmt
     exact le_trans (le_of_eq (mul_one _).symm) (prob_bind_univ_ge
-      (prob_genCmd_univ octx tvars pctx imm ctx 0) fun _ => (prob_pure_of_mem (Set.mem_univ _)).ge)
+      (prob_genCmd_univ octx tvars pctx imm ctx 0 _ _) fun _ => (prob_pure_of_mem (Set.mem_univ _)).ge)
   | succ n =>
     exact le_trans (prob_genStmt_ite_ge octx tvars pctx imm procs labels C ctx n k)
       (prob_mono (Set.subset_univ _))

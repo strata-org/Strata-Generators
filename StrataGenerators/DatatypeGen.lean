@@ -18,8 +18,9 @@ data type definitions in Strata Core. The generator uses Basalt `Gen`.
 
 The generator makes a `MutualDatatype Unit`. That type is a `List (LDatatype Unit)`,
 and it holds the contents of one `mutual … end` block. The block obeys the argument
-half of `Core.TypeSpec.MutualADTWF`. That half is the `argsWF`, `refsKnown` and
-`argVarsScoped` fields from `Strata.Languages.Core.DatatypeTypeSpec`.
+half of `Core.TypeSpec.MutualADTWF`. That half is the `argsWF`, `argVarsScoped` and
+`argsWellKinded` fields from `Strata.Languages.Core.Typing.Spec.DatatypeTypeSpec`;
+`MutualADTWF.refsKnown` follows from `argsWellKinded`.
 
 A **block datatype** is a datatype that this `mutual … end` block declares. The datatypes
 of one block can refer to each other, therefore they are mutually recursive. This module
@@ -78,10 +79,9 @@ because the rule for a uniform occurrence gives those arguments.
 
 ## Type parameters, and which datatypes can refer to which
 
-Each datatype in the block declares its *own* `typeArgs`. The generator makes each
-list of type parameters independently, and the block does not share one list. The
-generator takes all of these names from one common name space, therefore two
-different datatypes can use the same parameter names.
+Each datatype in the block declares its own `typeArgs`, and all of these lists hold the
+same names, each in its own order. `MutualADTWF.typeArgsAgree` requires this agreement.
+The generator draws one list of names and gives each datatype a random permutation of it.
 
 A datatype `dᵢ` can refer to a block datatype `dⱼ` only when
 `dⱼ.typeArgs ⊆ dᵢ.typeArgs`. The reference is the uniform occurrence
@@ -115,9 +115,7 @@ one of these names:
 
 The generator threads the datatype names through `reserved`, therefore these names
 stay different in pairs. The generator makes each type parameter fresh against the
-reserved set, but it does not add the parameter back to that set. Therefore two
-different datatypes can use the same parameter names, and one parameterized datatype
-can refer to another.
+reserved set, and it drops each parameter that `Lambda.isAllowedName` rejects.
 
 The `genFreshName` function for a command uses the same method for a variable name.
 It draws a random legal identifier. If that identifier is already in the reserved
@@ -146,9 +144,9 @@ these three conditions:
    is a correct direct reference, but `Pair (n τs) …` and `Sequence (n τs)` are not
    correct.
 
-`refsKnown` also puts a condition on each referenced type constructor name. That name
-must be a known primitive, a datatype of the ambient context, or a block name. The
-generator obeys this field by construction. It emits only head symbols from
+`MutualADTWF.refsKnown` also puts a condition on each referenced type constructor name.
+That name must be a known primitive, a datatype of the ambient context, or a block name.
+The generator obeys this condition by construction. It emits only head symbols from
 `baseTypes` and `tyCons`, together with the block names and `"arrow"`.
 
 The first constructor that the generator makes for each datatype is *a constructor that
@@ -166,12 +164,12 @@ namespace DatatypeGen
 
 /-! ## The known type constructors of the ambient context
 
-`refsKnown` resolves a referenced name against the known types and the datatypes of
-the ambient `LContext`. This generator makes a *new* datatype, and no proof obligation
-connects it to one concrete context. Therefore the caller supplies the type
+`MutualADTWF.refsKnown` resolves a referenced name against the known types and the
+datatypes of the ambient `LContext`. This generator makes a *new* datatype, and no proof
+obligation connects it to one concrete context. Therefore the caller supplies the type
 constructors that the generator can refer to as explicit parameters. The generator
-emits only these constructors, the name of the datatype and `"arrow"`. Therefore
-`refsKnown` holds for each context that knows all of these names. -/
+emits only these constructors, the name of the datatype and `"arrow"`. Therefore each
+reference resolves in each context that knows all of these names. -/
 
 /-- An applied type constructor that the generator can refer to, with its arity. -/
 abbrev KnownTyCon := String × Nat
@@ -496,10 +494,9 @@ A header is a `Lambda.TypeConstructor`. That structure holds a `name` and a list
 
 The generator draws the names different in pairs, because it threads them through
 `reserved`. Therefore the names of the block are different, which `namesNodup` needs,
-and no name is the same as a base type or an applied type. The generator draws each type
-parameter fresh against the reserved set, but it does not add the parameter back.
-Therefore two different datatypes can use the same parameter names, and one
-parameterized datatype can refer to another. -/
+and no name is the same as a base type or an applied type. The generator draws the type
+parameters once, fresh against the reserved set, and each header holds a permutation of
+them. -/
 
 /-- The block references that are visible to a datatype with the type parameters
     `tyParams`. The result holds each header `⟨n, ps⟩` for which `ps ⊆ tyParams`, as the
@@ -558,7 +555,8 @@ def permutationOf [Gen G] : (xs : List α) → G { ys // xs.Perm ys }
 
 /-! ## How the generator makes the block
 
-`genParamsList` draws one list of type parameters for each datatype. `genRanks` draws one
+`genParamsList` draws one list of type parameters for each datatype, and all of these lists
+are permutations of one list. `genRanks` draws one
 *inhabitance rank* for each datatype. `genConstructors` makes the constructors of one
 datatype. It gets three inputs: the header of that datatype, the headers of the block, and
 the set of names that the inhabited constructor may use. It calculates the visible
@@ -591,19 +589,29 @@ The rank is an explicit label, and the position of a datatype in the list gives 
 Therefore the proof of completeness builds no topological order. It uses the rank that the
 derivation of the inhabitance gives it. Read `rankExists` in the proofs. -/
 
-/-- Draw `n` lists of type parameters, one for each datatype. The generator draws the
-    length of each list independently in the range `[0, maxTyParams]`. It draws each list
-    fresh against `reserved`, which holds the block names and the reserved keywords. The
-    names in one list are different in pairs. The generator draws the lists for two
-    different datatypes independently, therefore two lists can hold the same names. -/
-def genParamsList [Gen G] (reserved : List String) (maxTyParams : Nat) :
-    Nat → G (List (List TyIdentifier))
+/-- Draw `n` arrangements of the list `params`, one for each datatype. Each arrangement is a
+    random permutation of `params`. -/
+def genParamPerms [Gen G] (params : List TyIdentifier) : Nat → G (List (List TyIdentifier))
   | 0 => pure []
   | n + 1 => do
-    let numTyParams ← chooseNat 0 maxTyParams (by omega)
-    let params ← genFreshNames reserved numTyParams
-    let rest ← genParamsList reserved maxTyParams n
-    pure (params :: rest)
+    let ⟨ps, _⟩ ← permutationOf params
+    let rest ← genParamPerms params n
+    pure (ps :: rest)
+
+/-- Draw `n` lists of type parameters, one for each datatype. All the lists hold the same
+    members, because `MutualADTWF.typeArgsAgree` requires the datatypes of a block to declare
+    the same type parameters, up to order.
+
+    The generator draws one list of `[0, maxTyParams]` names, different in pairs and fresh
+    against `reserved`, which holds the block names and the reserved keywords. It keeps only
+    the names that `Lambda.isAllowedName` accepts, so no parameter starts with a reserved
+    prefix such as `Lambda.genTyPrefix`. Each datatype then gets its own random permutation of
+    that list. -/
+def genParamsList [Gen G] (reserved : List String) (maxTyParams : Nat) (n : Nat) :
+    G (List (List TyIdentifier)) := do
+  let numTyParams ← chooseNat 0 maxTyParams (by omega)
+  let rawParams ← genFreshNames reserved numTyParams
+  genParamPerms (rawParams.filter Lambda.isAllowedName) n
 
 /-- Draw `n` inhabitance ranks, one for each datatype. The generator draws each rank
     independently in the range `[0, maxRank]`, and two datatypes can draw the same rank.

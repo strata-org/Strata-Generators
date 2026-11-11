@@ -7,7 +7,8 @@ import BasaltExamples.ArbString.Def
 import Strata.Languages.Core.StatementTypeSpec
 import StrataGenerators.CmdHasTypeAGen.Core
 import StrataGenerators.FunctionHasTypeAGen.Core
-import StrataGenerators.StmtHasTypeAGen.GenCallStmtSound
+import StrataGenerators.StmtHasTypeAGen.CallDefs
+import StrataGenerators.UnitFormat
 
 open Lambda RandomChoice Core Imperative ArbString
 
@@ -18,7 +19,7 @@ This file contains the canonical definition of `genStmt` / `genStmtChain`, mutua
 recursive generators of well-typed Strata Core statements
 (`Statement = Imperative.Stmt Core.Expression Core.Command`) satisfying the
 `StatementHasTypeA` / `StatementsHasTypeA` relations of
-`Strata.Languages.Core.StatementTypeSpec`.
+`Strata.Languages.Core.Typing.Spec.StatementTypeSpec`.
 
 ## Reuse of existing generators
 
@@ -28,8 +29,6 @@ component generators:
 - `genCmd` (from `CmdHasTypeAGen/Core.lean`) for the `cmd` constructor. A
   generated `Cmd Expression` is wrapped as `CmdExt.cmd`, whose typing
   (`CmdExtHasType'.cmd`) delegates straight back to `CmdHasType'`.
-- `genFunction` (from `FunctionHasTypeAGen/Core.lean`) for the well-typed
-  function witness of the `funcDecl` constructor.
 - `genLExpr` (from `HasTypeAGen/Core.lean`) for the `bool`/`int` expressions
   appearing in `ite`/`loop` guards, loop measures, and loop invariants.
 
@@ -124,86 +123,26 @@ def genFreshLabel [Gen G] (labels : List String) : G String := do
     support-inversion lemma `mem_support_elements_iff` when sampling `bound`. -/
 instance : Inhabited Boundedness := ⟨.Infinite⟩
 
-/-- Generate a random `TypeConstructor`: a name and a list of (up to `depth`)
-    parameter names, all produced by `genIdentName` so each is a non-empty,
-    non-keyword identifier (constructor and type-parameter names both appear in
-    identifier position). The `bound` field is sampled over both `Boundedness`
-    values: it is typing-irrelevant (the `typeDecl` rule's `addKnownTypeWithError`
+/-- The prefix the generator gives every type that a `typeDecl` statement declares. -/
+def localTypePrefix : String := "local_"
+
+def isLocalTypeName (n : String) : Bool := n.startsWith localTypePrefix
+
+/-- Draw a local type name: a `genIdentName` identifier, prefixed with `localTypePrefix` unless it
+    already starts with it. -/
+def genLocalTypeName [Gen G] : G String := do
+  let s ← genIdentName
+  pure (if isLocalTypeName s then s else localTypePrefix ++ s)
+
+/-- Generate a random `TypeConstructor`: a local type name (`genLocalTypeName`) and a list of (up
+    to `depth`) parameter names drawn by `genIdentName`. The `bound` field is sampled over both
+    `Boundedness` values: it is typing-irrelevant (the `typeDecl` rule's `addKnownTypeWithError`
     keys only off `name`/`numargs`), so either choice is well-typed. -/
 def genTypeConstructor [Gen G] (depth : Nat) : G TypeConstructor := do
-  let name ← genIdentName
+  let name ← genLocalTypeName
   let params ← listOfMaxLength depth genIdentName
   let bound ← elements [Boundedness.Infinite, Boundedness.Finite] (by simp)
   pure { bound := bound, name := name, params := params }
-
-/-- Lift a monomorphic `Function` to a non-recursive `PureFunc Expression` (the
-    syntactic declaration node stored in a `funcDecl` statement). Each monotype
-    field is wrapped as the trivial polytype `∀ []. mty`. The `isRecursive` flag
-    is forced to `false` (the `funcDecl` typing rule requires a non-recursive
-    declaration). -/
-def Function.toPureFuncDecl (f : Function) : Imperative.PureFunc Expression :=
-  { name := f.name,
-    typeArgs := f.typeArgs,
-    isConstr := f.isConstr,
-    isRecursive := false,
-    inputs := f.inputs.map (fun (id, mty) => (id, (.forAll [] mty : LTy))),
-    output := (.forAll [] f.output : LTy),
-    body := f.body,
-    attr := f.attr,
-    axioms := f.axioms,
-    preconditions := f.preconditions,
-    measure := f.measure }
-
-/-- **`toPureFuncDecl` is a section of `Function.ofPureFunc`.** Wrapping each monotype field as
-    `∀ []. mty` is exactly what `LTy.toMonoType?` reads back, so the lift loses nothing and the
-    roundtrip returns the function it started from.
-
-    The hypothesis is the one field that `Function` has and that the roundtrip cannot recover on its
-    own: `toPureFuncDecl` writes `isRecursive := false` into the declaration, and `ofPureFunc` leaves
-    `isRecursive` at its `false` default, so a *recursive* `f` comes back with the flag cleared. Every
-    `f` the suite lifts is non-recursive — `genFunction` leaves the flag at its default, which
-    `genFunction_not_isRecursive` reads off the support.
-
-    This is the premise `Function.ofPureFunc decl = .ok func` of `StatementHasType'.funcDecl`. -/
-theorem ofPureFunc_toPureFuncDecl (f : Function) (hrec : f.isRecursive = false) :
-    Function.ofPureFunc (Function.toPureFuncDecl f) = .ok f := by
-  -- The `inputs` field is the only one that `ofPureFunc` traverses: `mapM` over the wrapped
-  -- signature reads each `∀ []. mty` back as `mty`, so it gives `f.inputs` unchanged. The step
-  -- function stays a *variable* `g` with its one relevant value as a hypothesis, so that the
-  -- rewrite matches whatever `ofPureFunc` unfolds to, and the error message it builds plays no
-  -- part.
-  have hinputs : ∀ (g : CoreLParams.Identifier × LTy →
-        Except Std.Format (CoreLParams.Identifier × LMonoTy)),
-      (∀ (id : CoreLParams.Identifier) (mty : LMonoTy),
-        g (id, (.forAll [] mty : LTy)) = .ok (id, mty)) →
-      ∀ (l : ListMap CoreLParams.Identifier LMonoTy),
-        List.mapM g (l.map (fun p => (p.1, (.forAll [] p.2 : LTy)))) = .ok l := by
-    intro g hg l
-    induction l with
-    | nil => rfl
-    | cons hd tl ih =>
-      rw [List.map_cons, List.mapM_cons, hg hd.1 hd.2, ih]
-      rfl
-  cases f with
-  | mk name typeArgs isConstr isRecursive inputs output body attr axioms preconditions measure =>
-    simp only at hrec
-    subst hrec
-    -- Unfold, tie off the `inputs` traversal with `hinputs`, and let the `output` field's
-    -- `toMonoType?` reduce on its own.
-    simp only [Function.ofPureFunc, Function.toPureFuncDecl, bind, Except.bind]
-    rw [hinputs _ (fun _ _ => rfl) inputs]
-    rfl
-
-/-- Generate a syntactic (non-recursive) function-declaration node by generating
-    a well-typed `Function` via `genFunction` and lifting it to a `PureFunc`.
-
-    `genFuncDeclStmt` no longer calls this: since the `funcDecl` rule ties the declaration to the
-    witness function, it draws one `Function` and lifts it in place. What is left of this definition is
-    the *set of declarations* that a generated `funcDecl` statement can carry, which is what the
-    `funcDecl` clause of `SpecComplete.AlphabetOk` states. Read `genStmt`. -/
-def genDecl [Gen G] (octx : OpCtx) (depth : Nat) (pctx : PolyOpCtx := []) :
-    G (Imperative.PureFunc Expression) :=
-  Function.toPureFuncDecl <$> genFunction [] octx depth pctx
 
 -- ── Guard / measure / invariant sub-generators ───────────────────────────
 
@@ -217,7 +156,7 @@ def genCondOrNondet [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx := []) : G (ExprOrNondet Expression) :=
   frequency
     [ (1, fun () => pure .nondet),
-      (4, fun () => (fun e => ExprOrNondet.det e) <$> genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool) ]
+      (4, fun () => ExprOrNondet.det <$> genLExpr ctx.toFVarCtx octx pctx tvars [] depth .bool) ]
     (by simp)
 
 /-- Generate an optional loop measure: either `none`, or `some m` for an
@@ -247,13 +186,19 @@ def genInvariants [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 
 -- ── Non-nesting (leaf) statement sub-generators ──────────────────────────
 
-/-- Generate a `cmd` statement by delegating to `genCmd`. The imperative command
-    is wrapped as `CmdExt.cmd`; `C` is unchanged. -/
+/-- The names of the functions of `C`. The typing rule of a variable declaration bans a variable
+    named after a function, so the statement generators declare no variable with one of these
+    names. -/
+def functionNames (C : LContext CoreLParams) : List String :=
+  (C.functions.toArray.map (·.name.name)).toList
+
+/-- Generate a `cmd` statement by delegating to `genCmd`. The imperative command is wrapped as
+    `CmdExt.cmd`; `C` is unchanged. -/
 def genCmdStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit))
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
     (pctx : PolyOpCtx := []) : G GenStmtResult := do
-  let r ← genCmd octx tvars immutableVars ctx depth pctx
+  let r ← genCmd octx tvars immutableVars ctx depth pctx [] C.knownTypes
   pure ⟨[Stmt.cmd (CmdExt.cmd r.cmd)], C, r.outCtx⟩
 
 /-- Generate an `exit` statement that targets a block around it. The typing rule
@@ -270,22 +215,6 @@ def genExitStmt [Gen G] (labels : List String)
   | l :: ls => do
       let lbl ← elements (l :: ls) (by simp)
       pure ⟨[Stmt.exit lbl default], C, ctx⟩
-
-/-- Generate a `funcDecl` statement. **One** well-typed `Function` is drawn, and it is both the
-    witness that `C` gains and, through `Function.toPureFuncDecl`, the syntactic declaration the
-    statement carries.
-
-    The rule `StatementHasType'.funcDecl` asks for `Function.ofPureFunc decl = .ok func`, so the
-    declaration determines the function, and a generator that drew the two independently would emit a
-    statement whose output context no derivation can produce. `ofPureFunc_toPureFuncDecl` is the
-    roundtrip that discharges the premise for the single drawn function. `Γ` is unchanged; `C` becomes
-    `C.addFactoryFunction func`. -/
-def genFuncDeclStmt [Gen G] (octx : OpCtx)
-    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
-    (pctx : PolyOpCtx := []) : G GenStmtResult := do
-  let func ← genFunction [] octx depth pctx
-  pure ⟨[Stmt.funcDecl (Function.toPureFuncDecl func) default],
-        C.addFactoryFunction func.toLFunc, ctx⟩
 
 /-- Generate a `typeDecl` statement. The function draws a random `TypeConstructor`, and it checks that
     constructor against the context through `addKnownTypeWithError`. On a success, the output context is the
@@ -349,14 +278,21 @@ def outTarget (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (base : Na
     (q : Identifier Unit × LMonoTy) (i : Nat) : Identifier Unit × LMonoTy :=
   if reusable immutableVars ctx q then q else (⟨indexedFreshName base i, ()⟩, q.2)
 
+/-- The length of the longest string of a list, and `0` for the empty list. -/
+def maxStrLen (l : List String) : Nat :=
+  l.foldl (fun acc s => max acc s.length) 0
+
 /-- **Choose one receiving variable per `out` parameter**, across the callee's whole
     output-only block `O`: `outTarget` at each position, with the base taken past
-    each name of the scope, so that each new name is fresh and two different positions get two different names.
+    each name of the scope and each name of `avoid`, so that each new name is fresh, is not in
+    `avoid`, and two different positions get two different names. A caller lists the function
+    names in `avoid`, since a new name is declared.
     The result has the same length as the output-only block, and the same types in the same order, which
     `outTargets_length` and `outTargets_values` prove. Only the names can differ. -/
 def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
-    (O : @LMonoTySignature Unit) : @LMonoTySignature Unit :=
-  O.toList.zipIdx.map (fun p => outTarget immutableVars ctx (maxNameLen ctx) p.1 p.2)
+    (O : @LMonoTySignature Unit) (avoid : List String := []) : @LMonoTySignature Unit :=
+  O.toList.zipIdx.map (fun p =>
+    outTarget immutableVars ctx (maxNameLen ctx + maxStrLen avoid) p.1 p.2)
 
 /-- Generate a procedure-call statement targeting one of the callable procedures
     in `procs`. This follows the call-site recipe literally, step by step:
@@ -391,7 +327,9 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     4. **Generate the call.** The by-value inputs `exprs` (one per `s.I` position, at
        the type declared there) are drawn from `genLExpr`, and the argument list is
        assembled by `mkArgs`: `inout` args for `s.M`, `in` args for `exprs`, `out`
-       args for `outTargets`.
+       args for `outTargets`. The call rule asks every binder annotation of an input to be a
+       known type, so the generator keeps the call only when each input passes
+       `binderAnnotsKnownIn C.knownTypes`.
 
     The emitted shape is uniform. It holds the `init` statements for the missing names only, then the `call`, and
     the generator splices that group **inline** into the statement sequence around it, with no block and no
@@ -411,7 +349,13 @@ def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
 
     The remaining `Nodup` guard is genuinely needed: the callee's own signature may
     repeat a key, and a reused out target may coincide with an in-out name, either
-    of which would make the `init` chain shadow a name it had already declared.
+    of which would make the `init` chain shadow a name it had already declared. The call
+    rule also asks the written-to variables to be distinct, which the same guard gives.
+
+    A declaration bans a variable named after a function. An out target that has to be
+    declared is a new name longer than every function name of `C`. An in-out name is the
+    callee's, so the guard skips the callee when an in-out name that has to be declared is a
+    function name.
 
     Note that no `labels` argument is needed: emitting no block means the
     enclosing-label set plays no role, and the emitted sequence is correspondingly
@@ -449,13 +393,15 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     -- 4 handles. `substSig` keeps each key, so the in-out names are still exactly the names of the declared
     -- block. The callee fixes each name, and the instantiation fixes each type.
     let inoutNames : List (Identifier Unit × LMonoTy) := Mσ
-    let outTargets : @LMonoTySignature Unit := outTargets immutableVars ctx Oσ
+    let outTargets : @LMonoTySignature Unit := outTargets immutableVars ctx Oσ (functionNames C)
     -- Step 4. For each in-out argument, reuse the variable of the scope when the scope holds it at the correct
     -- type, and otherwise plan an `init` for it. A name that the call can neither reuse nor declare makes this
     -- callee uncallable here. Each out target is usable by construction, which `outTargets_all_usableName`
     -- proves.
     if inoutNames.all (usableName immutableVars ctx) = true
-        ∧ (Mσ ++ outTargets).keys.Nodup then
+        ∧ (Mσ ++ outTargets).keys.Nodup
+        ∧ (inoutNames.filter (needsInit ctx)).all
+            (fun q => !(functionNames C).contains q.1.name) = true then
       -- The in-out arguments that the group must declare first, and then the out targets that it must declare.
       let inoutToInit := inoutNames.filter (needsInit ctx)
       let outToInit := outTargets.filter (needsInit ctx)
@@ -464,17 +410,21 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
       -- and assemble the call. The `mkArgs` in-out/out names come from key-position
       -- only, and `substSig` preserves keys, so passing `s.M` is the same as `Mσ`.
       let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx pctx tvars [] depth τ)
-      -- Step 6: sample how the by-value inputs and the out targets interleave. The
-      -- call rule reads the input positions and the write positions through two
-      -- projections that each drop the other kind of node, so their relative order
-      -- is free. `mask` picks one order; see `mkArgs`.
-      let mask ← listOf (elements [true, false] (by simp))
-      let theCall :=
-        Statement.call s.pname
-          (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
-      -- The `init`s (possibly none) then the call, inline in the ambient scope.
-      pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,
-        StrataGenerators.Stmt.insertAllCtx ctx toInit⟩
+      -- The call rule asks every binder annotation of an input to be a known type.
+      if exprs.all (binderAnnotsKnownIn C.knownTypes) = true then do
+        -- Step 6: sample how the by-value inputs and the out targets interleave. The
+        -- call rule reads the input positions and the write positions through two
+        -- projections that each drop the other kind of node, so their relative order
+        -- is free. `mask` picks one order; see `mkArgs`.
+        let mask ← listOf (elements [true, false] (by simp))
+        let theCall :=
+          Statement.call s.pname
+            (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
+        -- The `init`s (possibly none) then the call, inline in the ambient scope.
+        pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,
+          StrataGenerators.Stmt.insertAllCtx ctx toInit⟩
+      else
+        default
     else
       default
 
@@ -490,7 +440,7 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     than `1`, the expected number of nested statements (`block`, `ite` and `loop`) has an upper bound
     that does not depend on `size`. At the shipping weights this number is `3 · maxStmtSeqLen / 16`,
     which is less than `1` when `maxStmtSeqLen ≤ 5`. The shipping weights keep the nesting branches
-    light (`1` each, against `6` for `cmd`) so that the default cap can be `5`. A tuning profile with
+    light (`1` each, against `7` for `cmd`) so that the default cap can be `5`. A tuning profile with
     heavier nesting gets a smaller cap from `TuningProfiles.maxStmtSeqLenFor`.
     Read `StrataGenerators.SizeDistributionLoops`.
 
@@ -518,7 +468,7 @@ mutual
     bounded in `size` when `maxStmtSeqLen` is small enough. Read `defaultMaxStmtSeqLen`.
 
     At `size = 0` only the *leaf* constructors are produced (`cmd`, `exit`,
-    `funcDecl`, `typeDecl`), with size-0 expressions. At `size + 1` the nesting
+    `typeDecl`), with size-0 expressions. At `size + 1` the nesting
     constructors (`block`, `ite`, `loop`) may additionally be produced, with their
     bodies generated at the smaller `size` (so sub-programs shrink as they nest).
 
@@ -532,8 +482,8 @@ mutual
     `genStmt_sound`.
 
     Tagged `@[tunable]`, so every branch weight is a runtime knob, and `genStmt.tuned θ` reads each
-    weight from `θ`. There are two sites: the `size = 0` leaf list has arity 5, and the `size + 1`
-    list has arity 9. The second site carries `loop` at flat index 13, which is the knob that a
+    weight from `θ`. There are two sites: the `size = 0` leaf list has arity 4, and the `size + 1`
+    list has arity 8. The second site carries `loop` at flat index 11, which is the knob that a
     loop-transformation test wants turned up.
 
     The weights are *constant* rather than indexed by `size`, because no `depth` binder is in scope
@@ -558,7 +508,7 @@ mutual
 
     The two distributions differ in one respect. This is not a regression, and it is worth knowing.
     The old generator renormalised over the surviving branches. This one hands the share of a pruned
-    branch to `cmd`, which leaves `funcDecl` and `typeDecl` slightly rarer in a scope with no label
+    branch to `cmd`, which leaves `typeDecl` slightly rarer in a scope with no label
     and no callee. -/
 @[tunable]
 def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
@@ -578,21 +528,19 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
         (1, fun () =>
           if labels.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
           else genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt octx C ctx 0 pctx),
         (1, fun () => genTypeDeclStmt C ctx 0),
         (3, fun () =>
           if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
           else genCallStmt octx tvars immutableVars procs C ctx 0 pctx) ]
-      (by show 0 < 4+1+1+1+3; omega)
+      (by show 0 < 4+1+1+3; omega)
   | size + 1 =>
     -- As in the `size = 0` case, `exit` and `call` defer to `genCmdStmt` when their own
     -- support is provably empty, which happens with no enclosing label and with no callee.
     frequency
-      [ (6, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
+      [ (7, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
         (1, fun () =>
           if labels.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
           else genExitStmt labels C ctx),
-        (1, fun () => genFuncDeclStmt octx C ctx (size + 1) pctx),
         (1, fun () => genTypeDeclStmt C ctx (size + 1)),
         (3, fun () =>
           if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
@@ -627,7 +575,7 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (body, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size blen maxStmtSeqLen
           pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]
-      (by show 0 < 6+1+1+1+3+1+1+1+1; omega)
+      (by show 0 < 7+1+1+3+1+1+1+1; omega)
 termination_by (size, 0, 0)
 
 /-- Generate a chain of up to `len` well-typed statement *groups*, threading both
@@ -674,9 +622,7 @@ def genProgramStmts [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
-open Std in
-instance instToFormatUnitStmtHasTypeAGen : ToFormat Unit where
-  format _ := .nil
+attribute [local instance] unitToFormat
 
 -- Smoke test: a handful of individual statements at size 2.
 #guard_msgs(drop warning, drop all) in

@@ -1,5 +1,7 @@
 import StrataGenerators.ProgramGen
+import StrataGenerators.ProgramGen.RecFuncBlockSupport
 import StrataGenerators.StmtHasTypeAGen
+import StrataGenerators.ProcedureHasTypeAGen
 
 /-!
 # Threading callable procedure signatures through the declaration fold
@@ -67,10 +69,10 @@ theorem findGo_of_mem_of_prefix_fresh {k : DeclKind} {x : Expression.Ident}
   induction pre with
   | nil =>
     simp only [List.nil_append, Program.find?.go]
-    rw [if_pos (by simp [hk, hx])]
+    rw [ite_eq_left (by simp [hk, hx])]
   | cons d' rest ih =>
     simp only [List.cons_append, Program.find?.go]
-    rw [if_neg (by
+    rw [ite_eq_right (by
       intro hmatch
       simp only [Bool.and_eq_true, beq_iff_eq] at hmatch
       exact hfresh d' List.mem_cons_self hmatch)]
@@ -147,13 +149,18 @@ theorem genProcedure_sig_decomp {octx : OpCtx} {pctx : PolyOpCtx} {procs : ProcS
       (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen)) :
     ∃ M I O : @LMonoTySignature Unit,
       p.header.inputs = M ++ I ∧ p.header.outputs = M ++ O ∧
-      (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) := by
-  simp only [genProcedure, mem_support_bind_iff, mem_support_pure_iff] at hp
-  obtain ⟨name, _hname, typeArgs, _htypeArgs, M, _hM, rawInputOnly, _hrawIn,
-          rawOutputOnly, _hrawOut, pre, _hpre, post, _hpost,
-          ⟨body, C', ctx'⟩, _hbody, rfl⟩ := hp
+      (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) ∧
+      (M ++ O).keys.Nodup := by
+  have hnd := genProcedure_outputs_nodup hp
+  simp only [genProcedure, genProcedureWith, mem_support_bind_iff, mem_support_pure_iff] at hp
+  obtain ⟨name, _, typeArgs, _, M, _, rawInputOnly, _,
+          rawOutputOnly, _, pre, _, post, _,
+          ⟨body, C', ctx'⟩, _, _, _, rfl⟩ := hp
+  generalize avoidFunctionNames C M = M at hnd
+  generalize avoidFunctionNames C rawInputOnly = rawInputOnly at hnd
+  generalize avoidFunctionNames C rawOutputOnly = rawOutputOnly at hnd
   refine ⟨M, disjointInputs rawInputOnly M,
-          disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M), rfl, rfl, ?_⟩
+          disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M), rfl, rfl, ?_, hnd⟩
   intro i hi
   -- The `i`-th `I` key is a key of `I`, hence not an `M` key; and `O` was filtered
   -- against `M ++ I`, so it is not an `O` key either.
@@ -207,7 +214,8 @@ def ProcsEmitted (procs : ProcSigCtx) (decls : List Decl) : Prop :=
     p.header.typeArgs = sig.typeArgs ∧
     p.header.inputs = sig.M ++ sig.I ∧
     p.header.outputs = sig.M ++ sig.O ∧
-    (∀ i (hi : i < sig.I.keys.length), (sig.M ++ sig.O).keys.contains (sig.I.keys[i]'hi) = false)
+    (∀ i (hi : i < sig.I.keys.length), (sig.M ++ sig.O).keys.contains (sig.I.keys[i]'hi) = false) ∧
+    (sig.M ++ sig.O).keys.Nodup
 
 /-! ## Membership + `Nodup` ⇒ `find?` resolution
 
@@ -229,7 +237,7 @@ theorem procedure_find?_of_mem {decls : List Decl} {p : Procedure}
     Program.Procedure.find? { decls := decls } p.header.name = some p := by
   obtain ⟨pre, suf, rfl⟩ := List.append_of_mem hmem
   refine procedure_find?_of_split (md := md) ?_
-  intro d' hd' ⟨_hkind, hname⟩
+  intro d' hd' ⟨hkind, hname⟩
   -- The name of each declaration is a member of its own list of the names. Therefore the shared name occurs two
   -- times in the list of the names of the program, and that list holds no duplicate.
   have hgn : (Program.mk (decls := pre ++ Decl.proc p md :: suf)).getNames
@@ -241,12 +249,13 @@ theorem procedure_find?_of_mem {decls : List Decl} {p : Procedure}
     refine List.mem_flatMap.mpr ⟨d', hd', ?_⟩
     -- Every declaration's own name is among its `names`.
     cases d' with
-    | type t m => exact absurd _hkind (by simp [Decl.kind])
-    | ax a m => exact absurd _hkind (by simp [Decl.kind])
-    | distinct n es m => exact absurd _hkind (by simp [Decl.kind])
+    | type t m => exact absurd hkind (by simp [Decl.kind])
+    | ax a m => exact absurd hkind (by simp [Decl.kind])
+    | distinct n es m => exact absurd hkind (by simp [Decl.kind])
     | proc p' m => simp [Decl.names, Decl.name]
-    | func f m => exact absurd _hkind (by simp [Decl.kind])
-    | recFuncBlock fs m => exact absurd _hkind (by simp [Decl.kind])
+    | «lemma» l m => exact absurd hkind (by simp [Decl.kind])
+    | func f m => exact absurd hkind (by simp [Decl.kind])
+    | recFuncBlock fs m => exact absurd hkind (by simp [Decl.kind])
   rw [hname] at hd'name
   -- `++` is left-associative, so the outer split is
   -- `(pre_names ++ proc_names) ++ suf_names`; take the *inner* one.
@@ -264,89 +273,10 @@ theorem procSigCorresponds_of_emitted {procs : ProcSigCtx} {decls : List Decl}
     (hnodup : (Program.mk (decls := decls)).getNames.Nodup) :
     ProcSigCorresponds procs { decls := decls } := by
   intro sig hsig
-  obtain ⟨p, md, hmem, hname, htyArgs, hins, houts, hdisj⟩ := hem sig hsig
-  refine ⟨p, ?_, htyArgs, hins, houts, hdisj⟩
+  obtain ⟨p, md, hmem, hname, htyArgs, hins, houts, hdisj, hnd⟩ := hem sig hsig
+  refine ⟨p, ?_, htyArgs, hins, houts, hdisj, hnd⟩
   rw [← hname]
   exact procedure_find?_of_mem hmem hnodup
-
-
-
-/-! ## `procs` grows monotonically across the fold
-
-Only `genDeclProcedure` changes the context of the callable procedures, and it puts each new entry at the
-front. Each other step copies that context. Therefore the context only grows, and `ProcSigCorresponds.mono`
-then lets the fold use one correspondence for the *final* state at each step in the middle. -/
-
-/-- One declaration step never drops a registered signature. -/
-theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
-    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
-    ∀ sig ∈ s.procs, sig ∈ s'.procs := by
-  -- `genDeclStep` is a weighted `frequency`; support inversion yields a
-  -- `(weight, generator)` pair, so the branch equations pin both components.
-  simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
-    or_false, Prod.mk.injEq] at h
-  obtain ⟨w, g, hg, _hw, hmem⟩ := h
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
-  -- Abstract: gated; both branches copy `procs`.
-  · simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff,
-      mem_support_pure_iff] at hmem
-    obtain ⟨pr, ⟨nm, _, ar, _, hpr⟩, hmatch⟩ := hmem
-    subst hpr
-    simp only at hmatch
-    split at hmatch
-    all_goals (
-      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-      obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
-  -- Alias / axiom / distinct: `procs` copied.
-  · simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; exact fun _ h => h
-  · simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; exact fun _ h => h
-  -- Distinct: gated on the constants' factory adds; both branches copy `procs`.
-  · simp only [genDeclDistinct, mem_support_bind_iff] at hmem
-    obtain ⟨pr, _, hmatch⟩ := hmem
-    split at hmatch
-    all_goals (
-      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-      obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
-  -- Datatype: gated; both branches copy `procs`.
-  · simp only [genDeclDatatype, mem_support_bind_iff] at hmem
-    obtain ⟨block, _, hmatch⟩ := hmem
-    split at hmatch
-    all_goals (
-      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-      obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
-  -- Function: gated; both branches copy `procs`. `split` cases the `match` without
-  -- naming the (projection-typed) scrutinee.
-  · simp only [genDeclFunction, mem_support_bind_iff] at hmem
-    obtain ⟨func₀, _, nm, _, hmatch⟩ := hmem
-    split at hmatch
-    all_goals (
-      simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-      obtain ⟨_, hs'⟩ := hmatch; subst hs'; exact fun _ h => h)
-  -- Procedure: `procs` gains one entry at the front.
-  · simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨proc₀, _, nm, _, _, hs'⟩ := hmem
-    subst hs'
-    exact fun sig hsig => List.mem_cons_of_mem _ hsig
-
-/-- The whole fold never drops a registered signature. -/
-theorem genDeclsFold_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
-    (n : Nat) (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n)) :
-    ∀ sig ∈ s.procs, sig ∈ s'.procs := by
-  induction n generalizing s ds s' with
-  | zero =>
-    simp only [genDeclsFold, mem_support_pure_iff, Prod.mk.injEq] at h
-    obtain ⟨_, hs'⟩ := h; subst hs'; exact fun _ h => h
-  | succ n ih =>
-    simp only [genDeclsFold, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
-    obtain ⟨⟨ds₁, s₁⟩, hstep, ⟨rest, s₂⟩, hrest, _, hs'⟩ := h
-    subst hs'
-    exact fun sig hsig => ih hrest sig (genDeclStep_procs_mono hstep sig hsig)
-
 
 
 
@@ -369,7 +299,7 @@ theorem commonPrefixList_append {α : Type} [DecidableEq α] :
     intro A B
     show ProgramGen.commonPrefixList (a :: (as ++ A)) (a :: (as ++ B))
         = a :: (as ++ ProgramGen.commonPrefixList A B)
-    rw [ProgramGen.commonPrefixList, if_pos rfl, ih A B]
+    rw [ProgramGen.commonPrefixList, ite_eq_left rfl, ih A B]
 
 /-- Two signatures whose *keys* are disjoint have no common prefix: a shared
     leading entry would share its key. -/
@@ -383,12 +313,12 @@ theorem commonPrefix_eq_nil_of_disjoint {A B : List (Identifier Unit × LMonoTy)
     | nil => rfl
     | cons b bs =>
       simp only [ProgramGen.commonPrefixList]
-      rw [if_neg]
+      rw [ite_eq_right]
       intro heq
       -- `a = b` would put `a.1` in both key lists.
       refine h a.1 ?_ ?_
-      · rw [ListMap.keys_eq_map_fst]; exact List.mem_map.mpr ⟨a, List.mem_cons_self, rfl⟩
-      · rw [ListMap.keys_eq_map_fst]
+      · rw [ListMap.keys_eq_map_fst (a :: as)]; exact List.mem_map.mpr ⟨a, List.mem_cons_self, rfl⟩
+      · rw [ListMap.keys_eq_map_fst (b :: bs)]
         exact List.mem_map.mpr ⟨b, List.mem_cons_self, by rw [heq]⟩
 
 /-- **`ProgramGen.commonPrefix` is exact on a decomposed signature pair.** -/
@@ -430,9 +360,10 @@ theorem genProcedure_commonPrefix_decomp {octx : OpCtx} {pctx : PolyOpCtx}
       p.header.inputs.drop M.length = I ∧
       p.header.outputs.drop M.length = O ∧
       p.header.inputs = M ++ I ∧ p.header.outputs = M ++ O ∧
-      (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) := by
-  obtain ⟨M, I, O, hins, houts, hdisj⟩ := genProcedure_sig_decomp hp
-  refine ⟨M, I, O, ?_, ?_, ?_, hins, houts, hdisj⟩
+      (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) ∧
+      (M ++ O).keys.Nodup := by
+  obtain ⟨M, I, O, hins, houts, hdisj, hnd⟩ := genProcedure_sig_decomp hp
+  refine ⟨M, I, O, ?_, ?_, ?_, hins, houts, hdisj, hnd⟩
   · show ProgramGen.commonPrefixList p.header.inputs p.header.outputs = M
     rw [hins, houts]
     exact commonPrefix_of_decomp (keys_disjoint_of_decomp hdisj)
@@ -454,64 +385,80 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
         p.header.inputs = sig.M ++ sig.I ∧
         p.header.outputs = sig.M ++ sig.O ∧
         (∀ i (hi : i < sig.I.keys.length),
-          (sig.M ++ sig.O).keys.contains (sig.I.keys[i]'hi) = false) := by
-  -- `genDeclStep` is a weighted `frequency`; support inversion yields a
-  -- `(weight, generator)` pair, so the branch equations pin both components.
-  simp only [genDeclStep, mem_support_frequency_iff, List.mem_cons, List.not_mem_nil,
-    or_false, Prod.mk.injEq] at h
-  obtain ⟨w, g, hg, _hw, hmem⟩ := h
-  rcases hg with ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩ | ⟨_, rfl⟩
-  · left
-    simp only [genDeclAbstract, genAbstractType, mem_support_bind_iff,
-      mem_support_pure_iff] at hmem
-    obtain ⟨pr, ⟨nm, _, ar, _, hpr⟩, hmatch⟩ := hmem
-    subst hpr; simp only at hmatch
-    split at hmatch
-    all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-               obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
-  · left
-    simp only [genDeclAlias, genAlias, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; rfl
-  · left
-    simp only [genDeclAxiom, genAxiom, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨pr, _, _, hs'⟩ := hmem; subst hs'; rfl
-  · left
-    simp only [genDeclDistinct, mem_support_bind_iff] at hmem
-    obtain ⟨pr, _, hmatch⟩ := hmem
-    split at hmatch
-    all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-               obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
-  · left
-    simp only [genDeclDatatype, mem_support_bind_iff] at hmem
-    obtain ⟨block, _, hmatch⟩ := hmem
-    split at hmatch
-    all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-               obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
-  · left
-    simp only [genDeclFunction, mem_support_bind_iff] at hmem
-    obtain ⟨func₀, _, nm, _, hmatch⟩ := hmem
-    split at hmatch
-    all_goals (simp only [mem_support_pure_iff, Prod.mk.injEq] at hmatch
-               obtain ⟨_, hs'⟩ := hmatch; subst hs'; rfl)
-  · right
-    simp only [genDeclProcedure, mem_support_bind_iff, mem_support_pure_iff,
-      Prod.mk.injEq] at hmem
-    obtain ⟨proc₀, hproc₀, nm, _hnm, hds, hs'⟩ := hmem
-    -- Renaming leaves `inputs`/`outputs`/`typeArgs` alone, so the decomposition
-    -- recovered from `proc₀`'s support is the renamed procedure's decomposition too.
-    obtain ⟨M, I, O, hcp, hdI, hdO, hins, houts, hdisj⟩ :=
-      genProcedure_commonPrefix_decomp hproc₀
-    subst hs'
-    refine ⟨{ proc₀ with header := { proc₀.header with name := ⟨nm, ()⟩ } }, _,
-      hds, rfl, rfl, rfl, ?_, ?_, ?_⟩
-    · show proc₀.header.inputs = _ ++ _
-      rw [hcp, hdI]; exact hins
-    · show proc₀.header.outputs = _ ++ _
-      rw [hcp, hdO]; exact houts
-    · show ∀ i (hi : i < _), _ = false
-      rw [hcp, hdI, hdO]; exact hdisj
+          (sig.M ++ sig.O).keys.contains (sig.I.keys[i]'hi) = false) ∧
+        (sig.M ++ sig.O).keys.Nodup := by
+  have hR : IsSoundFor (genDeclRecFuncBlock (G := SPMF) s b) (fun r => r.2.procs = s.procs) :=
+    fun ⟨_, _⟩ hr => genDeclRecFuncBlock_procs hr
+  refine IsSoundFor.of_mem_pair h ?_
+  rw [IsSoundFor.iff_obs]
+  unfold genDeclStep genDeclAbstract genDeclAlias genDeclAxiom genDeclDistinct genDeclDatatype
+    genDeclFunction genDeclProcedure
+  -- Flattening `genAlias` lets the alias step's `match` reduce before the walk. Otherwise the walk
+  -- generates the `genDeclAlias.match_1` lemmas here too, and they clash with the copies that
+  -- ProgramGen.Sound generates when both modules are imported.
+  simp only [genAlias, mkAliasDecl, bind_assoc, pure_bind]
+  walk [(true_law (genAbstractType (G := SPMF) s.reserved b.maxTyConArity)).obs,
+    (true_law (genDeclTypeName (G := SPMF) s.reserved)).obs,
+    fun r k => (true_law (DatatypeGen.genFreshNames (G := SPMF) r k)).obs,
+    fun tp => (true_law (genNonRecursiveArgTy (G := SPMF) s.baseTypes s.tyCons tp b.tySize)).obs,
+    (true_law (genAxiom (G := SPMF) s.octx s.pctx s.reserved b.exprDepth)).obs,
+    (true_law (genDistinctAssertion (G := SPMF) s.baseTypes s.tyCons s.reserved
+      b.maxDistinctVars b.tySize)).obs,
+    (true_law (genMutuallyRecursiveDatatypes (G := SPMF) s.baseTypes (s.tyCons ++ s.dtCons)
+      b.maxExtraDatatypes b.maxTyParams b.maxExtraBaseConstrs b.maxRecConstrs
+      b.maxArgs b.maxDatatypeSize s.reserved)).obs,
+    (true_law (genFunction (G := SPMF) [] s.octx b.funcDepth s.derivedPctx
+      (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons)).obs,
+    (true_law (genDeclName (G := SPMF) s.reserved)).obs,
+    (isSoundFor_self_support (genProcedure (G := SPMF) s.octx s.procs s.C s.Γ b.procSize
+      b.procLen s.derivedPctx b.maxStmtSeqLen)).obs,
+    hR.obs]
+  all_goals try first
+    | exact .inl rfl
+    | exact .inl ‹_›
+    | (obtain ⟨-, hprocs, -⟩ := registerFuncs_fields ‹GenState.registerFuncs _ _ = some _›
+       exact .inl hprocs)
+  -- The procedure step: renaming leaves `inputs`/`outputs`/`typeArgs` alone, so the
+  -- decomposition recovered from the drawn procedure is the renamed procedure's too.
+  obtain ⟨M, I, O, hcp, hdI, hdO, hins, houts, hdisj, hnd⟩ :=
+    genProcedure_commonPrefix_decomp ‹_ ∈ SPMF.support (genProcedure _ _ _ _ _ _ _ _)›
+  refine .inr ⟨_, _, rfl, rfl, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · rfl
+  · rfl
+  · dsimp only; rw [hcp, hdI]; exact hins
+  · dsimp only; rw [hcp, hdO]; exact houts
+  · dsimp only; rw [hcp, hdI, hdO]; exact hdisj
+  · dsimp only; rw [hcp, hdO]; exact hnd
+
+/-! ## `procs` grows monotonically across the fold
+
+Only `genDeclProcedure` changes the context of the callable procedures, and it puts each new
+entry at the front. Each other step copies that context. Therefore the context only grows, and
+`ProcSigCorresponds.mono` then lets the fold use one correspondence for the *final* state at each
+step in the middle. -/
+
+/-- One declaration step never drops a registered signature. -/
+theorem genDeclStep_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
+    (h : (ds, s') ∈ SPMF.support (genDeclStep (G := SPMF) s b)) :
+    ∀ sig ∈ s.procs, sig ∈ s'.procs := by
+  rcases genDeclStep_procs_step h with heq | ⟨_, _, _, hprocs, _⟩
+  · rw [heq]; exact fun _ h => h
+  · rw [hprocs]; exact fun _ h => List.mem_cons_of_mem _ h
+
+/-- The whole fold never drops a registered signature. -/
+theorem genDeclsFold_procs_mono {s s' : GenState} {b : Bounds} {ds : List Decl}
+    (n : Nat) (h : (ds, s') ∈ SPMF.support (genDeclsFold (G := SPMF) s b n)) :
+    ∀ sig ∈ s.procs, sig ∈ s'.procs := by
+  induction n generalizing s ds s' with
+  | zero =>
+    simp only [genDeclsFold, mem_support_pure_iff, Prod.mk.injEq] at h
+    obtain ⟨_, rfl⟩ := h; exact fun _ h => h
+  | succ n ih =>
+    refine IsSoundFor.of_mem_pair h ?_
+    rw [IsSoundFor.iff_obs, genDeclsFold]
+    walk [(isSoundFor_self_support (genDeclStep (G := SPMF) s b)).obs,
+      fun s₁ => (isSoundFor_self_support (genDeclsFold (G := SPMF) s₁ b n)).obs]
+    exact ih ‹_› _ (genDeclStep_procs_mono ‹_› _ ‹_›)
 
 /-- The whole fold preserves `ProcsEmitted`, relative to the declarations emitted
     so far. Membership survives the append a later step performs. -/
@@ -525,24 +472,26 @@ theorem genDeclsFold_procsEmitted {s s' : GenState} {b : Bounds} {ds : List Decl
     obtain ⟨hds, hs'⟩ := h; subst hds hs'
     simpa using hprior
   | succ n ih =>
-    simp only [genDeclsFold, mem_support_bind_iff, mem_support_pure_iff, Prod.mk.injEq] at h
-    obtain ⟨⟨ds₁, s₁⟩, hstep, ⟨rest, s₂⟩, hrest, hds, hs'⟩ := h
-    subst hds hs'
-    -- After the first step, `ProcsEmitted s₁.procs (prior ++ ds₁)`.
-    have hstep' : ProcsEmitted s₁.procs (prior ++ ds₁) := by
-      rcases genDeclStep_procs_step hstep with heq | ⟨p, sig, hds₁, hprocs, rest'⟩
-      · intro sg hsg
-        obtain ⟨q, md, hq, r⟩ := hprior sg (heq ▸ hsg)
-        exact ⟨q, md, List.mem_append_left _ hq, r⟩
-      · intro sg hsg
-        rw [hprocs] at hsg
-        rcases List.mem_cons.mp hsg with rfl | hsg
-        · exact ⟨p, .empty, by rw [hds₁]; exact List.mem_append_right _ (by simp), rest'⟩
-        · obtain ⟨q, md, hq, r⟩ := hprior sg hsg
+    refine IsSoundFor.of_mem_pair h ?_
+    rw [IsSoundFor.iff_obs, genDeclsFold]
+    walk [(isSoundFor_self_support (genDeclStep (G := SPMF) s b)).obs,
+      fun s₁ => (isSoundFor_self_support (genDeclsFold (G := SPMF) s₁ b n)).obs]
+    next step hstep tail htail =>
+      -- After the first step, `ProcsEmitted` holds of its output relative to `prior ++ step.1`.
+      have hstep' : ProcsEmitted step.2.procs (prior ++ step.1) := by
+        rcases genDeclStep_procs_step hstep with heq | ⟨p, sig, hds₁, hprocs, rest'⟩
+        · intro sg hsg
+          obtain ⟨q, md, hq, r⟩ := hprior sg (heq ▸ hsg)
           exact ⟨q, md, List.mem_append_left _ hq, r⟩
-    -- Then the tail, re-associating the appends.
-    have := ih hrest hstep'
-    rw [List.append_assoc] at this
-    exact this
+        · intro sg hsg
+          rw [hprocs] at hsg
+          rcases List.mem_cons.mp hsg with rfl | hsg
+          · exact ⟨p, .empty, by rw [hds₁]; exact List.mem_append_right _ (by simp), rest'⟩
+          · obtain ⟨q, md, hq, r⟩ := hprior sg hsg
+            exact ⟨q, md, List.mem_append_left _ hq, r⟩
+      -- Then the tail, re-associating the appends.
+      have htail' := ih htail hstep'
+      rw [List.append_assoc] at htail'
+      exact htail'
 
 end ProgramGen

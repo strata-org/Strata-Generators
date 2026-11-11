@@ -1,4 +1,5 @@
 import StrataGenerators.CmdHasTypeAGen.Core
+import StrataGenerators.StmtHasTypeAGen.Core
 import StrataGenerators.HasTypeAGen.TestSupport
 import Strata.DL.Lambda.Denote.LExprAnnotated
 import Strata.Languages.Core.CmdEval
@@ -283,15 +284,18 @@ def shrinkCmds (inCtx : VarCtx) (cmds : List (Cmd Expression)) : List (List (Cmd
 -- ── The wrappers around the generators ────────────────────────────────
 
 /-- Makes one well-typed command in `IO`. The result holds the command, the input context and the
-    output context. -/
+    output context. No declared variable is named after a function of `cmdSeqCheckContext`. -/
 def genCmdIO (ctx : VarCtx := []) (depth : Nat := 2) : IO (Cmd Expression × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []
-  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] ctx depth
+  let ⟨cmd, ctx'⟩ ← genCmd (G := IO) coreMonoOps tvars [] ctx depth []
+    (StrataGenerators.Stmt.functionNames cmdSeqCheckContext)
   return (cmd, ctx, ctx')
 
-/-- Makes a sequence of well-typed commands in `IO`. -/
+/-- Makes a sequence of well-typed commands in `IO`. No declared variable is named after a function
+    of `cmdSeqCheckContext`. -/
 def genCmdsIO (n : Nat := 5) (ctx : VarCtx := []) (depth : Nat := 2) :
     IO (List (Cmd Expression) × VarCtx × VarCtx) := do
   let tvars : List TyIdentifier := []
   let (cmds, ctx') ← genCmds (G := IO) coreMonoOps tvars [] ctx depth n
+    (StrataGenerators.Stmt.functionNames cmdSeqCheckContext)
   return (cmds, ctx, ctx')

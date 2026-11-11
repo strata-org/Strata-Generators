@@ -3,6 +3,7 @@
 -- `ProcedureHasTypeAGen/TestSupport.lean` exist. The proof file (`ProcedureHasTypeAGen.lean`) still
 -- sees the statement proofs via `Support.lean`.
 import StrataGenerators.StmtHasTypeAGen.Core
+import StrataGenerators.UnitFormat
 import Strata.Languages.Core.Procedure
 
 open Lambda LExpr RandomChoice Core Imperative ArbString Std
@@ -17,18 +18,19 @@ open StrataGenerators.Stmt
 
 This file defines `genProcedure`, a generator of well-typed Strata Core
 procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
-`Strata.Languages.Core.ProcedureTypeSpec`.
+`Strata.Languages.Core.Typing.Spec.ProcedureTypeSpec`.
 
 ## Design: in-out parameters via three disjoint signature blocks
 
-`ProcHasType'` has eight obligations (see `ProcHasType'`). The generator produces:
+The generator meets the obligations of `ProcHasType'` as follows:
 
 - The type arguments are a list of type-variable names that holds no duplicate, from `genTypeArgs`, exactly as
   in `genFunction`. That list discharges the field about distinct type arguments. `genLMonoTy typeArgs` draws
   each input type and each output type over those type arguments, so the field about an undeclared variable
   holds.
-- Three signature blocks whose keys are disjoint in pairs. `genInputs typeArgs` gives each of them with distinct
-  keys, and the filter `disjointInputs` makes them disjoint:
+- Three signature blocks whose keys are disjoint in pairs. `genInputs` gives each of them with
+  distinct keys, `avoidFunctionNames` drops each parameter named after a function of `C`
+  (`formalsNotFunctions`), and the filter `disjointInputs` makes them disjoint:
   * The in-out block holds each parameter that has *both* roles.
   * The input-only block holds each parameter with the input role only, and the filter makes its keys disjoint
     from the keys of the in-out block.
@@ -40,18 +42,19 @@ procedures (`Procedure`) satisfying the `ProcHasTypeA` relation of
   `inputsNodup`/`outputsNodup` (each is an append of two disjoint `Nodup`-keyed
   blocks).
 - The preconditions and the postconditions are labelled expressions of the type `bool`, from `genChecks`.
-  **Both** obligations reduce, under the annotated specification, whose `exprTyped` reads no context, to
-  `HasTypeA [] c.expr bool`. That is exactly what `genLExpr … .bool` gives, so neither obligation depends on the
-  context of the inputs or of the body.
+  **Both** obligations reduce, under the annotated specification, whose `exprTyped` reads no type scope, to
+  `HasTypeA [] c.expr bool` together with every binder annotation of `c.expr` being registered.
+  `genLExpr … .bool` gives both, so neither obligation depends on the context of the inputs or of
+  the body. The annotation obligations hold trivially in the annotated
+  reading.
 - The body is a `structured` list of statements. Its length is not more than the given length, and its initial
-  scope holds the inputs, the outputs and the old bindings of the in-out block. That scope follows the
-  declarative `procBodyContext`, whose scope for a body holds the scope of the inputs, of the outputs and of
-  oldScope`) and with `inputs.keys ++ (oldVars M).keys` as the immutable names.
+  scope holds the inputs, the outputs and the old bindings of the in-out block, as the declarative
+  `procBodyScopes` does, with `inputs.keys ++ (oldVars M).keys` as the immutable names.
   The body may therefore freely *read* the inputs and the `old` bindings but can
   only *assign* to the output-only names `O` (`set` targets are drawn from the
   mutable sub-context, which excludes the immutable inputs and `old` bindings).
-  This discharges `bodyTyped` (via `procBodyContext_inout`, which identifies the
-  body context with `procToTCtx (inputs ++ outputs ++ oldVars M)`) and `modRights`
+  This discharges `bodyTyped` (via `procBodyScopes_inout`, which identifies the
+  body scopes with `procToTCtx (inputs ++ outputs ++ oldVars M)`) and `modRights`
   (via `genStmtChain_mutableVars`, whose write-target tracking is over the mutable
   keys, i.e. exactly the output-only keys `O ⊆ outputs.keys`).
 
@@ -81,7 +84,7 @@ def disjointInputs (inputs : ListMap (Identifier Unit) LMonoTy)
 
 /-- The `old`-scope variable context for an in-out block `M`: each in-out
     parameter `(g, ty)` contributes an entry `(old g, ty)`. This is the value-level
-    counterpart of the declarative `procBodyContext`'s `oldScope` (which further
+    counterpart of the `old` bindings of the declarative `procBodyScopes` (which further
     wraps each type as a trivial polytype); seeding the body's `VarCtx` with these
     bindings lets the body *read* the entry value `old g` of each in-out
     parameter, exactly as a postcondition may. `CoreIdent.mkOld` prefixes the
@@ -89,6 +92,12 @@ def disjointInputs (inputs : ListMap (Identifier Unit) LMonoTy)
     generated parameter name. -/
 def oldVars (M : ListMap (Identifier Unit) LMonoTy) : ListMap (Identifier Unit) LMonoTy :=
   M.map (fun (id, ty) => (CoreIdent.mkOld id.name, ty))
+
+/-- The signature `sig` without the parameters named after a function of `C`. The procedure rule
+    bans a formal parameter with the name of a function in scope. -/
+def avoidFunctionNames (C : LContext CoreLParams) (sig : ListMap (Identifier Unit) LMonoTy) :
+    ListMap (Identifier Unit) LMonoTy :=
+  sig.filter (fun p => !(functionNames C).contains p.1.name)
 
 /-- Project a parameter signature to the expression-layer `FVarCtx` a contract
     clause reads its free variables from. Each entry of the signature becomes an entry of that context.
@@ -103,11 +112,7 @@ def sigFctx (sig : @LMonoTySignature Unit) : FVarCtx :=
 /-- Generate a labeled contract clause list (`preconditions` or `postconditions`):
     a `ListMap` from label names to `Procedure.Check`s, each wrapping a `bool`
     expression drawn from `genLExpr … .bool`. Labels come from `genNameList`; the
-    `attr`/`md` fields are left at their defaults (`.Default` / `#[]`).
-
-    Every generated clause is a well-typed `bool` expression in the *empty* bvar
-    context, so it satisfies both `preconditionsTyped` and `postconditionsTyped`
-    under the annotated typing spec (which ignores the ambient context). -/
+    `attr`/`md` fields are left at their defaults (`.Default` / `#[]`). -/
 def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier)
     (depth : Nat) (pctx : PolyOpCtx := []) : G (ListMap CoreLabel Procedure.Check) := do
   let labels ← genNameList depth
@@ -115,52 +120,25 @@ def genChecks [Gen G] (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier
     let e ← genLExpr fctx octx pctx tvars [] depth .bool
     pure (l, ({ expr := e } : Procedure.Check)))
 
-/-- Generate a well-typed `Procedure`.
-
-    - The type arguments are a list of type-variable names with no duplicate, from `genTypeArgs`.
-    - The outputs are a signature with distinct keys, whose types are over the type arguments, from
-      `genInputs typeArgs size`.
-    - The inputs are a signature with distinct keys, whose types are over the type arguments, from
-      `genInputs typeArgs size`. The filter `disjointInputs` makes its keys disjoint from the keys of the
-      outputs, so this call gives no in-out parameter.
-    - The preconditions and the postconditions are labelled expressions of the type `bool` over the type
-      arguments, from `genChecks`.
-    - The body is a `structured` list of statements. Its length is not more than the given length, the generator
-      makes each element at the given size, and the initial scope holds the inputs **and** the outputs. Therefore
-      a `set` command and a guard can name
-      either), with the *inputs'* keys marked immutable so the body may read but
-      never assign to them.
-
-    - The context of the callable procedures holds the signature of each procedure that the body can call. Each
-      entry records the in-out block, the input-only block and the output-only block, with the shared block first
-      in both roles.
-      Threaded into `genStmtChain` so the body may emit `call` statements against
-      them, and an empty context gives a body with no call. The generated body is sound against each program for
-      which `ProcSigCorresponds procs P` holds. Read `genProcedure_sound`.
-
-    `noFilter` / statement `MetaData` are at their defaults.
-
-    The body is generated under the *ambient* context `C` (its type parameters
-    marked rigid) rather than a hardcoded `LContext.default`, so a caller can thread
-    in the context under which the surrounding program is being checked; the ambient
-    type-scope `Γ` is likewise threaded to the soundness statement (see
-    `genProcedure_sound`). Passing `LContext.default` and `{}` recovers the old
-    behaviour.
-
-    See `genProcedure_sound` for the well-typedness guarantee. -/
-def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
-    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G Procedure := do
+/-- The generator of `genProcedure`, with the generator of the body as the parameter `chain`. It
+    applies `chain` to the type arguments, the immutable names, the context and the initial scope of
+    the body. -/
+def genProcedureWith [Gen G]
+    (chain : List TyIdentifier → List (Identifier Unit) → LContext CoreLParams → VarCtx →
+      G (List Statement × LContext CoreLParams × VarCtx))
+    (octx : OpCtx) (C : LContext CoreLParams) (size : Nat) (pctx : PolyOpCtx := []) :
+    G Procedure := do
   let name ← genIdentName
   let typeArgs ← genTypeArgs size
   -- Three mutually-disjoint signature blocks. `M` is the in-out block (parameters
   -- that appear in *both* `inputs` and `outputs`); `I` is input-only; `O` is
   -- output-only. Disjointness is forced by filtering each later block by the
-  -- keys already committed (`disjointInputs`), so all three share no key.
-  let inout ← genInputs typeArgs size
-  let rawInputOnly ← genInputs typeArgs size
+  -- keys already committed (`disjointInputs`), so all three share no key. No formal parameter
+  -- is named after a function of `C` (`avoidFunctionNames`).
+  let inout := avoidFunctionNames C (← genInputs (genLMonoTy typeArgs size) size)
+  let rawInputOnly := avoidFunctionNames C (← genInputs (genLMonoTy typeArgs size) size)
   let inputOnly := disjointInputs rawInputOnly inout
-  let rawOutputOnly ← genInputs typeArgs size
+  let rawOutputOnly := avoidFunctionNames C (← genInputs (genLMonoTy typeArgs size) size)
   let outputOnly := disjointInputs rawOutputOnly (inout ++ inputOnly)
   -- The shared in-out block `M` leads both signatures (`inputs = M ++ I`,
   -- `outputs = M ++ O`), so the shared parameters occupy the same leading
@@ -170,42 +148,30 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
   -- The contract clauses may *read* parameters, so each is generated at the
   -- free-variable context the declarative spec types it in (`ProcedureTypeSpec`):
   --   * preconditions see the **inputs** only (`procInputContext`);
-  --   * postconditions see **inputs ++ outputs ++ old(inout)** (`procBodyContext`).
-  -- A signature entry `(⟨x, ()⟩, τ)` becomes the `FVarCtx` entry `(x, τ)`.
+  --   * postconditions see **inputs ++ outputs ++ old(inout)** (`procBodyScopes`).
   let preconditions ← genChecks (sigFctx inputs) octx typeArgs size pctx
   let postconditions ←
     genChecks (sigFctx (inputs ++ outputs ++ oldVars inout)) octx typeArgs size pctx
-  -- The scope of the body starts with the inputs, the outputs, and the old binding of each entry of the in-out
-  -- block. That scope follows the declarative `procBodyContext`. The inputs *and* each old binding are immutable,
-  -- so the writable keys are the output-only names, which
-  -- are exactly the outputs the body is entitled to assign. `VarCtx` and
-  -- `LMonoTySignature` are both `List ((Identifier Unit) × LMonoTy)`.
-  --
-  -- Body expressions draw their free variables from the *current* scope: the
-  -- each statement generator computes its context of the free variables from the scope at each step, through
-  -- `VarCtx.toFVarCtx`. Therefore an expression of a generated body can *read* a parameter, including one whose
-  -- type is polymorphic, and it can read each local that an earlier statement declares. It does not only declare
-  -- a fresh local. Each emitted free variable is in the current scope, so a name that a fresh `init` gives never
-  -- collides with
-  -- them (the `init_det` rule's `x ∉ getVars e` premise), which is what keeps the
-  -- generator sound (see `freshNamesDisjointFromExprs_toFVarCtx`).
-  let (body, _, _) ← genStmtChain octx typeArgs
-    (ListMap.keys inputs ++ ListMap.keys (oldVars inout)) procs []
+  -- The scope of the body starts with the inputs, the outputs, and the old binding of each entry
+  -- of the in-out block. That scope follows the declarative `procBodyScopes`. The inputs *and*
+  -- each old binding are immutable, so the writable keys are the output-only names, which are
+  -- exactly the outputs the body is entitled to assign.
+  let (body, _, _) ← chain typeArgs
+    (ListMap.keys inputs ++ ListMap.keys (oldVars inout))
     -- The procedure's type parameters are *rigid* inside its body: unification
     -- must not refine them (a caller may instantiate them at any type), so the
-    -- body is generated under a context marking `typeArgs` rigid. This matches
-    -- `Procedure.typeCheck`, which sets `rigidTypeVars` to the type parameters
-    -- before checking the body, and pins a generated `init`'s stored type to its
-    -- annotation (see `genProcedure_complete` / the statement-level `hRigid`).
-    ({ C with rigidTypeVars := typeArgs }) (inputs ++ outputs ++ oldVars inout) pctx size len
-    maxStmtSeqLen
+    -- body is generated under a context that adds `typeArgs` to the rigid type
+    -- variables, as the procedure rule (`ProcHasType'.bodyTyped`) checks it.
+    ({ C with rigidTypeVars := C.rigidTypeVars ++ typeArgs })
+    (inputs ++ outputs ++ oldVars inout)
+  let lemmas ← genNameList size
   pure {
     header := {
       name := ⟨name, ()⟩,
       typeArgs := typeArgs,
       inputs := inputs,
       outputs := outputs,
-      noFilter := false
+      lemmas := lemmas
     },
     spec := {
       preconditions := preconditions,
@@ -213,6 +179,49 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     },
     body := .structured body
   }
+
+/-- Generate a well-typed `Procedure`.
+
+    - The type arguments are a list of type-variable names with no duplicate, from `genTypeArgs`.
+    - The outputs are a signature with distinct keys, whose types are over the type arguments, from
+      `genInputs (genLMonoTy typeArgs size) size`.
+    - The inputs are a signature with distinct keys, whose types are over the type arguments, from
+      `genInputs (genLMonoTy typeArgs size) size`. The filter `disjointInputs` makes its keys
+      disjoint from the keys of the outputs, so this call gives no in-out parameter.
+    - No parameter is named after a function of `C`; `avoidFunctionNames` drops those.
+    - The preconditions and the postconditions are labeled expressions of the type `bool` over
+      the type arguments, from `genChecks`.
+    - The body is a `structured` list of statements. Its length is not more than the given length,
+      the generator makes each element at the given size, and the initial scope holds the inputs
+      **and** the outputs. Therefore a `set` command and a guard can name either, and the inputs'
+      keys are marked immutable so the body may read but never assign to them.
+
+    - The context of the callable procedures holds the signature of each procedure that the body
+      can call. Each entry records the in-out block, the input-only block and the output-only
+      block, with the shared block first in both roles.
+      Threaded into `genStmtChain` so the body may emit `call` statements against
+      them, and an empty context gives a body with no call. The generated body is sound against
+      each program for which `ProcSigCorresponds procs P` holds. Read `genProcedure_sound`.
+
+    - `lemmas` is a list of names from `genNameList size`.
+
+    The statement `MetaData` is at its default.
+
+    The body is generated under the *ambient* context `C` (with its type parameters
+    added to the rigid type variables) rather than a hardcoded `LContext.default`, so a caller can
+    thread in the context under which the surrounding program is being checked; the ambient
+    type-scope `Γ` is likewise threaded to the soundness statement (see
+    `genProcedure_sound`). Passing `LContext.default` and `{}` recovers the old
+    behaviour.
+
+    See `genProcedure_sound` for the well-typedness guarantee. -/
+def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
+    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G Procedure :=
+  genProcedureWith
+    (fun tvars immutableVars C' ctx =>
+      genStmtChain octx tvars immutableVars procs [] C' ctx pctx size len maxStmtSeqLen)
+    octx C size pctx
 
 /-- Read the `ProcSig` of a procedure header off its signature, under a
     caller-chosen name `name` (the post-relabel `P{i}` a call site refers to). The
@@ -237,9 +246,7 @@ def headerProcSig (name : String) (h : Procedure.Header) : ProcSig where
 
 -- ── Quick tests ──────────────────────────────────────────────────────────
 
-open Std in
-instance instToFormatUnitProcedureHasTypeAGen : ToFormat Unit where
-  format _ := .nil
+attribute [local instance] unitToFormat
 
 -- Smoke test: a handful of procedures at size 2, up to 4 body statements.
 #guard_msgs(drop warning, drop all) in
