@@ -57,11 +57,6 @@ default: the largest cap, at most `5`, with `r < 1` (`expectedChildStmts_maxStmt
 So `genStmtT_expect_numNesting_finite` gives a finite bound on the expected nesting of one
 statement draw for every profile, at every size.
 
-**Chains.** A chain of `len` statement groups, which is what `genProgramStmtsT` and the test
-harness draw, holds at most `len` times the bound for one group (`genStmtChainT_expect_count_le_geom`,
-`genProgramStmtsT_expect_numNesting_le`, `genProgramStmtsT_expect_numLoops_le`). The harness grows
-`len` with the Plausible size, so the expected count per harness draw grows linearly in `len`.
-
 All the bounds are upper bounds on the count of `block`, `ite` and `loop` statements. They say
 nothing about the size of the expressions, which still grows with `n`. The length of an invariant
 list, like the length of a nested body, is at most `maxStmtSeqLen`.
@@ -729,19 +724,6 @@ theorem genStmtT_expect_numNesting_le_geom (θ : Tuning) (octx : OpCtx) (tvars :
     maxStmtSeqLen size labels C ctx
   rwa [nestShare_nestingCost] at h
 
-/-- **A tail bound (Markov).** The probability of at least `t` loops is at most the expectation bound
-divided by `t`. -/
-theorem genStmtT_prob_numLoops_ge (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx)
-    (maxStmtSeqLen size : Nat) (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx)
-    (t : ℝ≥0∞) (ht0 : t ≠ 0) (htt : t ≠ ⊤) :
-    prob (genStmtT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size
-        maxStmtSeqLen) {r | t ≤ count loopCost r}
-      ≤ loopShare θ * (1 - expectedChildStmts maxStmtSeqLen θ)⁻¹ / t :=
-  le_trans (prob_le_expect_div _ _ ht0 htt) (ENNReal.div_le_div_right
-    (genStmtT_expect_numLoops_le_geom θ octx tvars immutableVars procs pctx maxStmtSeqLen size
-      labels C ctx).2 _)
-
 -- ── The shipping weights ─────────────────────────────────────────────────
 
 /-- The shipping weights of the `size + 1` site: `7, 1, 1, 3, 1, 1, 1, 1`. -/
@@ -817,21 +799,6 @@ theorem genStmt_expect_numNesting_le (octx : OpCtx) (tvars : List TyIdentifier)
   refine le_trans h ?_
   ennr
 
-/-- **Markov's inequality at the shipping weights and the default cap**: a draw has at least `t`
-loops with probability at most `1/t`, at every size. For example, at least `4` loops with
-probability at most `1/4`. -/
-theorem genStmt_prob_numLoops_ge_default (octx : OpCtx) (tvars : List TyIdentifier)
-    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx) (size : Nat)
-    (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) (t : ℝ≥0∞) (ht0 : t ≠ 0)
-    (htt : t ≠ ⊤) :
-    prob (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size)
-        {r | t ≤ count loopCost r} ≤ 1 / t := by
-  have h := genStmtT_prob_numLoops_ge stmtDefault octx tvars immutableVars procs pctx
-    defaultMaxStmtSeqLen size labels C ctx t ht0 htt
-  rw [genStmtT_defaults, loopShare_default, inv_one_sub_expectedChildStmts_default] at h
-  refine le_trans h (ENNReal.div_le_div_right ?_ _)
-  ennr
-
 -- ── Every profile, at its own cap ────────────────────────────────────────
 
 /-- **The per-profile cap keeps every profile subcritical.** At `maxStmtSeqLenFor θ`, one statement
@@ -861,9 +828,7 @@ theorem expectedChildStmts_maxStmtSeqLenFor_lt_one (θ : Tuning) :
 
 /-- **Every tuning profile, at its own cap, has a bounded expected nesting**: the tuned statement
 generator at `maxStmtSeqLenFor θ` has at most `nestingShare θ / (1 − r)` nested statements on
-average, at every size, and this bound is finite. This is about one statement draw. The harness
-draws a chain of `len` statement groups; `genProgramStmtsT_expect_numNesting_le` states the bound
-for a chain. -/
+average, at every size, and this bound is finite. This is about one statement draw. -/
 theorem genStmtT_expect_numNesting_finite (θ : Tuning) (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx) (pctx : PolyOpCtx) (size : Nat)
     (labels : List String) (C : LContext CoreLParams) (ctx : VarCtx) :
@@ -882,43 +847,5 @@ theorem genStmtT_expect_numNesting_finite (θ : Tuning) (octx : OpCtx) (tvars : 
             (stmtWeight θ 4 + stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7) := le_add_self
       _ = _ := by ring
   · exact ENNReal.inv_ne_top.mpr (tsub_pos_of_lt (expectedChildStmts_maxStmtSeqLenFor_lt_one θ)).ne'
-
--- ── Chains ───────────────────────────────────────────────────────────────
-
-/-- **A chain of `len` groups**, uniformly in the size: at most `len · share / (1 − r)`. -/
-theorem genStmtChainT_expect_count_le_geom (c : NestCost) (θ : Tuning) (octx : OpCtx)
-    (tvars : List TyIdentifier) (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
-    (pctx : PolyOpCtx) (maxStmtSeqLen size len : Nat) (labels : List String)
-    (C : LContext CoreLParams) (ctx : VarCtx) :
-    expect (genStmtChainT (G := SPMF) θ octx tvars immutableVars procs labels C ctx pctx size len
-        maxStmtSeqLen) (countChain c)
-      ≤ (len : ℝ≥0∞) * (nestShare c θ * (1 - expectedChildStmts maxStmtSeqLen θ)⁻¹) :=
-  genStmtChainT_expect_le c θ octx tvars immutableVars procs pctx size maxStmtSeqLen _ labels
-    (fun C ctx => genStmtT_expect_count_le_geom c θ octx tvars immutableVars procs pctx
-      maxStmtSeqLen size labels C ctx) len C ctx
-
-/-- **The statement lists that the harness draws**, at the profile's own cap: at most
-`len · nestingShare θ / (1 − r)` nested statements on average, at every size. -/
-theorem genProgramStmtsT_expect_numNesting_le (θ : Tuning) (octx : OpCtx)
-    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
-    expect (genProgramStmtsT (G := SPMF) θ octx tvars size len pctx) (countChain nestingCost)
-      ≤ (len : ℝ≥0∞) *
-          (nestingShare θ * (1 - expectedChildStmts (maxStmtSeqLenFor θ) θ)⁻¹) := by
-  have h := genStmtChainT_expect_count_le_geom nestingCost θ octx tvars [] [] pctx
-    (maxStmtSeqLenFor θ) size len [] LContext.default []
-  rwa [nestShare_nestingCost] at h
-
-/-- **The statement lists that the harness draws**, at the profile's own cap: at most
-`len · loopShare θ / (1 − r)` loops on average, at every size. At the shipping weights this is at
-most `len`. -/
-theorem genProgramStmtsT_expect_numLoops_le (θ : Tuning) (octx : OpCtx)
-    (tvars : List TyIdentifier) (size len : Nat) (pctx : PolyOpCtx) :
-    expect (genProgramStmtsT (G := SPMF) θ octx tvars size len pctx) (countChain loopCost)
-      ≤ (len : ℝ≥0∞) *
-          (loopShare θ * (1 - expectedChildStmts (maxStmtSeqLenFor θ) θ)⁻¹) := by
-  have h := genStmtChainT_expect_count_le_geom loopCost θ octx tvars [] [] pctx
-    (maxStmtSeqLenFor θ) size len [] LContext.default []
-  rwa [nestShare_loopCost] at h
-
 
 end StrataGenerators.SizeDistributionLoops

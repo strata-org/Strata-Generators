@@ -24,4 +24,3 @@ import StrataGenerators.PrinterCoverage
 import StrataGenerators.SizeDistribution
 import StrataGenerators.SizeDistributionStmt
 import StrataGenerators.SizeDistributionLoops
-import StrataGenerators.SizeDistributionProgram
