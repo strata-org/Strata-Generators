@@ -17,6 +17,7 @@ import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProgramGen.ProcSigThread
 import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
+import StrataGenerators.ProgramGen.CompleteProcedure
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
 -- `SPMF.prob` bounds on how the size and the body-length cap shape the statement generator's
@@ -26,3 +27,6 @@ import StrataGenerators.SizeDistributionStmt
 import StrataGenerators.SizeDistributionLoops
 -- Completeness of `genStmt` for some size and some body-length cap, with size-free side conditions.
 import StrataGenerators.StmtHasTypeAGenCompleteExists
+-- Completeness of `genProcedure` at every large enough size, body length and cap, through the
+-- size-free statement completeness.
+import StrataGenerators.ProcedureHasTypeAGenCompleteExists

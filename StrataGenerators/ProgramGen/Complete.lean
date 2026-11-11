@@ -20,12 +20,14 @@ reachability with no new program-level obligation.
 This file proves that composition, plus the per-step reachability lemmas that a
 caller composes with it.
 
-## Status: 6 of the 8 declaration kinds
+## Status: 7 of the 8 declaration kinds
 
 This file has per-step reachability lemmas for **axioms, abstract types, aliases,
 `distinct`, datatype blocks and recursive function blocks** (the `genDecl*_complete`
-theorems below). Two kinds have no lemma: functions and procedures. What the remaining
-two need is catalogued in the repo's issue tracker, along with the other blockers
+theorems below). The procedure step is in `StrataGenerators.ProgramGen.CompleteProcedure`, through
+the size-free statement completeness, while the program has no polymorphic operator yet. Functions
+have no lemma. What the function step needs is catalogued in the repo's issue tracker, along with
+the other blockers
 (`genIdentName` has no two-directional support lemma, and `genLExpr` is itself
 incomplete). The `ArityOk` blocker is
 **gone**: upstream's `argsWellKinded` plus a vocabulary derived from

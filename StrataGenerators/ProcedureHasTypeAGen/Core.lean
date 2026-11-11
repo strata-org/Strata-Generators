@@ -219,8 +219,11 @@ def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
     (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G Procedure :=
   genProcedureWith
-    (fun tvars immutableVars C' ctx =>
-      genStmtChain octx tvars immutableVars procs [] C' ctx pctx size len maxStmtSeqLen)
+    (fun tvars immutableVars C' ctx => do
+      -- The body length is uniform on `[0, len]`, so that one bound covers bodies of every length
+      -- up to it (all procedures of a program share `len`).
+      let ⟨⟨l, _⟩⟩ ← RandomChoice.choose 0 len (Nat.zero_le _)
+      genStmtChain octx tvars immutableVars procs [] C' ctx pctx size l maxStmtSeqLen)
     octx C size pctx
 
 /-- Read the `ProcSig` of a procedure header off its signature, under a

@@ -277,7 +277,7 @@ end
 mutual
 /-- `CallOk` with `ExprReach` in place of reachability at one depth for the by-value inputs. Every
     other clause of the call recipe is unchanged. -/
-def CallOkE (procs : ProcSigCtx) (ctx : VarCtx) : Statement → Prop
+def CallOkE (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) : Statement → Prop
   | .cmd (CmdExt.call pname args _) =>
       ∃ (s : ProcSig) (σvals : List LMonoTy) (exprs : List Expression.Expr)
         (mask : List Bool),
@@ -290,75 +290,129 @@ def CallOkE (procs : ProcSigCtx) (ctx : VarCtx) : Statement → Prop
                 (by apply List.ne_nil_of_length_pos; assumption)
             else pure (.bool : LMonoTy)) : SPMF (List LMonoTy)) ∧
         args = StrataGenerators.Stmt.mkArgs s.M
-          (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
+          (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O))
           exprs mask ∧
-        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName [] ctx) = true ∧
+        (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).all (usableName imm ctx) = true ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M
-          ++ outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
+          ++ outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).keys.Nodup ∧
         List.Forall₂ (fun e τ => ExprReach (octx := octx) (tvars := tvars) ctx τ e)
           exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values ∧
         (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter (needsInit ctx)
-          ++ (outTargets [] ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
+          ++ (outTargets imm ctx (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O)).filter
                 (needsInit ctx) = []
   | .cmd (CmdExt.cmd _) => True
-  | .block _ body _ => CallOkEList procs ctx body
-  | .ite _ t e _ => CallOkEList procs ctx t ∧ CallOkEList procs ctx e
-  | .loop _ _ _ body _ => CallOkEList procs ctx body
+  | .block _ body _ => CallOkEList imm procs ctx body
+  | .ite _ t e _ => CallOkEList imm procs ctx t ∧ CallOkEList imm procs ctx e
+  | .loop _ _ _ body _ => CallOkEList imm procs ctx body
   | .exit _ _ => True
   | .typeDecl _ _ => True
 
 /-- `CallOkE` lifted to a statement chain, threading the scope with `stepCtx`. -/
-def CallOkEList (procs : ProcSigCtx) (ctx : VarCtx) : List Statement → Prop
+def CallOkEList (imm : List (Identifier Unit)) (procs : ProcSigCtx) (ctx : VarCtx) : List Statement → Prop
   | [] => True
-  | s :: ss => CallOkE procs ctx s ∧ CallOkEList procs (stepCtx ctx s) ss
+  | s :: ss => CallOkE imm procs ctx s ∧ CallOkEList imm procs (stepCtx ctx s) ss
 end
 
 mutual
-theorem callOkE_eventually (procs : ProcSigCtx) : ∀ (ctx : VarCtx) (s : Statement),
-    CallOkE (octx := octx) (tvars := tvars) procs ctx s →
-      Eventually fun n => CallOk (octx := octx) (tvars := tvars) procs ctx n s
+theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
+    ∀ (ctx : VarCtx) (s : Statement), CallOkE (octx := octx) (tvars := tvars) imm procs ctx s →
+      Eventually fun n => CallOk (octx := octx) (tvars := tvars) imm procs ctx n s
   | _, .cmd (CmdExt.call _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h₇, h₈⟩ =>
     (Eventually.forall₂ h₇).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆, h, h₈⟩
   | _, .cmd (CmdExt.cmd _), _ => .of_forall fun _ => trivial
-  | ctx, .block _ body _, h => (callOkEList_eventually procs ctx body h).pred
+  | ctx, .block _ body _, h => (callOkEList_eventually imm procs ctx body h).pred
   | ctx, .ite _ t e _, ⟨ht, he⟩ =>
-    ((callOkEList_eventually procs ctx t ht).pred.and (callOkEList_eventually procs ctx e he).pred)
-  | ctx, .loop _ _ _ body _, h => (callOkEList_eventually procs ctx body h).pred
+    (callOkEList_eventually imm procs ctx t ht).pred.and (callOkEList_eventually imm procs ctx e he).pred
+  | ctx, .loop _ _ _ body _, h => (callOkEList_eventually imm procs ctx body h).pred
   | _, .exit _ _, _ => .of_forall fun _ => trivial
   | _, .typeDecl _ _, _ => .of_forall fun _ => trivial
 
-theorem callOkEList_eventually (procs : ProcSigCtx) : ∀ (ctx : VarCtx) (ss : List Statement),
-    CallOkEList (octx := octx) (tvars := tvars) procs ctx ss →
-      Eventually fun n => CallOkList (octx := octx) (tvars := tvars) procs ctx n ss
+theorem callOkEList_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
+    ∀ (ctx : VarCtx) (ss : List Statement), CallOkEList (octx := octx) (tvars := tvars) imm procs ctx ss →
+      Eventually fun n => CallOkList (octx := octx) (tvars := tvars) imm procs ctx n ss
   | _, [], _ => .of_forall fun _ => trivial
   | ctx, s :: ss, ⟨hs, hss⟩ =>
-    (callOkE_eventually procs ctx s hs).and (callOkEList_eventually procs (stepCtx ctx s) ss hss)
+    (callOkE_eventually imm procs ctx s hs).and (callOkEList_eventually imm procs (stepCtx ctx s) ss hss)
 end
 
--- ── Completeness with an existential size and cap ───────────────────────────
+-- ── Statement chains at a fixed size and cap ────────────────────────────────
+
+/-- `spec_complete_at` for a statement chain, at a fixed size `n` and cap `k`: each statement of a
+    well-typed chain meets the side conditions, so the chain is in `genStmtChain`'s support at its own
+    length. -/
+theorem spec_complete_chain_at (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (k : Nat) :
+    ∀ (ss : List Statement) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
+      (C' : LContext CoreLParams) (ts' : TypeScopes), StatementsWellTyped P C ts L ss C' ts' →
+    ∀ (ctx : VarCtx) (n : Nat), Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types →
+      InGenShapeList ss → WritesOkList imm ss → AlphabetOkList tvars k n ss →
+      CallOkList (octx := octx) (tvars := tvars) imm procs ctx n ss →
+      ExprOkList (octx := octx) (tvars := tvars) ctx n ss →
+      ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
+        ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
+          SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx [] n ss.length k)
+  | [], C, _, _, _, _, hss, ctx, n, hΓ, _, _, _, _, _ => by
+    cases hss with
+    | nil _ _ _ _ hequiv => exact ⟨ctx, hequiv.trans hΓ, rfl, genStmtChain_nil_mem procs C ctx n⟩
+  | s :: ss, C, ts, L, C', ts', hss, ctx, n, hΓ, ⟨hnf, hnfs⟩, ⟨hwr, hwrs⟩, ⟨hok, hoks⟩,
+      ⟨hcall, hcalls⟩, ⟨hexpr, hexprs⟩ => by
+    cases hss with
+    | cons _ C₁ _ _ ts₁ _ _ _ _ hs hss =>
+      obtain ⟨ctx₁, hctx₁, rfl, hsmem⟩ :=
+        spec_complete_at (maxStmtSeqLen := k) P imm procs C ts L s C₁ ts₁ hs ctx n hΓ hnf hwr hok
+          hcall hexpr
+      obtain ⟨ctx₂, hctx₂, hstep, hssmem⟩ :=
+        spec_complete_chain_at P imm procs k ss C₁ ts₁ L C' ts' hss (stepCtx ctx s) n hctx₁ hnfs hwrs
+          hoks hcalls hexprs
+      refine ⟨ctx₂, hctx₂, by rw [hstep]; rfl, ?_⟩
+      simpa using genStmtChain_cons_mem procs C ctx n ss.length ⟨[s], C₁, stepCtx ctx s⟩ ss C'
+        ctx₂ hsmem hssmem
+
+-- ── Completeness at every large enough size and cap ─────────────────────────
+
+/-- **Completeness of `genStmtChain`, at every large enough size and cap.** A well-typed chain that
+    meets the size-free side conditions is in `genStmtChain`'s support at its own length, at every
+    cap `k ≥ K` and every size `n` from some threshold on. This is the form a caller that fixes the
+    size and the cap for other reasons, such as a procedure, uses. -/
+theorem spec_complete_chain_ev (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
+    (ss : List Statement) (C : LContext CoreLParams) (ts : TypeScopes) (L : List String)
+    (C' : LContext CoreLParams) (ts' : TypeScopes) (hss : StatementsWellTyped P C ts L ss C' ts')
+    (ctx : VarCtx) (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
+    (hshape : InGenShapeList ss) (hwr : WritesOkList imm ss) (hok : AlphabetOkEList tvars ss)
+    (hcall : CallOkEList (octx := octx) (tvars := tvars) imm procs ctx ss)
+    (hexpr : ExprOkEList (octx := octx) (tvars := tvars) ctx ss) :
+    ∃ K, Eventually fun n => ∀ k, K ≤ k →
+      ∃ ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧ ctx' = stepCtxList ctx ss ∧
+        ((ss, C', ctx') : List Statement × LContext CoreLParams × VarCtx) ∈
+          SPMF.support (genStmtChain (G := SPMF) octx tvars imm procs L C ctx [] n ss.length k) := by
+  obtain ⟨K, ha⟩ := alphabetOkEList_eventually ss hok
+  exact ⟨K, (ha.and ((callOkEList_eventually imm procs ctx ss hcall).and
+    (exprOkEList_eventually ctx ss hexpr))).mono fun n ⟨hA, hC, hE⟩ k hk =>
+      spec_complete_chain_at P imm procs k ss C ts L C' ts' hss ctx n hΓ hshape hwr (hA k hk) hC hE⟩
 
 /-- **Completeness of `genStmt`, for some size and some body-length cap.** Every well-typed
-    statement in generator shape (`InGenShape`) whose names, `init` types, call recipes and
-    expressions meet the size-free conditions `AlphabetOkE`, `CallOkE` and `ExprOkE` is in the
-    support of `genStmt … n k` for some size `n` and some cap `k`, with an output scope equivalent
-    to the typing's. None of the side conditions mentions a size or a cap. -/
-theorem spec_complete (P : Program) (procs : ProcSigCtx)
+    statement in generator shape (`InGenShape`) that writes no immutable variable (`WritesOk`) and
+    whose names, `init` types, call recipes and expressions meet the size-free conditions
+    `AlphabetOkE`, `CallOkE` and `ExprOkE` is in the support of `genStmt … n k` for some size `n` and
+    some cap `k`, with an output scope equivalent to the typing's. None of the side conditions
+    mentions a size or a cap. -/
+theorem spec_complete (P : Program) (imm : List (Identifier Unit)) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ts : TypeScopes) (labels : List String)
     (s : Statement) (C' : LContext CoreLParams) (ts' : TypeScopes)
     (h : StatementWellTyped P C ts labels s C' ts') (ctx : VarCtx)
     (hΓ : Strata.Util.HMaps.Equiv ts (procToTCtx ctx).types)
-    (hshape : InGenShape s) (hok : AlphabetOkE tvars s)
-    (hcall : CallOkE (octx := octx) (tvars := tvars) procs ctx s)
+    (hshape : InGenShape s) (hwr : WritesOk imm s) (hok : AlphabetOkE tvars s)
+    (hcall : CallOkE (octx := octx) (tvars := tvars) imm procs ctx s)
     (hexpr : ExprOkE (octx := octx) (tvars := tvars) ctx s) :
     ∃ k n ctx', Strata.Util.HMaps.Equiv ts' (procToTCtx ctx').types ∧
       ctx' = stepCtx ctx s ∧
       (⟨[s], C', ctx'⟩ : GenStmtResult) ∈
-        SPMF.support (genStmt (G := SPMF) octx tvars [] procs labels C ctx [] n k) := by
+        SPMF.support (genStmt (G := SPMF) octx tvars imm procs labels C ctx [] n k) := by
   obtain ⟨K, ha⟩ := alphabetOkE_eventually s hok
-  obtain ⟨N, hN⟩ := (ha.and ((callOkE_eventually procs ctx s hcall).and
+  obtain ⟨N, hN⟩ := (ha.and ((callOkE_eventually imm procs ctx s hcall).and
     (exprOkE_eventually ctx s hexpr)))
   obtain ⟨hA, hC, hE⟩ := hN N le_rfl
-  exact ⟨K, N, spec_complete_at (maxStmtSeqLen := K) P procs C ts labels s C' ts' h ctx N hΓ hshape
-    (hA K le_rfl) hC hE⟩
+  exact ⟨K, N, spec_complete_at (maxStmtSeqLen := K) P imm procs C ts labels s C' ts' h ctx N hΓ
+    hshape hwr (hA K le_rfl) hC hE⟩
 
 end StrataGenerators.Stmt.SpecComplete

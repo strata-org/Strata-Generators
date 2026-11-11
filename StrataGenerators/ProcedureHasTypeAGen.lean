@@ -619,6 +619,8 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
   obtain ⟨name, _, typeArgs, htypeArgs, rawM, hrawM, rawIn, hrawIn,
           rawOut, hrawOut, pre, hpre, post, hpost,
           ⟨body, C', ctx'⟩, hbody, lemmas, _, rfl⟩ := hproc
+  -- The body length `l ≤ len` that the generator drew.
+  obtain ⟨⟨⟨l, _⟩⟩, _, hbody⟩ := hbody
   -- The three blocks without the function names: `M` (in-out), `rawInputOnly` and
   -- `rawOutputOnly`, before the disjointness filters.
   obtain ⟨hMKeysNodup, hMVals, hMs0, _⟩ := avoidFunctionNames_support C typeArgs size rawM hrawM
@@ -754,14 +756,14 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
-      hseedWK (hops.mono rfl (fun _ _ hv => hv)) size len hseedFun (body, C', ctx') hbody
+      hseedWK (hops.mono rfl (fun _ _ hv => hv)) size l hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
   have hmod := genStmtChain_mutableVars octx pctx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
       { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
-      size len (body, C', ctx') hbody
+      size l (body, C', ctx') hbody
   -- The body scopes of the procedure agree with the scope of the seed on every lookup.
   have heq := procBodyScopes_inout name typeArgs (lemmas := lemmas) M
     (disjointInputs rawInputOnly M)
@@ -901,7 +903,8 @@ set_option maxHeartbeats 800000 in
     - The premises for each contract clause say that its attribute field and its metadata field hold their
       default values, that `genNameList` reaches its list of labels, and that `genLExpr … .bool`
       reaches its expression.
-    - `hBodyReach` says that the statement list of the body is in the support of `genStmtChain`, at exactly the
+    - `hBodyReach` says that the statement list of the body is in the support of `genStmtChain` at a body
+      length `bodyLen ≤ len` (the generator draws it uniformly from `[0, len]`), at exactly the
       seed that the generator uses, which is the three blocks and then the old variables, with the keys of the
       inputs and of the old variables as the immutable names, at an empty context of the labels and of the free
       variables,
@@ -965,11 +968,12 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
       c.expr ∈ SPMF.support (genLExpr (G := SPMF)
         (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx [] proc.header.typeArgs [] size .bool))
+    (bodyLen : Nat) (hBodyLen : bodyLen ≤ len)
     (hBodyReach : (bodyss, C', ctx') ∈ SPMF.support
       (genStmtChain (G := SPMF) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { C with rigidTypeVars := C.rigidTypeVars ++ proc.header.typeArgs }
-        (M ++ I ++ (M ++ O) ++ oldVars M) [] size len maxStmtSeqLen))
+        (M ++ I ++ (M ++ O) ++ oldVars M) [] size bodyLen maxStmtSeqLen))
     (hLemmasLen : proc.header.lemmas.length ≤ size)
     (hLemmasReach : ∀ s ∈ proc.header.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF))) :
     proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len (maxStmtSeqLen := maxStmtSeqLen)) := by
@@ -1022,7 +1026,7 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
   · -- body reachable: the generator's filtered blocks equal `M`/`I`/`O`; `hBodyReach`
     -- is the body's `genStmtChain` support membership directly.
     rw [hMeq, hIeq, hI_eq, hOeq, hO_eq]
-    exact hBodyReach
+    exact ⟨⟨⟨bodyLen, Nat.zero_le _, hBodyLen⟩⟩, by simp, hBodyReach⟩
   · -- the reassembled record equals `proc`.
     rw [hMeq, hIeq, hI_eq, hOeq, hO_eq]
     obtain ⟨⟨pname, ptyArgs, pinputs, poutputs, plemmas⟩, ⟨ppre, ppost⟩, pbody⟩ := proc
