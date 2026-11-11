@@ -63,6 +63,8 @@ singleton branches reduce to the old single-statement reasoning via
 
 namespace StrataGenerators.Procedure
 
+variable {maxStmtSeqLen : Nat}
+
 /-- Membership in the *mutable* sub-context's keys: `k` is a mutable key iff it
     is a key of the full context **and** is not a immutable name. This is the
     single bridge that turns the write-target-tracking into the
@@ -354,7 +356,7 @@ theorem genStmt_mutableVars
     (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SPMF.support
-      (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n)) :
+      (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n maxStmtSeqLen)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) r.stmts,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
@@ -371,7 +373,7 @@ theorem genStmt_mutableVars
         (true_law (genLExpr _ _ _ _ _ _ _)).obs,
         (true_law (genCondOrNondet _ _ _ _ _)).obs,
         (true_law (genOptMeasure _ _ _ _ _)).obs,
-        (true_law (genInvariants _ _ _ _ _)).obs]
+        (true_law (genInvariants _ _ _ _ _ _)).obs]
   all_goals (try simp only [block_modifiedVars_singleton, block_definedVars_singleton,
     HasVarsImp.modifiedVars, HasVarsImp.definedVars, Stmt.modifiedVars, Stmt.definedVars,
     CmdExt.modifiedVars, CmdExt.definedVars, ite_false, Bool.false_eq_true, List.not_mem_nil] at *)
@@ -395,7 +397,7 @@ theorem genStmtChain_mutableVars
     (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (result : List Statement × LContext CoreLParams × VarCtx)
     (hr : result ∈ SPMF.support
-      (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size len)) :
+      (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size len maxStmtSeqLen)) :
     (∀ v ∈ Block.modifiedVars (P := Expression) result.1,
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) result.1 false) ∧
     (∀ k ∈ Map.keys (result.2.2.writable immutableVars),

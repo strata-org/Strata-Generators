@@ -67,6 +67,7 @@ break it. Each clause of `AlphabetOk` about a name is in the same position.
 namespace StrataGenerators.Stmt.SpecComplete.Gaps
 
 variable {octx : OpCtx} {tvars : List TyIdentifier}
+variable {maxStmtSeqLen : Nat}
 
 -- ── Shape of a call group ────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
     (ce : Command)
     (h : (⟨[Stmt.cmd ce], C', ctx'⟩ : GenStmtResult) ∈
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n)) :
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen)) :
     (∃ c, ce = CmdExt.cmd c ∧ (⟨c, ctx'⟩ : GenCmdResult) ∈
         SPMF.support
           (genCmd (G := SPMF) octx tvars immutableVars ctx n [] [] C.knownTypes)) ∨
@@ -112,11 +113,11 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       (isSoundFor_self_support (listOf (elements [true, false] _))).obs,
       (isSoundFor_self_support (genTypeConstructor _)).obs,
       (isSoundFor_self_support (genFreshLabel _)).obs,
-      (isSoundFor_self_support (genStmtChain _ _ _ _ _ _ _ _ _ _)).obs,
+      (isSoundFor_self_support (genStmtChain _ _ _ _ _ _ _ _ _ _ _)).obs,
       (isSoundFor_self_support (genLExpr _ _ _ _ _ _ _)).obs,
       (isSoundFor_self_support (genCondOrNondet _ _ _ _ _)).obs,
       (isSoundFor_self_support (genOptMeasure _ _ _ _ _)).obs,
-      (isSoundFor_self_support (genInvariants _ _ _ _ _)).obs]
+      (isSoundFor_self_support (genInvariants _ _ _ _ _ _)).obs]
   all_goals (rename_i heq; simp only [GenStmtResult.mk.injEq, List.cons.injEq, Stmt.cmd.injEq,
     reduceCtorEq, false_and, and_true] at heq)
   all_goals first
@@ -178,7 +179,7 @@ theorem metadata_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCt
     (l : String) (e : Expression.Expr) (md : Imperative.MetaData Expression)
     (hmd : md ≠ default) :
     (⟨[Statement.assert l e md], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
@@ -216,7 +217,7 @@ theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (l : String) (e : Expression.Expr)
     (hl : l ∉ SPMF.support (genIdentName (G := SPMF))) :
     (⟨[Statement.assert l e default], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
@@ -323,7 +324,7 @@ theorem outTargets_sigP (avoid : List String) :
 theorem outTarget_gap (labels : List String)
     (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv [] [sigP] labels C C' callerCtx ctx' n _ h with
     ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, hs, hce⟩
@@ -398,7 +399,7 @@ theorem otherTargetCall_gap (labels : List String)
     StatementWellTyped progP C (procToTCtx callerCtx).types labels otherTargetCall C
         (procToTCtx callerCtx).types ∧
     (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n) :=
+      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) :=
   ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
 -- ── `spec_complete`'s old environment hypotheses were unsatisfiable ──────────

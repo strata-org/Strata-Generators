@@ -1614,7 +1614,7 @@ theorem genDeclProcedure_names {s : GenState} {b : Bounds} {ds : List Decl} {s' 
   refine IsSoundFor.of_mem_pair h ?_
   rw [IsSoundFor.iff_obs]; unfold genDeclProcedure; dsimp only
   walk [(true_law (genProcedure (G := SPMF) s.octx s.procs s.C s.Γ b.procSize b.procLen
-    s.derivedPctx)).obs, (isSoundFor_self_support (genDeclName (G := SPMF) s.reserved)).obs]
+    s.derivedPctx b.maxStmtSeqLen)).obs, (isSoundFor_self_support (genDeclName (G := SPMF) s.reserved)).obs]
   refine namesStep_single ?_ rfl (genDeclName_fresh ‹_›).1
   simp [declNames, Decl.names, Decl.name]
 

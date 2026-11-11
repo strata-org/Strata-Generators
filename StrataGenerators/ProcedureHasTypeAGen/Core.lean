@@ -217,10 +217,10 @@ def genProcedureWith [Gen G]
     See `genProcedure_sound` for the well-typedness guarantee. -/
 def genProcedure [Gen G] (octx : OpCtx) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
-    (pctx : PolyOpCtx := []) : G Procedure :=
+    (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := defaultMaxStmtSeqLen) : G Procedure :=
   genProcedureWith
     (fun tvars immutableVars C' ctx =>
-      genStmtChain octx tvars immutableVars procs [] C' ctx pctx size len)
+      genStmtChain octx tvars immutableVars procs [] C' ctx pctx size len maxStmtSeqLen)
     octx C size pctx
 
 /-- Read the `ProcSig` of a procedure header off its signature, under a

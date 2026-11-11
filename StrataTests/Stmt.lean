@@ -18,7 +18,9 @@ generated statements`, which the suite already tests.
 
 `dist-report` measures a loop in 23–26% of statement lists at the source weights, and in
 80–82% under `stmtLoopHeavy`. A loop inside a loop goes from 0–2% to 27–28%, and that is
-where a loop-elimination pass is most likely to be wrong. So those two properties are
+where a loop-elimination pass is most likely to be wrong. These rates were measured before
+`maxStmtSeqLen` capped the body lengths, and with the old weights; they were not measured again.
+So those two properties are
 registered under both weightings, through `@[strata_property (tunings := …)]`. Each row has
 its own verdict and its own Tyche panel. The `[default]` row is exactly the property as
 written, because `genWith defaults` is the type's `Arbitrary` instance.

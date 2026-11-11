@@ -40,6 +40,8 @@ open StrataGenerators.Procedure StrataGenerators.Stmt
 
 namespace ProgramGen
 
+variable {maxStmtSeqLen : Nat}
+
 /-! ## `find?` under append -/
 
 /-- **The scan distributes over append.** `Program.find?.go` walks the list in
@@ -144,7 +146,7 @@ def procSigOf (p : Procedure) (M I O : @LMonoTySignature Unit) :
 theorem genProcedure_sig_decomp {octx : OpCtx} {pctx : PolyOpCtx} {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
     (hp : p ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen)) :
     ∃ M I O : @LMonoTySignature Unit,
       p.header.inputs = M ++ I ∧ p.header.outputs = M ++ O ∧
       (∀ i (hi : i < I.keys.length), (M ++ O).keys.contains (I.keys[i]'hi) = false) ∧
@@ -352,7 +354,7 @@ theorem genProcedure_commonPrefix_decomp {octx : OpCtx} {pctx : PolyOpCtx}
     {procs : ProcSigCtx}
     {C : LContext CoreLParams} {Γ : TContext Unit} {size len : Nat} {p : Procedure}
     (hp : p ∈ SPMF.support
-      (genProcedure (G := SPMF) octx procs C Γ size len pctx)) :
+      (genProcedure (G := SPMF) octx procs C Γ size len pctx maxStmtSeqLen)) :
     ∃ M I O : @LMonoTySignature Unit,
       ProgramGen.commonPrefix p.header.inputs p.header.outputs = M ∧
       p.header.inputs.drop M.length = I ∧
@@ -409,7 +411,7 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
       (fun x => (StrataGenerators.Stmt.functionNames s.C).contains x) s.dtCons)).obs,
     (true_law (genDeclName (G := SPMF) s.reserved)).obs,
     (isSoundFor_self_support (genProcedure (G := SPMF) s.octx s.procs s.C s.Γ b.procSize
-      b.procLen s.derivedPctx)).obs,
+      b.procLen s.derivedPctx b.maxStmtSeqLen)).obs,
     hR.obs]
   all_goals try first
     | exact .inl rfl
@@ -419,7 +421,7 @@ theorem genDeclStep_procs_step {s s' : GenState} {b : Bounds} {ds : List Decl}
   -- The procedure step: renaming leaves `inputs`/`outputs`/`typeArgs` alone, so the
   -- decomposition recovered from the drawn procedure is the renamed procedure's too.
   obtain ⟨M, I, O, hcp, hdI, hdO, hins, houts, hdisj, hnd⟩ :=
-    genProcedure_commonPrefix_decomp ‹_ ∈ SPMF.support (genProcedure _ _ _ _ _ _ _)›
+    genProcedure_commonPrefix_decomp ‹_ ∈ SPMF.support (genProcedure _ _ _ _ _ _ _ _)›
   refine .inr ⟨_, _, rfl, rfl, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · rfl
   · rfl
