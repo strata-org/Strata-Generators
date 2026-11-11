@@ -85,7 +85,7 @@ theorem prob_eq_obs {α : Type} (p : SPMF α) (E : Set α) :
     prob p E = SPMF.expectObs.spec p (E.indicator 1) := rfl
 
 theorem zero_le_obs {α : Type} (g : SPMF α) (φ : α → ℝ≥0∞) : 0 ≤ SPMF.expectObs.spec g φ :=
-  zero_le _
+  zero_le
 
 section mass
 variable (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
@@ -226,7 +226,7 @@ theorem mass_regex (bctx : BVarCtx) (ho : (opsOfType octx .regex).length > 0) : 
     norm_num
     refine ENNReal.div_le_div_right ?_ _
     calc (4 : ℝ≥0∞) = 2 + (0 + 2) := by norm_num
-      _ ≤ _ := by gcongr; exact zero_le _
+      _ ≤ _ := by gcongr; exact zero_le
 
 /-- A lower bound on `genLExprBase`'s mass at each type, at every depth (`0` where none is
 proven). -/
@@ -250,8 +250,8 @@ theorem massFloor_le (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) :
   · exact mass_bitvec fctx octx pctx tvars bctx _ n
   · split
     · exact mass_regex fctx octx pctx tvars bctx ‹_› n
-    · exact zero_le _
-  · exact zero_le _
+    · exact zero_le
+  · exact zero_le
 
 end mass
 
@@ -312,7 +312,7 @@ variable {name : String} {k : Nat} {m : Unit}
 @[simp] theorem OpCall_succ_ind_strConst (x : String) :
     (OpCall name (k + 1)).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.strConst m x) = 0 := OpCall_succ_ind_const _
 @[simp] theorem OpCall_succ_ind_realConst (r : Rat) :
-    (OpCall name (k + 1)).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.realConst m r) = 0 := OpCall_succ_ind_const _
+    (OpCall name (k + 1)).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.rationalConst m r) = 0 := OpCall_succ_ind_const _
 @[simp] theorem OpCall_succ_ind_bitvecConst (w : Nat) (b : BitVec w) :
     (OpCall name (k + 1)).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.bitvecConst m w b) = 0 :=
   OpCall_succ_ind_const _
@@ -323,7 +323,7 @@ variable {name : String} {k : Nat} {m : Unit}
 @[simp] theorem OpCall_zero_ind_strConst (x : String) :
     (OpCall name 0).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.strConst m x) = 0 := OpCall_zero_ind_const _
 @[simp] theorem OpCall_zero_ind_realConst (r : Rat) :
-    (OpCall name 0).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.realConst m r) = 0 := OpCall_zero_ind_const _
+    (OpCall name 0).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.rationalConst m r) = 0 := OpCall_zero_ind_const _
 @[simp] theorem OpCall_zero_ind_bitvecConst (w : Nat) (b : BitVec w) :
     (OpCall name 0).indicator (1 : LExpr' → ℝ≥0∞) (LExpr.bitvecConst m w b) = 0 :=
   OpCall_zero_ind_const _
@@ -414,8 +414,8 @@ theorem genLExprBase_prob_ge_indir (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyO
         fun h => le_obs_of_le_prob (h := hB) (p := genIndir (G := SPMF) octx _ _ h),
         fun m τ fb φ => zero_le_obs (genIndirPolyCore (G := SPMF) fctx octx pctx bctx τ
           (genLExprBase (G := SPMF) fctx octx pctx tvars bctx m) fb) φ]
-       simp only [LMonoTy.arrow, LMonoTy.bool, LMonoTy.int, LMonoTy.string, LMonoTy.real,
-         dif_pos hi, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
+       try delta LMonoTy.arrow LMonoTy.bool LMonoTy.int LMonoTy.string LMonoTy.real
+       simp only [dif_pos hi, List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]
        exact le_div_of_term (by norm_num) (by term_le_sum))
 
 
@@ -483,7 +483,7 @@ theorem off_succ_le_app (bctx : BVarCtx) (n k : Nat) (name : String) (τ : LMono
 /-- At depth `0` every draw is a leaf, never an application. -/
 theorem off_zero_succ (bctx : BVarCtx) (k : Nat) (name : String) (τ : LMonoTy) :
     prob (genOff fctx octx pctx tvars bctx 0 τ) (OpCall name (k + 1)) = 0 := by
-  refine le_antisymm ?_ (zero_le _)
+  refine le_antisymm ?_ zero_le
   unfold genOff
   rw [genLExprBaseW.eq_def, prob_eq_obs]
   split
@@ -560,7 +560,8 @@ theorem off_op_le (bctx : BVarCtx) (name : String) (a b : LMonoTy) : ∀ n,
           (genLExprBaseW (G := SPMF) fctx octx pctx tvars 0 0 bctx m) fb) p,
         fun p => obs_default_le (α := LExpr') p]
     simp [Function.comp_def, sum_ind_op_eq_count]
-    simp only [pickShare, LMonoTy.arrow]
+    simp only [pickShare]
+    delta LMonoTy.arrow
     split_ifs <;> [skip; simp]
     rw [ENNReal.div_eq_inv_mul]
   | n + 1 => by
@@ -579,7 +580,8 @@ theorem off_op_le (bctx : BVarCtx) (name : String) (a b : LMonoTy) : ∀ n,
           (genLExprBaseW (G := SPMF) fctx octx pctx tvars 0 0 bctx m) fb) p,
         fun p => obs_default_le (α := LExpr') p]
     simp [Function.comp_def, sum_ind_op_eq_count]
-    simp only [pickShare, LMonoTy.arrow]
+    simp only [pickShare]
+    delta LMonoTy.arrow
     split_ifs <;> [skip; simp]
     rw [ENNReal.div_eq_inv_mul, ← mul_assoc]
     gcongr
@@ -640,7 +642,7 @@ theorem off_call_le (bctx : BVarCtx) (name : String) (r : LMonoTy) (as : List LM
     intro _
     have h0 : tyAfter r as 0 = .tcons "arrow" [as[0]'(List.length_pos_iff.2 has),
         tyAfter r as 1] := tyAfter_succ _
-    refine ⟨fun n a b hne => le_antisymm ?_ (zero_le _), fun _ _ _ h => absurd h (by omega),
+    refine ⟨fun n a b hne => le_antisymm ?_ zero_le, fun _ _ _ h => absurd h (by omega),
       fun n => ?_⟩
     · refine (off_op_le fctx octx pctx tvars bctx name a b n).trans (le_of_eq ?_)
       rw [hps _ (by simpa [tyAfter] using hne), mul_zero]
@@ -662,7 +664,7 @@ theorem off_call_le (bctx : BVarCtx) (name : String) (r : LMonoTy) (as : List LM
     have hzero : ∀ n σ, σ ≠ tyAfter r as (k + 1) →
         prob (genOff fctx octx pctx tvars bctx n σ) (OpCall name (k + 1)) = 0 := by
       intro n σ hσ
-      refine le_antisymm ?_ (zero_le _)
+      refine le_antisymm ?_ zero_le
       cases n with
       | zero => exact (off_zero_succ fctx octx pctx tvars bctx k name σ).le
       | succ n =>
@@ -676,7 +678,7 @@ theorem off_call_le (bctx : BVarCtx) (name : String) (r : LMonoTy) (as : List LM
               exact h.2.2.1), SPMF.expect_const, mul_zero, mul_zero]
     refine ⟨fun n a b hne => hzero n _ hne, fun n σ hσ _ => hzero n σ hσ, fun n => ?_⟩
     cases n with
-    | zero => rw [off_zero_succ]; exact zero_le _
+    | zero => rw [off_zero_succ]; exact zero_le
     | succ n =>
       refine (off_succ_le_app fctx octx pctx tvars bctx n k name _).trans ?_
       refine (mul_le_mul_right (offApp_le fctx octx pctx tvars bctx n k name _) _).trans ?_
@@ -704,7 +706,7 @@ theorem off_eq_zero_of_lt (bctx : BVarCtx) (name : String) :
   | 0, _, _, _, hk => absurd hk (by omega)
   | k + 1, 0, τ, _, _ => off_zero_succ fctx octx pctx tvars bctx k name τ
   | k + 1, n + 1, τ, hn, _ => by
-    refine le_antisymm ?_ (zero_le _)
+    refine le_antisymm ?_ zero_le
     refine (off_succ_le_app fctx octx pctx tvars bctx n k name τ).trans ?_
     refine (mul_le_mul_right (offApp_le fctx octx pctx tvars bctx n k name τ) _).trans
       (le_of_eq ?_)

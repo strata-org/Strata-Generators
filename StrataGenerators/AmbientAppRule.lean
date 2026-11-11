@@ -225,7 +225,7 @@ theorem le_obs_of_le_prob {p : SPMF α} {E : Set α} {B : ℝ≥0∞} (h : B ≤
     B ≤ SPMF.expectObs.spec p (E.indicator 1) := h
 
 /-- The trivial lower bound, for the branches a walk need not count. -/
-theorem zero_le_obs (p : SPMF α) (φ : α → ℝ≥0∞) : 0 ≤ SPMF.expectObs.spec p φ := zero_le _
+theorem zero_le_obs (p : SPMF α) (φ : α → ℝ≥0∞) : 0 ≤ SPMF.expectObs.spec p φ := zero_le
 
 theorem div_three_le (x : ℝ≥0∞) : x / 3 ≤ x :=
   ENNReal.div_le_of_le_mul (le_mul_of_one_le_right' (by norm_num))
@@ -407,7 +407,7 @@ theorem genExpr_prob_callN_le (f : Fn) (k : Nat) :
       fun _ ⟨g, x, h, _⟩ => ⟨g, x, h⟩
     cases n with
     | zero =>
-      unfold genExpr; rw [prob_genLeaf_app_eq_zero sig Γ hApp]; exact zero_le _
+      unfold genExpr; rw [prob_genLeaf_app_eq_zero sig Γ hApp]; exact zero_le
     | succ n =>
       -- The application rule: `g x` is a call with `k + 1` arguments iff `g` is one with `k`,
       -- which at the guessed type `σ → τ` is bounded by the induction hypothesis.
@@ -590,7 +590,8 @@ most `1 / numBaseTypes` (exactly that for a base type in the list, `0` otherwise
 theorem genTyUniform_prob_le {numBaseTypes : Nat} (h2 : 2 ≤ numBaseTypes) (τ : Ty) :
     prob (genTyUniform numBaseTypes : SPMF Ty) {τ} ≤ (numBaseTypes : ℝ≥0∞)⁻¹ := by
   unfold SPMF.prob genTyUniform
-  rw [SPMF.expect_elements, div_eq_mul_inv]
+  refine (SPMF.expect_elements (xs := baseTys numBaseTypes) _ _).trans_le ?_
+  rw [div_eq_mul_inv]
   have hlen : (baseTys numBaseTypes).length = numBaseTypes := by simp [baseTys]; omega
   rw [hlen]
   calc _ ≤ 1 * (numBaseTypes : ℝ≥0∞)⁻¹ := by
