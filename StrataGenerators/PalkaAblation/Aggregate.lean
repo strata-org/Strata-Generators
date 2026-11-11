@@ -7,9 +7,9 @@ import StrataGenerators.PalkaAblation.Bounds
 *any* operator of a class `C`: the operators returning `r` whose arity lies in `[k + 1, M]` and
 whose arguments are all base types (`bool`, `int`, `string`, `real`, bitvectors).
 
-* `off_callIn_le`: the ablated generator (`genLExprBase` without its Indir and IndirPoly branches,
-  i.e. with only the STLC application rule left) makes such a call with probability at most
-  `1/9 · (1/13)^k`. A call with at least `k + 1` arguments needs `k + 1` nested application
+* `off_callIn_le`: the generator without the Pałka rule (`genLExprBase` without its Indir and
+  IndirPoly branches, so only the STLC application rule builds calls) makes such a call with
+  probability at most `1/9 · (1/13)^k`. A call with at least `k + 1` arguments needs `k + 1` nested application
   rules, and each is chosen with share at most `1/9` (`1/13` at an arrow type).
 * `on_callIn_ge`: `genLExprBase` makes one with probability at least
   `1/6 · |C|/F · (7/24)^M`, where `F` is the number of operators returning `r`. Its Indir branch
@@ -20,8 +20,8 @@ whose arguments are all base types (`bool`, `int`, `string`, `real`, bitvectors)
 * `palka_more_frequent_three`: the case of exactly three arguments. More than one in six of the
   operators returning `r` is enough.
 * `palka_more_frequent_three_four`: three or four arguments. More than six in eleven is enough.
-* `genLExpr_below_arity`: at every depth below an operator's arity, the ablated generator never
-  calls it, while `genLExpr` does with positive probability.
+* `genLExpr_below_arity`: at every depth below an operator's arity, the generator without the Pałka
+  rule never calls it, while `genLExpr` does with positive probability.
 
 None of this depends on a particular factory: every statement quantifies over the operator context,
 the depth `n + 1`, and the variable contexts. Nothing is computed, so no `native_decide`.
@@ -96,9 +96,9 @@ theorem OpCall_subset_Spine (name : String) : ∀ k, OpCall name k ⊆ Spine k
     rintro e ⟨g, x, rfl, hg⟩
     exact ⟨g, x, rfl, OpCall_subset_Spine name k hg⟩
 
-/-! ## The ablated generator: an upper bound -/
+/-! ## The generator without the Pałka rule: an upper bound -/
 
-section ablated
+section noPalka
 variable (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
 
 /-- At depth `n + 1`, an application at the root comes only from the application branch. -/
@@ -183,7 +183,7 @@ theorem prob_le_one' {α : Type} (p : SPMF α) (E : Set α) : prob p E ≤ 1 :=
 theorem appShare_arrow (a b : LMonoTy) : appShare (.arrow a b) = 1 / 13 := by
   simp [appShare, isArrow, LMonoTy.arrow]
 
-/-- **The ablated generator rarely builds long spines.** At every depth and type, the root is
+/-- **The generator without the Pałka rule rarely builds long spines.** At every depth and type, the root is
 `k + 1` nested applications with probability at most `appShare τ · (1/13)^k`. -/
 theorem off_spine_le (bctx : BVarCtx) : ∀ n k τ,
     prob (genOff fctx octx pctx tvars bctx n τ) (Spine (k + 1)) ≤ appShare τ * (1 / 13) ^ k
@@ -208,7 +208,7 @@ theorem off_spine_le (bctx : BVarCtx) : ∀ n k τ,
           rw [SPMF.expect_const, pow_succ']
           exact mul_le_of_le_one_left' (SPMF.mass_le_one _)
 
-end ablated
+end noPalka
 
 /-! ## The class of operators and its calls -/
 
@@ -246,7 +246,8 @@ theorem CallIn_classOps_subset_Spine (octx : OpCtx) (r : LMonoTy) (lo hi : Nat) 
   exact Spine_anti hp.2.1.1 (OpCall_subset_Spine p.1 _ he)
 
 /-- **The STLC rule, over the class.** Every operator of `classOps octx r (k + 1) hi` has at least
-`k + 1` arguments, so the ablated generator calls one with probability at most `1/9 · (1/13)^k`. -/
+`k + 1` arguments, so the generator without the Pałka rule calls one with probability at most
+`1/9 · (1/13)^k`. -/
 theorem off_callIn_le (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) (r : LMonoTy) (k hi : Nat) :
     prob (genOff fctx octx pctx tvars bctx n r) (CallIn (classOps octx r (k + 1) hi))
@@ -365,8 +366,8 @@ Let `C` be the operators returning `r` with between `k + 1` and `M` arguments, a
 and `F` all operators returning `r`. If `6 · 24^M · F < 9 · 13^k · 7^M · |C|`, i.e. `C` is a
 large enough fraction of the operators returning `r`, then at every depth `n + 1` and in every
 variable context, `genLExprBase` makes a full call of an operator of `C` strictly more often than
-the same generator with its Indir and IndirPoly branches removed (only the STLC application rule
-left). -/
+the generator without the Pałka rule (its Indir and IndirPoly branches removed, so only the STLC
+application rule builds calls). -/
 theorem palka_more_frequent (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) (n : Nat) (r : LMonoTy) (k M : Nat)
     (hmany : 6 * 24 ^ M * (findOpsInCtx octx r).length
@@ -413,7 +414,8 @@ theorem palka_more_frequent_three_four (fctx : FVarCtx) (octx : OpCtx) (pctx : P
 
 /-- **Below its arity, only the Indir rules make the call.** For an Indir candidate
 `(name, as)` at `r` whose argument types all have a positive mass floor (in particular, all base
-types), and every depth `d` below its arity, the ablated generator never makes the call, while
+types), and every depth `d` below its arity, the generator without the Pałka rule never makes the
+call, while
 `genLExpr` makes it with positive probability. -/
 theorem genLExpr_below_arity (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx)
     (tvars : List TyIdentifier) (bctx : BVarCtx) {name : String} {as : List LMonoTy}

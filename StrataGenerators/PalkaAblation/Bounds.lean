@@ -4,8 +4,8 @@ import Basalt
 /-!
 # Factory calls with and without the Indir/IndirPoly rules: the bounds
 
-**What is ablated.** Only the two branches that apply a factory operator to arguments read off its
-signature (Indir and IndirPoly, Pałka et al.'s rules). The ablated generator keeps the rest,
+**What is removed.** Only the two branches that apply a factory operator to arguments read off its
+signature (Indir and IndirPoly, Pałka et al.'s rules). The generator without the Pałka rule keeps the rest,
 including `genAppArgTy` and `genGenerableTy`, which draw argument types from the context's
 generable types (also after Pałka et al.). The upper bound `off_call_le` is used with the guess
 probability bounded by `1`, so it does not depend on how `genAppArgTy` guesses: it holds for any
@@ -419,19 +419,19 @@ theorem genLExprBase_prob_ge_indir (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyO
        exact le_div_of_term (by norm_num) (by term_le_sum))
 
 
-/-! ## The ablated generator: an upper bound -/
+/-! ## The generator without the Pałka rule: an upper bound -/
 
 theorem obs_le_iSup {α : Type} (g : SPMF α) (p : α → ℝ≥0∞) :
     SPMF.expectObs.spec g p ≤ ⨆ a, p a := SPMF.expect_le_iSup
 
-section ablated
+section noPalka
 variable (fctx : FVarCtx) (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
 
-/-- The ablated generator: `genLExprBase` without its Indir and IndirPoly branches. -/
+/-- The generator without the Pałka rule: `genLExprBase` without its Indir and IndirPoly branches. -/
 noncomputable abbrev genOff (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) : SPMF LExpr' :=
   genLExprBaseW (G := SPMF) fctx octx pctx tvars 0 0 bctx n τ
 
-/-- The ablated generator's application branch at type `τ`. -/
+/-- The application branch of the generator without the Pałka rule, at type `τ`. -/
 noncomputable abbrev offApp (bctx : BVarCtx) (n : Nat) (τ : LMonoTy) : SPMF LExpr' :=
   genApp (genAppArgTy (G := SPMF) fctx octx tvars bctx n τ)
     (genLExprBaseW (G := SPMF) fctx octx pctx tvars 0 0 bctx n) τ
@@ -441,7 +441,8 @@ def isArrow : LMonoTy → Bool
   | .tcons "arrow" [_, _] => true
   | _ => false
 
-/-- The application branch's share of its site, in the ablated generator: `1/13` at an arrow,
+/-- The application branch's share of its site, in the generator without the Pałka rule: `1/13`
+at an arrow,
 at most `1/9` elsewhere (`1/16` at `bool`, `1/10` at `int`, …, `0` at a declared type). -/
 noncomputable def appShare (τ : LMonoTy) : ℝ≥0∞ := if isArrow τ then 1 / 13 else 1 / 9
 
@@ -613,7 +614,7 @@ theorem tyAfter_succ {r : LMonoTy} {as : List LMonoTy} {k : Nat} (hk : k < as.le
   simp only [tyAfter, List.drop_eq_getElem_cons hk, LMonoTy.mkArrow'_cons]
   rfl
 
-/-- The upper bound on the ablated generator's probability of a call with `k` arguments, given a
+/-- The upper bound on the probability that the generator without the Pałka rule makes a call with `k` arguments, given a
 bound `γ τ a` on the probability that `genAppArgTy` guesses `a` at target `τ`: the innermost
 bare operator, then one application rule per argument. -/
 noncomputable def offChain (γ : LMonoTy → LMonoTy → ℝ≥0∞) (ps : ℝ≥0∞) (r : LMonoTy)
@@ -622,9 +623,9 @@ noncomputable def offChain (γ : LMonoTy → LMonoTy → ℝ≥0∞) (ps : ℝ�
   | k + 1 => appShare (tyAfter r as (k + 1)) * γ (tyAfter r as (k + 1)) (as.getD k .bool)
       * offChain γ ps r as k
 
-/-- **The ablated generator, bounded.** If `name` is an operator only at its type
+/-- **The generator without the Pałka rule, bounded.** If `name` is an operator only at its type
 `mkArrow' r as` (with `as ≠ []`), and `γ` bounds `genAppArgTy`'s guesses, then at every depth the
-ablated generator makes a full call of `name` with probability at most `offChain … |as|`. -/
+generator without the Pałka rule makes a full call of `name` with probability at most `offChain … |as|`. -/
 theorem off_call_le (bctx : BVarCtx) (name : String) (r : LMonoTy) (as : List LMonoTy)
     (has : as ≠ []) (hps : ∀ σ, σ ≠ LMonoTy.mkArrow' r as → pickShare octx name σ = 0)
     (γ : LMonoTy → LMonoTy → ℝ≥0∞)
@@ -698,7 +699,7 @@ theorem off_call_le (bctx : BVarCtx) (name : String) (r : LMonoTy) (as : List LM
             · exact hγ _ _ _
         _ = _ := by ring
 
-/-- **Below the arity, the ablated generator cannot make the call at all**: a call with `k`
+/-- **Below the arity, the generator without the Pałka rule cannot make the call at all**: a call with `k`
 arguments needs `k` nested application rules, each of which uses one unit of depth. -/
 theorem off_eq_zero_of_lt (bctx : BVarCtx) (name : String) :
     ∀ k n τ, n < k → 0 < k →
@@ -715,7 +716,7 @@ theorem off_eq_zero_of_lt (bctx : BVarCtx) (name : String) :
           off_eq_zero_of_lt bctx name k n _ (by omega) (by omega),
       SPMF.expect_const, mul_zero, mul_zero]
 
-end ablated
+end noPalka
 
 /-! ## Pałka et al.'s rule on: a lower bound -/
 
