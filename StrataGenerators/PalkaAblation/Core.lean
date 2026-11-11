@@ -38,11 +38,11 @@ at no other type.
   probability.
 
 **Axioms.** `core_ablation` and `core_genLExpr_below_arity` use no `native_decide`: membership in
-`separatedCalls` / `belowArityCalls` is a hypothesis, discharged by the check's own definition. They
-depend only on the standard axioms and on the `native_decide` axioms that `Core.Factory` already
-carries (its `name_nodup` field). Only the three counting theorems (`coreCalls_length`,
-`separatedCalls_length`, `belowArityCalls_length`) use `native_decide` themselves; each use adds its
-own auxiliary axiom of the same kind (trust in the compiled evaluator).
+`separatedCalls` / `belowArityCalls` is a hypothesis, discharged by the check's own definition, so
+they depend only on the standard axioms. Only the three counting theorems (`coreCalls_length`,
+`separatedCalls_length`, `belowArityCalls_length`) use `native_decide`; each use adds an auxiliary
+axiom (trust in the compiled evaluator). Checking them with `decide +kernel` instead is possible
+(via `Core.factory_toArray` in `FactoryArrayBridge.lean`) but takes about 30 GB of memory.
 -/
 
 namespace StrataGenerators.PalkaAblation
