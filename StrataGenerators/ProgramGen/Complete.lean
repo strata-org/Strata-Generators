@@ -5,9 +5,8 @@ import Basalt.Walk.Complete
 /-!
 # Completeness of the whole-program generator (fold inversion)
 
-A monolithic "every `ProgramHasTypeA` program is reachable" theorem is inherently
-false for a *bounded sampler* without a union of per-declaration reachability side
-conditions (the same reason datatype completeness needs `BitvecWidthOnly`).
+A monolithic "every `ProgramWellTyped` program is reachable" theorem is false for a *bounded
+sampler* without per-declaration reachability side conditions.
 
 One claim is cleanly provable, and it is the useful contribution about completeness: the **fold composes**. If
 each step for one declaration is reachable from its input state, then `genDeclsFold` reaches the whole
@@ -37,25 +36,22 @@ function, or each member's parts, are reachable, and the caller discharges it fr
 of the expression generator (for a function, `genFunction_complete`). The procedure step takes a
 hypothesis that `genProcedure` reaches the procedure, which `genProcedure_complete` gives.
 
-`genNonRecursiveArgTy_complete` is a support lemma. It gives
-`genArgTy_complete_of_wf` at the empty block, which is what an alias body and the
-monotype of `distinct` need.
+`genNonRecursiveArgTy_complete` is a completeness lemma for `genNonRecursiveArgTy`, with an
+existential size. It follows from `genArgTy_complete_of_wf` at the empty block, and it is what an
+alias body and the monotype of `distinct` need.
 
-The datatype step has two lemmas, in the same relation as `genDeclAlias_complete`
-to `genDeclAlias_complete_of_body`. `genDeclDatatype_complete` takes the reachability of the block at the size
-in the bounds. `genDeclDatatype_complete_of_MutualADTWF` discharges that hypothesis from `MutualADTWF` alone,
-through `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, and the size in its conclusion is then
-existential.
+The alias and datatype steps each have two lemmas. `genDeclAlias_complete_of_body` is
+`genDeclAlias_complete` with the type parameters fixed to the body's free variables, as
+`mkAliasDecl` computes them. `genDeclDatatype_complete` takes the reachability of the block by the
+datatype generator at the sizes in the bounds. `genDeclDatatype_complete_of_MutualADTWF` discharges
+that hypothesis through `genMutuallyRecursiveDatatypes_complete_of_MutualADTWF`, from `MutualADTWF`
+together with conditions on the names, the lengths against the bounds, `VocabOk` and
+`BitvecWidthOnly`, and the size in its conclusion is then existential.
 
 The two `example`s at the end of this file compose a declaration-extension lemma through the
 dispatch, the fold and the assembly of a program, for an abstract-type step and for
 a datatype step. The result is a reachable whole program, so the interface of these
 lemmas holds up in use.
-
-This file proves that program reachability *reduces to*
-per-declaration reachability, and it gives a declaration-extension lemma for each of the 8 declaration
-kinds. Each one takes premises about the reachability of a declaration's parts by the
-sub-generators.
 -/
 
 open Lambda RandomChoice Core Imperative
