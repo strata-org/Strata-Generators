@@ -29,7 +29,7 @@ def procStepState (s : GenState) (proc : Procedure) (nm : String) : GenState :=
                       O := proc.header.outputs.drop M.length } :: s.procs }
 
 /-- **The procedure step reaches every procedure that `genProcedure` reaches eventually**, for every
-    bounds record with a large enough `procSize` and `maxStmtSeqLen` and a `procLen` at least the
+    `b : Bounds` with a large enough `procSize` and `maxStmtSeqLen` and a `procLen` at least the
     body's length, under a fresh, allowed name. -/
 theorem genDeclProcedure_complete {s : GenState} {proc : Procedure} {nm : String} {L : Nat}
     (hname : proc.header.name = ⟨nm, ()⟩)

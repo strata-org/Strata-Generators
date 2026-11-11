@@ -1,15 +1,17 @@
 import StrataGenerators.ProgramGen.CompleteProcedure
 
 /-!
-# Whole-program completeness, for some bounds record
+# Whole-program completeness, for some `Bounds`
 
-`genProgram_complete_of_fold` composes per-step reachability at one *fixed* bounds record. This
-module removes the bounds from the statement: `genProgram_complete_eventually` says that if each
+`Bounds` collects the size parameters of the program generator, so that a statement about the
+generator quantifies over one `Bounds` value instead of reasoning about each size separately.
+`genProgram_complete_of_fold` composes per-step reachability at one *fixed* `b : Bounds`. This
+module removes `b` from the statement: `genProgram_complete_eventually` says that if each
 declaration step of a trace is reachable at every large enough bound, the whole program is reachable
 by `genProgram … b` for *some* `b`.
 
-Every premise of a step lemma asks a bound to be *large enough*, so it suffices to look at the bounds
-records whose numeric fields all equal one number `N` (`Bounds.uniform N fam`). "At every large
+Every premise of a step lemma asks a bound to be *large enough*, so it suffices to look at the
+`Bounds` values whose numeric fields all equal one number `N` (`Bounds.uniform N fam`). "At every large
 enough bound" is then `Eventually` over `N`, and the steps of a trace combine through
 `Eventually.and`.
 
@@ -30,7 +32,7 @@ open StrataGenerators.Stmt (isLocalTypeName)
 
 namespace ProgramGen
 
-/-- The bounds record whose numeric fields are all `N`, with the derived-operator families `fam`. -/
+/-- The `Bounds` value whose numeric fields are all `N`, with the derived-operator families `fam`. -/
 def Bounds.uniform (N : Nat) (fam : DerivedOpFamilies) : Bounds where
   maxTyConArity := N
   maxAliasTyParams := N
@@ -201,10 +203,10 @@ theorem genDeclsFold_complete_eventually (fam : DerivedOpFamilies) :
     (h.and (genDeclsFold_complete_eventually fam rest s' hrest)).mono fun _ ⟨h₁, h₂⟩ => by
       simpa [traceFinal] using genDeclsFold_cons_complete h₁ h₂
 
-/-- **Whole-program completeness, for some bounds record.** If each declaration step of a trace
+/-- **Whole-program completeness, for some `Bounds`.** If each declaration step of a trace
     from `initState` is reachable at every large enough uniform bound (`TraceReach`, built from the
     `step*_eventually` lemmas), then `genProgram` reaches the program of the trace's declarations at
-    some bounds record with the families `fam`. -/
+    some `b : Bounds` with the families `fam`. -/
 theorem genProgram_complete_eventually (fam : DerivedOpFamilies)
     (steps : List (List Decl × GenState)) (h : TraceReach fam initState steps) :
     ∃ b : Bounds, b.derivedFamilies = fam ∧

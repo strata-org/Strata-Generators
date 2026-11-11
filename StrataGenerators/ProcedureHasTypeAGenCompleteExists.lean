@@ -20,21 +20,11 @@ open StrataGenerators.Stmt StrataGenerators.Function StrataGenerators.Stmt.SpecC
 
 namespace StrataGenerators.Procedure
 
-/-- A type that `genLMonoTy` reaches at some depth, it reaches at every large enough depth. -/
-theorem genLMonoTy_eventually {tvars : List TyIdentifier} {τ : LMonoTy}
-    (h : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m)) :
-    Eventually fun n => τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) := by
-  obtain ⟨m, hm⟩ := h
-  exact ⟨m, fun n hn => (genLMonoTy_support tvars n τ).mpr
-    (inGenLMonoTySupport_mono tvars m n τ hn ((genLMonoTy_support tvars m τ).mp hm))⟩
-
 /-- A list of reachable names is in `genNameList`'s support at every depth at least its length. -/
 theorem genNameList_eventually {l : List String}
     (h : ∀ s ∈ l, s ∈ SPMF.support (genIdentName (G := SPMF))) :
     Eventually fun n => l ∈ SPMF.support (genNameList (G := SPMF) n) :=
   ⟨l.length, fun n hn => (mem_support_genNameList_iff n l).mpr ⟨hn, h⟩⟩
-
-theorem le_eventually (a : Nat) : Eventually (a ≤ ·) := ⟨a, fun _ h => h⟩
 
 /-- **The completeness of `genProcedure`, at every large enough size, body length and cap.** The
     premises are `genProcedure_complete`'s, with every length premise dropped, each type premise
@@ -94,7 +84,8 @@ theorem genProcedure_complete_ev (P : Program) (octx : OpCtx) (procs : ProcSigCt
       (M ++ I ++ (M ++ O) ++ oldVars M) bodyss)
     (hLemmasReach : ∀ s ∈ proc.header.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF))) :
     ∃ K, Eventually fun size => ∀ len k, bodyss.length ≤ len → K ≤ k →
-      proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := k)) := by
+      proc ∈ SPMF.support
+        (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := k)) := by
   obtain ⟨K, hbody⟩ := spec_complete_chain_ev P (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M))
     procs bodyss _ ts [] C' ts' hBodyWT _ hBodyΓ hBodyShape hBodyWrites hBodyNames hBodyCalls
     hBodyExprs

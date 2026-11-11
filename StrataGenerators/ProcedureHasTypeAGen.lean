@@ -20,7 +20,8 @@ the `ProcHasTypeA` typing relation of `Strata.Languages.Core.Typing.Spec.Procedu
 The proof is *compositional*: it reuses `genInputs_support`/`genInputs_complete`
 for the output signature, exactly as the generator of a function uses them for its inputs. It also uses
 `genStmtChain_sound` and the membership of the body in the support of `genStmtChain`, for the body. The
-completeness proof takes that membership as a hypothesis, and `spec_complete_at` can discharge it. It also uses
+completeness proof takes that membership as a hypothesis, and `spec_complete_chain_at` discharges it
+(`genProcedure_complete_ev` does so with no size in its premises). It also uses
 `genStmtChain_mutableVars`, for the obligation about the rights to modify a variable.
 
 ## The context-alignment lemma
@@ -910,7 +911,7 @@ set_option maxHeartbeats 800000 in
       variables,
       type-variable list `typeArgs`, and the ambient `C` with `typeArgs` added to its rigid type
       variables. (A caller can
-      obtain this membership from `spec_complete_at` applied to each body statement.)
+      obtain this membership from `spec_complete_chain_at`, or use `genProcedure_complete_ev`.)
     - `hLemmasLen` and `hLemmasReach` say that the lemma names are not more than `size` in number
       and that `genIdentName` reaches each of them.
 

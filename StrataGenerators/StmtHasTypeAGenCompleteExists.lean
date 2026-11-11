@@ -4,27 +4,33 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
-# Completeness of `genStmt` with an existential size and body-length cap
+# Completeness of `genStmt` and `genStmtChain` with an existential size and body-length cap
 
-`spec_complete_at` is stated at a fixed size `n` and a fixed body-length cap `k`: its side conditions
-`AlphabetOk`, `CallOk` and `ExprOk` mention both. This module removes them from the statement.
-`spec_complete`, the main completeness statement for `genStmt`, says that a well-typed statement that meets the *size-free* forms of the
-side conditions is reachable by `genStmt … n k` for *some* `n` and `k`.
+`spec_complete_at` is stated at a fixed size `n` and a fixed body-length cap `k`, and its side
+conditions `AlphabetOk`, `CallOk` and `ExprOk` mention both. This module states completeness with
+side conditions that mention neither:
 
-The size-free forms are `AlphabetOkE`, `CallOkE` and `ExprOkE`. They keep every clause about a
-name, a shape or a call recipe, drop every clause about a length, and replace "reachable by
-`genLExpr` at depth `n`" by `ExprReach`, "reachable by `genLExpr` at every large enough depth".
-`exprReach_of_syntactic` discharges `ExprReach` from the syntactic side conditions of
+* `spec_complete`: a well-typed statement that meets the size-free side conditions is in the support
+  of `genStmt … n k` for *some* `n` and `k`.
+* `spec_complete_chain_ev`: a well-typed statement chain that meets them is in the support of
+  `genStmtChain` at its own length, at every large enough `n` and `k`. A caller that fixes the size
+  and the cap for other reasons, such as a procedure, uses this form.
+
+Both hold for every list `imm` of immutable variables, under `WritesOk imm`, and for every polymorphic
+operator context `pctx`.
+
+The size-free side conditions are `AlphabetOkE`, `CallOkE` and `ExprOkE`. They keep every clause of
+`AlphabetOk`, `CallOk` and `ExprOk` about a name, a shape or a call recipe, drop every clause about a
+length, and use `ExprReach`, "reachable by `genLExpr` at every large enough depth", for an
+expression. `exprReach_of_syntactic` discharges `ExprReach` from the syntactic side conditions of
 `genLExpr_complete`, which do not mention a depth.
 
-The proof needs no lemma about the monotonicity of a support in the size. Each `*.eventually`
-lemma shows that a size-free condition gives the original condition at every large enough `n`
-(and `k`), and `spec_complete_at` is applied at the largest of the thresholds.
+The `*_eventually` lemmas show that each size-free condition gives the size-indexed one at every large
+enough `n` (and `k`). The theorems apply `spec_complete_at` at the largest of these thresholds, so
+the proof needs no lemma about the monotonicity of a support in the size.
 -/
 
-namespace StrataGenerators.Stmt.SpecComplete
-variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
-
+namespace StrataGenerators
 
 -- ── "Eventually" ─────────────────────────────────────────────────────────────
 
@@ -61,6 +67,21 @@ theorem Eventually.forall₂ {α β : Type} {R : α → β → Nat → Prop} :
       Eventually fun n => List.Forall₂ (fun a b => R a b n) l₁ l₂
   | _, _, .nil => .of_forall fun _ => .nil
   | _, _, .cons h hs => (h.and (Eventually.forall₂ hs)).mono fun _ ⟨h₁, h₂⟩ => .cons h₁ h₂
+
+theorem le_eventually (a : Nat) : Eventually (a ≤ ·) := ⟨a, fun _ h => h⟩
+
+/-- A type that `genLMonoTy` reaches at some depth, it reaches at every large enough depth. -/
+theorem genLMonoTy_eventually {tvars : List TyIdentifier} {τ : LMonoTy}
+    (h : ∃ m, τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars m)) :
+    Eventually fun n => τ ∈ SPMF.support (genLMonoTy (G := SPMF) tvars n) := by
+  obtain ⟨m, hm⟩ := h
+  exact ⟨m, fun n hn => (genLMonoTy_support tvars n τ).mpr
+    (inGenLMonoTySupport_mono tvars m n τ hn ((genLMonoTy_support tvars m τ).mp hm))⟩
+
+end StrataGenerators
+
+namespace StrataGenerators.Stmt.SpecComplete
+variable {octx : OpCtx} {tvars : List TyIdentifier} {pctx : PolyOpCtx}
 
 -- ── Expressions reachable at every large enough depth ───────────────────────
 
@@ -112,14 +133,14 @@ def AlphabetOkEList (tvars : List TyIdentifier) : List Statement → Prop
 end
 
 /-- `AlphabetOk` holds at every large enough cap `k` and size `n`. -/
-def AlphabetOkEv (tvars : List TyIdentifier) (s : Statement) : Prop :=
+private def AlphabetOkEv (tvars : List TyIdentifier) (s : Statement) : Prop :=
   ∃ K, Eventually fun n => ∀ k, K ≤ k → AlphabetOk tvars k n s
 
 /-- `AlphabetOkList` holds at every large enough cap `k` and size `n`. -/
-def AlphabetOkListEv (tvars : List TyIdentifier) (ss : List Statement) : Prop :=
+private def AlphabetOkListEv (tvars : List TyIdentifier) (ss : List Statement) : Prop :=
   ∃ K, Eventually fun n => ∀ k, K ≤ k → AlphabetOkList tvars k n ss
 
-theorem AlphabetOkListEv.cons {s : Statement} {ss : List Statement}
+private theorem AlphabetOkListEv.cons {s : Statement} {ss : List Statement}
     (hs : AlphabetOkEv tvars s) (hss : AlphabetOkListEv tvars ss) :
     AlphabetOkListEv tvars (s :: ss) := by
   obtain ⟨K₁, h₁⟩ := hs; obtain ⟨K₂, h₂⟩ := hss
@@ -127,7 +148,7 @@ theorem AlphabetOkListEv.cons {s : Statement} {ss : List Statement}
     ⟨a k (by omega), b k (by omega)⟩⟩
 
 /-- A nested body: the body's condition one size smaller, and its length below the cap. -/
-theorem AlphabetOkListEv.nested {ss : List Statement} (h : AlphabetOkListEv tvars ss) :
+private theorem AlphabetOkListEv.nested {ss : List Statement} (h : AlphabetOkListEv tvars ss) :
     ∃ K, Eventually fun n => ∀ k, K ≤ k →
       ss.length ≤ k ∧ AlphabetOkList tvars k (n - 1) ss := by
   obtain ⟨K, hK⟩ := h
@@ -135,15 +156,17 @@ theorem AlphabetOkListEv.nested {ss : List Statement} (h : AlphabetOkListEv tvar
 
 mutual
 theorem alphabetOkE_eventually : ∀ (s : Statement), AlphabetOkE tvars s → AlphabetOkEv tvars s
-  | .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)), ⟨hx, m, hm⟩ =>
-    ⟨0, ⟨m, fun n hn _ _ => ⟨hx, (genLMonoTy_support tvars n mty).mpr
-      (inGenLMonoTySupport_mono tvars m n mty hn ((genLMonoTy_support tvars m mty).mp hm))⟩⟩⟩
+  | .cmd (CmdExt.cmd (.init x (.forAll [] mty) _ _)), ⟨hx, hm⟩ =>
+    ⟨0, (genLMonoTy_eventually hm).mono fun _ h _ _ => ⟨hx, h⟩⟩
   | .cmd (CmdExt.cmd (.init _ (.forAll (_ :: _) _) _ _)), _ =>
     ⟨0, .of_forall fun _ _ _ => by simp [AlphabetOk]⟩
   | .cmd (CmdExt.cmd (.set _ _ _)), _ => ⟨0, .of_forall fun _ _ _ => by simp [AlphabetOk]⟩
-  | .cmd (CmdExt.cmd (.assert _ _ _)), h => ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
-  | .cmd (CmdExt.cmd (.assume _ _ _)), h => ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
-  | .cmd (CmdExt.cmd (.cover _ _ _)), h => ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
+  | .cmd (CmdExt.cmd (.assert _ _ _)), h =>
+    ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
+  | .cmd (CmdExt.cmd (.assume _ _ _)), h =>
+    ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
+  | .cmd (CmdExt.cmd (.cover _ _ _)), h =>
+    ⟨0, .of_forall fun _ _ _ => by simpa [AlphabetOk, AlphabetOkE] using h⟩
   | .cmd (CmdExt.call _ _ _), _ => ⟨0, .of_forall fun _ _ _ => by simp [AlphabetOk]⟩
   | .block _ body _, ⟨hl, hb⟩ => by
     obtain ⟨K, N, h⟩ := (alphabetOkEList_eventually body hb).nested
@@ -183,7 +206,8 @@ def CmdExprOkE (ctx : VarCtx) : Cmd Expression → Prop
   | .init _ (.forAll [] mty) (.det e) _ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx mty e
   | .init _ _ _ _ => True
   | .set x (.det e) _ =>
-      ∀ mty, Map.find? ctx x = some mty → ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx mty e
+      ∀ mty, Map.find? ctx x = some mty →
+        ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx mty e
   | .set _ _ _ => True
   | .assert _ e _ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool e
   | .assume _ e _ => ExprReach (octx := octx) (tvars := tvars) (pctx := pctx) ctx .bool e
@@ -310,7 +334,8 @@ end
 
 mutual
 theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
-    ∀ (ctx : VarCtx) (s : Statement), CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s →
+    ∀ (ctx : VarCtx) (s : Statement),
+      CallOkE (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx s →
       Eventually fun n => CallOk (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n s
   | _, .cmd (CmdExt.call _ _ _), ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h₆⟩ =>
     (Eventually.forall₂ h₆).mono fun _ h => ⟨sg, σvals, exprs, mask, h₁, h₂, h₃, h₄, h₅, h⟩
@@ -323,7 +348,8 @@ theorem callOkE_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
   | _, .typeDecl _ _, _ => .of_forall fun _ => trivial
 
 theorem callOkEList_eventually (imm : List (Identifier Unit)) (procs : ProcSigCtx) :
-    ∀ (ctx : VarCtx) (ss : List Statement), CallOkEList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx ss →
+    ∀ (ctx : VarCtx) (ss : List Statement),
+      CallOkEList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx ss →
       Eventually fun n => CallOkList (octx := octx) (tvars := tvars) (pctx := pctx) imm procs ctx n ss
   | _, [], _ => .of_forall fun _ => trivial
   | ctx, s :: ss, ⟨hs, hss⟩ =>

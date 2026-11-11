@@ -263,10 +263,9 @@ mutual
     `ctx`.
     `True` on every non-call leaf; nested bodies recurse with the body's own scope.
 
-    The `mask` existential is what makes the argument *order* free. `mkArgs` used to
-    fix it as in-out, then by-value input, then out target, and a well-typed call in
-    any other order was out of reach. The in-out block must still lead, because `M`
-    heads both the input signature and the output signature.
+    The `mask` existential is what makes the argument *order* free: a fixed order (in-out, then
+    by-value input, then out target) would miss every well-typed call in another order. The in-out
+    block leads, because `M` heads both the input signature and the output signature.
 
     The existential costs nothing: `mkArgs_surjective` shows that some mask reaches
     *every* order-preserving interleaving of the by-value inputs with the out
