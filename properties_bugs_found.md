@@ -203,7 +203,6 @@ produced by `k` individual blocks `mutual t1 end; mutual t2 end; ..., mutual tk 
 ## Implementation bugs caught
 
 - **(FIXED)** `LExpr` type inference is incomplete (if we erase type annotations on a well-typed term, if the resultant term contains an unannotated quantified free variable e.g. `\forall x. x`, type inference fails to reconstruct a type)
-- Progress doesn't hold for `LExpr`s (this was previously known, due to uninterpreted functions, the fact that `\forall` and `\exists` quantifiers don't evaluate under `if` and equality of lambda expressions is conservative)
 - 11 situations in which the parser + pretty-printer round-trip fails:
   - **(FIXED)** `Type parameters to functions can't begin with `s` in their name (conflicts with `<s` signed less-than operator):
   - **(FIXED)** `Pretty-printer mis-prints `real` numbers that are represented as rationals with a non-terminating decimal representation (e.g. `1/3` is `0.333...`, but is printed as `0.0` instead)
