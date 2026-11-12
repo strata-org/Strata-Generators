@@ -6,15 +6,8 @@ open StrataGenerators.Test
 open StrataGenerators.Mono
 open StrataGenerators.ProgramTuning
 
-/-- Puts a property behind the `mono` gate, so it runs only under `--mono`. Every property in
-    this file goes behind it: at the default trials and size, Core's `MonomorphizeFunctions`
-    can run for a very long time on a generated program, and a full run with this group in it
-    did not finish. -/
-private def monoGated (d : TestDecl) : TestDecl := { d with gate := some "mono" }
-
 @[strata_properties]
 def monoProperties : List TestDecl :=
-  List.map monoGated <|
     family GenProgram
         -- The pass gives a program, or it raises a diagnostic. One property scores that choice, here,
         -- so that a diagnostic cannot silently empty each property below.
@@ -24,7 +17,13 @@ def monoProperties : List TestDecl :=
             fun gp => checkMonoAllFuncsMonomorphic gp.prog),
         ("mono: no factory entry keeps its type parameters",
             fun gp => checkMonoFactoryMonomorphic gp.prog),
-        ("mono: output of monomorphization typechecks", fun gp => checkMonoOutputTypechecks gp.prog),
+        ("mono: output of monomorphization typechecks", fun gp => checkMonoOutputTypechecks gp.prog,
+            .knownFailure "the monomorphized output of a polymorphic procedure fails to \
+              re-typecheck, with or without `inout` parameters (one shrunk counterexample is \
+              `procedure nx<P, Hh, iU> (K : string, wf : real, Os : Map real iU, out PQuaJ : \
+              real) {}`); failed on 6 of 6 runs on 2026-11-11. Likely the same `$__ty0` checker \
+              defect as the witness `mono: a polymorphic procedure with an inout parameter and a \
+              type-parameter output re-typechecks after the pass`"),
         ("mono: monomorphization pass is idempotent", fun gp => checkMonoIdempotent gp.prog),
         -- A reference to a dropped polymorphic original, anywhere in the output.
         ("mono: no reference to a dropped polymorphic original survives",
@@ -62,7 +61,7 @@ private def polyInoutOutProcDecl : Decl :=
     `mono: output of monomorphization typechecks`, which a draw falsifies only sometimes. -/
 @[strata_property]
 def monoPolyInoutOutputTypechecks : TestDecl :=
-  monoGated <| knownFailure "on a polymorphic procedure with an inout parameter and an output of a \
+  knownFailure "on a polymorphic procedure with an inout parameter and an output of a \
     type-parameter type, Core's `Program.typeCheck` gives the output a type variable in its \
     reserved namespace (`$__ty0`), and re-checking the monomorphized output rejects that \
     name; the same checker defect as the inout re-typecheck property" <|
@@ -79,7 +78,6 @@ def monoPolyInoutOutputTypechecks : TestDecl :=
     opposite input, and this weighting would make it vacuous. -/
 @[strata_properties]
 def monoPolyHeavyProperties : List TestDecl :=
-  List.map monoGated <|
     (family GenProgram
         [ ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
@@ -92,7 +90,6 @@ def monoPolyHeavyProperties : List TestDecl :=
     declaration is a function or a datatype block. A raise of one rate lowers the other. -/
 @[strata_properties]
 def monoDatatypeHeavyProperties : List TestDecl :=
-  List.map monoGated <|
     (family GenProgram
         [ ("mono: a polymorphic datatype is still polymorphic after the pass",
             fun gp => checkMonoPolyDatatypesRemain gp.prog),

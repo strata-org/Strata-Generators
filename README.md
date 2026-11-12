@@ -85,7 +85,7 @@ lake build test
 - `maxSize` (default: 5): maximum size parameter for generation (controls
   the depth of the generated AST)
 
-Flags (all optional; the Tyche visualization pass and the `mono` properties are off by default):
+Flags (all optional; the Tyche visualization pass is off by default):
 
 - `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
   This flag runs 100 trials for each property, with `size = 2` passed to the generators.
@@ -94,8 +94,6 @@ Flags (all optional; the Tyche visualization pass and the `mono` properties are 
 - `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000; only used with `--tyche`)
 - `--smt` — Tests properties related to Strata SMT encodings. This CLI flag requires a local installation of an SMT solver (cvc5/z3). 
   If `--smt` is passed but the SMT solver cannot be run, the test harness emits an error and exits with a non-zero exit code.
-- `--mono` — Tests the properties of the `mono` group (Core's `MonomorphizeFunctions` pass). These are off by default:
-  at the default trials and size, the pass can run for a very long time on a generated program, and a full run with them did not finish.
 - `--known-failure=NAME`: treat the property with the whole name `NAME` as known to fail for this run only (see `Marking individual properties as known to fail` below)
 
 See [`properties_bugs_found.md`](properties_bugs_found.md) for the full list of properties tested & bugs found.

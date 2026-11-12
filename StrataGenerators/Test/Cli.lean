@@ -29,9 +29,6 @@ inputs, and the cost of one draw grows faster than the bound does.
   It has an effect only with `--tyche`.
 * `--smt` enables the `smt` gate. That gate admits each property whose oracle is a live `cvc5` or `z3`. It is
   off by default, so the suite needs no solver.
-* `--mono` enables the `mono` gate. That gate admits the properties of the `mono` group, which test Core's
-  `MonomorphizeFunctions` pass. It is off by default, because at the default trials and size that pass can run
-  for a very long time on a generated program, and a full run did not finish.
 * `--only=SUBSTRING` runs only the properties whose name holds `SUBSTRING`. You can give the flag more than
   one time, and a property that matches one of them runs. The report holds no other property, and that is
   what makes work on one new property cheap.
@@ -92,7 +89,7 @@ def parseCli (args : List String) : Cli :=
                        (if quick then quickNumTrials else 1000)
         maxSize   := (positional[1]? >>= String.toNat?).getD
                        (if quick then quickMaxSize else defaultMaxSize)
-        gates     := ["smt", "mono"].filter fun g => flags.contains s!"--{g}" }
+        gates     := if flags.contains "--smt" then ["smt"] else [] }
     tycheEnabled := flags.contains "--tyche"
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
     tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000

@@ -522,7 +522,6 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 | `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
 | `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
-| `--mono` | enable the `mono` gate, which holds the whole `mono` group (off by default: the pass can run for a very long time on a generated program). |
 | `--tyche` | run the Tyche pass after the suite (off by default; it costs about as much as the suite). |
 | `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). Needs `--tyche`. |
 | `--tyche-samples=N` | samples per panel (default 1000). Needs `--tyche`. |
