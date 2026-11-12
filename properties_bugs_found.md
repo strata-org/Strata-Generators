@@ -273,37 +273,6 @@ function f5 () : bool {
 
 - For a given loop, the `LoopElim` transformation creates two blocks that share the same label. Minimal counterexample: a procedure whose body is a non-determinsitic loop (`while * { }`).
 - **(FIXED)** `ProcedureInlining` gives two call sites of the same procedure identical labels. The wrapper block label now carries a per-call-site counter (`$__inline1_Callee$inlined`, `$__inline2_Callee$inlined`)
-- `ProcedureInlining` drops the callee's `requires` obligation. Consider this sourc ep
-
-Consider this source Core program:
-```
-procedure Foo(x : int)
-spec { 
-  requires [pre]: x >= 0; 
-} { };
-
-procedure Main () {
-  var y : int := -1;
-  call Foo(y);
-};
-```
-
-and this resultant program (obtained via ProcedureInlining):
-
-```
--- Foo is same as before
-
--- Note that `Foo`'s precondition is missing after it is inlined into `Main`
-procedure Main () {
-  var y : int := -1;
-  Foo$inlined: {
-    var Foo_x_0 : int := y;
-  }
-}
-```
-The symbolic evaluator returns 1 obligation on the source program, but 0 obligations in the transformed program (a missing proof obligation).
-
-
 - **(FIXED)** `ProcedureInlining` copies `old x` expressions verbatim while renaming `x`, turning a well-typed program into an ill-typed one. Consider this source Core program:
 ```
 procedure Foo (inout T : bool) {
