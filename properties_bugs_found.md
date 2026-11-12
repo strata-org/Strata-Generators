@@ -276,7 +276,6 @@ function f5 () : bool {
 }
 ```
 
-The five findings below come from testing the eight Core transform passes that have no correctness proof (issue #69). The first four have a self-contained reproducer in [`docs/strata-unproven-transform-bugs.md`](docs/strata-unproven-transform-bugs.md); the fifth — which is in the symbolic evaluator rather than in a pass — is in [`docs/strata-symbolic-eval-nondet-collision.md`](docs/strata-symbolic-eval-nondet-collision.md). Each is pinned by a `#guard` in `StrataGenerators/ProgramGen/UnprovenTransforms.lean` so a fix turns the guard red. Two of the five have since been fixed upstream (Strata `38115786d`), and their guards are stated positively now, so a regression turns them red instead.
 
 
 - For a given loop, the `LoopElim` transformation creates two blocks that share the same label. Minimal counterexample: a procedure whose body is a non-determinsitic loop (`while * { }`).

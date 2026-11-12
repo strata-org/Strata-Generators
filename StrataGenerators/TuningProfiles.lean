@@ -437,8 +437,9 @@ def genProcedureT [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (procs : ProcSigCt
     (C : LContext CoreLParams) (_Γ : TContext Unit) (size len : Nat)
     (pctx : PolyOpCtx := []) (maxStmtSeqLen : Nat := maxStmtSeqLenFor θ) : G Procedure :=
   StrataGenerators.Procedure.genProcedureWith
-    (fun tvars immutableVars C' ctx =>
-      genStmtChainT θ octx tvars immutableVars procs [] C' ctx pctx size len maxStmtSeqLen)
+    (fun tvars immutableVars C' ctx => do
+      let ⟨⟨l, _⟩⟩ ← RandomChoice.choose 0 len (Nat.zero_le _)
+      genStmtChainT θ octx tvars immutableVars procs [] C' ctx pctx size l maxStmtSeqLen)
     octx C size pctx
 
 /-- `genIndirPoly` with the weights of the generator it falls back to read from `θ`. The body is
