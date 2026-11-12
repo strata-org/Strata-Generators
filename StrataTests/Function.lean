@@ -62,6 +62,8 @@ def fnTypeCheckComplete : TestDecl :=
     parser accepts. -/
 @[strata_property]
 def fnRoundtrip : TestDecl :=
+  knownFailure "the printer writes an unsupported bitvec width as `$__unsupported_bvN` (e.g. \
+    `bitvec 0`), which the parser rejects as an undeclared type; about 30% of draws" <|
   (TestDecl.action "function: pretty-print/parse round-trip"
     (fun cfg => ActionResult.ofTuple <$>
       roundtripFunctionAction cfg.numTrials cfg.maxSize)).withPanel

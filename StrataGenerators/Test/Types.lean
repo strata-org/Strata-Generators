@@ -28,9 +28,9 @@ open Plausible
 namespace StrataGenerators.Test
 
 /-- The settings for a run. The driver reads them from the command line one time, and it
-    gives them to each property. `gates` holds the tags that the run enables, and the flag
-    `--smt` adds the tag `"smt"`. If the `TestDecl.gate` field of a property is not in this
-    list, the driver reports the property as skipped and does not run it. -/
+    gives them to each property. `gates` holds the tags that the run enables: the flag `--smt`
+    adds the tag `"smt"`, and `--mono` adds `"mono"`. If the `TestDecl.gate` field of a property
+    is not in this list, the driver reports the property as skipped and does not run it. -/
 structure RunConfig where
   numTrials : Nat := 1000
   maxSize   : Nat := 100

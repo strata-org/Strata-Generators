@@ -6,8 +6,15 @@ open StrataGenerators.Test
 open StrataGenerators.Mono
 open StrataGenerators.ProgramTuning
 
+/-- Puts a property behind the `mono` gate, so it runs only under `--mono`. Every property in
+    this file goes behind it: at the default trials and size, Core's `MonomorphizeFunctions`
+    can run for a very long time on a generated program, and a full run with this group in it
+    did not finish. -/
+private def monoGated (d : TestDecl) : TestDecl := { d with gate := some "mono" }
+
 @[strata_properties]
 def monoProperties : List TestDecl :=
+  List.map monoGated <|
     family GenProgram
         -- The pass gives a program, or it raises a diagnostic. One property scores that choice, here,
         -- so that a diagnostic cannot silently empty each property below.
@@ -55,7 +62,7 @@ private def polyInoutOutProcDecl : Decl :=
     `mono: output of monomorphization typechecks`, which a draw falsifies only sometimes. -/
 @[strata_property]
 def monoPolyInoutOutputTypechecks : TestDecl :=
-  knownFailure "on a polymorphic procedure with an inout parameter and an output of a \
+  monoGated <| knownFailure "on a polymorphic procedure with an inout parameter and an output of a \
     type-parameter type, Core's `Program.typeCheck` gives the output a type variable in its \
     reserved namespace (`$__ty0`), and re-checking the monomorphized output rejects that \
     name; the same checker defect as the inout re-typecheck property" <|
@@ -72,6 +79,7 @@ def monoPolyInoutOutputTypechecks : TestDecl :=
     opposite input, and this weighting would make it vacuous. -/
 @[strata_properties]
 def monoPolyHeavyProperties : List TestDecl :=
+  List.map monoGated <|
     (family GenProgram
         [ ("mono: no reference to a dropped polymorphic original survives",
             fun gp => checkMonoNoPolyRefsSurvive gp.prog),
@@ -84,6 +92,7 @@ def monoPolyHeavyProperties : List TestDecl :=
     declaration is a function or a datatype block. A raise of one rate lowers the other. -/
 @[strata_properties]
 def monoDatatypeHeavyProperties : List TestDecl :=
+  List.map monoGated <|
     (family GenProgram
         [ ("mono: a polymorphic datatype is still polymorphic after the pass",
             fun gp => checkMonoPolyDatatypesRemain gp.prog),

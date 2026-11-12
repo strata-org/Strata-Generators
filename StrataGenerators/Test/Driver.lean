@@ -129,15 +129,9 @@ def cleanup (cli : Cli) (selected : List TestDecl) (diags : List Diagnostic) : I
     IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"
   else
     IO.println ""
-    -- Name the flag that stopped the pass. `--quick` also turns the pass off. A report of
-    -- `--no-tyche` for a `--quick` run makes a reader look for a flag that they did not give,
-    -- or look at a stale `tycheOut` from an earlier run, because this branch writes no file.
-    if cli.quick then
-      IO.println s!"Tyche visualizations disabled (--quick); no file written, so \
-        {cli.tycheOut} — if it exists — is from an earlier run."
-      IO.println s!"For the preset's trials/size *with* panels, pass them positionally \
-        instead: {quickNumTrials} {quickMaxSize}"
-    else
-      IO.println "Tyche visualizations disabled (--no-tyche)."
+    -- This branch writes no file, so say so: a reader can otherwise open a stale `tycheOut`
+    -- from an earlier run and take it for this one.
+    IO.println s!"Tyche visualizations off (pass --tyche to write them); no file written, so \
+      {cli.tycheOut} — if it exists — is from an earlier run."
 
 end StrataGenerators.Test
