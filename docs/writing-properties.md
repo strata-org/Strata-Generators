@@ -517,14 +517,14 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 
 | flag | effect |
 |---|---|
-| `--quick` | 100 trials, max size 2. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
+| `--quick` | 100 trials for each property, max size 2. A positional argument takes precedence, so `--quick 500` runs 500 trials and keeps the rest. |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
 | `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
-| `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
-| `--tyche` | run the Tyche pass after the suite (off by default; it costs about as much as the suite). |
-| `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). Needs `--tyche`. |
-| `--tyche-samples=N` | samples per panel (default 1000). Needs `--tyche`. |
+| `--smt` | test properties related to Strata's SMT encoding (needs `cvc5` or `z3` on `PATH`). |
+| `--tyche` | run another pass to obtain data for Tyche visualizatinos after all tests finish running (this flag is off by default, as collecting the data for the Tyche visualizations is time-consuming). |
+| `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). Requires `--tyche`. |
+| `--tyche-samples=N` | samples per panel (default 1000). Requires `--tyche`. |
 
 `--only=… --quick` is the loop to iterate in: it runs one property or one group, skips
 the diagnostics, and writes no Tyche file.
@@ -533,24 +533,6 @@ Note that the suite is **not** seed-deterministic, and a few properties fail on
 roughly one draw in several hundred. Never conclude anything from comparing one run to
 one run.
 
-### Known-flaky properties
-
-These properties fail on some runs and pass on others at the default 1000 trials and size 5,
-so they carry no `knownFailure` mark: a mark would make the run fail whenever they pass.
-Each failure still gates the exit code, so treat a red run that names only these as
-inconclusive. They were observed over two full runs and one targeted run on 2026-11-11, and
-none is triaged.
-
-| property | observed | counterexample shape |
-|---|---|---|
-| `stmt: ANF preserves typeability` | failed on both full runs, passed 1000/1000 on a targeted run | a `regex` assignment such as `N := re.*(N)` |
-| `s2u: every block is reachable from the entry` | failed on one of two full runs | a procedure whose body is one empty labelled block `H: { }` |
-| `s2u: a cfg-bodied procedure prints` | failed on one of two full runs | an internal operator (`Bv8.SNegOverflow`) missing from the CST mapping tables |
-| `alias: eager and incremental resolution give the same obligations` | failed on one of two full runs | a polymorphic procedure with unsupported bitvec widths and a `bv128` guard |
-| `adt: no datatype derives the same function name twice` | failed on the one full run that reached it | a datatype `W.` with a type parameter and a constructor field named `Triggers` |
-
-To check whether one of them is still flaky, run it several times on its own, e.g.
-`for i in 1 2 3 4 5; do .lake/build/bin/test-plain --only="s2u: every block"; done`.
 
 ## Where things live
 
