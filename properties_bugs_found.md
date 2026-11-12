@@ -30,8 +30,7 @@
 **`FilterProcedures` transformation**
 (Removes procedures that are unreachable from an input list of procedure declarations, where unreachable = "not in the transitive closure")
 
-- The `FilterProcedures` transformation updates its `changed` flag correctly
-  - This transformation removes unreachable procedures (unreachable from a given starting point, which is a list of procedures)
+- The `FilterProcedures` transformation updates its `changed` flag correctly. 
 - `FilterProcedures` keeps the procedures that were specified as starting points
 - `FilterProcedures` keeps all procedures that are in the transitive closure of the starting list of procedures
 - `FilterProcedures` only removes procedures (and not other declarations)
@@ -160,7 +159,6 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 **Function inlining**
 (Note: the function that implements this transformation takes a `fuel` parameter)
 - If we supply `fuel = 0` to the transformation, the program is unchnaged
-- Function inlining preserves the type of programs
 - No free variables are introduced by function inlining
 - Function inlining preserves the result of evaluation
 - Function inlining preserves the types of expressions
@@ -205,7 +203,6 @@ produced by `k` individual blocks `mutual t1 end; mutual t2 end; ..., mutual tk 
 ## Implementation bugs caught
 
 - **(FIXED)** `LExpr` type inference is incomplete (if we erase type annotations on a well-typed term, if the resultant term contains an unannotated quantified free variable e.g. `\forall x. x`, type inference fails to reconstruct a type)
-- Progress doesn't hold for `LExpr`s (this was previously known, due to uninterpreted functions, the fact that `\forall` and `\exists` quantifiers don't evaluate under `if` and equality of lambda expressions is conservative)
 - 11 situations in which the parser + pretty-printer round-trip fails:
   - **(FIXED)** `Type parameters to functions can't begin with `s` in their name (conflicts with `<s` signed less-than operator):
   - **(FIXED)** `Pretty-printer mis-prints `real` numbers that are represented as rationals with a non-terminating decimal representation (e.g. `1/3` is `0.333...`, but is printed as `0.0` instead)
@@ -217,16 +214,12 @@ produced by `k` individual blocks `mutual t1 end; mutual t2 end; ..., mutual tk 
   - Typechecker accepts bit-vector types with non-power-of-2 lengths, but the printer only supports printing the types `bv{1, 8, 16, 32, 64} `-- unsupported bitvec types are printed as `$__unknown_type` instead
   - **(FIXED)** `Bit-vector literals with some width `n`, where `n` is not a power of 2, are printed as `bv{64}(n) `(i.e. the width `n` becomes the value, and the actual value of the bit-vector is discarded), changing the meaning of the term
   - **(FIXED)** ``bv128` is registered in the Core factory & the DDM, but `bv128` literals are unprintable / unparseable 
-  - Core contains factory functions `Bv{n}.ToInt` and `Int.ToBv{n}` for converting from bitvec <-> int, but these functions are unprintable
+  - **(FIXED)** Core contains factory functions `Bv{n}.ToInt` and `Int.ToBv{n}` for converting from bitvec <-> int, but these functions are unprintable, so each of these is rendered as a fresh type variable instead.
 - The precondition elimination transformation erroneously reports its `changed` flag as false, even though it rewrites procedures to gain an `assert` statement in its body. This happens
 for nested function declarations that don't have preconditions, but whose bodies invoke a precondition-carrying function (e.g. `Int.SafeDiv`).
 - Non-ASCII strings are not escaped when passed to SMT-Lib, so the Core partial evaluator and SMT solvers disagree on the length of non-ASCII strings (The Core evaluator reports `Str.Length "é" = 1`, but Z3 says `Str.Length "é" = 2` and CVC5 reports `Parse Error: Non-printable character in string literal`)
 - The SMT dialect's comparison operator on real numbers (represented as decimal orders) isn't a total order, i.e. it is possible for `r1 <= r2`, `r2 <= r1` and `r1 == r2` to all be false, violating trichotomy
 - The SMT dialect's equality check returns false on two decimals that are mathematically equal but have different mantissa-exponent representations (e.g. `3.0` can be represented as `3 * 10^0` or `30 * 10^-1` , which are mathematically the same but considered to be not equal)
-- `bitvec 128` literals cannot be pretty-printed, even though the width is registered in the factory (`Factory.lean`) and has a grammar production (`bv128Lit`, `Grammar.lean:113`): `lconstToExpr` logs `unsupported bitvec width: 128`. Every other registered width prints.
-- **(FIXED)** `None of the 18 `Bv{w}.ToInt` / `Bv{w}.ToUInt` / `Int.ToBv{w}` conversion operators can be pretty-printed, at *any* registered width (`w ∈ {1, 8, 16, 32, 64, 128}`). They are all registered in the factory (`Factory.lean`) but have no grammar production, so each of these is 
-rendered as a fresh type variable instead. 
-- `Function.typeCheck` accepts `bitvec w` for all natural numbers `w`, but the pretty-printer only support widths in the set `{1, 8, 16, 32, 64}`
 - `Set` is registered in the list of known types in the Core factory and the typechecker accepts a `Set` type, but the DDM printer does not support printing `Set` factory functions (e.g. `Set.empty`)
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
 
