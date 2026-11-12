@@ -211,11 +211,11 @@ produced by `k` individual blocks `mutual t1 end; mutual t2 end; ..., mutual tk 
   - Pipe-escaping identifiers for types (wrapping identifiers with `|...|` to handle SMTLib names) is not done uniformly (only done for type annotations but not the return type for functions)
   - **(FIXED)** Periods are allowed in the grammar for identifiers but not accepted by the parser (which uses them to resolve namespaces)
   - **(FIXED)** `Applying the factory function `Real.Neg` on a negative real number literal fails the round-trip property due to missing parenthesization (`Real.Neg (-3.0)` is printed as `--3.0`, which re-parses as `-(-3.0)`; note `Int.Neg (-3)` correctly prints as `-(-3)`)
-  - Typechecker accepts bit-vector types with non-power-of-2 lengths, but the printer only supports printing the types `bv{1, 8, 16, 32, 64} `-- unsupported bitvec types are printed as `$__unknown_type` instead
+  - **(FIXED)** Typechecker accepts bit-vector types with non-power-of-2 lengths, but the printer only supports printing the types `bv{1, 8, 16, 32, 64} `-- unsupported bitvec types are printed as `$__unknown_type` instead
   - **(FIXED)** `Bit-vector literals with some width `n`, where `n` is not a power of 2, are printed as `bv{64}(n) `(i.e. the width `n` becomes the value, and the actual value of the bit-vector is discarded), changing the meaning of the term
   - **(FIXED)** ``bv128` is registered in the Core factory & the DDM, but `bv128` literals are unprintable / unparseable 
   - **(FIXED)** Core contains factory functions `Bv{n}.ToInt` and `Int.ToBv{n}` for converting from bitvec <-> int, but these functions are unprintable, so each of these is rendered as a fresh type variable instead.
-- The precondition elimination transformation erroneously reports its `changed` flag as false, even though it rewrites procedures to gain an `assert` statement in its body. This happens
+- **(FIXED)** The precondition elimination transformation erroneously reports its `changed` flag as false, even though it rewrites procedures to gain an `assert` statement in its body. This happens
 for nested function declarations that don't have preconditions, but whose bodies invoke a precondition-carrying function (e.g. `Int.SafeDiv`).
 - Non-ASCII strings are not escaped when passed to SMT-Lib, so the Core partial evaluator and SMT solvers disagree on the length of non-ASCII strings (The Core evaluator reports `Str.Length "é" = 1`, but Z3 says `Str.Length "é" = 2` and CVC5 reports `Parse Error: Non-printable character in string literal`)
 - The SMT dialect's comparison operator on real numbers (represented as decimal orders) isn't a total order, i.e. it is possible for `r1 <= r2`, `r2 <= r1` and `r1 == r2` to all be false, violating trichotomy
@@ -339,7 +339,7 @@ On the transformed program, the typechecker emits an error:
 No free variables are allowed here! Free Variables: [old T]]
 ```
 
-- Symbolic evaluator drops proof obligations in programs with two consecutive non-deterministic conditionals. Consider this Core source program:
+- **(FIXED)** Symbolic evaluator drops proof obligations in programs with two consecutive non-deterministic conditionals. Consider this Core source program:
 
 ```
 procedure P ()
