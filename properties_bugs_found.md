@@ -30,8 +30,7 @@
 **`FilterProcedures` transformation**
 (Removes procedures that are unreachable from an input list of procedure declarations, where unreachable = "not in the transitive closure")
 
-- The `FilterProcedures` transformation updates its `changed` flag correctly
-  - This transformation removes unreachable procedures (unreachable from a given starting point, which is a list of procedures)
+- The `FilterProcedures` transformation updates its `changed` flag correctly. 
 - `FilterProcedures` keeps the procedures that were specified as starting points
 - `FilterProcedures` keeps all procedures that are in the transitive closure of the starting list of procedures
 - `FilterProcedures` only removes procedures (and not other declarations)
@@ -160,7 +159,6 @@ the printer substitutes a syntactically valid placeholder rather than failing.
 **Function inlining**
 (Note: the function that implements this transformation takes a `fuel` parameter)
 - If we supply `fuel = 0` to the transformation, the program is unchnaged
-- Function inlining preserves the type of programs
 - No free variables are introduced by function inlining
 - Function inlining preserves the result of evaluation
 - Function inlining preserves the types of expressions
@@ -223,7 +221,6 @@ for nested function declarations that don't have preconditions, but whose bodies
 - Non-ASCII strings are not escaped when passed to SMT-Lib, so the Core partial evaluator and SMT solvers disagree on the length of non-ASCII strings (The Core evaluator reports `Str.Length "é" = 1`, but Z3 says `Str.Length "é" = 2` and CVC5 reports `Parse Error: Non-printable character in string literal`)
 - The SMT dialect's comparison operator on real numbers (represented as decimal orders) isn't a total order, i.e. it is possible for `r1 <= r2`, `r2 <= r1` and `r1 == r2` to all be false, violating trichotomy
 - The SMT dialect's equality check returns false on two decimals that are mathematically equal but have different mantissa-exponent representations (e.g. `3.0` can be represented as `3 * 10^0` or `30 * 10^-1` , which are mathematically the same but considered to be not equal)
-- `Function.typeCheck` accepts `bitvec w` for all natural numbers `w`, but the pretty-printer only support widths in the set `{1, 8, 16, 32, 64}`
 - `Set` is registered in the list of known types in the Core factory and the typechecker accepts a `Set` type, but the DDM printer does not support printing `Set` factory functions (e.g. `Set.empty`)
 - For polymorphic functions whose type parameters are only used for type annotations on binders in their body, elaborated programs produced by the typechecker erroneously rewrite the type variable. For example, if we supply this program to the typechecker (which accepts it):
 
