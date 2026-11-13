@@ -27,26 +27,11 @@ inputs, and the cost of one draw grows faster than the bound does.
 * `--tyche-samples=N` gives the number of the samples for each panel of Tyche. The default value is 1000.
 * `--smt` enables the `smt` gate. That gate admits each property whose oracle is a live `cvc5` or `z3`. It is
   off by default, so the suite needs no solver.
-* `--seed=N` gives each property the seed `N`, and reports the seed of each property that fails. The same
-  command line then gets the same inputs, so a counterexample comes back. Without the flag, each run starts
-  from the operating system. `IO.stdGenRef` gets its seed from `IO.getRandomBytes` at startup, so a failing
-  input is gone at the end of the run. `N` also goes to the process-wide generator, which the self-driving
-  `IO` properties and the Tyche pass use.
-
-  1 seed serves each property, as `hspec` and `tasty-quickcheck` also do. Two properties of
-  1 input type then get the same inputs, so a run with a seed covers less than a run
-  without one. Use the flag to get a failure again, not to gate a merge.
-
-  The seed alone does not fix the inputs, because the trial count and the maximum size also
-  decide them. A failure therefore prints the whole command line that gives its inputs again.
-
-  A property with its own seed from `@[strata_property (seed := …)]` keeps that seed, with
-  its own trial count and maximum size, and ignores the flag and the positional arguments.
-  `StrataGenerators.Test.TestDecl.runConfig` tells you why the declaration wins.
+* `--seed=N` fixes a particular seed for a property.
 * `--only=SUBSTRING` runs only the properties whose name holds `SUBSTRING`. You can give the flag more than
   one time, and a property that matches one of them runs. The report holds no other property, and that is
   what makes work on one new property cheap.
-* `--list` prints the registry, with the name, the group, the gate, the seed and the expectation of each
+* `--list` prints the registry, with the name, the group, the seed and the expected result for each
   property. The driver then stops, and it runs nothing. Use it to make sure that the harness found your property.
 * `--known-failure=NAME` marks `NAME` as known to fail for this run. The report hides its counterexample, and
   the property stops gating the exit code. You can give the flag more than one time. The permanent form is
@@ -54,8 +39,6 @@ inputs, and the cost of one draw grows faster than the bound does.
   you want the results of the other properties while someone triages a defect. Unlike `--only=`, this flag
   takes a **whole property name**, and not a substring. A substring would claim that each property of a group
   must fail, and the report would then give a failure for each property of the group that holds.
-
-An argument that the driver cannot read is an error, and the driver stops. See `cliErrors`.
 
 There is no `--suite=` flag. A report group *is* a prefix of a name, so `--only="lift:"` selects
 the `lift` group exactly.
@@ -80,9 +63,7 @@ structure Cli where
       the Tyche pass. A report of `--no-tyche` for a `--quick` run makes a reader look for a
       flag that they did not give. -/
   quick        : Bool
-  /-- Arguments that the driver could not read. A driver stops instead of a run on a value
-      that it dropped. For example, a bad `--seed=` gives a run without a seed, and the
-      counterexample that the flag must find does not come back. -/
+  /-- CLI arguments that the driver was unable to parse -/
   errors       : List String := []
 
 /-- The number of trials that `--quick` selects. -/
