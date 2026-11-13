@@ -129,9 +129,9 @@ def cleanup (cli : Cli) (selected : List TestDecl) (diags : List Diagnostic) : I
     IO.println "Open with Tyche: VS Code → Ctrl+Shift+P → 'Tyche: Open' → select the file"
   else
     IO.println ""
-    -- This branch writes no file, so say so: a reader can otherwise open a stale `tycheOut`
-    -- from an earlier run and take it for this one.
-    IO.println s!"Tyche visualizations off (pass --tyche to write them); no file written, so \
-      {cli.tycheOut} — if it exists — is from an earlier run."
+    -- This branch writes no file. Tell the reader, because the reader can otherwise open an
+    -- old `tycheOut` from an earlier run and think that it is from this run.
+    IO.println s!"Tyche visualizations are off. Use --tyche to write them. This run wrote no \
+      file, so if {cli.tycheOut} exists, it is from an earlier run."
 
 end StrataGenerators.Test

@@ -46,7 +46,8 @@ def exprPreservation : TestDecl :=
     term such as `if (∀x. e) then …` can take no step. -/
 @[strata_property]
 def exprProgress : TestDecl :=
-  knownFailure s!"a closed `real` product such as `Real.Mul #13/28 #16/5` takes no step; failed on both full runs of 2026-11-11; not yet triaged" <|
+  knownFailure "a closed `real` product such as `Real.Mul #13/28 #16/5` takes no step; \
+    failed on both full runs of 2026-11-11; not yet triaged" <|
   (TestDecl.property "expr: progress (closed)"
     (fun (te : ClosedTypedExpr) => checkProgress te.expr)).withPanel genAndCheckProgress
 

@@ -21,8 +21,8 @@ inputs, and the cost of one draw grows faster than the bound does.
 * `--quick` gives a fast preset for a short cycle of work: 100 trials and the maximum size 2. Use it to find
   a defect, and use the default values to gate a merge. A positional argument has a higher precedence, so
   `--quick 500` gives 500 trials and keeps each other part of the preset.
-* `--tyche` runs the pass that writes the visualizations for Tyche. The pass is off by default, because it
-  draws a second set of samples for each property and costs about as much as the suite itself.
+* `--tyche` runs the pass that writes the visualizations for Tyche. The pass is off by default. It draws a
+  second set of samples for each property, so it takes about as much time as the suite.
 * `--tyche-out=PATH` gives the path of the JSONL output for Tyche. The default value is
   `tyche_output.jsonl`. It has an effect only with `--tyche`.
 * `--tyche-samples=N` gives the number of the samples for each panel of Tyche. The default value is 1000.

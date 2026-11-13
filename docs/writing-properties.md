@@ -522,9 +522,9 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 | `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
 | `--smt` | test properties related to Strata's SMT encoding (needs `cvc5` or `z3` on `PATH`). |
-| `--tyche` | run another pass to obtain data for Tyche visualizatinos after all tests finish running (this flag is off by default, as collecting the data for the Tyche visualizations is time-consuming). |
-| `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). Requires `--tyche`. |
-| `--tyche-samples=N` | samples per panel (default 1000). Requires `--tyche`. |
+| `--tyche` | after all tests finish, run a second pass that writes the data for the Tyche visualizations. Off by default, because this pass takes a long time. |
+| `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). Needs `--tyche`. |
+| `--tyche-samples=N` | samples per panel (default 1000). Needs `--tyche`. |
 
 `--only=… --quick` is the loop to iterate in: it runs one property or one group, skips
 the diagnostics, and writes no Tyche file.
@@ -532,7 +532,6 @@ the diagnostics, and writes no Tyche file.
 Note that the suite is **not** seed-deterministic, and a few properties fail on
 roughly one draw in several hundred. Never conclude anything from comparing one run to
 one run.
-
 
 ## Where things live
 
