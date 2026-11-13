@@ -308,8 +308,9 @@ structure TestDecl where
   expect : Expectation := .mustHold
   /-- A seed for this property alone, with its trial count and maximum size. The property then
       gets the same inputs on each run, whatever the command line gives. `none` is the default
-      and lets the run decide. Write `@[strata_property (seed := 42)]`, or `withSeed 42` in a
-      term. See `SeedPin`. -/
+      and lets the run decide. Write
+      `@[strata_property (seed := 42, numTrials := 1000, maxSize := 5)]`, or
+      `withSeed 42 1000 5` in a term. See `SeedPin`. -/
   seed : Option SeedPin := none
   /-- Whether the run emits a Tyche panel. A sampled property and a property over a set of
       witnesses get a panel by default. A `witness` body and an `action` body have nothing to

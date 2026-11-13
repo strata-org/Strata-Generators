@@ -117,7 +117,9 @@ run without one. Use it to get a failure again, not to gate a merge.
 
 `@[strata_property (seed := N)]` gives 1 property its own seed, whatever the run has. The
 pin also fixes the trial count and the maximum size of that property: write
-`(seed := N, numTrials := T, maxSize := S)`, or let them take the default values. A
+`(seed := N, numTrials := T, maxSize := S)`. A number that you do not give takes the default
+value of a run (1000 trials, max size 5), so a seed from a `--quick` run then gives different
+inputs. Copy all 3 numbers from the failure report. A
 defect that only some inputs show then fails on each run, and `knownFailure` can watch it.
 The cost: that property stops the search for new defects. See `SeedPin`, `TestDecl.runConfig` and
 `withSeed`.

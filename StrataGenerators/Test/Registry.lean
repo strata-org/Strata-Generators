@@ -17,9 +17,13 @@ def myPassIdempotent : TestDecl :=
 the same inputs on each run:
 
 ```lean
-@[strata_property (seed := 8021)]
+@[strata_property (seed := 8021, numTrials := 1000, maxSize := 5)]
 def myRareDefect : TestDecl := …
 ```
+
+Give all 3 numbers, as the failure report prints them. A number that you do not give gets the
+default value of a run, and the inputs then change if the run that found them had a different
+value.
 
 You edit nothing inside this package. The attribute records the
 *name* of the declaration in an environment extension, and `strata_registry%` in

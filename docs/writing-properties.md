@@ -509,7 +509,7 @@ A property can hold its own seed. It then gets the same inputs on each run, what
 the command line gives:
 
 ```lean
-@[strata_property (seed := 8021)]
+@[strata_property (seed := 8021, numTrials := 1000, maxSize := 5)]
 def liftFreshSnapshotNames : TestDecl :=
   knownFailure "strata-org/Strata#123: a minted snapshot name can collide with one \
 already in the program" <|
@@ -522,12 +522,19 @@ the inputs. Give them as `(seed := N, numTrials := T, maxSize := S)`, in this or
 number that you do not give gets the default value of a run (1000 trials, max size 5). The
 pinned property runs at these numbers, whatever the command line gives, so `--quick` does
 not change its inputs. Copy the attribute that the failure report suggests: it holds the
-numbers of the run that found the input. `numTrials := 0` is an error, because 0 trials
+numbers of the run that found the input.
+
+**Caution:** `(seed := N)` alone runs at 1000 trials and max size 5. It gives the input
+again only if the run that found it also had these numbers. A seed from a `--quick` run
+(100 trials, max size 2) gives different inputs, and the `knownFailure` mark then fails
+the run. Always copy all 3 numbers from the report.
+
+`numTrials := 0` is an error, because 0 trials
 tests nothing. A seed on a `witness` or `witnesses` property is also an error, because such
 a property draws no inputs.
 
-`@[strata_properties (seed := N)]` sets the seed on each member of a list. `withSeed N` is
-the term form, for a `family` member or for a property built in a term. It reads as a
+`@[strata_properties (seed := N, numTrials := T, maxSize := S)]` sets the pin on each member
+of a list. `withSeed N T S` is the term form, for a `family` member or for a property built in a term. It reads as a
 prefix, as `knownFailure` does.
 
 **Use it** for a defect that only some inputs show. A seed that gives such an input makes

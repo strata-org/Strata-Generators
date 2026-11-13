@@ -315,15 +315,19 @@ You can mark a defect that only some inputs show. Give the property the seed tha
 such an input, and the property then fails on each run:
 
 ```lean
-@[strata_property (seed := 8021)]
+@[strata_property (seed := 8021, numTrials := 1000, maxSize := 5)]
 def myPassOutputTypechecks : TestDecl :=
   knownFailure "strata-org/Strata#123: …" <| …
 ```
 
 To find the number, run with `--seed=N` until the property fails. The report prints the
-attribute to use, for example `@[strata_property (seed := 8021, numTrials := 1000, maxSize := 5)]`.
-The pin holds the trial count and the maximum size too, because the seed alone does not fix
-the inputs.
+attribute to use. The pin holds the trial count and the maximum size too, because the seed
+alone does not fix the inputs.
+
+**Caution:** `(seed := N)` alone runs at 1000 trials and max size 5. It gives the input
+again only if the run that found it also had these numbers. A seed from a `--quick` run
+(100 trials, max size 2) gives different inputs, and the `knownFailure` mark then fails
+the run. Always copy all 3 numbers from the report.
 
 ## Tyche visualization
 
