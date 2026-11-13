@@ -4,11 +4,11 @@ open Lambda LExpr RandomChoice Core Imperative TypeSpec ArbString
 open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 
 /-!
-# The side conditions of `spec_complete` are necessary
+# The side conditions of `spec_complete_at` are necessary
 
-`spec_complete` in `StmtHasTypeAGenComplete.lean` carries three side conditions:
-`InGenShape`, `AlphabetOk` and `CallOk`. This file shows that you cannot remove
-them. For each of the three, it gives a statement that is well-typed under
+`spec_complete_at` in `StmtHasTypeAGenComplete.lean` carries five side conditions: `InGenShape`,
+`WritesOk`, `AlphabetOk`, `CallOk` and `ExprOk`. This file shows that three of them, `InGenShape`,
+`AlphabetOk` and `CallOk`, cannot be removed. For each of the three, it gives a statement that is well-typed under
 `StatementWellTyped` but is not in the support of `genStmt`. Therefore no
 completeness theorem holds for `genStmt` without a side condition of this kind.
 
@@ -47,10 +47,10 @@ discharges one:
   `loop`, an `exit` and a `typeDecl`. It leaves a `.cmd` node
   untouched. The gap of `metadata_gap` is at a `.cmd` node, so this function
   cannot close it.
-* `Core.WF.WFcallProp.lhsWF` gives the `Nodup` fact that `CallOk` needs for the
-  write keys of a call. Its parent `Core.WF.WFStatementProp` is not recursive:
-  the `block`, `ite` and `loop` cases are empty structures. So it says nothing
-  about a call inside a body.
+* The call rule's own premise `Core.WF.WFcallProp` gives the `Nodup` fact for the
+  write keys of a call (`lhsWF`), and its in-scope premise gives that no write key needs
+  an `init`. `call_written_nodup` and `call_no_init` derive both inside `spec_complete_at`, so
+  `CallOk` asks for neither.
 * `LContext.WellKindedTy` bounds the type constructors of an `init` annotation.
   `genLMonoTy`'s support also bounds the depth of the type and the free type
   variables (`genLMonoTy_support`), so `WellKindedTy` is too weak.
@@ -402,7 +402,7 @@ theorem otherTargetCall_gap (labels : List String)
       SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) :=
   ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
--- ── `spec_complete`'s old environment hypotheses were unsatisfiable ──────────
+-- ── Why `ExprOk` is per expression ──────────────────────────────────────────
 
 /-! ### A hypothesis over each environment is unsatisfiable, at each depth
 
@@ -441,8 +441,8 @@ theorem not_exists_depth_GenLExprComplete :
     `hExprC`'s `ctx = []` instance. -/
 theorem toFVarCtx_nil : VarCtx.toFVarCtx [] = [] := rfl
 
-/-- **The old `hExprC` was unsatisfiable**, so the old `spec_complete` was vacuous.
-    Instantiate at `ctx = []`. -/
+/-- **A hypothesis `hExprC` over each environment is unsatisfiable**, so a completeness theorem that
+    took it would be vacuous. Instantiate at `ctx = []`. -/
 theorem hExprC_unsatisfiable :
     ¬ (∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d) := by
   intro h; exact not_GenLExprComplete 0 (h 0 [])

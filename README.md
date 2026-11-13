@@ -13,6 +13,10 @@ Specifically, the repo contains generators for the following fragment of Strata 
 - Procedures (typing relation: `ProcWellTyped`)
 - Whole programs (typing relation: `ProgramWellTyped`)
 
+Note: we currently do not support generating the following:
+- Recursive / mutually recursive functions  (this is non-trivial, since Strata Core functions contain a termination measure for int-valued recursion)
+- Pre/post-conditions that have a known verification outcome (e.g., we don't support generating "all pre-conditions that are provably true under some condition"), since proving completeness may be undecidable
+
 ## Generator Interpretations
 Basalt generators are polymorphic in their monad (see the [Basalt repo](https://github.com/hgoldstein95/basalt) for more details): this means they can be interpreted differently for execution / proofs. 
 

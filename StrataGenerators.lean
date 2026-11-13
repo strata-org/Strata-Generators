@@ -17,10 +17,15 @@ import StrataGenerators.ProgramGen.ContextOkPreserve
 import StrataGenerators.ProgramGen.ProcSigThread
 import StrataGenerators.ProgramGen.SoundProgram
 import StrataGenerators.ProgramGen.Complete
+-- Whole-program completeness for some `Bounds`, from declaration-extension lemmas at every large
+-- enough bound.
+import StrataGenerators.ProgramGen.CompleteEventually
 import StrataGenerators.PhaseChangedFlag
 import StrataGenerators.PrinterCoverage
--- `SPMF.prob` bounds on how the size parameter shapes `genLExprBase`'s distribution: which root
--- forms each size can produce, and the size threshold for covering every form in one draw.
+-- `SPMF.prob` bounds on how the size and the body-length cap shape the statement generator's
+-- distribution: probability lower bounds on nested statements, and upper bounds on their expected number.
 import StrataGenerators.SizeDistribution
 import StrataGenerators.SizeDistributionStmt
 import StrataGenerators.SizeDistributionLoops
+-- Completeness of `genStmt` for some size and some body-length cap, with size-free side conditions.
+import StrataGenerators.StmtHasTypeAGenCompleteExists

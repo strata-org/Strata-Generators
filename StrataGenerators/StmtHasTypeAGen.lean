@@ -714,7 +714,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
     (hMnotFn : ((StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M).filter
       (needsInit ctx)).all (fun q => !(functionNames C).contains q.1.name) = true)
     (hexprs : List.Forall₂
-      (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] d τ))
+      (fun e τ => e ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] d τ))
       exprs (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.I).values)
     (hgen : exprs.all (binderAnnotsKnownIn C.knownTypes) = true) :
     (⟨StrataGenerators.Stmt.initChain
@@ -730,7 +730,7 @@ theorem genCallStmt_mem_complete (procs : ProcSigCtx)
           ++ (outTargets immutableVars ctx
                 (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C)).filter (needsInit ctx))⟩
       : GenStmtResult) ∈
-      SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d) := by
+      SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx d pctx) := by
   -- `procs` is non-empty (it contains `s`), so the `p₀ :: ps` branch fires.
   cases procs with
   | nil => exact absurd hs (by simp)
@@ -1025,8 +1025,8 @@ end
 /-- A `genCmdStmt` result (at depth `n`) is reachable by `genStmt … n`. -/
 theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SPMF.support (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx n)) :
-    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
+    (hr : r ∈ SPMF.support (genCmdStmt (G := SPMF) octx tvars immutableVars C ctx n pctx)) :
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n maxStmtSeqLen) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -1039,7 +1039,7 @@ theorem genCmdStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
 theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SPMF.support (genExitStmt (G := SPMF) labels C ctx)) :
-    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n maxStmtSeqLen) := by
   -- With `labels = []` the `exit` branch is weighted 0, but there `genExitStmt`
   -- is `default` (support `∅`), so `hr` is impossible; with `labels ≠ []` the
   -- branch weight reduces to `1`.
@@ -1058,7 +1058,7 @@ theorem genExitStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : V
 theorem genTypeDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
     (hr : r ∈ SPMF.support (genTypeDeclStmt (G := SPMF) C ctx n)) :
-    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n maxStmtSeqLen) := by
   cases n with
   | zero =>
     rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
@@ -1071,8 +1071,8 @@ theorem genTypeDeclStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx
     branch sits at frequency index 3 in both the size-0 and size+1 lists. -/
 theorem genCallStmt_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
     (r : GenStmtResult)
-    (hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx n)) :
-    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
+    (hr : r ∈ SPMF.support (genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx n pctx)) :
+    r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx n maxStmtSeqLen) := by
   -- With `procs = []` the `call` branch is weighted 0, but there `genCallStmt`
   -- is `default` (support `∅`), so `hr` is impossible; with `procs ≠ []` the
   -- branch weight reduces to `1`.
@@ -1094,10 +1094,10 @@ theorem block_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx)
     (label : String) (body : List Statement) (C_body : LContext CoreLParams) (Γ_body : VarCtx)
     (len : Nat) (hlen : len ≤ maxStmtSeqLen)
     (hbody : (body, C_body, Γ_body) ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs (label :: labels) C ctx [] size len maxStmtSeqLen))
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs (label :: labels) C ctx pctx size len maxStmtSeqLen))
     (hlabel : label ∈ SPMF.support (genFreshLabel (G := SPMF) labels)) :
     (⟨[Stmt.block label body default], C, ctx⟩ : GenStmtResult) ∈
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1) maxStmtSeqLen) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx (size + 1) maxStmtSeqLen) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.head _)))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -1111,13 +1111,13 @@ theorem ite_det_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCt
     (cond : Expression.Expr) (thenb elseb : List Statement)
     (Ct : LContext CoreLParams) (Γt : VarCtx) (Ce : LContext CoreLParams) (Γe : VarCtx)
     (tlen elen : Nat) (htlen : tlen ≤ maxStmtSeqLen) (helen : elen ≤ maxStmtSeqLen)
-    (hcond : cond ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] (size + 1) .bool))
+    (hcond : cond ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] (size + 1) .bool))
     (hthen : (thenb, Ct, Γt) ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size tlen maxStmtSeqLen))
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size tlen maxStmtSeqLen))
     (helse : (elseb, Ce, Γe) ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size elen maxStmtSeqLen)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size elen maxStmtSeqLen)) :
     (⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1) maxStmtSeqLen) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx (size + 1) maxStmtSeqLen) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -1132,11 +1132,11 @@ theorem ite_nondet_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : Va
     (Ct : LContext CoreLParams) (Γt : VarCtx) (Ce : LContext CoreLParams) (Γe : VarCtx)
     (tlen elen : Nat) (htlen : tlen ≤ maxStmtSeqLen) (helen : elen ≤ maxStmtSeqLen)
     (hthen : (thenb, Ct, Γt) ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size tlen maxStmtSeqLen))
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size tlen maxStmtSeqLen))
     (helse : (elseb, Ce, Γe) ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size elen maxStmtSeqLen)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size elen maxStmtSeqLen)) :
     (⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩ : GenStmtResult) ∈
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1) maxStmtSeqLen) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx (size + 1) maxStmtSeqLen) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _)))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -1153,15 +1153,15 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
     (C_body : LContext CoreLParams) (Γ_body : VarCtx)
     (blen : Nat) (hblen : blen ≤ maxStmtSeqLen)
     (hguard : guard ∈ SPMF.support
-      (genCondOrNondet (G := SPMF) octx tvars ctx (size + 1) []))
+      (genCondOrNondet (G := SPMF) octx tvars ctx (size + 1) pctx))
     (hmeasure : measure ∈ SPMF.support
-      (genOptMeasure (G := SPMF) octx tvars ctx (size + 1) []))
+      (genOptMeasure (G := SPMF) octx tvars ctx (size + 1) pctx))
     (hinvs : invs ∈ SPMF.support
-      (genInvariants (G := SPMF) octx tvars ctx maxStmtSeqLen (size + 1) []))
+      (genInvariants (G := SPMF) octx tvars ctx maxStmtSeqLen (size + 1) pctx))
     (hbody : (body, C_body, Γ_body) ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size blen maxStmtSeqLen)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size blen maxStmtSeqLen)) :
     (⟨[Stmt.loop guard measure invs body default], C, ctx⟩ : GenStmtResult) ∈
-      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] (size + 1) maxStmtSeqLen) := by
+      SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx (size + 1) maxStmtSeqLen) := by
   rw [genStmt, mem_support_frequency_iff (by simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil]; omega)]
   refine ⟨1, _, .tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.tail _ (.head _))))))), by omega, ?_⟩
   simp only [mem_support_bind_iff, mem_support_pure_iff, mem_support_choose_iff]
@@ -1174,7 +1174,7 @@ theorem loop_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) 
 /-- The empty statement list is in `genStmtChain`'s support at length `0`. -/
 theorem genStmtChain_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size : Nat) :
     ((([] : List Statement)), C, ctx) ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size 0 maxStmtSeqLen) := by
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size 0 maxStmtSeqLen) := by
   rw [genStmtChain]; exact mem_support_pure_iff.mpr rfl
 
 /-- If the head statement `r` is reachable by `genStmt` (at `size`) and the tail is
@@ -1182,11 +1182,11 @@ theorem genStmtChain_nil_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ct
     length `len`), then the whole `cons` is reachable at length `len+1`. -/
 theorem genStmtChain_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (ctx : VarCtx) (size len : Nat)
     (r : GenStmtResult) (rest : List Statement) (C'' : LContext CoreLParams) (Γ'' : VarCtx)
-    (hhead : r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] size maxStmtSeqLen))
+    (hhead : r ∈ SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size maxStmtSeqLen))
     (htail : (rest, C'', Γ'') ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels r.outC r.outCtx [] size len maxStmtSeqLen)) :
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels r.outC r.outCtx pctx size len maxStmtSeqLen)) :
     (r.stmts ++ rest, C'', Γ'') ∈
-      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx [] size (len + 1) maxStmtSeqLen) := by
+      SPMF.support (genStmtChain (G := SPMF) octx tvars immutableVars procs labels C ctx pctx size (len + 1) maxStmtSeqLen) := by
   rw [genStmtChain]
   simp only [mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨r, hhead, (rest, C'', Γ''), htail, rfl⟩
@@ -1203,8 +1203,8 @@ theorem genStmtChain_cons_mem (procs : ProcSigCtx) (C : LContext CoreLParams) (c
 theorem genCondOrNondet_complete (depth : Nat) (ctx : VarCtx)
     (cond : ExprOrNondet Expression)
     (hcond : ∀ g, cond = .det g →
-      g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
-    cond ∈ SPMF.support (genCondOrNondet (G := SPMF) octx tvars ctx depth []) := by
+      g ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] depth .bool)) :
+    cond ∈ SPMF.support (genCondOrNondet (G := SPMF) octx tvars ctx depth pctx) := by
   rw [genCondOrNondet, mem_support_frequency_iff]
   cases cond with
   | nondet =>
@@ -1220,8 +1220,8 @@ theorem genCondOrNondet_complete (depth : Nat) (ctx : VarCtx)
 theorem genOptMeasure_complete (depth : Nat) (ctx : VarCtx)
     (measure : Option Expression.Expr)
     (hmeasure : ∀ m, measure = some m →
-      m ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .int)) :
-    measure ∈ SPMF.support (genOptMeasure (G := SPMF) octx tvars ctx depth []) := by
+      m ∈ SPMF.support (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] depth .int)) :
+    measure ∈ SPMF.support (genOptMeasure (G := SPMF) octx tvars ctx depth pctx) := by
   simp only [genOptMeasure,
     mem_support_biasedOptionGen_iff (r := 3/4) (by decide +kernel) (by decide +kernel)]
   cases measure with
@@ -1235,8 +1235,8 @@ theorem genInvariant_complete (depth : Nat) (ctx : VarCtx)
     (p : String × Expression.Expr)
     (hlabel : p.1 ∈ SPMF.support (genIdentName (G := SPMF)))
     (hexpr : p.2 ∈ SPMF.support
-      (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
-    p ∈ SPMF.support (genInvariant (G := SPMF) octx tvars ctx depth []) := by
+      (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] depth .bool)) :
+    p ∈ SPMF.support (genInvariant (G := SPMF) octx tvars ctx depth pctx) := by
   simp only [genInvariant, mem_support_bind_iff, mem_support_pure_iff]
   exact ⟨p.1, hlabel, p.2, hexpr, rfl⟩
 
@@ -1247,8 +1247,8 @@ theorem genInvariants_complete (maxLen depth : Nat) (ctx : VarCtx)
     (hlen : invs.length ≤ maxLen)
     (hinvs : ∀ p ∈ invs, p.1 ∈ SPMF.support (genIdentName (G := SPMF)) ∧
       p.2 ∈ SPMF.support
-        (genLExpr (G := SPMF) ctx.toFVarCtx octx [] tvars [] depth .bool)) :
-    invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx maxLen depth []) := by
+        (genLExpr (G := SPMF) ctx.toFVarCtx octx pctx tvars [] depth .bool)) :
+    invs ∈ SPMF.support (genInvariants (G := SPMF) octx tvars ctx maxLen depth pctx) := by
   simp only [genInvariants, mem_support_listOfMaxLength_iff]
   refine ⟨hlen, fun p hp => ?_⟩
   exact genInvariant_complete depth ctx p (hinvs p hp).1 (hinvs p hp).2

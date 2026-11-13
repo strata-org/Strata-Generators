@@ -210,6 +210,21 @@ theorem genProgramStmtsT_tuned_support_eq (θ : Tuning) (octx : OpCtx)
       = SPMF.support (genProgramStmts (G := SPMF) octx tvars size len pctx maxStmtSeqLen) :=
   genStmtChain_tuned_support_eq ..
 
+/-- `genProcedureWith` reaches the same procedures from two body generators that reach the same
+    bodies. -/
+theorem genProcedureWith_support_congr
+    {f g : List TyIdentifier → List (Identifier Unit) → LContext CoreLParams → VarCtx →
+      SPMF (List Statement × LContext CoreLParams × VarCtx)}
+    (h : ∀ tv imm C' ctx, SPMF.support (f tv imm C' ctx) = SPMF.support (g tv imm C' ctx))
+    (octx : OpCtx) (C : LContext CoreLParams) (size : Nat) (pctx : PolyOpCtx) :
+    SPMF.support (StrataGenerators.Procedure.genProcedureWith f octx C size pctx)
+      = SPMF.support (StrataGenerators.Procedure.genProcedureWith g octx C size pctx) := by
+  unfold StrataGenerators.Procedure.genProcedureWith
+  repeat' first
+    | refine SPMF.support_bind_congr (h ..) (fun _ => ?_)
+    | refine SPMF.support_bind_congr rfl (fun _ => ?_)
+    | rfl
+
 /-- At every `θ`, the tuned procedure generator is `genProcedure`. `genProcedureT` differs from the
     shipping generator only in which statement-chain generator it calls, so the block's θ-invariance is
     the whole proof. This is why the `proc:` profiles, which aim at the three transform passes, have no
@@ -222,12 +237,8 @@ theorem genProcedureT_tuned_support_eq (θ : Tuning) (octx : OpCtx) (procs : Pro
         (StrataGenerators.Procedure.genProcedure (G := SPMF) octx procs C Γ size len pctx
           maxStmtSeqLen) := by
   unfold genProcedureT StrataGenerators.Procedure.genProcedure
-  -- The two `do` blocks agree draw for draw except for the statement-chain call, so descend through
-  -- the binds and use the block's fact at the one that differs.
-  repeat' first
-    | refine SPMF.support_bind_congr rfl (fun _ => ?_)
-    | refine SPMF.support_bind_congr (genStmtChain_tuned_support_eq ..) (fun _ => ?_)
-    | rfl
+  exact genProcedureWith_support_congr (fun _ _ _ _ => SPMF.support_bind_congr rfl fun _ => by
+    split; exact genStmtChain_tuned_support_eq ..) ..
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- 3. The command, type and expression generators

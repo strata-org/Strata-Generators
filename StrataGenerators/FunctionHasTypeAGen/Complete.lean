@@ -195,7 +195,7 @@ theorem genFuncParts_complete (genRecursive : SPMF Bool) (fctx : FVarCtx) (octx 
     Every expression is reached over the formals and the ambient variables of `fctx` that no
     formal shadows and whose types are over the type arguments (`funcFctx`), with the operators of
     `opsOver func.typeArgs octx`. -/
-theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
+theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat) (pctx : PolyOpCtx)
     (avoid : String → Bool) (dts : List (String × Nat))
     (C : LContext CoreLParams) (ts : TypeScopes)
     (func : Function)
@@ -211,32 +211,32 @@ theorem genFunction_complete (fctx : FVarCtx) (octx : OpCtx) (depth : Nat)
     (hOutputReach : func.output ∈ SPMF.support (genLMonoTy (G := SPMF) func.typeArgs depth))
     (hBodyReach : ∀ b, func.body = some b →
       b ∈ SPMF.support (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
-        (opsOver func.typeArgs octx) [] func.typeArgs [] depth func.output))
+        (opsOver func.typeArgs octx) pctx func.typeArgs [] depth func.output))
     (hPreLen : func.preconditions.length ≤ maxFuncClauses)
     (hPreReach : ∀ p ∈ func.preconditions, p.expr ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
-        (opsOver func.typeArgs octx) [] func.typeArgs [] depth .bool))
+        (opsOver func.typeArgs octx) pctx func.typeArgs [] depth .bool))
     (hAxiomsLen : func.axioms.length ≤ maxFuncClauses)
     (hAxiomsReach : ∀ ax ∈ func.axioms, ax ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
-        (opsOver func.typeArgs octx) [] func.typeArgs [] depth .bool))
+        (opsOver func.typeArgs octx) pctx func.typeArgs [] depth .bool))
     (hMeasureReach : ∀ m, func.measure = some m → m ∈ SPMF.support
       (genLExpr (G := SPMF) (funcFctx fctx func.inputs func.typeArgs)
-        (opsOver func.typeArgs octx) [] func.typeArgs [] depth .int) ∨
+        (opsOver func.typeArgs octx) pctx func.typeArgs [] depth .int) ∨
       ∃ p ∈ datatypeFormals dts func.inputs, m = .fvar () p.1 (some p.2))
     (hAttrLen : func.attr.size ≤ depth)
     (hAttrIdx : ∀ a ∈ func.attr.toList, ∀ i ∈ attrParamIdx a, i ≤ depth)
     (hLemmasLen : func.lemmas.length ≤ depth)
     (hLemmasReach : ∀ s ∈ func.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF)))
     (hAvoidInputs : ∀ x ∈ func.inputs.keys, avoid x.name = false) :
-    func ∈ SPMF.support (genFunction (G := SPMF) fctx octx depth [] avoid dts) := by
+    func ∈ SPMF.support (genFunction (G := SPMF) fctx octx depth pctx avoid dts) := by
   simp only [genFunction, mem_support_bind_iff]
   exact ⟨func.name.name, hNameReach, _,
     genFuncSig_complete depth avoid dts func hwt.typeArgsNodup hwt.inputsNodup
       hwt.typeArgsInSignature
       hTyArgsLen hTyArgsReach hInputNamesLen hInputNamesReach hInputTyReach hOutputReach
       hAvoidInputs,
-    genFuncParts_complete genRareFlag fctx octx depth [] dts C ts func hwt
+    genFuncParts_complete genRareFlag fctx octx depth pctx dts C ts func hwt
       (mem_support_genRareFlag _) hBodyReach hPreLen hPreReach hAxiomsLen hAxiomsReach
       hMeasureReach hAttrLen hAttrIdx hLemmasLen hLemmasReach⟩
 

@@ -20,7 +20,8 @@ the `ProcHasTypeA` typing relation of `Strata.Languages.Core.Typing.Spec.Procedu
 The proof is *compositional*: it reuses `genInputs_support`/`genInputs_complete`
 for the output signature, exactly as the generator of a function uses them for its inputs. It also uses
 `genStmtChain_sound` and the membership of the body in the support of `genStmtChain`, for the body. The
-completeness proof takes that membership as a hypothesis, and `spec_complete` can discharge it. It also uses
+completeness proof takes that membership as a hypothesis, and `spec_complete_chain_at` discharges it.
+It also uses
 `genStmtChain_mutableVars`, for the obligation about the rights to modify a variable.
 
 ## The context-alignment lemma
@@ -469,14 +470,14 @@ theorem genChecks_support (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdenti
 /-- Reverse of `mapM_genChecks_values`: a `ListMap` of checks whose every `expr`
     is reachable by `genLExpr … .bool` is in the support
     of the `mapM` inside `genChecks`, run over its own keys. -/
-theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) {pctx : PolyOpCtx}
     (m : ListMap CoreLabel Procedure.Check)
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool)) :
     m ∈ SPMF.support
       (m.keys.mapM (m := SPMF) (fun l => do
-        let e ← genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool
+        let e ← genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool
         pure (l, ({ expr := e } : Procedure.Check)))) := by
   induction m with
   | nil => exact SPMF.mem_support_pure_iff.mpr rfl
@@ -492,13 +493,13 @@ theorem mapM_genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List Ty
     reachable by `genNameList`, whose clauses are all default-`attr`/empty-`md`,
     and whose every `expr` is reachable by `genLExpr … .bool`, is in the support of
     `genChecks`. -/
-theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat)
+theorem genChecks_complete (fctx : FVarCtx) (octx : OpCtx) (tvars : List TyIdentifier) (depth : Nat) {pctx : PolyOpCtx}
     (m : ListMap CoreLabel Procedure.Check)
     (hlabels : m.keys ∈ SPMF.support (genNameList (G := SPMF) depth))
     (hattr : ∀ c ∈ m.values, c.attr = .Default)
     (hmd : ∀ c ∈ m.values, c.md = #[])
-    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx [] tvars [] depth .bool)) :
-    m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth) := by
+    (hvals : ∀ c ∈ m.values, c.expr ∈ SPMF.support (genLExpr (G := SPMF) fctx octx pctx tvars [] depth .bool)) :
+    m ∈ SPMF.support (genChecks (G := SPMF) fctx octx tvars depth pctx) := by
   unfold genChecks
   exact mem_support_bind_iff.mpr
     ⟨m.keys, hlabels, mapM_genChecks_complete fctx octx tvars depth m hattr hmd hvals⟩
@@ -619,6 +620,8 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
   obtain ⟨name, _, typeArgs, htypeArgs, rawM, hrawM, rawIn, hrawIn,
           rawOut, hrawOut, pre, hpre, post, hpost,
           ⟨body, C', ctx'⟩, hbody, lemmas, _, rfl⟩ := hproc
+  -- The body length `l ≤ len` that the generator drew.
+  obtain ⟨⟨⟨l, _⟩⟩, _, hbody⟩ := hbody
   -- The three blocks without the function names: `M` (in-out), `rawInputOnly` and
   -- `rawOutputOnly`, before the disjointness filters.
   obtain ⟨hMKeysNodup, hMVals, hMs0, _⟩ := avoidFunctionNames_support C typeArgs size rawM hrawM
@@ -754,14 +757,14 @@ theorem genProcedure_sound (P : Program) (octx : OpCtx) (procs : ProcSigCtx)
       { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
-      hseedWK (hops.mono rfl (fun _ _ hv => hv)) size len hseedFun (body, C', ctx') hbody
+      hseedWK (hops.mono rfl (fun _ _ hv => hv)) size l hseedFun (body, C', ctx') hbody
   -- modRights from the sequence invariant (write targets are mutable keys).
   have hmod := genStmtChain_mutableVars octx pctx typeArgs
       (ListMap.keys (M ++ disjointInputs rawInputOnly M) ++ ListMap.keys (oldVars M)) procs []
       { C with rigidTypeVars := C.rigidTypeVars ++ typeArgs }
       (M ++ disjointInputs rawInputOnly M ++
         (M ++ disjointInputs rawOutputOnly (M ++ disjointInputs rawInputOnly M)) ++ oldVars M)
-      size len (body, C', ctx') hbody
+      size l (body, C', ctx') hbody
   -- The body scopes of the procedure agree with the scope of the seed on every lookup.
   have heq := procBodyScopes_inout name typeArgs (lemmas := lemmas) M
     (disjointInputs rawInputOnly M)
@@ -901,20 +904,21 @@ set_option maxHeartbeats 800000 in
     - The premises for each contract clause say that its attribute field and its metadata field hold their
       default values, that `genNameList` reaches its list of labels, and that `genLExpr … .bool`
       reaches its expression.
-    - `hBodyReach` says that the statement list of the body is in the support of `genStmtChain`, at exactly the
+    - `hBodyReach` says that the statement list of the body is in the support of `genStmtChain` at a body
+      length `bodyLen ≤ len` (the generator draws it uniformly from `[0, len]`), at exactly the
       seed that the generator uses, which is the three blocks and then the old variables, with the keys of the
       inputs and of the old variables as the immutable names, at an empty context of the labels and of the free
       variables,
       type-variable list `typeArgs`, and the ambient `C` with `typeArgs` added to its rigid type
       variables. (A caller can
-      obtain this membership from `spec_complete` applied to each body statement.)
+      obtain this membership from `spec_complete_chain_at`.)
     - `hLemmasLen` and `hLemmasReach` say that the lemma names are not more than `size` in number
       and that `genIdentName` reaches each of them.
 
     The block name-length / reachability conditions are stated concretely via
     `mem_support_genNameList_iff`. -/
 theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
-    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat)
+    (C : LContext CoreLParams) (Γ : TContext Unit) (size len : Nat) {pctx : PolyOpCtx}
     (proc : Procedure)
     (M I O : ListMap (Identifier Unit) LMonoTy)
     (bodyss : List Statement) (C' : LContext CoreLParams) (ctx' : VarCtx)
@@ -957,22 +961,23 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
     (hPreMd : ∀ c ∈ proc.spec.preconditions.values, c.md = #[])
     (hPreExpr : ∀ c ∈ proc.spec.preconditions.values,
       c.expr ∈ SPMF.support (genLExpr (G := SPMF)
-        (sigFctx (M ++ I)) octx [] proc.header.typeArgs [] size .bool))
+        (sigFctx (M ++ I)) octx pctx proc.header.typeArgs [] size .bool))
     -- postconditions:
     (hPostLabels : proc.spec.postconditions.keys ∈ SPMF.support (genNameList (G := SPMF) size))
     (hPostAttr : ∀ c ∈ proc.spec.postconditions.values, c.attr = .Default)
     (hPostMd : ∀ c ∈ proc.spec.postconditions.values, c.md = #[])
     (hPostExpr : ∀ c ∈ proc.spec.postconditions.values,
       c.expr ∈ SPMF.support (genLExpr (G := SPMF)
-        (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx [] proc.header.typeArgs [] size .bool))
+        (sigFctx (M ++ I ++ (M ++ O) ++ oldVars M)) octx pctx proc.header.typeArgs [] size .bool))
+    (bodyLen : Nat) (hBodyLen : bodyLen ≤ len)
     (hBodyReach : (bodyss, C', ctx') ∈ SPMF.support
       (genStmtChain (G := SPMF) octx proc.header.typeArgs
         (ListMap.keys (M ++ I) ++ ListMap.keys (oldVars M)) procs []
         { C with rigidTypeVars := C.rigidTypeVars ++ proc.header.typeArgs }
-        (M ++ I ++ (M ++ O) ++ oldVars M) [] size len maxStmtSeqLen))
+        (M ++ I ++ (M ++ O) ++ oldVars M) pctx size bodyLen maxStmtSeqLen))
     (hLemmasLen : proc.header.lemmas.length ≤ size)
     (hLemmasReach : ∀ s ∈ proc.header.lemmas, s ∈ SPMF.support (genIdentName (G := SPMF))) :
-    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len (maxStmtSeqLen := maxStmtSeqLen)) := by
+    proc ∈ SPMF.support (genProcedure (G := SPMF) octx procs C Γ size len pctx (maxStmtSeqLen := maxStmtSeqLen)) := by
   simp only [genProcedure, genProcedureWith, mem_support_bind_iff, mem_support_pure_iff]
   -- The generator's `disjointInputs` filters reproduce `I` and `O` unchanged.
   have hI_eq : disjointInputs I M = I := disjointInputs_eq_self I M hIdisjM
@@ -1022,7 +1027,7 @@ theorem genProcedure_complete (octx : OpCtx) (procs : ProcSigCtx)
   · -- body reachable: the generator's filtered blocks equal `M`/`I`/`O`; `hBodyReach`
     -- is the body's `genStmtChain` support membership directly.
     rw [hMeq, hIeq, hI_eq, hOeq, hO_eq]
-    exact hBodyReach
+    exact ⟨⟨⟨bodyLen, Nat.zero_le _, hBodyLen⟩⟩, by simp, hBodyReach⟩
   · -- the reassembled record equals `proc`.
     rw [hMeq, hIeq, hI_eq, hOeq, hO_eq]
     obtain ⟨⟨pname, ptyArgs, pinputs, poutputs, plemmas⟩, ⟨ppre, ppost⟩, pbody⟩ := proc
