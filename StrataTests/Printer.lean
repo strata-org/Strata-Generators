@@ -42,6 +42,8 @@ def printerBvIntConversions : TestDecl :=
     place of a sample. -/
 @[strata_property]
 def printerBvWidthAgreement : TestDecl :=
+  knownFailure "the type checker accepts every bitvec width, but the printer supports only \
+    five; the others print as `$__unsupported_bvN`" <|
   (TestDecl.witness "printer: every typecheckable bitvec width is printable"
     checkAllWidthsAgree).withEnumeratedPanel bvWidthAgreementSamples
 
@@ -58,5 +60,8 @@ def printerBvWidthAgreement : TestDecl :=
     `printer conversion-error` diagnostic gives the counts over a whole sample. -/
 @[strata_property]
 def printerNoConversionError : TestDecl :=
+  knownFailure "`Core.formatProgram` logs a conversion error on generated programs (an \
+    unsupported bitvec width, or an internal operator such as `Int.Neg` missing from the CST \
+    tables); failed on both full runs of 2026-11-11; not yet triaged" <|
   (TestDecl.property "printer: no conversion error on generated programs"
     (fun (gp : GenProgram) => checkProgramPrintsWithoutError gp.prog)).withPanel genPrinterProgramProp

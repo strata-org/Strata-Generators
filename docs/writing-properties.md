@@ -517,14 +517,14 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 
 | flag | effect |
 |---|---|
-| `--quick` | 100 trials, max size 2, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
+| `--quick` | 100 trials for each property, max size 2. A positional argument takes precedence, so `--quick 500` runs 500 trials and keeps the rest. |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
 | `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
-| `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
-| `--no-tyche` | skip the Tyche pass. |
-| `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). |
-| `--tyche-samples=N` | samples per panel (default 1000). |
+| `--smt` | test properties related to Strata's SMT encoding (needs `cvc5` or `z3` on `PATH`). |
+| `--tyche` | after all tests finish, run a second pass that writes the data for the Tyche visualizations. Off by default, because this pass takes a long time. |
+| `--tyche-out=PATH` | Tyche JSONL output path (default `tyche_output.jsonl`). Needs `--tyche`. |
+| `--tyche-samples=N` | samples per panel (default 1000). Needs `--tyche`. |
 
 `--only=… --quick` is the loop to iterate in: it runs one property or one group, skips
 the diagnostics, and writes no Tyche file.

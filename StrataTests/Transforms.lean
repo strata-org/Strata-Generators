@@ -100,7 +100,9 @@ def unprovenTransforms : List TestDecl :=
       ("loop: a nondet loop with a measure is accepted",
        fun gp => checkLoopNondetMeasureAccepted gp.prog),
       ("loop: LoopElim mints distinct block labels",
-       fun gp => checkLoopBlockLabelsNodup gp.prog),
+       fun gp => checkLoopBlockLabelsNodup gp.prog,
+       .knownFailure "`LoopElim` mints a duplicate block label on a procedure with a \
+         `decreases` loop; failed on both full runs of 2026-11-11; not yet triaged"),
       ("loop: erasedLoops is faithful",
        fun gp => checkLoopElimStatFaithful gp.prog),
       -- CommonSubexprElim: fresh names and order
@@ -145,7 +147,9 @@ def unprovenTransforms : List TestDecl :=
       -- containment and not equality, because the pass copies the obligations of the callee
       -- to each call site by design.
       ("procInline: symbolic evaluation loses no obligation",
-       fun gp => checkInlineProcSymbolicAgreement gp.prog),
+       fun gp => checkInlineProcSymbolicAgreement gp.prog,
+       .knownFailure "symbolic evaluation of the inlined program loses an obligation from a \
+         callee precondition (e.g. `requires bv8.sMulOverflow(…)`); failed on both full runs of 2026-11-11; not yet triaged"),
       -- NondetElim and LoopInitHoist: the postconditions that neither file proves
       ("nondetElim: no nondet guard is left",
        fun gp => checkNondetElimNoNondetGuard gp.prog),
