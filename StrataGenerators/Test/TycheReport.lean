@@ -76,7 +76,12 @@ private def sampleMark (runner : PropertyRunner α) (check : α → Bool) (name 
 /-- Writes the panel for one property. A property that gives its own `panel` writer gets that
     panel. For each other property, the panel comes from the body. A `Body.witness` property and
     a `Body.action` property have nothing to sample, so this function writes no panel for
-    them. -/
+    them.
+
+    A panel samples from the process-wide generator, which `--seed=` sets for the whole
+    run, so the panels of a run with a seed are the same each time. A panel ignores the
+    seed of a property: a panel shows a distribution, and 1000 samples of 1 input show
+    nothing. -/
 def writePanel (handle : IO.FS.Handle) (d : TestDecl) (cfg : RunConfig)
     (numSamples runStart : Nat) : IO Unit := do
   unless d.tyche do return

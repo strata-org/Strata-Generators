@@ -29,3 +29,6 @@ import StrataGenerators.SizeDistributionStmt
 import StrataGenerators.SizeDistributionLoops
 -- Completeness of `genStmt` for some size and some body-length cap, with size-free side conditions.
 import StrataGenerators.StmtHasTypeAGenCompleteExists
+-- Build-time checks that the registration attributes record the tuning and the seed pin
+-- that they were given. No test driver imports this module.
+import StrataGenerators.Test.RegistrySelfTest

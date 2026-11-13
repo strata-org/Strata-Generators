@@ -25,11 +25,19 @@ open Elab Term in
     that can go out of date.
 
     The elaborator splices a `@[strata_properties]` list in place. A report therefore cannot
-    tell the two attributes apart. -/
+    tell the two attributes apart.
+
+    The `(seed := N, …)` argument of an attribute becomes a `withSeed` around the
+    declaration, or around each member of a list. The seed is applied here, so a driver
+    folds a plain `List TestDecl` whose `seed` fields already hold what the attributes
+    asked for. The run needs no second idea of what the seed of a property is. -/
 elab "strata_registry%" : term => do
+  let pinFn : Option SeedPin → TermElabM Term
+    | none   => `(id)
+    | some p => `(withSeed $(quote p.seed) $(quote p.numTrials) $(quote p.maxSize))
   let chunks ← (registryEntries (← getEnv)).mapM fun
-    | .single n => `(term| [($(mkIdent n) : TestDecl)])
-    | .many n   => `(term| ($(mkIdent n) : List TestDecl))
+    | .single n p => do `(term| [$(← pinFn p) ($(mkIdent n) : TestDecl)])
+    | .many n p   => do `(term| (($(mkIdent n) : List TestDecl).map $(← pinFn p)))
   elabTerm (← `(List.flatten [$chunks,*])) none
 
 open Elab Term in

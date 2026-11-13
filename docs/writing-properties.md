@@ -444,6 +444,7 @@ tree — it needs two field names differing by a trailing `!`, which a draw almo
 produces, so `AdtLaws.bangFieldWitness` is the real pin and the property is a net around
 it.
 
+
 ### Marking one for a single run
 
 ```bash
@@ -458,6 +459,17 @@ gets committed, since only the declaration can carry a reason.
 
 `--list` prints every mark and its reason, so the registry is the answer to "what is
 known to fail?".
+
+## Fixing the seed
+
+To ensure that a fixed set of random inputs are used for a particular property, 
+specify the `seed`, `numTrials` and `size` for it, like so:
+
+```lean
+@[strata_property (seed := 8021, numTrials := 1000, maxSize := 5)]
+def myPassOutputTypechecks : TestDecl :=
+  knownFailure "strata-org/Strata#123: …" <| …
+```
 
 ## Tyche panels
 
@@ -518,8 +530,9 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 | flag | effect |
 |---|---|
 | `--quick` | 100 trials, max size 2, no Tyche pass. A positional argument wins, so `--quick 500` gives 500 trials and keeps the rest. |
+| `--seed=N` | give each property the seed `N`, and report the seed of each property that fails. The same command line then gets the same inputs. See [Get the same inputs again](#get-the-same-inputs-again). |
 | `--only=SUBSTRING` | run only properties whose name contains it. Repeatable. `--only="lift:"` selects the `lift` group. |
-| `--list` | print the registry, with each property's expectation, and exit. The answer to "did my property get picked up?" |
+| `--list` | print the registry, with the seed and the expectation of each property, and exit. The answer to "did my property get picked up?" |
 | `--known-failure=NAME` | treat the property called `NAME` as known to fail for this run. Repeatable; whole name, not a substring. |
 | `--smt` | enable the `smt` gate (needs `cvc5` or `z3` on `PATH`). |
 | `--no-tyche` | skip the Tyche pass. |
@@ -529,9 +542,9 @@ divisor is a statement about the flag, and it will be wrong the moment the flag 
 `--only=… --quick` is the loop to iterate in: it runs one property or one group, skips
 the diagnostics, and writes no Tyche file.
 
-Note that the suite is **not** seed-deterministic, and a few properties fail on
-roughly one draw in several hundred. Never conclude anything from comparing one run to
-one run.
+A run **without** `--seed=` does not come back the same, and a few properties fail on about
+1 input in several hundred. Do not make a conclusion from 1 run against 1 run: give
+`--seed=N` to both runs, or run each of them several times.
 
 ## Where things live
 

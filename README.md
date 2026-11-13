@@ -94,6 +94,7 @@ Flags (all optional; the Tyche visualization pass is on by default):
 - `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
   This flag runs 100 trials for each property, with `size = 2` passed to the generators.
   This flag omits Tyche visualizations:
+- `--seed=N` — Use a fixed seed `N` for each property. When a fixed (seed, no. of trials, size) combination is used, the generator produces the same output.
 - `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
 - `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
 - `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
@@ -298,6 +299,15 @@ def stmtTransforms' : List TestDecl :=
   ]
 ```
 
+
+To ensure that a fixed set of random inputs are used for a particular property, 
+specify the `seed`, `numTrials` and `size` for it, like so:
+
+```lean
+@[strata_property (seed := 8021, numTrials := 1000, maxSize := 5)]
+def myPassOutputTypechecks : TestDecl :=
+  knownFailure "strata-org/Strata#123: …" <| …
+```
 
 ## Tyche visualization
 
