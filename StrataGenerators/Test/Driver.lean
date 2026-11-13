@@ -109,13 +109,14 @@ def setup (cli : Cli) (registry : List TestDecl) : IO (Option UInt32) := do
     if let some code ← checkSolvers then
       return some code
 
-  -- `--seed=N` also sets the process-wide generator. Everything that samples outside
-  -- Plausible's own runner reads it: the self-driving `IO` properties (`Gen.run`), the
-  -- generator sizes of the Tyche pass (`IO.rand`), and the panels. Plausible gets its seed
-  -- separately, through `Configuration.randomSeed`. A property with a seed thus takes
-  -- nothing from this generator, and it cannot change the inputs of another property.
+  -- `--seed=N` also sets the 2 process-wide generators (see `setProcessSeed`). Everything
+  -- that samples outside Plausible's own runner reads them: the self-driving `IO` properties
+  -- (`Gen.run`, and generators at `G := IO`), the generator sizes of the Tyche pass
+  -- (`IO.rand`), and the panels. Plausible gets its seed separately, through
+  -- `Configuration.randomSeed`. A property with a seed thus takes nothing from these
+  -- generators, and it cannot change the inputs of another property.
   if let some s := cli.run.seed then
-    IO.setRandSeed s
+    setProcessSeed s
 
   let seedNote := match cli.run.seed with
     | some s => s!", seed {s}"

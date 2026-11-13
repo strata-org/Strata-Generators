@@ -1,5 +1,6 @@
 import Plausible
 import Basalt.Tuning.Basic
+import Basalt.IO
 import StrataGenerators.Tyche
 
 /-!
@@ -700,25 +701,37 @@ def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
                                 | some m => s!"{m}\n    {note}"
                                 | none => note) }
 
-/-- Run `act` with the process-wide generator at `seed`, then put back the old state.
+/-- Set the 2 process-wide generators to `seed`.
+
+    There are 2 generators. `Gen.run` and `IO.rand` read `IO.stdGenRef`. A Basalt generator
+    that runs at `G := IO` reads `Basalt.ioGen`, a SplitMix generator, through the
+    `RandomChoice IO` instance. If only `IO.stdGenRef` gets the seed, each property that runs
+    a generator at `G := IO` gets new inputs on each run. -/
+def setProcessSeed (seed : Nat) : IO Unit := do
+  IO.setRandSeed seed
+  ioGen.set (SplitMix.ofSeed seed.toUInt64)
+
+/-- Run `act` with the process-wide generators at `seed`, then put back the old states.
 
     A `Body.action` samples for itself, and this module cannot give it a seed. The action
-    calls `Gen.run` or `IO.rand`, and both read `IO.stdGenRef`, so that ref is the only
-    way in from here.
+    calls `Gen.run`, `IO.rand` or a generator at `G := IO`. These read `IO.stdGenRef` or
+    `ioGen` (see `setProcessSeed`), so these 2 generators are the only way in from here.
 
-    The old state goes back to keep the seed local to the action. Without this step, each
+    The old states go back to keep the seed local to the action. Without this step, each
     property after the action also gets fixed inputs. The suite then stops the search for
     new defects in properties that asked for no seed. -/
 private def withSeededRng (seed : Option Nat) (act : IO α) : IO α := do
   match seed with
   | none => act
   | some s =>
-    let saved ← IO.stdGenRef.get
+    let savedStd ← IO.stdGenRef.get
+    let savedSplit ← ioGen.get
     try
-      IO.setRandSeed s
+      setProcessSeed s
       act
     finally
-      IO.stdGenRef.set saved
+      IO.stdGenRef.set savedStd
+      ioGen.set savedSplit
 
 /-- Reconciles a raw verdict with the claim of the declaration.
 
