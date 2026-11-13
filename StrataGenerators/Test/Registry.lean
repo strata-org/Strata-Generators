@@ -73,7 +73,7 @@ inductive Entry where
   /-- A `def _ : List TestDecl`. The collector splices the list in place. `seed` applies to
       each member. -/
   | many (decl : Name) (seed : Option SeedPin)
-  deriving Inhabited, Repr
+  deriving Inhabited, Repr, BEq
 
 /-- The registry. It holds the entries of one module in declaration order, and it holds the
     modules in import order. -/

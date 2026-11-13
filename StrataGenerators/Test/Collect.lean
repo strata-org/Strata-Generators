@@ -32,15 +32,12 @@ open Elab Term in
     folds a plain `List TestDecl` whose `seed` fields already hold what the attributes
     asked for. The run needs no second idea of what the seed of a property is. -/
 elab "strata_registry%" : term => do
+  let pinFn : Option SeedPin → TermElabM Term
+    | none   => `(id)
+    | some p => `(withSeed $(quote p.seed) $(quote p.numTrials) $(quote p.maxSize))
   let chunks ← (registryEntries (← getEnv)).mapM fun
-    | .single n none      => `(term| [($(mkIdent n) : TestDecl)])
-    | .single n (some p)  =>
-      `(term| [withSeed $(quote p.seed) $(quote p.numTrials) $(quote p.maxSize)
-                 ($(mkIdent n) : TestDecl)])
-    | .many n none        => `(term| ($(mkIdent n) : List TestDecl))
-    | .many n (some p)    =>
-      `(term| (($(mkIdent n) : List TestDecl).map
-                 (withSeed $(quote p.seed) $(quote p.numTrials) $(quote p.maxSize))))
+    | .single n p => do `(term| [$(← pinFn p) ($(mkIdent n) : TestDecl)])
+    | .many n p   => do `(term| (($(mkIdent n) : List TestDecl).map $(← pinFn p)))
   elabTerm (← `(List.flatten [$chunks,*])) none
 
 open Elab Term in

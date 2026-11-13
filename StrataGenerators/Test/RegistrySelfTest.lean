@@ -76,15 +76,11 @@ private def expected : List Entry :=
     .many (ns ++ `tuningMatrix ++ `tuned) none,
     .many (ns ++ `pinnedFamily) (pin 11 20 1) ]
 
-private def sameEntry : Entry → Entry → Bool
-  | .single a p, .single b q | .many a p, .many b q => a == b && p == q
-  | _, _ => false
-
 run_cmd do
   let ns := `StrataGenerators.Test.RegistrySelfTest
   let mine := (registryEntries (← getEnv)).toList.filter fun
     | .single n _ | .many n _ => ns.isPrefixOf n
-  unless mine.length == expected.length && (mine.zip expected).all fun (a, b) => sameEntry a b do
+  unless mine == expected do
     throwError "the registry misread an attribute.\nexpected:{indentD (repr expected)}\n\
       got:{indentD (repr mine)}"
 

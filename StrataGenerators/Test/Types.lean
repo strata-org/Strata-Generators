@@ -72,21 +72,13 @@ structure SeedPin where
   maxSize   : Nat := defaultMaxSize
   deriving Inhabited, Repr, BEq
 
-/-- The pin as the attribute that writes it: `(seed := 7, numTrials := 1000, maxSize := 5)`. -/
-def SeedPin.attrArg (p : SeedPin) : String :=
-  s!"(seed := {p.seed}, numTrials := {p.numTrials}, maxSize := {p.maxSize})"
-
-/-- The pin as a term: `withSeed 7 1000 5`. -/
-def SeedPin.term (p : SeedPin) : String :=
-  s!"withSeed {p.seed} {p.numTrials} {p.maxSize}"
-
-/-- The Plausible configuration for a `RunConfig`, at `seed` if the run has one.
+/-- The Plausible configuration for a `RunConfig`, at its seed if it has one.
 
     With `randomSeed`, `Testable.checkIO` runs the trials from `mkStdGen seed` and not from
     the process-wide `IO.stdGenRef`. A property with a seed thus takes nothing from the
     global generator, and it cannot change the inputs of another property. -/
-def RunConfig.toConfiguration (cfg : RunConfig) (seed : Option Nat := none) : Configuration :=
-  { numInst := cfg.numTrials, maxSize := cfg.maxSize, randomSeed := seed }
+def RunConfig.toConfiguration (cfg : RunConfig) : Configuration :=
+  { numInst := cfg.numTrials, maxSize := cfg.maxSize, randomSeed := cfg.seed }
 
 /-- The report of a property that drives itself with `IO`. It gives the verdict, the number
     of its own samples that passed, the number of samples that it drew, and a message.
@@ -654,27 +646,17 @@ def runSampled (α : Type) [Repr α] [Shrinkable α] [Arbitrary α]
 private def shellQuote (s : String) : String :=
   "'" ++ s.replace "'" "'\\''" ++ "'"
 
-/-- The command line that runs only `d`, at the settings `cfg`, and gives its inputs again.
-
-    It holds each setting that decides the inputs: the trial count, the maximum size and the
-    seed. It holds the gate too, because without the gate the property does not run. A
-    property with a pin needs no settings on the command line, because its pin wins. -/
-def TestDecl.replayCommand (d : TestDecl) (cfg : RunConfig) : String :=
-  let gate := match d.gate with | some g => s!" --{g}" | none => ""
-  let only := s!" --only={shellQuote d.name}"
-  match d.seed, cfg.seed with
-  | some _, _ => s!"lake test --{only}{gate}"
-  | none, some s => s!"lake test -- {cfg.numTrials} {cfg.maxSize} --seed={s}{only}{gate}"
-  | none, none => s!"lake test -- {cfg.numTrials} {cfg.maxSize}{only}{gate}"
-
 /-- Put the seed on a *failing* verdict, with the command line that gives the counterexample
-    again. `cfg` is the configuration of the run, before `TestDecl.runConfig`.
+    again. `eff` is the configuration that the property ran at, after `TestDecl.runConfig`.
 
     Only on a failure. A property that passes has nothing to replay, and 1 line for each
     property that passes hides the 1 line that counts. A run without a seed gets no note,
-    because no number can give its inputs again. -/
-def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
-  let eff := d.runConfig cfg
+    because no number can give its inputs again.
+
+    The command line holds each setting that decides the inputs: the trial count, the maximum
+    size and the seed. It holds the gate too, because without the gate the property does not
+    run. A property with a pin needs no settings on the command line, because its pin wins. -/
+def Outcome.noteSeed (o : Outcome) (d : TestDecl) (eff : RunConfig) : Outcome :=
   match eff.seed with
   | none => o
   | some s =>
@@ -688,19 +670,20 @@ def Outcome.noteSeed (o : Outcome) (d : TestDecl) (cfg : RunConfig) : Outcome :=
       -- `@[strata_properties (seed := …)]` pins each member of the list, so a member gets
       -- the term form. The attribute keeps an existing `(tuning := …)`, because the tuning
       -- also decides the inputs.
-      let pin : SeedPin := { seed := s, numTrials := eff.numTrials, maxSize := eff.maxSize }
-      let settings := s!"seed {s}, {eff.numTrials} trials, max size {eff.maxSize}"
+      let (t, m) := (eff.numTrials, eff.maxSize)
+      let gate := match d.gate with | some g => s!" --{g}" | none => ""
+      let only := s!" --only={shellQuote d.name}{gate}"
+      let settings := s!"seed {s}, {t} trials, max size {m}"
       let note :=
         if d.seed.isSome then
-          s!"{settings} (set at the declaration). Replay with `{d.replayCommand cfg}`"
+          s!"{settings} (set at the declaration). Replay with `lake test --{only}`"
         else
-          s!"{settings}. Replay with `{d.replayCommand cfg}`. To keep this input, add \
-            `{pin.attrArg}` to the `@[strata_property]` attribute of the property, after its \
-            `(tuning := …)` if it has one. For a member of a `@[strata_properties]` list, put \
-            `{pin.term} <|` in front of the member."
-      { o with message := some (match o.message with
-                                | some m => s!"{m}\n    {note}"
-                                | none => note) }
+          s!"{settings}. Replay with `lake test -- {t} {m} --seed={s}{only}`. To keep this \
+            input, add `(seed := {s}, numTrials := {t}, maxSize := {m})` to the \
+            `@[strata_property]` attribute of the property, after its `(tuning := …)` if it \
+            has one. For a member of a `@[strata_properties]` list, put \
+            `withSeed {s} {t} {m} <|` in front of the member."
+      { o with message := some ((o.message.map (· ++ "\n    ")).getD "" ++ note) }
 
 /-- Set the 2 process-wide generators to `seed`.
 
@@ -778,8 +761,8 @@ def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
   match d.body with
   | .sampled runner check _ inst _ =>
     let o ← @runSampled _ ⟨fun x _ => runner.render x⟩ ⟨runner.shrink⟩ ⟨runner.gen⟩
-      check inst (eff.toConfiguration eff.seed)
-    pure (o.noteSeed d cfg)
+      check inst eff.toConfiguration
+    pure (o.noteSeed d eff)
   | .witness verdict => pure { passed := verdict }
   | .witnesses cases render check _ =>
     let failures := cases.filter (fun c => !check c)
@@ -799,7 +782,7 @@ def TestDecl.runRaw (d : TestDecl) (cfg : RunConfig) : IO Outcome := do
     -- `eff.numTrials` and `eff.maxSize`.
     let r ← withSeededRng eff.seed (run eff)
     pure (Outcome.noteSeed { passed := r.passed, counts := some (r.samples, r.total),
-                             message := r.message } d cfg)
+                             message := r.message } d eff)
 
 /-- Runs one property and reconciles the verdict against the claim of the property. **A driver
     calls this function.** `runRaw` is for a consumer that wants the verdict without the
