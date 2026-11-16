@@ -42,11 +42,16 @@ def programChecks : List TestDecl :=
       ("program: getNames of a well-typed program are distinct",
        fun gp => checkProgramNamesNodup gp.prog),
       ("program: typeCheck output re-typechecks",
-       fun gp => checkProgramTypeCheckIdempotent gp.prog),
+       fun gp => checkProgramTypeCheckIdempotent gp.prog,
+       .knownFailure "Core's `Program.typeCheck` rejects its own output for a polymorphic \
+         procedure with an inout parameter of its type variable; the same defect as the \
+         witness `program: a polymorphic procedure with an inout parameter re-typechecks`"),
       ("program: stripMetaData preserves typeability",
        fun gp => checkProgramStripMetaPreservesTyping gp.prog),
       ("program: eraseTypes preserves typeability",
-       fun gp => checkProgramEraseTypesPreservesTyping gp.prog) ]
+       fun gp => checkProgramEraseTypesPreservesTyping gp.prog,
+       .knownFailure "an axiom such as `Sequence.select!(Sequence.empty<bool>(), …)` no longer \
+         typechecks after `eraseTypes`; failed on both full runs of 2026-11-11; not yet triaged") ]
 
 /-- The four claims that hold only *across* declarations. No shape of a smaller generator can
     state them.

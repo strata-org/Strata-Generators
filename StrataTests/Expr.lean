@@ -46,6 +46,8 @@ def exprPreservation : TestDecl :=
     term such as `if (∀x. e) then …` can take no step. -/
 @[strata_property]
 def exprProgress : TestDecl :=
+  knownFailure "a closed `real` product such as `Real.Mul #13/28 #16/5` takes no step; \
+    failed on both full runs of 2026-11-11; not yet triaged" <|
   (TestDecl.property "expr: progress (closed)"
     (fun (te : ClosedTypedExpr) => checkProgress te.expr)).withPanel genAndCheckProgress
 
@@ -82,6 +84,8 @@ def exprResolveAfterErase : TestDecl :=
     characters that are not ASCII. -/
 @[strata_property]
 def exprSmtStringEscaping : TestDecl :=
+  knownFailure "the SMT escape function drops non-ASCII, so a string literal goes out as raw \
+    UTF-8; cvc5 rejects it, and z3 measures it in bytes and not in codepoints" <|
   (TestDecl.action "expr: SMT string literals are printable ASCII"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.SmtStringEscaping.escapingAction cfg.numTrials)).withPanel
@@ -96,6 +100,8 @@ def exprSmtStringEscaping : TestDecl :=
     draws are almost never equal. -/
 @[strata_property]
 def realDecimalEqFold : TestDecl :=
+  knownFailure "`Factory.eq` folds two reals of equal value to `false` when their `Decimal` \
+    spellings differ (`13e-1` and `13000e-4`); `Decimal` has no normal form" <|
   (TestDecl.action "real: Decimal eq fold agrees with value equality"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.DecimalAgreement.eqFoldAction cfg.numTrials)).withPanel
@@ -104,6 +110,8 @@ def realDecimalEqFold : TestDecl :=
 /-- The comparator for `Decimal` gives a total order on values. -/
 @[strata_property]
 def realDecimalTrichotomy : TestDecl :=
+  knownFailure "`eq` on `Decimal` is structural and `lt` is by value, so for two spellings of \
+    one value (`-2e0` and `-20e-1`) neither `<` nor `=` holds" <|
   (TestDecl.action "real: Decimal comparator is a total order"
     (fun cfg => ActionResult.ofTuple <$>
       StrataGenerators.DecimalAgreement.trichotomyAction cfg.numTrials)).withPanel

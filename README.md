@@ -63,13 +63,14 @@ the actual code for the generator, while `HasTypeAGen.lean` contains the generat
 
 ## Running tests using these generators 
 
-To run a test executable, which tests a variety of properties using these Strata Core generators,
-run `lake test -- --quick`. (The `--quick` flag minimizes the no. of tests run, if we omit this flag,
-the entire test suite, consisting of 160+ properties, takes 10+ minutes to run. This is because it runs each property with 1000 random trials, with 
-the randomly generated inputs having a larger size.)
+To run the test executable, run `lake test -- --quick`. The executable uses these Strata Core
+generators to test many properties. The `--quick` flag decreases the number of tests. Without this
+flag, the test suite runs each of its 160+ properties with 1000 random trials and larger inputs.
+A full run then takes more than 30 minutes.
 
-This executable runs a Plausible test suite via LSpec, and visualizes test results using [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension for
-inspecting property-based testing generators.
+This executable runs a Plausible test suite through LSpec. With the `--tyche` flag, it also writes
+data for [Tyche](https://github.com/tyche-pbt/tyche-extension), a VS Code extension that shows the
+output distributions of property-based testing generators.
 
 If you want to manually configure the no. of trials / size of inputs, you can pass
 them through to the test driver after `--`:
@@ -89,14 +90,16 @@ lake build test
 - `maxSize` (default: 5): maximum size parameter for generation (controls
   the depth of the generated AST)
 
-Flags (all optional; the Tyche visualization pass is on by default):
+Flags (all optional; the Tyche visualization pass is off by default):
 
 - `--quick` runs a small no. of tests with a small size, prioritizing fast results. 
   This flag runs 100 trials for each property, with `size = 2` passed to the generators.
-  This flag omits Tyche visualizations:
-- `--no-tyche`: omit Tyche visualizations (i.e. only run tests)
-- `--tyche-out=PATH`: output filepath for JSON files storing test metadata which is ingested by Tyche (this defaults to `tyche_output.jsonl`)
-- `--tyche-samples=N` — no. of test samples visualized per Tyche panel (default 1000)
+- `--tyche`: after the tests, run a second pass that writes the data for the Tyche visualizations.
+  This pass is off by default. It makes the run about two times longer.
+- `--tyche-out=PATH`: the path of the JSONL file that Tyche reads (default `tyche_output.jsonl`).
+  This flag has an effect only with `--tyche`.
+- `--tyche-samples=N`: the number of samples in each Tyche panel (default 1000).
+  This flag has an effect only with `--tyche`.
 - `--smt` — Tests properties related to Strata SMT encodings. This CLI flag requires a local installation of an SMT solver (cvc5/z3). 
   If `--smt` is passed but the SMT solver cannot be run, the test harness emits an error and exits with a non-zero exit code.
 - `--known-failure=NAME`: treat the property with the whole name `NAME` as known to fail for this run only (see `Marking individual properties as known to fail` below)
@@ -113,7 +116,7 @@ All properties, generators and CLI flags are shared with the default test runner
 To run the alternate `test-plain` harness, do:
 ```bash
 lake build test-plain
-.lake/build/bin/test-plain [numTrials] [maxSize] [--smt]
+.lake/build/bin/test-plain [numTrials] [maxSize] [flags]
 ```
 
 `test-plain` keeps the LSpec dependency droppable. LSpec is a git dependency on mainline
@@ -307,9 +310,9 @@ inspecting property-based testing generators.
 
 ### Generating samples
 
-The boilerplate code to produce Tyche visualizations are automatically added
-when a new property is registered. By default, the test driver updates the Tyche panels
-in VS Code (the `--quick` / `--no-tyche` CLI flags suppress this behavior).
+The harness automatically adds the code for the Tyche visualizations when you register
+a new property. The test driver writes the Tyche panels only when you give it the
+`--tyche` flag.
 
 To add auxiliary information to a Tyche panel, modify the 
 instance of the `TycheFeatures` typeclass for the type being generated 
@@ -317,19 +320,16 @@ instance of the `TycheFeatures` typeclass for the type being generated
 [`StrataGenerators/Test/Generators.lean`](./StrataGenerators/Test/Generators.lean) for details).
 For example, one can add a feature that explains why a property-based test failed (`rejection_cause`).
 
-To further control the Tyche visualizations, use these CLI flags:
+To control the Tyche visualizations, use these flags with `--tyche`:
 
 - `--tyche-samples=N` (default: 1000) — number of samples per generator
 - `--tyche-out=PATH` (default: `tyche_output.jsonl`) — output file path
 
-The Tyche visualizations dominate the runtime of the `lake test` executable. 
-By default, the `--quick` CLI flag suppresses Tyche visualizations.
-To get the smaller no. of trials via the `--quick` flag while still 
-having Tyche visualizations, pass the following CLI args manually
-to the test executable:
+The Tyche pass takes about as much time as the test suite. Thus, the pass is off by default.
+To get Tyche visualizations with the smaller number of trials from `--quick`, run:
 
 ```bash
-.lake/build/bin/test 100 40 --tyche-samples=200
+.lake/build/bin/test --quick --tyche --tyche-samples=200
 ```
 
 ### Viewing Tyche visualizations
@@ -344,7 +344,7 @@ Run the following to produce the Tyche visualizations with a small no. of tests:
 
 ```bash
 lake build test
-.lake/build/bin/test 100 40 --tyche-samples=200
+.lake/build/bin/test --quick --tyche --tyche-samples=200
 ```
 
 Then, in VS Code, do `Cmd+Shift+P` → `Tyche: Open`, and click on the relevant panel.

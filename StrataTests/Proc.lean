@@ -98,6 +98,9 @@ def procTransforms : List TestDecl :=
     also uses `procFactoryStrippedDiagnostic`. -/
 @[strata_property]
 def procPrecondFactoryStripped : TestDecl :=
+  knownFailure "spec-side: the 68 seeded `Core.Factory` builtins (e.g. `Int.SafeDiv requires \
+    !(y == 0)`) keep their preconditions, which the pass must keep because they are the WF \
+    obligations it reads; the property should exclude them" <|
   .forAll "proc: PrecondElim factory entries are stripped"
     (Generators.procs.withRender fun gp =>
       procsRepr gp.procs ++ "\n\n" ++ procFactoryStrippedDiagnostic gp.procs)

@@ -18,13 +18,15 @@ property, so a run tests a small shape first and the largest shape last. The num
 those bounds is *structural*. A term of the depth 6 and a program of six declarations are already large
 inputs, and the cost of one draw grows faster than the bound does.
 
-* `--quick` gives a fast preset for a short cycle of work: 100 trials, the maximum size 2, and no pass for
-  Tyche. Use it to find a defect, and use the default values to gate a merge. A positional argument has a
-  higher precedence, so `--quick 500` gives 500 trials and keeps each other part of the preset.
-* `--no-tyche` skips the pass that writes the visualizations for Tyche, which runs by default.
+* `--quick` gives a fast preset for a short cycle of work: 100 trials and the maximum size 2. Use it to find
+  a defect, and use the default values to gate a merge. A positional argument has a higher precedence, so
+  `--quick 500` gives 500 trials and keeps each other part of the preset.
+* `--tyche` runs the pass that writes the visualizations for Tyche. The pass is off by default. It draws a
+  second set of samples for each property, so it takes about as much time as the suite.
 * `--tyche-out=PATH` gives the path of the JSONL output for Tyche. The default value is
-  `tyche_output.jsonl`.
+  `tyche_output.jsonl`. It has an effect only with `--tyche`.
 * `--tyche-samples=N` gives the number of the samples for each panel of Tyche. The default value is 1000.
+  It has an effect only with `--tyche`.
 * `--smt` enables the `smt` gate. That gate admits each property whose oracle is a live `cvc5` or `z3`. It is
   off by default, so the suite needs no solver.
 * `--only=SUBSTRING` runs only the properties whose name holds `SUBSTRING`. You can give the flag more than
@@ -58,10 +60,6 @@ structure Cli where
   knownFailures : List String
   /-- Print the registry and stop. -/
   listOnly     : Bool
-  /-- Whether the command line held `--quick`. A driver can then name the flag that stopped
-      the Tyche pass. A report of `--no-tyche` for a `--quick` run makes a reader look for a
-      flag that they did not give. -/
-  quick        : Bool
 
 /-- The number of trials that `--quick` selects. -/
 def quickNumTrials : Nat := 100
@@ -92,13 +90,12 @@ def parseCli (args : List String) : Cli :=
         maxSize   := (positional[1]? >>= String.toNat?).getD
                        (if quick then quickMaxSize else defaultMaxSize)
         gates     := if flags.contains "--smt" then ["smt"] else [] }
-    tycheEnabled := !flags.contains "--no-tyche" && !quick
+    tycheEnabled := flags.contains "--tyche"
     tycheOut     := (flagValue "--tyche-out=").getD "tyche_output.jsonl"
     tycheSamples := ((flagValue "--tyche-samples=").bind String.toNat?).getD 1000
     only          := flagValues "--only="
     knownFailures := flagValues "--known-failure="
-    listOnly      := flags.contains "--list"
-    quick         := quick }
+    listOnly      := flags.contains "--list" }
 
 /-- Whether `needle` occurs in `hay`. -/
 private def contains (hay needle : String) : Bool :=
