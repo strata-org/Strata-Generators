@@ -43,16 +43,15 @@ an inductive relation:
 
 ## No proof can remove the predicates
 
-`StmtHasTypeAGenCompleteGaps.lean` proves that `InGenShape`, `AlphabetOk` and `CallOk` are
+`StmtHasTypeAGenCompleteGaps.lean` proves that `InGenShape` and `AlphabetOk` are
 necessary. For each of them, it gives a statement that `StatementWellTyped` accepts and that the
 support of `genStmt` does not hold.
-Those theorems are `metadata_gap`, `label_gap` and `outTarget_gap`.
+Those theorems are `metadata_gap` and `label_gap`.
 
 One of the gaps has a counterexample that a person can write in Core:
 
-* `outTargets` picks the receiving variable of each `out` parameter itself, and the specification accepts
-  each writable variable of the correct type. Read `outTarget_gap`. `genStmt` also emits the default
-  metadata, and the grammar of Core has a prefix for an annotation on each statement. Read `metadata_gap`.
+* `genStmt` always emits the default metadata, and the grammar of Core has a prefix for an
+  annotation on each statement. Read `metadata_gap`.
 
 Each other gap needs a witness that lives in the abstract syntax tree alone. `genAssertCmd`,
 `genAssumeCmd`, `genCoverCmd` and `genFreshName` each draw from `genIdentName`, so each name of a parsed
