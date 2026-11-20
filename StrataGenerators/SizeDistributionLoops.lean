@@ -44,12 +44,12 @@ E[#loops] ≤ loopShare θ / (1 − r)        (every n; finite exactly when r < 
 The same holds for the number of `block`, `ite` and `loop` statements together, with the share
 `nestingShare θ = (w₄ + w₅ + w₆ + w₇) / W` in place of `loopShare θ`.
 
-At the shipping weights `loopShare = 1/16` and `r = 3 · maxStmtSeqLen / 16`. At the default cap
-`maxStmtSeqLen = 5`, `r = 15/16`: `genStmt_expect_numLoops_le_one` says that the expected number of
+At the shipping weights `loopShare = 1/19` and `r = 3 · maxStmtSeqLen / 19`. At the default cap
+`maxStmtSeqLen = 5`, `r = 15/19`: `genStmt_expect_numLoops_le_one` says that the expected number of
 loops is at most `1` at every size, and `genStmt_expect_numNesting_le` that the expected number of
 nested statements is at most `4`. These two corollaries are about the shipping weights only. A
 tuning profile `θ` has its own `r`, and the geometric bound is finite only if that `r` is less than
-`1`. A cap of `6` or more at the shipping weights gives `r > 1`, and then the upper bound grows like
+`1`. A cap of `7` or more at the shipping weights gives `r > 1`, and then the upper bound grows like
 `rⁿ`. No theorem here shows that the expected count itself grows.
 
 **Every profile, at its own cap.** The tuned entry points use the cap `maxStmtSeqLenFor θ` by
@@ -89,7 +89,10 @@ theorem genStmtT_zero [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List 
         (θ.weight 2 0, fun () => genTypeDeclStmt C ctx 0),
         (θ.weight 3 0, fun () =>
           if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
-          else genCallStmt octx tvars immutableVars procs C ctx 0 pctx) ]
+          else genCallStmt octx tvars immutableVars procs C ctx 0 pctx),
+        (θ.weight 4 0, fun () =>
+          if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
+          else genCallStmtMatch octx tvars immutableVars procs C ctx 0 pctx) ]
       (Tuning.sum_map_fst_pos θ 0 0 _ _) := by
   unfold genStmtT
   delta genStmt._mutual.tuned
@@ -101,21 +104,21 @@ theorem genStmtT_succ [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List 
     (C : LContext CoreLParams) (ctx : VarCtx) (pctx : PolyOpCtx) (size maxStmtSeqLen : Nat) :
     genStmtT (G := G) θ octx tvars immutableVars procs labels C ctx pctx (size + 1) maxStmtSeqLen =
     frequency
-      [ (θ.weight 4 0, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
-        (θ.weight 5 0, fun () =>
+      [ (θ.weight 5 0, fun () => genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx),
+        (θ.weight 6 0, fun () =>
           if labels.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
           else genExitStmt labels C ctx),
-        (θ.weight 6 0, fun () => genTypeDeclStmt C ctx (size + 1)),
-        (θ.weight 7 0, fun () =>
+        (θ.weight 7 0, fun () => genTypeDeclStmt C ctx (size + 1)),
+        (θ.weight 8 0, fun () =>
           if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
           else genCallStmt octx tvars immutableVars procs C ctx (size + 1) pctx),
-        (θ.weight 8 0, fun () => do
+        (θ.weight 9 0, fun () => do
           let label ← genFreshLabel labels
           let ⟨⟨len, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (body, _, _) ← genStmtChainT θ octx tvars immutableVars procs (label :: labels) C ctx
             pctx size len maxStmtSeqLen
           pure ⟨[Stmt.block label body default], C, ctx⟩),
-        (θ.weight 9 0, fun () => do
+        (θ.weight 10 0, fun () => do
           let cond ← genLExpr ctx.toFVarCtx octx pctx tvars [] (size + 1) .bool
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
@@ -124,7 +127,7 @@ theorem genStmtT_succ [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List 
           let (elseb, _, _) ← genStmtChainT θ octx tvars immutableVars procs labels C ctx pctx size
             elen maxStmtSeqLen
           pure ⟨[Stmt.ite (.det cond) thenb elseb default], C, ctx⟩),
-        (θ.weight 10 0, fun () => do
+        (θ.weight 11 0, fun () => do
           let ⟨⟨tlen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let ⟨⟨elen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (thenb, _, _) ← genStmtChainT θ octx tvars immutableVars procs labels C ctx pctx size
@@ -132,15 +135,18 @@ theorem genStmtT_succ [_root_.Gen G] (θ : Tuning) (octx : OpCtx) (tvars : List 
           let (elseb, _, _) ← genStmtChainT θ octx tvars immutableVars procs labels C ctx pctx size
             elen maxStmtSeqLen
           pure ⟨[Stmt.ite .nondet thenb elseb default], C, ctx⟩),
-        (θ.weight 11 0, fun () => do
+        (θ.weight 12 0, fun () => do
           let guard ← genCondOrNondet octx tvars ctx (size + 1) pctx
           let measure ← genOptMeasure octx tvars ctx (size + 1) pctx
           let invariants ← genInvariants octx tvars ctx maxStmtSeqLen (size + 1) pctx
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (body, _, _) ← genStmtChainT θ octx tvars immutableVars procs labels C ctx pctx size
             blen maxStmtSeqLen
-          pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]
-      (Tuning.sum_map_fst_pos θ 4 0 _ _) := by
+          pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩),
+        (θ.weight 13 0, fun () =>
+          if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
+          else genCallStmtMatch octx tvars immutableVars procs C ctx (size + 1) pctx) ]
+      (Tuning.sum_map_fst_pos θ 5 0 _ _) := by
   unfold genStmtT
   delta genStmt._mutual.tuned
   rw [WellFounded.fix_eq]
@@ -271,6 +277,18 @@ theorem genTypeDeclStmt_count (C : LContext CoreLParams) (ctx : VarCtx) (depth :
   · simp only [mem_support_pure_iff] at hr; subst hr; rfl
   · simp only [mem_support_bot_iff] at hr
 
+/-- A group that `genCallTail` emits holds no nesting statement: it is a chain of `init` statements
+    and a call. -/
+theorem genCallTail_count (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (C : LContext CoreLParams) (ctx : VarCtx)
+    (depth : Nat) (pctx : PolyOpCtx) (s : ProcSig) (σ : List (TyIdentifier × LMonoTy))
+    (T : @LMonoTySignature Unit) (r : GenStmtResult)
+    (hr : r ∈ support (genCallTail (G := SPMF) octx tvars immutableVars C ctx depth pctx s σ T)) :
+    nestCountL c r.stmts = 0 := by
+  obtain ⟨_, _, _, _, _, rfl⟩ := genCallTail_support hr
+  simp only [nestCountL_append, nestCountL_initChain, nestCountL_cons, nestCountL_nil]
+  rfl
+
 theorem genCallStmt_count (octx : OpCtx) (tvars : List TyIdentifier)
     (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx)
@@ -282,31 +300,34 @@ theorem genCallStmt_count (octx : OpCtx) (tvars : List TyIdentifier)
   | cons p₀ ps =>
     simp only [genCallStmt, mem_support_bind_iff] at hr
     obtain ⟨_, _, _, _, hr⟩ := hr
-    split at hr
-    · simp only [mem_support_bind_iff] at hr
-      obtain ⟨_, _, hr⟩ := hr
-      split at hr
-      · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-        obtain ⟨_, _, rfl⟩ := hr
-        simp only [nestCountL_append, nestCountL_initChain, nestCountL_cons, nestCountL_nil]
-        rfl
-      · simp only [mem_support_bot_iff] at hr
-    · simp only [mem_support_bot_iff] at hr
+    exact genCallTail_count c (hr := hr)
+
+/-- A `genCallStmtMatch` group holds no nesting statement. -/
+theorem genCallStmtMatch_count (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx)
+    (r : GenStmtResult)
+    (hr : r ∈ support
+      (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx depth pctx)) :
+    nestCountL c r.stmts = 0 := by
+  obtain ⟨_, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  exact genCallTail_count c (hr := hr)
 
 end Leaves
 
 -- ── The weights and the two quantities ───────────────────────────────────
 
 /-- The weight of branch `j` of the `size + 1` site of `genStmt` under `θ`. The site starts at flat
-index `4` and `genStmt` reads its weights at depth `0`. Branches: `0` `cmd`, `1` `exit`,
+index `5` and `genStmt` reads its weights at depth `0`. Branches: `0` `cmd`, `1` `exit`,
 `2` `typeDecl`, `3` `call`, `4` `block`, `5` deterministic `ite`, `6` nondeterministic `ite`,
-`7` `loop`. -/
-noncomputable def stmtWeight (θ : Tuning) (j : Nat) : ℝ≥0∞ := (θ.weight (4 + j) 0 : ℝ≥0∞)
+`7` `loop`, `8` matching `call`. -/
+noncomputable def stmtWeight (θ : Tuning) (j : Nat) : ℝ≥0∞ := (θ.weight (5 + j) 0 : ℝ≥0∞)
 
 /-- The total weight `W` of the `size + 1` site. -/
 noncomputable def stmtTotalWeight (θ : Tuning) : ℝ≥0∞ :=
   stmtWeight θ 0 + stmtWeight θ 1 + stmtWeight θ 2 + stmtWeight θ 3 +
-    stmtWeight θ 4 + stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7
+    stmtWeight θ 4 + stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7 +
+    stmtWeight θ 8
 
 /-- The share of a statement draw at size `n + 1` that a count with costs `c` charges at the top:
 `(c.block · w₄ + c.ite · (w₅ + w₆) + c.loop · w₇) / W`. -/
@@ -374,15 +395,21 @@ theorem genStmt_leaf_expect (c : NestCost) (octx : OpCtx) (tvars : List TyIdenti
     ∧ expect (genTypeDeclStmt (G := SPMF) C ctx depth) (count c) = 0
     ∧ expect (if procs.isEmpty then genCmdStmt (G := SPMF) octx tvars immutableVars C ctx depth pctx
         else genCallStmt (G := SPMF) octx tvars immutableVars procs C ctx depth pctx)
+          (count c) = 0
+    ∧ expect (if procs.isEmpty then genCmdStmt (G := SPMF) octx tvars immutableVars C ctx depth pctx
+        else genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx depth pctx)
           (count c) = 0 := by
   refine ⟨expect_count_eq_zero c (genCmdStmt_count c _ _ _ _ _ _ _), ?_,
-    expect_count_eq_zero c (genTypeDeclStmt_count c _ _ _), ?_⟩
+    expect_count_eq_zero c (genTypeDeclStmt_count c _ _ _), ?_, ?_⟩
   · split
     · exact expect_count_eq_zero c (genCmdStmt_count c _ _ _ _ _ _ _)
     · exact expect_count_eq_zero c (genExitStmt_count c _ _ _)
   · split
     · exact expect_count_eq_zero c (genCmdStmt_count c _ _ _ _ _ _ _)
     · exact expect_count_eq_zero c (genCallStmt_count c _ _ _ _ _ _ _ _)
+  · split
+    · exact expect_count_eq_zero c (genCmdStmt_count c _ _ _ _ _ _ _)
+    · exact expect_count_eq_zero c (genCallStmtMatch_count c _ _ _ _ _ _ _ _)
 
 /-- A draw whose continuation is bounded by a constant, whatever it draws. `mass ≤ 1` is what
 makes this an inequality and not an equality: a sub-draw that fails contributes nothing. -/
@@ -629,17 +656,17 @@ theorem genStmtT_expect_count_le (c : NestCost) (θ : Tuning) (octx : OpCtx)
   induction size with
   | zero =>
     intro labels C ctx
-    obtain ⟨h0, h1, h2, h3⟩ :=
+    obtain ⟨h0, h1, h2, h3, h4⟩ :=
       genStmt_leaf_expect c octx tvars immutableVars procs labels C ctx pctx 0
     rw [genStmtT_zero, expect_frequency]
-    simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, h0, h1, h2, h3]
+    simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, h0, h1, h2, h3, h4]
     simp [countBound]
   | succ size ihsize =>
     intro labels C ctx
-    obtain ⟨h0, h1, h2, h3⟩ :=
+    obtain ⟨h0, h1, h2, h3, h4⟩ :=
       genStmt_leaf_expect c octx tvars immutableVars procs labels C ctx pctx (size + 1)
     rw [genStmtT_succ, expect_frequency]
-    simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, h0, h1, h2, h3,
+    simp only [List.map_cons, List.map_nil, List.sum_cons, List.sum_nil, h0, h1, h2, h3, h4,
       mul_zero, zero_add, add_zero]
     have hb := block_branch_le c θ octx tvars immutableVars procs pctx size maxStmtSeqLen _ labels C
       ctx ihsize
@@ -652,8 +679,9 @@ theorem genStmtT_expect_count_le (c : NestCost) (θ : Tuning) (octx : OpCtx)
     refine le_trans (ENNReal.div_le_div_right (add_le_add (mul_le_mul_right hb _)
       (add_le_add (mul_le_mul_right hd _) (add_le_add (mul_le_mul_right hn _)
         (mul_le_mul_right hl _)))) _) (le_of_eq ?_)
-    have hW : (((θ.weight 4 0 + (θ.weight 5 0 + (θ.weight 6 0 + (θ.weight 7 0 +
-        (θ.weight 8 0 + (θ.weight 9 0 + (θ.weight 10 0 + θ.weight 11 0))))))) : ℕ) : ℝ≥0∞)
+    have hW : (((θ.weight 5 0 + (θ.weight 6 0 + (θ.weight 7 0 + (θ.weight 8 0 +
+        (θ.weight 9 0 + (θ.weight 10 0 + (θ.weight 11 0 + (θ.weight 12 0 +
+          θ.weight 13 0)))))))) : ℕ) : ℝ≥0∞)
         = stmtTotalWeight θ := by
       simp only [stmtTotalWeight, stmtWeight]; push_cast; ring
     rw [hW]
@@ -726,52 +754,53 @@ theorem genStmtT_expect_numNesting_le_geom (θ : Tuning) (octx : OpCtx) (tvars :
 
 -- ── The shipping weights ─────────────────────────────────────────────────
 
-/-- The shipping weights of the `size + 1` site: `7, 1, 1, 3, 1, 1, 1, 1`. -/
+/-- The shipping weights of the `size + 1` site: `7, 1, 1, 3, 1, 1, 1, 1, 3`. -/
 theorem stmtWeight_default :
     stmtWeight stmtDefault 0 = 7 ∧ stmtWeight stmtDefault 1 = 1 ∧ stmtWeight stmtDefault 2 = 1 ∧
     stmtWeight stmtDefault 3 = 3 ∧ stmtWeight stmtDefault 4 = 1 ∧ stmtWeight stmtDefault 5 = 1 ∧
-    stmtWeight stmtDefault 6 = 1 ∧ stmtWeight stmtDefault 7 = 1 := by
+    stmtWeight stmtDefault 6 = 1 ∧ stmtWeight stmtDefault 7 = 1 ∧
+      stmtWeight stmtDefault 8 = 3 := by
   simp only [stmtWeight]
-  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
+  refine ⟨?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_, ?_⟩ <;>
     exact_mod_cast (by decide : _)
 
-theorem stmtTotalWeight_default : stmtTotalWeight stmtDefault = 16 := by
-  obtain ⟨h0, h1, h2, h3, h4, h5, h6, h7⟩ := stmtWeight_default
-  rw [stmtTotalWeight, h0, h1, h2, h3, h4, h5, h6, h7]; norm_num
+theorem stmtTotalWeight_default : stmtTotalWeight stmtDefault = 19 := by
+  obtain ⟨h0, h1, h2, h3, h4, h5, h6, h7, h8⟩ := stmtWeight_default
+  rw [stmtTotalWeight, h0, h1, h2, h3, h4, h5, h6, h7, h8]; norm_num
 
-/-- At the shipping weights, the `loop` branch holds `1/16` of the weight at size `n + 1`. -/
-theorem loopShare_default : loopShare stmtDefault = 1 / 16 := by
-  rw [loopShare, stmtTotalWeight_default, stmtWeight_default.2.2.2.2.2.2.2]
+/-- At the shipping weights, the `loop` branch holds `1/19` of the weight at size `n + 1`. -/
+theorem loopShare_default : loopShare stmtDefault = 1 / 19 := by
+  rw [loopShare, stmtTotalWeight_default, stmtWeight_default.2.2.2.2.2.2.2.1]
 
-/-- At the shipping weights, the nested branches hold `1/4` of the weight at size `n + 1`. -/
-theorem nestingShare_default : nestingShare stmtDefault = 1 / 4 := by
-  obtain ⟨-, -, -, -, h4, h5, h6, h7⟩ := stmtWeight_default
+/-- At the shipping weights, the nested branches hold `4/19` of the weight at size `n + 1`. -/
+theorem nestingShare_default : nestingShare stmtDefault = 4 / 19 := by
+  obtain ⟨-, -, -, -, h4, h5, h6, h7, -⟩ := stmtWeight_default
   rw [nestingShare, stmtTotalWeight_default, h4, h5, h6, h7,
     ENNReal.div_eq_div_iff (by norm_num) (by norm_num) (by norm_num) (by norm_num)]
   norm_num
 
-/-- At the shipping weights, one statement draw at size `n + 1` makes `3 · maxStmtSeqLen / 16` child
-statement draws, on average. -/
+/-- At the shipping weights, one statement draw at size `n + 1` makes `3 · maxStmtSeqLen / 19`
+child statement draws, on average. -/
 theorem expectedChildStmts_default (maxStmtSeqLen : Nat) :
-    expectedChildStmts maxStmtSeqLen stmtDefault = 3 * maxStmtSeqLen / 16 := by
-  obtain ⟨-, -, -, -, h4, h5, h6, h7⟩ := stmtWeight_default
+    expectedChildStmts maxStmtSeqLen stmtDefault = 3 * maxStmtSeqLen / 19 := by
+  obtain ⟨-, -, -, -, h4, h5, h6, h7, -⟩ := stmtWeight_default
   rw [expectedChildStmts, bodiesPerStmt, stmtTotalWeight_default, h4, h5, h6, h7]
   simp only [div_eq_mul_inv]
   have h2 : (2 : ℝ≥0∞) * 2⁻¹ = 1 := ENNReal.mul_inv_cancel (by norm_num) (by norm_num)
-  calc (1 + 2 * 1 + 2 * 1 + 1 : ℝ≥0∞) * 16⁻¹ * ((maxStmtSeqLen : ℝ≥0∞) * 2⁻¹)
-      = 3 * maxStmtSeqLen * 16⁻¹ * (2 * 2⁻¹) := by ring
-    _ = 3 * maxStmtSeqLen * 16⁻¹ := by rw [h2, mul_one]
+  calc (1 + 2 * 1 + 2 * 1 + 1 : ℝ≥0∞) * 19⁻¹ * ((maxStmtSeqLen : ℝ≥0∞) * 2⁻¹)
+      = 3 * maxStmtSeqLen * 19⁻¹ * (2 * 2⁻¹) := by ring
+    _ = 3 * maxStmtSeqLen * 19⁻¹ := by rw [h2, mul_one]
 
-/-- At the default cap `5`, `r = 15/16`, and `1 / (1 − r) = 16`. -/
+/-- At the default cap `5`, `r = 15/19`, and `1 / (1 − r) = 19/4`. -/
 theorem inv_one_sub_expectedChildStmts_default :
-    (1 - expectedChildStmts defaultMaxStmtSeqLen stmtDefault)⁻¹ = 16 := by
+    (1 - expectedChildStmts defaultMaxStmtSeqLen stmtDefault)⁻¹ = 19 / 4 := by
   rw [expectedChildStmts_default, show ((defaultMaxStmtSeqLen : ℕ) : ℝ≥0∞) = 5 from rfl]
-  have h : (1 : ℝ≥0∞) - 3 * 5 / 16 = 1 / 16 := by
+  have h : (1 : ℝ≥0∞) - 3 * 5 / 19 = 4 / 19 := by
     refine ENNReal.sub_eq_of_eq_add (by finiteness) ?_
     rw [ENNReal.div_add_div_same]
     norm_num
     exact (ENNReal.div_self (by norm_num) (by norm_num)).symm
-  rw [h, one_div, inv_inv]
+  rw [h, ENNReal.inv_div (by norm_num) (by norm_num)]
 
 /-- **At the shipping weights and the default cap, the expected number of loops is at most `1`, at
 every size**, in every context. -/
@@ -805,10 +834,10 @@ theorem genStmt_expect_numNesting_le (octx : OpCtx) (tvars : List TyIdentifier)
 draw makes fewer than one statement draw one level down, on average, for every `θ`. -/
 theorem expectedChildStmts_maxStmtSeqLenFor_lt_one (θ : Tuning) :
     expectedChildStmts (maxStmtSeqLenFor θ) θ < 1 := by
-  set B : ℕ := θ.weight 8 0 + 2 * θ.weight 9 0 + 2 * θ.weight 10 0 + θ.weight 11 0 with hB
-  set W : ℕ := θ.weight 4 0 + θ.weight 5 0 + θ.weight 6 0 + θ.weight 7 0 +
-    θ.weight 8 0 + θ.weight 9 0 + θ.weight 10 0 + θ.weight 11 0 with hW
-  have hW0 : 0 < W := by have := Tuning.weight_pos θ 4 0; omega
+  set B : ℕ := θ.weight 9 0 + 2 * θ.weight 10 0 + 2 * θ.weight 11 0 + θ.weight 12 0 with hB
+  set W : ℕ := θ.weight 5 0 + θ.weight 6 0 + θ.weight 7 0 + θ.weight 8 0 +
+    θ.weight 9 0 + θ.weight 10 0 + θ.weight 11 0 + θ.weight 12 0 + θ.weight 13 0 with hW
+  have hW0 : 0 < W := by have := Tuning.weight_pos θ 5 0; omega
   have hk : B * maxStmtSeqLenFor θ < W * 2 := by
     have h1 : maxStmtSeqLenFor θ ≤ (2 * W - 1) / B := Nat.min_le_right _ _
     calc B * maxStmtSeqLenFor θ ≤ B * ((2 * W - 1) / B) := Nat.mul_le_mul_left _ h1
@@ -819,7 +848,8 @@ theorem expectedChildStmts_maxStmtSeqLenFor_lt_one (θ : Tuning) :
     simp only [expectedChildStmts, bodiesPerStmt, stmtTotalWeight, stmtWeight]
     rw [StrataGenerators.SizeDistribution.div_mul_div _ _ _ (by
       simp only [ne_eq, add_eq_zero, Nat.cast_eq_zero]
-      exact fun h => absurd h.1.1.1.1.1.1.1 (Tuning.weight_pos θ 4 0).ne') (by finiteness), hB, hW]
+      exact fun h => absurd h.1.1.1.1.1.1.1.1 (Tuning.weight_pos θ 5 0).ne')
+        (by finiteness), hB, hW]
     push_cast
     congr 1
   rw [hr, ENNReal.div_lt_iff (Or.inl (by exact_mod_cast (by omega : W * 2 ≠ 0)))
@@ -844,7 +874,8 @@ theorem genStmtT_expect_numNesting_finite (θ : Tuning) (octx : OpCtx) (tvars : 
     simp only [stmtTotalWeight, one_mul]
     calc stmtWeight θ 4 + stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7
         ≤ stmtWeight θ 0 + stmtWeight θ 1 + stmtWeight θ 2 + stmtWeight θ 3 +
-            (stmtWeight θ 4 + stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7) := le_add_self
+            (stmtWeight θ 4 + stmtWeight θ 5 + stmtWeight θ 6 + stmtWeight θ 7) +
+          stmtWeight θ 8 := le_trans le_add_self le_self_add
       _ = _ := by ring
   · exact ENNReal.inv_ne_top.mpr (tsub_pos_of_lt (expectedChildStmts_maxStmtSeqLenFor_lt_one θ)).ne'
 

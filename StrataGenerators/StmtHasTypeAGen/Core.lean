@@ -254,6 +254,12 @@ def usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (q : Identifier Unit × LMonoTy) : Bool :=
   reusable immutableVars ctx q || needsInit ctx q
 
+/-- The out argument that receives a result at position `i` under a new name: the name
+    `indexedFreshName base i`, with the type `ty`. The caller brings it into scope with an
+    `init`. -/
+def freshOut (base i : Nat) (ty : LMonoTy) : Identifier Unit × LMonoTy :=
+  (⟨indexedFreshName base i, ()⟩, ty)
+
 /-- **Choose the caller's variable that will receive one `out` result.** A call's
     `out` arguments are not expressions but *variables the callee assigns to*, so
     for each `out` parameter the call site has to name one such variable. This picks
@@ -276,11 +282,16 @@ def usableName (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     the callee. -/
 def outTarget (immutableVars : List (Identifier Unit)) (ctx : VarCtx) (base : Nat)
     (q : Identifier Unit × LMonoTy) (i : Nat) : Identifier Unit × LMonoTy :=
-  if reusable immutableVars ctx q then q else (⟨indexedFreshName base i, ()⟩, q.2)
+  if reusable immutableVars ctx q then q else freshOut base i q.2
 
 /-- The length of the longest string of a list, and `0` for the empty list. -/
 def maxStrLen (l : List String) : Nat :=
   l.foldl (fun acc s => max acc s.length) 0
+
+/-- The base length for new out-argument names: past each name of the scope `ctx` and each name of
+    `avoid`, so that a name `indexedFreshName base i` is fresh and is not in `avoid`. -/
+def outNameBase (ctx : VarCtx) (avoid : List String) : Nat :=
+  maxNameLen ctx + maxStrLen avoid
 
 /-- **Choose one receiving variable per `out` parameter**, across the callee's whole
     output-only block `O`: `outTarget` at each position, with the base taken past
@@ -292,7 +303,66 @@ def maxStrLen (l : List String) : Nat :=
 def outTargets (immutableVars : List (Identifier Unit)) (ctx : VarCtx)
     (O : @LMonoTySignature Unit) (avoid : List String := []) : @LMonoTySignature Unit :=
   O.toList.zipIdx.map (fun p =>
-    outTarget immutableVars ctx (maxNameLen ctx + maxStrLen avoid) p.1 p.2)
+    outTarget immutableVars ctx (outNameBase ctx avoid) p.1 p.2)
+
+/-- The shared tail of the call generators `genCallStmt` and `genCallStmtMatch`. Given the callee
+    `s`, the instantiation `σ` of its type parameters and the out arguments `outTargets` (one per
+    output-only formal), it assembles the call group.
+
+    1. **Guards.** Keep the call only when each in-out name is usable, the write keys
+       `Mσ ++ outTargets` are distinct, and no in-out name that needs an `init` is a function name.
+    2. **Inputs.** Generate each by-value input at its instantiated type. Keep the call only when
+       each input passes `binderAnnotsKnownIn C.knownTypes`.
+    3. **Assembly.** Sample the interleaving mask. The result is the `init` chain for each name
+       that the scope lacks, then the call, with the scope extended by those names.
+
+    The in-out names are read off `Mσ`, the instantiated in-out block, which `substSig` leaves with
+    the names of the callee. -/
+def genCallTail [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat) (pctx : PolyOpCtx)
+    (s : ProcSig) (σ : List (TyIdentifier × LMonoTy))
+    (outTargets : @LMonoTySignature Unit) : G GenStmtResult :=
+  -- The instantiated blocks: types substituted, names untouched.
+  let Mσ := StrataGenerators.Stmt.substSig σ s.M
+  let Iσ := StrataGenerators.Stmt.substSig σ s.I
+  let inoutNames : List (Identifier Unit × LMonoTy) := Mσ
+  -- For each in-out argument, reuse the variable of the scope when the scope holds it at the
+  -- correct type, and otherwise plan an `init` for it. A name that the call can neither reuse nor
+  -- declare makes this callee uncallable here.
+  if inoutNames.all (usableName immutableVars ctx) = true
+      ∧ (Mσ ++ outTargets).keys.Nodup
+      ∧ (inoutNames.filter (needsInit ctx)).all
+          (fun q => !(functionNames C).contains q.1.name) = true then
+    -- The in-out arguments that the group must declare first, and then the out targets that it
+    -- must declare.
+    let toInit := inoutNames.filter (needsInit ctx) ++ outTargets.filter (needsInit ctx)
+    do
+      -- Generate the by-value inputs at the instantiated input types and assemble the call.
+      let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx pctx tvars [] depth τ)
+      -- The call rule asks every binder annotation of an input to be a known type.
+      if exprs.all (binderAnnotsKnownIn C.knownTypes) = true then do
+        -- Sample how the by-value inputs and the out targets interleave. The call rule reads the
+        -- input positions and the write positions through two projections that each drop the
+        -- other kind of node, so their relative order is free. `mask` picks one order; see
+        -- `mkArgs`.
+        let mask ← listOf (elements [true, false] (by simp))
+        let theCall :=
+          Statement.call s.pname
+            (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
+        -- The `init`s (possibly none) then the call, inline in the ambient scope.
+        pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,
+          StrataGenerators.Stmt.insertAllCtx ctx toInit⟩
+      else
+        default
+  else
+    default
+
+/-- Draw one monotype from the generable types `generableTys`, or `.bool` when there are none. -/
+def sampleTyArg [Gen G] (generableTys : List LMonoTy) : G LMonoTy :=
+  if hg : generableTys.length > 0 then
+    elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
+  else pure .bool
 
 /-- Generate a procedure-call statement targeting one of the callable procedures
     in `procs`. This follows the call-site recipe literally, step by step:
@@ -370,63 +440,151 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
   | p₀ :: ps => do
     -- Step 1: pick a random procedure to call from the procedure context.
     let s ← elements (p₀ :: ps) (by simp)
-    -- Step 2. Instantiate the type parameters of the callee. The signature of a polymorphic callee is over its
-    -- own type parameters, and the call rule permits each concrete instantiation. The generator therefore samples
-    -- one monotype for each type parameter, from the generable types, as `genIndirPoly` samples a type for
-    -- polymorphic factory functions), then instantiate the three signature blocks
-    -- by `σ`. A monomorphic callee (`s.typeArgs = []`) gives `σ = []`, and
-    -- `substSig [] = id`, so this reduces to the previous behaviour verbatim.
+    -- Step 2. Instantiate the type parameters of the callee. The signature of a polymorphic
+    -- callee is over its own type parameters, and the call rule permits each concrete
+    -- instantiation. The generator therefore samples one monotype for each type parameter, from
+    -- the generable types, as `genIndirPoly` samples a type for polymorphic factory functions,
+    -- and then instantiates the three signature blocks by `σ`. A monomorphic callee
+    -- (`s.typeArgs = []`) gives `σ = []`, and `substSig [] = id`.
     let generableTys := generableTypesFromCtx ctx.values [] octx
-    let σvals ← s.typeArgs.mapM (fun _ =>
-      if hg : generableTys.length > 0 then
-        elements generableTys (by apply List.ne_nil_of_length_pos; assumption)
-      else pure .bool)
+    let σvals ← s.typeArgs.mapM (fun _ => sampleTyArg generableTys)
     let σ : List (TyIdentifier × LMonoTy) := s.typeArgs.zip σvals
-    -- The instantiated blocks: types substituted, names untouched.
-    let Mσ := StrataGenerators.Stmt.substSig σ s.M
-    let Iσ := StrataGenerators.Stmt.substSig σ s.I
+    -- Step 3. The callee fixes the name of each in-out argument and the instantiation fixes each
+    -- type. The out targets are chosen for the instantiated output-only block, by `outTargets`.
     let Oσ := StrataGenerators.Stmt.substSig σ s.O
-    -- Step 3: read the in-out args off the callee's (instantiated) signature. Front
-    -- alignment (`inputs = M ++ I`, `outputs = M ++ O`) makes `Mσ` exactly the
-    -- in-out block, and the second holds the output-only arguments. The callee writes back through both blocks,
-    -- so both need a variable of the caller, and the callee fixes the name of an in-out argument only, which step
-    -- 4 handles. `substSig` keeps each key, so the in-out names are still exactly the names of the declared
-    -- block. The callee fixes each name, and the instantiation fixes each type.
-    let inoutNames : List (Identifier Unit × LMonoTy) := Mσ
-    let outTargets : @LMonoTySignature Unit := outTargets immutableVars ctx Oσ (functionNames C)
-    -- Step 4. For each in-out argument, reuse the variable of the scope when the scope holds it at the correct
-    -- type, and otherwise plan an `init` for it. A name that the call can neither reuse nor declare makes this
-    -- callee uncallable here. Each out target is usable by construction, which `outTargets_all_usableName`
-    -- proves.
-    if inoutNames.all (usableName immutableVars ctx) = true
-        ∧ (Mσ ++ outTargets).keys.Nodup
-        ∧ (inoutNames.filter (needsInit ctx)).all
-            (fun q => !(functionNames C).contains q.1.name) = true then
-      -- The in-out arguments that the group must declare first, and then the out targets that it must declare.
-      let inoutToInit := inoutNames.filter (needsInit ctx)
-      let outToInit := outTargets.filter (needsInit ctx)
-      let toInit := inoutToInit ++ outToInit
-      -- Step 5: generate the by-value inputs (at the *instantiated* input types)
-      -- and assemble the call. The `mkArgs` in-out/out names come from key-position
-      -- only, and `substSig` preserves keys, so passing `s.M` is the same as `Mσ`.
-      let exprs ← Iσ.values.mapM (fun τ => genLExpr ctx.toFVarCtx octx pctx tvars [] depth τ)
-      -- The call rule asks every binder annotation of an input to be a known type.
-      if exprs.all (binderAnnotsKnownIn C.knownTypes) = true then do
-        -- Step 6: sample how the by-value inputs and the out targets interleave. The
-        -- call rule reads the input positions and the write positions through two
-        -- projections that each drop the other kind of node, so their relative order
-        -- is free. `mask` picks one order; see `mkArgs`.
-        let mask ← listOf (elements [true, false] (by simp))
-        let theCall :=
-          Statement.call s.pname
-            (StrataGenerators.Stmt.mkArgs s.M outTargets exprs mask) default
-        -- The `init`s (possibly none) then the call, inline in the ambient scope.
-        pure ⟨StrataGenerators.Stmt.initChain toInit ++ [theCall], C,
-          StrataGenerators.Stmt.insertAllCtx ctx toInit⟩
+    genCallTail octx tvars immutableVars C ctx depth pctx s σ
+      (outTargets immutableVars ctx Oσ (functionNames C))
+
+/-- Choose, for each output-only formal of a callee, either an existing caller variable (`some v`)
+    or a fresh name (`none`). `cands` holds the variables still allowed. Once a variable is chosen,
+    the later formals cannot choose it, so the chosen variables are pairwise distinct. The list of
+    formals fixes the number of choices. -/
+def pickOutTargets [Gen G] (cands : List (Identifier Unit × LMonoTy)) :
+    List (Identifier Unit × LMonoTy) → G (List (Option (Identifier Unit × LMonoTy)))
+  | [] => pure []
+  | _ :: rest => do
+    let c ← elements (none :: cands.map some) (by simp)
+    let cands' := match c with
+      | some v => cands.filter (fun q => !(q.1 == v.1))
+      | none => cands
+    let more ← pickOutTargets cands' rest
+    pure (c :: more)
+
+/-- Fresh names for the `n` type parameters of a callee: the first `n` names of the name supply
+    that are not in `avoid`. -/
+def freshTyArgs (avoid : List TyIdentifier) (n : Nat) : List TyIdentifier :=
+  ((freshNameSupply (avoid.length + n)).filter (· ∉ avoid)).take n
+
+/-- Match the type of each output-only formal whose target is a caller variable `v : t` against
+    `t`, **one way**: the unifier may bind only type variables of the formal, and the match fails
+    when it binds a type variable of `t`. A formal with a fresh target imposes nothing. The result
+    is `none` when a match fails, and otherwise the list of the unifiers in the order of the
+    formals. -/
+def matchTargets (formals : @LMonoTySignature Unit)
+    (chosen : List (Option (Identifier Unit × LMonoTy))) : Option (List Lambda.Subst) :=
+  (formals.zip chosen).mapM (fun (q, c) =>
+    match c with
+    | none => some []
+    | some v => do
+      let sb ← unifyTypes q.2 v.2
+      if v.2.freeVars.all (fun x => (Strata.Util.HMaps.find? sb x).isNone) then some sb else none)
+
+/-- The names that replace the type parameters of the callee `s` in the matching call: the first
+    names of the name supply that no type variable of the scope, of the generable types, of the
+    enclosing type variables or of the callee mentions. Hence no type variable of a caller variable
+    is among them. -/
+def matchFreshArgs (octx : OpCtx) (tvars : List TyIdentifier) (ctx : VarCtx) (s : ProcSig) :
+    List TyIdentifier :=
+  freshTyArgs ((ctx.values.flatMap LMonoTy.freeVars
+    ++ (generableTypesFromCtx ctx.values [] octx).flatMap LMonoTy.freeVars
+    ++ tvars ++ s.typeArgs).eraseDups) s.typeArgs.length
+
+/-- The renaming of the type parameters of the callee `s` to the names `matchFreshArgs`. -/
+def matchRenaming (octx : OpCtx) (tvars : List TyIdentifier) (ctx : VarCtx) (s : ProcSig) :
+    List (TyIdentifier × LMonoTy) :=
+  s.typeArgs.zip ((matchFreshArgs octx tvars ctx s).map LMonoTy.ftvar)
+
+/-- The instantiation of one (renamed) type parameter `f`: the type that the first unifier binds to
+    `f`, and otherwise a type that `sampleTyArg` draws. -/
+def matchedTyArg [Gen G] (generableTys : List LMonoTy) (substs : List Lambda.Subst)
+    (f : TyIdentifier) : G LMonoTy :=
+  match substs.findSome? (fun sb => Strata.Util.HMaps.find? sb f) with
+  | some t => pure t
+  | none => sampleTyArg generableTys
+
+/-- The out arguments of a call, given the instantiated output-only formals `Oσ` and the chosen
+    targets: a chosen caller variable keeps its name, and a new name is `freshOut base i`.
+    Each entry has the type of its formal. -/
+def matchOutTargets (base : Nat) (Oσ : @LMonoTySignature Unit)
+    (chosen : List (Option (Identifier Unit × LMonoTy))) : @LMonoTySignature Unit :=
+  (Oσ.zip chosen).zipIdx.map (fun ((q, c), i) =>
+    match c with
+    | some v => (v.1, q.2)
+    | none => freshOut base i q.2)
+
+/-- Whether each instantiated formal that has a caller variable as its target has exactly the type
+    of that variable. -/
+def targetsMatched (Oσ : @LMonoTySignature Unit)
+    (chosen : List (Option (Identifier Unit × LMonoTy))) : Bool :=
+  (Oσ.zip chosen).all (fun (q, c) =>
+    match c with
+    | none => true
+    | some v => q.2 == v.2)
+
+/-- Generate a procedure-call statement like `genCallStmt`, but choose the instantiation of the
+    callee's type parameters by **one-way matching**, in the way that a polymorphic function
+    application does (`findPolymorphicOps`): the types of the caller's variables are fixed, and
+    only the type parameters of the callee are bound.
+
+    1. **Callee and targets.** Draw a callee `s`. For each output-only formal, draw either a
+       variable of the scope that is mutable, not named like a function and different from the
+       other targets, or a new name that an `init` declares before the call.
+    2. **Matching.** Rename the type parameters of `s` away from each type variable of the scope
+       (`matchFreshArgs`). For a formal whose target is a variable `v : t`, unify the formal's type
+       with `t`, and fail when the unifier binds a type variable of `t` (`matchTargets`). A failed
+       match gives the empty generator.
+    3. **Sampling.** Draw a type only for each type parameter that the matches leave unbound, from
+       the generable types (and `.bool` when there are none).
+    4. **Assembly.** Instantiate the three signature blocks, and generate the inputs at the
+       instantiated types, exactly as `genCallStmt` does (`genCallTail`). The call is kept only
+       under the guards of `genCallStmt`, and when each instantiated formal type equals the type of
+       the variable chosen for it. That last check rejects bindings that disagree between two
+       formals.
+
+    Example. The callee is `p<a>(x : a) returns (y : a)`, and the scope has `r : int` and
+    `b : bool`. When the draw picks the target `r` for `y`, the match binds `a := int`, so the
+    emitted call is `call p(x := e, out r)` with `e : int`, and no `init` is needed. When the
+    draw picks `b`, then `a := bool`. When the draw picks a new name, `a` is sampled. -/
+def genCallStmtMatch [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
+    (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (ctx : VarCtx) (depth : Nat)
+    (pctx : PolyOpCtx := []) : G GenStmtResult :=
+  match procs with
+  | [] => default
+  | p₀ :: ps => do
+    let s ← elements (p₀ :: ps) (by simp)
+    -- Step 1: a target for each output-only formal.
+    let cands := ctx.filter (fun q =>
+      !immutableVars.contains q.1 && !(functionNames C).contains q.1.name)
+    let chosen ← pickOutTargets cands s.O
+    -- Step 2: match each formal that has a variable as its target, with the type parameters of
+    -- the callee renamed.
+    let Orenamed := StrataGenerators.Stmt.substSig (matchRenaming octx tvars ctx s) s.O
+    match matchTargets Orenamed chosen with
+    | none => default
+    | some substs =>
+      -- Step 3: the bound type parameters take their match, and the others are sampled.
+      let σvals ← (matchFreshArgs octx tvars ctx s).mapM
+        (matchedTyArg (generableTypesFromCtx ctx.values [] octx) substs)
+      let σ : List (TyIdentifier × LMonoTy) := s.typeArgs.zip σvals
+      let Oσ := StrataGenerators.Stmt.substSig σ s.O
+      -- Each matched formal must have exactly the type of its variable after the instantiation.
+      if targetsMatched Oσ chosen = true then
+        genCallTail octx tvars immutableVars C ctx depth pctx s σ
+          (matchOutTargets (outNameBase ctx (functionNames C)) Oσ chosen)
       else
         default
-    else
-      default
 
 -- ── Main mutually-recursive statement / statement-list generators ─────────
 
@@ -438,8 +596,8 @@ def genCallStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
     analysis gives on the expected number of loops grew like `n!`. With a fixed cap, one statement draw makes
     `expectedChildStmts maxStmtSeqLen θ` statement draws one level down, on average. If this is less
     than `1`, the expected number of nested statements (`block`, `ite` and `loop`) has an upper bound
-    that does not depend on `size`. At the shipping weights this number is `3 · maxStmtSeqLen / 16`,
-    which is less than `1` when `maxStmtSeqLen ≤ 5`. The shipping weights keep the nesting branches
+    that does not depend on `size`. At the shipping weights this number is `3 · maxStmtSeqLen / 19`,
+    which is less than `1` when `maxStmtSeqLen ≤ 6`. The shipping weights keep the nesting branches
     light (`1` each, against `7` for `cmd`) so that the default cap can be `5`. A tuning profile with
     heavier nesting gets a smaller cap from `TuningProfiles.maxStmtSeqLenFor`.
     Read `StrataGenerators.SizeDistributionLoops`.
@@ -472,8 +630,9 @@ mutual
     constructors (`block`, `ite`, `loop`) may additionally be produced, with their
     bodies generated at the smaller `size` (so sub-programs shrink as they nest).
 
-    A procedure `call` is produced at every size. It is the one branch that may
-    yield more than one statement: its missing-name `init`s precede it in the
+    A procedure `call` is produced at every size, by `genCallStmt` and by `genCallStmtMatch`, which
+    differ in how they instantiate the type parameters of the callee. Either call branch may yield
+    more than one statement: its missing-name `init`s precede it in the
     **ambient** scope, so it returns the list `init … ++ [call]` and an extended
     output scope (see `genCallStmt`). This is why the result type is a statement
     *list*; every other branch returns a singleton.
@@ -482,8 +641,8 @@ mutual
     `genStmt_sound`.
 
     Tagged `@[tunable]`, so every branch weight is a runtime knob, and `genStmt.tuned θ` reads each
-    weight from `θ`. There are two sites: the `size = 0` leaf list has arity 4, and the `size + 1`
-    list has arity 8. The second site carries `loop` at flat index 11, which is the knob that a
+    weight from `θ`. There are two sites: the `size = 0` leaf list has arity 5, and the `size + 1`
+    list has arity 9. The second site carries `loop` at flat index 12, which is the knob that a
     loop-transformation test wants turned up.
 
     The weights are *constant* rather than indexed by `size`, because no `depth` binder is in scope
@@ -531,8 +690,11 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
         (1, fun () => genTypeDeclStmt C ctx 0),
         (3, fun () =>
           if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
-          else genCallStmt octx tvars immutableVars procs C ctx 0 pctx) ]
-      (by show 0 < 4+1+1+3; omega)
+          else genCallStmt octx tvars immutableVars procs C ctx 0 pctx),
+        (3, fun () =>
+          if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx 0 pctx
+          else genCallStmtMatch octx tvars immutableVars procs C ctx 0 pctx) ]
+      (by show 0 < 4+1+1+3+3; omega)
   | size + 1 =>
     -- As in the `size = 0` case, `exit` and `call` defer to `genCmdStmt` when their own
     -- support is provably empty, which happens with no enclosing label and with no callee.
@@ -574,8 +736,11 @@ def genStmt [Gen G] (octx : OpCtx) (tvars : List TyIdentifier)
           let invariants ← genInvariants octx tvars ctx maxStmtSeqLen (size + 1) pctx
           let ⟨⟨blen, _⟩⟩ ← RandomChoice.choose 0 maxStmtSeqLen (Nat.zero_le _)
           let (body, _, _) ← genStmtChain octx tvars immutableVars procs labels C ctx pctx size blen maxStmtSeqLen
-          pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩) ]
-      (by show 0 < 7+1+1+3+1+1+1+1; omega)
+          pure ⟨[Stmt.loop guard measure invariants body default], C, ctx⟩),
+        (3, fun () =>
+          if procs.isEmpty then genCmdStmt octx tvars immutableVars C ctx (size + 1) pctx
+          else genCallStmtMatch octx tvars immutableVars procs C ctx (size + 1) pctx) ]
+      (by show 0 < 7+1+1+3+1+1+1+1+3; omega)
 termination_by (size, 0, 0)
 
 /-- Generate a chain of up to `len` well-typed statement *groups*, threading both

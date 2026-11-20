@@ -274,6 +274,54 @@ theorem mem_keys_append_exists (M T : @LMonoTySignature Unit) (v : Identifier Un
     obtain ⟨q, hq, rfl⟩ := List.mem_map.mp h
     exact ⟨q, List.mem_append_right _ hq, rfl⟩
 
+/-- A group that `genCallTail` emits writes only to writable variables of the scope or to names
+    that it defines, and its output scope has only such keys. A name of the write-list `Mσ ++ T`
+    that the scope holds is reused and is not immutable, so it is a key of `ctx.writable
+    immutableVars`. A name that the scope lacks is declared by the `init` chain. This needs each
+    out argument in `T` that the scope binds to be mutable. -/
+theorem genCallTail_mutableVars
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
+    (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat) (s : ProcSig)
+    (σ : List (TyIdentifier × LMonoTy)) (T : @LMonoTySignature Unit)
+    (hTimm : ∀ q ∈ T.toList, ctx.find? q.1 ≠ none → immutableVars.contains q.1 = false)
+    (r : GenStmtResult)
+    (hr : r ∈ SPMF.support
+      (genCallTail (G := SPMF) octx tvars immutableVars C ctx n pctx s σ T)) :
+    (∀ v ∈ Block.modifiedVars (P := Expression) r.stmts,
+      v ∈ Map.keys (ctx.writable immutableVars) ++
+        Block.definedVars (P := Expression) r.stmts false) ∧
+    (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
+      k ∈ Map.keys (ctx.writable immutableVars) ++
+        Block.definedVars (P := Expression) r.stmts false) := by
+  obtain ⟨⟨hMusable, _, _⟩, exprs, mask, _, _, rfl⟩ := genCallTail_support hr
+  generalize hMσ : StrataGenerators.Stmt.substSig σ s.M = Mσ at hMusable ⊢
+  simp only [callGroup_modifiedVars, callGroup_definedVars, filter_needsInit_append]
+  refine ⟨?_, ?_⟩
+  · intro x hx
+    -- Each LHS name is either `init`-defined (absent from `ctx`) or reused
+    -- (bound in `ctx`, hence a mutable key, which is the writability part of `reusable`).
+    rw [show s.M.keys = Mσ.keys by rw [← hMσ, StrataGenerators.Stmt.substSig_keys]] at hx
+    obtain ⟨q, hq, rfl⟩ := mem_keys_append_exists Mσ T _ hx
+    rcases hfind_q : ctx.find? q.1 with _ | τ
+    · have hinit : needsInit ctx q = true := by simp [needsInit, VarCtx.isFresh, hfind_q]
+      exact List.mem_append_right _ (List.mem_map.mpr ⟨q, List.mem_filter.mpr ⟨hq, hinit⟩, rfl⟩)
+    · have hfne : ctx.find? q.1 ≠ none := by rw [hfind_q]; exact Option.some_ne_none _
+      have himm : immutableVars.contains q.1 = false := by
+        rcases List.mem_append.mp hq with h | h
+        · exact usableName_not_immutable (List.all_eq_true.mp hMusable q h) hfne
+        · exact hTimm q h hfne
+      exact List.mem_append_left _
+        ((mem_writable_keys_iff ctx immutableVars q.1).mpr
+          ⟨Map.find?_mem_keys ctx hfind_q, by rw [himm]; rfl⟩)
+  · intro k hx
+    -- `insertAllCtx` only adds the `init`ed names, which are exactly the group's `definedVars`.
+    obtain ⟨hk_keys, hk_ro⟩ := (mem_writable_keys_iff _ _ _).mp hx
+    rcases List.mem_append.mp
+        (StrataGenerators.Stmt.insertAllCtx_keys_subset _ ctx hk_keys) with h | h
+    · exact List.mem_append_left _ ((mem_writable_keys_iff ctx immutableVars _).mpr ⟨h, hk_ro⟩)
+    · exact List.mem_append_right _ h
+
 /-- **The invariant about the rights to modify a variable, for one call statement.** The emitted group is the
     inline chain of the `init` statements followed by the `call`, as a statement *list*, and the generator splices
     it into the scope around it, with no `block`. Each modified variable of that group is a written-to name of the
@@ -302,38 +350,36 @@ theorem genCallStmt_mutableVars
       v ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) ∧
     (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
       k ∈ Map.keys (ctx.writable immutableVars) ++ Block.definedVars (P := Expression) r.stmts false) := by
-  revert r; show IsSoundFor _ _
-  rw [IsSoundFor.iff_obs, genCallStmt.eq_def]
-  walk [(true_law (List.mapM _ _)).obs,
-    (true_law (genLExpr _ _ _ _ _ _ _)).obs,
-    (true_law (elements [true, false] _)).obs]
-  -- Name the instantiated in-out block `Mσ` and the chosen out targets `T`.
-  all_goals
-    rename_i s _ σvals _ hcond _ _ _ _ _ x hx
-    generalize hMσ : StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.M = Mσ at hcond hx ⊢
-    generalize hT : outTargets immutableVars ctx _ (functionNames C) = T at hcond hx ⊢
-    simp only [callGroup_modifiedVars, callGroup_definedVars, filter_needsInit_append] at hx ⊢
-  · -- Each LHS name is either `init`-defined (absent from `ctx`) or reused
-    -- (bound in `ctx`, hence a mutable key, which is the writability part of `reusable`).
-    rw [show s.M.keys = Mσ.keys by rw [← hMσ, StrataGenerators.Stmt.substSig_keys]] at hx
-    obtain ⟨q, hq, rfl⟩ := mem_keys_append_exists Mσ T _ hx
-    rcases hfind_q : ctx.find? q.1 with _ | τ
-    · have hinit : needsInit ctx q = true := by simp [needsInit, VarCtx.isFresh, hfind_q]
-      exact List.mem_append_right _ (List.mem_map.mpr ⟨q, List.mem_filter.mpr ⟨hq, hinit⟩, rfl⟩)
-    · -- Every out target is usable (`outTargets_all_usableName`), so the guard extends to `Mσ ++ T`.
-      have hall : (List.append Mσ T).all (usableName immutableVars ctx) = true :=
-        hT ▸ all_usableName_append immutableVars ctx Mσ _ _ hcond.1
-      have hnotinit : needsInit ctx q = false := by simp [needsInit, VarCtx.isFresh, hfind_q]
-      have hq' := List.all_eq_true.mp hall q hq
-      simp only [usableName, hnotinit, Bool.or_false, reusable, hfind_q, Bool.and_eq_true,
-        beq_iff_eq] at hq'
-      exact List.mem_append_left _
-        ((mem_writable_keys_iff ctx immutableVars q.1).mpr ⟨Map.find?_mem_keys ctx hfind_q, hq'.2⟩)
-  · -- `insertAllCtx` only adds the `init`ed names, which are exactly the group's `definedVars`.
-    obtain ⟨hk_keys, hk_ro⟩ := (mem_writable_keys_iff _ _ _).mp hx
-    rcases List.mem_append.mp (StrataGenerators.Stmt.insertAllCtx_keys_subset _ ctx hk_keys) with h | h
-    · exact List.mem_append_left _ ((mem_writable_keys_iff ctx immutableVars _).mpr ⟨h, hk_ro⟩)
-    · exact List.mem_append_right _ h
+  cases procs with
+  | nil => simp only [genCallStmt, mem_support_bot_iff] at hr
+  | cons p₀ ps =>
+    simp only [genCallStmt, mem_support_bind_iff] at hr
+    obtain ⟨_, _, _, _, hr⟩ := hr
+    exact genCallTail_mutableVars octx pctx tvars immutableVars C ctx n _ _ _
+      (fun q hq hne => usableName_not_immutable
+        (List.all_eq_true.mp (outTargets_all_usableName _ _ _ _) q hq) hne) r hr
+
+/-- A `genCallStmtMatch` group writes only to writable variables of the scope or to names that it
+    defines, and its output scope has only such keys, as for `genCallStmt`. -/
+theorem genCallStmtMatch_mutableVars
+    (octx : OpCtx) (pctx : PolyOpCtx) (tvars : List TyIdentifier)
+    (immutableVars : List (Identifier Unit))
+    (procs : ProcSigCtx)
+    (C : LContext CoreLParams) (ctx : VarCtx) (n : Nat)
+    (r : GenStmtResult)
+    (hr : r ∈ SPMF.support
+      (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx n pctx)) :
+    (∀ v ∈ Block.modifiedVars (P := Expression) r.stmts,
+      v ∈ Map.keys (ctx.writable immutableVars) ++
+        Block.definedVars (P := Expression) r.stmts false) ∧
+    (∀ k ∈ Map.keys (r.outCtx.writable immutableVars),
+      k ∈ Map.keys (ctx.writable immutableVars) ++
+        Block.definedVars (P := Expression) r.stmts false) := by
+  obtain ⟨_, chosen, _, _, _, hcand, _, _, hr⟩ :=
+    genCallStmtMatch_cases (octx := octx) (tvars := tvars) (pctx := pctx) r hr
+  exact genCallTail_mutableVars octx pctx tvars immutableVars C ctx n _ _ _
+    (matchOutTargets_not_immutable ctx _ (maxNameLen_le_outNameBase ctx _) _ chosen
+      (fun v hv => (hcand v hv).2)) r hr
 
 -- ── The statement-level invariant (mutual over genStmt / genStmtChain) ────────
 
@@ -366,6 +412,8 @@ theorem genStmt_mutableVars
   walk [fun ctx d kt => IsSoundFor.obs
           (genCmd_mutableVars octx pctx tvars immutableVars ctx d (avoid := []) (kt := kt)),
         fun d => IsSoundFor.obs (genCallStmt_mutableVars octx pctx tvars immutableVars procs C ctx d),
+        fun d => IsSoundFor.obs
+          (genCallStmtMatch_mutableVars octx pctx tvars immutableVars procs C ctx d),
         fun l C ctx len => IsSoundFor.obs
           (genStmtChain_mutableVars octx pctx tvars immutableVars procs l C ctx _ len),
         (true_law (genTypeConstructor _)).obs,

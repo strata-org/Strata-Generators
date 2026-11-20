@@ -7,8 +7,8 @@ import StrataGenerators.StmtHasTypeAGen
 **Statements** (`genStmt`). `genStmt_nesting_threshold`: at size `0` the top level never holds a
 `block`, `ite` or `loop`, in every context; at size `n + 1` it holds each of them with positive
 probability, each a closed form in the body-length cap `k = maxStmtSeqLen` alone:
-`iteAtSize k = 1/(16 (k+1)²)`, `blockAtSize k = 1/(32 (k+1))`,
-`loopAtSize k = 1/(320 (k+1)²)`. Each witness is the empty form of the statement (empty
+`iteAtSize k = 1/(19 (k+1)²)`, `blockAtSize k = 1/(38 (k+1))`,
+`loopAtSize k = 1/(380 (k+1)²)`. Each witness is the empty form of the statement (empty
 branches, empty body, nondeterministic guard), so it needs no sub-draw to succeed. Each body length
 is uniform on `[0, k]`, and the witness takes it to be `0`, which gives each `1/(k+1)`. A `loop`'s
 invariant list has a length uniform on `[0, k]` as well, so none of the three bounds depends on the
@@ -92,6 +92,20 @@ theorem genTypeDeclStmt_flat :
   · simp only [mem_support_pure_iff] at hr; subst hr; simp [HasNesting, IsNesting]
   · simp only [mem_support_bot_iff] at hr
 
+/-- A group that `genCallTail` emits has no nesting: it is a chain of `init` statements and a
+    call. -/
+theorem genCallTail_flat {C : LContext CoreLParams} {ctx : VarCtx} {d : Nat} {s : ProcSig}
+    {σ : List (TyIdentifier × LMonoTy)} {T : @LMonoTySignature Unit} {r : GenStmtResult}
+    (hr : r ∈ support (genCallTail (G := SPMF) octx tvars imm C ctx d pctx s σ T)) :
+    ¬ HasNesting r := by
+  obtain ⟨_, _, _, _, _, rfl⟩ := genCallTail_support hr
+  simp only [HasNesting, List.mem_append, List.mem_singleton, not_exists, not_and]
+  rintro s (hs | rfl)
+  · simp only [StrataGenerators.Stmt.initChain, List.mem_map] at hs
+    obtain ⟨_, _, rfl⟩ := hs
+    simp [IsNesting]
+  · simp [IsNesting]
+
 theorem genCallStmt_flat :
     IsSoundFor (genCallStmt (G := SPMF) octx tvars imm procs C ctx d pctx)
       (fun r => ¬ HasNesting r) := by
@@ -101,20 +115,15 @@ theorem genCallStmt_flat :
   | cons p₀ ps =>
     simp only [genCallStmt, mem_support_bind_iff] at hr
     obtain ⟨_, _, _, _, hr⟩ := hr
-    split at hr
-    · simp only [mem_support_bind_iff] at hr
-      obtain ⟨_, _, hr⟩ := hr
-      split at hr
-      · simp only [mem_support_bind_iff, mem_support_pure_iff] at hr
-        obtain ⟨_, _, rfl⟩ := hr
-        simp only [HasNesting, List.mem_append, List.mem_singleton, not_exists, not_and]
-        rintro s (hs | rfl)
-        · simp only [StrataGenerators.Stmt.initChain, List.mem_map] at hs
-          obtain ⟨_, _, rfl⟩ := hs
-          simp [IsNesting]
-        · simp [IsNesting]
-      · simp only [mem_support_bot_iff] at hr
-    · simp only [mem_support_bot_iff] at hr
+    exact genCallTail_flat (hr := hr)
+
+/-- A `genCallStmtMatch` group has no nesting statement. -/
+theorem genCallStmtMatch_flat :
+    IsSoundFor (genCallStmtMatch (G := SPMF) octx tvars imm procs C ctx d pctx)
+      (fun r => ¬ HasNesting r) := by
+  intro r hr
+  obtain ⟨_, _, _, _, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  exact genCallTail_flat (hr := hr)
 
 end leaves
 
@@ -126,7 +135,8 @@ theorem genStmt_zero_flat (imm : List (Identifier Unit)) (procs : ProcSigCtx)
   rw [IsSoundFor.iff_obs, genStmt]
   walk [(genCmdStmt_flat octx tvars pctx _ _ _ _).obs, (genExitStmt_flat _ _ _).obs,
     (genTypeDeclStmt_flat _ _ _).obs,
-    (genCallStmt_flat octx tvars pctx _ _ _ _ _).obs]
+    (genCallStmt_flat octx tvars pctx _ _ _ _ _).obs,
+    (genCallStmtMatch_flat octx tvars pctx _ _ _ _ _).obs]
   all_goals assumption
 
 def IsIte : Statement → Prop
@@ -159,19 +169,19 @@ theorem genStmtChain_zero (imm : List (Identifier Unit)) (procs : ProcSigCtx)
   rw [genStmtChain]
 
 /-- The lower bound on a top-level `ite` at every size `n + 1`, with body-length cap `k`:
-`1 / (16 (k+1)²)`. The `16` is the total branch weight of `genStmt`; each `(k+1)` is the chance that
-one of the two branch lengths, uniform on `[0, k]`, comes out `0`. -/
-noncomputable def iteAtSize (k : Nat) : ℝ≥0∞ := 1 / (16 * ((k : ℝ≥0∞) + 1) ^ 2)
+`1 / (19 (k+1)²)`. The `19` is the total branch weight of `genStmt`; each `(k+1)` is the chance
+that one of the two branch lengths, uniform on `[0, k]`, comes out `0`. -/
+noncomputable def iteAtSize (k : Nat) : ℝ≥0∞ := 1 / (19 * ((k : ℝ≥0∞) + 1) ^ 2)
 
 /-- The lower bound on a top-level `block` at every size `n + 1`, with body-length cap `k`:
-`1 / (32 (k+1))`. One body length, and the `1`-of-`16` branch weight against the `1/2` mass of the
+`1 / (38 (k+1))`. One body length, and the `1`-of-`19` branch weight against the `1/2` mass of the
 fresh label. -/
-noncomputable def blockAtSize (k : Nat) : ℝ≥0∞ := 1 / (32 * ((k : ℝ≥0∞) + 1))
+noncomputable def blockAtSize (k : Nat) : ℝ≥0∞ := 1 / (38 * ((k : ℝ≥0∞) + 1))
 
 /-- The lower bound on a top-level `loop` at every size `n + 1`, with cap `k`:
-`1 / (320 (k+1)²)`. The `20` is the guard (`1/5`) and the measure (`1/4`), next to the
-`1`-of-`16` weight; one `(k+1)` is the empty invariant list, the other the empty body. -/
-noncomputable def loopAtSize (k : Nat) : ℝ≥0∞ := 1 / (320 * ((k : ℝ≥0∞) + 1) ^ 2)
+`1 / (380 (k+1)²)`. The `20` is the guard (`1/5`) and the measure (`1/4`), next to the
+`1`-of-`19` weight; one `(k+1)` is the empty invariant list, the other the empty body. -/
+noncomputable def loopAtSize (k : Nat) : ℝ≥0∞ := 1 / (380 * ((k : ℝ≥0∞) + 1) ^ 2)
 
 theorem cast_add_one_ne_zero (k : Nat) : ((k : ℝ≥0∞) + 1) ≠ 0 := by
   intro h; rw [add_eq_zero] at h; simp at h
@@ -183,28 +193,29 @@ macro "fin_ne" : tactic => `(tactic| first | finiteness | positivity | norm_num)
 
 /-- The closed form, unfolded into the nested-product shape the branch-by-branch proof builds. -/
 theorem iteAtSize_eq (k : Nat) :
-    iteAtSize k = 1 / 16 * (1 / ((k : ℝ≥0∞) + 1) * (1 / ((k : ℝ≥0∞) + 1))) := by
+    iteAtSize k = 1 / 19 * (1 / ((k : ℝ≥0∞) + 1) * (1 / ((k : ℝ≥0∞) + 1))) := by
   rw [iteAtSize,
     div_mul_div 1 1 ((k : ℝ≥0∞) + 1) (cast_add_one_ne_zero k) (cast_add_one_ne_top k),
     div_mul_div 1 (1 * 1) (((k : ℝ≥0∞) + 1) * ((k : ℝ≥0∞) + 1)) (by fin_ne) (by fin_ne)]
   frac_eq
 
 theorem blockAtSize_eq (k : Nat) :
-    blockAtSize k = 1 / 16 * (1 / 2 * (1 / ((k : ℝ≥0∞) + 1))) := by
+    blockAtSize k = 1 / 19 * (1 / 2 * (1 / ((k : ℝ≥0∞) + 1))) := by
   rw [blockAtSize,
     div_mul_div 1 1 ((k : ℝ≥0∞) + 1) (b := 2) (by fin_ne) (by fin_ne),
-    div_mul_div 1 (1 * 1) ((2 : ℝ≥0∞) * ((k : ℝ≥0∞) + 1)) (b := 16) (by fin_ne) (by fin_ne)]
+    div_mul_div 1 (1 * 1) ((2 : ℝ≥0∞) * ((k : ℝ≥0∞) + 1)) (b := 19) (by fin_ne) (by fin_ne)]
   frac_eq
 
 theorem loopAtSize_eq (k : Nat) :
-    loopAtSize k = 1 / 16 * (1 / 5 * (1 / 4 * (1 / ((k : ℝ≥0∞) + 1) * (1 / ((k : ℝ≥0∞) + 1))))) := by
+    loopAtSize k =
+      1 / 19 * (1 / 5 * (1 / 4 * (1 / ((k : ℝ≥0∞) + 1) * (1 / ((k : ℝ≥0∞) + 1))))) := by
   rw [loopAtSize,
     div_mul_div 1 1 ((k : ℝ≥0∞) + 1) (cast_add_one_ne_zero k) (cast_add_one_ne_top k),
     div_mul_div 1 (1 * 1) (((k : ℝ≥0∞) + 1) * ((k : ℝ≥0∞) + 1)) (b := 4) (by fin_ne) (by fin_ne),
     div_mul_div 1 (1 * (1 * 1)) ((4 : ℝ≥0∞) * (((k : ℝ≥0∞) + 1) * ((k : ℝ≥0∞) + 1))) (b := 5)
       (by fin_ne) (by fin_ne),
     div_mul_div 1 (1 * (1 * (1 * 1)))
-      ((5 : ℝ≥0∞) * ((4 : ℝ≥0∞) * (((k : ℝ≥0∞) + 1) * ((k : ℝ≥0∞) + 1)))) (b := 16)
+      ((5 : ℝ≥0∞) * ((4 : ℝ≥0∞) * (((k : ℝ≥0∞) + 1) * ((k : ℝ≥0∞) + 1)))) (b := 19)
       (by fin_ne) (by fin_ne)]
   frac_eq
 
