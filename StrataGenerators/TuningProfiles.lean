@@ -66,21 +66,23 @@ are the names a profile is written in. An `example` in this module pins each blo
 reorders a branch in the generator, the build breaks rather than the profile silently moving to the
 wrong branch. -/
 
-/-! Flat indices of `genStmt`'s two sites. The `size = 0` leaf list holds 0 to 3, and the
-`size + 1` list holds 4 to 11. -/
+/-! Flat indices of `genStmt`'s two sites. The `size = 0` leaf list holds 0 to 4, and the
+`size + 1` list holds 5 to 13. The matching call (`callMatch`) is the last branch of each list. -/
 namespace StmtIdx
-def cmd0      : Nat := 0
-def exit0     : Nat := 1
-def typeDecl0 : Nat := 2
-def call0     : Nat := 3
-def cmd       : Nat := 4
-def exit      : Nat := 5
-def typeDecl  : Nat := 6
-def call      : Nat := 7
-def block     : Nat := 8
-def iteDet    : Nat := 9
-def iteNondet : Nat := 10
-def loop      : Nat := 11
+def cmd0       : Nat := 0
+def exit0      : Nat := 1
+def typeDecl0  : Nat := 2
+def call0      : Nat := 3
+def callMatch0 : Nat := 4
+def cmd        : Nat := 5
+def exit       : Nat := 6
+def typeDecl   : Nat := 7
+def call       : Nat := 8
+def block      : Nat := 9
+def iteDet     : Nat := 10
+def iteNondet  : Nat := 11
+def loop       : Nat := 12
+def callMatch  : Nat := 13
 end StmtIdx
 
 /-! Flat indices of `genCmd`'s two sites. The writable-context list holds 0 to 6, and it is the only
@@ -172,9 +174,9 @@ end ExprIdx
 
 /-! ### Statements -/
 
-/-- The shipping statement distribution. At `size + 1` the leaves stand at 7 to 1 to 1 to 3, and
-`block`, `ite`, `ite-nondet` and `loop` stand at 1 each. The `size = 0` leaves stand at 4 to 1 to 1
-to 3. -/
+/-- The shipping statement distribution. At `size + 1` the leaves stand at 7 to 1 to 1 to 3 to 3
+(`cmd`, `exit`, `typeDecl`, `call`, matching `call`), and `block`, `ite`, `ite-nondet` and `loop`
+stand at 1 each. The `size = 0` leaves stand at 4 to 1 to 1 to 3 to 3. -/
 def stmtDefault : Tuning := genStmt._mutual.defaults
 
 /-- **The body-length cap for a statement profile.** The largest cap, at most
@@ -190,11 +192,11 @@ and its expected nesting stays bounded in `size`. At the shipping weights it is
 def maxStmtSeqLenFor (θ : Tuning) : Nat :=
   let w := fun i => θ.weight i 0
   let total := w StmtIdx.cmd + w StmtIdx.exit + w StmtIdx.typeDecl + w StmtIdx.call +
-    w StmtIdx.block + w StmtIdx.iteDet + w StmtIdx.iteNondet + w StmtIdx.loop
+    w StmtIdx.block + w StmtIdx.iteDet + w StmtIdx.iteNondet + w StmtIdx.loop + w StmtIdx.callMatch
   let bodies := w StmtIdx.block + 2 * w StmtIdx.iteDet + 2 * w StmtIdx.iteNondet + w StmtIdx.loop
   min defaultMaxStmtSeqLen ((2 * total - 1) / bodies)
 
-/-- **Loop-heavy** (`stmt: LoopElim …`). `loop` (24) outweighs the sum of the rest (20), so a loop
+/-- **Loop-heavy** (`stmt: LoopElim …`). `loop` (24) outweighs the sum of the rest (23), so a loop
 is the modal statement at every nesting level. A loop inside a loop then becomes common rather than
 incidental, and that is where a loop-elimination pass is most likely to be wrong.
 
@@ -220,7 +222,8 @@ def stmtLoopWide : Tuning :=
 so this profile bites only when the generator has a non-empty `ProcSigCtx`. The procedure-list
 harness is the one that supplies one. -/
 def stmtCallHeavy : Tuning :=
-  withWeights stmtDefault [(StmtIdx.call, 12), (StmtIdx.call0, 12)]
+  withWeights stmtDefault
+    [(StmtIdx.call, 12), (StmtIdx.call0, 12), (StmtIdx.callMatch, 12), (StmtIdx.callMatch0, 12)]
 
 /-- **Everything at once** for the statement suite. Loops are common, and `exit`, which Kleene
 does not support, and `call` are both well represented. One run then exercises the `LoopElim`,
@@ -228,9 +231,9 @@ does not support, and `call` are both well represented. One run then exercises t
 them. -/
 def stmtMixed : Tuning :=
   withWeights stmtDefault
-    [(StmtIdx.loop, 8), (StmtIdx.exit, 6), (StmtIdx.call, 3),
-     (StmtIdx.block, 4),
-     (StmtIdx.exit0, 6), (StmtIdx.call0, 3)]
+    [(StmtIdx.loop, 8), (StmtIdx.exit, 6), (StmtIdx.call, 2),
+     (StmtIdx.callMatch, 1), (StmtIdx.block, 4),
+     (StmtIdx.exit0, 6), (StmtIdx.call0, 2), (StmtIdx.callMatch0, 1)]
 
 /-! ### Procedures: the same statement knobs, aimed at the three transform passes -/
 
@@ -240,7 +243,8 @@ def procCallHeavy : Tuning := stmtCallHeavy
 /-- **PrecondElim.** A `call` creates the call site at which the pass asserts the callee's
 precondition, so this profile raises `call`. -/
 def procPrecondHeavy : Tuning :=
-  withWeights stmtDefault [(StmtIdx.call, 6), (StmtIdx.call0, 6)]
+  withWeights stmtDefault
+    [(StmtIdx.call, 6), (StmtIdx.call0, 6), (StmtIdx.callMatch, 6), (StmtIdx.callMatch0, 6)]
 
 /-! **There is deliberately no ANFEncoder profile**, and the reason is about the pass rather than
 about the weights. `Core.ANFEncoder` eliminates common subexpressions. It does not flatten
@@ -568,8 +572,8 @@ offset changes and one of these examples fails. Without them, every profile woul
 the wrong branch. -/
 
 example : genStmt._mutual.sites.size = 2 := rfl
-example : (genStmt._mutual.sites[0]!.offset, genStmt._mutual.sites[0]!.arity) = (0, 4) := rfl
-example : (genStmt._mutual.sites[1]!.offset, genStmt._mutual.sites[1]!.arity) = (4, 8) := rfl
+example : (genStmt._mutual.sites[0]!.offset, genStmt._mutual.sites[0]!.arity) = (0, 5) := rfl
+example : (genStmt._mutual.sites[1]!.offset, genStmt._mutual.sites[1]!.arity) = (5, 9) := rfl
 example : genStmt._mutual.defaults = genStmt.defaults := rfl
 example : (genCmd.sites[0]!.offset, genCmd.sites[0]!.arity) = (0, 7) := rfl
 example : (genCmd.sites[1]!.offset, genCmd.sites[1]!.arity) = (7, 5) := rfl
@@ -606,6 +610,7 @@ example : maxStmtSeqLenFor stmtMixed = 3 := by decide
 example : maxStmtSeqLenFor stmtCallHeavy = 5 := by decide
 example : maxStmtSeqLenFor procPrecondHeavy = 5 := by decide
 example : stmtCallHeavy.schedules[StmtIdx.call]! = (12, 0) := rfl
+example : stmtCallHeavy.schedules[StmtIdx.callMatch]! = (12, 0) := rfl
 example : exprQuantHeavy.schedules[ExprIdx.boolAll]! = (8, 0) := rfl
 example : exprQuantHeavy.schedules[ExprIdx.boolEq]! = (8, 0) := rfl
 example : exprEvalHeavy.schedules[ExprIdx.absArrow]! = (4, 0) := rfl

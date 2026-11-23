@@ -404,8 +404,8 @@ example : TunableGen.genWith (α := GenProgram) progDefault = Arbitrary.arbitrar
 
 /-! The arity that a hand-built tuning must match. `TestDecl.withTuning` checks a `θ` against it, so a
 tuning meant for another generator becomes a red line that names both numbers. -/
-example : TunableGen.arity GenStmts = 12 := rfl
-example : TunableGen.arity GenProcs = 12 := rfl
+example : TunableGen.arity GenStmts = 14 := rfl
+example : TunableGen.arity GenProcs = 14 := rfl
 example : TunableGen.arity GenCmdsWithCtx = 12 := rfl
 example : TunableGen.arity GenCmdWithCtx = 12 := rfl
 example : TunableGen.arity TypedExpr = 84 := rfl

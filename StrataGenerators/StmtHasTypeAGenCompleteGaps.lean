@@ -7,18 +7,17 @@ open StrataGenerators.Stmt StrataGenerators.Procedure StrataGenerators.Function
 # The side conditions of `spec_complete_at` are necessary
 
 `spec_complete_at` in `StmtHasTypeAGenComplete.lean` carries five side conditions: `InGenShape`,
-`WritesOk`, `AlphabetOk`, `CallOk` and `ExprOk`. This file shows that three of them, `InGenShape`,
-`AlphabetOk` and `CallOk`, cannot be removed. For each of the three, it gives a statement that is well-typed under
+`WritesOk`, `AlphabetOk`, `CallOk` and `ExprOk`. This file shows that two of them, `InGenShape` and
+`AlphabetOk`, cannot be removed. For each of the two, it gives a statement that is well-typed under
 `StatementWellTyped` but is not in the support of `genStmt`. Therefore no
 completeness theorem holds for `genStmt` without a side condition of this kind.
 
-## The three gaps
+## The two gaps
 
 | Predicate     | Clause that survives      | Gap theorem      | In Core source? |
 | ------------- | ------------------------- | ---------------- | --------------- |
 | `InGenShape`  | `md = default`            | `metadata_gap`   | yes             |
 | `AlphabetOk`  | name in `genIdentName`    | `label_gap`      | no              |
-| `CallOk`      | out target is `outTargets`| `outTarget_gap`  | yes             |
 
 The docstring of each gap theorem gives the Strata Core source text of its
 counterexample. `Core.formatProgram` produced that text from the statement in the
@@ -84,10 +83,44 @@ theorem initChain_append_call_singleton {L : List (Identifier Unit × LMonoTy)}
 
 -- ── Inversion of `genStmt` at a one-statement `.cmd` group ───────────────
 
+/-- A one-statement `.cmd` group that `genCallTail` produces is a call whose argument list is a
+    `mkArgs` recipe over the callee's in-out block and the out arguments. -/
+theorem genCallTail_cmd_inv {C : LContext CoreLParams} {ctx : VarCtx} {n : Nat} {s : ProcSig}
+    {σ : List (TyIdentifier × LMonoTy)} {T : @LMonoTySignature Unit} {C' : LContext CoreLParams}
+    {ctx' : VarCtx} {ce : Command} {r : GenStmtResult} {pctx : PolyOpCtx}
+    (hr : r ∈ SPMF.support
+      (genCallTail (G := SPMF) octx tvars immutableVars C ctx n pctx s σ T))
+    (heq : r = ⟨[Stmt.cmd ce], C', ctx'⟩) :
+    ∃ (exprs : List Expression.Expr) (mask : List Bool),
+      ce = CmdExt.call s.pname (StrataGenerators.Stmt.mkArgs s.M T exprs mask) default := by
+  obtain ⟨_, exprs, mask, _, _, rfl⟩ := genCallTail_support hr
+  simp only [GenStmtResult.mk.injEq] at heq
+  have hcall := initChain_append_call_singleton heq.1.symm
+  simp only [Statement.call, Stmt.cmd.injEq] at hcall
+  exact ⟨exprs, mask, hcall⟩
+
+/-- A one-statement `.cmd` group that `genCallStmtMatch` produces is a call whose argument list is
+    a `mkArgs` recipe over the callee's in-out block. -/
+theorem genCallStmtMatch_cmd_inv (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
+    (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat) (ce : Command)
+    (r : GenStmtResult)
+    (hr : r ∈ SPMF.support
+      (genCallStmtMatch (G := SPMF) octx tvars immutableVars procs C ctx n []))
+    (heq : r = ⟨[Stmt.cmd ce], C', ctx'⟩) :
+    ∃ (s : ProcSig) (targets : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+        (mask : List Bool),
+        s ∈ procs ∧
+        ce = CmdExt.call s.pname
+          (StrataGenerators.Stmt.mkArgs s.M targets exprs mask) default := by
+  obtain ⟨s, _, _, hs, _, _, _, _, hr⟩ := genCallStmtMatch_cases r hr
+  obtain ⟨exprs, mask, hce⟩ := genCallTail_cmd_inv hr heq
+  exact ⟨s, _, exprs, mask, hs, hce⟩
+
 /-- **Inversion at a `.cmd` group.** `genStmt` reaches a one-statement group
-    `[.cmd ce]` in exactly two ways. Either `genCmd` produced an imperative
+    `[.cmd ce]` in exactly three ways. Either `genCmd` produced an imperative
     command, or `genCallStmt` produced a call whose argument list is a `mkArgs`
-    recipe. The other six branches produce a `block`, an `ite`, a `loop`, an
+    recipe, or `genCallStmtMatch` produced a call whose argument list is a `mkArgs`
+    recipe with some targets. The other six branches produce a `block`, an `ite`, a `loop`, an
     `exit` or a `typeDecl`, so they cannot produce a `.cmd`. -/
 theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
     (labels : List String) (C C' : LContext CoreLParams) (ctx ctx' : VarCtx) (n : Nat)
@@ -103,7 +136,12 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
           (StrataGenerators.Stmt.mkArgs s.M
             (outTargets immutableVars ctx
               (StrataGenerators.Stmt.substSig (s.typeArgs.zip σvals) s.O) (functionNames C))
-            exprs mask) default) := by
+            exprs mask) default) ∨
+    (∃ (s : ProcSig) (targets : @LMonoTySignature Unit) (exprs : List Expression.Expr)
+        (mask : List Bool),
+        s ∈ procs ∧
+        ce = CmdExt.call s.pname
+          (StrataGenerators.Stmt.mkArgs s.M targets exprs mask) default) := by
   refine (?_ : IsSoundFor _ (fun (r : GenStmtResult) => r = ⟨[Stmt.cmd ce], C', ctx'⟩ → _)) _ h rfl
   rw [IsSoundFor.iff_obs]
   cases n <;> rw [genStmt] <;>
@@ -111,6 +149,7 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
     walk [(isSoundFor_self_support (genCmd _ _ _ _ _ _ _ _)).obs,
       (isSoundFor_self_support (List.mapM (m := SPMF) _ _)).obs,
       (isSoundFor_self_support (listOf (elements [true, false] _))).obs,
+      (isSoundFor_self_support (genCallStmtMatch _ _ _ _ _ _ _ _)).obs,
       (isSoundFor_self_support (genTypeConstructor _)).obs,
       (isSoundFor_self_support (genFreshLabel _)).obs,
       (isSoundFor_self_support (genStmtChain _ _ _ _ _ _ _ _ _ _ _)).obs,
@@ -118,13 +157,14 @@ theorem mem_genStmt_cmd_inv (immutableVars : List (Identifier Unit)) (procs : Pr
       (isSoundFor_self_support (genCondOrNondet _ _ _ _ _)).obs,
       (isSoundFor_self_support (genOptMeasure _ _ _ _ _)).obs,
       (isSoundFor_self_support (genInvariants _ _ _ _ _ _)).obs]
-  all_goals (rename_i heq; simp only [GenStmtResult.mk.injEq, List.cons.injEq, Stmt.cmd.injEq,
+  all_goals (rename_i heq; try simp only [GenStmtResult.mk.injEq, List.cons.injEq, Stmt.cmd.injEq,
     reduceCtorEq, false_and, and_true] at heq)
   all_goals first
     | (obtain ⟨rfl, -, rfl⟩ := heq; exact Or.inl ⟨_, rfl, ‹_›⟩)
     | (have hcall := initChain_append_call_singleton heq.1.symm
        simp only [Statement.call, Stmt.cmd.injEq] at hcall
-       exact Or.inr ⟨_, _, _, _, ‹_›, hcall⟩)
+       exact Or.inr (Or.inl ⟨_, _, _, _, ‹_›, hcall⟩))
+    | exact Or.inr (Or.inr (genCallStmtMatch_cmd_inv _ _ _ _ _ _ _ _ _ ‹_› ‹_›))
 
 /-- **Inversion at an `assert` command.** `genAssertCmd` is the only branch of
     `genCmd` that produces an `assert`. It emits `default` metadata, and it draws
@@ -182,9 +222,10 @@ theorem metadata_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCt
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
+    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩ | ⟨s, targets, exprs, mask, _, hce⟩
   · rw [CmdExt.cmd.injEq] at hce; subst hce
     exact hmd (mem_genCmd_assert_inv immutableVars ctx ctx' n l e md hc).1
+  · exact absurd hce (by simp)
   · exact absurd hce (by simp)
 
 /-- The metadata of `mdKey` is not `default`, so `metadata_gap` applies to it. -/
@@ -220,9 +261,10 @@ theorem label_gap (immutableVars : List (Identifier Unit)) (procs : ProcSigCtx)
       SPMF.support (genStmt (G := SPMF) octx tvars immutableVars procs labels C ctx [] n maxStmtSeqLen) := by
   intro h
   rcases mem_genStmt_cmd_inv immutableVars procs labels C C' ctx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩
+    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, _, hce⟩ | ⟨s, targets, exprs, mask, _, hce⟩
   · rw [CmdExt.cmd.injEq] at hce; subst hce
     exact hl (mem_genCmd_assert_inv immutableVars ctx ctx' n l e default hc).2
+  · exact absurd hce (by simp)
   · exact absurd hce (by simp)
 
 /-- The empty label is not a legal identifier, so `label_gap` applies to it. An
@@ -261,146 +303,6 @@ theorem mkArgs_out_then_in (y : Identifier Unit)
     StrataGenerators.Stmt.mkArgs [] [(y, ty)] [e] [false]
       = [CallArg.outArg y, CallArg.inArg e] := by
   simp [StrataGenerators.Stmt.mkArgs, StrataGenerators.Stmt.mergeBy]
-
--- ── Gap 3: the out-target name choice of `CallOk` ─────────────────────────
-
-/-- The callee of the counterexample: `procedure p (x : int, out r : int)`. -/
-def procP : Procedure :=
-  { header := { name := ⟨"p", ()⟩, typeArgs := [],
-                inputs := [(⟨"x", ()⟩, .int)], outputs := [(⟨"r", ()⟩, .int)] },
-    spec := { preconditions := [], postconditions := [] },
-    body := .structured [] }
-
-/-- The program that declares `procP`. -/
-def progP : Program := { decls := [.proc procP .empty] }
-
-/-- The generator-side signature of `procP`: no in-out block, one input-only
-    parameter `x`, one output-only parameter `r`. -/
-def sigP : ProcSig :=
-  { pname := "p", typeArgs := [], M := [], I := [(⟨"x", ()⟩, .int)],
-    O := [(⟨"r", ()⟩, .int)] }
-
-/-- The scope of the caller: `r : int` and `z : int`. Both have the type of the
-    `out` parameter, so either one can receive the result. -/
-def callerCtx : VarCtx := [(⟨"r", ()⟩, .int), (⟨"z", ()⟩, .int)]
-
-/-- The call `call p(1, out z);`. It receives the result into `z`, not into the
-    name `r` that the callee declares. -/
-def otherTargetCall : Statement :=
-  Statement.call "p"
-    [CallArg.inArg (LExpr.const () (.intConst 1)), CallArg.outArg ⟨"z", ()⟩] default
-
-/-- With `r : int` in scope, the generator's out target for `procP` is `r`, whatever names it
-    avoids. -/
-theorem outTargets_sigP (avoid : List String) :
-    outTargets [] callerCtx (StrataGenerators.Stmt.substSig [] sigP.O) avoid
-      = [(⟨"r", ()⟩, (.int : LMonoTy))] := by
-  rw [outTargets_eq_of_reused [] callerCtx _ avoid (by decide)]
-  rfl
-
-/-- **Gap 3: the out-target name choice.** The `call` rule constrains an `out`
-    argument's existence, its type and its writability. It says nothing about its
-    *name*. `outTargets` fixes the name: it reuses the name the callee declares
-    when that name is in scope at the declared type, and otherwise it invents a
-    fresh one. So a call that receives the result into another in-scope variable of
-    the same type is well-typed and out of reach.
-
-    ```
-    program Core;
-
-    procedure p (x : int, out r : int)
-    {
-
-    };
-    procedure caller ()
-    {
-      var r : int := 0;
-      var z : int := 0;
-      call p(1, out z);
-    };
-    ```
-
-    `otherTargetCall_wt` gives the well-typedness of the call. -/
-theorem outTarget_gap (labels : List String)
-    (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
-    (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) := by
-  intro h
-  rcases mem_genStmt_cmd_inv [] [sigP] labels C C' callerCtx ctx' n _ h with
-    ⟨c, hce, hc⟩ | ⟨s, σvals, exprs, mask, hs, hce⟩
-  · exact absurd hce (by simp)
-  · -- `procs = [sigP]`, so the callee is `sigP` and its instantiation is empty.
-    rw [List.mem_singleton] at hs
-    subst hs
-    rw [show sigP.typeArgs.zip σvals = [] from by simp [sigP]] at hce
-    -- Compare the write positions: the recipe writes to `r`, the call writes to `z`.
-    rw [CmdExt.call.injEq] at hce
-    obtain ⟨-, hargs, -⟩ := hce
-    have hlhs := congrArg CallArg.getLhs hargs
-    rw [StrataGenerators.Stmt.getLhs_mkArgs, outTargets_sigP] at hlhs
-    exact absurd hlhs (by decide)
-
-/-- **`otherTargetCall` is well-typed.** The type instantiation is empty. The one input
-    position holds the literal `1` at type `int`. The one write position holds `z`, which the
-    scope binds at type `int`. -/
-theorem otherTargetCall_wt (C : LContext CoreLParams) (L : List String) :
-    StatementWellTyped progP C (procToTCtx callerCtx).types L otherTargetCall C
-      (procToTCtx callerCtx).types := by
-  have hfind : Program.Procedure.find? progP "p" = some procP := by decide
-  refine .cmd _ _ _ _ _ (.call _ "p" _ procP _ [] _ hfind ?_ ?_ ?_ ?_
-    (Strata.Util.HMaps.Equiv.refl _))
-  · refine ⟨by rw [hfind]; rfl, ?_, by decide, ?_⟩
-    · intro proc hproc
-      rw [hfind] at hproc
-      cases hproc
-      exact ⟨by decide, by decide, by decide, by decide⟩
-    · simp only [CallArg.getInputExprs, Calls.getInputExprs, List.filterMap_cons,
-        List.filterMap_nil, Forall]
-      exact ⟨⟩
-  · intro v hv
-    simp only [CallArg.getLhs, List.filterMap_cons, List.filterMap_nil,
-      List.mem_singleton] at hv
-    subst hv
-    rw [procToTCtx_find]
-    decide
-  · intro i hi hj
-    have hi' : i < 1 := by simpa only [CallArg.getInputExprs, Calls.getInputExprs,
-      List.filterMap_cons, List.filterMap_nil, List.length_cons, List.length_nil] using hi
-    have hzero : i = 0 := by omega
-    subst hzero
-    show ExprWellTyped C _ (LExpr.const () (.intConst 1))
-      (LMonoTy.subst (Strata.Util.HMaps.ofScopes [[]]) .int)
-    rw [Lambda.subst_ofScopes_nilScope]
-    refine ⟨.const, ?_, ⟨?_, ?_, ?_⟩⟩
-    · intro t ht
-      simp [LExpr.binderAnnotations] at ht
-    · intro x ann hx
-      simp [LExpr.freeVars] at hx
-    · intro o ty ho
-      simp [LExpr.opAnnots] at ho
-    · intro o ho
-      simp [LExpr.getOps] at ho
-  · intro i hi hj
-    have hi' : i < 1 := by simpa only [CallArg.getLhs, List.filterMap_cons,
-      List.filterMap_nil, List.length_cons, List.length_nil] using hi
-    have hzero : i = 0 := by omega
-    subst hzero
-    rw [show (ListMap.values procP.header.outputs)[0] = (.int : LMonoTy) from rfl,
-      Lambda.subst_ofScopes_nilScope]
-    simp only [CallArg.getLhs, List.filterMap_cons, List.filterMap_nil,
-      List.getElem_cons_zero]
-    rw [procToTCtx_find]
-    decide
-
-/-- **The full counterexample for `CallOk`.** `otherTargetCall` is well-typed, and
-    `genStmt` cannot reach it at any size. -/
-theorem otherTargetCall_gap (labels : List String)
-    (C C' : LContext CoreLParams) (ctx' : VarCtx) (n : Nat) :
-    StatementWellTyped progP C (procToTCtx callerCtx).types labels otherTargetCall C
-        (procToTCtx callerCtx).types ∧
-    (⟨[otherTargetCall], C', ctx'⟩ : GenStmtResult) ∉
-      SPMF.support (genStmt (G := SPMF) octx tvars [] [sigP] labels C callerCtx [] n maxStmtSeqLen) :=
-  ⟨otherTargetCall_wt C labels, outTarget_gap labels C C' ctx' n⟩
 
 -- ── Why `ExprOk` is per expression ──────────────────────────────────────────
 
@@ -446,5 +348,90 @@ theorem toFVarCtx_nil : VarCtx.toFVarCtx [] = [] := rfl
 theorem hExprC_unsatisfiable :
     ¬ (∀ d (ctx : VarCtx), GenLExprComplete ctx.toFVarCtx octx tvars d) := by
   intro h; exact not_GenLExprComplete 0 (h 0 [])
+
+-- ── A call that receives its result into another variable ──────────────────
+
+/-- The callee `procedure p (x : int, out r : int)`: no in-out block, one by-value input, and one
+    output-only parameter. -/
+def sigP : ProcSig :=
+  { pname := "p", typeArgs := [], M := [], I := [(⟨"x", ()⟩, .int)],
+    O := [(⟨"r", ()⟩, .int)] }
+
+/-- A scope with two integer variables, `r` and `z`. -/
+def callerCtx : VarCtx := [(⟨"r", ()⟩, .int), (⟨"z", ()⟩, .int)]
+
+/-- The call `call p(1, out z);`, which receives the result in `z` and not in the variable `r` that
+    the callee declares. -/
+def otherTargetCall : Statement :=
+  Statement.call "p"
+    [CallArg.inArg (LExpr.const () (.intConst 1)), CallArg.outArg ⟨"z", ()⟩] default
+
+/-- The call `call p(1, out z);` is in the support of `genCallStmtMatch`, at some depth, when no
+    function of the context is named `z`. The generator draws `z` as the target of the one
+    output-only formal, and the type of `z` matches the type of the formal. The call receives the
+    result in a variable other than the callee's own parameter `r`, which `genCallStmt` cannot
+    produce. -/
+theorem otherTargetCall_mem_genCallStmtMatch (C : LContext CoreLParams) (pctx : PolyOpCtx)
+    (hz : "z" ∉ functionNames C) :
+    ∃ d, (⟨[otherTargetCall], C, callerCtx⟩ : GenStmtResult) ∈
+      SPMF.support (genCallStmtMatch (G := SPMF) octx tvars [] [sigP] C callerCtx d pctx) := by
+  have hone : ∃ d, (LExpr.const () (.intConst 1) : LExpr') ∈ SPMF.support
+      (genLExpr (G := SPMF) callerCtx.toFVarCtx octx pctx tvars [] d .int) :=
+    genLExpr_complete_exists _ _ _ _ _ _ genLMonoTy_mem_int _ _ (by exact .const) trivial trivial
+      ⟨0, .intConst⟩
+  obtain ⟨d, hd⟩ := hone
+  refine ⟨d, ?_⟩
+  unfold genCallStmtMatch
+  simp only [mem_support_bind_iff]
+  have hne : ([sigP] : List ProcSig) ≠ [] := by simp
+  refine ⟨sigP, (mem_support_elements_iff hne).mpr (List.mem_singleton_self _),
+    [some (⟨"z", ()⟩, .int)], ?_, ?_⟩
+  · have hO : sigP.O = [(⟨"r", ()⟩, LMonoTy.int)] := rfl
+    rw [hO]
+    simp only [pickOutTargets, mem_support_bind_iff, mem_support_pure_iff]
+    refine ⟨some (⟨"z", ()⟩, .int), ?_, [], by simp, rfl⟩
+    rw [mem_support_elements_iff]
+    refine List.mem_cons_of_mem _ (List.mem_map.mpr
+      ⟨(⟨"z", ()⟩, .int), List.mem_filter.mpr ⟨?_, ?_⟩, rfl⟩)
+    · simp [callerCtx]
+    · simp [hz]
+  · have hren : matchRenaming octx tvars callerCtx sigP = [] := by
+      simp [matchRenaming, sigP]
+    have hfresh : matchFreshArgs octx tvars callerCtx sigP = [] := by
+      simp [matchFreshArgs, freshTyArgs, sigP]
+    obtain ⟨substs, hsubsts⟩ : ∃ substs, matchTargets
+        (StrataGenerators.Stmt.substSig (matchRenaming octx tvars callerCtx sigP) sigP.O)
+        [some (⟨"z", ()⟩, LMonoTy.int)] = some substs := by
+      rw [hren, StrataGenerators.Stmt.substSig_nil]
+      have hfv : LMonoTy.int.freeVars = [] := rfl
+      obtain ⟨Su, hSu, -⟩ := unifyTypes_matching_complete LMonoTy.int LMonoTy.int []
+        (fun v hv => absurd hv (by rw [hfv]; exact List.not_mem_nil)) rfl
+      refine ⟨[Su], ?_⟩
+      simp [matchTargets, sigP, hSu, hfv]
+    rw [hsubsts]
+    simp only [hfresh, List.mapM_nil, mem_support_bind_iff, mem_support_pure_iff]
+    refine ⟨[], rfl, ?_⟩
+    have hzipNil : sigP.typeArgs.zip ([] : List LMonoTy) = [] := rfl
+    rw [hzipNil, StrataGenerators.Stmt.substSig_nil]
+    have hmatched : targetsMatched sigP.O [some (⟨"z", ()⟩, LMonoTy.int)] = true := by decide
+    rw [ite_eq_left hmatched]
+    have hT : matchOutTargets (outNameBase callerCtx (functionNames C)) sigP.O
+        [some (⟨"z", ()⟩, LMonoTy.int)] = [(⟨"z", ()⟩, LMonoTy.int)] := rfl
+    rw [hT]
+    have hMusable : (StrataGenerators.Stmt.substSig [] sigP.M).all
+        (usableName [] callerCtx) = true := by
+      simp [sigP, StrataGenerators.Stmt.substSig]
+    have hNodup : (StrataGenerators.Stmt.substSig [] sigP.M ++
+        (show @LMonoTySignature Unit from [(⟨"z", ()⟩, LMonoTy.int)])).keys.Nodup := by decide
+    have hMnotFn : ((StrataGenerators.Stmt.substSig [] sigP.M).filter (needsInit callerCtx)).all
+        (fun q => !(functionNames C).contains q.1.name) = true := by
+      simp [sigP, StrataGenerators.Stmt.substSig]
+    have hannots : ([LExpr.const () (.intConst 1)] : List LExpr').all
+        (binderAnnotsKnownIn C.knownTypes) = true := by
+      simp [binderAnnotsKnownIn, LExpr.binderAnnotations]
+    exact genCallTail_mem (octx := octx) (tvars := tvars) (immutableVars := [])
+      (pctx := pctx) (C := C) (ctx := callerCtx) (d := d) (s := sigP) (σ := [])
+      (T := [(⟨"z", ()⟩, LMonoTy.int)]) hMusable hNodup hMnotFn
+      [LExpr.const () (.intConst 1)] [true] (.cons hd .nil) hannots
 
 end StrataGenerators.Stmt.SpecComplete.Gaps
